@@ -21,16 +21,16 @@ type runRecords struct {
 	// runs holds the last run of each trigger, by resource key and
 	// then by trigger.
 	runs map[string]map[string]observatory.ProcedureRun
-	// busy holds each trigger whose run goes on now, as key/trigger,
-	// so one trigger has one run at a time.
-	busy map[string]bool
+	// busy holds the trigger of the run that goes on now, by resource
+	// key, so a resource runs one procedure at a time.
+	busy map[string]string
 	// changed rings on each change of a record, so the status writer
 	// writes it, and a wait for another resource's run reads it.
 	changed *bell
 }
 
 func newRunRecords(changed *bell) *runRecords {
-	return &runRecords{runs: map[string]map[string]observatory.ProcedureRun{}, busy: map[string]bool{}, changed: changed}
+	return &runRecords{runs: map[string]map[string]observatory.ProcedureRun{}, busy: map[string]string{}, changed: changed}
 }
 
 // seed loads the runs from the status of each resource with
@@ -102,19 +102,28 @@ func triggerOrder(trigger string) int {
 	return 2 + n
 }
 
-// acquire takes one trigger of one resource for a run, and waits while
-// another run of it goes on, or until ctx ends.
-func (r *runRecords) acquire(ctx context.Context, key, trigger string) error {
-	id := key + "/" + trigger
+// acquire takes a resource's turn for one trigger's run, and waits
+// while another run of the resource goes on, or until ctx ends. Two
+// runs of one resource would send its device two targets at once, such
+// as a park from the weather and an unpark from the end of its for.
+// waiting is called with the trigger whose run goes on, each time the
+// run waits behind another trigger.
+func (r *runRecords) acquire(ctx context.Context, key, trigger string, waiting func(holder string)) error {
+	told := ""
 	for {
 		wake := r.changed.wait()
 		r.mu.Lock()
-		if !r.busy[id] {
-			r.busy[id] = true
+		holder, held := r.busy[key]
+		if !held {
+			r.busy[key] = trigger
 			r.mu.Unlock()
 			return nil
 		}
 		r.mu.Unlock()
+		if holder != told {
+			told = holder
+			waiting(holder)
+		}
 		select {
 		case <-ctx.Done():
 			return context.Cause(ctx)
@@ -123,9 +132,9 @@ func (r *runRecords) acquire(ctx context.Context, key, trigger string) error {
 	}
 }
 
-func (r *runRecords) release(key, trigger string) {
+func (r *runRecords) release(key string) {
 	r.mu.Lock()
-	delete(r.busy, key+"/"+trigger)
+	delete(r.busy, key)
 	r.mu.Unlock()
 	r.changed.notify()
 }

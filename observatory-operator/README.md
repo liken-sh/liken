@@ -463,11 +463,25 @@ that unparks in bad weather with no `requires` parks again at once.
 
 `for` delays the run until the status has held that long, such as
 `for: 20m`, and a change of the status before then cancels it, as
-`for` does in a Prometheus alert rule. A run that goes on when its
-condition changes, or when its resource's deactivation begins, stops,
-and its record is `Skipped` with the reason, such as
-`WeatherStation lab Safe is no longer False`. A trigger whose
-condition names nothing records one `Failed` run and one Warning.
+`for` does in a Prometheus alert rule. A trigger whose condition names
+nothing records one `Failed` run and one Warning.
+
+A run that began runs to its end, whatever its condition does
+meanwhile, so a weather station that flaps, or that reconnects and
+reports `Safe` as `Unknown` for a moment, does not stop a park
+halfway. Only the resource's deactivation, or the operator's stop,
+ends a run. The deactivation ends it as `Skipped` with the reason, and
+a new copy of the operator resumes a run that the stop interrupted.
+
+A resource runs one procedure at a time, its activation and
+deactivation included, so its device never receives two targets at
+once. A run that becomes due while another run of the resource goes
+on is `Pending`, with a summary such as
+`Waiting for the run of triggers[0] to end`. When that run ends, the
+waiting run begins only if its condition still holds with the same
+transition time. Otherwise its record is `Skipped`, with a summary
+such as
+`WeatherStation lab Safe is no longer True, so the run did not begin`.
 
 The tree gives no order to a trigger, so `after` orders the runs of
 one transition: in a trigger, `after` waits for the runs of the other

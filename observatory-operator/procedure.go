@@ -7,6 +7,11 @@ package main
 // record: each action that is not Done runs again. The actions are
 // target states, so running one again changes only what is still
 // needed.
+//
+// A resource runs one procedure at a time, the lifecycle's included.
+// A run that becomes due while another run of the resource goes on
+// waits for it, and its record is Pending with the trigger it waits
+// for.
 
 import (
 	"context"
@@ -42,17 +47,12 @@ type membership struct {
 type event struct {
 	member func(t *tree, key string) (membership, bool)
 	// over answers why the event ended, such as a condition that
-	// changed, or nil while it holds. A run of the event waits for
-	// nothing after its event ended. Nil for a lifecycle step, which
-	// its own context ends.
+	// changed, or nil while it holds. Nil for a lifecycle step. A run
+	// that waited for its turn starts only while its event holds, and
+	// after does not wait for a run that never began before the event
+	// ended, because none will begin.
 	over func(t *tree) error
 }
-
-// stopError ends a run whose event ended while it waited. The run
-// stops with no failure, as it does when its context ends.
-type stopError struct{ why error }
-
-func (s stopError) Error() string { return s.why.Error() }
 
 // procCall is one run of one trigger of one resource.
 type procCall struct {
@@ -95,26 +95,69 @@ func sameActions(run observatory.ProcedureRun, actions []action) bool {
 	return slices.EqualFunc(run.Actions, actions, func(r observatory.ActionRun, a action) bool { return r.Action == a.String() })
 }
 
+// settled reports whether the run of a call's transition has ended,
+// with the error of a run that failed and that the call does not run
+// again.
+func (o *operator) settled(c procCall) (bool, error) {
+	run, found := o.runs.get(c.res.key(), c.trigger)
+	if !found || !answers(run, c.since, c.period) || !sameActions(run, c.actions) {
+		return false, nil
+	}
+	switch {
+	case ended(run.State):
+		return true, nil
+	case run.State == observatory.StepFailed && !c.rerun:
+		return true, fmt.Errorf("%s: %s", c.res, lowerFirst(run.Summary))
+	}
+	return false, nil
+}
+
 // runProcedure runs one trigger's actions, and answers an error that
 // names the resource when an action fails. A run that answered the
 // transition already is not run again, unless it failed and the call
-// reruns it.
+// reruns it. A run that started runs to its end: only its context
+// ends it, when the resource's deactivation begins or the operator
+// stops.
 func (o *operator) runProcedure(ctx context.Context, c procCall) error {
 	if len(c.actions) == 0 {
 		return nil
 	}
-	key := c.res.key()
-	if err := o.runs.acquire(ctx, key, c.trigger); err != nil {
+	if done, err := o.settled(c); done {
 		return err
 	}
-	defer o.runs.release(key, c.trigger)
+	key := c.res.key()
+	pending := false
+	err := o.runs.acquire(ctx, key, c.trigger, func(holder string) {
+		if run, found := o.runs.get(key, c.trigger); found && answers(run, c.since, c.period) && run.State == observatory.StepRunning {
+			// A run that an operator restart interrupted keeps its
+			// record while it waits.
+			return
+		}
+		pending = true
+		o.runs.put(key, pendingRun(c, holder))
+	})
+	if err != nil {
+		if pending && !errors.Is(err, context.Canceled) {
+			// The deactivation ended the run's wait. An operator that
+			// stops leaves the record Pending, and the next copy starts
+			// the run again.
+			o.runs.put(key, skippedRun(c, err))
+		}
+		return err
+	}
+	defer o.runs.release(key)
+	if done, err := o.settled(c); done {
+		return err
+	}
 	run, found := o.runs.get(key, c.trigger)
 	same := found && answers(run, c.since, c.period) && sameActions(run, c.actions)
+	if resumed := same && run.State == observatory.StepRunning; !resumed && c.event.over != nil {
+		if why := c.event.over(o.snapshot()); why != nil {
+			o.runs.put(key, skippedRun(c, why))
+			return nil
+		}
+	}
 	switch {
-	case same && ended(run.State):
-		return nil
-	case same && run.State == observatory.StepFailed && !c.rerun:
-		return fmt.Errorf("%s: %s", c.res, lowerFirst(run.Summary))
 	case same && run.State == observatory.StepRunning:
 		// An operator restart interrupted the run: it resumes, and
 		// posts no second start.
@@ -160,6 +203,30 @@ func (o *operator) runProcedure(ctx context.Context, c procCall) error {
 	o.recorder.Normal(reference(c.res.kind, c.res.meta), reasonProcedureDone,
 		fmt.Sprintf("Procedure %s %s in %s: %s", c.trigger, strings.ToLower(string(run.State)), duration(stop.Sub(*run.StartTime)), lowerFirst(run.Summary)))
 	return nil
+}
+
+// pendingRun is the record of a run that waits for the run of another
+// trigger of its resource to end.
+func pendingRun(c procCall, holder string) observatory.ProcedureRun {
+	since := c.since
+	run := observatory.ProcedureRun{Trigger: c.trigger, Since: &since, State: observatory.StepPending,
+		Summary: "Waiting for the run of " + holder + " to end"}
+	for _, a := range c.actions {
+		run.Actions = append(run.Actions, observatory.ActionRun{Action: a.String(), State: observatory.StepPending})
+	}
+	return run
+}
+
+// skippedRun is the record of a run that waited for its turn while its
+// condition changed, so it never began.
+func skippedRun(c procCall, why error) observatory.ProcedureRun {
+	run := pendingRun(c, "")
+	now := stamp()
+	run.State, run.StopTime, run.Summary = observatory.StepSkipped, &now, sentence(why.Error())+", so the run did not begin"
+	for i := range run.Actions {
+		run.Actions[i].State = observatory.StepSkipped
+	}
+	return run
 }
 
 func (o *operator) procedureStarted(c procCall) {
@@ -208,10 +275,10 @@ func (o *operator) runAction(ctx context.Context, c procCall, run *observatory.P
 		// The operator stops. The run stays Running, and the next copy
 		// of the operator resumes it.
 		return ctx.Err()
-	case ctx.Err() != nil || errors.As(err, new(stopError)):
+	case ctx.Err() != nil:
 		// The run's work ended for a reason that is no failure, such as
-		// a reservation that ended during its Activation step, or a
-		// condition that changed while a trigger's run went on.
+		// a reservation that ended during its Activation step, or the
+		// deactivation of the resource while a trigger's run went on.
 		cause := err
 		if ctx.Err() != nil {
 			cause = context.Cause(ctx)
@@ -302,14 +369,6 @@ func (o *operator) predecessors(ctx context.Context, c procCall, a action, repor
 		return nil
 	}
 	return o.waitFor(ctx, report, func(t *tree) (bool, string, error) {
-		// The run of another resource for the same event can end
-		// because the event ended. This run then stops too, before it
-		// acts after a run that did not do its work.
-		if c.event.over != nil {
-			if err := c.event.over(t); err != nil {
-				return false, "", stopError{err}
-			}
-		}
 		from := asNow(t, c)
 		for i, ref := range a.After {
 			targets, err := t.resolve(from, fmt.Sprintf("after[%d]", i), ref.Kind, ref.Name, true)
@@ -322,10 +381,15 @@ func (o *operator) predecessors(ctx context.Context, c procCall, a action, repor
 					continue
 				}
 				run, found := o.runs.get(g.key(), m.trigger)
+				answered := found && answers(run, m.since, m.period)
 				switch {
-				case found && answers(run, m.since, m.period) && run.State == observatory.StepFailed:
+				case answered && run.State == observatory.StepFailed:
 					return false, "", fmt.Errorf("after[%d]: %s failed: %s", i, g, lowerFirst(run.Summary))
-				case found && answers(run, m.since, m.period) && ended(run.State):
+				case answered && ended(run.State):
+					continue
+				case !answered && c.event.over != nil && c.event.over(t) != nil:
+					// The event ended before this resource's run of it
+					// began, so that run never begins.
 					continue
 				}
 				return false, "waiting for " + g.String(), nil

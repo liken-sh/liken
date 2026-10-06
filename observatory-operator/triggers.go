@@ -11,14 +11,18 @@ package main
 // activation, until its deactivation begins. So a condition that holds
 // when the activation ends runs the trigger then.
 //
-// A run that goes on when its condition changes, or when its resource
-// stops being active, stops, and its record says why. The weather that
-// turns safe stops a park that has not ended, and the next transition
-// runs the next trigger.
+// A run that started runs to its end, whatever its condition does
+// meanwhile. A weather station that flaps, or that reconnects and
+// reports Safe as Unknown for a moment, must not stop a park halfway.
+// Only the resource's deactivation, or the operator's stop, ends a
+// run. A resource runs one procedure at a time (procedure.go), so a
+// run that becomes due while another run of the resource goes on waits
+// for it. It then begins only while its condition still holds with the
+// same transition time, and its record otherwise says why it did not
+// begin.
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -33,7 +37,6 @@ func triggerName(i int) string { return fmt.Sprintf("triggers[%d]", i) }
 
 // flight is one trigger's run that goes on now.
 type flight struct {
-	since  time.Time
 	cancel context.CancelCauseFunc
 	done   chan struct{}
 }
@@ -72,8 +75,8 @@ func (o *operator) keepTriggers(ctx context.Context) {
 }
 
 // evaluateTriggers starts each trigger's run that is due, stops each
-// run whose condition changed or whose resource stopped being active,
-// and answers the earliest time a trigger's for ends, or zero.
+// run whose resource stopped being active, and answers the earliest
+// time a trigger's for ends, or zero.
 func (o *operator) evaluateTriggers(ctx context.Context, t *tree, flights map[string]*flight, group *sync.WaitGroup) time.Time {
 	for id, f := range flights {
 		select {
@@ -95,6 +98,9 @@ func (o *operator) evaluateTriggers(ctx context.Context, t *tree, flights map[st
 				}
 				continue
 			}
+			if f != nil {
+				continue
+			}
 			when := trigger.When
 			targets, err := t.resolve(r, name+".when", when.Kind, when.Name, false)
 			if err != nil {
@@ -110,16 +116,18 @@ func (o *operator) evaluateTriggers(ctx context.Context, t *tree, flights map[st
 			want := conditionStatus(when.Status)
 			c := conditionOf(conditions, when.Type)
 			holds, since := c.Status == want, c.LastTransitionTime
-			if f != nil {
-				if !holds || !f.since.Equal(since) {
-					f.cancel(fmt.Errorf("%s %s is no longer %s", targets[0], when.Type, want))
-				}
+			call := procCall{res: r, trigger: name, actions: trigger.Run, period: period}
+			if run, ok := o.runs.get(r.key(), name); ok && run.State == observatory.StepRunning && run.Since != nil && answers(run, *run.Since, period) {
+				// An operator restart interrupted the run, and it
+				// resumes, whatever its condition reads now.
+				call.since, call.event = *run.Since, o.conditionEvent(targets[0], when.Type, want, *run.Since)
+				flights[id] = o.fly(ctx, call, group)
 				continue
 			}
 			if !holds {
 				continue
 			}
-			if run, ok := o.runs.get(r.key(), name); ok && answers(run, since, period) && run.State != observatory.StepRunning {
+			if run, ok := o.runs.get(r.key(), name); ok && answers(run, since, period) {
 				continue
 			}
 			if at := since.Add(wait); time.Now().Before(at) {
@@ -128,8 +136,7 @@ func (o *operator) evaluateTriggers(ctx context.Context, t *tree, flights map[st
 				}
 				continue
 			}
-			call := procCall{res: r, trigger: name, actions: trigger.Run, since: since, period: period,
-				event: o.conditionEvent(targets[0], when.Type, want, since)}
+			call.since, call.event = since, o.conditionEvent(targets[0], when.Type, want, since)
 			flights[id] = o.fly(ctx, call, group)
 		}
 	}
@@ -139,12 +146,12 @@ func (o *operator) evaluateTriggers(ctx context.Context, t *tree, flights map[st
 // fly starts one trigger's run.
 func (o *operator) fly(ctx context.Context, call procCall, group *sync.WaitGroup) *flight {
 	runCtx, cancel := context.WithCancelCause(ctx)
-	f := &flight{since: call.since, cancel: cancel, done: make(chan struct{})}
+	f := &flight{cancel: cancel, done: make(chan struct{})}
 	group.Go(func() {
 		defer o.structure.notify()
 		defer close(f.done)
 		defer cancel(nil)
-		if err := o.runProcedure(runCtx, call); err != nil && runCtx.Err() == nil && !errors.As(err, new(stopError)) {
+		if err := o.runProcedure(runCtx, call); err != nil && runCtx.Err() == nil {
 			o.logf("%s %s: %v", call.res, call.trigger, err)
 		}
 	})
@@ -204,12 +211,15 @@ func (o *operator) activePeriod(r resource) (time.Time, bool) {
 
 // conditionEvent answers the transition of one condition to one status
 // as the event that each action's after waits on: the runs of the
-// other resources' triggers on the same condition and status.
+// other resources' triggers that answer the same transition.
 func (o *operator) conditionEvent(g target, conditionType string, status observatory.ConditionStatus, since time.Time) event {
 	over := func(t *tree) error {
 		conditions, _ := t.conditionsOf(g.kind, g.name)
-		if c := conditionOf(conditions, conditionType); c.Status != status || !c.LastTransitionTime.Equal(since) {
+		switch c := conditionOf(conditions, conditionType); {
+		case c.Status != status:
 			return fmt.Errorf("%s %s is no longer %s", g, conditionType, status)
+		case !c.LastTransitionTime.Equal(since):
+			return fmt.Errorf("%s %s turned %s again at %s", g, conditionType, status, c.LastTransitionTime.UTC().Format(time.RFC3339))
 		}
 		return nil
 	}
@@ -229,8 +239,7 @@ func (o *operator) conditionEvent(g target, conditionType string, status observa
 			if err != nil || targets[0] != g || trigger.When.Type != conditionType || conditionStatus(trigger.When.Status) != status {
 				continue
 			}
-			conditions, _ := t.conditionsOf(g.kind, g.name)
-			return membership{trigger: triggerName(j), since: conditionOf(conditions, conditionType).LastTransitionTime, period: period}, true
+			return membership{trigger: triggerName(j), since: since, period: period}, true
 		}
 		return membership{}, false
 	}}

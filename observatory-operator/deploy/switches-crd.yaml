@@ -409,7 +409,9 @@ spec:
                     status it names, while the resource is active: from
                     when its activation is done until its deactivation
                     begins. A condition that holds when the activation
-                    ends runs then. Optional.
+                    ends runs then. A run that began runs to its end,
+                    unless the resource's deactivation begins, and a
+                    resource runs one procedure at a time. Optional.
                   items:
                     type: object
                     required: [when, run]

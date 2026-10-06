@@ -239,10 +239,21 @@ Step 4 settled these:
 - The trigger controller wakes on `structure`, not `changed`, so an
   INDI reading does not wake it. Each change of a run's record or of
   the `Active` state rings `structure`.
-- A trigger's run stops, `Skipped` with the reason, when its condition
-  changes before the run ends, or when its resource stops being
-  active. A run that waits in `after` stops when its own condition
-  changes, before it acts after a run that stopped.
+- A trigger's run that began runs to its end, whatever its condition
+  does meanwhile. Only the resource's deactivation, or the operator's
+  stop, ends it. Step 4 first stopped a run when its condition
+  changed, and that rule changed the same day: a weather station that
+  flaps, or that reconnects and reports `Safe` as `Unknown`, would
+  cancel a safety park halfway.
+- A resource runs one procedure at a time, the lifecycle's runs
+  included. A run that becomes due while another run of the resource
+  goes on is `Pending` until that run ends. It then begins only if its
+  condition still holds with the same transition time, and is
+  `Skipped` with the reason otherwise.
+- In a trigger's run, `after` waits for the named resources' runs of
+  the transition that the run answers. A resource whose run of that
+  transition never began before the condition changed is not waited
+  for, because that run never begins.
 - A trigger's run that failed is not run again for the same
   transition. A trigger whose `when` names nothing records one failed
   run with no `since`.

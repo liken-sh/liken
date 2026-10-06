@@ -171,30 +171,32 @@ func TestATriggerWhoseConditionHoldsAtActivationRunsThen(t *testing.T) {
 	})
 }
 
-// A run whose condition changes before it ends stops, and its record
-// says why. The dome's park, which waits for the mount's run, stops
-// too, and parks nothing.
-func TestARunStopsWhenItsConditionChanges(t *testing.T) {
+// A run that started runs to its end, though its condition changes
+// meanwhile, so a weather station that flaps does not stop a park
+// halfway. The dome's park, which waits for the mount's run of the same
+// transition, runs after it.
+func TestARunThatStartedRunsToItsEnd(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
-		w.indi.hold("Telescope Simulator", "TELESCOPE_PARK")
+		w.indi.move("Telescope Simulator", "TELESCOPE_PARK")
 		w.weather("Alert")
 		w.until(time.Minute, "the mount does not park", func() bool {
 			return lastRun(t, w, observatory.MountKind, "east", "triggers[0]").State == observatory.StepRunning
 		})
 		w.weather("Ok")
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		w.indi.setState("east-telescope", "Telescope Simulator", "TELESCOPE_PARK", "Ok")
 		for _, d := range []struct {
-			kind observatory.Kind
-			name string
-		}{{observatory.MountKind, "east"}, {observatory.DomeKind, "lab"}} {
+			kind    observatory.Kind
+			name    string
+			summary string
+		}{{observatory.MountKind, "east", "Parked Mount east"}, {observatory.DomeKind, "lab", "Parked Dome lab"}} {
 			run := w.runEnds(d.kind, d.name, "triggers[0]", time.Minute)
-			if run.State != observatory.StepSkipped || run.Summary != "WeatherStation lab Safe is no longer False" {
+			if run.State != observatory.StepDone || run.Summary != d.summary {
 				t.Errorf("the run of %s %s = %s %q", d.kind.Name, d.name, run.State, run.Summary)
 			}
-		}
-		if n := w.indi.count("lab-observatory", "Dome Simulator.DOME_PARK"); n != 0 {
-			t.Errorf("the dome received %d parks", n)
 		}
 	})
 }
@@ -247,6 +249,34 @@ func TestANewOperatorResumesATriggersRun(t *testing.T) {
 		}
 		if n := w.indi.count("east-telescope", "Telescope Simulator.TELESCOPE_PARK"); n != 2 {
 			t.Errorf("the mount received %d parks, want the held one and one from the new copy", n)
+		}
+	})
+}
+
+// A run that an operator restart interrupted resumes, though its
+// condition changed while no copy of the operator ran. The new copy
+// waits for the park that goes on, and sends no second park.
+func TestANewOperatorResumesARunWhoseConditionChanged(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := readyWorld(t)
+		w.indi.move("Telescope Simulator", "TELESCOPE_PARK")
+		w.weather("Alert")
+		w.until(time.Minute, "the mount's run is not recorded", func() bool {
+			return lastRun(t, w, observatory.MountKind, "east", "triggers[0]").State == observatory.StepRunning
+		})
+		w.halt()
+		w.weather("Ok")
+		w.start()
+		w.until(time.Minute, "the new copy does not report the weather safe", func() bool {
+			return strings.HasPrefix(w.stateOf(observatory.WeatherStationKind, "lab", observatory.ConditionSafe), "True")
+		})
+		w.indi.setState("east-telescope", "Telescope Simulator", "TELESCOPE_PARK", "Ok")
+		if run := w.runEnds(observatory.MountKind, "east", "triggers[0]", time.Minute); run.State != observatory.StepDone || run.Summary != "Parked Mount east" {
+			t.Errorf("the mount's run = %s %q", run.State, run.Summary)
+		}
+		if n := w.indi.count("east-telescope", "Telescope Simulator.TELESCOPE_PARK"); n != 1 {
+			t.Errorf("the mount received %d parks, want 1", n)
 		}
 	})
 }
