@@ -7,6 +7,7 @@ package main
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
@@ -179,17 +180,31 @@ func (o *operator) observatoryStatus(t *tree, site *observatory.Observatory, com
 			Longitude: longitude(site.Spec.Location.Longitude),
 		},
 	}
+	// A reservation that deactivates disconnects the observatory's
+	// devices, unless another reservation keeps or starts them
+	// (StopSite). Only then is the observatory Deactivating.
+	var keeping bool
+	var leaving []string
 	for _, telescope := range sortedNames(t.telescopes) {
 		if t.telescopes[telescope].Spec.Observatory == name {
 			next.Telescopes = append(next.Telescopes, telescope)
 			if holder, ok := o.claims.holderOf(telescope); ok {
 				next.Reservations = append(next.Reservations, holder)
 			}
+			switch phase, _ := o.telescopePhase(t, telescope); phase {
+			case observatory.PhaseDeactivating:
+				holder, _ := o.claims.holderOf(telescope)
+				leaving = append(leaving, holder)
+			case observatory.PhaseReady, observatory.PhaseActivating, observatory.PhaseError:
+				keeping = true
+			}
 		}
 	}
 	next.Phase = observatory.PhaseIdle
 	message := "Not reserved"
-	if len(next.Reservations) > 0 {
+	if len(leaving) > 0 && !keeping {
+		next.Phase, message = observatory.PhaseDeactivating, "Deactivating for Reservation "+strings.Join(leaving, ", ")
+	} else if len(next.Reservations) > 0 {
 		next.Phase, message = observatory.PhaseReady, "Connected every device"
 		for _, d := range devices {
 			if phase := composed[d.key()].Phase; phase != observatory.DeviceConnected {

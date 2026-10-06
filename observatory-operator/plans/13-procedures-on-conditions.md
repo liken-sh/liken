@@ -233,6 +233,10 @@ lifecycle code:
   runs now, else the older resource, else the first by kind and name.
   The other never starts, and reports `Error` with the name of the
   device that runs the driver.
+- During a release, the `Observatory` reports `Activating`, "Waiting
+  for Dome lab (Disconnecting)", as plan 78 records. **Fixed on
+  2026-10-06.** An `Observatory` whose reservations all deactivate
+  reports `Deactivating`, with the names of those reservations.
 
 ## The order of the work
 
@@ -250,7 +254,8 @@ lifecycle code:
    its weather station reports unsafe for any length of time, and
    opens it after 20 minutes of safe weather.
 5. **`job`.**
-6. **The two defects** from plan 11's drill.
+6. **The defects** from the drills, under "Also in scope". All four
+   were fixed on 2026-10-06.
 
 Each step lands with its tests and keeps the coverage gate.
 

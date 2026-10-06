@@ -139,6 +139,31 @@ func TestTheTreeReportsDownward(t *testing.T) {
 	})
 }
 
+// An observatory whose only reservation deactivates is Deactivating,
+// not Activating, while its devices disconnect. The dome's driver never
+// answers the disconnect, so the release stays in StopSite.
+func TestAnObservatoryDeactivatesWithItsReservation(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := readyWorld(t)
+		w.indi.hold("Dome Simulator", "CONNECTION")
+		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
+		var phases []observatory.Phase
+		w.until(10*time.Minute, "the Observatory is not Deactivating", func() bool {
+			lab, _ := decode[observatory.Observatory](t, w.api, kindCollection(observatory.ObservatoryKind), "lab")
+			phases = append(phases, lab.Status.Phase)
+			return lab.Status.Phase == observatory.PhaseDeactivating
+		})
+		if slices.Contains(phases, observatory.PhaseActivating) {
+			t.Errorf("phases = %v, want no Activating", phases)
+		}
+		lab, _ := decode[observatory.Observatory](t, w.api, kindCollection(observatory.ObservatoryKind), "lab")
+		if c := conditionOf(lab.Status.Conditions, observatory.ConditionReady); c.Message != "Deactivating for Reservation east-tonight" {
+			t.Errorf("Ready = %+v", c)
+		}
+	})
+}
+
 // A resource whose parent is missing stays, and says which parent is
 // missing.
 func TestAMissingParentIsReported(t *testing.T) {
