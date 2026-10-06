@@ -222,7 +222,10 @@ lifecycle code:
   of its devices.
 - After the server's pod is replaced, PHD2 stays disconnected and the
   `Guider` stays `Activating`. The guider's connection follows the
-  server's, as every device's does.
+  server's, as every device's does. **Fixed on 2026-10-06.** The
+  runner sends `set_connected` once for each pair of a guider's pod
+  and a server's pod, after the camera and the mount connect on the
+  new server.
 - A second device with the same driver on one server breaks the
   first: both report `Error`, and the first stays `Starting` for 52 s
   after the second leaves. **Fixed on 2026-10-06.** A server runs one

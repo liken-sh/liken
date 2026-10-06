@@ -4,10 +4,12 @@ package main
 // StartGuider left it: it creates the guider's pod again when the pod is
 // gone, replaces it when PHD2's profile changes, and connects the camera
 // and the mount of each new PHD2. A PHD2 that restarts, in a new pod or
-// in the same one, starts with nothing connected. The runner connects
-// the equipment once for each pod, and only while PHD2 is Stopped, so a
-// holder that disconnects PHD2's equipment on purpose keeps it
-// disconnected until the pod changes.
+// in the same one, starts with nothing connected. A new INDI server
+// ends PHD2's INDI connection, and PHD2 does not open it again. So the
+// runner connects the equipment once for each pair of a guider's pod
+// and a server's pod, after the server's camera and mount connect, and
+// only while PHD2 is Stopped. A holder that disconnects PHD2's
+// equipment on purpose keeps it disconnected until either pod changes.
 
 import (
 	"context"
@@ -48,8 +50,8 @@ func (r *runner) keepGuider(ctx context.Context, t *tree, ref serverRef, telesco
 	if created {
 		r.recordPod(reference(observatory.GuiderKind, guider.Metadata), guiderName(guider), "The new PHD2 starts idle and not calibrated.")
 	}
-	if err == nil {
-		err = r.connectNewGuider(ctx, guider, gear)
+	if err == nil && gearConnected(handles) {
+		err = r.connectNewGuider(ctx, ref, guider, gear)
 	}
 	r.o.guiderFault(guider.Metadata.Name, err)
 	if err != nil {
@@ -57,24 +59,39 @@ func (r *runner) keepGuider(ctx context.Context, t *tree, ref serverRef, telesco
 	}
 }
 
-// connectNewGuider connects the equipment of a PHD2 in a pod that the
-// runner has not connected yet.
-func (r *runner) connectNewGuider(ctx context.Context, guider *observatory.Guider, gear guiderEquipment) error {
+// gearConnected reports whether every device of the guider's equipment is
+// connected on its server. PHD2's own INDI client would connect a
+// device that is not, before the runner configures it again (steady.go).
+func gearConnected(handles map[string]handle) bool {
+	for _, h := range handles {
+		if !h.connected() {
+			return false
+		}
+	}
+	return true
+}
+
+// connectNewGuider connects the equipment of a PHD2 that the runner has
+// not connected to the server's pod that runs now.
+func (r *runner) connectNewGuider(ctx context.Context, ref serverRef, guider *observatory.Guider, gear guiderEquipment) error {
 	name := guiderName(guider)
-	p, ok := r.o.snapshot().pods[name]
-	if !ok || !p.ready() {
+	t := r.o.snapshot()
+	p, ok := t.pods[name]
+	server, running := t.pods[ref.String()]
+	if !ok || !p.ready() || !running {
 		return nil
 	}
+	link := p.Metadata.UID + "/" + server.Metadata.UID
 	conn, ok := r.o.guiderConns.get(name)
 	if !ok {
 		return nil
 	}
 	s := conn.client.State()
 	switch {
-	case !s.Open || s.Equipment == nil || p.Metadata.UID == r.guiderPod:
+	case !s.Open || s.Equipment == nil || link == r.guiderLink:
 		return nil
 	case equipment(s):
-		r.guiderPod = p.Metadata.UID
+		r.guiderLink = link
 		return nil
 	case capturing(s):
 		return nil
@@ -82,6 +99,6 @@ func (r *runner) connectNewGuider(ctx context.Context, guider *observatory.Guide
 	if err := r.o.connectGuider(ctx, func(string) {}, conn, gear); err != nil {
 		return err
 	}
-	r.guiderPod = p.Metadata.UID
+	r.guiderLink = link
 	return nil
 }

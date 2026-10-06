@@ -4,6 +4,8 @@ package main
 // pod that is Ready, as the kubelet would start PHD2 in it. A new pod,
 // or the same name with a new UID, starts a new PHD2 with nothing
 // connected, and a pod that stops ends every connection to its PHD2.
+// A PHD2 whose INDI server's pod changes loses its INDI connection: its
+// equipment disconnects and it shows an alert, as the real PHD2 does.
 
 import (
 	"context"
@@ -33,6 +35,9 @@ type guiderWorld struct {
 type fakeGuider struct {
 	uid  string
 	phd2 *phd2test.Server
+	// server is the UID of the INDI server's pod that PHD2 reached
+	// last, or "" while the pod is gone.
+	server string
 }
 
 func startGuiderWorld(ctx context.Context, api *fakeAPI) *guiderWorld {
@@ -78,10 +83,19 @@ func (w *guiderWorld) catchUp() {
 		if labels[labelRole] != roleGuider || !podReady(p) {
 			continue
 		}
-		if _, ok := w.running[name]; ok {
+		server := ""
+		if indi, ok := pods[labels[labelServer].(string)]; ok {
+			server = podUID(indi)
+		}
+		if g, ok := w.running[name]; ok {
+			if g.server != "" && g.server != server {
+				g.phd2.Set(func(s *phd2test.Server) { s.Equipment, s.AppState = false, "Stopped" })
+				g.phd2.Broadcast(phd2test.Event("Alert", map[string]any{"Msg": "INDI server disconnected", "Type": "error"}))
+			}
+			g.server = server
 			continue
 		}
-		g := &fakeGuider{uid: podUID(p), phd2: phd2test.New()}
+		g := &fakeGuider{uid: podUID(p), phd2: phd2test.New(), server: server}
 		if w.prepare != nil {
 			w.prepare(g.phd2)
 		}

@@ -324,6 +324,28 @@ func TestTheRunnerConnectsEachNewPHD2Once(t *testing.T) {
 	})
 }
 
+// A new INDI server ends PHD2's INDI connection, while the guider's pod
+// stays. The runner connects PHD2's equipment again after the new
+// server's devices connect.
+func TestANewServerConnectsPHD2Again(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := readyGuider(t)
+		phd2 := w.guiders.phd2("east-guider")
+		phd2.Clear()
+		before, _ := w.api.object(podsCollection, "east-telescope")
+
+		w.api.deleteNamed(podsCollection, "east-telescope")
+		w.until(2*time.Minute, "the Guider is not Ready on the new server", func() bool {
+			p, ok := w.api.object(podsCollection, "east-telescope")
+			return ok && podUID(p) != podUID(before) && strings.Contains(phd2.Received(), "set_connected") && guider(w).Status.Phase == observatory.PhaseReady
+		})
+		if starts := w.guiders.starts("east-guider"); starts != 1 {
+			t.Errorf("the guider's pod started %d PHD2s, want 1", starts)
+		}
+	})
+}
+
 func TestARestartedOperatorLeavesAReadyGuiderAlone(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
