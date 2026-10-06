@@ -107,7 +107,8 @@ runner for each `Reservation` (`reservation.go`, `activation.go`,
 the status writer (`status.go`, `statustree.go`, `standing.go`,
 `readings.go`, `guiderstatus.go`), the lock relay (`locks.go`), and the
 trigger controller (`triggers.go`), which runs each resource's
-`spec.triggers` (plan 13). The runner's `Activation` and
+`spec.triggers` (plan 13), and runs a failed one again on the retry
+annotation (`retry.go`). The runner's `Activation` and
 `Deactivation` steps run the lifecycle procedures (`procsteps.go`):
 `procedure.go` runs one trigger's actions, `action.go`, `cooler.go`,
 and `jobs.go` carry out one action, `resources.go` resolves a

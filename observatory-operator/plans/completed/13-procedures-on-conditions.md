@@ -384,6 +384,14 @@ found these defects. Each fix lands with a test against the fakes.
   its lock holds now fails with the lock's explanation. In a trigger's
   run, a refused dome park adds that `after: [{kind: Mount}]` orders
   the dome's park after the mounts' parks.
+- **The retry annotation runs a failed trigger's run again.**
+  `observatory.liken.sh/retry` on a `Reservation` runs its failed step
+  again, but a trigger's run that failed had no way to run again for
+  the same transition. The same annotation on any resource with
+  procedures now runs again each `Failed` run of its triggers whose
+  condition still holds with the same transition time, with its `Done`
+  actions skipped. The operator then removes the annotation. A
+  lifecycle run stays retried through its reservation.
 
 ## How we test it
 

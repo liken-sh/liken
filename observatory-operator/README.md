@@ -309,6 +309,21 @@ safe to power off. In both cases, this runs the failed step again:
 kubectl annotate reservation east-tonight -n observatory observatory.liken.sh/retry=1
 ```
 
+A trigger's run that failed, such as a dome park that the driver
+refused, is not run again for the same transition. The same annotation
+on the resource runs it again, once the cause is fixed:
+
+```sh
+kubectl annotate dome lab -n observatory observatory.liken.sh/retry=1
+```
+
+The operator runs again each `Failed` run of the resource's
+`spec.triggers` whose condition still holds with the same transition
+time, skips the actions that are `Done`, and removes the annotation.
+A run whose condition changed since stays `Failed`. A run of
+`activation` or `deactivation` runs again through the retry annotation
+of its reservation.
+
 One telescope serves one reservation at a time. A second reservation
 of the telescope waits in `Wait`, and its summary names the reservation
 it waits for. Waiting reservations take the telescope in the order of

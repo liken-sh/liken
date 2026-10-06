@@ -196,10 +196,16 @@ func TestAFailedActionFailsTheStepUntilARetry(t *testing.T) {
 // retry annotates a failed reservation, as a person does to run its
 // failed step again.
 func (w *world) retry(name string) {
-	object, _ := w.api.object(kindCollection(observatory.ReservationKind), name)
+	w.annotateRetry(observatory.ReservationKind, name)
+}
+
+// annotateRetry sets the retry annotation on any resource, as a person
+// does with kubectl annotate.
+func (w *world) annotateRetry(kind observatory.Kind, name string) {
+	object, _ := w.api.object(kindCollection(kind), name)
 	object["metadata"].(map[string]any)["annotations"] = map[string]any{annotationRetry: "1"}
 	w.api.mu.Lock()
-	w.api.store(kindCollection(observatory.ReservationKind), name, object, "MODIFIED")
+	w.api.store(kindCollection(kind), name, object, "MODIFIED")
 	w.api.mu.Unlock()
 }
 

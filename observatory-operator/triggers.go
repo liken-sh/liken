@@ -41,16 +41,26 @@ type flight struct {
 	done   chan struct{}
 }
 
+// control is the trigger controller's own state between passes.
+type control struct {
+	// flights holds the runs that go on, by resource key and trigger.
+	flights map[string]*flight
+	// retried holds the resourceVersion of each resource whose retry
+	// annotation the controller acted on, so a pass that reads the
+	// store before it holds the removal does not act twice.
+	retried map[string]string
+	group   sync.WaitGroup
+}
+
 // keepTriggers runs the triggers after each change, until ctx ends.
 func (o *operator) keepTriggers(ctx context.Context) {
-	flights := map[string]*flight{}
-	var group sync.WaitGroup
-	defer group.Wait()
+	k := &control{flights: map[string]*flight{}, retried: map[string]string{}}
+	defer k.group.Wait()
 	for {
 		wake := o.structure.wait()
 		var due time.Time
 		if o.stores.ready() && o.seeded.Load() {
-			due = o.evaluateTriggers(ctx, o.snapshot(), flights, &group)
+			due = o.evaluateTriggers(ctx, o.snapshot(), k)
 		}
 		// The timer is a clock: the end of a trigger's for, when its
 		// run becomes due.
@@ -76,8 +86,11 @@ func (o *operator) keepTriggers(ctx context.Context) {
 
 // evaluateTriggers starts each trigger's run that is due, stops each
 // run whose resource stopped being active, and answers the earliest
-// time a trigger's for ends, or zero.
-func (o *operator) evaluateTriggers(ctx context.Context, t *tree, flights map[string]*flight, group *sync.WaitGroup) time.Time {
+// time a trigger's for ends, or zero. A resource with the retry
+// annotation runs again each failed run whose condition still holds
+// with the same transition time (retry.go).
+func (o *operator) evaluateTriggers(ctx context.Context, t *tree, k *control) time.Time {
+	flights := k.flights
 	for id, f := range flights {
 		select {
 		case <-f.done:
@@ -86,7 +99,8 @@ func (o *operator) evaluateTriggers(ctx context.Context, t *tree, flights map[st
 		}
 	}
 	var due time.Time
-	for _, r := range t.withTriggers() {
+	for _, r := range t.withProcedures() {
+		retry := k.retryAsked(r)
 		period, active := o.activePeriod(r)
 		for i, trigger := range r.procedures.Triggers {
 			name := triggerName(i)
@@ -121,14 +135,17 @@ func (o *operator) evaluateTriggers(ctx context.Context, t *tree, flights map[st
 				// An operator restart interrupted the run, and it
 				// resumes, whatever its condition reads now.
 				call.since, call.event = *run.Since, o.conditionEvent(r, targets[0], when.Type, want, *run.Since)
-				flights[id] = o.fly(ctx, call, group)
+				flights[id] = o.fly(ctx, call, &k.group)
 				continue
 			}
 			if !holds {
 				continue
 			}
 			if run, ok := o.runs.get(r.key(), name); ok && answers(run, since, period) {
-				continue
+				if !retry || run.State != observatory.StepFailed {
+					continue
+				}
+				call.rerun = true
 			}
 			if at := since.Add(wait); time.Now().Before(at) {
 				if due.IsZero() || at.Before(due) {
@@ -137,7 +154,10 @@ func (o *operator) evaluateTriggers(ctx context.Context, t *tree, flights map[st
 				continue
 			}
 			call.since, call.event = since, o.conditionEvent(r, targets[0], when.Type, want, since)
-			flights[id] = o.fly(ctx, call, group)
+			flights[id] = o.fly(ctx, call, &k.group)
+		}
+		if retry {
+			o.clearRetryOf(ctx, r, k)
 		}
 	}
 	return due
@@ -169,23 +189,18 @@ func (o *operator) fly(ctx context.Context, call procCall, group *sync.WaitGroup
 	return f
 }
 
-// withTriggers answers every resource that has a trigger in
-// spec.triggers.
-func (t *tree) withTriggers() []resource {
+// withProcedures answers every resource that can state procedures:
+// every Observatory, Telescope, and device.
+func (t *tree) withProcedures() []resource {
 	var out []resource
-	add := func(r resource) {
-		if len(r.procedures.Triggers) > 0 {
-			out = append(out, r)
-		}
-	}
 	for _, name := range sortedNames(t.observatories) {
-		add(ofObservatory(t.observatories[name]))
+		out = append(out, ofObservatory(t.observatories[name]))
 	}
 	for _, name := range sortedNames(t.telescopes) {
-		add(ofTelescope(t.telescopes[name]))
+		out = append(out, ofTelescope(t.telescopes[name]))
 	}
 	for _, d := range t.devices {
-		add(t.ofDevice(d))
+		out = append(out, t.ofDevice(d))
 	}
 	return out
 }
