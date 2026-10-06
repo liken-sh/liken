@@ -96,7 +96,7 @@ and connects it to the guide camera and the mount. Deactivation now
 runs `Abort`, `Secure`, `StopGuider`, `Disconnect`, `StopDevices`,
 `PowerOff`, and `StopSite`. `Abort` also stops PHD2's exposures and
 guiding, and `StopGuider` deletes the guider's pod before `Disconnect`.
-[Plan 09](../09-the-guider.md) gives the reasons.
+[Plan 09](09-the-guider.md) gives the reasons.
 
 The server stops in `PowerOff`, after the outputs switch off. The
 operator reaches a `Switch` through the telescope's server, so a
@@ -275,7 +275,7 @@ unparked already. Both are fixed in the build that the drill ran last.
 
 - The placement of the pods. The guide camera's pod and the server's
   pod belong on one node when the link between nodes is slow, and the
-  operator places no pod. [Plan 09](../09-the-guider.md) places them
+  operator places no pod. [Plan 09](09-the-guider.md) places them
   with the guider's pod. Built later on 2026-10-05, ahead of the rest
   of plan 09: the camera of the `OpticalTrain` that a `Guider` names
   has a required pod affinity to its telescope's server, unless the

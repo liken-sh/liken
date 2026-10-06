@@ -312,7 +312,7 @@ change to the profile replaces the pod.
 `StopGuider` deletes the pod before `Disconnect`, so PHD2 never sees
 its devices drop. On a compositor with no seat, a modal dialog ends
 PHD2, and the kubelet starts it again: [plan
-09](plans/09-the-guider.md) lists the dialogs that PHD2 can open.
+09](plans/completed/09-the-guider.md) lists the dialogs that PHD2 can open.
 
 A `Guider`'s status holds what PHD2 reports while the operator's
 connection to its event server is open:

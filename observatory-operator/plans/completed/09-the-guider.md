@@ -5,8 +5,12 @@ Proposed on 2026-10-05. The guide camera's placement was built on
 tested against the fake API server and a fake PHD2 event server: the
 event client in `phd2/`, the profile, the guider's pod, the steps
 `StartGuider` and `StopGuider`, the `Guider`'s status, and the example.
-The PHD2 image `indi-phd2` is built in `indi/`. The drill on the test
-cluster has not run, and this plan stays open until it does.
+The PHD2 image `indi-phd2` is built in `indi/`. Drilled on 2026-10-06
+on the two-node test cluster, with the operator's development build
+`2026.10.04-004-dev-048-82139946`. "What the test cluster measured"
+gives the results. The drill found no defect. Two drills have not run
+on the cluster: a guider pod deleted while `Ready`, and an operator
+restart while PHD2 guides.
 
 ## The problem
 
@@ -27,7 +31,7 @@ Before each start, the pod writes PHD2's whole profile, including
 `~/phd2.1` lock. A display claim puts PHD2 on a monitor when a person
 wants to watch it. The display claim is not built.
 
-[The compositor advertises no seat](../../display-operator/plans/open-problems/the-compositor-advertises-no-seat.md)
+[The compositor advertises no seat](../../../display-operator/plans/open-problems/the-compositor-advertises-no-seat.md)
 stays open until display-operator decides on a remedy. Until then, a
 modal dialog during a night ends PHD2, and the pod restarts it.
 
@@ -45,8 +49,9 @@ on the other node from the server, so each guide frame crossed the
 ### The guide camera's placement is built
 
 Built on 2026-10-05, before the guider's pod, and tested against the
-fake API server in `placement_test.go`. Not drilled on the test
-cluster yet.
+fake API server in `placement_test.go`. Drilled on 2026-10-06 with the
+guider: the guide camera's pod and the guider's pod ran on the node of
+the server.
 
 The camera of the `OpticalTrain` that a `Guider` names has a required
 pod affinity to its telescope's server pod, on the node label
@@ -268,6 +273,97 @@ change. Deactivation then stops PHD2 and deletes its pod before
 in 19 steps and then guided at about one step a second with 1-second
 exposures.
 
+## What the test cluster measured
+
+The operator ran from its development build
+`2026.10.04-004-dev-048-82139946`, applied by Flux from the deploy
+artifact, on the two-node test cluster of plan 03. The inventory was
+`examples/simulators.yaml` without its `Reservation`. The drill created
+a `Reservation` for the east telescope by hand, read
+`kubectl get reservation -w` and `kubectl get guider -w`, and took the
+step times from `status.steps` and the operator's log, to the second.
+The `indi` images had a new revision for PHD2, so each node pulled the
+`indi` and `indi-simulators` images again, and the guider's node pulled
+`weston` and `indi-phd2` for the first time.
+
+| Step | Time | What it did |
+|---|---|---|
+| `Wait` | under 1 s | Took the telescope |
+| `StartSite` | 38 s | 29 s of it pulled `indi-simulators` |
+| `PowerOn` | 4 s | |
+| `StartDevices` | 61 s | 57 s of it pulled `indi-simulators` on the other node |
+| `Connect` | 1 s | |
+| `Configure` | under 1 s | |
+| `Prepare` | 19 s | Cooled the main camera to -10 °C |
+| `StartGuider` | 47 s | 11 s pulled the 92 MB `weston` image and 23 s pulled the 211 MB `indi-phd2` image. The pod was Ready 10 s after PHD2 started, and PHD2 reported its camera and mount connected 1 s later. |
+| `Abort` | under 1 s | "Stopped PHD2, which was Guiding" |
+| `Secure` | 64 s | Parked the mount in 31 s and warmed the main camera to 5 °C |
+| `StopGuider` | 2 s | Deleted the pod while the camera and the mount were connected |
+| `Disconnect` | 1 s | |
+| `StopDevices` | 1 s | |
+| `PowerOff` | 3 s | |
+| `StopSite` | 19 s | Parked the dome in 17 s |
+
+The `Reservation` reached `Released` 91 s after its delete, and the
+operator then removed it. The operator sets `SafeToPowerOff` to `True`
+with the phase `Released`. The watch did not record the condition,
+because the object was gone 1 s later.
+
+The guider's pod, the guide camera's pod, and the server's pod ran on
+one node. `kubectl get guider` showed `Ready` with the state `Stopped`
+and a pixel scale of 2.475 arc-seconds per pixel, which matches 2.4 µm
+pixels behind the 200 mm guide scope.
+
+After `Prepare`, the mount was unparked, not tracking, at declination
+-90°. Acting as the holder, the drill sent the mount through INDI to
+declination 0° with tracking on, so the calibration measures both axes
+at a declination where RA moves the star. Then, over the event API
+through a port-forward to `east-guider`, it sent `set_exposure` of
+1,000 ms, `loop`, `find_star`, and `guide` with a settle of 1.5 pixels
+for 8 seconds, a timeout of 60 seconds, and `recalibrate`.
+
+The times are from the `loop` request to the watch's report of the
+`Guider`'s status.
+
+| Time from `loop` | `Guider` state | Total RMS in the status |
+|---|---|---|
+| 2 s | `Looping` | none |
+| 11 s | `Selected` | none |
+| 16 s | `Calibrating` | none |
+| 89 s | `Guiding` | none |
+| 90 s | `Guiding` | 4.28 arc-seconds after the first step |
+| 101 s | `Guiding` | 1.42 arc-seconds over 10 steps |
+| 146 s | `Guiding` | 0.84 arc-seconds over 50 steps |
+| 207 s | `Guiding` | 0.54 arc-seconds over 100 steps |
+| 223 s to 298 s | `Guiding` | 0.50 to 0.52 arc-seconds over 100 steps |
+
+PHD2 found a star on the first `find_star`, with an SNR of 77 and an
+HFD of 2.2 to 2.4 pixels, so the example's guide scope works with the
+guide camera simulator. Calibration took 73 s and 35 steps: 12 west,
+4 east, 3 for backlash, 10 north, 4 south, and 2 south nudges. It
+measured 2.94 pixels per second in RA at -179.3° and 3.06 pixels per
+second in Dec at 88.4°. PHD2 settled in 10 frames with none dropped,
+and guided for 3 min 56 s, until `Abort`. In the 198 s that the
+drill's connection stayed open, PHD2 sent 179 guide steps, one in
+1.1 s, and no `StarLost` or `Alert`. Over the last 100 steps, the RMS that the
+drill computed from the `GuideStep` events was 0.42 arc-seconds in RA,
+0.28 in Dec, and 0.50 in total. The status showed 0.51 arc-seconds
+10 s later. The status
+changed once a second, with `star.snr`, `star.hfd`, and
+`lastStepTime`.
+
+The `compositor` and `phd2` containers each had a restart count of 0
+for the whole reservation, and no modal dialog opened. PHD2 logged 102 GDK assertions about the missing seat, such as
+`gdk_seat_get_keyboard: assertion 'GDK_IS_SEAT (seat)' failed`: 28
+when its window opened, 66 when it connected its equipment, and 2
+each when it started to loop, to calibrate, and to guide. None of
+them stopped PHD2. weston logged one warning, that
+its runtime directory has the mode 0777 and the owner root, and one
+that the read-only root holds no shader cache. Neither stopped it.
+When `StopGuider` deleted the pod, the `phd2` container ended with
+the status `Error`, because PHD2 has no handler for `SIGTERM`; the pod
+was gone 2 s after the delete.
+
 ## Upstream issues
 
 - [phd2#683](https://github.com/OpenPHDGuiding/phd2/issues/683), open:
@@ -292,4 +388,4 @@ exposures.
 - The event server: `src/event_server.cpp` in `OpenPHDGuiding/phd2`
 - The command line: `src/phd.cpp`, and the profile: `src/phdconfig.cpp`
 - The INDI backends: `src/cam_indi.cpp` and `src/scope_indi.cpp`
-- [Root plan 74](../../plans/74-astrophotography.md), "Guiding"
+- [Root plan 74](../../../plans/74-astrophotography.md), "Guiding"
