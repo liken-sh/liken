@@ -24,6 +24,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"time"
@@ -43,6 +44,9 @@ type operator struct {
 	structure *bell
 	// dialer opens each INDI connection. Nil dials the network.
 	dialer indi.Dialer
+	// logs receives the operator's log (logs.go): standard error in a
+	// pod, and a buffer in a test that reads what the log says.
+	logs io.Writer
 
 	servers *servers
 	claims  *claims
@@ -77,6 +81,7 @@ func newOperator(namespace string, client *apiclient.Client, dialer indi.Dialer)
 		changed:   changed,
 		structure: newBell(changed),
 		dialer:    dialer,
+		logs:      os.Stderr,
 		claims:    newClaims(),
 		versions:  memo.New(),
 		runners:   map[string]*runner{},
@@ -178,7 +183,7 @@ func (o *operator) supervise(ctx context.Context, t *tree) {
 	o.claims.forgetGone(t)
 	o.servers.sync(ctx, t)
 	if err := o.sweep(t); err != nil {
-		fmt.Fprintf(os.Stderr, "observatory-operator: %v\n", err)
+		o.logf("%v", err)
 	}
 }
 
@@ -255,7 +260,7 @@ func (o *operator) send(ctx context.Context, report func(string), what string, w
 			return nil
 		}
 		message := fmt.Sprintf("retrying in %s: %s: %v", duration(pause), what, err)
-		fmt.Fprintf(os.Stderr, "observatory-operator: %s\n", message)
+		o.logf("%s", message)
 		if report != nil {
 			report(message)
 		}

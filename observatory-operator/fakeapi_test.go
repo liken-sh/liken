@@ -56,6 +56,10 @@ type fakeAPI struct {
 	refusals int
 	// patchRefusals is how many merge patches the server refuses next.
 	patchRefusals int
+	// lateDeletes is how many patches that remove a deleted object's
+	// last finalizer answer 404 after the object goes, as a patch does
+	// when another request deleted the object first.
+	lateDeletes int
 	// statusRefusals and eventRefusals are how many status writes and
 	// Event creates the server refuses next.
 	statusRefusals, eventRefusals int
@@ -446,7 +450,13 @@ func (a *fakeAPI) patch(w http.ResponseWriter, r *http.Request, collection, name
 	}
 	finalizers, _ := nextMeta["finalizers"].([]any)
 	if nextMeta["deletionTimestamp"] != nil && len(finalizers) == 0 {
-		_ = json.NewEncoder(w).Encode(a.store(collection, name, next, "DELETED"))
+		deleted := a.store(collection, name, next, "DELETED")
+		if a.lateDeletes > 0 {
+			a.lateDeletes--
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(deleted)
 		return
 	}
 	_ = json.NewEncoder(w).Encode(a.store(collection, name, next, "MODIFIED"))

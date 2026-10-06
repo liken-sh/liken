@@ -4,7 +4,10 @@ package main
 // Events: each message leads with the state, in a few words.
 
 import (
+	"encoding/json"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -82,6 +85,98 @@ func TestAFinishedReservationShowsNoStep(t *testing.T) {
 			if !slices.Contains(events, want) {
 				t.Errorf("no Event %q in %q", want, events)
 			}
+		}
+	})
+}
+
+// SafeToPowerOff says why the devices are not safe to power off yet,
+// and leads with the state.
+func TestSafeToPowerOffSaysWhyNot(t *testing.T) {
+	cases := []struct {
+		phase   observatory.ReservationPhase
+		reason  string
+		message string
+	}{
+		{observatory.ReservationScheduled, "Scheduled", "Waiting to activate Telescope east"},
+		{observatory.ReservationActivating, "Activating", "Activating Telescope east"},
+		{observatory.ReservationReady, "InUse", "In use by desktop"},
+		{observatory.ReservationDeactivating, "Deactivating", "Deactivating Telescope east"},
+		{observatory.ReservationReleased, "Released", "Safe to power off"},
+	}
+	for _, c := range cases {
+		t.Run(string(c.phase), func(t *testing.T) {
+			r := &runner{o: &operator{namespace: testNamespace}, res: &observatory.Reservation{
+				Spec: observatory.ReservationSpec{Telescope: "east", Holder: "desktop"},
+			}}
+			r.status.Phase = c.phase
+			r.compose()
+			safe := conditionOf(r.status.Conditions, observatory.ConditionSafeToPowerOff)
+			if safe.Reason != c.reason || safe.Message != c.message {
+				t.Errorf("SafeToPowerOff = %s: %s, want %s: %s", safe.Reason, safe.Message, c.reason, c.message)
+			}
+		})
+	}
+}
+
+// printedLines answers the columns of `kubectl get rsv -o wide` for each
+// change of a reservation's status, in order. A change of the metadata
+// alone, such as a delete that a finalizer holds, is left out: the API
+// server writes it, and the operator cannot give it a column of its own.
+func printedLines(t *testing.T, a *fakeAPI, name string) []string {
+	t.Helper()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var out []string
+	var last any
+	for _, e := range a.events {
+		if e.collection != kindCollection(observatory.ReservationKind) || e.kind != "MODIFIED" ||
+			e.object["metadata"].(map[string]any)["name"] != name || equalJSON(e.object["status"], last) {
+			continue
+		}
+		last = e.object["status"]
+		var r observatory.Reservation
+		body, _ := json.Marshal(e.object)
+		if err := json.Unmarshal(body, &r); err != nil {
+			t.Fatal(err)
+		}
+		line := []string{string(r.Status.Phase), string(r.Status.Step), conditionOf(r.Status.Conditions, observatory.ConditionReady).Message}
+		if r.Status.Endpoint != nil {
+			line = append(line, r.Status.Endpoint.Host, strconv.Itoa(int(r.Status.Endpoint.Port)))
+		}
+		out = append(out, strings.Join(line, " | "))
+	}
+	return out
+}
+
+// repeatedLines answers each line that equals the line before it.
+func repeatedLines(lines []string) []string {
+	var out []string
+	for i := 1; i < len(lines); i++ {
+		if lines[i] == lines[i-1] {
+			out = append(out, lines[i])
+		}
+	}
+	return out
+}
+
+// Each status write of a reservation changes a line of
+// `kubectl get rsv -w`, so the watch prints no line twice for the
+// operator's writes. A write that changes only a time or a step's
+// record below the columns waits for a change that a person can see.
+func TestEachStatusWriteChangesWhatKubectlGetShows(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := startWorld(t)
+		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
+		w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
+		time.Sleep(3 * time.Minute)
+		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
+		w.until(10*time.Minute, "the reservation stays", func() bool {
+			_, ok := w.reservation("east-tonight")
+			return !ok
+		})
+		if repeated := repeatedLines(printedLines(t, w.api, "east-tonight")); len(repeated) != 0 {
+			t.Errorf("status writes printed the line before them again: %q", repeated)
 		}
 	})
 }

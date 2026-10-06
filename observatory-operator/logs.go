@@ -8,7 +8,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -16,9 +15,10 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// logf writes one line, as every line of the operator's log begins.
-func logf(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "observatory-operator: "+format+"\n", args...)
+// logf writes one line to the operator's log, with the prefix that
+// begins every line.
+func (o *operator) logf(format string, args ...any) {
+	fmt.Fprintf(o.logs, "observatory-operator: "+format+"\n", args...)
 }
 
 // timedOut begins the summary of a step that passed its deadline.

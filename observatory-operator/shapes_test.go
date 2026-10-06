@@ -135,6 +135,30 @@ func TestARefusedFinalizerIsSentAgain(t *testing.T) {
 	})
 }
 
+// A finalizer that is gone with its reservation is removed: the
+// operator does not send the patch again, and logs no retry.
+func TestAFinalizerOfAGoneReservationIsRemoved(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := startWorld(t)
+		w.reserve("west-tonight", map[string]any{"telescope": "west", "holder": "desktop"})
+		w.phase("west-tonight", observatory.ReservationReady, 10*time.Minute)
+		w.api.mu.Lock()
+		w.api.lateDeletes = 1
+		w.api.mu.Unlock()
+		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "west-tonight")
+		w.until(10*time.Minute, "the reservation stays", func() bool {
+			_, ok := w.reservation("west-tonight")
+			return !ok
+		})
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		if logs := w.logs.String(); strings.Contains(logs, "retrying") {
+			t.Errorf("the operator retried a finished removal:\n%s", logs)
+		}
+	})
+}
+
 // A device added while a reservation is Ready gets its pod, and the
 // server restarts with a link to it, because indiserver reads its
 // drivers from its arguments. The devices come back on the new server,

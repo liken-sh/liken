@@ -65,7 +65,8 @@ func hasFinalizer(r *observatory.Reservation) bool {
 // setFinalizer adds or removes the reservation's finalizer with a merge
 // patch that states the resourceVersion, so the API server refuses it
 // with a 409 when another writer changed the list since the read. The
-// caller reads the reservation again and calls once more.
+// caller reads the reservation again and calls once more. A removal
+// that finds the reservation gone is done: the finalizer went with it.
 func (o *operator) setFinalizer(r *observatory.Reservation, present bool) error {
 	finalizers := slices.DeleteFunc(slices.Clone(r.Metadata.Finalizers), func(f string) bool {
 		return f == observatory.ReservationFinalizer
@@ -73,7 +74,11 @@ func (o *operator) setFinalizer(r *observatory.Reservation, present bool) error 
 	if present {
 		finalizers = append(finalizers, observatory.ReservationFinalizer)
 	}
-	return o.patchMetadata(r, map[string]any{"finalizers": finalizers})
+	err := o.patchMetadata(r, map[string]any{"finalizers": finalizers})
+	if !present && errors.Is(err, apiclient.ErrNotFound) {
+		return nil
+	}
+	return err
 }
 
 // annotationRetry asks the operator to run a failed step again. The

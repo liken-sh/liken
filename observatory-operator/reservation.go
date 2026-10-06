@@ -14,7 +14,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 	"time"
@@ -227,7 +226,7 @@ func (r *runner) runStep(ctx context.Context, name observatory.StepName, fn step
 	r.status.Step = name
 	r.status.Phase = phaseOf(name)
 	r.save(ctx)
-	logf("Reservation %s: %s %s", r.name, name, begins)
+	r.o.logf("Reservation %s: %s %s", r.name, name, begins)
 
 	limit := stepTimeouts[name]
 	stepCtx, cancel := ctx, context.CancelFunc(func() {})
@@ -253,7 +252,7 @@ func (r *runner) runStep(ctx context.Context, name observatory.StepName, fn step
 	case err != nil && errors.Is(context.Cause(ctx), errEnding):
 		s.State, s.Summary = observatory.StepSkipped, sentence(errEnding.Error())
 		r.save(ctx)
-		logf("Reservation %s: %s", r.name, stepLine(s))
+		r.o.logf("Reservation %s: %s", r.name, stepLine(s))
 		return errEnding
 	case err != nil && ctx.Err() != nil:
 		// The operator stops. The step stays Running, and the next
@@ -275,7 +274,7 @@ func (r *runner) runStep(ctx context.Context, name observatory.StepName, fn step
 		s.State, s.Summary = observatory.StepDone, result.message
 	}
 	r.save(ctx)
-	logf("Reservation %s: %s", r.name, stepLine(s))
+	r.o.logf("Reservation %s: %s", r.name, stepLine(s))
 	r.o.record(r.res, eventNormal, string(name), sentence(strings.TrimPrefix(stepLine(s), string(name)+" ")))
 	return nil
 }
@@ -296,7 +295,7 @@ const (
 )
 
 func (r *runner) failure(ctx context.Context, s *observatory.Step, reason string) {
-	logf("Reservation %s: %s", r.name, stepLine(s))
+	r.o.logf("Reservation %s: %s", r.name, stepLine(s))
 	r.status.Phase = observatory.ReservationFailed
 	r.save(ctx)
 	r.o.record(r.res, eventWarning, reason, failedMessage(s))
@@ -342,7 +341,7 @@ func (r *runner) save(ctx context.Context) {
 	r.compose()
 	if r.status.Phase != r.logged {
 		r.logged = r.status.Phase
-		logf("Reservation %s: %s", r.name, phaseLine(&r.status))
+		r.o.logf("Reservation %s: %s", r.name, phaseLine(&r.status))
 	}
 	held := *r.res
 	_, err := informer.SettleStatus[observatory.Reservation](r.o.client.WithContext(ctx), r.o.versions,
@@ -359,7 +358,7 @@ func (r *runner) save(ctx context.Context) {
 	if err == nil {
 		r.res = &held
 	} else if ctx.Err() == nil {
-		fmt.Fprintf(os.Stderr, "observatory-operator: writing the status of the Reservation %s: %v\n", r.name, err)
+		r.o.logf("writing the status of the Reservation %s: %v", r.name, err)
 	}
 }
 
@@ -374,13 +373,20 @@ func (r *runner) compose() {
 		reason, message = string(step.Name), firstNonEmpty(step.Summary, "Running")
 	}
 	ready := condition(observatory.ConditionReady, observatory.ConditionFalse, reason, message)
-	safe := condition(observatory.ConditionSafeToPowerOff, observatory.ConditionFalse, string(s.Phase), "Not released")
+	// SafeToPowerOff says why the devices are not safe to power off
+	// yet: activation waits to start or runs, the holder uses the
+	// telescope, or deactivation runs.
+	telescope := "Telescope " + r.res.Spec.Telescope
+	safe := condition(observatory.ConditionSafeToPowerOff, observatory.ConditionFalse, string(s.Phase), string(s.Phase)+" "+telescope)
 	switch s.Phase {
+	case observatory.ReservationScheduled:
+		safe.Message = "Waiting to activate " + telescope
 	case observatory.ReservationReady:
 		endpoint := r.endpoint()
 		s.Endpoint = &endpoint
 		ready = condition(observatory.ConditionReady, observatory.ConditionTrue, "Ready",
 			fmt.Sprintf("Ready at %s:%d", endpoint.Host, endpoint.Port))
+		safe.Reason, safe.Message = "InUse", "In use by "+r.res.Spec.Holder
 	case observatory.ReservationReleased:
 		safe = condition(observatory.ConditionSafeToPowerOff, observatory.ConditionTrue, "Released", "Safe to power off")
 	case observatory.ReservationFailed:

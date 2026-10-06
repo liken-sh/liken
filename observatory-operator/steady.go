@@ -17,7 +17,6 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -57,7 +56,7 @@ func (r *runner) steady(ctx context.Context) {
 		}
 		if inputs := podInputs(t, ref, telescope); inputs != kept {
 			if err := r.keepPods(ctx, t, ref, telescope, devices); err != nil {
-				fmt.Fprintf(os.Stderr, "observatory-operator: keeping the pods of %s: %v\n", ref, err)
+				r.o.logf("keeping the pods of %s: %v", ref, err)
 			} else {
 				kept = inputs
 			}
@@ -288,6 +287,6 @@ func (r *runner) again(ctx context.Context, h handle, work func(context.Context)
 	}
 	r.o.fault(h.d, err)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "observatory-operator: setting up %s again failed: %v\n", h, err)
+		r.o.logf("setting up %s again failed: %v", h, err)
 	}
 }

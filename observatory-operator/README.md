@@ -166,12 +166,14 @@ and the worst verdict of its weather stations.
 
 A `Reservation` moves through the phases `Scheduled`, `Activating`,
 `Ready`, `Deactivating`, and `Released`, or `Failed`. `status.steps`
-lists every step in order, with its state, start and stop times, and
-a summary that names the device a step waits for. Each step's state is
-`Pending`, `Running`, `Done`, `Failed`, or `Skipped`. `status.step`
-names the step that runs now, or the step that failed, and it is
-empty while the reservation is `Ready` or `Released`. "How a
-reservation runs" below states what each step does.
+lists the steps in order, with their states, start and stop times, and
+summaries. A summary names the device that a step waits for. The list
+holds the activation steps from the start, and deactivation adds its
+steps when it begins, so a `Ready` reservation lists only what ran.
+Each step's state is `Pending`, `Running`, `Done`, `Failed`, or
+`Skipped`. `status.step` names the step that runs now, or the step
+that failed, and it is empty while the reservation is `Ready` or
+`Released`. "How a reservation runs" below states what each step does.
 
 ```sh
 kubectl get rsv -n observatory -w
@@ -184,7 +186,9 @@ kubectl get cam,mnt,sw -n observatory
 
 `kubectl get rsv -w` prints a line for each change of the status: the
 phase, the step, and the message of the step that runs, such as the
-device it waits for. `-o wide` adds the start, the end, and the
+device it waits for. It also prints a line for each change of the
+metadata, which repeats the line before it: one when the operator adds
+its finalizer, and one when a person deletes the reservation. `-o wide` adds the start, the end, and the
 endpoint. The message is the `Ready` condition's: while a step runs,
 its reason is the step and its message is the step's summary.
 `kubectl describe` lists each step with its name first, and the
@@ -204,7 +208,9 @@ observatory-operator: Reservation east-tonight: Prepare done in 19 s: cooled Cam
 observatory-operator: Reservation east-tonight: Ready at east-telescope.observatory.svc:7624
 ```
 
-`SafeToPowerOff` is `True` when the deactivation steps are done. The
+`SafeToPowerOff` is `True` when the deactivation steps are done. Until
+then it is `False`, and its message says why, such as
+`In use by desktop` while the reservation is `Ready`. The
 `Guider` kind has its CRD, but its pod is [plan 09](plans/09-the-guider.md):
 its `Ready` condition is `False` with the reason `NotImplemented`.
 
@@ -226,7 +232,7 @@ goes on.
 | `StartDevices` | Starts the pod of every other device, and waits until each pod is Ready and its driver defines its device on the server. A device on real hardware waits here for its claim. | 10 min |
 | `Connect` | Connects the mount, the GPS, the polar aligner, the focusers, the filter wheels, the rotators, the dust caps, the flat panels, the sky quality meters, the receivers, and the cameras, in that order. | 2 min |
 | `Configure` | Writes the observatory's location to the mount and the GPS, each camera's `ACTIVE_DEVICES` from its train, the camera's gain and offset, the tube's focal length and aperture, and the filter names. | 2 min |
-| `Prepare` | Opens the dust caps, cools each camera to `spec.temperature` within 0.5 °C, and unparks the mount. | 20 min |
+| `Prepare` | Opens the dust caps, cools each camera to `spec.temperature` within 0.5 °C, and unparks the mount. It does not switch tracking on, because the holder, KStars in mode 1 or a `Session` in mode 2, aligns and calibrates the mount first. | 20 min |
 | `Abort` | Ends each exposure and stops the mount if it moves. | 2 min |
 | `Secure` | Switches the flat panels off, closes the dust caps, parks the mount, and warms each cooled camera to 5 °C for up to 10 minutes before it switches the cooler off. | 20 min |
 | `Disconnect` | Disconnects the devices in the reverse order of `Connect`. | 2 min |

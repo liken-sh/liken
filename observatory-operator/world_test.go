@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -29,6 +30,27 @@ type world struct {
 	o    *operator
 	stop func()
 	done chan struct{}
+	// logs holds what every copy of the operator logged.
+	logs *logBuffer
+}
+
+// logBuffer collects the operator's log. The operator's goroutines
+// write to it at once, so a lock guards it.
+type logBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *logBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *logBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // example answers the resources of examples/simulators.yaml, by kind,
@@ -73,9 +95,14 @@ func startWorld(t *testing.T) *world {
 	for _, object := range example(t) {
 		api.put(kindCollection(kindNamed(object["kind"].(string))), object)
 	}
-	w := &world{t: t, api: api, indi: startIndiWorld(t, api)}
+	w := &world{t: t, api: api, indi: startIndiWorld(t, api), logs: &logBuffer{}}
 	w.start()
 	t.Cleanup(w.halt)
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("the operator's log:\n%s", w.logs.String())
+		}
+	})
 	return w
 }
 
@@ -88,6 +115,7 @@ func (w *world) start() {
 	}
 	ctx, cancel := context.WithCancel(w.t.Context())
 	o := newOperator(testNamespace, client.WithContext(ctx), w.indi)
+	o.logs = w.logs
 	w.o = o
 	w.stop, w.done = cancel, make(chan struct{})
 	done := w.done

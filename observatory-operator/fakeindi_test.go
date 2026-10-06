@@ -280,6 +280,9 @@ type indiWorld struct {
 	// moving holds the properties whose driver answers a change with
 	// Busy, as a mount that slews does, until a test sets the state.
 	moving map[string]bool
+	// lateDials holds how many dials each server refuses after its pod
+	// is Ready, as an indiserver that has not opened its port yet does.
+	lateDials map[string]int
 
 	// followMu serializes catchUp, and guards last, the pods that the
 	// servers follow now.
@@ -288,7 +291,7 @@ type indiWorld struct {
 }
 
 func startIndiWorld(t *testing.T, api *fakeAPI) *indiWorld {
-	w := &indiWorld{t: t, api: api, servers: map[string]*fakeServer{}, held: map[string]bool{}, refused: map[string]bool{}, moving: map[string]bool{}}
+	w := &indiWorld{t: t, api: api, servers: map[string]*fakeServer{}, held: map[string]bool{}, refused: map[string]bool{}, moving: map[string]bool{}, lateDials: map[string]int{}}
 	go w.follow(t.Context())
 	return w
 }
@@ -439,7 +442,8 @@ func (w *indiWorld) DialContext(ctx context.Context, network, address string) (n
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	s, ok := w.servers[name]
-	if !ok {
+	if !ok || w.lateDials[name] > 0 {
+		w.lateDials[name]--
 		return nil, &net.OpError{Op: "dial", Net: "tcp", Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}
 	}
 	client, server := net.Pipe()
@@ -653,6 +657,14 @@ func (w *indiWorld) refuse(device, property string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.refused[device+"."+property] = true
+}
+
+// listenLate makes a server refuse its next dials after its pod is
+// Ready.
+func (w *indiWorld) listenLate(server string, dials int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.lateDials[server] = dials
 }
 
 // cut closes every client connection to a server while the server and

@@ -10,10 +10,10 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"os"
+	"errors"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/liken-sh/liken/observatory-operator/indi"
@@ -126,9 +126,16 @@ func (s *servers) open(parent context.Context, name string) *indiServer {
 }
 
 // keep runs the client's connection while the server's pod is Ready,
-// and opens it again after it ends.
+// and opens it again after it ends. A new indiserver opens its port a
+// moment after its pod is Ready, so the first dial to it is often
+// refused. That refusal is not a fault, and the reservation's status
+// already says that it waits for the connection, so keep logs only a
+// refusal that follows another refusal. A connection that ran makes
+// the next refusal the first again, because the server that ended it
+// may have restarted.
 func (s *servers) keep(ctx context.Context, server *indiServer) {
 	pause := redialFirst
+	refused := false
 	for {
 		err := s.o.waitFor(ctx, nil, func(t *tree) (bool, string, error) {
 			p, ok := t.pods[server.name]
@@ -142,7 +149,11 @@ func (s *servers) keep(ctx context.Context, server *indiServer) {
 		if ctx.Err() != nil {
 			return
 		}
-		fmt.Fprintf(os.Stderr, "observatory-operator: the INDI connection to %s ended: %v\n", server.name, err)
+		wasRefused := refused
+		refused = errors.Is(err, syscall.ECONNREFUSED)
+		if !refused || wasRefused {
+			s.o.logf("the INDI connection to %s ended: %v", server.name, err)
+		}
 		if time.Since(began) >= redialReset {
 			pause = redialFirst
 		}

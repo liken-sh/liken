@@ -7,9 +7,7 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/liken-sh/liken/observatory-operator/observatory"
@@ -70,6 +68,6 @@ func (o *operator) record(r *observatory.Reservation, kind, reason, message stri
 		err = o.client.RequestJSON(http.MethodPost, "/api/v1/namespaces/"+r.Metadata.Namespace+"/events", body, nil)
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "observatory-operator: recording %s on the Reservation %s: %v\n", reason, r.Metadata.Name, err)
+		o.logf("recording %s on the Reservation %s: %v", reason, r.Metadata.Name, err)
 	}
 }

@@ -85,6 +85,10 @@ The steps were proposed in this order:
 | `PowerOff` | Switches the outputs off, then stops the `Switch` pods and the telescope's server. |
 | `StopSite` | Stops the observatory's server, unless another reservation is active. |
 
+Note added on 2026-10-05: `Prepare` does not switch tracking on,
+because the holder, KStars in mode 1 or a `Session` in mode 2, aligns
+and calibrates the mount first.
+
 The server stops in `PowerOff`, after the outputs switch off. The
 operator reaches a `Switch` through the telescope's server, so a
 server that stopped in `StopDevices` would leave the outputs on. Each

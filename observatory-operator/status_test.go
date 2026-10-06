@@ -279,6 +279,36 @@ func TestAConnectionThatEndsIsOpenedAgainAfterAPause(t *testing.T) {
 	})
 }
 
+// indiserver opens its port a moment after its pod is Ready, so the
+// operator's first dial of a new server is often refused. That refusal
+// is no fault and logs nothing. A server that refuses the dial after
+// the pause too is logged.
+func TestAServerThatListensLateLogsOnlyARepeatedRefusal(t *testing.T) {
+	cases := []struct {
+		name  string
+		dials int
+		want  int
+	}{
+		{"one refusal", 1, 0},
+		{"two refusals", 2, 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				w := startWorld(t)
+				w.indi.listenLate("west-telescope", c.dials)
+				w.reserve("west-tonight", map[string]any{"telescope": "west", "holder": "desktop"})
+				w.phase("west-tonight", observatory.ReservationReady, 10*time.Minute)
+				refusals := strings.Count(w.logs.String(), "the INDI connection to west-telescope ended: dial tcp: connect: connection refused")
+				if refusals != c.want {
+					t.Errorf("%d refusals logged, want %d:\n%s", refusals, c.want, w.logs.String())
+				}
+			})
+		})
+	}
+}
+
 // A device of the observatory that comes back is connected again, and
 // the dome's policy is written again.
 func TestASiteDeviceThatComesBackIsSetUpAgain(t *testing.T) {
