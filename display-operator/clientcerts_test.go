@@ -14,9 +14,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
@@ -156,23 +158,22 @@ func TestAVerifiedClientCertificateIsTheCaller(t *testing.T) {
 // names the certificate's user.
 func TestTheCapturedEventNamesTheCertificateUser(t *testing.T) {
 	authority := newClientAuthority(t)
-	cluster := newTestCluster(t)
-	server := newTestAPI(t, cluster, newSidecarFixture(t))
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newTestCluster(t)
+		server := newTestAPI(t, cluster, newPipedSidecar(t))
 
-	resp := callOver(t, server, apiRoot+"/displays/HDMI-A-1/screen.png",
-		authority.verified(t, "admin", []string{"system:masters"}), nil)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("the certificate answered %d, want 200: %s", resp.StatusCode, body(t, resp))
-	}
+		resp := callOver(t, server, apiRoot+"/displays/HDMI-A-1/screen.png",
+			authority.verified(t, "admin", []string{"system:masters"}), nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("the certificate answered %d, want 200: %s", resp.StatusCode, body(t, resp))
+		}
+		synctest.Wait()
 
-	recorded := cluster.recorded()
-	if len(recorded) != 1 {
-		t.Fatalf("the capture wrote %d events, want 1", len(recorded))
-	}
-	want := "admin took the screen of HDMI-A-1 as image/png"
-	if recorded[0].Message != want {
-		t.Errorf("the event reads %q, want %q", recorded[0].Message, want)
-	}
+		want := []string{"Normal Captured admin took the screen of HDMI-A-1 as image/png"}
+		if got := eventLines(cluster.events.About("Display", "HDMI-A-1")); !slices.Equal(got, want) {
+			t.Errorf("the Events are %q, want %q", got, want)
+		}
+	})
 }
 
 // A certificate that named a caller is the caller, and the Bearer

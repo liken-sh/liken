@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
 // An extension block built by hand, so a test can state its data
@@ -177,7 +179,7 @@ func TestTheDisplayReportsThePhysicalAddress(t *testing.T) {
 		name    string
 		steps   []edidStep
 		address string
-		status  string
+		status  conditions.Status
 		reason  string
 		message string
 	}{
@@ -308,7 +310,7 @@ func TestTheDisplayRefusesAnAmbiguousAddress(t *testing.T) {
 		name    string
 		wired   []wiredPanel
 		address string
-		status  string
+		status  conditions.Status
 		reason  string
 		message string
 	}{

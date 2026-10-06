@@ -32,6 +32,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/events"
 )
 
 // The two VCP codes this operator reads and writes. The MCCS
@@ -737,6 +739,8 @@ func (p *draPlugin) standbyReleased(connector string) {
 	}
 	if err := p.controls.standby(connector); err != nil {
 		fmt.Fprintf(os.Stderr, "putting %s to standby: %v\n", connector, err)
+		p.notices.post(connector, events.TypeWarning, PanelStandbyFailedReason,
+			fmt.Sprintf("the panel on %s did not take the standby after its last claim ended, and stays on: %v", connector, err))
 	}
 }
 

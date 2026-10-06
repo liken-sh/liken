@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -19,6 +20,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/conditions"
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
@@ -31,24 +33,16 @@ const (
 	DisplaysPath      = "/apis/" + DisplayGroup + "/" + DisplayVersion + "/displays"
 )
 
-// The two conditions the operator publishes, and the reason a
-// panel that answers no DDC/CI carries.
+// The two conditions the Display controller publishes about the
+// panel. Their reasons are in reasons.go.
 const (
 	ConnectedCondition  = "Connected"
 	ResponsiveCondition = "Responsive"
-	NoDDCReplyReason    = "NoDDCReply"
 )
 
-// The condition that reports the compositor behind this screen, and
-// its three reasons. Serving is a compositor that answered the probe.
-// Down is a socket that refuses the connect or ends under the probe.
-// Hung is a socket that accepts and answers nothing.
-const (
-	CompositorServingCondition = "CompositorServing"
-	CompositorServingReason    = "Serving"
-	CompositorDownReason       = "Down"
-	CompositorHungReason       = "Hung"
-)
+// The condition that reports the compositor behind this screen. Its
+// reasons are in reasons.go.
+const CompositorServingCondition = "CompositorServing"
 
 // The one value each override field takes. The block states
 // what the panel is held at, and its absence is what lifts it.
@@ -238,22 +232,18 @@ type DisplayValues struct {
 	Power       *string `json:"power,omitempty"`
 }
 
-// The standard condition shape, held here for the reason the
-// slice structs are held here: this program writes these fields and no
-// others.
-type DisplayCondition struct {
-	Type               string `json:"type"`
-	Status             string `json:"status"`
-	Reason             string `json:"reason"`
-	Message            string `json:"message,omitempty"`
-	LastTransitionTime string `json:"lastTransitionTime"`
-}
+// A Display's conditions have the shape every liken component
+// reports, the shape of metav1.Condition. The CRD in
+// deploy/displays.yaml states no observedGeneration, and this operator
+// sets none, so the field is never written. The CRD accepts an empty
+// message, which the shared type writes where it has none.
+type DisplayCondition = conditions.Condition
 
 // The two states a condition takes here. Unknown is never
 // written: the operator either read the panel or it did not.
 const (
-	conditionTrue  = "True"
-	conditionFalse = "False"
+	conditionTrue  = conditions.True
+	conditionFalse = conditions.False
 )
 
 // Whether the override holds the panel dark, and by which of
@@ -384,26 +374,15 @@ func muteValue(muted *bool) (uint16, bool) {
 	return valueRaw(vcpAudioMute, name)
 }
 
-// The condition with this type replaced, and the timestamp kept
-// when nothing about it changed. A timestamp that moved on every pass
-// would make every pass a write.
-func setCondition(conditions []DisplayCondition, next DisplayCondition) []DisplayCondition {
-	for index, current := range conditions {
-		if current.Type != next.Type {
-			continue
-		}
-		if current.Status == next.Status && current.Reason == next.Reason && current.Message == next.Message {
-			return conditions
-		}
-		if current.Status == next.Status {
-			next.LastTransitionTime = current.LastTransitionTime
-		}
-		updated := make([]DisplayCondition, len(conditions))
-		copy(updated, conditions)
-		updated[index] = next
-		return updated
-	}
-	return append(conditions, next)
+// The condition with this type replaced, and the timestamp kept when
+// the status did not change (conditions.Set). The list is copied
+// first, because a pass composes from the published status and
+// compares the two to decide whether to write, so the published list
+// must stay as it was.
+func setCondition(list []DisplayCondition, next DisplayCondition) []DisplayCondition {
+	updated := slices.Clone(list)
+	conditions.Set(&updated, next)
+	return updated
 }
 
 func listDisplays(c *apiclient.Client) ([]Display, error) {

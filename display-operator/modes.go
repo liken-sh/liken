@@ -36,6 +36,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/events"
 )
 
 // The one key this driver reads out of a claim's opaque
@@ -421,6 +423,9 @@ func (p *draPlugin) applyMode(ctx context.Context, output Output, mode string) e
 	// one line that names the screen and the change that caused it.
 	fmt.Printf("%s: the mode goes from %s to %s, and the compositor restarts\n",
 		output.Connector, reportedMode(current[output.Connector]), mode)
+	p.notices.post(output.Connector, events.TypeNormal, ModeChangedReason,
+		fmt.Sprintf("the mode of %s goes from %s to %s; the compositor restarts, and every screen on the card blanks",
+			output.Connector, reportedMode(current[output.Connector]), mode))
 	// The blast. The kubelet restarts the container, the new
 	// compositor parses the rewritten config, and every client on every
 	// output of this card loses its connection. That is the accepted
@@ -552,7 +557,12 @@ func (p *draPlugin) restartCompositor() error {
 // again, and that Down is the path the taint and the clients already
 // take.
 func (p *draPlugin) killHungCompositor() error {
-	return p.restart("hung", func() error { return p.ending(p.killCompositor) })
+	if err := p.restart("hung", func() error { return p.ending(p.killCompositor) }); err != nil {
+		return err
+	}
+	p.notices.post("", events.TypeWarning, CompositorKilledReason,
+		fmt.Sprintf("the compositor answered nothing for %s; the operator ended it, and the kubelet starts it again", compositorHungLimit))
+	return nil
 }
 
 // Restart ends the compositor and counts the restart under the reason

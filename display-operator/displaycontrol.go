@@ -928,7 +928,7 @@ func (d *displayControl) statusOf(display *Display, output Output, facts panelFa
 	// the gauges the idle screen's drive shows up on.
 	d.metrics.recordPanel(output.Connector, facts)
 	status.Conditions = setCondition(status.Conditions, d.condition(ConnectedCondition, true,
-		"PanelAttached", output.Connector+" carries this panel"))
+		PanelAttachedReason, output.Connector+" carries this panel"))
 	status.Conditions = setCondition(status.Conditions, d.responsive(facts))
 	return d.withPhysicalAddress(status, output, ambiguous)
 }
@@ -961,7 +961,7 @@ func (d *displayControl) servedMode(connector string) string {
 // turns DDC/CI off.
 func (d *displayControl) responsive(facts panelFacts) DisplayCondition {
 	if facts.Responsive {
-		return d.condition(ResponsiveCondition, true, "AnswersDDC", "the panel answers DDC/CI")
+		return d.condition(ResponsiveCondition, true, AnswersDDCReason, "the panel answers DDC/CI")
 	}
 	return d.condition(ResponsiveCondition, false, NoDDCReplyReason,
 		"the panel answers no DDC/CI; a panel in standby does not answer it, and some panels turn DDC/CI off in their own menu")
@@ -977,7 +977,7 @@ func (d *displayControl) absent(display *Display) error {
 	absent := func(published DisplayStatus) (DisplayStatus, bool) {
 		status := published
 		status.Conditions = setCondition(status.Conditions, d.condition(ConnectedCondition, false,
-			"NoPanel", "no panel on "+status.Connector))
+			NoPanelReason, "no panel on "+status.Connector))
 		// The connector serves no EDID, or the EDID of another monitor,
 		// such as the TV's EDID that a receiver in standby can pass
 		// through. Either way the port this machine's cable is in has
@@ -1002,7 +1002,7 @@ func (d *displayControl) condition(kind string, met bool, reason, message string
 		Status:             status,
 		Reason:             reason,
 		Message:            message,
-		LastTransitionTime: d.now().UTC().Format(time.RFC3339),
+		LastTransitionTime: d.now().UTC().Truncate(time.Second),
 	}
 }
 

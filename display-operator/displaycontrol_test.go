@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"maps"
 	"net/http"
 	"slices"
@@ -21,6 +22,8 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
+	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 )
 
 // A panel of the lab drill, answering the capability string it
@@ -102,6 +105,10 @@ type displayFixture struct {
 	// The pass read nothing from the card, which is every pass while
 	// the operator holds no connection to a compositor.
 	unread bool
+	// The Events the controller's recorder wrote, which the API server
+	// serves in front of handler.
+	events   *eventstest.Events
+	recorder *events.Recorder
 }
 
 func (f *displayFixture) clock() time.Time { return f.at }
@@ -141,8 +148,11 @@ func newDisplayBench(t *testing.T, wired ...wiredPanel) *displayFixture {
 	}
 	controls, bench := benchPanels(t, t.TempDir(), "card1", panels)
 	fixture.bench = bench
-	fixture.client = testClient(t, fixture.handler())
+	fixture.events = &eventstest.Events{}
+	fixture.client = testClient(t, fixture.events.Around(fixture.handler()))
+	fixture.recorder = events.New(t.Context(), fixture.client, componentName, events.Options{Instance: "liken-1", Log: io.Discard})
 	fixture.control = newDisplayControl(fixture.client, "liken-1", controls, fixture.outputs)
+	fixture.control.displays.recorder = fixture.recorder
 	fixture.at = time.Unix(0, 0).UTC()
 	fixture.control.now = fixture.clock
 	// The probe cache reads the same clock, because the window

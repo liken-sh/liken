@@ -39,6 +39,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
@@ -245,6 +246,14 @@ func operate() {
 		fatal("reading node %s: %v", nodeName, err)
 	}
 
+	// One recorder posts every Event of this operator, about the
+	// Displays of this node. The pod's name is each Event's
+	// reportingInstance, so a person can tell which node's operator
+	// wrote it. notices finds the Display of a connector for the code
+	// that acts on a connector, once the Display store below is set.
+	recorder := events.New(ctx, client, componentName, events.Options{Instance: os.Getenv("POD_NAME")})
+	notices := &screenNotices{node: nodeName}
+
 	card := claimedCard()
 	socketPath := socketDir + "/" + socketName
 
@@ -260,6 +269,7 @@ func operate() {
 	// nothing at all.
 	plugin := newDRAPlugin(client, card, socketDir, layout)
 	plugin.metrics = readings
+	plugin.notices = notices
 	// A panel whose claim ended while the last operator container ran
 	// may still wait for its standby, and the record says which.
 	plugin.resumeReleases()
@@ -366,6 +376,8 @@ func operate() {
 	// (objectcache.go).
 	stores := clusterStores{layouts: layouts.View(), pods: pods.View()}
 	shared := newDisplayStore(client, displays.View())
+	shared.recorder = recorder
+	notices.displays.Store(shared)
 	panels.displays = shared
 	places.displays, places.stores = shared, stores
 	// The Display controller starts once its store is set, because its

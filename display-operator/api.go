@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
@@ -106,6 +107,9 @@ func serveAPI() {
 		fatal("in-cluster config for the watches: %v", err)
 	}
 	readings := newAPIMetrics(apiComponent, version)
+	// The Events' reportingInstance is the host name, which is the
+	// pod's name, so a person can tell which replica wrote one.
+	recorder := events.New(ctx, client, apiComponent, events.Options{})
 
 	holder := &certificateHolder{}
 	anchor, err := startAuthority(ctx, client, watcher, namespace, holder, readings)
@@ -135,7 +139,7 @@ func serveAPI() {
 		readings: readings,
 		sidecar:  newSidecarClient(anchor, captureTokenPath),
 		record: func(screen *Display, subject, aspect, form string) {
-			recordCapture(client, screen, subject, aspect, form)
+			recordCapture(recorder, screen, subject, aspect, form)
 		},
 		publicBase: os.Getenv("PUBLIC_BASE"),
 		now:        time.Now,

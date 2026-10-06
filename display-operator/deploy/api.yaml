@@ -162,7 +162,9 @@ rules:
     verbs: [get]
   # Every request that produces bytes writes a Captured Event on the
   # Display, so kubectl describe display answers who looked at a
-  # screen and when.
+  # screen and when. The create writes a new Event, and the patch adds
+  # a repeat of the same capture within 10 minutes to the count of the
+  # Event it wrote.
   - apiGroups: [""]
     resources: [events]
     verbs: [create, patch]

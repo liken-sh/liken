@@ -27,6 +27,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/conditions"
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
@@ -84,8 +85,8 @@ type PodStatus struct {
 // because it is the one answer that covers every container of the
 // pod.
 type PodCondition struct {
-	Type   string `json:"type"`
-	Status string `json:"status"`
+	Type   string            `json:"type"`
+	Status conditions.Status `json:"status"`
 }
 
 // A pod is ready only while the kubelet says so; a pod with no

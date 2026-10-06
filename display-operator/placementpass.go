@@ -556,7 +556,7 @@ func (p *placementPass) stated(kind string, met bool, reason, message string) Di
 		Status:             status,
 		Reason:             reason,
 		Message:            message,
-		LastTransitionTime: p.now().UTC().Format(time.RFC3339),
+		LastTransitionTime: p.now().UTC().Truncate(time.Second),
 	}
 }
 

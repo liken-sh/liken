@@ -2,8 +2,8 @@
 # more. It writes one ResourceSlice, writes the status of every
 # Display it created, reads the claims on the screens it drives and
 # the pods that hold them, reads the Layouts a Display names, reads
-# its own Node, and reviews the token the API sends its capture
-# container.
+# its own Node, posts Events about the Displays, and reviews the token
+# the API sends its capture container.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -99,6 +99,37 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: display-operator
+subjects:
+  - kind: ServiceAccount
+    name: display-operator
+    namespace: liken-system
+---
+# The Events about the Displays (displayevents.go, reasons.go): a
+# condition that changed, a write the panel did not confirm, a mode
+# change, a compositor the operator ended. A Display is cluster-scoped,
+# and the API server accepts an Event about a cluster-scoped object only
+# in default or kube-system, so the grant is a Role in default and
+# nowhere else. The create writes a new Event, and the patch adds a
+# repeat within 10 minutes to the count of the Event it wrote.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: display-operator-events
+  namespace: default
+rules:
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: display-operator-events
+  namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: display-operator-events
 subjects:
   - kind: ServiceAccount
     name: display-operator

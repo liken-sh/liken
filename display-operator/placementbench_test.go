@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
 // The claims of the drills below. A surface id carries the first
@@ -465,7 +466,7 @@ func conditionByType(status DisplayStatus, kind string) DisplayCondition {
 	return DisplayCondition{}
 }
 
-func assertCondition(t *testing.T, status DisplayStatus, want, reason string) {
+func assertCondition(t *testing.T, status DisplayStatus, want conditions.Status, reason string) {
 	t.Helper()
 	condition := conditionOf(status)
 	if condition.Status != want || condition.Reason != reason {

@@ -61,7 +61,11 @@ var (
 // screen to come back.
 type draPlugin struct {
 	drav1.UnimplementedDRAPluginServer
-	client    *apiclient.Client
+	client *apiclient.Client
+	// notices posts the Events of the plugin's actions on the screens:
+	// a mode change, a compositor it ended, a standby that failed. Nil
+	// posts nothing.
+	notices   *screenNotices
 	sysRoot   string
 	card      string
 	socketDir string

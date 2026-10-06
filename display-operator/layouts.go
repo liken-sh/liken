@@ -31,20 +31,9 @@ import (
 // Display resource is served at.
 const LayoutsPath = "/apis/" + DisplayGroup + "/" + DisplayVersion + "/layouts"
 
-// The condition a Display carries for the Layout it names, and the
-// reason a name that resolves to nothing carries. The screen shows the
-// default layout in that state, so the condition is the only report of
-// the name that failed.
-const (
-	LayoutResolvedCondition = "LayoutResolved"
-	LayoutNotFoundReason    = "LayoutNotFound"
-	// The two reasons the condition carries when it is met: the screen
-	// shows the Layout it names, or it names none and shows the
-	// default. They are two states of one condition, because a reader
-	// asking why a screen is arranged as it is needs to know which.
-	LayoutFoundReason   = "LayoutFound"
-	DefaultLayoutReason = "DefaultLayout"
-)
+// The condition a Display carries for the Layout it names. Its
+// reasons are in reasons.go.
+const LayoutResolvedCondition = "LayoutResolved"
 
 type Layout struct {
 	APIVersion string     `json:"apiVersion,omitempty"`

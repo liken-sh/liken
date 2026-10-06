@@ -36,6 +36,7 @@ import (
 	"reflect"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/informer"
 	"github.com/liken-sh/liken/kubernetes/memo"
 )
@@ -54,9 +55,15 @@ func (d *Display) GetObjectMeta() informer.Meta { return &d.Metadata }
 // and the memo sends one request about each Display to the API server
 // at a time (memo.Versions.Send). A read the store answers takes only the
 // memo's lock, so it never waits on the other pass's request.
+//
+// The store posts the Events of each condition transition and each new
+// unconfirmed write after the status write lands (announce), so a
+// write the API server refuses posts nothing, and the next pass finds
+// the same transition again. A nil recorder posts nothing.
 type displayStore struct {
-	client *apiclient.Client
-	held   informer.Held
+	client   *apiclient.Client
+	held     informer.Held
+	recorder *events.Recorder
 }
 
 // newDisplayStore builds the store over one watch's store view. The
@@ -109,7 +116,9 @@ func (s *displayStore) writeStatus(display *Display, status DisplayStatus) error
 		return written.Metadata.ResourceVersion, nil
 	})
 	if err == nil {
+		before := display.Status
 		*display = written
+		s.announce(display, before)
 	}
 	return err
 }
@@ -122,14 +131,19 @@ func (s *displayStore) writeStatus(display *Display, status DisplayStatus) error
 // writes once more. A Display that is gone answers
 // apiclient.ErrNotFound.
 func (s *displayStore) settleStatus(display *Display, compose func(published DisplayStatus) (DisplayStatus, bool)) error {
-	_, err := informer.SettleStatus(s.client, s.held.Versions, displayPath(display.Metadata.Name), display, func(held *Display) bool {
+	var before DisplayStatus
+	landed, err := informer.SettleStatus(s.client, s.held.Versions, displayPath(display.Metadata.Name), display, func(held *Display) bool {
 		status, ours := compose(held.Status)
 		if !ours || reflect.DeepEqual(held.Status, status) {
 			return false
 		}
+		before = held.Status
 		held.APIVersion, held.Kind, held.Status = DisplayAPIVersion, "Display", status
 		return true
 	})
+	if landed {
+		s.announce(display, before)
+	}
 	return err
 }
 

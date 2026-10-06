@@ -29,18 +29,9 @@ import (
 	"time"
 )
 
-// The condition that states where status.physicalAddress came from,
-// and its three reasons. ReadFromEDID is an address the connector's
-// current EDID serves. Retained is the last valid address, kept while
-// the connector serves no EDID for this monitor or serves no valid
-// address in it. Ambiguous is a monitor that two connectors on this
-// node both serve, with different addresses.
-const (
-	PhysicalAddressCurrentCondition = "PhysicalAddressCurrent"
-	ReadFromEDIDReason              = "ReadFromEDID"
-	RetainedReason                  = "Retained"
-	AmbiguousReason                 = "Ambiguous"
-)
+// The condition that states where status.physicalAddress came from.
+// Its three reasons are in reasons.go.
+const PhysicalAddressCurrentCondition = "PhysicalAddressCurrent"
 
 // The CTA-861 data block collection starts at byte 4 of the extension
 // and ends where the descriptors start, at the offset byte 2 holds.
@@ -218,7 +209,7 @@ func (d *displayControl) retainAddress(status DisplayStatus, cause string) Displ
 	}
 	since := d.now().UTC().Format(time.RFC3339)
 	if current := currentCondition(status, PhysicalAddressCurrentCondition); current.Status == conditionFalse {
-		since = current.LastTransitionTime
+		since = current.LastTransitionTime.Format(time.RFC3339)
 	}
 	status.Conditions = setCondition(status.Conditions, d.condition(PhysicalAddressCurrentCondition, false,
 		RetainedReason, fmt.Sprintf("%s; this is the address it served until %s", cause, since)))

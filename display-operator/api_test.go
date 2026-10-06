@@ -15,6 +15,8 @@ import (
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
+	"github.com/liken-sh/liken/kubernetes/events"
+	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 )
 
 // The cluster a test API reads is an HTTP server answering the real
@@ -29,8 +31,10 @@ type testCluster struct {
 	allowed       bool
 	reason        string
 	screens       map[string]Display
-	events        []Event
 	reviews       []accessReview
+	// events holds the Events the API's recorder writes, and serves
+	// them in front of answer.
+	events *eventstest.Events
 }
 
 func newTestCluster(t *testing.T) *testCluster {
@@ -95,7 +99,8 @@ func newTestCluster(t *testing.T) *testCluster {
 			},
 		},
 	}
-	cluster.server = apiservertest.Start(t, http.HandlerFunc(cluster.answer))
+	cluster.events = &eventstest.Events{}
+	cluster.server = apiservertest.Start(t, cluster.events.Around(http.HandlerFunc(cluster.answer)))
 	return cluster
 }
 
@@ -120,12 +125,6 @@ func (c *testCluster) answer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(screen)
-	case strings.HasSuffix(r.URL.Path, "/events"):
-		var event Event
-		_ = json.NewDecoder(r.Body).Decode(&event)
-		c.events = append(c.events, event)
-		w.WriteHeader(http.StatusCreated)
-		fmt.Fprint(w, `{}`)
 	default:
 		w.WriteHeader(http.StatusNotFound)
 		fmt.Fprintf(w, `{"kind":"Status","code":404,"message":%q}`, r.URL.Path)
@@ -163,10 +162,10 @@ func (c *testCluster) reviewed() []accessReview {
 	return append([]accessReview(nil), c.reviews...)
 }
 
-func (c *testCluster) recorded() []Event {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return append([]Event(nil), c.events...)
+// recorded answers the Events the API wrote. The recorder writes on
+// its own goroutine, so a test reads this after synctest.Wait.
+func (c *testCluster) recorded() []events.Event {
+	return c.events.List()
 }
 
 // The sidecar in a test is a real HTTPS server on the private leg,
@@ -247,6 +246,7 @@ func newTestAPI(t *testing.T, cluster *testCluster, sidecar *sidecarFixture) *ap
 	if err := os.WriteFile(tokenFile, []byte("the-api-token"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	recorder := events.New(t.Context(), client, apiComponent, events.Options{Instance: "display-api-test", Log: io.Discard})
 	index := newSidecarIndex()
 	index.hold(Pod{
 		Metadata: PodMeta{Namespace: sidecarNamespace, Name: "display-operator-abc"},
@@ -264,7 +264,7 @@ func newTestAPI(t *testing.T, cluster *testCluster, sidecar *sidecarFixture) *ap
 		}),
 		sidecar: &sidecarClient{http: sidecar.client, tokenPath: tokenFile, port: sidecar.port},
 		record: func(screen *Display, subject, aspect, form string) {
-			recordCapture(client, screen, subject, aspect, form)
+			recordCapture(recorder, screen, subject, aspect, form)
 		},
 		now: time.Now,
 	}

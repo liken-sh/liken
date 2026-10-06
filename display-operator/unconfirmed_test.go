@@ -26,6 +26,7 @@ func (f *displayFixture) restartOperator() {
 	controls.now = f.clock
 	previous := f.control
 	f.control = newDisplayControl(f.client, "liken-1", controls, f.outputs)
+	f.control.displays.recorder = f.recorder
 	f.control.now = previous.now
 	f.control.prepared = previous.prepared
 	f.control.served = previous.served

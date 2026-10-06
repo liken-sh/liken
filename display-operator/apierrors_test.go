@@ -7,12 +7,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
+	"github.com/liken-sh/liken/kubernetes/events"
 )
 
 // Every row of the manual's error table is answered here, in the
@@ -279,44 +281,45 @@ func TestAuthorizingBeforeReading(t *testing.T) {
 }
 
 // A request that produced bytes writes the Captured Event a person
-// reads with kubectl describe display.
+// reads with kubectl describe display. The Event names the Display by
+// uid as well as by name and kind, because kubectl describe searches a
+// resource's Events by uid and finds none written without one.
 func TestACaptureWritesItsEvent(t *testing.T) {
-	cluster := newTestCluster(t)
-	server := newTestAPI(t, cluster, newSidecarFixture(t))
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newTestCluster(t)
+		server := newTestAPI(t, cluster, newPipedSidecar(t))
 
-	resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.png", nil)
-	if held := body(t, resp); held == "" {
-		t.Fatal("the capture answered no bytes")
-	}
-
-	events := cluster.recorded()
-	if len(events) != 1 {
-		t.Fatalf("the capture wrote %d events, want one", len(events))
-	}
-	event := events[0]
-	if event.Reason != capturedReason || event.Type != normalEvent {
-		t.Errorf("the event is %s/%s, want %s/%s", event.Type, event.Reason, normalEvent, capturedReason)
-	}
-	if event.InvolvedObject.Name != "HDMI-A-1" || event.InvolvedObject.Kind != "Display" {
-		t.Errorf("the event names %+v, want the Display it captured", event.InvolvedObject)
-	}
-	for _, word := range []string{"system:serviceaccount:liken-system:viewer", screenAspect, "HDMI-A-1"} {
-		if !strings.Contains(event.Message, word) {
-			t.Errorf("the message %q does not name %q", event.Message, word)
+		resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.png", nil)
+		if held := body(t, resp); held == "" {
+			t.Fatal("the capture answered no bytes")
 		}
-	}
+		synctest.Wait()
+
+		want := []string{"Normal Captured system:serviceaccount:liken-system:viewer took the screen of HDMI-A-1 as image/png"}
+		if got := eventLines(cluster.events.About("Display", "HDMI-A-1")); !slices.Equal(got, want) {
+			t.Errorf("the Events are %q, want %q", got, want)
+		}
+		named := cluster.recorded()[0].InvolvedObject
+		wantObject := events.ObjectReference{APIVersion: DisplayAPIVersion, Kind: "Display", Name: "HDMI-A-1", UID: "e740343c-8168-4b59-af5b-4a747367fcf8"}
+		if named != wantObject {
+			t.Errorf("the Event names %+v, want %+v", named, wantObject)
+		}
+	})
 }
 
 // A HEAD writes no Event, because it produced no bytes.
 func TestHeadWritesNoEvent(t *testing.T) {
-	cluster := newTestCluster(t)
-	server := newTestAPI(t, cluster, newSidecarFixture(t))
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newTestCluster(t)
+		server := newTestAPI(t, cluster, newPipedSidecar(t))
 
-	call(t, server, http.MethodHead, apiRoot+"/displays/HDMI-A-1/screen.png", nil)
+		call(t, server, http.MethodHead, apiRoot+"/displays/HDMI-A-1/screen.png", nil)
+		synctest.Wait()
 
-	if events := cluster.recorded(); len(events) != 0 {
-		t.Errorf("a HEAD wrote %d events, want none", len(events))
-	}
+		if events := cluster.recorded(); len(events) != 0 {
+			t.Errorf("a HEAD wrote %d events, want none", len(events))
+		}
+	})
 }
 
 // A document answers a client that holds its tag with 304 and the
@@ -529,28 +532,6 @@ func TestASidecarWithAnUnknownCertificateIsUnavailable(t *testing.T) {
 	}
 	if !strings.Contains(document.Detail, "certificate") {
 		t.Errorf("the detail is %q, want the handshake's own words", document.Detail)
-	}
-}
-
-// The Captured Event names the object by uid as well as by name,
-// because kubectl describe searches a resource's events by uid and
-// finds none written without one.
-func TestTheCapturedEventNamesTheObjectsUID(t *testing.T) {
-	cluster := newTestCluster(t)
-	server := newTestAPI(t, cluster, newSidecarFixture(t))
-
-	call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.png", nil)
-
-	events := cluster.recorded()
-	if len(events) != 1 {
-		t.Fatalf("the capture wrote %d events, want one", len(events))
-	}
-	named := events[0].InvolvedObject
-	if named.UID != "e740343c-8168-4b59-af5b-4a747367fcf8" {
-		t.Errorf("the event names uid %q, want the Display's own", named.UID)
-	}
-	if named.APIVersion != DisplayAPIVersion || named.Kind != "Display" {
-		t.Errorf("the event names %s %s, want the Display's own kind", named.APIVersion, named.Kind)
 	}
 }
 

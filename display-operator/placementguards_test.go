@@ -418,7 +418,7 @@ func TestTheCompositorConditionMovesItsTimeOnlyOnAChange(t *testing.T) {
 	fixture.run()
 
 	down := conditionByType(fixture.status(labMonitor()), CompositorServingCondition)
-	if down.LastTransitionTime != clock.Format(time.RFC3339) {
-		t.Errorf("the condition turned at %s, want %s", down.LastTransitionTime, clock.Format(time.RFC3339))
+	if !down.LastTransitionTime.Equal(clock.UTC().Truncate(time.Second)) {
+		t.Errorf("the condition turned at %s, want %s", down.LastTransitionTime, clock.UTC().Truncate(time.Second))
 	}
 }

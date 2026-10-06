@@ -178,3 +178,42 @@ the devices reference still governs the other paths: a pod that
 holds a connector's control device owns that wire while it runs, so
 do not declare resting values or write overrides for a screen whose
 control device a pod holds.
+
+## Events
+
+The operator posts an `Event` on a `Display` for each condition that
+changes and for each action it takes on the screen. A condition
+states what is true now. An `Event` states what happened, and the
+API server deletes it one hour after its last write. A `Display` is
+cluster-scoped, so its `Event`s are in the `default` namespace.
+`kubectl describe display` shows them. `kubectl events` shows them
+only with `-n default` or `-A`:
+
+    kubectl events -n default --for display/boe-1080-display
+
+A condition that changes posts one `Event` with the condition's own
+reason and message. A new message with the same status and reason
+posts nothing. The operator posts the `Event` after the status write
+lands, so a write the API server refuses posts nothing. The same
+`Event` again within 10 minutes adds to the count of the first one,
+and `kubectl describe` shows it once, with the count.
+
+| Reason | Type | Condition or action |
+| --- | --- | --- |
+| `PanelAttached` | Normal | `Connected` is `True`: a panel is on the connector. |
+| `NoPanel` | Normal | `Connected` is `False`: the connector serves no EDID for this monitor. |
+| `AnswersDDC` | Normal | `Responsive` is `True`. |
+| `NoDDCReply` | Normal | `Responsive` is `False`. A panel in standby does not answer DDC/CI. |
+| `Serving` | Normal | `CompositorServing` is `True`. |
+| `Down` | Warning | `CompositorServing` is `False`: the compositor's socket refuses the connect. |
+| `Hung` | Warning | `CompositorServing` is `False`: the socket accepts and the compositor answers nothing. |
+| `ReadFromEDID` | Normal | `PhysicalAddressCurrent` is `True`. |
+| `Retained` | Normal | `PhysicalAddressCurrent` is `False`, and the field keeps the last valid address. |
+| `Ambiguous` | Warning | `PhysicalAddressCurrent` is `False`: two connectors serve this monitor with different addresses. |
+| `LayoutFound`, `DefaultLayout` | Normal | `LayoutResolved` is `True`. |
+| `LayoutNotFound` | Warning | `LayoutResolved` is `False`: no `Layout` has the name `spec.layout` states. |
+| `WriteUnconfirmed` | Warning | A write is new in `status.unconfirmed`. The message names the control, the value, and what the device read back. |
+| `ModeChanged` | Normal | A mode change restarts the compositor. The message names the mode before and after. Every screen on the card blanks. |
+| `CompositorKilled` | Warning | The compositor answered nothing for 10 seconds, and the operator ended it. The kubelet starts it again. The `Event` is on every `Display` of the node. |
+| `PanelStandbyFailed` | Warning | The panel did not take the standby after its last claim ended, and stays on. The operator does not try again. |
+| `Captured` | Normal | A capture through the API returned bytes. The message names the subject, the aspect, and the media type. |
