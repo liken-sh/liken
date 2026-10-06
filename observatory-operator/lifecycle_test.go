@@ -84,7 +84,8 @@ func TestAReservationActivatesTheTelescopeAndReleasesIt(t *testing.T) {
 }
 
 // The west telescope's mount starts unparked, so its activation finds
-// it there, and its camera has a cooler and no cool action, which the
+// it there, the dome's activation opens the shutter that the simulator
+// starts closed, and its camera has a cooler and no cool action, which the
 // Activation step notes.
 func TestTheActivationStepNotesACameraThatNothingCools(t *testing.T) {
 	t.Parallel()
@@ -94,7 +95,7 @@ func TestTheActivationStepNotesACameraThatNothingCools(t *testing.T) {
 		r := w.phase("west-tonight", observatory.ReservationReady, 10*time.Minute)
 		want := "Ran the activation of Observatory lab, Dome lab, Mount west; Camera west-main has a cooler and no cool action in spec.activation\n" +
 			exampleJobDone + "\n" +
-			"Dome lab state: Unparked Done: Found Dome lab unparked\n" +
+			"Dome lab state: Unparked Done: Found Dome lab unparked and opened its shutter\n" +
 			"Mount west state: Unparked Done: Found Mount west unparked"
 		if got := stepText(stepOf(r, observatory.StepActivation)); got != want {
 			t.Errorf("Activation =\n%s\nwant\n%s", got, want)

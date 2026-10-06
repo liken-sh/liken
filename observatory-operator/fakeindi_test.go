@@ -561,6 +561,7 @@ func (w *indiWorld) answer(name string, s *fakeServer, c *fakeConn, v xmlVector)
 		s.broadcast(p.set())
 		return
 	}
+	parked := d.value("DOME_PARK", "PARK")
 	for _, m := range v.Members {
 		for i := range p.Members {
 			if p.Members[i].Name == m.Name {
@@ -573,6 +574,9 @@ func (w *indiWorld) answer(name string, s *fakeServer, c *fakeConn, v xmlVector)
 		p.State = "Busy"
 	}
 	d.saveConfig(p)
+	if parked != d.value("DOME_PARK", "PARK") {
+		d.shutterFollowsPark(s)
+	}
 	s.broadcast(p.set())
 	// An abort ends what moves, as the simulators' abort does.
 	if moving, ok := aborts[p.Name]; ok {

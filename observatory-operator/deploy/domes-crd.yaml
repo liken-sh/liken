@@ -83,7 +83,7 @@ spec:
                 park while a mount of the observatory is unparked, a
                 mount does not unpark while the dome is parked, and the
                 shutter closes when the dome parks and opens when it
-                unparks.
+                unparks. A `state` action sets the shutter too.
               properties:
                 observatory:
                   type: string
@@ -190,7 +190,12 @@ spec:
                         description: >-
                           The park to reach: `Parked` or `Unparked`,
                           written to `DOME_PARK`. A park that the driver
-                          reports already is not sent again. The default
+                          reports already is not sent again. The shutter
+                          follows: after the park, the operator writes
+                          `SHUTTER_CLOSE` or `SHUTTER_OPEN` to
+                          `DOME_SHUTTER` when the shutter is not there
+                          already, because the driver moves the shutter
+                          only when the park state changes. The default
                           timeout is 10 minutes.
                       job:
                         type: object
@@ -394,7 +399,12 @@ spec:
                         description: >-
                           The park to reach: `Parked` or `Unparked`,
                           written to `DOME_PARK`. A park that the driver
-                          reports already is not sent again. The default
+                          reports already is not sent again. The shutter
+                          follows: after the park, the operator writes
+                          `SHUTTER_CLOSE` or `SHUTTER_OPEN` to
+                          `DOME_SHUTTER` when the shutter is not there
+                          already, because the driver moves the shutter
+                          only when the park state changes. The default
                           timeout is 10 minutes.
                       job:
                         type: object
@@ -662,8 +672,14 @@ spec:
                                 The park to reach: `Parked` or
                                 `Unparked`, written to `DOME_PARK`. A
                                 park that the driver reports already is
-                                not sent again. The default timeout is
-                                10 minutes.
+                                not sent again. The shutter follows:
+                                after the park, the operator writes
+                                `SHUTTER_CLOSE` or `SHUTTER_OPEN` to
+                                `DOME_SHUTTER` when the shutter is not
+                                there already, because the driver moves
+                                the shutter only when the park state
+                                changes. The default timeout is 10
+                                minutes.
                             job:
                               type: object
                               required: [image]

@@ -54,7 +54,7 @@ func TestAConnectedDeviceReportsItsState(t *testing.T) {
 			want      string
 		}{
 			{observatory.DomeKind, "lab", observatory.ConditionParked, "False Unparked: Dome lab is unparked"},
-			{observatory.DomeKind, "lab", observatory.ConditionOpen, "False Closed: The shutter of Dome lab is closed"},
+			{observatory.DomeKind, "lab", observatory.ConditionOpen, "True Open: The shutter of Dome lab is open"},
 			{observatory.MountKind, "east", observatory.ConditionParked, "False Unparked: Mount east is unparked"},
 			{observatory.MountKind, "east", observatory.ConditionTracking, "False NotTracking: Mount east is not tracking"},
 			{observatory.DustCapKind, "east", observatory.ConditionOpen, "True Open: DustCap east is open"},
@@ -77,7 +77,7 @@ func TestTheOtherSideOfEachState(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
-		w.indi.ask("lab-observatory", "Dome Simulator", "DOME_SHUTTER", "SHUTTER_OPEN=On", "SHUTTER_CLOSE=Off")
+		w.indi.ask("lab-observatory", "Dome Simulator", "DOME_SHUTTER", "SHUTTER_OPEN=Off", "SHUTTER_CLOSE=On")
 		w.indi.ask("east-telescope", "Telescope Simulator", "TELESCOPE_TRACK_STATE", "TRACK_ON=On", "TRACK_OFF=Off")
 		w.indi.ask("east-telescope", "Dust Cover Simulator", "CAP_PARK", "PARK=On", "UNPARK=Off")
 		w.indi.ask("east-telescope", "Light Panel Simulator", "FLAT_LIGHT_CONTROL", "FLAT_LIGHT_ON=On", "FLAT_LIGHT_OFF=Off")
@@ -91,7 +91,7 @@ func TestTheOtherSideOfEachState(t *testing.T) {
 			condition string
 			want      string
 		}{
-			{observatory.DomeKind, "lab", observatory.ConditionOpen, "True Open: The shutter of Dome lab is open"},
+			{observatory.DomeKind, "lab", observatory.ConditionOpen, "False Closed: The shutter of Dome lab is closed"},
 			{observatory.MountKind, "east", observatory.ConditionTracking, "True Tracking: Mount east is tracking"},
 			{observatory.DustCapKind, "east", observatory.ConditionOpen, "False Closed: DustCap east is closed"},
 			{observatory.FlatPanelKind, "east", observatory.ConditionLit, "True LightOn: The light of FlatPanel east is on"},

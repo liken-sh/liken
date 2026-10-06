@@ -2,8 +2,8 @@
 
 Proposed on 2026-10-06. Built on 2026-10-06, all six steps, and
 tested against the fake API server and the fake INDI servers. The
-drill on the test cluster has not run, so nothing here was measured
-on real machines.
+first drill on the test cluster ran on 2026-10-06, and "What the first
+drill found" lists its defects and their fixes.
 
 ## The problem
 
@@ -48,7 +48,9 @@ states its own procedures.
     `DOME_POLICY` and `MOUNT_POLICY` and relays the park states, as
     plan 12 built. No field turns them off.
   - The shutter follows the park state: it closes when the dome parks,
-    and opens when the dome unparks. No field changes it.
+    and opens when the dome unparks. No field changes it. A dome's
+    `state` action includes the shutter (see "What the first drill
+    found").
 
 ### What each resource states
 
@@ -355,6 +357,19 @@ lifecycle code:
    were fixed on 2026-10-06.
 
 Each step lands with its tests and keeps the coverage gate.
+
+## What the first drill found
+
+The first drill on the two-node test cluster ran on 2026-10-06, and
+found these defects. Each fix lands with a test against the fakes.
+
+- **A dome's target state includes its shutter.** The driver acts on
+  `DOME_SHUTTER_PARK_POLICY` only when the park state changes. The
+  simulator starts unparked with its shutter closed, so
+  `state: Unparked` found the dome unparked and left the shutter
+  closed. The action now sets `DOME_SHUTTER` after the park move, or
+  when no move was needed, when the shutter is not where the rule puts
+  it: open after `state: Unparked`, and closed after `state: Parked`.
 
 ## How we test it
 

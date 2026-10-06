@@ -141,10 +141,45 @@ func (o *operator) act(ctx, wait context.Context, h handle, a action, report fun
 		if err != nil {
 			return "", err
 		}
+		summary := "found " + h.String() + " " + target.found
 		if changed {
-			return target.did + " " + h.String(), nil
+			summary = target.did + " " + h.String()
 		}
-		return "found " + h.String() + " " + target.found, nil
+		if h.d.kind != observatory.DomeKind {
+			return summary, nil
+		}
+		moved, err := shutterFollows(wait, h, a.State, report)
+		if err != nil || moved == "" {
+			return summary, err
+		}
+		return summary + " and " + moved, nil
 	}
 	return "", fmt.Errorf("a %s cannot run %s", h.d.kind.Name, a)
+}
+
+// shutterTargets maps a dome's park state to the shutter's: closed
+// when parked, and open when unparked.
+var shutterTargets = map[string]switchTarget{
+	"Parked":   {"DOME_SHUTTER", "SHUTTER_CLOSE", "closing the shutter of", "closed its shutter", ""},
+	"Unparked": {"DOME_SHUTTER", "SHUTTER_OPEN", "opening the shutter of", "opened its shutter", ""},
+}
+
+// shutterFollows moves a dome's shutter to where its park state puts
+// it, and answers what it did, or "" when the shutter was there
+// already. The driver moves the shutter through
+// DOME_SHUTTER_PARK_POLICY only when the park state changes, so a dome
+// that starts unparked with its shutter closed stays closed after an
+// unpark that finds it unparked. A dome with no DOME_SHUTTER, such as a
+// roll-off roof, has nothing to move.
+func shutterFollows(ctx context.Context, h handle, state string, report func(string)) (string, error) {
+	target := shutterTargets[state]
+	if _, ok := h.client().Property(h.name, target.property); !ok {
+		return "", nil
+	}
+	report(target.doing + " " + h.String())
+	changed, err := h.switchOn(ctx, target.property, target.member)
+	if err != nil || !changed {
+		return "", err
+	}
+	return target.did, nil
 }

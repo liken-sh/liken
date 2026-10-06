@@ -143,3 +143,28 @@ func (w *indiWorld) parked(server, device, property string) string {
 	}
 	return ""
 }
+
+// shutterFollowsPark moves a dome's shutter when a client changes its
+// park state, as DOME_SHUTTER_PARK_POLICY tells INDI's dome to
+// (Dome::Park and Dome::UnPark in libs/indibase/indidome.cpp). The
+// driver acts on the policy only in those handlers, so a park that
+// finds the dome there already moves no shutter. The fake sends the
+// shutter's update before the park's, so a client that reads the
+// shutter after the park settles reads where the policy put it. The
+// caller holds w.mu.
+func (d *fakeDriver) shutterFollowsPark(s *fakeServer) {
+	shutter := d.find("DOME_SHUTTER")
+	if shutter == nil {
+		return
+	}
+	switch {
+	case d.value("DOME_PARK", "PARK") == "On" && d.value("DOME_SHUTTER_PARK_POLICY", "SHUTTER_CLOSE_ON_PARK") == "On":
+		shutter.setSwitch("SHUTTER_CLOSE")
+	case d.value("DOME_PARK", "UNPARK") == "On" && d.value("DOME_SHUTTER_PARK_POLICY", "SHUTTER_OPEN_ON_UNPARK") == "On":
+		shutter.setSwitch("SHUTTER_OPEN")
+	default:
+		return
+	}
+	shutter.State = "Ok"
+	s.broadcast(shutter.set())
+}

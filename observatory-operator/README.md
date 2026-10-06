@@ -569,7 +569,11 @@ what each driver needs to read:
 - Each dome's shutter follows its park state:
   `DOME_SHUTTER_PARK_POLICY` has `SHUTTER_CLOSE_ON_PARK` and
   `SHUTTER_OPEN_ON_UNPARK` both On. The dome enforces this alone, also
-  while the operator is down.
+  while the operator is down. The driver acts on the policy only when
+  its park state changes, so a dome's `state` action also sets
+  `DOME_SHUTTER`: after `state: Unparked` the shutter is open, and
+  after `state: Parked` it is closed. The simulator starts unparked
+  with its shutter closed, and its activation opens the shutter.
 
 In an observatory with no dome, each mount's `DOME_POLICY` is
 `DOME_IGNORED`. INDI's mount starts locked and unlocks only when a
