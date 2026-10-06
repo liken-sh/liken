@@ -19,14 +19,11 @@ type (
 // states.
 type CameraSpec struct {
 	TrainDevice
+	Procedures[CameraAction]
 	// Gain is written to CCD_GAIN, in the driver's own units.
 	Gain *float64 `json:"gain,omitempty"`
 	// Offset is written to CCD_OFFSET, in the driver's own units.
 	Offset *float64 `json:"offset,omitempty"`
-	// Temperature is the cooler's setpoint in degrees Celsius,
-	// written to CCD_TEMPERATURE. With no setpoint, the operator
-	// leaves the cooler off.
-	Temperature *float64 `json:"temperature,omitempty"`
 }
 
 type CameraStatus struct {
@@ -40,7 +37,8 @@ type CameraStatus struct {
 type CameraDisplay struct {
 	// Temperature is the sensor's temperature, such as -9.8 °C.
 	Temperature string `json:"temperature,omitempty"`
-	// Setpoint is spec.temperature, such as -10 °C.
+	// Setpoint is the cool action of the camera's activation, such
+	// as -10 °C.
 	Setpoint string `json:"setpoint,omitempty"`
 	// Cooler is On or Off, from CCD_COOLER.
 	Cooler string `json:"cooler,omitempty"`
@@ -70,6 +68,7 @@ type CameraReadings struct {
 // FilterWheelSpec describes a device with INDI's FILTER_INTERFACE.
 type FilterWheelSpec struct {
 	TrainDevice
+	Procedures[Action]
 	// Filters names the filter in each slot, from slot 1. The
 	// operator writes them to FILTER_NAME.
 	Filters []string `json:"filters,omitempty"`
@@ -90,6 +89,7 @@ type FilterWheelReadings struct {
 // FocuserSpec describes a device with INDI's FOCUSER_INTERFACE.
 type FocuserSpec struct {
 	TrainDevice
+	Procedures[Action]
 }
 
 type FocuserStatus struct {
@@ -113,6 +113,7 @@ type FocuserReadings struct {
 // RotatorSpec describes a device with INDI's ROTATOR_INTERFACE.
 type RotatorSpec struct {
 	TrainDevice
+	Procedures[Action]
 }
 
 type RotatorStatus struct {
@@ -136,6 +137,7 @@ type RotatorReadings struct {
 // DustCapSpec describes a device with INDI's DUSTCAP_INTERFACE.
 type DustCapSpec struct {
 	TrainDevice
+	Procedures[CoverAction]
 }
 
 type DustCapStatus struct {
@@ -159,6 +161,7 @@ type DustCapReadings struct {
 // FlatPanelSpec describes a device with INDI's LIGHTBOX_INTERFACE.
 type FlatPanelSpec struct {
 	TrainDevice
+	Procedures[LightAction]
 }
 
 type FlatPanelStatus struct {

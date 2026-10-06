@@ -9,6 +9,7 @@ type Observatory = Object[ObservatorySpec, ObservatoryStatus]
 
 type ObservatorySpec struct {
 	Location Location `json:"location"`
+	Procedures[Action]
 }
 
 // Location is the site on the Earth. The operator writes it to each
@@ -45,6 +46,9 @@ type ObservatoryStatus struct {
 	// the worst one, or Unknown when no station reports.
 	Weather Safety             `json:"weather,omitempty"`
 	Display ObservatoryDisplay `json:"display,omitzero"`
+	// Procedures holds the last run of each trigger of the
+	// observatory's own procedures.
+	Procedures []ProcedureRun `json:"procedures,omitempty"`
 }
 
 // ObservatoryDisplay holds the spec's location as a person reads it,

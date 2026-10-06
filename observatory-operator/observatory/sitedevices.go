@@ -17,6 +17,7 @@ type (
 // mounts lock each other's park, and the shutter follows the park.
 type DomeSpec struct {
 	ObservatoryDevice
+	Procedures[ParkAction]
 }
 
 type DomeStatus struct {
@@ -44,6 +45,7 @@ type DomeReadings struct {
 // WeatherStationSpec describes a device with INDI's WEATHER_INTERFACE.
 type WeatherStationSpec struct {
 	ObservatoryDevice
+	Procedures[Action]
 }
 
 type WeatherStationStatus struct {
@@ -89,6 +91,7 @@ type WeatherParameter struct {
 // INDI's AUX_INTERFACE that defines SKY_QUALITY.
 type SkyQualityMeterSpec struct {
 	TelescopeOrObservatoryDevice
+	Procedures[Action]
 }
 
 type SkyQualityMeterStatus struct {
@@ -115,6 +118,7 @@ type SkyQualityMeterReadings struct {
 // device's spec.power names one of its outputs.
 type SwitchSpec struct {
 	TelescopeOrObservatoryDevice
+	Procedures[Action]
 }
 
 type SwitchStatus struct {
@@ -146,6 +150,7 @@ type SwitchChannel struct {
 // SPECTROGRAPH_INTERFACE, such as an RTL-SDR.
 type ReceiverSpec struct {
 	TelescopeOrObservatoryDevice
+	Procedures[Action]
 }
 
 type ReceiverStatus struct {

@@ -295,10 +295,11 @@ func (r *runner) reapply(ctx context.Context, t *tree, ref serverRef, appeared *
 			if _, err := configureDevice(ctx, t, site, h, all, &notes); err != nil {
 				return err
 			}
-			if h.d.kind == observatory.CameraKind && h.d.object.Spec.Temperature != nil {
-				// The setpoint goes back, and the cooler works toward
-				// it while the holder works. The runner does not wait.
-				_, err := optional(ctx, h, "CCD_TEMPERATURE", map[string]float64{"CCD_TEMPERATURE_VALUE": *h.d.object.Spec.Temperature}, &notes)
+			if setpoint := coolSetpoint(h.d); h.d.kind == observatory.CameraKind && setpoint != nil {
+				// The setpoint of the camera's activation goes back, and
+				// the cooler works toward it while the holder works. The
+				// runner does not wait.
+				_, err := optional(ctx, h, "CCD_TEMPERATURE", map[string]float64{"CCD_TEMPERATURE_VALUE": *setpoint}, &notes)
 				return err
 			}
 			return nil

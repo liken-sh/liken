@@ -136,7 +136,7 @@ spec:
                     failed, and the `Ready` condition names it.
                 step:
                   type: string
-                  enum: [Wait, StartSite, PowerOn, StartDevices, Connect, Configure, Prepare, StartGuider, Abort, Secure, StopGuider, Disconnect, StopDevices, PowerOff, StopSite]
+                  enum: [Wait, StartSite, PowerOn, StartDevices, Connect, Configure, Activation, StartGuider, Abort, Deactivation, StopGuider, Disconnect, StopDevices, PowerOff, StopSite]
                   description: >-
                     The step that runs now, or the step that failed.
                     It is empty while the phase is `Ready` or
@@ -146,10 +146,10 @@ spec:
                   description: >-
                     Every step, in the order it runs. The activation
                     steps are `Wait`, `StartSite`, `PowerOn`,
-                    `StartDevices`, `Connect`, `Configure`, `Prepare`,
-                    and `StartGuider`, and the list holds them from the
-                    start. The deactivation steps are `Abort`,
-                    `Secure`, `StopGuider`, `Disconnect`,
+                    `StartDevices`, `Connect`, `Configure`,
+                    `Activation`, and `StartGuider`, and the list holds
+                    them from the start. The deactivation steps are
+                    `Abort`, `Deactivation`, `StopGuider`, `Disconnect`,
                     `StopDevices`, `PowerOff`, and `StopSite`, and the
                     list holds them from when
                     deactivation begins. A step starts only when the
@@ -163,7 +163,7 @@ spec:
                     properties:
                       name:
                         type: string
-                        enum: [Wait, StartSite, PowerOn, StartDevices, Connect, Configure, Prepare, StartGuider, Abort, Secure, StopGuider, Disconnect, StopDevices, PowerOff, StopSite]
+                        enum: [Wait, StartSite, PowerOn, StartDevices, Connect, Configure, Activation, StartGuider, Abort, Deactivation, StopGuider, Disconnect, StopDevices, PowerOff, StopSite]
                         description: "The step's name."
                       state:
                         type: string
@@ -185,6 +185,55 @@ spec:
                         description: >-
                           What the step waits for or did. It names the
                           device when one device holds the step up.
+                      actions:
+                        type: array
+                        description: >-
+                          The actions of the procedures that the
+                          `Activation` or `Deactivation` step waited on,
+                          each with the resource it belongs to. The
+                          resource's `status.procedures` holds the same
+                          record.
+                        items:
+                          type: object
+                          required: [kind, name, action, state]
+                          description: >-
+                            One action of one resource.
+                          properties:
+                            kind:
+                              type: string
+                              description: >-
+                                The kind of the resource.
+                            name:
+                              type: string
+                              description: >-
+                                The name of the resource.
+                            action:
+                              type: string
+                              description: >-
+                                The action as its YAML reads, such as
+                                `state: Parked` or `cool: -10 °C within
+                                0.5 °C`.
+                            state:
+                              type: string
+                              enum: [Pending, Running, Done, Failed, Skipped]
+                              description: >-
+                                The action's progress: `Pending`,
+                                `Running`, `Done`, `Failed`, or
+                                `Skipped` when it had nothing to do.
+                            startTime:
+                              type: string
+                              format: date-time
+                              description: >-
+                                When the action began to run.
+                            stopTime:
+                              type: string
+                              format: date-time
+                              description: >-
+                                When the action ended.
+                            summary:
+                              type: string
+                              description: >-
+                                What the action waits for or did.
                 endpoint:
                   type: object
                   required: [service, host, port]

@@ -36,6 +36,18 @@
 #
 # The operator starts nothing for these resources until a Reservation
 # activates their telescope.
+#
+# Each resource states its own procedures: what the operator does with
+# the equipment when the resource's Telescope or Observatory turns
+# `Active`, in `activation`, and when it stops being `Active`, in
+# `deactivation`. An action is a target state, such as `state: Parked`,
+# so the operator can run it twice, and run it again after a restart,
+# with no harm. The tree orders the procedures: activation runs the
+# Observatory and its devices first, then each Telescope and its
+# devices, then the devices of each OpticalTrain, and deactivation runs
+# in the reverse order. The Reservation's `Activation` and
+# `Deactivation` steps wait for them, and the Reservation's status
+# copies their actions.
 # The Reservation at the end starts the `east` telescope, and `west`
 # stays down, because each telescope has its own INDI server. Each
 # device of `west` is `Idle`, and the focuser on the shelf is
@@ -64,6 +76,13 @@ spec:
 # The devices that no telescope owns run on the observatory's own INDI
 # server. That server runs while at least one reservation here is
 # active.
+#
+# The dome unparks on activation, and so opens its shutter, but only
+# while the weather station reports `Safe`: `requires` makes the action
+# wait for the condition, up to the action's timeout of 10 minutes. It
+# parks on deactivation. The tree runs the dome's deactivation after
+# the telescopes', so the mounts are parked first, and the park lock
+# lets the dome park.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Dome
 metadata:
@@ -71,6 +90,12 @@ metadata:
 spec:
   observatory: lab
   driver: {name: indi_simulator_dome}
+  activation:
+  - state: Unparked
+    requires:
+    - {kind: WeatherStation, name: lab, type: Safe}
+  deactivation:
+  - state: Parked
 ---
 apiVersion: observatory.liken.sh/v1alpha1
 kind: WeatherStation
@@ -100,6 +125,9 @@ metadata:
 spec:
   observatory: lab
 ---
+# The mount unparks on activation, after the dome unparked, and parks on
+# deactivation, before the dome parks. The operator leaves tracking off,
+# because the holder aligns and calibrates the mount first.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Mount
 metadata:
@@ -107,6 +135,10 @@ metadata:
 spec:
   telescope: east
   driver: {name: indi_simulator_telescope}
+  activation:
+  - state: Unparked
+  deactivation:
+  - state: Parked
 ---
 apiVersion: observatory.liken.sh/v1alpha1
 kind: GPS
@@ -184,9 +216,13 @@ spec:
   telescope: east
   opticalTube: east-guidescope
 ---
-# The main camera, on output 1. Activation writes the gain and the
-# offset, and waits until the sensor cools to -10 degrees Celsius.
-# Deactivation warms it before its output switches off.
+# The main camera, on output 1. The `Configure` step writes the gain and
+# the offset. Activation cools the sensor to -10 degrees Celsius and
+# waits until it is within 0.5 degrees of that. Deactivation warms the
+# sensor to 5 degrees before the cooler goes off, because a sensor that
+# loses its cooler at -10 degrees warms by tens of degrees in seconds,
+# and that stress can crack it. A cooler cannot warm a sensor above the
+# air around it, so the warm-up ends at its timeout and does not fail.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Camera
 metadata:
@@ -197,7 +233,10 @@ spec:
   power: {switch: east, output: 1}
   gain: 100
   offset: 10
-  temperature: -10
+  activation:
+  - cool: {celsius: -10, within: 0.5}
+  deactivation:
+  - warm: {celsius: 5}
 ---
 # The filter wheel, the focuser, and the rotator share output 2, the
 # way a USB hub on one 12 V line does.
@@ -231,8 +270,8 @@ spec:
   power: {switch: east, output: 2}
 ---
 # The dust cap and the flat panel are on output 3. Activation opens the
-# cap. Deactivation switches the panel's light off and closes the cap
-# before the output switches off.
+# cap, and deactivation closes it. The devices of a train run after the
+# mount on activation, and before it on deactivation.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: DustCap
 metadata:
@@ -241,7 +280,13 @@ spec:
   opticalTrain: east-imaging
   driver: {name: indi_simulator_dustcover}
   power: {switch: east, output: 3}
+  activation:
+  - state: Open
+  deactivation:
+  - state: Closed
 ---
+# Deactivation switches the panel's light off. YAML reads a bare On or
+# Off as a boolean, so the value is quoted.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: FlatPanel
 metadata:
@@ -250,6 +295,8 @@ spec:
   opticalTrain: east-imaging
   driver: {name: indi_simulator_lightpanel}
   power: {switch: east, output: 3}
+  deactivation:
+  - state: "Off"
 ---
 # The guide camera, behind the guide scope. It has no power output, so
 # a person powers it by hand. The guide simulator draws 2.4 µm pixels
@@ -298,6 +345,10 @@ metadata:
 spec:
   telescope: west
   driver: {name: indi_simulator_telescope}
+  activation:
+  - state: Unparked
+  deactivation:
+  - state: Parked
 ---
 apiVersion: observatory.liken.sh/v1alpha1
 kind: OpticalTube
@@ -316,6 +367,8 @@ spec:
   telescope: west
   opticalTube: west-newtonian
 ---
+# This camera has a cooler and no procedure that cools it, so the
+# `Activation` step's summary notes it.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Camera
 metadata:

@@ -4,8 +4,8 @@ package main
 // observatory.DeactivationSteps. They run after a delete, which the
 // finalizer holds until they are done, or at spec.end. Each step acts
 // on the devices that are there: a reservation whose activation failed
-// at StartDevices has no device connected, and Secure then has nothing
-// to park.
+// at StartDevices has no device connected, and the Deactivation step
+// then skips the actions of each device (procsteps.go).
 
 import (
 	"context"
@@ -16,12 +16,6 @@ import (
 
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
-
-// warmLimit bounds the warm-up of one camera in Secure. A cooler cannot
-// warm a sensor above the air around it, so on a cold night a sensor
-// may never reach warmTarget. After this wait Secure switches the
-// cooler off where the sensor is, and notes the temperature.
-const warmLimit = 10 * time.Minute
 
 // deactivate begins deactivation, if it has not begun, and runs the
 // deactivation steps that are not finished.
@@ -43,13 +37,13 @@ func (r *runner) deactivate(ctx context.Context) {
 		r.o.record(r.res, string(observatory.ReservationDeactivating), "Deactivating Telescope "+r.res.Spec.Telescope)
 	}
 	steps := map[observatory.StepName]stepFunc{
-		observatory.StepAbort:       r.abort,
-		observatory.StepSecure:      r.secure,
-		observatory.StepStopGuider:  r.stopGuider,
-		observatory.StepDisconnect:  r.disconnect,
-		observatory.StepStopDevices: r.stopTelescopeDevices,
-		observatory.StepPowerOff:    r.powerOff,
-		observatory.StepStopSite:    r.stopSite,
+		observatory.StepAbort:        r.abort,
+		observatory.StepDeactivation: r.deactivation,
+		observatory.StepStopGuider:   r.stopGuider,
+		observatory.StepDisconnect:   r.disconnect,
+		observatory.StepStopDevices:  r.stopTelescopeDevices,
+		observatory.StepPowerOff:     r.powerOff,
+		observatory.StepStopSite:     r.stopSite,
 	}
 	for _, name := range observatory.DeactivationSteps {
 		switch r.step(name).State {
@@ -193,90 +187,6 @@ func (r *runner) abort(ctx context.Context, w *stepWork) (outcome, error) {
 	return done("%s", strings.Join(append(did, notes...), "; "))
 }
 
-// secure switches the flat panels off, closes the dust caps, parks the
-// mount, and warms each cooled camera before it switches the cooler
-// off.
-func (r *runner) secure(ctx context.Context, w *stepWork) (outcome, error) {
-	handles, notes := r.liveHandles(ctx, w)
-	if len(handles) == 0 {
-		return skipped("%s", strings.Join(append([]string{"no device connected"}, notes...), "; "))
-	}
-	var did []string
-	moves := []struct {
-		kind             observatory.Kind
-		property, member string
-		// doing names the change while it runs, and verb once it is done.
-		doing, verb string
-	}{
-		{observatory.FlatPanelKind, "FLAT_LIGHT_CONTROL", "FLAT_LIGHT_OFF", "switching off", "switched off"},
-		{observatory.DustCapKind, "CAP_PARK", "PARK", "closing", "closed"},
-		{observatory.MountKind, "TELESCOPE_PARK", "PARK", "parking", "parked"},
-	}
-	for _, move := range moves {
-		for _, h := range ofKind(handles, move.kind) {
-			w.report(fmt.Sprintf("%s %s", move.doing, h))
-			changed, err := h.switchOn(ctx, move.property, move.member)
-			if err != nil {
-				return outcome{}, err
-			}
-			if changed {
-				did = append(did, move.verb+" "+h.String())
-			}
-		}
-	}
-	var cooled []handle
-	for _, h := range ofKind(handles, observatory.CameraKind) {
-		if h.d.object.Spec.Temperature != nil || on(h, "CCD_COOLER", "COOLER_ON") {
-			cooled = append(cooled, h)
-		}
-	}
-	for _, h := range coolable(ctx, cooled, &notes) {
-		note, err := warm(ctx, h, w.report)
-		if err != nil {
-			return outcome{}, err
-		}
-		did = append(did, note)
-	}
-	if len(did) == 0 {
-		return skipped("%s", firstNonEmpty(strings.Join(notes, "; "), "found every device secure"))
-	}
-	return done("%s", strings.Join(append(did, notes...), "; "))
-}
-
-// warm raises a camera's setpoint to warmTarget, waits up to warmLimit,
-// and switches the cooler off.
-func warm(ctx context.Context, h handle, report func(string)) (string, error) {
-	p, _ := h.client().Property(h.name, "CCD_TEMPERATURE")
-	now, _ := number(p, "CCD_TEMPERATURE_VALUE")
-	note := fmt.Sprintf("found %s at %s", h.String(), quantity(now, 1, "°C"))
-	if now < warmTarget-coolTolerance {
-		report(fmt.Sprintf("warming %s from %s to %s", h, quantity(now, 1, "°C"), quantity(warmTarget, 1, "°C")))
-		wait, cancel := context.WithTimeout(ctx, warmLimit)
-		err := setTemperature(wait, h, warmTarget, report)
-		cancel()
-		switch {
-		case err == nil:
-			note = fmt.Sprintf("warmed %s to %s", h.String(), quantity(warmTarget, 1, "°C"))
-		case ctx.Err() != nil:
-			return "", err
-		default:
-			note = fmt.Sprintf("warmed %s for %s: %v", h.String(), duration(warmLimit), err)
-		}
-	}
-	if _, ok := h.client().Property(h.name, "CCD_COOLER"); ok {
-		changed, err := h.switchOn(ctx, "CCD_COOLER", "COOLER_OFF")
-		if err != nil {
-			return "", err
-		}
-		if changed {
-			note += "; switched off the cooler of " + h.String()
-		} else {
-			note += "; found the cooler of " + h.String() + " off"
-		}
-	}
-	return note, nil
-}
-
 // disconnect disconnects the telescope's devices in the reverse order
 // of Connect.
 func (r *runner) disconnect(ctx context.Context, w *stepWork) (outcome, error) {
@@ -349,10 +259,11 @@ func (r *runner) powerOff(ctx context.Context, w *stepWork) (outcome, error) {
 	return done("%s", strings.Join(notes, "; "))
 }
 
-// stopSite parks the domes, disconnects the observatory's devices,
-// switches their outputs off, and stops the observatory's server,
-// unless a reservation of another telescope in the observatory holds
-// its telescope.
+// stopSite disconnects the observatory's devices, switches their
+// outputs off, and stops the observatory's server, unless a
+// reservation of another telescope in the observatory holds its
+// telescope. The dome's park is a procedure, which the Deactivation
+// step ran while the mounts were still connected.
 func (r *runner) stopSite(ctx context.Context, w *stepWork) (outcome, error) {
 	t := r.o.snapshot()
 	telescope, ok := t.telescopes[r.res.Spec.Telescope]
@@ -378,21 +289,6 @@ func (r *runner) stopSite(ctx context.Context, w *stepWork) (outcome, error) {
 	devices := t.devicesOn(ref)
 	switches, others := partition(devices)
 	live, did := r.o.connectedHandles(ctx, w.report, t, ref, inOrder(others, siteOrder))
-	// The mounts parked in Secure, and the dome must hold that state
-	// before it is asked to park, or mountLocksDome refuses the park.
-	r.o.relayLocks(r.o.snapshot())
-	for _, h := range live {
-		if h.d.kind == observatory.DomeKind {
-			w.report("parking " + h.String())
-			changed, err := h.switchOn(ctx, "DOME_PARK", "PARK")
-			if err != nil {
-				return outcome{}, err
-			}
-			if changed {
-				did = append(did, "parked "+h.String())
-			}
-		}
-	}
 	slices.Reverse(live)
 	for _, h := range live {
 		if err := h.disconnect(ctx); err != nil {

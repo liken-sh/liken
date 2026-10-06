@@ -258,8 +258,8 @@ func siteLocks(t *testing.T, w *world) observatory.Condition {
 	return conditionOf(site.Status.Conditions, observatory.ConditionLocksRelayed)
 }
 
-// The last release parks the dome after Secure parked both mounts and
-// their drivers stopped, so the lock lets the dome park.
+// Two reservations that end together park the dome once both mounts
+// parked, so the lock lets the dome park.
 func TestTheLastReleaseParksTheDome(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

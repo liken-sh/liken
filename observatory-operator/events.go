@@ -25,6 +25,10 @@ package main
 //     (moves.go).
 //   - A move that a mount or a dome refuses under a lock policy is one
 //     Warning on the device (locks.go).
+//   - Each run of a procedure posts one Event on its resource when it
+//     starts, and one when it ends: ProcedureStarted, ProcedureDone,
+//     or the Warning ProcedureFailed (procedure.go). Its actions post
+//     none: the run's record in status.procedures holds them.
 
 import (
 	"github.com/liken-sh/liken/kubernetes/conditions"

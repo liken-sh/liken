@@ -1,6 +1,8 @@
 # 13, Procedures on conditions
 
-Proposed on 2026-10-06. Not built.
+Proposed on 2026-10-06. Steps 1, 2, and 3 built on 2026-10-06, and
+tested against the fake API server and the fake INDI servers. The
+drill on the test cluster has not run.
 
 ## The problem
 
@@ -122,10 +124,11 @@ spec:
   the setpoint.
 - **`activation` and `deactivation` are the names people write for two
   triggers.** The `Telescope` and the `Observatory` get an `Active`
-  condition. A telescope is active from when its reservation has
-  connected and configured its devices until its deactivation begins.
-  An observatory is active from when the first reservation in it has
-  connected the observatory's devices until the last one ends.
+  condition. A telescope is active from the start of its
+  reservation's `Activation` step, after `Configure`, until the start
+  of its `Deactivation` step. An observatory is active from the
+  `Activation` step of the first reservation in it until the
+  `Deactivation` step of the last telescope in it.
   `activation` runs as `Active` turns `True`, and `deactivation` as it
   turns `False`, while every device is still connected.
 - **One rule makes a trigger a barrier.** The operator does not take
@@ -136,9 +139,13 @@ spec:
   and the telescope becomes `Ready` only after them. `StartSite` stays
   a bring-up step, so its deadline still covers only image pulls. A
   new `Deactivation` step after `Abort` runs the telescope's
-  deactivation procedures, and then, when no other reservation holds
-  a telescope in the observatory, the observatory's, before
-  `Disconnect` starts. A procedure on any
+  deactivation procedures, and then, when every other telescope in
+  the observatory has stopped being active and run its deactivation,
+  the observatory's, before `Disconnect` starts. Two reservations that
+  end together both still hold their telescopes during their
+  `Deactivation` steps, so a test of the holders would leave the
+  observatory active, and the last telescope to finish ends it after
+  every mount parked. A procedure on any
   other trigger, such as the weather, runs with no step waiting on it.
   A step that finds a failed procedure of the same transition, such as
   the observatory's activation that an earlier reservation started,
@@ -196,6 +203,32 @@ of them, so a trigger never reads a stale state. A camera with a
 cooler and no activation procedure that cools it gets a note in the
 `Activation` step's message, so a missing procedure is not silent.
 
+### What the build settled
+
+Step 3 settled these points, which the design above leaves open:
+
+- A tier runs the `Observatory`'s or the `Telescope`'s own procedure
+  first, and then its devices' in parallel. Deactivation runs the
+  devices first, and then the owner's.
+- `requires` lands with step 3, because the example's dome unparks
+  only in safe weather.
+- A deactivation action on a device that is not connected is
+  `Skipped`, as `Secure` skipped such a device: a reservation whose
+  activation failed before `Connect` ends with nothing to act on. An
+  activation action on such a device fails.
+- A telescope that never began its `Activation` step runs no
+  deactivation, and its observatory deactivates only when the
+  observatory was active.
+- The retry annotation starts the `Activation` step again, and the
+  telescope keeps the time it turned active, so a run that is `Done`
+  stays `Done`, and a run that failed runs again.
+- An observatory's `Active` time comes from its stored condition after
+  an operator restart. A stored condition that the status writer had
+  not written yet is replaced by the earliest activation of an active
+  telescope in it.
+- YAML reads a bare `On` or `Off` as a boolean, so a `FlatPanel`'s
+  state is quoted: `state: "Off"`.
+
 ## What this removes
 
 - `Observatory.spec.policies`, all four fields.
@@ -247,10 +280,11 @@ lifecycle code:
    transitions as `Event`s through `kubernetes/events`.
 3. **The engine and the two lifecycle triggers.** `Telescope` and
    `Observatory` `Active`, `activation`, `deactivation`, the
-   target-state actions, `after`, the tree order, the barrier rule,
-   `status.procedures`, and the steps' `actions`. `Prepare` and
-   `Secure` go, and the example states their actions as procedures.
-4. **`on`, `for`, and `requires`.** The example closes the dome when
+   target-state actions, `after`, `requires`, the tree order, the
+   barrier rule, `status.procedures`, and the steps' `actions`.
+   `Prepare` and `Secure` go, and the example states their actions as
+   procedures. Built on 2026-10-06.
+4. **`on` and `for`.** The example closes the dome when
    its weather station reports unsafe for any length of time, and
    opens it after 20 minutes of safe weather.
 5. **`job`.**

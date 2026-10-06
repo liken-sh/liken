@@ -27,8 +27,8 @@ func TestASmallTelescopeSkipsWhatItLacks(t *testing.T) {
 				w.put(observatory.MountKind, "solo-mount", map[string]any{"telescope": "solo", "driver": map[string]any{"name": "indi_simulator_telescope"}})
 			},
 			steps: []string{
-				"Wait=Done", "StartSite=Skipped", "PowerOn=Done", "StartDevices=Done", "Connect=Done", "Configure=Done", "Prepare=Skipped", "StartGuider=Skipped",
-				"Abort=Skipped", "Secure=Done", "StopGuider=Skipped", "Disconnect=Done", "StopDevices=Done", "PowerOff=Done", "StopSite=Skipped",
+				"Wait=Done", "StartSite=Skipped", "PowerOn=Done", "StartDevices=Done", "Connect=Done", "Configure=Done", "Activation=Skipped", "StartGuider=Skipped",
+				"Abort=Skipped", "Deactivation=Skipped", "StopGuider=Skipped", "Disconnect=Done", "StopDevices=Done", "PowerOff=Done", "StopSite=Skipped",
 			},
 		},
 		{
@@ -37,8 +37,8 @@ func TestASmallTelescopeSkipsWhatItLacks(t *testing.T) {
 				w.put(observatory.SwitchKind, "solo-power", map[string]any{"telescope": "solo", "driver": map[string]any{"name": "indi_simulator_io"}})
 			},
 			steps: []string{
-				"Wait=Done", "StartSite=Skipped", "PowerOn=Done", "StartDevices=Skipped", "Connect=Skipped", "Configure=Skipped", "Prepare=Skipped", "StartGuider=Skipped",
-				"Abort=Skipped", "Secure=Skipped", "StopGuider=Skipped", "Disconnect=Skipped", "StopDevices=Skipped", "PowerOff=Done", "StopSite=Skipped",
+				"Wait=Done", "StartSite=Skipped", "PowerOn=Done", "StartDevices=Skipped", "Connect=Skipped", "Configure=Skipped", "Activation=Skipped", "StartGuider=Skipped",
+				"Abort=Skipped", "Deactivation=Skipped", "StopGuider=Skipped", "Disconnect=Skipped", "StopDevices=Skipped", "PowerOff=Done", "StopSite=Skipped",
 			},
 		},
 	}
@@ -73,18 +73,18 @@ func TestDriversThatLackTheirKindsPropertiesAreNoted(t *testing.T) {
 		// the sky quality meter defines no CCD_TEMPERATURE, no
 		// ACTIVE_DEVICES, no CCD_GAIN, and no SCOPE_INFO, and the polar
 		// aligner no FILTER_NAME.
-		w.put(observatory.CameraKind, "east-odd", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_sqm"}, "temperature": -5, "gain": 1})
+		w.put(observatory.CameraKind, "east-odd", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_sqm"}, "activation": []any{map[string]any{"cool": map[string]any{"celsius": -5}}}, "gain": 1})
 		w.put(observatory.FilterWheelKind, "east-odd", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_pac"}, "filters": []any{"L"}})
 		w.api.deleteNamed(kindCollection(observatory.PolarAlignerKind), "east")
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		r := w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
 		notes := map[observatory.StepName][]string{
-			observatory.StepConfigure: {"no CCD_GAIN on Camera east-odd", "no SCOPE_INFO on Camera east-odd", "no FILTER_NAME on FilterWheel east-odd"},
-			observatory.StepPrepare:   {"no cooler on Camera east-odd: no CCD_TEMPERATURE"},
+			observatory.StepConfigure:  {"no CCD_GAIN on Camera east-odd", "no SCOPE_INFO on Camera east-odd", "no FILTER_NAME on FilterWheel east-odd"},
+			observatory.StepActivation: {"Camera east-odd cool: -5 °C within 0.5 °C Skipped: No cooler on Camera east-odd: no CCD_TEMPERATURE"},
 		}
 		for name, want := range notes {
 			for _, note := range want {
-				if message := stepOf(r, name).Summary; !strings.Contains(message, note) {
+				if message := stepText(stepOf(r, name)); !strings.Contains(message, note) {
 					t.Errorf("%s: %q does not note %q", name, message, note)
 				}
 			}
@@ -102,8 +102,8 @@ func TestAReservationThatEndsDuringActivationDeactivates(t *testing.T) {
 		end := time.Now().Add(5 * time.Minute).UTC().Format(time.RFC3339)
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop", "end": end})
 		r := w.phase("east-tonight", observatory.ReservationReleased, 20*time.Minute)
-		if step := stepOf(r, observatory.StepPrepare); step.State != observatory.StepSkipped || step.Summary != "Reservation ended" {
-			t.Errorf("Prepare = %+v", step)
+		if step := stepOf(r, observatory.StepActivation); step.State != observatory.StepSkipped || step.Summary != "Reservation ended" {
+			t.Errorf("Activation = %+v", step)
 		}
 		if pods := w.api.names(podsCollection); len(pods) != 0 {
 			t.Errorf("pods after the release: %v", pods)

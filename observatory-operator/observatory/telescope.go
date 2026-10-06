@@ -9,6 +9,7 @@ type Telescope = Object[TelescopeSpec, TelescopeStatus]
 
 type TelescopeSpec struct {
 	Observatory string `json:"observatory"`
+	Procedures[Action]
 }
 
 type TelescopeStatus struct {
@@ -30,6 +31,9 @@ type TelescopeStatus struct {
 	// Guider is the telescope's Guider, and whether it is ready.
 	Guider  *GuiderRef       `json:"guider,omitempty"`
 	Display TelescopeDisplay `json:"display"`
+	// Procedures holds the last run of each trigger of the telescope's
+	// own procedures.
+	Procedures []ProcedureRun `json:"procedures,omitempty"`
 }
 
 // TelescopeDisplay holds what the printer columns show.

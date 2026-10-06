@@ -78,7 +78,7 @@ func ptr[T any](v T) *T { return &v }
 
 func TestTheDisplayOfACamera(t *testing.T) {
 	camera := &device{kind: observatory.CameraKind}
-	camera.object.Spec.Temperature = ptr(-10.0)
+	camera.object.Spec.Activation = []action{{Cool: &observatory.Temperature{Celsius: -10}}}
 	cases := []struct {
 		name     string
 		readings any

@@ -50,6 +50,15 @@ func simulator(name string) map[string]any {
 	return map[string]any{"name": name}
 }
 
+// camera builds the spec of a camera on a train, with more fields.
+func camera(more map[string]any) map[string]any {
+	spec := map[string]any{"opticalTrain": "east-imaging", "driver": simulator("indi_simulator_ccd")}
+	for k, v := range more {
+		spec[k] = v
+	}
+	return spec
+}
+
 func TestTheAPIServerAcceptsAndRefuses(t *testing.T) {
 	cases := []struct {
 		name string
@@ -75,9 +84,51 @@ func TestTheAPIServerAcceptsAndRefuses(t *testing.T) {
 			map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{
 				"name": "/usr/bin/indi_simulator_ccd", "image": "ghcr.io/example/ccd:1.0"}},
 			"spec.driver.name: Invalid value"},
+		{"a camera that cools on activation and warms on deactivation", CameraKind,
+			camera(map[string]any{"activation": []any{map[string]any{"cool": map[string]any{"celsius": -10.0}}},
+				"deactivation": []any{map[string]any{"warm": map[string]any{"celsius": 5.0, "within": 1.0}, "timeout": "15m"}}}), ""},
 		{"a cooler setpoint below the limit", CameraKind,
-			map[string]any{"opticalTrain": "east-imaging", "driver": simulator("indi_simulator_ccd"),
-				"temperature": -150.0}, "spec.temperature: Invalid value"},
+			camera(map[string]any{"activation": []any{map[string]any{"cool": map[string]any{"celsius": -150.0}}}}),
+			"spec.activation[0].cool.celsius: Invalid value"},
+		{"an action that cools and warms", CameraKind,
+			camera(map[string]any{"activation": []any{map[string]any{"cool": map[string]any{"celsius": -10.0}, "warm": map[string]any{"celsius": 5.0}}}}),
+			"an action names exactly one of cool and warm"},
+		{"an action that names nothing", CameraKind,
+			camera(map[string]any{"activation": []any{map[string]any{"timeout": "5m"}}}),
+			"an action names exactly one of cool and warm"},
+		{"a park that a camera cannot do", CameraKind,
+			camera(map[string]any{"activation": []any{map[string]any{"state": "Parked"}}}),
+			"an action names exactly one of cool and warm"},
+		{"a dome that unparks in safe weather", DomeKind,
+			map[string]any{"observatory": "lab", "driver": simulator("indi_simulator_dome"),
+				"activation": []any{map[string]any{"state": "Unparked",
+					"requires": []any{map[string]any{"kind": "WeatherStation", "name": "lab", "type": "Safe"}}}},
+				"deactivation": []any{map[string]any{"state": "Parked", "after": []any{map[string]any{"kind": "Mount"}}}}}, ""},
+		{"a dome that opens like a dust cap", DomeKind,
+			map[string]any{"observatory": "lab", "driver": simulator("indi_simulator_dome"),
+				"activation": []any{map[string]any{"state": "Open"}}}, "Unsupported value"},
+		{"a timeout that is no duration", MountKind,
+			map[string]any{"telescope": "east", "driver": simulator("indi_simulator_telescope"),
+				"activation": []any{map[string]any{"state": "Unparked", "timeout": "soon"}}},
+			"timeout must be a positive duration"},
+		{"a timeout of nothing", MountKind,
+			map[string]any{"telescope": "east", "driver": simulator("indi_simulator_telescope"),
+				"activation": []any{map[string]any{"state": "Unparked", "timeout": "0s"}}},
+			"timeout must be a positive duration"},
+		{"a requirement on a Reservation", MountKind,
+			map[string]any{"telescope": "east", "driver": simulator("indi_simulator_telescope"),
+				"activation": []any{map[string]any{"state": "Unparked",
+					"requires": []any{map[string]any{"kind": "Reservation", "name": "x", "type": "Ready"}}}}},
+			"spec.activation[0].requires[0].kind: Unsupported value"},
+		{"a dust cap that closes", DustCapKind,
+			map[string]any{"opticalTrain": "east-imaging", "driver": simulator("indi_simulator_dustcover"),
+				"deactivation": []any{map[string]any{"state": "Closed"}}}, ""},
+		{"a flat panel that switches its light off", FlatPanelKind,
+			map[string]any{"opticalTrain": "east-imaging", "driver": simulator("indi_simulator_lightpanel"),
+				"deactivation": []any{map[string]any{"state": "Off"}}}, ""},
+		{"an action of a focuser", FocuserKind,
+			map[string]any{"opticalTrain": "east-imaging", "driver": simulator("indi_simulator_focus"),
+				"activation": []any{map[string]any{"timeout": "1m"}}}, "a Focuser has no action to name"},
 		{"a mount on the shelf", MountKind,
 			map[string]any{"driver": simulator("indi_simulator_telescope")}, ""},
 		{"a parent name in capitals", MountKind,

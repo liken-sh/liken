@@ -134,7 +134,7 @@ func deviceDisplay(d *device, readings any, maximum func(property, member string
 	case observatory.CameraKind:
 		r, _ := readings.(observatory.CameraReadings)
 		var out observatory.CameraDisplay
-		if t := d.object.Spec.Temperature; t != nil {
+		if t := coolSetpoint(d); t != nil {
 			out.Setpoint = quantity(*t, 1, "°C")
 		}
 		if r.Temperature != nil {

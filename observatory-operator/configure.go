@@ -1,7 +1,6 @@
 package main
 
-// The Configure and Prepare steps: the settings that the resources
-// state, and the moves that make a telescope ready to image.
+// The Configure step: the settings that the resources state.
 
 import (
 	"context"
@@ -16,7 +15,8 @@ import (
 // DOME_POLICY, each camera's ACTIVE_DEVICES from its train, the camera's
 // gain, offset, and the tube's aperture and focal length, and the
 // filter wheel's names. It then relays the domes' park state to the
-// mount (locks.go), so the mount holds it before Prepare unparks it.
+// mount (locks.go), so the mount holds it before a procedure unparks
+// it.
 func (r *runner) configure(ctx context.Context, w *stepWork) (outcome, error) {
 	t, handles, err := r.telescopeHandles(ctx, w)
 	if err != nil {
@@ -201,70 +201,4 @@ func lockPolicy(ctx context.Context, h handle, property, locks, ignored string, 
 		return true, fmt.Errorf("%s: saving the configuration after %s: %w", h, property, err)
 	}
 	return true, nil
-}
-
-// prepare opens the dust caps, cools each camera that has a setpoint,
-// and unparks the mount.
-func (r *runner) prepare(ctx context.Context, w *stepWork) (outcome, error) {
-	_, handles, err := r.telescopeHandles(ctx, w)
-	if err != nil {
-		return outcome{}, err
-	}
-	// already names each device that needed no change, so a Skipped
-	// Prepare tells a telescope with nothing to do from one whose
-	// devices were ready.
-	var did, already, notes []string
-	for _, h := range ofKind(handles, observatory.DustCapKind) {
-		w.report("opening " + h.String())
-		changed, err := h.switchOn(ctx, "CAP_PARK", "UNPARK")
-		if err != nil {
-			return outcome{}, err
-		}
-		if changed {
-			did = append(did, "opened "+h.String())
-		} else {
-			already = append(already, "found "+h.String()+" open")
-		}
-	}
-	var cameras []handle
-	for _, h := range ofKind(handles, observatory.CameraKind) {
-		if h.d.object.Spec.Temperature != nil {
-			cameras = append(cameras, h)
-		}
-	}
-	for _, h := range coolable(ctx, cameras, &notes) {
-		target := *h.d.object.Spec.Temperature
-		w.report(fmt.Sprintf("cooling %s to %s", h, quantity(target, 1, "°C")))
-		if err := setTemperature(ctx, h, target, w.report); err != nil {
-			return outcome{}, err
-		}
-		did = append(did, fmt.Sprintf("cooled %s to %s", h.String(), quantity(target, 1, "°C")))
-	}
-	for _, h := range ofKind(handles, observatory.MountKind) {
-		w.report("unparking " + h.String())
-		changed, err := h.switchOn(ctx, "TELESCOPE_PARK", "UNPARK")
-		if err != nil {
-			return outcome{}, err
-		}
-		if changed {
-			did = append(did, "unparked "+h.String())
-		} else {
-			already = append(already, "found "+h.String()+" unparked")
-		}
-	}
-	notes = append(already, notes...)
-	if len(did) == 0 {
-		return skipped("%s", firstNonEmpty(strings.Join(notes, "; "), "found nothing to open, cool, or unpark"))
-	}
-	return done("%s", strings.Join(append(did, notes...), "; "))
-}
-
-func ofKind(handles []handle, kind observatory.Kind) []handle {
-	var out []handle
-	for _, h := range handles {
-		if h.d.kind == kind {
-			out = append(out, h)
-		}
-	}
-	return out
 }

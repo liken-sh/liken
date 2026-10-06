@@ -85,11 +85,13 @@ func TestAFinishedReservationShowsNoStep(t *testing.T) {
 			t.Errorf("a Released reservation shows step %q and SafeToPowerOff %+v", r.Status.Step, safe)
 		}
 		// The simulators answer at once, so each step takes no time on
-		// the bubble's clock.
+		// the bubble's clock. The dome's activation waits for the
+		// weather station's Safe condition, which the status writer
+		// writes within its window of a second.
 		events := eventMessages(w.api)
 		for _, want := range []string{
 			"Wait: Done in 0 s: took Telescope east",
-			"Ready: Ready in 0 s at east-telescope.observatory.svc:7624",
+			"Ready: Ready in 1 s at east-telescope.observatory.svc:7624",
 			"Deactivating: Deactivating Telescope east",
 			"Released: Released in 0 s: Telescope east is safe to power off",
 		} {

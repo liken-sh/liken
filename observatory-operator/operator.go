@@ -32,6 +32,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
@@ -72,6 +73,16 @@ type operator struct {
 	// locks records what the lock relay sent (locks.go).
 	locks lockMemo
 
+	// runs records the runs of every procedure (runs.go), and activity
+	// the Active state of each Telescope and Observatory (activity.go).
+	runs     *runRecords
+	activity *activity
+	// seeded is set once the claims, the runs, and the activity are
+	// read from the stored statuses. The status writer writes no status
+	// before then, so it never writes an empty record over a stored
+	// one.
+	seeded atomic.Bool
+
 	mu      sync.Mutex
 	runners map[string]*runner
 	// running counts the runners' goroutines, so a stop waits for each.
@@ -105,6 +116,8 @@ func newOperator(namespace string, client *apiclient.Client, dialer indi.Dialer)
 		faults:    map[string]string{},
 		sites:     map[string]lock{},
 	}
+	o.runs = newRunRecords(changed)
+	o.activity = newActivity(changed)
 	o.servers = newServers(o)
 	o.guiderConns = newGuiderConns(o)
 	return o
@@ -177,9 +190,15 @@ func (o *operator) run(ctx context.Context, watches func(context.Context) *store
 			t := o.snapshot()
 			if !seeded {
 				// The holders of each telescope come from the status of
-				// each reservation, before any runner can take one.
+				// each reservation, before any runner can take one, and
+				// the runs and the activity come from the stored
+				// statuses, before any runner or trigger runs.
 				o.claims.seed(t)
+				o.runs.seed(t)
+				o.activity.seed(t, o.claims)
 				seeded = true
+				o.seeded.Store(true)
+				o.changed.notify()
 			}
 			o.supervise(ctx, t)
 		}
@@ -201,6 +220,7 @@ func (o *operator) supervise(ctx context.Context, t *tree) {
 		o.startRunner(ctx, r)
 	}
 	o.claims.forgetGone(t)
+	o.activity.forgetUnheld(t, o.claims)
 	o.servers.sync(ctx, t)
 	o.guiderConns.sync(ctx, t)
 	if err := o.sweep(t); err != nil {

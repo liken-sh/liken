@@ -153,6 +153,9 @@ type DeviceStatus struct {
 	// Properties is every property that the device defines, as the
 	// driver defines it, with no BLOB data.
 	Properties []Property `json:"properties,omitempty"`
+	// Procedures holds the last run of each trigger of the device's
+	// procedures.
+	Procedures []ProcedureRun `json:"procedures,omitempty"`
 }
 
 // Property is one INDI property, as the driver defines it and with

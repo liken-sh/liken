@@ -59,3 +59,14 @@ var Kinds = []Kind{
 func (k Kind) Path(namespace string) string {
 	return "/apis/" + APIVersion + "/namespaces/" + namespace + "/" + k.Plural
 }
+
+// KindNamed answers the kind of a name, such as Mount, and false for a
+// name that is no kind of the group.
+func KindNamed(name string) (Kind, bool) {
+	for _, kind := range Kinds {
+		if kind.Name == name {
+			return kind, true
+		}
+	}
+	return Kind{}, false
+}

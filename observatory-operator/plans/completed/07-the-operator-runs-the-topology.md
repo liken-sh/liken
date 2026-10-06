@@ -98,6 +98,12 @@ runs `Abort`, `Secure`, `StopGuider`, `Disconnect`, `StopDevices`,
 guiding, and `StopGuider` deletes the guider's pod before `Disconnect`.
 [Plan 09](09-the-guider.md) gives the reasons.
 
+Note added on 2026-10-06: plan 13 replaces `Prepare` with
+`Activation` and `Secure` with `Deactivation`, which run the
+procedures that each resource states, and `StopSite` no longer parks
+the dome. [Plan 13](../13-procedures-on-conditions.md) gives the
+reasons.
+
 The server stops in `PowerOff`, after the outputs switch off. The
 operator reaches a `Switch` through the telescope's server, so a
 server that stopped in `StopDevices` would leave the outputs on. Each

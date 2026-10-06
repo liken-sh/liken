@@ -30,8 +30,8 @@ package main
 // mount snoops (ACTIVE_DOME): parked while any dome is not unparked. A
 // device that moves counts as neither parked nor unparked, so it holds
 // the lock. A device that reports no park state holds it too, because
-// it may be anywhere, except a mount that the Secure step parked
-// before its driver stopped.
+// it may be anywhere, except a mount whose reservation's Deactivation
+// step ended before its driver stopped.
 //
 // A driver keeps the last report it received. While the operator is
 // down, each lock holds the state that the operator relayed last, and
@@ -187,8 +187,8 @@ func (o *operator) planLocks(t *tree, site *observatory.Observatory) sitePlan {
 	siteRef := serverRef{observatory.ObservatoryKind, site.Metadata.Name}
 	domeHandles := o.handlesOf(t, siteRef, domeDevices)
 	// Only a held telescope's mount counts. A telescope that no
-	// reservation holds has no server, and the Secure step of its last
-	// reservation parked its mount.
+	// reservation holds has no server, and the Deactivation step of its
+	// last reservation ran the mount's deactivation.
 	var mountDevices []*device
 	var mountHandles []handle
 	secured := map[string]bool{}
@@ -202,7 +202,7 @@ func (o *operator) planLocks(t *tree, site *observatory.Observatory) sitePlan {
 		mountDevices = append(mountDevices, devices...)
 		mountHandles = append(mountHandles, o.handlesOf(t, ref, devices)...)
 		for _, d := range devices {
-			secured[d.key()] = parkedBySecure(t.reservations[holder])
+			secured[d.key()] = parkedByDeactivation(t.reservations[holder])
 		}
 	}
 	var plan sitePlan
@@ -212,7 +212,7 @@ func (o *operator) planLocks(t *tree, site *observatory.Observatory) sitePlan {
 	}
 	// A dome that does not report holds the lock, because it may be
 	// parked. A mount that does not report holds it too, unless the
-	// Secure step parked it before its driver stopped.
+	// Deactivation step ended before its driver stopped.
 	domes := parkStates(domeHandles, domeDevices, "DOME_PARK", "UNPARK", func(*device) bool { return true })
 	mounts := parkStates(mountHandles, mountDevices, "TELESCOPE_PARK", "PARK", func(d *device) bool { return !secured[d.key()] })
 	done, waiting := plan.domeLocksMount(site, domes, mountHandles)
@@ -227,13 +227,14 @@ func (o *operator) planLocks(t *tree, site *observatory.Observatory) sitePlan {
 	return plan
 }
 
-// parkedBySecure reports whether a reservation's Secure step ended, so
-// its telescope's mount is parked.
-func parkedBySecure(r *observatory.Reservation) bool {
+// parkedByDeactivation reports whether a reservation's Deactivation
+// step ended, so its telescope's mount is parked, when its
+// deactivation parks it.
+func parkedByDeactivation(r *observatory.Reservation) bool {
 	if r == nil {
 		return false
 	}
-	s := findStep(r.Status.Steps, observatory.StepSecure)
+	s := findStep(r.Status.Steps, observatory.StepDeactivation)
 	return s != nil && (s.State == observatory.StepDone || s.State == observatory.StepSkipped)
 }
 

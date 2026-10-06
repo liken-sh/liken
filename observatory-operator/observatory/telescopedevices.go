@@ -21,6 +21,7 @@ type (
 // configures it, so the spec holds no location.
 type MountSpec struct {
 	TelescopeDevice
+	Procedures[ParkAction]
 }
 
 type MountStatus struct {
@@ -55,6 +56,7 @@ type MountReadings struct {
 // GPSSpec describes a device with INDI's GPS_INTERFACE.
 type GPSSpec struct {
 	TelescopeDevice
+	Procedures[Action]
 }
 
 type GPSStatus struct {
@@ -80,6 +82,7 @@ type GPSReadings struct {
 // motor that moves the mount's axis in altitude and azimuth.
 type PolarAlignerSpec struct {
 	TelescopeDevice
+	Procedures[Action]
 }
 
 type PolarAlignerStatus struct {

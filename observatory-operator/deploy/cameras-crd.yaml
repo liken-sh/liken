@@ -181,15 +181,340 @@ spec:
                   description: >-
                     The sensor's offset, written to `CCD_OFFSET`, in the
                     driver's own units. Optional.
-                temperature:
-                  type: number
-                  minimum: -100
-                  maximum: 50
+                activation:
+                  type: array
+                  maxItems: 16
                   description: >-
-                    The cooler's setpoint, in degrees Celsius, written
-                    to `CCD_TEMPERATURE`. Activation waits until the
-                    sensor reaches it. Optional. With no setpoint, the
-                    operator leaves the cooler off.
+                    The actions that run, in order, as the device's
+                    `Telescope` or `Observatory` turns `Active`, while
+                    every device is still connected. The `Reservation`'s
+                    `Activation` step waits for them. Each action is a
+                    target state, so a run that an operator restart
+                    interrupted runs again each action that is not
+                    `Done`. Optional.
+                  items:
+                    type: object
+                    description: >-
+                      One action, which names exactly one of `cool` and
+                      `warm`.
+                    x-kubernetes-validations:
+                      - rule: "[has(self.cool), has(self.warm)].filter(x, x).size() == 1"
+                        message: "an action names exactly one of cool and warm"
+                    properties:
+                      cool:
+                        type: object
+                        required: [celsius]
+                        description: >-
+                          Cools the sensor: the operator writes
+                          `celsius` to `CCD_TEMPERATURE` and waits until
+                          the sensor is within `within` of it. The
+                          default timeout is 20 minutes.
+                        properties:
+                          celsius:
+                            type: number
+                            minimum: -100
+                            maximum: 50
+                            description: >-
+                              The setpoint, in degrees Celsius.
+                          within:
+                            type: number
+                            minimum: 0
+                            exclusiveMinimum: true
+                            maximum: 10
+                            default: 0.5
+                            description: >-
+                              How close to the setpoint the sensor must
+                              come, in degrees Celsius. The default is
+                              0.5.
+                      warm:
+                        type: object
+                        required: [celsius]
+                        description: >-
+                          Warms the sensor before its cooler goes off:
+                          the operator writes `celsius` to
+                          `CCD_TEMPERATURE`, waits until the sensor is
+                          within `within` of it or until the timeout,
+                          and switches `CCD_COOLER` off. A cooler cannot
+                          warm a sensor above the air around it, so the
+                          timeout ends the wait and does not fail the
+                          action. The default timeout is 10 minutes.
+                        properties:
+                          celsius:
+                            type: number
+                            minimum: -100
+                            maximum: 50
+                            description: >-
+                              The setpoint, in degrees Celsius.
+                          within:
+                            type: number
+                            minimum: 0
+                            exclusiveMinimum: true
+                            maximum: 10
+                            default: 0.5
+                            description: >-
+                              How close to the setpoint the sensor must
+                              come, in degrees Celsius. The default is
+                              0.5.
+                      timeout:
+                        type: string
+                        maxLength: 32
+                        description: >-
+                          How long the action may take, its waits for
+                          `requires` and `after` included, as a duration
+                          such as `20m`. An action that passes it fails.
+                          Optional. Each action has a default.
+                        x-kubernetes-validations:
+                          - rule: "self.matches('^([0-9]+(\\\\.[0-9]+)?(ms|s|m|h))+$') && duration(self) > duration('0s')"
+                            message: "timeout must be a positive duration, such as 20m or 1h30m"
+                      requires:
+                        type: array
+                        maxItems: 8
+                        description: >-
+                          The conditions that must hold before the
+                          action runs. The operator waits for each one
+                          until the action's timeout. They bind only the
+                          actions that the operator runs: a move that a
+                          person makes in KStars is stopped only by the
+                          drivers' park locks.
+                        items:
+                          type: object
+                          required: [type]
+                          description: >-
+                            One condition, and the status it must have.
+                          properties:
+                            kind:
+                              type: string
+                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                              description: >-
+                                The kind of the resource whose condition
+                                it reads. With no `kind`, the condition
+                                is the resource's own. A `kind` of
+                                `Observatory` or `Telescope` with no
+                                `name` means the resource's own
+                                observatory or telescope.
+                            name:
+                              type: string
+                              minLength: 1
+                              maxLength: 253
+                              pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                              description: >-
+                                The name of the resource, in this
+                                namespace. A device kind needs a name.
+                            type:
+                              type: string
+                              minLength: 1
+                              maxLength: 316
+                              description: >-
+                                The condition's type, such as `Safe` or
+                                `Parked`.
+                            status:
+                              type: string
+                              enum: ["True", "False", Unknown]
+                              default: "True"
+                              description: >-
+                                The status that the condition must have:
+                                `True`, `False`, or `Unknown`. The
+                                default is `True`.
+                      after:
+                        type: array
+                        maxItems: 8
+                        description: >-
+                          The resources whose runs for the same event
+                          must end before the action runs: the same
+                          lifecycle step, or the same transition of the
+                          same condition. A resource with no such run is
+                          not waited for. A resource in a later tier of
+                          the tree is waited for until the action's
+                          timeout, and the action then fails.
+                        items:
+                          type: object
+                          required: [kind]
+                          description: >-
+                            One resource, by its kind and name.
+                          properties:
+                            kind:
+                              type: string
+                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                              description: >-
+                                The kind of the resource.
+                            name:
+                              type: string
+                              minLength: 1
+                              maxLength: 253
+                              pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                              description: >-
+                                The name of the resource. With no
+                                `name`, the reference names every
+                                resource of the kind in the observatory,
+                                or the resource's own `Observatory` or
+                                `Telescope`.
+                deactivation:
+                  type: array
+                  maxItems: 16
+                  description: >-
+                    The actions that run, in order, as the device's
+                    `Telescope` or `Observatory` stops being `Active`,
+                    while every device is still connected. The
+                    `Reservation`'s `Deactivation` step waits for them.
+                    Each action is a target state, so a run that an
+                    operator restart interrupted runs again each action
+                    that is not `Done`. Optional.
+                  items:
+                    type: object
+                    description: >-
+                      One action, which names exactly one of `cool` and
+                      `warm`.
+                    x-kubernetes-validations:
+                      - rule: "[has(self.cool), has(self.warm)].filter(x, x).size() == 1"
+                        message: "an action names exactly one of cool and warm"
+                    properties:
+                      cool:
+                        type: object
+                        required: [celsius]
+                        description: >-
+                          Cools the sensor: the operator writes
+                          `celsius` to `CCD_TEMPERATURE` and waits until
+                          the sensor is within `within` of it. The
+                          default timeout is 20 minutes.
+                        properties:
+                          celsius:
+                            type: number
+                            minimum: -100
+                            maximum: 50
+                            description: >-
+                              The setpoint, in degrees Celsius.
+                          within:
+                            type: number
+                            minimum: 0
+                            exclusiveMinimum: true
+                            maximum: 10
+                            default: 0.5
+                            description: >-
+                              How close to the setpoint the sensor must
+                              come, in degrees Celsius. The default is
+                              0.5.
+                      warm:
+                        type: object
+                        required: [celsius]
+                        description: >-
+                          Warms the sensor before its cooler goes off:
+                          the operator writes `celsius` to
+                          `CCD_TEMPERATURE`, waits until the sensor is
+                          within `within` of it or until the timeout,
+                          and switches `CCD_COOLER` off. A cooler cannot
+                          warm a sensor above the air around it, so the
+                          timeout ends the wait and does not fail the
+                          action. The default timeout is 10 minutes.
+                        properties:
+                          celsius:
+                            type: number
+                            minimum: -100
+                            maximum: 50
+                            description: >-
+                              The setpoint, in degrees Celsius.
+                          within:
+                            type: number
+                            minimum: 0
+                            exclusiveMinimum: true
+                            maximum: 10
+                            default: 0.5
+                            description: >-
+                              How close to the setpoint the sensor must
+                              come, in degrees Celsius. The default is
+                              0.5.
+                      timeout:
+                        type: string
+                        maxLength: 32
+                        description: >-
+                          How long the action may take, its waits for
+                          `requires` and `after` included, as a duration
+                          such as `20m`. An action that passes it fails.
+                          Optional. Each action has a default.
+                        x-kubernetes-validations:
+                          - rule: "self.matches('^([0-9]+(\\\\.[0-9]+)?(ms|s|m|h))+$') && duration(self) > duration('0s')"
+                            message: "timeout must be a positive duration, such as 20m or 1h30m"
+                      requires:
+                        type: array
+                        maxItems: 8
+                        description: >-
+                          The conditions that must hold before the
+                          action runs. The operator waits for each one
+                          until the action's timeout. They bind only the
+                          actions that the operator runs: a move that a
+                          person makes in KStars is stopped only by the
+                          drivers' park locks.
+                        items:
+                          type: object
+                          required: [type]
+                          description: >-
+                            One condition, and the status it must have.
+                          properties:
+                            kind:
+                              type: string
+                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                              description: >-
+                                The kind of the resource whose condition
+                                it reads. With no `kind`, the condition
+                                is the resource's own. A `kind` of
+                                `Observatory` or `Telescope` with no
+                                `name` means the resource's own
+                                observatory or telescope.
+                            name:
+                              type: string
+                              minLength: 1
+                              maxLength: 253
+                              pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                              description: >-
+                                The name of the resource, in this
+                                namespace. A device kind needs a name.
+                            type:
+                              type: string
+                              minLength: 1
+                              maxLength: 316
+                              description: >-
+                                The condition's type, such as `Safe` or
+                                `Parked`.
+                            status:
+                              type: string
+                              enum: ["True", "False", Unknown]
+                              default: "True"
+                              description: >-
+                                The status that the condition must have:
+                                `True`, `False`, or `Unknown`. The
+                                default is `True`.
+                      after:
+                        type: array
+                        maxItems: 8
+                        description: >-
+                          The resources whose runs for the same event
+                          must end before the action runs: the same
+                          lifecycle step, or the same transition of the
+                          same condition. A resource with no such run is
+                          not waited for. A resource in a later tier of
+                          the tree is waited for until the action's
+                          timeout, and the action then fails.
+                        items:
+                          type: object
+                          required: [kind]
+                          description: >-
+                            One resource, by its kind and name.
+                          properties:
+                            kind:
+                              type: string
+                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                              description: >-
+                                The kind of the resource.
+                            name:
+                              type: string
+                              minLength: 1
+                              maxLength: 253
+                              pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                              description: >-
+                                The name of the resource. With no
+                                `name`, the reference names every
+                                resource of the kind in the observatory,
+                                or the resource's own `Observatory` or
+                                `Telescope`.
             status:
               type: object
               description: >-
@@ -281,6 +606,92 @@ spec:
                         description: >-
                           When `status` last changed. A write with the
                           same status keeps this time.
+                procedures:
+                  type: array
+                  description: >-
+                    The last run of each trigger of the resource's
+                    procedures: `activation`, `deactivation`, and
+                    `on[0]` and so on for each item of `spec.on`. An
+                    operator that restarts resumes a run from this
+                    record.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [trigger]
+                  items:
+                    type: object
+                    required: [trigger, state]
+                    description: >-
+                      The last run of one trigger.
+                    properties:
+                      trigger:
+                        type: string
+                        description: >-
+                          The trigger: `activation`, `deactivation`, or
+                          `on[0]` for the first item of `spec.on`.
+                      since:
+                        type: string
+                        format: date-time
+                        description: >-
+                          The transition time of the condition that the
+                          run answers: the `lastTransitionTime` of
+                          `Active` for activation and deactivation.
+                      state:
+                        type: string
+                        enum: [Pending, Running, Done, Failed, Skipped]
+                        description: >-
+                          The run's progress: `Pending`, `Running`,
+                          `Done`, `Failed`, or `Skipped` when it had
+                          nothing to do.
+                      startTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When the run began to run.
+                      stopTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When the run ended.
+                      summary:
+                        type: string
+                        description: >-
+                          What the run waits for or did.
+                      actions:
+                        type: array
+                        description: >-
+                          Each action of the run, in order.
+                        items:
+                          type: object
+                          required: [action, state]
+                          description: >-
+                            One action.
+                          properties:
+                            action:
+                              type: string
+                              description: >-
+                                The action as its YAML reads, such as
+                                `state: Parked` or `cool: -10 °C within
+                                0.5 °C`.
+                            state:
+                              type: string
+                              enum: [Pending, Running, Done, Failed, Skipped]
+                              description: >-
+                                The action's progress: `Pending`,
+                                `Running`, `Done`, `Failed`, or
+                                `Skipped` when it had nothing to do.
+                            startTime:
+                              type: string
+                              format: date-time
+                              description: >-
+                                When the action began to run.
+                            stopTime:
+                              type: string
+                              format: date-time
+                              description: >-
+                                When the action ended.
+                            summary:
+                              type: string
+                              description: >-
+                                What the action waits for or did.
                 indiDevice:
                   type: string
                   description: >-
@@ -410,7 +821,7 @@ spec:
                       description: "The sensor's temperature, such as `-9.8 °C`."
                     setpoint:
                       type: string
-                      description: "The setpoint that `spec.temperature` states, such as `-10 °C`."
+                      description: "The setpoint of the `cool` action in `spec.activation`, such as `-10 °C`."
                     cooler:
                       type: string
                       description: "`On` or `Off`, from `CCD_COOLER`."

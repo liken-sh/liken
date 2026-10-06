@@ -162,7 +162,9 @@ func (o *operator) telescopeStatus(t *tree, telescope *observatory.Telescope, co
 	next.Conditions = withGeneration([]observatory.Condition{
 		parentCondition(t.missingObservatory(telescope.Spec.Observatory)),
 		readyCondition(phase, message),
+		o.activity.condition(telescopeKey(name)),
 	}, next.ObservedGeneration)
+	next.Procedures = o.runs.list(telescopeKey(name))
 	return next
 }
 
@@ -214,11 +216,12 @@ func (o *operator) observatoryStatus(t *tree, site *observatory.Observatory, com
 		}
 	}
 	next.Weather = worstWeather(devices, composed)
-	conditions := []observatory.Condition{readyCondition(next.Phase, message)}
+	conditions := []observatory.Condition{readyCondition(next.Phase, message), o.activity.condition(observatoryKey(name))}
 	if locks := o.planLocks(t, site).condition; locks != nil {
 		conditions = append(conditions, *locks)
 	}
 	next.Conditions = withGeneration(conditions, next.ObservedGeneration)
+	next.Procedures = o.runs.list(observatoryKey(name))
 	return next
 }
 

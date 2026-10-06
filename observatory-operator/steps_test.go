@@ -37,7 +37,7 @@ func TestAStepThatPassesItsDeadlineFailsTheReservation(t *testing.T) {
 		if ready.Reason != reasonTimedOut || !strings.HasPrefix(ready.Message, "StartDevices timed out after 10 min: ") || !strings.Contains(ready.Message, "Camera east-main") {
 			t.Errorf("Ready = %+v", ready)
 		}
-		if got := stepStates(r); !slices.Equal(got[5:], []string{"Configure=Pending", "Prepare=Pending", "StartGuider=Pending"}) {
+		if got := stepStates(r); !slices.Equal(got[5:], []string{"Configure=Pending", "Activation=Pending", "StartGuider=Pending"}) {
 			t.Errorf("the steps after the failed one ran: %v", got)
 		}
 		if !slices.Contains(w.api.eventReasons(), reasonTimedOut) {
@@ -67,16 +67,25 @@ func TestAStepThatPassesItsDeadlineFailsTheReservation(t *testing.T) {
 
 // A device that never answers a change fails its step at the deadline,
 // and the message names the device.
-func TestACoolerThatNeverReachesItsSetpointFailsPrepare(t *testing.T) {
+func TestACoolerThatNeverReachesItsSetpointFailsActivation(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.indi.hold("CCD Simulator", "CCD_TEMPERATURE")
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
+		w.phase("east-tonight", observatory.ReservationActivating, time.Minute)
+		began := time.Now()
 		r := w.phase("east-tonight", observatory.ReservationFailed, 30*time.Minute)
-		step := stepOf(r, observatory.StepPrepare)
-		if step.State != observatory.StepFailed || !strings.Contains(step.Summary, "Timed out after 20 min: ") || !strings.Contains(step.Summary, "Camera east-main") {
-			t.Errorf("Prepare = %+v", step)
+		step := stepOf(r, observatory.StepActivation)
+		want := "Failed: Camera east-main: cool: -10 °C within 0.5 °C: timed out after 20 min: cooling Camera east-main to -10 °C"
+		if step.State != observatory.StepFailed || step.Summary != want {
+			t.Errorf("Activation = %+v\nwant %q", step, want)
+		}
+		if waited := time.Since(began); waited < 20*time.Minute || waited > 21*time.Minute {
+			t.Errorf("the step failed after %v, want the action's 20-minute timeout", waited)
+		}
+		if !slices.Contains(w.api.eventReasons(), reasonProcedureFailed) {
+			t.Errorf("events = %v", w.api.eventReasons())
 		}
 	})
 }
@@ -90,9 +99,9 @@ func TestANewOperatorContinuesTheStepThatRan(t *testing.T) {
 		w := startWorld(t)
 		w.indi.hold("CCD Simulator", "CCD_TEMPERATURE")
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
-		w.until(time.Minute, "Prepare does not run", func() bool {
+		w.until(time.Minute, "the cool action does not run", func() bool {
 			r, _ := w.reservation("east-tonight")
-			return stepOf(r, observatory.StepPrepare).State == observatory.StepRunning
+			return strings.Contains(stepText(stepOf(r, observatory.StepActivation)), "Camera east-main cool: -10 °C within 0.5 °C Running")
 		})
 		before, _ := w.reservation("east-tonight")
 		connects := w.indi.count("east-telescope", "Telescope Simulator.CONNECTION")
@@ -100,7 +109,7 @@ func TestANewOperatorContinuesTheStepThatRan(t *testing.T) {
 		w.restart()
 		w.indi.release("CCD Simulator", "CCD_TEMPERATURE")
 		r := w.phase("east-tonight", observatory.ReservationReady, 25*time.Minute)
-		for _, name := range []observatory.StepName{observatory.StepWait, observatory.StepConnect, observatory.StepPrepare} {
+		for _, name := range []observatory.StepName{observatory.StepWait, observatory.StepConnect, observatory.StepActivation} {
 			if a, b := stepOf(before, name).StartTime, stepOf(r, name).StartTime; a == nil || b == nil || !a.Equal(*b) {
 				t.Errorf("%s started at %v before the restart and %v after it", name, a, b)
 			}
@@ -124,9 +133,9 @@ func TestANewOperatorContinuesDeactivation(t *testing.T) {
 		w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
 		w.indi.hold("Telescope Simulator", "TELESCOPE_PARK")
 		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
-		w.until(time.Minute, "Secure does not run", func() bool {
+		w.until(time.Minute, "the park does not run", func() bool {
 			r, _ := w.reservation("east-tonight")
-			return stepOf(r, observatory.StepSecure).State == observatory.StepRunning
+			return strings.Contains(stepText(stepOf(r, observatory.StepDeactivation)), "Mount east state: Parked Running")
 		})
 		w.restart()
 		w.indi.release("Telescope Simulator", "TELESCOPE_PARK")
@@ -149,7 +158,7 @@ func TestANewOperatorContinuesDeactivation(t *testing.T) {
 // A new operator that finds a park still running waits for it to end,
 // and sends no park of its own. libindi's telescope aborts a park when
 // a client sends TELESCOPE_PARK while the mount moves to its park
-// position, so a second park would fail Secure.
+// position, so a second park would fail the Deactivation step.
 func TestANewOperatorWaitsForAParkThatRuns(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -164,8 +173,8 @@ func TestANewOperatorWaitsForAParkThatRuns(t *testing.T) {
 		})
 		synctest.Wait()
 		r, _ := w.reservation("east-tonight")
-		if message := stepOf(r, observatory.StepSecure).Summary; message != "Parking Mount east" {
-			t.Errorf("Secure's message during the park = %q", message)
+		if text := stepText(stepOf(r, observatory.StepDeactivation)); !strings.Contains(text, "Mount east state: Parked Running: Parking Mount east") {
+			t.Errorf("the Deactivation step during the park =\n%s", text)
 		}
 
 		w.restart()

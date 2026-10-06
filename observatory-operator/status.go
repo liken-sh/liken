@@ -31,7 +31,7 @@ func (o *operator) writeStatuses(ctx context.Context) {
 	seen := &statusMemo{}
 	for {
 		wake := o.changed.wait()
-		if o.stores.ready() {
+		if o.stores.ready() && o.seeded.Load() {
 			o.writeAll(ctx, o.snapshot(), seen)
 		}
 		// After a failed write, the writer waits for the next window,
@@ -212,6 +212,7 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 		ready = condition(observatory.ConditionReady, observatory.ConditionTrue, string(next.Phase), deviceMessage(next, d.kind, ref, name, "", standing))
 	}
 	next.Conditions = []observatory.Condition{parent, ready}
+	next.Procedures = o.runs.list(d.key())
 	if next.Phase == observatory.DeviceConnected && device != nil {
 		next.Conditions = append(next.Conditions, stateConditions(d, *device)...)
 	}

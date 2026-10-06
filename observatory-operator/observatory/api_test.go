@@ -35,6 +35,27 @@ func TestAKindAnswersTheURLOfItsCollection(t *testing.T) {
 	}
 }
 
+// A procedure names a kind by its name, and a name that is no kind
+// names nothing.
+func TestANameAnswersItsKind(t *testing.T) {
+	cases := []struct {
+		name  string
+		want  Kind
+		found bool
+	}{
+		{"Mount", MountKind, true},
+		{"WeatherStation", WeatherStationKind, true},
+		{"Telescope", TelescopeKind, true},
+		{"mount", Kind{}, false},
+		{"Planet", Kind{}, false},
+	}
+	for _, c := range cases {
+		if got, found := KindNamed(c.name); got != c.want || found != c.found {
+			t.Errorf("KindNamed(%q) = %v %t, want %v %t", c.name, got, found, c.want, c.found)
+		}
+	}
+}
+
 // A device names its parent through the struct that its spec embeds,
 // such as TrainDevice, so the operator finds the parent of any device
 // with one method.
@@ -44,13 +65,13 @@ func TestADeviceAnswersItsParent(t *testing.T) {
 		device interface{ Parent() Parent }
 		want   Parent
 	}{
-		{"a mount", MountSpec{TelescopeDevice{Telescope: "east"}}, Parent{TelescopeKind, "east"}},
+		{"a mount", MountSpec{TelescopeDevice: TelescopeDevice{Telescope: "east"}}, Parent{TelescopeKind, "east"}},
 		{"a camera", CameraSpec{TrainDevice: TrainDevice{OpticalTrain: "east-imaging"}},
 			Parent{OpticalTrainKind, "east-imaging"}},
-		{"a dome", DomeSpec{ObservatoryDevice{Observatory: "lab"}}, Parent{ObservatoryKind, "lab"}},
-		{"a switch on a telescope", SwitchSpec{TelescopeOrObservatoryDevice{Telescope: "east"}},
+		{"a dome", DomeSpec{ObservatoryDevice: ObservatoryDevice{Observatory: "lab"}}, Parent{ObservatoryKind, "lab"}},
+		{"a switch on a telescope", SwitchSpec{TelescopeOrObservatoryDevice: TelescopeOrObservatoryDevice{Telescope: "east"}},
 			Parent{TelescopeKind, "east"}},
-		{"a switch on the observatory", SwitchSpec{TelescopeOrObservatoryDevice{Observatory: "lab"}},
+		{"a switch on the observatory", SwitchSpec{TelescopeOrObservatoryDevice: TelescopeOrObservatoryDevice{Observatory: "lab"}},
 			Parent{ObservatoryKind, "lab"}},
 		{"a mount on the shelf", MountSpec{}, Parent{}},
 		{"a camera on the shelf", CameraSpec{}, Parent{}},

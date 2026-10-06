@@ -116,18 +116,18 @@ func TestADriverThatLacksAPropertyIsNotedAndSkipped(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
-		w.put(observatory.CameraKind, "east-guide", map[string]any{"opticalTrain": "east-guiding", "driver": map[string]any{"name": "indi_simulator_guide"}, "temperature": -5, "offset": 3})
+		w.put(observatory.CameraKind, "east-guide", map[string]any{"opticalTrain": "east-guiding", "driver": map[string]any{"name": "indi_simulator_guide"}, "activation": []any{map[string]any{"cool": map[string]any{"celsius": -5}}}, "offset": 3})
 		w.put(observatory.FilterWheelKind, "east", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_wheel"},
 			"filters": []any{"L", "R", "G", "B", "Ha", "OIII", "SII", "Dark", "Spare"}})
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		r := w.phase("east-tonight", observatory.ReservationReady, 15*time.Minute)
 		notes := map[observatory.StepName][]string{
-			observatory.StepConfigure: {"no CCD_OFFSET on Camera east-guide", "no slot for 1 of the filters on FilterWheel east (8 slots)"},
-			observatory.StepPrepare:   {"no cooler on Camera east-guide: CCD_TEMPERATURE is read-only"},
+			observatory.StepConfigure:  {"no CCD_OFFSET on Camera east-guide", "no slot for 1 of the filters on FilterWheel east (8 slots)"},
+			observatory.StepActivation: {"Camera east-guide cool: -5 °C within 0.5 °C Skipped: No cooler on Camera east-guide: CCD_TEMPERATURE is read-only"},
 		}
 		for name, want := range notes {
 			for _, note := range want {
-				if message := stepOf(r, name).Summary; !strings.Contains(message, note) {
+				if message := stepText(stepOf(r, name)); !strings.Contains(message, note) {
 					t.Errorf("%s: %q does not note %q", name, message, note)
 				}
 			}
@@ -271,13 +271,13 @@ func TestADeviceThatRefusesAChangeFailsItsStep(t *testing.T) {
 		{"CCD Simulator", "CCD_GAIN", observatory.StepConfigure, false},
 		{"CCD Simulator", "CCD_OFFSET", observatory.StepConfigure, false},
 		{"CCD Simulator", "SCOPE_INFO", observatory.StepConfigure, false},
-		{"CCD Simulator", "CCD_TEMPERATURE", observatory.StepPrepare, false},
-		{"Telescope Simulator", "TELESCOPE_PARK", observatory.StepSecure, true},
-		{"Dust Cover Simulator", "CAP_PARK", observatory.StepSecure, true},
+		{"CCD Simulator", "CCD_TEMPERATURE", observatory.StepActivation, false},
+		{"Telescope Simulator", "TELESCOPE_PARK", observatory.StepDeactivation, true},
+		{"Dust Cover Simulator", "CAP_PARK", observatory.StepDeactivation, true},
+		{"Dome Simulator", "DOME_PARK", observatory.StepDeactivation, true},
 		{"CCD Simulator", "CONNECTION", observatory.StepDisconnect, true},
 		{"Simulator IO", "DIGITAL_OUTPUT_1", observatory.StepPowerOff, true},
 		{"Simulator IO", "CONNECTION", observatory.StepPowerOff, true},
-		{"Dome Simulator", "DOME_PARK", observatory.StepStopSite, true},
 		{"Weather Simulator", "CONNECTION", observatory.StepStopSite, true},
 	}
 	for _, c := range cases {

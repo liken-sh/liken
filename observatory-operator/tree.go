@@ -34,10 +34,10 @@ type deviceSpec struct {
 	OpticalTrain string `json:"opticalTrain,omitempty"`
 	Observatory  string `json:"observatory,omitempty"`
 	observatory.DeviceSpec
-	Gain        *float64 `json:"gain,omitempty"`
-	Offset      *float64 `json:"offset,omitempty"`
-	Temperature *float64 `json:"temperature,omitempty"`
-	Filters     []string `json:"filters,omitempty"`
+	observatory.Procedures[action]
+	Gain    *float64 `json:"gain,omitempty"`
+	Offset  *float64 `json:"offset,omitempty"`
+	Filters []string `json:"filters,omitempty"`
 }
 
 type deviceStatus struct {

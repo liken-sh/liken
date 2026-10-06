@@ -153,6 +153,248 @@ spec:
                     API server validates it when the operator creates
                     the claim. Optional. A simulator needs no claim.
                   x-kubernetes-preserve-unknown-fields: true
+                activation:
+                  type: array
+                  maxItems: 16
+                  description: >-
+                    The actions that run, in order, as the device's
+                    `Telescope` or `Observatory` turns `Active`, while
+                    every device is still connected. The `Reservation`'s
+                    `Activation` step waits for them. Each action is a
+                    target state, so a run that an operator restart
+                    interrupted runs again each action that is not
+                    `Done`. Optional.
+                  items:
+                    type: object
+                    description: >-
+                      One action, which names `state`.
+                    x-kubernetes-validations:
+                      - rule: "has(self.state)"
+                        message: "an action of a FlatPanel names state"
+                    properties:
+                      state:
+                        type: string
+                        enum: ["On", "Off"]
+                        description: >-
+                          The light to reach: `On` or `Off`, written to
+                          `FLAT_LIGHT_CONTROL`. YAML reads a bare On or
+                          Off as a boolean, so quote the value, as in
+                          `state: "Off"`. The default timeout is 10
+                          minutes.
+                      timeout:
+                        type: string
+                        maxLength: 32
+                        description: >-
+                          How long the action may take, its waits for
+                          `requires` and `after` included, as a duration
+                          such as `20m`. An action that passes it fails.
+                          Optional. Each action has a default.
+                        x-kubernetes-validations:
+                          - rule: "self.matches('^([0-9]+(\\\\.[0-9]+)?(ms|s|m|h))+$') && duration(self) > duration('0s')"
+                            message: "timeout must be a positive duration, such as 20m or 1h30m"
+                      requires:
+                        type: array
+                        maxItems: 8
+                        description: >-
+                          The conditions that must hold before the
+                          action runs. The operator waits for each one
+                          until the action's timeout. They bind only the
+                          actions that the operator runs: a move that a
+                          person makes in KStars is stopped only by the
+                          drivers' park locks.
+                        items:
+                          type: object
+                          required: [type]
+                          description: >-
+                            One condition, and the status it must have.
+                          properties:
+                            kind:
+                              type: string
+                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                              description: >-
+                                The kind of the resource whose condition
+                                it reads. With no `kind`, the condition
+                                is the resource's own. A `kind` of
+                                `Observatory` or `Telescope` with no
+                                `name` means the resource's own
+                                observatory or telescope.
+                            name:
+                              type: string
+                              minLength: 1
+                              maxLength: 253
+                              pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                              description: >-
+                                The name of the resource, in this
+                                namespace. A device kind needs a name.
+                            type:
+                              type: string
+                              minLength: 1
+                              maxLength: 316
+                              description: >-
+                                The condition's type, such as `Safe` or
+                                `Parked`.
+                            status:
+                              type: string
+                              enum: ["True", "False", Unknown]
+                              default: "True"
+                              description: >-
+                                The status that the condition must have:
+                                `True`, `False`, or `Unknown`. The
+                                default is `True`.
+                      after:
+                        type: array
+                        maxItems: 8
+                        description: >-
+                          The resources whose runs for the same event
+                          must end before the action runs: the same
+                          lifecycle step, or the same transition of the
+                          same condition. A resource with no such run is
+                          not waited for. A resource in a later tier of
+                          the tree is waited for until the action's
+                          timeout, and the action then fails.
+                        items:
+                          type: object
+                          required: [kind]
+                          description: >-
+                            One resource, by its kind and name.
+                          properties:
+                            kind:
+                              type: string
+                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                              description: >-
+                                The kind of the resource.
+                            name:
+                              type: string
+                              minLength: 1
+                              maxLength: 253
+                              pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                              description: >-
+                                The name of the resource. With no
+                                `name`, the reference names every
+                                resource of the kind in the observatory,
+                                or the resource's own `Observatory` or
+                                `Telescope`.
+                deactivation:
+                  type: array
+                  maxItems: 16
+                  description: >-
+                    The actions that run, in order, as the device's
+                    `Telescope` or `Observatory` stops being `Active`,
+                    while every device is still connected. The
+                    `Reservation`'s `Deactivation` step waits for them.
+                    Each action is a target state, so a run that an
+                    operator restart interrupted runs again each action
+                    that is not `Done`. Optional.
+                  items:
+                    type: object
+                    description: >-
+                      One action, which names `state`.
+                    x-kubernetes-validations:
+                      - rule: "has(self.state)"
+                        message: "an action of a FlatPanel names state"
+                    properties:
+                      state:
+                        type: string
+                        enum: ["On", "Off"]
+                        description: >-
+                          The light to reach: `On` or `Off`, written to
+                          `FLAT_LIGHT_CONTROL`. YAML reads a bare On or
+                          Off as a boolean, so quote the value, as in
+                          `state: "Off"`. The default timeout is 10
+                          minutes.
+                      timeout:
+                        type: string
+                        maxLength: 32
+                        description: >-
+                          How long the action may take, its waits for
+                          `requires` and `after` included, as a duration
+                          such as `20m`. An action that passes it fails.
+                          Optional. Each action has a default.
+                        x-kubernetes-validations:
+                          - rule: "self.matches('^([0-9]+(\\\\.[0-9]+)?(ms|s|m|h))+$') && duration(self) > duration('0s')"
+                            message: "timeout must be a positive duration, such as 20m or 1h30m"
+                      requires:
+                        type: array
+                        maxItems: 8
+                        description: >-
+                          The conditions that must hold before the
+                          action runs. The operator waits for each one
+                          until the action's timeout. They bind only the
+                          actions that the operator runs: a move that a
+                          person makes in KStars is stopped only by the
+                          drivers' park locks.
+                        items:
+                          type: object
+                          required: [type]
+                          description: >-
+                            One condition, and the status it must have.
+                          properties:
+                            kind:
+                              type: string
+                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                              description: >-
+                                The kind of the resource whose condition
+                                it reads. With no `kind`, the condition
+                                is the resource's own. A `kind` of
+                                `Observatory` or `Telescope` with no
+                                `name` means the resource's own
+                                observatory or telescope.
+                            name:
+                              type: string
+                              minLength: 1
+                              maxLength: 253
+                              pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                              description: >-
+                                The name of the resource, in this
+                                namespace. A device kind needs a name.
+                            type:
+                              type: string
+                              minLength: 1
+                              maxLength: 316
+                              description: >-
+                                The condition's type, such as `Safe` or
+                                `Parked`.
+                            status:
+                              type: string
+                              enum: ["True", "False", Unknown]
+                              default: "True"
+                              description: >-
+                                The status that the condition must have:
+                                `True`, `False`, or `Unknown`. The
+                                default is `True`.
+                      after:
+                        type: array
+                        maxItems: 8
+                        description: >-
+                          The resources whose runs for the same event
+                          must end before the action runs: the same
+                          lifecycle step, or the same transition of the
+                          same condition. A resource with no such run is
+                          not waited for. A resource in a later tier of
+                          the tree is waited for until the action's
+                          timeout, and the action then fails.
+                        items:
+                          type: object
+                          required: [kind]
+                          description: >-
+                            One resource, by its kind and name.
+                          properties:
+                            kind:
+                              type: string
+                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                              description: >-
+                                The kind of the resource.
+                            name:
+                              type: string
+                              minLength: 1
+                              maxLength: 253
+                              pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                              description: >-
+                                The name of the resource. With no
+                                `name`, the reference names every
+                                resource of the kind in the observatory,
+                                or the resource's own `Observatory` or
+                                `Telescope`.
             status:
               type: object
               description: >-
@@ -244,6 +486,92 @@ spec:
                         description: >-
                           When `status` last changed. A write with the
                           same status keeps this time.
+                procedures:
+                  type: array
+                  description: >-
+                    The last run of each trigger of the resource's
+                    procedures: `activation`, `deactivation`, and
+                    `on[0]` and so on for each item of `spec.on`. An
+                    operator that restarts resumes a run from this
+                    record.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [trigger]
+                  items:
+                    type: object
+                    required: [trigger, state]
+                    description: >-
+                      The last run of one trigger.
+                    properties:
+                      trigger:
+                        type: string
+                        description: >-
+                          The trigger: `activation`, `deactivation`, or
+                          `on[0]` for the first item of `spec.on`.
+                      since:
+                        type: string
+                        format: date-time
+                        description: >-
+                          The transition time of the condition that the
+                          run answers: the `lastTransitionTime` of
+                          `Active` for activation and deactivation.
+                      state:
+                        type: string
+                        enum: [Pending, Running, Done, Failed, Skipped]
+                        description: >-
+                          The run's progress: `Pending`, `Running`,
+                          `Done`, `Failed`, or `Skipped` when it had
+                          nothing to do.
+                      startTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When the run began to run.
+                      stopTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When the run ended.
+                      summary:
+                        type: string
+                        description: >-
+                          What the run waits for or did.
+                      actions:
+                        type: array
+                        description: >-
+                          Each action of the run, in order.
+                        items:
+                          type: object
+                          required: [action, state]
+                          description: >-
+                            One action.
+                          properties:
+                            action:
+                              type: string
+                              description: >-
+                                The action as its YAML reads, such as
+                                `state: Parked` or `cool: -10 °C within
+                                0.5 °C`.
+                            state:
+                              type: string
+                              enum: [Pending, Running, Done, Failed, Skipped]
+                              description: >-
+                                The action's progress: `Pending`,
+                                `Running`, `Done`, `Failed`, or
+                                `Skipped` when it had nothing to do.
+                            startTime:
+                              type: string
+                              format: date-time
+                              description: >-
+                                When the action began to run.
+                            stopTime:
+                              type: string
+                              format: date-time
+                              description: >-
+                                When the action ended.
+                            summary:
+                              type: string
+                              description: >-
+                                What the action waits for or did.
                 indiDevice:
                   type: string
                   description: >-

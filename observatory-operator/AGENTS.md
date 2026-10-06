@@ -98,7 +98,12 @@ runner for each `Reservation` (`reservation.go`, `activation.go`,
 `configure.go`, `deactivation.go`, `steady.go`, `moves.go`,
 `finish.go`, and the guider's `guidersteps.go` and `guidersteady.go`),
 the status writer (`status.go`, `statustree.go`, `standing.go`,
-`readings.go`, `guiderstatus.go`), and the lock relay (`locks.go`). Each
+`readings.go`, `guiderstatus.go`), and the lock relay (`locks.go`). The
+runner's `Activation` and `Deactivation` steps run the procedures of
+plan 13 (`procsteps.go`): `procedure.go` runs one trigger's actions,
+`action.go` and `cooler.go` carry out one action, `resources.go`
+resolves a procedure's references, `runs.go` holds the record of each
+run, and `activity.go` the `Active` condition. Each
 of them waits on a bell and reads the watches' stores again. `changed`
 rings on every watch event, every INDI event, and every change that a
 PHD2 reports, and `structure` on the same events except an INDI

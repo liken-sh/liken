@@ -299,6 +299,9 @@ type indiWorld struct {
 	// lateDials holds how many dials each server refuses after its pod
 	// is Ready, as an indiserver that has not opened its port yet does.
 	lateDials map[string]int
+	// presets holds the switch that a driver turns On when it defines a
+	// property, by "<device>.<property>" (fakepresets_test.go).
+	presets map[string]string
 	// shimDelay is the time from a change of a server pod's annotation
 	// to the shim's start or stop of a driver (fakeshim_test.go).
 	shimDelay time.Duration
@@ -313,7 +316,7 @@ type indiWorld struct {
 }
 
 func startIndiWorld(t *testing.T, api *fakeAPI) *indiWorld {
-	w := &indiWorld{t: t, api: api, servers: map[string]*fakeServer{}, held: map[string]bool{}, refused: map[string]bool{}, moving: map[string]bool{}, lateDials: map[string]int{}}
+	w := &indiWorld{t: t, api: api, servers: map[string]*fakeServer{}, held: map[string]bool{}, refused: map[string]bool{}, moving: map[string]bool{}, lateDials: map[string]int{}, presets: map[string]string{}}
 	go w.follow(t.Context())
 	return w
 }
@@ -442,6 +445,7 @@ func (w *indiWorld) sync(pods map[string]map[string]any) {
 			d := newFakeDriver(w.t, execOf(device))
 			s.drivers[link], s.uids[link] = d, podUID(device)
 			for _, prop := range d.props {
+				w.applyPreset(prop)
 				s.broadcast(prop.def())
 			}
 		}
@@ -586,6 +590,7 @@ func (w *indiWorld) answer(name string, s *fakeServer, c *fakeConn, v xmlVector)
 		d.connected = true
 		for _, prop := range d.onConnect {
 			added := prop.copy()
+			w.applyPreset(added)
 			d.props = append(d.props, added)
 			s.broadcast(added.def())
 		}
@@ -710,6 +715,13 @@ func (w *indiWorld) refuse(device, property string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.refused[device+"."+property] = true
+}
+
+// accept makes a driver that refused a property answer it again.
+func (w *indiWorld) accept(device, property string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	delete(w.refused, device+"."+property)
 }
 
 // listenLate makes a server refuse its next dials after its pod is

@@ -6,10 +6,11 @@ on a [`liken`](https://liken.sh/) cluster, under the API group
 as resources, and a `Reservation` gives one holder the use of one
 `Telescope`. While a reservation is active, the operator runs each of
 the telescope's INDI devices in its own pod, serves them on one INDI
-server, and connects, configures, and prepares each device in a fixed
-order. It starts PHD2 for the telescope's `Guider` and connects it to
-the guide camera and the mount. At the end it secures each device and
-reports that the devices are safe to power off. KStars, or
+server, connects and configures each device in a fixed order, and
+runs the procedures that each resource states for its activation. It
+starts PHD2 for the telescope's `Guider` and connects it to the guide
+camera and the mount. At the end it runs each resource's deactivation
+procedures and reports that the devices are safe to power off. KStars, or
 `astrophotography-operator`, drives the telescope through its server,
 and guides through PHD2's event server.
 
@@ -133,9 +134,8 @@ Every device kind shares these spec fields:
 
 The other spec fields are the few that activation needs:
 `Observatory.spec.location`, the tube's
-`aperture` and `focalLength` in millimeters, the camera's `gain`,
-`offset`, and `temperature` setpoint in degrees Celsius, the filter
-wheel's `filters`, the guider's `opticalTrain` and `pulses`, and the
+`aperture` and `focalLength` in millimeters, the camera's `gain` and
+`offset`, the filter wheel's `filters`, the guider's `opticalTrain` and `pulses`, and the
 reservation's `telescope`, `holder`, `start`, and `end`. [Plan
 05](plans/05-the-property-schema.md) will generate typed fields for the
 other standard properties. `kubectl explain` prints every field with
@@ -210,7 +210,10 @@ devices, and its guider's phase and PHD2's state. Its `Guider` column,
 in `-o wide`, shows both, such as `Ready, Guiding`, and an empty cell
 for a telescope with no `Guider`. An `Observatory`'s status
 names its server, its telescopes, its devices, the active reservations,
-and the worst verdict of its weather stations.
+and the worst verdict of its weather stations. A `Telescope` and an
+`Observatory` also report the condition `Active`, and each resource
+with procedures reports their runs in `status.procedures`, as
+"Procedures" below states.
 
 A `Reservation` moves through the phases `Scheduled`, `Activating`,
 `Ready`, `Deactivating`, and `Released`, or `Failed`. `status.steps`
@@ -251,8 +254,8 @@ phase change and for each step's start and end:
 
 ```text
 observatory-operator: Reservation east-tonight: Activating
-observatory-operator: Reservation east-tonight: Prepare started
-observatory-operator: Reservation east-tonight: Prepare done in 19 s: cooled Camera east-main to -10 °C; found Mount east unparked
+observatory-operator: Reservation east-tonight: Activation started
+observatory-operator: Reservation east-tonight: Activation done in 19 s: ran the activation of Dome lab, Mount east, Camera east-main, DustCap east
 observatory-operator: Reservation east-tonight: Ready at east-telescope.observatory.svc:7624
 ```
 
@@ -278,16 +281,16 @@ goes on.
 | `PowerOn` | Starts the telescope's server with a link to every device, starts and connects its `Switch` devices, and switches on each output that a device's `spec.power` names. | 10 min |
 | `StartDevices` | Starts the pod of every other device, and waits until each pod is Ready and its driver defines its device on the server. A device on real hardware waits here for its claim. | 10 min |
 | `Connect` | Connects the mount, the GPS, the polar aligner, the focusers, the filter wheels, the rotators, the dust caps, the flat panels, the sky quality meters, the receivers, and the cameras, in that order. | 2 min |
-| `Configure` | Writes the observatory's location and the `DOME_POLICY` to the mount, the location to the GPS, each camera's `ACTIVE_DEVICES` from its train, the camera's gain and offset, the tube's focal length and aperture, and the filter names. It then relays the dome's park state to the mount, before `Prepare` unparks it. | 2 min |
-| `Prepare` | Opens the dust caps, cools each camera to `spec.temperature` within 0.5 °C, and unparks the mount. It does not switch tracking on, because the holder, KStars in mode 1 or a `Session` in mode 2, aligns and calibrates the mount first. | 20 min |
+| `Configure` | Writes the observatory's location and the `DOME_POLICY` to the mount, the location to the GPS, each camera's `ACTIVE_DEVICES` from its train, the camera's gain and offset, the tube's focal length and aperture, and the filter names. It then relays the dome's park state to the mount, before a procedure unparks it. | 2 min |
+| `Activation` | Runs the activation procedures, from the top of the tree down: the `Observatory`'s and its devices', unless another reservation in the observatory ran them, then the `Telescope`'s and its devices', then those of the devices of its trains. "Procedures" below states what they do. | none: each action's timeout |
 | `StartGuider` | Starts the guider's pod, waits for PHD2's event server, sends `set_connected`, and waits until PHD2 reports its camera and mount connected. A telescope with no `Guider` skips it. | 10 min |
 | `Abort` | Stops PHD2's exposures and guiding with `stop_capture`, then ends each exposure and stops the mount if it moves. | 2 min |
-| `Secure` | Switches the flat panels off, closes the dust caps, parks the mount, and warms each cooled camera to 5 °C for up to 10 minutes before it switches the cooler off. | 20 min |
+| `Deactivation` | Runs the deactivation procedures, from the bottom of the tree up: those of the devices of the telescope's trains, then the `Telescope`'s own devices' and its own. When the last telescope in the observatory ends, it then runs the observatory's devices' and the `Observatory`'s own. Every device is still connected. | none: each action's timeout |
 | `StopGuider` | Deletes the guider's pod, `Service`, and `ConfigMap`, while its camera and mount are still connected. | 2 min |
 | `Disconnect` | Disconnects the devices in the reverse order of `Connect`. | 2 min |
 | `StopDevices` | Deletes the device pods. | 2 min |
 | `PowerOff` | Switches the outputs off, then stops the `Switch` pods and the telescope's server. | 5 min |
-| `StopSite` | Relays the parked mounts to the dome, parks the dome, disconnects the observatory's devices, and stops its server, unless a reservation of another telescope in the observatory is active. | 10 min |
+| `StopSite` | Disconnects the observatory's devices, switches their outputs off, and stops its server, unless a reservation of another telescope in the observatory is active. | 5 min |
 
 Deactivation begins at `spec.end`, or when a person deletes the
 reservation. The finalizer `observatory.liken.sh/deactivate` holds a
@@ -351,6 +354,104 @@ reason and message. A `ParentFound` that is `False`, a `Ready` whose
 reason is `Error`, and a `Safe` that is `False` are `Warning`s. `kubectl describe` lists them
 for an hour.
 
+## Procedures
+
+Each resource states what the operator does with its equipment, in two
+fields of its spec. Every device kind, the `Telescope`, and the
+`Observatory` have them:
+
+- `activation` runs as the resource's `Telescope` or `Observatory`
+  turns `Active`, in the reservation's `Activation` step.
+- `deactivation` runs as it stops being `Active`, in the
+  `Deactivation` step, while every device is still connected.
+
+Each is a list of actions that run in order. An action is a target
+state, so it is safe to run twice: the operator reads what the device
+reports, and sends nothing when the device is there already. Each kind
+accepts only the actions it supports, and the CRD refuses the others:
+
+| Kind | Action | Default timeout |
+|---|---|---|
+| `Dome`, `Mount` | `state: Parked` or `state: Unparked` | 10 min |
+| `DustCap` | `state: Open` or `state: Closed` | 10 min |
+| `FlatPanel` | `state: "On"` or `state: "Off"`, the light, quoted because YAML reads a bare `On` as a boolean | 10 min |
+| `Camera` | `cool: {celsius, within}`: write the setpoint and wait until the sensor is within `within`, 0.5 °C by default | 20 min |
+| `Camera` | `warm: {celsius, within}`: warm the sensor, then switch the cooler off | 10 min |
+
+A `warm` that does not reach its setpoint by its timeout still
+switches the cooler off, and notes where the sensor is, because a
+cooler cannot warm a sensor above the air around it. The setpoint of a
+camera's first `cool` action is also the setpoint that the operator
+sends again to a camera whose driver restarts, and the `Setpoint`
+column of `kubectl get cam`. The `Activation` step's summary names each
+camera whose driver has a cooler and whose activation does not cool
+it.
+
+Every action also takes these fields:
+
+- `timeout`, a duration such as `20m`, bounds the action and its
+  waits. An action that passes it fails.
+- `requires` lists conditions, as `{kind, name, type, status}`, that
+  must hold before the action runs. `status` is `"True"` unless the
+  field says otherwise. The operator waits for each one until the
+  timeout, and the action's summary names what it waits for, such as
+  `Waiting for WeatherStation lab Safe=True`. `requires` binds only the
+  operator's own actions: a move that a person makes in KStars is
+  stopped only by the drivers' park locks.
+- `after` lists resources, as `{kind, name}`, whose runs for the same
+  step must end first. `{kind: Mount}` with no name means every
+  `Mount` in the observatory. A resource with no run in the step is not
+  waited for.
+
+A reference with no `kind` names the resource itself. A `kind` of
+`Observatory` or `Telescope` with no `name` names the resource's own.
+A reference that names nothing that exists fails the action, and the
+message names the field, such as `after[0]: no Mount north`.
+
+The tree orders the runs. Activation runs the `Observatory` and then
+its devices, then the `Telescope` and then its own devices, then the
+devices of its trains. Deactivation runs the same tiers in reverse.
+The runs of one tier run in parallel. So the dome unparks before the
+mount, and the mount parks before the dome, with no `after`. An
+`after` that names a resource of a later tier waits until the
+action's timeout, and the action then fails. The observatory's tiers
+run when the first reservation in it activates, under a lock, and a
+second reservation finds those runs `Done`. They run again at
+deactivation when the last telescope in the observatory ends.
+
+A `Telescope` and an `Observatory` report the condition `Active`. A
+telescope is `Active` from the start of its reservation's `Activation`
+step until the start of its `Deactivation` step. An observatory is
+`Active` from the `Activation` step of the first reservation in it
+until the `Deactivation` step of the last one. Each run records the
+`lastTransitionTime` of `Active` that it answers, in `since`, so a
+trigger runs once for each transition.
+
+A resource's `status.procedures` holds the last run of each trigger:
+its `trigger`, `since`, `state`, start and stop times, `summary`, and
+each action with its state, times, and summary. The reservation's
+`Activation` and `Deactivation` steps copy the actions they waited on
+into `status.steps[].actions`, each with its resource, so
+`kubectl describe reservation` shows the whole activation. A run that
+an operator restart interrupted resumes from the record, and runs
+again each action that is not `Done`. A failed action fails its run
+and the step, and the retry annotation runs the failed run again,
+while a run that is `Done` stays `Done`. Each run posts an Event on its
+resource when it starts and when it ends: `ProcedureStarted`,
+`ProcedureDone`, or the Warning `ProcedureFailed`.
+
+```sh
+kubectl get dome lab -n observatory -o jsonpath='{.status.procedures}'
+kubectl get rsv east-tonight -n observatory \
+  -o jsonpath='{.status.steps[?(@.name=="Activation")].actions}'
+```
+
+`examples/simulators.yaml` states a whole site this way: the dome
+unparks while the weather station reports `Safe`, the mounts unpark,
+the cap opens, and the camera cools to -10 °C. At the end, the flat
+panel's light goes off, the cap closes, the camera warms to 5 °C, the
+mounts park, and the dome parks.
+
 ## The dome and mount locks
 
 While an `Observatory` has a `Dome`, the domes and the mounts lock
@@ -382,9 +483,9 @@ servers. Each mount receives the domes' state under the name in its
 `ACTIVE_DEVICES.ACTIVE_DOME`. The dome receives one state for every
 mount under the name in its `ACTIVE_DEVICES.ACTIVE_TELESCOPE`:
 unparked while any mount is unparked, moving, or silent. A mount that
-does not report its park state counts as unparked until the `Secure`
-step of its reservation has parked it. A dome that does not report
-counts as parked.
+does not report its park state counts as unparked until the
+`Deactivation` step of its reservation has ended. A dome that does not
+report counts as parked.
 
 The `Observatory`'s `LocksRelayed` condition reports the relay. It is
 `True` while the operator relays each state, and its message names
@@ -405,7 +506,7 @@ for the move fails, as it does for any `Alert`.
 A `Guider` runs PHD2 for its `Telescope`, with the camera of the
 `OpticalTrain` it names. `StartGuider` starts PHD2, connects it to the
 camera and the mount, and leaves it idle. The operator never loops,
-calibrates, or guides: tracking stays off after `Prepare` until the
+calibrates, or guides: tracking stays off after activation until the
 holder aligns the mount, so the holder drives PHD2 from then on. KStars
 or `astrophotography-operator` connects to PHD2's event server at the
 `Guider`'s `status.endpoint`, such as

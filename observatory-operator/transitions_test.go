@@ -34,7 +34,7 @@ func TestADevicePostsItsReadyTransitions(t *testing.T) {
 		w := readyWorld(t)
 
 		got := slices.DeleteFunc(typedEvents(w.api, observatory.CameraKind, "east-main"), func(e string) bool {
-			return strings.HasPrefix(e, "Normal CoolerOff: ")
+			return strings.HasPrefix(e, "Normal CoolerOff: ") || strings.HasPrefix(e, "Normal Procedure")
 		})
 
 		want := []string{

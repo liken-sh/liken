@@ -58,28 +58,29 @@ const (
 	StepStartDevices StepName = "StartDevices"
 	StepConnect      StepName = "Connect"
 	StepConfigure    StepName = "Configure"
-	StepPrepare      StepName = "Prepare"
+	StepActivation   StepName = "Activation"
 	StepStartGuider  StepName = "StartGuider"
 
-	StepAbort       StepName = "Abort"
-	StepSecure      StepName = "Secure"
-	StepStopGuider  StepName = "StopGuider"
-	StepDisconnect  StepName = "Disconnect"
-	StepStopDevices StepName = "StopDevices"
-	StepPowerOff    StepName = "PowerOff"
-	StepStopSite    StepName = "StopSite"
+	StepAbort        StepName = "Abort"
+	StepDeactivation StepName = "Deactivation"
+	StepStopGuider   StepName = "StopGuider"
+	StepDisconnect   StepName = "Disconnect"
+	StepStopDevices  StepName = "StopDevices"
+	StepPowerOff     StepName = "PowerOff"
+	StepStopSite     StepName = "StopSite"
 )
 
 // ActivationSteps run in this order. Plan 07 states what each one
-// does.
+// does, and plan 13 states the Activation step, which runs the
+// procedures of the resources' activation.
 var ActivationSteps = []StepName{
 	StepWait, StepStartSite, StepPowerOn, StepStartDevices,
-	StepConnect, StepConfigure, StepPrepare, StepStartGuider,
+	StepConnect, StepConfigure, StepActivation, StepStartGuider,
 }
 
 // DeactivationSteps run in this order, after spec.end or a delete.
 var DeactivationSteps = []StepName{
-	StepAbort, StepSecure, StepStopGuider, StepDisconnect, StepStopDevices,
+	StepAbort, StepDeactivation, StepStopGuider, StepDisconnect, StepStopDevices,
 	StepPowerOff, StepStopSite,
 }
 
@@ -119,17 +120,28 @@ type Step struct {
 	StartTime *time.Time `json:"startTime,omitempty"`
 	StopTime  *time.Time `json:"stopTime,omitempty"`
 	// Summary says what the step waits for or did, and names the
-	// device when one device holds the step up. The JSON names of a
-	// step's fields sort as name, startTime, state, stopTime, summary,
-	// and `kubectl describe` prints a map's fields in that sorted
-	// order, so each step begins with its name.
+	// device when one device holds the step up. `kubectl describe`
+	// prints a map's fields in the sorted order of their JSON names:
+	// actions, name, startTime, state, stopTime, summary. So a step
+	// begins with its name, except a step with actions, which begins
+	// with them.
 	Summary string `json:"summary,omitempty"`
+	// Actions copies the actions of the procedures that the
+	// Activation or Deactivation step waited on, each with the
+	// resource that it belongs to.
+	Actions []StepAction `json:"actions,omitempty"`
+}
+
+// StepAction is one action of a procedure that a step waited on.
+type StepAction struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+	ActionRun
 }
 
 const (
 	// ConditionSafeToPowerOff is True when the deactivation steps are
-	// done: the mount parked, the cameras warmed, the dust caps closed,
-	// and the pods stopped.
+	// done: the deactivation procedures ran, and the pods stopped.
 	ConditionSafeToPowerOff = "SafeToPowerOff"
 
 	// ReservationFinalizer holds a deleted Reservation until its

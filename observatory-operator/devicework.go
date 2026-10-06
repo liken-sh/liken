@@ -8,7 +8,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"math"
 	"slices"
 	"strconv"
 
@@ -49,67 +48,6 @@ func inOrder(devices []*device, kinds []observatory.Kind) []*device {
 		}
 	}
 	return out
-}
-
-// The temperatures of a camera's cooler, in degrees Celsius.
-const (
-	// coolTolerance is how close to its setpoint a sensor must be for
-	// Prepare to count it as cooled.
-	coolTolerance = 0.5
-	// warmTarget is the setpoint that Secure warms a cooled sensor to
-	// before it switches the cooler off. A sensor that loses its cooler
-	// at -10 °C warms by tens of degrees in seconds, and the stress of
-	// that change can crack it. Warming under control first limits the
-	// rate.
-	warmTarget = 5.0
-)
-
-// coolers answers the cameras of a telescope that the step must cool or
-// warm, and notes each camera whose driver has no cooler.
-func coolable(ctx context.Context, cameras []handle, notes *[]string) []handle {
-	var out []handle
-	for _, h := range cameras {
-		p, ok := h.property(ctx, "CCD_TEMPERATURE")
-		switch {
-		case !ok:
-			*notes = append(*notes, fmt.Sprintf("no cooler on %s: no CCD_TEMPERATURE", h))
-		case p.Perm == indi.ReadOnly:
-			*notes = append(*notes, fmt.Sprintf("no cooler on %s: CCD_TEMPERATURE is read-only", h))
-		default:
-			out = append(out, h)
-		}
-	}
-	return out
-}
-
-// setTemperature sends a cooler setpoint and waits until the sensor is
-// within coolTolerance of it, or until the driver reports Alert, or
-// until ctx ends. report says how far the sensor is.
-func setTemperature(ctx context.Context, h handle, target float64, report func(string)) error {
-	if _, err := h.client().SetNumbers(h.name, "CCD_TEMPERATURE", map[string]float64{"CCD_TEMPERATURE_VALUE": target}); err != nil {
-		return fmt.Errorf("%s: %w", h, err)
-	}
-	last := math.NaN()
-	err := h.client().WaitFor(ctx, func(s *indi.Store) bool {
-		p, ok := s.Property(h.name, "CCD_TEMPERATURE")
-		if !ok {
-			return false
-		}
-		if p.State == indi.Alert {
-			return true
-		}
-		now, _ := number(p, "CCD_TEMPERATURE_VALUE")
-		last = now
-		return math.Abs(now-target) <= coolTolerance
-	})
-	if err != nil {
-		return fmt.Errorf("%s reached %s of %s: %w", h, quantity(last, 1, "°C"), quantity(target, 1, "°C"), err)
-	}
-	if p, _ := h.client().Property(h.name, "CCD_TEMPERATURE"); p.State == indi.Alert {
-		return fmt.Errorf("%s: indi: %s.CCD_TEMPERATURE is Alert", h, h.name)
-	}
-	report(fmt.Sprintf("reached %s on %s", quantity(target, 1, "°C"), h))
-	return nil
 }
 
 // location writes the observatory's location to a mount or a GPS.

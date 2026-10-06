@@ -35,7 +35,17 @@ var (
 		GuiderLostLock, GuiderPaused, GuiderLooping)
 	stepStates = strs(StepPending, StepRunning, StepDone, StepFailed, StepSkipped)
 	covers     = []string{CoverOpen, CoverClosed, CoverMoving}
-	deviceKind = func() []string {
+	refKinds   = func() []string {
+		var names []string
+		for _, kind := range Kinds {
+			if kind != ReservationKind {
+				names = append(names, kind.Name)
+			}
+		}
+		return names
+	}()
+	conditionStatuses = strs(ConditionTrue, ConditionFalse, ConditionUnknown)
+	deviceKind        = func() []string {
 		var names []string
 		for _, kind := range DeviceKinds {
 			names = append(names, kind.Name)
@@ -73,8 +83,17 @@ func TestEachEnumHoldsTheGoConstants(t *testing.T) {
 		{ReservationKind, "status.step", stepNames},
 		{ReservationKind, "status.steps[].name", stepNames},
 		{ReservationKind, "status.steps[].state", stepStates},
-		{ReservationKind, "status.conditions[].status",
-			strs(ConditionTrue, ConditionFalse, ConditionUnknown)},
+		{ReservationKind, "status.conditions[].status", conditionStatuses},
+		{ReservationKind, "status.steps[].actions[].state", stepStates},
+		{DomeKind, "spec.activation[].state", strs(StateParked, StateUnparked)},
+		{MountKind, "spec.deactivation[].state", strs(StateParked, StateUnparked)},
+		{DustCapKind, "spec.activation[].state", strs(StateOpen, StateClosed)},
+		{FlatPanelKind, "spec.deactivation[].state", strs(StateOn, StateOff)},
+		{CameraKind, "spec.activation[].requires[].kind", refKinds},
+		{CameraKind, "spec.activation[].requires[].status", conditionStatuses},
+		{ObservatoryKind, "spec.deactivation[].after[].kind", refKinds},
+		{TelescopeKind, "status.procedures[].state", stepStates},
+		{MountKind, "status.procedures[].actions[].state", stepStates},
 	}
 	for _, c := range cases {
 		t.Run(c.kind.Name+"."+c.path, func(t *testing.T) {

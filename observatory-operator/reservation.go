@@ -206,7 +206,8 @@ func (r *runner) step(name observatory.StepName) *observatory.Step {
 // stepWork is what a step function receives: the runner, and a way to
 // say what the step waits for now.
 type stepWork struct {
-	r *runner
+	r    *runner
+	name observatory.StepName
 	// report records what the step does or waits for in the step's
 	// message, and writes the status when the message changed.
 	report func(string)
@@ -252,7 +253,7 @@ func (r *runner) runStep(ctx context.Context, name observatory.StepName, fn step
 		stepCtx, cancel = context.WithDeadline(ctx, s.StartTime.Add(limit))
 	}
 	defer cancel()
-	work := &stepWork{r: r}
+	work := &stepWork{r: r, name: name}
 	work.report = func(message string) {
 		message = sentence(message)
 		work.last = message
