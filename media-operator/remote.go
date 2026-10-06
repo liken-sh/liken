@@ -383,31 +383,29 @@ func (r *reader) readAndPublish(ctx context.Context, nodes []openNode) {
 	// context's end must close the nodes to unblock it.
 	defer context.AfterFunc(reading, func() { closeNodes(nodes) })()
 
-	events := readNodes(reading, nodes, stopReading)
-	for {
-		select {
-		case <-reading.Done():
-			return
-		case event, open := <-events:
-			if !open {
-				return
+	// The loop reads the channel until readNodes closes it, and does
+	// not return when the batch is cancelled. A node delivers its last
+	// events and then ends, and the end cancels the batch. A select on the
+	// cancellation as well would choose at random between it and the
+	// events still in the channel, and lose a press or a release that
+	// the node read before it ended. The cancellation closes every
+	// node, so each reader ends and the channel closes.
+	for event := range readNodes(reading, nodes, stopReading) {
+		if !publishable(event.event) {
+			continue
+		}
+		// Discovery logs each raw event, and the fold below is
+		// unchanged, so a controller in discovery still drives its
+		// unit and still wakes a faded screen.
+		if r.discovery {
+			for _, line := range discoveryLines(event.node, event.event) {
+				fmt.Fprintf(r.log, "remote: %s\n", line)
 			}
-			if !publishable(event.event) {
-				continue
-			}
-			// Discovery logs each raw event, and the fold below is
-			// unchanged, so a controller in discovery still drives its
-			// unit and still wakes a faded screen.
-			if r.discovery {
-				for _, line := range discoveryLines(event.node, event.event) {
-					fmt.Fprintf(r.log, "remote: %s\n", line)
-				}
-			}
-			// A press gets one line, and a release or a repeat gets none,
-			// so a held control is one line and not one per tick.
-			if line := r.fold(event.event); line != "" {
-				logLine(r.log, "remote: %s: %s", event.node, line)
-			}
+		}
+		// A press gets one line, and a release or a repeat gets none,
+		// so a held control is one line and not one per tick.
+		if line := r.fold(event.event); line != "" {
+			logLine(r.log, "remote: %s: %s", event.node, line)
 		}
 	}
 }

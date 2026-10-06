@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"testing/synctest"
 )
 
 // The gate stands before the fold. The reader folds every EV_KEY event
@@ -57,7 +58,8 @@ func TestPublishableKeepsOnlyBindableEvents(t *testing.T) {
 }
 
 // testReader wires a reader to a fake broker, so a test reads what the
-// standing pod publishes.
+// standing pod publishes. Each caller runs in a synctest bubble, so a
+// wait for a publish runs on the bubble's clock and not the wall clock.
 func testReader(t *testing.T) (*reader, *fakeBroker) {
 	t.Helper()
 	bus, brokers, connected := startBus(t, 1, nil, nil)
@@ -77,21 +79,23 @@ func testReader(t *testing.T) (*reader, *fakeBroker) {
 // a fresh session republishes the availability and the declared codes the
 // pod last held. The operator's gap report survives a broker restart.
 func TestTheReaderRepublishesItsRetainedStateOnConnect(t *testing.T) {
-	r, broker := testReader(t)
-	r.publishCodes(remoteCodes{Keys: []uint16{0x130}})
-	waitForPublish(t, broker.pubs)
+	synctest.Test(t, func(t *testing.T) {
+		r, broker := testReader(t)
+		r.publishCodes(remoteCodes{Keys: []uint16{0x130}})
+		waitForPublish(t, broker.pubs)
 
-	r.onConnect(r.bus)
+		r.onConnect(r.bus)
 
-	availability := waitForPublish(t, broker.pubs)
-	mustMatch(t, availability.topic, remoteAvailabilityTopic(defaultTopicBase, "house", "sofa"))
-	mustMatch(t, string(availability.payload), availabilityOnline)
-	mustMatch(t, availability.retained, true)
+		availability := waitForPublish(t, broker.pubs)
+		mustMatch(t, availability.topic, remoteAvailabilityTopic(defaultTopicBase, "house", "sofa"))
+		mustMatch(t, string(availability.payload), availabilityOnline)
+		mustMatch(t, availability.retained, true)
 
-	codes := waitForPublish(t, broker.pubs)
-	mustMatch(t, codes.topic, remoteCodesTopic(defaultTopicBase, "house", "sofa"))
-	mustMatch(t, string(codes.payload), `{"keys":[304]}`)
-	mustMatch(t, codes.retained, true)
+		codes := waitForPublish(t, broker.pubs)
+		mustMatch(t, codes.topic, remoteCodesTopic(defaultTopicBase, "house", "sofa"))
+		mustMatch(t, string(codes.payload), `{"keys":[304]}`)
+		mustMatch(t, codes.retained, true)
+	})
 }
 
 // The declared codes are the union over the kept nodes, in code order
@@ -134,119 +138,129 @@ func TestTheReaderLogsAVerdictOnlyWhenThePictureChanges(t *testing.T) {
 // at every node open, clears them when the nodes vanish, and
 // republishes whichever stands on a reconnect.
 func TestTheReaderPublishesTheDeclaredCodesRetained(t *testing.T) {
-	r, broker := testReader(t)
+	synctest.Test(t, func(t *testing.T) {
+		r, broker := testReader(t)
 
-	r.publishCodes(remoteCodes{Keys: []uint16{0x130}, Axes: []uint16{0x10}})
+		r.publishCodes(remoteCodes{Keys: []uint16{0x130}, Axes: []uint16{0x10}})
 
-	published := waitForPublish(t, broker.pubs)
-	mustMatch(t, published.topic, remoteCodesTopic(defaultTopicBase, "house", "sofa"))
-	mustMatch(t, published.retained, true)
-	mustMatch(t, string(published.payload), `{"keys":[304],"axes":[16]}`)
+		published := waitForPublish(t, broker.pubs)
+		mustMatch(t, published.topic, remoteCodesTopic(defaultTopicBase, "house", "sofa"))
+		mustMatch(t, published.retained, true)
+		mustMatch(t, string(published.payload), `{"keys":[304],"axes":[16]}`)
 
-	r.onConnect(r.bus)
-	waitForPublish(t, broker.pubs)
-	again := waitForPublish(t, broker.pubs)
-	mustMatch(t, again.topic, remoteCodesTopic(defaultTopicBase, "house", "sofa"))
-	mustMatch(t, string(again.payload), `{"keys":[304],"axes":[16]}`)
+		r.onConnect(r.bus)
+		waitForPublish(t, broker.pubs)
+		again := waitForPublish(t, broker.pubs)
+		mustMatch(t, again.topic, remoteCodesTopic(defaultTopicBase, "house", "sofa"))
+		mustMatch(t, string(again.payload), `{"keys":[304],"axes":[16]}`)
 
-	r.clearCodes()
-	cleared := waitForPublish(t, broker.pubs)
-	mustMatch(t, cleared.topic, remoteCodesTopic(defaultTopicBase, "house", "sofa"))
-	mustMatch(t, len(cleared.payload), 0)
-	mustMatch(t, cleared.retained, true)
+		r.clearCodes()
+		cleared := waitForPublish(t, broker.pubs)
+		mustMatch(t, cleared.topic, remoteCodesTopic(defaultTopicBase, "house", "sofa"))
+		mustMatch(t, len(cleared.payload), 0)
+		mustMatch(t, cleared.retained, true)
+	})
 }
 
 // A reader in discovery logs each raw event the way a Keymap names it
 // and folds it all the same, so a controller a person maps still drives
 // the unit it holds.
 func TestADiscoveringReaderLogsEachEventAndPublishesItAnyway(t *testing.T) {
-	r, broker := testReader(t)
-	r.discovery = true
-	var log bytes.Buffer
-	r.log = &log
+	synctest.Test(t, func(t *testing.T) {
+		r, broker := testReader(t)
+		r.discovery = true
+		var log bytes.Buffer
+		r.log = &log
 
-	read, write, err := os.Pipe()
-	mustSucceed(t, err)
-	_, err = write.Write(eventBytes(inputEvent{Type: evKey, Code: 0x130, Value: 1}))
-	mustSucceed(t, err)
-	mustSucceed(t, write.Close())
+		read, write, err := os.Pipe()
+		mustSucceed(t, err)
+		_, err = write.Write(eventBytes(inputEvent{Type: evKey, Code: 0x130, Value: 1}))
+		mustSucceed(t, err)
+		mustSucceed(t, write.Close())
 
-	r.readAndPublish(context.Background(), []openNode{
-		{file: read, path: "/dev/input/event3", name: "Wireless Controller"},
+		r.readAndPublish(context.Background(), []openNode{
+			{file: read, path: "/dev/input/event3", name: "Wireless Controller"},
+		})
+
+		published := waitForPublish(t, broker.pubs)
+		mustMatch(t, published.topic, remoteEventsTopic(defaultTopicBase, "house", "sofa"))
+		mustMatch(t, string(published.payload), `{"key":"KEY_ENTER","value":1}`)
+
+		written := log.String()
+		for _, want := range []string{
+			`event3 "Wireless Controller"`, "EV_KEY (1)", "BTN_SOUTH (304)", "press (1)",
+			"- press: BTN_SOUTH", "key: " + keymapKeyHint,
+		} {
+			mustMatch(t, strings.Contains(written, want), true)
+		}
 	})
-
-	published := waitForPublish(t, broker.pubs)
-	mustMatch(t, published.topic, remoteEventsTopic(defaultTopicBase, "house", "sofa"))
-	mustMatch(t, string(published.payload), `{"key":"KEY_ENTER","value":1}`)
-
-	written := log.String()
-	for _, want := range []string{
-		`event3 "Wireless Controller"`, "EV_KEY (1)", "BTN_SOUTH (304)", "press (1)",
-		"- press: BTN_SOUTH", "key: " + keymapKeyHint,
-	} {
-		mustMatch(t, strings.Contains(written, want), true)
-	}
 }
 
 // Out of discovery the reader logs the press alone: one line that names
 // the node, the control, and the key it published.
 func TestAnOrdinaryReaderLogsThePressItPublished(t *testing.T) {
-	r, broker := testReader(t)
-	var log logBuffer
-	r.log = &log
+	synctest.Test(t, func(t *testing.T) {
+		r, broker := testReader(t)
+		var log logBuffer
+		r.log = &log
 
-	read, write, err := os.Pipe()
-	mustSucceed(t, err)
-	_, err = write.Write(eventBytes(inputEvent{Type: evKey, Code: 0x130, Value: 1}))
-	mustSucceed(t, err)
-	mustSucceed(t, write.Close())
+		read, write, err := os.Pipe()
+		mustSucceed(t, err)
+		_, err = write.Write(eventBytes(inputEvent{Type: evKey, Code: 0x130, Value: 1}))
+		mustSucceed(t, err)
+		mustSucceed(t, write.Close())
 
-	r.readAndPublish(context.Background(), []openNode{
-		{file: read, path: "/dev/input/event3", name: "Wireless Controller"},
+		r.readAndPublish(context.Background(), []openNode{
+			{file: read, path: "/dev/input/event3", name: "Wireless Controller"},
+		})
+
+		waitForPublish(t, broker.pubs)
+		mustLogOnce(t, &log, `remote: event3 "Wireless Controller": BTN_SOUTH (304) pressed, published KEY_ENTER to `+
+			remoteEventsTopic(defaultTopicBase, "house", "sofa"))
 	})
-
-	waitForPublish(t, broker.pubs)
-	mustLogOnce(t, &log, `remote: event3 "Wireless Controller": BTN_SOUTH (304) pressed, published KEY_ENTER to `+
-		remoteEventsTopic(defaultTopicBase, "house", "sofa"))
 }
 
 // A controller that connects and then leaves is two lines: the nodes it
 // arrived on with what they declare, and the same nodes as they close.
 func TestTheReaderLogsAControllerConnectingAndLeaving(t *testing.T) {
-	r, broker := testReader(t)
-	var log logBuffer
-	r.log = &log
+	synctest.Test(t, func(t *testing.T) {
+		r, broker := testReader(t)
+		var log logBuffer
+		r.log = &log
 
-	read, write, err := os.Pipe()
-	mustSucceed(t, err)
-	mustSucceed(t, write.Close())
+		read, write, err := os.Pipe()
+		mustSucceed(t, err)
+		mustSucceed(t, write.Close())
 
-	r.serve(context.Background(), []openNode{{
-		file: read, path: "/dev/input/event3", name: "Wireless Controller",
-		keys: bitmapOf(keyBitmapBytes, 0x130, 0x131),
-	}})
+		r.serve(context.Background(), []openNode{{
+			file: read, path: "/dev/input/event3", name: "Wireless Controller",
+			keys: bitmapOf(keyBitmapBytes, 0x130, 0x131),
+		}})
 
-	waitForPublish(t, broker.pubs)
-	mustMatchAll(t, log.lines(), []string{
-		`remote: controller connected on event3 "Wireless Controller": 2 key codes, no hat axes`,
-		`remote: controller disconnected from event3 "Wireless Controller": its input nodes closed`,
+		waitForPublish(t, broker.pubs)
+		mustMatchAll(t, log.lines(), []string{
+			`remote: controller connected on event3 "Wireless Controller": 2 key codes, no hat axes`,
+			`remote: controller disconnected from event3 "Wireless Controller": its input nodes closed`,
+		})
 	})
 }
 
 // A pod the kubelet stops is not a controller that left, so the end of
 // the run writes no disconnect line.
 func TestAStoppingPodLogsNoDisconnect(t *testing.T) {
-	r, _ := testReader(t)
-	var log logBuffer
-	r.log = &log
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	synctest.Test(t, func(t *testing.T) {
+		r, _ := testReader(t)
+		var log logBuffer
+		r.log = &log
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
 
-	read, write, err := os.Pipe()
-	mustSucceed(t, err)
-	defer write.Close()
+		read, write, err := os.Pipe()
+		mustSucceed(t, err)
+		defer write.Close()
 
-	r.serve(ctx, []openNode{{file: read, path: "/dev/input/event3", name: "pad"}})
+		r.serve(ctx, []openNode{{file: read, path: "/dev/input/event3", name: "pad"}})
 
-	mustLogOnce(t, &log, "remote: controller connected on event3")
+		mustLogOnce(t, &log, "remote: controller connected on event3")
+	})
 }
