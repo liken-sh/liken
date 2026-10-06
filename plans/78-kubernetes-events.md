@@ -308,7 +308,7 @@ records here what it built and what it measured. The plan closes into
   means before a reservation is Ready. The test of refused `Event`s
   now refuses two and shows that every `Event` arrives.
 
-The build changed four points of the design above:
+The build changed four points of the design as it was first settled:
 
 - `events.New` takes the context that ends its goroutine, and an
   `Options` value, in place of `New(client, component)`.
