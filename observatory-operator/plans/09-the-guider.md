@@ -163,12 +163,14 @@ pod is Ready, and opens it again after a pause that doubles from 1 to
 
 PHD2 sends `AppState` only to a new connection, among its catch-up
 events (`send_catchup_events` in `src/event_server.cpp`). So the client
-sets the state from the events that imply one, as PHD2's sample
-clients do: `LoopingExposures`, `StartCalibration`, `Calibrating`,
-`StartGuiding`, `GuideStep`, `StarLost`, and `Paused`. A stop implies
-no state, because PHD2 can stop guiding and go on looping, so
-`GuidingStopped` and `LoopingExposuresStopped` read `get_app_state`
-again. PHD2 sends no event when its equipment connects or disconnects,
+sets the state from the events that imply one: `StarSelected`,
+`LoopingExposures`, `StartCalibration`, `Calibrating`, `StartGuiding`,
+`GuideStep`, `StarLost` while guiding, and `Paused`. PHD2 loops in two
+states, `Looping` with no star selected and `Selected` with one
+(`Guider::GetExposedState`), so `LoopingExposures` keeps `Selected`. A
+stop implies no state, because PHD2 can stop guiding and go on looping,
+so `GuidingStopped`, `LoopingExposuresStopped`, `LockPositionLost`, and
+a `StarLost` outside guiding read `get_app_state` again. PHD2 sends no event when its equipment connects or disconnects,
 so an `Alert` or a `ConfigurationChange` reads the calibration, the
 equipment, and the pixel scale again. Each of these reads is one
 request for one event.
@@ -245,8 +247,16 @@ the client to PHD2's protocol against `phd2test`, and the operator's
 `guider_test.go` runs the steps, the status, a refused connect, a
 guider pod that is deleted while `Ready`, and an operator restart
 against the fake API server, the INDI transcripts, and one fake PHD2
-for each guider pod. A transcript of a real PHD2's event server is
-recorded in `phd2/testdata/`, and the client's tests replay it.
+for each guider pod. `phd2/testdata/` holds one session of a real
+PHD2 2.6.14 on its event API: connect, the baseline, `set_connected`,
+a loop, a selected star, calibration, 33 guide steps, and
+`stop_capture`. `replay_test.go` serves it to the client, and the
+client's state matches what PHD2 answered at each point. The fake in
+`phd2test` follows it too: `ConfigurationChange` before the answer to
+`set_connected`, no pixel scale before the camera connects, and
+`GuidingStopped` before `LoopingExposuresStopped`. The 33 recorded
+steps give an RMS of 0.50 pixels, 0.62 arcseconds, at 1.24 arcseconds
+per pixel.
 
 The drill on the test cluster: a `Reservation` activates the east
 telescope with the `Guider` `Ready`. Then, acting as the holder, turn

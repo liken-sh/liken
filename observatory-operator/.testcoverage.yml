@@ -21,7 +21,7 @@ exclude:
 
 threshold:
   # The total covers the six packages. The tests measure 95.5%:
-  # observatory/ 100%, indi/ 97.6%, phd2/ 95.2%, phd2/phd2test/ 100%,
+  # observatory/ 100%, indi/ 97.6%, phd2/ 96.1%, phd2/phd2test/ 99.0%,
   # drivers/ 94.3%, and the operator's package 94.9% with main.go left
   # out. The floor was 97 before the
   # operator's package joined the total. Most of the rest of that
