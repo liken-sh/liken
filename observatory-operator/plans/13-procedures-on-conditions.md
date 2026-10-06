@@ -294,7 +294,12 @@ lifecycle code:
   device for each driver. The device that runs is the one the server
   runs now, else the older resource, else the first by kind and name.
   The other never starts, and reports `Error` with the name of the
-  device that runs the driver.
+  device that runs the driver. During activation that dropped a
+  device with no word in the steps, such as the imaging camera, so
+  on the same day activation began to refuse such a pair: `StartSite`
+  or `PowerOn` fails, and its message names both devices and the
+  driver. The choice above remains for a device that joins a running
+  server during a `Ready` reservation.
 - During a release, the `Observatory` reports `Activating`, "Waiting
   for Dome lab (Disconnecting)", as plan 78 records. **Fixed on
   2026-10-06.** An `Observatory` whose reservations all deactivate

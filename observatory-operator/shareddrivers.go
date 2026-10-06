@@ -20,6 +20,13 @@ package main
 //
 // The tree makes the choice (devicesOn), so the runner's pods and
 // drivers, activation, and the status writer all use the same one.
+//
+// Activation refuses such a pair instead: the step that starts a
+// server fails, and names both devices and the driver. Otherwise the
+// reservation would become Ready without one of its devices, such as
+// the imaging camera, and only that device's status would say so. A
+// device that joins a running server while its reservation is Ready
+// meets the choice above, and the device that runs stays.
 
 import (
 	"fmt"
@@ -99,6 +106,25 @@ func createdAt(d *device) time.Time {
 		return *at
 	}
 	return time.Time{}
+}
+
+// driverConflicts answers an error that names each pair of devices on
+// a server that share a driver, or nil when there is none.
+func (t *tree) driverConflicts(ref serverRef) error {
+	var pairs []string
+	for _, d := range t.placedOn(ref) {
+		holder, taken := t.driverTakenBy(d)
+		if !taken {
+			continue
+		}
+		pair := []*device{holder, d}
+		slices.SortFunc(pair, func(a, b *device) int { return strings.Compare(a.key(), b.key()) })
+		pairs = append(pairs, fmt.Sprintf("%s and %s share driver %s on server %s", names(pair[:1]), names(pair[1:]), d.object.Spec.Driver.Name, ref))
+	}
+	if len(pairs) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s: INDI gives both devices one name. Move one of each pair to another server, or to the shelf", strings.Join(pairs, "; "))
 }
 
 // sharedDriver is the fault of a device whose driver another device on

@@ -79,6 +79,22 @@ func TestAnInventoryThatCannotRunFailsTheStepThatNeedsIt(t *testing.T) {
 			step:    observatory.StepPowerOn,
 			message: `Receiver east.radio: the pod and Service name "east.radio-receiver" is not a DNS label`,
 		},
+		{
+			name: "two devices of the telescope with one driver",
+			change: func(w *world) {
+				w.put(observatory.FocuserKind, "guide", map[string]any{"opticalTrain": "east-guiding", "driver": map[string]any{"name": "indi_simulator_focus"}})
+			},
+			step:    observatory.StepPowerOn,
+			message: "Focuser east and Focuser guide share driver indi_simulator_focus on server east-telescope: INDI gives both devices one name",
+		},
+		{
+			name: "two devices of the observatory with one driver",
+			change: func(w *world) {
+				w.put(observatory.WeatherStationKind, "roof", map[string]any{"observatory": "lab", "driver": map[string]any{"name": "indi_simulator_weather"}})
+			},
+			step:    observatory.StepStartSite,
+			message: "WeatherStation lab and WeatherStation roof share driver indi_simulator_weather on server lab-observatory: INDI gives both devices one name",
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

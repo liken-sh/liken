@@ -153,6 +153,9 @@ func (r *runner) startSite(ctx context.Context, w *stepWork) (outcome, error) {
 		return outcome{}, err
 	}
 	ref := serverRef{observatory.ObservatoryKind, site.Metadata.Name}
+	if err := t.driverConflicts(ref); err != nil {
+		return outcome{}, err
+	}
 	devices := t.devicesOn(ref)
 	if len(devices) == 0 {
 		return skipped("no devices on Observatory %s", site.Metadata.Name)
@@ -237,6 +240,9 @@ func (r *runner) powerOn(ctx context.Context, w *stepWork) (outcome, error) {
 	}
 	if len(devices) == 0 {
 		return outcome{}, fmt.Errorf("no devices on Telescope %s", telescope.Metadata.Name)
+	}
+	if err := t.driverConflicts(ref); err != nil {
+		return outcome{}, err
 	}
 	if _, err := r.o.startServer(ctx, w.report, ref, telescope.Metadata.UID, devices); err != nil {
 		return outcome{}, err

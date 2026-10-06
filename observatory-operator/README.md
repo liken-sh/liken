@@ -277,8 +277,8 @@ goes on.
 | Step | What it does | Deadline |
 |---|---|---|
 | `Wait` | Waits for `spec.start`, and for no other reservation to hold the telescope. | none |
-| `StartSite` | Starts the observatory's server and its devices, connects them, and writes the dome's `DOME_SHUTTER_PARK_POLICY` and its `MOUNT_POLICY`. Another reservation in the observatory may have started them already. | 10 min |
-| `PowerOn` | Starts the telescope's server with a link to every device, starts and connects its `Switch` devices, and switches on each output that a device's `spec.power` names. | 10 min |
+| `StartSite` | Starts the observatory's server and its devices, connects them, and writes the dome's `DOME_SHUTTER_PARK_POLICY` and its `MOUNT_POLICY`. Another reservation in the observatory may have started them already. Fails when two devices of the observatory name one driver. | 10 min |
+| `PowerOn` | Starts the telescope's server with a link to every device, starts and connects its `Switch` devices, and switches on each output that a device's `spec.power` names. Fails when two devices of the telescope name one driver. | 10 min |
 | `StartDevices` | Starts the pod of every other device, and waits until each pod is Ready and its driver defines its device on the server. A device on real hardware waits here for its claim. | 10 min |
 | `Connect` | Connects the mount, the GPS, the polar aligner, the focusers, the filter wheels, the rotators, the dust caps, the flat panels, the sky quality meters, the receivers, and the cameras, in that order. | 2 min |
 | `Configure` | Writes the observatory's location and the `DOME_POLICY` to the mount, the location to the GPS, each camera's `ACTIVE_DEVICES` from its train, the camera's gain and offset, the tube's focal length and aperture, and the filter names. It then relays the dome's park state to the mount, before a procedure unparks it. | 2 min |
@@ -336,6 +336,16 @@ operator posts a `DriverStarted` or a `DriverStopped` Event on the
 pod until the reservation is `Ready`, or until deactivation's
 `StopDevices`. A device on a telescope with no active reservation
 changes nothing that runs.
+
+INDI names a device after its model, so two devices on one server
+with the same driver define one device, and the second driver breaks
+the first. Activation refuses such a pair: `StartSite` or `PowerOn`
+fails, and its message names both devices and the driver, so a
+reservation never becomes `Ready` without its imaging camera. A device
+that joins a running server during a `Ready` reservation, with a
+driver that a running device holds, never starts. It reports `Error`
+with the name of the device that runs the driver, and the running
+device stays connected.
 
 While such a pod is gone, its device is `Starting`, and the `Ready`
 message of the device or its `Guider` reads `Creating pod <name>`.

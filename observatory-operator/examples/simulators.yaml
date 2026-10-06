@@ -417,7 +417,9 @@ spec:
 # focuser's driver on the running INDI server and connects it. The
 # other devices on that server stay connected. On a train of `east`,
 # the spare reports `Error` and does not start, because `Focuser east`
-# runs `indi_simulator_focus` on that server already.
+# runs `indi_simulator_focus` on that server already. Installed there
+# before a reservation of `east` activates, it fails that reservation's
+# `PowerOn` step instead, which names both focusers and the driver.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Focuser
 metadata:
