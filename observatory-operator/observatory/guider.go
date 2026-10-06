@@ -80,6 +80,10 @@ type GuiderRMS struct {
 	Total float64 `json:"total"`
 	// Steps counts the guide steps that the RMS covers, at most 100.
 	Steps int32 `json:"steps"`
+	// Since is when PHD2 sent the first guide step that the RMS covers.
+	// PHD2 sends a new connection no earlier steps, so the window
+	// starts again when the operator restarts.
+	Since time.Time `json:"since"`
 }
 
 // GuideStar is the guide star as PHD2 measured it.

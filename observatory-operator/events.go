@@ -1,9 +1,13 @@
 package main
 
-// The Events of a Reservation. `kubectl describe reservation` lists
-// them under the status, so a person reads when each step ended and
-// why a step failed, with no log to open. Each phase change and each
-// step's end is one Event, and a failure is a Warning.
+// The Events of a Reservation, and of the objects whose pods its
+// runner keeps. `kubectl describe` lists them under the status, so a
+// person reads when each step ended and why a step failed, with no log
+// to open. Each phase change and each step's end is one Event on the
+// Reservation, and a failure is a Warning. A pod that a Ready
+// reservation's runner creates is one Event on the Guider or the
+// device that the pod runs, because the status shows only the gap
+// while the pod is gone.
 
 import (
 	"encoding/json"
@@ -49,25 +53,30 @@ type eventSource struct {
 	Component string `json:"component"`
 }
 
-// record writes one Event about a reservation. A failed write is
-// logged and changes nothing else: the status holds the same facts.
+// record writes one Event about a reservation.
 func (o *operator) record(r *observatory.Reservation, kind, reason, message string) {
+	o.recordOn(involvedObject{
+		APIVersion: observatory.APIVersion, Kind: observatory.ReservationKind.Name,
+		Name: r.Metadata.Name, Namespace: r.Metadata.Namespace, UID: r.Metadata.UID,
+	}, kind, reason, message)
+}
+
+// recordOn writes one Event about an object. A failed write is logged
+// and changes nothing else: the status holds the same facts.
+func (o *operator) recordOn(about involvedObject, kind, reason, message string) {
 	at := time.Now().UTC().Format(time.RFC3339)
 	body, err := json.Marshal(event{
 		APIVersion: "v1", Kind: "Event",
-		Metadata: eventMeta{GenerateName: r.Metadata.Name + ".", Namespace: r.Metadata.Namespace},
-		InvolvedObject: involvedObject{
-			APIVersion: observatory.APIVersion, Kind: observatory.ReservationKind.Name,
-			Name: r.Metadata.Name, Namespace: r.Metadata.Namespace, UID: r.Metadata.UID,
-		},
-		Reason: reason, Message: message, Type: kind,
+		Metadata:       eventMeta{GenerateName: about.Name + ".", Namespace: about.Namespace},
+		InvolvedObject: about,
+		Reason:         reason, Message: message, Type: kind,
 		Source:         eventSource{Component: managedBy},
 		FirstTimestamp: at, LastTimestamp: at, Count: 1,
 	})
 	if err == nil {
-		err = o.client.RequestJSON(http.MethodPost, "/api/v1/namespaces/"+r.Metadata.Namespace+"/events", body, nil)
+		err = o.client.RequestJSON(http.MethodPost, "/api/v1/namespaces/"+about.Namespace+"/events", body, nil)
 	}
 	if err != nil {
-		o.logf("recording %s on the Reservation %s: %v", reason, r.Metadata.Name, err)
+		o.logf("recording %s on the %s %s: %v", reason, about.Kind, about.Name, err)
 	}
 }

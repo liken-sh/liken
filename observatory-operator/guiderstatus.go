@@ -60,10 +60,10 @@ func (o *operator) guiderStatus(t *tree, guider *observatory.Guider) observatory
 	case phase == observatory.PhaseError:
 		message = "Reservation " + holder.Metadata.Name + " failed"
 	default:
+		message = guiderWaiting(name, p, hasPod, s, phase == observatory.PhaseReady)
 		if phase == observatory.PhaseReady {
 			phase = observatory.PhaseActivating
 		}
-		message = guiderWaiting(name, p, hasPod, s)
 	}
 	next.Phase = phase
 	next.Conditions = withGeneration([]observatory.Condition{
@@ -73,9 +73,13 @@ func (o *operator) guiderStatus(t *tree, guider *observatory.Guider) observatory
 	return next
 }
 
-// guiderWaiting says what a guider that is not ready waits for.
-func guiderWaiting(name string, p *pod, hasPod bool, s phd2.State) string {
+// guiderWaiting says what a guider that is not ready waits for. kept
+// is true while the reservation is Ready, when its runner, not
+// StartGuider, creates a pod that is gone.
+func guiderWaiting(name string, p *pod, hasPod bool, s phd2.State, kept bool) string {
 	switch {
+	case !hasPod && kept:
+		return "Creating pod " + name
 	case !hasPod:
 		return "Waiting for StartGuider to create pod " + name
 	case !p.ready():
@@ -98,7 +102,10 @@ func guiderReadings(next *observatory.GuiderStatus, s phd2.State) {
 	next.PixelScale = s.PixelScale
 	if s.PixelScale != nil && s.RMS.Steps > 0 {
 		scale := *s.PixelScale
-		next.RMS = &observatory.GuiderRMS{RA: s.RMS.RA * scale, Dec: s.RMS.Dec * scale, Total: s.RMS.Total * scale, Steps: int32(s.RMS.Steps)}
+		next.RMS = &observatory.GuiderRMS{
+			RA: s.RMS.RA * scale, Dec: s.RMS.Dec * scale, Total: s.RMS.Total * scale,
+			Steps: int32(s.RMS.Steps), Since: s.RMS.Since.Truncate(time.Second),
+		}
 		next.Display.RMS = quantity(next.RMS.Total, 2, "arcsec")
 	}
 	if s.Step != nil {

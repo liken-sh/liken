@@ -21,18 +21,23 @@ func TestADevicesMessageLeadsWithItsState(t *testing.T) {
 		name   string
 		status deviceStatus
 		fault  string
-		want   string
+		// kept is true while a Ready reservation's runner keeps the
+		// device's pod.
+		kept bool
+		want string
 	}{
-		{"a device with no pod", deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceInventory}}, "", "Not reserved"},
+		{"a device with no pod", deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceInventory}}, "", false, "Not reserved"},
+		{"a device whose pod a Ready reservation creates again", deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceInventory}}, "", true,
+			"Creating pod east-main-camera"},
 		{"a pod whose driver has not defined its device", deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceStarting, Pod: "camera-east-main"}}, "",
-			"Waiting for its driver on east-telescope"},
-		{"a connected device", deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceConnected, IndiDevice: "CCD Simulator"}}, "", "Connected on east-telescope"},
+			false, "Waiting for its driver on east-telescope"},
+		{"a connected device", deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceConnected, IndiDevice: "CCD Simulator"}}, "", true, "Connected on east-telescope"},
 		{"a device that failed", deviceStatus{DeviceStatus: observatory.DeviceStatus{Phase: observatory.DeviceError, IndiDevice: "CCD Simulator"}}, "indi: CCD Simulator.CCD_GAIN is Alert",
-			"Failed: indi: CCD Simulator.CCD_GAIN is Alert"},
+			true, "Failed: indi: CCD Simulator.CCD_GAIN is Alert"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := deviceMessage(c.status, ref, c.fault); got != c.want {
+			if got := deviceMessage(c.status, ref, "east-main-camera", c.fault, c.kept); got != c.want {
 				t.Errorf("got %q, want %q", got, c.want)
 			}
 		})

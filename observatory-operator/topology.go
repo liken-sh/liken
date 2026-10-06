@@ -17,10 +17,12 @@ import (
 // running pod whose spec differs from the one built now. A pod that
 // stops must be gone before the new one of the same name can be
 // created. A write that the API server refuses is sent again (send),
-// and the step's deadline bounds the tries.
-func (o *operator) ensure(ctx context.Context, report func(string), built *pod, svc *service, claim *resourceClaim) error {
+// and the step's deadline bounds the tries. created reports whether
+// the API server created the pod, so a Ready reservation's runner can
+// record an Event for each pod that it creates.
+func (o *operator) ensure(ctx context.Context, report func(string), built *pod, svc *service, claim *resourceClaim) (created bool, err error) {
 	name := built.Metadata.Name
-	return o.waitFor(ctx, report, func(t *tree) (bool, string, error) {
+	err = o.waitFor(ctx, report, func(t *tree) (bool, string, error) {
 		if claim != nil {
 			// A claim's spec cannot change, and one that exists is the
 			// one the operator created. The create answers 409 then.
@@ -40,7 +42,10 @@ func (o *operator) ensure(ctx context.Context, report func(string), built *pod, 
 		running, ok := t.pods[name]
 		switch {
 		case !ok:
-			if err := o.send(ctx, report, fmt.Sprintf("creating pod %s", name), func() error { return o.create("/api/v1/namespaces/"+o.namespace+"/pods", built) }); err != nil {
+			if err := o.send(ctx, report, fmt.Sprintf("creating pod %s", name), func() (err error) {
+				created, err = o.post("/api/v1/namespaces/"+o.namespace+"/pods", built)
+				return err
+			}); err != nil {
 				return false, "", err
 			}
 			return true, "", nil
@@ -54,6 +59,7 @@ func (o *operator) ensure(ctx context.Context, report func(string), built *pod, 
 		}
 		return true, "", nil
 	})
+	return created, err
 }
 
 // startServer creates the pod and the Service of one INDI server, with
@@ -63,26 +69,33 @@ func (o *operator) startServer(ctx context.Context, report func(string), ref ser
 	if err != nil {
 		return err
 	}
-	return o.ensure(ctx, report, built, svc, nil)
+	_, err = o.ensure(ctx, report, built, svc, nil)
+	return err
 }
 
 // startDevices creates the pod, the Service, and the claim of each
-// device. The tree of now decides which camera a Guider names, so a
-// Guider created during a reservation places its camera at the next
-// start of the camera's pod.
-func (o *operator) startDevices(ctx context.Context, report func(string), ref serverRef, devices []*device) error {
+// device, and answers the devices whose pod it created. The tree of
+// now decides which camera a Guider names, so a Guider created during
+// a reservation places its camera at the next start of the camera's
+// pod.
+func (o *operator) startDevices(ctx context.Context, report func(string), ref serverRef, devices []*device) ([]*device, error) {
 	t := o.snapshot()
+	var started []*device
 	for _, d := range devices {
 		built, svc, claim, err := devicePod(o.namespace, ref, d, t.guides(ref, d))
 		if err != nil {
 			o.fault(d, err)
-			return fmt.Errorf("%s %s: %w", d.kind.Name, d.name(), err)
+			return started, fmt.Errorf("%s %s: %w", d.kind.Name, d.name(), err)
 		}
-		if err := o.ensure(ctx, report, built, svc, claim); err != nil {
-			return err
+		created, err := o.ensure(ctx, report, built, svc, claim)
+		if created {
+			started = append(started, d)
+		}
+		if err != nil {
+			return started, err
 		}
 	}
-	return nil
+	return started, nil
 }
 
 // waitReady waits until the pod of each device is Ready. For real

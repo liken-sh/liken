@@ -6,6 +6,8 @@ package main
 //   - It creates again each pod that is gone, such as one a node's
 //     eviction deleted, and replaces the server when the telescope's
 //     devices change, because the server's links name every device.
+//     It records an Event for each device pod and guider pod that it
+//     creates (recordPod).
 //   - It keeps the telescope's guider (guidersteady.go).
 //   - It connects and configures again each device whose driver comes
 //     back on its server disconnected. A driver comes back that way
@@ -93,7 +95,9 @@ func (r *runner) keepPods(ctx context.Context, t *tree, ref serverRef, telescope
 	if err := r.o.startServer(ctx, nil, ref, telescope.Metadata.UID, devices); err != nil {
 		return err
 	}
-	if err := r.o.startDevices(ctx, nil, ref, devices); err != nil {
+	created, err := r.o.startDevices(ctx, nil, ref, devices)
+	r.recordDevicePods(created)
+	if err != nil {
 		return err
 	}
 	site, ok := t.observatories[telescope.Spec.Observatory]
@@ -113,8 +117,42 @@ func (r *runner) keepPods(ctx context.Context, t *tree, ref serverRef, telescope
 	if err := r.o.startServer(ctx, nil, siteRef, site.Metadata.UID, siteDevices); err != nil {
 		return err
 	}
-	return r.o.startDevices(ctx, nil, siteRef, siteDevices)
+	created, err = r.o.startDevices(ctx, nil, siteRef, siteDevices)
+	r.recordDevicePods(created)
+	return err
 }
+
+// recordDevicePods writes an Event and a log line for each device whose
+// pod the runner created.
+func (r *runner) recordDevicePods(devices []*device) {
+	for _, d := range devices {
+		name, _ := objectName(d.kind, d.name())
+		meta := d.object.Metadata
+		r.recordPod(involvedObject{
+			APIVersion: observatory.APIVersion, Kind: d.kind.Name,
+			Name: meta.Name, Namespace: meta.Namespace, UID: meta.UID,
+		}, name, "")
+	}
+}
+
+// recordPod writes an Event on an object and a log line when the runner
+// creates the object's pod while the reservation is Ready. The status
+// shows the gap only while the pod is gone, and a person reading
+// `kubectl describe` later needs to know that the pod is new, because
+// a new pod starts with nothing that the holder set. note follows the
+// first sentence of the Event's message.
+func (r *runner) recordPod(about involvedObject, pod, note string) {
+	message := fmt.Sprintf("Created pod %s while Reservation %s is Ready.", pod, r.name)
+	if note != "" {
+		message += " " + note
+	}
+	r.o.recordOn(about, eventNormal, reasonPodCreated, message)
+	r.o.logf("Reservation %s: created pod %s for %s %s", r.name, pod, about.Kind, about.Name)
+}
+
+// reasonPodCreated is the reason of the Event for a pod that a Ready
+// reservation's runner creates.
+const reasonPodCreated = "PodCreated"
 
 // podInputs answers everything that keepPods reads from a tree, as one
 // string: the owners' UIDs, each device's identity, spec generation,

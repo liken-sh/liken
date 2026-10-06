@@ -41,15 +41,22 @@ func objectPath(kind observatory.Kind, namespace, name string) string {
 // already is no error: a pass that read a store before the watch
 // delivered the operator's own create sends the create again.
 func (o *operator) create(collection string, object any) error {
+	_, err := o.post(collection, object)
+	return err
+}
+
+// post creates an object as create does, and reports whether the API
+// server created it, not answered that it exists.
+func (o *operator) post(collection string, object any) (bool, error) {
 	body, err := json.Marshal(object)
 	if err != nil {
-		return err
+		return false, err
 	}
 	err = o.client.RequestJSON(http.MethodPost, collection, body, nil)
 	if errors.Is(err, apiclient.ErrConflict) {
-		return nil
+		return false, nil
 	}
-	return err
+	return err == nil, err
 }
 
 // writeJSON sends one object to a path with a method, such as the PUT

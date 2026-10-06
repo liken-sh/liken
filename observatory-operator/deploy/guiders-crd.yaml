@@ -156,14 +156,17 @@ spec:
                     one of them.
                 rms:
                   type: object
-                  required: [ra, dec, total, steps]
+                  required: [ra, dec, total, steps, since]
                   description: >-
                     The root mean square of the star's distance from
                     the lock position over the last guide steps, in
                     arc-seconds, along the mount's axes and in total.
-                    It covers at most the last 100 steps since guiding
-                    started, and it is absent while PHD2's pixel scale
-                    is not known.
+                    It covers at most the last 100 steps that the
+                    operator received since guiding started, and
+                    `since` gives the time of the first of them. PHD2
+                    sends a new connection no earlier steps, so the
+                    window also starts again when the operator restarts.
+                    It is absent while PHD2's pixel scale is not known.
                   properties:
                     ra:
                       type: number
@@ -178,6 +181,12 @@ spec:
                       type: integer
                       format: int32
                       description: "The number of guide steps that the RMS covers."
+                    since:
+                      type: string
+                      format: date-time
+                      description: >-
+                        When PHD2 sent the first guide step that the
+                        RMS covers, as an RFC 3339 time to the second.
                 star:
                   type: object
                   required: [snr, hfd]

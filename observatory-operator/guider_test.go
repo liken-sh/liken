@@ -271,6 +271,9 @@ func TestTheGuiderStatusFollowsPHD2(t *testing.T) {
 		if s.RMS.RA != 0.75 || s.RMS.Dec != 1 || s.RMS.Total != 1.25 || s.Display.RMS != "1.25 arcsec" {
 			t.Errorf("rms = %+v, display %q", s.RMS, s.Display.RMS)
 		}
+		if !s.RMS.Since.Equal(time.Unix(1790000000, 0)) {
+			t.Errorf("rms since %v, want the first step's second", s.RMS.Since)
+		}
 		if s.State != observatory.GuiderGuiding || s.Calibrated == nil || !*s.Calibrated || *s.PixelScale != 2.5 {
 			t.Errorf("status = %s", mustJSON(s))
 		}

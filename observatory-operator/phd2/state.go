@@ -54,10 +54,14 @@ const RMSWindow = 100
 
 // RMS is the root mean square of the last guide steps' distances, in
 // pixels. Steps counts the steps it covers, and is 0 before the first
-// step since guiding started.
+// step since guiding started. PHD2 sends a new connection no earlier
+// guide steps, so the window also begins at the first step that this
+// connection received.
 type RMS struct {
 	Steps          int
 	RA, Dec, Total float64
+	// Since is when PHD2 sent the oldest step that the RMS covers.
+	Since time.Time
 }
 
 // Alert is one alert, from an Alert event.
@@ -81,15 +85,17 @@ func (s State) clone() State {
 	return out
 }
 
-// window holds the distances of the last RMSWindow guide steps.
+// window holds the distances and the times of the last RMSWindow
+// guide steps.
 type window struct {
 	ra, dec []float64
+	at      []time.Time
 }
 
-func (w *window) add(ra, dec float64) RMS {
-	w.ra, w.dec = append(w.ra, ra), append(w.dec, dec)
+func (w *window) add(ra, dec float64, at time.Time) RMS {
+	w.ra, w.dec, w.at = append(w.ra, ra), append(w.dec, dec), append(w.at, at)
 	if len(w.ra) > RMSWindow {
-		w.ra, w.dec = w.ra[1:], w.dec[1:]
+		w.ra, w.dec, w.at = w.ra[1:], w.dec[1:], w.at[1:]
 	}
 	var sumRA, sumDec float64
 	for i := range w.ra {
@@ -97,7 +103,7 @@ func (w *window) add(ra, dec float64) RMS {
 		sumDec += w.dec[i] * w.dec[i]
 	}
 	n := float64(len(w.ra))
-	return RMS{Steps: len(w.ra), RA: math.Sqrt(sumRA / n), Dec: math.Sqrt(sumDec / n), Total: math.Sqrt((sumRA + sumDec) / n)}
+	return RMS{Steps: len(w.ra), RA: math.Sqrt(sumRA / n), Dec: math.Sqrt(sumDec / n), Total: math.Sqrt((sumRA + sumDec) / n), Since: w.at[0]}
 }
 
 // message is any line PHD2 sends: an event has Event, and an answer
@@ -232,7 +238,7 @@ func (c *Client) event(m message) {
 	case "GuideStep":
 		s.AppState = "Guiding"
 		s.Step = &Step{Frame: m.Frame, Time: at, RA: m.RADistanceRaw, Dec: m.DECDistanceRaw, SNR: m.SNR, HFD: m.HFD}
-		s.RMS = c.rms.add(m.RADistanceRaw, m.DECDistanceRaw)
+		s.RMS = c.rms.add(m.RADistanceRaw, m.DECDistanceRaw, at)
 	case "StarLost":
 		// A star lost while guiding is LostLock. One lost while
 		// looping leaves a state that the event does not say.

@@ -99,6 +99,25 @@ func (o *operator) telescopePhase(t *tree, telescope string) (observatory.Phase,
 	return observatory.PhaseActivating, r
 }
 
+// keeps reports whether a Ready reservation's runner keeps the pods of
+// a server. Each Ready runner of a telescope on an observatory also
+// keeps the observatory's pods (steady.go).
+func (o *operator) keeps(t *tree, ref serverRef) bool {
+	if ref.kind == observatory.TelescopeKind {
+		phase, _ := o.telescopePhase(t, ref.name)
+		return phase == observatory.PhaseReady
+	}
+	for _, name := range sortedNames(t.telescopes) {
+		if t.telescopes[name].Spec.Observatory != ref.name {
+			continue
+		}
+		if phase, _ := o.telescopePhase(t, name); phase == observatory.PhaseReady {
+			return true
+		}
+	}
+	return false
+}
+
 func (o *operator) telescopeStatus(t *tree, telescope *observatory.Telescope, composed map[string]deviceStatus, guiders map[string]observatory.GuiderStatus) observatory.TelescopeStatus {
 	name := telescope.Metadata.Name
 	phase, holder := o.telescopePhase(t, name)

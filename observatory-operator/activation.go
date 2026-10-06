@@ -199,7 +199,7 @@ func (r *runner) powerSwitches(ctx context.Context, w *stepWork, ref serverRef, 
 // startAndConnect starts the pods of the devices, waits until each
 // driver defines its device on the server, and connects them in order.
 func (r *runner) startAndConnect(ctx context.Context, w *stepWork, ref serverRef, devices []*device) (map[string]handle, error) {
-	if err := r.o.startDevices(ctx, w.report, ref, devices); err != nil {
+	if _, err := r.o.startDevices(ctx, w.report, ref, devices); err != nil {
 		return nil, err
 	}
 	if err := r.o.waitReady(ctx, w.report, devices); err != nil {
@@ -270,7 +270,7 @@ func (r *runner) startTelescopeDevices(ctx context.Context, w *stepWork) (outcom
 	if len(others) == 0 {
 		return skipped("no devices besides Switches")
 	}
-	if err := r.o.startDevices(ctx, w.report, ref, others); err != nil {
+	if _, err := r.o.startDevices(ctx, w.report, ref, others); err != nil {
 		return outcome{}, err
 	}
 	if err := r.o.waitReady(ctx, w.report, others); err != nil {

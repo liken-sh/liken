@@ -164,6 +164,9 @@ func TestGuideStepsGiveTheRMSOfTheirDistances(t *testing.T) {
 		if s.RMS.Steps != 2 || s.RMS.RA != math.Sqrt(5) || s.RMS.Dec != math.Sqrt(8) || s.RMS.Total != math.Sqrt(13) {
 			t.Errorf("rms = %+v", s.RMS)
 		}
+		if want := time.Unix(1790000000, 500_000_000).UTC(); !s.RMS.Since.Equal(want) {
+			t.Errorf("rms since %v, want %v", s.RMS.Since, want)
+		}
 		if s.Step == nil || s.Step.Frame != 2 || s.Step.SNR != 41.25 || s.Step.HFD != 2.31 {
 			t.Errorf("step = %+v", s.Step)
 		}
@@ -177,17 +180,28 @@ func TestGuideStepsGiveTheRMSOfTheirDistances(t *testing.T) {
 	})
 }
 
+// stepAt builds a guide step that PHD2 sent at a second of its own.
+func stepAt(frame int, ra, dec float64, second int64) map[string]any {
+	step := phd2test.GuideStep(frame, ra, dec)
+	step["Timestamp"] = float64(second)
+	return step
+}
+
 func TestTheRMSCoversTheLastWindowOfSteps(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := phd2test.New()
 		c := running(t, f)
 		settled(c)
-		f.Broadcast(phd2test.GuideStep(1, 100, 100))
+		f.Broadcast(stepAt(1, 100, 100, 1790000001))
 		for frame := 2; frame <= RMSWindow+1; frame++ {
-			f.Broadcast(phd2test.GuideStep(frame, 1, 1))
+			f.Broadcast(stepAt(frame, 1, 1, 1790000000+int64(frame)))
 		}
-		if s := settled(c); s.RMS.Steps != RMSWindow || s.RMS.RA != 1 || s.RMS.Dec != 1 {
+		s := settled(c)
+		if s.RMS.Steps != RMSWindow || s.RMS.RA != 1 || s.RMS.Dec != 1 {
 			t.Errorf("rms = %+v", s.RMS)
+		}
+		if want := time.Unix(1790000002, 0).UTC(); !s.RMS.Since.Equal(want) {
+			t.Errorf("rms since %v, want the second step's %v", s.RMS.Since, want)
 		}
 	})
 }

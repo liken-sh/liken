@@ -180,9 +180,10 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 	next.Display = deviceDisplay(d, next.Readings, maximum)
 	next.Phase = devicePhase(hasPod && p.Metadata.DeletionTimestamp != nil, hasPod, defined, connection, fault)
 	parent := parentCondition(t.missingParent(d))
-	ready := condition(observatory.ConditionReady, observatory.ConditionFalse, string(next.Phase), deviceMessage(next, ref, fault))
+	kept := placed && o.keeps(t, ref)
+	ready := condition(observatory.ConditionReady, observatory.ConditionFalse, string(next.Phase), deviceMessage(next, ref, name, fault, kept))
 	if next.Phase == observatory.DeviceConnected {
-		ready = condition(observatory.ConditionReady, observatory.ConditionTrue, string(next.Phase), deviceMessage(next, ref, ""))
+		ready = condition(observatory.ConditionReady, observatory.ConditionTrue, string(next.Phase), deviceMessage(next, ref, name, "", kept))
 	}
 	next.Conditions = []observatory.Condition{parent, ready}
 	for i := range next.Conditions {
@@ -211,10 +212,15 @@ func devicePhase(stopping, hasPod, defined bool, connection indi.Property, fault
 	return observatory.DeviceStarting
 }
 
-func deviceMessage(s deviceStatus, ref serverRef, fault string) string {
+// deviceMessage says what a device does, or waits for. pod names the
+// device's pod. kept is true while a Ready reservation's runner keeps
+// the pods of the device's server, and creates a pod that is gone.
+func deviceMessage(s deviceStatus, ref serverRef, pod, fault string, kept bool) string {
 	switch {
 	case fault != "":
 		return "Failed: " + fault
+	case s.Phase == observatory.DeviceInventory && kept:
+		return "Creating pod " + pod
 	case s.Phase == observatory.DeviceInventory:
 		return "Not reserved"
 	case s.IndiDevice == "":

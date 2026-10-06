@@ -188,6 +188,13 @@ operator multiplies it by the pixel scale for the status. PHD2 answers
 `get_pixel_scale` with `null` while it does not know the camera's
 pixel size or the focal length, and the status then has no RMS.
 
+Correction, 2026-10-06: the window starts at `StartGuiding` only when
+the client's connection was open then. PHD2 sends a new connection no
+earlier guide steps, so after an operator restart the window starts at
+the first step that the new connection receives ("A guider pod deleted
+while `Ready`, and an operator restart" measured this). The status now
+gives `rms.since`, the time of the first step in the window.
+
 The client sends only `set_connected`, `stop_capture`, and the four
 reads. `phd2/phd2test` is the fake event server that both the
 package's tests and the operator's tests use. It answers over
@@ -406,6 +413,12 @@ calibrated, as expected, because calibration and guiding belong to the
 holder. In PHD2's debug log, the operator sent only the four baseline
 reads, one `set_connected`, and the reads that follow a
 `ConfigurationChange`.
+
+Correction, 2026-10-06, after the drill: while a `Ready`
+reservation's runner creates a pod again, the `Ready` message of the
+`Guider` or the device now reads "Creating pod <name>". The runner
+records a `PodCreated` Event on the `Guider` or the device when it
+creates the pod, and writes one line to its log.
 
 The drill then calibrated and guided again. PHD2 calibrated in 72 s
 and settled in 10 s. After 70 s of guiding, the drill ran

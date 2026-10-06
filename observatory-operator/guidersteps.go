@@ -136,7 +136,7 @@ func (r *runner) startGuider(ctx context.Context, w *stepWork) (outcome, error) 
 		return outcome{}, err
 	}
 	gear, _ := guiderGear(camera, mount, focalLength, handles)
-	if err := r.o.startGuiderPod(ctx, w.report, ref, guider, gear); err != nil {
+	if _, err := r.o.startGuiderPod(ctx, w.report, ref, guider, gear); err != nil {
 		return outcome{}, err
 	}
 	conn, err := r.o.waitGuider(ctx, w.report, guider)
@@ -157,14 +157,15 @@ func gearText(gear guiderEquipment) string {
 	return text
 }
 
-// startGuiderPod creates or replaces the guider's objects.
-func (o *operator) startGuiderPod(ctx context.Context, report func(string), ref serverRef, guider *observatory.Guider, gear guiderEquipment) error {
+// startGuiderPod creates or replaces the guider's objects, and reports
+// whether it created the pod.
+func (o *operator) startGuiderPod(ctx context.Context, report func(string), ref serverRef, guider *observatory.Guider, gear guiderEquipment) (bool, error) {
 	files, built, svc, err := guiderPod(o.namespace, ref, guider, gear)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := o.ensureFiles(ctx, report, o.snapshot(), files); err != nil {
-		return err
+		return false, err
 	}
 	return o.ensure(ctx, report, built, svc, nil)
 }

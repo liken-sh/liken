@@ -278,6 +278,12 @@ telescope's inventory restarts the server, which then links to it. The
 operator also creates the guider's pod again, and connects the camera
 and the mount of each new PHD2 once.
 
+While such a pod is gone, the `Ready` message of its device or its
+`Guider` reads `Creating pod <name>`. When the operator creates the
+pod, it records a `PodCreated` Event on the device or the `Guider`,
+and writes one line to its log. A new PHD2 starts idle and not
+calibrated, so the holder calibrates and starts guiding again.
+
 ## The guider
 
 A `Guider` runs PHD2 for its `Telescope`, with the camera of the
@@ -322,7 +328,10 @@ connection to its event server is open:
 - `calibrated`, and `pixelScale` in arc-seconds per pixel.
 - `rms`: the RMS of the star's distance from the lock position in
   right ascension, declination, and total, in arc-seconds, over the
-  last 100 guide steps since guiding started.
+  last 100 guide steps that the operator received since guiding
+  started. `rms.since` is the time of the first of those steps. PHD2
+  sends a new connection no earlier steps, so the window also starts
+  again when the operator restarts.
 - `star`: the guide star's SNR and its HFD in pixels, and
   `lastStepTime`, from the last guide step.
 - `alert`: the last alert PHD2 showed, or the last calibration that
