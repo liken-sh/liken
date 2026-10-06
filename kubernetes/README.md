@@ -31,7 +31,22 @@ published.
   hands each version to its owner, and nil when the object does not
   exist. The package links only `tools/cache`, `dynamic`, and `rest`
   from client-go.
+- `events` posts core/v1 `Event`s about an operator's objects through
+  `apiclient`. It writes in the background from a bounded queue, sends
+  a failed write again, and patches the count of an `Event` that
+  repeats within 10 minutes in place of a new one. `SetCondition`
+  posts one `Event` for each condition transition. It imports nothing
+  from `k8s.io`.
+- `conditions` holds the `Condition` type that every component's
+  resources report, in the shape of `metav1.Condition`, and `Set`,
+  which moves `lastTransitionTime` only when the status changes.
+- `events/eventstest` is a fake of the `events` collection. A test
+  mounts it in front of its own fake API server and reads the `Event`s
+  from it.
+- `apiservertest` serves a test's fake API server over in-memory
+  connections, so the test runs on the fake clock of `testing/synctest`.
 
-The `operators` skill in `.agents/skills` at the top of the repository
+Root plan 78 gives the rule for a condition, an `Event`, and a log
+line. The `operators` skill in `.agents/skills` at the top of the repository
 gives the rules each watch must follow and the reasons for the
 reflector. `make test` runs every check CI runs.

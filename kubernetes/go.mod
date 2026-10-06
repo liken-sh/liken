@@ -1,6 +1,7 @@
-// The client, the watch, and the cache that the operators share. The
-// apiclient and memo packages import nothing from k8s.io, so a program
-// that must not link client-go can use them. The informer package
+// The client, the watch, the cache, and the Event writer that the
+// operators share. The apiclient, memo, events, and conditions packages
+// import nothing from k8s.io, so a program that must not link
+// client-go can use them. The informer package
 // links the three parts of client-go that a watch needs.
 //
 // The Kubernetes libraries follow the Kubernetes minor that liken

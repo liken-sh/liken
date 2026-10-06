@@ -233,25 +233,32 @@ The recipe for each component:
    them in its troubleshooting guide.
 5. Grant `create` and `patch` on `events`.
 6. Test: the component's fake API server mounts
-   `apiservertest.Events` in front of its own handler, and each test
+   `eventstest.Events` in front of its own handler, and each test
    asserts the `Event`s its key transitions post, in a `synctest`
    bubble.
 
-### Tests: `apiservertest.Events`
+### Tests: `eventstest.Events`
 
-`apiservertest.Events` is a fake of the core/v1 `events` collection.
-A test mounts it in front of its own handler with `Around`, and it
-answers each create, patch, read, and list of `Event`s the way the API
-server does. `List` and `About` answer what it holds, `Refuse` makes
-it refuse the next writes with a `503`, and `Expire` deletes every
-`Event`, the way the TTL does. The writer's tests and each
-component's tests use it, so no component keeps its own copy of an
-`Event` store.
+`kubernetes/events/eventstest` is a fake of the core/v1 `events`
+collection. A test mounts it in front of its own fake API server with
+`Around`, serves both through `apiservertest`, and runs in a
+`synctest` bubble. The fake answers each create and merge patch of an
+`Event` the way the API server does, and refuses an `Event` about a
+cluster-scoped object outside `default` and `kube-system`. `List` and
+`About` answer what it holds, `Refuse` makes it refuse the next writes
+with a `503`, and `Expire` deletes every `Event`, the way the TTL does.
+The writer's tests and each component's tests use it, so no component
+keeps its own copy of an `Event` store.
+
+The fake is in its own package next to the writer, and not in
+`apiservertest`, because `apiclient`'s tests import `apiservertest`
+and the writer imports `apiclient`. A fake in `apiservertest` that
+holds the writer's `Event` type makes an import cycle.
 
 ## The rollout
 
 - **Wave 1:** this plan; `kubernetes/events`, `kubernetes/conditions`,
-  and `apiservertest.Events`; the section on `Event`s in the root
+  and `kubernetes/events/eventstest`; the section on `Event`s in the root
   `AGENTS.md` and the `operators` skill; and `observatory-operator`,
   which posts the most `Event`s today. It also fixes defects 3 and 4.
 - **Wave 2, in parallel, one agent for each group:**
