@@ -226,18 +226,35 @@ mod tests {
         Mutex::new(Sheets::default())
     }
 
-    /// The interval as the pod states it. Every test states one, because the
-    /// tile mapping divides by this value.
-    fn interval(text: &str) {
+    /// The lock on the interval variable. Cargo runs tests on parallel
+    /// threads, and several tests here set the one process-wide variable,
+    /// so a test holds this lock from its set to its last read. Without it,
+    /// another test's set lands between them.
+    static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn env() -> std::sync::MutexGuard<'static, ()> {
+        ENV.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn set_interval(text: &str) {
         // SAFETY: the tests in this module are the one reader of this
-        // variable, and each one sets it before it reads it.
+        // variable, and each one holds ENV while it sets and reads it.
         unsafe { std::env::set_var(INTERVAL_VARIABLE, text) };
+    }
+
+    /// The interval as the pod states it, held until the guard drops. Every
+    /// test states one, because the tile mapping divides by this value.
+    fn interval(text: &str) -> std::sync::MutexGuard<'static, ()> {
+        let held = env();
+        set_interval(text);
+        held
     }
 
     /// The interval falls back to ten seconds, which is Jellyfin's own
     /// default, for an unset value and for one no reader can use.
     #[test]
     fn the_interval_falls_back_to_ten_seconds() {
+        let _env = env();
         for (text, want) in [
             ("10s", 10_000),
             ("5s", 5_000),
@@ -251,7 +268,7 @@ mod tests {
             ("10x", DEFAULT_INTERVAL_MS),
             ("100us", DEFAULT_INTERVAL_MS),
         ] {
-            interval(text);
+            set_interval(text);
             assert_eq!(interval_ms(), want, "{text}");
         }
         // SAFETY: as above, and no other test reads this variable unset.
@@ -316,7 +333,7 @@ mod tests {
     #[test]
     fn the_scrub_time_maps_to_a_cell_of_a_sheet() {
         let dir = trickplay("mapping", "16 - 2x2", &[sheet()]);
-        interval("10s");
+        let _env = interval("10s");
         for (milliseconds, cell) in [(0, 0), (9_999, 0), (15_000, 1), (25_000, 2), (39_999, 3)] {
             let tile = tile(&dir.to_string_lossy(), milliseconds, 32, 32, &held()).expect("a tile");
             assert_eq!((tile.width, tile.height), (32, 32), "{milliseconds}");
@@ -337,7 +354,7 @@ mod tests {
     #[test]
     fn a_time_past_the_end_clamps_to_the_highest_sheet() {
         let dir = trickplay("clamp", "16 - 2x2", &[sheet()]);
-        interval("10s");
+        let _env = interval("10s");
         // 9,000,000 ms is index 900, which is sheet 225 and cell 0.
         let tile = tile(&dir.to_string_lossy(), 9_000_000, 24, 24, &held()).expect("a tile");
         assert_eq!((tile.width, tile.height), (24, 24));
@@ -352,7 +369,7 @@ mod tests {
     fn the_tile_height_is_the_sheet_height_over_the_rows() {
         let scope = encoded(200, 84, ImageFormat::Jpeg, [0, 0, 0, 255]);
         let dir = trickplay("scope", "100 - 2x2", &[scope]);
-        interval("10s");
+        let _env = interval("10s");
         let tile = tile(&dir.to_string_lossy(), 0, 360, 220, &held()).expect("a tile");
         assert_eq!((tile.width, tile.height), (360, 151));
     }
@@ -362,7 +379,7 @@ mod tests {
     #[test]
     fn the_sheet_is_decoded_once_and_held() {
         let dir = trickplay("held", "16 - 2x2", &[sheet()]);
-        interval("10s");
+        let _env = interval("10s");
         let sheets = held();
         assert!(tile(&dir.to_string_lossy(), 0, 16, 16, &sheets).is_some());
         std::fs::remove_file(dir.join("16 - 2x2").join("0.jpg")).expect("the sheet to go");
@@ -374,7 +391,7 @@ mod tests {
     /// sheet that is not a picture, and a sheet too short to hold its rows.
     #[test]
     fn a_directory_the_display_cannot_read_crops_nothing() {
-        interval("10s");
+        let _env = interval("10s");
         assert!(tile("/art/nothing", 5_000, 24, 24, &held()).is_none());
 
         let empty = trickplay("empty", "not a layout", &[]);
