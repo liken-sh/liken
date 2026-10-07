@@ -1,66 +1,60 @@
 ---
-title: audio.liken.sh
+title: audio-operator
 ---
 
-# `audio.liken.sh`
+# `audio-operator`
 
-`audio-operator` gives a Kubernetes workload a place to play sound.
-It publishes each physical audio output of a
-[`liken`](https://liken.sh/docs/) machine, a monitor's speakers or
-the analog jack, as a device on the cluster, through
-[Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/),
-the Kubernetes API for devices. The operator runs
-[PipeWire](https://pipewire.org/) and
-[WirePlumber](https://pipewire.pages.freedesktop.org/wireplumber/)
-in its pod, so the machine's system image contains no sound server. A
-pod that claims an output receives the PipeWire socket and the name
-of the sink its streams must reach.
+`audio-operator` lets a pod on a [`liken`](https://liken.sh/docs/)
+cluster play sound through a real speaker, or record from a
+microphone, with no privilege and no host path. You write a claim
+that names the output, such as the speakers of one monitor, the
+analog jack, or a Bluetooth speaker, and the pod that holds the claim
+gets a PipeWire socket and the name of the sink to play to. You don't
+configure anything on the machine.
 
-A claim and a `Deployment` are the whole task. The claim names the
-output: a monitor's speakers by the monitor's identity, the analog
-jack by its connection type, or one output by name. The `Deployment`
-references the claim, and its container receives the socket and the
-sink name. No step touches the machine itself: no SSH, no
-configuration on the host, no privileged pod.
+Things you can run this way:
 
-Sound you can run this way:
-
-* a video's sound on the same monitor that shows its picture, paired
-  with the [display operator](https://liken.sh/display/),
+* a video's sound on the speakers of the monitor that shows its
+  picture, together with
+  [`display-operator`](https://liken.sh/display/),
 * music from a player pod to the amplifier on the analog jack,
-* an announcement to the speakers of a named monitor,
-* music to a paired Bluetooth speaker, claimed by its MAC address
-  like any other output.
+* an announcement on the speakers of one named monitor,
+* music to a paired Bluetooth speaker, which you claim by its MAC
+  address like any other output.
 
 Start here:
 
 * [Install the operator](/docs/guides/install/). The install applies
-  the manifests this site serves at
-  [`/deploy/`](/deploy/kustomization.yaml), so it needs no clone.
+  the manifests that this site serves at
+  [`/deploy/`](/deploy/kustomization.yaml), so you don't need a clone.
 * [Play sound to an output](/docs/guides/claim/): the claim, the
-  `Deployment`, and what the container receives.
-* [Pair sound with its screen](/docs/guides/pair/): one claim that
-  allocates a monitor's screen and that monitor's speakers together.
-* [Devices](/docs/reference/devices/): every attribute a claim can
-  select on, the taints, and the delivery.
+  `Deployment`, and what the container gets.
+* [Pair sound with its screen](/docs/guides/pair/): one claim for a
+  monitor's screen and that monitor's speakers together.
+* [Devices](/docs/reference/devices/): every attribute that a claim
+  can select on.
 
-The operator is one of the
-[hardware operators](https://liken.sh/docs/concepts/hardware-operators/),
-the optional layer above the operating system. A cluster that never
-installs it runs unchanged. `liken` itself publishes the sound card;
-this operator claims that card and publishes its outputs, one device
-for each playback PCM device, under `audio.liken.sh`. Its siblings
-publish [monitor outputs](https://liken.sh/display/) and
-[Bluetooth controllers](https://liken.sh/bluetooth/). A monitor's
-speakers pair with its screen through `monitor.liken.sh/id`, the
-identity both drivers read from the same monitor.
+## How it works
 
-The [Bluetooth operator](https://liken.sh/bluetooth/) publishes one
-more thing this operator claims: the media bus of each radio. With
-that bus in its claim, this pod runs the sound server for Bluetooth
-audio as well, and each paired speaker publishes as an
-`audio.liken.sh` device beside the card's outputs. One PipeWire and
-one socket serve both.
+The operator runs [PipeWire](https://pipewire.org/) and
+[WirePlumber](https://pipewire.pages.freedesktop.org/wireplumber/) in
+its own pod, so the machine's system image has no sound server. The
+pod claims the machine's sound card, which `liken` publishes, and
+publishes each output and input of the card as its own device under
+the
+[Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
+driver `audio.liken.sh`. Your pod claims one of those devices, and
+the scheduler places it on the machine that has it.
+
+[`bluetooth-operator`](https://liken.sh/bluetooth/) publishes the
+media bus of each Bluetooth radio, and this operator claims it too.
+So the same PipeWire also runs Bluetooth audio, and each paired
+speaker appears as an `audio.liken.sh` device beside the card's
+outputs.
+
+`audio-operator` is one of the extension operators for
+[claiming hardware](https://liken.sh/docs/concepts/claiming-hardware/).
+You install it only if your cluster needs sound.
 
 * [The source](https://github.com/liken-sh/liken/tree/main/audio-operator)
 * [The `liken` manual](https://liken.sh/docs/)

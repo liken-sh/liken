@@ -148,7 +148,8 @@ source that serves `rating.imdb`:
 
 Keep `tmdb` before `imdb` for the credits. IMDb's datasets hold about
 nine people for each title, the billed cast and the key crew, and TMDb
-holds the full cast. So `imdb` answers the credits of a title only where
+holds the full cast, of which the `tmdb` source writes the first 50
+people. So `imdb` answers the credits of a title only where
 no source before it answered: a title TMDb does not hold, or a
 `Library` with no TMDb key.
 
@@ -211,8 +212,11 @@ Each `Job` of the `Library` ends by writing the trickplay gap onto the
 volume as a work list,
 `.liken/worklists/<namespace>/<library>/trickplay.jsonl` under the
 library root: one line per video, with its path, its size, and its
-length. The list is named for the `Library`, so two clusters whose
-`Library`s mount one volume never read each other's list. When that
+length. A `Job` leaves the file alone when the list it would write
+names the same videos, with the same sizes and lengths in the same
+order, so the file keeps its earlier time. The list is named for the
+`Library`, so two clusters whose `Library`s mount one volume never read
+each other's list. When that
 `Job` has ended, the gap in `status.gaps` is above zero or a
 `spec.refresh` time has titles left, and no trickplay worker of the
 `Library` runs, the operator
@@ -529,8 +533,11 @@ With no template, the worker decodes and runs the models on the CPU.
 `ResourceClaimTemplate`, as [A worker on a GPU](#a-worker-on-a-gpu)
 describes for both workers. With the claim, `ffmpeg` decodes and scales the video on
 the render node through VA-API, and OpenVINO runs the models on the
-Intel GPU. A file the render node refuses to decode is decoded again in
-software. OpenVINO compiles the models for the GPU when the worker
+Intel GPU. Some GPUs decode a format that their video processor cannot
+scale, such as 10-bit HEVC on an older Intel GPU. The worker tries the
+GPU's scale on the first 2 seconds of each video, and where that fails,
+the GPU decodes and the CPU scales. A file the render node refuses to
+decode is decoded again in software. OpenVINO compiles the models for the GPU when the worker
 starts, and it keeps the compiled kernels in an `emptyDir`, so one
 worker `Job` compiles once for its whole list.
 

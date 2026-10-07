@@ -3,6 +3,8 @@ title: Volume attributes
 weight: 10
 ---
 
+# Volume attributes
+
 A read-only volume is described by its `volumeAttributes`, in the `csi`
 block of an inline volume or of a `ReadOnlyMany` `PersistentVolume`. The
 driver refuses an unknown attribute, a malformed value, and a volume

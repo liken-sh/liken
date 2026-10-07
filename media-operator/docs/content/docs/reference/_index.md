@@ -5,25 +5,26 @@ weight: 20
 
 # Reference
 
-The reference describes the five resources this operator serves and
-the message bus their running pieces meet on. [Players](/docs/reference/players/)
-and [Plays](/docs/reference/plays/) are the equipment and the runs on
-it. [Remotes](/docs/reference/remotes/) and
-[Keymaps](/docs/reference/keymaps/) are the controllers and their
-button tables.
-[MediaPreferences](/docs/reference/mediapreferences/) holds the
-cluster's language defaults. [The media bus](/docs/reference/bus/)
-is the MQTT contract that carries what happens while a run is live:
-reports, commands, button events, and state.
-[The media API](/docs/reference/api/) is the HTTPS face of a
-`Player`: it captures what is on the unit now, its screen, its audio,
-or the two composed into one stream.
-[Render node capabilities](/docs/reference/capabilities/) describes
-the `media.liken.sh` devices that state what each GPU's media driver
-can decode, encode, and scale.
+The reference describes the five resources and how their pods talk
+to each other:
 
-Each resource page gives the resource's fields, then its topics and
-payloads in an "On the bus" section. `MediaPreferences` alone has no
-topics: its values resolve into a `Play`'s pod when the operator
-creates it. The bus page gives the rules the whole topic tree
-follows.
+* [Players](/docs/reference/players/) are the units of equipment, and
+  [Plays](/docs/reference/plays/) are the runs of media on them.
+* [Remotes](/docs/reference/remotes/) are the controllers, and
+  [Keymaps](/docs/reference/keymaps/) map their buttons.
+* [MediaPreferences](/docs/reference/mediapreferences/) holds the
+  cluster's default languages.
+* [The media bus](/docs/reference/bus/) is the MQTT contract for
+  everything that happens while media plays: reports, commands,
+  button presses, and state.
+* [The media API](/docs/reference/api/) captures what a `Player`
+  shows and plays right now, as its screen, its sound, or both in
+  one stream.
+* [Render node capabilities](/docs/reference/capabilities/) describes
+  the `media.liken.sh` devices that state what each GPU can decode,
+  encode, and scale.
+
+Each resource page lists the resource's fields, then its topics and
+payloads under "On the bus". `MediaPreferences` has no topics: the
+operator reads its values into a `Play`'s pod when it creates the
+pod. The bus page gives the rules for the whole topic tree.

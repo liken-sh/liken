@@ -4,8 +4,10 @@
 # site's manual, because the sidebar on every page shows the whole
 # manual already; a nav entry would name the same destination twice.
 #
-# An entry with an absolute url is family-wide: "liken" and
-# "releases" point at the same places from every site. An entry with
+# An entry with an absolute url is family-wide: "liken", "operators",
+# and "releases" point at the same places from every site. "operators"
+# links to the page in the OS manual that orients a reader to every
+# extension operator and links to each one's manual. An entry with
 # param instead of url is site-scoped: it takes its destination from
 # the named parameter in the site's hugo.yaml. "repository" therefore
 # points at the code that the site documents. When a site does not
@@ -21,6 +23,8 @@
 - label: liken
   url: https://liken.sh/
   code: true
+- label: operators
+  url: https://liken.sh/docs/concepts/extension-operators/
 - label: repository
   param: repository
 - label: releases

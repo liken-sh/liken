@@ -35,7 +35,7 @@ writes, and the CDI files it writes for the runtime are the public
 contracts available to any DRA driver.
 
 The operator is one of `liken`'s optional
-[hardware operators](https://liken.sh/docs/concepts/hardware-operators/),
+[extension operators for claiming hardware](https://liken.sh/docs/concepts/claiming-hardware/),
 and it installs as an ordinary workload. A cluster that never deploys
 it behaves as it does now. Its pod runs bluetoothd, so the `liken`
 system image ships no BlueZ and no D-Bus.

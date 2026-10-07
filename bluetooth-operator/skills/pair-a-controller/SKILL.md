@@ -18,12 +18,24 @@ shell on a node or in a pod.
 
 ## Use the pairing command
 
-`kubectl liken bluetooth pair` runs steps 1 through 3 from a laptop.
-It opens a window on the radio, lists the devices the radio reports as
+`liken plugins sync` installs the `kubectl liken bluetooth` plugin, as
+[Install the plugins](https://liken.sh/docs/reference/cli/#install-the-plugins)
+describes. `kubectl liken bluetooth pair` runs steps 1 through 3 from
+a laptop. It opens a window on the radio, lists the devices the radio reports as
 they appear, and approves the one you pick. It drives the same
 `PairingRequest` flow the numbered steps write by hand, and it reads
 your kubeconfig, so RBAC governs it like every other call. The steps
 below are the way to script the flow or to read each object it writes.
+
+The command takes these flags:
+
+| Flag | What it does |
+| --- | --- |
+| `--adapter` | The adapter to open the window on. The first argument after `pair` does the same. With neither, the command uses the cluster's only adapter and stops with an error when the cluster has none or more than one. |
+| `--window` | How long the window stays open, in seconds. With no value, the `PairingRequest` takes its default of 180, and the range is 15 to 900. |
+| `-n`, `--namespace` | The namespace of the `PairingRequest`. The default is `liken-system`. |
+| `--force` | Silences the warning that the CLI's version differs from the operator's. The command runs either way. |
+| `--version` | Prints the CLI's version and exits. |
 
 ## 1. Open a pairing window
 
@@ -119,7 +131,7 @@ reboot.
 If the [Dynamic Resource Allocation
 (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
 objects are new to you, read
-[How the pieces fit](https://liken.sh/bluetooth/docs/guides/#how-the-pieces-fit) first. Then
+[How a claim reaches your pod](https://liken.sh/bluetooth/docs/concepts/how-the-pieces-fit/) first. Then
 create a
 [`ResourceClaim`](https://kubernetes.io/docs/reference/kubernetes-api/resource/resource-claim-v1/)
 that selects the controller by its address:
@@ -180,6 +192,29 @@ If the controller is switched off, the pod parks `Unschedulable` and
 starts when somebody turns it on. If the controller disconnects while
 the pod runs, the eviction after `tolerationSeconds` ends the pod's
 session.
+
+<a id="when-a-connected-controller-sends-no-input"></a>
+
+### When a connected controller sends no input
+
+`bluetoothd` can bring a controller's link up and never create its
+HID device. The `Peripheral` then shows `Connected`, the device
+drops its `disconnected` taint, and the pod receives no presses. The
+operator finds this state. A paired controller that is connected, has
+delivered input before, and has no Bluetooth HID device in the
+kernel is stuck. After 15 seconds in that state, the operator calls
+`Disconnect` and then `Connect` on the controller through
+`bluetoothd`, which runs the input profile again.
+
+When a reconnect does not bring the HID device back, the operator
+waits a minute before the next one. The wait doubles after each
+reconnect that does not help, up to 15 minutes. A device that has
+never delivered input, such as a speaker that lists a HID profile and
+never opens it, is never reconnected. The operator posts no `Event`
+for a reconnect. The `operator` container's log has a line when it
+starts one and when it finishes:
+
+    kubectl -n liken-system logs ds/bluetooth-operator -c operator
 
 In a `Deployment`, claim through a `ResourceClaimTemplate` instead of
 a standing `ResourceClaim`. A standing claim keeps its allocation

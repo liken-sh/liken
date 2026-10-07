@@ -4,10 +4,15 @@ title: The dome and mount locks
 weight: 50
 ---
 
-While an `Observatory` has a `Dome`, the domes and the mounts lock
-each other's park, and no field turns the locks off. INDI's drivers
-enforce both locks, and the operator writes each policy and relays
-what each driver needs to read:
+# The dome and mount locks
+
+The domes and the mounts of an observatory lock each other's park.
+While an `Observatory` has a `Dome`, a mount refuses to unpark while
+the dome is parked or moving, and a dome refuses to park while the
+mount of a reserved telescope in the observatory is unparked or
+moving. No field turns these locks off. INDI's drivers enforce both
+locks. The operator sets the policy in each driver and passes each
+driver the state it needs to read:
 
 - Each mount's `DOME_POLICY` is `DOME_LOCKS`. The mount refuses to
   unpark while a dome is parked or moving. The mount does not park

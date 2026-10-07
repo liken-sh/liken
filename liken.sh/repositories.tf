@@ -28,10 +28,11 @@ locals {
   #
   # An archived repository moved into liken as a directory of the same
   # name, with its history. It stays in this map because it still
-  # exists, read-only, and because its Pages site still serves the
-  # manual under its old name. GitHub refuses every change to an
-  # archived repository, so its entry must not change after the
-  # archive.
+  # exists, read-only, with its Pages site. The wildcard in
+  # redirects.tf sends the site's old name to the redirect host, so the
+  # site answers only at the github.io address. GitHub refuses
+  # every change to an archived repository, so its entry must not
+  # change after the archive.
   repositories = {
     liken = {
       description = "Linux + Kubernetes"

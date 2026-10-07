@@ -6,6 +6,8 @@ toc: true
 
 <!-- Generated from deploy/guiders-crd.yaml by crdref. Do not edit. -->
 
+# `Guider`
+
 A `Guider` runs PHD2 for one `Telescope`, as a client of the telescope's INDI server, and guides with the camera of one `OpticalTrain`. A guide scope is a train with its own small tube, and an off-axis guider is a train on the imaging train's tube. While a `Reservation` holds the telescope, the operator runs PHD2, connects it to the guide camera and the mount, and leaves it idle. The holder calibrates and guides through PHD2's event server at `status.endpoint`.
 
 ## spec
@@ -96,7 +98,7 @@ One condition, in the shape of `metav1.Condition`.
 | --- | --- | --- | --- |
 | <span id="statusconditions--type"></span>`type` | string | yes | The condition's name, such as `Ready`. |
 | <span id="statusconditions--status"></span>`status` | string | yes | Whether the condition holds: `True`, `False`, or `Unknown`. One of: `True`, `False`, `Unknown`. |
-| <span id="statusconditions--observedgeneration"></span>`observedGeneration` | integer | no | The `metadata.generation` of the spec that the condition judged. |
+| <span id="statusconditions--observedgeneration"></span>`observedGeneration` | integer | no | The `metadata.generation` of the spec that the condition reflects. |
 | <span id="statusconditions--reason"></span>`reason` | string | yes | One word in CamelCase for the cause. |
 | <span id="statusconditions--message"></span>`message` | string | yes | The cause, for a person to read. It can be empty. |
 | <span id="statusconditions--lasttransitiontime"></span>`lastTransitionTime` | string | yes | When `status` last changed. A write with the same status keeps this time. |

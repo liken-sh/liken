@@ -14,7 +14,7 @@ topic under the media operator's tree, with its writer, its readers,
 and its payload. Each resource page links here for the rules and
 gives the payload shapes for its own topics.
 
-Three operators meet on the broker. The media operator, its playback
+Two operators meet on the broker. The media operator, its playback
 pods, each `Remote`'s pod, and each idle pod connect to it. The
 [library operator](https://liken.sh/library/) runs its own tree on
 the same broker. Your program can connect too. A

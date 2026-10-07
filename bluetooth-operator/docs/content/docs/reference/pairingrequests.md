@@ -6,6 +6,8 @@ toc: true
 
 <!-- Generated from deploy/crds.yaml by crdref. Do not edit. -->
 
+# `PairingRequest`
+
 A `PairingRequest` is one pairing window on one adapter. Create it
 to open the window, watch `status.seen` for the controller you put
 in pairing mode, and approve that controller by writing its address

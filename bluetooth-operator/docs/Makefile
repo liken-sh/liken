@@ -1,4 +1,4 @@
-# The docs domain builds the manual for bluetooth.liken.sh. The three
+# The docs domain builds the manual served at liken.sh/bluetooth. The three
 # CRD reference pages are generated, never edited: crdref, the
 # generator the brand component publishes, renders each page from
 # its schema in deploy/crds.yaml and a hand-written preamble that

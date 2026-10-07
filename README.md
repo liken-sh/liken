@@ -30,9 +30,9 @@ Each top-level directory is one component, named for what it ships:
   runs: a library closure on `scratch` of `indiserver` and every core
   driver, and one image on it for each vendor SDK family, built from
   dated snapshots of Ubuntu and the INDI PPA.
-- [`equipment-operator/`](equipment-operator/) drives the A/V equipment
-  at the far end of a machine's cable: receivers over the network, and
-  televisions over CEC.
+- [`equipment-operator/`](equipment-operator/) controls the A/V
+  equipment that a machine plays through: receivers over the network,
+  and televisions over CEC.
 - [`media-operator/`](media-operator/) declares players, plays,
   remotes, and keymaps, and reconciles them into pods that claim the
   hardware operators' devices.

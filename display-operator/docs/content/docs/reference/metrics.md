@@ -6,12 +6,19 @@ toc: true
 
 # Metrics
 
-The operator serves Prometheus metrics at `/metrics` on port 9200, one
-per node, under liken's [shared
+Three processes serve Prometheus metrics at `/metrics`, under `liken`'s [shared
 contract](https://github.com/liken-sh/liken/blob/main/plans/completed/65-prometheus-metrics.md).
-The base applies with no Prometheus in the cluster. An owner who runs
-the prometheus-operator adds the `deploy/monitoring` component beside
-the base, which holds a `PodMonitor` for the port.
+The `display-operator` container serves plain HTTP on port 9200, one
+per node. The `display-capture` container serves them on port 9201,
+the same TLS port as the captures, and the route needs no token. The
+`display-api` `Deployment` serves plain HTTP on port 9200, once for
+the cluster. The base applies with no Prometheus in the cluster. An
+owner who runs the prometheus-operator adds the `deploy/monitoring`
+component beside the base, which holds a `PodMonitor` for each port.
+
+Each process also sets `liken_build_info{component, version}` to 1.
+The `component` is `display-operator`, `display-capture`, or
+`display-api`.
 
 | Component | Metric | Type | Why |
 | --- | --- | --- | --- |
@@ -24,6 +31,19 @@ the base, which holds a `PodMonitor` for the port.
 | display-operator | `display_compositor_container_restarts_total` | counter | the kubelet's own count, which includes the restarts nobody ordered |
 | display-operator | `display_surfaces{output}` | gauge | what the compositor holds; a stuck surface |
 | display-operator | `display_panel_power{output}`, `display_panel_brightness{output}` | gauge | the DDC state the idle screen drives |
+| display-operator | `display_reconcile_duration_seconds{kind}` | histogram | how long one pass of the reconcile loop took |
+| display-operator | `display_reconcile_errors_total{kind}` | counter | passes of the reconcile loop that returned an error |
+| display-operator | `display_watch_restarts_total{kind}` | counter | watches the API server accepted after the first one, for each kind |
+| display-capture | `display_capture_ready` | gauge | the sidecar holds the certificate the API verifies it under |
+| display-capture | `display_capture_conversion{graph}` | gauge | which of the two frame-conversion graphs the node uses, `vaapi` or `software` |
+| display-capture | `display_captures_active{aspect}` | gauge | captures running on the node now |
+| display-capture | `display_capture_bytes_total{aspect,format}`, `display_capture_seconds_total{aspect,format}` | counter | how much the sidecar encoded and sent, and how long it streamed |
+| display-capture | `display_capture_frames_total{format}` | counter | frames taken from the compositor |
+| display-capture | `display_capture_failures_total{reason}` | counter | captures that failed |
+| display-api | `display_api_requests_total{route,method,status}` | counter | requests answered |
+| display-api | `display_api_request_seconds{route}` | histogram | time to the response headers |
+| display-api | `display_api_streams_active{aspect}` | gauge | capture responses the API is streaming now |
+| display-api | `display_api_certificate_expiry_seconds` | gauge | when the serving certificate expires, in seconds since the epoch |
 
 ```yaml
 resources:

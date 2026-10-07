@@ -63,11 +63,12 @@ spec:
           type: object
           description: >-
             A `Reservation` gives one holder the use of one `Telescope`.
-            Activation runs when `spec.start` arrives, or at once with
-            no start. Deactivation runs when `spec.end` arrives, or when
-            the `Reservation` is deleted, and it parks the mount, warms
-            the cameras, and closes the dust caps before it stops the
-            pods. `status.steps` lists every step and its state.
+            Activation runs when `spec.start` arrives, or at once with no
+            start. Deactivation runs when `spec.end` arrives, or when the
+            `Reservation` is deleted, and it runs the deactivation procedures,
+            such as parking the mount, warming the cameras, and closing the
+            dust caps, before it stops the pods. `status.steps` lists every
+            step and its state.
           required: [spec]
           properties:
             spec:
@@ -285,7 +286,7 @@ spec:
                         minimum: 0
                         description: >-
                           The `metadata.generation` of the spec that the
-                          condition judged.
+                          condition reflects.
                       reason:
                         type: string
                         minLength: 1

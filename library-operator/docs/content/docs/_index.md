@@ -2,13 +2,17 @@
 title: Manual
 ---
 
-# The `library.liken.sh` manual
+# The `library-operator` manual
 
-This manual will tell you how to install `library-operator` on a
-[`liken`](https://liken.sh/docs/) cluster and how to declare the
-libraries it catalogs. The guides give the steps. The reference
-describes each resource and its fields.
+The guides show how to install `library-operator`, declare your
+libraries, put the media browser on a screen, and connect the
+catalog to metadata providers, Radarr, Sonarr, and Jellyfin. The
+reference describes each resource and its fields, the franchise file,
+the topics on the message bus, and the metrics.
 
-The
+The manual covers how to run the operator. The
+[source](https://github.com/liken-sh/liken/tree/main/library-operator)
+explains how it works, in the comments of its Go and Rust files and
+manifests, and the
 [design documents](https://github.com/liken-sh/liken/tree/main/library-operator/plans)
-say why the operator is built the way it is.
+explain why it's built this way.

@@ -41,10 +41,10 @@ spec:
         openAPIV3Schema:
           type: object
           description: >-
-            One controller model's table from its odd controls to the
-            kernel key names they should report. Write one Keymap per
-            model that needs one, and share it through every Remote of
-            that model.
+            One controller model's mapping from the controls that its kernel
+            driver names wrongly to the key names they should report. Write
+            one Keymap per model that needs one, and share it through every
+            Remote of that model.
           properties:
             spec:
               type: object
@@ -79,41 +79,38 @@ spec:
                         type: string
                         pattern: '^(BTN|KEY)_[A-Z0-9_]+$'
                         description: >-
-                          The button, by its evdev key name: BTN_SOUTH
-                          on a gamepad, KEY_PLAYPAUSE on a media
-                          remote. Every Linux driver reports the same
-                          button under the same name, so the name
-                          works across models. Any name in the
-                          kernel's EV_KEY space is accepted; the
-                          pattern here catches a typo's shape, and the
-                          operator's compile is the gate on the name
-                          itself. A Remote in discovery logs the name
-                          of every code its controller reports, so
-                          the names come from the log, not from a
-                          vendor document.
+                          The button, by its evdev key name: BTN_SOUTH on a
+                          gamepad, KEY_PLAYPAUSE on a media remote. Every
+                          Linux driver reports the same button under the same
+                          name, so the name works across models. Any name in
+                          the kernel's EV_KEY space is accepted; the pattern
+                          catches an obvious typo, and the operator refuses a
+                          name that is not in its own table of evdev key names
+                          when it compiles the Keymap. A Remote in discovery
+                          logs the name of every code its controller reports,
+                          so the names come from the log, not from a vendor
+                          document.
                       key:
                         type: string
                         pattern: '^((BTN|KEY)_[A-Z0-9_]+|none)$'
                         description: >-
-                          The kernel key name this control reports
-                          instead, or none to drop it. Both sides are
-                          the kernel's own names. A consumer binds this
-                          name and not the control, and none is how a
-                          Keymap silences a control the base would
-                          otherwise pass.
+                          The kernel key name this control reports instead, or
+                          none to drop it. Both sides are the kernel's own
+                          names. A consumer binds this name and not the
+                          control, and none is how a Keymap silences a control
+                          that the default mapping would otherwise pass.
                       repeat:
                         type: object
                         description: >-
-                          When present, the standing remote pod
-                          synthesises the repeat while the button is
-                          held: it publishes the press, waits the delay,
-                          then publishes a repeat every interval until
-                          the release. A gamepad button never
-                          autorepeats in the kernel, so it needs this
-                          block. A keyboard key autorepeats on its own
-                          and needs none. One repeat is capped at 30
-                          seconds, because a controller that sleeps
-                          mid-hold publishes no release.
+                          When present, the Remote's pod synthesises the
+                          repeat while the button is held: it publishes the
+                          press, waits the delay, then publishes a repeat
+                          every interval until the release. A gamepad button
+                          never autorepeats in the kernel, so it needs this
+                          block. A keyboard key autorepeats on its own and
+                          needs none. One repeat is capped at 30 seconds,
+                          because a controller that sleeps mid-hold publishes
+                          no release.
                         properties:
                           delay:
                             type: string
@@ -161,18 +158,17 @@ spec:
                         type: string
                         pattern: '^((BTN|KEY)_[A-Z0-9_]+|none)$'
                         description: >-
-                          The kernel key name this direction reports, or
-                          none to drop it. The base already names both
-                          directions of both hats as the arrows, so an
-                          entry here is for a pad that means something
-                          else by them.
+                          The kernel key name this direction reports, or none
+                          to drop it. The default mapping already names both
+                          directions of both hats as the arrows, so an entry
+                          here is for a pad that means something else by them.
                       repeat:
                         type: object
                         description: >-
-                          The same repeat block the buttons carry, for a
-                          hat direction. The base already repeats the
-                          four arrows, so an entry needs this only where
-                          it names a key of its own.
+                          The same repeat block the buttons carry, for a hat
+                          direction. The default mapping already repeats the
+                          four arrows, so an entry needs this only where it
+                          names a key of its own.
                         properties:
                           delay:
                             type: string

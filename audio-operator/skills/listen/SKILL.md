@@ -24,7 +24,10 @@ guide is the short path through it.
 
 ## The `kubectl liken audio capture` command
 
-The short path is the CLI. `kubectl liken audio capture` streams a
+The short path is the CLI. `liken plugins sync` installs the
+`kubectl liken audio` plugin, as
+[Install the plugins](https://liken.sh/docs/reference/cli/#install-the-plugins)
+describes. `kubectl liken audio capture` streams a
 `Sink`'s sound to stdout as WAV, so a file or a pipe is a single
 command:
 
@@ -35,6 +38,11 @@ command:
 `--source` taps a `Source`, a microphone, in place of a `Sink`. A
 `Sink` and a `Source` are cluster-scoped, so the command takes no
 namespace.
+
+The CLI compares its own version with the operator's. When they
+differ, it warns on stderr and tells you to run
+`kubectl liken plugins sync`. `--force` silences that warning and the
+tap runs either way. `--version` prints the CLI's version and exits.
 
 The CLI authenticates with the client certificate in your
 kubeconfig, the same subject `kubectl` uses, so the grant that step

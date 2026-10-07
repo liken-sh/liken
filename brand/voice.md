@@ -8,7 +8,73 @@ text against them before you publish. This file follows its own
 rules and is an example of them.
 
 Write in Simplified Technical English (ASD-STE100). That standard is
-the base, and the rules below add only what it does not state.
+the base, and the rules below add only what it does not state. STE
+keeps each word and sentence plain. It does not make a page clear on
+its own: a page of correct STE sentences can still be hard to follow.
+
+## Plain explanation
+
+Write the way you would explain the system to a colleague at a
+whiteboard. Say what the thing is for, then how it works, in the
+words you would use out loud.
+
+- **Start from what the reader wants.** Define a thing by what it
+  does for the reader, then explain how it works. "A `Receiver` is
+  one A/V receiver on the far end of a `liken` machine's HDMI cable"
+  gives its place in the wiring. "A `Receiver` is an A/V receiver
+  that a `liken` machine plays through. When a `Player` starts
+  playing, `equipment-operator` turns the receiver on and selects
+  the machine's input" tells the reader why to declare one.
+- **Name things directly.** Do not announce a list before you give
+  it. "The storage operators give pods volumes of two kinds that
+  Kubernetes does not provide on its own" makes the reader wait for
+  the two kinds. "`git-csi-driver` mounts a git repository as a
+  volume, and `per-node-csi-driver` gives each node its own
+  directory" names them.
+- **Do not coin phrases.** A phrase that the reader must decode,
+  such as "at the grain that a workload asks for", "what the
+  hardware serves", or "the far end of the cable", hides a plain
+  fact. Write the fact: "one monitor output, one speaker, or one
+  controller". A coined phrase that repeats from page to page is a
+  sign that the fact under it was never written down.
+- **Skip what the reader already knows.** The reader knows that an
+  HDMI cable carries picture and sound, and that a `Deployment`
+  runs pods. Spend the words on what `liken` does.
+- **Do not build rhythm.** Paired and tripled clauses ("the cable
+  carries the picture, and the network carries the control"),
+  headings that count ("One image", "Two boot slots"), and closing
+  lines with a twist ("it reboots for one reason: because you asked
+  it to") make text sound crafted. Write the plain sentence, even
+  when it is less symmetrical.
+- **Connect the facts.** A paragraph explains one idea, and its
+  sentences depend on each other. Use "because", "so", "when", and
+  "until" to show how the facts connect. A paragraph of independent
+  one-fact sentences leaves the reader to find the connection.
+- **Talk to the reader.** Write "you" for the reader, and name the
+  component that acts. Contractions are fine.
+- **Do not write about the page.** "This page gives the model in one
+  read" tells the reader nothing about the model. Start with the
+  model.
+
+## Pages
+
+Arrange each page in the order that the reader needs it: what the
+thing is for, how to use it, and then the detail.
+
+- A concept page opens with what the thing is and why it matters, in
+  a paragraph or two, before any table, list of steps, or field.
+- A guide opens with what the reader will have at the end and what
+  they need first. Then it gives the steps.
+- A reference page opens with one sentence on what the object is for
+  and a link to the guide that uses it.
+- A manual's front page says what the component lets you do, shows
+  a few things you can build with it, and links to the guides to
+  start with. A short paragraph on how it works and one sentence that
+  places it among the other components can follow. The detail goes in
+  the manual's concepts.
+- Say a thing once. When several pages need the same explanation,
+  such as what an extension operator is, write it on one page and
+  link to it from the others.
 
 ## Clarity
 
@@ -39,9 +105,9 @@ Introduce the component or state before describing what changes it.
 Explain a technical term when the intended reader needs a definition;
 keep the term when it names the concept precisely.
 
-Use a natural, conversational voice. Contractions and humor are fine
-when they fit the subject and keep the facts clear. Do not add jokes
-or turn an explanation into a slogan to give it personality.
+Use a natural, conversational voice. Humor is fine when it fits the
+subject and keeps the facts clear. Do not add jokes or turn an
+explanation into a slogan to give it personality.
 
 ## Comments
 

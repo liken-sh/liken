@@ -5,6 +5,8 @@ description: "Run a replicated store as a Deployment on one per-node claim with 
 
 This skill is the guide at https://liken.sh/per-node/docs/guides/replicated-store/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
+# Run a replicated store
+
 A replicated store is several pods that each hold a full copy of one
 data set and keep the copies in agreement over the network. Each pod
 runs the store beside its program, the copies exchange changes, and a

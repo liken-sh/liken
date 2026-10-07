@@ -1,91 +1,84 @@
 ---
-title: The extension operators
+title: Extension operators
 weight: 20
 aliases:
   - /docs/concepts/hardware-operators/
 ---
 
-# The extension operators
+# Extension operators
 
-The extension operators are operators that you install on a `liken`
-cluster. Each one is its own project, with its own repository and
-its own manual on a `liken.sh` subdomain, and a cluster installs
-only the ones its equipment and its workloads need. A cluster that
-installs none of them runs unchanged.
+`liken` itself only boots machines into Kubernetes. To do more with
+the cluster, such as put a dashboard on a monitor, play a film on the
+TV, or run a telescope, you install extension operators. Each one is a
+Kubernetes operator for one area: you describe what you want as
+Kubernetes resources, and the operator makes it happen. Each operator
+that is built has its own manual on this site, and its source is a directory of the
+[`liken` repository](https://github.com/liken-sh/liken).
 
-Two families exist today. The hardware operators publish the
-machine's hardware as devices a workload can claim. The media
-operators compose those devices into media playback, and keep the
-libraries that playback draws from. The families layer in one direction: a
-media operator claims devices the way any workload does. No
-hardware operator depends on the workloads above it.
+* [Claiming hardware](/docs/concepts/claiming-hardware/):
+  `display-operator`, `audio-operator`, and `bluetooth-operator` let a
+  pod claim one monitor, one speaker, or one game controller.
+* [Mounting storage](/docs/concepts/mounting-storage/):
+  `git-csi-driver` mounts a git repository as a volume, and
+  `per-node-csi-driver` gives a pod a directory on the node it runs
+  on.
+* [Running a home theater](/docs/concepts/running-a-home-theater/):
+  `media-operator`, `library-operator`, `people-operator`, and
+  `equipment-operator` turn a machine connected to a TV into a media
+  player, with a catalog of your films and series, the people who
+  watch them, and control of the receiver and the TV.
+* [Running an observatory](/docs/concepts/running-an-observatory/):
+  `observatory-operator` runs a telescope's mount, cameras, and other
+  equipment through INDI. `astrophotography-operator` will run imaging
+  sessions on that telescope. It is planned, and not built yet.
 
-## The hardware operators
+## Install only what you need
 
-Each hardware operator publishes one kind of machine hardware as
-DRA devices, so a workload claims that hardware the way
-[Give a workload a device](/docs/guides/devices/) shows, with no
-privilege and no host path.
+The operating system installs none of these operators. It boots each
+machine into Kubernetes and publishes the machine's own hardware as
+devices, as [Devices](/docs/reference/devices/) describes, and it
+stops there. You install the operators that your equipment and your
+workloads need, and a cluster with none of them works the same way.
+To take `liken` into a new area, you usually add an operator, and the
+operating system stays as it is.
 
-Each operator is a DRA driver of its own, separate from the
-operating system's driver that [Devices](/docs/reference/devices/)
-describes. The operating system publishes hardware present on a
-machine, such as a Bluetooth radio, a GPU, or a sound card. A hardware
-operator publishes what that hardware serves, at the grain a
-workload asks for: a paired controller, a monitor output, an audio
-output.
+## Use something else in place of an operator
 
-A device can also take parameters from the claim. A `ResourceClaim`
-contains an opaque config block per driver. The operator reads the
-block when it prepares the claim and puts the device into the state
-the block asks for before the pod starts. The audio operator takes
-`codec` on a Bluetooth speaker, and the display operator takes
-`mode` on a monitor output. A `DeviceClass` can contain the same
-block as cluster policy, and the claim's own block wins. Each
-operator's manual documents its parameters beside its attributes.
+An operator works with the rest of the cluster only through
+Kubernetes objects: the devices it claims, the resources it defines,
+and the `Event`s and conditions it posts. Other software can use the
+same objects, so you can run something else beside an operator, or in
+its place. For example:
 
-The name of a hardware operator's device class is also the hostname
-of its manual. Each manual gives the install steps and the claims
-for its devices:
+* [`library-operator`](https://liken.sh/library/) writes the `.nfo`
+  files and the artwork beside your media in the formats that Kodi and
+  Jellyfin read. Jellyfin can read the same library with no operator
+  at all. When you run both and name the Jellyfin server in the
+  `Catalog`'s `spec.jellyfin`, `library-operator` keeps each person's
+  playback progress the same in both places.
+* [`observatory-operator`](https://liken.sh/observatory/) serves a
+  telescope's devices on its INDI server. KStars drives the telescope
+  through that server, and guides through PHD2's event server.
 
-* [bluetooth.liken.sh](https://liken.sh/bluetooth/) publishes paired
-  Bluetooth controllers. The source is
-  the [`bluetooth-operator` directory](https://github.com/liken-sh/liken/tree/main/bluetooth-operator)
-  of the `liken` repository.
-* [display.liken.sh](https://liken.sh/display/) publishes monitor
-  outputs. The source is
-  the [`display-operator` directory](https://github.com/liken-sh/liken/tree/main/display-operator)
-  of the `liken` repository.
-* [audio.liken.sh](https://liken.sh/audio/) publishes audio outputs.
-  The source is
-  the [`audio-operator` directory](https://github.com/liken-sh/liken/tree/main/audio-operator)
-  of the `liken` repository.
+An operator that uses devices claims them with a `ResourceClaim`, the
+same way any workload does. So the dependencies go one way: the
+operators that publish devices do not depend on the operators that
+claim them.
 
-## The media operators
+## Device classes and ingress are yours to decide
 
-Two operators share the media layer, and they layer in one direction
-too.
+An operator ships a `DeviceClass` only for its own pod, so it can
+claim the hardware it manages. `liken` ships no `DeviceClass` for
+your workloads. You write those yourself, and each operator's manual
+shows how.
 
-The media operator routes and controls media playback on a cluster.
-Which display and speakers form a unit, what plays on it, and which
-controller drives it are all declared as Kubernetes resources. It publishes no devices of its own. It selects devices
-out of what the hardware operators publish, with the same CEL
-selectors a hand-written `ResourceClaim` would use, and it claims
-them only for the pods it runs. Its manual is
-[media.liken.sh](https://liken.sh/media/): the resources, the install,
-and the MQTT message bus its pods and your own programs share. The
-source is
-the [`media-operator` directory](https://github.com/liken-sh/liken/tree/main/media-operator)
-of the `liken` repository.
-
-The library operator declares the media libraries of that cluster as
-Kubernetes resources: a root directory of movies or series on a
-volume, the catalog its scanners keep of what is there, and a media
-browser that replaces the idle screen on a `Player` the media operator
-owns. It publishes no devices, and it claims the display only through
-the `Player`'s own claim. The media
-operator never reads the library operator's resources. Its manual is
-[library.liken.sh](https://liken.sh/library/): the resources, the
-install, the scanners, and the browser. The source is
-the [`library-operator` directory](https://github.com/liken-sh/liken/tree/main/library-operator)
-of the `liken` repository.
+`liken` gives a cluster no ingress controller and no load balancer.
+The operating system turns off the add-ons that k3s bundles, such as
+the Traefik ingress controller and the load balancer for `Service`
+objects of type `LoadBalancer`. You can turn each one on again in the
+`features` field of the [`Cluster`](/docs/reference/cluster/) spec.
+You decide which services are reachable from outside the cluster, and
+how: every operator's `Service` has the default type, `ClusterIP`, and
+no operator ships an `Ingress`. Two operators, `bluetooth-operator`
+and `equipment-operator`, run on the host network, so their metrics
+ports are open on each node's own address.

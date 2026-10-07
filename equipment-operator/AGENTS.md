@@ -1,8 +1,8 @@
 # Working on equipment-operator
 
 This directory holds the `Receiver` resource and the operator that
-drives it: A/V equipment at the far end of a `liken` machine's cable,
-reached over the network for volume, power, and input. It also holds
+drives it: the A/V receiver that a `liken` machine plays through,
+controlled over the network for volume, power, and input. It also holds
 the `CECBus` and `Television` resources, which reach the same
 equipment over the HDMI-CEC wire. The manifests and the tests are the
 documentation, and the comments teach how the system works.

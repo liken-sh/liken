@@ -1,10 +1,10 @@
 # equipment-operator
 
-A `Receiver` is one A/V receiver on the far end of a `liken` machine's
-HDMI cable. The cable carries the picture and sound. The operator
-reaches the receiver over the network, reports its power, input, and
-volume, and while a `Player` plays through it, powers it on, selects the
-input, and changes its volume from the room's remote.
+A `Receiver` is an A/V receiver that a `liken` machine plays through.
+The operator controls the receiver over the network and reports its
+power, input, and volume. While a `Player` plays through it, the
+operator turns it on, selects the machine's input, and changes its
+volume from the room's remote.
 
 ```yaml
 apiVersion: equipment.liken.sh/v1alpha1

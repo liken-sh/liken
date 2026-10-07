@@ -4,6 +4,8 @@ weight: 60
 description: "Add a Guider to a telescope so the operator runs PHD2 with the guide camera and the mount, then calibrate and guide from KStars and Ekos through PHD2's event server, and read the guiding RMS from the Guider's status. Use when a telescope needs autoguiding, when choosing between mount and ST-4 pulses, or when PHD2 does not connect or keeps restarting."
 ---
 
+# Guide with PHD2
+
 A `Guider` makes the operator run [PHD2](https://openphdguiding.org/)
 for one telescope. During a reservation, the operator starts PHD2,
 connects it to the guide camera and the mount, and then leaves it

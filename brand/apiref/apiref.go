@@ -74,6 +74,9 @@ func Generate(openAPIJSON []byte, source string, opts Options) ([]byte, error) {
 	// this long.
 	fmt.Fprintf(&b, "---\ntitle: %s\nweight: %d\ntoc: true\n---\n\n", title, weight)
 	fmt.Fprintf(&b, "<!-- Generated from %s by apiref. Do not edit. -->\n\n", displayPath(source))
+	// The page template prints no heading, so the page carries its
+	// own.
+	fmt.Fprintf(&b, "# %s\n\n", title)
 	if preamble := strings.Trim(string(opts.Preamble), "\n"); preamble != "" {
 		b.WriteString(preamble + "\n\n")
 	}

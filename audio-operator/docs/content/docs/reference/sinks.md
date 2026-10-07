@@ -6,6 +6,8 @@ toc: true
 
 <!-- Generated from deploy/crds.yaml by crdref. Do not edit. -->
 
+# `Sink`
+
 A `Sink` is one playback endpoint as a Kubernetes resource: an
 analog jack, an HDMI or DisplayPort output, the playback side of a
 USB card, or a Bluetooth speaker. The operator creates one for every
@@ -14,7 +16,7 @@ same device name the `ResourceSlice` carries. You never create or
 delete one. The operator writes `status`: where the endpoint is, the
 controls the card declares, and the values it last read. The media
 operator writes `status.session`, the volume asks of a remote's keys.
-You write `spec`, which states what the endpoint rests at.
+You write `spec`, which states the settings you want for the endpoint.
 
 ```yaml
 apiVersion: audio.liken.sh/v1alpha1
@@ -72,7 +74,7 @@ The claim and the `Sink` answer two different needs. A pod that
 plays sound still holds the output through a claim, as the
 [claim guide](/docs/guides/claim/) shows, and it still has its own
 stream volume. The `Sink` is for everything about the output that
-is not the sound itself: its resting level, its mute, and the
+is not the sound itself: its default level, its mute, and the
 card's own controls. Because it is an ordinary Kubernetes resource,
 anything with the right RBAC can change it. A pod that only wants
 to mute the kitchen needs no claim, and a rule that lowers every
@@ -88,7 +90,7 @@ The desired settings for the endpoint. Every field is optional. The operator wri
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="spec--volume"></span>`volume` | [object](#specvolume) | no | The endpoint's volume, in percent of unity. level is the resting level the operator applies. max and step bound the volume asks the media operator writes into status.session, and the operator does not read them. |
+| <span id="spec--volume"></span>`volume` | [object](#specvolume) | no | The endpoint's volume, in percent of unity. level is the default level that the operator applies. max and step bound the volume asks the media operator writes into status.session, and the operator does not read them. |
 | <span id="spec--mute"></span>`mute` | boolean | no | Whether the endpoint is silent. The operator applies this setting at the same layer as volume.level, and on the same terms. |
 | <span id="spec--controls"></span>`controls` | map[string]string | no | The card's own controls, keyed by the kernel's control name as status.capabilities lists them, such as Master Playback Volume. An integer control takes a number within its range. A boolean control takes on or off. An enumerated control takes one of its values. The operator writes a control only when spec states it. When two endpoints share one control, the last write wins because the hardware has one register. |
 | <span id="spec--layout"></span>`layout` | []string | no | The channel positions of an ALSA sink, in PCM slot order, in PipeWire's channel names, such as FL, FR, FC, LFE, RL, RR, SL, SR, RLC, RRC, TFL, TFR, NA for a slot that plays nothing, and AUX0 to AUX63. A 7.1 receiver on HDMI takes [FL, FR, RL, RR, FC, LFE, SL, SR], and a 5.1 one takes [FL, FR, RL, RR, FC, LFE]. When this field is absent, the operator selects the layout from the monitor's ELD on HDMI and DisplayPort, from the device's own channel map on USB, and declares no positions on the analog jack, whose streams then play in stereo. The operator declares the layout to PipeWire, and a change restarts the PipeWire container once no stream plays on the machine. The number of positions must be a channel count the device accepts, or PipeWire ignores the layout. The operator does not write the kernel's channel map, so on HDMI each slot reaches the speaker the kernel's standard allocation gives it, and a height position names a slot that the kernel routes elsewhere. A Bluetooth speaker ignores this field. |
@@ -96,11 +98,11 @@ The desired settings for the endpoint. Every field is optional. The operator wri
 
 ### spec.volume
 
-The endpoint's volume, in percent of unity. level is the resting level the operator applies. max and step bound the volume asks the media operator writes into status.session, and the operator does not read them.
+The endpoint's volume, in percent of unity. level is the default level that the operator applies. max and step bound the volume asks the media operator writes into status.session, and the operator does not read them.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specvolume--level"></span>`level` | integer | no | The level the endpoint rests at, as a percent of unity, applied to every channel alike. On an ALSA endpoint it is the gain PipeWire applies in software. On a Bluetooth speaker it is the speaker's own volume, sent over AVRCP when the speaker supports absolute volume, and a software gain when it does not. The operator applies it when it changes and when the endpoint appears, under a claim or not, and a claim holder's own stream fader is a separate level above it. A level that changes after that, at the device or by a volume ask, stays, and status.observed.volume reports it. When it is absent, a node that PipeWire builds while the operator runs starts at unity. |
+| <span id="specvolume--level"></span>`level` | integer | no | The endpoint's default level, as a percent of unity, applied to every channel alike. On an ALSA endpoint it is the gain PipeWire applies in software. On a Bluetooth speaker it is the speaker's own volume, sent over AVRCP when the speaker supports absolute volume, and a software gain when it does not. The operator applies it when it changes and when the endpoint appears, under a claim or not, and a claim holder's own stream fader is a separate level above it. A level that changes after that, at the device or by a volume ask, stays, and status.observed.volume reports it. When it is absent, a node that PipeWire builds while the operator runs starts at unity. |
 | <span id="specvolume--max"></span>`max` | integer | no | The highest level a volume ask can set. The media operator holds its asks at or below it. A person at the device can still set a higher level. Default: `100`. |
 | <span id="specvolume--step"></span>`step` | integer | no | How far one press of a remote's volume key moves the level the media operator asks for. Default: `5`. |
 
@@ -295,7 +297,7 @@ lands in can change between plug events. `status.monitor` reports
 which monitor the slot feeds now, and a machine with one HDMI
 monitor never sees the difference.
 
-## The resting layer
+## How the operator applies the `spec`
 
 The operator writes a declared `volume.level` and `mute` when the
 declaration changes and when the endpoint appears: a speaker that

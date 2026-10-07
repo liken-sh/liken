@@ -1,6 +1,6 @@
 ---
 name: operators
-description: How the liken-sh operators keep their view of the cluster and their devices current. Covers the three guards every Kubernetes watch loop needs, the scenarios a watch loop must pass in a test, status writes, conditions and the Events they post, timers, device traffic, the node label that keeps a device DaemonSet off a node, and the decision to watch through client-go with the shape of the reference port. Use when writing or reviewing an operator's watch, reconcile pass, status write, condition, Event, backstop, timer, device polling, or device DaemonSet.
+description: How the liken-sh operators keep their view of the cluster and their devices current. Covers the three guards every Kubernetes watch loop needs, the scenarios a watch loop must pass in a test, status writes, conditions and the Events they post, timers, device traffic, the node label that keeps a device DaemonSet off a node, the decision to watch through client-go with the shape of the reference port, and the manual pages that each kind of change must update. Use when writing or reviewing an operator's watch, reconcile pass, status write, condition, Event, backstop, timer, device polling, or device DaemonSet, and before committing any change to an operator or a CSI driver.
 ---
 
 # Writing and reviewing operators
@@ -447,3 +447,31 @@ it.
   `memo.Written`, whole stores, and the creates they must not
   repeat). The test `TestAPassDoesNotActOnACopyOlderThanItsOwnWrite`
   in each operator fails without the memo.
+
+## The manual changes with the code
+
+Each component's manual is in `docs/content`, and the skills in its
+`skills/` are generated from the guides there. A reader installs and
+runs the component from the manual alone, so a manual that lags the
+code gives a wrong command, not a missing detail. An audit in
+2026-10 found the same kinds of drift in most components. Each one
+came from a change that updated the code and left the manual for
+later. So update the manual in the commit that changes the code.
+
+The generated pages, the CRD and API references and the skills, are
+current when you run the component's generators. The hand-written
+pages drift. Check these for each kind of change:
+
+| Change | Pages to update |
+|---|---|
+| A file added to or removed from `deploy/kustomization.yaml` | Every file list in the install guide: the raw-URL install, the GitOps example, and the removal steps |
+| A container, `Deployment`, or `DaemonSet` added or removed | The install guide's description of what runs, and the development-build pin, which names every image |
+| A metric added, renamed, or removed | `reference/metrics.md` |
+| A flag on the operator or the `kubectl liken` plugin | The guide that runs the command |
+| A printer column, condition, or `Event` reason | Every sample of `kubectl get` or `kubectl describe` output that shows it |
+| A behavior the operator adds on its own, such as a recovery or a retry that a person can see | The guide where a reader looks when the behavior surprises them |
+| A field or topic removed from the bus or the API | Every page of another component that names it |
+
+After you edit a guide, run the component's `skills` target and its
+docs tests. CI fails when the committed skills differ from what the
+generator writes.

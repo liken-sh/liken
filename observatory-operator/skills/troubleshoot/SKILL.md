@@ -5,6 +5,8 @@ description: "Find why a reservation failed or waits, from the step and the devi
 
 This skill is the guide at https://liken.sh/observatory/docs/guides/troubleshoot/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
+# Troubleshoot
+
 Start from the reservation. Its status names the step that failed or
 waits, and the step's summary names the device:
 

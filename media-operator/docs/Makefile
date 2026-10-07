@@ -1,4 +1,4 @@
-# The docs domain builds the manual for media.liken.sh. Five of the
+# The docs domain builds the manual for liken.sh/media/. Five of the
 # reference pages are generated, never edited: crdref, the generator
 # the brand component publishes, renders each page from its CRD
 # schema in deploy/, a hand-written preamble that opens the page, and

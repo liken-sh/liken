@@ -4,6 +4,19 @@ title: How a reservation runs
 weight: 30
 ---
 
+# How a reservation runs
+
+A `Reservation` gives one holder the use of one `Telescope`, from
+`spec.start`, or from its creation when it has no start, until
+`spec.end`, or until it is deleted when it has no end. When it starts,
+the operator brings the equipment up: it starts each device's INDI
+driver, connects the devices, configures them, and runs the activation
+procedures. When it ends, the operator runs the deactivation
+procedures, such as parking the mount and warming the cameras, stops
+what it started in reverse order, and reports when the telescope is
+safe to power off. The observatory's own devices keep running while
+another telescope's reservation there is active.
+
 The operator runs one step at a time, in a fixed order, and a step
 starts only when the step before it is `Done` or `Skipped`. Each step
 reads what the cluster and the devices report before it changes

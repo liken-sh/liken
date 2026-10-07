@@ -23,7 +23,10 @@ has the full contract. This guide is the short path through it.
 
 ## The `kubectl liken display capture` command
 
-The short path is the CLI. `kubectl liken display capture` streams an
+The short path is the CLI. `liken plugins sync` installs the
+`kubectl liken display` plugin, as
+[Install the plugins](https://liken.sh/docs/reference/cli/#install-the-plugins)
+describes. `kubectl liken display capture` streams an
 output's screen to stdout as MP4, so a file or a pipe is a single
 command:
 
@@ -32,6 +35,12 @@ command:
 
 `--format png` writes one frame in place of a clip. A `Display` is
 cluster-scoped, so the command takes no namespace.
+
+The CLI compares its own version with the operator's. When they
+differ, it warns on stderr and tells you to run
+`kubectl liken plugins sync`. `--force` silences that warning and the
+capture runs either way. `--version` prints the CLI's version and
+exits.
 
 The CLI authenticates with the client certificate in your
 kubeconfig, the same subject `kubectl` uses, so the grant that step

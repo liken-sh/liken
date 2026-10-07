@@ -3,7 +3,7 @@ analog input, or the capture side of a USB card. The operator
 creates one for every capture endpoint it publishes, cluster-scoped
 like a `Node`, named the same way a `Sink` is. You never create or
 delete one. The operator writes the whole of `status`, and you write
-`spec`, which states what the endpoint rests at.
+`spec`, which states the settings you want for the endpoint.
 
 ```yaml
 apiVersion: audio.liken.sh/v1alpha1

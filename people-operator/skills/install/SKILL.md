@@ -5,6 +5,8 @@ description: "Install the Person resource definition and people-operator from it
 
 This skill is the guide at https://liken.sh/people/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
+# Install the operator
+
 Install the resource definition and the operator from the kustomize
 base in the operator's `deploy/` directory. You need `kubectl` with
 cluster-admin rights. The base puts the operator in the
@@ -56,8 +58,8 @@ spec:
   nickname: Ada
 ```
 
-`kubectl get people` lists them. Within a few seconds, the `Avatar`
-column shows `True`: the operator drew the person's initials into
+`kubectl get people` lists them. Within a few seconds, the `Picture`
+column shows `Initials`: the operator drew the person's initials into
 `status.thumbnail`. The [pictures](https://liken.sh/people/docs/guides/pictures/) guide shows how to
 give a person a picture in place of the initials.
 

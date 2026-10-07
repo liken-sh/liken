@@ -5,10 +5,13 @@ description: "Connect a USB-CEC adapter to a liken machine and to a room's HDMI 
 
 This skill is the guide at https://liken.sh/equipment/docs/guides/connect-a-cec-adapter/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
-This guide follows one room from a new USB-CEC adapter to a TV that
-wakes with the room's `Player`. At the end, the adapter speaks for the
-machine on the HDMI-CEC wire. A Play or a press of the room remote's
-power button wakes the TV and switches it to the machine. The power
+# Connect a USB-CEC adapter
+
+This guide takes one room from a new USB-CEC adapter to a TV that
+wakes with the room's `Player`. At the end, the adapter sends and
+answers HDMI-CEC messages for the machine. A `Play`, or a press of the
+room remote's power button, wakes the TV and switches it to the
+machine. The power
 button also turns the TV off, and the TV's own remote drives the
 `Player`.
 
@@ -316,13 +319,39 @@ The other reasons:
 * `TooLate`: the wake had not started 2 minutes after the node
   workload saw it, and it sent nothing.
 
+A press of the home key of the room remote writes
+`status.session.inputAsk` with the action `show`. The adapter then
+claims the TV's input for the `Display` the same way, when the TV
+reports On or `ToOn`, and the receiver selects the session's input if
+it is on. The ask wakes no TV that is off. A press of any other key,
+except a power key, writes the action `ensure` while the `Receiver`'s
+`InputSelected` condition is not `True`. An `ensure` asks a receiver
+that is on for the session's input, and sends the TV nothing.
+
+While a session holds the room awake, the adapter also answers two
+messages from other devices, for the session's `Display` only. A TV
+that comes out of standby broadcasts Request Active Source, and the
+adapter answers with Active Source, so the TV shows the `Player`
+instead of its own home screen. A TV whose source menu a person uses
+broadcasts Set Stream Path with an input's physical address, and the
+adapter answers with Active Source when that address is the
+`Display`'s. The adapter leaves a Request Active Source to another
+source when a person moved the route to that source after the
+adapter's own claim. A Set Stream Path for the `Display` of a session
+that sleeps wakes the `Player`'s screen, as the last section of this
+guide describes.
+
 An operator restart wakes nothing. Both workloads adopt the sessions
 they find when they start, and send nothing for them.
 
 ## Turn the room off with the power button
 
 The room remote's power button turns the whole room on or off, the
-TV included. At each press, the adapter asks the TV for its power,
+TV included. A power ask in `status.session.powerAsk` names the
+action `toggle`, `on`, or `off`. A `toggle` always moves the room. An
+`on` moves it only when the room is off, and an `off` only when the
+room is on. An ask that moves nothing sends nothing and writes one
+log line that says so. At each press, the adapter asks the TV for its power,
 because no timer asks the TV between presses. The press waits up to 3
 seconds for the answer, and it decides from `status.power` when no
 answer arrives. A TV that reports On or ToOn means the room is on, so

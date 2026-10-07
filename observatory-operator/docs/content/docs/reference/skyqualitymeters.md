@@ -6,6 +6,8 @@ toc: true
 
 <!-- Generated from deploy/skyqualitymeters-crd.yaml by crdref. Do not edit. -->
 
+# `SkyQualityMeter`
+
 A `SkyQualityMeter` measures the brightness of the sky: an INDI driver with `AUX_INTERFACE` that defines `SKY_QUALITY`. It belongs to the `Observatory`, or to one `Telescope` when it is mounted on it.
 
 ## spec
@@ -242,7 +244,7 @@ One condition, in the shape of `metav1.Condition`.
 | --- | --- | --- | --- |
 | <span id="statusconditions--type"></span>`type` | string | yes | The condition's name, such as `Ready`. |
 | <span id="statusconditions--status"></span>`status` | string | yes | Whether the condition holds: `True`, `False`, or `Unknown`. One of: `True`, `False`, `Unknown`. |
-| <span id="statusconditions--observedgeneration"></span>`observedGeneration` | integer | no | The `metadata.generation` of the spec that the condition judged. |
+| <span id="statusconditions--observedgeneration"></span>`observedGeneration` | integer | no | The `metadata.generation` of the spec that the condition reflects. |
 | <span id="statusconditions--reason"></span>`reason` | string | yes | One word in CamelCase for the cause. |
 | <span id="statusconditions--message"></span>`message` | string | yes | The cause, for a person to read. It can be empty. |
 | <span id="statusconditions--lasttransitiontime"></span>`lastTransitionTime` | string | yes | When `status` last changed. A write with the same status keeps this time. |
@@ -254,7 +256,7 @@ The last run of one trigger.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="statusprocedures--trigger"></span>`trigger` | string | yes | The trigger: `activation`, `deactivation`, or `triggers[0]` for the first item of `spec.triggers`. |
-| <span id="statusprocedures--since"></span>`since` | string | no | The transition time of the condition that the run answers: the `lastTransitionTime` of `Active` for activation and deactivation. |
+| <span id="statusprocedures--since"></span>`since` | string | no | The transition time of the condition that started the run: the `lastTransitionTime` of `Active` for activation and deactivation. |
 | <span id="statusprocedures--state"></span>`state` | string | yes | The run's progress: `Pending`, `Running`, `Done`, `Failed`, or `Skipped` when it had nothing to do. One of: `Pending`, `Running`, `Done`, `Failed`, `Skipped`. |
 | <span id="statusprocedures--starttime"></span>`startTime` | string | no | When the run began to run. |
 | <span id="statusprocedures--stoptime"></span>`stopTime` | string | no | When the run ended. |

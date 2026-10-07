@@ -4,9 +4,14 @@ title: The resources
 weight: 10
 ---
 
-The observatory is 20 kinds of resource in the API group
-`observatory.liken.sh/v1alpha1`. This page shows how they fit
-together. Each kind has its own page, below, with every field.
+# The resources
+
+You describe an observatory with 20 kinds of resource in the API
+group `observatory.liken.sh/v1alpha1`. Most of them describe the
+site, the telescopes, and each piece of equipment. A `Reservation`
+gives someone the use of a telescope, and an `OpticalTrain` and a
+`Guider` describe how light reaches a camera and how the telescope
+guides. Each kind has its own reference page with every field.
 
 Every kind is namespaced, and every kind is in the category `astro`,
 so `kubectl get astro` lists the whole observatory. Each resource names

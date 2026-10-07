@@ -6,6 +6,8 @@ toc: true
 
 <!-- Generated from static/v1/audio/openapi.json by apiref. Do not edit. -->
 
+# Routes
+
 The routes below are generated from the OpenAPI document `audio-api`
 serves at `/v1/audio/openapi.json`. The API renders that document
 from its router table, so this page lists every route the program

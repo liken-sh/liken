@@ -2,43 +2,35 @@
 title: Manual
 ---
 
-# The `bluetooth.liken.sh` manual
+# The `bluetooth-operator` manual
 
-This manual tells you how to install `bluetooth-operator` on a
-[`liken`](https://liken.sh/docs/) cluster and how to pair a
-controller and give it to a pod. The guides give the steps. The
-reference describes the devices, their attributes and taints, the
-pairing API, and what a claim delivers.
+The guides show how to install `bluetooth-operator`, pair a
+controller, and give it to a pod. The reference describes the pairing
+API, the devices with their attributes and taints, what a claim gives
+a container, and the metrics.
 
-The operator publishes each paired Bluetooth device as a
-[Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
-device. A workload claims one input device through the
-`bluetooth-input` device class, the way
+A workload claims a paired controller the same way that
 [Give a workload a device](https://liken.sh/docs/guides/devices/)
-shows for `liken`'s own devices.
+shows for the devices that `liken` publishes, through the
+`bluetooth-input` device class. The operator also publishes one device
+that isn't a paired peer: the radio's
+[media bus](/docs/reference/devices/#the-media-bus), which
+[`audio-operator`](https://liken.sh/audio/) claims to play to
+Bluetooth speakers.
 
-One published device is not a paired peer: the adapter's [media
-bus](/docs/reference/devices/#the-media-bus), which the machine's
-sound server claims to serve Bluetooth speakers.
+This site also serves the manifests that the guides apply, as raw
+YAML under [`/deploy/`](/deploy/kustomization.yaml). They're the
+repository's own files. They include the `bluetooth-adapter` class,
+because the operator's own pod claims the radio through it, and not
+the `bluetooth-input` class, because the classes your workloads
+claim through are yours to create. The install guide gives its YAML.
 
-This site also serves the deployment manifests the guides apply, as
-raw YAML under [`/deploy/`](/deploy/kustomization.yaml): the
-[CRDs](/deploy/crds.yaml), the [RBAC](/deploy/rbac.yaml), and the
-[workload](/deploy/operator.yaml). They are the repository's own
-files, published with the manual that describes them. The
-[`bluetooth-adapter` class](/deploy/deviceclasses.yaml) ships among
-them, because the operator's own claim template names it. The
-`bluetooth-input` class does not: a class workloads claim through is
-cluster policy, yours to create, and the install guide gives its
-YAML.
-
-This manual is small on purpose. The
-[source](https://github.com/liken-sh/liken/tree/main/bluetooth-operator) is
-written to be read: the Go files and the manifests have comments
-that explain how the operator works. The manual tells you how to
-operate it; the
+The manual covers how to run the operator. The
+[source](https://github.com/liken-sh/liken/tree/main/bluetooth-operator)
+explains how it works, in the comments of its Go files and manifests,
+and the
 [design documents](https://github.com/liken-sh/liken/tree/main/bluetooth-operator/plans)
-say why it is built the way it is.
+explain why it's built this way.
 
 Every page of this site is also available as Markdown. Add `index.md`
 to a page's address to get it.

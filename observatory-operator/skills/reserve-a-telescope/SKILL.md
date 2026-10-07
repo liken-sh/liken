@@ -5,6 +5,8 @@ description: "Reserve a telescope for a night with a Reservation, watch it start
 
 This skill is the guide at https://liken.sh/observatory/docs/guides/reserve-a-telescope/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
+# Reserve a telescope
+
 A `Reservation` gives one person, or one program, the use of one
 telescope for a time. While it is active, the operator runs the
 telescope's equipment. When it ends, the operator parks and powers

@@ -4,6 +4,8 @@ weight: 20
 description: "Describe a real observatory as observatory.liken.sh resources: the site, each telescope, its optical tubes and trains, and one resource per device with the INDI driver and image that run it. Use when setting up someone's mount, cameras, focuser, filter wheel, dome, or other astronomy equipment, when choosing an INDI driver, or when a resource reports ParentFound False."
 ---
 
+# Describe your equipment
+
 This guide turns a real setup into resources. You write one resource
 for the site, one for each telescope, one for each tube and light
 path, and one for each device. At the end, `kubectl get astro` lists

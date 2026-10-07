@@ -1301,13 +1301,12 @@ spec:
                   format: int64
                   minimum: 0
                   description: >-
-                    The metadata.generation of the spec that this
-                    status judged. The operator writes this value on
-                    each pass. Each condition carries the same value,
-                    but a client that only needs to know whether the
-                    operator has seen its edit reads the value here,
-                    at the top of status, where Kubernetes
-                    controllers usually publish it.
+                    The metadata.generation of the spec that this status
+                    reflects. The operator writes this value on each pass.
+                    Each condition carries the same value, but a client that
+                    only needs to know whether the operator has seen its edit
+                    reads the value here, at the top of status, where
+                    Kubernetes controllers usually publish it.
                 role:
                   type: string
                   description: >-
@@ -2377,26 +2376,22 @@ spec:
                 boot:
                   type: object
                   description: >-
-                    The record of this boot. The system writes this
-                    record again on every boot, and the operator
-                    compares the spec against it. Compare this field
-                    with firmware, the state that stays through
-                    reboots. The manifest sources give the documents
-                    that the boot used: the staged copy that waits
-                    for its proving boot, the proven
-                    last-known-good copy, or, on the first boot only,
-                    the seed in the image. The system records these
-                    sources separately for the Machine manifest and
-                    the Cluster document, because the two stage and
-                    prove independently. The hashes identify the
-                    exact bytes, and the storage, network, and
-                    modules blocks show the spec as actuated.
-                    Together they are the reference for drift between
-                    what the cluster asks for and what the machine
-                    did. A rejection reports a staged document that
-                    failed and that the system quarantined. The
-                    rejection stands until a different edit proves
-                    out.
+                    The record of this boot. The system writes this record
+                    again on every boot, and the operator compares the spec
+                    against it. Compare this field with firmware, the state
+                    that stays through reboots. The manifest sources give the
+                    documents that the boot used: the staged copy that waits
+                    for its proving boot, the proven last-known-good copy, or,
+                    on the first boot only, the seed in the image. The system
+                    records these sources separately for the Machine manifest
+                    and the Cluster document, because the two stage and prove
+                    independently. The hashes identify the exact bytes, and
+                    the storage, network, and modules blocks show the spec as
+                    actuated. Together they are the reference for drift
+                    between what the cluster asks for and what the machine
+                    did. A rejection reports a staged document that failed and
+                    that the system quarantined. The rejection stays until a
+                    different edit passes its proving boot.
                   properties:
                     time:
                       type: string
@@ -2949,11 +2944,10 @@ spec:
                     systemRejection:
                       type: object
                       description: >-
-                        The verdict on a system release whose proving
-                        boot did not complete: the machine booted the
-                        staged slot, did not prove it, and the
-                        firmware returned the machine to the proven
-                        slot. This verdict stands until the catalog
+                        The record of a system release whose proving boot did
+                        not complete: the machine booted the staged slot, did
+                        not prove it, and the firmware returned the machine to
+                        the proven slot. The record stays until the catalog
                         names a different release.
                       required: [reason, rejectedAt]
                       properties:
@@ -2979,11 +2973,10 @@ spec:
                     credentialsRejection:
                       type: object
                       description: >-
-                        The verdict on a staged registry-credentials
-                        document that the machine could not parse.
-                        This verdict stands until a different
-                        rendering, which an edit to the Secret makes,
-                        replaces it.
+                        The record of a staged registry-credentials document
+                        that the machine could not parse. The record stays
+                        until a different rendering, which an edit to the
+                        Secret makes, replaces it.
                       required: [reason, rejectedAt]
                       properties:
                         hash:
@@ -3339,24 +3332,22 @@ spec:
                 runtime:
                   type: object
                   description: >-
-                    The runtime discipline that init imposed on this
-                    boot: the Go environment and log level it gave the
-                    k3s process, the configuration it wrote for the
-                    kubelet inside it, and the level it gave
-                    containerd beside it. These are the resolved
-                    values, not the strings from the Cluster's
-                    spec.runtime. An operator who changes a setting
-                    reads back here what each machine actually runs.
+                    The runtime settings that init applied on this boot: the
+                    Go environment and log level it gave the k3s process, the
+                    configuration it wrote for the kubelet inside it, and the
+                    level it gave containerd beside it. These are the resolved
+                    values, not the strings from the Cluster's spec.runtime.
+                    An operator who changes a setting reads back here what
+                    each machine actually runs.
                   properties:
                     k3s:
                       type: object
                       description: >-
-                        The runtime discipline of the k3s process on
-                        this machine. containerd and the shims get the
-                        same Go environment. This field is absent when
-                        init set no variable and rendered no log
-                        level, so k3s runs on Go's own defaults and
-                        logs at info.
+                        The runtime settings of the k3s process on this
+                        machine. containerd and the shims get the same Go
+                        environment. This field is absent when init set no
+                        variable and rendered no log level, so k3s runs on
+                        Go's own defaults and logs at info.
                       properties:
                         goMemoryLimit:
                           type: string
@@ -3504,21 +3495,19 @@ spec:
                 lastFailStop:
                   type: object
                   description: >-
-                    The last boot that this machine refused to run.
-                    Init stops a boot for two failures: it cannot tell
-                    which configuration is its own, or it cannot
-                    satisfy a declared storage role. A machine that
-                    runs with the wrong configuration can do damage
-                    that a reboot does not undo, so init powers the
-                    machine off instead. The refusal writes its reason
-                    to the machine's own disk, and the next boot
-                    reports it here. The refusal is not always the
-                    previous boot, and the time field gives the age of
-                    the news. Nothing clears this field. The next
-                    refusal replaces it. An empty field means that
-                    this machine has never refused a boot, or that the
-                    role it could not satisfy was the one that holds
-                    the record.
+                    The last boot that this machine refused to run. Init stops
+                    a boot for two failures: it cannot tell which
+                    configuration is its own, or it cannot satisfy a declared
+                    storage role. A machine that runs with the wrong
+                    configuration can do damage that a reboot does not undo,
+                    so init powers the machine off instead. The refusal writes
+                    its reason to the machine's own disk, and the next boot
+                    reports it here. The refusal is not always the previous
+                    boot, and the time field shows how old the refusal is.
+                    Nothing clears this field. The next refusal replaces it.
+                    An empty field means that this machine has never refused a
+                    boot, or that the role it could not satisfy was the one
+                    that holds the record.
                   properties:
                     time:
                       type: string
@@ -3587,23 +3576,21 @@ spec:
                         type: string
                         enum: ["True", "False", "Unknown"]
                         description: >-
-                          The verdict. Every condition type on a
-                          Machine states a healthy fact, so True is
-                          the good verdict for all of them. Unknown
-                          means that the operator cannot tell yet,
-                          for example when the machine's facts carry
-                          no boot record.
+                          The condition's status. Every condition type on a
+                          Machine states a healthy fact, so True is the
+                          healthy status for all of them. Unknown means that
+                          the operator cannot tell yet, for example when the
+                          machine's facts carry no boot record.
                       observedGeneration:
                         type: integer
                         format: int64
                         minimum: 0
                         description: >-
                           The metadata.generation that this condition
-                          judged. The generation counts spec edits,
-                          so this field lets a client tell a verdict
-                          on the current spec from a verdict on an
-                          earlier spec. That difference is important
-                          here, because an edit can wait for a
+                          reflects. The generation counts spec edits, so this
+                          field lets a client tell a condition on the current
+                          spec from one on an earlier spec. That difference is
+                          important here, because an edit can wait for a
                           reboot.
                       reason:
                         type: string
@@ -3647,11 +3634,10 @@ spec:
                         type: string
                         format: date-time
                         description: >-
-                          The time when the status of this condition
-                          last changed. A pass that writes the same
-                          status again does not move this time, so
-                          the field gives the length of time that
-                          this verdict has held.
+                          The time when the status of this condition last
+                          changed. A pass that writes the same status again
+                          does not move this time, so the field gives how long
+                          the condition has had this status.
                 pending:
                   type: array
                   description: >-
@@ -3697,12 +3683,11 @@ spec:
                       hash:
                         type: string
                         description: >-
-                          The staged document's identity: the value
-                          that an approve-disruption annotation names
-                          to grant this change its disruption. A
-                          requested reboot has no document, so its
-                          entry carries the running boot's identity,
-                          which spends itself the same way.
+                          The staged document's identity: the value that an
+                          approve-disruption annotation names to grant this
+                          change its disruption. A requested reboot has no
+                          document, so its entry carries the running boot's
+                          identity, which the reboot uses up the same way.
                       summary:
                         type: string
                         description: >-

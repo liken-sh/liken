@@ -44,6 +44,7 @@ resources:
   - rbac.yaml
   - operator.yaml
   - api.yaml
+  - api-authentication.yaml
 
 labels:
   - includeSelectors: false

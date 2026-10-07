@@ -47,7 +47,7 @@ lands in can change between plug events. `status.monitor` reports
 which monitor the slot feeds now, and a machine with one HDMI
 monitor never sees the difference.
 
-## The resting layer
+## How the operator applies the `spec`
 
 The operator writes a declared `volume.level` and `mute` when the
 declaration changes and when the endpoint appears: a speaker that

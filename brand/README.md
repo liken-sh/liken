@@ -80,9 +80,9 @@ shell inlines it into every page, for the reason the stylesheet
 section below gives.
 
 `data/nav.yaml` lists the entries of the top nav, in order. Every
-site renders the same labels from this file. "liken" and "releases"
-have absolute URLs, the same from every site, so a change to those
-links is one commit here.
+site renders the same labels from this file. "liken", "operators",
+and "releases" have absolute URLs, the same from every site, so a
+change to those links is one commit here.
 "repository" is site-scoped: it links to the URL the site sets in
 `params.repository`. If a site does not set `params.repository`,
 the nav omits the entry, because there is no URL to link.

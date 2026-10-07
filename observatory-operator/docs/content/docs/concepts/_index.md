@@ -1,7 +1,9 @@
 ---
 title: Concepts
-weight: 15
+weight: 5
 ---
+
+# Concepts
 
 These pages explain how the operator works: how the resources fit
 together, what a reservation does from start to end, how procedures

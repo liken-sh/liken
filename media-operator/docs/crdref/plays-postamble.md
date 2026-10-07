@@ -117,6 +117,16 @@ direction: seconds for `seek`, and chapters for `chapter`.
 | `power` | asks the unit's client to do what power does between films, then ends the run |
 | `power-off` | asks the unit's client to turn the room off, then ends the run |
 
+Two parts of the on-screen display answer these actions. When an item
+names an `appearances` file and the on-screen display is up, playing
+or paused, the display draws a row of cards above the skip control and
+the chip, one for each credited person in the scene, and `up`, `left`,
+and `right` move the focus along it. When an item's `marks` place the
+playhead inside an intro or a recap, or inside the credits before a
+post-credits scene, the display offers a skip control, and `select`
+takes it. A skip to a post-credits scene takes `select` only while the
+on-screen display is up. The display never skips on its own.
+
 `play`, `hold`, `stop`, and `power-off` set the state they name, so a
 second one changes nothing. The playback pod binds them to the names
 the kernel's `rc-cec` keymap gives a TV remote's deterministic

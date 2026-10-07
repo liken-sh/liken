@@ -3,6 +3,8 @@ title: Guides
 weight: 10
 ---
 
-The guides give the steps to install the operator, to put a
-receiver under a `Player`, and to connect a USB-CEC adapter so that
-the TV wakes with the room.
+# Guides
+
+The guides show how to install the operator, put a receiver under a
+`Player`, and connect a USB-CEC adapter so that the TV wakes with the
+room.

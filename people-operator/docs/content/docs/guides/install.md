@@ -1,8 +1,10 @@
 ---
-title: Install
+title: Install the operator
 weight: 10
 description: "Install the Person resource definition and people-operator from its kustomize base, and declare the people of a cluster. Use when a cluster needs Person objects, which other operators name as the owners of playback progress, or when a running operator must be upgraded or removed."
 ---
+
+# Install the operator
 
 Install the resource definition and the operator from the kustomize
 base in the operator's `deploy/` directory. You need `kubectl` with
@@ -55,8 +57,8 @@ spec:
   nickname: Ada
 ```
 
-`kubectl get people` lists them. Within a few seconds, the `Avatar`
-column shows `True`: the operator drew the person's initials into
+`kubectl get people` lists them. Within a few seconds, the `Picture`
+column shows `Initials`: the operator drew the person's initials into
 `status.thumbnail`. The [pictures](../pictures/) guide shows how to
 give a person a picture in place of the initials.
 

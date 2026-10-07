@@ -4,6 +4,8 @@ weight: 40
 description: "Give many applications one git repository, one directory each, as separate writeable volumes on the same ref. Use when several applications share one configuration repository and none may read another's files."
 ---
 
+# Give many applications one repository
+
 One repository can hold the configuration of many applications, one
 directory per application. Each application gets its own writeable
 volume on the same repository and the same ref, and mounts only its own

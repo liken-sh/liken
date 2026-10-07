@@ -1,5 +1,5 @@
 # The site's configuration. The site is the manual for
-# people-operator, served at people.liken.sh.
+# people-operator, served at https://liken.sh/people/.
 #
 # The theme is brand/, the brand component at the top of this
 # repository. It provides the page shell, the top nav, the mark,
@@ -16,7 +16,7 @@ markup:
   goldmark:
     renderer:
       unsafe: true
-title: people.liken.sh
+title: people-operator
 # Hugo looks for a theme by name under themesDir, and the repository
 # root holds brand/, so the site and the theme it builds with are
 # always the same commit.

@@ -1,4 +1,4 @@
-# The docs domain builds the manual for display.liken.sh, with the same
+# The docs domain builds the manual served at liken.sh/display, with the same
 # `make build` every manual runs, so the root Makefile and CI build each
 # manual one way. The build generates a reference page for each CRD, the
 # Display and the Layout, through crdref, and the route reference from

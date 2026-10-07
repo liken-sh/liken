@@ -36,7 +36,7 @@ allocates it, and WirePlumber registers the A2DP endpoint with
 claims it exactly like an HDMI output.
 
 The operator is one of `liken`'s
-[hardware operators](https://liken.sh/docs/concepts/hardware-operators/):
+[extension operators for claiming hardware](https://liken.sh/docs/concepts/claiming-hardware/):
 optional workloads, installed like any other manifest, that a
 cluster runs fine without. What it needs from `liken` is the card.
 `liken`'s own DRA driver publishes the raw hardware. This operator

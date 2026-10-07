@@ -4,6 +4,8 @@ title: The guider
 weight: 60
 ---
 
+# The guider
+
 A `Guider` runs PHD2 for its `Telescope`, with the camera of the
 `OpticalTrain` it names. `StartGuider` starts PHD2, connects it to the
 camera and the mount, and leaves it idle. The operator never loops,

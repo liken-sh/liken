@@ -5,6 +5,6 @@ weight: 5
 
 # Concepts
 
-This section describes the model behind `liken`. The guides give the
-steps for each task. This section explains the system that those
-steps operate, so that each step has an evident reason.
+These pages explain how `liken` works and what you can add to it.
+The guides give the steps for each task, and these pages give the
+reasons behind those steps.

@@ -1,7 +1,7 @@
 ---
 title: Declare a library
 weight: 20
-description: "Declare a Library on one directory of one claim, read what it reports, and learn what its namespace determines. Use when adding a movies, series, or music root to a namespace, or when a title will not play."
+description: "Declare a Library on one directory of one claim, read what it reports, and learn what its namespace determines. Use when adding a movies, series, or franchises root to a namespace, or when a title will not play."
 ---
 
 # Declare a library

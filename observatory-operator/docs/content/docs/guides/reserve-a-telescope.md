@@ -4,6 +4,8 @@ weight: 40
 description: "Reserve a telescope for a night with a Reservation, watch it start the equipment, connect KStars and Ekos to its INDI server, expose the server and PHD2 outside the cluster, and end the night safely. Use when someone wants to observe, when KStars cannot reach the telescope, or when deciding how to expose INDI from a cluster."
 ---
 
+# Reserve a telescope
+
 A `Reservation` gives one person, or one program, the use of one
 telescope for a time. While it is active, the operator runs the
 telescope's equipment. When it ends, the operator parks and powers

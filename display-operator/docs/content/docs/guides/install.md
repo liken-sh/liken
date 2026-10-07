@@ -34,10 +34,10 @@ device. Look for a `displayNode` attribute in that node's
     kubectl get resourceslice <node>-liken.sh -o yaml
 
 If no device has `displayNode`, the operator's own claim will
-park and its pod will stay `Pending`. The
-[hardware operators](https://liken.sh/docs/concepts/hardware-operators/)
-page describes this layering: `liken` publishes the card, and this
-operator refines it into outputs.
+park and its pod will stay `Pending`.
+[Claiming hardware](https://liken.sh/docs/concepts/claiming-hardware/)
+explains why: `liken` publishes the whole card, and this operator
+claims it and publishes each of its outputs.
 
 ## 2. The device classes
 
@@ -116,16 +116,23 @@ selector that reads a missing attribute fails the whole allocation.
 ## 3. Apply the manifests
 
 This site serves the repository's [`deploy/`](/deploy/kustomization.yaml)
-directory as raw YAML, so the install needs no clone. Five files
+directory as raw YAML, so the install needs no clone. Seven files
 are the rest of the install, and `api.yaml` is the one that runs
 once per cluster rather than once per node:
 
     kubectl apply -n liken-system \
       -f https://liken.sh/display/deploy/displays.yaml \
+      -f https://liken.sh/display/deploy/layouts.yaml \
       -f https://liken.sh/display/deploy/deviceclasses.yaml \
       -f https://liken.sh/display/deploy/rbac.yaml \
       -f https://liken.sh/display/deploy/operator.yaml \
       -f https://liken.sh/display/deploy/api.yaml
+
+`api.yaml` binds one `Role` in `kube-system`, which `-n` would
+refuse, so that binding is in a file of its own. Apply it with no
+`-n`:
+
+    kubectl apply -f https://liken.sh/display/deploy/api-authentication.yaml
 
 `api.yaml` holds the `display-api` `Deployment`, its `Service`, and
 its RBAC. It answers the routes the [API reference](/docs/reference/api/)
@@ -136,10 +143,15 @@ operator creates a [`Display`](/docs/reference/displays/) for every
 monitor it probes, and it cannot do that on a cluster where the kind
 is missing.
 
+`layouts.yaml` is the `Layout` `CustomResourceDefinition`. A
+[`Layout`](/docs/reference/layouts/) divides a screen into regions,
+as the [layout guide](/docs/guides/layout/) shows. The operator reads
+it by the name a `Display` states and watches the kind for changes.
+
 The `-n` flag places the `ServiceAccount` and the `DaemonSet` in
 `liken-system`, the namespace every `liken` cluster has. The
 `ClusterRoleBinding`'s subject names that namespace, so the binding
-only works there. `DeviceClass` and the `CustomResourceDefinition`
+only works there. `DeviceClass` and the `CustomResourceDefinitions`
 are cluster-scoped, so the flag leaves them alone.
 
 For GitOps, point a `Kustomization` at your specific classes and the
@@ -147,14 +159,28 @@ same URLs. `kustomize` takes a raw YAML URL as a resource:
 
     apiVersion: kustomize.config.k8s.io/v1beta1
     kind: Kustomization
-    namespace: liken-system
+    transformers:
+      - |-
+        apiVersion: builtin
+        kind: NamespaceTransformer
+        metadata:
+          name: liken-system
+          namespace: liken-system
+        unsetOnly: true
     resources:
       - classes.yaml
       - https://liken.sh/display/deploy/displays.yaml
+      - https://liken.sh/display/deploy/layouts.yaml
       - https://liken.sh/display/deploy/deviceclasses.yaml
       - https://liken.sh/display/deploy/rbac.yaml
       - https://liken.sh/display/deploy/operator.yaml
       - https://liken.sh/display/deploy/api.yaml
+      - https://liken.sh/display/deploy/api-authentication.yaml
+
+The transformer sets `liken-system` only on the objects that state no
+namespace, so the binding in `api-authentication.yaml` stays in
+`kube-system`. A top-level `namespace:` field would move it, and the
+API couldn't read the client certificate authority.
 
 A clone works too: `kubectl apply -k display-operator/deploy/` from the
 repository applies the same base through
@@ -283,7 +309,16 @@ resources:
 images:
   - name: ghcr.io/liken-sh/display-operator
     newTag: 2026.09.03-007-dev-003-abcdef01
+  - name: ghcr.io/liken-sh/display-capture
+    newTag: 2026.09.03-007-dev-003-abcdef01
+  - name: ghcr.io/liken-sh/display-api
+    newTag: 2026.09.03-007-dev-003-abcdef01
 ```
+
+The operator `DaemonSet` runs `display-operator` and `display-capture`,
+and the `display-api` `Deployment` runs `display-api`. Pin all three
+images to the same version. A pin on one image leaves the others on
+`:latest`.
 
 A git fetch by sha needs all forty characters; the eight in the
 version are not enough. The summary of the CI run for that commit
@@ -303,6 +338,7 @@ published one:
       -f https://liken.sh/display/deploy/api.yaml \
       -f https://liken.sh/display/deploy/rbac.yaml \
       -f https://liken.sh/display/deploy/operator.yaml
+    kubectl delete -f https://liken.sh/display/deploy/api-authentication.yaml
     kubectl delete resourceslice <node>-display.liken.sh
 
 The API's own `Secret`s and `ConfigMap` outlive the `Deployment`.
@@ -321,3 +357,7 @@ including the brightness a standing override captured. A panel an
 override darkened then has nothing left to restore it. Lift every
 override, and confirm every panel shows what you expect, before you
 delete `displays.yaml`.
+
+Deleting `layouts.yaml` deletes every `Layout` with it, and the
+arrangements they hold. Delete it after the last screen that names a
+`Layout` no longer needs one.

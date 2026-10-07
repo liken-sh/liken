@@ -5,6 +5,8 @@ description: "Install git-csi-driver from its kustomize base and set the plugin'
 
 This skill is the guide at https://liken.sh/git/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
+# Install the driver
+
 Install the driver from the kustomize base in the driver's `deploy/`
 directory. You need a cluster with standard CSI plumbing, `kubectl`
 with cluster-admin rights, and the `liken-system` namespace.

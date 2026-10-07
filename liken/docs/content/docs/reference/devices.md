@@ -28,7 +28,7 @@ Usually a cluster administrator installs a DRA driver as a DaemonSet.
 system is the only thing that identifies the hardware before other
 software starts.
 
-The [hardware operators](/docs/concepts/extension-operators/#the-hardware-operators) are
+The [device operators](/docs/concepts/claiming-hardware/) are
 separate DRA drivers that you install as workloads. Each one
 publishes a kind of device this driver does not, such as the
 controllers paired to a Bluetooth radio.
@@ -138,7 +138,7 @@ measure, for example the codecs that a GPU can encode. To read those
 facts, you must run libva and a vendor driver, which the image does
 not contain. A pod that holds a claim on the render node can measure
 them for itself, so the operating system does not publish them.
-media-operator measures them, and publishes them as devices of its
+[`media-operator`](https://liken.sh/media/) measures them, and publishes them as devices of its
 own driver, `media.liken.sh`, that pair with the render node through
 `resource.kubernetes.io/pciBusID`.
 

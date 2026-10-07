@@ -1,8 +1,10 @@
 ---
-title: A named cache
+title: Give pods a per-node cache
 weight: 30
 description: "Give pods a named per-node cache directory that a pod on a new node fills again. Use when a workload makes items it can make again, such as decoded art or fetched files."
 ---
+
+# Give pods a per-node cache
 
 A named cache is a directory that one or more pods fill with items they
 can make again, such as decoded art or fetched files. When a copy lacks

@@ -6,7 +6,9 @@ toc: true
 
 <!-- Generated from deploy/reservations-crd.yaml by crdref. Do not edit. -->
 
-A `Reservation` gives one holder the use of one `Telescope`. Activation runs when `spec.start` arrives, or at once with no start. Deactivation runs when `spec.end` arrives, or when the `Reservation` is deleted, and it parks the mount, warms the cameras, and closes the dust caps before it stops the pods. `status.steps` lists every step and its state.
+# `Reservation`
+
+A `Reservation` gives one holder the use of one `Telescope`. Activation runs when `spec.start` arrives, or at once with no start. Deactivation runs when `spec.end` arrives, or when the `Reservation` is deleted, and it runs the deactivation procedures, such as parking the mount, warming the cameras, and closing the dust caps, before it stops the pods. `status.steps` lists every step and its state.
 
 ## spec
 
@@ -77,7 +79,7 @@ One condition, in the shape of `metav1.Condition`.
 | --- | --- | --- | --- |
 | <span id="statusconditions--type"></span>`type` | string | yes | The condition's name, such as `Ready`. |
 | <span id="statusconditions--status"></span>`status` | string | yes | Whether the condition holds: `True`, `False`, or `Unknown`. One of: `True`, `False`, `Unknown`. |
-| <span id="statusconditions--observedgeneration"></span>`observedGeneration` | integer | no | The `metadata.generation` of the spec that the condition judged. |
+| <span id="statusconditions--observedgeneration"></span>`observedGeneration` | integer | no | The `metadata.generation` of the spec that the condition reflects. |
 | <span id="statusconditions--reason"></span>`reason` | string | yes | One word in CamelCase for the cause. |
 | <span id="statusconditions--message"></span>`message` | string | yes | The cause, for a person to read. It can be empty. |
 | <span id="statusconditions--lasttransitiontime"></span>`lastTransitionTime` | string | yes | When `status` last changed. A write with the same status keeps this time. |

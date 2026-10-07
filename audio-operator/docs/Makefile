@@ -1,5 +1,5 @@
-# The docs domain builds the manual for audio.liken.sh, with the
-# same `make build` every manual runs, so the root Makefile and CI
+# The docs domain builds the manual served at liken.sh/audio, with
+# the same `make build` every manual runs, so the root Makefile and CI
 # build each manual one way. The build generates two reference pages,
 # for the Sink and Source CRDs, through crdref, and the route
 # reference from the API's own OpenAPI document, through apiref. Both

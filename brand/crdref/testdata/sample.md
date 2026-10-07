@@ -6,6 +6,8 @@ toc: true
 
 <!-- Generated from testdata/sample-crd.yaml by crdref. Do not edit. -->
 
+# `Widget`
+
 A Widget describes one widget.
 
 ## spec

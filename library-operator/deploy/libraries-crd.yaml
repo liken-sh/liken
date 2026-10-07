@@ -304,7 +304,7 @@ spec:
                     enabled:
                       type: boolean
                       default: false
-                      description: "Off by default, because a first pass is hours of CPU for a library of any size. The pass reads the feature of every title end to end and writes a directory of sheets beside each feature. It reads no trailer, extra, sample, or theme. Turned on, each Job of this library writes the gap as a work list onto the volume when it ends, and the operator then starts a trickplay worker Job. The worker holds no catalog, so no walk or webhook rescan waits for it. It works through the list one feature at a time and asks the operator to rescan each title's folder when the title is done, so the catalog shows the sheets within seconds."
+                      description: "Off by default, because a first pass is hours of CPU for a library of any size. The pass reads the feature of every title end to end and writes a directory of sheets beside each feature. It reads no trailer, extra, sample, or theme. Turned on, each Job of this library writes the features that still need sheets as a work list onto the volume when it ends, and the operator then starts a trickplay worker Job. The worker holds no catalog, so no walk or webhook rescan waits for it. It works through the list one feature at a time and asks the operator to rescan each title's folder when the title is done, so the catalog shows the sheets within seconds."
                     gpuResourceClaimTemplate:
                       type: string
                       minLength: 1
@@ -323,7 +323,7 @@ spec:
                     enabled:
                       type: boolean
                       default: false
-                      description: "Off by default, because every title pulls a video file of tens of megabytes onto the library volume. Turned on, the Job of this library runs a trailer-files container, which pulls one trailer per title: the highest-scored trailer whose site it can fetch from, at the tallest height the title's own feature allows, remuxed and checked before it lands under the title's trailers folder. The container starts no new title after fifteen minutes of one run, and the next Job continues the gap."
+                      description: "Off by default, because every title pulls a video file of tens of megabytes onto the library volume. Turned on, the Job of this library runs a trailer-files container, which pulls one trailer per title: the highest-scored trailer whose site it can fetch from, at the tallest height the title's own feature allows, remuxed and checked before it lands under the title's trailers folder. The container starts no new title after fifteen minutes of one run, and the next Job continues with the titles that remain."
                 appearances:
                   type: object
                   default: {}
@@ -332,7 +332,7 @@ spec:
                     enabled:
                       type: boolean
                       default: false
-                      description: "Off by default, because a first pass decodes every frame of every feature in the library, which took 1.5 to 6 minutes for a film on a laptop GPU in the measurements of plan 75, and takes longer in software. A feature is in the gap when the probe gave it a length and its title credits at least one actor with a headshot. An episode takes its series' cast. Turned on, each Job of this library writes the gap as a work list onto the volume when it ends, and the operator then starts an appearances worker Job. The worker holds no catalog, so no walk or webhook rescan waits for it. It finds and embeds the faces of one feature at a time, matches them with the cast, writes the answer and the attempt to the ledger, and asks the operator to rescan each title's folder when the title is done. A found answer stands until the file at its path is replaced."
+                      description: "Off by default, because a first pass decodes every frame of every feature in the library, which took 1.5 to 6 minutes for a film on a laptop GPU in the measurements of plan 75, and takes longer in software. A feature needs this fact when the probe gave it a length and its title credits at least one actor with a headshot. An episode takes its series' cast. Turned on, each Job of this library writes the features that still need this fact as a work list onto the volume when it ends, and the operator then starts an appearances worker Job. The worker holds no catalog, so no walk or webhook rescan waits for it. It finds and embeds the faces of one feature at a time, matches them with the cast, writes the answer and the attempt to the ledger, and asks the operator to rescan each title's folder when the title is done. A result stays until the file at its path is replaced."
                     gpuResourceClaimTemplate:
                       type: string
                       minLength: 1
@@ -372,12 +372,11 @@ spec:
                     format: date-time
                     maxLength: 30
                     description: >-
-                      The time to ask again from, as RFC 3339. A fact
-                      reopens its gap for the titles it attempted
-                      before this time. The scan key asks for one full
-                      walk, answered by a walk that starts at or after
-                      this time. A time that has not come yet waits,
-                      and the work runs once when it arrives.
+                      The time to ask again from, as RFC 3339. A fact asks
+                      again for the titles it attempted before this time. The
+                      scan key asks for one full walk, answered by a walk that
+                      starts at or after this time. A time that has not come
+                      yet waits, and the work runs once when it arrives.
                   x-kubernetes-validations:
                     - rule: >-
                         self.all(fact, fact in ['probe', 'arrival', 'trickplay',
@@ -394,17 +393,16 @@ spec:
                         every key of spec.refresh must name a fact the
                         operator runs, or scan for a full walk
                   description: >-
-                    One time per refresh target. A key named for a fact,
-                    by the names status.gaps uses, reopens that fact's
-                    gap: an attempt whose time is before the refresh does
-                    not count, so the title is in the gap again although
-                    its file and its rows are there, the fact asks a
-                    provider again, and it rewrites its own files and
-                    rows in place. The key scan asks for one full walk
-                    of the library, and a walk that starts at or after
-                    the time answers it. Nothing is deleted, and a
-                    target this map does not name is untouched. A time
-                    that has not come yet waits, and the work runs once
+                    One time per refresh target. A key named for a fact, by
+                    the names status.gaps uses, makes that fact ask again: an
+                    attempt whose time is before the refresh does not count,
+                    so the title needs the fact again although its file and
+                    its rows are there, the fact asks a provider again, and it
+                    rewrites its own files and rows in place. The key scan
+                    asks for one full walk of the library, and a walk that
+                    starts at or after the time answers it. Nothing is
+                    deleted, and a target this map does not name is untouched.
+                    A time that has not come yet waits, and the work runs once
                     when it arrives.
             status:
               type: object
@@ -642,42 +640,38 @@ spec:
                         type: string
                         enum: ["True", "False", "Unknown"]
                         description: >-
-                          The verdict. Bound and Ready state a healthy
-                          fact, so True is the good verdict for both.
-                          Departing states work in progress, so its
-                          True says the teardown is running, and its
-                          reason says how far. Unknown means the
-                          operator cannot tell yet.
+                          The condition's status. For Bound and Ready, True is
+                          the healthy status. For Departing, True means the
+                          teardown is running, and the reason says how far it
+                          has got. Unknown means the operator cannot tell yet.
                       observedGeneration:
                         type: integer
                         format: int64
                         minimum: 0
                         description: >-
-                          The metadata.generation this condition
-                          judged. The generation counts spec edits, so
-                          a reader can tell a verdict on the spec as
-                          it stands from a verdict on an earlier spec.
+                          The metadata.generation that this condition
+                          reflects. The generation counts spec edits, so a
+                          reader can tell a condition on the current spec from
+                          one on an earlier spec.
                       reason:
                         type: string
                         maxLength: 1024
                         minLength: 1
                         pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
                         description: >-
-                          One CamelCase word for why the condition
-                          holds this verdict, meant for a program to
-                          match on.
+                          One CamelCase word for why the condition has this
+                          status, for a program to match on.
                       message:
                         type: string
                         maxLength: 32768
                         description: >-
-                          The same answer in a sentence a person
-                          reads, such as the claim that is not bound
-                          or the container that will not start.
+                          The same reason, as a sentence for a person to read,
+                          such as the claim that is not bound or the container
+                          that will not start.
                       lastTransitionTime:
                         type: string
                         format: date-time
                         description: >-
-                          When the verdict last changed. It moves only
-                          when the status flips, not on every write,
-                          so it answers how long a library has been
+                          When the status last changed. It does not move on
+                          every write, so it shows how long a library has been
                           Ready.

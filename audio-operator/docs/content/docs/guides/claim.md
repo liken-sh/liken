@@ -30,7 +30,7 @@ Each device is one PCM device of the card, with the attached
 monitor's facts as attributes. A playback endpoint has the
 `sink` attribute. Write a CEL selector against them. If the Dynamic
 Resource Allocation (DRA) objects are new to you, read
-[How the pieces fit](/docs/guides/#how-the-pieces-fit) first. Four
+[How a claim reaches your pod](/docs/concepts/how-the-pieces-fit/) first. Four
 useful forms:
 
     # by name, the same name kubectl get sinks shows
@@ -227,10 +227,10 @@ in the class when every workload through it does.
 
 The switch takes a second or two, and the pod's start waits for
 it. The speaker's sink arrives at unity volume on every prepare, so
-set loudness in your player's own stream volume. The level the
-speaker itself rests at is declared on its `Sink`, which
+set loudness in your player's own stream volume. The speaker's own
+default level is declared on its `Sink`, as
 [Set endpoint volume and controls](/docs/guides/rest/) shows. A codec
-declared there is the resting choice, and a claim's own parameter
+declared there is the default choice, and a claim's own parameter
 overrides it.
 
 ## Record from a source

@@ -1,8 +1,10 @@
 ---
-title: A replicated store
+title: Run a replicated store
 weight: 20
 description: "Run a replicated store as a Deployment on one per-node claim with anti-affinity across nodes and a PodDisruptionBudget. Use when several pods each hold a full copy of one data set and keep the copies in agreement over the network."
 ---
+
+# Run a replicated store
 
 A replicated store is several pods that each hold a full copy of one
 data set and keep the copies in agreement over the network. Each pod

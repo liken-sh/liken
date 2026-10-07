@@ -6,6 +6,8 @@ toc: true
 
 <!-- Generated from deploy/layouts.yaml by crdref. Do not edit. -->
 
+# `Layout`
+
 A `Layout` divides a screen into regions. Each region is a rectangle
 in fractions of the screen and a label selector, and it shows the
 window of the first pod whose labels match. A `Display` names the

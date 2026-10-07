@@ -6,6 +6,8 @@ toc: true
 
 <!-- Generated from openapi.json by apiref. Do not edit. -->
 
+# Routes
+
 The routes below are generated from the OpenAPI document `media-api`
 serves at `/v1/media/openapi.json`. The API renders that document
 from its router, so this page lists every route the program serves.

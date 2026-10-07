@@ -1,6 +1,6 @@
 ---
 name: libraries
-description: "Declare a Library on one directory of one claim, read what it reports, and learn what its namespace determines. Use when adding a movies, series, or music root to a namespace, or when a title will not play."
+description: "Declare a Library on one directory of one claim, read what it reports, and learn what its namespace determines. Use when adding a movies, series, or franchises root to a namespace, or when a title will not play."
 ---
 
 This skill is the guide at https://liken.sh/library/docs/guides/libraries/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.

@@ -3,6 +3,8 @@ title: Drivers and images
 weight: 15
 ---
 
+# Drivers and images
+
 A device names its INDI driver in `spec.driver.name`, and the
 operator runs the driver from an image that the `indi` build
 publishes on `ghcr.io/liken-sh`. Each operator build pins the tag of

@@ -208,6 +208,34 @@ func TestGenerateTitlesAndWeightsThePage(t *testing.T) {
 	}
 }
 
+// The page template prints no heading of its own, so the page names
+// the kind it documents in its first heading, in the code face like
+// every kind in the prose. A Title changes the sidebar's label, and
+// the heading stays the kind.
+func TestGenerateHeadsThePageWithTheKind(t *testing.T) {
+	crd, err := os.ReadFile("testdata/sample-crd.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		opts Options
+	}{
+		{"defaults", Options{}},
+		{"title", Options{Title: "Widgets"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := Generate(crd, "testdata/sample-crd.yaml", tc.opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(got), "-->\n\n# `Widget`\n\n") {
+				t.Errorf("the page does not open with the kind as its heading:\n%s", string(got))
+			}
+		})
+	}
+}
+
 func TestGenerateRefusesANonCRD(t *testing.T) {
 	_, err := Generate([]byte("apiVersion: v1\nkind: ConfigMap\n"), "x.yaml", Options{})
 	if err == nil {

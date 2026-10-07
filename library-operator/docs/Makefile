@@ -1,4 +1,4 @@
-# The docs domain builds the manual for library.liken.sh. The
+# The docs domain builds the manual for liken.sh/library/. The
 # reference pages are generated, never edited: crdref, the generator
 # the brand component publishes, renders one page from each CRD
 # schema in deploy/, so a schema edit is a manual edit. GENERATED

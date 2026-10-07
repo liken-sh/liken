@@ -1,68 +1,77 @@
 ---
-title: media.liken.sh
+title: media-operator
 ---
 
-# `media.liken.sh`
+# `media-operator`
 
-`media-operator` is a Kubernetes operator for
-the routing and control of media playback in a cluster. It runs on a
-[`liken`](https://liken.sh/docs/) cluster above the hardware
-operators: the [`display-operator`](https://liken.sh/display/),
-[`audio-operator`](https://liken.sh/audio/), and
-[`bluetooth-operator`](https://liken.sh/bluetooth/) publish each
-display, speaker, and controller as a claimable device, and this
-operator declares what those devices form together.
+`media-operator` plays films, series, and music on the screens and
+speakers of a [`liken`](https://liken.sh/docs/) cluster, and lets a
+remote control them. You declare each unit of equipment, such as a
+TV with its speakers, as a `Player`, and you start playback by
+creating a `Play` on it. A `Remote` connects a controller to the
+players it drives.
 
-The API is five resources. A `Player` is one unit of equipment in
-one place: a lone speaker, a TV with its surround pair, a gaming TV
-with its controllers. A `Play` is one run of media
-on a player, with a lifecycle analogous to a `Job`: a film, an
-album, or a season of episodes, played in order and run to
-completion. Create it to start, delete it to stop, and
-`kubectl get plays` lists what plays right now. A `Remote` is one
-physical controller, bound to the players it drives. A `Keymap` maps
-one controller model's buttons to named media actions. A fifth,
-`MediaPreferences`, holds one cluster-wide default for audio and
-subtitle languages.
+Things you can run this way:
 
-The operator reconciles a `Play` into one playback pod beside the
-hardware, running [`mpv`](https://mpv.io/) under a thin supervisor,
-with every device claim, toleration, and socket built from the
-`Player` spec. Each `Remote` has its own pod, which publishes
-button events to the cluster's [message bus](/docs/reference/bus/),
-and the playback pod applies the bindings. Between runs, each
-`Player`'s idle pod holds its display: it shows a clock and the
-unit's name and fades them after minutes of no activity. After
-longer, the operator darkens the panel through the display layer's
-own resource for the screen.
-
-Media you can run this way:
-
-* a film to a TV with its surround pair, the picture on the claimed
-  display and the sound on the claimed sinks,
-* an album to a lone speaker,
-* a season of episodes, played in order and run to completion,
-* any `https://` stream, `nfs://` export, or `claim://` volume in the
-  `Play`'s namespace, named by URI in the `Play`.
+* a film on a TV with a surround pair, the picture on the TV and the
+  sound on the speakers,
+* an album on a lone speaker,
+* a season of episodes, played in order to the end,
+* any `https://` stream, `nfs://` export, `claim://` volume in the
+  `Play`'s namespace, or a `pattern://` test pattern that the player
+  image carries.
 
 Start here:
 
 * [Install the operator](/docs/guides/install/). The install applies
-  the manifests this site serves at
-  [`/deploy/`](/deploy/kustomization.yaml), so it needs no clone.
-* [The message bus](/docs/reference/bus/): every topic the operator,
-  the pods, and your own programs share.
-* [Reference](/docs/reference/): each resource, its fields, and the
-  bus topics it speaks on.
+  the manifests that this site serves at
+  [`/deploy/`](/deploy/kustomization.yaml), so you don't need a clone.
+* [Declare a `Player`](/docs/guides/declare-a-player/) for a screen
+  and its speakers, and prove that it plays.
+* [Map a new controller](/docs/guides/mapping-a-controller/) when its
+  buttons do the wrong thing.
+* [Reference](/docs/reference/): each resource, its fields, and its
+  topics on the message bus.
 
-The operator publishes no devices of its own. A `Player` selects
-devices out of what the hardware operators publish, with the same
-[CEL](https://kubernetes.io/docs/reference/using-api/cel/) selectors
-a hand-written `ResourceClaim` would use, and the operator writes
-the claims itself: one long-lived claim for each `Player`'s idle
-display, and one claim per run for what a `Play` needs. A cluster that never installs
-this operator runs unchanged. Media library management is a separate
-concern, and this project does none of it.
+## How it works
+
+The API has five resources:
+
+* A `Player` is one unit of equipment in one place: a lone speaker, a TV with its
+  own speakers, or a TV with a receiver. It selects its screen,
+  speakers, and GPU with the same
+  [CEL](https://kubernetes.io/docs/reference/using-api/cel/) selectors
+  that a hand-written `ResourceClaim` uses.
+* A `Play` is one run of media on a player, like a `Job`: a film, an
+  album, or a season. Create it to start, delete it to stop, and
+  `kubectl get plays` lists what's playing now.
+* A `Remote` is one physical controller, bound to the players it
+  drives.
+* A `Keymap` maps one controller model's buttons to media actions.
+* `MediaPreferences` holds the cluster's default audio and subtitle
+  languages.
+
+For each `Play`, the operator starts one pod that runs
+[`mpv`](https://mpv.io/), with claims on the `Player`'s devices. It
+claims the speakers and the other devices only while the `Play` runs,
+so other workloads can use them in between. Between plays, each
+`Player`'s idle pod keeps the screen: it shows a clock and the
+player's name, and fades them after a few minutes with no activity.
+You can also have the operator turn the panel off after longer, when
+`display-operator` serves the screen.
+
+Each `Remote` has its own pod, which sends button presses to the
+cluster's [message bus](/docs/reference/bus/), and the playback pod
+acts on them. Your own programs can use the same bus. The operator
+also ships a capabilities agent, which publishes what each GPU can
+decode, encode, and scale, as `media.liken.sh` devices, so a pod can
+claim a GPU that decodes 10-bit HEVC, for example.
+
+`media-operator` is one of the extension operators for
+[running a home theater](https://liken.sh/docs/concepts/running-a-home-theater/).
+It plays what you name in a `Play`.
+[`library-operator`](https://liken.sh/library/) adds a catalog of
+your films and series, and a browser on the screen to pick from it.
 
 * [The source](https://github.com/liken-sh/liken/tree/main/media-operator)
 * [The `liken` manual](https://liken.sh/docs/)

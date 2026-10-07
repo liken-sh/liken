@@ -11,7 +11,7 @@ and a USB adapter that one pod holds alone. No step here needs a
 privileged pod or a host path.
 
 [Devices](/docs/reference/devices/) describes what `liken` publishes and
-why. The [hardware operators](/docs/concepts/extension-operators/#the-hardware-operators)
+why. The [device operators](/docs/concepts/claiming-hardware/)
 publish devices the operating system does not: paired Bluetooth
 controllers, monitor outputs, and audio outputs.
 

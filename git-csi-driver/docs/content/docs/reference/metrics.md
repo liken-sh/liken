@@ -3,6 +3,8 @@ title: What the driver reports
 weight: 30
 ---
 
+# What the driver reports
+
 The driver serves its metrics at `/metrics` on the port named
 `metrics`, `9200` by default, on both the node plugin and the
 controller. The base in `deploy/` needs no Prometheus and applies

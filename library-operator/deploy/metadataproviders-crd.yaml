@@ -164,7 +164,7 @@ spec:
                   description: "The account is with IntroDB, a community database of the intro, recap, credits, and post-credits spans of movies and episodes. It provides only the marks fact, finds a work by its IMDb id, and needs no account. The block is empty, and its presence says that the operator may ask IntroDB."
                 imdb:
                   type: object
-                  description: "The account is with IMDb's published datasets, which serve the rating.imdb fact for movies, series, and episodes, and the credits fact for movies and series, and need no account. The credits hold about nine people for each title, so the block answers them only where no source before it in a Library's sources answered. The block is empty, and its presence says that the operator may download the files. IMDb publishes the files for personal and non-commercial use, so each cluster downloads them from IMDb. An enricher reads each file once per run and keeps only the rows of the titles in its gap list. Where the cluster has a StorageClass whose provisioner is per-node.liken.sh, the operator makes the claim <provider>-datasets of 3Gi on it, and each node keeps a copy of each file there."
+                  description: "The account is with IMDb's published datasets, which serve the rating.imdb fact for movies, series, and episodes, and the credits fact for movies and series, and need no account. The credits hold about nine people for each title, so the operator uses them only where no source before this one in a Library's sources had credits. The block is empty, and its presence says that the operator may download the files. IMDb publishes the files for personal and non-commercial use, so each cluster downloads them from IMDb. An enricher reads each file once per run and keeps only the rows of the titles in its gap list. Where the cluster has a StorageClass whose provisioner is per-node.liken.sh, the operator makes the claim <provider>-datasets of 3Gi on it, and each node keeps a copy of each file there."
                 facts:
                   type: array
                   x-kubernetes-list-type: atomic
@@ -274,30 +274,31 @@ spec:
                         type: string
                         enum: ["True", "False", "Unknown"]
                         description: >-
-                          The verdict. True is the good verdict, and
-                          Unknown means the operator cannot tell yet.
+                          The condition's status. True is the healthy status,
+                          and Unknown means the operator cannot tell yet.
                       observedGeneration:
                         type: integer
                         format: int64
                         minimum: 0
                         description: >-
-                          The metadata.generation this condition judged.
+                          The metadata.generation that this condition
+                          reflects.
                       reason:
                         type: string
                         maxLength: 1024
                         minLength: 1
                         pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
                         description: >-
-                          One CamelCase word for why the condition holds
-                          this verdict, meant for a program to match on.
+                          One CamelCase word for why the condition has this
+                          status, for a program to match on.
                       message:
                         type: string
                         maxLength: 32768
                         description: >-
-                          The same answer in a sentence a person reads.
+                          The same reason, as a sentence for a person to read.
                       lastTransitionTime:
                         type: string
                         format: date-time
                         description: >-
-                          When the verdict last changed. It moves only
-                          when the status flips.
+                          When the status last changed. A change of the reason
+                          or the message alone does not move it.

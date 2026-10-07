@@ -2,29 +2,27 @@
 title: Manual
 ---
 
-# The `display.liken.sh` manual
+# The `display-operator` manual
 
-This manual tells you how to install `display-operator` on a
-[`liken`](https://liken.sh/docs/) cluster and how to put a workload's
-window on a screen. The guides give the steps. The reference
-describes the devices, their attributes, what a claim delivers, and
-the `Display` resource that carries each panel's controls.
+The guides show how to install `display-operator`, put a pod's window
+on a screen, divide a screen between several pods, and take a
+screenshot. The reference describes the devices and their attributes,
+what a claim gives a container, the `Display` resource that holds each
+panel's controls, the `Layout` resource, the HTTP API, and the
+metrics.
 
-The operator publishes each monitor output of a graphics card as a
-[Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
-device. A workload claims one through the `display-output` device
-class, the way
+A workload claims a screen the same way that
 [Give a workload a device](https://liken.sh/docs/guides/devices/)
-shows for `liken`'s own devices.
+shows for the devices that `liken` publishes, through a device class
+such as `display-output`.
 
-This site also serves the deployment manifests the guides apply, as
-raw YAML under [`/deploy/`](/deploy/kustomization.yaml). They are the
-repository's own files, published with the manual that describes
-them.
+This site also serves the manifests that the guides apply, as raw
+YAML under [`/deploy/`](/deploy/kustomization.yaml). They're the
+repository's own files.
 
-This manual is small on purpose. The
-[source](https://github.com/liken-sh/liken/tree/main/display-operator) is written
-to be read: the Go files and the manifests have comments that
-explain how the operator works. The manual tells you how to operate
-it; the [design documents](https://github.com/liken-sh/liken/tree/main/display-operator/plans)
-say why it is built the way it is.
+The manual covers how to run the operator. The
+[source](https://github.com/liken-sh/liken/tree/main/display-operator)
+explains how it works, in the comments of its Go files and manifests,
+and the
+[design documents](https://github.com/liken-sh/liken/tree/main/display-operator/plans)
+explain why it's built this way.

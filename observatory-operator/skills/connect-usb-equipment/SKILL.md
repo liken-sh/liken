@@ -5,6 +5,8 @@ description: "Give an INDI device its USB hardware: load the kernel driver on th
 
 This skill is the guide at https://liken.sh/observatory/docs/guides/connect-usb-equipment/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
+# Connect USB equipment
+
 This guide gives a device resource its real hardware. The machine
 the equipment plugs into publishes the USB device, a `DeviceClass`
 selects it, and the device's `spec.claim` claims it. During a

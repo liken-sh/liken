@@ -81,6 +81,29 @@ func TestGenerateTitlesAndWeightsThePage(t *testing.T) {
 	}
 }
 
+// The page template prints no heading of its own, so the page opens
+// with its title as its first heading.
+func TestGenerateHeadsThePageWithItsTitle(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts Options
+		want string
+	}{
+		{"defaults", Options{}, "-->\n\n# widget-api\n\n"},
+		{"title", Options{Title: "Routes"}, "-->\n\n# Routes\n\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := Generate(read(t, "testdata/sample-openapi.json"), "testdata/sample-openapi.json", tc.opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(got), tc.want) {
+				t.Errorf("the page does not open with %q:\n%s", tc.want, string(got))
+			}
+		})
+	}
+}
+
 // The real document from one of the operator manuals is the test for
 // the whole page: it holds every route, every header, and the problem
 // schema the manuals link, and it is the file the Makefile rules

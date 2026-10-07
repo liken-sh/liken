@@ -1,0 +1,26 @@
+# The one object of audio-api that lives outside liken-system: the
+# RoleBinding in kube-system that lets audio-api read the cluster's
+# client certificate authority. It is a file of its own because
+# kubectl apply -n liken-system refuses an object that states another
+# namespace, so the install guide applies this file with no -n flag.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: audio-api-authentication-reader
+  # The API server publishes the cluster's client certificate
+  # authority in the ConfigMap extension-apiserver-authentication in
+  # kube-system, and the API reads it to verify a caller's client
+  # certificate, and watches it so a rotated authority takes effect
+  # with no restart. extension-apiserver-authentication-reader is the
+  # built-in Role that grants get, list, and watch on that one object,
+  # and it is the Role every extension API server binds for the same
+  # read.
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: extension-apiserver-authentication-reader
+subjects:
+  - kind: ServiceAccount
+    name: audio-api
+    namespace: liken-system

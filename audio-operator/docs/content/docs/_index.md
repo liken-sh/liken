@@ -2,33 +2,27 @@
 title: Manual
 ---
 
-# The `audio.liken.sh` manual
+# The `audio-operator` manual
 
-This manual tells you how to install `audio-operator` on a
-[`liken`](https://liken.sh/docs/) cluster, how to play a workload's
-sound through a physical output, and how to set an output's volume,
-mute, and card controls. The guides give the steps. The reference describes the
-devices, their attributes, what a claim delivers, and the `Sink`
-and `Source` resources.
+The guides show how to install `audio-operator`, play a pod's sound
+through an output, pair a monitor's speakers with its screen, set an
+output's volume and mute, and listen to what an output plays. The
+reference describes the devices and their attributes, what a claim
+gives a container, the `Sink` and `Source` resources, and the HTTP
+API.
 
-The operator publishes each physical audio endpoint of a machine as
-a
-[Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
-device, and as a `Sink` or `Source` resource of its own. A workload
-claims one through the `audio-sink` or `audio-source` device class,
-the way
+A workload claims an output the same way that
 [Give a workload a device](https://liken.sh/docs/guides/devices/)
-shows for `liken`'s own devices.
+shows for the devices that `liken` publishes, through the
+`audio-sink` or `audio-source` device class.
 
-This site also serves the deployment manifests the guides apply, as
-raw YAML under [`/deploy/`](/deploy/kustomization.yaml). They are
-the repository's own files, published with the manual that describes
-them.
+This site also serves the manifests that the guides apply, as raw
+YAML under [`/deploy/`](/deploy/kustomization.yaml). They're the
+repository's own files.
 
-This manual is small on purpose. The
-[source](https://github.com/liken-sh/liken/tree/main/audio-operator) is written
-to be read: the Go files and the manifests have comments that
-explain how the operator works. The manual tells you how to operate
-it; the
+The manual covers how to run the operator. The
+[source](https://github.com/liken-sh/liken/tree/main/audio-operator)
+explains how it works, in the comments of its Go files and manifests,
+and the
 [design documents](https://github.com/liken-sh/liken/tree/main/audio-operator/plans)
-say why it is built the way it is.
+explain why it's built this way.

@@ -5,20 +5,24 @@ weight: 20
 
 # Reference
 
-The reference describes each resource this operator serves. Its
-pages generate from the resource schemas, so each field's description
-is the manual for that field. [Libraries](/docs/reference/libraries/)
-is a volume of media of one kind, and what its scanner reports.
-[Catalogs](/docs/reference/catalogs/) is a namespace's shared catalog
-and the claims its agents run on.
-[Metadata providers](/docs/reference/metadataproviders/) is one
-account with one provider, and the facts it may serve.
-Three pages do not generate.
-[Franchises](/docs/reference/franchises/) is the file a person or an
-agent writes to put films and series in story order, and the schema
-that checks it. [The library bus](/docs/reference/bus/) is every topic
-this operator's pods publish and read on `media-operator`'s bus, with
-the shape of each payload, the play request a media browser of any
-make publishes included. [Metrics](/docs/reference/metrics/) is the
-Prometheus series the operator, the media browser, and the catalog's
-Corrosion agent serve, and the component that scrapes them.
+Three pages are generated from the resource schemas, so each field's
+description is the documentation for that field:
+
+* [Libraries](/docs/reference/libraries/): one directory of media of
+  one kind, and what its scan reports.
+* [Catalogs](/docs/reference/catalogs/): a namespace's shared catalog,
+  and the claims that hold its copies.
+* [Metadata providers](/docs/reference/metadataproviders/): one account
+  with one provider, and the facts it can supply.
+
+Three pages are written by hand:
+
+* [Franchises](/docs/reference/franchises/): the file that puts films
+  and series in story order, and the schema that checks it.
+* [The library bus](/docs/reference/bus/): every topic that this
+  operator's pods publish and read on `media-operator`'s message bus,
+  with the shape of each payload. That includes the play request,
+  which a media browser of any make can publish.
+* [Metrics](/docs/reference/metrics/): the Prometheus metrics that the
+  operator, the media browser, and the catalog's Corrosion agent
+  serve, and how to scrape them.

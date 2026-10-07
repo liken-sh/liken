@@ -1,8 +1,10 @@
 ---
-title: Install
+title: Install the driver
 weight: 10
 description: "Install per-node-csi-driver from its kustomize base with the per-node StorageClass, and set the plugin's flags. Use when a cluster needs one directory per node per volume."
 ---
+
+# Install the driver
 
 Install the driver from the kustomize base in the driver's `deploy/`
 directory. You need a cluster with standard CSI plumbing, `kubectl`

@@ -5,5 +5,5 @@ weight: 10
 
 # Guides
 
-The guides give the steps for each task the driver exists for, and
-show how the CSI objects fit together.
+Each guide gives the steps for one task, and shows which CSI objects
+it uses.

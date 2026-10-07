@@ -6,6 +6,8 @@ toc: true
 
 <!-- Generated from deploy/crds.yaml by crdref. Do not edit. -->
 
+# `Peripheral`
+
 A `Peripheral` is one bonded device. The controller or speaker has
 link keys for this adapter, and the object reports what the radio
 observes about it. The operator creates the object when pairing

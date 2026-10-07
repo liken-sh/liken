@@ -5,6 +5,8 @@ description: "Mount a git repository read-only, inline in a pod spec or through 
 
 This skill is the guide at https://liken.sh/git/docs/guides/read-only/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
+# Mount a repository read-only
+
 A read-only volume has two forms. The inline form is a CSI volume in
 the pod spec. It needs no `PersistentVolume` and no claim, so any pod in
 any namespace can mount any repository the node can reach. The claim

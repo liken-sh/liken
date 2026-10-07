@@ -6,6 +6,8 @@ toc: true
 
 <!-- Generated from testdata/sample-openapi.json by apiref. Do not edit. -->
 
+# widget-api
+
 `widget-api`, version `v1alpha1`, described in OpenAPI 3.1.1.
 
 Every Widget in this cluster, and the sound one makes.

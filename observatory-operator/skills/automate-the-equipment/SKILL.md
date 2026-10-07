@@ -5,6 +5,8 @@ description: "Declare what the operator does with the equipment at the start and
 
 This skill is the guide at https://liken.sh/observatory/docs/guides/automate-the-equipment/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
+# Automate the equipment
+
 Each resource can say what the operator does with its equipment. You
 write that in three fields of its spec:
 

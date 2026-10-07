@@ -6,6 +6,8 @@ toc: true
 
 <!-- Generated from deploy/catalogs-crd.yaml by crdref. Do not edit. -->
 
+# `Catalog`
+
 A `Catalog` is a namespace's shared catalog: one Corrosion cluster that
 every `Library` in the namespace writes into. Declare one `Catalog` in a
 namespace. It runs the catalog pod, the one durable member of that
@@ -119,7 +121,7 @@ The Secret in this namespace that holds a Jellyfin API key, and the key inside i
 
 ## status
 
-The cluster the Catalog stands, written only by the library operator.
+The catalog cluster that this Catalog runs. Only the library operator writes it.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -186,8 +188,8 @@ The typed observations the operator keeps on this Catalog, in the standard Kuber
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="statusconditions--type"></span>`type` | string | yes | The check this entry reports, in CamelCase. It is the key of this list. Pattern: `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`. |
-| <span id="statusconditions--status"></span>`status` | string | yes | The verdict. True is the good verdict, and Unknown means the operator cannot tell yet. One of: `True`, `False`, `Unknown`. |
-| <span id="statusconditions--observedgeneration"></span>`observedGeneration` | integer | no | The metadata.generation this condition judged. |
-| <span id="statusconditions--reason"></span>`reason` | string | no | One CamelCase word for why the condition holds this verdict, meant for a program to match on. Pattern: `^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$`. |
-| <span id="statusconditions--message"></span>`message` | string | no | The same answer in a sentence a person reads. |
-| <span id="statusconditions--lasttransitiontime"></span>`lastTransitionTime` | string | yes | When the verdict last changed. It moves only when the status flips. |
+| <span id="statusconditions--status"></span>`status` | string | yes | The condition's status. True is the healthy status, and Unknown means the operator cannot tell yet. One of: `True`, `False`, `Unknown`. |
+| <span id="statusconditions--observedgeneration"></span>`observedGeneration` | integer | no | The metadata.generation that this condition reflects. |
+| <span id="statusconditions--reason"></span>`reason` | string | no | One CamelCase word for why the condition has this status, for a program to match on. Pattern: `^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$`. |
+| <span id="statusconditions--message"></span>`message` | string | no | The same reason, as a sentence for a person to read. |
+| <span id="statusconditions--lasttransitiontime"></span>`lastTransitionTime` | string | yes | When the status last changed. A change of the reason or the message alone does not move it. |

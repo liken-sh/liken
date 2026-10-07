@@ -6,6 +6,8 @@ toc: true
 
 <!-- Generated from deploy/people-crd.yaml by crdref. Do not edit. -->
 
+# `Person`
+
 ## spec
 
 | Field | Type | Required | Description |
@@ -31,24 +33,24 @@ This person's login at an outside identity provider, as an OIDC issuer URL and s
 | --- | --- | --- | --- |
 | <span id="status--uid"></span>`uid` | integer | no | The uid in effect for this person. Nothing writes it yet. |
 | <span id="status--thumbnail"></span>`thumbnail` | string | no | This person's picture as a square JPEG, 256 by 256 pixels, in a `data:image/jpeg;base64,` URI. It is the picture that `spec.avatar` names, cropped to its centre, or this person's initials when there is no picture. A screen crops it to its own shape. |
-| <span id="status--avatar"></span>`avatar` | [object](#statusavatar) | no | What the thumbnail answers: the source, the version of the picture read there, and the check request. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | `AvatarReady` is `True` when the thumbnail answers `spec.avatar`, with the reason `Fetched`, `Baked`, `Inline`, or `Initials`. It is `False` when the picture did not read, with the reason `FetchFailed`, `BakeFailed`, `DecodeFailed`, or `UnsupportedScheme`; the last good picture then stays, or the initials show when there was none. |
+| <span id="status--avatar"></span>`avatar` | [object](#statusavatar) | no | What the thumbnail was made from: the source, the version of the picture that the operator read there, and the check request. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | `AvatarReady` is `True` when the thumbnail was made from the current `spec.avatar`, with the reason `Fetched`, `Baked`, `Inline`, or `Initials`. It is `False` when the picture did not read, with the reason `FetchFailed`, `BakeFailed`, `DecodeFailed`, or `UnsupportedScheme`; the last good picture then stays, or the initials show when there was none. |
 
 ### status.avatar
 
-What the thumbnail answers: the source, the version of the picture read there, and the check request.
+What the thumbnail was made from: the source, the version of the picture that the operator read there, and the check request.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="statusavatar--source"></span>`source` | string | no | The `spec.avatar` that the thumbnail answers. |
+| <span id="statusavatar--source"></span>`source` | string | no | The `spec.avatar` that the thumbnail was made from. |
 | <span id="statusavatar--etag"></span>`etag` | string | no | The `ETag` of the picture an HTTP source answered. The check every six hours sends it as `If-None-Match`. |
 | <span id="statusavatar--lastmodified"></span>`lastModified` | string | no | The `Last-Modified` of the picture an HTTP source answered, or the modification time of a file on NFS or a claim. |
 | <span id="statusavatar--size"></span>`size` | integer | no | The size in bytes of a file on NFS or a claim. |
-| <span id="statusavatar--checked"></span>`checked` | string | no | The value of the `people.liken.sh/check-avatar` annotation that the thumbnail answers. A new value of the annotation reads the picture again. |
+| <span id="statusavatar--checked"></span>`checked` | string | no | The value of the `people.liken.sh/check-avatar` annotation when the operator made the thumbnail. A new value of the annotation reads the picture again. |
 
 ### status.conditions[]
 
-`AvatarReady` is `True` when the thumbnail answers `spec.avatar`, with the reason `Fetched`, `Baked`, `Inline`, or `Initials`. It is `False` when the picture did not read, with the reason `FetchFailed`, `BakeFailed`, `DecodeFailed`, or `UnsupportedScheme`; the last good picture then stays, or the initials show when there was none.
+`AvatarReady` is `True` when the thumbnail was made from the current `spec.avatar`, with the reason `Fetched`, `Baked`, `Inline`, or `Initials`. It is `False` when the picture did not read, with the reason `FetchFailed`, `BakeFailed`, `DecodeFailed`, or `UnsupportedScheme`; the last good picture then stays, or the initials show when there was none.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

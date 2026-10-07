@@ -1,8 +1,7 @@
 # The site's configuration. The site is the manual for the library
-# operator, served at library.liken.sh. The hardware operators name
-# their sites after their device classes; this operator publishes no
-# devices, so the hostname names what it operates instead: the
-# media libraries of a cluster.
+# operator, served at https://liken.sh/library/. Every manual is
+# titled with its component's name, the name the rest of the project
+# uses for it.
 #
 # The theme is brand/, the brand component at the top of this
 # repository. It provides the page shell, the top nav, the mark,
@@ -19,7 +18,7 @@ markup:
   goldmark:
     renderer:
       unsafe: true
-title: library.liken.sh
+title: library-operator
 # Hugo looks for a theme by name under themesDir, and the repository
 # root holds brand/, so the site and the theme it builds with are
 # always the same commit.

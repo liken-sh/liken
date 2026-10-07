@@ -4,6 +4,8 @@ weight: 70
 description: "Find why a reservation failed or waits, from the step and the device its status names: a missing parent, two devices on one driver, a pod that stays Pending, a device that does not connect, a park that a lock refused, or a delete that does not finish. Then run the failed step again with the retry annotation. Use when a Reservation is Failed or stuck, when a device reports Error, or when a resource will not delete."
 ---
 
+# Troubleshoot
+
 Start from the reservation. Its status names the step that failed or
 waits, and the step's summary names the device:
 

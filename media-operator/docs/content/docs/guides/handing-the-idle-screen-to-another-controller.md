@@ -60,6 +60,7 @@ operator resolves the two into one name.
           address: bus.liken-system.svc:1883
           statusTopic: liken/media/players/den/den/status
           volumeTopic: liken/media/players/den/den/volume
+          powerTopic: liken/media/players/den/den/power
           commandsTopic: liken/media/players/den/den/commands
           panelTopic: liken/media/players/den/den/panel
           remotes:

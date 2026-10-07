@@ -101,10 +101,9 @@ spec:
                 displayName:
                   type: string
                   description: >-
-                    The human name of this unit, the one the idle
-                    screen and later ambient surfaces show in place of
-                    the object name, such as Studio Lab. Omit it, and
-                    the idle screen falls back to the object name.
+                    The human name of this unit, which the idle screen shows
+                    in place of the object name, such as Studio Lab. Omit it,
+                    and the idle screen falls back to the object name.
                 display:
                   type: object
                   required: [class]
@@ -245,10 +244,10 @@ spec:
                   # each unit that names it, and focus decides which one a
                   # press reaches.
                   description: >-
-                    The controllers this unit owns, each naming a
-                    Remote in the same namespace. Each Remote runs a
-                    standing pod of its own, and the Play's command
-                    sidecar reads the events every entry publishes.
+                    The controllers this unit owns, each naming a Remote in
+                    the same namespace. Each Remote runs a pod of its own, and
+                    the Play's command sidecar reads the events every entry
+                    publishes.
                   items:
                     type: object
                     required: [name]
@@ -333,31 +332,28 @@ spec:
                       format: int64
                       minimum: 0
                       description: >-
-                        Seconds of quiet before the idle screen fades to
-                        black. Zero disables the automatic fade; omit it
-                        to inherit the default MediaPreferences.
+                        Seconds with no activity before the idle screen fades
+                        to black. Zero disables the automatic fade; omit it to
+                        inherit the default MediaPreferences.
                     offAfterSeconds:
                       type: integer
                       format: int64
                       minimum: 0
                       description: >-
-                        Seconds of quiet before the panel
-                        itself goes dark, at least fadeAfterSeconds.
-                        Zero or unset means the panel never goes dark
-                        on its own. The panel goes dark only where the
-                        cluster runs a display-operator that publishes
-                        a Display for the screen.
+                        Seconds with no activity before the panel itself goes
+                        dark, at least fadeAfterSeconds. Zero or unset means
+                        the panel never goes dark on its own. The panel goes
+                        dark only where the cluster runs a display-operator
+                        that publishes a Display for the screen.
                     offMode:
                       type: string
                       enum: [backlight, power]
                       description: >-
-                        Which override the off window applies to the
-                        screen's Display. The default, backlight,
-                        holds the panel at brightness zero, which
-                        still answers DDC. Power off stops some
-                        panels from answering DDC at all; state it
-                        only for a panel that woke from it in a
-                        drill.
+                        Which override the off window applies to the screen's
+                        Display. The default, backlight, holds the panel at
+                        brightness zero, which still answers DDC. Power off
+                        stops some panels from answering DDC at all; use it
+                        only for a panel that you have seen wake from it.
             status:
               type: object
               description: >-
@@ -386,10 +382,10 @@ spec:
                 receiver:
                   type: object
                   description: >-
-                    The equipment this unit's cable lands on, matched
-                    from the machine the unit draws on and the monitor
-                    id of its screen. Absent for a unit that plays
-                    straight into its panel.
+                    The receiver that this unit's video goes into, matched
+                    from the machine the unit draws on and the monitor id of
+                    its screen. Absent for a unit that plays straight into its
+                    panel.
                   properties:
                     name:
                       type: string
@@ -397,8 +393,8 @@ spec:
                     input:
                       type: string
                       description: >-
-                        The input of that Receiver this unit's cable
-                        lands on.
+                        The input of that Receiver that this unit is connected
+                        to.
                     reachable:
                       type: string
                       description: >-
@@ -459,21 +455,19 @@ spec:
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   description: >-
-                    The unit's conditions. There is one, Screen, and it
-                    is absent until the idle claim has resolved once.
-                    True with reason Present means the screen's Display
-                    reports a panel on its connector. False with reason
-                    PanelAway means the Display reports no panel there:
-                    the monitor shows another input, the idle claim has
-                    deallocated, and the idle pod parks Pending until
-                    the panel returns. That park is by design, and an
-                    alert on Pending pods can read this reason to stay
-                    quiet for it. False with any other reason carries
-                    the Display's own reason through. Unknown with
-                    reason NoDisplay means no Display carries the
-                    remembered monitor id, and Unknown with reason
-                    NotReported means the Display carries no Connected
-                    condition. The message is the Display's own, and
+                    The unit's conditions. There is one, Screen, and it is
+                    absent until the idle claim has resolved once. True with
+                    reason Present means the screen's Display reports a panel
+                    on its connector. False with reason PanelAway means the
+                    Display reports no panel there: the monitor shows another
+                    input, the idle claim has deallocated, and the idle pod
+                    stays Pending until the panel returns. This is expected,
+                    and an alert on Pending pods can read this reason to stay
+                    quiet. False with any other reason carries the Display's
+                    own reason through. Unknown with reason NoDisplay means no
+                    Display carries the remembered monitor id, and Unknown
+                    with reason NotReported means the Display carries no
+                    Connected condition. The message is the Display's own, and
                     lastTransitionTime moves only when the status does.
                   items:
                     type: object
@@ -549,12 +543,12 @@ spec:
                       type: integer
                       format: int64
                       minimum: 0
-                      description: |-
-                        The resolved seconds of quiet before the screen
-                        fades to black. Zero means the screen never
-                        fades on its own. The client that draws holds
-                        this timer, so the field is always written: zero
-                        is a policy, and an absent field is not one.
+                      description: >-
+                        The resolved seconds of quiet before the screen fades
+                        to black. Zero means the screen never fades on its
+                        own. The client that draws holds this timer, so the
+                        operator always writes the field, and zero always
+                        means never.
                     offAfterSeconds:
                       type: integer
                       format: int64
@@ -567,12 +561,11 @@ spec:
                         is.
                     bus:
                       type: object
-                      description: |-
-                        The bus facts a delegate's client reads. With
-                        the two windows above, this block is the whole
-                        contract a delegate wires its client from. It is
-                        present under every controller but
-                        media.liken.sh/none.
+                      description: >-
+                        The bus facts a delegate's client reads. With the two
+                        windows above, this block holds everything that a
+                        delegate's client needs. It is present under every
+                        controller but media.liken.sh/none.
                       properties:
                         address:
                           type: string
@@ -581,11 +574,11 @@ spec:
                             operator itself connects to.
                         statusTopic:
                           type: string
-                          description: |-
-                            The retained topic that carries the unit's
-                            presentable state: its name, its activity,
-                            the Play it runs, and its parts. A client
-                            reads it on subscribe and asks for nothing.
+                          description: >-
+                            The retained topic that carries the state that the
+                            unit's screen shows: its name, its activity, the
+                            Play it runs, and its parts. A client reads it on
+                            subscribe and asks for nothing.
                         volumeTopic:
                           type: string
                           description: |-
@@ -618,11 +611,11 @@ spec:
                             key.
                         panelTopic:
                           type: string
-                          description: |-
-                            The retained topic a client states its panel
-                            desire on, as on or off. The client holds no
-                            API credentials, so the operator reads the
-                            desire here and overrides the screen's
+                          description: >-
+                            The retained topic on which a client publishes
+                            whether it wants the panel on or off. The client
+                            holds no API credentials, so the operator reads
+                            the desire here and overrides the screen's
                             Display.
                         powerTopic:
                           type: string

@@ -3,6 +3,8 @@ title: What the driver reports
 weight: 30
 ---
 
+# What the driver reports
+
 ## The listener
 
 The node plugin serves metrics at `/metrics` on the port named

@@ -77,9 +77,10 @@ is still there, showing its idle screen.
 Over the bus, every key a remote sends reaches the browser under the
 kernel's name, except volume, mute, and the cycle key. Those three are
 handled before they reach the browser, and the browser draws the level
-as a fading row. While the `Player`'s owner-mark topic holds a
-non-empty payload, equipment owns the room's level and draws its own
-indicator, so the browser draws no row. So a remote with a keyboard
+as a fading row. The level arrives on the `Player`'s volume topic. When
+its payload carries `"indicator": "receiver"`, the receiver draws the
+level on the TV, so the browser draws no row. A payload with no
+`indicator` field means the browser draws the row. So a remote with a keyboard
 types into search, and its home and search buttons work once a
 `Keymap` names them. The same keys reach the browser from a keyboard
 attached to the screen's machine.

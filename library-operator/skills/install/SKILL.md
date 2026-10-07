@@ -133,14 +133,29 @@ seconds. A copy that waits for the `Lease` still takes webhooks, and
 it serves each one when it leads.
 
 The `ClusterRole` is cluster-wide because a `Library` can be in any
-namespace. On this operator's own resources, its grants are read and
-status writes. On `media-operator`'s `Player` and `MediaPreferences`
-they are read, on `Play` create and patch, and on `people.liken.sh`'s
-`Person` patch, for one finalizer. On the claims, pods, `Jobs`,
-`Services`, and the one `ConfigMap` per screen namespace it owns,
-they are create and delete. On `CronJobs` the grant is delete alone,
-for the one an earlier release stood for each `Library`. That `ConfigMap` holds the
-`Person` list every screen reads.
+namespace. Its grants, by object:
+
+* This operator's own resources: read on `Library`, `Catalog`, and
+  `MetadataProvider`, status writes on all three, and `patch` on
+  `Library`, for its finalizer.
+* `media-operator`'s `Player` and `MediaPreferences`: read. `Play`:
+  read, create, and patch. `people.liken.sh`'s `Person`: read and
+  patch, for one finalizer.
+* `Secrets`: `get`, to run the reachability check of a
+  `MetadataProvider`. `Nodes`, `StorageClasses`, and
+  `ResourceClaimTemplates`: read. The grant on
+  `ResourceClaimTemplates` also deletes, for the templates an earlier
+  release created.
+* The claims, volumes, pods, and `Jobs` it owns: read, create, and
+  delete. The grant on `PersistentVolumes` is the one for volumes the
+  operator writes for a claim on a per-node class.
+* `Services` and `EndpointSlices`: read, create, and update, and
+  `Services` also delete. `ConfigMaps`: read, create, and update. The
+  `ConfigMap` of each screen namespace holds the `Person` list that
+  every screen reads.
+* `Events`: list, create, and patch.
+* `CronJobs`: delete only, to remove the `CronJob` that an earlier
+  release created for each `Library`.
 
 This site serves the same files as raw YAML, so a clone is never
 needed: [`libraries-crd.yaml`](https://liken.sh/library/deploy/libraries-crd.yaml),

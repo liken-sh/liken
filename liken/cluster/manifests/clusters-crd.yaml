@@ -709,45 +709,40 @@ spec:
                 runtime:
                   type: object
                   description: >-
-                    The discipline that the cluster applies to the k3s
-                    process, to the components inside it, and to
-                    containerd beside it. The section has one
-                    subsection for each thing that reads a setting:
-                    k3s for the process itself, kubelet for the
-                    configuration of the kubelet component that runs
-                    inside it, and containerd for the container
-                    runtime that k3s starts. The whole section is an
-                    opt-in. An unset field applies nothing, so the
-                    reader keeps its own default, and a cluster that
-                    names nothing here renders the same configuration
-                    it rendered before. Every value here is read only
-                    when the k3s process starts, so an edit converges
-                    when k3s restarts in place on each machine,
-                    sequenced through the same turns as a reboot, one
-                    leader at a time, with the machine and its pods
-                    up. containerd follows the same rule, because k3s
-                    starts containerd and stops it again.
+                    The runtime settings that the cluster applies to the k3s
+                    process, to the components inside it, and to containerd
+                    beside it. The section has one subsection for each thing
+                    that reads a setting: k3s for the process itself, kubelet
+                    for the configuration of the kubelet component that runs
+                    inside it, and containerd for the container runtime that
+                    k3s starts. The whole section is an opt-in. An unset field
+                    applies nothing, so the reader keeps its own default, and
+                    a cluster that names nothing here renders the same
+                    configuration it rendered before. Every value here is read
+                    only when the k3s process starts, so an edit converges
+                    when k3s restarts in place on each machine, sequenced
+                    through the same turns as a reboot, one leader at a time,
+                    with the machine and its pods up. containerd follows the
+                    same rule, because k3s starts containerd and stops it
+                    again.
                   properties:
                     k3s:
                       type: object
                       description: >-
-                        The runtime discipline of the k3s process
-                        itself: the Go environment that init gives it,
-                        and how much it prints. An unset field applies
-                        nothing, so k3s keeps its own default for it.
-                        The two Go fields shape only the environment
-                        that init gives to the k3s process it starts,
-                        where k3s keeps Go's own defaults: no memory
-                        ceiling, and a heap that grows to twice its
-                        live data before the collector runs. Set a
-                        field to change that trade on a small machine,
-                        where k3s is the largest resident process.
-                        containerd and the shims that k3s starts
-                        inherit that environment, because k3s is their
-                        parent. No other process reads it: not init,
-                        not the operators, and not the workloads,
-                        which get their environment from their own pod
-                        specs.
+                        The runtime settings of the k3s process itself: the Go
+                        environment that init gives it, and how much it
+                        prints. An unset field applies nothing, so k3s keeps
+                        its own default for it. The two Go fields shape only
+                        the environment that init gives to the k3s process it
+                        starts, where k3s keeps Go's own defaults: no memory
+                        ceiling, and a heap that grows to twice its live data
+                        before the collector runs. Set a field to change that
+                        trade on a small machine, where k3s is the largest
+                        resident process. containerd and the shims that k3s
+                        starts inherit that environment, because k3s is their
+                        parent. No other process reads it: not init, not the
+                        operators, and not the workloads, which get their
+                        environment from their own pod specs.
                       properties:
                         goMemoryLimit:
                           type: string
@@ -994,32 +989,28 @@ spec:
                   type: string
                   enum: [Ready, Updating, Degraded]
                   description: >-
-                    The conditions below, as one word. The system
-                    derives this value on every sweep, and never
-                    stores it as a truth of its own. Ready means that
-                    every machine is Ready. Updating means that the
-                    machines which are not Ready are all in a
-                    transition: rebooting into a change, waiting for
-                    one, or booting. This is the expected shape of a
-                    Cluster edit as it moves through the fleet.
-                    Degraded means that at least one machine is Lost,
-                    Blocked, or unhealthy in another way. This field
-                    can never truthfully show one state: lost quorum.
-                    The loss of a majority of the leaders takes the
-                    API server down with it, so no writer is left.
-                    When quorum is lost, the signal is that this
-                    status does not change any more.
+                    The conditions below, as one word. The system derives this
+                    value from the conditions on every sweep. Ready means that
+                    every machine is Ready. Updating means that the machines
+                    which are not Ready are all in a transition: rebooting
+                    into a change, waiting for one, or booting. This is the
+                    expected shape of a Cluster edit as it moves through the
+                    fleet. Degraded means that at least one machine is Lost,
+                    Blocked, or unhealthy in another way. This field can never
+                    truthfully show one state: lost quorum. The loss of a
+                    majority of the leaders takes the API server down with it,
+                    so no writer is left. When quorum is lost, the signal is
+                    that this status does not change any more.
                 observedGeneration:
                   type: integer
                   format: int64
                   minimum: 0
                   description: >-
-                    The metadata.generation of the spec that this
-                    status judged. The sweep stamps it on every write.
-                    Each condition carries the same stamp, but a
-                    client that only asks whether the sweep has seen
-                    its edit reads the stamp here, at the top of
-                    status, where Kubernetes controllers
+                    The metadata.generation of the spec that this status
+                    reflects. The sweep stamps it on every write. Each
+                    condition carries the same stamp, but a client that only
+                    asks whether the sweep has seen its edit reads the stamp
+                    here, at the top of status, where Kubernetes controllers
                     conventionally publish it.
                 conditions:
                   type: array
@@ -1057,23 +1048,21 @@ spec:
                         type: string
                         enum: ["True", "False", "Unknown"]
                         description: >-
-                          The verdict for this observation: True,
-                          False, or Unknown. A True MachinesReady means
-                          that every machine is Ready. A False
-                          Progressing means that the rollout no longer
-                          makes progress. Unknown means that the sweep
+                          The condition's status: True, False, or Unknown. A
+                          True MachinesReady means that every machine is
+                          Ready. A False Progressing means that the rollout no
+                          longer makes progress. Unknown means that the sweep
                           cannot tell.
                       observedGeneration:
                         type: integer
                         format: int64
                         minimum: 0
                         description: >-
-                          The metadata.generation of the Cluster spec
-                          that this condition judged. The generation
-                          counts spec edits, so this field lets a
-                          client tell a verdict on the current spec
-                          from a verdict on an earlier spec. That
-                          difference is important here, because an edit
+                          The metadata.generation of the Cluster spec that
+                          this condition reflects. The generation counts spec
+                          edits, so this field lets a client tell a condition
+                          on the current spec from one on an earlier spec.
+                          That difference is important here, because an edit
                           can wait for a reboot.
                       reason:
                         type: string
@@ -1101,11 +1090,10 @@ spec:
                         type: string
                         format: date-time
                         description: >-
-                          When the status field last changed value. The
-                          sweep writes this condition on every pass,
-                          but moves this time only when the status
-                          changes, so the value gives the age of the
-                          current verdict.
+                          When the status field last changed value. The sweep
+                          writes this condition on every pass, but moves this
+                          time only when the status changes, so the value
+                          gives the age of the current status.
                 machines:
                   type: object
                   description: >-
@@ -1175,10 +1163,10 @@ spec:
                       type: string
                       maxLength: 64
                       description: >-
-                        The highest version in the catalog. The sweep
-                        derives it, so the NEWEST printer column can
-                        sit next to VERSION and nobody compares
-                        versions at the terminal.
+                        The highest version in the catalog. The sweep derives
+                        it, so the NEWEST printer column can appear next to
+                        VERSION, and nobody has to compare versions at the
+                        terminal.
                     available:
                       type: string
                       maxLength: 64

@@ -4,6 +4,8 @@ weight: 50
 description: "Declare what the operator does with the equipment at the start and end of each reservation and when a condition changes: unpark and park the dome and mount, open and close the dust cap, cool and warm the camera, power devices from a switch, park on bad weather, and run a container as a Job. Use when setting up a dome or a roll-off roof, protecting equipment from weather, cooling a camera, or testing procedures against the simulators."
 ---
 
+# Automate the equipment
+
 Each resource can say what the operator does with its equipment. You
 write that in three fields of its spec:
 

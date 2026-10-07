@@ -6,7 +6,9 @@ toc: true
 
 <!-- Generated from deploy/receivers-crd.yaml by crdref. Do not edit. -->
 
-One piece of A/V equipment on the far end of a machine's cable. The resource declares the protocol that reaches it, the inputs liken machines feed, and the session that currently uses it.
+# `Receiver`
+
+An A/V receiver that a liken machine plays through. The resource declares the protocol the operator controls it with, the inputs that liken machines are connected to, and the session that uses it now.
 
 ## spec
 
@@ -266,7 +268,7 @@ What the receiver last reported, in its own units, plus the protocol's own setti
 | <span id="status--settledsettings"></span>`settledSettings` | map[string]string | no | A digest of each declared block the operator has sent, including the fields the receiver does not report, keyed by the block's path in the spec: spec.denon.settings, spec.wiim.settings, and spec.zones. After an operator restart, the operator sends a block's unreported fields again only when the block's digest differs from this one, so a restart sends nothing for a block no one changed, whatever metadata.generation says, and a new Receiver or a block edited while the operator was down sends them once. |
 | <span id="status--powergeneration"></span>`powerGeneration` | integer | no | The record an earlier operator wrote of the metadata.generation whose spec.power it settled. The operator does not read or write it, and its first status apply removes it. |
 | <span id="status--settingsgeneration"></span>`settingsGeneration` | integer | no | The record an earlier operator wrote of the metadata.generation whose declared settings it had sent. The operator reads it once, when it starts: a status that holds it and no settledSettings is from that operator, which had sent the declared blocks, so the operator records each declared block as sent and sends nothing for it. The operator does not write it, and its first status apply removes it. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Reachable is True only after a recent answered exchange with the receiver, never on an open socket alone. SettingsConfirmed is False, with reason NotConfirmed, while a declared setting or zone control has had its 3 sends at its declared value and the receiver still reports another value. Its message names each such field by its path in the spec. The condition is absent otherwise. InputSelected exists while a session stands. It is True, with reason SessionInput, while the receiver reports the session's input. It is False, with reason OtherInput, while the receiver reports another input. It is Unknown, with reason Unreachable or NoInputReported, while the operator cannot reach the receiver or the receiver has reported no input. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Reachable is True only after a recent answered exchange with the receiver, never on an open socket alone. SettingsConfirmed is False, with reason NotConfirmed, while a declared setting or zone control has had its 3 sends at its declared value and the receiver still reports another value. Its message names each such field by its path in the spec. The condition is absent otherwise. InputSelected exists while a session exists. It is True, with reason SessionInput, while the receiver reports the session's input. It is False, with reason OtherInput, while the receiver reports another input. It is Unknown, with reason Unreachable or NoInputReported, while the operator cannot reach the receiver or the receiver has reported no input. |
 
 ### status.zones.*
 
@@ -280,7 +282,7 @@ One entry per zone the receiver reported, keyed by the zone's protocol name. A s
 | <span id="statuszones--mute"></span>`mute` | boolean | no | Whether the zone last reported itself muted. |
 | <span id="statuszones--volume"></span>`volume` | string | no | The zone's volume in the receiver's own scale. A Denon counts 0 to 98 in half steps. |
 | <span id="statuszones--volumemax"></span>`volumeMax` | string | no | The last volume limit the receiver sent for this zone, in the same scale. It is what the receiver said and nothing the operator acts on: on a Denon the number moves with the volume. |
-| <span id="statuszones--sleep"></span>`sleep` | integer | no | Minutes until the zone sleeps, and zero when no sleep timer stands. |
+| <span id="statuszones--sleep"></span>`sleep` | integer | no | Minutes until the zone sleeps, and zero when no sleep timer is set. |
 
 ### status.session
 
@@ -326,13 +328,13 @@ An ask for the session's input, which the media operator writes for a press of a
 
 ### status.conditions[]
 
-Reachable is True only after a recent answered exchange with the receiver, never on an open socket alone. SettingsConfirmed is False, with reason NotConfirmed, while a declared setting or zone control has had its 3 sends at its declared value and the receiver still reports another value. Its message names each such field by its path in the spec. The condition is absent otherwise. InputSelected exists while a session stands. It is True, with reason SessionInput, while the receiver reports the session's input. It is False, with reason OtherInput, while the receiver reports another input. It is Unknown, with reason Unreachable or NoInputReported, while the operator cannot reach the receiver or the receiver has reported no input.
+Reachable is True only after a recent answered exchange with the receiver, never on an open socket alone. SettingsConfirmed is False, with reason NotConfirmed, while a declared setting or zone control has had its 3 sends at its declared value and the receiver still reports another value. Its message names each such field by its path in the spec. The condition is absent otherwise. InputSelected exists while a session exists. It is True, with reason SessionInput, while the receiver reports the session's input. It is False, with reason OtherInput, while the receiver reports another input. It is Unknown, with reason Unreachable or NoInputReported, while the operator cannot reach the receiver or the receiver has reported no input.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="statusconditions--type"></span>`type` | string | yes | The check this entry reports, in CamelCase. It is the key of this list. Pattern: `^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$`. |
-| <span id="statusconditions--status"></span>`status` | string | yes | The verdict. True is the good verdict, and Unknown means the operator cannot tell yet. One of: `True`, `False`, `Unknown`. |
-| <span id="statusconditions--observedgeneration"></span>`observedGeneration` | integer | no | The metadata.generation this condition judged. |
-| <span id="statusconditions--reason"></span>`reason` | string | no | One CamelCase word for why the condition holds this verdict, meant for a program to match on. Pattern: `^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$`. |
-| <span id="statusconditions--message"></span>`message` | string | no | The same answer in a sentence a person reads. |
-| <span id="statusconditions--lasttransitiontime"></span>`lastTransitionTime` | string | yes | When the verdict last changed. It moves only when the status flips. |
+| <span id="statusconditions--status"></span>`status` | string | yes | The condition's status. True is the healthy status, and Unknown means the operator cannot tell yet. One of: `True`, `False`, `Unknown`. |
+| <span id="statusconditions--observedgeneration"></span>`observedGeneration` | integer | no | The metadata.generation that this condition reflects. |
+| <span id="statusconditions--reason"></span>`reason` | string | no | One CamelCase word for why the condition has this status, for a program to match on. Pattern: `^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$`. |
+| <span id="statusconditions--message"></span>`message` | string | no | The same reason, as a sentence for a person to read. |
+| <span id="statusconditions--lasttransitiontime"></span>`lastTransitionTime` | string | yes | When the status last changed. A change of the reason or the message alone does not move it. |

@@ -1,4 +1,4 @@
-## The name and the resting layer
+## The name and the `spec`
 
 A `Source` is named by the same rule as a `Sink`, and its `spec`
 works the same way: the operator writes a declared `volume` and

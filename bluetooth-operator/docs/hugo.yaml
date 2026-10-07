@@ -1,9 +1,9 @@
 # The site's configuration. The look is not configured here: the
 # brand theme, brand/ at the top of the repository, provides the page
 # shell, the nav, and the stylesheet that every liken site shares, so
-# this site reads as one place with the manual at liken.sh. The site
-# is named for the operator's DRA driver, bluetooth.liken.sh, because
-# that name is the one an operator of a cluster already knows.
+# this site reads as one place with the manual at liken.sh. Every
+# manual is titled with its component's name, the name the rest of
+# the project uses for it. It is served at https://liken.sh/bluetooth/.
 baseURL: https://liken.sh/bluetooth/
 
 # The generated reference pages put an id on each field's table row,
@@ -15,7 +15,7 @@ markup:
   goldmark:
     renderer:
       unsafe: true
-title: bluetooth.liken.sh
+title: bluetooth-operator
 # Hugo looks for a theme by name under themesDir, and the repository
 # root holds brand/, so the site and the theme it builds with are
 # always the same commit.

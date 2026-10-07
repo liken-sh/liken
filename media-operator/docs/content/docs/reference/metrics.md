@@ -19,6 +19,9 @@ carries a `PodMonitor` for each of these pods, beside the base.
 
 | Component | Metric | Type | Why |
 | --- | --- | --- | --- |
+| media-operator | `media_reconcile_duration_seconds{kind}` | histogram | how long one reconcile of one kind took |
+| media-operator | `media_reconcile_errors_total{kind}` | counter | reconciles that returned an error |
+| media-operator | `media_watch_restarts_total{kind}` | counter | a watch's stream ended and the operator opened it again |
 | media-operator | `media_players{zone, state}` | gauge | idle, playing, paused |
 | media-operator | `media_playback_starts_total` | counter | plays over time |
 | media-operator | `media_playback_failures_total{reason}` | counter | the film did not start |
@@ -32,6 +35,7 @@ carries a `PodMonitor` for each of these pods, beside the base.
 | media-api | `media_api_streams_active{aspect}` | gauge | captures open now |
 | media-api | `media_api_upstream_requests_total{upstream, status}` | counter | what display-api and audio-api answered |
 | media-api | `media_api_compose_offset_seconds` | histogram | the measured header offset |
+| media-api | `media_api_compose_offset_last_seconds` | gauge | the last correction, signed: negative when the audio headers arrived first |
 | media-api | `media_api_certificate_expiry_seconds` | gauge | the serving leaf runs out |
 
 ```yaml

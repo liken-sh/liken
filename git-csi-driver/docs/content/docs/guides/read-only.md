@@ -4,6 +4,8 @@ weight: 20
 description: "Mount a git repository read-only, inline in a pod spec or through a claim, with pull on demand and webhooks. Use when a pod needs a checkout it never writes, including a checkout of a private repository."
 ---
 
+# Mount a repository read-only
+
 A read-only volume has two forms. The inline form is a CSI volume in
 the pod spec. It needs no `PersistentVolume` and no claim, so any pod in
 any namespace can mount any repository the node can reach. The claim

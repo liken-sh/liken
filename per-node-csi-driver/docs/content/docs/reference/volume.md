@@ -1,7 +1,9 @@
 ---
-title: The volume
+title: Volumes
 weight: 10
 ---
+
+# Volumes
 
 A person or an operator writes two objects. The `PersistentVolume`
 names the driver, the handle, the class, an access mode, a capacity,

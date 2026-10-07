@@ -1078,7 +1078,7 @@ spec:
                         minimum: 0
                         description: >-
                           The `metadata.generation` of the spec that the
-                          condition judged.
+                          condition reflects.
                       reason:
                         type: string
                         minLength: 1
@@ -1122,9 +1122,9 @@ spec:
                         type: string
                         format: date-time
                         description: >-
-                          The transition time of the condition that the
-                          run answers: the `lastTransitionTime` of
-                          `Active` for activation and deactivation.
+                          The transition time of the condition that started
+                          the run: the `lastTransitionTime` of `Active` for
+                          activation and deactivation.
                       state:
                         type: string
                         enum: [Pending, Running, Done, Failed, Skipped]

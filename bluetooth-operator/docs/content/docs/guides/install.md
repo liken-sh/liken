@@ -36,7 +36,7 @@ is cluster-scoped policy, the same convention a `StorageClass`
 follows: the cluster owner names and curates the classes workloads
 may ask for. The classes split by owner. If the DRA objects are new
 to you, read
-[How the pieces fit](/docs/guides/#how-the-pieces-fit) first.
+[How a claim reaches your pod](/docs/concepts/how-the-pieces-fit/) first.
 
 * `bluetooth-adapter` is wiring, and the base ships it, served at
   [`deviceclasses.yaml`](/deploy/deviceclasses.yaml). The
@@ -98,10 +98,11 @@ workload's manifest, create a specific class.
 
 This site serves the repository's manifests as raw YAML under
 [/deploy/](/deploy/kustomization.yaml), so you can install from here
-without a clone. Apply the three files into `liken-system`, the
+without a clone. Apply the four files into `liken-system`, the
 namespace a `liken` cluster already has:
 
     kubectl apply -n liken-system \
+      -f https://liken.sh/bluetooth/deploy/deviceclasses.yaml \
       -f https://liken.sh/bluetooth/deploy/crds.yaml \
       -f https://liken.sh/bluetooth/deploy/rbac.yaml \
       -f https://liken.sh/bluetooth/deploy/operator.yaml
@@ -112,6 +113,7 @@ Or point your own GitOps at the same files with a `Kustomization`:
     kind: Kustomization
     namespace: liken-system
     resources:
+      - https://liken.sh/bluetooth/deploy/deviceclasses.yaml
       - https://liken.sh/bluetooth/deploy/crds.yaml
       - https://liken.sh/bluetooth/deploy/rbac.yaml
       - https://liken.sh/bluetooth/deploy/operator.yaml
@@ -306,7 +308,10 @@ them with `kubectl describe` on the object. A `Peripheral` and a
 A controller that connects or disconnects posts no `Event`. A Low
 Energy remote drops its link between presses, so the `Connected`
 condition and the `bluetooth_disconnects_total` metric hold those
-changes. The API server deletes an `Event` an hour after its last
+changes. A reconnect of a controller that holds a link with no input
+posts no `Event` either, and the `operator` container's log records
+it, as [Pair a controller](/docs/guides/pair-a-controller/#when-a-connected-controller-sends-no-input)
+describes. The API server deletes an `Event` an hour after its last
 write. The status and the pod's log keep each fact longer.
 
 <a id="look-inside-the-stack"></a>

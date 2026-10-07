@@ -8,7 +8,7 @@ description: "Connect Radarr, Sonarr, and Jellyfin to a Library's webhook so an 
 
 A full walk runs on the `Library`'s schedule, once an hour by
 default. A webhook rescans one folder as soon as the `Library` has no
-other `Job` running, so a new title reaches the wall without waiting
+other `Job` running, so a new title shows on the screens without waiting
 for the next walk.
 
 ## The address
@@ -86,9 +86,8 @@ top-level `Path`, which is what the operator reads.
 
 Radarr and Sonarr write beside the media too. This operator reads the
 `uniqueid` in the Kodi `.nfo` they write, so keep that metadata
-option on. Turn off their image writes and their import of extra
-files, so that the art and subtitle facts are the only writers of
-those. The [Jellyfin guide](/docs/guides/jellyfin/#5-share-the-volume-with-jellyfin)
+option on. Turn off their image writes, so that the art facts are the only
+writers of images, and turn off their import of extra files. The [Jellyfin guide](/docs/guides/jellyfin/#5-share-the-volume-with-jellyfin)
 lists the Jellyfin switches.
 
 ## By hand

@@ -18,7 +18,7 @@ socket. This needs no SSH, no configuration on the host, and no
 privileged pod.
 
 The operator is one of `liken`'s
-[hardware operators](https://liken.sh/docs/concepts/hardware-operators/):
+[extension operators for claiming hardware](https://liken.sh/docs/concepts/claiming-hardware/):
 optional workloads, installed like any other manifest, that a cluster
 runs fine without. What it needs from `liken` is the card. `liken`'s
 own DRA driver publishes the raw hardware. This operator claims the

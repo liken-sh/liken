@@ -22,7 +22,7 @@ that claim. A window on that socket is a window on that screen.
 If the
 [Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
 objects are new to you, read
-[How the pieces fit](https://liken.sh/display/docs/guides/#how-the-pieces-fit) first.
+[How a claim reaches your pod](https://liken.sh/display/docs/concepts/how-the-pieces-fit/) first.
 
 List what a node offers:
 

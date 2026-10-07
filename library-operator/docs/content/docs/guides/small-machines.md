@@ -90,9 +90,10 @@ The trickplay worker, when enabled, is a pod of its own with one
 container and no agent. It requests `32Mi` of memory and `500m` of CPU,
 and its limit is `512Mi`. It runs beside the `Library`'s `Job`, so a
 node that takes both holds the sum of the two. The appearances worker
-is the same shape with a limit of `1536Mi`, because `ffmpeg` held
-860 MB on a 4K file decoded in software, and the face models held
-350 MB beside it. The two workers of one `Library` can run at the same
+is a pod of the same kind. It requests `32Mi` of memory and one core
+of CPU, and its limit is `1536Mi`, because the largest measured run held
+740 MB in the tool and `ffmpeg` together, for a 4K file decoded in
+software. The two workers of one `Library` can run at the same
 time.
 A worker with `parallelism` above 1 runs that many such pods, and two
 of them can share a node, so a node can hold the limit more than once.

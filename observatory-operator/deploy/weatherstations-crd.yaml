@@ -62,11 +62,10 @@ spec:
         openAPIV3Schema:
           type: object
           description: >-
-            A `WeatherStation` reports the weather at the site and
-            whether it is safe to observe: an INDI driver with
-            `WEATHER_INTERFACE`. It runs on the observatory's own INDI
-            server, and the `Observatory`'s status reports the worst
-            verdict of its stations.
+            A `WeatherStation` reports the weather at the site and whether it
+            is safe to observe: an INDI driver with `WEATHER_INTERFACE`. It
+            runs on the observatory's own INDI server, and the `Observatory`'s
+            status reports the worst safety status of its stations.
           required: [spec]
           properties:
             spec:
@@ -884,7 +883,7 @@ spec:
                         minimum: 0
                         description: >-
                           The `metadata.generation` of the spec that the
-                          condition judged.
+                          condition reflects.
                       reason:
                         type: string
                         minLength: 1
@@ -928,9 +927,9 @@ spec:
                         type: string
                         format: date-time
                         description: >-
-                          The transition time of the condition that the
-                          run answers: the `lastTransitionTime` of
-                          `Active` for activation and deactivation.
+                          The transition time of the condition that started
+                          the run: the `lastTransitionTime` of `Active` for
+                          activation and deactivation.
                       state:
                         type: string
                         enum: [Pending, Running, Done, Failed, Skipped]
@@ -1110,21 +1109,20 @@ spec:
                 readings:
                   type: object
                   description: >-
-                    What the weather station reports, from
-                    `SAFETY_STATUS`, `WEATHER_PARAMETERS`, and
-                    `WEATHER_STATUS`. A field is absent until the driver
-                    sends it. INDI reports each verdict as a light: `Ok`
-                    is `Safe`, `Busy` is `Warning`, `Alert` is `Danger`,
-                    and `Idle` is `Unknown`.
+                    What the weather station reports, from `SAFETY_STATUS`,
+                    `WEATHER_PARAMETERS`, and `WEATHER_STATUS`. A field is
+                    absent until the driver sends it. INDI reports each safety
+                    status as a light: `Ok` is `Safe`, `Busy` is `Warning`,
+                    `Alert` is `Danger`, and `Idle` is `Unknown`.
                   properties:
                     safety:
                       type: string
                       enum: [Safe, Warning, Danger, Unknown]
-                      description: "The station's verdict for the whole site."
+                      description: "The station's safety status for the whole site."
                     parameters:
                       type: array
                       description: >-
-                        Each measurement, with its verdict against the
+                        Each measurement, with its safety status against the
                         driver's limits.
                       x-kubernetes-list-type: map
                       x-kubernetes-list-map-keys: [name]
@@ -1160,4 +1158,4 @@ spec:
                           safety:
                             type: string
                             enum: [Safe, Warning, Danger, Unknown]
-                            description: "The verdict for this measurement."
+                            description: "The safety status of this measurement."

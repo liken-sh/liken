@@ -4,13 +4,19 @@ title: Procedures
 weight: 40
 ---
 
-This page states exactly how procedures and triggers run. [Automate
-the equipment](/docs/guides/automate-the-equipment/) is the guide to
-writing them.
+# Procedures
 
-Each resource states what the operator does with its equipment, in
-three fields of its spec. Every device kind, the `Telescope`, and the
-`Observatory` have them:
+Procedures are the actions you want the equipment to take when a
+reservation starts and ends, such as unpark the dome, cool the
+camera, and open the dust cap, and the reverse at the end. Triggers
+are actions that run once each time a condition changes to the status
+they name, while their resource is active, such as parking everything
+when the weather turns unsafe.
+[Automate the equipment](/docs/guides/automate-the-equipment/) shows
+how to write them.
+
+Each resource lists its procedures in three fields of its spec. Every
+device kind, the `Telescope`, and the `Observatory` have them:
 
 - `activation` runs as the resource's `Telescope` or `Observatory`
   turns `Active`, in the reservation's `Activation` step.

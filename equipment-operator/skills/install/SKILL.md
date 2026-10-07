@@ -5,6 +5,8 @@ description: "Install equipment-operator on a liken cluster, declare a Receiver,
 
 This skill is the guide at https://liken.sh/equipment/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
+# Install the operator
+
 This guide installs `equipment-operator` on a
 [`liken`](https://liken.sh/docs/) cluster and declares a `Receiver`.
 At the end, the operator runs in `liken-system` and reports the
@@ -13,11 +15,12 @@ receiver's power, input, and volume.
 You need:
 
 * A `liken` cluster with the
-  [`media-operator`](https://liken.sh/media/) installed. The operator
-  applies the session and the asks that `media-operator` writes into
-  the `Receiver`'s status.
-* A receiver that supports the Denon and Marantz control protocol on
-  the network, with network control enabled in its own menu.
+  [`media-operator`](https://liken.sh/media/) installed. When a
+  `Player` plays, `media-operator` writes what the receiver should do
+  into the `Receiver`'s status, and this operator carries it out.
+* A receiver on the network that speaks the Denon and Marantz control
+  protocol, with network control enabled in its own menu, or a WiiM
+  device.
 * `kubectl` with cluster-admin access, because the install creates a
   CRD and a `ClusterRole`.
 
@@ -50,12 +53,16 @@ TV that a `CECBus` in `Control` finds.
 For GitOps, point a `Kustomization` at the base and pin `<version>`
 to the operator's version, which is the release tag that last
 published it. The [GitHub release](https://github.com/liken-sh/liken/releases)
-for each tag lists every component and its version. The base names
-the image at `latest`, so pin the image to the same version:
+for each tag lists every component and its version. The base sets the
+namespace `liken-system` with a transformer that leaves an object's own
+namespace alone, so the example sets no top-level `namespace:` field.
+That field overwrites a namespace an object states, and it would move
+the monitoring component's dashboard out of the monitoring namespace.
+The base names the image at `latest`, so pin the image to the same
+version:
 
     apiVersion: kustomize.config.k8s.io/v1beta1
     kind: Kustomization
-    namespace: liken-system
     resources:
       - https://github.com/liken-sh/liken//equipment-operator/deploy?ref=<version>
     images:
@@ -274,6 +281,10 @@ that cable. The volume block is in the receiver's own scale. `max` is
 the loudest level a press may set the room to, and a Denon requires
 it, because the limit a Denon reports moves with the volume. `step`
 is how far one press moves the volume, and half steps are allowed.
+`indicator` is `Player` by default, so the `Player`'s screens draw
+the volume bar. Set it to `Receiver` when the receiver shows its own
+overlay on the TV. `media-operator` reads `indicator`, and
+`equipment-operator` does not.
 `kubectl get receivers` shows the receiver's model, what the receiver
 last reported, and the `Player` whose session holds it:
 

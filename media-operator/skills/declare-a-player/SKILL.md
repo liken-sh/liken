@@ -58,7 +58,7 @@ machine has more than one of a kind:
     kind: Player
     metadata:
       name: den
-      namespace: house
+      namespace: media
     spec:
       zone: den
       displayName: Den Television
@@ -162,7 +162,7 @@ reach:
     kind: Play
     metadata:
       name: den-check
-      namespace: house
+      namespace: media
     spec:
       players: [den]
       items:

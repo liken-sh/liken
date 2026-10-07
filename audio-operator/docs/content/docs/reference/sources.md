@@ -6,12 +6,14 @@ toc: true
 
 <!-- Generated from deploy/crds.yaml by crdref. Do not edit. -->
 
+# `Source`
+
 A `Source` is one capture endpoint as a Kubernetes resource: an
 analog input, or the capture side of a USB card. The operator
 creates one for every capture endpoint it publishes, cluster-scoped
 like a `Node`, named the same way a `Sink` is. You never create or
 delete one. The operator writes the whole of `status`, and you write
-`spec`, which states what the endpoint rests at.
+`spec`, which states the settings you want for the endpoint.
 
 ```yaml
 apiVersion: audio.liken.sh/v1alpha1
@@ -67,7 +69,7 @@ One capture endpoint: an analog input, or a USB card's capture side. A Bluetooth
 
 ## spec
 
-The settings the endpoint rests at. Every field is optional. The operator writes volume and mute when they change and when the endpoint appears, and otherwise reports the level the endpoint holds. It writes a declared control back when the endpoint diverges from it. It never writes a field the spec leaves out.
+The settings you want for the endpoint. Every field is optional. The operator writes volume and mute when they change and when the endpoint appears, and otherwise reports the level the endpoint holds. It writes a declared control back when the endpoint diverges from it. It never writes a field the spec leaves out.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -169,7 +171,7 @@ Connected reports that the endpoint can capture now: a plug in an analog jack, a
 | <span id="statusconditions--message"></span>`message` | string | no |  |
 | <span id="statusconditions--lasttransitiontime"></span>`lastTransitionTime` | string | yes |  |
 
-## The name and the resting layer
+## The name and the `spec`
 
 A `Source` is named by the same rule as a `Sink`, and its `spec`
 works the same way: the operator writes a declared `volume` and

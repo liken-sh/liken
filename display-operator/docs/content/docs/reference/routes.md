@@ -6,6 +6,8 @@ toc: true
 
 <!-- Generated from content/docs/reference/openapi.json by apiref. Do not edit. -->
 
+# Routes
+
 The routes below are generated from the OpenAPI document
 `display-api` serves at `/v1/display/openapi.json`. The API renders
 that document from its own router, so this page lists every route the

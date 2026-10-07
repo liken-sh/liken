@@ -43,10 +43,10 @@ device. Look for a device stamped
     kubectl get resourceslice <node>-liken.sh -o yaml
 
 If no device has the stamp, the operator's own claim will park and
-its pod will stay `Pending`. The
-[hardware operators](https://liken.sh/docs/concepts/hardware-operators/)
-page describes this layering: `liken` publishes the card, and this
-operator refines it into outputs.
+its pod will stay `Pending`.
+[Claiming hardware](https://liken.sh/docs/concepts/claiming-hardware/)
+explains why: `liken` publishes the whole card, and this operator
+claims it and publishes each of its outputs.
 
 ## 2. The device classes
 
@@ -119,19 +119,31 @@ workload's manifest, create a specific class.
 
 This site serves the repository's
 [`deploy/`](https://liken.sh/audio/deploy/kustomization.yaml) directory as raw YAML, so
-the install needs no clone. Four files are the rest of the install:
+the install needs no clone. Six files are the rest of the install:
 
     kubectl apply -n liken-system \
       -f https://liken.sh/audio/deploy/crds.yaml \
       -f https://liken.sh/audio/deploy/deviceclasses.yaml \
       -f https://liken.sh/audio/deploy/rbac.yaml \
-      -f https://liken.sh/audio/deploy/operator.yaml
+      -f https://liken.sh/audio/deploy/operator.yaml \
+      -f https://liken.sh/audio/deploy/api.yaml
+
+`api.yaml` binds one `Role` in `kube-system`, which `-n` would
+refuse, so that binding is in a file of its own. Apply it with no
+`-n`:
+
+    kubectl apply -f https://liken.sh/audio/deploy/api-authentication.yaml
 
 `crds.yaml` holds the `Sink` and `Source`
 `CustomResourceDefinitions`, the resources the operator creates for
 every endpoint it publishes. The
 [`Sink`](https://liken.sh/audio/docs/reference/sinks/) and
 [`Source`](https://liken.sh/audio/docs/reference/sources/) references describe them.
+
+`api.yaml` holds `audio-api`, a `Deployment` and a `Service` that run
+once for the whole cluster, with the RBAC they need. The
+[listen guide](https://liken.sh/audio/docs/guides/listen/) depends on it. A cluster that
+needs no capture API can leave this file out.
 
 The `-n` flag places the `ServiceAccount` and the `DaemonSet` in
 `liken-system`, the namespace every `liken` cluster has. The
@@ -145,13 +157,27 @@ takes a raw YAML URL as a resource:
 
     apiVersion: kustomize.config.k8s.io/v1beta1
     kind: Kustomization
-    namespace: liken-system
+    transformers:
+      - |-
+        apiVersion: builtin
+        kind: NamespaceTransformer
+        metadata:
+          name: liken-system
+          namespace: liken-system
+        unsetOnly: true
     resources:
       - classes.yaml
       - https://liken.sh/audio/deploy/crds.yaml
       - https://liken.sh/audio/deploy/deviceclasses.yaml
       - https://liken.sh/audio/deploy/rbac.yaml
       - https://liken.sh/audio/deploy/operator.yaml
+      - https://liken.sh/audio/deploy/api.yaml
+      - https://liken.sh/audio/deploy/api-authentication.yaml
+
+The transformer sets `liken-system` only on the objects that state no
+namespace, so the binding in `api-authentication.yaml` stays in
+`kube-system`. A top-level `namespace:` field would move it, and the
+API couldn't read the client certificate authority.
 
 A clone works too: `kubectl apply -k audio-operator/deploy/` from the
 repository applies the same files through
@@ -170,10 +196,11 @@ describes.
 
     kubectl -n liken-system get pods -o wide
 
-The pod is four containers from one image. A `declare` init
+The pod is five containers from one image. A `declare` init
 container writes PipeWire's sink declarations, PipeWire and
-WirePlumber run as sidecars, and the operator publishes what they
-hold. On the machine with the card, the operator's log reports the
+WirePlumber run as sidecars, the `operator` container publishes what
+they hold, and the `capture` container serves the taps that
+`audio-api` forwards. On the machine with the card, the operator's log reports the
 slice it wrote:
 
     kubectl -n liken-system logs ds/audio-operator
@@ -230,7 +257,7 @@ that is switched off publishes with taints, the same way an HDMI
 output with no monitor does.
 
 Now [play sound to an output](https://liken.sh/audio/docs/guides/claim/), or
-[set what an endpoint rests at](https://liken.sh/audio/docs/guides/rest/).
+[set an endpoint's volume and controls](https://liken.sh/audio/docs/guides/rest/).
 
 ## Keep the pods off nodes with no sound card
 
@@ -296,6 +323,24 @@ A patch of your own that sets a node affinity on this `DaemonSet`
 replaces the list of terms in the base, and the `none` term with it.
 Copy the `none` requirement into each term of your patch.
 
+## Pin a release
+
+The site serves the manifests of the current `main`, and the images
+in the manifests name `:latest`. To pin a release instead, reference
+the operator's `kustomize` base at the operator's version, which is
+the release tag that last published it. The
+[GitHub release](https://github.com/liken-sh/liken/releases) for each
+tag lists every component and its version. One tag versions the
+manifests and the image together, so pin both to the same version:
+
+    apiVersion: kustomize.config.k8s.io/v1beta1
+    kind: Kustomization
+    resources:
+      - https://github.com/liken-sh/liken//audio-operator/deploy?ref=<version>
+    images:
+      - name: ghcr.io/liken-sh/audio-operator
+        newTag: <version>
+
 ## Running a development build
 
 A push to `main` that changes the operator publishes a development
@@ -332,8 +377,14 @@ published one:
 
     kubectl delete -n liken-system \
       -f https://liken.sh/audio/deploy/rbac.yaml \
-      -f https://liken.sh/audio/deploy/operator.yaml
+      -f https://liken.sh/audio/deploy/operator.yaml \
+      -f https://liken.sh/audio/deploy/api.yaml
+    kubectl delete -f https://liken.sh/audio/deploy/api-authentication.yaml
     kubectl delete resourceslice <node>-audio.liken.sh
+
+The API's own `Secret`s and `ConfigMap` outlive the `Deployment`.
+Delete `audio-api-tls`, `audio-capture-server`, and `audio-api-ca` in
+`liken-system` by hand.
 
 This leaves the `DeviceClasses` in place: `sound-card` from the
 base, and the consumer classes you created. Delete them when no

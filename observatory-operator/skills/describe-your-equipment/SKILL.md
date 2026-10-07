@@ -5,6 +5,8 @@ description: "Describe a real observatory as observatory.liken.sh resources: the
 
 This skill is the guide at https://liken.sh/observatory/docs/guides/describe-your-equipment/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
+# Describe your equipment
+
 This guide turns a real setup into resources. You write one resource
 for the site, one for each telescope, one for each tube and light
 path, and one for each device. At the end, `kubectl get astro` lists

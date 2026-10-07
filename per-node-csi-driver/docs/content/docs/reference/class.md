@@ -1,7 +1,9 @@
 ---
-title: The class
+title: The StorageClass
 weight: 20
 ---
+
+# The `per-node` `StorageClass`
 
 The kustomize base in `deploy/` defines the `StorageClass` named
 `per-node`. It takes no parameters. A volume of this driver gets all of

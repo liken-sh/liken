@@ -6,7 +6,7 @@ same device name the `ResourceSlice` carries. You never create or
 delete one. The operator writes `status`: where the endpoint is, the
 controls the card declares, and the values it last read. The media
 operator writes `status.session`, the volume asks of a remote's keys.
-You write `spec`, which states what the endpoint rests at.
+You write `spec`, which states the settings you want for the endpoint.
 
 ```yaml
 apiVersion: audio.liken.sh/v1alpha1
@@ -64,7 +64,7 @@ The claim and the `Sink` answer two different needs. A pod that
 plays sound still holds the output through a claim, as the
 [claim guide](/docs/guides/claim/) shows, and it still has its own
 stream volume. The `Sink` is for everything about the output that
-is not the sound itself: its resting level, its mute, and the
+is not the sound itself: its default level, its mute, and the
 card's own controls. Because it is an ordinary Kubernetes resource,
 anything with the right RBAC can change it. A pod that only wants
 to mute the kitchen needs no claim, and a rule that lowers every

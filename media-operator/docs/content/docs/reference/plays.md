@@ -6,6 +6,8 @@ toc: true
 
 <!-- Generated from deploy/plays-crd.yaml by crdref. Do not edit. -->
 
+# `Play`
+
 A `Play` is one run of media on a [Player](/docs/reference/players/):
 a film, an album, or a season of episodes, played in order. Its
 lifecycle is analogous to a `Job`'s: it runs once to completion, and
@@ -76,9 +78,9 @@ What to play and where. The spec is immutable: a different film or a different p
 | <span id="spec--next"></span>`next` | [object](#specnext) | no | The work that follows this run. The display offers it on the scrubber as a chip, and as a card near the end of the run. The card stays up for five seconds, and the OSD shows it again after that. When the item's marks place credits in its second half, the card rises at the start of the credits, or after the scene that follows them, as the marks field describes. Otherwise a film's card rises when three percent of the item or three minutes remain, whichever is less, and an episode's card, for an item whose presentation names a series, rises when one and a half percent of the item or ninety seconds remain, whichever is less. With the OSD down, the risen card shows focused, and select takes it, unless a skip control is up beside it. Then select does what it does for the skip control alone. A select on the offer publishes the request below on the Player's commands topic, where the program that wrote the Play reads it back and creates the next Play. A Play with no next block offers nothing. |
 | <span id="spec--trickplayinterval"></span>`trickplayInterval` | string | no | The seconds one trickplay tile covers, as a Go duration like 10s. Jellyfin writes no manifest beside the sheets, so the Play declares it. Omitted, it defaults to 10s, the Jellyfin default. |
 | <span id="spec--ttlsecondsafterfinished"></span>`ttlSecondsAfterFinished` | integer | no | How long this Play remains after it finishes, in seconds, the meaning a Job gives the name. While it remains, kubectl get plays still shows what just played and where it stopped; deleting the Play deletes that record. Omitted, it is 300 seconds. Zero deletes the Play as soon as it finishes. The playback pod does not wait for this window: it is deleted as soon as the run finishes. |
-| <span id="spec--audiolanguages"></span>`audioLanguages` | []string | no | A per-Play override of the audio language order, the most specific tier; omit it to inherit the Player. |
-| <span id="spec--subtitlelanguages"></span>`subtitleLanguages` | []string | no | A per-Play override of the subtitle language order, the most specific tier; omit it to inherit the Player. |
-| <span id="spec--subtitles"></span>`subtitles` | string | no | A per-Play override of when subtitles show, the most specific tier; omit it to inherit the Player. One of: `on`, `off`, `auto`. |
+| <span id="spec--audiolanguages"></span>`audioLanguages` | []string | no | A per-Play override of the audio language order. Omit it to use the Player's. |
+| <span id="spec--subtitlelanguages"></span>`subtitleLanguages` | []string | no | A per-Play override of the subtitle language order. Omit it to use the Player's. |
+| <span id="spec--subtitles"></span>`subtitles` | string | no | A per-Play override of when subtitles show. Omit it to use the Player's. One of: `on`, `off`, `auto`. |
 
 ### spec.items[]
 
@@ -97,7 +99,7 @@ How the item should look, for the fields the display cannot read from the file. 
 | --- | --- | --- | --- |
 | <span id="specitemspresentation--type"></span>`type` | string | no | The media type the display tunes its layout by. mpv cannot infer this, and the display does not read it from the file name. One of: `video`, `music`, `image`. |
 | <span id="specitemspresentation--hint"></span>`hint` | string | no | The finer kind within the type. A video is a movie or a series, and music is an album. It selects the layout the display draws. An album also declares that the item's URI names a directory, which the playback pod expands into one timeline of the audio files it holds. The directory must hold at least one audio file, or the run fails. One of: `movie`, `series`, `album`. |
-| <span id="specitemspresentation--role"></span>`role` | string | no | The item's part in the work. The one value is trailer, and the display marks a trailer on the line under the title. Omit it for the work itself. One of: `trailer`. |
+| <span id="specitemspresentation--role"></span>`role` | string | no | What the item is, when it is not the work itself. The only value is trailer, and the display marks a trailer on the line under the title. Omit it for the work itself. One of: `trailer`. |
 | <span id="specitemspresentation--title"></span>`title` | string | no | The item's name, which overrides the file's own tag. Set it when the tag is wrong or absent. |
 | <span id="specitemspresentation--series"></span>`series` | string | no | The series this episode belongs to. |
 | <span id="specitemspresentation--season"></span>`season` | integer | no | The season number of the episode. |
@@ -110,7 +112,7 @@ How the item should look, for the fields the display cannot read from the file. 
 | <span id="specitemspresentation--art"></span>`art` | string | no | The cover art URI, claim://, nfs:// or https://, resolved the way the media URI is. It is the first place the cover is looked for; a picture embedded in the file and a cover.jpg beside it follow, and the pod reads both of those itself. |
 | <span id="specitemspresentation--logo"></span>`logo` | string | no | The logo art URI, claim://, nfs:// or https://, resolved the way the media URI is. The display shows it in the header in place of the title. |
 | <span id="specitemspresentation--trickplay"></span>`trickplay` | string | no | The X.trickplay directory URI, claim://, nfs:// or https://, resolved the way the media URI is. The display shows a tile from it on the scrub cursor. |
-| <span id="specitemspresentation--appearances"></span>`appearances` | string | no | The URI of the item's spans file, claim://, nfs:// or https://, resolved the way the media URI is. The library's appearances fact writes it as X.spans.json in .liken/appearances/ beside the video. When the film pauses, the display shows the credited people on screen at the playhead. |
+| <span id="specitemspresentation--appearances"></span>`appearances` | string | no | The URI of the item's spans file, claim://, nfs:// or https://, resolved the way the media URI is. library-operator writes it as X.spans.json in .liken/appearances/ beside the video. When the film pauses, the display shows the credited people on screen at the playhead. |
 | <span id="specitemspresentation--contributors"></span>`contributors` | string | no | The URI of the library's .contributors directory, claim://, nfs:// or https://, resolved the way the media URI is. The spans file names each portrait by its path under it. |
 | <span id="specitemspresentation--marks"></span>`marks` | [\[\]object](#specitemspresentationmarks) | no | The spans in the file where the intro, the recap, the credits, the scene after the credits, and the preview are. A database can give several candidate spans for one kind, and the list carries every one. The display merges the candidates that overlap into one span, from the median start and the median end. It offers a skip control while the playhead is inside an intro or a recap. With the OSD down, the control shows focused, and select skips. The credits count when they start in the second half of the item. A scene after them is a post-credits span, or the gap between two credits spans. Inside the credits before a scene, the display offers a skip to the scene, and select takes it only while the OSD is up. The up-next card rises at the start of the credits, or, when a scene follows them, at the later of the start of the last credits span and the end of the last scene. A card after a scene never rises later than it would with no marks. An item with no marks plays with no skip control, and its card rises by the time that remains, as the next field describes. |
 
@@ -143,7 +145,7 @@ What the playback pod reports, written only by the media operator. The playback 
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="status--phase"></span>`phase` | string | no | Where the run is in its life, in the words Jobs and Pods use. Pending is declared but not yet performing, Running is the pod performing the play, paused or not, and Finished and Failed are the two ends. The word is Running rather than Playing because a phase moves forward only, and a paused film would force Playing to flap; the paused field beside this one says the rest. One of: `Pending`, `Running`, `Finished`, `Failed`. |
+| <span id="status--phase"></span>`phase` | string | no | Where the run is in its life, in the words Jobs and Pods use. Pending is declared but not yet performing, Running is the pod performing the play, paused or not, and Finished and Failed are the two ends. The word is Running rather than Playing because a phase moves forward only, and a phase of Playing would switch back and forth each time a film paused. The paused field reports the pause. One of: `Pending`, `Running`, `Finished`, `Failed`. |
 | <span id="status--activity"></span>`activity` | string | no | The one word for what the Play does right now, the phase and the paused flag folded together. Starting is Pending, Playing and Paused both mean Running, and Finished and Failed match the phase. The phase is the lifecycle; the activity is what a person reads at a glance. One of: `Starting`, `Playing`, `Paused`, `Finished`, `Failed`. |
 | <span id="status--paused"></span>`paused` | boolean | no | True while the player holds the current item still. The phase stays Running, because a pause does not advance the lifecycle. |
 | <span id="status--item"></span>`item` | integer | no | Which URI plays now, counting from 1 in spec order. The third of five episodes shows 3. |
@@ -152,7 +154,7 @@ What the playback pod reports, written only by the media operator. The playback 
 | <span id="status--pod"></span>`pod` | string | no | The playback pod's name, for kubectl describe and logs. The pod is owned by this Play and is deleted with it. |
 | <span id="status--message"></span>`message` | string | no | The reason for the phase, as one line of text: the resolver refused a URI, the Player does not exist, the pod failed. |
 | <span id="status--finishedat"></span>`finishedAt` | string | no | When the operator first read this run's phase as Finished. The time-to-live after finishing counts from here and not from the Play's creation, so the window measures the end of the film. It is written here rather than held in the operator, so an operator that restarts reads the clock back. |
-| <span id="status--audiolanguages"></span>`audioLanguages` | []string | no | The resolved audio language order this run applied, the record of what the three tiers settled on. |
+| <span id="status--audiolanguages"></span>`audioLanguages` | []string | no | The audio language order this run applied, after the operator combined the Play, the Player, and MediaPreferences. |
 | <span id="status--subtitlelanguages"></span>`subtitleLanguages` | []string | no | The resolved subtitle language order this run applied. |
 | <span id="status--subtitles"></span>`subtitles` | string | no | The resolved subtitle setting this run applied, one of on, off, or auto. |
 | <span id="status--audiolanguage"></span>`audioLanguage` | string | no | The language of the audio track mpv chose, so you can see when a code matched no track. The value is the track's own tag as the file contains it, for Matroska the three-letter ISO 639-2 code, whatever form the preference used. |
@@ -290,6 +292,16 @@ direction: seconds for `seek`, and chapters for `chapter`.
 | `home` | asks the unit's client for its home page, then ends the run |
 | `power` | asks the unit's client to do what power does between films, then ends the run |
 | `power-off` | asks the unit's client to turn the room off, then ends the run |
+
+Two parts of the on-screen display answer these actions. When an item
+names an `appearances` file and the on-screen display is up, playing
+or paused, the display draws a row of cards above the skip control and
+the chip, one for each credited person in the scene, and `up`, `left`,
+and `right` move the focus along it. When an item's `marks` place the
+playhead inside an intro or a recap, or inside the credits before a
+post-credits scene, the display offers a skip control, and `select`
+takes it. A skip to a post-credits scene takes `select` only while the
+on-screen display is up. The display never skips on its own.
 
 `play`, `hold`, `stop`, and `power-off` set the state they name, so a
 second one changes nothing. The playback pod binds them to the names

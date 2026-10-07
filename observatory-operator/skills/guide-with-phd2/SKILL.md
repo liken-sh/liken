@@ -5,6 +5,8 @@ description: "Add a Guider to a telescope so the operator runs PHD2 with the gui
 
 This skill is the guide at https://liken.sh/observatory/docs/guides/guide-with-phd2/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
+# Guide with PHD2
+
 A `Guider` makes the operator run [PHD2](https://openphdguiding.org/)
 for one telescope. During a reservation, the operator starts PHD2,
 connects it to the guide camera and the mount, and then leaves it

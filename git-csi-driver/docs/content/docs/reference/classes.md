@@ -3,6 +3,8 @@ title: Class parameters
 weight: 20
 ---
 
+# Class parameters
+
 A `VolumeAttributesClass` with `driverName: git.liken.sh` carries a
 commit and push policy in `parameters`. Every parameter has a default,
 so an empty class arms a volume with the defaults. The controller

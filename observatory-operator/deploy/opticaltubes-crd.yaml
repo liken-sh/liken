@@ -118,7 +118,7 @@ spec:
                         minimum: 0
                         description: >-
                           The `metadata.generation` of the spec that the
-                          condition judged.
+                          condition reflects.
                       reason:
                         type: string
                         minLength: 1

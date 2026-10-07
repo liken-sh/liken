@@ -28,8 +28,8 @@ The short path is the CLI. `kubectl liken media capture` streams a
 `Player`'s composed video and sound to stdout as one MP4, so a file
 or a pipe is a single command:
 
-    kubectl liken media capture living-room -n house > living-room.mp4
-    kubectl liken media capture living-room -n house | mpv -
+    kubectl liken media capture living-room -n media > living-room.mp4
+    kubectl liken media capture living-room -n media | mpv -
 
 `--format mkv` writes Matroska instead, and `-n` (or `--namespace`)
 names the `Player`'s namespace.
@@ -90,7 +90,7 @@ namespace of the `Player`:
     kind: RoleBinding
     metadata:
       name: media-viewer
-      namespace: house
+      namespace: media
     roleRef:
       apiGroup: rbac.authorization.k8s.io
       kind: ClusterRole
@@ -108,13 +108,13 @@ An application gets the grant through its `ServiceAccount`:
     kind: ServiceAccount
     metadata:
       name: media-viewer
-      namespace: house
+      namespace: media
     ---
     apiVersion: rbac.authorization.k8s.io/v1
     kind: RoleBinding
     metadata:
       name: media-viewer
-      namespace: house
+      namespace: media
     roleRef:
       apiGroup: rbac.authorization.k8s.io
       kind: ClusterRole
@@ -122,7 +122,7 @@ An application gets the grant through its `ServiceAccount`:
     subjects:
       - kind: ServiceAccount
         name: media-viewer
-        namespace: house
+        namespace: media
 
 The composed route needs `players/media` and nothing else, because
 `media-api` calls the sibling APIs under its own `ServiceAccount`. A
@@ -250,7 +250,7 @@ sibling's audience.
 
 List the players and pick one:
 
-    kubectl -n house get players
+    kubectl -n media get players
 
 Before you record, ask what the `Player` has. The info route returns
 the `Display` name and node, each `Sink` name, whether a `Play` is
@@ -258,7 +258,7 @@ running, and the number of streams:
 
     kubectl -n liken-system exec record -- curl -sS --fail-with-body \
       --cacert /tmp/ca.crt --cert /client/tls.crt --key /client/tls.key \
-      https://media-api.liken-system.svc/v1/media/namespaces/house/players/living-room
+      https://media-api.liken-system.svc/v1/media/namespaces/media/players/living-room
 
 Every command below runs in the pod from step 2 and writes its file
 there. `--fail-with-body` makes `curl` exit non-zero on an error and
@@ -269,14 +269,14 @@ Ten seconds of the screen with its sound, as MP4:
     kubectl -n liken-system exec record -- curl -sS --fail-with-body \
       --cacert /tmp/ca.crt --cert /client/tls.crt --key /client/tls.key \
       -o /tmp/living-room.mp4 \
-      'https://media-api.liken-system.svc/v1/media/namespaces/house/players/living-room/media.mp4?t=0,10'
+      'https://media-api.liken-system.svc/v1/media/namespaces/media/players/living-room/media.mp4?t=0,10'
 
 The same span as Matroska, scaled to 960 pixels wide:
 
     kubectl -n liken-system exec record -- curl -sS --fail-with-body \
       --cacert /tmp/ca.crt --cert /client/tls.crt --key /client/tls.key \
       -o /tmp/living-room.mkv \
-      'https://media-api.liken-system.svc/v1/media/namespaces/house/players/living-room/media.mkv?t=0,10&width=960'
+      'https://media-api.liken-system.svc/v1/media/namespaces/media/players/living-room/media.mkv?t=0,10&width=960'
 
 `media.mp4` is H.264 in fragmented MP4 with Opus audio: one video
 track if the `Player` has a screen, and one audio track per `Sink`
@@ -297,7 +297,7 @@ owns the hardware. Read the redirect first:
 
     kubectl -n liken-system exec record -- curl -sS -i \
       --cacert /tmp/ca.crt --cert /client/tls.crt --key /client/tls.key \
-      https://media-api.liken-system.svc/v1/media/namespaces/house/players/living-room/screen.png
+      https://media-api.liken-system.svc/v1/media/namespaces/media/players/living-room/screen.png
 
 `Location` is the `display-api` route for this `Player`'s `Display`,
 and `Link` points to the composed `media.mp4` as `related`. Read
@@ -306,7 +306,7 @@ that `Location` into a variable, then request it:
     kubectl -n liken-system exec record -- sh -c '
       url=$(curl -sS -o /dev/null -w "%{redirect_url}" --cacert /tmp/ca.crt \
         --cert /client/tls.crt --key /client/tls.key \
-        https://media-api.liken-system.svc/v1/media/namespaces/house/players/living-room/screen.png)
+        https://media-api.liken-system.svc/v1/media/namespaces/media/players/living-room/screen.png)
       curl -sS --fail-with-body --cacert /tmp/ca.crt \
         --cert /client/tls.crt --key /client/tls.key -o /tmp/screen.png "$url"'
 
@@ -315,7 +315,7 @@ Five seconds of the sound alone, which redirects to `audio-api`:
     kubectl -n liken-system exec record -- sh -c '
       url=$(curl -sS -o /dev/null -w "%{redirect_url}" --cacert /tmp/ca.crt \
         --cert /client/tls.crt --key /client/tls.key \
-        "https://media-api.liken-system.svc/v1/media/namespaces/house/players/living-room/audio.wav?t=0,5")
+        "https://media-api.liken-system.svc/v1/media/namespaces/media/players/living-room/audio.wav?t=0,5")
       curl -sS --fail-with-body --cacert /tmp/ca.crt \
         --cert /client/tls.crt --key /client/tls.key -o /tmp/living-room.wav "$url"'
 
@@ -361,9 +361,9 @@ first byte over ten runs, and `media.mkv` took 4.18 s.
 The cluster's own record of the recording is an `Event` on the
 `Player`, in the `Player`'s namespace:
 
-    kubectl -n house get events --field-selector reason=Captured
+    kubectl -n media get events --field-selector reason=Captured
 
-`kubectl -n house describe player` tells you who recorded which
+`kubectl -n media describe player` tells you who recorded which
 unit, in which form, and when.
 
 ### When a recording is refused
@@ -392,4 +392,4 @@ that file:
 The `RoleBinding` from step 1 is a standing grant. If the recording
 was a one-off, delete it too:
 
-    kubectl -n house delete rolebinding media-viewer
+    kubectl -n media delete rolebinding media-viewer

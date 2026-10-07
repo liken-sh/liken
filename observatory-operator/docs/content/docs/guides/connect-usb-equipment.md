@@ -4,6 +4,8 @@ weight: 30
 description: "Give an INDI device its USB hardware: load the kernel driver on the liken machine, find the device in the node's ResourceSlice, write a DeviceClass, and put a claim in the device's spec.claim. Covers which astronomy equipment can reach a pod today and which cannot. Use when connecting a real mount, focuser, filter wheel, power box, or camera, or when a device's pod stays Pending."
 ---
 
+# Connect USB equipment
+
 This guide gives a device resource its real hardware. The machine
 the equipment plugs into publishes the USB device, a `DeviceClass`
 selects it, and the device's `spec.claim` claims it. During a

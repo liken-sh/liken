@@ -6,6 +6,8 @@ toc: true
 
 <!-- Generated from deploy/displays.yaml by crdref. Do not edit. -->
 
+# `Display`
+
 A `Display` is one monitor as a Kubernetes resource. The operator
 creates one for every monitor it probes, cluster-scoped like a
 `Node`, named by the same monitor id the devices publish as

@@ -6,6 +6,8 @@ toc: true
 
 <!-- Generated from deploy/crds.yaml by crdref. Do not edit. -->
 
+# `Adapter`
+
 An `Adapter` is one Bluetooth radio. The operator creates the
 object for the adapter its pod claimed and names it for the radio's
 address, lowercase with dashes. It is the root of the pairing

@@ -5,6 +5,8 @@ description: "Install observatory-operator on a liken cluster, run the example o
 
 This skill is the guide at https://liken.sh/observatory/docs/guides/install/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
+# Install the operator
+
 This guide installs `observatory-operator` on a
 [`liken`](https://liken.sh/docs/) cluster, and then runs a whole
 observatory of INDI simulators: a dome, a weather station, two

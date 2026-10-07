@@ -96,13 +96,13 @@ spec:
               properties:
                 volume:
                   type: object
-                  description: "The endpoint's volume, in percent of unity. level is the resting level the operator applies. max and step bound the volume asks the media operator writes into status.session, and the operator does not read them."
+                  description: "The endpoint's volume, in percent of unity. level is the default level that the operator applies. max and step bound the volume asks the media operator writes into status.session, and the operator does not read them."
                   properties:
                     level:
                       type: integer
                       minimum: 0
                       maximum: 100
-                      description: "The level the endpoint rests at, as a percent of unity, applied to every channel alike. On an ALSA endpoint it is the gain PipeWire applies in software. On a Bluetooth speaker it is the speaker's own volume, sent over AVRCP when the speaker supports absolute volume, and a software gain when it does not. The operator applies it when it changes and when the endpoint appears, under a claim or not, and a claim holder's own stream fader is a separate level above it. A level that changes after that, at the device or by a volume ask, stays, and status.observed.volume reports it. When it is absent, a node that PipeWire builds while the operator runs starts at unity."
+                      description: "The endpoint's default level, as a percent of unity, applied to every channel alike. On an ALSA endpoint it is the gain PipeWire applies in software. On a Bluetooth speaker it is the speaker's own volume, sent over AVRCP when the speaker supports absolute volume, and a software gain when it does not. The operator applies it when it changes and when the endpoint appears, under a claim or not, and a claim holder's own stream fader is a separate level above it. A level that changes after that, at the device or by a volume ask, stays, and status.observed.volume reports it. When it is absent, a node that PipeWire builds while the operator runs starts at unity."
                     max:
                       type: integer
                       minimum: 1
@@ -419,7 +419,7 @@ spec:
           properties:
             spec:
               type: object
-              description: "The settings the endpoint rests at. Every field is optional. The operator writes volume and mute when they change and when the endpoint appears, and otherwise reports the level the endpoint holds. It writes a declared control back when the endpoint diverges from it. It never writes a field the spec leaves out."
+              description: "The settings you want for the endpoint. Every field is optional. The operator writes volume and mute when they change and when the endpoint appears, and otherwise reports the level the endpoint holds. It writes a declared control back when the endpoint diverges from it. It never writes a field the spec leaves out."
               default: {}
               properties:
                 volume:

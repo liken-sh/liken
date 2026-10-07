@@ -5,85 +5,99 @@ weight: 10
 
 # How `liken` works
 
-This page gives the model in one read: what a machine runs, how a
-fleet changes, and where your part of the system is. The guides
-assume this model.
+A `liken` machine boots straight into Kubernetes. It runs the Linux
+kernel, k3s, and a small `init`. It has no shell, no SSH server, no
+package manager, and no configuration files to edit. You
+manage the machines the same way you manage your workloads, by
+editing Kubernetes resources with `kubectl`.
 
-## One image, plus your layer
-
-Every machine runs the same operating system image. The image is a
-read-only squashfs file, built by the project and published in every
-release. Nothing on a machine edits it.
-
-Everything that makes a cluster yours is in one small archive: the
-deployment layer. It holds your Cluster document, your Machine
-manifests, and the cluster's identity, which is its certificate
-authorities and its join token.
-[`liken layer`](/docs/reference/cli/#liken-layer) packs the archive,
-and every boot loads the image and your layer together.
-
-A machine has no package manager and no configuration files to edit.
-What a machine runs is the image plus the layer, and both are
-declared.
-
-## Two boot slots
-
-Each machine keeps two copies of the operating system, in slots named
-A and B. The machine runs from one slot and downloads upgrades into
-the other. An upgrade reboots into the new slot one time, as a trial.
-A trial that fails, in any way, ends with the machine back on the
-slot it already proved. [Roll back](/docs/guides/rollback/) describes
-the fallback paths.
-
-An installation writes slot A. The first upgrade fills slot B, and
-after that the slots alternate.
-
-## Two resources drive everything
+## The `Cluster` and `Machine` resources
 
 A `liken` cluster is an ordinary Kubernetes cluster with two extra
 resources:
 
-* A [Cluster](/docs/reference/cluster/) declares the fleet in one
-  document: the release that every machine runs, the network, and
-  the settings that the machines share.
-* A [Machine](/docs/reference/machine/) declares one machine: its
-  disks, its network ports, and its kernel modules. The machine
-  reports what it observes in the resource's `status`.
+* A [`Cluster`](/docs/reference/cluster/) describes the whole fleet:
+  the release that every machine runs, the network, and the settings
+  that the machines share.
+* A [`Machine`](/docs/reference/machine/) describes one machine: its
+  disks, its network ports, and its kernel modules. The machine also
+  reports what it finds, such as its hardware, in the resource's
+  `status`.
 
-You operate the fleet when you edit these two resources with
-`kubectl`. A machine has no shell and no SSH server. Each machine
-reads the two documents and converges to them.
+Each machine reads these two documents and changes itself to match
+them. To change a machine, you edit its `Machine` or the `Cluster`.
 
-A change applies with the smallest disruption that it needs. Some
-values apply live, within seconds. Some restart k3s in place, and
-the pods stay up. Some wait for the machine's next boot, whatever
-causes it. Some need a reboot of their own. A machine that needs a
-disruption stages the change, reports it in the Machine's
-`status.pending`, and waits for its turn under the cluster's
-disruption budget.
+## How a change reaches a machine
 
-A machine that agrees with every document still reboots for one
-reason: because you asked it to.
+A machine applies each change with the least disruption that the
+change needs:
+
+* Some values, such as `sysctls` and `nodeLabels`, apply within
+  seconds.
+* Some, such as a cluster feature or the registry settings, restart
+  k3s in place, and the pods keep running.
+* Some wait for the machine's next boot, whatever the reason for that
+  boot.
+* Some, such as a change to storage or the network, need a reboot of
+  their own.
+
+A machine never reboots on its own schedule. When a change needs a
+reboot, the machine stages the change, reports it in the `Machine`'s
+`status.pending`, and waits until the cluster's disruption budget
+gives it a turn. With the default `rebootPolicy`, `Manual`, it also
+waits for you to approve the reboot, which
+[`liken approve-reboot`](/docs/reference/cli/#liken-approve-reboot) does. With `Auto`, it
+takes the reboot when its turn comes. Either way, it cordons and
+drains itself before it goes down.
+
+You can also ask a machine to reboot when nothing has changed, for
+example when a driver bound the wrong device, or on a machine you're
+experimenting on.
 [`liken request-reboot`](/docs/reference/cli/#liken-request-reboot)
-is that request, for a driver that bound the wrong device or a
-machine you are experimenting on. It takes the same turn, the same
-cordon, and the same drain as every other reboot.
+makes that request. The reboot then waits for its turn and, under
+`Manual`, for your approval, with the same cordon and drain as any
+other.
 
-## Releases and the channel
+## What a machine boots
+
+Every machine boots the same operating system image. The project
+builds the image and publishes it in each release. It is a read-only
+squashfs file, and nothing on the machine changes it.
+
+Your cluster's own files are in a small archive called the
+deployment layer. It holds your `Cluster` document, your `Machine`
+manifests, and the cluster's identity: its certificate authorities
+and its join token.
+[`liken layer`](/docs/reference/cli/#liken-layer) builds the archive,
+and each boot loads the image and your layer together. So everything
+a machine runs comes from those two declared files.
+
+## Releases and upgrades
 
 A release is a set of files with a version such as `2026.07.20-001`.
-Releases are published on
+The project publishes releases on
 [the release channel](/docs/reference/release-channel/), a directory
-that any web server can share. Your Cluster names the channel, pins
-each release by the digest of its release document, and points
-`spec.version` at the release to run. Each machine downloads from
-the channel, verifies every byte against the pinned digest, and
-takes its turn to reboot. [Upgrade the
-fleet](/docs/guides/upgrade/) is one edit to the Cluster.
+that any web server can serve. Your `Cluster` names the channel, pins
+each release by the digest of its release document, and sets
+`spec.version` to the release that the machines run.
 
-## Where to go next
+To upgrade, you change `spec.version`, as
+[Upgrade the fleet](/docs/guides/upgrade/) shows. Each machine
+downloads the release from the channel, checks every byte against the
+pinned digest, and reboots into it when its turn comes.
 
-[Install a cluster](/docs/guides/install/) gives the steps from a
-downloaded release to `kubectl get nodes`. When something does not
-go to plan, [Troubleshoot](/docs/guides/troubleshoot/) maps each
-symptom to the field that explains it.
+Each machine keeps two copies of the operating system, in slots
+named A and B, so an upgrade never overwrites the copy that is
+running. The install writes slot A, and the first upgrade writes
+slot B. After that, each upgrade goes to the slot that is not
+running. The machine boots the new slot once, as a trial. If the
+trial fails in any way, the machine boots the slot that it last
+booted successfully.
+[Roll back](/docs/guides/rollback/) describes each way back.
+
+## Next steps
+
+[Install a cluster](/docs/guides/install/) takes you from a
+downloaded release to `kubectl get nodes`. When something goes
+wrong, [Troubleshoot](/docs/guides/troubleshoot/) maps each symptom
+to the status field that explains it.

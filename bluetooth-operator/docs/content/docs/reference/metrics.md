@@ -4,6 +4,8 @@ weight: 40
 toc: true
 ---
 
+# Metrics
+
 The operator serves Prometheus metrics at `/metrics` on port `9250`.
 The base applies with no Prometheus in the cluster at all. An owner
 who runs the prometheus-operator adds the `deploy/monitoring`
@@ -20,6 +22,9 @@ component beside the base to scrape it.
 | bluetooth-operator | `bluetooth_pair_attempts_total{result}` | counter | bluetoothd refuses the pairings a person opens |
 | bluetooth-operator | `bluetooth_adapter_present` | gauge | the rtw88 wedge |
 | bluetooth-operator | `bluetooth_input_events_total{peripheral}` | counter | the relay is passing presses |
+| bluetooth-operator | `bluetooth_reconcile_duration_seconds{kind}` | histogram | how long one reconcile pass over one resource kind took |
+| bluetooth-operator | `bluetooth_reconcile_errors_total{kind}` | counter | reconcile passes over one resource kind that ended in an error |
+| bluetooth-operator | `liken_build_info{component, version}` | gauge | which release the process runs; always 1 |
 
 ```yaml
 resources:

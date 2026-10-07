@@ -15,18 +15,22 @@ is playing or recording. You need the operator
 [installed](/docs/guides/install/) on your
 [`liken`](https://liken.sh/docs/) cluster.
 
-Every output and input the operator publishes has its own resource:
-a [`Sink`](/docs/reference/sinks/) for playback and a
-[`Source`](/docs/reference/sources/) for capture. The operator writes
-hardware facts and the latest readings to `status`. You write desired
-settings to `spec`. The operator applies a declared volume and mute
-when you change them and when the endpoint appears, and reapplies a
-declared control or codec when the hardware differs from it. A pod
-can still claim the speaker
-while the operator applies these settings. The pod's stream volume is
-separate from the endpoint volume. A claim's codec parameter takes
-precedence while it allocates a Bluetooth speaker. A codec declared on
-the `Sink` takes effect after that claim ends.
+Every output and input that the operator publishes has its own
+resource: a [`Sink`](/docs/reference/sinks/) for playback and a
+[`Source`](/docs/reference/sources/) for capture. You write the
+settings you want in `spec`, and the operator writes the hardware's
+facts and its latest readings in `status`.
+
+The operator applies a volume and mute from `spec` when you change
+them and when the endpoint appears. It applies a control or a codec
+from `spec` again whenever the hardware drifts from it. None of this
+needs the speaker to be free: a pod can claim it and play while the
+operator applies the settings. The endpoint volume is separate from
+the volume of the pod's own stream.
+
+While a claim holds a Bluetooth speaker, the codec in the claim's
+parameters applies. The codec in the `Sink`'s `spec` takes effect when
+that claim ends.
 
 ## 1. See what is there
 

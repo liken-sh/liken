@@ -3,6 +3,8 @@ title: Objects the operator creates
 weight: 70
 ---
 
+# Objects the operator creates
+
 The operator creates pods, `Service`s, `ResourceClaim`s, `ConfigMap`s,
 and `Job`s in the `observatory` namespace while a reservation runs, and
 deletes all but the `Job`s when it ends. Kubernetes deletes each `Job`

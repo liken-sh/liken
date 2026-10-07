@@ -50,8 +50,8 @@ spec:
             spec:
               type: object
               description: >-
-                The default language and subtitle fields, each read
-                only when no more specific tier states it.
+                The default language and subtitle fields. The operator uses
+                each one only when the Player and the Play leave it unset.
               properties:
                 audioLanguages:
                   type: array
@@ -104,56 +104,51 @@ spec:
                       type: string
                       pattern: '^[a-z0-9.-]+/[a-z0-9-]+$'
                       description: >-
-                        The operator that draws every idle screen
-                        the household does not override, as a
-                        domain-qualified name. Two names belong to the
-                        media operator: media.liken.sh/idle-screen, the
-                        default, which draws the idle screen this
-                        operator ships, and media.liken.sh/none, under
-                        which nothing draws an idle screen and no claim
-                        exists. Any other name hands each screen to the
-                        operator that handles it, which reads a
-                        Player's status.idle for the claim to reference,
-                        the requests it carries, the two windows, and the
-                        bus it joins.
+                        The operator that draws every idle screen whose Player
+                        does not name its own, as a domain-qualified name. Two
+                        names belong to the media operator:
+                        media.liken.sh/idle-screen, the default, which draws
+                        the idle screen this operator ships, and
+                        media.liken.sh/none, under which nothing draws an idle
+                        screen and no claim exists. Any other name hands each
+                        screen to the operator that handles it, which reads a
+                        Player's status.idle for the claim to reference, the
+                        requests it carries, the two windows, and the bus it
+                        joins.
                     image:
                       type: string
                       description: >-
-                        The container image that draws every idle
-                        screen. The image starts with its own entrypoint
-                        and reads each unit's state from the bus. It
-                        implements the fade and off windows, the focus
-                        gate, the shade, the volume indicator, and the panel
-                        desire in its own process. Unset, every screen the
-                        household does not override runs the idle client
-                        the media operator ships.
+                        The container image that draws every idle screen. The
+                        image starts with its own entrypoint and reads each
+                        unit's state from the bus. It implements the fade and
+                        off windows, the focus gate, the shade, the volume
+                        indicator, and the panel desire in its own process.
+                        Unset, every screen whose Player names no image runs
+                        the idle client that the media operator ships.
                     fadeAfterSeconds:
                       type: integer
                       format: int64
                       minimum: 0
                       description: >-
-                        Seconds of quiet before an idle screen fades to
-                        black. Zero disables the automatic fade; unset,
+                        Seconds with no activity before an idle screen fades
+                        to black. Zero disables the automatic fade; unset,
                         every screen fades after 600.
                     offAfterSeconds:
                       type: integer
                       format: int64
                       minimum: 0
                       description: >-
-                        Seconds of quiet before an idle panel
-                        goes dark, at least fadeAfterSeconds. Zero or
-                        unset means panels never go dark on their own.
-                        A panel goes dark only where the cluster runs
-                        a display-operator that publishes a Display
-                        for the screen.
+                        Seconds with no activity before an idle panel goes
+                        dark, at least fadeAfterSeconds. Zero or unset means
+                        panels never go dark on their own. A panel goes dark
+                        only where the cluster runs a display-operator that
+                        publishes a Display for the screen.
                     offMode:
                       type: string
                       enum: [backlight, power]
                       description: >-
-                        Which override the off window applies to the
-                        screen's Display. The default, backlight,
-                        holds the panel at brightness zero, which
-                        still answers DDC. Power off stops some
-                        panels from answering DDC at all; state it
-                        only for a panel that woke from it in a
-                        drill.
+                        Which override the off window applies to the screen's
+                        Display. The default, backlight, holds the panel at
+                        brightness zero, which still answers DDC. Power off
+                        stops some panels from answering DDC at all; use it
+                        only for a panel that you have seen wake from it.

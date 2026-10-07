@@ -3,6 +3,8 @@ title: Reading the status
 weight: 20
 ---
 
+# Reading the status
+
 The operator writes every status, and no person writes one. This page
 explains the status of the devices, the telescopes and observatories,
 and the reservations.
@@ -94,7 +96,7 @@ message names the device, such as `Dome lab is parked`. A park, a
 shutter, or a cover that moves is `Unknown` with the reason `Moving`
 until the move ends. `Safe` is `False` with the reason `Warning` or
 `Danger`. A driver that reports neither side of a switch, or a station
-with no verdict, gives `Unknown` with the reason `NotReported`. A
+with no safety status, gives `Unknown` with the reason `NotReported`. A
 device that is not connected has none of these conditions, so a
 trigger never reads a state that the operator cannot confirm.
 
@@ -106,7 +108,7 @@ devices, and its guider's phase and PHD2's state. Its `Guider` column,
 in `-o wide`, shows both, such as `Ready, Guiding`, and an empty cell
 for a telescope with no `Guider`. An `Observatory`'s status
 names its server, its telescopes, its devices, the active reservations,
-and the worst verdict of its weather stations. A `Telescope` and an
+and the worst safety status of its weather stations. A `Telescope` and an
 `Observatory` also report the condition `Active`, and each resource
 with procedures reports their runs in `status.procedures`, as
 [Procedures](/docs/concepts/procedures/) states.

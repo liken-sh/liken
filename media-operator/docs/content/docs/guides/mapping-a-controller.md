@@ -6,13 +6,13 @@ description: "Declare a Remote, find the codes a controller emits with discovery
 
 # Map a new controller
 
-A controller works before it has a `Keymap`. The standing pod passes
-every `KEY_*` code through under the kernel's own name, and turns the
-hat axes into the arrows. It reads a gamepad's south and east buttons
-as enter and back. This guide finds the codes a controller emits and
-writes a `Keymap` row only for a control the base gets wrong or
-leaves out. At the end, every button the controller has does what its
-label says.
+A controller works before it has a `Keymap`. The `Remote`'s pod
+passes every `KEY_*` code through under the kernel's own name, turns
+the hat axes into the arrows, and reads a gamepad's south and east
+buttons as enter and back. This guide finds the codes that a
+controller sends, and writes a `Keymap` row only for each button that
+this default mapping gets wrong or leaves out. At the end, every
+button on the controller does what its label says.
 
 You need:
 
@@ -44,7 +44,7 @@ under a kernel name already work:
     kind: Remote
     metadata:
       name: den-remote
-      namespace: house
+      namespace: media
     spec:
       device:
         class: bluetooth-input
@@ -73,7 +73,7 @@ connecting, then each press:
     remote: event3 "Handheld Remote" EV_KEY (1) BTN_SOUTH (304) press (1)
     remote:   - press: BTN_SOUTH   # code 304
     remote:     key: <a KEY_* name, or none>
-    remote: event3 "Handheld Remote": BTN_SOUTH (304) pressed, published KEY_ENTER to liken/media/remotes/house/den-remote/events
+    remote: event3 "Handheld Remote": BTN_SOUTH (304) pressed, published KEY_ENTER to liken/media/remotes/media/den-remote/events
 
 The two indented lines are a `Keymap` row. Paste it under
 `spec.buttons`, or under `spec.axes` for a hat direction. Then

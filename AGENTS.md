@@ -142,6 +142,18 @@ on a physical test cluster. The `testing` skill under `.agents/skills`
 holds the fakes for each peer and device, the coverage gate, and the
 gotchas. Load it before you write or review a test.
 
+## The manual changes with the code
+
+A reader installs and runs each component from its manual alone, so a
+manual that lags the code gives that reader a wrong command. A commit
+that changes what a person installs, runs, reads, or sees updates the
+component's manual in the same commit. That includes a manifest, a
+container, a flag, a metric, a printer column, a condition, an
+`Event`, and a behavior the component adds on its own. When the change
+crosses into another component's domain, update that component's
+pages too. The `operators` skill under `.agents/skills` lists the
+pages each kind of change touches.
+
 ## Branch names
 
 This repository works on `main`. `corrosion`, outside this repository,

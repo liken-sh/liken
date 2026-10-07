@@ -39,9 +39,9 @@ type ListMeta struct {
 	ResourceVersion string `json:"resourceVersion,omitempty"`
 }
 
-// A Receiver describes one piece of A/V equipment on the far end of a
-// machine's cable. It is cluster-scoped because the machines that feed
-// it belong to the cluster.
+// A Receiver describes an A/V receiver that a liken machine plays
+// through. It is cluster-scoped because the machines connected to it
+// belong to the cluster.
 type Receiver struct {
 	APIVersion string               `json:"apiVersion,omitempty"`
 	Kind       string               `json:"kind,omitempty"`

@@ -51,11 +51,26 @@ into a bootable image. Read the repository to see what your machine
 runs.
 
 Releases are published at
-[releases.liken.sh](https://releases.liken.sh/). Upgrades come
-straight from the channel: you catalog a release and set the
-version, and the machines reboot into it one turn at a time.
+[releases.liken.sh](https://releases.liken.sh/). To upgrade, you add
+the release to your `Cluster` and set the version. The machines
+download it, and each one reboots into it when its turn comes, one
+machine at a time by default, after you approve the reboot or on its
+own if its `rebootPolicy` is `Auto`.
+
+Extension operators add more to the cluster: screens, speakers, and
+game controllers for your pods, git repositories as volumes, a home
+theater, and a telescope. You install only the ones you need.
+[Extension operators](/docs/concepts/extension-operators/) describes
+them all.
 
 [The manual](/docs/) tells you how to run your own cluster.
 [How `liken` works](/docs/concepts/how-liken-works/) explains the
 model, and [Install a cluster](/docs/guides/install/) gives the
 steps from a downloaded release to `kubectl get nodes`.
+
+## Why `liken`?
+
+The name comes from **Li**nux + **K**ub**e**r**n**etes. It also sounds
+like *lichen*: a very small thing that grows on bare rock, as `liken`
+grows on bare metal. The mark is a patch of lichen, drawn as the
+hexagonal plates that a lichen cracks into as it grows.

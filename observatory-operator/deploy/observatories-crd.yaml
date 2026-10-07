@@ -803,9 +803,9 @@ spec:
                         type: string
                         format: date-time
                         description: >-
-                          The transition time of the condition that the
-                          run answers: the `lastTransitionTime` of
-                          `Active` for activation and deactivation.
+                          The transition time of the condition that started
+                          the run: the `lastTransitionTime` of `Active` for
+                          activation and deactivation.
                       state:
                         type: string
                         enum: [Pending, Running, Done, Failed, Skipped]
@@ -868,18 +868,16 @@ spec:
                   type: array
                   description: >-
                     `Ready` is `True` while the observatory's server and
-                    devices run and are connected. `LocksRelayed` is
-                    present while the observatory has a `Dome`. It is
-                    `True` while the operator relays the park states
-                    that the locks need, `False` with the reason
-                    `Waiting` while a dome or a mount does not report
-                    what the relay needs, and `False` with the reason
-                    `Idle` while no dome or mount runs. `Active` is
-                    `True` from the `Activation` step of the first
-                    reservation in the observatory until the
-                    `Deactivation` step of the last one. Its
-                    `lastTransitionTime` is the transition that the
-                    activation and deactivation procedures answer.
+                    devices run and are connected. `LocksRelayed` is present
+                    while the observatory has a `Dome`. It is `True` while the
+                    operator relays the park states that the locks need,
+                    `False` with the reason `Waiting` while a dome or a mount
+                    does not report what the relay needs, and `False` with the
+                    reason `Idle` while no dome or mount runs. `Active` is
+                    `True` from the `Activation` step of the first reservation
+                    in the observatory until the `Deactivation` step of the
+                    last one. Its `lastTransitionTime` is the transition that
+                    starts the activation and deactivation procedures.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:
@@ -905,7 +903,7 @@ spec:
                         minimum: 0
                         description: >-
                           The `metadata.generation` of the spec that the
-                          condition judged.
+                          condition reflects.
                       reason:
                         type: string
                         minLength: 1
@@ -995,5 +993,5 @@ spec:
                   type: string
                   enum: [Safe, Warning, Danger, Unknown]
                   description: >-
-                    The worst verdict of the observatory's weather
+                    The worst safety status of the observatory's weather
                     stations, or `Unknown` when no station reports.

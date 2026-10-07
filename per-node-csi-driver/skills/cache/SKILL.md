@@ -5,6 +5,8 @@ description: "Give pods a named per-node cache directory that a pod on a new nod
 
 This skill is the guide at https://liken.sh/per-node/docs/guides/cache/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
+# Give pods a per-node cache
+
 A named cache is a directory that one or more pods fill with items they
 can make again, such as decoded art or fetched files. When a copy lacks
 an item, the pod makes it again. A pod that moves to a new node starts

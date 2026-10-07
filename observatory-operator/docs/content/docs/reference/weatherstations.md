@@ -6,7 +6,9 @@ toc: true
 
 <!-- Generated from deploy/weatherstations-crd.yaml by crdref. Do not edit. -->
 
-A `WeatherStation` reports the weather at the site and whether it is safe to observe: an INDI driver with `WEATHER_INTERFACE`. It runs on the observatory's own INDI server, and the `Observatory`'s status reports the worst verdict of its stations.
+# `WeatherStation`
+
+A `WeatherStation` reports the weather at the site and whether it is safe to observe: an INDI driver with `WEATHER_INTERFACE`. It runs on the observatory's own INDI server, and the `Observatory`'s status reports the worst safety status of its stations.
 
 ## spec
 
@@ -230,7 +232,7 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--pod"></span>`pod` | string | no | The name of the device's pod, while it exists. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the device's pod. |
 | <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Every property that the device defines, as the driver defines it, with the values of its last update. A vendor's own properties are here, and no typed reading depends on one. The list holds no BLOB data. |
-| <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the weather station reports, from `SAFETY_STATUS`, `WEATHER_PARAMETERS`, and `WEATHER_STATUS`. A field is absent until the driver sends it. INDI reports each verdict as a light: `Ok` is `Safe`, `Busy` is `Warning`, `Alert` is `Danger`, and `Idle` is `Unknown`. |
+| <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the weather station reports, from `SAFETY_STATUS`, `WEATHER_PARAMETERS`, and `WEATHER_STATUS`. A field is absent until the driver sends it. INDI reports each safety status as a light: `Ok` is `Safe`, `Busy` is `Warning`, `Alert` is `Danger`, and `Idle` is `Unknown`. |
 
 ### status.conditions[]
 
@@ -240,7 +242,7 @@ One condition, in the shape of `metav1.Condition`.
 | --- | --- | --- | --- |
 | <span id="statusconditions--type"></span>`type` | string | yes | The condition's name, such as `Ready`. |
 | <span id="statusconditions--status"></span>`status` | string | yes | Whether the condition holds: `True`, `False`, or `Unknown`. One of: `True`, `False`, `Unknown`. |
-| <span id="statusconditions--observedgeneration"></span>`observedGeneration` | integer | no | The `metadata.generation` of the spec that the condition judged. |
+| <span id="statusconditions--observedgeneration"></span>`observedGeneration` | integer | no | The `metadata.generation` of the spec that the condition reflects. |
 | <span id="statusconditions--reason"></span>`reason` | string | yes | One word in CamelCase for the cause. |
 | <span id="statusconditions--message"></span>`message` | string | yes | The cause, for a person to read. It can be empty. |
 | <span id="statusconditions--lasttransitiontime"></span>`lastTransitionTime` | string | yes | When `status` last changed. A write with the same status keeps this time. |
@@ -252,7 +254,7 @@ The last run of one trigger.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="statusprocedures--trigger"></span>`trigger` | string | yes | The trigger: `activation`, `deactivation`, or `triggers[0]` for the first item of `spec.triggers`. |
-| <span id="statusprocedures--since"></span>`since` | string | no | The transition time of the condition that the run answers: the `lastTransitionTime` of `Active` for activation and deactivation. |
+| <span id="statusprocedures--since"></span>`since` | string | no | The transition time of the condition that started the run: the `lastTransitionTime` of `Active` for activation and deactivation. |
 | <span id="statusprocedures--state"></span>`state` | string | yes | The run's progress: `Pending`, `Running`, `Done`, `Failed`, or `Skipped` when it had nothing to do. One of: `Pending`, `Running`, `Done`, `Failed`, `Skipped`. |
 | <span id="statusprocedures--starttime"></span>`startTime` | string | no | When the run began to run. |
 | <span id="statusprocedures--stoptime"></span>`stopTime` | string | no | When the run ended. |
@@ -301,12 +303,12 @@ One member of the property.
 
 ### status.readings
 
-What the weather station reports, from `SAFETY_STATUS`, `WEATHER_PARAMETERS`, and `WEATHER_STATUS`. A field is absent until the driver sends it. INDI reports each verdict as a light: `Ok` is `Safe`, `Busy` is `Warning`, `Alert` is `Danger`, and `Idle` is `Unknown`.
+What the weather station reports, from `SAFETY_STATUS`, `WEATHER_PARAMETERS`, and `WEATHER_STATUS`. A field is absent until the driver sends it. INDI reports each safety status as a light: `Ok` is `Safe`, `Busy` is `Warning`, `Alert` is `Danger`, and `Idle` is `Unknown`.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="statusreadings--safety"></span>`safety` | string | no | The station's verdict for the whole site. One of: `Safe`, `Warning`, `Danger`, `Unknown`. |
-| <span id="statusreadings--parameters"></span>`parameters` | [\[\]object](#statusreadingsparameters) | no | Each measurement, with its verdict against the driver's limits. |
+| <span id="statusreadings--safety"></span>`safety` | string | no | The station's safety status for the whole site. One of: `Safe`, `Warning`, `Danger`, `Unknown`. |
+| <span id="statusreadings--parameters"></span>`parameters` | [\[\]object](#statusreadingsparameters) | no | Each measurement, with its safety status against the driver's limits. |
 
 #### status.readings.parameters[]
 
@@ -318,4 +320,4 @@ One measurement.
 | <span id="statusreadingsparameters--label"></span>`label` | string | no | The label that the driver gives the measurement, with its unit, such as `Temperature (C)`. |
 | <span id="statusreadingsparameters--value"></span>`value` | number | no | The value, in the unit that the label names. |
 | <span id="statusreadingsparameters--text"></span>`text` | string | no | The value with the unit that the label names, such as `12.5 °C` or `20 km/h`. A label that names no unit gives the number alone. |
-| <span id="statusreadingsparameters--safety"></span>`safety` | string | no | The verdict for this measurement. One of: `Safe`, `Warning`, `Danger`, `Unknown`. |
+| <span id="statusreadingsparameters--safety"></span>`safety` | string | no | The safety status of this measurement. One of: `Safe`, `Warning`, `Danger`, `Unknown`. |

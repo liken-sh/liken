@@ -100,6 +100,11 @@ func Generate(crdYAML []byte, source string, opts Options) ([]byte, error) {
 	// and short pages would not.
 	fmt.Fprintf(&b, "---\ntitle: %s\nweight: %d\ntoc: true\n---\n\n", title, weight)
 	fmt.Fprintf(&b, "<!-- Generated from %s by crdref. Do not edit. -->\n\n", displayPath(source))
+	// The page template prints no heading, so the page carries its
+	// own. It names the kind in the code face, as the prose names
+	// every kind, while the title above labels the page in the
+	// sidebar.
+	fmt.Fprintf(&b, "# `%s`\n\n", kind)
 	if p := strings.Trim(string(opts.Preamble), "\n"); p != "" {
 		b.WriteString(p + "\n\n")
 	}

@@ -6,6 +6,8 @@ toc: true
 
 <!-- Generated from deploy/players-crd.yaml by crdref. Do not edit. -->
 
+# `Player`
+
 A `Player` is one named unit of equipment: a lone speaker, a TV
 with its built-in speakers, a TV with a receiver. The spec selects
 the unit's devices out of what the hardware operators publish, with
@@ -53,11 +55,11 @@ The devices that form the unit, each selected from what a hardware operator publ
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="spec--zone"></span>`zone` | string | no | The area this Player is in, such as living-room. A word for grouping and display; nothing acts on it yet. |
-| <span id="spec--displayname"></span>`displayName` | string | no | The human name of this unit, the one the idle screen and later ambient surfaces show in place of the object name, such as Studio Lab. Omit it, and the idle screen falls back to the object name. |
+| <span id="spec--displayname"></span>`displayName` | string | no | The human name of this unit, which the idle screen shows in place of the object name, such as Studio Lab. Omit it, and the idle screen falls back to the object name. |
 | <span id="spec--display"></span>`display` | [object](#specdisplay) | no | The display this Player shows video on. Omit it for an audio-only Player. |
 | <span id="spec--sinks"></span>`sinks` | [\[\]object](#specsinks) | no | The audio outputs this Player plays sound through. |
 | <span id="spec--render"></span>`render` | [object](#specrender) | no | The GPU render node the player program decodes and draws with. Omit it only for an audio-only Player; mpv needs a GPU to put video on a display. |
-| <span id="spec--remotes"></span>`remotes` | [\[\]object](#specremotes) | no | The controllers this unit owns, each naming a Remote in the same namespace. Each Remote runs a standing pod of its own, and the Play's command sidecar reads the events every entry publishes. |
+| <span id="spec--remotes"></span>`remotes` | [\[\]object](#specremotes) | no | The controllers this unit owns, each naming a Remote in the same namespace. Each Remote runs a pod of its own, and the Play's command sidecar reads the events every entry publishes. |
 | <span id="spec--audiolanguages"></span>`audioLanguages` | []string | no | A per-Player override of the audio language order; omit it to inherit the default MediaPreferences. |
 | <span id="spec--subtitlelanguages"></span>`subtitleLanguages` | []string | no | A per-Player override of the subtitle language order; omit it to inherit the default MediaPreferences. |
 | <span id="spec--subtitles"></span>`subtitles` | string | no | A per-Player override of when subtitles show; omit it to inherit the default MediaPreferences. One of: `on`, `off`, `auto`. |
@@ -115,7 +117,7 @@ The GPU render node the player program decodes and draws with. Omit it only for 
 
 ### spec.remotes[]
 
-The controllers this unit owns, each naming a Remote in the same namespace. Each Remote runs a standing pod of its own, and the Play's command sidecar reads the events every entry publishes.
+The controllers this unit owns, each naming a Remote in the same namespace. Each Remote runs a pod of its own, and the Play's command sidecar reads the events every entry publishes.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -130,9 +132,9 @@ This unit's idle screen policy. Each field overrides the default MediaPreference
 | --- | --- | --- | --- |
 | <span id="specidle--controller"></span>`controller` | string | no | The operator that draws this unit's idle screen, as a domain-qualified name. Two names belong to the media operator: media.liken.sh/idle-screen, which is the default and draws the idle screen this operator ships, and media.liken.sh/none, under which nothing draws an idle screen on this unit and no claim exists. Any other name hands the screen to the operator that handles it, which reads status.idle for the claim to reference, the requests it carries, the two windows, and the bus it joins; image has no effect under such a name, because that operator brings its own pod. Omit it to inherit the default MediaPreferences. Pattern: `^[a-z0-9.-]+/[a-z0-9-]+$`. |
 | <span id="specidle--image"></span>`image` | string | no | The container image that draws this unit's idle screen. The image starts with its own entrypoint and reads the unit's state from the bus. It implements the fade and off windows, the focus gate, the shade, the volume indicator, and the panel desire in its own process. Omit it to inherit the default from MediaPreferences. Where no tier names an image, the screen runs the idle client the media operator ships. |
-| <span id="specidle--fadeafterseconds"></span>`fadeAfterSeconds` | integer | no | Seconds of quiet before the idle screen fades to black. Zero disables the automatic fade; omit it to inherit the default MediaPreferences. |
-| <span id="specidle--offafterseconds"></span>`offAfterSeconds` | integer | no | Seconds of quiet before the panel itself goes dark, at least fadeAfterSeconds. Zero or unset means the panel never goes dark on its own. The panel goes dark only where the cluster runs a display-operator that publishes a Display for the screen. |
-| <span id="specidle--offmode"></span>`offMode` | string | no | Which override the off window applies to the screen's Display. The default, backlight, holds the panel at brightness zero, which still answers DDC. Power off stops some panels from answering DDC at all; state it only for a panel that woke from it in a drill. One of: `backlight`, `power`. |
+| <span id="specidle--fadeafterseconds"></span>`fadeAfterSeconds` | integer | no | Seconds with no activity before the idle screen fades to black. Zero disables the automatic fade; omit it to inherit the default MediaPreferences. |
+| <span id="specidle--offafterseconds"></span>`offAfterSeconds` | integer | no | Seconds with no activity before the panel itself goes dark, at least fadeAfterSeconds. Zero or unset means the panel never goes dark on its own. The panel goes dark only where the cluster runs a display-operator that publishes a Display for the screen. |
+| <span id="specidle--offmode"></span>`offMode` | string | no | Which override the off window applies to the screen's Display. The default, backlight, holds the panel at brightness zero, which still answers DDC. Power off stops some panels from answering DDC at all; use it only for a panel that you have seen wake from it. One of: `backlight`, `power`. |
 
 ## status
 
@@ -143,20 +145,20 @@ What plays on this Player now, written only by the media operator. It is derived
 | <span id="status--activity"></span>`activity` | string | no | Whether the Player performs a run now. Playing is a Play running on it, Starting is a Play whose pod has not begun, and Idle is no Play at all. One of: `Playing`, `Starting`, `Idle`. |
 | <span id="status--play"></span>`play` | string | no | The name of the Play on this Player, in the same namespace. Empty while the Player is Idle. |
 | <span id="status--panel"></span>`panel` | string | no | What the screen's Display last observed: On, BacklightOff, or Off. Empty until a Display reports an observation for the unit's screen. |
-| <span id="status--receiver"></span>`receiver` | [object](#statusreceiver) | no | The equipment this unit's cable lands on, matched from the machine the unit draws on and the monitor id of its screen. Absent for a unit that plays straight into its panel. |
+| <span id="status--receiver"></span>`receiver` | [object](#statusreceiver) | no | The receiver that this unit's video goes into, matched from the machine the unit draws on and the monitor id of its screen. Absent for a unit that plays straight into its panel. |
 | <span id="status--screen"></span>`screen` | [object](#statusscreen) | no | The last screen the idle claim resolved to. The operator keeps it while the panel is away, so it can still read the screen's Display and say why the idle pod waits. Absent until the claim has resolved once. |
 | <span id="status--sinks"></span>`sinks` | [\[\]object](#statussinks) | no | The Sink each spec.sinks selection resolved to, in spec order. The operator writes the list from an allocated playback claim and keeps it after the Play retires, the way it keeps status.screen. A tap through these names still needs a running Play. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The unit's conditions. There is one, Screen, and it is absent until the idle claim has resolved once. True with reason Present means the screen's Display reports a panel on its connector. False with reason PanelAway means the Display reports no panel there: the monitor shows another input, the idle claim has deallocated, and the idle pod parks Pending until the panel returns. That park is by design, and an alert on Pending pods can read this reason to stay quiet for it. False with any other reason carries the Display's own reason through. Unknown with reason NoDisplay means no Display carries the remembered monitor id, and Unknown with reason NotReported means the Display carries no Connected condition. The message is the Display's own, and lastTransitionTime moves only when the status does. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The unit's conditions. There is one, Screen, and it is absent until the idle claim has resolved once. True with reason Present means the screen's Display reports a panel on its connector. False with reason PanelAway means the Display reports no panel there: the monitor shows another input, the idle claim has deallocated, and the idle pod stays Pending until the panel returns. This is expected, and an alert on Pending pods can read this reason to stay quiet. False with any other reason carries the Display's own reason through. Unknown with reason NoDisplay means no Display carries the remembered monitor id, and Unknown with reason NotReported means the Display carries no Connected condition. The message is the Display's own, and lastTransitionTime moves only when the status does. |
 | <span id="status--idle"></span>`idle` | [object](#statusidle) | no | What draws this unit's idle screen, and everything the operator that draws it needs. A delegate wires its client from this block alone, and it sets MEDIA_PLAYER_NAME on that client to the Player's metadata.name, the value every focus mark holds. The block is absent for a Player that drives no screen and where the cluster names no display-draw class. A delegate reads this block and never the spec, because the spec may inherit its controller from the default MediaPreferences, and only the media operator resolves the tiers. |
 
 ### status.receiver
 
-The equipment this unit's cable lands on, matched from the machine the unit draws on and the monitor id of its screen. Absent for a unit that plays straight into its panel.
+The receiver that this unit's video goes into, matched from the machine the unit draws on and the monitor id of its screen. Absent for a unit that plays straight into its panel.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="statusreceiver--name"></span>`name` | string | no | The name of the matched Receiver. |
-| <span id="statusreceiver--input"></span>`input` | string | no | The input of that Receiver this unit's cable lands on. |
+| <span id="statusreceiver--input"></span>`input` | string | no | The input of that Receiver that this unit is connected to. |
 | <span id="statusreceiver--reachable"></span>`reachable` | string | no | The status of the Receiver's Reachable condition, empty until it carries one. |
 
 ### status.screen
@@ -179,7 +181,7 @@ The Sink each spec.sinks selection resolved to, in spec order. The operator writ
 
 ### status.conditions[]
 
-The unit's conditions. There is one, Screen, and it is absent until the idle claim has resolved once. True with reason Present means the screen's Display reports a panel on its connector. False with reason PanelAway means the Display reports no panel there: the monitor shows another input, the idle claim has deallocated, and the idle pod parks Pending until the panel returns. That park is by design, and an alert on Pending pods can read this reason to stay quiet for it. False with any other reason carries the Display's own reason through. Unknown with reason NoDisplay means no Display carries the remembered monitor id, and Unknown with reason NotReported means the Display carries no Connected condition. The message is the Display's own, and lastTransitionTime moves only when the status does.
+The unit's conditions. There is one, Screen, and it is absent until the idle claim has resolved once. True with reason Present means the screen's Display reports a panel on its connector. False with reason PanelAway means the Display reports no panel there: the monitor shows another input, the idle claim has deallocated, and the idle pod stays Pending until the panel returns. This is expected, and an alert on Pending pods can read this reason to stay quiet. False with any other reason carries the Display's own reason through. Unknown with reason NoDisplay means no Display carries the remembered monitor id, and Unknown with reason NotReported means the Display carries no Connected condition. The message is the Display's own, and lastTransitionTime moves only when the status does.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -198,21 +200,21 @@ What draws this unit's idle screen, and everything the operator that draws it ne
 | <span id="statusidle--controller"></span>`controller` | string | no | The resolved controller name, after spec.idle.controller, the default MediaPreferences, and the built-in media.liken.sh/idle-screen resolve in that order. |
 | <span id="statusidle--claim"></span>`claim` | string | no | The standing ResourceClaim on this unit's screen, in the Player's namespace. The pod that draws references it by name in its resourceClaims. Empty under media.liken.sh/none, where no claim exists. |
 | <span id="statusidle--requests"></span>`requests` | []string | no | The claim's request names, in claim order: draw, and render where the Player states a render node. The container that draws states one resources.claims entry per name. Empty under media.liken.sh/none. |
-| <span id="statusidle--fadeafterseconds"></span>`fadeAfterSeconds` | integer | no | The resolved seconds of quiet before the screen fades to black. Zero means the screen never fades on its own. The client that draws holds this timer, so the field is always written: zero is a policy, and an absent field is not one. |
+| <span id="statusidle--fadeafterseconds"></span>`fadeAfterSeconds` | integer | no | The resolved seconds of quiet before the screen fades to black. Zero means the screen never fades on its own. The client that draws holds this timer, so the operator always writes the field, and zero always means never. |
 | <span id="statusidle--offafterseconds"></span>`offAfterSeconds` | integer | no | The resolved seconds of quiet before the panel goes dark, at least fadeAfterSeconds. Zero means the panel never goes dark on its own. It is always written, for the reason fadeAfterSeconds is. |
-| <span id="statusidle--bus"></span>`bus` | [object](#statusidlebus) | no | The bus facts a delegate's client reads. With the two windows above, this block is the whole contract a delegate wires its client from. It is present under every controller but media.liken.sh/none. |
+| <span id="statusidle--bus"></span>`bus` | [object](#statusidlebus) | no | The bus facts a delegate's client reads. With the two windows above, this block holds everything that a delegate's client needs. It is present under every controller but media.liken.sh/none. |
 
 #### status.idle.bus
 
-The bus facts a delegate's client reads. With the two windows above, this block is the whole contract a delegate wires its client from. It is present under every controller but media.liken.sh/none.
+The bus facts a delegate's client reads. With the two windows above, this block holds everything that a delegate's client needs. It is present under every controller but media.liken.sh/none.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="statusidlebus--address"></span>`address` | string | no | The broker, as host:port. It is the address the operator itself connects to. |
-| <span id="statusidlebus--statustopic"></span>`statusTopic` | string | no | The retained topic that carries the unit's presentable state: its name, its activity, the Play it runs, and its parts. A client reads it on subscribe and asks for nothing. |
+| <span id="statusidlebus--statustopic"></span>`statusTopic` | string | no | The retained topic that carries the state that the unit's screen shows: its name, its activity, the Play it runs, and its parts. A client reads it on subscribe and asks for nothing. |
 | <span id="statusidlebus--volumetopic"></span>`volumeTopic` | string | no | The retained topic that carries the unit's level, as {"level": 0.63, "muted": false}, where the level is the fraction of the device's max. The media operator is its only writer. The client draws the indicator for each live message and publishes no level. A volume key reaches the media operator from the controller's events topic, and a client that asks for a step publishes on this topic plus /commands. Empty means the unit has no sinks: the client subscribes to no level and draws none. |
 | <span id="statusidlebus--commandstopic"></span>`commandsTopic` | string | no | The topic the playback pod publishes play-next on when a person takes the up-next offer on the scrubber. The client that wrote the Play reads that ask and starts the next work. When a Play ends, the client's own surface is on the screen again and the retained status is the cue, so nothing is published here for it. The pod also publishes home when a person presses home during a film, just before the Play ends, and the client reads that ask as a press of the home key. |
-| <span id="statusidlebus--paneltopic"></span>`panelTopic` | string | no | The retained topic a client states its panel desire on, as on or off. The client holds no API credentials, so the operator reads the desire here and overrides the screen's Display. |
+| <span id="statusidlebus--paneltopic"></span>`panelTopic` | string | no | The retained topic on which a client publishes whether it wants the panel on or off. The client holds no API credentials, so the operator reads the desire here and overrides the screen's Display. |
 | <span id="statusidlebus--powertopic"></span>`powerTopic` | string | no | The topic a power press on this unit publishes an ask on while the unit's status topic states the power mode room: toggle for KEY_POWER and KEY_POWER2, off for KEY_SLEEP, and on for KEY_WAKEUP, the names the kernel gives a TV remote's Power Off Function and Power On Function. The media operator writes each ask into the Receiver's session, and the equipment operator turns the room off or on. The media operator also publishes wake here when a person picks the unit's input in the TV's source menu while the screen sleeps, and sleep when the TV goes to standby, and the client wakes or sleeps the screen. Every unit carries the topic, wired through a Receiver or not, so a delegate's pod stays the same when a Receiver is wired or removed. In the power mode screen, a power press reaches the client, which lowers the shade. |
 | <span id="statusidlebus--remotes"></span>`remotes` | [\[\]object](#statusidlebusremotes) | no | The unit's controllers, one entry each, in spec.remotes order. That position is the index a focus moment carries, and it is the order the status topic lists the parts in. A unit with no controllers lists none. |
 

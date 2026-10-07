@@ -788,9 +788,9 @@ spec:
                         type: string
                         format: date-time
                         description: >-
-                          The transition time of the condition that the
-                          run answers: the `lastTransitionTime` of
-                          `Active` for activation and deactivation.
+                          The transition time of the condition that started
+                          the run: the `lastTransitionTime` of `Active` for
+                          activation and deactivation.
                       state:
                         type: string
                         enum: [Pending, Running, Done, Failed, Skipped]
@@ -852,14 +852,13 @@ spec:
                 conditions:
                   type: array
                   description: >-
-                    `Ready` is `True` while the telescope's server runs
-                    and every device of the telescope is connected.
-                    `ParentFound` is `False` when the `Observatory` does
-                    not exist. `Active` is `True` from the start of its
-                    reservation's `Activation` step until the start of
-                    its `Deactivation` step. Its `lastTransitionTime` is
-                    the transition that the activation and deactivation
-                    procedures answer.
+                    `Ready` is `True` while the telescope's server runs and
+                    every device of the telescope is connected. `ParentFound`
+                    is `False` when the `Observatory` does not exist. `Active`
+                    is `True` from the start of its reservation's `Activation`
+                    step until the start of its `Deactivation` step. Its
+                    `lastTransitionTime` is the transition that starts the
+                    activation and deactivation procedures.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:
@@ -885,7 +884,7 @@ spec:
                         minimum: 0
                         description: >-
                           The `metadata.generation` of the spec that the
-                          condition judged.
+                          condition reflects.
                       reason:
                         type: string
                         minLength: 1

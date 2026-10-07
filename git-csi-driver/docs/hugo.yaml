@@ -1,14 +1,14 @@
 # The site's configuration. The site is the manual for the git CSI
-# driver, served at git.liken.sh.
-# The hostname is the CSI driver name, so the name a volume names is
-# also the address where a reader learns what it does.
+# driver, served at https://liken.sh/git/. The path is the first label
+# of the CSI driver name, `git.liken.sh`, so the name a volume names
+# also leads to the page where a reader learns what it does.
 #
 # The theme is brand/, the brand component at the top of this
 # repository. It provides the page shell, the top nav, the mark,
 # and the stylesheet that every liken site uses, so this site reads
 # as part of the same family as liken.sh.
 baseURL: https://liken.sh/git/
-title: git.liken.sh
+title: git-csi-driver
 # Hugo looks for a theme by name under themesDir, and the repository
 # root holds brand/, so the site and the theme it builds with are
 # always the same commit.

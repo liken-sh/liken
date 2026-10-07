@@ -16,6 +16,10 @@ beside the base, which holds a `PodMonitor` for each of the three.
 
 | Component | Metric | Type | Why |
 | --- | --- | --- | --- |
+| library-operator | `liken_build_info{component, version}` | gauge | the release each process runs, always 1 |
+| library-operator | `library_reconcile_duration_seconds{kind}` | histogram | how long one reconcile pass over one object took |
+| library-operator | `library_reconcile_errors_total{kind}` | counter | reconcile passes that ended in an error |
+| library-operator | `library_watch_restarts_total{kind}` | counter | watches the API server closed that the operator reopened |
 | library-operator | `library_run_duration_seconds{library, worker}` | histogram | a worker whose run got slow |
 | library-operator | `library_run_last_success_timestamp_seconds{library, worker}` | gauge | a worker that stopped finishing |
 | library-operator | `library_items{library, kind}` | gauge | catalog size over time |

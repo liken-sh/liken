@@ -1,8 +1,10 @@
 ---
-title: Install
+title: Install the operator
 weight: 10
 description: "Install observatory-operator on a liken cluster, run the example observatory of INDI simulators, reserve its telescope, and connect KStars to it. Use when a cluster has no observatory.liken.sh resources yet, to try the operator with no hardware, or when removing the operator."
 ---
+
+# Install the operator
 
 This guide installs `observatory-operator` on a
 [`liken`](https://liken.sh/docs/) cluster, and then runs a whole

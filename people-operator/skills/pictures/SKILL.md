@@ -5,6 +5,8 @@ description: "Give a Person a picture with spec.avatar, from an https:// URL, a 
 
 This skill is the guide at https://liken.sh/people/docs/guides/pictures/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
+# Give a person a picture
+
 `people-operator` reads the picture that a `Person`'s `spec.avatar`
 names, and writes a square thumbnail of it, 256 by 256 pixels, into
 `status.thumbnail`. Every screen draws that one field, so a new
@@ -54,10 +56,11 @@ The operator refuses a picture that breaks one of these limits:
 
 ## Read whether the picture worked
 
-The `Avatar` column of `kubectl get people` shows the `AvatarReady`
-condition. `True` means the thumbnail answers `spec.avatar`. `False`
-means the picture did not read. The condition's reason and message
-say why:
+The `Picture` column of `kubectl get people` shows the reason of the
+`AvatarReady` condition. `kubectl get people -o wide` adds a `Message`
+column with the condition's message. The condition is `True` when the
+thumbnail was made from the current `spec.avatar`, and `False` when the
+picture did not read. The condition's reason and message say why:
 
 ```sh
 kubectl get person ada -o jsonpath='{.status.conditions[?(@.type=="AvatarReady")]}'
@@ -70,7 +73,7 @@ kubectl get person ada -o jsonpath='{.status.conditions[?(@.type=="AvatarReady")
 | `Baked` | `True` | A pod read the picture from NFS or a claim. |
 | `Initials` | `True` | `spec.avatar` is empty, so the thumbnail shows the initials. |
 | `FetchFailed` | `False` | The server did not answer `200`, the file is larger than 10 MiB, or the fetch took longer than 15 seconds. |
-| `BakeFailed` | `False` | The pod did not find the file, did not finish in two minutes, or wrote no result. |
+| `BakeFailed` | `False` | The pod did not find the file, did not finish in two minutes, or wrote no result. A claim in a namespace that does not exist also fails this way. |
 | `DecodeFailed` | `False` | The file is not a JPEG, PNG, GIF, or WebP picture, or it is larger than 8192 pixels on a side. |
 | `UnsupportedScheme` | `False` | `spec.avatar` is not a URI in one of the five schemes. |
 

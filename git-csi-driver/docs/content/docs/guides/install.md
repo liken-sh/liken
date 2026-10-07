@@ -1,8 +1,10 @@
 ---
-title: Install
+title: Install the driver
 weight: 10
 description: "Install git-csi-driver from its kustomize base and set the plugin's flags. Use when a cluster must mount git repositories as volumes."
 ---
+
+# Install the driver
 
 Install the driver from the kustomize base in the driver's `deploy/`
 directory. You need a cluster with standard CSI plumbing, `kubectl`

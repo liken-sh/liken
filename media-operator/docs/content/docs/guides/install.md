@@ -56,11 +56,12 @@ the install needs no clone:
       -f https://liken.sh/media/deploy/mediapreferences-crd.yaml \
       -f https://liken.sh/media/deploy/rbac.yaml \
       -f https://liken.sh/media/deploy/operator.yaml \
+      -f https://liken.sh/media/deploy/api.yaml \
       -f https://liken.sh/media/deploy/bus.yaml \
       -f https://liken.sh/media/deploy/capabilities.yaml
 
-The `-n` flag places the `ServiceAccounts`, the two `Deployments`,
-the `DaemonSet`, and the `Service` in `liken-system`, the namespace
+The `-n` flag places the `ServiceAccounts`, the three `Deployments`,
+the `DaemonSet`, and the `Services` in `liken-system`, the namespace
 every `liken` cluster has. The CRDs, the `DeviceClasses`, and the
 `ClusterRoles` are cluster-scoped, so the flag does not apply to them.
 
@@ -78,6 +79,7 @@ takes a raw YAML URL as a resource:
       - https://liken.sh/media/deploy/mediapreferences-crd.yaml
       - https://liken.sh/media/deploy/rbac.yaml
       - https://liken.sh/media/deploy/operator.yaml
+      - https://liken.sh/media/deploy/api.yaml
       - https://liken.sh/media/deploy/bus.yaml
       - https://liken.sh/media/deploy/capabilities.yaml
 
@@ -103,6 +105,10 @@ resources:
 images:
   - name: ghcr.io/liken-sh/media-operator
     newTag: 2026.09.03-007-dev-003-abcdef01
+  - name: ghcr.io/liken-sh/media-operator-api
+    newTag: 2026.09.03-007-dev-003-abcdef01
+  - name: ghcr.io/liken-sh/media-operator-capabilities
+    newTag: 2026.09.03-007-dev-003-abcdef01
 ```
 
 A git fetch by sha needs all forty characters; the eight in the
@@ -116,17 +122,23 @@ can pull that artifact by the version, with no sha.
 
 ## What the install runs
 
-The install runs two `Deployments` and one `DaemonSet` in
+The install runs three `Deployments` and one `DaemonSet` in
 `liken-system`, and they are separate on purpose:
 
 * `media-operator` watches the five resources and reconciles them
-  into claims and pods. It keeps no state on a volume and serves no
-  HTTP. On
+  into claims and pods. It keeps no state on a volume. It serves no
+  API. Its only listener answers Prometheus metrics on port 9200. On
   every pass it re-derives everything from the API server, and it
   reads each playback pod's report from the bus. Only the copy that
   holds the `Lease` named `media-operator` in `liken-system`
   reconciles, so a second copy from a rollout or a larger replica
   count waits and changes nothing.
+* `media-api` answers HTTPS for a `Player`: the capture routes of
+  [Record what a player is playing](/docs/guides/record/) and the
+  [API reference](/docs/reference/api/). It runs from its own image,
+  `media-operator-api`, which holds `ffmpeg`, and it has one replica
+  with a `Recreate` strategy, so two pods never run at once. A
+  `Service` named `media-api` serves it on port 443.
 * `bus` is one [Mosquitto](https://mosquitto.org/) broker, with a
   `Service` at `bus.liken-system.svc:1883`. The broker is not inside
   the operator's pod, so the operator restarts without dropping a
@@ -201,7 +213,7 @@ refuses such a pod.
 
     kubectl -n liken-system get pods
 
-The operator's pod and the bus's pod report `Running`, and so does a
+The operator's pod, the API's pod, and the bus's pod report `Running`, and so does a
 `media-capabilities` pod on each node with a GPU. The operator's log names the `Lease` it
 holds, and then counts what it found. client-go's leader election
 writes lines of its own beside these:
@@ -322,6 +334,7 @@ itself:
     kubectl delete -n liken-system \
       -f https://liken.sh/media/deploy/rbac.yaml \
       -f https://liken.sh/media/deploy/operator.yaml \
+      -f https://liken.sh/media/deploy/api.yaml \
       -f https://liken.sh/media/deploy/bus.yaml \
       -f https://liken.sh/media/deploy/capabilities.yaml
 
