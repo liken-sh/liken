@@ -295,9 +295,10 @@ It also makes three open problems smaller, and it does not close
 them. A fresh agent's first version arrives late (an open problem that
 the `confirmer` closed on 2026-09-16) and
 [slow agent shutdown](69-an-agents-exit-inside-its-grace-period.md) happen
-less often, because a `Library` starts fewer agents. [Copies never give
-space back](../open-problems/copies-never-give-space-back.md) affects three
-fewer copies for each `Library`.
+less often, because a `Library` starts fewer agents. Copies that never
+give space back (an open problem deleted on 2026-10-07, when no Job copy
+on `liken-1` held more than 1 MB of free pages) affect three fewer
+copies for each `Library`.
 
 ## What was set aside
 
