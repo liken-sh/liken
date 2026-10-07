@@ -27,7 +27,7 @@ You need:
 The operator has no release yet, so you install a development build.
 Every push to `main` that changes the operator publishes one. Its
 version is the most recent release tag of the repository, plus a
-suffix: `2026.10.04-004-dev-124-93f85ef4` is the 124th build past
+suffix: `2026.10.04-004-dev-124-93f85ef4` is 124 commits past
 release `2026.10.04-004`, at commit `93f85ef4`. The summary of the CI
 run for that commit gives the version, and the
 [package page](https://github.com/liken-sh/liken/pkgs/container/observatory-operator)
@@ -130,7 +130,7 @@ explains each step.
 The reservation's status names the telescope's INDI server:
 
 ```sh
-kubectl get rsv east-tonight -n observatory -o jsonpath='{.status.endpoint}'
+kubectl get rsv east-tonight -n observatory -o jsonpath='{.status.endpoint.host}:{.status.endpoint.port}'
 ```
 
 That address, `east-telescope.observatory.svc:7624`, works only inside

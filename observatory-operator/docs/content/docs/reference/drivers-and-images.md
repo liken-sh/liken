@@ -17,13 +17,12 @@ The operator picks the image from the driver's name:
    camera simulators draw from.
 4. Every other driver runs from `indi`, which holds INDI's own
    drivers: the mounts, focusers, domes, weather stations, and the
-   rest of the `indi-bin` package. `indi_eqmod_telescope`,
-   `indi_lx200generic`, `indi_celestron_gps`, and `indi_moonlite` are
-   among them.
+   rest of the `indi-bin` package. `indi_lx200generic`,
+   `indi_celestron_gps`, and `indi_moonlite` are among them.
 
 | Image | Drivers |
 |---|---|
-| `indi-open` | the third-party drivers that link no vendor SDK, such as `indi_rolloffino`, `indi_aagcloudwatcher_ng`, and the Atik EFW wheel |
+| `indi-open` | the third-party drivers that link no vendor SDK, such as `indi_eqmod_telescope`, `indi_rolloffino`, `indi_aagcloudwatcher_ng`, and the Atik EFW wheel |
 | `indi-zwo` | ZWO cameras, EFW filter wheels, EAF focusers, the CAA rotator, and the USB-to-ST4 adapter |
 | `indi-qhy` | QHY cameras |
 | `indi-playerone` | Player One cameras and filter wheel |

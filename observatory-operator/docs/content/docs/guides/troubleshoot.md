@@ -36,7 +36,7 @@ no other reservation to hold it. The summary says which:
 * A reservation name: another reservation holds the telescope. It
   takes the telescope when that one is `Released`. A `Released`
   reservation no longer holds anything, but a `Failed` one does until
-  you delete it.
+  you delete it or its `end` time passes.
 * `Telescope east is being deleted`: a delete of the telescope or its
   observatory is in progress.
 

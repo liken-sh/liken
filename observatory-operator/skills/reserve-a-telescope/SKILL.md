@@ -78,7 +78,7 @@ When the reservation is `Ready`, `status.endpoint` names the
 telescope's INDI server, such as `east-telescope.observatory.svc:7624`:
 
 ```sh
-kubectl get rsv east-tonight -n observatory -o jsonpath='{.status.endpoint}'
+kubectl get rsv east-tonight -n observatory -o jsonpath='{.status.endpoint.host}:{.status.endpoint.port}'
 ```
 
 Point an Ekos profile at that host and port, in remote mode. From a
@@ -171,8 +171,8 @@ the servers, and PHD2 need.
 ## End the night
 
 The reservation ends at its `end` time, or when you delete it.
-Deactivation runs in the reverse order of activation: it stops PHD2
-and any exposure, runs your deactivation procedures, such as closing
+Deactivation runs in the reverse order of activation: it stops PHD2's
+guiding and any exposure, runs your deactivation procedures, such as closing
 the dust cap, warming the camera, and parking the mount and the dome,
 disconnects the devices, stops their pods, and switches their power
 off.

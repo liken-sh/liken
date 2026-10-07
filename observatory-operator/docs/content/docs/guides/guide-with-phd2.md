@@ -71,10 +71,9 @@ When a reservation of the telescope reaches its `StartGuider` step,
 the operator starts PHD2, connects its camera and mount, and waits
 until PHD2 reports both connected. Then the reservation is `Ready`.
 
-The operator never loops, calibrates, or guides. The mount is not
-tracking yet when the reservation becomes `Ready`, and calibration
-needs a tracking mount and a star. So you align the mount, start
-tracking, and then start guiding.
+The operator never loops, calibrates, or guides, and it never starts
+tracking. Calibration needs a tracking mount and a star, so you align
+the mount, start tracking, and then start guiding.
 
 At the end of the reservation, the operator stops guiding and
 exposures, and stops PHD2 before it disconnects the camera and the
@@ -87,8 +86,8 @@ a guide frame about once a second.
 
 ## Guide from KStars
 
-The guider's `status.endpoint` names PHD2's event server, such as
-`east-guider.observatory.svc:4400`. From a desktop, forward the port:
+The guider's `status.endpoint` names PHD2's event server, with its
+host, such as `east-guider.observatory.svc`, and its port, 4400. From a desktop, forward the port:
 
 ```sh
 kubectl port-forward -n observatory svc/east-guider 4400
@@ -126,9 +125,19 @@ phase and PHD2's state together, such as `Ready, Guiding`.
 
 ## When PHD2 restarts
 
-If PHD2's pod is deleted, or PHD2 exits, the operator starts it again
-and connects its camera and mount. A new PHD2 starts idle and not
+If PHD2's pod is deleted, the operator creates it again and connects
+PHD2's camera and mount. The operator also connects them again when
+the telescope's INDI server restarts. A new PHD2 starts idle and not
 calibrated, so calibrate and start guiding again from Ekos.
+
+If PHD2 exits and the kubelet restarts its container in the same pod,
+the operator does not connect the camera and the mount again. Connect
+them from the Ekos guide module, or delete the pod so that the
+operator creates a new one:
+
+```sh
+kubectl delete pod -n observatory east-guider
+```
 
 PHD2 can exit by itself when it opens a dialog that waits for an
 answer, because the headless display has no one to answer it. If the

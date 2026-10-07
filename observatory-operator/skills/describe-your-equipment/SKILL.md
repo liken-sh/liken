@@ -163,11 +163,14 @@ The `driver.name` is the name of the INDI driver program, such as
 for each product. The operator runs the driver from an image of the
 `indi` build, which it selects from the driver's name:
 
-* INDI's own drivers, such as `indi_eqmod_telescope`,
-  `indi_lx200generic`, `indi_celestron_gps`, `indi_moonlite`, and
-  `indi_simulator_ccd`, run from the `indi` image.
-* A vendor's driver runs from that vendor's image, such as `indi-zwo`
-  for `indi_asi_ccd`. [Drivers and images](https://liken.sh/observatory/docs/reference/drivers-and-images/)
+* INDI's own drivers, such as `indi_lx200generic`,
+  `indi_celestron_gps`, and `indi_moonlite`, run from the `indi`
+  image.
+* The simulators, such as `indi_simulator_ccd`, run from
+  `indi-simulators`.
+* A third-party driver runs from the image that holds it: `indi-zwo`
+  for `indi_asi_ccd`, or `indi-open` for `indi_eqmod_telescope` and the
+  other drivers that link no vendor SDK. [Drivers and images](https://liken.sh/observatory/docs/reference/drivers-and-images/)
   lists the images and what each one holds.
 
 The CRD does not check a driver name against INDI. A misspelled name

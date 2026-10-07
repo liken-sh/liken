@@ -5,7 +5,8 @@ weight: 70
 
 The operator creates pods, `Service`s, `ResourceClaim`s, `ConfigMap`s,
 and `Job`s in the `observatory` namespace while a reservation runs, and
-deletes them when it ends. Their names, ports, and labels are stable,
+deletes all but the `Job`s when it ends. Kubernetes deletes each `Job`
+an hour after it finishes. Their names, ports, and labels are stable,
 so your own `Service` or `NetworkPolicy` can select them. Do not edit
 the objects themselves: the operator deletes them at the end of each
 reservation, and creates them again for the next one.

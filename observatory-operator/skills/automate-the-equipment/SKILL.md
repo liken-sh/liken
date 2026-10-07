@@ -33,7 +33,7 @@ operator restarts.
 | `DustCap` | `state: Open` or `state: Closed` | 10 min |
 | `FlatPanel` | `state: Lit` or `state: Dark` | 10 min |
 | `Camera` | `cool: {celsius, within}`: set the cooler, and wait until the sensor is within `within` degrees, 0.5 by default | 20 min |
-| `Camera` | `warm: {celsius}`: warm the sensor to that temperature, then switch the cooler off | 10 min |
+| `Camera` | `warm: {celsius, within}`: warm the sensor to within `within` degrees of that temperature, then switch the cooler off | 10 min |
 | any kind, `Telescope`, `Observatory` | `job`: run a container once, as a Kubernetes `Job` | 10 min |
 
 Each kind accepts only its own actions, and the API server refuses the
@@ -80,8 +80,9 @@ spec:
     - warm: {celsius: 5}
 ```
 
-The operator unparks the mount but leaves tracking off. You align and
-start tracking from KStars.
+The operator unparks the mount, and it never starts or stops tracking.
+Whether a mount tracks after it unparks depends on its driver. You
+align and start tracking from KStars.
 
 Warm the camera before the cooler goes off. A sensor that loses its
 cooling at -10 °C warms by tens of degrees in seconds, and that stress
@@ -96,17 +97,19 @@ operator sends again if the camera's driver restarts during the night.
 ## The order of the procedures
 
 The tree orders the procedures, so most setups need no explicit order.
-Activation runs from the top of the tree down:
+Activation runs from the top of the tree down, in five tiers:
 
-1. the `Observatory` and its devices, such as the dome
-2. the `Telescope` and its own devices, such as the mount
-3. the devices of its optical trains, such as the dust cap and the
-   camera
+1. the `Observatory`'s own procedures
+2. the procedures of the observatory's devices, such as the dome
+3. the `Telescope`'s own procedures
+4. the procedures of the telescope's own devices, such as the mount
+5. the procedures of the devices of its optical trains, such as the
+   dust cap and the camera
 
-Deactivation runs the same groups from the bottom up. The procedures
-of one group run at the same time. So the dome opens before the mount
-unparks, and the mount parks before the dome closes, with nothing more
-to write.
+Each tier starts when the tier before it ends, and the procedures of
+one tier run at the same time. Deactivation runs the same tiers from
+the bottom up. So the dome opens before the mount unparks, and the
+mount parks before the dome closes, with nothing more to write.
 
 When two telescopes share an observatory, the observatory's procedures
 run once: when the first reservation starts, and when the last one
