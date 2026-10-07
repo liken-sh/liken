@@ -31,6 +31,11 @@ answers.
 
 ## What a fix could look like
 
+- **Keep the hour.** This is the current choice, made on 2026-10-07. A
+  person rarely deletes or replaces a provider's `Secret` while a
+  `Library` that names it is active, and after five minutes the
+  `Library`'s `Ready` condition names the stuck pod and the kubelet's
+  event.
 - **A pod that cannot resolve a key makes the check due.** The
   operator already watches the pods of its library `Job`s. A pod whose
   container waits with `CreateContainerConfigError` names, in its own
