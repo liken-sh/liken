@@ -50,6 +50,10 @@ func (i *inventory) ensureAdapter(state adapterState) (*Adapter, error) {
 			fmt.Fprintf(os.Stderr, "naming the radio %q: %v\n", adapter.Spec.Alias, err)
 		}
 	}
+	// The trace setting is applied before the status write, so the
+	// status reports the value the btmon container reads after this
+	// pass.
+	i.applyBtmon(adapter)
 
 	err = i.settleAdapter(adapter, state)
 	if apiclient.Stale(err) {
@@ -101,6 +105,7 @@ func (i *inventory) settleAdapter(adapter *Adapter, state adapterState) error {
 		Node:    i.nodeName,
 		Powered: state.Powered,
 		Privacy: i.reportedPrivacy(adapter),
+		Btmon:   i.reportedBtmon(adapter),
 	})
 }
 
@@ -166,6 +171,7 @@ func (i *inventory) refuseDeletion(adapter *Adapter, state adapterState) error {
 		Node:            i.nodeName,
 		Powered:         state.Powered,
 		Privacy:         i.reportedPrivacy(adapter),
+		Btmon:           i.reportedBtmon(adapter),
 		DeletionRefused: reason,
 	})
 }

@@ -119,7 +119,9 @@ spec:
         # address, writes BlueZ's tree, and exits. It also writes the
         # radio's identity key back from its own Secret, and writes
         # the Adapter's spec.privacy into the settings volume, because
-        # bluetoothd reads both only when it starts.
+        # bluetoothd reads both only when it starts. It writes the
+        # Adapter's spec.btmon there too, so a radio with the trace
+        # on traces from the start of bluetoothd.
         - name: bondfetch
           image: ghcr.io/liken-sh/bluetooth-bondfetch:latest
           env:
@@ -168,44 +170,45 @@ spec:
               mountPath: /var/lib/bluetooth
             - name: settings
               mountPath: /var/run/bluetooth.liken.sh/settings
-        # btmon, as a sidecar that runs as long as the pod. It traces
-        # the HCI link, the layer under D-Bus and under bluetoothd,
-        # and writes each packet to the container log. A stall of a
-        # bonded controller can last for hours before a person sees
-        # it, and the fix is a roll of this pod, which ends every
-        # process that saw the stall. The trace is in the log before
-        # the roll, so the evidence stays after it.
+        # btmon, as a sidecar that runs as long as the pod. While the
+        # Adapter's spec.btmon is true, it traces the HCI link, the
+        # layer under D-Bus and under bluetoothd, and writes each
+        # packet to the container log. A stall of a bonded controller
+        # can last for hours before a person sees it, and the fix is a
+        # roll of this pod, which ends every process that saw the
+        # stall. The trace is in the log before the roll, so the
+        # evidence stays after it.
         #
-        # btmon reports only what happens after it binds the monitor
-        # channel, so it starts before bluetoothd. At adapter
-        # registration, bluetoothd tells the kernel which bonded
-        # devices may reconnect, and those commands are in the trace.
-        # The trace stays nearly empty while no controller connects or
-        # sends, and a button press is about eight lines.
+        # The trace is off until a person turns it on, because btmon
+        # prints key material in plain text: the link keys, the long
+        # term keys, and the radio's identity key. Anybody who can
+        # read this pod's logs can read those keys. start-btmon reads
+        # the btmon file in the settings volume, and starts btmon
+        # while the file says true. A change starts or stops the trace
+        # in seconds, with no restart of the pod.
+        #
+        # The container starts before bluetoothd, because btmon
+        # reports only what happens after it binds the monitor
+        # channel. At adapter registration, bluetoothd tells the
+        # kernel which bonded devices may reconnect, and with the
+        # trace on those commands are in the trace. The trace stays
+        # nearly empty while no controller connects or sends, and a
+        # button press is about eight lines.
         #
         # It needs no claim and no bus. The monitor channel reports
         # every adapter on the machine, and a machine has one.
         - name: btmon
           image: ghcr.io/liken-sh/bluetoothd:latest
           restartPolicy: Always
-          # --no-time leaves the timestamps to the container log, which
-          # records the wall-clock time of each line. --columns sets
-          # the width for the packet header lines, which btmon cuts to
-          # 80 characters by default and so cuts the names of
-          # management clients. The terminal makes the C library write
-          # each line when btmon finishes it. With a pipe, the library
-          # holds the output until its buffer fills, and a rare line
-          # waits in the buffer for hours. On a terminal btmon also
-          # starts a pager and colors its output, and the first two
-          # flags turn both off.
+          # start-btmon runs btmon with the arguments that
+          # bluetoothd/btmon/child.go explains.
           command:
-            - /usr/bin/btmon
-            - --no-pager
-            - --color
-            - never
-            - --no-time
-            - --columns
-            - "160"
+            - /usr/local/bin/start-btmon
+          # The terminal makes the C library write each line when
+          # btmon finishes it. With a pipe, the library holds the
+          # output until its buffer fills, and a rare line waits in
+          # the buffer for hours. btmon writes to this terminal
+          # through start-btmon.
           tty: true
           securityContext:
             # hci_sock_bind tests capable(CAP_NET_RAW) before it binds
@@ -215,6 +218,10 @@ spec:
             # sets no ambient capabilities, so an added capability
             # reaches only a process that runs as root. The container
             # runs as root for that reason, and it writes nothing.
+            # btmon, the child of start-btmon, runs as root too, and
+            # the kernel gives a program that root starts each
+            # capability in the container's bounding set, NET_RAW
+            # among them.
             capabilities:
               drop: ["ALL"]
               add: ["NET_RAW"]
@@ -229,6 +236,11 @@ spec:
               memory: 16Mi
             limits:
               memory: 32Mi
+          volumeMounts:
+            # The btmon file, which turns the trace on and off.
+            - name: settings
+              mountPath: /var/run/bluetooth.liken.sh/settings
+              readOnly: true
         # bluetoothd, as a sidecar: an init container that restarts
         # always, which the kubelet starts before the operator and
         # stops after it. Both halves of that order matter. The bus
@@ -383,10 +395,11 @@ spec:
               mountPath: /var/lib/bluetooth
             # The privacy value that bluetoothd started with, which the
             # operator compares with the Adapter's spec.privacy and
-            # reports in its status.
+            # reports in its status. The mount is writable because the
+            # operator writes the btmon file here when the Adapter's
+            # spec.btmon changes. It never writes the privacy file.
             - name: settings
               mountPath: /var/run/bluetooth.liken.sh/settings
-              readOnly: true
       resourceClaims:
         - name: adapter
           resourceClaimTemplateName: bluetooth-adapter
@@ -436,10 +449,10 @@ spec:
         # Create and PS and pair it again after every pod restart.
         - name: bonds
           emptyDir: {}
-        # The settings that bluetoothd reads at start, which come from
-        # the Adapter. bondfetch writes a file named privacy here, and
-        # start-bluetoothd and the operator read it. An emptyDir, so
-        # each new pod starts from the Adapter's spec and not from the
-        # last pod's file.
+        # The settings that come from the Adapter. bondfetch writes two
+        # files here. start-bluetoothd and the operator read privacy.
+        # start-btmon reads btmon, and the operator writes it again when
+        # spec.btmon changes. An emptyDir, so each new pod starts from
+        # the Adapter's spec and not from the last pod's files.
         - name: settings
           emptyDir: {}

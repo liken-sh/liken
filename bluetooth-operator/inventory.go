@@ -116,9 +116,15 @@ type inventory struct {
 	// of it posts RadioClaimed or RadioLost.
 	radioHeld bonds.Address
 
-	// settings is the pod's settings volume, whose privacy file holds
-	// the value bluetoothd started with (privacy.go).
+	// settings is the pod's settings volume. Its privacy file holds
+	// the value bluetoothd started with (privacy.go), and its btmon
+	// file holds the trace setting (btmon.go).
 	settings string
+
+	// btmon is the value in the btmon file after this pass, which the
+	// Adapter's status.btmon reports. It is nil when the pass could not
+	// read the file, and the status then keeps the value it has.
+	btmon *bool
 
 	// privacy is the value this pass reports in the Adapter's
 	// status.privacy. It is empty when the pass could not read the
@@ -287,6 +293,11 @@ func (i *inventory) reconcile() inventoryPass {
 		return pass
 	}
 	pass.adapter = adapter
+	if i.btmon == nil || *i.btmon != adapter.Spec.Btmon {
+		// The pass could not read or write the btmon file. The retry
+		// pass tries again.
+		pass.ok = false
+	}
 
 	// One walk of sysfs answers the battery of every device this pass
 	// writes, before any status write, so each Peripheral reads the level

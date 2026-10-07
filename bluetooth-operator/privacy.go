@@ -38,9 +38,9 @@ import (
 )
 
 const (
-	// settingsRoot is the pod's settings volume, which this container
-	// mounts read-only. bondfetch writes it, and start-bluetoothd reads
-	// it.
+	// settingsRoot is the pod's settings volume. bondfetch writes it,
+	// start-bluetoothd and start-btmon read it, and this container
+	// writes only its btmon file (btmon.go).
 	settingsRoot = "/var/run/bluetooth.liken.sh/settings"
 
 	// privacyFile is the file in the settings volume that holds the

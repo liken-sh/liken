@@ -28,10 +28,14 @@ override:
   # building. Starting the daemon needs a real bus.
   - path: ^bluetoothd$
     threshold: 49
+  # start-btmon: the supervisor, the watch, and the child are tested.
+  # main and run name the real settings directory and the real btmon.
+  - path: ^bluetoothd/btmon$
+    threshold: 79
   # bondfetch: the fetch loop needs a real adapter; the parsing does
   # not.
   - path: ^bondfetch$
-    threshold: 52
+    threshold: 55
   # bonds: the on-disk bond format, which is pure byte layout.
   - path: ^bonds$
     threshold: 92

@@ -1,7 +1,8 @@
-# The bluetoothd image: the three static programs the pod runs
-# (bluetoothd, dbus-daemon, and the Go entrypoint), four more that a
-# person runs with kubectl exec (bluetoothctl, btmgmt, btmon, and
-# dbus-send), their configuration, and nothing else.
+# The bluetoothd image: the static programs the pod runs (bluetoothd,
+# dbus-daemon, btmon, and the two Go entrypoints, start-bluetoothd and
+# start-btmon), three more that a person runs with kubectl exec
+# (bluetoothctl, btmgmt, and dbus-send), their configuration, and
+# nothing else.
 #
 # bluetoothd ships here, in a workload's image, and not in the
 # read-only root that every liken machine boots. That is why the
@@ -104,15 +105,16 @@ RUN ./configure \
 # moved, so a BlueZ or dbus release that relocates one of these stops
 # the build rather than shipping an image without it.
 #
-# The four person-run tools each answer a question nothing else in
-# the pod can. btmgmt reads the kernel's management settings, and
-# btmgmt info is the only reading of Connectable, Discoverable, and
-# the rest this image can take. btmon traces the HCI link, the
-# layer under D-Bus and under the daemon, which is the only reading
-# of what the controller and the remote device exchanged; the bind
-# it makes tests CAP_NET_RAW, which the pod's bluetoothd container
-# adds for it. dbus-send calls any method on org.bluez, so a person
-# starts one connection or reads one property with no shell.
+# The four tools each answer a question nothing else in the pod can.
+# btmgmt reads the kernel's management settings, and btmgmt info is
+# the only reading of Connectable, Discoverable, and the rest this
+# image can take. btmon traces the HCI link, the layer under D-Bus
+# and under the daemon, which is the only reading of what the
+# controller and the remote device exchanged. The pod's btmon
+# container runs it while a person has the trace turned on, and that
+# container holds the CAP_NET_RAW that btmon's bind tests. dbus-send
+# calls any method on org.bluez, so a person starts one connection or
+# reads one property with no shell.
 #
 # The three additions cost 3,042,456 bytes on a 7,851,292-byte
 # image: btmgmt 500,008, btmon 2,114,552, and dbus-send 427,896,
@@ -183,8 +185,10 @@ RUN set -eux; \
     printf 'root:x:0:0:root:/root:/sbin/nologin\nmessagebus:x:100:100:D-Bus message bus:/:/sbin/nologin\n' > /out/etc/passwd; \
     printf 'root:x:0:\nmessagebus:x:100:\n' > /out/etc/group
 
-# The entrypoint. It is built from this repository's own module, which
-# is also where the operator comes from, so both images move together.
+# The two entrypoints. They are built from this repository's own
+# module, which is also where the operator comes from, so the images
+# move together. start-btmon is the command of the pod's btmon
+# container, and it runs btmon while the Adapter's spec.btmon is true.
 FROM golang:1.27.1-bookworm AS entrypoint
 # proxy.golang.org sometimes drops a module download partway through
 # the stream. With the default comma, `go` tries the origin only when
@@ -198,20 +202,23 @@ WORKDIR /src
 COPY go.mod go.sum ./
 # go.mod replaces the shared kubernetes module with ../kubernetes, so
 # the module graph reads its go.mod from the second build context named
-# kubernetes. The entrypoint imports none of its packages, so the
-# module file is all it needs.
+# kubernetes. The entrypoints import none of its packages, so the
+# module file is all they need.
 COPY --from=kubernetes go.mod /kubernetes/
 RUN go mod download
 COPY bluetoothd/*.go ./bluetoothd/
+COPY bluetoothd/btmon/*.go ./bluetoothd/btmon/
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /start-bluetoothd ./bluetoothd
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /start-btmon ./bluetoothd/btmon
 # The license files of the Go standard library and of each module that
-# the binary links. notices/go.sh says why the image needs them.
+# the binaries link. notices/go.sh says why the image needs them.
 COPY --from=notices go.sh /
-RUN CGO_ENABLED=0 sh /go.sh /notices ./bluetoothd
+RUN CGO_ENABLED=0 sh /go.sh /notices ./bluetoothd ./bluetoothd/btmon
 
 FROM scratch
 COPY --from=daemons /out/ /
 COPY --from=entrypoint /start-bluetoothd /usr/local/bin/start-bluetoothd
+COPY --from=entrypoint /start-btmon /usr/local/bin/start-btmon
 COPY --from=entrypoint /notices /
 
 # /etc/bluetooth holds no file in the image. The entrypoint writes

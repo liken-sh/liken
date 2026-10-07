@@ -9,8 +9,8 @@ package main
 // kernel accepts it only while the radio is powered off. So the value
 // has to be in place before bluetoothd starts, and this program is the
 // part of the pod that runs then and holds an API client and the
-// radio's address. It writes the value into the pod's settings volume,
-// and start-bluetoothd writes main.conf from it.
+// radio's address. It writes the value into the pod's settings volume
+// (settings.go), and start-bluetoothd writes main.conf from it.
 //
 // The settings file also tells the operator which value bluetoothd
 // started with. The operator compares it with spec.privacy on each
@@ -25,72 +25,14 @@ package main
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-const (
-	// defaultSettings is the pod's settings volume. start-bluetoothd
-	// reads the privacy file in it, and the operator mounts it
-	// read-only. settingsVar overrides the directory, the same way
-	// rootVar overrides the bonds tree.
-	settingsVar     = "BLUETOOTH_SETTINGS_ROOT"
-	defaultSettings = "/var/run/bluetooth.liken.sh/settings"
-
-	// privacyFile is the file in the settings volume that holds the
-	// value of the Adapter's spec.privacy.
-	privacyFile = "privacy"
-
-	// adaptersPath is the collection of the operator's Adapters. An
-	// Adapter is cluster-scoped and named for its radio's address.
-	adaptersPath = "/apis/bluetooth.liken.sh/v1alpha1/adapters/"
-
-	// privacyOff is BlueZ's default, and the value of an empty
-	// spec.privacy.
-	privacyOff = "off"
-)
-
-// adapterSpec is the part of an Adapter that this program reads. The
-// API server's schema refuses any value outside BlueZ's five, and
-// start-bluetoothd refuses one too, so this program passes the value
-// on as it reads it.
-type adapterSpec struct {
-	Spec struct {
-		Privacy string `json:"privacy,omitempty"`
-	} `json:"spec"`
-}
-
-// writePrivacy reads the radio's Adapter, writes its spec.privacy into
-// the settings volume, and answers the value it wrote.
-//
-// An Adapter that does not exist yet is off, because the operator
-// creates it on its first pass, after bluetoothd has started. Any
-// other failure to read it is an error, the same as a failure to read
-// the bonds, so the pod stays in Init and bluetoothd does not start
-// with a value that a person did not choose.
-func writePrivacy(api *apiclient.Client, adapter bonds.Address, settings string) (string, error) {
-	privacy := privacyOff
-	object, err := apiclient.Get[adapterSpec](api, adaptersPath+adapter.Key())
-	switch {
-	case err == nil:
-		if object.Spec.Privacy != "" {
-			privacy = object.Spec.Privacy
-		}
-	case errors.Is(err, apiclient.ErrNotFound):
-	default:
-		return "", fmt.Errorf("reading the Adapter for %s: %w", adapter, err)
-	}
-
-	path := filepath.Join(settings, privacyFile)
-	if err := os.WriteFile(path, []byte(privacy+"\n"), 0o644); err != nil {
-		return "", fmt.Errorf("writing %s: %w", path, err)
-	}
-	fmt.Printf("bondfetch: privacy is %s for %s\n", privacy, adapter)
-	return privacy, nil
-}
+// privacyOff is BlueZ's default, and the value of an empty
+// spec.privacy.
+const privacyOff = "off"
 
 // restoreIdentity writes the radio's identity file into the tree
 // bluetoothd reads: the stored file when the radio has one, and a new

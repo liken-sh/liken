@@ -64,6 +64,10 @@ spec:
           type: string
           description: The Low Energy privacy that bluetoothd started with.
           jsonPath: .status.privacy
+        - name: Btmon
+          type: boolean
+          description: The trace setting that the btmon container reads.
+          jsonPath: .status.btmon
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -109,6 +113,18 @@ spec:
                     network and device do. bluetoothd reads the value
                     only when it starts, so the operator deletes its own
                     pod to apply a change.
+                btmon:
+                  type: boolean
+                  description: >-
+                    Whether the btmon container traces this radio's HCI
+                    link and management channel into its log. The trace
+                    prints key material in plain text, such as link
+                    keys, long term keys, and the radio's identity key,
+                    so anybody who can read the operator pod's logs can
+                    read those keys. Turn it on while you diagnose a
+                    fault, and turn it off after. An empty field is
+                    false. A change starts or stops the trace within
+                    seconds, with no restart of the pod.
             status:
               type: object
               description: What the operator observes about the radio.
@@ -133,6 +149,12 @@ spec:
                     started with. It is what bluetoothd was told, not
                     what the kernel accepted. btmgmt info in the
                     bluetoothd container shows the kernel's setting.
+                btmon:
+                  type: boolean
+                  description: >-
+                    The value of the setting that the btmon container
+                    reads, which the operator writes from spec.btmon.
+                    With true, the container runs the trace.
                 deletionRefused:
                   type: string
                   description: >-

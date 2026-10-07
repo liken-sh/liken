@@ -186,6 +186,12 @@ type AdapterSpec struct {
 	// change takes effect when the operator's pod starts again
 	// (privacy.go).
 	Privacy string `json:"privacy,omitempty"`
+
+	// Btmon turns on the btmon container's trace of this radio. The
+	// operator writes it into the pod's settings volume, and the
+	// container starts or stops btmon when the value changes
+	// (btmon.go).
+	Btmon bool `json:"btmon,omitempty"`
 }
 
 type AdapterStatus struct {
@@ -197,6 +203,11 @@ type AdapterStatus struct {
 	// read from the pod's settings volume. It reports what bluetoothd
 	// was told, not what the kernel accepted.
 	Privacy string `json:"privacy,omitempty"`
+
+	// Btmon is the value in the settings volume's btmon file, which
+	// the btmon container reads. It is not omitted when false, so the
+	// printer column shows false and not an empty cell.
+	Btmon bool `json:"btmon"`
 
 	// DeletionRefused names why the operator kept its finalizer on an
 	// Adapter somebody deleted. It is empty at every other time.

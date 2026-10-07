@@ -275,8 +275,8 @@ its node is labeled `bluetooth.liken.sh/bluetooth: none`. Then read
 the radio the operator holds:
 
     $ kubectl get adapters
-    NAME                ALIAS   ADDRESS             NODE      POWERED   PRIVACY   AGE
-    04-4a-69-66-92-27           04:4A:69:66:92:27   liken-1   true      off       1m
+    NAME                ALIAS   ADDRESS             NODE      POWERED   PRIVACY   BTMON   AGE
+    04-4a-69-66-92-27           04:4A:69:66:92:27   liken-1   true      off       false   1m
 
 The operator creates an `Adapter` object for the radio its pod
 claimed, named for the radio's address. The `ResourceSlice` of paired
@@ -287,9 +287,9 @@ the next step.
 ## Read the Events
 
 The operator posts a Kubernetes `Event` when a window opens or
-closes, a device pairs, a bond, a relay, or the radio fails, or a
-change of privacy restarts the pod. Read them with `kubectl describe`
-on the object. A `Peripheral`, an `Adapter`, and a `Node` are
+closes, a device pairs, a bond, a relay, or the radio fails, a
+change of privacy restarts the pod, or the trace turns on or off.
+Read them with `kubectl describe` on the object. A `Peripheral`, an `Adapter`, and a `Node` are
 cluster-scoped, so their `Event`s are in `default`, and
 `kubectl events --for` finds them only with `-n default` or `-A`:
 
@@ -307,6 +307,7 @@ cluster-scoped, so their `Event`s are in `default`, and
 | `RadioClaimed` | Normal | `Node` | `bluetoothd` in the pod reports the radio. |
 | `RadioLost` | Warning | `Node` | The radio is gone from `bluetoothd`: the adapter was unplugged or reset. |
 | `PrivacyChanged` | Normal | `Adapter` | `spec.privacy` differs from the value `bluetoothd` started with, and the operator deletes its own pod so that `bluetoothd` starts with the new value. |
+| `BtmonChanged` | Normal | `Adapter` | `spec.btmon` differs from the value the `btmon` container reads, and the operator wrote the new value, so the container starts or stops its trace. |
 
 A controller that connects or disconnects posts no `Event`. A Low
 Energy remote drops its link between presses, so the `Connected`
@@ -347,17 +348,33 @@ device by hand:
       dbus-send --system --print-reply --dest=org.bluez \
       /org/bluez/hci0/dev_A0_AB_51_33_B7_12 org.bluez.Device1.Connect
 
-The pod's `btmon` container traces the HCI link for as long as the
-pod runs, the layer under D-Bus and under `bluetoothd`. The trace
-shows a disconnect reason or a retransmission that no higher layer
-reports. It also shows the commands where `bluetoothd` tells the
-kernel which bonded devices may reconnect. The trace is the
+The pod's `btmon` container can trace the HCI link, the layer under
+D-Bus and under `bluetoothd`. The trace shows a disconnect reason or a
+retransmission that no higher layer reports. The trace is the
 container's log, so it stays readable after a roll of the pod
-replaces the processes that saw a fault. Read it on one machine:
+replaces the processes that saw a fault.
+
+The trace is off until you turn it on, because `btmon` prints key
+material in plain text: the link keys, the long term keys, and the
+radio's identity key. Anybody who can read the operator pod's logs can
+read those keys. Turn it on for one radio while you diagnose a fault,
+with `spec.btmon` on its `Adapter`:
+
+    kubectl patch adapter <adapter> --type merge -p '{"spec":{"btmon":true}}'
+
+The trace starts within seconds, and the pod does not restart, so no
+controller disconnects. A radio whose `Adapter` has `spec.btmon: true`
+when its pod starts is traced from the start of `bluetoothd`, so the
+trace also shows the commands where `bluetoothd` tells the kernel which
+bonded devices may reconnect. Read the trace on one machine:
 
     kubectl -n liken-system logs -c btmon --timestamps \
       $(kubectl -n liken-system get pods -l app=bluetooth-operator \
           --field-selector spec.nodeName=<node> -o name)
+
+Turn it off when you have what you need, with `false` in place of
+`true`. The lines already in the log stay there until the kubelet
+rotates the log or the pod goes away.
 
 ## The privilege it takes
 

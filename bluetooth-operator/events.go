@@ -5,11 +5,11 @@ package main
 // a Node.
 //
 // An Event records what just happened: a window opened or closed, a
-// device paired, a bond or a radio went away, or a change of privacy
-// restarted the pod. A condition and a status
-// field hold what is true now, and the API server deletes an Event an
-// hour after its last write, so each fact here is also in a status
-// field or a log line.
+// device paired, a bond or a radio went away, a change of privacy
+// restarted the pod, or the trace turned on or off. A condition and a
+// status field hold what is true now, and the API server deletes an
+// Event an hour after its last write, so each fact here is also in a
+// status field or a log line.
 //
 // The Connected condition posts no Event. A Low Energy remote drops its
 // link between presses and pages the radio again on the next one, so
@@ -68,6 +68,11 @@ const (
 	// differs from the value bluetoothd started with, and the operator
 	// deletes its own pod so that bluetoothd starts with the new value.
 	reasonPrivacyChanged = "PrivacyChanged"
+
+	// reasonBtmonChanged is Normal, on an Adapter: spec.btmon differs
+	// from the value in the settings volume, and the operator wrote the
+	// new value, so the btmon container starts or stops its trace.
+	reasonBtmonChanged = "BtmonChanged"
 )
 
 // adapterReference names an Adapter in an Event. An Adapter is

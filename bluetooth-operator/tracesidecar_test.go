@@ -41,3 +41,35 @@ func TestTheTraceWritesToATerminal(t *testing.T) {
 		t.Errorf("the second init container is %q with tty %v, want btmon with tty true", trace.Name, trace.TTY)
 	}
 }
+
+// settingsMount answers the mount of the settings volume in one
+// container, and fails the test when the container has none.
+func settingsMount(t *testing.T, container corev1.Container) corev1.VolumeMount {
+	t.Helper()
+	for _, mount := range container.VolumeMounts {
+		if mount.Name == "settings" {
+			return mount
+		}
+	}
+	t.Fatalf("the %s container does not mount the settings volume", container.Name)
+	return corev1.VolumeMount{}
+}
+
+// start-btmon runs the trace, and reads its setting from the settings
+// volume. The operator writes that setting, so its own mount is
+// writable, and the trace's mount is not.
+func TestTheTraceReadsItsSettingFromTheSettingsVolume(t *testing.T) {
+	daemonSet := daemonSetIn(t, "deploy/operator.yaml")
+	trace := daemonSet.Spec.Template.Spec.InitContainers[1]
+	operator := daemonSet.Spec.Template.Spec.Containers[0]
+
+	if !slices.Equal(trace.Command, []string{"/usr/local/bin/start-btmon"}) {
+		t.Errorf("the btmon container runs %v, want start-btmon", trace.Command)
+	}
+	if mount := settingsMount(t, trace); !mount.ReadOnly {
+		t.Error("the btmon container mounts the settings volume writable, want read-only")
+	}
+	if mount := settingsMount(t, operator); mount.ReadOnly {
+		t.Error("the operator container mounts the settings volume read-only, want writable")
+	}
+}

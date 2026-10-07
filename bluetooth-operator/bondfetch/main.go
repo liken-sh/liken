@@ -1,7 +1,8 @@
 // bondfetch writes an adapter's stored bonds into the directory
 // bluetoothd reads, and then exits. It also restores the adapter's
-// identity key and writes the Adapter's privacy setting, because both
-// must be in place before bluetoothd starts (privacy.go).
+// identity key and writes the Adapter's privacy and btmon settings,
+// because each must be in place before bluetoothd starts (privacy.go
+// and settings.go).
 //
 // It is a plain init container. The pod's bonds are in Kubernetes
 // Secrets, one for each bond, each labelled with the adapter it
@@ -108,7 +109,7 @@ func run() error {
 	if err := materialize(client, namespace, adapter.Address, root); err != nil {
 		return err
 	}
-	privacy, err := writePrivacy(client, adapter.Address, settings)
+	privacy, err := writeSettings(client, adapter.Address, settings)
 	if err != nil {
 		return err
 	}

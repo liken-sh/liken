@@ -26,10 +26,29 @@ pod. An empty field is `off`.
 show the value the running `bluetoothd` started with:
 
     $ kubectl get adapters
-    NAME                ALIAS   ADDRESS             NODE      POWERED   PRIVACY   AGE
-    04-4a-69-66-92-27           04:4A:69:66:92:27   liken-1   true      device    1m
+    NAME                ALIAS   ADDRESS             NODE      POWERED   PRIVACY   BTMON   AGE
+    04-4a-69-66-92-27           04:4A:69:66:92:27   liken-1   true      device    false   1m
 
 With privacy on, the operator keeps the radio's identity resolving key
 in the `Secret` `bluetooth-identity-<adapter>` in the operator's
 namespace. The `Adapter` owns it, so deleting the `Adapter` collects
 it. The operator keeps it when privacy goes off again.
+
+`spec.btmon: true` turns on the trace of the radio in the pod's `btmon`
+container. The trace records each packet on the radio's HCI link and
+management channel in the container's log, so a controller that stalls
+while the trace runs leaves evidence that outlasts a restart of the
+pod. The trace is off
+until you turn it on, because `btmon` prints key material in plain
+text: the link keys, the long term keys, and the radio's identity
+key. Anybody who can read the operator pod's logs can read those keys.
+Turn the trace on while you diagnose a fault, and turn it off after:
+
+    kubectl patch adapter 04-4a-69-66-92-27 --type merge -p '{"spec":{"btmon":true}}'
+
+When `spec.btmon` differs from the value the `btmon` container reads,
+the operator writes the new value and posts a `BtmonChanged` `Event`
+on the `Adapter` that names it. The container starts or stops `btmon`
+within seconds, and the pod does not restart, so no controller
+disconnects. An empty field is `false`. `status.btmon` and the `BTMON`
+column show the value the container reads.
