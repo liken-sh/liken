@@ -64,13 +64,16 @@ func startGuiderWorld(ctx context.Context, api *fakeAPI) *guiderWorld {
 }
 
 // catchUp starts a PHD2 for each Ready guider pod, and stops the PHD2
-// of each pod that is gone or not Ready.
+// of each pod that is gone or not Ready. The watch loop and each dial
+// both catch up, so each one reads the pods under w.mu. A catch-up that
+// read the pods before it held the lock could apply them after a newer
+// one, and stop the PHD2 of a pod that still runs.
 func (w *guiderWorld) catchUp() {
+	var stopped []string
+	w.mu.Lock()
 	w.api.mu.Lock()
 	pods := maps.Clone(w.api.objects[podsCollection])
 	w.api.mu.Unlock()
-	var stopped []string
-	w.mu.Lock()
 	for name, g := range w.running {
 		if p, ok := pods[name]; !ok || podUID(p) != g.uid || !podReady(p) {
 			g.phd2.Cut()
