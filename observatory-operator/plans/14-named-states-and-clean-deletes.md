@@ -1,7 +1,8 @@
 # 14, Named states and clean deletes
 
 Proposed on 2026-10-06. Step 1, the named states, built on 2026-10-06.
-Steps 2 and 3, the finalizers, are not built.
+Step 2, the finalizer on devices, built on 2026-10-06. Step 3, the
+finalizer on `Telescope` and `Observatory`, is not built.
 
 A park that fails or that a client aborts leaves `TELESCOPE_PARK` with
 the state `Alert`. libindi's telescope also turns both switches off,

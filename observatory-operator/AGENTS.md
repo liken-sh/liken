@@ -100,7 +100,8 @@ package's tests and the operator's tests share.
 ## The operator
 
 The operator's files are flat in `package main`, one domain to a file.
-`operator.go` starts the five kinds of goroutine: the supervisor, one
+`operator.go` starts the five kinds of goroutine: the supervisor
+(with the finalizers of `finalizers.go`), one
 runner for each `Reservation` (`reservation.go`, `activation.go`,
 `configure.go`, `deactivation.go`, `steady.go`, `moves.go`,
 `finish.go`, and the guider's `guidersteps.go` and `guidersteady.go`),

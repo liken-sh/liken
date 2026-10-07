@@ -372,9 +372,8 @@ that leaves, to the shelf or to another telescope, first runs its
 timeouts of its actions. Then its driver stops on the server, also
 after a `deactivation` that failed with a `ProcedureFailed` Warning,
 and the device loses its pod, its `Service`, and its `ResourceClaim`.
-A device that a person deletes runs no `deactivation`: its spec is
-gone, and to keep it the operator would need a finalizer on every
-device. The
+A device that a person deletes leaves the same way ("Deleting a
+running resource" below). The
 operator posts a `DriverStarted` or a `DriverStopped` Event on the
 `Telescope` or the `Observatory`, and the device that left gets a
 `PodDeleted` Event. A device that leaves during activation keeps its
@@ -408,6 +407,46 @@ appears or changes its status or its reason, with the condition's
 reason and message. A `ParentFound` that is `False`, a `Ready` whose
 reason is `Error`, and a `Safe` that is `False` are `Warning`s. `kubectl describe` lists them
 for an hour.
+
+### Deleting a running resource
+
+The operator adds the finalizer `observatory.liken.sh/deactivate` to
+each resource that it runs something for, so a delete waits until the
+operator stopped it:
+
+| Resource | Holds the finalizer |
+|---|---|
+| `Reservation` | from its first step until its deactivation steps are done |
+| A device | from just before the operator creates its pod until the pod is gone and no held server runs the device |
+
+A device that a person deletes during a session leaves its server.
+When its `Telescope` or `Observatory` is `Active`, and the device ran
+its `activation`, the operator first runs its `deactivation` through
+its driver, so a dust cap closes and a dome parks. A `deactivation`
+that fails or times out posts a `ProcedureFailed` Warning, and the
+delete goes on. A device that is not connected skips its actions.
+Then the operator stops the device's driver, deletes its pod, its
+`Service`, and its `ResourceClaim`, and posts a `PodDeleted` Event on
+the device. Then it removes the finalizer, and the device is gone. A
+device deleted during activation goes when the reservation is `Ready`,
+with no procedure, because the `Activation` step did not run its
+`activation`.
+
+A device with no pod, such as one on the shelf, one of a telescope
+with no reservation, or one whose reservation is `Released`, carries
+no finalizer, and a delete removes it at once.
+
+While the operator is down, a delete of a running resource waits for
+it, and the operator does the work when it returns. A person can
+remove the finalizer by hand:
+
+```sh
+kubectl patch dustcap east -n observatory --type=merge -p '{"metadata":{"finalizers":null}}'
+```
+
+That skips the device's `deactivation`. Kubernetes then deletes its
+pod, its `Service`, and its `ResourceClaim` by garbage collection,
+before the operator stops its driver on the running server.
 
 ## Procedures
 

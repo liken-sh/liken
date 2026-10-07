@@ -113,11 +113,14 @@ func (d *device) parent() (observatory.Parent, bool) {
 // server answers the INDI server that runs a device: its telescope's,
 // or its observatory's. A device on a train runs on the server of the
 // train's telescope. The answer is false for a device on the shelf,
-// and while a train that the device names is missing.
+// while a train that the device names is missing, and for a device
+// that a person deleted. The finalizer keeps a deleted device's object
+// until its server let it go, and a server that runs it treats it as a
+// device that left (finalizers.go).
 func (t *tree) server(d *device) (serverRef, bool) {
 	p, installed := d.parent()
 	switch {
-	case !installed:
+	case !installed, deleting(d.object.Metadata):
 		return serverRef{}, false
 	case p.Kind == observatory.OpticalTrainKind:
 		train, ok := t.trains[p.Name]

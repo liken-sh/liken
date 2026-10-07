@@ -121,7 +121,7 @@ func TestARefusedFinalizerIsSentAgain(t *testing.T) {
 		w.api.mu.Unlock()
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		r := w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
-		if !slices.Contains(r.Metadata.Finalizers, observatory.ReservationFinalizer) {
+		if !slices.Contains(r.Metadata.Finalizers, observatory.Finalizer) {
 			t.Errorf("finalizers = %v", r.Metadata.Finalizers)
 		}
 		w.api.mu.Lock()

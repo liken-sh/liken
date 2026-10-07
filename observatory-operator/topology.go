@@ -85,11 +85,11 @@ func (o *operator) ensureServer(ctx context.Context, report func(string), ref se
 	return o.ensure(ctx, report, built, svc, nil)
 }
 
-// startDevices creates the pod, the Service, and the claim of each
-// device, and answers the devices whose pod it created. The tree of
-// now decides which camera a Guider names, so a Guider created during
-// a reservation places its camera at the next start of the camera's
-// pod.
+// startDevices gives each device the finalizer, creates its pod, its
+// Service, and its claim, and answers the devices whose pod it
+// created. The tree of now decides which camera a Guider names, so a
+// Guider created during a reservation places its camera at the next
+// start of the camera's pod.
 func (o *operator) startDevices(ctx context.Context, report func(string), ref serverRef, devices []*device) ([]*device, error) {
 	t := o.snapshot()
 	var started []*device
@@ -98,6 +98,9 @@ func (o *operator) startDevices(ctx context.Context, report func(string), ref se
 		if err != nil {
 			o.fault(d, err)
 			return started, fmt.Errorf("%s %s: %w", d.kind.Name, d.name(), err)
+		}
+		if err := o.holdDevice(ctx, report, d); err != nil {
+			return started, err
 		}
 		created, err := o.ensure(ctx, report, built, svc, claim)
 		if created {

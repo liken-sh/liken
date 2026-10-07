@@ -143,8 +143,4 @@ const (
 	// ConditionSafeToPowerOff is True when the deactivation steps are
 	// done: the deactivation procedures ran, and the pods stopped.
 	ConditionSafeToPowerOff = "SafeToPowerOff"
-
-	// ReservationFinalizer holds a deleted Reservation until its
-	// deactivation steps are done.
-	ReservationFinalizer = Group + "/deactivate"
 )

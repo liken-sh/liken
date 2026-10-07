@@ -2,8 +2,8 @@ package main
 
 // A device that leaves a telescope or an observatory that is Active,
 // while its object still exists, runs its deactivation before its
-// driver stops. A device whose object a person deletes stops with no
-// deactivation: its spec is gone.
+// driver stops. devicedelete_test.go holds a device that a person
+// deletes.
 
 import (
 	"slices"
@@ -91,25 +91,6 @@ func TestALeavingDevicesFailedDeactivationStillStopsItsDriver(t *testing.T) {
 		failed := "Warning ProcedureFailed: Procedure deactivation failed: " + want
 		if got := typedEvents(w.api, observatory.DustCapKind, "east"); !slices.Contains(got, failed) {
 			t.Errorf("dust cap Events = %q, want %q", got, failed)
-		}
-	})
-}
-
-// A deleted device has no spec left to run, so its driver stops with
-// no deactivation.
-func TestADeletedDeviceStopsWithNoDeactivation(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		w := readyWorld(t)
-		w.api.deleteNamed(kindCollection(observatory.DustCapKind), "east")
-		w.until(5*time.Minute, "the dust cap's pod stays", func() bool {
-			return !slices.Contains(w.api.names(podsCollection), "east-dustcap")
-		})
-		if n := startedRuns(w.api, observatory.DustCapKind, "east", observatory.TriggerDeactivation); n != 0 {
-			t.Errorf("the deactivation started %d times, want none", n)
-		}
-		if slices.Contains(w.indi.changes(), "east-telescope Dust Cover Simulator.CAP_PARK PARK=On UNPARK=Off") {
-			t.Errorf("changes = %q, want no park of the dust cap", w.indi.changes())
 		}
 	})
 }

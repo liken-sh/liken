@@ -48,7 +48,7 @@ func TestAReservationActivatesTheTelescopeAndReleasesIt(t *testing.T) {
 		if r.Status.Endpoint == nil || r.Status.Endpoint.Host != "east-telescope.observatory.svc" || r.Status.Endpoint.Port != 7624 {
 			t.Errorf("endpoint = %+v", r.Status.Endpoint)
 		}
-		if !slices.Contains(r.Metadata.Finalizers, observatory.ReservationFinalizer) {
+		if !slices.Contains(r.Metadata.Finalizers, observatory.Finalizer) {
 			t.Errorf("finalizers = %v", r.Metadata.Finalizers)
 		}
 		pods := w.api.names(podsCollection)
@@ -150,7 +150,7 @@ func TestAReservationDeactivatesAtItsEnd(t *testing.T) {
 		if c := conditionOf(r.Status.Conditions, observatory.ConditionReady); c.Status != observatory.ConditionFalse {
 			t.Errorf("Ready = %+v", c)
 		}
-		if slices.Contains(r.Metadata.Finalizers, observatory.ReservationFinalizer) {
+		if slices.Contains(r.Metadata.Finalizers, observatory.Finalizer) {
 			t.Errorf("the finalizer stays: %v", r.Metadata.Finalizers)
 		}
 		// The Deactivation step closes the cap and warms the camera,

@@ -26,6 +26,10 @@ import (
 const (
 	// Group is the API group of every kind in this package.
 	Group = "observatory.liken.sh"
+	// Finalizer holds a deleted resource while the operator still runs
+	// something for it: a Reservation until its deactivation steps are
+	// done, and a device until its pod is gone.
+	Finalizer = Group + "/deactivate"
 	// Version is the one version that the CRDs serve.
 	Version = "v1alpha1"
 	// APIVersion is the value of apiVersion in every object.

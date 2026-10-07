@@ -98,7 +98,7 @@ func TestTheRoleGrantsWhatTheOperatorSends(t *testing.T) {
 		needs = append(needs, need{observatory.Group, kind.Plural + "/status", "update"})
 	}
 	// A merge patch removes the retry annotation of any resource with
-	// procedures.
+	// procedures, and adds and removes a device's finalizer.
 	for _, kind := range append([]observatory.Kind{observatory.ObservatoryKind, observatory.TelescopeKind}, observatory.DeviceKinds...) {
 		needs = append(needs, need{observatory.Group, kind.Plural, "patch"})
 	}

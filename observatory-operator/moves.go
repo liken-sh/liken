@@ -1,9 +1,9 @@
 package main
 
 // A device can leave a server while a reservation is Ready: a person
-// removes its parent field to put it on the shelf, or names another
-// train, telescope, or observatory. The runner handles the change as
-// it handles a device that joins:
+// removes its parent field to put it on the shelf, names another
+// train, telescope, or observatory, or deletes the device. The runner
+// handles the change as it handles a device that joins:
 //
 //   - The device runs its deactivation through its driver on the
 //     running server, while its old parent is Active (leaves.go).
@@ -54,8 +54,9 @@ func strays(t *tree, ref serverRef) map[string]string {
 
 // removeStrays deletes the pod, the Service, and the claim of each
 // device that left a server, and posts an Event on each such device
-// that still exists. A deleted device's pod goes by garbage collection
-// too, and has no device to post on.
+// that still exists. A deleted device still exists while the finalizer
+// holds it, and the supervisor removes the finalizer once its pod is
+// gone (finalizers.go).
 func (r *runner) removeStrays(ctx context.Context, t *tree, ref serverRef) error {
 	left := strays(t, ref)
 	if len(left) == 0 {
@@ -75,8 +76,12 @@ func (r *runner) removeStrays(ctx context.Context, t *tree, ref serverRef) error
 		if !ok {
 			continue
 		}
+		why := fmt.Sprintf("left %s %s", ref.kind.Name, ref.name)
+		if deleting(d.object.Metadata) {
+			why = "was deleted"
+		}
 		r.o.recorder.Normal(reference(d.kind, d.object.Metadata), reasonPodDeleted,
-			fmt.Sprintf("Deleted pod %s, because the %s left %s %s while Reservation %s is Ready.", left[key], d.kind.Name, ref.kind.Name, ref.name, r.name))
+			fmt.Sprintf("Deleted pod %s, because the %s %s while Reservation %s is Ready.", left[key], d.kind.Name, why, r.name))
 		r.o.logf("Reservation %s: deleted pod %s of %s, which left %s", r.name, left[key], key, ref)
 	}
 	return nil

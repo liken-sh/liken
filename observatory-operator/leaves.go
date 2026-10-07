@@ -18,21 +18,26 @@ package main
 // ProcedureFailed, and the driver stops anyway after the run ends,
 // because the device is out of the operator's care.
 //
-// A device whose object a person deleted runs no deactivation. Its
-// spec is gone, and keeping it until the run ends would need a
-// finalizer on every device.
+// A device that a person deleted leaves the same way. The finalizer
+// keeps its object, and so its spec, until its pod is gone
+// (finalizers.go). Its deactivation runs only when its activation ran
+// for the same transition: a device deleted during activation, before
+// the Activation step reached it, was never opened, and goes with no
+// procedure.
 
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
 // leavers answers the devices of the pods that left a server whose
-// objects still exist: the same object, by UID, with another parent or
-// none. A pod whose device the step stops, with its parent unchanged,
-// and the pod of a deleted device, are not leavers.
+// objects still exist: the same object, by UID, with another parent,
+// none, or a deletionTimestamp. A pod whose device the step stops,
+// with its parent unchanged, and the pod of a device that is gone, are
+// not leavers.
 func leavers(t *tree, ref serverRef, pods []string) []resource {
 	var out []resource
 	for _, name := range pods {
@@ -75,7 +80,7 @@ func (o *operator) deactivateLeavers(ctx context.Context, t *tree, ref serverRef
 	}
 	var group sync.WaitGroup
 	for _, r := range leavers(t, ref, pods) {
-		if len(r.procedures.Deactivation) == 0 {
+		if len(r.procedures.Deactivation) == 0 || (deleting(r.meta) && !o.activated(r, state.since)) {
 			continue
 		}
 		group.Go(func() {
@@ -90,4 +95,11 @@ func (o *operator) deactivateLeavers(ctx context.Context, t *tree, ref serverRef
 		})
 	}
 	group.Wait()
+}
+
+// activated reports whether a device's activation ran for the
+// transition of Active that began at since.
+func (o *operator) activated(r resource, since time.Time) bool {
+	run, ok := o.runs.get(r.record(), observatory.TriggerActivation)
+	return ok && answers(run, since, time.Time{})
 }

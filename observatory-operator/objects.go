@@ -1,14 +1,14 @@
 package main
 
 // The writes of objects other than a status: the creates and deletes of
-// pods, Services, ConfigMaps, and ResourceClaims, the finalizer of a Reservation,
-// and the annotation that asks for a retry.
+// pods, Services, ConfigMaps, and ResourceClaims, the finalizer of a
+// Reservation, and the annotation that asks for a retry. finalizers.go
+// holds the finalizer of every other resource.
 
 import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"slices"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/memo"
@@ -80,7 +80,7 @@ func (o *operator) deleteObject(path string) error {
 }
 
 func hasFinalizer(r *observatory.Reservation) bool {
-	return slices.Contains(r.Metadata.Finalizers, observatory.ReservationFinalizer)
+	return holdsFinalizer(r.Metadata)
 }
 
 // setFinalizer adds or removes the reservation's finalizer with a merge
@@ -89,13 +89,7 @@ func hasFinalizer(r *observatory.Reservation) bool {
 // caller reads the reservation again and calls once more. A removal
 // that finds the reservation gone is done: the finalizer went with it.
 func (o *operator) setFinalizer(r *observatory.Reservation, present bool) error {
-	finalizers := slices.DeleteFunc(slices.Clone(r.Metadata.Finalizers), func(f string) bool {
-		return f == observatory.ReservationFinalizer
-	})
-	if present {
-		finalizers = append(finalizers, observatory.ReservationFinalizer)
-	}
-	err := o.patchMetadata(r, map[string]any{"finalizers": finalizers})
+	err := o.patchMetadata(r, map[string]any{"finalizers": finalizersWith(r.Metadata, present)})
 	if !present && errors.Is(err, apiclient.ErrNotFound) {
 		return nil
 	}

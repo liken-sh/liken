@@ -13,6 +13,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -92,6 +93,19 @@ func telescopeTiers(t *tree, telescope *observatory.Telescope, since time.Time) 
 		tier(t, directDevices(t, observatory.TelescopeKind, name), since),
 		tier(t, trains, since),
 	}
+}
+
+// withoutDeleted answers tiers without the devices that a person
+// deleted. Such a device runs on no server, so its activation would
+// wait for a driver that may never start (tree.server).
+func withoutDeleted(tiers [][]stepRun) [][]stepRun {
+	out := make([][]stepRun, 0, len(tiers))
+	for _, members := range tiers {
+		out = append(out, slices.DeleteFunc(slices.Clone(members), func(m stepRun) bool {
+			return m.res.device != nil && deleting(m.res.meta)
+		}))
+	}
+	return out
 }
 
 // runTiers runs tiers from..to of a plan in order, the runs of each
@@ -205,7 +219,7 @@ func (r *runner) activation(ctx context.Context, w *stepWork) (outcome, error) {
 	if held := r.o.activity.get(scopeKey); held.active {
 		scopeSince = held.since
 	}
-	plan := &stepPlan{trigger: observatory.TriggerActivation, tiers: append(siteTiers(t, site, siteSince), telescopeTiers(t, telescope, scopeSince)...)}
+	plan := &stepPlan{trigger: observatory.TriggerActivation, tiers: withoutDeleted(append(siteTiers(t, site, siteSince), telescopeTiers(t, telescope, scopeSince)...))}
 	err = r.runTiers(ctx, w, plan, 0, 2, false)
 	lock.release()
 	if err != nil {

@@ -233,7 +233,11 @@ func (o *operator) supervise(ctx context.Context, t *tree) {
 	o.runs.forget(o.snapshot)
 	o.servers.sync(ctx, t)
 	o.guiderConns.sync(ctx, t)
-	if err := o.sweep(t); err != nil {
+	held := o.heldServers(t)
+	if err := o.sweep(t, held); err != nil {
+		o.logf("%v", err)
+	}
+	if err := o.releaseDevices(t, held); err != nil {
 		o.logf("%v", err)
 	}
 }
@@ -269,14 +273,7 @@ func (o *operator) startRunner(ctx context.Context, r *observatory.Reservation) 
 // deactivation, so the sweep finds them only when a reservation went
 // away without deactivation, such as one whose finalizer a person
 // removed.
-func (o *operator) sweep(t *tree) error {
-	held := map[string]bool{}
-	for telescope := range o.claims.held() {
-		held[serverRef{observatory.TelescopeKind, telescope}.String()] = true
-		if scope, ok := t.telescopes[telescope]; ok {
-			held[serverRef{observatory.ObservatoryKind, scope.Spec.Observatory}.String()] = true
-		}
-	}
+func (o *operator) sweep(t *tree, held map[string]bool) error {
 	var problems []error
 	for name, p := range t.pods {
 		if server := p.Metadata.Labels[labelServer]; !held[server] && p.Metadata.DeletionTimestamp == nil {
@@ -294,6 +291,19 @@ func (o *operator) sweep(t *tree) error {
 		}
 	}
 	return joinErrors(problems)
+}
+
+// heldServers answers the names of the servers that a reservation
+// holds: the server of each held telescope and of its observatory.
+func (o *operator) heldServers(t *tree) map[string]bool {
+	held := map[string]bool{}
+	for telescope := range o.claims.held() {
+		held[serverRef{observatory.TelescopeKind, telescope}.String()] = true
+		if scope, ok := t.telescopes[telescope]; ok {
+			held[serverRef{observatory.ObservatoryKind, scope.Spec.Observatory}.String()] = true
+		}
+	}
+	return held
 }
 
 // The pause before a refused write is sent again. It is a backoff
