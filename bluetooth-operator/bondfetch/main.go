@@ -108,10 +108,11 @@ func run() error {
 	if err := materialize(client, namespace, adapter.Address, root); err != nil {
 		return err
 	}
-	if err := restoreIdentity(client, namespace, adapter.Address, root); err != nil {
+	privacy, err := writePrivacy(client, adapter.Address, settings)
+	if err != nil {
 		return err
 	}
-	return writePrivacy(client, adapter.Address, settings)
+	return restoreIdentity(client, namespace, adapter.Address, root, privacy)
 }
 
 // materialize writes one adapter's stored bonds into the tree

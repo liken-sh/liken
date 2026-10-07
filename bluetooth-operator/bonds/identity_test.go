@@ -1,8 +1,10 @@
 package bonds
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 )
 
@@ -86,5 +88,25 @@ func TestTheIdentitySecretIsNeverABond(t *testing.T) {
 	}
 	if tree := secret.Tree(); len(tree) != 0 {
 		t.Errorf("Tree = %v, want no bonds", tree)
+	}
+}
+
+// Each new identity holds its own random key, in the form load_irk
+// reads, so two radios never share an identity.
+func TestNewIdentityHoldsAFreshKeyInTheFormBlueZReads(t *testing.T) {
+	first, err := NewIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := NewIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	form := regexp.MustCompile(`^\[General\]\nIdentityResolvingKey=[0-9a-f]{32}\n$`)
+	if !form.Match(first) || !form.Match(second) {
+		t.Errorf("identities %q and %q, want one 32-digit hex key under [General]", first, second)
+	}
+	if bytes.Equal(first, second) {
+		t.Errorf("two new identities hold the same key %q", first)
 	}
 }

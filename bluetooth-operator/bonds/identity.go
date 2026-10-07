@@ -8,8 +8,11 @@ package bonds
 // peer that paired with the radio holds a copy of that key, so the
 // peer resolves each new address back to the radio. bluetoothd keeps
 // the key in <adapter>/identity, under [General]
-// IdentityResolvingKey. load_irk in BlueZ's src/adapter.c reads it,
-// and writes a new random key when the file has none.
+// IdentityResolvingKey. load_irk in BlueZ's src/adapter.c reads it.
+// When the file has none, bluetoothd makes a key through the kernel's
+// AF_ALG socket, and fails on a machine that does not load that
+// socket's modules, so bondfetch writes a new key before bluetoothd
+// starts (NewIdentity).
 //
 // The pod's tree is an emptyDir, so without a stored copy each new pod
 // writes a new key, and every bonded peer then holds a key for an
@@ -25,6 +28,8 @@ package bonds
 // programs read it.
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"io/fs"
 	"os"
@@ -58,6 +63,17 @@ func ReadIdentity(root string, adapter Address) ([]byte, error) {
 		return nil, nil
 	}
 	return identity, err
+}
+
+// NewIdentity answers an identity file with a new random key, in the
+// form load_irk reads: 32 hex digits under [General]
+// IdentityResolvingKey, in lowercase as BlueZ writes them.
+func NewIdentity() ([]byte, error) {
+	key := make([]byte, 16)
+	if _, err := rand.Read(key); err != nil {
+		return nil, err
+	}
+	return []byte("[General]\nIdentityResolvingKey=" + hex.EncodeToString(key) + "\n"), nil
 }
 
 // WriteIdentity writes an adapter's identity file into a BlueZ storage

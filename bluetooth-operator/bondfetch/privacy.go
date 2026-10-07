@@ -63,15 +63,15 @@ type adapterSpec struct {
 	} `json:"spec"`
 }
 
-// writePrivacy reads the radio's Adapter and writes its spec.privacy
-// into the settings volume.
+// writePrivacy reads the radio's Adapter, writes its spec.privacy into
+// the settings volume, and answers the value it wrote.
 //
 // An Adapter that does not exist yet is off, because the operator
 // creates it on its first pass, after bluetoothd has started. Any
 // other failure to read it is an error, the same as a failure to read
 // the bonds, so the pod stays in Init and bluetoothd does not start
 // with a value that a person did not choose.
-func writePrivacy(api *apiclient.Client, adapter bonds.Address, settings string) error {
+func writePrivacy(api *apiclient.Client, adapter bonds.Address, settings string) (string, error) {
 	privacy := privacyOff
 	object, err := apiclient.Get[adapterSpec](api, adaptersPath+adapter.Key())
 	switch {
@@ -81,41 +81,59 @@ func writePrivacy(api *apiclient.Client, adapter bonds.Address, settings string)
 		}
 	case errors.Is(err, apiclient.ErrNotFound):
 	default:
-		return fmt.Errorf("reading the Adapter for %s: %w", adapter, err)
+		return "", fmt.Errorf("reading the Adapter for %s: %w", adapter, err)
 	}
 
 	path := filepath.Join(settings, privacyFile)
 	if err := os.WriteFile(path, []byte(privacy+"\n"), 0o644); err != nil {
-		return fmt.Errorf("writing %s: %w", path, err)
+		return "", fmt.Errorf("writing %s: %w", path, err)
 	}
 	fmt.Printf("bondfetch: privacy is %s for %s\n", privacy, adapter)
-	return nil
+	return privacy, nil
 }
 
-// restoreIdentity writes the radio's stored identity file into the tree
-// bluetoothd reads.
+// restoreIdentity writes the radio's identity file into the tree
+// bluetoothd reads: the stored file when the radio has one, and a new
+// random key when privacy is on and nothing is stored.
 //
-// A radio with no identity Secret has never had privacy on, so it gets
-// no file. Any other failure to read the Secret is an error. bluetoothd
-// would write a new key when privacy is on, and every bonded peer would
-// then hold a key for an identity that the radio does not present.
-func restoreIdentity(api *apiclient.Client, namespace string, adapter bonds.Address, root string) error {
+// bluetoothd makes a missing key itself (generate_and_write_irk in
+// BlueZ's src/adapter.c), but it draws the random bytes through the
+// kernel's AF_ALG socket. Ubuntu's kernel builds that socket's support
+// as modules, and on a machine that does not load them bluetoothd logs
+// "Failed to open crypto" and starts with privacy off. A key that this
+// program writes needs no kernel crypto, and the operator stores it in
+// the identity Secret on its first pass.
+//
+// A radio with privacy off and no stored file gets no file, because
+// bluetoothd reads the key only when privacy is on. Any failure to
+// read the Secret is an error, because a new key would replace the one
+// that the radio's bonded peers hold.
+func restoreIdentity(api *apiclient.Client, namespace string, adapter bonds.Address, root, privacy string) error {
 	secret, err := apiclient.Get[bonds.Secret](api, bonds.IdentitySecretPath(namespace, adapter))
-	if errors.Is(err, apiclient.ErrNotFound) {
-		return nil
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 		return fmt.Errorf("reading the identity of %s: %w", adapter, err)
 	}
-	identity := secret.Identity()
-	if len(identity) == 0 {
-		// A Secret with no key restores nothing. bluetoothd writes a new
-		// key when privacy is on, and the operator stores it.
+	var identity []byte
+	if err == nil {
+		identity = secret.Identity()
+	}
+	if len(identity) > 0 {
+		if err := bonds.WriteIdentity(root, adapter, identity); err != nil {
+			return fmt.Errorf("writing the identity of %s under %s: %w", adapter, root, err)
+		}
+		fmt.Printf("bondfetch: restored the identity of %s\n", adapter)
 		return nil
+	}
+	if privacy == privacyOff {
+		return nil
+	}
+	identity, err = bonds.NewIdentity()
+	if err != nil {
+		return fmt.Errorf("making an identity key for %s: %w", adapter, err)
 	}
 	if err := bonds.WriteIdentity(root, adapter, identity); err != nil {
 		return fmt.Errorf("writing the identity of %s under %s: %w", adapter, root, err)
 	}
-	fmt.Printf("bondfetch: restored the identity of %s\n", adapter)
+	fmt.Printf("bondfetch: wrote a new identity key for %s, because privacy is %s and none is stored\n", adapter, privacy)
 	return nil
 }

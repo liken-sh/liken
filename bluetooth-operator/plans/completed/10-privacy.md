@@ -114,10 +114,17 @@ match, so it is never read as a bond.
 
 The store pass that writes bonds back (`bondstore.go`) also reads
 `<adapter>/identity` and writes the `Secret` when the file differs from
-it. bluetoothd writes the file once, when privacy is first on and no
-key exists, so the write happens once in the radio's life.
-`bondfetch` writes the file back into the tree before bluetoothd
+it. `bondfetch` writes the file back into the tree before bluetoothd
 starts. A radio with privacy off has no file and no `Secret`.
+
+When privacy is on and no key is stored, `bondfetch` writes a new
+random key, and the store pass then writes it into the `Secret` once
+in the radio's life. bluetoothd can make the key itself, but it draws
+the random bytes through the kernel's `AF_ALG` socket, and Ubuntu's
+kernel builds that socket's support as modules. On `stick-1` on
+2026-10-07, which loads none of them, bluetoothd logged
+`generate_and_write_irk() Failed to open crypto` and started with
+privacy off (measured). A key from `bondfetch` needs no kernel crypto.
 
 The `Secret` is kept when privacy is turned off again. The key costs
 nothing while privacy is off, and a radio that turns privacy on again

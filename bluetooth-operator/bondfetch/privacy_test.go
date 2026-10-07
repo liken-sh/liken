@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
@@ -73,7 +74,7 @@ func TestWritePrivacyWritesTheFieldsValue(t *testing.T) {
 			api := testAPI(t, apiObjects(t, c.objects))
 			settings := t.TempDir()
 
-			if err := writePrivacy(api, testAddress, settings); err != nil {
+			if _, err := writePrivacy(api, testAddress, settings); err != nil {
 				t.Fatalf("writePrivacy: %v", err)
 			}
 
@@ -90,7 +91,7 @@ func TestWritePrivacyFailsWhenTheAdapterCannotBeRead(t *testing.T) {
 	api := testAPI(t, failingAPI())
 	settings := t.TempDir()
 
-	if err := writePrivacy(api, testAddress, settings); err == nil {
+	if _, err := writePrivacy(api, testAddress, settings); err == nil {
 		t.Fatal("writePrivacy reported success for an Adapter it could not read")
 	}
 	if _, err := os.Stat(filepath.Join(settings, "privacy")); !os.IsNotExist(err) {
@@ -105,7 +106,7 @@ func TestRestoreIdentityWritesTheStoredFile(t *testing.T) {
 	api := testAPI(t, apiObjects(t, map[string]any{testIdentityPath: secret}))
 	root := t.TempDir()
 
-	if err := restoreIdentity(api, "bluetooth", testAddress, root); err != nil {
+	if err := restoreIdentity(api, "bluetooth", testAddress, root, "device"); err != nil {
 		t.Fatalf("restoreIdentity: %v", err)
 	}
 
@@ -118,13 +119,13 @@ func TestRestoreIdentityWritesTheStoredFile(t *testing.T) {
 	}
 }
 
-// A radio that never had privacy on has no identity Secret, and gets no
-// file.
-func TestRestoreIdentityWritesNothingWithNoSecret(t *testing.T) {
+// A radio with privacy off and no identity Secret gets no file, because
+// bluetoothd reads the key only when privacy is on.
+func TestRestoreIdentityWritesNothingWithPrivacyOff(t *testing.T) {
 	api := testAPI(t, apiObjects(t, map[string]any{}))
 	root := t.TempDir()
 
-	if err := restoreIdentity(api, "bluetooth", testAddress, root); err != nil {
+	if err := restoreIdentity(api, "bluetooth", testAddress, root, "off"); err != nil {
 		t.Fatalf("restoreIdentity: %v", err)
 	}
 
@@ -143,7 +144,28 @@ func TestRestoreIdentityWritesNothingWithNoSecret(t *testing.T) {
 func TestRestoreIdentityFailsWhenTheSecretCannotBeRead(t *testing.T) {
 	api := testAPI(t, failingAPI())
 
-	if err := restoreIdentity(api, "bluetooth", testAddress, t.TempDir()); err == nil {
+	if err := restoreIdentity(api, "bluetooth", testAddress, t.TempDir(), "device"); err == nil {
 		t.Fatal("restoreIdentity reported success for a Secret it could not read")
+	}
+}
+
+// A radio with privacy on and no stored key gets a new random key
+// before bluetoothd starts. bluetoothd would make the key itself
+// through the kernel's AF_ALG socket, which needs crypto modules that a
+// machine may not load, and then it starts with privacy off.
+func TestRestoreIdentityWritesANewKeyWhenPrivacyIsOn(t *testing.T) {
+	api := testAPI(t, apiObjects(t, map[string]any{}))
+	root := t.TempDir()
+
+	if err := restoreIdentity(api, "bluetooth", testAddress, root, "device"); err != nil {
+		t.Fatalf("restoreIdentity: %v", err)
+	}
+
+	identity, err := os.ReadFile(filepath.Join(root, "04:4A:69:66:92:27", "identity"))
+	if err != nil {
+		t.Fatalf("reading the identity file: %v", err)
+	}
+	if !regexp.MustCompile(`^\[General\]\nIdentityResolvingKey=[0-9a-f]{32}\n$`).Match(identity) {
+		t.Errorf("identity = %q, want one 32-digit hex key under [General]", identity)
 	}
 }

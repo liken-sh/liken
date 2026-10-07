@@ -39,10 +39,10 @@ status the restart leaves.
 
 ## The identity key
 
-`bluetoothd` writes the radio's IRK the first time it starts with
-privacy on. The operator stores the key in the `Secret`
-`bluetooth-identity-<adapter>`, and the next pod writes it back before
-`bluetoothd` starts. So a new pod, a reinstall, or a radio moved to
+The first pod that starts with privacy on writes a new random IRK for
+the radio before `bluetoothd` starts. The operator stores the key in
+the `Secret` `bluetooth-identity-<adapter>`, and each later pod writes
+it back before `bluetoothd` starts. So a new pod, a reinstall, or a radio moved to
 another machine keeps the identity that its paired devices know. The
 operator keeps the `Secret` when you turn privacy off, so a radio that
 turns privacy on again presents the same identity.
