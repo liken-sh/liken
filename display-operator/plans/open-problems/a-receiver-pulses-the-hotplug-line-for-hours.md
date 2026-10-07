@@ -52,8 +52,9 @@ weston started, 136 ms after another source on the receiver sent
   equipment-operator reads the `SSHOS` family on each connect and
   reports Pass Through as `status.denon.hdmi.passThrough`, and a
   person can set it in `spec.denon.settings.hdmi.passThrough`
-  ([equipment-operator plan 13](../../../equipment-operator/plans/13-every-setting-a-receiver-exposes.md#denon)
-  covers the `hdmi` family).
+  ([equipment-operator plan 14](../../../equipment-operator/plans/14-one-settings-model-for-every-receiver.md)
+  moves Pass Through to the settings every receiver shares, as
+  `spec.settings.hdmi.passThrough`).
 - Whether the pulses reach anything a person sees or hears. The TV was
   off during the second spell.
 
