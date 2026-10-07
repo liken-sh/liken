@@ -204,6 +204,8 @@ On `liken-1`, on 2026-10-07, on the radio on `stick-1`, with build
    type `Random (0x03)`. The radio connects to the X6, so the X6 did
    not have to resolve the radio's address to accept the link. A Low
    Energy controller that connects to the radio itself was not tested.
+   The DualSense, on a classic link, kept working, as a classic link
+   does not use privacy.
 
 The first build, `d235281c`, sent `Privacy: Disabled (0x00)` with a
 zero key, because bluetoothd could not make the key (see
