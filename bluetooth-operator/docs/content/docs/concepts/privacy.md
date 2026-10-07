@@ -53,6 +53,8 @@ A device that paired while privacy was off may not hold the radio's
 IRK. Such a device cannot resolve the radio's private address after you
 turn privacy on, and a Low Energy controller that accepts connections
 only from its bonded radio may refuse to connect until you pair it
-again. This has not been measured on real controllers yet. If a Low
-Energy controller does not reconnect after you turn privacy on, pair it
-again.
+again. When the radio opens the link, as it does for a remote that
+wakes and advertises, the remote does not have to resolve the radio's
+address. An X6 remote that paired while privacy was off connected again
+without a new pairing in a test on 2026-10-07. If a Low Energy
+controller does not reconnect after you turn privacy on, pair it again.

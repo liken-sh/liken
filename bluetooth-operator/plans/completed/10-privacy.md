@@ -1,6 +1,9 @@
 # Privacy
 
-Plan 10. Built 2026-10-07. The drill in "How it will be proved" has not run.
+Plan 10. Built 2026-10-07. Drilled on `liken-1` on 2026-10-07: steps
+1 to 3 ran on the radio on `stick-1`, and step 4, which sets the field
+back to `off`, has not run. The results are in
+[What the drill measured](#what-the-drill-measured).
 
 It lets a person turn on Bluetooth Low Energy privacy for one radio
 with a field on its `Adapter`, and it keeps the radio's identity key in
@@ -181,6 +184,30 @@ The drill, on `liken-1`, on the radio on `stick-1`:
    classic link and the X6, and record whether each reconnects
    without pairing again. This step needs a person at the controllers.
 4. Set the field back to `off`, and confirm the roll and the status.
+
+## What the drill measured
+
+On `liken-1`, on 2026-10-07, on the radio on `stick-1`, with build
+`50b3d3ac` (measured):
+
+1. Setting `spec.privacy: device` rolled the pod once, and the
+   `PrivacyChanged` `Event` reached the API server before the old pod
+   ended. `status.privacy` read `device`. The `btmon` trace showed
+   bluetoothd send `Set Privacy` with `Privacy: Enabled (0x01)` and a
+   nonzero key.
+2. The operator stored the key in `bluetooth-identity-f4-96-34-aa-91-bd`.
+   After a roll of the pod by hand, `bondfetch` restored the file, and
+   the new bluetoothd sent the same key.
+3. The X6, a Low Energy remote paired while privacy was off, connected
+   again on a button press without a new pairing. The radio set a
+   resolvable random address and connected to the X6 with own address
+   type `Random (0x03)`. The radio connects to the X6, so the X6 did
+   not have to resolve the radio's address to accept the link. A Low
+   Energy controller that connects to the radio itself was not tested.
+
+The first build, `d235281c`, sent `Privacy: Disabled (0x00)` with a
+zero key, because bluetoothd could not make the key (see
+[The identity key](#the-identity-key)).
 
 ## What was considered and set aside
 
