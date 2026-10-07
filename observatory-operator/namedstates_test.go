@@ -8,6 +8,7 @@ import (
 	"testing"
 	"testing/synctest"
 
+	"github.com/liken-sh/liken/observatory-operator/indi"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
@@ -171,4 +172,46 @@ func TestAFlatPanelNamesItsLight(t *testing.T) {
 			}, string(observatory.StateLit)},
 		})
 	})
+}
+
+// lookup answers a lookup over a fixed set of INDI properties, so a
+// test can name a state from a driver that defines only some of them.
+func lookup(ps ...indi.Property) func(string) (indi.Property, bool) {
+	return func(name string) (indi.Property, bool) {
+		for _, p := range ps {
+			if p.Name == name {
+				return p, true
+			}
+		}
+		return indi.Property{}, false
+	}
+}
+
+func switchProperty(name string, state indi.State, on string) indi.Property {
+	return indi.Property{Name: name, Type: indi.SwitchType, State: state, Members: []indi.Member{{Name: on, Switch: true}}}
+}
+
+func TestAMountWithoutParkOrTrackingNamesItsState(t *testing.T) {
+	t.Parallel()
+	coordinates := func(state indi.State) indi.Property {
+		return indi.Property{Name: "EQUATORIAL_EOD_COORD", Type: indi.NumberType, State: state}
+	}
+	cases := []struct {
+		name string
+		with []indi.Property
+		want observatory.MountState
+	}{
+		{"no coordinates", []indi.Property{switchProperty("TELESCOPE_PARK", indi.Ok, "PARK")}, ""},
+		{"no park, tracking", []indi.Property{coordinates(indi.Ok), switchProperty("TELESCOPE_TRACK_STATE", indi.Ok, "TRACK_ON")}, observatory.MountTracking},
+		{"no park, slewing", []indi.Property{coordinates(indi.Busy)}, observatory.MountSlewing},
+		{"no tracking, parked", []indi.Property{coordinates(indi.Ok), switchProperty("TELESCOPE_PARK", indi.Ok, "PARK")}, observatory.MountParked},
+		{"neither, still", []indi.Property{coordinates(indi.Ok)}, observatory.MountStopped},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := mountState(lookup(c.with...)); got != c.want {
+				t.Errorf("mountState = %q, want %q", got, c.want)
+			}
+		})
+	}
 }

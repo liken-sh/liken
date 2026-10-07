@@ -69,7 +69,7 @@ func readings(kind observatory.Kind, r reader) any {
 		return observatory.MountReadings{
 			RightAscension: r.number("EQUATORIAL_EOD_COORD", "RA"),
 			Declination:    r.number("EQUATORIAL_EOD_COORD", "DEC"),
-			State:          mountState(r),
+			State:          mountState(r.property),
 		}
 	case observatory.GPSKind:
 		return gpsReadings(r)
@@ -136,13 +136,16 @@ func readings(kind observatory.Kind, r reader) any {
 //     tracking reads Slewing until the coordinates settle.
 //   - TRACK_ON On is Tracking, and anything else is Stopped.
 //
-// A disconnected driver deletes these properties, so the state is
-// absent until the driver defines all three.
-func mountState(r reader) observatory.MountState {
-	park, parkOK := r.property("TELESCOPE_PARK")
-	track, trackOK := r.property("TELESCOPE_TRACK_STATE")
-	coordinates, coordinatesOK := r.property("EQUATORIAL_EOD_COORD")
-	if !parkOK || !trackOK || !coordinatesOK {
+// Every mount driver defines EQUATORIAL_EOD_COORD, and a disconnected
+// driver deletes it, so the state is absent until the driver defines
+// it. A mount with no park or no tracking defines no TELESCOPE_PARK or
+// TELESCOPE_TRACK_STATE, and the rules for the missing property do not
+// match.
+func mountState(property func(string) (indi.Property, bool)) observatory.MountState {
+	park, _ := property("TELESCOPE_PARK")
+	track, _ := property("TELESCOPE_TRACK_STATE")
+	coordinates, ok := property("EQUATORIAL_EOD_COORD")
+	if !ok {
 		return ""
 	}
 	switch {
