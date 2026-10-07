@@ -131,19 +131,19 @@ func TestANewOperatorResumesARunFromItsRecord(t *testing.T) {
 			spec["activation"] = []any{
 				map[string]any{"cool": map[string]any{"celsius": -10}},
 				map[string]any{"cool": map[string]any{"celsius": -5},
-					"requires": []any{map[string]any{"kind": "Mount", "name": "east", "type": "Tracking"}}},
+					"requires": []any{map[string]any{"kind": "FlatPanel", "name": "east", "type": "Lit"}}},
 			}
 		})
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		w.until(time.Minute, "the second cool does not wait", func() bool {
 			r, _ := w.reservation("east-tonight")
 			return strings.Contains(stepText(stepOf(r, observatory.StepActivation)),
-				"Camera east-main cool: -5 °C within 0.5 °C Running: Waiting for Mount east Tracking=True")
+				"Camera east-main cool: -5 °C within 0.5 °C Running: Waiting for FlatPanel east Lit=True")
 		})
 		time.Sleep(2 * statusWindow)
 
 		w.restart()
-		w.indi.ask("east-telescope", "Telescope Simulator", "TELESCOPE_TRACK_STATE", "TRACK_ON=On", "TRACK_OFF=Off")
+		w.indi.ask("east-telescope", "Light Panel Simulator", "FLAT_LIGHT_CONTROL", "FLAT_LIGHT_ON=On", "FLAT_LIGHT_OFF=Off")
 		r := w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
 		if n := w.indi.count("east-telescope", "CCD Simulator.CCD_TEMPERATURE"); n != 2 {
 			t.Errorf("the camera received %d setpoints, want -10 once and -5 once", n)

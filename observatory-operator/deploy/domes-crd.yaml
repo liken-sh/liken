@@ -43,9 +43,9 @@ spec:
         - name: Shutter
           type: string
           jsonPath: .status.readings.shutter
-        - name: Parked
-          type: boolean
-          jsonPath: .status.readings.parked
+        - name: Park
+          type: string
+          jsonPath: .status.readings.park
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -906,7 +906,7 @@ spec:
                     While a device is connected, it also reports the
                     state that the triggers of procedures read, by
                     kind: a `Dome` `Parked` and `Open` (the shutter), a
-                    `Mount` `Parked` and `Tracking`, a `DustCap` `Open`,
+                    `Mount` `Parked`, a `DustCap` `Open`,
                     a `FlatPanel` `Lit` (the light), a `Camera`
                     `Cooling` (the cooler), and a `WeatherStation`
                     `Safe`. A park, a shutter, or a cover that moves is
@@ -1190,6 +1190,10 @@ spec:
                       description: >-
                         `Open`, `Closed`, or `Moving` while
                         `DOME_SHUTTER` is `Busy`.
-                    parked:
-                      type: boolean
-                      description: "Whether the dome is parked."
+                    park:
+                      type: string
+                      enum: [Parked, Unparked, Moving]
+                      description: >-
+                        `Parked` or `Unparked` from the member of
+                        `DOME_PARK` that is on, or `Moving` while
+                        `DOME_PARK` is `Busy`.

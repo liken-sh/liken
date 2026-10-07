@@ -1,6 +1,14 @@
 # 14, Named states and clean deletes
 
-Proposed on 2026-10-06. Not built.
+Proposed on 2026-10-06. Step 1, the named states, built on 2026-10-06.
+Steps 2 and 3, the finalizers, are not built.
+
+A park that fails or that a client aborts leaves `TELESCOPE_PARK` with
+the state `Alert`. libindi's telescope also turns both switches off,
+but a driver can leave `PARK` on. Step 1 reads an `Alert` park as not
+parked, so such a mount reads `Stopped`, or `Slewing` or `Tracking`
+when it still moves. The `Parked` condition still reads the switch
+alone, and reads `True` for that driver.
 
 ## The problem
 

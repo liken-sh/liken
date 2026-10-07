@@ -585,6 +585,12 @@ func (w *indiWorld) answer(name string, s *fakeServer, c *fakeConn, v xmlVector)
 			s.broadcast(target.set())
 		}
 	}
+	// An abort during a park ends the park, as libindi's telescope does
+	// (Telescope::ISNewSwitch in libs/indibase/inditelescope.cpp).
+	if park := d.find("TELESCOPE_PARK"); p.Name == "TELESCOPE_ABORT_MOTION" && park != nil && park.State == "Busy" {
+		interrupt(park)
+		s.broadcast(park.set())
+	}
 	if p.Name != "CONNECTION" {
 		return
 	}

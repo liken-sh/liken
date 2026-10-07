@@ -13,9 +13,6 @@ const (
 	// and does not move: SHUTTER_OPEN On in DOME_SHUTTER, or UNPARK On
 	// in CAP_PARK.
 	ConditionOpen = "Open"
-	// Tracking is True while a Mount's TELESCOPE_TRACK_STATE has
-	// TRACK_ON On.
-	ConditionTracking = "Tracking"
 	// Lit is True while a FlatPanel's FLAT_LIGHT_CONTROL has
 	// FLAT_LIGHT_ON On.
 	ConditionLit = "Lit"

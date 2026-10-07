@@ -39,6 +39,21 @@ type MountDisplay struct {
 	Declination    string `json:"declination,omitempty"`
 }
 
+// MountState names what a mount does. A mount does one thing at a
+// time, so one field names it, where INDI reports two switches and a
+// light.
+type MountState string
+
+const (
+	MountParked    MountState = "Parked"
+	MountParking   MountState = "Parking"
+	MountUnparking MountState = "Unparking"
+	// Stopped is a mount that is unparked and does not move.
+	MountStopped  MountState = "Stopped"
+	MountSlewing  MountState = "Slewing"
+	MountTracking MountState = "Tracking"
+)
+
 // MountReadings come from EQUATORIAL_EOD_COORD, TELESCOPE_PARK, and
 // TELESCOPE_TRACK_STATE. A nil field is a reading the driver has not
 // sent.
@@ -49,8 +64,9 @@ type MountReadings struct {
 	// Declination is in degrees, from -90 to 90, in the equinox of the
 	// date (JNow).
 	Declination *float64 `json:"declination,omitempty"`
-	Parked      *bool    `json:"parked,omitempty"`
-	Tracking    *bool    `json:"tracking,omitempty"`
+	// State is absent until the driver defines TELESCOPE_PARK,
+	// TELESCOPE_TRACK_STATE, and EQUATORIAL_EOD_COORD.
+	State MountState `json:"state,omitempty"`
 }
 
 // GPSSpec describes a device with INDI's GPS_INTERFACE.

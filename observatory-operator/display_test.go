@@ -6,7 +6,6 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/liken-sh/liken/observatory-operator/indi"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
@@ -87,13 +86,18 @@ func TestTheDisplayOfACamera(t *testing.T) {
 		{"a camera with no pod shows its setpoint", nil, observatory.CameraDisplay{Setpoint: "-10 °C"}},
 		{
 			"a cooling camera",
-			observatory.CameraReadings{Temperature: ptr(-9.84), Cooler: ptr(true), CoolerPower: ptr(42.0), ExposureState: indi.Idle},
+			observatory.CameraReadings{Temperature: ptr(-9.84), Cooler: ptr(true), CoolerPower: ptr(42.0), Exposure: observatory.ExposureIdle},
 			observatory.CameraDisplay{Temperature: "-9.8 °C", Setpoint: "-10 °C", Cooler: "On", CoolerPower: "42 %", Exposure: "Idle"},
 		},
 		{
 			"a camera that exposes",
-			observatory.CameraReadings{Cooler: ptr(false), ExposureState: indi.Busy, ExposureRemaining: ptr(12.0)},
+			observatory.CameraReadings{Cooler: ptr(false), Exposure: observatory.ExposureExposing, ExposureRemaining: ptr(12.0)},
 			observatory.CameraDisplay{Setpoint: "-10 °C", Cooler: "Off", Exposure: "12 s"},
+		},
+		{
+			"a camera whose exposure ended",
+			observatory.CameraReadings{Cooler: ptr(false), Exposure: observatory.ExposureDone},
+			observatory.CameraDisplay{Setpoint: "-10 °C", Cooler: "Off", Exposure: "Done"},
 		},
 	}
 	for _, c := range cases {

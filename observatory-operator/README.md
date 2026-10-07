@@ -94,16 +94,16 @@ install a device, set its parent field.
 | `Telescope` | `tel` | `observatory` | the server's host and port |
 | `OpticalTube` | `ota` | `telescope` | `aperture`, `focalLength` in mm |
 | `OpticalTrain` | `train` | `telescope` | its camera |
-| `Mount` | `mnt` | `telescope` | RA as `19h17m21s`, Dec as `+12°34′56″`, parked, tracking |
+| `Mount` | `mnt` | `telescope` | RA as `19h17m21s`, Dec as `+12°34′56″`, state |
 | `GPS` | none | `telescope` | fix, time |
 | `PolarAligner` | `pac` | `telescope` | adjustment state |
-| `Camera` | `cam` | `opticalTrain` | temperature, setpoint, cooler `On` or `Off`, exposure |
+| `Camera` | `cam` | `opticalTrain` | temperature, setpoint, cooler `On` or `Off`, exposure state or time left |
 | `FilterWheel` | `fw` | `opticalTrain` | slot, filter |
 | `Focuser` | `foc` | `opticalTrain` | position |
 | `Rotator` | `rot` | `opticalTrain` | angle |
 | `DustCap` | `cap` | `opticalTrain` | `Open`, `Closed`, or `Moving` |
-| `FlatPanel` | `flat` | `opticalTrain` | light, brightness |
-| `Dome` | none | `observatory` | azimuth, shutter, parked |
+| `FlatPanel` | `flat` | `opticalTrain` | `Lit` or `Dark`, brightness |
+| `Dome` | none | `observatory` | azimuth, shutter, park |
 | `WeatherStation` | `weather` | `observatory` | safety |
 | `SkyQualityMeter` | `sqm` | `telescope` or `observatory` | brightness in mag/arcsec² |
 | `Switch` | `sw` | `telescope` or `observatory` | the outputs that are on |
@@ -181,6 +181,27 @@ A device's status has the same fields in every kind, and one
   limits of each member. A vendor's own properties are here. The list
   holds no BLOB data.
 
+A reading that holds a state names it in one word, because a device
+is in one state at a time:
+
+| Kind | Reading | Values | From |
+|---|---|---|---|
+| `Mount` | `state` | `Parked`, `Parking`, `Unparking`, `Stopped`, `Slewing`, `Tracking` | `TELESCOPE_PARK`, `TELESCOPE_TRACK_STATE`, and the state of `EQUATORIAL_EOD_COORD` |
+| `Dome` | `park` | `Parked`, `Unparked`, `Moving` | `DOME_PARK` |
+| `Dome` | `shutter` | `Open`, `Closed`, `Moving` | `DOME_SHUTTER` |
+| `DustCap` | `cover` | `Open`, `Closed`, `Moving` | `CAP_PARK` |
+| `Camera` | `exposure` | `Idle`, `Exposing`, `Done`, `Failed` | the state of `CCD_EXPOSURE` |
+| `FlatPanel` | `light` | `Lit`, `Dark` | `FLAT_LIGHT_CONTROL` |
+
+A mount reads the first state that applies, in this order. A `Busy`
+park is `Parking` or `Unparking`, toward the switch that is on. `PARK`
+on is `Parked`, unless the park's state is `Alert`: a park that failed
+or that a client aborted does not say where the mount is. A `Busy`
+`EQUATORIAL_EOD_COORD` is `Slewing`, so a slew that ends in tracking
+reads `Slewing` until the coordinates settle. `TRACK_ON` on is
+`Tracking`, and a mount that does none of these is `Stopped`. A
+`Moving` dome turns to or from its park position.
+
 While a device is `Connected`, its conditions also give its state, for
 a trigger or for `kubectl wait --for=condition=Parked`. Each one comes
 from the property in the table, and a driver that does not define the
@@ -191,7 +212,6 @@ property gives no condition:
 | `Dome` | `Parked` | the dome is parked | `DOME_PARK` |
 | `Dome` | `Open` | the shutter is open | `DOME_SHUTTER` |
 | `Mount` | `Parked` | the mount is parked | `TELESCOPE_PARK` |
-| `Mount` | `Tracking` | tracking is on | `TELESCOPE_TRACK_STATE` |
 | `DustCap` | `Open` | the cover is open | `CAP_PARK` |
 | `FlatPanel` | `Lit` | the light is on | `FLAT_LIGHT_CONTROL` |
 | `Camera` | `Cooling` | the cooler is on | `CCD_COOLER` |

@@ -1046,7 +1046,7 @@ spec:
                     While a device is connected, it also reports the
                     state that the triggers of procedures read, by
                     kind: a `Dome` `Parked` and `Open` (the shutter), a
-                    `Mount` `Parked` and `Tracking`, a `DustCap` `Open`,
+                    `Mount` `Parked`, a `DustCap` `Open`,
                     a `FlatPanel` `Lit` (the light), a `Camera`
                     `Cooling` (the cooler), and a `WeatherStation`
                     `Safe`. A park, a shutter, or a cover that moves is
@@ -1321,7 +1321,7 @@ spec:
                       description: "The cooler's power, such as `42 %`."
                     exposure:
                       type: string
-                      description: "The time left, such as `12 s`, while an exposure runs, and the state of `CCD_EXPOSURE` otherwise."
+                      description: "The time left, such as `12 s`, while an exposure runs, and `readings.exposure` otherwise."
                 readings:
                   type: object
                   description: >-
@@ -1344,13 +1344,14 @@ spec:
                       minimum: 0
                       maximum: 100
                       description: "The cooler's power, in percent."
-                    exposureState:
+                    exposure:
                       type: string
-                      enum: [Idle, Ok, Busy, Alert]
+                      enum: [Idle, Exposing, Done, Failed]
                       description: >-
-                        The state of `CCD_EXPOSURE`: `Busy` while an
-                        exposure runs, `Ok` when it ended, and `Alert`
-                        when it failed.
+                        The state of `CCD_EXPOSURE`: `Idle` before the
+                        first exposure, `Exposing` while an exposure
+                        runs (`Busy`), `Done` when it ended (`Ok`), and
+                        `Failed` when it failed (`Alert`).
                     exposureRemaining:
                       type: number
                       minimum: 0

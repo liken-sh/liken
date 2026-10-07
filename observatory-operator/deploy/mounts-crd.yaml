@@ -42,12 +42,9 @@ spec:
         - name: Dec
           type: string
           jsonPath: .status.display.declination
-        - name: Parked
-          type: boolean
-          jsonPath: .status.readings.parked
-        - name: Tracking
-          type: boolean
-          jsonPath: .status.readings.tracking
+        - name: State
+          type: string
+          jsonPath: .status.readings.state
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -890,7 +887,7 @@ spec:
                     While a device is connected, it also reports the
                     state that the triggers of procedures read, by
                     kind: a `Dome` `Parked` and `Open` (the shutter), a
-                    `Mount` `Parked` and `Tracking`, a `DustCap` `Open`,
+                    `Mount` `Parked`, a `DustCap` `Open`,
                     a `FlatPanel` `Lit` (the light), a `Camera`
                     `Cooling` (the cooler), and a `WeatherStation`
                     `Safe`. A park, a shutter, or a cover that moves is
@@ -1178,9 +1175,16 @@ spec:
                       description: >-
                         Where the mount points, in degrees from -90 to
                         90, in the equinox of the date (JNow).
-                    parked:
-                      type: boolean
-                      description: "Whether the mount is parked."
-                    tracking:
-                      type: boolean
-                      description: "Whether the mount tracks the sky."
+                    state:
+                      type: string
+                      enum: [Parked, Parking, Unparking, Stopped, Slewing, Tracking]
+                      description: >-
+                        What the mount does: `Parking` or `Unparking`
+                        while `TELESCOPE_PARK` is `Busy`, `Parked` while
+                        its `PARK` member is on and its state is not
+                        `Alert`, `Slewing` while `EQUATORIAL_EOD_COORD`
+                        is `Busy`, `Tracking` while the `TRACK_ON`
+                        member of `TELESCOPE_TRACK_STATE` is on, and
+                        `Stopped` otherwise. The first that applies
+                        wins. Absent until the driver defines all three
+                        properties.

@@ -870,7 +870,7 @@ spec:
                     While a device is connected, it also reports the
                     state that the triggers of procedures read, by
                     kind: a `Dome` `Parked` and `Open` (the shutter), a
-                    `Mount` `Parked` and `Tracking`, a `DustCap` `Open`,
+                    `Mount` `Parked`, a `DustCap` `Open`,
                     a `FlatPanel` `Lit` (the light), a `Camera`
                     `Cooling` (the cooler), and a `WeatherStation`
                     `Safe`. A park, a shutter, or a cover that moves is

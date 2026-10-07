@@ -32,6 +32,16 @@ type DomeDisplay struct {
 	Azimuth string `json:"azimuth,omitempty"`
 }
 
+// DomePark names where a dome is: at its park position, away from
+// it, or moving while DOME_PARK is Busy.
+type DomePark string
+
+const (
+	DomeParked   DomePark = "Parked"
+	DomeUnparked DomePark = "Unparked"
+	DomeMoving   DomePark = "Moving"
+)
+
 // DomeReadings come from ABS_DOME_POSITION, DOME_SHUTTER, and
 // DOME_PARK.
 type DomeReadings struct {
@@ -39,7 +49,8 @@ type DomeReadings struct {
 	Azimuth *float64 `json:"azimuth,omitempty"`
 	// Shutter is Open, Closed, or Moving.
 	Shutter string `json:"shutter,omitempty"`
-	Parked  *bool  `json:"parked,omitempty"`
+	// Park is Parked, Unparked, or Moving.
+	Park DomePark `json:"park,omitempty"`
 }
 
 // WeatherStationSpec describes a device with INDI's WEATHER_INTERFACE.

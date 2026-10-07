@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/liken-sh/liken/observatory-operator/indi"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
@@ -146,8 +145,8 @@ func deviceDisplay(d *device, readings any, maximum func(property, member string
 		if r.CoolerPower != nil {
 			out.CoolerPower = quantity(*r.CoolerPower, 0, "%")
 		}
-		out.Exposure = string(r.ExposureState)
-		if r.ExposureState == indi.Busy && r.ExposureRemaining != nil {
+		out.Exposure = string(r.Exposure)
+		if r.Exposure == observatory.ExposureExposing && r.ExposureRemaining != nil {
 			out.Exposure = quantity(*r.ExposureRemaining, 1, "s")
 		}
 		return out

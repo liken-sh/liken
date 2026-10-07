@@ -69,8 +69,7 @@ func readings(kind observatory.Kind, r reader) any {
 		return observatory.MountReadings{
 			RightAscension: r.number("EQUATORIAL_EOD_COORD", "RA"),
 			Declination:    r.number("EQUATORIAL_EOD_COORD", "DEC"),
-			Parked:         r.on("TELESCOPE_PARK", "PARK"),
-			Tracking:       r.on("TELESCOPE_TRACK_STATE", "TRACK_ON"),
+			State:          mountState(r),
 		}
 	case observatory.GPSKind:
 		return gpsReadings(r)
@@ -78,12 +77,12 @@ func readings(kind observatory.Kind, r reader) any {
 		return observatory.PolarAlignerReadings{Adjustment: r.state("PAC_MANUAL_ADJUSTMENT")}
 	case observatory.CameraKind:
 		out := observatory.CameraReadings{
-			Temperature:   r.number("CCD_TEMPERATURE", "CCD_TEMPERATURE_VALUE"),
-			Cooler:        r.on("CCD_COOLER", "COOLER_ON"),
-			CoolerPower:   r.number("CCD_COOLER_POWER", "CCD_COOLER_VALUE"),
-			ExposureState: r.state("CCD_EXPOSURE"),
+			Temperature: r.number("CCD_TEMPERATURE", "CCD_TEMPERATURE_VALUE"),
+			Cooler:      r.on("CCD_COOLER", "COOLER_ON"),
+			CoolerPower: r.number("CCD_COOLER_POWER", "CCD_COOLER_VALUE"),
+			Exposure:    exposure(r),
 		}
-		if out.ExposureState == indi.Busy {
+		if out.Exposure == observatory.ExposureExposing {
 			out.ExposureRemaining = r.number("CCD_EXPOSURE", "CCD_EXPOSURE_VALUE")
 		}
 		return out
@@ -102,14 +101,14 @@ func readings(kind observatory.Kind, r reader) any {
 		return observatory.DustCapReadings{Cover: cover(r, "CAP_PARK", "UNPARK", "PARK")}
 	case observatory.FlatPanelKind:
 		return observatory.FlatPanelReadings{
-			Light:      r.on("FLAT_LIGHT_CONTROL", "FLAT_LIGHT_ON"),
+			Light:      light(r),
 			Brightness: r.number("FLAT_LIGHT_INTENSITY", "FLAT_LIGHT_INTENSITY_VALUE"),
 		}
 	case observatory.DomeKind:
 		return observatory.DomeReadings{
 			Azimuth: r.number("ABS_DOME_POSITION", "DOME_ABSOLUTE_POSITION"),
 			Shutter: cover(r, "DOME_SHUTTER", "SHUTTER_OPEN", "SHUTTER_CLOSE"),
-			Parked:  r.on("DOME_PARK", "PARK"),
+			Park:    domePark(r),
 		}
 	case observatory.WeatherStationKind:
 		return weatherReadings(r)
@@ -121,6 +120,93 @@ func readings(kind observatory.Kind, r reader) any {
 		return observatory.ReceiverReadings{Frequency: r.number("RECEIVER_SETTINGS", "RECEIVER_FREQUENCY")}
 	}
 	return nil
+}
+
+// mountState names what a mount does, in this order:
+//
+//   - A Busy TELESCOPE_PARK is Parking or Unparking, toward the switch
+//     that is On, because a park moves the mount whatever else it
+//     reports.
+//   - PARK On is Parked, unless the light is Alert. libindi's
+//     telescope answers an abort during a park with both switches Off
+//     and the light Alert, but a driver can leave PARK On after a
+//     park fails, and then the switch does not say where the mount
+//     is.
+//   - A Busy EQUATORIAL_EOD_COORD is Slewing. A slew that ends in
+//     tracking reads Slewing until the coordinates settle.
+//   - TRACK_ON On is Tracking, and anything else is Stopped.
+//
+// A disconnected driver deletes these properties, so the state is
+// absent until the driver defines all three.
+func mountState(r reader) observatory.MountState {
+	park, parkOK := r.property("TELESCOPE_PARK")
+	track, trackOK := r.property("TELESCOPE_TRACK_STATE")
+	coordinates, coordinatesOK := r.property("EQUATORIAL_EOD_COORD")
+	if !parkOK || !trackOK || !coordinatesOK {
+		return ""
+	}
+	switch {
+	case park.State == indi.Busy && isOn(park, "UNPARK"):
+		return observatory.MountUnparking
+	case park.State == indi.Busy && isOn(park, "PARK"):
+		return observatory.MountParking
+	case park.State != indi.Alert && isOn(park, "PARK"):
+		return observatory.MountParked
+	case coordinates.State == indi.Busy:
+		return observatory.MountSlewing
+	case isOn(track, "TRACK_ON"):
+		return observatory.MountTracking
+	}
+	return observatory.MountStopped
+}
+
+// domePark reads DOME_PARK as a cover reads its switch: Moving while
+// Busy, then the member that is On.
+func domePark(r reader) observatory.DomePark {
+	p, ok := r.property("DOME_PARK")
+	switch {
+	case !ok:
+		return ""
+	case p.State == indi.Busy:
+		return observatory.DomeMoving
+	case isOn(p, "PARK"):
+		return observatory.DomeParked
+	case isOn(p, "UNPARK"):
+		return observatory.DomeUnparked
+	}
+	return ""
+}
+
+// exposure names the light of CCD_EXPOSURE.
+func exposure(r reader) observatory.ExposureState {
+	p, ok := r.property("CCD_EXPOSURE")
+	if !ok {
+		return ""
+	}
+	switch p.State {
+	case indi.Busy:
+		return observatory.ExposureExposing
+	case indi.Ok:
+		return observatory.ExposureDone
+	case indi.Alert:
+		return observatory.ExposureFailed
+	}
+	return observatory.ExposureIdle
+}
+
+// light names a flat panel's light from the switch of
+// FLAT_LIGHT_CONTROL, as the Lit condition reads it.
+func light(r reader) observatory.LightState {
+	p, ok := r.property("FLAT_LIGHT_CONTROL")
+	switch {
+	case !ok:
+		return ""
+	case isOn(p, "FLAT_LIGHT_ON"):
+		return observatory.StateLit
+	case isOn(p, "FLAT_LIGHT_OFF"):
+		return observatory.StateDark
+	}
+	return ""
 }
 
 // cover reads a cover's position from a switch property: Moving while

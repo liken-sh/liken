@@ -37,7 +37,7 @@ spec:
           type: string
           jsonPath: .status.phase
         - name: Light
-          type: boolean
+          type: string
           jsonPath: .status.readings.light
         - name: Brightness
           type: string
@@ -876,7 +876,7 @@ spec:
                     While a device is connected, it also reports the
                     state that the triggers of procedures read, by
                     kind: a `Dome` `Parked` and `Open` (the shutter), a
-                    `Mount` `Parked` and `Tracking`, a `DustCap` `Open`,
+                    `Mount` `Parked`, a `DustCap` `Open`,
                     a `FlatPanel` `Lit` (the light), a `Camera`
                     `Cooling` (the cooler), and a `WeatherStation`
                     `Safe`. A park, a shutter, or a cover that moves is
@@ -1148,8 +1148,12 @@ spec:
                     field is absent until the driver sends it.
                   properties:
                     light:
-                      type: boolean
-                      description: "Whether the panel's light is on."
+                      type: string
+                      enum: [Lit, Dark]
+                      description: >-
+                        `Lit` while the `FLAT_LIGHT_ON` member of
+                        `FLAT_LIGHT_CONTROL` is on, and `Dark` while
+                        `FLAT_LIGHT_OFF` is on.
                     brightness:
                       type: number
                       minimum: 0

@@ -65,7 +65,7 @@ func TestADeviceReportsWhatItsDriverReports(t *testing.T) {
 			t.Errorf("outputs on = %v", power.Status.Readings.On)
 		}
 		mount, _ := decode[observatory.Mount](t, w.api, kindCollection(observatory.MountKind), "east")
-		if mount.Status.Readings.Parked == nil || *mount.Status.Readings.Parked || mount.Status.Readings.RightAscension == nil {
+		if mount.Status.Readings.State != observatory.MountStopped || mount.Status.Readings.RightAscension == nil {
 			t.Errorf("mount readings = %+v", mount.Status.Readings)
 		}
 

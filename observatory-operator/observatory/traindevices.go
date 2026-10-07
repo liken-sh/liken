@@ -1,7 +1,5 @@
 package observatory
 
-import "github.com/liken-sh/liken/observatory-operator/indi"
-
 // The devices on one light path, behind one optical tube.
 
 type (
@@ -45,9 +43,21 @@ type CameraDisplay struct {
 	// CoolerPower is the cooler's power, such as 42 %.
 	CoolerPower string `json:"coolerPower,omitempty"`
 	// Exposure is the time left, such as 12 s, while an exposure runs,
-	// and the state of CCD_EXPOSURE otherwise.
+	// and the reading's named exposure state otherwise.
 	Exposure string `json:"exposure,omitempty"`
 }
+
+// ExposureState names the light of a camera's CCD_EXPOSURE: Idle
+// before the first exposure, Exposing while it is Busy, Done when it
+// is Ok, and Failed when it is Alert.
+type ExposureState string
+
+const (
+	ExposureIdle     ExposureState = "Idle"
+	ExposureExposing ExposureState = "Exposing"
+	ExposureDone     ExposureState = "Done"
+	ExposureFailed   ExposureState = "Failed"
+)
 
 // CameraReadings come from CCD_TEMPERATURE, CCD_COOLER_POWER, and
 // CCD_EXPOSURE.
@@ -58,9 +68,8 @@ type CameraReadings struct {
 	Cooler *bool `json:"cooler,omitempty"`
 	// CoolerPower is the cooler's power in percent.
 	CoolerPower *float64 `json:"coolerPower,omitempty"`
-	// ExposureState is the state of CCD_EXPOSURE: Busy while an
-	// exposure runs.
-	ExposureState indi.State `json:"exposureState,omitempty"`
+	// Exposure names the light of CCD_EXPOSURE.
+	Exposure ExposureState `json:"exposure,omitempty"`
 	// ExposureRemaining is the time left in the exposure, in seconds.
 	ExposureRemaining *float64 `json:"exposureRemaining,omitempty"`
 }
@@ -180,7 +189,8 @@ type FlatPanelDisplay struct {
 // FlatPanelReadings come from FLAT_LIGHT_CONTROL and
 // FLAT_LIGHT_INTENSITY.
 type FlatPanelReadings struct {
-	Light *bool `json:"light,omitempty"`
+	// Light is Lit or Dark, the words of the panel's state action.
+	Light LightState `json:"light,omitempty"`
 	// Brightness is in the driver's own units, from 0 to the maximum
 	// that FLAT_LIGHT_INTENSITY defines.
 	Brightness *float64 `json:"brightness,omitempty"`

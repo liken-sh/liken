@@ -9,9 +9,9 @@ package main
 //
 // A park, a shutter, or a cover that moves reports Busy, and its
 // condition is Unknown with the reason Moving until the move ends.
-// Tracking, a cooler, and a light read the switch alone, because
-// INDI's drivers report Busy for the whole time that tracking or
-// cooling runs.
+// A cooler and a light read the switch alone. INDI's drivers report
+// Busy for the whole time that cooling runs, so Busy does not mean a
+// move.
 
 import (
 	"fmt"
@@ -49,7 +49,6 @@ var stateRules = map[observatory.Kind][]stateRule{
 	},
 	observatory.MountKind: {
 		{observatory.ConditionParked, "TELESCOPE_PARK", "PARK", "UNPARK", "Parked", "Unparked", "%s", "is parked", "is unparked", true},
-		{observatory.ConditionTracking, "TELESCOPE_TRACK_STATE", "TRACK_ON", "TRACK_OFF", "Tracking", "NotTracking", "%s", "is tracking", "is not tracking", false},
 	},
 	observatory.DustCapKind: {
 		{observatory.ConditionOpen, "CAP_PARK", "UNPARK", "PARK", "Open", "Closed", "%s", "is open", "is closed", true},
