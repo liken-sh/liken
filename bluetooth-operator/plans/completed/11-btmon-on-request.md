@@ -1,6 +1,7 @@
 # btmon on request
 
-Plan 11. Built 2026-10-07. The drill in "How it will be proved" has not run.
+Plan 11. Built 2026-10-07. Drilled on `liken-1` on 2026-10-07; the
+results are in [What the drill measured](#what-the-drill-measured).
 
 It makes the `btmon` sidecar's trace a setting of the radio,
 `Adapter.spec.btmon`, off by default. A person turns the trace on for
@@ -98,6 +99,25 @@ button press. Setting `spec.btmon: true` starts the trace within
 seconds with no new pod, and a button press appears in it. Setting it
 back to `false` stops the trace, and the pod's restart count does not
 change.
+
+## What the drill measured
+
+On `liken-1`, on 2026-10-07, on the radio on `stick-1`, with build
+`cfb5c9e9` (measured):
+
+- With the field absent, the `btmon` container wrote no line in the
+  first minute of a new pod.
+- Setting `spec.btmon: true` started the trace 2 seconds after the
+  patch, in the same pod, with one `BtmonChanged` `Event`.
+- Removing the field stopped the trace within 5 seconds, and the log
+  gained no line in the next 30 seconds while the X6 stayed bonded.
+- No container in the pod restarted across either change.
+
+The `Btmon` printer column was empty on that build until the first
+change. The status write compared the new status with the old one, and
+an absent field read as `false`, so a status that an older operator
+wrote never gained the field. `status.btmon` is a pointer for that
+reason.
 
 ## What was considered and set aside
 

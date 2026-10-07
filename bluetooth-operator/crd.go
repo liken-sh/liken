@@ -205,9 +205,11 @@ type AdapterStatus struct {
 	Privacy string `json:"privacy,omitempty"`
 
 	// Btmon is the value in the settings volume's btmon file, which
-	// the btmon container reads. It is not omitted when false, so the
-	// printer column shows false and not an empty cell.
-	Btmon bool `json:"btmon"`
+	// the btmon container reads. It is a pointer so that a status an
+	// older operator wrote, with no btmon field, differs from false and
+	// gets written, and the printer column shows false and not an empty
+	// cell. It is not omitted when false for the same reason.
+	Btmon *bool `json:"btmon"`
 
 	// DeletionRefused names why the operator kept its finalizer on an
 	// Adapter somebody deleted. It is empty at every other time.

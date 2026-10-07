@@ -91,9 +91,10 @@ func (i *inventory) applyBtmon(adapter *Adapter) {
 // reportedBtmon answers the value for status.btmon: the value in the
 // btmon file after this pass, or the value the status already has when
 // the pass could not read the file.
-func (i *inventory) reportedBtmon(adapter *Adapter) bool {
+func (i *inventory) reportedBtmon(adapter *Adapter) *bool {
 	if i.btmon == nil {
 		return adapter.Status.Btmon
 	}
-	return *i.btmon
+	value := *i.btmon
+	return &value
 }

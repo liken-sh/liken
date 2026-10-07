@@ -286,7 +286,7 @@ func (i *inventory) reconcileAdapterAlias(adapter *Adapter, state adapterState) 
 // unconditional write would send a request to the API server on each
 // of them.
 func (i *inventory) writeAdapterStatus(adapter *Adapter, status AdapterStatus) error {
-	if adapter.Status == status {
+	if sameStatus(adapter.Status, status) {
 		return nil
 	}
 	adapter.Status = status
@@ -296,4 +296,15 @@ func (i *inventory) writeAdapterStatus(adapter *Adapter, status AdapterStatus) e
 	}
 	i.cache.adapters.Versions.Note(adapter.Metadata.Name, adapter.Metadata.ResourceVersion)
 	return nil
+}
+
+// sameStatus answers whether two statuses hold the same values. It
+// compares btmon by value, and an absent btmon differs from false.
+func sameStatus(a, b AdapterStatus) bool {
+	btmonA, btmonB := a.Btmon, b.Btmon
+	a.Btmon, b.Btmon = nil, nil
+	if a != b || (btmonA == nil) != (btmonB == nil) {
+		return false
+	}
+	return btmonA == nil || *btmonA == *btmonB
 }

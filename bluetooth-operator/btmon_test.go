@@ -79,7 +79,7 @@ func TestADifferentTraceSettingWritesTheFile(t *testing.T) {
 				if got := traceFile(t, inventory.settings); got != c.want {
 					t.Errorf("the btmon file holds %q, want %q", got, c.want)
 				}
-				if adapter := read[Adapter](t, fixture, testAdapterObjectPath()); adapter.Status.Btmon != c.spec {
+				if adapter := read[Adapter](t, fixture, testAdapterObjectPath()); adapter.Status.Btmon == nil || *adapter.Status.Btmon != c.spec {
 					t.Errorf("status.btmon = %v, want %v", adapter.Status.Btmon, c.spec)
 				}
 				if !pass.ok {
@@ -157,7 +157,7 @@ func TestAnAgreeingTraceSettingWritesNothing(t *testing.T) {
 				if after := traceInode(t, inventory.settings); after != before {
 					t.Errorf("the btmon file is inode %d after the pass, want %d as before it", after, before)
 				}
-				if adapter := read[Adapter](t, fixture, testAdapterObjectPath()); adapter.Status.Btmon != c.spec {
+				if adapter := read[Adapter](t, fixture, testAdapterObjectPath()); adapter.Status.Btmon == nil || *adapter.Status.Btmon != c.spec {
 					t.Errorf("status.btmon = %v, want %v", adapter.Status.Btmon, c.spec)
 				}
 				assertPosted(t, postedAbout(recorded, adapterKind, testAdapterName))
@@ -201,9 +201,35 @@ func TestAFailedTraceWriteIsAFailedPass(t *testing.T) {
 		if pass.ok {
 			t.Error("the pass reported success with no btmon file written")
 		}
-		if adapter := read[Adapter](t, fixture, testAdapterObjectPath()); adapter.Status.Btmon {
+		if adapter := read[Adapter](t, fixture, testAdapterObjectPath()); adapter.Status.Btmon != nil && *adapter.Status.Btmon {
 			t.Error("status.btmon = true, want the false that the volume holds")
 		}
 		assertPosted(t, postedAbout(recorded, adapterKind, testAdapterName))
+	})
+}
+
+// An off trace shows in status as false, not as an absent field, so
+// the printer column reads false on a radio whose trace was never on,
+// including a radio whose status an older operator wrote.
+func TestAnOffTraceShowsInStatus(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture()
+		fixture.put(t, testAdapterObjectPath(), adapterWithTrace(false))
+		inventory, _ := eventInventory(t, fixture, testRadio(t))
+		inventory.settings = traceSettings(t, "false")
+		inventory.reconcile()
+
+		// The status an older operator wrote, with no btmon field.
+		written := read[map[string]any](t, fixture, testAdapterObjectPath())
+		delete((*written)["status"].(map[string]any), "btmon")
+		fixture.put(t, testAdapterObjectPath(), written)
+		synctest.Wait()
+		inventory.reconcile()
+
+		object := read[map[string]any](t, fixture, testAdapterObjectPath())
+		status, _ := (*object)["status"].(map[string]any)
+		if btmon, found := status["btmon"]; !found || btmon != false {
+			t.Errorf("status.btmon = %v (present %v), want false", btmon, found)
+		}
 	})
 }
