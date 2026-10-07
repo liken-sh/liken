@@ -1,11 +1,10 @@
 # 14, Named states and clean deletes
 
 Proposed on 2026-10-06. Built on 2026-10-06, all three steps, and
-tested against the fake API server and the fake INDI servers. The
-drill on the test cluster has not run: it deletes the dust cap and the
-dome during a session, and a telescope during a session, and reads the
-Events. "What the build found" below records what a delete did before
-the finalizers.
+tested against the fake API server and the fake INDI servers. Drilled
+on the test cluster on 2026-10-07, with INDI simulators; "The drill"
+below records the results and the two defects it found. "What the
+build found" records what a delete did before the finalizers.
 
 A park that fails or that a client aborts leaves `TELESCOPE_PARK` with
 the state `Alert`. libindi's telescope also turns both switches off,
@@ -156,3 +155,45 @@ down goes when the operator returns; a `Telescope` deleted during a
 session ends its reservation and goes. The drill on the test cluster
 deletes the dust cap and the dome during a session, and a telescope
 during a session, and reads the Events.
+
+## The drill
+
+On 2026-10-07, on the test cluster, with INDI simulators, builds
+`dev-116-e95ca15b` and then `dev-119-f8de4aa3`:
+
+- While no reservation runs, no resource holds the finalizer. During a
+  session of the east telescope, the `Observatory`, the `Telescope`,
+  and every device on a running server hold it, and the west telescope
+  and its devices do not.
+- A mount slewed to a target read `Slewing` for 19 s, then `Tracking`.
+- The dust cap, deleted during the session, closed in 5 s, and the
+  `DustCap` was gone 7 s after the delete, with its pod.
+- A flat panel lit by hand and then deleted stayed lit on
+  `dev-116-e95ca15b`: a device with a deactivation and no activation
+  skipped its deactivation. Fixed in `8fa03991`; on `dev-119-f8de4aa3`
+  the light switched off, and the `FlatPanel` was gone in 1 s. The
+  same commit keeps a deleted device's status `Connected`, with its
+  readings, while its deactivation runs. Before, it read
+  `Disconnecting` with no readings.
+- The flat panel, deleted while the operator was scaled to zero, kept
+  its finalizer, and went 5 s after the operator returned.
+- The dome, deleted over a parked mount, parked in 17 s and went. Over
+  an unparked mount, its lock refused the park, as it must, and the
+  `ProcedureFailed` Event said only that `DOME_PARK` was `Alert`.
+  Fixed in `f8de4aa3`: the Event names the lock and the mount.
+- Recreated devices joined the running session and ran their
+  activations.
+- The east `Telescope`, deleted during a session with the mount
+  unparked and the cap open, ended its reservation: the camera warmed,
+  the cap closed, the mount parked and then the dome, and every pod
+  stopped. The reservation reached `Released` 56 s after the delete,
+  with "Telescope east was deleted" in its `Deactivating` Event, and
+  the `Telescope` was gone.
+- The `Observatory`, deleted while both telescopes were `Ready`, ended
+  both reservations. The observatory's own deactivation ran with the
+  last one, and the `Observatory` was gone with no pod left: 2 min 13 s
+  on the first run, 1 min 14 s on the second.
+- On the first `Observatory` delete, `PowerOff` and `StopSite` each
+  took 32 s, against 2 s in every other run. The INDI server closed its
+  connection at once, so a driver pod took the 30 s grace period to
+  stop. The cause is not found; the second run did not repeat it.
