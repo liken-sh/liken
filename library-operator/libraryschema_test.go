@@ -6,6 +6,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"os"
 	"regexp"
@@ -333,4 +334,34 @@ func fieldsTheSchemaDrops(schema map[string]any, written any, path string) []str
 		}
 	}
 	return dropped
+}
+
+// A Library's name starts the name of every Job it becomes, and the pod
+// of an Indexed Job takes the hostname <job>-<index>, which must fit a
+// 63-character DNS label. The CRD caps the name, so the longest name it
+// admits still gives every Job a valid name and every worker pod a valid
+// hostname, at the highest index the parallelism cap allows and a
+// creation time far in the future.
+func TestTheLongestLibraryNameLeavesEveryJobNameValid(t *testing.T) {
+	schema := librarySchema(t)
+	rules := schemaField(t, schema, "schema", "openAPIV3Schema", "x-kubernetes-validations").([]any)
+	rule := rules[0].(map[string]any)["rule"]
+	if want := fmt.Sprintf("size(self.metadata.name) <= %d", maxLibraryNameLength); rule != want {
+		t.Fatalf("the CRD's first rule is %q, want %q", rule, want)
+	}
+	name := strings.Repeat("n", maxLibraryNameLength)
+	far := time.Date(2200, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	names := []string{cleanupJobName(name), libraryJobName(name, jobModeWalk, far),
+		libraryJobName(name, jobModeGaps, far)}
+	for _, worker := range factWorkers {
+		highest := schemaField(t, schema, "schema", "openAPIV3Schema", "properties", "spec",
+			"properties", worker.fact, "properties", "parallelism", "maximum").(int)
+		names = append(names, fmt.Sprintf("%s-%d", libraryJobName(name, worker.fact, far), highest-1))
+	}
+	for _, one := range names {
+		if len(one) > 63 {
+			t.Errorf("%s is %d characters, past the 63 a DNS label holds", one, len(one))
+		}
+	}
 }

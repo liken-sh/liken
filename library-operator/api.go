@@ -137,6 +137,13 @@ type ListMeta struct {
 	ResourceVersion string `json:"resourceVersion,omitempty"`
 }
 
+// The longest name a Library may take, which the CRD enforces. The name
+// starts the name of every Job the Library becomes, and the pod of an
+// Indexed worker Job takes the hostname <job>-<index>, which a 63-character
+// DNS label must hold. Past this length, the API server refuses the
+// Library's Jobs and the Library never scans.
+const maxLibraryNameLength = 32
+
 // A Library is a volume of media of one kind. The operator reads the
 // spec and writes the status: the spec is what a person declared, and
 // the status is what the volume resolved to and what the scanner

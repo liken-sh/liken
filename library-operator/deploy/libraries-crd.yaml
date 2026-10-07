@@ -102,6 +102,13 @@ spec:
             franchises included: its volume holds one directory per
             franchise, and it names a second claim for the art the scan
             downloads. Create one for each volume and kind you hold.
+          x-kubernetes-validations:
+            - rule: size(self.metadata.name) <= 32
+              message: >-
+                a Library name is at most 32 characters, because it
+                starts the name of each Job the Library runs, and the
+                pods of those Jobs take hostnames of at most 63
+                characters
           properties:
             spec:
               type: object

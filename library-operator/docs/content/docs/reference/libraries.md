@@ -17,6 +17,10 @@ back what the catalog holds: how many titles, how many folders the walk
 could not identify, and when it last walked. An import can rescan
 folders at once through the webhook address in the status.
 
+A `Library` name is at most 32 characters. The name starts the name
+of each `Job` the `Library` runs, and the pods of those `Job`s take
+hostnames that Kubernetes limits to 63 characters.
+
 A namespace may hold many libraries, of any mix of kinds, and one
 volume may hold several libraries, each with its own root. The kind
 and the storage are immutable: a different volume or a different kind
