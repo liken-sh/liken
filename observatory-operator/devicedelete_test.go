@@ -161,3 +161,46 @@ func TestADeviceDeletedBeforeItsActivationGoesWithNoProcedure(t *testing.T) {
 		}
 	})
 }
+
+// A device with a deactivation and no activation runs its deactivation
+// when it is deleted during a session: a person lit the flat panel,
+// and its delete turns it dark.
+func TestADeletedDeviceWithNoActivationRunsItsDeactivation(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := readyWorld(t)
+		w.indi.ask("east-telescope", "Light Panel Simulator", "FLAT_LIGHT_CONTROL", "FLAT_LIGHT_ON=On", "FLAT_LIGHT_OFF=Off")
+		w.settle()
+		w.api.deleteNamed(kindCollection(observatory.FlatPanelKind), "east")
+		w.gone(observatory.FlatPanelKind, "east", 5*time.Minute)
+		if n := startedRuns(w.api, observatory.FlatPanelKind, "east", observatory.TriggerDeactivation); n != 1 {
+			t.Errorf("the deactivation started %d times, want once", n)
+		}
+	})
+}
+
+// A deleted device reads as Connected, with its readings, while its
+// deactivation runs on its old server, so a person who watches the
+// delete reads the cap close. It reads Disconnecting once its driver
+// stops.
+func TestADeletedDeviceReadsConnectedWhileItsDeactivationRuns(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := readyWorld(t)
+		w.indi.hold("Dust Cover Simulator", "CAP_PARK")
+		w.api.deleteNamed(kindCollection(observatory.DustCapKind), "east")
+		w.until(time.Minute, "the deactivation does not start", func() bool {
+			return startedRuns(w.api, observatory.DustCapKind, "east", observatory.TriggerDeactivation) == 1
+		})
+		time.Sleep(2 * statusWindow)
+		w.settle()
+		object, _ := decode[map[string]any](t, w.api, kindCollection(observatory.DustCapKind), "east")
+		status, _ := object["status"].(map[string]any)
+		if phase := status["phase"]; phase != string(observatory.DeviceConnected) {
+			t.Errorf("phase = %v, want Connected", phase)
+		}
+		if cover := w.reading(observatory.DustCapKind, "east", "cover"); cover != observatory.CoverOpen {
+			t.Errorf("readings.cover = %q, want Open", cover)
+		}
+	})
+}

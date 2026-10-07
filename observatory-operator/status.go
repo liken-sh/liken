@@ -183,7 +183,15 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 	if taken {
 		fault = sharedDriver(holder, ref)
 	}
-	if server, open := o.servers.get(ref.String()); placed && !taken && hasPod && open && server.client.Connected() {
+	// A device that left its server, by a move or a delete, keeps its
+	// pod there while its deactivation runs (leaves.go). Its status
+	// reads that server until the driver stops, so a person who watches
+	// the delete reads the cap close.
+	at, readable := ref.String(), placed
+	if left := hasPod && (!placed || p.Metadata.Labels[labelServer] != ref.String()); left {
+		at, readable = p.Metadata.Labels[labelServer], p.Metadata.DeletionTimestamp == nil
+	}
+	if server, open := o.servers.get(at); readable && !taken && hasPod && open && server.client.Connected() {
 		if indiDevice := indiName(server.client, d); indiDevice != "" {
 			r := reader{c: server.client, name: indiDevice}
 			next.IndiDevice = indiDevice
@@ -197,8 +205,9 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 	next.Display = deviceDisplay(d, next.Readings, maximum)
 	standing := o.standingOf(t, d)
 	// A pod that a device's server no longer runs is one that a Ready
-	// runner deletes (moves.go), or one that deactivation deletes.
-	stray := hasPod && (!placed || p.Metadata.Labels[labelServer] != ref.String())
+	// runner deletes (moves.go), or one that deactivation deletes. It
+	// reads as stopping once its driver is gone from that server.
+	stray := hasPod && !defined && (!placed || p.Metadata.Labels[labelServer] != ref.String())
 	next.Phase = devicePhase(hasPod && (stray || p.Metadata.DeletionTimestamp != nil), hasPod, defined, standing, connection, fault)
 	if taken {
 		next.Phase = observatory.DeviceError

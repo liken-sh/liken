@@ -20,10 +20,13 @@ package main
 //
 // A device that a person deleted leaves the same way. The finalizer
 // keeps its object, and so its spec, until its pod is gone
-// (finalizers.go). Its deactivation runs only when its activation ran
-// for the same transition: a device deleted during activation, before
-// the Activation step reached it, was never opened, and goes with no
-// procedure.
+// (finalizers.go). A device with an activation runs its deactivation
+// only when its activation ran for the same transition: a dust cap
+// deleted during activation, before the Activation step reached it, was
+// never opened, and goes with no procedure. A device with no
+// activation runs its deactivation whenever its parent is Active,
+// because a person can change it during the session, such as a flat
+// panel lit by hand.
 
 import (
 	"context"
@@ -80,7 +83,7 @@ func (o *operator) deactivateLeavers(ctx context.Context, t *tree, ref serverRef
 	}
 	var group sync.WaitGroup
 	for _, r := range leavers(t, ref, pods) {
-		if len(r.procedures.Deactivation) == 0 || (deleting(r.meta) && !o.activated(r, state.since)) {
+		if len(r.procedures.Deactivation) == 0 || (deleting(r.meta) && len(r.procedures.Activation) > 0 && !o.activated(r, state.since)) {
 			continue
 		}
 		group.Go(func() {
