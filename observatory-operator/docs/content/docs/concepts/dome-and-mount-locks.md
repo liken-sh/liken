@@ -1,4 +1,5 @@
 ---
+aliases: [/docs/reference/dome-and-mount-locks/]
 title: The dome and mount locks
 weight: 50
 ---

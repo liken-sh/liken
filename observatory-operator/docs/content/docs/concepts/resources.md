@@ -1,4 +1,5 @@
 ---
+aliases: [/docs/reference/resources/]
 title: The resources
 weight: 10
 ---

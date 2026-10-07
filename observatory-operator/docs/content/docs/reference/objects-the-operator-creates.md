@@ -72,12 +72,12 @@ where it runs. A telescope with no `Guider` has no affinity on any
 pod. The guider's pod, `Service`, and `ConfigMap` take the name
 `<guider>-guider`, such as `east-guider`. A `job` action's `Job` takes
 the kind, the resource, the trigger, and a hash, such as
-`observatory-lab-activation-a799431dd4` ([Procedures](/docs/reference/procedures/)).
+`observatory-lab-activation-a799431dd4` ([Procedures](/docs/concepts/procedures/)).
 
 ## Finalizers
 
 The operator adds the finalizer `observatory.liken.sh/deactivate` to
 each resource it runs something for, so a delete waits until the
 operator has stopped it.
-[Deleting a running resource](/docs/reference/how-a-reservation-runs/#deleting-a-running-resource)
+[Deleting a running resource](/docs/concepts/how-a-reservation-runs/#deleting-a-running-resource)
 lists when each kind holds it.

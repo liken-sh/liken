@@ -1,4 +1,5 @@
 ---
+aliases: [/docs/reference/procedures/]
 title: Procedures
 weight: 40
 ---

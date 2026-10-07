@@ -2,10 +2,12 @@
 title: Manual
 ---
 
-The manual has two parts. The guides take you from an empty cluster
+The manual has three parts. The guides take you from an empty cluster
 to a reserved telescope that KStars drives: install the operator,
 describe your equipment, give it the USB devices it needs, reserve a
-telescope, automate the equipment, and guide with PHD2. The reference
-explains how a reservation runs, what each status field means, and
-the objects the operator creates, and it lists every field of the 20
-resources.
+telescope, automate the equipment, and guide with PHD2. The concepts
+explain how the operator works: the resources, a reservation from
+start to end, procedures and triggers, the dome and mount locks, and
+the guider. The reference lists the drivers and their images, what
+each status field means, the objects the operator creates, and every
+field of the 20 resources.

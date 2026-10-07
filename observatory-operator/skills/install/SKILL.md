@@ -122,7 +122,7 @@ kubectl get pods -n observatory
 kubectl get mnt,cam,dome,guider -n observatory
 ```
 
-[How a reservation runs](https://liken.sh/observatory/docs/reference/how-a-reservation-runs/)
+[How a reservation runs](https://liken.sh/observatory/docs/concepts/how-a-reservation-runs/)
 explains each step.
 
 ## Connect KStars
@@ -185,7 +185,7 @@ kubectl delete -n observatory -f https://liken.sh/observatory/examples/simulator
 A resource that the operator is still running something for carries
 the finalizer `observatory.liken.sh/deactivate`, and its delete waits
 for the operator. If the operator is gone first, those deletes wait
-forever. [Deleting a running resource](https://liken.sh/observatory/docs/reference/how-a-reservation-runs/#deleting-a-running-resource)
+forever. [Deleting a running resource](https://liken.sh/observatory/docs/concepts/how-a-reservation-runs/#deleting-a-running-resource)
 explains the finalizer and how to remove it by hand.
 
 Then delete the base:

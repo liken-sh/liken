@@ -1,4 +1,5 @@
 ---
+aliases: [/docs/reference/the-guider/]
 title: The guider
 weight: 60
 ---

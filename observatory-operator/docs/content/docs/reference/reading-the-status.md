@@ -109,7 +109,7 @@ names its server, its telescopes, its devices, the active reservations,
 and the worst verdict of its weather stations. A `Telescope` and an
 `Observatory` also report the condition `Active`, and each resource
 with procedures reports their runs in `status.procedures`, as
-[Procedures](/docs/reference/procedures/) states.
+[Procedures](/docs/concepts/procedures/) states.
 
 ## Reservations
 
@@ -122,7 +122,7 @@ steps when it begins, so a `Ready` reservation lists only what ran.
 Each step's state is `Pending`, `Running`, `Done`, `Failed`, or
 `Skipped`. `status.step` names the step that runs now, or the step
 that failed, and it is empty while the reservation is `Ready` or
-`Released`. [How a reservation runs](/docs/reference/how-a-reservation-runs/) states what each step does.
+`Released`. [How a reservation runs](/docs/concepts/how-a-reservation-runs/) states what each step does.
 
 ```sh
 kubectl get rsv -n observatory -w
@@ -160,4 +160,4 @@ observatory-operator: Reservation east-tonight: Ready at east-telescope.observat
 `SafeToPowerOff` is `True` when the deactivation steps are done. Until
 then it is `False`, and its message says why, such as
 `In use by desktop` while the reservation is `Ready`. [The
-guider](/docs/reference/the-guider/) states what a `Guider`'s status holds.
+guider](/docs/concepts/the-guider/) states what a `Guider`'s status holds.

@@ -64,9 +64,10 @@ telescope at once and holds it until it is deleted.
 The manual at [liken.sh/observatory](https://liken.sh/observatory/)
 describes the operator for the people who run it: the guides to
 install it, describe equipment, connect USB hardware, reserve a
-telescope, write procedures, and guide with PHD2, and the reference of
-how a reservation runs, what each status field means, and every field
-of the 20 resources. Its source is in [`docs/`](docs/), and
+telescope, write procedures, and guide with PHD2. The concepts explain
+how a reservation runs, how procedures run, and how the locks and the
+guider work. The reference lists what each status field means and
+every field of the 20 resources. Its source is in [`docs/`](docs/), and
 `make -C docs skills` emits each guide as an Agent Skill in
 [`skills/`](skills/).
 

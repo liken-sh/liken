@@ -164,5 +164,5 @@ kubectl patch dustcap east -n observatory --type=merge -p '{"metadata":{"finaliz
 ```
 
 That skips the device's deactivation, so its equipment stays as it is.
-[Deleting a running resource](https://liken.sh/observatory/docs/reference/how-a-reservation-runs/#deleting-a-running-resource)
+[Deleting a running resource](https://liken.sh/observatory/docs/concepts/how-a-reservation-runs/#deleting-a-running-resource)
 explains what happens to each kind.

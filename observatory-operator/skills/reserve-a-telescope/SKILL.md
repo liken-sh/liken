@@ -65,7 +65,7 @@ operator:
    unparking the dome and cooling the camera
 7. starts PHD2, if the telescope has a `Guider`
 
-[How a reservation runs](https://liken.sh/observatory/docs/reference/how-a-reservation-runs/)
+[How a reservation runs](https://liken.sh/observatory/docs/concepts/how-a-reservation-runs/)
 gives each step's exact behavior and deadline. To follow one step:
 
 ```sh
