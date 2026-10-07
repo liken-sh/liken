@@ -238,8 +238,8 @@ another worker, which passes over every title the first one finished.
 The worker decodes on a GPU when `spec.trickplay.gpuResourceClaimTemplate`
 names a `ResourceClaimTemplate`, as the next section describes.
 `ffmpeg` decodes through VA-API, and it falls back to software for a
-codec the GPU refuses. With no template, the worker decodes in
-software.
+codec the GPU refuses. It does not fall back when the driver cannot
+open the GPU at all. With no template, the worker decodes in software.
 
 #### A worker on a GPU
 
@@ -255,8 +255,20 @@ of the claim, the GPU the worker decodes on, so a claim for another
 kind of device, such as an NPU for the face models, takes a field of
 its own.
 
-The simplest template asks for one render node of a class. The class
-here selects every render node that `liken` publishes:
+Both workers need a GPU whose VA-API driver decodes the library's
+video, 10-bit HEVC included, and scales 10-bit frames. A render node
+alone does not say what its driver can do. On a fleet of mixed GPUs, a
+pod can then land on a GPU that the image's driver cannot open, such as
+an AMD GPU when the image holds the Intel driver. `ffmpeg` fails on
+every video before it reads a frame, and the worker records a miss for
+each one, which lasts 30 days. So the template pairs the render node
+with a `media.liken.sh` capability device of the same GPU, and the
+scheduler places the pod only on a GPU whose driver states that it
+decodes and scales 10-bit video.
+[Claim a GPU by what it decodes](https://liken.sh/media/docs/guides/claim-a-gpu-by-capability/)
+describes the capability devices and writes the `decode-10bit` class.
+The `gpu-render` class here selects every render node that `liken`
+publishes:
 
 ```yaml
 apiVersion: resource.k8s.io/v1
@@ -282,6 +294,12 @@ spec:
         - name: gpu
           exactly:
             deviceClassName: gpu-render
+        - name: decodes
+          exactly:
+            deviceClassName: decode-10bit
+      constraints:
+        - requests: [gpu, decodes]
+          matchAttribute: resource.kubernetes.io/pciBusID
 ```
 
 ```yaml
@@ -296,34 +314,10 @@ spec:
     gpuResourceClaimTemplate: trickplay-gpu
 ```
 
-On a fleet of mixed GPUs, a render node alone can land on a GPU whose
-driver cannot decode the library's codecs. The template can pair the
-render node with a `media.liken.sh` capability device of the same GPU,
-so the scheduler places the pod only on a GPU whose driver decodes
-10-bit HEVC and scales 10-bit frames.
-[Claim a GPU by what it decodes](https://liken.sh/media/docs/guides/claim-a-gpu-by-capability/)
-describes the capability devices and writes the `decode-10bit` class:
-
-```yaml
-apiVersion: resource.k8s.io/v1
-kind: ResourceClaimTemplate
-metadata:
-  name: appearances-gpu
-  namespace: media
-spec:
-  spec:
-    devices:
-      requests:
-        - name: gpu
-          exactly:
-            deviceClassName: gpu-render
-        - name: decodes
-          exactly:
-            deviceClassName: decode-10bit
-      constraints:
-        - requests: [gpu, decodes]
-          matchAttribute: resource.kubernetes.io/pciBusID
-```
+The appearances worker takes a template of the same shape in
+`spec.appearances.gpuResourceClaimTemplate`. On a fleet where every
+GPU's driver decodes the library's video, the `gpu` request alone is
+enough.
 
 This template needs a `liken` release that publishes
 `resource.kubernetes.io/pciBusID` on its render nodes. On an older
