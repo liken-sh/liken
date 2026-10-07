@@ -8,9 +8,8 @@ the power button stops the `Play` and then does what power does on an
 idle `Player`.
 
 The drill in "How it will be proved" was not run, and no record of
-it exists. The browser's `KEY_WWW` gap, set aside below, is the open
-problem [The browser does not bind
-`KEY_WWW`](../../library-operator/plans/open-problems/the-browser-does-not-bind-key-www.md).
+it exists. The browser's `KEY_WWW` gap, set aside below, is closed: the
+browser binds `KEY_WWW` to home in `key_of`.
 
 Two later changes alter the design below:
 

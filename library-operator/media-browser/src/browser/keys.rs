@@ -8,10 +8,12 @@
 /// Select is enter and back is escape, so a press from a remote takes the
 /// path the keyboard and the script take. The three power names are the
 /// ones the kernel gives a remote's power button, and a remote sends one
-/// of them. Home pops to the home page, people raises the person picker
-/// and answers it, search opens the search wall, power asks for the
-/// shade, and a letter or a digit is the character itself, which is the
-/// word a typed key gives on a local run.
+/// of them. Home has two names, because the `rc-cec` keymap sends
+/// `KEY_WWW` for a TV remote's Internet button and some remotes send it
+/// for their home button. Home pops to the home page, people raises the
+/// person picker and answers it, search opens the search wall, power asks
+/// for the shade, and a letter or a digit is the character itself, which
+/// is the word a typed key gives on a local run.
 pub fn key_of(name: &str) -> Option<&'static str> {
     match name {
         "KEY_UP" => Some("up"),
@@ -20,7 +22,7 @@ pub fn key_of(name: &str) -> Option<&'static str> {
         "KEY_RIGHT" => Some("right"),
         "KEY_ENTER" | "KEY_OK" | "KEY_SELECT" | "KEY_KPENTER" => Some("enter"),
         "KEY_BACK" | "KEY_ESC" | "KEY_EXIT" => Some("escape"),
-        "KEY_HOMEPAGE" => Some("home"),
+        "KEY_HOMEPAGE" | "KEY_WWW" => Some("home"),
         // KEY_ADDRESSBOOK is the kernel's name for a contacts button,
         // which is the key a remote binds to the person picker.
         "KEY_ADDRESSBOOK" => Some("people"),
@@ -64,7 +66,7 @@ mod tests {
 
     // Every name that carries a word of its own, so a binding that
     // changes shows up in one place.
-    const BOUND: [(&str, &str); 19] = [
+    const BOUND: [(&str, &str); 20] = [
         ("KEY_UP", "up"),
         ("KEY_DOWN", "down"),
         ("KEY_LEFT", "left"),
@@ -77,6 +79,7 @@ mod tests {
         ("KEY_ESC", "escape"),
         ("KEY_EXIT", "escape"),
         ("KEY_HOMEPAGE", "home"),
+        ("KEY_WWW", "home"),
         ("KEY_ADDRESSBOOK", "people"),
         ("KEY_SEARCH", "search"),
         ("KEY_POWER", "power"),
