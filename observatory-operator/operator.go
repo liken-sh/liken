@@ -240,6 +240,9 @@ func (o *operator) supervise(ctx context.Context, t *tree) {
 	if err := o.releaseDevices(t, held); err != nil {
 		o.logf("%v", err)
 	}
+	if err := o.keepParents(t); err != nil {
+		o.logf("%v", err)
+	}
 }
 
 // finished reports whether a reservation has no work left: it is

@@ -2,7 +2,8 @@ package main
 
 // The deactivation steps, in the order of
 // observatory.DeactivationSteps. They run after a delete, which the
-// finalizer holds until they are done, or at spec.end. Each step acts
+// finalizer holds until they are done, at spec.end, or after a delete
+// of the reservation's Telescope or its Observatory. Each step acts
 // on the devices that are there: a reservation whose activation failed
 // at StartDevices has no device connected, and the Deactivation step
 // then skips the actions of each device (procsteps.go).
@@ -34,7 +35,11 @@ func (r *runner) deactivate(ctx context.Context) {
 		r.status.Steps = append(r.status.Steps, pendingSteps(observatory.DeactivationSteps)...)
 		r.status.Phase = observatory.ReservationDeactivating
 		r.save(ctx)
-		r.o.record(r.res, string(observatory.ReservationDeactivating), "Deactivating Telescope "+r.res.Spec.Telescope)
+		message := "Deactivating Telescope " + r.res.Spec.Telescope
+		if parent := heldParentDeleted(r.o.snapshot(), r.res); parent != "" {
+			message += ": " + parent + " was deleted"
+		}
+		r.o.record(r.res, string(observatory.ReservationDeactivating), message)
 	}
 	steps := map[observatory.StepName]stepFunc{
 		observatory.StepAbort:        r.abort,
@@ -140,8 +145,15 @@ func (o *operator) connectedHandles(ctx context.Context, report func(string), t 
 
 // abort stops PHD2, ends the exposures that run, and stops the mount if
 // it moves. A device that is idle receives nothing: the simulators answer an abort
-// of nothing with no update at all.
+// of nothing with no update at all. When a person deleted the
+// telescope or its observatory, the step's summary begins with that,
+// because the reservation's own spec and metadata do not show why it
+// ended.
 func (r *runner) abort(ctx context.Context, w *stepWork) (outcome, error) {
+	var why []string
+	if parent := heldParentDeleted(r.o.snapshot(), r.res); parent != "" {
+		why = append(why, parent+" was deleted")
+	}
 	// PHD2 stops first, so no guide pulse follows the mount's stop.
 	stopped, err := r.stopCapture(ctx, w)
 	if err != nil {
@@ -153,7 +165,7 @@ func (r *runner) abort(ctx context.Context, w *stepWork) (outcome, error) {
 	}
 	handles, notes := r.liveHandles(ctx, w)
 	if len(handles) == 0 && len(did) == 0 {
-		return skipped("%s", strings.Join(append([]string{"no device connected"}, notes...), "; "))
+		return skipped("%s", strings.Join(slices.Concat(why, []string{"no device connected"}, notes), "; "))
 	}
 	stop := func(h handle, watched, property string) error {
 		if !busy(h, watched) {
@@ -182,9 +194,9 @@ func (r *runner) abort(ctx context.Context, w *stepWork) (outcome, error) {
 		}
 	}
 	if len(did) == 0 {
-		return skipped("%s", strings.Join(append([]string{"found no exposure or slew to abort"}, notes...), "; "))
+		return skipped("%s", strings.Join(slices.Concat(why, []string{"found no exposure or slew to abort"}, notes), "; "))
 	}
-	return done("%s", strings.Join(append(did, notes...), "; "))
+	return done("%s", strings.Join(slices.Concat(why, did, notes), "; "))
 }
 
 // disconnect disconnects the telescope's devices in the reverse order

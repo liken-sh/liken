@@ -72,13 +72,14 @@ func (r *runner) activate(ctx context.Context) {
 		fmt.Sprintf("Ready in %s at %s:%d", duration(time.Since(r.began(observatory.ActivationSteps[1:]))), endpoint.Host, endpoint.Port))
 }
 
-// cancelOnEnding ends ctx with errEnding when the reservation is
-// deleted or reaches spec.end. The timer is a clock: spec.end.
+// cancelOnEnding ends ctx with errEnding when the reservation must
+// deactivate (ending). The timer is a clock: spec.end.
 func (r *runner) cancelOnEnding(ctx context.Context, cancel context.CancelCauseFunc) {
 	for ctx.Err() == nil {
 		wake := r.o.structure.wait()
-		res, ok := r.o.snapshot().reservations[r.name]
-		if !ok || ending(res, time.Now()) {
+		t := r.o.snapshot()
+		res, ok := t.reservations[r.name]
+		if !ok || ending(t, res, time.Now()) {
 			cancel(errEnding)
 			return
 		}
@@ -100,7 +101,11 @@ func (r *runner) cancelOnEnding(ctx context.Context, cancel context.CancelCauseF
 }
 
 // wait waits for spec.start, then for the telescope to exist and for
-// no other reservation to hold it.
+// no other reservation to hold it. A telescope that a person deleted,
+// or whose observatory a person deleted, stays while the finalizer
+// holds it for its last reservation, and the step waits as it waits
+// for a missing telescope. Once it takes the telescope, the step gives
+// the telescope and its observatory the finalizer (finalizers.go).
 func (r *runner) wait(ctx context.Context, w *stepWork) (outcome, error) {
 	for {
 		if ctx.Err() != nil {
@@ -115,12 +120,22 @@ func (r *runner) wait(ctx context.Context, w *stepWork) (outcome, error) {
 		}
 		wake := r.o.structure.wait()
 		t := r.o.snapshot()
-		if _, ok := t.telescopes[res.Spec.Telescope]; !ok {
+		telescope, ok := t.telescopes[res.Spec.Telescope]
+		switch {
+		case !ok:
 			w.report("missing Telescope " + res.Spec.Telescope)
-		} else if took, other := r.o.claims.take(t, res, now); took {
+		case deletedParent(t, telescope) != "":
+			w.report(deletedParent(t, telescope) + " is being deleted")
+		default:
+			took, other := r.o.claims.take(t, res, now)
+			if !took {
+				w.report("waiting for Reservation " + other)
+				break
+			}
+			if err := r.o.holdParents(ctx, w.report, telescope); err != nil {
+				return outcome{}, err
+			}
 			return done("took Telescope %s", res.Spec.Telescope)
-		} else {
-			w.report("waiting for Reservation " + other)
 		}
 		select {
 		case <-ctx.Done():

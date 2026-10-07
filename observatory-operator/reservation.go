@@ -24,7 +24,7 @@ import (
 )
 
 // errEnding is the cause that ends an activation step when the
-// reservation is deleted or reaches spec.end.
+// reservation must deactivate (ending).
 var errEnding = errors.New("reservation ended")
 
 type runner struct {
@@ -138,28 +138,55 @@ func (r *runner) refresh() bool {
 }
 
 // ending reports whether the reservation must deactivate: a person
-// deleted it, or spec.end came.
-func ending(res *observatory.Reservation, now time.Time) bool {
-	return res.Metadata.DeletionTimestamp != nil || (res.Spec.End != nil && !now.Before(*res.Spec.End))
+// deleted it, spec.end came, or a person deleted the telescope it
+// holds or that telescope's observatory (deletedParent).
+func ending(t *tree, res *observatory.Reservation, now time.Time) bool {
+	return deleting(res.Metadata) || (res.Spec.End != nil && !now.Before(*res.Spec.End)) || heldParentDeleted(t, res) != ""
+}
+
+// heldParentDeleted answers the parent that a person deleted, such as
+// "Telescope east", when the reservation holds that telescope, or "".
+// A reservation that has not taken its telescope waits instead (wait).
+func heldParentDeleted(t *tree, res *observatory.Reservation) string {
+	telescope, ok := t.telescopes[res.Spec.Telescope]
+	if !ok || !holds(res) {
+		return ""
+	}
+	return deletedParent(t, telescope)
+}
+
+// deletedParent answers "Telescope <name>" for a telescope that a
+// person deleted, "Observatory <name>" for one whose observatory a
+// person deleted, or "". The finalizer keeps both in the tree until
+// the reservation that holds the telescope is Released.
+func deletedParent(t *tree, telescope *observatory.Telescope) string {
+	if deleting(telescope.Metadata) {
+		return "Telescope " + telescope.Metadata.Name
+	}
+	if site, ok := t.observatories[telescope.Spec.Observatory]; ok && deleting(site.Metadata) {
+		return "Observatory " + site.Metadata.Name
+	}
+	return ""
 }
 
 func (r *runner) stage() stage {
 	if r.status.Phase == observatory.ReservationReleased {
 		return stageReleased
 	}
+	t := r.o.snapshot()
 	deactivating := false
 	for _, s := range r.status.Steps {
 		if isDeactivation(s.Name) {
 			deactivating = true
 		}
-		if s.State == observatory.StepFailed && (deactivating || !ending(r.res, time.Now())) {
+		if s.State == observatory.StepFailed && (deactivating || !ending(t, r.res, time.Now())) {
 			return stageFailed
 		}
 	}
 	switch {
 	case deactivating && allFinished(r.status.Steps):
 		return stageReleased
-	case deactivating, ending(r.res, time.Now()):
+	case deactivating, ending(t, r.res, time.Now()):
 		return stageDeactivate
 	case allFinished(r.status.Steps):
 		return stageReady

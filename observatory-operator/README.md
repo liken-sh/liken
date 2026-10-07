@@ -298,7 +298,7 @@ goes on.
 
 | Step | What it does | Deadline |
 |---|---|---|
-| `Wait` | Waits for `spec.start`, and for no other reservation to hold the telescope. | none |
+| `Wait` | Waits for `spec.start`, for the telescope to exist with no delete pending on it or its observatory, and for no other reservation to hold the telescope. | none |
 | `StartSite` | Starts the observatory's server and its devices, connects them, and writes the dome's `DOME_SHUTTER_PARK_POLICY` and its `MOUNT_POLICY`. Another reservation in the observatory may have started them already. Fails when two devices of the observatory name one driver. | 10 min |
 | `PowerOn` | Starts the telescope's server with a link to every device, starts and connects its `Switch` devices, and switches on each output that a device's `spec.power` names. Fails when two devices of the telescope name one driver. | 10 min |
 | `StartDevices` | Starts the pod of every other device, and waits until each pod is Ready and its driver defines its device on the server. A device on real hardware waits here for its claim. | 10 min |
@@ -314,8 +314,9 @@ goes on.
 | `PowerOff` | Switches the outputs off, then stops the `Switch` pods and the telescope's server. | 5 min |
 | `StopSite` | Disconnects the observatory's devices, switches their outputs off, and stops its server, unless a reservation of another telescope in the observatory is active. | 5 min |
 
-Deactivation begins at `spec.end`, or when a person deletes the
-reservation. The finalizer `observatory.liken.sh/deactivate` holds a
+Deactivation begins at `spec.end`, when a person deletes the
+reservation, or when a person deletes its `Telescope` or that
+telescope's `Observatory` ("Deleting a running resource" below). The finalizer `observatory.liken.sh/deactivate` holds a
 deleted reservation until deactivation is done. A reservation that
 reaches `spec.end` stays, `Released`, until a person deletes it.
 
@@ -418,6 +419,8 @@ operator stopped it:
 |---|---|
 | `Reservation` | from its first step until its deactivation steps are done |
 | A device | from just before the operator creates its pod until the pod is gone and no held server runs the device |
+| `Telescope` | from when a reservation takes it in `Wait` until that reservation is `Released` |
+| `Observatory` | while a reservation holds any of its telescopes |
 
 A device that a person deletes during a session leaves its server.
 When its `Telescope` or `Observatory` is `Active`, and the device ran
@@ -432,9 +435,29 @@ device deleted during activation goes when the reservation is `Ready`,
 with no procedure, because the `Activation` step did not run its
 `activation`.
 
+A `Telescope` that a person deletes during a session ends the
+reservation that holds it, as `spec.end` does. The deactivation steps
+run, from `Abort`, on the telescope and its devices, which stay while
+the finalizer holds them. The summary of `Abort` begins with
+`Telescope east was deleted`, and the `Deactivating` Event on the
+reservation ends with the same words. When the reservation is
+`Released`, the operator removes the finalizer, and the telescope is
+gone. A deleted `Observatory` ends the reservation of each of its
+telescopes the same way, and goes when the last one is `Released`.
+Each device of a deleted telescope or observatory stays: only the
+resource that a person deleted goes.
+
+A new reservation of a telescope that is being deleted, or whose
+observatory is being deleted, waits in `Wait`, and its summary reads
+`Telescope east is being deleted`. When the telescope is gone, the
+summary reads `Missing Telescope east`, as for a telescope that never
+existed.
+
 A device with no pod, such as one on the shelf, one of a telescope
 with no reservation, or one whose reservation is `Released`, carries
-no finalizer, and a delete removes it at once.
+no finalizer, and a delete removes it at once. So do a `Telescope`
+that no reservation holds and an `Observatory` with no held
+telescope.
 
 While the operator is down, a delete of a running resource waits for
 it, and the operator does the work when it returns. A person can
@@ -446,7 +469,16 @@ kubectl patch dustcap east -n observatory --type=merge -p '{"metadata":{"finaliz
 
 That skips the device's `deactivation`. Kubernetes then deletes its
 pod, its `Service`, and its `ResourceClaim` by garbage collection,
-before the operator stops its driver on the running server.
+before the operator stops its driver on the running server. The same
+patch on a held `Telescope` lets it go at once, and Kubernetes deletes
+its server's pod and `Service`. The reservation runs on until it
+ends, and then reads a missing telescope: its `Deactivation` step
+skips every procedure, and
+`StopSite` leaves the observatory's server to the operator's sweep,
+which stops it with no procedure. On an `Observatory`, the patch lets
+it go at once, and the reservation runs on until it ends. Its
+`Deactivation` step then reads a missing observatory and skips every
+procedure.
 
 ## Procedures
 

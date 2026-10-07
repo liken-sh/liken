@@ -28,7 +28,9 @@ const (
 	Group = "observatory.liken.sh"
 	// Finalizer holds a deleted resource while the operator still runs
 	// something for it: a Reservation until its deactivation steps are
-	// done, and a device until its pod is gone.
+	// done, a device until its pod is gone, and a Telescope or an
+	// Observatory while a reservation holds it or one of its
+	// telescopes.
 	Finalizer = Group + "/deactivate"
 	// Version is the one version that the CRDs serve.
 	Version = "v1alpha1"

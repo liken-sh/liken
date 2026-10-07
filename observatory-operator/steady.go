@@ -43,7 +43,7 @@ func (r *runner) steady(ctx context.Context) {
 	kept := ""
 	for ctx.Err() == nil {
 		wake := r.o.structure.wait()
-		if !r.refresh() || ending(r.res, time.Now()) {
+		if !r.refresh() || ending(r.o.snapshot(), r.res, time.Now()) {
 			return
 		}
 		t := r.o.snapshot()

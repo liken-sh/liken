@@ -85,4 +85,4 @@ must hold.
 | [11](completed/11-devices-join-a-running-server.md) | Built: a device joins or leaves a running server, with no restart of the server; drilled on the test cluster |
 | [12](completed/12-the-dome-and-mount-locks-across-servers.md) | Built: the operator relays the park states between the servers, so the drivers enforce the dome and mount locks; drilled on the test cluster |
 | [13](completed/13-procedures-on-conditions.md) | Built: each resource states its own procedures, triggered by conditions; the policy flags and the hard-coded `Prepare` and `Secure` go; drilled twice on the test cluster |
-| [14](14-named-states-and-clean-deletes.md) | Proposed: readings name one state instead of a pair of booleans, and a finalizer runs a deleted resource's deactivation |
+| [14](completed/14-named-states-and-clean-deletes.md) | Built: readings name one state instead of a pair of booleans, and a finalizer runs a deleted resource's deactivation; the drill on the test cluster has not run |

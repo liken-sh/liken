@@ -15,7 +15,14 @@ package main
 // run carries no finalizer, so the delete of an inventory device is
 // instant.
 //
-// While the operator is down, a delete of a running device waits for
+// A Telescope gets the finalizer when a reservation takes it (wait),
+// and its Observatory with it. The supervisor removes each when no
+// reservation holds the telescope, or any telescope of the
+// observatory. A deleted Telescope or Observatory ends the reservation
+// that holds it, as spec.end does (ending), and the deactivation steps
+// still read it from the tree, because the finalizer keeps its object.
+//
+// While the operator is down, a delete of a running resource waits for
 // it. A person can remove the finalizer by hand, and the README says
 // what that skips.
 
@@ -57,10 +64,28 @@ func finalizersWith(m observatory.ObjectMeta, present bool) []string {
 // kind. It reads the resource from the API server, not from a store,
 // and patches its metadata with the resourceVersion of that read, so a
 // write of another controller's finalizer in between answers 409 and
-// is not lost. The API server refuses a new finalizer on an object
-// that is being deleted, so an add to such an object, or to one that
-// is gone, writes nothing.
+// is not lost. The status writer changes the resourceVersion of a
+// Telescope or an Observatory often, so a 409 reads the resource and
+// patches again at once, up to finalizerTries times, before the caller
+// waits out a pause.
 func (o *operator) setFinalizerOf(kind observatory.Kind, name string, present bool) error {
+	var err error
+	for range finalizerTries {
+		if err = o.patchFinalizer(kind, name, present); !errors.Is(err, apiclient.ErrConflict) {
+			return err
+		}
+	}
+	return err
+}
+
+// finalizerTries bounds the reads and patches of one setFinalizerOf.
+const finalizerTries = 3
+
+// patchFinalizer reads one resource and patches its finalizers. The
+// API server refuses a new finalizer on an object that is being
+// deleted, so an add to such an object, or to one that is gone, writes
+// nothing.
+func (o *operator) patchFinalizer(kind observatory.Kind, name string, present bool) error {
 	path := objectPath(kind, o.namespace, name)
 	var held struct {
 		Metadata observatory.ObjectMeta `json:"metadata"`
@@ -124,4 +149,49 @@ func (o *operator) releaseDevices(t *tree, held map[string]bool) error {
 		problems = append(problems, o.setFinalizerOf(d.kind, d.name(), false))
 	}
 	return joinErrors(problems)
+}
+
+// holdParents gives a telescope that a reservation took, and its
+// observatory, the finalizer. A write that the API server refuses is
+// sent again (send) until ctx ends.
+func (o *operator) holdParents(ctx context.Context, report func(string), telescope *observatory.Telescope) error {
+	what := "adding the finalizer of Telescope " + telescope.Metadata.Name + " and Observatory " + telescope.Spec.Observatory
+	return o.send(ctx, report, what, func() error {
+		return errors.Join(
+			o.setFinalizerOf(observatory.TelescopeKind, telescope.Metadata.Name, true),
+			o.setFinalizerOf(observatory.ObservatoryKind, telescope.Spec.Observatory, true),
+		)
+	})
+}
+
+// keepParents gives each held Telescope and the Observatory of each
+// one the finalizer, and removes it from every other. The add covers a
+// telescope that a reservation took before the operator added
+// finalizers to telescopes. The removal lets a Telescope or an
+// Observatory go once the reservation that held it is Released.
+func (o *operator) keepParents(t *tree) error {
+	held := o.claims.held()
+	sites := map[string]bool{}
+	for name := range held {
+		if scope, ok := t.telescopes[name]; ok {
+			sites[scope.Spec.Observatory] = true
+		}
+	}
+	var problems []error
+	for name, scope := range t.telescopes {
+		problems = append(problems, o.keepFinalizer(observatory.TelescopeKind, scope.Metadata, held[name]))
+	}
+	for name, site := range t.observatories {
+		problems = append(problems, o.keepFinalizer(observatory.ObservatoryKind, site.Metadata, sites[name]))
+	}
+	return joinErrors(problems)
+}
+
+// keepFinalizer adds or removes one resource's finalizer when the
+// store's copy differs from want.
+func (o *operator) keepFinalizer(kind observatory.Kind, m observatory.ObjectMeta, want bool) error {
+	if holdsFinalizer(m) == want || (want && deleting(m)) {
+		return nil
+	}
+	return o.setFinalizerOf(kind, m.Name, want)
 }

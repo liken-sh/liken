@@ -64,9 +64,10 @@ rules:
       - guiders/status
       - reservations/status
     verbs: [update]
-  # A merge patch of a reservation's or a device's metadata adds and
-  # removes its finalizer, and a merge patch of any resource with
-  # procedures removes its retry annotation.
+  # A merge patch of the metadata of a reservation, a device, a
+  # telescope, or an observatory adds and removes its finalizer, and a
+  # merge patch of any resource with procedures removes its retry
+  # annotation.
   - apiGroups: [observatory.liken.sh]
     resources:
       - reservations
