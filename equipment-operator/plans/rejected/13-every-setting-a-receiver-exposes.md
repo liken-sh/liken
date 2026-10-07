@@ -7,6 +7,13 @@ plan 07's open HTTP design, the open problem about the WiiM settings
 the amp does not read back, and the open problem about the
 `Receiver`'s `cec:` block. Not built.
 
+Replaced on 2026-10-06, before any of it was built, by plans 14 to 18.
+The discovery for those plans found that settings common to every
+brand belong at the `Receiver` level, not in each protocol block, and
+that "every setting on any protocol" has no bound. This document
+stays as the record of the first design. Its claims are corrected in
+the plans that replace it.
+
 ## The problem
 
 A person who sets up a `liken` home theater has to read and change
@@ -140,7 +147,7 @@ Assistant `denonavr` library and other community code send.
 family, including HDMI Control, ARC, and Pow.Off Control. The first
 draft of this plan said those had no read, which was wrong.
 display-operator's open problem
-[a receiver pulses the hotplug line for hours](../../display-operator/plans/open-problems/a-receiver-pulses-the-hotplug-line-for-hours.md)
+[a receiver pulses the hotplug line for hours](../../../display-operator/plans/open-problems/a-receiver-pulses-the-hotplug-line-for-hours.md)
 needs the `hdmi.passThrough` value that `SSHOSPAS` reads.
 
 The control port is the primary path. The HTTP interface is used for a

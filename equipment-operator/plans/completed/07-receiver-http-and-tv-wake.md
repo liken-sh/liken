@@ -3,9 +3,10 @@
 Plan 07. Closed on 2026-10-04. The TV wake is designed in plan 09,
 built in its phase 3 on 2026-09-26, and drilled on `liken-1`. The
 receiver's HTTP interface moved to
-[plan 13](../13-every-setting-a-receiver-exposes.md), which decides how
-the driver uses it along with every other protocol the receiver
-serves.
+[plan 13](../rejected/13-every-setting-a-receiver-exposes.md), which
+decided how the driver uses it along with every other protocol the
+receiver serves. [Plan 17](../17-the-denons-inputs-zones-and-web-setup.md)
+replaced it.
 
 ## The problem
 

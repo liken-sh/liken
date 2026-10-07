@@ -24,6 +24,10 @@ any work still unbuilt becomes a new plan or an open problem.
 
 [`completed/`](completed/) holds the plans that are built.
 
+[`rejected/`](rejected/) holds the plans that were replaced or set
+aside before they were built. Each one stays as the record of what was
+considered and why.
+
 [`open-problems/`](open-problems/) holds the questions this operator
 owes an answer to. Those documents have no number, because nobody has
 decided yet what work they become.

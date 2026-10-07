@@ -241,8 +241,16 @@ number. Each later plan has its own number in this directory:
 - [11](completed/11-one-operator-holds-the-lease.md), leader election.
 - [12](completed/12-network-discovery-can-be-turned-off.md), network
   discovery that can be turned off.
-- [13](13-every-setting-a-receiver-exposes.md), every setting a
-  receiver exposes. Not built.
+- [13](rejected/13-every-setting-a-receiver-exposes.md), every setting
+  a receiver exposes. Replaced by plans 14 to 18.
+- [14](14-one-settings-model-for-every-receiver.md), one settings model
+  for every receiver. Not built.
+- [15](15-the-speaker-layout.md), the speaker layout. Not built.
+- [16](16-the-wiims-settings.md), the WiiM's settings. Not built.
+- [17](17-the-denons-inputs-zones-and-web-setup.md), the Denon's
+  inputs, zones, and web setup. Not built.
+- [18](18-system-audio-mode-on-the-wake.md), System Audio Mode on the
+  wake. Not built.
 
 [Plan 77](../../plans/completed/77-the-media-bus-stops-at-media-operator.md),
 at the top of the repository, moved the level, power, and input asks

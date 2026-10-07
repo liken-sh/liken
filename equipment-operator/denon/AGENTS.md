@@ -137,5 +137,6 @@ trigger outputs (`TR`), the speaker presets beyond the number, and the
 first four over port 23, so there is no way to prove a parser for them
 here.
 
-Plan 13 covers these families, the receiver's HTTP interfaces, where
-the video controls answer as remote-key presses, and the speaker setup.
+Plan 15 covers the speaker setup. Plan 17 covers the inputs, the
+zones, the video controls, the triggers, and the receiver's HTTP and
+HTTPS setup interfaces.

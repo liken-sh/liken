@@ -17,30 +17,45 @@ for it.
 
 `make test` runs every check CI runs.
 
-## Every setting a receiver exposes
+## Receiver settings
 
-Build every protocol block to this rule, which plan 13 brings the
-existing blocks up to. A block reads every family its receiver answers
-into status, and accepts in its spec every setting the operator can
-send. The operator learns what a model supports from the model, never
-from a table of models. Each field in a driver's family table states
-one tier:
+Build every receiver setting to these rules. Plan 14 brings the
+existing blocks up to them, and plans 15 to 18 add families.
+
+A setting that means the same thing on every brand goes in the
+`Receiver`'s `spec.settings`, in one vocabulary with explicit units,
+so a person learns one shape and a new receiver keeps the room's
+setup. The protocol block, such as `spec.denon` or `spec.wiim`, holds
+the connection and the settings only that brand has. Every `Receiver`
+holds exactly one protocol block. Status mirrors the spec:
+`status.settings` and `status.<protocol>`.
+
+A plan names which families get built. Each field in a driver's table
+states one tier, and the operator learns what a model supports from
+the model, never from a table of models:
 
 * **Confirmed**: the receiver reads the field back. The operator
   compares, sends a field that differs, and confirms it.
 * **Sent once**: a documented setter with no read. The operator sends
-  it once for each change of the block, and `status.settledSettings`
+  it once for each change of the family, and `status.settledSettings`
   keeps it from being sent again after a restart.
 * **Reported**: a read with no setter, in status only.
-* **Unsupported**: the model refuses it, and
-  `status.<protocol>.unsupported` names it.
+* **Unsupported**: the model refused the read or the command, left it
+  out of its capability document, or did not answer it during the
+  first read.
+
+The tier in the table is a ceiling: a Confirmed field that a unit does
+not read back is sent once on that unit. A device's answer that means
+"not in this state" never makes a field Unsupported.
+`status.settingExceptions` lists each field whose state differs from
+its tier, with the reason, and a declared field in that list makes
+`SettingsConfirmed` False. The operator never changes an undeclared
+field to make a declared one land.
 
 An undocumented setter is declarable only after a drill shows that the
-receiver reads it back. Families that mean the same thing take the
-same name in every block, such as `system`, `tone`, `eq`, and
-`speakers`. A command that acts once, such as a reboot or an alarm, is
-not a setting. A new protocol block follows the same rule. Plan 13
-holds the reasons and the family table.
+receiver reads it back. A command that acts once, such as a reboot or
+an alarm, is not a setting. Plan 14 holds the reasons, the common
+vocabulary, and the protocol references for a new receiver brand.
 
 ## The Denon driver
 

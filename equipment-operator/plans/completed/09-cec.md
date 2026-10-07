@@ -6,7 +6,8 @@ playing the TV. Phase 3 built 2026-09-26 and tested against `vivid`,
 with a second `vivid` output playing a streaming player. The hardware
 drills of phases 1 to 3 ran on `liken-1`. Phase 4 is not built: the
 `Receiver`'s `cec:` block moved to
-[plan 13](../13-every-setting-a-receiver-exposes.md#cec). Phase 5 was
+[plan 13](../rejected/13-every-setting-a-receiver-exposes.md#cec), and
+[plan 18](../18-system-audio-mode-on-the-wake.md) replaced it. Phase 5 was
 built on 2026-10-04 as the guide
 [Connect a USB-CEC adapter](../../docs/content/docs/guides/connect-a-cec-adapter.md). The power press
 that turns the TV off was built 2026-09-27 and tested against `vivid`
