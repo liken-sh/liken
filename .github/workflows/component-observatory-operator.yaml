@@ -187,6 +187,85 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  docs:
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'docs') }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: observatory-operator
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: setup-go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: observatory-operator/docs/go.mod
+          cache: false
+
+      # The repository's Actions cache holds 10 GB, and GitHub evicts
+      # the oldest entries when the caches pass that limit. So every run
+      # restores the Go caches, and only a push to main saves them: a
+      # branch never writes an entry that pushes one of main's out.
+      #
+      # The downloaded modules are one entry for the family `manuals`,
+      # saved when the key misses. The key follows the hash of
+      # `observatory-operator/docs/go.sum`.
+      # When no entry has the key, as on a branch that changes `go.sum`,
+      # the restore takes the newest entry of the same family, which
+      # holds most of the modules that the job needs.
+      #
+      # The entry holds the extracted source and, from the download
+      # cache, only the `go.mod` files and the zip hashes. `go` reads the
+      # `go.mod` files to load the module graph, and it downloads a module
+      # again when its zip hash is missing. `go` does not read a zip
+      # file after it extracts the source, and the zip files are about
+      # half of the compressed entry.
+      - id: go-modules
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/go/pkg/mod/*
+            !~/go/pkg/mod/cache
+            ~/go/pkg/mod/cache/download/**/*.mod
+            ~/go/pkg/mod/cache/download/**/*.ziphash
+          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-manuals-${{ hashFiles('observatory-operator/docs/go.sum') }}
+          restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-manuals-
+
+      # A saved cache never changes, and Go trims a build cache entry
+      # that no build used for five days, so a build cache saved once
+      # would lose the compiled Hugo. This entry's key ends in the
+      # commit: each push to main saves a new one, and every run
+      # restores the newest one for the same go.sum, or for any go.sum
+      # when none matches, as on a branch that changes it. Every manual
+      # with the same go.sum shares the entry.
+      - id: hugo-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/go-build
+          key: hugo-build-${{ runner.os }}-${{ hashFiles('observatory-operator/docs/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            hugo-build-${{ runner.os }}-${{ hashFiles('observatory-operator/docs/go.sum') }}-
+            hugo-build-${{ runner.os }}-
+
+      - run: make test-docs
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.go-modules.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/go/pkg/mod/*
+            !~/go/pkg/mod/cache
+            ~/go/pkg/mod/cache/download/**/*.mod
+            ~/go/pkg/mod/cache/download/**/*.ziphash
+          key: ${{ steps.go-modules.outputs.cache-primary-key }}
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.hugo-cache.outputs.cache-primary-key }}
+
   prek:
     if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'prek') }}
     runs-on: ubuntu-26.04

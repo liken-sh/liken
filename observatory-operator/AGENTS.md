@@ -6,13 +6,22 @@ hardware through INDI, and the manifests that run it: the operator's
 the INDI client in `indi/`, the client of PHD2's event server in
 `phd2/`, the map of driver images in `drivers/`,
 the CRDs, the RBAC, and the operator's `Deployment` in `deploy/`, the
-example in `examples/`, and the plans.
+example in `examples/`, the manual in `docs/`, the skills that the
+manual's guides emit in `skills/`, and the plans.
 
 `plans/00-design.md` is the design, and the `plans/` directory holds the
 plans that build it. Code exists only where a plan calls for it. [Root
 plan 74](../plans/74-astrophotography.md) records the architecture that
 this component and `astrophotography-operator` share, and the
 simulator tests that support it.
+
+The manual at https://liken.sh/observatory/ is the description of
+the operator for the people who run it, and `docs/AGENTS.md` covers
+writing it. A change to what a person sees, such as a step, a field, a
+condition, or a message, changes the manual in the same commit. The
+resource pages are generated from the CRDs, and `skills/` is generated
+from the guides, so run `make -C docs generate skills` after an edit to
+either.
 
 `make test` runs every check CI runs. `pods_test.go` holds the
 operator's pods to the properties that plan 03 measured, and

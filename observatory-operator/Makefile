@@ -7,7 +7,7 @@
 # place.
 
 .PHONY: test
-test: test-go
+test: test-go test-docs
 
 # One run of the tests gives both the race check and the coverage
 # profile, because -race with -covermode=atomic does both.
@@ -38,15 +38,50 @@ test-go:
 drivers:
 	go test ./drivers -run TestTheMapIsCurrent -update
 
+.PHONY: test-docs
+test-docs:
+# The reference pages are generated and committed, so a checkout
+# carries them. make decides that a page is current by comparing file
+# times, and a fresh checkout gives each file the time that git wrote
+# it. So in CI, make cannot be trusted to rebuild a page, and a change
+# to a generator in brand/ can leave a stale page that the site
+# publishes. The check runs the generate target with -B, which
+# regenerates every page whatever the times say. It fails when the
+# result differs from what git has staged, or adds an untracked file,
+# as the skills check below does.
+	$(MAKE) -C docs -B generate
+	git diff --quiet -- docs/content/docs/reference \
+		&& test -z "$$(git ls-files --others --exclude-standard -- docs/content/docs/reference)" \
+		|| { git status --short -- docs/content/docs/reference; exit 1; }
+	$(MAKE) -C docs test
+# skills/ is generated from the guides and committed, so a checkout
+# carries it. The check regenerates it and fails when the result differs
+# from what git has staged, or adds an untracked file, which means a
+# guide changed and nobody ran `make -C docs skills`. The comparison is
+# with the index, not with the last commit, so a commit that stages a
+# guide and its regenerated skill together passes.
+	$(MAKE) -C docs skills
+	git diff --quiet -- skills && test -z "$$(git ls-files --others --exclude-standard -- skills)" \
+		|| { git status --short -- skills; exit 1; }
+	$(MAKE) -C docs build
+
 # The coverage report is the profile the gate already measured, drawn
-# as one HTML page. This module has no manual, so the site serves the
-# page at coverage/observatory-operator.html. `test` does not depend on
+# as one HTML page for the site to publish. `test` does not depend on
 # it: the gate decides whether a change passes, and the report only
-# shows a reader what the tests reached.
+# shows a reader what the tests reached, so a report that fails to
+# render never fails a build.
 #
-# coverage is brand's tool. This module has no docs module to pin it
-# as a tool, so the command runs it from brand's own module.
+# coverage is a tool of the docs module, the way Hugo and crdref are,
+# so the command runs from docs/ and names the paths above it.
 .PHONY: coverage-report
 coverage-report: coverage.out
-	cd ../brand && go run ./coverage -title observatory-operator -root ../observatory-operator \
-		-label Go -out ../observatory-operator/coverage.html ../observatory-operator/coverage.out
+	cd docs && go tool coverage \
+		-title observatory-operator \
+		-root .. \
+		-out ../coverage.html \
+		-label Go ../coverage.out
+
+# The report reads the profile test-go writes, so a tree with no
+# profile runs the tests first.
+coverage.out:
+	$(MAKE) test-go

@@ -1188,6 +1188,9 @@ jobs:
           echo "checking the media-operator manual"
           fetch https://liken.sh/media/ > page.html
           grep -q "<title>" page.html
+          echo "checking the observatory-operator manual"
+          fetch https://liken.sh/observatory/ > page.html
+          grep -q "<title>" page.html
           echo "checking the people-operator manual"
           fetch https://liken.sh/people/ > page.html
           grep -q "<title>" page.html

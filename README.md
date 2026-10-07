@@ -43,9 +43,9 @@ Each top-level directory is one component, named for what it ships:
   bus rules of a screen client. The idle screen and the media browser
   both link it.
 - [`people-operator/`](people-operator/) defines the `Person` resource.
-- [`observatory-operator/`](observatory-operator/) will control an
-  observatory's hardware through INDI, and holds the Go INDI client so
-  far.
+- [`observatory-operator/`](observatory-operator/) runs an
+  observatory's hardware through INDI, and its manual is at
+  [liken.sh/observatory](https://liken.sh/observatory/).
   [`astrophotography-operator/`](astrophotography-operator/) will run
   imaging sessions on it, and holds only plans so far.
 - [`git-csi-driver/`](git-csi-driver/) mounts git repositories as

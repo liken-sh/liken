@@ -14,6 +14,9 @@ license = "MIT"
 [depends]
 components = ["indi", "kubernetes", "notices", "weston"]
 
+[docs]
+prefix = "observatory"
+
 # gofmt, vet, a tidy check of go.mod, and one run of the tests that
 # checks for races and writes the coverage profile, then the coverage
 # gate on that profile. .testcoverage.yml holds the floor.
@@ -23,6 +26,13 @@ toolchain = "go"
 run = "make test-go"
 timeout = 15
 coverage = ["coverage.out"]
+
+# The link check, the generated skills, and the site build.
+[[jobs]]
+name = "docs"
+toolchain = "hugo"
+module = "docs"
+run = "make test-docs"
 
 # The hooks in .pre-commit-config.yaml: the formatters, the linters,
 # and the hygiene checks. The go job runs the tests and the coverage

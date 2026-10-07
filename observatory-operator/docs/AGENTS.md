@@ -1,0 +1,13 @@
+@../../brand/voice.md
+
+# Authoring this docs domain
+
+This directory is the source of https://liken.sh/observatory/,
+observatory-operator's manual. Hugo builds it with the shared brand theme, `brand/`
+at the top of the repository.
+
+Write all site prose in Simplified Technical English (ASD-STE100):
+short sentences, active voice, one instruction per sentence. The voice
+rules imported above add what that standard does not state, and they
+govern every word this site publishes. Scan a page against them before
+you commit it.
