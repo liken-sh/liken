@@ -314,7 +314,7 @@ write. The status and the pod's log keep each fact longer.
 
 ## Inspect the Bluetooth stack
 
-The `bluetoothd` image holds four tools for a person. Each runs as
+The `bluetoothd` image holds three tools for a person. Each runs as
 a direct `kubectl exec`, with no shell between, and every one of
 them needs the `-i` flag. BlueZ's shells attach to their standard
 input. With stdin closed the attach fails, and the command never
@@ -322,14 +322,10 @@ runs and prints nothing.
 
 `btmgmt info` prints the adapter's management settings, and its
 `current settings` line is where `Connectable`, `Discoverable`, and
-`Bondable` read. `btmon` traces the HCI link live, the layer under
-D-Bus and under `bluetoothd`. It shows a disconnect reason or a
-retransmission that no higher layer reports. `dbus-send` calls any
-method on `org.bluez`. `bluetoothctl list` names what the daemon
-holds.
+`Bondable` read. `dbus-send` calls any method on `org.bluez`.
+`bluetoothctl list` names what the daemon holds.
 
     kubectl -n liken-system exec -i ds/bluetooth-operator -c bluetoothd -- btmgmt info
-    kubectl -n liken-system exec -i ds/bluetooth-operator -c bluetoothd -- btmon
     kubectl -n liken-system exec -i ds/bluetooth-operator -c bluetoothd -- bluetoothctl list
 
 One limit: the image has no shell, and BlueZ's argument parser
@@ -344,16 +340,27 @@ device by hand:
       dbus-send --system --print-reply --dest=org.bluez \
       /org/bluez/hci0/dev_A0_AB_51_33_B7_12 org.bluez.Device1.Connect
 
+The pod's `btmon` container traces the HCI link for as long as the
+pod runs, the layer under D-Bus and under `bluetoothd`. The trace
+shows a disconnect reason or a retransmission that no higher layer
+reports. It also shows the commands where `bluetoothd` tells the
+kernel which bonded devices may reconnect. The trace is the
+container's log, so it stays readable after a roll of the pod
+replaces the processes that saw a fault. Read it on one machine:
+
+    kubectl -n liken-system logs -c btmon --timestamps \
+      $(kubectl -n liken-system get pods -l app=bluetooth-operator \
+          --field-selector spec.nodeName=<node> -o name)
+
 ## The privilege it takes
 
-The pod is three containers, and the privilege is confined to one of
-them. `NET_RAW` is the one capability `bluetoothd` itself does not
-use. It is there for `btmon`, which binds the kernel's HCI monitor
-channel, and that bind tests `CAP_NET_RAW`. The `bluetoothd`
-container takes `hostNetwork` and five capabilities (`NET_ADMIN`,
-`NET_RAW`, `NET_BIND_SERVICE`, `SETUID`, `SETGID`), because it is the
-Bluetooth stack. The `operator` and `bondfetch` containers drop every
-capability. The comments in
+The pod is four containers, and the privilege is confined to two of
+them. The `bluetoothd` container takes four capabilities
+(`NET_ADMIN`, `NET_BIND_SERVICE`, `SETUID`, `SETGID`), because it is
+the Bluetooth stack. The `btmon` container takes only `NET_RAW`,
+because it binds the kernel's HCI monitor channel, and that bind
+tests `CAP_NET_RAW`. Every container shares the pod's `hostNetwork`.
+The `operator` and `bondfetch` containers drop every capability. The comments in
 [`deploy/operator.yaml`](https://liken.sh/bluetooth/deploy/operator.yaml) state the kernel or
 daemon check behind each grant.
 

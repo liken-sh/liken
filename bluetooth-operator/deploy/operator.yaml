@@ -163,6 +163,67 @@ spec:
           volumeMounts:
             - name: bonds
               mountPath: /var/lib/bluetooth
+        # btmon, as a sidecar that runs as long as the pod. It traces
+        # the HCI link, the layer under D-Bus and under bluetoothd,
+        # and writes each packet to the container log. A stall of a
+        # bonded controller can last for hours before a person sees
+        # it, and the fix is a roll of this pod, which ends every
+        # process that saw the stall. The trace is in the log before
+        # the roll, so the evidence stays after it.
+        #
+        # btmon reports only what happens after it binds the monitor
+        # channel, so it starts before bluetoothd. At adapter
+        # registration, bluetoothd tells the kernel which bonded
+        # devices may reconnect, and those commands are in the trace.
+        # The trace stays nearly empty while no controller connects or
+        # sends, and a button press is about eight lines.
+        #
+        # It needs no claim and no bus. The monitor channel reports
+        # every adapter on the machine, and a machine has one.
+        - name: btmon
+          image: ghcr.io/liken-sh/bluetoothd:latest
+          restartPolicy: Always
+          # --no-time leaves the timestamps to the container log, which
+          # records the wall-clock time of each line. --columns sets
+          # the width for the packet header lines, which btmon cuts to
+          # 80 characters by default and so cuts the names of
+          # management clients. The terminal makes the C library write
+          # each line when btmon finishes it. With a pipe, the library
+          # holds the output until its buffer fills, and a rare line
+          # waits in the buffer for hours. On a terminal btmon also
+          # starts a pager and colors its output, and the first two
+          # flags turn both off.
+          command:
+            - /usr/bin/btmon
+            - --no-pager
+            - --color
+            - never
+            - --no-time
+            - --columns
+            - "160"
+          tty: true
+          securityContext:
+            # hci_sock_bind tests capable(CAP_NET_RAW) before it binds
+            # HCI_CHANNEL_MONITOR, and without the capability btmon
+            # prints "Failed to bind channel: Operation not
+            # permitted". The bind takes nothing more. The kubelet
+            # sets no ambient capabilities, so an added capability
+            # reaches only a process that runs as root. The container
+            # runs as root for that reason, and it writes nothing.
+            capabilities:
+              drop: ["ALL"]
+              add: ["NET_RAW"]
+            runAsUser: 0
+            runAsGroup: 0
+            readOnlyRootFilesystem: true
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
         # bluetoothd, as a sidecar: an init container that restarts
         # always, which the kubelet starts before the operator and
         # stops after it. Both halves of that order matter. The bus
@@ -171,9 +232,10 @@ spec:
         # deletion is a clean exit rather than the operator reporting
         # that bluetoothd left the bus.
         #
-        # It has every capability in this pod. bluetoothd is the
-        # Bluetooth stack, and the operator beside it only reads the
-        # daemon over D-Bus and writes to the API server.
+        # It has every capability in this pod except the one that
+        # btmon takes. bluetoothd is the Bluetooth stack, and the
+        # operator beside it only reads the daemon over D-Bus and
+        # writes to the API server.
         - name: bluetoothd
           image: ghcr.io/liken-sh/bluetoothd:latest
           restartPolicy: Always
@@ -187,17 +249,10 @@ spec:
           securityContext:
             # NET_ADMIN is what the kernel checks: the Bluetooth
             # management channel's privileged commands test for
-            # CAP_NET_ADMIN. bluetoothd itself uses no NET_RAW: it
-            # drives the management channel and seqpacket L2CAP
-            # sockets, never a raw HCI socket. btmon does, because
-            # hci_sock_bind tests capable(CAP_NET_RAW) before it
-            # binds HCI_CHANNEL_MONITOR, and with NET_ADMIN alone
-            # btmon prints "Failed to bind channel: Operation not
-            # permitted". The capability is on so that a person can
-            # read the HCI trace during an incident, with no patch
-            # and no roll, and it widens nothing: a container that
-            # already holds NET_ADMIN in the host network namespace
-            # holds the stronger grant. NET_BIND_SERVICE is for
+            # CAP_NET_ADMIN. bluetoothd uses no NET_RAW: it drives the
+            # management channel and seqpacket L2CAP sockets, never a
+            # raw HCI socket. The btmon container holds NET_RAW for
+            # the trace. NET_BIND_SERVICE is for
             # bluetoothd's SDP and GATT servers, which bind L2CAP
             # PSMs 1 and 31, both below the kernel's 0x1001 privilege
             # line. dbus-daemon drops to its messagebus user at
@@ -205,7 +260,7 @@ spec:
             # CAP_SETGID. Everything else drops.
             capabilities:
               drop: ["ALL"]
-              add: ["NET_ADMIN", "NET_RAW", "NET_BIND_SERVICE", "SETUID", "SETGID"]
+              add: ["NET_ADMIN", "NET_BIND_SERVICE", "SETUID", "SETGID"]
             privileged: false
             allowPrivilegeEscalation: false
           resources:
