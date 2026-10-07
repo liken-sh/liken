@@ -22,7 +22,7 @@ time the catalog changes. Each report woke a pass, and that pass only
 cleared the report again. The branch made the report desk remember the
 keys the last pass dropped, and a report for one of those keys woke no
 pass. [A cleanup run outlives its
-`Library`](../open-problems/a-cleanup-run-outlives-its-library.md)
+`Library`](../completed/77-a-cleanup-job-deletes-its-own-run.md)
 describes why those rows remain.
 
 ## What the testbed measured

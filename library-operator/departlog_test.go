@@ -13,7 +13,6 @@ func TestADepartureLeavesOneLinePerStep(t *testing.T) {
 		name   string
 		choice catalogChoice
 		jobs   []Job
-		report *libraryReport
 		want   string
 	}{
 		{
@@ -22,11 +21,10 @@ func TestADepartureLeavesOneLinePerStep(t *testing.T) {
 			want:   "library house/movies is deleting: created the job movies-cleanup to sweep its rows from the catalog",
 		},
 		{
-			name:   "the sweep is echoed",
+			name:   "the sweep is confirmed",
 			choice: standingCatalog(),
 			jobs:   []Job{cleanup},
-			report: func() *libraryReport { r := echoing("movies-cleanup"); return &r }(),
-			want:   "library house/movies: released the finalizer, because the job movies-cleanup swept its rows and the reporter echoed it",
+			want:   "library house/movies: released the finalizer, because the job movies-cleanup swept its rows and a catalog pod confirmed the sweep",
 		},
 		{
 			name:   "no Catalog",
@@ -39,9 +37,6 @@ func TestADepartureLeavesOneLinePerStep(t *testing.T) {
 			cluster := newFakeCluster()
 			library := departingMovies(cluster)
 			operator, logged := loggingOperator(t, cluster)
-			if c.report != nil {
-				operator.reports.fold("house", "movies", *c.report)
-			}
 
 			if err := operator.depart(t.Context(), library, c.choice, c.jobs); err != nil {
 				t.Fatal(err)

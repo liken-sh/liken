@@ -140,7 +140,10 @@ func (c *confirmer) follow(ctx context.Context) {
 	for ctx.Err() == nil {
 		reached := false
 		err := c.catalog.subscribe(ctx, confirmerRunsQuery, nil,
-			func() { reached = true },
+			func() {
+				reached = true
+				c.dropOrphans(ctx)
+			},
 			func(columns []string, cells []any, deleted bool) { c.noteRun(ctx, columns, cells, deleted) })
 		if err != nil && ctx.Err() == nil {
 			c.logf("the run stream ended: %v", err)
@@ -213,17 +216,45 @@ func (c *confirmer) recheckWhilePending(ctx context.Context) {
 // version to zero, which the query does not read. No Job waits on the
 // row's old run after either one, and a confirmation written for a
 // deleted library's run would keep the library's key in the catalog
-// after the library is gone.
+// after the library is gone. So a delete also takes every confirmation
+// whose run is gone. The pending entry clears first, under the mutex, so
+// no recheck writes a confirmation for the deleted run after the drop.
+//
+// The drop is also the answer a cleanup Job waits for after it deletes
+// its own run: a confirmation of that run leaves the Job's copy only when
+// a standing pod held the delete.
 func (c *confirmer) noteRun(ctx context.Context, columns []string, cells []any, deleted bool) {
 	run, ok := decodeFinishedRun(columns, cells)
+	if deleted {
+		if ok {
+			c.clearRow(run.row())
+		}
+		c.dropOrphans(ctx)
+		return
+	}
 	if !ok {
 		return
 	}
-	if deleted {
-		c.clearRow(run.row())
+	c.place(run, c.settle(ctx, run))
+}
+
+// DropOrphans takes every confirmation whose run is gone. It runs on
+// each delete the run stream carries, and once each time a stream opens,
+// because a delete made while no stream was open reaches this pod in the
+// next stream's snapshot as a row that is not there, with no delete. A
+// drop that fails is one log line, and the next delete or stream drops
+// the same rows.
+func (c *confirmer) dropOrphans(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, catalogWriteTimeout)
+	defer cancel()
+	dropped, err := c.catalog.dropOrphanConfirmations(ctx)
+	if err != nil {
+		c.logf("could not drop the confirmations of runs that are gone: %v", err)
 		return
 	}
-	c.place(run, c.settle(ctx, run))
+	if dropped > 0 {
+		c.logf("dropped %d confirmations of runs that are gone", dropped)
+	}
 }
 
 // DecodeFinishedRun reads one runs row by column name into the run

@@ -115,6 +115,14 @@ func (c *Catalog) DeleteRuns(ctx context.Context, library string) (int, error) {
 	}})
 }
 
+// DeleteRun takes one worker's row for one library.
+func (c *Catalog) DeleteRun(ctx context.Context, library, worker string) (int, error) {
+	return c.apply(ctx, []statement{{
+		sql:    `DELETE FROM runs WHERE library = ? AND worker = ?`,
+		params: []any{library, worker},
+	}})
+}
+
 // Runs reads every run the catalog holds, keyed by library, each
 // library's runs sorted by worker.
 func (c *Catalog) Runs(ctx context.Context) (map[string][]libraryRun, error) {

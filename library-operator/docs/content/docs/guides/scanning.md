@@ -319,14 +319,18 @@ removes its rows from the namespace's catalog. The operator starts no
 new `Job` for a deleting `Library`, and it waits for any `Job` of the
 `Library` to finish. Then it runs a cleanup `Job` named
 `<library>-cleanup` on the `Library`'s catalog claim, which deletes the
-rows in batches through its own catalog agent. The finalizer clears
-once the cleanup `Job` succeeded and a catalog pod confirmed its run.
+rows in batches through its own catalog agent. The `Job` then writes
+its own `runs` row and waits for a catalog pod to confirm it, the way
+every worker `Job` does. After the confirmation, it deletes that row
+too, and waits for a catalog pod to hold the delete, so the catalog
+keeps no row of the departed `Library`. The finalizer clears when the
+cleanup `Job` succeeds.
 
 While this runs, the phase is `Departing`, and the `Departing`
 condition names the step: `ScanRunning` while a walk `Job` runs,
-`EnrichRunning` while another `Job` of the `Library` runs, `Sweeping`,
-`AwaitingEcho`, or `Blocked` when the cleanup `Job` keeps failing or
-the namespace holds two `Catalogs`. There is no timeout. The operator
+`EnrichRunning` while another `Job` of the `Library` runs, `Sweeping`
+while the cleanup `Job` runs, or `Blocked` when the cleanup `Job`
+keeps failing or the namespace holds two `Catalogs`. There is no timeout. The operator
 reports the blocker for as long as the object is deleting.
 
 A namespace with no `Catalog` releases at once, because nothing there

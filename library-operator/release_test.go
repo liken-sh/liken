@@ -8,15 +8,14 @@ import (
 	"testing"
 )
 
-// the whole release rule: the cleanup Job exited zero and the
-// namespace's reporter echoed that same Job back.
-func TestDepartReleasesWhenTheSweepIsEchoed(t *testing.T) {
+// the whole release rule: the cleanup Job exited zero, which it does
+// only once a catalog pod confirmed its sweep.
+func TestDepartReleasesWhenTheCleanupJobSucceeds(t *testing.T) {
 	cluster := newFakeCluster()
 	library := departingMovies(cluster)
 	done := houseJob("movies-cleanup", workerCleanup, JobStatus{Succeeded: 1})
 	cluster.holdJob(&done)
 	operator := testOperator(t, cluster)
-	operator.reports.fold("house", "movies", echoing("movies-cleanup"))
 
 	if err := operator.depart(t.Context(), library, standingCatalog(), []Job{done}); err != nil {
 		t.Fatal(err)
@@ -38,7 +37,6 @@ func TestDepartClearsTheRetainedTopics(t *testing.T) {
 	done := houseJob("movies-cleanup", workerCleanup, JobStatus{Succeeded: 1})
 	cluster.holdJob(&done)
 	operator, broker := operatorOnABroker(t, cluster)
-	operator.reports.fold("house", "movies", echoing("movies-cleanup"))
 
 	if err := operator.depart(t.Context(), library, standingCatalog(), []Job{done}); err != nil {
 		t.Fatal(err)

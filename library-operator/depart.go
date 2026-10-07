@@ -12,8 +12,9 @@ package main
 // schedule goes first, then the departure waits out any scan that is
 // still running, because a scan rewrites the rows the sweep deletes and
 // holds the claim the cleanup Job needs. The finalizer
-// goes only when the cleanup Job exited zero and the reporter echoed
-// that same Job back over the bus.
+// goes when the cleanup Job exited zero, because the Job exits zero only
+// when a standing catalog pod holds its deletes, the delete of its own
+// run among them (cleanup.go).
 //
 // A finalizer's classic cost is an object stuck deleting forever. The
 // operator never gives up on a timer: while something blocks the
@@ -116,15 +117,9 @@ func (o *operator) departureStage(ctx context.Context, library *Library, choice 
 	if blocker := cleanupBlocker(job); blocker != "" {
 		return departure{reason: reasonBlocked, message: blocker}, nil
 	}
-	if cleanupComplete(job, report) {
+	if cleanupComplete(job) {
 		return departure{clear: true, why: "the job " + job.Metadata.Name +
-			" swept its rows and the reporter echoed it"}, nil
-	}
-	if job != nil && job.Status.Succeeded > 0 {
-		return departure{
-			reason:  reasonAwaitingEcho,
-			message: "the sweep is done and the namespace's reporter has not echoed it yet",
-		}, nil
+			" swept its rows and a catalog pod confirmed the sweep"}, nil
 	}
 	return departure{
 		reason:  reasonSweeping,
@@ -136,8 +131,8 @@ func (o *operator) departureStage(ctx context.Context, library *Library, choice 
 // answers with the sentence a person has to act on, or empty when
 // the claim stands. A fresh empty claim is enough: the agent joins
 // the namespace's cluster, the rows arrive over gossip, and the sweep
-// deletes what has arrived, so the release still waits on the
-// reporter's own echo.
+// deletes what has arrived. The Job exits zero only when a standing
+// catalog pod confirms that its copy holds every delete.
 func (o *operator) standDepartureClaim(ctx context.Context, library *Library, choice catalogChoice) (string, error) {
 	namespace := library.Metadata.Namespace
 	name := scannerCatalogClaimName(library.Metadata.Name)

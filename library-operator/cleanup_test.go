@@ -5,11 +5,13 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -87,49 +89,61 @@ func (l *syncLog) String() string {
 }
 
 // The Job takes every row the departing library holds, the runs and
-// confirmations of every other worker with them, writes its own run last,
-// and exits on the confirmation. The surviving library is untouched.
-func TestTheCleanupJobSweepsAndWaitsToBeConfirmed(t *testing.T) {
-	catalog, agent := newSQLiteCatalog(t)
-	seedTwoLibrariesInEveryTable(t, catalog)
-	if _, _, err := catalog.UpsertRun(t.Context(), "house/movies",
-		libraryRun{Worker: workerScan, Job: "scan-1", Started: time.Unix(10, 0), Finished: time.Unix(20, 0)}); err != nil {
-		t.Fatal(err)
-	}
-	if err := catalog.UpsertConfirmation(t.Context(), "house/movies", workerScan, "scan-1",
-		"movies-catalog-0", 1, time.Unix(20, 0)); err != nil {
-		t.Fatal(err)
-	}
-	sweep := cleanupJob(t, catalog)
+// confirmations of every other worker with them, and its own run and
+// confirmation last, so the library's key leaves the catalog. A real
+// confirmer answers it, the way the standing catalog pod does. The
+// surviving library is untouched.
+func TestTheCleanupJobLeavesNoRowOfItsLibrary(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		catalog, agent := newSQLiteCatalog(t)
+		seedTwoLibrariesInEveryTable(t, catalog)
+		finishedRunOf(t, catalog, "house/movies", workerScan, "scan-1")
+		if err := catalog.UpsertConfirmation(t.Context(), "house/movies", workerScan, "scan-1",
+			"movies-catalog-0", 1, time.Unix(20, 0)); err != nil {
+			t.Fatal(err)
+		}
+		serving(t, testConfirmer(t, catalog, io.Discard))
+		sweep := cleanupJob(t, catalog)
 
-	done := make(chan error, 1)
-	go func() { done <- sweep.runJob(t.Context()) }()
-	confirmTheRun(t, catalog, workerCleanup, "cleanup-1")
-	if err := <-done; err != nil {
-		t.Fatalf("the job failed: %v", err)
-	}
+		if err := sweep.runJob(t.Context()); err != nil {
+			t.Fatalf("the job failed: %v", err)
+		}
 
-	if got := agent.rowsFor(t, "confirmations", "house/movies"); got != 1 {
-		t.Errorf("the departed library holds %d confirmations, want the cleanup's alone", got)
-	}
+		for _, table := range catalogTables {
+			if got := agent.rowsFor(t, table, "house/movies"); got != 0 {
+				t.Errorf("the departed library holds %d rows in %s, want none", got, table)
+			}
+		}
+		if got := agent.rowsFor(t, "movies", "house/series"); got == 0 {
+			t.Error("the surviving library lost its rows")
+		}
+		if !strings.Contains(sweep.log.(*syncLog).String(), "holds the delete of the cleanup run") {
+			t.Errorf("log = %q, want the release named", sweep.log.(*syncLog).String())
+		}
+	})
+}
 
-	if got := agent.rowsFor(t, "movies", "house/movies"); got != 0 {
-		t.Errorf("the departed library holds %d movie rows, want none", got)
-	}
-	if got := agent.rowsFor(t, "movies", "house/series"); got == 0 {
-		t.Error("the surviving library lost its rows")
-	}
-	runs, err := catalog.Runs(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	held := runs["house/movies"]
-	if len(held) != 1 || held[0].Worker != workerCleanup || held[0].Job != "cleanup-1" {
-		t.Fatalf("the library holds %+v, want the cleanup run alone", held)
-	}
-	if held[0].Finished.IsZero() {
-		t.Error("the cleanup run carries no finish time")
-	}
+// A confirmation that no pod drops after the Job deletes its run fails
+// the Job, because an agent that exits before a standing pod holds the
+// delete leaves the run in the catalog for good.
+func TestTheCleanupJobFailsWhenNoPodHoldsTheDelete(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		catalog, agent := newSQLiteCatalog(t)
+		sweep := cleanupJob(t, catalog)
+		sweep.handoffTimeout = time.Minute
+
+		done := make(chan error, 1)
+		go func() { done <- sweep.runJob(t.Context()) }()
+		confirmTheRun(t, catalog, workerCleanup, "cleanup-1")
+		err := <-done
+
+		if err == nil || !strings.Contains(err.Error(), "dropped the confirmation of the cleanup run cleanup-1") {
+			t.Errorf("error = %v, want the release's timeout", err)
+		}
+		if got := agent.rowsFor(t, "runs", "house/movies"); got != 0 {
+			t.Errorf("the library holds %d runs, want the Job's own run deleted", got)
+		}
+	})
 }
 
 // A confirmation that never arrives fails the Job, so the rows stay

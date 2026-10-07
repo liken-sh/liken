@@ -42,14 +42,6 @@ func walkJob(status JobStatus) Job {
 	return houseJob("movies-walk-29380000", jobModeWalk, status)
 }
 
-// the report in which the namespace's reporter echoes one cleanup Job
-// back, which is the proof the deletes reached the standing catalog.
-func echoing(job string) libraryReport {
-	return libraryReport{Runs: []libraryRun{
-		{Worker: workerCleanup, Job: job, Started: testNow, Finished: testNow},
-	}}
-}
-
 // reads the Departing condition off the held Library, where every rung of
 // the ladder reports.
 func departingCondition(t *testing.T, cluster *fakeCluster) Condition {
@@ -337,63 +329,6 @@ func TestTheCleanupJobReadsItsAgentAndNoBroker(t *testing.T) {
 	}
 	if _, held := environment[busAddressVariable]; held {
 		t.Errorf("%s reaches the sweep, and the sweep uses no bus", busAddressVariable)
-	}
-}
-
-// a Job that exited zero is not the end of it: the rows leave the
-// library's own claim only when the standing catalog holds them, and
-// the reporter's echo is what says so.
-func TestDepartWaitsForTheReportersEcho(t *testing.T) {
-	cluster := newFakeCluster()
-	library := departingMovies(cluster)
-	jobs := []Job{houseJob("movies-cleanup", workerCleanup, JobStatus{Succeeded: 1})}
-
-	if err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), jobs); err != nil {
-		t.Fatal(err)
-	}
-
-	if cluster.heldLibrary("movies") == nil {
-		t.Fatal("the finalizer was released before the reporter echoed the sweep")
-	}
-	if stage := departingCondition(t, cluster); stage.Reason != reasonAwaitingEcho {
-		t.Errorf("Departing = %+v, want %s", stage, reasonAwaitingEcho)
-	}
-}
-
-// a run that names another Job, or names this one with no time on it,
-// is not this sweep's echo.
-func TestDepartReadsOnlyItsOwnEcho(t *testing.T) {
-	cases := []struct {
-		name string
-		runs []libraryRun
-	}{
-		{name: "no runs at all"},
-		{name: "another job", runs: []libraryRun{
-			{Worker: workerCleanup, Job: "movies-cleanup-before", Finished: testNow},
-		}},
-		{name: "another worker", runs: []libraryRun{
-			{Worker: workerScan, Job: "movies-cleanup", Finished: testNow},
-		}},
-		{name: "unfinished", runs: []libraryRun{
-			{Worker: workerCleanup, Job: "movies-cleanup", Started: testNow},
-		}},
-	}
-	for _, one := range cases {
-		t.Run(one.name, func(t *testing.T) {
-			cluster := newFakeCluster()
-			library := departingMovies(cluster)
-			operator := testOperator(t, cluster)
-			operator.reports.fold("house", "movies", libraryReport{Runs: one.runs})
-			jobs := []Job{houseJob("movies-cleanup", workerCleanup, JobStatus{Succeeded: 1})}
-
-			if err := operator.depart(t.Context(), library, standingCatalog(), jobs); err != nil {
-				t.Fatal(err)
-			}
-
-			if cluster.heldLibrary("movies") == nil {
-				t.Error("the finalizer was released on an echo that names another run")
-			}
-		})
 	}
 }
 

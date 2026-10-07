@@ -180,6 +180,17 @@ new broadcast to current peers. A `Job` that waits more than two minutes
 fails, and Kubernetes retries it. `HANDOFF_TIMEOUT` sets that limit. The
 rows remain safe on the `Library`'s claim.
 
+A confirmation stays only as long as the run it answers. When a `runs`
+row is deleted, or a later `Job` of the same worker replaces it, the
+`confirmer` deletes every confirmation whose run is gone, whichever pod
+wrote it. It does the same each time its run stream opens, so a delete
+made while the `confirmer` was down is answered when it starts. The
+cleanup `Job` of a deleted `Library` relies on this. It deletes its own
+`runs` row after the confirmation, and exits only when that
+confirmation leaves its copy, because a catalog pod deletes it only
+after that pod holds the delete. The same `HANDOFF_TIMEOUT` bounds this
+wait.
+
 Before a phase reads its first gap, it waits until the local copy holds
 the newest run a catalog pod confirmed for the `Library`, the one the
 reporter last published. A gap read against a copy that has not synced

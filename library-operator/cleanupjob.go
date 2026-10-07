@@ -175,26 +175,12 @@ func cleanupBackoffDelay(count int) time.Duration {
 	return delay
 }
 
-// Whether the reporter has echoed this cleanup Job. The Job
-// writes its runs row last and the catalog pod publishes the row back
-// in the library's report, so a run that names this Job with a time on
-// it is the proof that the deletes reached the standing catalog.
-func cleanupEchoed(latest *libraryReport, job string) bool {
-	if latest == nil {
-		return false
-	}
-	for _, run := range latest.Runs {
-		if run.Worker == workerCleanup && run.Job == job && !run.Finished.IsZero() {
-			return true
-		}
-	}
-	return false
-}
-
-// The departing Library's rows are gone once its cleanup Job
-// exited zero and the reporter echoed that same Job.
-func cleanupComplete(job *Job, latest *libraryReport) bool {
-	return job != nil && job.Status.Succeeded > 0 && cleanupEchoed(latest, job.Metadata.Name)
+// The departing Library's rows are gone once its cleanup Job exited
+// zero. The Job exits zero only after a standing catalog pod confirmed
+// its sweep and held the delete of its own run, so the catalog holds no
+// row of the library, and the reporter publishes no report for it.
+func cleanupComplete(job *Job) bool {
+	return job != nil && job.Status.Succeeded > 0
 }
 
 // The cleanup Job of a released Library goes with its pods, so

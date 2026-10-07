@@ -223,6 +223,83 @@ func TestADeleteClearsTheRowWhateverRunItCarries(t *testing.T) {
 	})
 }
 
+// A cleanup Job deletes its own run once a pod confirmed it. The
+// confirmer drops its confirmation in answer, so the departed library
+// keeps no row, and the drop is what tells the Job a standing pod holds
+// the delete.
+func TestTheConfirmerDropsTheConfirmationOfADeletedRun(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		catalog, agent := newSQLiteCatalog(t)
+		serving(t, testConfirmer(t, catalog, io.Discard))
+		run := finishedRunOf(t, catalog, "house/departed", workerCleanup, "departed-cleanup")
+		awaitConfirmation(t, catalog, "house/departed", workerCleanup, "departed-cleanup", run.Version)
+
+		if _, err := catalog.DeleteRun(t.Context(), "house/departed", workerCleanup); err != nil {
+			t.Fatal(err)
+		}
+
+		awaitRowCount(t, agent, "confirmations", 0)
+	})
+}
+
+// A confirmer can confirm a run in the moment after a cleanup Job
+// deleted its row and before the stream carried the delete. The delete
+// arrives after the confirmation, and it takes the confirmation.
+func TestAConfirmationWrittenAfterItsRunWentIsDropped(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		catalog, agent := newSQLiteCatalog(t)
+		work := testConfirmer(t, catalog, io.Discard)
+		gone := finishedRun{library: "house/departed", worker: workerScan, job: "scan-1",
+			actor: sqliteAgentActor, version: 12}
+		if err := catalog.UpsertConfirmation(t.Context(), gone.library, gone.worker, gone.job,
+			testConfirmerPod, gone.version, time.Unix(30, 0)); err != nil {
+			t.Fatal(err)
+		}
+
+		streamDelete(t, work, gone)
+
+		if got := agent.rowCount(t, "confirmations"); got != 0 {
+			t.Errorf("confirmations holds %d rows, want the late one dropped", got)
+		}
+	})
+}
+
+// A delete made while no stream was open never reaches the confirmer
+// as a delete. The next stream drops the confirmation when it opens.
+func TestTheConfirmerDropsOrphansWhenItsStreamOpens(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		catalog, agent := newSQLiteCatalog(t)
+		if err := catalog.UpsertConfirmation(t.Context(), "house/departed", workerCleanup,
+			"departed-cleanup", "movies-catalog-1", 12, time.Unix(30, 0)); err != nil {
+			t.Fatal(err)
+		}
+
+		serving(t, testConfirmer(t, catalog, io.Discard))
+
+		awaitRowCount(t, agent, "confirmations", 0)
+	})
+}
+
+// A delete drops only the confirmations whose run is gone. The
+// confirmation of a run that stands is the proof a Job may still wait on.
+func TestADeleteKeepsTheConfirmationOfARunThatStands(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		catalog, agent := newSQLiteCatalog(t)
+		serving(t, testConfirmer(t, catalog, io.Discard))
+		kept := finishedRunOf(t, catalog, "house/movies", workerScan, "scan-1")
+		awaitConfirmation(t, catalog, "house/movies", workerScan, "scan-1", kept.Version)
+		gone := finishedRunOf(t, catalog, "house/departed", workerScan, "scan-1")
+		awaitConfirmation(t, catalog, "house/departed", workerScan, "scan-1", gone.Version)
+
+		if _, err := catalog.DeleteRuns(t.Context(), "house/departed"); err != nil {
+			t.Fatal(err)
+		}
+
+		awaitRowCount(t, agent, "confirmations", 1)
+		awaitConfirmation(t, catalog, "house/movies", workerScan, "scan-1", kept.Version)
+	})
+}
+
 // Hands one delete to the confirmer the way the run stream does.
 func streamDelete(t *testing.T, work *confirmer, run finishedRun) {
 	t.Helper()

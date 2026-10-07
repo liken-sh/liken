@@ -7,9 +7,13 @@ package main
 // and the operator cannot.
 //
 // The sweep is one pass, not a loop. The Job writes its own runs
-// row as its last write and waits for a catalog pod to confirm it, because
+// row after the sweep and waits for a catalog pod to confirm it, because
 // an agent that receives SIGTERM drops whatever broadcasts it still holds.
-// The confirmation is what says a standing pod holds the deletes.
+// The confirmation is what says a standing pod holds the deletes. The Job
+// then deletes that run too (cleanuprelease.go), so the departed library
+// leaves no row in the catalog, and it exits zero only when a standing pod
+// holds that delete. The operator releases the Library's finalizer on
+// that exit.
 
 import (
 	"context"
@@ -80,9 +84,9 @@ func newSweeper(log io.Writer) *sweeper {
 }
 
 // The whole of a cleanup Job: take every row the library holds,
-// including the runs and confirmations of every other worker, then write
-// its own run as the last row the agent has to broadcast, and wait for a
-// catalog pod to confirm it.
+// including the runs and confirmations of every other worker, write its
+// own run and wait for a catalog pod to confirm it, then delete that run
+// and wait for a catalog pod to hold the delete.
 func (s *sweeper) runJob(ctx context.Context) error {
 	started := time.Now().UTC()
 	if err := s.sweep(ctx); err != nil {
@@ -90,13 +94,16 @@ func (s *sweeper) runJob(ctx context.Context) error {
 	}
 
 	run := libraryRun{Worker: workerCleanup, Job: s.job, Started: started, Finished: time.Now().UTC()}
-	return handOff(ctx, s.catalog, s.library, run, s.log, s.handoffTimeout)
+	if err := handOff(ctx, s.catalog, s.library, run, s.log, s.handoffTimeout); err != nil {
+		return err
+	}
+	return releaseRun(ctx, s.catalog, s.library, s.job, s.log, s.handoffTimeout)
 }
 
 // Deletes every row of the library in every table, the runs of
 // every other worker with them, so the only rows this library holds after
 // the sweep are the run the Job writes next and the confirmations that
-// the catalog pods write for that run.
+// the catalog pods write for that run. The release deletes those last.
 func (s *sweeper) sweep(ctx context.Context) error {
 	removed, err := s.catalog.SweepLibrary(ctx, s.library)
 	if err != nil {

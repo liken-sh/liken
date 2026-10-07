@@ -596,7 +596,7 @@ spec:
                     Departing reports the teardown of a deleted Library:
                     True for as long as the operator's finalizer holds
                     the object open, with the reason ScanRunning,
-                    EnrichRunning, Sweeping, AwaitingEcho, or Blocked,
+                    EnrichRunning, Sweeping, or Blocked,
                     and a message that names what the teardown waits
                     on. Sources reports spec.sources: True when every
                     name resolves to a MetadataProvider and one of them

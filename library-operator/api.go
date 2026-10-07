@@ -812,14 +812,12 @@ const (
 
 	// The Departing condition's reasons, in the order depart.go
 	// reaches them: a walk Job of this library is still running, the
-	// cleanup Job is deleting the rows, the Job finished and the
-	// reporter has not echoed it yet, and the cleanup cannot run at
+	// cleanup Job is deleting the rows, and the cleanup cannot run at
 	// all. Blocked covers a cleanup Job that failed and a namespace
 	// with more than one Catalog.
-	reasonScanRunning  = "ScanRunning"
-	reasonSweeping     = "Sweeping"
-	reasonAwaitingEcho = "AwaitingEcho"
-	reasonBlocked      = "Blocked"
+	reasonScanRunning = "ScanRunning"
+	reasonSweeping    = "Sweeping"
+	reasonBlocked     = "Blocked"
 	// A Job of this library that fills gaps, or a Job an earlier release
 	// created, is still running. It writes onto the volume and into the
 	// catalog the sweep is emptying.

@@ -56,6 +56,22 @@ func (c *Catalog) pruneConfirmations(ctx context.Context, library, worker, keepJ
 	}})
 }
 
+// DropOrphanConfirmations takes every confirmation whose run is gone
+// from the runs table, whichever pod wrote it. A confirmation outlives its
+// run in two ways: a cleanup Job deletes its own run once a pod confirmed
+// it, and a confirmer can confirm a run in the moment after a delete of
+// its row and before its run stream carries that delete. Either row would
+// keep a departed library's key in the catalog. A run that a later Job of
+// the same worker replaced is gone too, so the confirmations of that
+// older Job go with it.
+func (c *Catalog) dropOrphanConfirmations(ctx context.Context) (int, error) {
+	return c.apply(ctx, []statement{{
+		sql: `DELETE FROM confirmations WHERE NOT EXISTS (SELECT 1 FROM runs ` +
+			`WHERE runs.library = confirmations.library AND runs.worker = confirmations.worker ` +
+			`AND runs.job = confirmations.job)`,
+	}})
+}
+
 // ConfirmedBy reports whether one pod has already confirmed one run
 // at one version, which is what keeps a confirmer from writing its row
 // again on every change the runs table streams. A retried pod of the same
