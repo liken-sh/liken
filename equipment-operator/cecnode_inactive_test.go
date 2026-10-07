@@ -50,6 +50,10 @@ func TestADarkScreenSendsInactiveSource(t *testing.T) {
 				for _, message := range c.before {
 					wire.Send(message)
 				}
+				// The adapter must hear the moved route before the
+				// screen goes dark, or it still holds the route to the
+				// Display and sends Inactive Source for it.
+				synctest.Wait()
 
 				asleep := *session
 				asleep.Awake = false
@@ -125,6 +129,10 @@ func TestAStoppedNodeSendsInactiveSource(t *testing.T) {
 				for _, message := range c.before {
 					wire.Send(message)
 				}
+				// The adapter must hear the moved route before the
+				// screen goes dark, or it still holds the route to the
+				// Display and sends Inactive Source for it.
+				synctest.Wait()
 				time.Sleep(quietPeriod)
 
 				stop()
