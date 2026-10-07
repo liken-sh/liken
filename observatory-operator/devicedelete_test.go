@@ -204,3 +204,19 @@ func TestADeletedDeviceReadsConnectedWhileItsDeactivationRuns(t *testing.T) {
 		}
 	})
 }
+
+// A dome deleted while a mount is unparked does not park: its lock
+// refuses, because the dome would close onto the mount. The failure
+// names the lock, as a refusal in a trigger does.
+func TestADomeDeletedOverAnUnparkedMountNamesItsLock(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := readyWorld(t)
+		w.api.deleteNamed(kindCollection(observatory.DomeKind), "lab")
+		w.gone(observatory.DomeKind, "lab", 5*time.Minute)
+		failed := "Warning ProcedureFailed: Procedure deactivation failed: state: Parked: Dome lab refused to park, because Mount east is unparked or moving. In Observatory lab, a dome does not park until every mount parks"
+		if got := typedEvents(w.api, observatory.DomeKind, "lab"); !slices.Contains(got, failed) {
+			t.Errorf("dome Events = %q, want %q", got, failed)
+		}
+	})
+}

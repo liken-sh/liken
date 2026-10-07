@@ -176,7 +176,13 @@ func (o *operator) explainRefusal(c procCall, h handle, a action, err error) err
 		return err
 	}
 	t := o.snapshot()
-	site, ok := t.observatories[t.observatoryOf(h.d.kind, h.d.name())]
+	// The call names the observatory of a device that left, which the
+	// tree places nowhere.
+	name := c.res.observatory
+	if name == "" {
+		name = t.observatoryOf(h.d.kind, h.d.name())
+	}
+	site, ok := t.observatories[name]
 	if !ok {
 		return err
 	}
@@ -214,9 +220,23 @@ func (o *operator) keepLocks(ctx context.Context) {
 }
 
 // domesOf answers the domes of an observatory, the Dome resources whose
-// spec.observatory names it. The park locks hold while there is one.
+// spec.observatory names it. The park locks hold while there is one. A
+// deleted dome counts while its pod runs on the observatory's server,
+// because its deactivation parks it there (leaves.go) and the dome
+// still turns over the mounts until its driver stops.
 func domesOf(t *tree, site *observatory.Observatory) []*device {
-	return sortedDevices(t.devicesOf(serverRef{observatory.ObservatoryKind, site.Metadata.Name}, observatory.DomeKind))
+	siteRef := serverRef{observatory.ObservatoryKind, site.Metadata.Name}
+	domes := t.devicesOf(siteRef, observatory.DomeKind)
+	for _, d := range t.devices {
+		if d.kind != observatory.DomeKind || !deleting(d.object.Metadata) {
+			continue
+		}
+		name, _ := objectName(d.kind, d.name())
+		if p, ok := t.pods[name]; ok && p.Metadata.Labels[labelServer] == siteRef.String() {
+			domes = append(domes, d)
+		}
+	}
+	return sortedDevices(domes)
 }
 
 // planLocks answers the relays, the watches, and the condition of one
