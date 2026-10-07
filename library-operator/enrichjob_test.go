@@ -536,18 +536,6 @@ func TestTheLibraryJobLeavesTrickplayToItsWorker(t *testing.T) {
 	if claims := job.Spec.Template.Spec.ResourceClaims; len(claims) != 0 {
 		t.Errorf("resourceClaims = %+v, want none", claims)
 	}
-	if got := envOf(*jobContainer(job, closeMode))[libraryWorkListsVariable]; got != factTrickplay {
-		t.Errorf("%s = %q, want the trickplay list", libraryWorkListsVariable, got)
-	}
-}
-
-// A Library that runs no heavy fact writes no list.
-func TestALibraryWithNoHeavyFactWritesNoList(t *testing.T) {
-	job := testEnrichJob(studioMovies(), "")
-
-	if got := envOf(*jobContainer(job, closeMode))[libraryWorkListsVariable]; got != "" {
-		t.Errorf("%s = %q, want none", libraryWorkListsVariable, got)
-	}
 }
 
 // The trailer files run where the Library turns them on and a Ready source

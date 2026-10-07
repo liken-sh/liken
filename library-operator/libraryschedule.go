@@ -87,7 +87,8 @@ func catalogJobsOf(jobs []Job, namespace, library string) []Job {
 // Whether any Job of this Library that holds its catalog claim is unfinished:
 // one the controller has marked neither Complete nor Failed. A Job between the
 // pods of its backoff counts. A heavy fact's worker does not count, because
-// it runs no agent, so a walk or a webhook's rescan never waits for a decode.
+// its agent runs on a copy of its own, so a walk or a webhook's rescan never
+// waits for a decode.
 func libraryJobUnfinished(jobs []Job, namespace, library string) bool {
 	return slices.ContainsFunc(catalogJobsOf(jobs, namespace, library), func(job Job) bool {
 		return !job.finished()

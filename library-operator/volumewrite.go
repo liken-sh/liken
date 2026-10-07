@@ -7,7 +7,8 @@ package main
 // temporary's, a remove that takes one file this operator wrote and nothing
 // else reads, a remove of a partial file a stopped writer left under .liken,
 // the trickplay map, the move and the remove a merge of two
-// .contributors/ entries makes, and the replace of a thumbnail or a tile
+// .contributors/ entries makes, the remove of the .liken directory at the
+// library root (rootliken.go), and the replace of a thumbnail or a tile
 // directory made from the file a path held before. The edit of one element
 // in an .nfo file is in xmledit.go, and the door for a file a writer reads,
 // changes, and writes back is in volumeupdate.go.
@@ -378,6 +379,19 @@ func (w *volumeWriter) removeMergedEntry(dir string) error {
 			dir, contributorsDirectory)
 	}
 	return os.RemoveAll(dir)
+}
+
+// The remove of the .liken directory at one library root, and of nothing
+// else: the path is built here from the root, so no caller can name another
+// directory. A root with no such directory is success.
+func (w *volumeWriter) removeRootLiken(root string) (bool, error) {
+	liken := filepath.Join(root, likenDirectory)
+	if _, err := os.Lstat(liken); errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	return true, os.RemoveAll(liken)
 }
 
 // The suffix of the one file name replaceEarlierFile takes: an episode's

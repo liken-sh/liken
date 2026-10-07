@@ -3,10 +3,10 @@
 This plan, written on 2026-10-07, gives each pod of a worker `Job` its
 own catalog agent, so the worker reads its fact's gap from the catalog
 instead of from a work list on the media volume, and splits that gap
-among its pods by hours instead of by a hash. It answers the open
-problem
-[`a-fan-out-share-is-one-title-folder`](open-problems/a-fan-out-share-is-one-title-folder.md).
-Not built.
+among its pods by hours instead of by a hash. It also removes the
+`.liken` directory at the library root. It answers the open problem "A
+fan-out share is one title folder", which the commit that built it
+deleted. Built on 2026-10-07. The drill on `liken-1` has not run yet.
 
 ## The problem
 
@@ -122,10 +122,21 @@ can read a different gap. A video in the later gap and not the earlier
 is in at most one share or in none, and a video in none stays in the
 gap for the next worker. Both outcomes are the ones plan 76 accepted.
 
+### The library root
+
+The root of a `Library` holds title folders and grouping folders, and
+the walk reads titles only below it. A `.liken` directory at the root
+holds no fact: on `liken-1` on 2026-10-07, it held the work lists of
+both clusters that mount the volumes, and ledgers that older releases
+wrote when they read the root, or a `trailers` folder at the root, as a
+title. The close container of every library `Job` removes the
+directory. A rescan of the root reads no title in the root itself, and
+the guides state that the root never holds a video file of its own.
+
 ### What a person sees
 
-- The `.liken/worklists` directory leaves each library's volume after
-  its next library `Job`.
+- The `.liken` directory at each library's root, with the work lists
+  in it, leaves the volume after the `Library`'s next library `Job`.
 - A worker `Job`'s pods take a little longer to start on a node where
   they have not run, while the agent catches up.
 - `kubectl get pvc` lists `<catalog>-workers` when

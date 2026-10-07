@@ -13,9 +13,9 @@ import (
 // volume, or ffmpeg's own output will not answer, and what the staging door
 // refuses.
 
-// A gap read that fails writes no list, because a list from part of the gap
-// would replace the whole list before it.
-func TestAWorkListIsNotWrittenWhereTheGapReadIsRefused(t *testing.T) {
+// A gap read that fails is an error, so the worker fails and works no part of
+// a gap it could not read whole.
+func TestAGapReadThatIsRefusedIsAnError(t *testing.T) {
 	catalog := NewCatalog("http://127.0.0.1:1", &http.Client{Timeout: time.Second})
 
 	if _, err := catalog.workItems(t.Context(), factTrickplay, trickplayLibrary, ledgerTime, time.Time{}); err == nil {
@@ -24,7 +24,7 @@ func TestAWorkListIsNotWrittenWhereTheGapReadIsRefused(t *testing.T) {
 }
 
 // A row the gap read cannot use is no work, so a short answer or a row with
-// no path leaves the list.
+// no path leaves the gap.
 func TestARowTheTrickplayGapCannotUseIsNoWork(t *testing.T) {
 	body := `{"columns":["path","size_bytes","duration_ms"]}` + "\n" +
 		`{"row":[1,["",5,100]]}` + "\n" +
@@ -37,7 +37,7 @@ func TestARowTheTrickplayGapCannotUseIsNoWork(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(items) != 0 {
-		t.Errorf("work list = %+v, want neither row", items)
+		t.Errorf("gap = %+v, want neither row", items)
 	}
 }
 

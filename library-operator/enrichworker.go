@@ -193,7 +193,7 @@ func (e *enricher) mayStartTitle() bool {
 	return e.stopStarting.IsZero() || time.Now().Before(e.stopStarting)
 }
 
-// Reads one fact's work list out of the local copy of the catalog, with
+// Reads one fact's gap out of the local copy of the catalog, with
 // the same query the reporter counts the gap with.
 func (e *enricher) gaps(ctx context.Context, fact string, now time.Time) ([]string, error) {
 	params := gapParams(fact, e.library, now, e.refresh[fact])

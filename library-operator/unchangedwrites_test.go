@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 	"time"
 )
@@ -66,13 +65,6 @@ func TestASecondPassWithTheSameInputWritesNothing(t *testing.T) {
 			}
 			return filepath.Join(dir, likenDirectory, likenLedgerName(factTrickplay))
 		}},
-		{"a work list", func(t *testing.T, w *volumeWriter, dir string) string {
-			items := []workItem{{Path: "A/a.mkv", Size: 4, DurationMs: 1000, Listed: time.Now().UTC()}}
-			if err := w.writeWorkList(dir, testWorkLibrary, factTrickplay, items); err != nil {
-				t.Fatal(err)
-			}
-			return workListPath(dir, testWorkLibrary, factTrickplay)
-		}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -87,69 +79,6 @@ func TestASecondPassWithTheSameInputWritesNothing(t *testing.T) {
 			}
 			if left := namesIn(t, filepath.Dir(target)); len(left) != 1 {
 				t.Errorf("the directory holds %v, want the file alone", left)
-			}
-		})
-	}
-}
-
-// A list of the same videos keeps the time of the list that named them first.
-// The worker passes over a video whose ledger holds an attempt at or after
-// that time, so the earlier time still covers an attempt the catalog has not
-// read yet.
-func TestAWorkListOfTheSameVideosKeepsItsFirstTime(t *testing.T) {
-	root := t.TempDir()
-	writer := newVolumeWriter("movies-close")
-	first := []workItem{{Path: "A/a.mkv", Size: 4, DurationMs: 1000, Listed: ledgerTime}}
-	again := []workItem{{Path: "A/a.mkv", Size: 4, DurationMs: 1000, Listed: ledgerTime.Add(time.Hour)}}
-	if err := writer.writeWorkList(root, testWorkLibrary, factTrickplay, first); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := writer.writeWorkList(root, testWorkLibrary, factTrickplay, again); err != nil {
-		t.Fatal(err)
-	}
-
-	read, err := readWorkList(root, testWorkLibrary, factTrickplay)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(read, first) {
-		t.Errorf("read %+v, want the first list %+v", read, first)
-	}
-}
-
-// A list that names another video, another size, or another length is a new
-// list, and it lands whole with its own time.
-func TestAWorkListOfOtherVideosReplacesTheOneBefore(t *testing.T) {
-	tests := []struct {
-		name string
-		next workItem
-	}{
-		{"another video", workItem{Path: "B/b.mkv", Size: 4, DurationMs: 1000}},
-		{"another size", workItem{Path: "A/a.mkv", Size: 5, DurationMs: 1000}},
-		{"another length", workItem{Path: "A/a.mkv", Size: 4, DurationMs: 2000}},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			root := t.TempDir()
-			writer := newVolumeWriter("movies-close")
-			first := []workItem{{Path: "A/a.mkv", Size: 4, DurationMs: 1000, Listed: ledgerTime}}
-			if err := writer.writeWorkList(root, testWorkLibrary, factTrickplay, first); err != nil {
-				t.Fatal(err)
-			}
-			next := test.next
-			next.Listed = ledgerTime.Add(time.Hour)
-
-			if err := writer.writeWorkList(root, testWorkLibrary, factTrickplay, []workItem{next}); err != nil {
-				t.Fatal(err)
-			}
-
-			read, err := readWorkList(root, testWorkLibrary, factTrickplay)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !slices.Equal(read, []workItem{next}) {
-				t.Errorf("read %+v, want the new list %+v", read, []workItem{next})
 			}
 		})
 	}

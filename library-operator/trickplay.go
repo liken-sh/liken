@@ -53,8 +53,8 @@ var trickplayWorker = factWorker{
 // thumbnail track while a person scrubs a title, and a trailer, an extra, a
 // sample, or a theme is not a title.
 //
-// The query selects the columns a work list carries, so the rows are the
-// worker's list as they are.
+// The query selects the columns of a workItem, so the rows are the worker's
+// gap as they are.
 func trickplayGapSQL() string {
 	return `SELECT path, size_bytes, duration_ms FROM files ` +
 		`WHERE library = ?1 AND type = '` + fileTypeVideo + `' AND present = 1 ` +

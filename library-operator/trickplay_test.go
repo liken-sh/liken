@@ -112,7 +112,7 @@ func standInFFmpegTakingItsOutput(t *testing.T) {
 }
 
 // seedTrickplayItem writes one movie's video onto the volume and returns the
-// line a work list holds for it: a feature with a length and no tiles, which
+// item a gap holds for it: a feature with a length and no tiles, which
 // is the shape of a trickplay gap.
 func seedTrickplayItem(t *testing.T, root string, duration time.Duration) workItem {
 	t.Helper()
@@ -154,12 +154,12 @@ func TestTheTrickplayGapAgainstTheRealSchema(t *testing.T) {
 	}
 	want := workItem{Path: "A/a.mkv", Size: 4096, DurationMs: 6540000, Listed: ledgerTime}
 	if len(items) != 1 || items[0] != want {
-		t.Fatalf("work list = %+v, want the one video with a length and no tiles, as %+v", items, want)
+		t.Fatalf("gap = %+v, want the one video with a length and no tiles, as %+v", items, want)
 	}
 }
 
 // An attempt inside the retry window takes the file out of the gap, and the
-// count the reporter reads is the same one the work list is written from.
+// count the reporter reads is the same one the worker reads its gap from.
 func TestATrickplayAttemptClosesItsOwnGapAgainstTheRealSchema(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	seed := &walkResult{
@@ -198,11 +198,8 @@ func TestATrickplayAttemptClosesItsOwnGapAgainstTheRealSchema(t *testing.T) {
 func TestTheTrickplayWorkerWritesSheetsBesideTheVideo(t *testing.T) {
 	root := t.TempDir()
 	item := seedTrickplayItem(t, root, 1050*time.Second)
-	if err := newVolumeWriter("movies-close").writeWorkList(root, testWorkLibrary, factTrickplay, []workItem{item}); err != nil {
-		t.Fatal(err)
-	}
 	standInFFmpeg(t, 2)
-	work, log := testFactWorker(t, trickplayWorker, libraryKindMovies, root)
+	work, log := gapWorker(t, trickplayWorker, libraryKindMovies, root, []workItem{item})
 
 	if err := work.work(t.Context()); err != nil {
 		t.Fatal(err)
@@ -287,7 +284,7 @@ func TestWhatOneTrickplayAttemptRecords(t *testing.T) {
 	}
 }
 
-// Tiles that landed after the list was written close the gap without a
+// Tiles that landed after the gap was read close the gap without a
 // decode, and the ledger says the file has them.
 func TestATrickplayDirectoryOnTheVolumeCostsNoDecode(t *testing.T) {
 	root := t.TempDir()

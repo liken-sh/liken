@@ -35,7 +35,11 @@ is the one kind whose files are written by people, and
 [Franchises](/docs/guides/franchises/) covers it.
 
 `root` defaults to `/` and must be absolute. One volume can therefore
-hold several libraries at different roots. The kind and the storage
+hold several libraries at different roots. The root holds title
+folders and grouping folders, never a video file of its own: the walk
+catalogs no video that sits directly in the root, so put each film in
+a folder of its own. [Scanning](/docs/guides/scanning/#what-a-scan-reads)
+gives the layout of each kind. The kind and the storage
 are immutable. A different volume, root, or kind is a different
 `Library`.
 

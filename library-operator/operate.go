@@ -181,8 +181,8 @@ type operator struct {
 	// deleted, keyed the way the report desk keys a Library.
 	legacyRetired map[string]bool
 
-	// The library Job whose work list each heavy fact's last worker took,
-	// keyed by the Library and the fact (factworkerjob.go).
+	// The library Job whose enrich run started each heavy fact's last
+	// worker, keyed by the Library and the fact (factworkerjob.go).
 	workListsTaken map[string]string
 
 	// Which of the classes this pass has read are served by the per-node
@@ -441,7 +441,7 @@ func (o *operator) pass() {
 			delete(o.legacyRetired, key)
 		}
 	}
-	// A restand key and a work list key name a Library and a worker, so the
+	// A restand key and a worker key name a Library and a worker, so the
 	// Library each names is the part before the last separator.
 	for key := range o.failedStands {
 		if !live[key[:strings.LastIndex(key, "/")]] {

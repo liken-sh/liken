@@ -44,7 +44,8 @@ func TestEachWorkerClaimsFromTheTemplateItsBlockNames(t *testing.T) {
 			library.Spec.Trickplay = LibraryTrickplay{Enabled: true, GPUResourceClaimTemplate: test.template}
 			library.Spec.Appearances = LibraryAppearances{Enabled: true, GPUResourceClaimTemplate: test.template}
 
-			pod := buildFactWorkerJob(library, test.worker, jobImages{}, "", "movies-walk-1", testNow).Spec.Template.Spec
+			pod := buildFactWorkerJob(library, testNamespaceCatalog(), test.worker, jobImages{}, "", enrichedRun(),
+				testNow).Spec.Template.Spec
 
 			var want []PodResourceClaim
 			var wantContainer []ResourceClaim
@@ -92,7 +93,8 @@ func runWorkers(t *testing.T, operator *operator, library *Library) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := operator.runFactWorkers(t.Context(), library, listedReport(3), nil, templates, testNow); err != nil {
+	if err := operator.runFactWorkers(t.Context(), library, testNamespaceCatalog(), listedReport(3), nil, templates,
+		testNow); err != nil {
 		t.Fatal(err)
 	}
 }

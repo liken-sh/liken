@@ -5,8 +5,7 @@ package main
 // containers that start together, beside one Corrosion agent on the
 // Library's one catalog claim. The agent is the only init container, because
 // Kubernetes runs a native sidecar as an init container. A close container
-// writes the run's start, waits for every phase's mark, writes the work list
-// of each heavy fact the Library runs, and hands off.
+// writes the run's start, waits for every phase's mark, and hands off.
 //
 // The pod names every phase and the facts each runs, so a person reads the
 // Job's work with kubectl get pod, and the operator holds no order of its
@@ -152,9 +151,6 @@ func libraryPodTemplate(library *Library, providers providerSet, languages []str
 	}
 	closing := enrichContainer(library, closeMode, closeMode, plan.paths, images.operator)
 	withPhaseEnv(&closing, plan, included)
-	if facts := workListFacts(library); len(facts) > 0 {
-		closing.Env = append(closing.Env, EnvVar{Name: libraryWorkListsVariable, Value: strings.Join(facts, ",")})
-	}
 	containers = append(containers, closing)
 
 	spec := PodSpec{

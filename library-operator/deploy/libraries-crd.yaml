@@ -311,7 +311,7 @@ spec:
                     enabled:
                       type: boolean
                       default: false
-                      description: "Off by default, because a first pass is hours of CPU for a library of any size. The pass reads the feature of every title end to end and writes a directory of sheets beside each feature. It reads no trailer, extra, sample, or theme. Turned on, each Job of this library writes the features that still need sheets as a work list onto the volume when it ends, and the operator then starts a trickplay worker Job. The worker holds no catalog, so no walk or webhook rescan waits for it. It works through the list one feature at a time and asks the operator to rescan each title's folder when the title is done, so the catalog shows the sheets within seconds."
+                      description: "Off by default, because a first pass is hours of CPU for a library of any size. The pass reads the feature of every title end to end and writes a directory of sheets beside each feature. It reads no trailer, extra, sample, or theme. Turned on, the operator starts a trickplay worker Job when a Job of this library ends with features that still need sheets. Each worker pod reads that gap from a copy of the catalog of its own, so no walk or webhook rescan waits for it. It works through its share of the gap one feature at a time and asks the operator to rescan each title's folder when the title is done, so the catalog shows the sheets within seconds."
                     gpuResourceClaimTemplate:
                       type: string
                       minLength: 1
@@ -321,7 +321,7 @@ spec:
                       minimum: 1
                       maximum: 16
                       default: 1
-                      description: "How many pods the trickplay worker Job runs at once. At 1, its default, one pod works the whole list. Above 1, the worker is an Indexed Job, and each pod takes the videos of the title folders that hash to its index, so a series and its ledger stay in one pod. Each pod claims its own render node from the template that gpuResourceClaimTemplate names. The pods prefer different nodes and share a node when no other node can take them. A failed pod is retried on its own share, up to twice, and the other pods keep their work. The cap of 16 keeps one typing error from starting hundreds of pods."
+                      description: "How many pods the trickplay worker Job runs at once. At 1, its default, one pod works the whole gap. Above 1, the worker is an Indexed Job, and every pod splits the gap by hours the same way: each title folder, longest first, goes to the pod with the fewest hours so far, so a series and its ledger stay in one pod. Each pod claims its own render node from the template that gpuResourceClaimTemplate names. The pods prefer different nodes and share a node when no other node can take them. A failed pod is retried on its own share, up to twice, and the other pods keep their work. The cap of 16 keeps one typing error from starting hundreds of pods."
                 trailers:
                   type: object
                   default: {}
@@ -339,7 +339,7 @@ spec:
                     enabled:
                       type: boolean
                       default: false
-                      description: "Off by default, because a first pass decodes every frame of every feature in the library, which took 1.5 to 6 minutes for a film on a laptop GPU in the measurements of plan 75, and takes longer in software. A feature needs this fact when the probe gave it a length and its title credits at least one actor with a headshot. An episode takes its series' cast. Turned on, each Job of this library writes the features that still need this fact as a work list onto the volume when it ends, and the operator then starts an appearances worker Job. The worker holds no catalog, so no walk or webhook rescan waits for it. It finds and embeds the faces of one feature at a time, matches them with the cast, writes the answer and the attempt to the ledger, and asks the operator to rescan each title's folder when the title is done. A result stays until the file at its path is replaced."
+                      description: "Off by default, because a first pass decodes every frame of every feature in the library, which took 1.5 to 6 minutes for a film on a laptop GPU in the measurements of plan 75, and takes longer in software. A feature needs this fact when the probe gave it a length and its title credits at least one actor with a headshot. An episode takes its series' cast. Turned on, the operator starts an appearances worker Job when a Job of this library ends with features that still need this fact. Each worker pod reads that gap from a copy of the catalog of its own, so no walk or webhook rescan waits for it. It finds and embeds the faces of one feature at a time, matches them with the cast, writes the answer and the attempt to the ledger, and asks the operator to rescan each title's folder when the title is done. A result stays until the file at its path is replaced."
                     gpuResourceClaimTemplate:
                       type: string
                       minLength: 1
@@ -349,7 +349,7 @@ spec:
                       minimum: 1
                       maximum: 16
                       default: 1
-                      description: "How many pods the appearances worker Job runs at once. At 1, its default, one pod works the whole list. Above 1, the worker is an Indexed Job, and each pod takes the videos of the title folders that hash to its index, so a series and its ledger stay in one pod. Each pod claims its own GPU from the template that gpuResourceClaimTemplate names. The pods prefer different nodes and share a node when no other node can take them. A failed pod is retried on its own share, up to twice, and the other pods keep their work. The cap of 16 keeps one typing error from starting hundreds of pods."
+                      description: "How many pods the appearances worker Job runs at once. At 1, its default, one pod works the whole gap. Above 1, the worker is an Indexed Job, and every pod splits the gap by hours the same way: each title folder, longest first, goes to the pod with the fewest hours so far, so a series and its ledger stay in one pod. Each pod claims its own GPU from the template that gpuResourceClaimTemplate names. The pods prefer different nodes and share a node when no other node can take them. A failed pod is retried on its own share, up to twice, and the other pods keep their work. The cap of 16 keeps one typing error from starting hundreds of pods."
                 languages:
                   type: array
                   x-kubernetes-list-type: atomic

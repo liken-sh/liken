@@ -203,33 +203,29 @@ titles stay in its gap for the next `Job`.
 The scrub-bar thumbnails are the `trickplay` fact, which runs where
 `spec.trickplay.enabled` is set. One title's decode runs for minutes,
 so the fact runs in a worker `Job` of its own, outside the `Job` that
-walks the `Library`. The worker holds no catalog agent and no catalog
-claim, so a walk and a webhook's rescan never wait for a decode, and
-no decode adds a copy of the catalog.
+walks the `Library`. A walk and a webhook's rescan never wait for a
+decode, because the worker's catalog agent runs on a copy of its own
+and not on the `Library`'s catalog claim.
 
-Each `Job` of the `Library` ends by writing the trickplay gap onto the
-volume as a work list,
-`.liken/worklists/<namespace>/<library>/trickplay.jsonl` under the
-library root: one line per video, with its path, its size, and its
-length. A `Job` leaves the file alone when the list it would write
-names the same videos, with the same sizes and lengths in the same
-order, so the file keeps its earlier time. The list is named for the
-`Library`, so two clusters whose `Library`s mount one volume never read
-each other's list. When that
-`Job` has ended, the gap in `status.gaps` is above zero or a
-`spec.refresh` time has titles left, and no trickplay worker of the
-`Library` runs, the operator
-starts one, named `<library>-trickplay-<suffix>`. The worker reads the
-list and checks each video again before it decodes it. It passes over
-a video that is gone, a video whose size changed, and a video with an
-attempt in `.liken/trickplay.yaml` from after the list was written.
+When a `Job` of the `Library` has ended, the gap in `status.gaps` is
+above zero or a `spec.refresh` time has titles left, and no trickplay
+worker of the `Library` runs, the operator starts one, named
+`<library>-trickplay-<suffix>`. Each pod of the worker waits until
+its own copy of the catalog holds that `Job`'s enrich run, then reads
+the trickplay gap from that copy: the path, the size, and the length
+of each video. The [catalog guide](/docs/guides/catalog/#how-a-worker-job-syncs)
+describes the copy and `spec.workers.storageClassName`, which sets
+where it is kept. The worker checks each video again before it
+decodes it. It passes over a video that is gone, a video whose size
+changed, and a video with an attempt in `.liken/trickplay.yaml` from
+after that enrich run finished.
 After the last video of a title folder, it asks the operator to rescan
 that folder through the `Library`'s webhook address, so the catalog
 shows the tiles within seconds.
 
 The worker has no time limit of its own. A backlog runs to the end of
-the list in one `Job`, and a `Job` that runs for 24 hours reaches its
-deadline. The list of the next `Job` of the `Library` then starts
+the gap in one `Job`, and a `Job` that runs for 24 hours reaches its
+deadline. The end of the next `Job` of the `Library` then starts
 another worker, which passes over every title the first one finished.
 
     kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=trickplay
@@ -347,8 +343,8 @@ same name.
 
 #### A worker on several nodes
 
-One worker pod works its whole list on one node. A large library can
-spread the list over several nodes' GPUs with
+One worker pod works the whole gap on one node. A large library can
+spread the gap over several nodes' GPUs with
 `spec.trickplay.parallelism` or `spec.appearances.parallelism`, the
 number of pods the worker `Job` runs at once, from 1 to 16:
 
@@ -361,12 +357,16 @@ spec:
 ```
 
 At 1, the default, the worker is one pod. Above 1, the worker is an
-Indexed `Job`, and every pod reads the same list. Each pod takes the
-videos of the title folders whose name hashes to its index, so a
-series and the ledgers of its seasons stay in one pod, and no two pods
-ask for a rescan of one folder. Each pod logs its share:
+Indexed `Job`, and every pod reads the same gap. Each pod splits the
+gap by hours with the same rule, so every pod computes the same split
+and no pod writes anything to coordinate. The rule groups the gap by
+title folder and gives each folder the sum of its videos' lengths. It
+sorts the folders longest first, with the folder's path as the
+tie-break, and gives each folder to the pod whose total is lowest so
+far. A series and the ledgers of its seasons stay in one pod, and no
+two pods ask for a rescan of one folder. Each pod logs its share:
 
-    library.liken.sh: index 1 of 3 takes 482 of the 1447 videos
+    library.liken.sh: index 1 of 3 takes 482 videos in 61 folders, 403.5 hours, of the 1447 videos in the gap
 
 Each pod claims its own device from the template that
 `gpuResourceClaimTemplate` names. The pods prefer different nodes. When fewer
@@ -375,10 +375,16 @@ node and its device, because `liken` publishes a render node for many
 claims at once. Kubernetes retries a failed pod up to twice on its own
 share, and leaves the pods that finished alone. The 24-hour deadline
 is for the whole `Job`. The worker counts as running until every pod
-has ended, so the next list waits for the last pod.
+has ended, so the next worker waits for the last pod.
 
-The split is by the count of title folders, not by hours. A pod whose
-share holds a long series can run for hours after the others end.
+A title folder is never split, because its ledger is one file. A
+series whose episodes run longer than an even share of the gap is
+still one pod's work, and that pod ends after the others.
+
+A pod whose copy holds a later walk than another pod's can read a
+different gap. A video in one gap and not the other is in at most one
+share, or in none. A video in no share stays in the gap, and the next
+worker takes it.
 
 The tile directory is the one Jellyfin reads and writes. So the worker
 accepts a directory Jellyfin made first and leaves it alone. The one
@@ -389,7 +395,7 @@ the new file and replaces the whole directory. The
 [scanning guide](/docs/guides/scanning/#a-file-replaced-at-the-same-path)
 says how the walk finds a replaced file. To make the tiles of any
 title again, delete its `.trickplay` directory, and the next walk opens
-its gap, and the list that `Job` writes starts a worker.
+its gap, and the end of that `Job` starts a worker.
 
 ### Appearances
 
@@ -399,11 +405,10 @@ set. The fact asks no provider: it matches the faces in the video with
 the headshots that the people facts put in `.contributors/`. A first
 pass decodes every frame of every feature, so the fact runs in a
 worker `Job` of its own, named `<library>-appearances-<suffix>`, in the
-same way as the [trickplay](#trickplay) worker. It reads the list
-`.liken/worklists/<namespace>/<library>/appearances.jsonl`, checks each
-video again before it
-opens it, and asks the operator to rescan each title folder when the
-folder is done.
+same way as the [trickplay](#trickplay) worker. It reads the
+appearances gap from its own copy of the catalog, checks each video
+again before it opens it, and asks the operator to rescan each title
+folder when the folder is done.
 `spec.appearances.parallelism` runs the worker on several nodes at
 once, as [a worker on several nodes](#a-worker-on-several-nodes)
 describes.
@@ -531,8 +536,8 @@ scale, such as 10-bit HEVC on an older Intel GPU. The worker tries the
 GPU's scale on the first 2 seconds of each video, and where that fails,
 the GPU decodes and the CPU scales. A file the render node refuses to
 decode is decoded again in software. OpenVINO compiles the models for the GPU when the worker
-starts, and it keeps the compiled kernels in an `emptyDir`, so one
-worker `Job` compiles once for its whole list.
+starts, and it keeps the compiled kernels in an `emptyDir`, so each
+pod of a worker `Job` compiles once for its whole share.
 
 #### Checking the faces by hand
 
@@ -902,9 +907,9 @@ starts a `Job` that fills gaps, without a walk, as soon as the
 `Library` has no other `Job` running, and a refresh set while a `Job`
 runs starts another one after it. The fact
 rewrites its own files and rows in place, and nothing is deleted.
-The `appearances` key works the same way: the `Job` that fills gaps
-writes the reopened videos into the worker's list, and the worker
-matches them again. The worker takes the videos whose detections
+The `appearances` key works the same way: the reopened videos are in
+the gap the worker reads after the `Job` that fills gaps, and the
+worker matches them again. The worker takes the videos whose detections
 record is on the volume first, because each of them needs only the
 match.
 

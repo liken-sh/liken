@@ -12,13 +12,14 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
-// What a worker container does with its list: which videos it passes over,
+// What a worker container does with its gap: which videos it passes over,
 // which it works on, and which folders it asks the operator to rescan.
 
-// The Library whose lists the worker tests write and read.
+// The Library whose gaps the worker tests read.
 const testWorkLibrary = "house/movies"
 
 // A worker of one fact over one root, with no webhook, and the buffer its log
@@ -37,6 +38,37 @@ func testFactWorker(t *testing.T, worker factWorker, kind, root string) (*factWo
 	}, log
 }
 
+// A worker whose copy of the catalog holds the gap given: a feature with a
+// length and no sheets for each item, which is the shape of a trickplay gap.
+// The gap counts from the test's start, so an attempt the worker makes is
+// later than the gap.
+func gapWorker(t *testing.T, worker factWorker, kind, root string, items []workItem) (*factWorkerRun, *bytes.Buffer) {
+	t.Helper()
+	work, log, _ := gapWorkerAndAgent(t, worker, kind, root, items)
+	return work, log
+}
+
+// The same worker, with the agent its copy is served by, so a test moves
+// the copy's versions.
+func gapWorkerAndAgent(t *testing.T, worker factWorker, kind, root string,
+	items []workItem) (*factWorkerRun, *bytes.Buffer, *sqliteAgent) {
+	t.Helper()
+	work, log := testFactWorker(t, worker, kind, root)
+	catalog, agent := newSQLiteCatalog(t)
+	seed := &walkResult{}
+	for _, item := range items {
+		seed.files = append(seed.files, fileRow{Path: item.Path, Library: testWorkLibrary, Present: true,
+			Type: fileTypeVideo, Role: fileRolePrimary, VideoCodec: "h264", DurationMs: item.DurationMs,
+			SizeBytes: item.Size})
+	}
+	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
+		t.Fatal(err)
+	}
+	work.catalog = catalog
+	work.since = time.Now().UTC()
+	return work, log, agent
+}
+
 // A worker that records the videos it is given and writes nothing, so a test
 // of the loop reads which videos reached the fact.
 func recordingWorker(worked *[]string) factWorker {
@@ -50,8 +82,8 @@ func recordingWorker(worked *[]string) factWorker {
 	}
 }
 
-// One video on the volume and the line a list holds for it, written at
-// listed.
+// One video on the volume and the item a gap holds for it, with the time the
+// gap counts from.
 func listedVideo(t *testing.T, root, path, content string, listed time.Time) workItem {
 	t.Helper()
 	writeFile(t, filepath.Join(root, path), content)
@@ -85,7 +117,7 @@ func recordWebhooks(t *testing.T, status int) (*webhookRecorder, string) {
 	return recorder, server.URL + webhookPathPrefix + "house/movies"
 }
 
-// The list can be hours old when the worker reaches a video, so the worker
+// The gap can be hours old when the worker reaches a video, so the worker
 // reads the volume and the ledger once more first.
 func TestWhichVideosAWorkerPassesOver(t *testing.T) {
 	listed := ledgerTime
@@ -95,7 +127,7 @@ func TestWhichVideosAWorkerPassesOver(t *testing.T) {
 		want    string
 		working bool
 	}{
-		{name: "a video as the list names it", working: true},
+		{name: "a video as the gap names it", working: true},
 		{name: "a video that is gone", want: "not on the volume",
 			setUp: func(t *testing.T, root string, item workItem) {
 				t.Helper()
@@ -108,13 +140,13 @@ func TestWhichVideosAWorkerPassesOver(t *testing.T) {
 				t.Helper()
 				writeFile(t, filepath.Join(root, item.Path), "a longer encode of the same title")
 			}},
-		{name: "an attempt after the list", want: "after the list was written",
+		{name: "an attempt after the enrich run", want: "after the enrich run",
 			setUp: func(t *testing.T, root string, item workItem) {
 				t.Helper()
 				writeFactLedger(t, filepath.Join(root, trickplayFolder), factTrickplay, likenLedger{
 					Attempts: []likenAttempt{{Path: trickplayFile, At: listed.Add(time.Minute), Result: attemptError}}})
 			}},
-		{name: "an attempt before the list", working: true,
+		{name: "an attempt before the enrich run", working: true,
 			setUp: func(t *testing.T, root string, item workItem) {
 				t.Helper()
 				writeFactLedger(t, filepath.Join(root, trickplayFolder), factTrickplay, likenLedger{
@@ -139,7 +171,7 @@ func TestWhichVideosAWorkerPassesOver(t *testing.T) {
 	}
 }
 
-// The worker works every video the list names and still holds, and asks for
+// The worker works every video of the gap the volume still holds, and asks for
 // one rescan per title folder, after the last video of that folder.
 func TestAWorkerWorksItsListAndAsksForOneRescanPerTitle(t *testing.T) {
 	root := t.TempDir()
@@ -147,14 +179,11 @@ func TestAWorkerWorksItsListAndAsksForOneRescanPerTitle(t *testing.T) {
 	items := []workItem{
 		listedVideo(t, root, "Harbour Lights/Season 01/Harbour Lights - S01E01.mkv", "one", listed),
 		listedVideo(t, root, "Harbour Lights/Season 01/Harbour Lights - S01E02.mkv", "two", listed),
-		{Path: "Harbour Lights/Season 01/Harbour Lights - S01E03.mkv", Size: 5, Listed: listed},
+		{Path: "Harbour Lights/Season 01/Harbour Lights - S01E03.mkv", Size: 5, DurationMs: 100000, Listed: listed},
 		listedVideo(t, root, "Quiet Field/Season 01/Quiet Field - S01E01.mkv", "three", listed),
 	}
-	if err := newVolumeWriter("movies-close").writeWorkList(root, testWorkLibrary, factTrickplay, items); err != nil {
-		t.Fatal(err)
-	}
 	var worked []string
-	work, log := testFactWorker(t, recordingWorker(&worked), libraryKindSeries, root)
+	work, log := gapWorker(t, recordingWorker(&worked), libraryKindSeries, root, items)
 	webhooks, address := recordWebhooks(t, http.StatusNoContent)
 	work.webhook = address
 
@@ -169,13 +198,13 @@ func TestAWorkerWorksItsListAndAsksForOneRescanPerTitle(t *testing.T) {
 	if got := webhooks.named(); !slices.Equal(got, []string{"Harbour Lights", "Quiet Field"}) {
 		t.Errorf("rescans named %v, want one per title folder", got)
 	}
-	if !strings.Contains(log.String(), "worked on 3 of the 4 videos the list named, and passed over 1") {
+	if !strings.Contains(log.String(), "worked on 3 of the 4 videos in its share, and passed over 1") {
 		t.Errorf("log = %q, want the counts of the run", log)
 	}
 }
 
 // A worker whose fact names the videos that are quick to work takes those
-// first, each group in the order of the list, so a refresh that reopens
+// first, each group in the order of the gap, so a refresh that reopens
 // many quick videos answers them before the slow ones.
 func TestAWorkerTakesTheQuickVideosFirst(t *testing.T) {
 	root := t.TempDir()
@@ -186,15 +215,12 @@ func TestAWorkerTakesTheQuickVideosFirst(t *testing.T) {
 		listedVideo(t, root, "Slow Two/Slow Two.mkv", "three", listed),
 		listedVideo(t, root, "Quick Two/Quick Two.mkv", "four", listed),
 	}
-	if err := newVolumeWriter("movies-close").writeWorkList(root, testWorkLibrary, factTrickplay, items); err != nil {
-		t.Fatal(err)
-	}
 	var worked []string
 	worker := recordingWorker(&worked)
 	worker.quick = func(_ *factWorkerRun, item workItem) bool {
 		return strings.HasPrefix(item.Path, "Quick")
 	}
-	work, _ := testFactWorker(t, worker, libraryKindMovies, root)
+	work, _ := gapWorker(t, worker, libraryKindMovies, root, items)
 
 	if err := work.work(t.Context()); err != nil {
 		t.Fatal(err)
@@ -210,12 +236,9 @@ func TestAWorkerTakesTheQuickVideosFirst(t *testing.T) {
 // catalog, so the worker asks for no rescan of it.
 func TestAWorkerAsksForNoRescanOfATitleItPassedOver(t *testing.T) {
 	root := t.TempDir()
-	items := []workItem{{Path: filepath.Join(trickplayFolder, trickplayFile), Size: 5, Listed: time.Now()}}
-	if err := newVolumeWriter("movies-close").writeWorkList(root, testWorkLibrary, factTrickplay, items); err != nil {
-		t.Fatal(err)
-	}
+	items := []workItem{{Path: filepath.Join(trickplayFolder, trickplayFile), Size: 5, DurationMs: 100000}}
 	var worked []string
-	work, _ := testFactWorker(t, recordingWorker(&worked), libraryKindMovies, root)
+	work, _ := gapWorker(t, recordingWorker(&worked), libraryKindMovies, root, items)
 	webhooks, address := recordWebhooks(t, http.StatusNoContent)
 	work.webhook = address
 
@@ -237,11 +260,8 @@ func TestARefusedRescanIsLoggedAndTheWorkGoesOn(t *testing.T) {
 		listedVideo(t, root, "A Quiet Field (1950)/A Quiet Field (1950).mkv", "one", listed),
 		listedVideo(t, root, "The Long Survey (1982)/The Long Survey (1982).mkv", "two", listed),
 	}
-	if err := newVolumeWriter("movies-close").writeWorkList(root, testWorkLibrary, factTrickplay, items); err != nil {
-		t.Fatal(err)
-	}
 	var worked []string
-	work, log := testFactWorker(t, recordingWorker(&worked), libraryKindMovies, root)
+	work, log := gapWorker(t, recordingWorker(&worked), libraryKindMovies, root, items)
 	_, address := recordWebhooks(t, http.StatusNotFound)
 	work.webhook = address
 
@@ -257,11 +277,10 @@ func TestARefusedRescanIsLoggedAndTheWorkGoesOn(t *testing.T) {
 	}
 }
 
-// A Library that has turned the fact on has no list until its next library
-// Job ends, which is no work and not a failure.
-func TestAWorkerWithNoListHasNoWork(t *testing.T) {
+// A gap of nothing is no work and not a failure.
+func TestAWorkerWithAnEmptyGapHasNoWork(t *testing.T) {
 	var worked []string
-	work, log := testFactWorker(t, recordingWorker(&worked), libraryKindMovies, t.TempDir())
+	work, log := gapWorker(t, recordingWorker(&worked), libraryKindMovies, t.TempDir(), nil)
 
 	if err := work.work(t.Context()); err != nil {
 		t.Fatal(err)
@@ -310,71 +329,66 @@ func TestAWorkerReadsItsWiringOutOfTheEnvironment(t *testing.T) {
 	}
 }
 
-// The list a worker reads is the list the close container wrote, line for
-// line.
-func TestAWorkListReadsBackAsItWasWritten(t *testing.T) {
-	root := t.TempDir()
-	items := []workItem{
-		{Path: "A Quiet Field (1950)/A Quiet Field (1950).mkv", Size: 3, DurationMs: 5400000, Listed: ledgerTime},
-		{Path: "The Long Survey (1982)/The Long Survey (1982).mkv", Size: 7, Listed: ledgerTime},
-	}
+// A pod reads its gap only once its copy holds the enrich run it was started
+// after, so every pod of the Job reads a copy that holds the same writes.
+func TestAWorkerWaitsForItsCopyBeforeItReadsTheGap(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		root := t.TempDir()
+		items := []workItem{listedVideo(t, root, "A Quiet Field (1950)/A Quiet Field (1950).mkv", "one", time.Time{})}
+		var worked []string
+		work, _, agent := gapWorkerAndAgent(t, recordingWorker(&worked), libraryKindMovies, root, items)
+		work.sync, work.syncTimeout = syncTarget{actor: otherAgent, version: 40}, time.Hour
+		agent.holdVersion(t, otherAgent, 12)
+		done := make(chan error, 1)
+		go func() { done <- work.work(t.Context()) }()
 
-	if err := newVolumeWriter("movies-close").writeWorkList(root, testWorkLibrary, factTrickplay, items); err != nil {
-		t.Fatal(err)
-	}
-	read, err := readWorkList(root, testWorkLibrary, factTrickplay)
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		if len(worked) != 0 {
+			t.Fatalf("worked on %v before the copy held the run", worked)
+		}
 
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.EqualFunc(read, items, func(a, b workItem) bool { return a == b }) {
-		t.Errorf("read %+v, want %+v", read, items)
-	}
-	if left := namesIn(t, filepath.Dir(workListPath(root, testWorkLibrary, factTrickplay))); !slices.Equal(left, []string{"trickplay.jsonl"}) {
-		t.Errorf("the list directory holds %v, want the list alone", left)
-	}
+		agent.holdVersion(t, otherAgent, 40)
+
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		if len(worked) != 1 {
+			t.Errorf("worked on %v, want the one video of the gap", worked)
+		}
+	})
 }
 
-// Two clusters can mount one volume with a Library each over the same root,
-// and each Library reads back its own list and not the other's.
-func TestTwoLibrariesOverOneRootKeepTheirOwnLists(t *testing.T) {
-	root := t.TempDir()
-	house := []workItem{{Path: "A/a.mkv", Size: 1, Listed: ledgerTime}}
-	lab := []workItem{{Path: "B/b.mkv", Size: 2, Listed: ledgerTime}}
-	writer := newVolumeWriter("movies-close")
-	if err := writer.writeWorkList(root, "media/movies", factAppearances, house); err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.writeWorkList(root, "default/movies", factAppearances, lab); err != nil {
-		t.Fatal(err)
-	}
+// A pod whose copy never holds the run fails at the bound, so the Job retries
+// and no pod works from a gap short of the run's writes.
+func TestAWorkerWhoseCopyNeverSyncsFails(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var worked []string
+		work, _ := gapWorker(t, recordingWorker(&worked), libraryKindMovies, t.TempDir(), nil)
+		work.sync, work.syncTimeout = syncTarget{actor: otherAgent, version: 40}, time.Minute
 
-	read, err := readWorkList(root, "media/movies", factAppearances)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(read, house) {
-		t.Errorf("media/movies read %+v, want its own list %+v", read, house)
-	}
+		if err := work.work(t.Context()); err == nil || !strings.Contains(err.Error(), "did not reach version 40") {
+			t.Errorf("work = %v, want the wait's bound", err)
+		}
+	})
 }
 
-// A list that does not parse is a list to repair, and the worker ends on it
-// rather than working a part of it.
-func TestAWorkListThatDoesNotParseIsAnError(t *testing.T) {
+// Every video of the gap carries the time the enrich run finished, so an
+// attempt the catalog had not read when the run ended passes the video over.
+func TestTheGapCountsFromTheEnrichRun(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, workListPath(root, testWorkLibrary, factTrickplay), "{\"path\":\"A/a.mkv\"}\nnot a line of a list\n")
+	item := listedVideo(t, root, filepath.Join(trickplayFolder, trickplayFile), "video", time.Time{})
+	writeFactLedger(t, filepath.Join(root, trickplayFolder), factTrickplay, likenLedger{
+		Attempts: []likenAttempt{{Path: trickplayFile, At: ledgerTime.Add(time.Minute), Result: attemptError}}})
+	var worked []string
+	work, log := gapWorker(t, recordingWorker(&worked), libraryKindMovies, root, []workItem{item})
+	work.since = ledgerTime
 
-	if _, err := readWorkList(root, testWorkLibrary, factTrickplay); err == nil {
-		t.Error("readWorkList = nil error, want the line it could not read")
+	if err := work.work(t.Context()); err != nil {
+		t.Fatal(err)
 	}
-}
 
-// The walk skips every dot name, so the list directory never becomes a row.
-func TestTheWalkNeverReadsAWorkList(t *testing.T) {
-	path := workListPath("/library", testWorkLibrary, factTrickplay)
-	relative := strings.Split(strings.TrimPrefix(path, "/library/"), string(filepath.Separator))
-
-	if !skipName(relative[0]) {
-		t.Errorf("the walk reads %s, want the list under a name it skips", path)
+	if len(worked) != 0 || !strings.Contains(log.String(), "an attempt after the enrich run answered it") {
+		t.Errorf("worked on %v with log %q, want the video passed over", worked, log)
 	}
 }

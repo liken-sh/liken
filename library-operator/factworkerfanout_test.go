@@ -24,8 +24,8 @@ func spreadAppearances(parallelism int) *Library {
 // The appearances worker of the Library, as JSON the API server reads.
 func appearancesJobJSON(t *testing.T, library *Library) string {
 	t.Helper()
-	job := buildFactWorkerJob(library, appearancesWorker, jobImages{appearances: "appearances:test"},
-		"http://library-operator.liken-system.svc/webhook/house/movies", "movies-walk-1", testNow)
+	job := buildFactWorkerJob(library, testNamespaceCatalog(), appearancesWorker,
+		jobImages{appearances: "appearances:test"}, "http://library-operator.liken-system.svc/webhook/house/movies", enrichedRun(), testNow)
 	body, err := json.Marshal(job)
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +56,8 @@ func TestAWorkerOfOnePodIsTheJobOfBefore(t *testing.T) {
 // A Library that spreads a worker over three pods gets an Indexed Job of
 // three completions, three at once, each index retried on its own.
 func TestASpreadWorkerIsAnIndexedJob(t *testing.T) {
-	job := buildFactWorkerJob(spreadAppearances(3), appearancesWorker, jobImages{}, "", "movies-walk-1", testNow)
+	job := buildFactWorkerJob(spreadAppearances(3), testNamespaceCatalog(), appearancesWorker, jobImages{}, "",
+		enrichedRun(), testNow)
 	spec := job.Spec
 
 	if spec.CompletionMode != indexedCompletion || *spec.Completions != 3 || *spec.Parallelism != 3 {
@@ -80,7 +81,8 @@ func TestASpreadWorkerIsAnIndexedJob(t *testing.T) {
 // all on the GPUs it has.
 func TestTheSpreadPodsPreferDifferentNodes(t *testing.T) {
 	library := spreadAppearances(3)
-	pod := buildFactWorkerJob(library, appearancesWorker, jobImages{}, "", "movies-walk-1", testNow).Spec.Template
+	pod := buildFactWorkerJob(library, testNamespaceCatalog(), appearancesWorker, jobImages{}, "", enrichedRun(),
+		testNow).Spec.Template
 
 	spread := pod.Spec.TopologySpreadConstraints
 	if len(spread) != 1 {
@@ -116,8 +118,8 @@ func TestEachWorkerReadsItsOwnParallelism(t *testing.T) {
 
 // An Indexed Job takes its Complete or Failed condition only when every
 // index has ended, so the due rule that reads the conditions holds the next
-// list back while any pod of the worker runs or waits out its backoff.
-func TestASpreadWorkerHoldsTheNextListUntilEveryIndexEnds(t *testing.T) {
+// worker back while any pod of the worker runs or waits out its backoff.
+func TestASpreadWorkerHoldsTheNextWorkerUntilEveryIndexEnds(t *testing.T) {
 	cases := []struct {
 		name   string
 		status JobStatus
@@ -150,7 +152,8 @@ func TestThePassNamesThePodsOfASpreadWorker(t *testing.T) {
 	library.Spec.Trickplay.Parallelism = 3
 	operator, logged := loggingOperator(t, cluster)
 
-	if err := operator.runFactWorkers(t.Context(), library, listedReport(3), nil, nil, testNow); err != nil {
+	if err := operator.runFactWorkers(t.Context(), library, testNamespaceCatalog(), listedReport(3), nil, nil,
+		testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -159,7 +162,7 @@ func TestThePassNamesThePodsOfASpreadWorker(t *testing.T) {
 		t.Fatalf("jobs = %+v, want one trickplay worker of 3 pods", created)
 	}
 	wantOneLine(t, logged, "library house/movies: created the job "+created[0].Metadata.Name,
-		"to work the trickplay gap of 3 videos in 3 pods from the list of the job movies-walk-1")
+		"to work the trickplay gap of 3 videos in 3 pods after the job movies-walk-1")
 }
 
 // The count the API server admits is the count the operator reads: an
@@ -187,7 +190,7 @@ func TestTheOperatorReadsAParallelismTheSchemaAdmits(t *testing.T) {
 }
 
 // A pod whose index the Job did not give it right is a Job to repair, so the
-// container fails before it reads the volume.
+// container fails before it reads the gap.
 func TestAWorkerWithABadIndexFails(t *testing.T) {
 	t.Setenv(libraryFactVariable, factAppearances)
 	t.Setenv(completionIndexVariable, "3")

@@ -153,7 +153,7 @@ func appearancesCalls(t *testing.T, calls string) []string {
 	return strings.Split(strings.TrimSpace(string(data)), "\n")
 }
 
-// One movie's video on the volume, and the line a work list holds for it.
+// One movie's video on the volume, and the item a gap holds for it.
 func seedAppearancesMovie(t *testing.T, root string) workItem {
 	t.Helper()
 	writeFile(t, filepath.Join(root, appearancesFolder, appearancesFile), "video")
@@ -219,7 +219,7 @@ func TestTheAppearancesGapAgainstTheRealSchema(t *testing.T) {
 		paths = append(paths, item.Path)
 	}
 	if want := []string{"A/a.mkv", "S/Season 01/s01e01.mkv"}; !slices.Equal(paths, want) {
-		t.Errorf("work list = %v, want %v", paths, want)
+		t.Errorf("gap = %v, want %v", paths, want)
 	}
 	if len(items) > 0 && (items[0].Size != 4096 || items[0].DurationMs != 6000000) {
 		t.Errorf("item = %+v, want the size and the length the worker checks", items[0])
@@ -580,9 +580,9 @@ func TestAnAppearancesWorkerJob(t *testing.T) {
 			library := studioMovies()
 			library.Spec.Appearances = LibraryAppearances{Enabled: true, GPUResourceClaimTemplate: test.template}
 
-			pod := buildFactWorkerJob(library, appearancesWorker,
+			pod := buildFactWorkerJob(library, testNamespaceCatalog(), appearancesWorker,
 				jobImages{operator: testScannerImage, ffmpeg: testFFmpegImage, appearances: testAppearancesImage},
-				"", "movies-walk-1", testNow).Spec.Template.Spec
+				"", enrichedRun(), testNow).Spec.Template.Spec
 
 			container := pod.Containers[0]
 			if container.Name != factAppearances || container.Image != testAppearancesImage ||
@@ -593,9 +593,9 @@ func TestAnAppearancesWorkerJob(t *testing.T) {
 			if container.Resources.Limits["memory"] != "1536Mi" {
 				t.Errorf("memory limit = %q, want 1536Mi", container.Resources.Limits["memory"])
 			}
-			if len(pod.Volumes) != 2 || pod.Volumes[1].EmptyDir == nil ||
+			if len(pod.Volumes) != 3 || pod.Volumes[2].EmptyDir == nil ||
 				!slices.ContainsFunc(container.VolumeMounts, func(m VolumeMount) bool {
-					return m.Name == pod.Volumes[1].Name && m.MountPath == appearancesScratch
+					return m.Name == pod.Volumes[2].Name && m.MountPath == appearancesScratch
 				}) {
 				t.Errorf("volumes = %+v mounted at %+v, want the scratch emptyDir at %s",
 					pod.Volumes, container.VolumeMounts, appearancesScratch)

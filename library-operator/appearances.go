@@ -27,7 +27,7 @@ import (
 // a 1080p film, 1.6 cores, and 301 CPU seconds in 533 seconds for a 4K film,
 // 0.6 cores, where the GPU's decode was the slower part. The CPU time per
 // film is close to the same, so the request sets how fast a node works its
-// list. A decode in software also keeps ffmpeg's two decode threads busy,
+// share. A decode in software also keeps ffmpeg's two decode threads busy,
 // and its CPU time was not measured. There is no CPU limit, so a run uses
 // the idle cores of its node.
 const (
@@ -38,9 +38,9 @@ const (
 // The emptyDir the worker keeps the GPU's compiled kernels in. OpenVINO
 // compiles the models' kernels for the GPU on its first start, which took
 // seconds in the experiments, and reads them from this cache on every start
-// after it. One worker Job works the whole list, so one compile serves every
-// video of the list, and a cache that the pod takes with it costs one compile
-// per list.
+// after it. Each pod of a worker Job works its whole share, so one compile
+// serves every video of the share, and a cache that the pod takes with it
+// costs one compile per pod.
 const appearancesScratch = "/var/cache/appearances"
 
 // The appearances worker. It runs where the Library turns the fact on, on the
@@ -64,7 +64,7 @@ var appearancesWorker = factWorker{
 	quick:            appearancesQuick,
 }
 
-// Whether a video of the list needs only the match: a detections record of
+// Whether a video of the gap needs only the match: a detections record of
 // its size and of the current format is on the volume. A refresh reopens
 // videos the worker answered before, and each of those takes a second,
 // against minutes for a decode.
@@ -86,8 +86,8 @@ func appearancesQuick(run *factWorkerRun, item workItem) bool {
 // file (settlefacts.go), and the gap opens again. A miss is asked again after
 // the dated window, and an error after a day.
 //
-// The query selects the columns a work list carries, so the rows are the
-// worker's list as they are.
+// The query selects the columns of a workItem, so the rows are the worker's
+// gap as they are.
 func appearancesGapSQL() string {
 	return `SELECT path, size_bytes, duration_ms FROM files ` +
 		`WHERE library = ?1 AND type = '` + fileTypeVideo + `' AND present = 1 ` +

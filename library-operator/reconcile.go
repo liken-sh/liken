@@ -80,9 +80,10 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		if err := o.retireOwnedClaimTemplates(ctx, library); err != nil {
 			return err
 		}
-		// A worker holds no catalog and waits for no source, so it starts
-		// whatever the gate of the library Job says.
-		if err := o.runFactWorkers(ctx, library, report, jobs, templates, now); err != nil {
+		// A worker's agent runs on a copy of its own and not on the
+		// Library's catalog claim, and the worker waits for no source, so
+		// it starts whatever the gate of the library Job says.
+		if err := o.runFactWorkers(ctx, library, choice.catalog, report, jobs, templates, now); err != nil {
 			return err
 		}
 		// No Job of this Library is built while any source it names has no

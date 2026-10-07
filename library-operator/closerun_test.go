@@ -8,7 +8,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io/fs"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -255,18 +257,17 @@ func TestACloseContainerWithNoWorkerFails(t *testing.T) {
 	}
 }
 
-// The close container writes the gap of each heavy fact the Library runs as
-// that fact's work list, before the finished run that starts the worker.
-func TestTheCloseContainerWritesTheWorkList(t *testing.T) {
+// The root holds no title, so a .liken directory there holds nothing a fact
+// reads: the close container removes it with every file in it, and leaves
+// the .liken directory of each title folder as it is.
+func TestTheCloseContainerRemovesTheLikenDirectoryAtTheRoot(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
-	seed := &walkResult{files: []fileRow{{Path: "A Quiet Field (1950)/A Quiet Field (1950).mkv",
-		Library: "house/movies", Present: true, Type: fileTypeVideo, Role: fileRolePrimary,
-		DurationMs: 5400000, VideoCodec: "h264", SizeBytes: 4096}}}
-	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
-		t.Fatal(err)
-	}
 	run, log := closingJob(t, catalog)
-	run.workLists = []string{factTrickplay}
+	rootLiken := filepath.Join(run.root, likenDirectory)
+	writeFile(t, filepath.Join(rootLiken, likenLedgerName(factIdentity)), "attempts: []\n")
+	writeFile(t, filepath.Join(rootLiken, "worklists", "house", "movies", "trickplay.jsonl"), "{}\n")
+	titleLedger := filepath.Join(run.root, "A Quiet Field (1950)", likenDirectory, likenLedgerName(factIdentity))
+	writeFile(t, titleLedger, "attempts: []\n")
 	done := make(chan error, 1)
 	go func() { done <- run.runJob(t.Context()) }()
 	confirmTheRun(t, catalog, workerEnrich, run.job)
@@ -274,25 +275,22 @@ func TestTheCloseContainerWritesTheWorkList(t *testing.T) {
 		t.Fatalf("the job failed: %v", err)
 	}
 
-	items, err := readWorkList(run.root, run.library, factTrickplay)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := os.Lstat(rootLiken); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the root's %s is still there: %v", likenDirectory, err)
 	}
-	if len(items) != 1 || items[0].Size != 4096 || items[0].DurationMs != 5400000 {
-		t.Errorf("work list = %+v, want the one video with its size and length", items)
+	if _, err := os.Stat(titleLedger); err != nil {
+		t.Errorf("the title's ledger is gone: %v", err)
 	}
-	if !strings.Contains(log.String(), "wrote the trickplay work list: 1 video") {
-		t.Errorf("log = %q, want the line that counts the list", log)
+	if !strings.Contains(log.String(), "removed the .liken directory at the library root") {
+		t.Errorf("log = %q, want the line that names the remove", log)
 	}
 }
 
-// A list the volume refuses is a failure of the run, and the Job still hands
-// off, so the rows it wrote reach the catalog.
-func TestAWorkListTheVolumeRefusesFailsTheRun(t *testing.T) {
+// A root with no .liken directory is the state the remove leaves, so the
+// close container removes nothing and says nothing about it.
+func TestARootWithNoLikenDirectoryIsLeftAlone(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
-	run, _ := closingJob(t, catalog)
-	run.workLists = []string{factTrickplay}
-	writeFile(t, filepath.Join(run.root, likenDirectory), "a file where the directory goes")
+	run, log := closingJob(t, catalog)
 	done := make(chan error, 1)
 	go func() { done <- run.runJob(t.Context()) }()
 	confirmTheRun(t, catalog, workerEnrich, run.job)
@@ -300,8 +298,7 @@ func TestAWorkListTheVolumeRefusesFailsTheRun(t *testing.T) {
 		t.Fatalf("the job failed: %v", err)
 	}
 
-	finished := awaitRun(t, catalog, func(held libraryRun) bool { return !held.Finished.IsZero() })
-	if !strings.Contains(finished.Failure, "the trickplay work list") {
-		t.Errorf("failure = %q, want the list it could not write", finished.Failure)
+	if strings.Contains(log.String(), likenDirectory+" directory") {
+		t.Errorf("log = %q, want no line about the root", log)
 	}
 }

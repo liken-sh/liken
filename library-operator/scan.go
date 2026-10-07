@@ -767,8 +767,13 @@ func rescanFolder(ctx context.Context, catalog *Catalog, scan folderScan, folder
 // the kind. A folder that left the volume reads as no rows, so the prune that
 // follows takes every row it held. A folder the scanner could not stat
 // is not a folder that left the volume, so it marks the read incomplete
-// and the caller sweeps nothing. A kind with no reader reads as nil.
+// and the caller sweeps nothing. A kind with no reader reads as nil, and so
+// does the library root, which holds no title: the walk reads titles only
+// below it, so no row and no ledger ever belong to the root itself.
 func readFolder(scan folderScan, folder string) *walkResult {
+	if relativePath(scan.root, folder) == "." {
+		return nil
+	}
 	result := &walkResult{}
 	held, err := directoryExists(folder)
 	result.noteReadError(err)

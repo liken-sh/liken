@@ -16,6 +16,12 @@ it runs, how it removes what is gone, and what happens when a
 The scanner reads the layout Kodi and Jellyfin read, so a volume those
 players already organize needs no change.
 
+A `Library`'s root holds title folders and grouping folders. It never
+holds a title of its own. The walk reads titles only in the folders
+below the root, so it catalogs no video file that sits directly in the
+root, and none in a `trailers` or other extras folder at the root. Put
+each film in a folder of its own.
+
 ### Movies
 
 One folder per title. A folder is a title folder when it holds
@@ -110,7 +116,7 @@ title folder, `season02-poster.jpg` beside `tvshow.nfo`, and
 
 ### The `.liken/` directory
 
-Beside a title, a dot-named directory holds the data that the `.nfo` file has
+In each title folder, a dot-named directory holds the data that the `.nfo` file has
 no element for: one YAML file per fact, named for the fact. `identity.yaml`
 holds the provider ids, or the candidates left for a person to choose
 from. `arrival.yaml` holds when each video file was first seen.
@@ -132,6 +138,10 @@ read-only, so it hands those names to the `Job`'s close container, which
 removes each file and logs one line for it. The longest writer, the
 appearances tool's detect pass, stops after 6 hours and changes its file as
 it writes, so the walk never names a file that a live writer holds.
+
+The library root holds no title, so no fact writes a `.liken/`
+directory there. The close container of every `Library` `Job` removes
+a `.liken/` directory at the root, with every file in it.
 
 ### `.contributors/`
 

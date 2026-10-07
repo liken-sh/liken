@@ -557,6 +557,9 @@ type VolumeMount struct {
 	// SubPath mounts one directory of the volume, so two agents keep
 	// their files on one claim without seeing each other's.
 	SubPath string `json:"subPath,omitempty"`
+	// SubPathExpr is SubPath with the container's variables expanded, so
+	// each pod of an Indexed Job mounts the directory of its own index.
+	SubPathExpr string `json:"subPathExpr,omitempty"`
 }
 
 // A scan pod carries two volumes: the library's claim, mounted

@@ -57,6 +57,7 @@ Where the catalog is stored and how large each agent's copy is.
 | <span id="spec--progress"></span>`progress` | [object](#specprogress) | no | The claim the progress store runs on: who watched what, and how far. Each field defaults to the field of the same name under storage, so a Catalog that names neither keeps the store on the catalog's class at the catalog's size. |
 | <span id="spec--libraries"></span>`libraries` | [object](#speclibraries) | no | The claim each Library's Jobs run on, one Job at a time, named after the Library with the suffix -catalog. Each is a working copy of the whole catalog that a Job rebuilds from the catalog of record, so a namespace that keeps the catalog of record on a durable class keeps these on a node-local class such as local-path. On a per-node class the claim is ReadWriteOncePod, so Kubernetes admits one pod of it in the cluster at a time. |
 | <span id="spec--screens"></span>`screens` | [object](#specscreens) | no | The settings every screen pod in the namespace takes. |
+| <span id="spec--workers"></span>`workers` | [object](#specworkers) | no | Where each pod of a worker Job keeps its copy of the catalog. A worker Job runs a heavy fact such as trickplay or appearances, and each of its pods runs a catalog agent that reads the fact's gap from a copy of its own. Every copy rebuilds from its peers, so a change here moves no data: pods that start after the change use the new place, and a running pod finishes where it started. |
 | <span id="spec--jellyfin"></span>`jellyfin` | [object](#specjellyfin) | no | The Jellyfin server this namespace keeps playback progress with, in both directions. A Catalog that names one makes the operator run a pod and a Service named after the Catalog with the suffix -jellyfin, beside the progress store. The pod records what Jellyfin reports into the progress store, and writes what a screen played back to Jellyfin. Omitted, the operator runs neither and deletes the previous pair. |
 
 ### spec.storage
@@ -104,6 +105,14 @@ The volume each screen's browser keeps its scaled art on: posters, backdrops, ep
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specscreensartcache--size"></span>`size` | string | no | The size of each screen's art claim, in a binary unit such as 2Gi. The browser is told to keep 128 MiB under it. A size change applies to new screens, not existing ones, because a bound claim's spec is immutable. Delete an existing screen's claim, and the next pass creates it at the new size. Default: `2Gi`. |
+
+### spec.workers
+
+Where each pod of a worker Job keeps its copy of the catalog. A worker Job runs a heavy fact such as trickplay or appearances, and each of its pods runs a catalog agent that reads the fact's gap from a copy of its own. Every copy rebuilds from its peers, so a change here moves no data: pods that start after the change use the new place, and a running pod finishes where it started.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specworkers--storageclassname"></span>`storageClassName` | string | no | The StorageClass of the one claim every worker copy in the namespace is on, named after the Catalog with the suffix -workers, at storage.size. Each pod mounts its own directory of the claim, named for the Library, the fact, and the pod's index. A per-node class is the one that fits: a pod that runs again on a node where its index ran before finds its copy there and syncs only what changed, and each copy takes room on that node. On any other class the claim is ReadWriteOnce, so the worker pods run where the volume is. Omitted, each pod keeps its copy in an emptyDir, which syncs in full when the pod starts and is deleted when the pod ends, and the operator deletes the -workers claim. The cluster's default class does not apply here. |
 
 ### spec.jellyfin
 

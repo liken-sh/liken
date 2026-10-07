@@ -53,8 +53,9 @@ meantime goes into the next `Job`. So five imports during one run start
 one `Job`, not five. The trailer files stop starting new titles fifteen
 minutes into a run, so a `Job` that works through a backlog of them
 ends within about fifteen minutes and one title, and the folders that
-waited go next. Trickplay runs in a worker `Job` that holds no catalog,
-so no folder waits for a decode. Past 64 distinct folders held for one
+waited go next. Trickplay runs in a worker `Job` whose catalog agent keeps a
+copy of its own, outside the `Library`'s one `Job` at a time, so no
+folder waits for a decode. Past 64 distinct folders held for one
 `Library`, the whole set collapses to a full walk.
 
 The trickplay worker sends the same request for each title folder it

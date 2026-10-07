@@ -24,7 +24,8 @@ import (
 // reconcileCatalogs stands each namespace's catalog cluster from its one
 // Catalog: the durable copies that hold the catalog, of which the first
 // reports it, the claim under each copy, and the Service and EndpointSlice
-// the agents find each other through. Every object is owned by the
+// the agents find each other through, and the claim of the worker copies
+// where the Catalog names a class for them. Every object is owned by the
 // Catalog, which is their real owner: they describe the namespace's one
 // Corrosion cluster. A namespace with more than one Catalog marks every
 // Catalog in it Blocked and stands nothing new. A failure in one namespace
@@ -111,6 +112,11 @@ func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string
 			if err := o.standProgressEndpoints(ctx, namespace, owners, progressMembers.Items); err != nil {
 				fmt.Fprintf(os.Stderr, "standing the progress endpoints in %s: %v\n", namespace, err)
 			}
+		}
+		// The workers claim follows spec.workers.storageClassName, and
+		// comes down when the field names no class.
+		if err := o.standWorkersClaim(ctx, catalog); err != nil {
+			fmt.Fprintf(os.Stderr, "standing the workers claim in %s: %v\n", namespace, err)
 		}
 		// The jellyfin pair stands beside the progress store while
 		// the Catalog names a Jellyfin server, and comes down when it
