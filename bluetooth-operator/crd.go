@@ -180,12 +180,23 @@ type AdapterSpec struct {
 	// Alias reconciles into BlueZ's Adapter1.Alias, which is the name
 	// the radio broadcasts about itself.
 	Alias string `json:"alias,omitempty"`
+
+	// Privacy is the value of BlueZ's Privacy key for this radio, and
+	// empty means off. bluetoothd reads the key only at start, so a
+	// change takes effect when the operator's pod starts again
+	// (privacy.go).
+	Privacy string `json:"privacy,omitempty"`
 }
 
 type AdapterStatus struct {
 	Address string `json:"address,omitempty"`
 	Node    string `json:"node,omitempty"`
 	Powered bool   `json:"powered"`
+
+	// Privacy is the value that the running bluetoothd started with,
+	// read from the pod's settings volume. It reports what bluetoothd
+	// was told, not what the kernel accepted.
+	Privacy string `json:"privacy,omitempty"`
 
 	// DeletionRefused names why the operator kept its finalizer on an
 	// Adapter somebody deleted. It is empty at every other time.

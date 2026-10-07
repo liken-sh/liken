@@ -2,7 +2,7 @@ package bonds
 
 // BlueZ's storage tree, read and written in the daemon's own shape.
 //
-// The tree under one adapter holds three kinds of entry:
+// The tree under one adapter holds four kinds of entry:
 //
 //   - a directory named after a paired device, holding that device's
 //     info file, and often an attributes file that is empty. The info
@@ -12,9 +12,12 @@ package bonds
 //     so most of these entries are the neighbours' phones and headsets.
 //   - settings, the adapter's own power state, which the pod already
 //     states in bluetoothd's main.conf.
+//   - identity, the adapter's own identity resolving key, which exists
+//     only after privacy was on. It travels in a Secret of its own
+//     (identity.go).
 //
-// The device directories and the cache entries that match them travel,
-// and nothing else does. A cache entry whose device has a directory
+// Of the bonds, the device directories and the cache entries that
+// match them travel, and nothing else does. A cache entry whose device has a directory
 // holds the SDP records, and a BR/EDR HID device does not reconnect
 // without them. A cache entry with no device directory is a device
 // this adapter never paired with, and copying it would publish who

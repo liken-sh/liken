@@ -115,6 +115,15 @@ type inventory struct {
 	// reported, and the zero address when it reported none. A change
 	// of it posts RadioClaimed or RadioLost.
 	radioHeld bonds.Address
+
+	// settings is the pod's settings volume, whose privacy file holds
+	// the value bluetoothd started with (privacy.go).
+	settings string
+
+	// privacy is the value this pass reports in the Adapter's
+	// status.privacy. It is empty when the pass could not read the
+	// settings file, and the status then keeps the value it has.
+	privacy string
 }
 
 func newInventory(client *apiclient.Client, radio radio, held *relays, nodeName, namespace string, readings *metrics) *inventory {
@@ -129,6 +138,7 @@ func newInventory(client *apiclient.Client, radio radio, held *relays, nodeName,
 		retiring:  map[bonds.Address]bool{},
 		follow:    func(string) {},
 		metrics:   readings,
+		settings:  settingsRoot,
 	}
 	// The connector reads the clock through a closure, because the
 	// inventory's clock is a field a test replaces after construction,
@@ -155,6 +165,17 @@ type inventoryPass struct {
 	// Secrets are not rewritten, because the teardown removes each bond
 	// and garbage collection takes each Secret with its Peripheral.
 	unpairing map[bonds.Address]bool
+
+	// adapter is the Adapter this pass reconciled, and nil when the
+	// pass did not read one. It owns the identity Secret, and its
+	// spec.privacy decides whether the pod restarts.
+	adapter *Adapter
+
+	// privacy is the value in the settings file, which bluetoothd
+	// started with. It is empty when the pod has no settings file or
+	// the pass could not read it, and the pod then never restarts for
+	// privacy.
+	privacy string
 
 	// again is how long until the loop must run this pass again, and
 	// zero means no follow-up is needed.
@@ -240,6 +261,22 @@ func (i *inventory) reconcile() inventoryPass {
 		}
 	}
 
+	// The settings file is read on each pass, before the Adapter's
+	// status is written. A missing file is a pod whose bluetoothd
+	// started with privacy off.
+	started, err := readStartedPrivacy(i.settings)
+	switch {
+	case err != nil:
+		fmt.Fprintf(os.Stderr, "reading the privacy that bluetoothd started with: %v\n", err)
+		i.privacy = ""
+		pass.ok = false
+	case started == "":
+		i.privacy = privacyOff
+	default:
+		i.privacy = started
+	}
+	pass.privacy = started
+
 	adapterStart := i.now()
 	adapter, err := i.ensureAdapter(snapshot.Adapter)
 	i.metrics.timeReconcile(adapterKind, adapterStart, i.now())
@@ -249,6 +286,7 @@ func (i *inventory) reconcile() inventoryPass {
 		pass.ok = false
 		return pass
 	}
+	pass.adapter = adapter
 
 	// One walk of sysfs answers the battery of every device this pass
 	// writes, before any status write, so each Peripheral reads the level

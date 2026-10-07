@@ -20,7 +20,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,6 +56,14 @@ const (
 	dbusDaemonPath = "/usr/bin/dbus-daemon"
 	bluetoothdPath = "/usr/libexec/bluetooth/bluetoothd"
 	inputConfPath  = "/etc/bluetooth/input.conf"
+	mainConfPath   = "/etc/bluetooth/main.conf"
+
+	// privacyPath is the file that bondfetch writes from the Adapter's
+	// spec.privacy before this container starts. The directory is the
+	// pod's settings volume, which the operator's container also
+	// mounts, so the operator reads the value that this bluetoothd
+	// started with.
+	privacyPath = "/var/run/bluetooth.liken.sh/settings/privacy"
 
 	classicBondedOnlyVar = "BLUETOOTH_CLASSIC_BONDED_ONLY"
 
@@ -93,6 +103,9 @@ func run() error {
 	}
 
 	if err := writeInputConf(inputConfPath, os.Getenv(classicBondedOnlyVar)); err != nil {
+		return err
+	}
+	if err := writeMainConf(mainConfPath, privacyPath); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(socket), 0o755); err != nil {
@@ -178,6 +191,54 @@ func writeInputConf(path, bondedOnly string) error {
 	}
 	contents := fmt.Sprintf("[General]\nClassicBondedOnly=%s\nUserspaceHID=false\n", bondedOnly)
 	return os.WriteFile(path, []byte(contents), 0o644)
+}
+
+// privacyValues are the values of BlueZ's Privacy key, spelled as
+// parse_privacy in BlueZ's src/main.c reads them. The Adapter's
+// spec.privacy states the same five in its schema.
+var privacyValues = map[string]bool{
+	"off":             true,
+	"network":         true,
+	"device":          true,
+	"limited-network": true,
+	"limited-device":  true,
+}
+
+// writeMainConf writes bluetoothd's main.conf at start, because the
+// Privacy key in it comes from the Adapter, and a person sets it for
+// one radio.
+//
+// bluetoothd reads Privacy once, and sends it to the kernel when each
+// adapter starts. The kernel accepts the privacy command only while
+// the radio is powered off. So the value in this file is the value
+// for the life of this bluetoothd, and the operator deletes its pod to
+// apply a new one.
+//
+// A missing settings file means privacy off, which is BlueZ's own
+// default. A pod with no settings volume then starts as BlueZ would
+// start with no Privacy key. Any value outside the five is a failure
+// to start. parse_privacy reads a value it does not recognize as off,
+// so a typing error would turn privacy off with no error.
+//
+// AutoEnable powers the adapter on when bluetoothd starts. bluetoothd
+// leaves an adapter down otherwise, so without this a machine that
+// reboots comes back with its radio off and its bonds unreachable, and
+// somebody has to run bluetoothctl to turn it on. No deployment has a
+// reason to turn it off, so it has no setting.
+func writeMainConf(path, settings string) error {
+	privacy := "off"
+	contents, err := os.ReadFile(settings)
+	switch {
+	case err == nil:
+		privacy = strings.TrimSpace(string(contents))
+	case !errors.Is(err, fs.ErrNotExist):
+		return fmt.Errorf("reading the privacy setting: %w", err)
+	}
+	if !privacyValues[privacy] {
+		return fmt.Errorf("%s must be off, network, device, limited-network, or limited-device, not %q", settings, privacy)
+	}
+	conf := fmt.Sprintf("[General]\nPrivacy=%s\n\n[Policy]\nAutoEnable=true\n", privacy)
+	return os.WriteFile(path, []byte(conf), 0o644)
 }
 
 // waitForSocket waits for dbus-daemon to bind the bus socket. It

@@ -126,6 +126,11 @@ From here on, **PS** alone reconnects the controller. The keys are
 in the `Secret`, so they survive a pod restart, an upgrade, and a
 reboot.
 
+The `Adapter`'s `spec.privacy` affects Low Energy links only, such as a
+remote's. A DualSense pairs and reconnects over a classic link, which
+always uses the radio's public address.
+[Privacy](https://liken.sh/bluetooth/docs/concepts/privacy/) explains the setting.
+
 ## 5. Claim the controller
 
 If the [Dynamic Resource Allocation

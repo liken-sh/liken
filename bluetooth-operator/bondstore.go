@@ -128,6 +128,11 @@ type bondStore struct {
 	secrets        informer.View
 	secretVersions *memo.Versions
 
+	// identity is the copy of the adapter's identity file that the
+	// identity Secret holds, as this store last wrote or read it, and
+	// nil before the first read (identity.go).
+	identity []byte
+
 	// reportedLegacy records that the operator has already named the
 	// older per-adapter Secret. The migration leaves that object alone,
 	// so the line is printed once for a person to act on rather than on

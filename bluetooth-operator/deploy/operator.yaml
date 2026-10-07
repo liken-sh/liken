@@ -116,7 +116,10 @@ spec:
         # The bonds, restored into the volume that bluetoothd reads.
         # bondfetch asks the kernel for the address of the adapter
         # this pod claimed, reads the Secrets labelled with that
-        # address, writes BlueZ's tree, and exits.
+        # address, writes BlueZ's tree, and exits. It also writes the
+        # radio's identity key back from its own Secret, and writes
+        # the Adapter's spec.privacy into the settings volume, because
+        # bluetoothd reads both only when it starts.
         - name: bondfetch
           image: ghcr.io/liken-sh/bluetooth-bondfetch:latest
           env:
@@ -163,6 +166,8 @@ spec:
           volumeMounts:
             - name: bonds
               mountPath: /var/lib/bluetooth
+            - name: settings
+              mountPath: /var/run/bluetooth.liken.sh/settings
         # btmon, as a sidecar that runs as long as the pod. It traces
         # the HCI link, the layer under D-Bus and under bluetoothd,
         # and writes each packet to the container log. A stall of a
@@ -280,6 +285,11 @@ spec:
               mountPath: /var/run/bluetooth.liken.sh/dbus
             - name: bonds
               mountPath: /var/lib/bluetooth
+            # start-bluetoothd writes main.conf from the privacy file
+            # that bondfetch wrote here.
+            - name: settings
+              mountPath: /var/run/bluetooth.liken.sh/settings
+              readOnly: true
       containers:
         - name: operator
           image: ghcr.io/liken-sh/bluetooth-operator:latest
@@ -297,6 +307,14 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            # This pod's own name. The operator deletes its pod by this
+            # name when the Adapter's spec.privacy differs from the
+            # value bluetoothd started with, because bluetoothd reads
+            # the setting only at start.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
             # The same address the bluetoothd container states, for
             # the same socket on the same volume.
             - name: DBUS_SYSTEM_BUS_ADDRESS
@@ -363,6 +381,12 @@ spec:
             # which is the other half of what bondfetch does at start.
             - name: bonds
               mountPath: /var/lib/bluetooth
+            # The privacy value that bluetoothd started with, which the
+            # operator compares with the Adapter's spec.privacy and
+            # reports in its status.
+            - name: settings
+              mountPath: /var/run/bluetooth.liken.sh/settings
+              readOnly: true
       resourceClaims:
         - name: adapter
           resourceClaimTemplateName: bluetooth-adapter
@@ -411,4 +435,11 @@ spec:
         # reconnects with the PS button, and a person has to hold
         # Create and PS and pair it again after every pod restart.
         - name: bonds
+          emptyDir: {}
+        # The settings that bluetoothd reads at start, which come from
+        # the Adapter. bondfetch writes a file named privacy here, and
+        # start-bluetoothd and the operator read it. An emptyDir, so
+        # each new pod starts from the Adapter's spec and not from the
+        # last pod's file.
+        - name: settings
           emptyDir: {}

@@ -139,3 +139,71 @@ func TestWaitForSocketGivesUp(t *testing.T) {
 		})
 	}
 }
+
+// writeMainConfFrom writes a settings file that holds value, runs
+// writeMainConf on it, and answers the main.conf it wrote.
+func writeMainConfFrom(t *testing.T, value string) (string, error) {
+	t.Helper()
+	directory := t.TempDir()
+	settings := filepath.Join(directory, "privacy")
+	if err := os.WriteFile(settings, []byte(value), 0o644); err != nil {
+		t.Fatalf("writing the settings file: %v", err)
+	}
+	path := filepath.Join(directory, "main.conf")
+	if err := writeMainConf(path, settings); err != nil {
+		return "", err
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading it back: %v", err)
+	}
+	return string(contents), nil
+}
+
+// Each of the five values of BlueZ's Privacy key reaches main.conf as
+// it is spelled, beside the AutoEnable that every start needs.
+func TestWriteMainConfWritesEachPrivacyValue(t *testing.T) {
+	for _, value := range []string{"off", "network", "device", "limited-network", "limited-device"} {
+		t.Run(value, func(t *testing.T) {
+			contents, err := writeMainConfFrom(t, value+"\n")
+			if err != nil {
+				t.Fatalf("writeMainConf: %v", err)
+			}
+			want := "[General]\nPrivacy=" + value + "\n\n[Policy]\nAutoEnable=true\n"
+			if contents != want {
+				t.Errorf("main.conf = %q, want %q", contents, want)
+			}
+		})
+	}
+}
+
+// A pod with no settings volume has no file, and starts with privacy
+// off, which is BlueZ's own default.
+func TestWriteMainConfWritesOffWithNoSettingsFile(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "main.conf")
+
+	if err := writeMainConf(path, filepath.Join(directory, "privacy")); err != nil {
+		t.Fatalf("writeMainConf: %v", err)
+	}
+
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading it back: %v", err)
+	}
+	if want := "[General]\nPrivacy=off\n\n[Policy]\nAutoEnable=true\n"; string(contents) != want {
+		t.Errorf("main.conf = %q, want %q", contents, want)
+	}
+}
+
+// BlueZ reads a Privacy value it does not recognize as off, so a value
+// outside the five stops the container before it reaches main.conf.
+func TestWriteMainConfRefusesAnyOtherValue(t *testing.T) {
+	for _, value := range []string{"", "on", "Device", "true", "limited"} {
+		t.Run(value, func(t *testing.T) {
+			if _, err := writeMainConfFrom(t, value); err == nil {
+				t.Errorf("writeMainConf accepted %q", value)
+			}
+		})
+	}
+}

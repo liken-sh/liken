@@ -1,5 +1,7 @@
 // bondfetch writes an adapter's stored bonds into the directory
-// bluetoothd reads, and then exits.
+// bluetoothd reads, and then exits. It also restores the adapter's
+// identity key and writes the Adapter's privacy setting, because both
+// must be in place before bluetoothd starts (privacy.go).
 //
 // It is a plain init container. The pod's bonds are in Kubernetes
 // Secrets, one for each bond, each labelled with the adapter it
@@ -82,6 +84,10 @@ func run() error {
 	if root == "" {
 		root = defaultRoot
 	}
+	settings := os.Getenv(settingsVar)
+	if settings == "" {
+		settings = defaultSettings
+	}
 
 	socket, err := openHCISocket()
 	if err != nil {
@@ -99,7 +105,13 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	return materialize(client, namespace, adapter.Address, root)
+	if err := materialize(client, namespace, adapter.Address, root); err != nil {
+		return err
+	}
+	if err := restoreIdentity(client, namespace, adapter.Address, root); err != nil {
+		return err
+	}
+	return writePrivacy(client, adapter.Address, settings)
 }
 
 // materialize writes one adapter's stored bonds into the tree

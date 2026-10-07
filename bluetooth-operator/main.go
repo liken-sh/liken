@@ -136,6 +136,13 @@ func main() {
 	if namespace == "" {
 		fatal("%s is unset; the pod spec must supply it from metadata.namespace", namespaceVar)
 	}
+	// The pod deletes itself by this name to apply a new privacy
+	// setting (privacy.go), and the downward API is where a pod reads
+	// its own name.
+	podName := os.Getenv(podNameVar)
+	if podName == "" {
+		fatal("%s is unset; the pod spec must supply it from metadata.name", podNameVar)
+	}
 	fmt.Printf("%s: operating the Bluetooth adapter on %s\n", DriverName, nodeName)
 
 	// Failures during setup end the process deliberately. This code
@@ -215,6 +222,7 @@ func main() {
 	publish := &publisher{client: client, nodeName: nodeName, owner: owner, relays: held}
 	keep := &bondStore{client: client, namespace: namespace, root: bondsRoot(), relays: held,
 		watchSecrets: func(adapter bonds.Address) informer.View { return watchBondSecrets(ctx, watcher, namespace, adapter) }}
+	restart := &privacyRestart{client: client, namespace: namespace, pod: podName, recorder: recorder}
 	objects := newInventory(client, newBlueZRadio(conn), held, nodeName, namespace, readings)
 	objects.recorder = recorder
 	objects.node = nodeReference(owner)
@@ -241,7 +249,9 @@ func main() {
 	objects.follow = edits.follow
 	retryScheduled := false
 	pass := func() {
-		// The three parts of a pass run in order and all of them run. The
+		// The three parts of a pass run in order and all of them run.
+		// The bond store also writes the radio's identity key
+		// (identity.go). The
 		// object reconcile runs first, because a bond's Secret is owned by
 		// that bond's Peripheral and a device under teardown must leave the
 		// slice before its bond is removed. A pairing that the slice
@@ -253,7 +263,13 @@ func main() {
 		if published {
 			objects.published()
 		}
-		persisted := keep.persist(readAdapter, state.owners, state.unpairing)
+		bonded := keep.persist(readAdapter, state.owners, state.unpairing)
+		identified := keep.persistIdentity(state.adapter)
+		persisted := bonded && identified
+		// The restart for a new privacy setting runs last, because it
+		// deletes this pod, and it waits for a pass that stored every
+		// bond and the identity key.
+		restart.apply(state.adapter, state.privacy, persisted)
 		if state.again > 0 {
 			// A window that is open or a teardown between two of its steps
 			// needs the next pass sooner than the backstop tick.

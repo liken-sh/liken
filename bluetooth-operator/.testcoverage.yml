@@ -21,17 +21,17 @@
 profile: coverage.out
 
 threshold:
-  total: 74
+  total: 75
 
 override:
   # The bluetoothd supervisor: what is testable is the argument
   # building. Starting the daemon needs a real bus.
   - path: ^bluetoothd$
-    threshold: 43
+    threshold: 49
   # bondfetch: the fetch loop needs a real adapter; the parsing does
   # not.
   - path: ^bondfetch$
-    threshold: 47
+    threshold: 52
   # bonds: the on-disk bond format, which is pure byte layout.
   - path: ^bonds$
-    threshold: 91
+    threshold: 92

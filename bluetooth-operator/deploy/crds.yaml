@@ -60,6 +60,10 @@ spec:
           type: boolean
           description: Whether bluetoothd has the radio powered on.
           jsonPath: .status.powered
+        - name: Privacy
+          type: string
+          description: The Low Energy privacy that bluetoothd started with.
+          jsonPath: .status.privacy
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -83,6 +87,28 @@ spec:
                     into BlueZ's Adapter1.Alias. A discoverable window
                     announces the adapter under this name. Leave it
                     empty to keep the name bluetoothd chose.
+                privacy:
+                  type: string
+                  # Quoted, because YAML 1.1 reads a bare off as false.
+                  enum: ["off", "network", "device", "limited-network", "limited-device"]
+                  description: >-
+                    Low Energy privacy for this radio, written into
+                    bluetoothd's Privacy key. With privacy on, the radio
+                    advertises and connects from a private address that
+                    it changes every few minutes, and only a device that
+                    paired with it can resolve that address back to the
+                    radio. A classic link always uses the radio's public
+                    address. off uses the fixed address, and is the
+                    value of an empty field. network accepts advertising
+                    only from a peer that uses a private address, which
+                    some older devices do not. device also accepts
+                    advertising from a peer's identity address.
+                    limited-network and limited-device advertise in
+                    Limited Discoverable Mode, which shows the identity
+                    address while the radio is discoverable, and scan as
+                    network and device do. bluetoothd reads the value
+                    only when it starts, so the operator deletes its own
+                    pod to apply a change.
             status:
               type: object
               description: What the operator observes about the radio.
@@ -100,6 +126,13 @@ spec:
                 powered:
                   type: boolean
                   description: Whether bluetoothd has the radio powered on.
+                privacy:
+                  type: string
+                  description: >-
+                    The privacy value that the running bluetoothd
+                    started with. It is what bluetoothd was told, not
+                    what the kernel accepted. btmgmt info in the
+                    bluetoothd container shows the kernel's setting.
                 deletionRefused:
                   type: string
                   description: >-

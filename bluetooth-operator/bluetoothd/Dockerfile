@@ -214,12 +214,11 @@ COPY --from=daemons /out/ /
 COPY --from=entrypoint /start-bluetoothd /usr/local/bin/start-bluetoothd
 COPY --from=entrypoint /notices /
 
-# AutoEnable is baked in, because an adapter that this operator holds
-# must power itself on, and no deployment has a reason to say
-# otherwise. input.conf is not here: the entrypoint writes it at start
-# from BLUETOOTH_CLASSIC_BONDED_ONLY, because that setting is a
-# security choice a person makes for one pairing session.
-COPY bluetoothd/main.conf /etc/bluetooth/main.conf
+# /etc/bluetooth holds no file in the image. The entrypoint writes
+# main.conf and input.conf at start: main.conf takes its Privacy key
+# from the Adapter, and input.conf takes ClassicBondedOnly from
+# BLUETOOTH_CLASSIC_BONDED_ONLY. Each one is a choice a person makes
+# at deploy time.
 
 # The image's own default for the bus address. The pod states the same
 # address on both containers, next to the volume that holds the

@@ -100,7 +100,18 @@ func (i *inventory) settleAdapter(adapter *Adapter, state adapterState) error {
 		Address: state.Address.Directory(),
 		Node:    i.nodeName,
 		Powered: state.Powered,
+		Privacy: i.reportedPrivacy(adapter),
 	})
+}
+
+// reportedPrivacy answers the value for status.privacy: the value this
+// pass read from the settings file, or the value the status already
+// has when the pass could not read the file.
+func (i *inventory) reportedPrivacy(adapter *Adapter) string {
+	if i.privacy == "" {
+		return adapter.Status.Privacy
+	}
+	return i.privacy
 }
 
 // createAdapter puts a radio in the API for the first time.
@@ -154,6 +165,7 @@ func (i *inventory) refuseDeletion(adapter *Adapter, state adapterState) error {
 		Address:         state.Address.Directory(),
 		Node:            i.nodeName,
 		Powered:         state.Powered,
+		Privacy:         i.reportedPrivacy(adapter),
 		DeletionRefused: reason,
 	})
 }

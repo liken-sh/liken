@@ -3,17 +3,20 @@
 # Bluetooth stack has to be, and correspondingly narrow here: it
 # writes one ResourceSlice, reads the claims the kubelet asks it to
 # prepare, reads its own Node, keeps the three objects of the pairing
-# API, reads and writes the Secrets that hold its adapter's bonds, and
-# posts Events about its objects and its Node.
+# API, reads and writes the Secrets that hold its adapter's bonds and
+# identity key, posts Events about its objects and its Node, and
+# deletes its own pod to apply a new privacy setting.
 #
 # One ServiceAccount serves the whole pod. A ServiceAccount is a
 # pod-level field, and the ServiceAccount admission controller mounts
 # the projected token into the init containers as well as the
-# containers, so bondfetch reads the Secrets through this identity and
-# there is no second one to give it. The two halves do not need the
-# same verbs, because bondfetch reads Secrets and never writes one.
-# Splitting the verbs would take a second pod, and both halves have
-# to hold the same adapter.
+# containers, so bondfetch reads the Secrets and its Adapter through
+# this identity and there is no second one to give it. The two halves
+# do not need the same verbs, because bondfetch reads Secrets and its
+# Adapter and never writes one. Splitting the verbs would take a
+# second pod, and both halves have to hold the same adapter. So
+# bondfetch's read of its Adapter needs no rule of its own: the get
+# on adapters below covers it.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -59,6 +62,9 @@ rules:
   # finalizer lists alone, which are edited as a merge patch so that a
   # person's own fields on the object survive the write.
   #
+  # bondfetch gets the Adapter for its radio before bluetoothd starts,
+  # and writes its spec.privacy into the pod's settings volume.
+  #
   # This is a ClusterRole and not a Role. Adapters and Peripherals are
   # cluster-scoped, and a PairingRequest may be created in any
   # namespace, which is the grant the whole design exists to make
@@ -97,8 +103,11 @@ subjects:
     namespace: liken-system
 ---
 # The bonds: one Secret for each bond, holding that one device's link
-# keys and labelled with the adapter it belongs to. bondfetch lists
-# them by that label before bluetoothd starts, and the operator creates
+# keys and labelled with the adapter it belongs to. The radio's own
+# identity key is in one more Secret, named for the radio, which
+# bondfetch gets by that name and the operator creates and updates.
+# bondfetch lists the bond Secrets by that label before bluetoothd
+# starts, and the operator creates
 # each one at its pairing and updates it whenever the keys change. The
 # operator also watches them by that label, so each pass compares the
 # bonds on disk with the watch's copies instead of reading every Secret
@@ -107,7 +116,8 @@ subjects:
 #
 # No delete. A bond's Secret is owned by that bond's Peripheral, so
 # deleting the Peripheral collects the Secret through ordinary garbage
-# collection, and the operator never removes one itself.
+# collection, and the operator never removes one itself. The identity
+# Secret is owned by the Adapter in the same way.
 #
 # A Role and not a ClusterRole, because these Secrets are in the
 # operator's own namespace alone and a namespaced grant is the
@@ -125,6 +135,18 @@ rules:
   - apiGroups: [""]
     resources: [secrets]
     verbs: [get, list, watch, create, update]
+  # The operator's own pod. bluetoothd reads its privacy setting only
+  # when it starts, so the operator deletes its pod when the Adapter's
+  # spec.privacy differs from the value bluetoothd started with, and
+  # the DaemonSet creates a new pod with the new value (privacy.go).
+  #
+  # The grant reaches every pod in the operator's namespace, not only
+  # this one. resourceNames cannot narrow it, because the pod's name
+  # changes with each pod the DaemonSet creates. The program deletes
+  # only the pod named in POD_NAME, which the downward API gives it.
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [delete]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

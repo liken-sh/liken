@@ -1,10 +1,12 @@
 package main
 
 // The Events this operator posts, for a person who runs
-// `kubectl describe` on a PairingRequest, a Peripheral, or a Node.
+// `kubectl describe` on a PairingRequest, a Peripheral, an Adapter, or
+// a Node.
 //
 // An Event records what just happened: a window opened or closed, a
-// device paired, a bond or a radio went away. A condition and a status
+// device paired, a bond or a radio went away, or a change of privacy
+// restarted the pod. A condition and a status
 // field hold what is true now, and the API server deletes an Event an
 // hour after its last write, so each fact here is also in a status
 // field or a log line.
@@ -16,8 +18,8 @@ package main
 // changes. Only the change that needs a person, a bond that left
 // bluetoothd, posts BondLost.
 //
-// Peripherals and Nodes are cluster-scoped, so their Events are in
-// `default`. A PairingRequest's Events are in its own namespace.
+// Peripherals, Adapters, and Nodes are cluster-scoped, so their Events
+// are in `default`. A PairingRequest's Events are in its own namespace.
 
 import "github.com/liken-sh/liken/kubernetes/events"
 
@@ -61,7 +63,23 @@ const (
 	// radio after it reported one, which means the adapter was
 	// unplugged or reset.
 	reasonRadioLost = "RadioLost"
+
+	// reasonPrivacyChanged is Normal, on an Adapter: spec.privacy
+	// differs from the value bluetoothd started with, and the operator
+	// deletes its own pod so that bluetoothd starts with the new value.
+	reasonPrivacyChanged = "PrivacyChanged"
 )
+
+// adapterReference names an Adapter in an Event. An Adapter is
+// cluster-scoped, so its Events are in default.
+func adapterReference(adapter *Adapter) events.ObjectReference {
+	return events.ObjectReference{
+		APIVersion: pairingAPI,
+		Kind:       adapterKind,
+		Name:       adapter.Metadata.Name,
+		UID:        adapter.Metadata.UID,
+	}
+}
 
 // requestReference names a PairingRequest in an Event.
 func requestReference(request *PairingRequest) events.ObjectReference {
