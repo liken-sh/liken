@@ -4,8 +4,8 @@ This plan, written on 2026-10-07, answers the open problem "A cleanup
 run outlives its `Library`". It chooses the first of that problem's
 three options: the operator releases a deleted `Library`'s finalizer
 when its cleanup `Job` succeeds, and the `Job` deletes its own run
-before it exits. Built on 2026-10-07. The drill on `liken-1` has not
-run yet.
+before it exits. Built on 2026-10-07, and proved on `liken-1` the same
+day.
 
 ## The problem
 
@@ -80,9 +80,9 @@ version the delete makes. The drill measures how long that takes.
 ## What is left by hand
 
 A row from before this change stays, because no confirmation answers
-it. On `liken-1`, the `drill-action` cleanup run needs a manual delete,
-and so does the `cleanup` run that the live `Library` `franchises`
-carries from a deletion under the same name on 2026-09-06.
+it. On `liken-1`, the `drill-action` cleanup run and the `cleanup` run
+that the live `Library` `franchises` carried from a deletion under the
+same name on 2026-09-06 were deleted by hand on 2026-10-07.
 
 ## The proof
 
@@ -92,6 +92,13 @@ any table of the catalog afterward. Other tests cover the confirmer's
 drop on a delete, on a late confirmation, and on a stream that opens,
 and the `Job`'s failure when no pod drops the confirmation.
 
-The drill on `liken-1`: declare a small `Library`, let it walk, delete
-it, and read the catalog for its key afterward. The cleanup `Job`'s log
-shows how long the drop took to arrive.
+The drill on `liken-1` on 2026-10-07, with one catalog pod: a
+`Library` `drill-cleanup` of kind `franchises` walked the 36
+franchises of the lab's repository. It was then deleted. The cleanup
+`Job` swept 1,573 rows, the confirmer confirmed its run and then
+dropped that confirmation, and the `Job` logged that a catalog pod held
+its delete. The operator released the finalizer 22 seconds after the
+delete. Afterward, none of the 23 tables in `catalogTables` held a row
+for `default/drill-cleanup`. When the new confirmer started, it also
+dropped 3 confirmations whose `scan` runs a later walk `Job` had
+replaced.
