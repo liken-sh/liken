@@ -15,3 +15,19 @@ file, and sweeps them the way it sweeps the `marks` table. The walk
 reads only the counts from the ledger, and it never reads the faces
 record. Neither the table nor either feature is built. The design is
 in [plan 75](../completed/75-scene-level-cast-appearances.md#step-2-the-catalog).
+
+## Rows of observations or rows of spans
+
+A film had about 650 to 780 named faces in plan 75's measurements, one
+per keyframe. One row per observation is then about one million rows
+for a library of about 1,450 films, and every copy of the catalog
+carries them: the catalog pods', each library `Job`'s, and each
+screen's. On a home cluster on 2026-10-07, each node's pod-storage
+partition was 8.3 GB with 4.4 to 7.1 GB free, and a copy of the catalog
+was about 720 MB before any appearance row. A span joins the keyframes
+of one person into one interval, which is several times fewer rows,
+and the scenes of a person and a jump to the next appearance both read
+intervals. The spans file already holds them. Rows of observations keep
+each face's similarity for a later threshold, but the ledger on the
+volume keeps it too. Rows of spans were the recommendation when plan 78
+set this work aside.
