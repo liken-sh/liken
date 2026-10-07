@@ -496,6 +496,12 @@ server and guider pods need a `NetworkPolicy` from the start, and mode
 1 needs a deliberate way for KStars to reach the server from outside
 the cluster.
 
+On 2026-10-07, plan 10 of `observatory-operator` closed this section
+differently: the cluster owner chooses both the path from outside and
+the `NetworkPolicy`, because a policy that the operator wrote would
+block the path the owner chose. The operator's manual names the labels
+and ports that the owner's objects select.
+
 ## Adjacent work this plan does not cover
 
 The screen shows that some pieces of the media stack serve more than

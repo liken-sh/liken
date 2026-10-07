@@ -1,6 +1,11 @@
 # 10, Access from a desktop
 
-Proposed on 2026-10-05. Not built. This plan completes mode 1.
+Proposed on 2026-10-05. Closed on 2026-10-07, built as documentation:
+the cluster owner chooses the path from a desktop, and the manual names
+what that path selects. This plan completes mode 1. KStars reached the
+`lab` fleet's simulators through `kubectl port-forward` before the
+plan closed. The full drill below, with an Ekos capture sequence, a
+plate solve, and PHD2 guiding, has not run.
 
 ## The problem
 
@@ -45,3 +50,29 @@ the end of mode 1.
 - Upload modes: `UploadSP` in `libs/indibase/indiccd.cpp`
 - [Root plan 74](../../plans/74-astrophotography.md), "Frames" and
   "Security"
+
+## What was built
+
+The operator chooses no path into the cluster and writes no
+`NetworkPolicy`. A port forward, a `LoadBalancer`, a VPN, and a mesh
+each suit a different network, and only the cluster owner knows which
+one fits. A policy that the operator wrote would block the path the
+owner chose. So the requirements changed:
+
+- The path is the cluster owner's. The manual's guide "Reserve a
+  telescope" gives a port forward and a `LoadBalancer` `Service` of the
+  owner's own, which selects the server's and the guider's pods by the
+  labels `observatory.liken.sh/kind` and `observatory.liken.sh/resource`.
+  The operator deletes its own `Service`s at the end of each
+  reservation, so an edit to them is lost, and the owner's `Service`
+  stays.
+- The `NetworkPolicy` is the cluster owner's. The guide states that
+  INDI and PHD2 have no authentication, and which traffic the pods of
+  the namespace need.
+- The holder was already built: `Reservation.spec.holder` is free
+  text from plan 06.
+- The upload mode needs no work: the operator never writes
+  `UPLOAD_MODE`, so Ekos sets it from the client.
+
+The reference page "Objects the operator creates" lists the names, the
+ports, and the labels as the contract that the owner's objects select.
