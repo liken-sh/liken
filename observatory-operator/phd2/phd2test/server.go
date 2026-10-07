@@ -20,6 +20,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"syscall"
 )
 
 // Server is one fake PHD2. Its fields are its state, and Set changes
@@ -43,6 +44,9 @@ type Server struct {
 	methods []string
 	conns   []net.Conn
 	dials   int
+	// exited records a Cut. A PHD2 that exited has no listener, so
+	// each later dial is refused.
+	exited bool
 	// Failed receives what the Server could not read. A test checks it.
 	failed []string
 }
@@ -51,10 +55,16 @@ type Server struct {
 // connected, as PHD2 is after it starts.
 func New() *Server { return &Server{AppState: "Stopped"} }
 
-// DialContext answers one end of a new pipe, and serves the other.
+// DialContext answers one end of a new pipe, and serves the other. A
+// Server that was cut refuses the dial with ECONNREFUSED, as a host with
+// no listener on the port does.
 func (s *Server) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
-	server, client := net.Pipe()
 	s.mu.Lock()
+	if s.exited {
+		s.mu.Unlock()
+		return nil, &net.OpError{Op: "dial", Net: network, Err: syscall.ECONNREFUSED}
+	}
+	server, client := net.Pipe()
 	s.conns = append(s.conns, server)
 	s.dials++
 	s.mu.Unlock()
@@ -99,11 +109,13 @@ func (s *Server) Broadcast(e map[string]any) {
 	}
 }
 
-// Cut closes every connection, as a PHD2 that exits does.
+// Cut closes every connection and refuses each later dial, as a PHD2
+// that exits does.
 func (s *Server) Cut() {
 	s.mu.Lock()
 	conns := s.conns
 	s.conns = nil
+	s.exited = true
 	s.mu.Unlock()
 	for _, c := range conns {
 		c.Close()

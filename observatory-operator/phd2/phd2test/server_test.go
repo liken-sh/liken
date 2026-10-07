@@ -184,3 +184,15 @@ func TestAHeldMethodWaitsAndABroadcastReachesTheClient(t *testing.T) {
 		}
 	})
 }
+
+// A PHD2 that exited refuses a new connection, the way a socket with no
+// listener refuses one, so a dial that races the end of a pod never
+// reaches the PHD2 that is gone.
+func TestACutServerRefusesADial(t *testing.T) {
+	s := New()
+	s.Cut()
+	if conn, err := s.DialContext(t.Context(), "tcp", "phd2:4400"); err == nil {
+		conn.Close()
+		t.Fatal("the dial reached a PHD2 that exited")
+	}
+}
