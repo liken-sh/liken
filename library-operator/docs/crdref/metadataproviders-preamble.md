@@ -7,6 +7,10 @@ fact the first provider in that list that serves it is the one
 asked. The `trailer` and `marks` facts take the union of their
 providers, so they ask every provider in the list that serves them.
 
+A `MetadataProvider` name is at most 32 characters, because `library-operator` builds the names
+of the objects it creates from it, and Kubernetes limits some of those
+names to 63 characters.
+
 A `MetadataProvider` names exactly one provider block: `tmdb`,
 `omdb`, `fanart`, `tvmaze`, `peertube`, `archive`, `theintrodb`,
 `introdb`, or `imdb`. TMDb, OMDb, and Fanart.tv take a key from a

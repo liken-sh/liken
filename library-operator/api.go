@@ -137,12 +137,15 @@ type ListMeta struct {
 	ResourceVersion string `json:"resourceVersion,omitempty"`
 }
 
-// The longest name a Library may take, which the CRD enforces. The name
-// starts the name of every Job the Library becomes, and the pod of an
-// Indexed worker Job takes the hostname <job>-<index>, which a 63-character
-// DNS label must hold. Past this length, the API server refuses the
-// Library's Jobs and the Library never scans.
-const maxLibraryNameLength = 32
+// The longest name a Library, a Catalog, a MetadataProvider, or a Player
+// may take, which each CRD enforces. The operator builds the names of the
+// Jobs, pods, Services, and claims it creates from these names, and
+// Kubernetes limits some of them to 63 characters: a Job name, the
+// hostname <job>-<index> of an Indexed Job's pod, a Service name, and a
+// label value, which every per-node claim's name becomes. Past those
+// limits, the API server refuses the object, and the operator can never
+// create it.
+const maxNameLength = 32
 
 // A Library is a volume of media of one kind. The operator reads the
 // spec and writes the status: the spec is what a person declared, and

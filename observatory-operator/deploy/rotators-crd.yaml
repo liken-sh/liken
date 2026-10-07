@@ -61,6 +61,13 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
+          x-kubernetes-validations:
+            - rule: size(self.metadata.name) <= 32
+              message: >-
+                a Rotator name is at most 32 characters, because
+                observatory-operator names its pod and Service
+                <name>-rotator, and a Service name holds at most 63
+                characters
           description: >-
             A `Rotator` turns the camera in one light path: an INDI
             driver with `ROTATOR_INTERFACE`.

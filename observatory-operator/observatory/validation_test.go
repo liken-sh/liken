@@ -6,6 +6,7 @@ package observatory
 // runs on a create or an update.
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -277,5 +278,38 @@ func TestAReservationKeepsItsTelescope(t *testing.T) {
 				t.Errorf("errors = %v, want %q", got, c.refusal)
 			}
 		})
+	}
+}
+
+// Every kind caps its name at 32 characters. observatory-operator names
+// the pod and Service of a device, a Telescope, or an Observatory
+// <name>-<kind>, a Service name holds at most 63 characters, and the
+// longest kind, SkyQualityMeter, leaves 47. A Job's labels carry the name
+// of the resource whose trigger ran it, and a label value holds at most
+// 63. One cap for every kind leaves room for a longer kind.
+func TestEveryKindCapsItsName(t *testing.T) {
+	cases := []struct {
+		name    string
+		length  int
+		refused bool
+	}{
+		{"a name of 32 characters", 32, false},
+		{"a name of 33 characters", 33, true},
+	}
+	for _, kind := range Kinds {
+		for _, one := range cases {
+			t.Run(kind.Name+"/"+one.name, func(t *testing.T) {
+				object := resource(kind, map[string]any{})
+				object["metadata"].(map[string]any)["name"] = strings.Repeat("n", one.length)
+
+				refused := slices.ContainsFunc(validate(t, kind, object, nil), func(err *field.Error) bool {
+					return strings.Contains(err.Error(), "name is at most 32 characters")
+				})
+
+				if refused != one.refused {
+					t.Errorf("refused = %v, want %v", refused, one.refused)
+				}
+			})
+		}
 	}
 }

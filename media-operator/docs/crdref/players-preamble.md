@@ -6,6 +6,10 @@ Between runs, the operator keeps one claim on the unit's display for
 the idle screen. It claims the other devices only while a
 [Play](/docs/reference/plays/) runs on the unit.
 
+A `Player` name is at most 32 characters, because `media-operator`
+and `library-operator` build the names of the objects they create
+from it, and Kubernetes limits some of those names to 63 characters.
+
 The resource is namespaced, and everything a `Player` becomes is
 created in its namespace: the claims, the playback pod, and the
 `Play` that names it, so RBAC on the namespace covers the set.

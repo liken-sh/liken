@@ -7,6 +7,10 @@ every `Library`'s `Job`s take, and the claim every screen's agent runs
 on, and it owns the pod, its claim, and the namespace's catalog
 `Service` and `EndpointSlice`.
 
+A `Catalog` name is at most 32 characters, because `library-operator` builds the names
+of the objects it creates from it, and Kubernetes limits some of those
+names to 63 characters.
+
 Each catalog agent holds the whole namespace's catalog, because the
 cluster gossips every row to every peer. So one size covers the whole
 namespace, on the `Catalog`, in place of a size on each `Library`.

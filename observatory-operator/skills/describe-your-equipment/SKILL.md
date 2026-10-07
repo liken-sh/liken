@@ -56,9 +56,10 @@ of its telescope, so `kubectl get pods` lists one telescope's pods
 together. Add a word only when the telescope has two devices of one
 kind, such as the cameras `east-main` and `east-guide`.
 
-A generated name must be 63 characters or fewer, because it is a
-`Service` name. The operator refuses a longer one, and its message
-gives the longest resource name that fits.
+A resource name is at most 32 characters, and the API server refuses
+a longer one when you apply it. The generated name must fit in the 63
+characters of a `Service` name, and the cap leaves room for the
+longest kind, `skyqualitymeter`.
 
 ## Describe the site
 

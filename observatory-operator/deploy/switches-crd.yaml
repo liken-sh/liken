@@ -65,6 +65,13 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
+          x-kubernetes-validations:
+            - rule: size(self.metadata.name) <= 32
+              message: >-
+                a Switch name is at most 32 characters, because
+                observatory-operator names its pod and Service
+                <name>-switch, and a Service name holds at most 63
+                characters
           description: >-
             A `Switch` is a relay board or a power box's outputs: an
             INDI driver with `OUTPUT_INTERFACE` or `INPUT_INTERFACE`. A

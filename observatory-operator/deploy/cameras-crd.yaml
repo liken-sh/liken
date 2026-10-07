@@ -74,6 +74,13 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
+          x-kubernetes-validations:
+            - rule: size(self.metadata.name) <= 32
+              message: >-
+                a Camera name is at most 32 characters, because
+                observatory-operator names its pod and Service
+                <name>-camera, and a Service name holds at most 63
+                characters
           description: >-
             A `Camera` is an imaging or guiding camera: an INDI driver
             with `CCD_INTERFACE`. It belongs to one `OpticalTrain`, and

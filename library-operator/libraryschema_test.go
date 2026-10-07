@@ -346,10 +346,10 @@ func TestTheLongestLibraryNameLeavesEveryJobNameValid(t *testing.T) {
 	schema := librarySchema(t)
 	rules := schemaField(t, schema, "schema", "openAPIV3Schema", "x-kubernetes-validations").([]any)
 	rule := rules[0].(map[string]any)["rule"]
-	if want := fmt.Sprintf("size(self.metadata.name) <= %d", maxLibraryNameLength); rule != want {
+	if want := fmt.Sprintf("size(self.metadata.name) <= %d", maxNameLength); rule != want {
 		t.Fatalf("the CRD's first rule is %q, want %q", rule, want)
 	}
-	name := strings.Repeat("n", maxLibraryNameLength)
+	name := strings.Repeat("n", maxNameLength)
 	far := time.Date(2200, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	names := []string{cleanupJobName(name), libraryJobName(name, jobModeWalk, far),

@@ -61,6 +61,13 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
+          x-kubernetes-validations:
+            - rule: size(self.metadata.name) <= 32
+              message: >-
+                a WeatherStation name is at most 32 characters, because
+                observatory-operator names its pod and Service
+                <name>-weatherstation, and a Service name holds at most
+                63 characters
           description: >-
             A `WeatherStation` reports the weather at the site and whether it
             is safe to observe: an INDI driver with `WEATHER_INTERFACE`. It

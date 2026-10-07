@@ -17,6 +17,10 @@ player. A `Player` names the `Remote`s it owns through
 `spec.remotes`, so the unit that owns a controller is the one that
 lists it, and one controller can drive several units.
 
+A `Remote` name is at most 32 characters, because `media-operator` builds the names
+of the objects it creates from it, and Kubernetes limits some of those
+names to 63 characters.
+
     apiVersion: media.liken.sh/v1alpha1
     kind: Remote
     metadata:

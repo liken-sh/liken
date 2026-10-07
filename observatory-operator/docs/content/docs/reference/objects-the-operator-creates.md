@@ -25,10 +25,11 @@ when the telescope has two devices of one kind, as the example does
 for its cameras.
 
 A generated name must be a DNS label of 63 characters or fewer,
-because each shim dials its device by the `Service` name. The operator
-refuses a resource whose generated name breaks that rule, and the step
-that needs the name fails with a message that gives the longest
-resource name that fits.
+because each shim dials its device by the `Service` name. So every
+CRD caps a resource name at 32 characters, and the API server refuses
+a longer name when the resource is applied. The operator also refuses
+a resource whose generated name is not a DNS label, and the step that
+needs the name fails with a message that says why.
 
 ## Ports
 

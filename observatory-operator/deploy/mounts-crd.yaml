@@ -67,6 +67,13 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
+          x-kubernetes-validations:
+            - rule: size(self.metadata.name) <= 32
+              message: >-
+                a Mount name is at most 32 characters, because
+                observatory-operator names its pod and Service
+                <name>-mount, and a Service name holds at most 63
+                characters
           description: >-
             A `Mount` is the device that points a `Telescope`: an INDI
             driver with `TELESCOPE_INTERFACE`. INDI and ASCOM call these

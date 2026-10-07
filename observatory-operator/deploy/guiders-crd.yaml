@@ -58,6 +58,13 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
+          x-kubernetes-validations:
+            - rule: size(self.metadata.name) <= 32
+              message: >-
+                a Guider name is at most 32 characters, because
+                observatory-operator names its pod and Service
+                <name>-guider, and a Service name holds at most 63
+                characters
           description: >-
             A `Guider` runs PHD2 for one `Telescope`, as a client of the
             telescope's INDI server, and guides with the camera of one

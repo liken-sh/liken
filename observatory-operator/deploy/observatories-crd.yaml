@@ -52,6 +52,13 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
+          x-kubernetes-validations:
+            - rule: size(self.metadata.name) <= 32
+              message: >-
+                a Observatory name is at most 32 characters, because
+                observatory-operator builds the names of its pods,
+                Services, and Job labels from the names of observatory
+                resources, and Kubernetes limits those to 63 characters
           description: >-
             An `Observatory` is the building and the site: the roof, the
             weather, and the location. `observatory-operator` runs one

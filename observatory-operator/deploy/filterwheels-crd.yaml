@@ -64,6 +64,13 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
+          x-kubernetes-validations:
+            - rule: size(self.metadata.name) <= 32
+              message: >-
+                a FilterWheel name is at most 32 characters, because
+                observatory-operator names its pod and Service
+                <name>-filterwheel, and a Service name holds at most 63
+                characters
           description: >-
             A `FilterWheel` holds the filters in front of a camera: an
             INDI driver with `FILTER_INTERFACE`.
