@@ -87,31 +87,19 @@ backoff in normal use:
 - Two films in a row that state different modes.
 - A heal or a `masterless` restart soon after a mode switch.
 
-The mode switch also has a time limit that assumes a fast restart.
-`modeSwitchTimeout` in `modes.go` is 10 s, and its comment counts
-about a second of kubelet turnaround. A wait of 10 s or more in the
-backoff is longer than that window, so the switch can fail with
-`errModeDeclined` while weston waits to start. The result depends on
-the caller:
+The mode switch waits for the backoff.
+[Plan 27](../completed/27-a-claim-holds-its-screen-before-its-prepare-succeeds.md)
+split the readback: it waits up to `compositorReturnLimit`, six
+minutes, for the new compositor to start, and then gives it
+`modeSwitchTimeout`, 10 s, to serve the mode. So a wait in the backoff
+no longer fails a switch with `errModeDeclined`, and it still darkens
+every screen on the card for the whole wait.
 
-- For a claim's prepare, the kubelet retries the prepare. A retry
-  after weston is back finds the mode in place and delivers. A retry
-  before weston is back fails with `errModeDeclined` again, because
-  the mode record and the last restart already name the mode.
-- For the restore of a `Display`'s resting mode, no kubelet retry
-  exists. The `Display` pass records a decline in
-  `status.unconfirmed`, and the entry clears only on a later pass that
-  finds the mode in place.
-
-This is read from the code and was not seen in a log. It can explain
-part of the 30 s.
-
-[A stuck mode prepare restarts the compositor without bound](a-stuck-mode-prepare-restarts-the-compositor-without-bound.md)
-is the same backoff at its limit: there, repeated restarts put the
-compositor in minutes of backoff. That problem is about a mode that
-never syncs. The prepare's restart budget did not stop its loop in the
-drill, so the backoff is the only bound that held. This problem is
-about restarts that succeed.
+Plan 27 also stopped the loop that held the backoff at its limit: the
+`Display` pass restored the resting mode between the retries of a
+claim's prepare, and each side restarted the compositor in turn. The
+prepare's restart budget now bounds a real decline, so the backoff is
+no longer the last bound on a mode switch.
 
 ## The options
 
@@ -130,8 +118,8 @@ None is chosen.
      weston by the path of its executable in the pod's shared process
      namespace
      and must still see each new weston as a new process;
-   - a fix for the stuck mode prepare first, because this option
-     removes the only bound that held that loop in the drill.
+   - plan 27, built, which stopped the loop whose only bound was the
+     backoff.
 2. **A supervisor in the sidecar.** A general process supervisor in
    the compositor image restarts weston after every exit, a crash
    included, with its own crash policy. The kubelet's restart count
@@ -169,9 +157,7 @@ None is chosen.
    crash loop on the node restart once a second.
 4. **Accept the delay.** The manual states that a second restart
    within about 10 minutes darkens every screen on the card for 10 s
-   or more. This depends on nothing, except that `modeSwitchTimeout`
-   must be at least as long as the backoff that can apply, or the
-   prepare fails first.
+   or more. This depends on nothing.
 
 ## What is not known
 

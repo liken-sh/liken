@@ -97,7 +97,12 @@ type displayFixture struct {
 	current  map[string]string
 	held     map[string]bool
 	modeSets []string
-	restarts int
+	// What the API server says a live claim holds, which covers a
+	// claim whose prepare has not finished, and how many times a pass
+	// read it.
+	allocated   map[string]bool
+	allocations int
+	restarts    int
 	// What the compositor reports it serves on each connector,
 	// which is the other half of the mode status reports. It is empty
 	// on a bench with no compositor answering.
@@ -159,6 +164,10 @@ func newDisplayBench(t *testing.T, wired ...wiredPanel) *displayFixture {
 	// that rate-limits a second ask is measured on it.
 	controls.now = fixture.clock
 	fixture.control.prepared = func() (map[string]bool, error) { return fixture.held, nil }
+	fixture.control.allocated = func() (map[string]bool, error) {
+		fixture.allocations++
+		return fixture.allocated, nil
+	}
 	// What the compositor reports, which the standing Wayland
 	// connection carries on the machine. A bench states one session,
 	// because nothing here restarts a compositor.

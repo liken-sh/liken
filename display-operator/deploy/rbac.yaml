@@ -43,7 +43,9 @@ rules:
     # The list and the watch serve the pass that places surfaces, not
     # the prepare call: a surface arrives on a claim's own socket, and
     # the claim's status.reservedFor names the pods whose labels a
-    # region's selector reads.
+    # region's selector reads. The Display pass lists the claims too,
+    # before it restarts the compositor, to learn whether a claim
+    # whose prepare has not finished holds a screen (screenholds.go).
     verbs: [get, list, watch]
   # The layouts a Display names (layouts.go). The get reads the one a
   # Display states, the list serves a pass that reads several, and the

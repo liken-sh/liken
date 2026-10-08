@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"net"
 	"os"
@@ -727,7 +728,8 @@ func TestTheReadbackEndsOnTheWatchsReport(t *testing.T) {
 
 // The compositor a switch ended still serves the mode the
 // claim replaced, and its answer is not the readback. The wait is
-// for the connection that follows the restart.
+// for the connection that follows the restart, and a compositor that
+// never answers has declined nothing.
 func TestTheReadbackTakesNoAnswerFromTheCompositorItEnded(t *testing.T) {
 	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1"})
 	bench := newWatchBench(t, server)
@@ -739,8 +741,11 @@ func TestTheReadbackTakesNoAnswerFromTheCompositorItEnded(t *testing.T) {
 	if err == nil {
 		t.Fatal("the readback took the answer of the compositor the switch ended")
 	}
-	if waited != modeSwitchTimeout {
-		t.Errorf("the readback gave up after %v, want %v", waited, modeSwitchTimeout)
+	if errors.Is(err, errModeDeclined) {
+		t.Errorf("the readback answered %v, want no decline", err)
+	}
+	if waited != compositorReturnLimit {
+		t.Errorf("the readback gave up after %v, want %v", waited, compositorReturnLimit)
 	}
 }
 

@@ -52,11 +52,10 @@ const modeParameter = "mode"
 // is what an unclaimed screen should run.
 const preferredMode = "preferred"
 
-// ModeSwitchTimeout bounds the wait for the screen to come back
-// at the requested mode. The drill measured 134 milliseconds of
-// compositor startup and about a second of kubelet turnaround, so ten
-// seconds has room. A timeout fails the prepare, and the kubelet's
-// retry starts a fresh wait.
+// ModeSwitchTimeout bounds the wait for the new compositor to serve
+// the requested mode, from the moment it answers. The drill measured
+// 134 milliseconds of compositor startup, so ten seconds has room for
+// a monitor that syncs slowly. A timeout is a decline.
 const modeSwitchTimeout = 10 * time.Second
 
 // ModeSwitchFallback bounds each wait inside that wait. The output
@@ -64,6 +63,15 @@ const modeSwitchTimeout = 10 * time.Second
 // report ends a wait early, so this bounds only the look that no
 // report starts: a source of served modes that raises no report.
 const modeSwitchFallback = time.Second
+
+// CompositorReturnLimit bounds the wait for the new compositor to
+// answer at all. The kubelet reads each restart the operator orders as
+// a crash, so a second restart within ten minutes waits in the crash
+// backoff, which doubles up to five minutes. The limit is past that
+// cap, so a compositor in backoff is waited for and never read as a
+// decline. A compositor that does not answer by the limit fails the
+// switch without a decline.
+const compositorReturnLimit = 6 * time.Minute
 
 // errModeDeclined marks a switch whose restart ran and whose
 // compositor serves another mode. A caller that reads it knows a
@@ -439,13 +447,7 @@ func (p *draPlugin) applyMode(ctx context.Context, output Output, mode string) e
 	}
 	p.restarted[output.Connector] = mode
 	if err := p.awaitMode(ctx, output.Connector, mode, before); err != nil {
-		// The restart ran, and the compositor that came back serves
-		// another mode, which is the decline itself. A wait the
-		// operator's shutdown ended is not.
-		if ctx.Err() != nil {
-			return err
-		}
-		return fmt.Errorf("%w: %w", errModeDeclined, err)
+		return err
 	}
 	p.republishSlice()
 	return nil
@@ -494,7 +496,17 @@ func (p *draPlugin) rewriteConfig(record map[string]string) error {
 // the mode the claim replaced. A compositor with a standing
 // connection is also a compositor a consumer can connect to, so the
 // socket needs no separate check.
+//
+// The wait has two parts. The first waits for the new compositor to
+// answer, for as long as the kubelet's crash backoff can hold it. The
+// second gives that compositor switchTimeout to serve the mode. Only
+// the second part can decline: a compositor that answers at another
+// mode is the decline, and a compositor that has not answered yet has
+// said nothing about the mode.
 func (p *draPlugin) awaitMode(ctx context.Context, connector, mode string, before uint64) error {
+	if err := p.awaitCompositor(ctx, before); err != nil {
+		return err
+	}
 	deadline := time.NewTimer(p.switchTimeout)
 	defer deadline.Stop()
 	for {
@@ -514,8 +526,29 @@ func (p *draPlugin) awaitMode(ctx context.Context, connector, mode string, befor
 			// claim stated, the budget it had, and the mode the
 			// compositor serves instead, because a person reads
 			// this line to learn which of the two the screen runs.
-			return fmt.Errorf("%s did not report the mode %s within %s; it reports %s",
-				connector, mode, p.switchTimeout, reportedMode(served.modes[connector]))
+			return fmt.Errorf("%w: %s did not report the mode %s within %s; it reports %s",
+				errModeDeclined, connector, mode, p.switchTimeout, reportedMode(served.modes[connector]))
+		case <-served.changed:
+		case <-time.After(p.switchFallback):
+		}
+	}
+}
+
+// awaitCompositor waits for a connection newer than the one the
+// restart ended.
+func (p *draPlugin) awaitCompositor(ctx context.Context, before uint64) error {
+	limit := time.NewTimer(compositorReturnLimit)
+	defer limit.Stop()
+	for {
+		served := p.compositorOutputs()
+		if served.session > before {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-limit.C:
+			return fmt.Errorf("the compositor did not answer within %s of its restart", compositorReturnLimit)
 		case <-served.changed:
 		case <-time.After(p.switchFallback):
 		}

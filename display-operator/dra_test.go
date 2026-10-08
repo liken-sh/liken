@@ -73,6 +73,12 @@ type fakeCompositor struct {
 	// Which compositor is answering. Every restart is a new one,
 	// and a readback takes no answer from the compositor it ended.
 	session uint64
+	// How long the kubelet holds the container in its crash backoff
+	// before the new compositor starts, and whether it never starts.
+	// A backoff runs on the clock, so a test that sets one runs in a
+	// synctest bubble.
+	backoff time.Duration
+	gone    bool
 }
 
 // modes is the GETCRTC readback: what each connector runs right now.
@@ -128,8 +134,23 @@ func (f *fakeCompositor) end() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.kills++
-	// The compositor that comes back is a new one whether or
-	// not it takes the mode the record states.
+	switch {
+	case f.gone:
+		return nil
+	case f.backoff > 0:
+		time.AfterFunc(f.backoff, func() {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			_ = f.start()
+		})
+		return nil
+	}
+	return f.start()
+}
+
+// start is the new compositor. It is a new one whether or not it
+// takes the mode the record states. The caller holds mu.
+func (f *fakeCompositor) start() error {
 	f.session++
 	if f.declines {
 		return nil

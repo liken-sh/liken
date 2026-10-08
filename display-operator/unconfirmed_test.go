@@ -29,6 +29,7 @@ func (f *displayFixture) restartOperator() {
 	f.control.displays.recorder = f.recorder
 	f.control.now = previous.now
 	f.control.prepared = previous.prepared
+	f.control.allocated = previous.allocated
 	f.control.served = previous.served
 	f.control.setMode = previous.setMode
 	f.control.restart = previous.restart

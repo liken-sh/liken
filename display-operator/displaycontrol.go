@@ -94,10 +94,14 @@ type displayControl struct {
 	// what holds the listing to the slower cadence.
 	swept   []string
 	sweptAt time.Time
-	// The output devices a prepared claim holds. A claim's own
-	// mode wins for its lifetime, and a compositor restart would end
-	// the workload drawing on the screen, so both wait on this.
-	prepared func() (map[string]bool, error)
+	// The output devices a claim holds. A claim's own mode wins
+	// for its lifetime, and a compositor restart would end the
+	// workload drawing on the screen, so both wait on these. Prepared
+	// reads the specs on disk, and allocated asks the API server, which
+	// also knows a claim whose prepare has not finished
+	// (screenholds.go).
+	prepared  func() (map[string]bool, error)
+	allocated func() (map[string]bool, error)
 	// The mode machinery of the prepare path, reused whole:
 	// setMode writes the record, rewrites the config, restarts the
 	// compositor, and reads the mode back; restart is the same restart
@@ -128,15 +132,18 @@ type displayControl struct {
 
 func newDisplayControl(client *apiclient.Client, node string, controls *panelControls, outputs func() []Output) *displayControl {
 	return &displayControl{
-		client:     client,
-		displays:   newDisplayStore(client, informer.View{}),
-		node:       node,
-		controls:   controls,
-		outputs:    outputs,
-		now:        time.Now,
-		wait:       waitFor,
-		tick:       pollInterval,
-		prepared:   preparedOutputs,
+		client:   client,
+		displays: newDisplayStore(client, informer.View{}),
+		node:     node,
+		controls: controls,
+		outputs:  outputs,
+		now:      time.Now,
+		wait:     waitFor,
+		tick:     pollInterval,
+		prepared: preparedOutputs,
+		allocated: func() (map[string]bool, error) {
+			return allocatedOutputs(client, node, clusterStores{})
+		},
 		wakes:      make(chan struct{}, 1),
 		restoring:  map[string]bool{},
 		abandoned:  map[string][]abandonedRestore{},
@@ -272,34 +279,44 @@ const canvasSettleWindow = 5 * time.Second
 // connector carrying the same monitor at the same mode owes nothing,
 // because every canvas is already the size it should be.
 //
-// It waits on three things: a claim that holds any screen on this card,
-// an output set that is still moving, and a panel whose restore is
-// still writing. The first is the workload's screen, the second is the
-// hazard window upstream documents, and the third is a panel on its way
-// back that has enough to do.
-func (d *displayControl) healCanvas(held map[string]bool) {
+// It waits on three things: an output set that is still moving, a
+// panel whose restore is still writing, and a claim that holds any
+// screen on this card. The first is the hazard window upstream
+// documents, the second is a panel on its way back that has enough to
+// do, and the third is the workload's screen.
+func (d *displayControl) healCanvas(held *screenHolds) {
 	owed, settled := d.canvasDebt()
 	if !owed || d.restart == nil {
 		return
 	}
-	switch {
-	case len(held) > 0:
-		d.deferHeal("a prepared claim holds a screen on this card")
-	case d.now().Before(settled.Add(canvasSettleWindow)):
+	if d.now().Before(settled.Add(canvasSettleWindow)) {
 		d.deferHeal("the outputs are still settling")
-	case d.restoresRunning():
-		d.deferHeal("a panel is still being restored")
-	default:
-		if err := d.restart(); err != nil {
-			fmt.Fprintf(os.Stderr, "restarting the compositor to heal the canvas: %v\n", err)
-			return
-		}
-		d.canvasHealed()
-		d.deferred = false
-		// The line a person reads in the operator's log. It stands for a re-
-		// creation that changed the screen, so it names the change.
-		fmt.Printf("an output was re-created: the compositor restarts and every canvas is laid out again\n")
+		return
 	}
+	if d.restoresRunning() {
+		d.deferHeal("a panel is still being restored")
+		return
+	}
+	// The claims are read last, because the answer can cost a listing
+	// of every claim in the cluster, and only a restart needs it.
+	claimed, err := held.any()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "the compositor restart waits, because reading which claims hold a screen failed: %v\n", err)
+		return
+	}
+	if claimed {
+		d.deferHeal("a claim holds a screen on this card")
+		return
+	}
+	if err := d.restart(); err != nil {
+		fmt.Fprintf(os.Stderr, "restarting the compositor to heal the canvas: %v\n", err)
+		return
+	}
+	d.canvasHealed()
+	d.deferred = false
+	// The line a person reads in the operator's log. It stands for a re-
+	// creation that changed the screen, so it names the change.
+	fmt.Printf("an output was re-created: the compositor restarts and every canvas is laid out again\n")
 }
 
 // What the compositor reported. Every output global that arrives or
@@ -345,17 +362,19 @@ func (d *displayControl) restoresRunning() bool {
 	return len(d.restoring) > 0
 }
 
-// What the prepared claims hold, and nothing when this operator
-// has no way to read them. A failure here is reported and treated as
-// no claims, because the seam reads the specs this driver wrote.
-func (d *displayControl) claimed() (map[string]bool, error) {
+// What the claims hold, for one pass. The specs on disk are read now,
+// and the API server only when a restart asks. A failure to read the
+// specs is reported and leaves the API server to answer alone.
+func (d *displayControl) claimed() (*screenHolds, error) {
+	held := &screenHolds{allocated: d.allocated}
 	if d.prepared == nil {
-		return nil, nil
+		return held, nil
 	}
-	held, err := d.prepared()
+	prepared, err := d.prepared()
 	if err != nil {
-		return nil, fmt.Errorf("reading the claims the kubelet prepared: %w", err)
+		return held, fmt.Errorf("reading the claims the kubelet prepared: %w", err)
 	}
+	held.prepared = prepared
 	return held, nil
 }
 
@@ -368,7 +387,7 @@ func (d *displayControl) claimed() (map[string]bool, error) {
 // mode the compositor declined, so it can actuate again what this pass
 // did. The prepare path's own budget of compositor restarts bounds a
 // mode switch that repeats.
-func (d *displayControl) reconcile(ctx context.Context, name string, output Output, held map[string]bool, ambiguous string) error {
+func (d *displayControl) reconcile(ctx context.Context, name string, output Output, held *screenHolds, ambiguous string) error {
 	err := d.reconcileOnce(ctx, name, output, held, ambiguous)
 	if errors.Is(err, apiclient.ErrConflict) {
 		d.wake()
@@ -379,7 +398,7 @@ func (d *displayControl) reconcile(ctx context.Context, name string, output Outp
 // One run over one panel. The resource is created empty when it is
 // absent, the panel is actuated, and the status is written last, so it
 // reports what the actuation left behind.
-func (d *displayControl) reconcileOnce(ctx context.Context, name string, output Output, held map[string]bool, ambiguous string) error {
+func (d *displayControl) reconcileOnce(ctx context.Context, name string, output Output, held *screenHolds, ambiguous string) error {
 	display, err := d.displays.get(name)
 	if errors.Is(err, apiclient.ErrNotFound) {
 		display, err = d.displays.create(name)
@@ -408,7 +427,7 @@ func (d *displayControl) reconcileOnce(ctx context.Context, name string, output 
 // compositor once and reads the mode back. A mode the compositor
 // declined is recorded in the ledger, and the operator does not
 // restart the compositor for it again until spec changes.
-func (d *displayControl) restMode(ctx context.Context, display *Display, output Output, held map[string]bool, ledger *unconfirmedLedger) error {
+func (d *displayControl) restMode(ctx context.Context, display *Display, output Output, held *screenHolds, ledger *unconfirmedLedger) error {
 	if display.Spec.Mode == nil {
 		return nil
 	}
@@ -422,7 +441,7 @@ func (d *displayControl) restMode(ctx context.Context, display *Display, output 
 		return fmt.Errorf("the spec states the mode %s, and %s offers %s",
 			want, output.Connector, strings.Join(output.OfferedModes, " "))
 	}
-	if held[deviceName(output.Connector)] || d.setMode == nil {
+	if d.setMode == nil {
 		return nil
 	}
 	if modeMatches(want, output.CurrentMode) {
@@ -432,7 +451,15 @@ func (d *displayControl) restMode(ctx context.Context, display *Display, output 
 	if ledger.declined(modeControl, want) {
 		return nil
 	}
-	err := d.setMode(ctx, output, want)
+	// The claims are read last, because only a restart needs them.
+	claimed, err := held.holds(deviceName(output.Connector))
+	if err != nil {
+		return fmt.Errorf("reading which claims hold %s: %w", output.Connector, err)
+	}
+	if claimed {
+		return nil
+	}
+	err = d.setMode(ctx, output, want)
 	if errors.Is(err, errModeDeclined) {
 		ledger.record(modeControl, want, d.modeNow(output), err, d.now())
 	}

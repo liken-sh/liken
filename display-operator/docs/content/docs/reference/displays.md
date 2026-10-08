@@ -290,14 +290,20 @@ the card. So the operator applies a resting mode only while no
 claim holds the screen. A claim's own `mode` parameter wins for the
 claim's lifetime, a `spec.mode` edit during a claim waits for the
 claim to end, and the unprepare that frees the screen restores the
-declaration promptly.
+declaration promptly. A claim holds the screen while a pod that is
+not being deleted holds the claim, before its prepare succeeds too.
+The kubelet retries a prepare that failed, and each prepare switches
+the screen to the claim's mode, so a resting mode applied between
+two retries would restart the compositor each way.
 
 A new operator pod starts the compositor at each monitor's resting
 mode, so the screen takes one modeset, not a modeset to the
 preferred mode and a second one to `spec.mode`. When the compositor
 serves another mode after its restart, the operator records the
 mode in `status.unconfirmed` and does not restart the compositor for
-it again until `spec` changes.
+it again until `spec` changes. A compositor that the kubelet holds in
+its crash backoff has served no mode yet, so the operator waits for
+it to start, up to six minutes, and gives it 10 seconds from then.
 
 ## The two values of the mode
 

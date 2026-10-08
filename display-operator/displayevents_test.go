@@ -287,6 +287,14 @@ func TestAModeSwitchPostsModeChanged(t *testing.T) {
 // the switch runs in a synctest bubble.
 func modeSwitchPlugin(t *testing.T) *draPlugin {
 	t.Helper()
+	plugin, _ := modeSwitchBench(t)
+	return plugin
+}
+
+// modeSwitchBench is the same plugin and the fake compositor behind
+// it, for a test that changes how the compositor comes back.
+func modeSwitchBench(t *testing.T) (*draPlugin, *fakeCompositor) {
+	t.Helper()
 	configDir := t.TempDir()
 	compositor := &fakeCompositor{
 		record:  configDir + "/modes.json",
@@ -304,5 +312,5 @@ func modeSwitchPlugin(t *testing.T) *draPlugin {
 		switchTimeout:  time.Second,
 		switchFallback: time.Millisecond,
 		metrics:        newMetrics(componentName, "dev"),
-	}
+	}, compositor
 }
