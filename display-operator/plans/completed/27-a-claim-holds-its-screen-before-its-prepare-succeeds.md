@@ -1,7 +1,7 @@
 # A claim holds its screen before its prepare succeeds
 
 Plan 27. Built on 2026-10-08. The drill on stick-1 with the build
-that carries this plan is still owed.
+that carries all three changes is still owed.
 
 A claim that stated a mode could start a loop of compositor restarts
 that only the kubelet's crash backoff slowed down. The open problem
@@ -40,7 +40,7 @@ card waited while `weston` was down, the idle screen's draw claim
 included. The drill deleted the `Play` at 17:48, and the screen came
 back at 17:51 when the last backoff ended.
 
-## The two faults
+## The faults
 
 **The `Display` pass did not see a claim whose prepare had not
 finished.** `preparedOutputs` reads the CDI specs on disk, and the
@@ -55,6 +55,15 @@ restart within ten minutes waits 10 s, then 20 s, up to 5 minutes. The
 10 s readback started at the restart, so any wait in the backoff
 failed the switch as a decline, and the panel looked as if it refused
 the mode.
+
+**The compositor's absence evicted the pod that asked for the
+restart.** A slice pass that finds no compositor serving taints every
+output and draw device with `display.liken.sh/disconnected`, so the
+taint manager evicts the clients that lost their connection. The pod
+whose prepare ordered the restart was evicted with them, about a
+second after the restart, although it had started nothing. Its
+deletion freed the screen, and the media operator's new pod switched
+the mode again. Drill 3 found this fault, below.
 
 ## What changed
 
@@ -87,10 +96,32 @@ prepares on the card, and the passes over the card's other panels,
 for as long as the backoff lasts. Nothing on the card can draw until
 the compositor starts, so the wait costs no picture.
 
+A slice pass that finds no compositor serving leaves the taint off an
+output whose claim is still preparing: the API server names a live
+claim on the output, and no spec on disk names it. The draw devices
+and every prepared output still take the taint, because their clients
+did lose their connection. The slice pass lists the claims only while
+no compositor serves, and it taints every output when the listing
+fails.
+
 The deletion half of the open problem needs nothing more. A `Play`'s
 delete marks its pod for deletion, and the `Display` pass then reads
 the claim as free. The kubelet stops the prepare's retries when the
 pod goes.
+
+## Drill 3
+
+Drill 3 ran on stick-1 on 2026-10-08 with
+`2026.10.08-002-dev-004-00461346`, which held the first two changes
+and not the third. A `Play` at 720p ran, its delete restored 1080p,
+and a second `Play` at 720p started at once. The second `Play` never
+ran. Each restart tainted the screen, the taint manager evicted the
+waiting playback pod within two seconds, and the `Display` pass then
+read the screen as free, as the new check says it should for a pod
+that is being deleted. After the second `Play` started, the screen
+switched between the two modes six times in 11 minutes, from 18:23:35
+to 18:34:21, and the last wait in the backoff was at its 5-minute cap. The readback waited out each backoff and recorded no false
+decline.
 
 ## What stays open
 

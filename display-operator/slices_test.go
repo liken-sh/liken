@@ -509,7 +509,7 @@ func TestTheFirstReconcileFreesTheScreensThatCameBack(t *testing.T) {
 			Driver:   DriverName,
 			NodeName: "liken-1",
 			Pool:     ResourcePool{Name: "liken-1", Generation: 3, ResourceSliceCount: 1},
-			Devices:  compositorDown(devices),
+			Devices:  compositorDown(devices, nil),
 		},
 	}}
 	client := testClient(t, fixture.handler(t))
@@ -538,7 +538,7 @@ func TestTheFirstReconcileFreesTheScreensThatCameBack(t *testing.T) {
 // every device carries the one NoExecute taint, because no output on
 // this node can serve a Wayland client.
 func TestCompositorDownTaintsEveryOutput(t *testing.T) {
-	devices := compositorDown(sliceDevices(testOutputs(t)))
+	devices := compositorDown(sliceDevices(testOutputs(t)), nil)
 
 	if len(devices) != 6 {
 		t.Fatalf("got %d devices, want 6", len(devices))
@@ -575,7 +575,7 @@ func TestPublishingCompositorDownEvictsTheClients(t *testing.T) {
 	}}
 	client := testClient(t, fixture.handler(t))
 
-	devices := compositorDown(sliceDevices(testOutputs(t)))
+	devices := compositorDown(sliceDevices(testOutputs(t)), nil)
 	if err := EnsureResourceSlice(client, "liken-1", testOwner(), devices); err != nil {
 		t.Fatal(err)
 	}
@@ -802,7 +802,7 @@ func TestEnsureLogsTheSliceItWrote(t *testing.T) {
 	// The compositor died, so every output takes the unservable
 	// taint. The device count does not move, and the taints are the
 	// whole event.
-	if err := EnsureResourceSlice(client, "liken-1", testOwner(), compositorDown(devices)); err != nil {
+	if err := EnsureResourceSlice(client, "liken-1", testOwner(), compositorDown(devices, nil)); err != nil {
 		t.Fatal(err)
 	}
 	want := "slice: wrote generation 4, 6 devices, 6 tainted: hdmi-a-1 gained " + disconnectedTaint +

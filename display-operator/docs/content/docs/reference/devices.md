@@ -417,7 +417,10 @@ right now. It appears in two cases:
   of that container. The kubelet restarts a dead compositor alone,
   and the taint lifts on the pass that finds the socket answering.
   This case taints the output and draw devices only. A control
-  device delivers an i2c node, which needs no compositor.
+  device delivers an i2c node, which needs no compositor. An output
+  whose claim is still preparing is not tainted either: a claim that
+  states a mode restarts the compositor during its prepare, and its
+  pod has started nothing that the restart could end.
 
 A connector that carried a monitor and then went dark is not one of
 them. It keeps that monitor for as long as it stays dark, and the

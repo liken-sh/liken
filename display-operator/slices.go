@@ -409,11 +409,22 @@ func unservableTaints() []DeviceTaint {
 // that pod on every compositor restart for no reason, and would keep a
 // control-only claim unallocated on a machine where no compositor
 // starts.
-func compositorDown(devices []SliceDevice) []SliceDevice {
+//
+// An output in preparing is not tainted either. A claim's prepare that
+// switches the mode restarts the compositor and waits for it, and the
+// claim's pod starts nothing until the prepare returns, so it has no
+// connection to lose. A taint would evict the pod that asked for the
+// restart. The screen would then read as free, the Display pass would
+// put the resting mode back with another restart, and the pod's
+// replacement would switch the mode again (screenholds.go).
+func compositorDown(devices []SliceDevice, preparing map[string]bool) []SliceDevice {
 	out := make([]SliceDevice, len(devices))
 	for i, device := range devices {
 		out[i] = device
 		if _, control := outputOfControl(device.Name); control {
+			continue
+		}
+		if preparing[device.Name] {
 			continue
 		}
 		out[i].Taints = unservableTaints()

@@ -19,8 +19,10 @@ package main
 // output device in this node's pool, and a pod that the API server is
 // not deleting holds the claim. The claims carry no field that selects
 // a node, so the answer costs one listing of every claim in the
-// cluster. The pass reads it only when a restart would follow, and at
-// most once per pass.
+// cluster. The Display pass reads it only when a restart would follow,
+// and at most once per pass. The slice pass reads it only while no
+// compositor serves, to leave the taint off an output whose claim is
+// still preparing (compositorDown in slices.go).
 
 import (
 	"errors"
@@ -99,6 +101,19 @@ func heldByLivePod(client *apiclient.Client, stores clusterStores, claim Resourc
 		}
 	}
 	return false, nil
+}
+
+// preparingOutputs names the output devices whose claim is still
+// preparing: a live claim holds the output, and no spec on disk names
+// it yet.
+func preparingOutputs(allocated, prepared map[string]bool) map[string]bool {
+	preparing := map[string]bool{}
+	for output := range allocated {
+		if !prepared[output] {
+			preparing[output] = true
+		}
+	}
+	return preparing
 }
 
 // screenHolds answers, for one pass, which output devices a claim

@@ -8,6 +8,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -242,5 +243,27 @@ func TestTheHealWaitsForAClaimWhosePrepareHasNotFinished(t *testing.T) {
 	}
 	if fixture.restarts != 1 {
 		t.Errorf("the compositor restarted %d times after the claim ended, want 1", fixture.restarts)
+	}
+}
+
+// A claim is still preparing when the API server says a live claim
+// holds the output and no spec on disk names it yet.
+func TestAClaimIsPreparingUntilItsSpecIsWritten(t *testing.T) {
+	cases := []struct {
+		name      string
+		allocated map[string]bool
+		prepared  map[string]bool
+		want      map[string]bool
+	}{
+		{name: "a claim the kubelet has not prepared", allocated: map[string]bool{"hdmi-a-1": true}, want: map[string]bool{"hdmi-a-1": true}},
+		{name: "a claim the kubelet prepared", allocated: map[string]bool{"hdmi-a-1": true}, prepared: map[string]bool{"hdmi-a-1": true}, want: map[string]bool{}},
+		{name: "no claim at all", want: map[string]bool{}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := preparingOutputs(c.allocated, c.prepared); !maps.Equal(got, c.want) {
+				t.Errorf("preparing = %v, want %v", got, c.want)
+			}
+		})
 	}
 }

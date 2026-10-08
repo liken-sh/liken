@@ -632,8 +632,15 @@ func reconcile(client *apiclient.Client, nodeName string, owner OwnerReference, 
 		// device says it serves nobody, and the NoExecute taint is what
 		// ends the clients whose connections died with the socket. A
 		// control device keeps its own taints, because the i2c bus it
-		// delivers needs no compositor.
-		devices = compositorDown(devices)
+		// delivers needs no compositor, and an output whose claim is
+		// still preparing keeps none, because its pod has started
+		// nothing. When the claims cannot be read, every output is
+		// tainted.
+		allocated, err := allocatedOutputs(client, nodeName, clusterStores{})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "reading which claims hold a screen: %v\n", err)
+		}
+		devices = compositorDown(devices, preparingOutputs(allocated, claimed))
 	}
 	return EnsureResourceSlice(client, nodeName, owner, devices)
 }

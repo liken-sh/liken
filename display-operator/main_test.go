@@ -364,7 +364,7 @@ func TestReconcileFreesTheScreensWhenTheSocketReturns(t *testing.T) {
 			Driver:   DriverName,
 			NodeName: "liken-1",
 			Pool:     ResourcePool{Name: "liken-1", Generation: 3, ResourceSliceCount: 1},
-			Devices:  compositorDown(sliceDevices(testOutputs(t))),
+			Devices:  compositorDown(sliceDevices(testOutputs(t)), nil),
 		},
 	}}
 	client := testClient(t, fixture.handler(t))

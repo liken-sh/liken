@@ -124,7 +124,7 @@ func TestCompositorDownTaintsOnlyTheDevicesThatNeedIt(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			devices := sliceDevices([]Output{c.output})
 			if !c.serving {
-				devices = compositorDown(devices)
+				devices = compositorDown(devices, nil)
 			}
 
 			index := slices.IndexFunc(devices, func(d SliceDevice) bool { return d.Name == c.device })
@@ -156,5 +156,22 @@ func TestAWaitingMixedClaimWritesNothingToThePanel(t *testing.T) {
 	}
 	if len(panel.sets) != 0 {
 		t.Errorf("a waiting claim wrote %+v to the panel", panel.sets)
+	}
+}
+
+// A claim whose prepare restarted the compositor is waiting for it,
+// and its pod has started nothing that could have lost a connection.
+// Its output keeps no taint, so the taint does not evict the pod that
+// asked for the restart. The draw device beside it is shared with
+// clients that did lose their connection, so it is tainted.
+func TestCompositorDownSparesTheOutputAPrepareWaitsOn(t *testing.T) {
+	devices := compositorDown(sliceDevices([]Output{controlledPanel(supportedControls{Brightness: true})}),
+		map[string]bool{"hdmi-a-1": true})
+
+	for _, device := range devices {
+		tainted := len(device.Taints) > 0
+		if want := device.Name == "hdmi-a-1-draw"; tainted != want {
+			t.Errorf("%s: taints = %+v, want tainted: %v", device.Name, device.Taints, want)
+		}
 	}
 }
