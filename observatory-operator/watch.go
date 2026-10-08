@@ -1,13 +1,14 @@
 package main
 
 // The watches. One watch follows each of the 20 kinds of the group in
-// the operator's namespace, and four more follow the pods, the
-// Services, the ConfigMaps, and the Jobs the operator created,
-// selected by its label. All of them run
-// on client-go's reflector through the shared informer package. A
-// handler only wakes the operator, and each goroutine that waits reads
-// the stores again: the supervisor, the status writer, and each
-// reservation's runner (reservation.go).
+// every namespace, and four more follow the pods, the Services, the
+// ConfigMaps, and the Jobs the operator created, selected by its label.
+// All of them run on client-go's reflector through the shared informer
+// package. A handler only wakes the operator, and each goroutine that
+// waits reads the stores again: the supervisor of each namespace, its
+// status writer, and each reservation's runner (reservation.go).
+// Each namespace's tree holds only that namespace's objects
+// (namespaces.go).
 
 import (
 	"context"
@@ -91,10 +92,12 @@ type copies struct {
 	held map[any]any
 }
 
-// listOf answers the typed copy of each object in a collection, in the
-// order of their keys. An object that does not convert is reported and
-// left out, as informer.CachedList does.
-func listOf[T any](s *stores, collection *informer.Collection) []T {
+// listOf answers the typed copy of each object of one namespace in a
+// collection, in the order of their keys. An object that does not
+// convert is reported and left out, as informer.CachedList does. The
+// copies of the other namespaces' objects stay, so the trees of
+// several namespaces do not convert each other's objects again.
+func listOf[T any](s *stores, collection *informer.Collection, namespace string) []T {
 	c := s.copies[collection]
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -107,6 +110,12 @@ func listOf[T any](s *stores, collection *informer.Collection) []T {
 	held := make(map[any]any, len(objects))
 	var items []T
 	for _, object := range objects {
+		if !strings.HasPrefix(keys[object], namespace+"/") {
+			if item, ok := c.held[object]; ok {
+				held[object] = item
+			}
+			continue
+		}
 		item, ok := c.held[object].(T)
 		if !ok {
 			var err error
@@ -126,9 +135,9 @@ func listOf[T any](s *stores, collection *informer.Collection) []T {
 // Services, the ConfigMaps, and the Jobs.
 var watchCount = int32(len(observatory.Kinds) + 4)
 
-// startWatches opens every watch. Each change notifies changed, and so
-// does the end of each watch's first read.
-func startWatches(ctx context.Context, client dynamic.Interface, namespace string, changed *bell) *stores {
+// startWatches opens every watch, across every namespace. Each change
+// notifies changed, and so does the end of each watch's first read.
+func startWatches(ctx context.Context, client dynamic.Interface, changed *bell) *stores {
 	s := &stores{kinds: map[observatory.Kind]*informer.Collection{}, copies: map[*informer.Collection]*copies{}}
 	options := informer.Options{
 		Handler: wakeOnAnyChange(func() {
@@ -142,18 +151,37 @@ func startWatches(ctx context.Context, client dynamic.Interface, namespace strin
 		},
 	}
 	for _, kind := range observatory.Kinds {
-		s.kinds[kind] = informer.Start(ctx, client, informer.Source{Resource: kindResource(kind), Namespace: namespace}, options)
+		s.kinds[kind] = informer.Start(ctx, client, informer.Source{Resource: kindResource(kind)}, options)
 	}
 	own := labelManagedBy + "=" + managedBy
-	s.pods = informer.Start(ctx, client, informer.Source{Resource: podsResource, Namespace: namespace, LabelSelector: own}, options)
-	s.services = informer.Start(ctx, client, informer.Source{Resource: servicesResource, Namespace: namespace, LabelSelector: own}, options)
-	s.configMaps = informer.Start(ctx, client, informer.Source{Resource: configMapsResource, Namespace: namespace, LabelSelector: own}, options)
-	s.jobs = informer.Start(ctx, client, informer.Source{Resource: jobsResource, Namespace: namespace, LabelSelector: own}, options)
+	s.pods = informer.Start(ctx, client, informer.Source{Resource: podsResource, LabelSelector: own}, options)
+	s.services = informer.Start(ctx, client, informer.Source{Resource: servicesResource, LabelSelector: own}, options)
+	s.configMaps = informer.Start(ctx, client, informer.Source{Resource: configMapsResource, LabelSelector: own}, options)
+	s.jobs = informer.Start(ctx, client, informer.Source{Resource: jobsResource, LabelSelector: own}, options)
 	for _, c := range s.kinds {
 		s.copies[c] = &copies{}
 	}
 	s.copies[s.pods], s.copies[s.services], s.copies[s.configMaps], s.copies[s.jobs] = &copies{}, &copies{}, &copies{}, &copies{}
 	return s
+}
+
+// namespaces answers each namespace that holds an object of the group
+// or an object the operator created. A namespace that holds only the
+// operator's pods still needs its supervisor, which deletes them.
+func (s *stores) namespaces() map[string]bool {
+	held := map[string]bool{}
+	collections := []*informer.Collection{s.pods, s.services, s.configMaps, s.jobs}
+	for _, c := range s.kinds {
+		collections = append(collections, c)
+	}
+	for _, c := range collections {
+		for _, key := range c.View().Store.ListKeys() {
+			if namespace, _, found := strings.Cut(key, "/"); found {
+				held[namespace] = true
+			}
+		}
+	}
+	return held
 }
 
 // ready reports whether every watch has read its whole collection once.
@@ -189,39 +217,39 @@ func wakeOnAnyChange(changed func()) cache.ResourceEventHandler {
 func (s *stores) snapshot(namespace string) *tree {
 	t := &tree{
 		namespace:     namespace,
-		observatories: byName(listOf[observatory.Observatory](s, s.kinds[observatory.ObservatoryKind])),
-		telescopes:    byName(listOf[observatory.Telescope](s, s.kinds[observatory.TelescopeKind])),
-		tubes:         byName(listOf[observatory.OpticalTube](s, s.kinds[observatory.OpticalTubeKind])),
-		trains:        byName(listOf[observatory.OpticalTrain](s, s.kinds[observatory.OpticalTrainKind])),
-		guiders:       byName(listOf[observatory.Guider](s, s.kinds[observatory.GuiderKind])),
-		reservations:  byName(listOf[observatory.Reservation](s, s.kinds[observatory.ReservationKind])),
+		observatories: byName(listOf[observatory.Observatory](s, s.kinds[observatory.ObservatoryKind], namespace)),
+		telescopes:    byName(listOf[observatory.Telescope](s, s.kinds[observatory.TelescopeKind], namespace)),
+		tubes:         byName(listOf[observatory.OpticalTube](s, s.kinds[observatory.OpticalTubeKind], namespace)),
+		trains:        byName(listOf[observatory.OpticalTrain](s, s.kinds[observatory.OpticalTrainKind], namespace)),
+		guiders:       byName(listOf[observatory.Guider](s, s.kinds[observatory.GuiderKind], namespace)),
+		reservations:  byName(listOf[observatory.Reservation](s, s.kinds[observatory.ReservationKind], namespace)),
 		pods:          map[string]*pod{},
 		services:      map[string]*service{},
 		configMaps:    map[string]*configMap{},
 		jobs:          map[string]*job{},
 	}
 	for _, kind := range observatory.DeviceKinds {
-		for _, object := range listOf[deviceObject](s, s.kinds[kind]) {
+		for _, object := range listOf[deviceObject](s, s.kinds[kind], namespace) {
 			t.devices = append(t.devices, &device{kind: kind, object: object})
 		}
 	}
-	for _, p := range listOf[pod](s, s.pods) {
+	for _, p := range listOf[pod](s, s.pods, namespace) {
 		t.pods[p.Metadata.Name] = &p
 	}
-	for _, svc := range listOf[service](s, s.services) {
+	for _, svc := range listOf[service](s, s.services, namespace) {
 		t.services[svc.Metadata.Name] = &svc
 	}
-	for _, files := range listOf[configMap](s, s.configMaps) {
+	for _, files := range listOf[configMap](s, s.configMaps, namespace) {
 		t.configMaps[files.Metadata.Name] = &files
 	}
-	for _, j := range listOf[job](s, s.jobs) {
+	for _, j := range listOf[job](s, s.jobs, namespace) {
 		t.jobs[j.Metadata.Name] = &j
 	}
 	return t
 }
 
 // byName indexes the objects of one kind by name. Every kind is
-// namespaced, and the operator watches one namespace.
+// namespaced, and a tree holds one namespace.
 func byName[S, T any](items []observatory.Object[S, T]) map[string]*observatory.Object[S, T] {
 	out := make(map[string]*observatory.Object[S, T], len(items))
 	for i := range items {

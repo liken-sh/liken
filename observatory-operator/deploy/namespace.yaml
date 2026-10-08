@@ -1,8 +1,0 @@
-# The namespace of observatory-operator and of the observatory's
-# resources. The operator, the device pods, the INDI servers, and every
-# resource of the observatory.liken.sh group that a person writes are
-# in it, so one RoleBinding grants the operator what it needs.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: observatory

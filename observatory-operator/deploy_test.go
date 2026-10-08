@@ -13,18 +13,29 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// The operator reads its namespace from the environment that the
-// Deployment sets.
-func TestTheDeploymentGivesTheOperatorItsNamespace(t *testing.T) {
+// The operator runs in liken-system, one copy, and reads no namespace
+// of its own from the environment, because it watches every namespace.
+func TestTheDeploymentRunsInLikenSystem(t *testing.T) {
 	t.Parallel()
-	raw, err := os.ReadFile("deploy/operator.yaml")
+	raw, err := os.ReadFile("deploy/kustomization.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var base struct {
+		Namespace string   `json:"namespace"`
+		Resources []string `json:"resources"`
+	}
+	if err := yaml.Unmarshal(raw, &base); err != nil {
+		t.Fatal(err)
+	}
+	if base.Namespace != "liken-system" || slices.Contains(base.Resources, "namespace.yaml") {
+		t.Errorf("base = %+v, want liken-system and no namespace of its own", base)
+	}
+	raw, err = os.ReadFile("deploy/operator.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
 	var deployment struct {
-		Metadata struct {
-			Namespace string `json:"namespace"`
-		} `json:"metadata"`
 		Spec struct {
 			Replicas int `json:"replicas"`
 			Template struct {
@@ -46,20 +57,13 @@ func TestTheDeploymentGivesTheOperatorItsNamespace(t *testing.T) {
 		}
 	}
 	containers := deployment.Spec.Template.Spec.Containers
-	if deployment.Metadata.Namespace != "observatory" || deployment.Spec.Replicas != 1 || len(containers) != 1 {
-		t.Fatalf("deployment = %+v", deployment)
-	}
-	if !slices.ContainsFunc(containers[0].Env, func(e struct {
-		Name string `json:"name"`
-	}) bool {
-		return e.Name == podNamespaceVariable
-	}) {
-		t.Errorf("the operator's environment has no %s", podNamespaceVariable)
+	if deployment.Spec.Replicas != 1 || len(containers) != 1 || len(containers[0].Env) != 0 {
+		t.Errorf("deployment = %+v, want one copy of one container with no environment", deployment)
 	}
 }
 
-// The Role grants every verb the operator sends, for every kind.
-func TestTheRoleGrantsWhatTheOperatorSends(t *testing.T) {
+// The ClusterRole grants every verb the operator sends, for every kind.
+func TestTheClusterRoleGrantsWhatTheOperatorSends(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile("deploy/rbac.yaml")
 	if err != nil {
@@ -75,7 +79,7 @@ func TestTheRoleGrantsWhatTheOperatorSends(t *testing.T) {
 		Rules []rule `json:"rules"`
 	}
 	for _, document := range bytes.Split(raw, []byte("\n---\n")) {
-		if bytes.Contains(document, []byte("kind: Role\n")) {
+		if bytes.Contains(document, []byte("kind: ClusterRole\n")) {
 			if err := yaml.Unmarshal(document, &role); err != nil {
 				t.Fatal(err)
 			}
@@ -122,7 +126,7 @@ func TestTheRoleGrantsWhatTheOperatorSends(t *testing.T) {
 	}
 	for _, n := range needs {
 		if !grants(n.group, n.resource, n.verb) {
-			t.Errorf("the Role does not grant %s on %s in the group %q", n.verb, n.resource, n.group)
+			t.Errorf("the ClusterRole does not grant %s on %s in the group %q", n.verb, n.resource, n.group)
 		}
 	}
 }

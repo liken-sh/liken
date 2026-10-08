@@ -21,11 +21,12 @@ import (
 func TestAWindowWithNoChangeComparesLittle(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
-		tree, seen := w.o.snapshot(), &statusMemo{}
-		w.o.writeAll(t.Context(), tree, seen)
+		o := w.operator()
+		tree, seen := o.snapshot(), &statusMemo{}
+		o.writeAll(t.Context(), tree, seen)
 		synctest.Wait()
 		before := w.api.statusWrites(kindCollection(observatory.CameraKind), "east-main")
-		allocs := testing.AllocsPerRun(10, func() { w.o.writeAll(t.Context(), tree, seen) })
+		allocs := testing.AllocsPerRun(10, func() { o.writeAll(t.Context(), tree, seen) })
 		if limit := float64(400 * len(tree.devices)); allocs > limit {
 			t.Errorf("%v allocations in a window with no change, want at most %v", allocs, limit)
 		}

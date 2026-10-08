@@ -3,9 +3,11 @@
 # the `indi-simulators` image, so the whole stack runs with no
 # hardware.
 #
-# Apply the CRDs first, then this file to the `observatory` namespace:
+# Apply the CRDs first, then this file to a namespace of your choice,
+# such as `observatory`:
 #
 #   kubectl apply -k deploy/
+#   kubectl create namespace observatory
 #   kubectl apply -n observatory -f examples/simulators.yaml
 #   kubectl get astro -n observatory
 #

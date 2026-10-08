@@ -1,7 +1,8 @@
 package main
 
-// The operator runs five kinds of goroutine on the stores of the
-// watches (watch.go):
+// An operator runs the observatory of one namespace, and the process
+// runs one for each namespace that holds one (namespaces.go). Each runs
+// five kinds of goroutine on the stores of the watches (watch.go):
 //
 //   - The supervisor below starts a runner for each Reservation that
 //     has work left, opens an INDI connection to each server pod
@@ -178,9 +179,11 @@ func (o *operator) faultOf(d *device) string {
 	return o.faults[d.key()]
 }
 
-// run opens the watches and supervises until ctx ends.
-func (o *operator) run(ctx context.Context, watches func(context.Context) *stores) {
-	o.stores = watches(ctx)
+// run supervises the namespace's observatory until ctx ends. The
+// stores belong to the process, which rings structure on each change
+// (namespaces.go).
+func (o *operator) run(ctx context.Context, s *stores) {
+	o.stores = s
 	var group sync.WaitGroup
 	group.Go(func() { o.writeStatuses(ctx) })
 	group.Go(func() { o.keepLocks(ctx) })
@@ -190,7 +193,6 @@ func (o *operator) run(ctx context.Context, watches func(context.Context) *store
 		o.servers.stopAll()
 		o.guiderConns.stopAll()
 		o.running.Wait()
-		o.stores.done()
 	}()
 	seeded := false
 	for {

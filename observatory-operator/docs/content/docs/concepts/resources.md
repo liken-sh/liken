@@ -15,7 +15,10 @@ guides. Each kind has its own reference page with every field.
 
 Every kind is namespaced, and every kind is in the category `astro`,
 so `kubectl get astro` lists the whole observatory. Each resource names
-its parent by name in its spec, so every reference points up the tree:
+its parent by name in its spec, and a name resolves in the resource's
+own namespace, so one observatory's resources all go in one namespace.
+Two namespaces can each hold an observatory, with the same names, and
+the operator runs them apart. Every reference points up the tree:
 
 ```
 Observatory          the site: location, Dome, WeatherStation

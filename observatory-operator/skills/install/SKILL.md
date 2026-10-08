@@ -58,21 +58,31 @@ kubectl apply -k .
 
 The base creates:
 
-* the namespace `observatory`
 * the CRDs of the `observatory.liken.sh` group
-* a `ServiceAccount` and a `Role` that cover only that namespace
-* the operator, a `Deployment` with one replica
+* a `ServiceAccount`, a `ClusterRole`, and a `ClusterRoleBinding`
+* the operator, a `Deployment` with one replica in `liken-system`, the
+  namespace of every `liken` operator
 
-The operator reads and writes resources in its own namespace only, so
-every resource of your observatory goes in `observatory`. This site
-also serves the [manifests](https://liken.sh/observatory/deploy/kustomization.yaml) as raw YAML,
-if you want to read them first or write your own.
+The operator watches every namespace. You choose the namespace your
+observatory lives in, and the operator runs the observatory's pods,
+`Service`s, and `Job`s in that namespace, beside its resources. So
+your `ResourceQuota`, `NetworkPolicy`, Pod Security level, and RBAC
+grants in that namespace cover the observatory. Every resource of one
+observatory goes in one namespace, because the resources name each
+other. This guide uses `observatory`:
+
+```sh
+kubectl create namespace observatory
+```
+
+This site also serves the [manifests](https://liken.sh/observatory/deploy/kustomization.yaml) as
+raw YAML, if you want to read them first or write your own.
 
 Check that the operator runs:
 
 ```sh
-kubectl -n observatory rollout status deployment/observatory-operator
-kubectl -n observatory logs deployment/observatory-operator
+kubectl -n liken-system rollout status deployment/observatory-operator
+kubectl -n liken-system logs deployment/observatory-operator
 ```
 
 ## Run the example observatory
@@ -175,6 +185,28 @@ stops guiding, closes the dust cap, warms the camera, parks the mount,
 parks the dome, and stops the pods. That takes a few minutes, mostly
 for the camera's warm-up. When the command returns, the equipment is
 safe to power off.
+
+## Upgrade from a base that created `observatory`
+
+The base of releases before `2026.10.08-002` created the namespace
+`observatory` and ran the operator in it. The base now creates no
+namespace. A GitOps tool that prunes, such as Flux with `prune: true`,
+deletes what a new version of a source no longer lists, so it deletes
+`observatory` and every resource in it on the upgrade. Before you
+upgrade, take the namespace out of the base's hands. Declare it in
+your own manifests, or mark it so Flux keeps it:
+
+```sh
+kubectl annotate namespace observatory kustomize.toolkit.fluxcd.io/prune=disabled
+```
+
+Flux then deletes the old `Deployment`, `ServiceAccount`, `Role`,
+and `RoleBinding` in `observatory`, and creates the operator in
+`liken-system`. With `kubectl apply -k`, delete those four yourself
+before you apply the new base, so two copies of the operator never
+run at once. The new
+operator finds the pods of a running reservation where they are, in
+`observatory`.
 
 ## Remove the operator
 

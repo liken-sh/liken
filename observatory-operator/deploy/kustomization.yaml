@@ -1,6 +1,8 @@
-# The kustomize base for observatory-operator: the namespace, the
-# resource definitions of the observatory.liken.sh group, and the
-# operator with its RBAC.
+# The kustomize base for observatory-operator: the resource definitions
+# of the observatory.liken.sh group, and the operator with its RBAC, in
+# liken-system. The base creates no namespace for the resources. Create
+# the namespace your observatory lives in, and apply its resources
+# there.
 #
 # This base is for the cluster owner to take. `liken` does not apply it
 # and does not name it. Take it through your own GitOps with patches of
@@ -8,8 +10,9 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+namespace: liken-system
+
 resources:
-  - namespace.yaml
   # The site, the telescope, and the optics, from the top of the tree
   # down.
   - observatories-crd.yaml

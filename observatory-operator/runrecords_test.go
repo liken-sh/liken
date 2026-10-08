@@ -24,7 +24,7 @@ func (w *world) recreate(kind observatory.Kind, name string) {
 	}
 	w.api.deleteNamed(collection, name)
 	w.until(time.Minute, kind.Name+" "+name+" is not gone", func() bool {
-		_, held := w.o.snapshot().resource(kind, name)
+		_, held := w.operator().snapshot().resource(kind, name)
 		return !held
 	})
 	w.api.put(collection, map[string]any{

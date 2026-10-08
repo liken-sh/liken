@@ -29,8 +29,8 @@ type world struct {
 	indi *indiWorld
 	// guiders runs a fake PHD2 in each guider pod.
 	guiders *guiderWorld
-	// o is the copy of the operator that runs now.
-	o    *operator
+	// n is the copy of the operator's process that runs now.
+	n    *namespaces
 	stop func()
 	done chan struct{}
 	// logs holds what every copy of the operator logged.
@@ -117,16 +117,36 @@ func (w *world) start() {
 		w.t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(w.t.Context())
-	o := newOperator(testNamespace, client.WithContext(ctx), dialers{w.indi, w.guiders})
-	o.logs = w.logs
-	o.recorder = events.New(ctx, client, managedBy, events.Options{Instance: "observatory-operator-0", Log: w.logs})
-	w.o = o
+	n := newNamespaces(client.WithContext(ctx), dialers{w.indi, w.guiders})
+	n.logs = w.logs
+	n.recorder = events.New(ctx, client, managedBy, events.Options{Instance: "observatory-operator-0", Log: w.logs})
+	w.n = n
 	w.stop, w.done = cancel, make(chan struct{})
 	done := w.done
 	go func() {
 		defer close(done)
-		o.run(ctx, func(ctx context.Context) *stores { return startWatches(ctx, watcher, testNamespace, o.structure) })
+		n.run(ctx, func(ctx context.Context, changed *bell) *stores { return startWatches(ctx, watcher, changed) })
 	}()
+}
+
+// operator answers the operator of the test's namespace, once it runs.
+func (w *world) operator() *operator {
+	w.t.Helper()
+	w.until(time.Minute, "the operator of "+testNamespace+" does not run", func() bool {
+		return w.n.operatorOf(testNamespace) != nil
+	})
+	return w.n.operatorOf(testNamespace)
+}
+
+// ring answers the bell that wakes until: the operator's of the test's
+// namespace, which every watch event and every INDI event rings, or
+// the process's, which every watch event rings, before that operator
+// runs.
+func (w *world) ring() <-chan struct{} {
+	if o := w.n.operatorOf(testNamespace); o != nil {
+		return o.changed.wait()
+	}
+	return w.n.changed.wait()
 }
 
 // halt stops the operator and waits until it has stopped, as a
@@ -171,7 +191,7 @@ func (w *world) until(limit time.Duration, what string, check func() bool) {
 	deadline := time.NewTimer(limit)
 	defer deadline.Stop()
 	for {
-		ring := w.o.changed.wait()
+		ring := w.ring()
 		w.api.mu.Lock()
 		changed := w.api.changed
 		w.api.mu.Unlock()

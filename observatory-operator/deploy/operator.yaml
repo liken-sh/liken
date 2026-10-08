@@ -1,6 +1,7 @@
-# The operator: one unprivileged Deployment in the observatory's
-# namespace. It reads the resources, runs each reserved telescope's
-# pods, and drives the devices through each INDI server's Service. It
+# The operator: one unprivileged Deployment in liken-system. It reads
+# the resources in every namespace, runs each reserved telescope's pods
+# in the telescope's namespace, and drives the devices through each
+# INDI server's Service. It
 # keeps no state outside the API server: a reservation's status records
 # every step, and a new pod continues from it.
 ---
@@ -8,7 +9,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: observatory-operator
-  namespace: observatory
 spec:
   replicas: 1
   selector:
@@ -29,13 +29,6 @@ spec:
       containers:
         - name: operator
           image: ghcr.io/liken-sh/observatory-operator:latest
-          env:
-            # The operator watches its own namespace, where the
-            # resources and the pods are.
-            - name: POD_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
           securityContext:
             runAsNonRoot: true
             runAsUser: 65534
@@ -48,7 +41,7 @@ spec:
             requests:
               cpu: 10m
               memory: 32Mi
-            # The watches hold every resource of the namespace, and each
+            # The watches hold every resource of the group, and each
             # INDI connection holds every property of its server's
             # devices: about 70 for a camera.
             limits:

@@ -50,8 +50,8 @@ camera whose driver has a cooler and whose activation does not cool
 it.
 
 A `job` is for what the other actions lack, such as a dew heater's
-relay or a webhook. The operator creates a `batch/v1` `Job` in its own
-namespace, owned by the resource, and the action ends when the `Job`
+relay or a webhook. The operator creates a `batch/v1` `Job` in the
+resource's namespace, owned by the resource, and the action ends when the `Job`
 ends: `Done` when it succeeds, and `Failed` when it fails. A failed
 action's summary gives the exit code of the `Job`'s container and the
 last lines, at most 300 bytes, of its termination message, such as

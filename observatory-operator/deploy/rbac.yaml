@@ -1,18 +1,19 @@
-# The operator's identity. Every object it reads and writes is in its
-# own namespace, so a Role grants it all, and it holds no permission in
-# any other namespace.
+# The operator's identity. It reads the resources of the group in every
+# namespace and runs each observatory's pods, Services, ConfigMaps,
+# claims, and Jobs in the namespace of its resources, so a ClusterRole
+# grants what it needs. The cluster owner chooses the namespaces, and
+# the operator writes nothing outside the ones that hold the group's
+# resources.
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: observatory-operator
-  namespace: observatory
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
   name: observatory-operator
-  namespace: observatory
 rules:
   # A watch of each kind reads the inventory and the reservations, and
   # get reads one reservation again after a write that met a conflict.
@@ -120,15 +121,14 @@ rules:
     verbs: [create, patch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata:
   name: observatory-operator
-  namespace: observatory
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: Role
+  kind: ClusterRole
   name: observatory-operator
 subjects:
   - kind: ServiceAccount
     name: observatory-operator
-    namespace: observatory
+    namespace: liken-system

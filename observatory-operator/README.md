@@ -32,8 +32,7 @@ the operator and four packages:
 - [`drivers/`](drivers/) maps each INDI driver to the image of the
   `indi` build that holds it, and names the images of the guider's pod.
 
-[`deploy/`](deploy/) holds the namespace, the CRDs, the RBAC, and the
-operator, and [`examples/simulators.yaml`](examples/simulators.yaml)
+[`deploy/`](deploy/) holds the CRDs, the RBAC, and the operator, and [`examples/simulators.yaml`](examples/simulators.yaml)
 is an observatory of simulators with a device of every kind.
 [`plans/00-design.md`](plans/00-design.md) is the design, and [root
 plan 74](../plans/74-astrophotography.md) holds the architecture and
@@ -43,14 +42,16 @@ the tests behind it. `make test` runs every check CI runs.
 
 ```sh
 kubectl apply -k deploy/
+kubectl create namespace observatory
 kubectl apply -n observatory -f examples/simulators.yaml
 kubectl get astro -n observatory
 ```
 
-`deploy/` creates the namespace `observatory`, the CRDs, and the
-operator: one `Deployment` with one replica, which watches the
-resources of its own namespace. Every resource of the observatory
-goes in that namespace. CI publishes the image
+`deploy/` creates the CRDs and the operator: one `Deployment` with one
+replica in `liken-system`, which watches the resources of every
+namespace. Every resource of one observatory goes in one namespace,
+and the operator runs the observatory's pods and `Job`s in that
+namespace. CI publishes the image
 `ghcr.io/liken-sh/observatory-operator` and the kustomize base as the
 OCI artifact `observatory-operator-deploy`, with the image's tag set
 to the release.

@@ -1,6 +1,6 @@
 ---
 name: operators
-description: How the liken-sh operators keep their view of the cluster and their devices current. Covers the three guards every Kubernetes watch loop needs, the scenarios a watch loop must pass in a test, status writes, conditions and the Events they post, timers, device traffic, the node label that keeps a device DaemonSet off a node, the decision to watch through client-go with the shape of the reference port, and the manual pages that each kind of change must update. Use when writing or reviewing an operator's watch, reconcile pass, status write, condition, Event, backstop, timer, device polling, or device DaemonSet, and before committing any change to an operator or a CSI driver.
+description: How the liken-sh operators keep their view of the cluster and their devices current. Covers the three guards every Kubernetes watch loop needs, the scenarios a watch loop must pass in a test, status writes, conditions and the Events they post, timers, device traffic, the node label that keeps a device DaemonSet off a node, where an operator runs and where its workloads run, the decision to watch through client-go with the shape of the reference port, and the manual pages that each kind of change must update. Use when writing or reviewing an operator's watch, reconcile pass, status write, condition, Event, backstop, timer, device polling, device DaemonSet, RBAC, or deploy base, and before committing any change to an operator or a CSI driver.
 ---
 
 # Writing and reviewing operators
@@ -201,6 +201,33 @@ affinity:
 - **The guide.** The install guide has the section "Keep the pods off
   nodes with no ...", in the same words as the other operators'
   guides.
+
+## An operator runs in liken-system and watches every namespace
+
+A person who installs `liken` finds every operator in one place, and
+the cluster owner chooses where their objects live. So every operator
+follows the same shape:
+
+- The operator's `Deployment` and `ServiceAccount` are in
+  `liken-system`. Its RBAC is a `ClusterRole` and a
+  `ClusterRoleBinding`, and it watches every namespace.
+- The deploy base creates no namespace other than `liken-system`, and
+  never sets the namespace of the owner's objects.
+- A namespaced object's workloads (pods, `Service`s, `ConfigMap`s,
+  `Job`s, `ResourceClaim`s) run in that object's namespace, never in
+  `liken-system`. The owner's `ResourceQuota`, `NetworkPolicy`, Pod
+  Security level, and RBAC grants in that namespace then cover them,
+  and a reference by name in a spec resolves there.
+- A kind is cluster-scoped only when it exists once per cluster or
+  names one piece of hardware, such as `Receiver`, `Television`,
+  `Keymap`, or `Person`. A kind that a person declares as a unit of
+  use, such as `Library`, `Player`, or `Telescope`, is namespaced.
+- Names in two namespaces can be the same. Key the operator's memory
+  by namespace and name, or keep one copy of the state for each
+  namespace, as `observatory-operator` does (`namespaces.go`).
+
+Plan 15 of `observatory-operator` moved that operator to this shape
+and records the reasons.
 
 ## Decision: every watch runs on client-go
 

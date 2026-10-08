@@ -16,9 +16,10 @@ import (
 )
 
 // logf writes one line to the operator's log, with the prefix that
-// begins every line.
+// begins every line. The prefix names the namespace, because the
+// observatories of several namespaces can use the same names.
 func (o *operator) logf(format string, args ...any) {
-	fmt.Fprintf(o.logs, "observatory-operator: "+format+"\n", args...)
+	fmt.Fprintf(o.logs, "observatory-operator: "+o.namespace+": "+format+"\n", args...)
 }
 
 // timedOut begins the summary of a step that passed its deadline.

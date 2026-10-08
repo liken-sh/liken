@@ -127,8 +127,14 @@ func collectionOf(path string) (collection, name, sub string) {
 	switch {
 	case strings.HasPrefix(path, "/api/v1/namespaces/"):
 		prefix, rest = "/api/v1/namespaces/", strings.TrimPrefix(path, "/api/v1/namespaces/")
+	case strings.HasPrefix(path, "/api/v1/") && strings.Count(path, "/") == 3:
+		// A list or a watch of every namespace.
+		return "/api/v1/namespaces/" + anyNamespace + "/" + strings.TrimPrefix(path, "/api/v1/"), "", ""
 	case strings.HasPrefix(path, "/apis/"):
 		parts := strings.SplitN(strings.TrimPrefix(path, "/apis/"), "/", 4)
+		if len(parts) == 3 {
+			return "/apis/" + parts[0] + "/" + parts[1] + "/namespaces/" + anyNamespace + "/" + parts[2], "", ""
+		}
 		if len(parts) < 4 || parts[2] != "namespaces" {
 			return "", "", ""
 		}
@@ -145,6 +151,32 @@ func collectionOf(path string) (collection, name, sub string) {
 		sub = parts[3]
 	}
 	return collection, name, sub
+}
+
+// anyNamespace stands for the namespace in the collection of a list or
+// a watch of every namespace.
+const anyNamespace = "*"
+
+// covers answers whether a collection is the one a list or a watch
+// names, or one namespace's part of a list or a watch of every
+// namespace.
+func covers(watched, collection string) bool {
+	if watched == collection {
+		return true
+	}
+	before, after, found := strings.Cut(watched, "/"+anyNamespace+"/")
+	if !found || !strings.HasPrefix(collection, before+"/") || !strings.HasSuffix(collection, "/"+after) {
+		return false
+	}
+	namespace := strings.TrimSuffix(strings.TrimPrefix(collection, before+"/"), "/"+after)
+	return namespace != "" && !strings.Contains(namespace, "/")
+}
+
+// namespaceOf answers the namespace of a collection's objects.
+func namespaceOf(collection string) string {
+	_, rest, _ := strings.Cut(collection, "/namespaces/")
+	namespace, _, _ := strings.Cut(rest, "/")
+	return namespace
 }
 
 func plural(collection string) string {
@@ -251,9 +283,11 @@ func (a *fakeAPI) list(w http.ResponseWriter, r *http.Request, collection string
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	items := []any{}
-	for _, object := range a.objects[collection] {
-		if selects(r.URL.Query().Get("labelSelector"), object) {
-			items = append(items, object)
+	for held, objects := range a.objects {
+		for _, object := range objects {
+			if covers(collection, held) && selects(r.URL.Query().Get("labelSelector"), object) {
+				items = append(items, object)
+			}
 		}
 	}
 	kind := fakeKinds[plural(collection)]
@@ -273,9 +307,11 @@ func (a *fakeAPI) watch(w http.ResponseWriter, r *http.Request, collection strin
 	a.mu.Lock()
 	from, _ := strconv.Atoi(r.URL.Query().Get("resourceVersion"))
 	if r.URL.Query().Get("sendInitialEvents") == "true" {
-		for _, object := range a.objects[collection] {
-			if selects(selector, object) {
-				writeEvent(w, "ADDED", object)
+		for held, objects := range a.objects {
+			for _, object := range objects {
+				if covers(collection, held) && selects(selector, object) {
+					writeEvent(w, "ADDED", object)
+				}
 			}
 		}
 		from = a.version
@@ -290,7 +326,7 @@ func (a *fakeAPI) watch(w http.ResponseWriter, r *http.Request, collection strin
 		a.mu.Lock()
 		changed := a.changed
 		for _, event := range a.events {
-			if event.collection == collection && event.version > from {
+			if covers(collection, event.collection) && event.version > from {
 				if selects(selector, event.object) {
 					writeEvent(w, event.kind, event.object)
 				}
@@ -358,7 +394,7 @@ func (a *fakeAPI) add(collection string, object map[string]any) map[string]any {
 	}
 	a.uids++
 	metadata["uid"] = "uid-" + strconv.Itoa(a.uids)
-	metadata["namespace"] = testNamespace
+	metadata["namespace"] = namespaceOf(collection)
 	metadata["generation"] = 1
 	metadata["creationTimestamp"] = time.Now().UTC().Format(time.RFC3339)
 	if plural(collection) == "jobs" {

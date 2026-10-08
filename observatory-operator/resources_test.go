@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 	"testing/synctest"
-	"time"
 
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
@@ -17,8 +16,7 @@ func TestAReferenceNamesResourcesFromWhereItIs(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
-		w.until(time.Minute, "the stores are not ready", func() bool { return w.o.stores.ready() })
-		tr := w.o.snapshot()
+		tr := w.operator().snapshot()
 		from := func(kind observatory.Kind, name string) resource {
 			r, ok := tr.resource(kind, name)
 			if !ok {
