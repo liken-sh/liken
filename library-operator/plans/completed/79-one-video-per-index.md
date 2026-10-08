@@ -7,8 +7,9 @@ pod reads its own message and works that one video. The `Job`
 controller is the queue: it starts the next index whenever a pod ends,
 up to `parallelism` at once, and each pod goes through the scheduler on
 its own. It replaces the worker design of
-[plan 78](completed/78-workers-are-catalog-peers.md), whose catalog
-copies and split by hours it removes. Not built.
+[plan 78](78-workers-are-catalog-peers.md), whose catalog
+copies and split by hours it removes. Built, and drilled on `liken-1`
+on 2026-10-08.
 
 ## The problem
 
@@ -176,3 +177,52 @@ The drill on `liken-1`: turn on `appearances` for `series` at a
 parallelism of 4, and record each pod's time from creation to work, its
 wall time per video, the `Job`'s progress, and that the list leaves the
 bus when the `Job` ends.
+
+## What the drill found
+
+Before the drill, a throwaway test published a list of 3,000 videos to
+`liken-1`'s Mosquitto 2.0.22 over a port-forward, read three indexes
+back in sessions of their own, read an index past the list as absent,
+and cleared the list, in 0.75 seconds in all. Mosquitto sent each
+retained message before the answer to the ping that followed the
+subscription, which is the order a pod's read depends on.
+
+On `liken-1` on 2026-10-08, `appearances` turned on for `series` at a
+parallelism of 4, on a `ResourceClaimTemplate` of the shared render
+node. The close container of the walk published a list of 6,828
+videos, and the operator started the worker after the walk's enrich
+run.
+
+The first run found a defect. The pass that started the worker also
+cleared its list, because the sweep reads the Jobs from the start of
+the pass, the new worker was not among them, and a rule cleared a list
+once a worker had taken it. Every pod read its index as absent, logged
+it, and exited zero within seconds. The `Job` was deleted, the rule was
+removed, and the sweep now keeps a list that no `Job` names while it is
+the newest work of its fact.
+
+The second run, on the fixed build:
+
+- Each pod started its work 6 seconds after the `Job` controller
+  created it, and decoded on the render node.
+- `liken-1` has 4 cores. Each pod requests 1 core and used 0.3 to 0.4,
+  so three pods ran, and the fourth stayed Pending on CPU until one
+  ended. The taint on `stick-1` kept every pod off it.
+- With three pods on the one iGPU, each 47-minute episode took 11
+  minutes 15 seconds, at about 680 MiB.
+- Seven episodes were done after 27 minutes. Their rescans waited
+  behind the hourly walk that had started meanwhile, and 20 minutes
+  into that walk the catalog held the found attempts of the first
+  three.
+- The hourly walk of `series` that ran beside the three decodes took
+  17 minutes 56 seconds for 177 folders, where the walk before the
+  worker took about 2 minutes. The decodes and the walk read one
+  volume, and the walk waited 4 minutes for CPU before it started.
+- Deleting the worker and turning the fact off cleared the list from
+  the bus within a minute. The walk that was running when the fact went
+  off still published a list of 6,825 videos, because its close
+  container was built with the fact on, and the next pass cleared that
+  list too, with no worker started.
+
+The backlog of 6,828 episodes is not the testbed's to work, so the
+drill stopped there.

@@ -8,7 +8,7 @@ among its pods by hours instead of by a hash. It also removes the
 fan-out share is one title folder", which the commit that built it
 deleted. Built on 2026-10-07. Its drill on `liken-1` on 2026-10-07 found
 that a fresh copy reads a partial gap, and
-[plan 79](../79-one-video-per-index.md) replaces its worker design.
+[plan 79](79-one-video-per-index.md) replaces its worker design.
 
 ## The problem
 
