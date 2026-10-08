@@ -1,7 +1,6 @@
 # One exchange at a time on a panel's bus
 
-Plan 28. Built and tested on 2026-10-08. The drill on stick-1 is still
-owed.
+Plan 28. Built and drilled on stick-1 on 2026-10-08.
 
 The `boe-1080-display` panel on stick-1 answered brightness reads
 with the replies to other controls, and a claim's prepare failed on
@@ -53,6 +52,25 @@ The turn is a channel and not a mutex. `testing/synctest` advances its
 fake clock only while every goroutine waits on a channel or a timer,
 and the tests of the turn run the protocol's own delays on that clock.
 
+## The drill
+
+The drill ran on stick-1 on 2026-10-08 with
+`2026.10.08-002-dev-007-00e72373`, which holds this plan and plan 27.
+The `lab-portable` `Player` states `brightness: 100`, so every
+prepare of its claims reads the panel's brightness while the
+`Display` pass polls the same panel.
+
+- The mode sequence of plan 27's drill 4: a `Play` at 720p, its
+  delete, and a second `Play` at once. The compositor restarted four
+  times for the four mode changes asked for, the second `Play` ran,
+  and the `Display` recorded no decline.
+- Six `Play`s in a row with no mode, each deleted when it ran. Each
+  ran within 9 s of the last.
+
+None of the eight prepares, and none of the polls beside them, logged
+a crossed or garbled reply. The panel's no-answer reads after a
+compositor restart did not appear either.
+
 ## What stays open
 
 A pod that holds a panel's control device reads and writes the bus
@@ -60,7 +78,6 @@ from its own process, outside these turns. The manual already says
 that such a pod owns the panel, and that no `Display` spec and no
 claim parameter writes it.
 
-Right after a compositor restart, the stick-1 panel sometimes answers
-no read at all for a moment. That is a panel that is busy after a
-mode change, not a crossed reply, and the drill of this plan checks
-whether it remains.
+Before this plan, the stick-1 panel sometimes answered no read at all
+right after a compositor restart. The drill did not see it, so it was
+most likely the crossed exchanges too, and nothing records it as open.
