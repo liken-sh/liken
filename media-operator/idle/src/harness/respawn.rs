@@ -153,8 +153,10 @@ fn compositor_socket() -> Option<PathBuf> {
     Some(PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR")?).join(display))
 }
 
-/// One compositor: the device and inode of the socket it bound.
-pub type Identity = (u64, u64);
+/// One compositor: the device, the inode, and the change time of the socket it
+/// bound. The kernel can give a new socket the inode of the one it replaced, so
+/// the change time is what tells them apart.
+pub type Identity = (u64, u64, i64, i64);
 
 /// The compositor that answers on the socket now, or nothing when none
 /// answers or the container names no socket.
@@ -162,7 +164,12 @@ fn compositor_identity(socket: Option<&PathBuf>) -> Option<Identity> {
     let socket = socket?;
     UnixStream::connect(socket).ok()?;
     let metadata = std::fs::metadata(socket).ok()?;
-    Some((metadata.dev(), metadata.ino()))
+    Some((
+        metadata.dev(),
+        metadata.ino(),
+        metadata.ctime(),
+        metadata.ctime_nsec(),
+    ))
 }
 
 /// Waits until the compositor accepts a connection, up to the limit. A
@@ -246,11 +253,11 @@ mod tests {
             },
             || true,
             compositors(vec![
-                Some((1, 1)),
-                Some((1, 2)),
-                Some((1, 2)),
-                Some((1, 3)),
-                Some((1, 3)),
+                Some((1, 1, 0, 0)),
+                Some((1, 2, 0, 0)),
+                Some((1, 2, 0, 0)),
+                Some((1, 3, 0, 0)),
+                Some((1, 3, 0, 0)),
             ]),
         );
 
@@ -269,7 +276,7 @@ mod tests {
                 exits(codes.next().unwrap())
             },
             || true,
-            compositors(vec![Some((1, 1)), None, Some((1, 2))]),
+            compositors(vec![Some((1, 1, 0, 0)), None, Some((1, 2, 0, 0))]),
         );
 
         assert_eq!(status, 0);
@@ -286,7 +293,7 @@ mod tests {
                 exits(NO_WINDOW)
             },
             || true,
-            compositors(vec![Some((1, 1)), Some((1, 1))]),
+            compositors(vec![Some((1, 1, 0, 0)), Some((1, 1, 0, 0))]),
         );
 
         assert_eq!(status, NO_WINDOW);
@@ -320,7 +327,7 @@ mod tests {
                 exits(3)
             },
             || true,
-            || Some((1, 1)),
+            || Some((1, 1, 0, 0)),
         );
 
         assert_eq!(status, 3);
@@ -349,7 +356,7 @@ mod tests {
         let status = respawn(
             || Command::new("sh").args(["-c", "kill -9 $$"]).spawn(),
             || true,
-            || Some((1, 1)),
+            || Some((1, 1, 0, 0)),
         );
 
         assert_eq!(status, 128 + libc::SIGKILL);
