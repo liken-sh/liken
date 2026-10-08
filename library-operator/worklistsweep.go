@@ -25,11 +25,12 @@ const workListClearTimeout = time.Minute
 // Library is gone.
 //
 // A worker that names the list keeps it while it runs and clears it when it
-// has finished. A list that the last worker took and whose Job is gone has
-// been worked. A list no worker took is kept while it is the newest work of
+// has finished. A list no worker names is kept while it is the newest work of
 // its fact, so the worker can start on it: no newer list of the fact, and no
 // newer finished library Job, which would have listed the fact again or found
-// its gap empty.
+// its gap empty. That holds for a list this pass started a worker on, too,
+// because the pass read its Jobs before it created that worker, and the
+// next pass reads the worker and keeps the list for it.
 func (o *operator) keepsWorkList(list workList, library *Library, jobs []Job, held []workList) bool {
 	if library == nil || library.Metadata.deleting() {
 		return false
@@ -41,9 +42,6 @@ func (o *operator) keepsWorkList(list workList, library *Library, jobs []Job, he
 	}
 	worker, known := factWorkerOf(list.fact)
 	if !known || !worker.enabled(library) {
-		return false
-	}
-	if o.workListsTaken[libraryKey(list.namespace, list.library)+"/"+list.fact] == list.run {
 		return false
 	}
 	for _, other := range held {
