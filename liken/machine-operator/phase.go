@@ -30,7 +30,10 @@ import (
 // machine reports the most severe one. A machine that is both
 // waiting on a Manual reboot and failing a sysctl is UpdatePending
 // and Degraded at the same time. The listing should show the one
-// that needs a person soonest.
+// that needs a person soonest. Downloading comes last because a
+// download finishes on its own: a machine that downloads a release
+// while a change waits on a reboot, or while something fails, shows
+// that instead.
 var phasePrecedence = []api.Phase{
 	api.PhaseUnknown,
 	api.PhaseBooting,
@@ -38,6 +41,7 @@ var phasePrecedence = []api.Phase{
 	api.PhaseUpdating,
 	api.PhaseUpdatePending,
 	api.PhaseDegraded,
+	api.PhaseDownloading,
 }
 
 // conditionPhase maps one condition to the phase it indicates. It
@@ -93,21 +97,25 @@ func conditionPhase(c api.Condition) api.Phase {
 		// the server publishes. A malformed credentials Secret has
 		// the same shape: only a corrected Secret fixes it.
 		return api.PhaseBlocked
-	case "RebootRequested", "RestartRequested", "DemotionRebooting", "Draining", "Downloading",
+	case "Downloading":
+		// A release downloads to the inactive slot in the background,
+		// and the machine serves its workloads until the reboot that
+		// proves the release. The cluster operator counts a machine
+		// that downloads as available, so a download takes no slot
+		// of the disruption budget, and a download that never ends
+		// holds no other machine's turn.
+		return api.PhaseDownloading
+	case "RebootRequested", "RestartRequested", "DemotionRebooting", "Draining",
 		"Proving", "LoadRequested":
 		// A disruption is in progress; the machine is in the middle
 		// of a change. Draining is the first step of a reboot: the
 		// node is cordoned and its workloads are being evicted
 		// before the machine goes down (a k3s restart skips this
-		// step, and pods survive). Downloading is the version
-		// target's equivalent. The change is arriving over the
-		// network instead of waiting on a reboot, but the machine is
-		// just as much in the middle of a change. So is Proving: a
-		// boot's imports stay on trial until the OS pods prove them,
-		// which ordinarily takes seconds. LoadRequested is the live
-		// load's moment in flight, usually under a second, and a
-		// machine applying its spec in place is updating, not
-		// degraded.
+		// step, and pods survive). So is Proving: a boot's imports
+		// stay on trial until the OS pods prove them, which
+		// ordinarily takes seconds. LoadRequested is the live load's
+		// moment in flight, usually under a second, and a machine
+		// applying its spec in place is updating, not degraded.
 		return api.PhaseUpdating
 	case "RebootPending", "RestartPending", "DemotionPending", "AwaitingTurn",
 		"StagedForNextBoot", "AwaitingPodRefresh":

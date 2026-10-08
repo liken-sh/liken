@@ -107,6 +107,7 @@ func newUnelectedGauge(o *metrics.Operator) func(bool) {
 var fleetPhases = []api.Phase{
 	api.PhaseReady,
 	api.PhaseBooting,
+	api.PhaseDownloading,
 	api.PhaseUpdating,
 	api.PhaseUpdatePending,
 	api.PhaseBlocked,

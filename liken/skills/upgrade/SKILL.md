@@ -109,9 +109,18 @@ trial when they do not match.
     kubectl get machines
 
 The LIKEN column changes to the new version one machine at a time, and
-the phase of each machine shows its step in the rollout. The phase of
-the Cluster shows Updating during the rollout, and Ready when the
-rollout is complete.
+the STATUS column shows each machine's step in the rollout:
+
+* `Downloading`: the machine downloads the release into its other
+  slot. It still serves its workloads, so the download does not count
+  against the disruption budget.
+* `UpdatePending`: the release is staged, and the machine waits for
+  its reboot turn, or for you when its `rebootPolicy` is `Manual`.
+* `Updating`: the machine drains, reboots into the new slot, and
+  proves the release.
+
+The phase of the Cluster shows Updating during the rollout, and Ready
+when the rollout is complete.
 
 If a machine with a granted turn does not return, the cluster sets its
 `Progressing` condition to `False` with the reason `RolloutStalled`.

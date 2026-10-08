@@ -84,7 +84,7 @@ func decideFleetSweep(machines []machine.Machine, renewals map[string]time.Time,
 		switch effective {
 		case api.PhaseReady:
 			s.tally.Ready++
-		case api.PhaseUpdating, api.PhaseUpdatePending, api.PhaseBooting:
+		case api.PhaseUpdating, api.PhaseUpdatePending, api.PhaseDownloading, api.PhaseBooting:
 			transitioning = append(transitioning, m.Metadata.Name)
 		default:
 			unwell = append(unwell, m.Metadata.Name)

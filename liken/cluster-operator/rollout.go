@@ -105,11 +105,13 @@ func wantsTurn(m *machine.Machine) bool {
 
 // available reports whether a machine is serving the cluster right
 // now. Blocked and UpdatePending machines are up. Their trouble is
-// administrative, not operational. Every other machine that is not
-// Ready is either absent or unwell.
+// administrative, not operational. A Downloading machine is up too:
+// the release downloads in the background, and the machine goes
+// down only on the turn that this conductor grants. Every other
+// machine that is not Ready is either absent or unwell.
 func available(phase api.Phase) bool {
 	switch phase {
-	case api.PhaseReady, api.PhaseUpdatePending, api.PhaseBlocked:
+	case api.PhaseReady, api.PhaseUpdatePending, api.PhaseBlocked, api.PhaseDownloading:
 		return true
 	}
 	return false

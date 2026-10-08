@@ -99,9 +99,27 @@ func TestDecidePhase(t *testing.T) {
 			api.PhaseBlocked,
 		},
 		{
-			"a release downloading is an update in flight",
+			"a release downloading in the background is downloading",
 			[]api.Condition{condition("VersionConverged", "False", "Downloading")},
-			api.PhaseUpdating,
+			api.PhaseDownloading,
+		},
+		{
+			// A download finishes on its own. A change that waits on a
+			// person, or a fault, needs that person sooner.
+			"a change waiting on a reboot shows over a download",
+			[]api.Condition{
+				condition("VersionConverged", "False", "Downloading"),
+				condition("SpecConverged", "False", "RebootPending"),
+			},
+			api.PhaseUpdatePending,
+		},
+		{
+			"a fault shows over a download",
+			[]api.Condition{
+				condition("VersionConverged", "False", "Downloading"),
+				condition("SysctlsApplied", "False", "ApplyFailed"),
+			},
+			api.PhaseDegraded,
 		},
 		{
 			"a demotion mid-reboot is an update in flight",

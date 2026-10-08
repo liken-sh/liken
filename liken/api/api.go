@@ -121,6 +121,7 @@ const (
 	PhaseUpdating      Phase = "Updating"      // a reboot is under way to apply a staged change
 	PhaseUpdatePending Phase = "UpdatePending" // a change is staged and waits for a Manual reboot
 	PhaseDegraded      Phase = "Degraded"      // something is wrong that does not match one of the specific states above
+	PhaseDownloading   Phase = "Downloading"   // a release downloads to the inactive slot while the machine serves its workloads
 	PhaseReady         Phase = "Ready"         // every condition is True
 )
 

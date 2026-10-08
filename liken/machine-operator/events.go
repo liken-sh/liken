@@ -116,8 +116,9 @@ func transitionEvent(c api.Condition) api.Condition {
 // badStatus answers the status of a condition that needs a person,
 // for events.Recorder.Transition. A condition needs a person when the
 // phase it argues for is Blocked, Degraded, or Unknown. A False that
-// argues for Updating, UpdatePending, or Booting is a change in
-// progress, which needs no one. Ready's reason is the phase word.
+// argues for Downloading, Updating, UpdatePending, or Booting is a
+// change in progress, which needs no one. Ready's reason is the phase
+// word.
 func badStatus(c api.Condition) conditions.Status {
 	phase := conditionPhase(c)
 	if c.Type == "Ready" && c.Status != api.ConditionTrue {

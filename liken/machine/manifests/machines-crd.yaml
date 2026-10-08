@@ -33,7 +33,7 @@ metadata:
     # that use its fields (init/schemarevision.go). Raise it in the
     # same change that changes the schema below; a test holds the two
     # together.
-    liken.sh/schema-revision: "6"
+    liken.sh/schema-revision: "7"
 spec:
   group: liken.sh
   names:
@@ -1275,15 +1275,21 @@ spec:
               properties:
                 phase:
                   type: string
-                  enum: [Unknown, Booting, Lost, Blocked, Updating, UpdatePending, Degraded, Ready]
+                  enum: [Unknown, Booting, Lost, Blocked, Updating, UpdatePending, Degraded, Downloading, Ready]
                   description: >-
                     The machine's state in one word. The system
                     derives this value from the conditions on each
                     reconcile pass, so the phase always agrees with
                     them. Ready means that every condition holds.
-                    UpdatePending and Updating mean that a staged
-                    change waits for a reboot (Manual), waits for
-                    this machine's next boot, or is in progress
+                    Downloading means that a release downloads to the
+                    slot the machine does not run from. The machine
+                    serves its workloads meanwhile, so a download
+                    takes no slot of the cluster's disruption budget.
+                    A machine that downloads while another change
+                    waits, or while something fails, shows that phase
+                    instead. UpdatePending and Updating mean that a
+                    staged change waits for a reboot (Manual), waits
+                    for this machine's next boot, or is in progress
                     (Auto). Blocked means that drift exists
                     which liken refuses to stage or cannot stage.
                     This state needs a different edit, and time does
