@@ -6,7 +6,9 @@ instead of from a work list on the media volume, and splits that gap
 among its pods by hours instead of by a hash. It also removes the
 `.liken` directory at the library root. It answers the open problem "A
 fan-out share is one title folder", which the commit that built it
-deleted. Built on 2026-10-07. The drill on `liken-1` has not run yet.
+deleted. Built on 2026-10-07. Its drill on `liken-1` on 2026-10-07 found
+that a fresh copy reads a partial gap, and
+[plan 79](../79-one-video-per-index.md) replaces its worker design.
 
 ## The problem
 
@@ -170,3 +172,21 @@ The drill on `liken-1`: turn on `trickplay` for `series` at a
 parallelism of 4, and record each pod's wall time, the agent's sync
 time and peak memory at pod start, and the free space on the node's
 pod-ephemeral storage while the copies stand.
+
+## What the drill found
+
+On `liken-1` on 2026-10-07, `appearances` turned on for `series` at a
+parallelism of 4 started a worker `Job` one second after the library
+`Job`'s enrich run, for a gap of 6,822 videos. The scheduler put two
+pods on `liken-1` and two on `stick-1`, a 4 GB machine that drives one
+screen, because nothing kept them off it. All four were running two
+minutes after the `Job` started. Each agent applied the catalog in
+batches of 100 to 500 rows, at about 25 millicores and 50 to 100 MiB in
+its first minutes.
+
+The first pod to read its gap, five minutes after the `Job` started,
+read 415 videos, not 6,822. Its copy held the writes of the library
+`Job` that started the worker, which is all the sync wait checks, and
+little else, because an `emptyDir` copy starts empty. The drill was
+stopped there. The root `.liken` removal worked: the `series` walk at
+20:20 logged that it removed the directory.
