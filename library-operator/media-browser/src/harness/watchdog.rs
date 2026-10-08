@@ -1,8 +1,8 @@
 // The window watchdog. A client with no window draws nothing while the screen
 // shows the compositor's background, and that is what a compositor restart
 // under a running screen pod leaves behind. Nothing inside the process can open
-// the connection again, so the client exits and the kubelet restarts the
-// container with backoff until the compositor answers.
+// the connection again, so the client exits, and the container's first
+// process starts it again when the compositor answers (respawn.rs).
 //
 // `WINDOW_GRACE_SECONDS` arms it, and the operator sets that variable on
 // the browser container of every screen pod. A run outside a pod sets it
@@ -82,9 +82,7 @@ impl Watchdog {
         }
         // The line names this binary, so a person reading the pod's log
         // tells it from the other containers there.
-        eprintln!(
-            "media-browser: {reason}; exiting {NO_WINDOW} so the kubelet restarts this container"
-        );
+        eprintln!("media-browser: {reason}; exiting {NO_WINDOW} to start again");
         std::process::exit(NO_WINDOW)
     }
 }

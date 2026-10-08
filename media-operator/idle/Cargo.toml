@@ -37,6 +37,9 @@ measure = ["dep:image"]
 # Every version is exact, so a build from this manifest resolves the same
 # crates the lock file names.
 [dependencies]
+# libc is here for sigaction and kill, which harness/respawn.rs uses to pass
+# the kubelet's stop to the client it runs as a child.
+libc = "=0.2.189"
 iced_winit = { version = "=0.14.0", default-features = false, features = [
     "wayland",
 ] }

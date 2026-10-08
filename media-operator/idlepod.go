@@ -254,8 +254,10 @@ func buildIdlePod(
 	// client's own watchdog. A compositor that restarts takes the window
 	// with it, and a client that kept running windowless would leave the
 	// compositor's background on the screen until a person deleted the
-	// pod. The client exits instead, and the kubelet restarts the
-	// container with backoff until the compositor answers again.
+	// pod. The client exits instead, and the container's first process
+	// starts it again when the compositor answers. Only a crash, or a
+	// compositor gone for minutes, ends the container for the kubelet to
+	// restart.
 	container.Env = append(container.Env,
 		EnvVar{Name: idleWindowGraceVariable, Value: strconv.Itoa(idleWindowGraceSeconds)})
 	// The idle screen names the unit and lists its parts, so a person reads

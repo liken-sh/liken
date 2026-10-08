@@ -1,8 +1,8 @@
 // The window watchdog. A client with no window draws nothing while the screen
 // shows the compositor's background, and that is what a compositor restart
 // under a running idle pod leaves behind. Nothing inside the process can open
-// the connection again, so the client exits and the kubelet restarts the
-// container with backoff until the compositor answers.
+// the connection again, so the client exits, and the container's first
+// process starts it again when the compositor answers (respawn.rs).
 //
 // `IDLE_WINDOW_GRACE_SECONDS` arms it, and the operator sets that variable on
 // the idle container alone. A pod that expects no window sets it nowhere and
@@ -81,9 +81,7 @@ impl Watchdog {
         if self.grace.is_none() {
             return;
         }
-        eprintln!(
-            "idle-screen: {reason}; exiting {NO_WINDOW} so the kubelet restarts this container"
-        );
+        eprintln!("idle-screen: {reason}; exiting {NO_WINDOW} to start again");
         std::process::exit(NO_WINDOW)
     }
 }

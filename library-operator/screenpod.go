@@ -62,13 +62,13 @@ const displayClaimName = "devices"
 // How long the kubelet waits between the SIGTERM and the kill on a
 // screen pod. The browser writes nothing to the catalog, and the agent
 // beside it holds only rows its peers replicate to it, so a kill costs
-// a re-sync and no data. The browser runs as PID 1 with no SIGTERM
-// handler, so it never exits on its own and every stop waits out the
-// whole grace. A short grace keeps a screen's restart short.
+// a re-sync and no data. The container's first process passes the
+// SIGTERM to the browser it runs as a child, and the browser has no
+// handler, so it ends at once. The grace bounds a stop that does not.
 const screenGracePeriod = 15
 
 // The seconds the browser waits for a window before it exits 7 and the
-// kubelet restarts it. The container reads the variable; a run outside a pod
+// container's first process starts it again. The container reads the variable; a run outside a pod
 // sets none and waits forever.
 const (
 	windowGraceVariable = "WINDOW_GRACE_SECONDS"
@@ -221,9 +221,9 @@ func buildScreenPod(player *Player, libraries []Library, catalog *NamespaceCatal
 		},
 		Spec: PodSpec{
 			// A screen is a standing service, so the kubelet restarts a
-			// container that exits rather than letting the pod end. That is
-			// also what puts the browser back after the window watchdog exits
-			// it.
+			// container that exits rather than letting the pod end. The
+			// container exits only on a crash: the browser that the window
+			// watchdog exits starts again inside it.
 			RestartPolicy:                 "Always",
 			TerminationGracePeriodSeconds: &grace,
 			AutomountServiceAccountToken:  &noToken,

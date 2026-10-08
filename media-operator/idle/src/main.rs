@@ -13,6 +13,14 @@ fn main() {
     // arms the watchdog.
     let wiring = Wiring::from_environment();
 
+    // In a pod, this process runs the client as its child and starts it
+    // again when a compositor restart takes its window (harness/respawn.rs).
+    // It returns before the listener below, so only the child binds the
+    // metrics port.
+    if let Some(status) = harness::respawn::supervise(wiring.window_grace.is_some()) {
+        std::process::exit(status);
+    }
+
     // The listener starts before the client opens its own reader, so a
     // scrape between start and the first bus session still reads a stated
     // value. A failure here never stops the run: the screen this pod exists

@@ -66,6 +66,13 @@ fn main() {
             // binary reads them here, after the flags and before the
             // window.
             options.from_environment();
+            // In a pod, this process runs the browser as its child and
+            // starts it again when a compositor restart takes its window
+            // (harness/respawn.rs). It returns before the listener below,
+            // so only the child binds the metrics port.
+            if let Some(status) = harness::respawn::supervise(options.window_grace.is_some()) {
+                std::process::exit(status);
+            }
             // The listener starts before the window, so a scrape that
             // arrives while the compositor is still handing over a
             // surface still finds the process's own numbers.

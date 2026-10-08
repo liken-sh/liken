@@ -13,6 +13,7 @@
 pub mod frame;
 pub mod graphics;
 pub mod options;
+pub mod respawn;
 pub mod timeline;
 pub mod watchdog;
 

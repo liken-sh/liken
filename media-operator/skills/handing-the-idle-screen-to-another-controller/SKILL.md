@@ -112,10 +112,18 @@ media plays.
 
 A window can go away under a running client when the compositor
 restarts. Nothing inside the process can open the connection again, so
-exit when no window exists for longer than a grace period, and let the
-kubelet restart the container. The operator's own client exits with
-code 7 in that case, so a person reading a container's last state
-finds the same code whichever client the image runs.
+exit when no window exists for longer than a grace period. The
+operator's own client exits with code 7 in that case, so a person
+reading a container's last state finds the same code whichever client
+the image runs.
+
+If your client's exit ends its container, the kubelet counts it as a
+crash, and a second compositor restart within ten minutes leaves your
+screen dark for 10 seconds or more while the kubelet's crash backoff
+runs. The operator's own client avoids that wait: the container's
+first process runs the client as a child, waits for the compositor's
+socket to accept a connection, and starts the client again. Only an
+exit with another code ends its container.
 
 ## Read the presses
 

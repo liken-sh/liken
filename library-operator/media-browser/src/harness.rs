@@ -14,6 +14,7 @@ pub mod capture;
 pub mod frame;
 pub mod graphics;
 pub mod options;
+pub mod respawn;
 pub mod stats;
 pub mod timeline;
 pub mod watchdog;
@@ -204,9 +205,16 @@ pub fn run<S: Screen + 'static>(mut screen: S, options: Options) -> Result<(), S
         },
     };
 
-    event_loop
-        .run_app(&mut app)
-        .map_err(|error| error.to_string())
+    // A loop that ends with an error lost its Wayland connection, which is
+    // the window's one path to the screen, so the watchdog takes the exit
+    // and the run reads as a lost window and not as a crash. A loop that a
+    // stop ended returns no error.
+    if let Err(error) = event_loop.run_app(&mut app) {
+        app.watchdog
+            .expire(&format!("the compositor stopped answering: {error}"));
+        return Err(error.to_string());
+    }
+    Ok(())
 }
 
 /// The run, once the compositor has given the process a window.
