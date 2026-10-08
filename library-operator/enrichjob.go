@@ -5,7 +5,8 @@ package main
 // containers that start together, beside one Corrosion agent on the
 // Library's one catalog claim. The agent is the only init container, because
 // Kubernetes runs a native sidecar as an init container. A close container
-// writes the run's start, waits for every phase's mark, and hands off.
+// writes the run's start, waits for every phase's mark, publishes the work
+// list of each heavy fact the Library runs, and hands off.
 //
 // The pod names every phase and the facts each runs, so a person reads the
 // Job's work with kubectl get pod, and the operator holds no order of its
@@ -91,7 +92,7 @@ func libraryJobName(library, mode string, created time.Time) string {
 // The library Job, owned by the Library so the garbage collector takes it
 // with the Library.
 func buildLibraryJob(library *Library, providers providerSet, languages []string,
-	plan libraryJob, images jobImages, created time.Time) *Job {
+	plan libraryJob, images jobImages, bus busEndpoint, created time.Time) *Job {
 	backoff, ttl := int32(scanBackoffLimit), int32(scanJobTTL)
 	deadline := int64(libraryJobDeadline / time.Second)
 	labels := workerLabels(library.Metadata.Name, plan.mode)
@@ -113,7 +114,7 @@ func buildLibraryJob(library *Library, providers providerSet, languages []string
 			BackoffLimit:            &backoff,
 			ActiveDeadlineSeconds:   &deadline,
 			TTLSecondsAfterFinished: &ttl,
-			Template:                libraryPodTemplate(library, providers, languages, plan, images),
+			Template:                libraryPodTemplate(library, providers, languages, plan, images, bus),
 		},
 	}
 }
@@ -133,7 +134,7 @@ func (plan libraryJob) included() []string {
 
 // The pod the library Job runs.
 func libraryPodTemplate(library *Library, providers providerSet, languages []string,
-	plan libraryJob, images jobImages) PodTemplateSpec {
+	plan libraryJob, images jobImages, bus busEndpoint) PodTemplateSpec {
 	grace := int64(scannerGracePeriod)
 	// No container holds a Kubernetes credential. Each reads its work through
 	// the agent beside it and takes a provider key through a secretKeyRef, so
@@ -151,6 +152,10 @@ func libraryPodTemplate(library *Library, providers providerSet, languages []str
 	}
 	closing := enrichContainer(library, closeMode, closeMode, plan.paths, images.operator)
 	withPhaseEnv(&closing, plan, included)
+	if facts := workListFacts(library); len(facts) > 0 {
+		closing.Env = append(closing.Env, EnvVar{Name: libraryWorkListsVariable, Value: strings.Join(facts, ",")})
+		closing.Env = append(closing.Env, bus.env()...)
+	}
 	containers = append(containers, closing)
 
 	spec := PodSpec{
@@ -165,6 +170,18 @@ func libraryPodTemplate(library *Library, providers providerSet, languages []str
 		Metadata: ObjectMeta{Labels: withMemberLabel(workerLabels(library.Metadata.Name, plan.mode))},
 		Spec:     spec,
 	}
+}
+
+// The heavy facts the Library runs, whose lists the close container
+// publishes.
+func workListFacts(library *Library) []string {
+	var facts []string
+	for _, worker := range factWorkers {
+		if worker.enabled(library) {
+			facts = append(facts, worker.fact)
+		}
+	}
+	return facts
 }
 
 // The volumes of the pod. The scan container mounts the storage claim

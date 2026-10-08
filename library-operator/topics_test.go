@@ -213,3 +213,61 @@ func TestParseCatalogAvailabilityTopicNamesTheNamespace(t *testing.T) {
 		})
 	}
 }
+
+// A work list's topics name the Library, the fact, and the run, so a person
+// reads one list with one filter, and the operator's filter reaches every
+// list's count and no item.
+func TestTheWorkListTopics(t *testing.T) {
+	list := workList{namespace: "house", library: "series", fact: factAppearances, run: "series-walk-1"}
+	cases := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{name: "item", got: list.itemTopic(defaultTopicBase, 41),
+			want: "liken/library/libraries/house/series/missing/appearances/series-walk-1/41"},
+		{name: "count", got: list.countTopic(defaultTopicBase),
+			want: "liken/library/libraries/house/series/missing/appearances/series-walk-1/count"},
+		{name: "count filter", got: workCountFilter(defaultTopicBase),
+			want: "liken/library/libraries/+/+/missing/+/+/count"},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			if one.got != one.want {
+				t.Errorf("topic = %q, want %q", one.got, one.want)
+			}
+		})
+	}
+	if !topicMatches(workCountFilter(defaultTopicBase), list.countTopic(defaultTopicBase)) ||
+		topicMatches(workCountFilter(defaultTopicBase), list.itemTopic(defaultTopicBase, 0)) {
+		t.Error("the count filter must reach the count and no item")
+	}
+	if !topicMatches(libraryStatusFilter(defaultTopicBase), libraryStatusTopic(defaultTopicBase, "house", "series")) ||
+		topicMatches(libraryStatusFilter(defaultTopicBase), list.countTopic(defaultTopicBase)) {
+		t.Error("the status filter must reach no work list")
+	}
+}
+
+// The operator reads the list back from a count topic, and refuses any
+// other topic.
+func TestParseWorkCountTopic(t *testing.T) {
+	list := workList{namespace: "house", library: "series", fact: factTrickplay, run: "series-walk-1"}
+	cases := []struct {
+		name  string
+		topic string
+		ok    bool
+	}{
+		{name: "a count", topic: list.countTopic(defaultTopicBase), ok: true},
+		{name: "an item", topic: list.itemTopic(defaultTopicBase, 3)},
+		{name: "a status", topic: libraryStatusTopic(defaultTopicBase, "house", "series")},
+		{name: "another base", topic: list.countTopic("other/base")},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			got, ok := parseWorkCountTopic(defaultTopicBase, one.topic)
+			if ok != one.ok || (ok && got != list) {
+				t.Errorf("parse = %+v, %v, want %+v, %v", got, ok, list, one.ok)
+			}
+		})
+	}
+}

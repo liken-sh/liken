@@ -15,7 +15,10 @@ package main
 // several clusters share one broker is a later refinement the string
 // already allows.
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // defaultTopicBase is the base every topic extends when the operator
 // sets none.
@@ -184,4 +187,56 @@ func parseLibraryTopic(base, topic string) (namespace, name, kind string, ok boo
 		return "", "", "", false
 	}
 	return namespace, name, kind, true
+}
+
+// The levels of a work list's topics. A library Job lists the videos a heavy
+// fact still needs under missing, one retained message per video, and the
+// count of them last (worklist.go).
+const (
+	workListKind  = "missing"
+	workCountKind = "count"
+)
+
+// One work list: the Library it belongs to, the heavy fact it lists, and
+// the library Job that published it, so the lists of two runs never mix.
+type workList struct {
+	namespace, library, fact, run string
+}
+
+// The topics of one work list, under the base given.
+func (l workList) prefix(base string) string {
+	return base + "/libraries/" + l.namespace + "/" + l.library + "/" + workListKind + "/" + l.fact + "/" + l.run
+}
+
+// The topic of one video of the list, by its index from 0.
+func (l workList) itemTopic(base string, index int) string {
+	return l.prefix(base) + "/" + strconv.Itoa(index)
+}
+
+// The topic of the list's count, which the library Job publishes last.
+func (l workList) countTopic(base string) string {
+	return l.prefix(base) + "/" + workCountKind
+}
+
+// The operator's subscription to the count of every work list. No other
+// filter reaches a work list's topics, because each names its levels with +.
+func workCountFilter(base string) string {
+	return base + "/libraries/+/+/" + workListKind + "/+/+/" + workCountKind
+}
+
+// Maps an inbound count topic back to the list it counts.
+func parseWorkCountTopic(base, topic string) (workList, bool) {
+	prefix := base + "/libraries/"
+	if !strings.HasPrefix(topic, prefix) {
+		return workList{}, false
+	}
+	parts := strings.Split(strings.TrimPrefix(topic, prefix), "/")
+	if len(parts) != 6 || parts[2] != workListKind || parts[5] != workCountKind {
+		return workList{}, false
+	}
+	list := workList{namespace: parts[0], library: parts[1], fact: parts[3], run: parts[4]}
+	if list.namespace == "" || list.library == "" || list.fact == "" || list.run == "" {
+		return workList{}, false
+	}
+	return list, true
 }

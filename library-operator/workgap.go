@@ -1,9 +1,10 @@
 package main
 
-// workgap.go is one heavy fact's gap as a worker reads it: the videos that
-// still need the fact, read from the worker pod's own copy of the catalog
-// with the gap query the reporter counts the gap with. The gap is sorted by
-// path, so the videos of one title folder come together.
+// workgap.go is one heavy fact's gap as the close container of a library Job
+// lists it: the videos that still need the fact, read from the Job's copy of
+// the catalog with the gap query the reporter counts the gap with. The gap is
+// sorted by path, so the videos of one title folder sit at neighboring
+// indexes of the list (worklist.go).
 
 import (
 	"context"
@@ -13,17 +14,19 @@ import (
 	"time"
 )
 
-// One video of a gap. The size is the size the walk read, which is the size
-// the probe recorded wherever the length comes from a probe record, because
-// the walk takes no length from a record of another size. The worker compares
-// it with the file on the volume before it opens the file. Listed is the time
-// the gap counts from, so the worker can tell an attempt that the catalog had
-// not read when the gap was taken from one the gap already took into account.
+// One video of a gap, and the payload of its message on the bus. The size is
+// the size the walk read, which is the size the probe recorded wherever the
+// length comes from a probe record, because the walk takes no length from a
+// record of another size. The worker compares it with the file on the volume
+// before it opens the file. Listed is the time the gap counts from, so the
+// worker can tell an attempt that the catalog had not read when the gap was
+// taken from one the gap already took into account. The worker reads it from
+// its Job, so the message does not carry it.
 type workItem struct {
-	Path       string
-	Size       int64
-	DurationMs int64
-	Listed     time.Time
+	Path       string    `json:"path"`
+	Size       int64     `json:"size"`
+	DurationMs int64     `json:"durationMs"`
+	Listed     time.Time `json:"-"`
 }
 
 // The length of the video, which says how many thumbnails cover it.

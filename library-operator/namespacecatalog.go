@@ -42,8 +42,6 @@ type CatalogSpec struct {
 	Libraries CatalogLibraries `json:"libraries,omitzero"`
 	// The settings every screen pod in the namespace takes.
 	Screens CatalogScreens `json:"screens,omitzero"`
-	// Where the catalog agent of each worker Job's pod keeps its copy.
-	Workers CatalogWorkers `json:"workers,omitzero"`
 	// The Jellyfin server this namespace keeps progress with.
 	Jellyfin *CatalogJellyfin `json:"jellyfin,omitempty"`
 }
@@ -96,16 +94,6 @@ type CatalogLibraries struct {
 type CatalogScreens struct {
 	StorageClassName string          `json:"storageClassName,omitempty"`
 	ArtCache         CatalogArtCache `json:"artCache,omitzero"`
-}
-
-// Where the agent in each pod of a worker Job keeps its copy of the catalog.
-// An empty StorageClassName puts each copy in an emptyDir of the pod, and
-// not on the cluster's default class, because a worker copy is a cache that
-// rebuilds from its peers, and the default class of most clusters,
-// local-path, would tie every copy to one node. A class puts the copies on
-// one claim, <catalog>-workers (workerclaim.go).
-type CatalogWorkers struct {
-	StorageClassName string `json:"storageClassName,omitempty"`
 }
 
 // The volume a screen's browser keeps its scaled art on, which it

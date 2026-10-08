@@ -38,7 +38,7 @@ func testEnrichJob(library *Library, path string, providers ...*MetadataProvider
 	if path != "" {
 		plan.paths = []string{path}
 	}
-	return buildLibraryJob(library, set, nil, plan, testJobImages, testNow)
+	return buildLibraryJob(library, set, nil, plan, testJobImages, testJobBus, testNow)
 }
 
 // The names of the regular containers of a Job, in the pod's order.
@@ -91,7 +91,7 @@ func TestAGapJobRunsNoWalk(t *testing.T) {
 	library := studioMovies()
 	plan := libraryJob{mode: jobModeGaps, phases: servedPhases(library, providerSet{})[:1]}
 
-	job := buildLibraryJob(library, providerSet{}, nil, plan, testJobImages, testNow)
+	job := buildLibraryJob(library, providerSet{}, nil, plan, testJobImages, testJobBus, testNow)
 
 	if got := jobContainerNames(job); !slices.Equal(got, []string{factProbe, closeMode}) {
 		t.Errorf("containers = %v, want the probe and the close container", got)
@@ -337,7 +337,7 @@ func TestAWalkOfSeveralFoldersNamesNoneInTheOnePath(t *testing.T) {
 	library := studioMovies()
 	plan := libraryJob{mode: jobModeWalk, paths: []string{"/a", "/b"}}
 
-	job := buildLibraryJob(library, providerSet{}, nil, plan, testJobImages, testNow)
+	job := buildLibraryJob(library, providerSet{}, nil, plan, testJobImages, testJobBus, testNow)
 
 	if got := containerEnvironment(*jobContainer(job, scannerContainer))[scanPathVariable]; got != "" {
 		t.Errorf("scan reads %s = %q, want none", scanPathVariable, got)
@@ -354,7 +354,7 @@ func TestEveryPhaseNamesItsWorkerAndItsSyncTarget(t *testing.T) {
 	plan := libraryJob{mode: jobModeWalk, phases: servedPhases(library, providerSet{}),
 		sync: syncTarget{actor: sqliteAgentActor, version: 40}}
 
-	job := buildLibraryJob(library, providerSet{}, nil, plan, testJobImages, testNow)
+	job := buildLibraryJob(library, providerSet{}, nil, plan, testJobImages, testJobBus, testNow)
 
 	for _, container := range job.Spec.Template.Spec.Containers {
 		got := containerEnvironment(container)
@@ -482,7 +482,7 @@ func TestEveryPhaseCarriesTheLanguages(t *testing.T) {
 	set := providerSet{libraryKey(tmdb.Metadata.Namespace, tmdb.Metadata.Name): tmdb}
 	plan := libraryJob{mode: jobModeWalk, phases: servedPhases(library, set)}
 
-	job := buildLibraryJob(library, set, []string{"en-US", "ko"}, plan, testJobImages, testNow)
+	job := buildLibraryJob(library, set, []string{"en-US", "ko"}, plan, testJobImages, testJobBus, testNow)
 
 	for _, container := range phaseContainers(job) {
 		if got := containerEnvironment(container)[libraryLanguagesVariable]; got != "en-US,ko" {

@@ -166,15 +166,6 @@ spec:
                           type: string
                           default: 2Gi
                           description: "The size of each screen's art claim, in a binary unit such as 2Gi. The browser is told to keep 128 MiB under it. A size change applies to new screens, not existing ones, because a bound claim's spec is immutable. Delete an existing screen's claim, and the next pass creates it at the new size."
-                workers:
-                  type: object
-                  default: {}
-                  description: "Where each pod of a worker Job keeps its copy of the catalog. A worker Job runs a heavy fact such as trickplay or appearances, and each of its pods runs a catalog agent that reads the fact's gap from a copy of its own. Every copy rebuilds from its peers, so a change here moves no data: pods that start after the change use the new place, and a running pod finishes where it started."
-                  properties:
-                    storageClassName:
-                      type: string
-                      minLength: 1
-                      description: "The StorageClass of the one claim every worker copy in the namespace is on, named after the Catalog with the suffix -workers, at storage.size. Each pod mounts its own directory of the claim, named for the Library, the fact, and the pod's index. A per-node class is the one that fits: a pod that runs again on a node where its index ran before finds its copy there and syncs only what changed, and each copy takes room on that node. On any other class the claim is ReadWriteOnce, so the worker pods run where the volume is. Omitted, each pod keeps its copy in an emptyDir, which syncs in full when the pod starts and is deleted when the pod ends, and the operator deletes the -workers claim. The cluster's default class does not apply here."
                 jellyfin:
                   type: object
                   required: [url, secretRef]

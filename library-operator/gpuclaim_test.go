@@ -44,7 +44,7 @@ func TestEachWorkerClaimsFromTheTemplateItsBlockNames(t *testing.T) {
 			library.Spec.Trickplay = LibraryTrickplay{Enabled: true, GPUResourceClaimTemplate: test.template}
 			library.Spec.Appearances = LibraryAppearances{Enabled: true, GPUResourceClaimTemplate: test.template}
 
-			pod := buildFactWorkerJob(library, testNamespaceCatalog(), test.worker, jobImages{}, "", enrichedRun(),
+			pod := buildFactWorkerJob(library, test.worker, jobImages{}, testJobBus, "", enrichedRun(), 3,
 				testNow).Spec.Template.Spec
 
 			var want []PodResourceClaim
@@ -86,15 +86,20 @@ func TestAWorkerWaitsForTheTemplateItNames(t *testing.T) {
 	}
 }
 
-// One worker step of a pass: read the templates, then start the workers.
+// One worker step of a pass, after movies-walk-1 published a list of three
+// videos for each heavy fact: read the templates, then start the workers.
 func runWorkers(t *testing.T, operator *operator, library *Library) {
 	t.Helper()
+	for _, worker := range factWorkers {
+		list := workList{namespace: library.Metadata.Namespace, library: library.Metadata.Name, fact: worker.fact,
+			run: "movies-walk-1"}
+		operator.workLists.fold(list, []byte("3"))
+	}
 	templates, err := operator.readGPUClaimTemplates(t.Context(), library)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := operator.runFactWorkers(t.Context(), library, testNamespaceCatalog(), listedReport(3), nil, templates,
-		testNow); err != nil {
+	if err := operator.runFactWorkers(t.Context(), library, listedReport(), nil, templates, testNow); err != nil {
 		t.Fatal(err)
 	}
 }

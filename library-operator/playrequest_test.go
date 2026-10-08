@@ -480,13 +480,15 @@ func operatorsBroker(t *testing.T, operator *operator) *fakeBroker {
 
 // Every subscription the operator remembers, which a fresh connection
 // re-sends in sorted order: the reports it folds, the requests it
-// serves, and the two marks the progress store publishes.
+// serves, the two marks the progress store publishes, and the count of
+// every work list.
 func TestTheOperatorSubscribesToEveryTopicItActsOn(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		operator, _ := playingHouse(t)
 		broker := operatorsBroker(t, operator)
 		want := []string{
 			catalogAvailabilityFilter(defaultTopicBase),
+			workCountFilter(defaultTopicBase),
 			libraryStatusFilter(defaultTopicBase),
 			personForgottenFilter(defaultTopicBase),
 			playRequestFilter(defaultTopicBase),

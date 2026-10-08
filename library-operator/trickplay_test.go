@@ -199,7 +199,7 @@ func TestTheTrickplayWorkerWritesSheetsBesideTheVideo(t *testing.T) {
 	root := t.TempDir()
 	item := seedTrickplayItem(t, root, 1050*time.Second)
 	standInFFmpeg(t, 2)
-	work, log := gapWorker(t, trickplayWorker, libraryKindMovies, root, []workItem{item})
+	work, log := listWorker(t, trickplayWorker, libraryKindMovies, root, []workItem{item}, 0)
 
 	if err := work.work(t.Context()); err != nil {
 		t.Fatal(err)

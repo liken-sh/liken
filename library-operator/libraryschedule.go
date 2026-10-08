@@ -87,8 +87,7 @@ func catalogJobsOf(jobs []Job, namespace, library string) []Job {
 // Whether any Job of this Library that holds its catalog claim is unfinished:
 // one the controller has marked neither Complete nor Failed. A Job between the
 // pods of its backoff counts. A heavy fact's worker does not count, because
-// its agent runs on a copy of its own, so a walk or a webhook's rescan never
-// waits for a decode.
+// it runs no agent, so a walk or a webhook's rescan never waits for a decode.
 func libraryJobUnfinished(jobs []Job, namespace, library string) bool {
 	return slices.ContainsFunc(catalogJobsOf(jobs, namespace, library), func(job Job) bool {
 		return !job.finished()
@@ -120,7 +119,7 @@ func (o *operator) runLibrary(ctx context.Context, library *Library, report *lib
 	if report != nil {
 		plan.sync = syncTargetFor(report.Runs)
 	}
-	job := buildLibraryJob(library, providers, o.languages, plan, o.jobImages(), now)
+	job := buildLibraryJob(library, providers, o.languages, plan, o.jobImages(), o.jobBus(), now)
 	_, err := o.createJob(ctx, job)
 	if err != nil && !errors.Is(err, apiclient.ErrConflict) {
 		return fmt.Errorf("creating the library job %s: %w", job.Metadata.Name, err)

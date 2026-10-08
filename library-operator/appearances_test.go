@@ -580,9 +580,9 @@ func TestAnAppearancesWorkerJob(t *testing.T) {
 			library := studioMovies()
 			library.Spec.Appearances = LibraryAppearances{Enabled: true, GPUResourceClaimTemplate: test.template}
 
-			pod := buildFactWorkerJob(library, testNamespaceCatalog(), appearancesWorker,
+			pod := buildFactWorkerJob(library, appearancesWorker,
 				jobImages{operator: testScannerImage, ffmpeg: testFFmpegImage, appearances: testAppearancesImage},
-				"", enrichedRun(), testNow).Spec.Template.Spec
+				testJobBus, "", enrichedRun(), 3, testNow).Spec.Template.Spec
 
 			container := pod.Containers[0]
 			if container.Name != factAppearances || container.Image != testAppearancesImage ||
@@ -593,9 +593,9 @@ func TestAnAppearancesWorkerJob(t *testing.T) {
 			if container.Resources.Limits["memory"] != "1536Mi" {
 				t.Errorf("memory limit = %q, want 1536Mi", container.Resources.Limits["memory"])
 			}
-			if len(pod.Volumes) != 3 || pod.Volumes[2].EmptyDir == nil ||
+			if len(pod.Volumes) != 2 || pod.Volumes[1].EmptyDir == nil ||
 				!slices.ContainsFunc(container.VolumeMounts, func(m VolumeMount) bool {
-					return m.Name == pod.Volumes[2].Name && m.MountPath == appearancesScratch
+					return m.Name == pod.Volumes[1].Name && m.MountPath == appearancesScratch
 				}) {
 				t.Errorf("volumes = %+v mounted at %+v, want the scratch emptyDir at %s",
 					pod.Volumes, container.VolumeMounts, appearancesScratch)
@@ -605,32 +605,5 @@ func TestAnAppearancesWorkerJob(t *testing.T) {
 				t.Errorf("claims = %+v, want the appearances template: %v", pod.ResourceClaims, test.template != "")
 			}
 		})
-	}
-}
-
-// A video is quick for the appearances worker where a detections record of
-// its size and of the current format is on the volume, because the worker
-// then runs only the match.
-func TestAVideoWithARecordOfItsSizeIsQuick(t *testing.T) {
-	root := t.TempDir()
-	video := filepath.Join(root, "Film", "Film.mkv")
-	writeFile(t, video, "film")
-	run := &factWorkerRun{root: root}
-	item := workItem{Path: "Film/Film.mkv", Size: 4}
-
-	if appearancesQuick(run, item) {
-		t.Error("a video with no record is quick")
-	}
-	writeFile(t, detectionsPath(video), detectionsLine(t, 5))
-	if appearancesQuick(run, item) {
-		t.Error("a video with a record of another size is quick")
-	}
-	writeFile(t, detectionsPath(video), earlierFormatDetectionsLine(t, 4))
-	if appearancesQuick(run, item) {
-		t.Error("a video with a record of an earlier format is quick")
-	}
-	writeFile(t, detectionsPath(video), detectionsLine(t, 4))
-	if !appearancesQuick(run, item) {
-		t.Error("a video with a record of its size is not quick")
 	}
 }

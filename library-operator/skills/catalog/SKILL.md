@@ -241,46 +241,6 @@ the `Player`. The next pass recreates them for the new node. This
 recovery does not delete claims on a per-node class, since those
 claims do not pin the pod to one node.
 
-## How a worker Job syncs
-
-A worker `Job` runs a heavy fact, such as `trickplay` or `appearances`,
-outside the `Library`'s own `Job`. Each of its pods runs a catalog
-agent as a native sidecar and carries the member label, so the agent
-joins the namespace's cluster like any other member. The worker
-waits until its copy holds the enrich run that the operator started
-it after, with the same wait and `SYNC_TIMEOUT` as a phase. It then
-reads its fact's gap from that copy on loopback. The worker writes no
-catalog row, so it makes no hand-off.
-
-`spec.workers.storageClassName` sets where each agent keeps its copy.
-The two choices trade the time a pod takes to sync against disk on
-the node:
-
-- **Unset**, the default. Each pod keeps its copy in an `emptyDir` on
-  the node's pod storage. The copy syncs in full when the pod starts
-  and is deleted when the pod ends. The cluster's default class does
-  not apply here, because on most clusters that is `local-path`, which
-  would tie each copy to one node. When the field is unset, the
-  operator deletes the `<catalog>-workers` claim if one stands.
-- **Set**. The operator creates one claim, `<catalog>-workers`, on
-  that class at `spec.storage.size`, owned by the `Catalog`. Each pod
-  mounts the directory `<library>-<fact>-<index>` of it, where the
-  index is the pod's completion index in its `Job`, and 0 in a `Job`
-  of one pod. On a per-node class, a pod that runs again on a node
-  where its index ran before finds its copy there and syncs only what
-  changed. Every such copy holds the whole catalog, so a node needs
-  room for one copy for each `Library`, fact, and index that ran on
-  it, beside the catalog and screen copies. On any other class the
-  claim is `ReadWriteOnce`, so the worker pods run on the node that
-  holds the volume.
-
-A change of the field moves no data, because every copy rebuilds from
-its peers. Pods that start after the change use the new place, and a
-running pod finishes where it started. The operator deletes a
-`<catalog>-workers` claim on a class the field no longer names. A pod
-that still mounts it keeps it until the pod ends, and the operator
-then creates the claim on the new class.
-
 ## Reading the catalog by hand
 
 The catalog pod's images have no shell. The agent's own binary answers

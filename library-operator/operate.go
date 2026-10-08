@@ -181,8 +181,11 @@ type operator struct {
 	// deleted, keyed the way the report desk keys a Library.
 	legacyRetired map[string]bool
 
-	// The library Job whose enrich run started each heavy fact's last
-	// worker, keyed by the Library and the fact (factworkerjob.go).
+	// The count of every work list the broker retains (worklistdesk.go).
+	workLists *workLists
+
+	// The library Job whose list each heavy fact's last worker took, keyed
+	// by the Library and the fact (factworkerjob.go).
 	workListsTaken map[string]string
 
 	// Which of the classes this pass has read are served by the per-node
@@ -245,6 +248,7 @@ func newOperator(client *apiclient.Client, stamped images,
 		paths:            newHeldPaths(wake),
 		plays:            newPlayRequests(wake),
 		marks:            newStoreMarks(wake),
+		workLists:        newWorkLists(wake),
 		published:        map[string]string{},
 		mediaTopicBase:   defaultMediaTopicBase,
 		wake:             wake,
@@ -274,6 +278,9 @@ func newOperator(client *apiclient.Client, stamped images,
 	// on the pass that reads these.
 	library.bus.Subscribe(playRecordedFilter(topicBase))
 	library.bus.Subscribe(personForgottenFilter(topicBase))
+	// The count of every work list, which says a library Job has published
+	// a heavy fact's gap for its worker.
+	library.bus.Subscribe(workCountFilter(topicBase))
 	return library
 }
 
@@ -454,6 +461,8 @@ func (o *operator) pass() {
 		}
 	}
 
+	o.sweepWorkLists(ctx, libraries.Items, jobs.Items)
+
 	// The screen pods come from the pass's one read of the pods it stands,
 	// so the pass deletes only a pod that stands.
 	screens := reads.screenPods()
@@ -528,6 +537,10 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 		if len(payload) != 0 {
 			o.reporters.mark(namespace, string(payload) == availabilityOnline)
 		}
+		return
+	}
+	if list, ok := parseWorkCountTopic(o.topicBase, topic); ok {
+		o.workLists.fold(list, payload)
 		return
 	}
 	namespace, name, kind, ok := parseLibraryTopic(o.topicBase, topic)

@@ -1,14 +1,12 @@
 package main
 
-// factworkerrun.go is the container of a worker Job. It waits until the
-// pod's own copy of the catalog holds the enrich run the worker was started
-// after, reads the fact's gap from that copy, takes its share of the gap,
-// checks each video against the volume once more, does the fact's work on
-// it, and asks the operator to rescan the title's folder, so the catalog
-// reads the new outputs and attempts within seconds and not at the next walk.
-// It writes no catalog row, only files on the volume, so it needs no
-// hand-off: the walk of each folder it rescans reads its work into the
-// catalog.
+// factworkerrun.go is the container of a worker Job's pod, which works one
+// video. It reads the index the Job controller gave the pod, reads the video
+// at that index of the list from the bus (worklist.go), checks the video
+// against the volume once more, does the fact's work on it, and asks the
+// operator to rescan the title's folder, so the catalog reads the new outputs
+// and attempts within seconds and not at the next walk. It writes no catalog
+// row, only files on the volume, so it needs no hand-off.
 
 import (
 	"bytes"
@@ -16,11 +14,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -30,13 +30,16 @@ import (
 const workerMode = "worker"
 
 // The environment of a worker container beside the Library's own: the one
-// fact it runs, the address of the Library's webhook on the operator, and
-// the time the enrich run it was started after finished, in RFC 3339, which
-// is the time its gap counts from.
+// fact it runs, the address of the Library's webhook on the operator, the
+// library Job whose list it works, and the time that Job's enrich run
+// finished, in RFC 3339, which is the time the gap counts from. The Job
+// controller sets the index in each pod of an Indexed Job.
 const (
-	libraryFactVariable    = "LIBRARY_FACT"
-	libraryWebhookVariable = "LIBRARY_WEBHOOK"
-	gapSinceVariable       = "LIBRARY_GAP_SINCE"
+	libraryFactVariable     = "LIBRARY_FACT"
+	libraryWebhookVariable  = "LIBRARY_WEBHOOK"
+	workListVariable        = "LIBRARY_WORK_LIST"
+	gapSinceVariable        = "LIBRARY_GAP_SINCE"
+	completionIndexVariable = "JOB_COMPLETION_INDEX"
 )
 
 // How long one rescan request may take. The operator answers at once and
@@ -44,11 +47,16 @@ const (
 // did not receive.
 const workerWebhookTimeout = 10 * time.Second
 
-// One worker container: the Library it works for, the volume it writes, and
-// where it sends a rescan.
+// How long the read of the pod's video from the bus may take. The read is a
+// connect, a subscribe, and one ping, so a broker that takes longer is one
+// the pod cannot reach, and the pod fails for the Job to retry.
+const workItemTimeout = time.Minute
+
+// One worker container: the Library it works for, the volume it writes, the
+// one video of the list it works, and where it sends a rescan.
 type factWorkerRun struct {
 	worker factWorker
-	// The Library's key, its namespace and its name, which selects its gap.
+	// The Library's key, its namespace and its name.
 	library string
 	kind    string
 	root    string
@@ -57,23 +65,19 @@ type factWorkerRun struct {
 	// The Library's webhook address, and empty where the operator named none.
 	webhook string
 	client  *http.Client
-	// The share of the gap this pod works, which is the whole gap in a Job
-	// of one pod.
-	share workerShare
-	// The pod's own copy of the catalog, the write it must hold before the
-	// worker reads the gap, and the bound on that wait.
-	catalog     *Catalog
-	sync        syncTarget
-	syncTimeout time.Duration
-	// The refresh time of the fact, and zero where the Library names none.
-	refresh time.Time
+	// The list this pod reads its video from, the pod's index in it, the
+	// base of the list's topics, and how the pod reaches the broker.
+	list  workList
+	index int
+	base  string
+	dial  func(context.Context) (net.Conn, error)
 	// The time the gap counts from: when the enrich run finished. An attempt
 	// at or after it may not be in the catalog yet.
 	since time.Time
 }
 
-// The role's whole program. A failure is a non-zero exit, so the Job fails and
-// the next library Job starts another worker.
+// The role's whole program. A failure is a non-zero exit, so the Job retries
+// the index, up to its backoff.
 func runWorker() {
 	stopped, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -92,123 +96,82 @@ func runWorker() {
 }
 
 // A worker learns everything from its environment, as every container of a
-// library Job does. A fact this image runs in no worker is a manifest to
-// repair, so the container fails before it reads the volume.
+// library Job does. A fact this image runs in no worker, and a pod with no
+// index or no list, are a manifest to repair, so the container fails before
+// it reads the volume.
 func newFactWorkerRun(log io.Writer) (*factWorkerRun, error) {
 	fact := os.Getenv(libraryFactVariable)
 	worker, held := factWorkerOf(fact)
 	if !held {
 		return nil, fmt.Errorf("%s names %q, which this image runs in no worker", libraryFactVariable, fact)
 	}
-	share, err := workerShareOf(os.Getenv(completionIndexVariable), os.Getenv(workerParallelismVariable))
-	if err != nil {
-		return nil, err
+	index, err := strconv.Atoi(os.Getenv(completionIndexVariable))
+	if err != nil || index < 0 {
+		return nil, fmt.Errorf("%s is %q, which is not the index of an Indexed Job's pod",
+			completionIndexVariable, os.Getenv(completionIndexVariable))
 	}
-	api := os.Getenv(catalogAPIVariable)
-	if api == "" {
-		api = defaultCatalogAPI
+	run := os.Getenv(workListVariable)
+	if run == "" {
+		return nil, fmt.Errorf("%s names no list", workListVariable)
 	}
+	namespace, name := os.Getenv(libraryNamespaceVariable), os.Getenv(libraryNameVariable)
+	bus := busEndpointOf(os.Getenv(busAddressVariable), os.Getenv(topicBaseVariable))
 	// A time this image cannot read is the zero time, so every attempt in
 	// the ledger counts as later than the gap, and the worker passes over
 	// each video the ledger has answered at all.
 	since, _ := time.Parse(time.RFC3339Nano, os.Getenv(gapSinceVariable))
 	return &factWorkerRun{
-		worker:      worker,
-		library:     libraryKey(os.Getenv(libraryNamespaceVariable), os.Getenv(libraryNameVariable)),
-		kind:        os.Getenv(libraryKindVariable),
-		root:        path.Join(libraryMountPath, os.Getenv(libraryRootVariable)),
-		writer:      newVolumeWriter(share.writerName(writerName(os.Getenv(jobNameVariable), fact))),
-		log:         log,
-		webhook:     os.Getenv(libraryWebhookVariable),
-		client:      &http.Client{Timeout: workerWebhookTimeout},
-		share:       share,
-		catalog:     NewCatalog(api, &http.Client{Timeout: catalogWriteTimeout}),
-		sync:        syncTargetOf(os.Getenv(syncActorVariable), os.Getenv(syncVersionVariable)),
-		refresh:     parseRefresh(os.Getenv(libraryRefreshVariable))[fact],
-		since:       since,
-		syncTimeout: syncTimeout(os.Getenv(syncTimeoutVariable)),
+		worker:  worker,
+		library: libraryKey(namespace, name),
+		kind:    os.Getenv(libraryKindVariable),
+		root:    path.Join(libraryMountPath, os.Getenv(libraryRootVariable)),
+		// The pods of one Job share the Job's name, so each adds its index,
+		// and no pod renames another's temporary in a folder they share.
+		writer:  newVolumeWriter(writerName(os.Getenv(jobNameVariable), fact) + "-" + strconv.Itoa(index)),
+		log:     log,
+		webhook: os.Getenv(libraryWebhookVariable),
+		client:  &http.Client{Timeout: workerWebhookTimeout},
+		list:    workList{namespace: namespace, library: name, fact: fact, run: run},
+		index:   index,
+		base:    bus.base,
+		dial:    bus.dial,
+		since:   since,
 	}, nil
 }
 
-// The pod's share of the gap, one video at a time, so one decode holds the
-// container's memory. The share keeps the gap's order by path, so the videos
-// of one title folder come together, and the rescan of a folder goes out once
-// its last video is done. One request per folder and not per video keeps a
-// series to one held path on the operator, which collapses more than
-// heldPathLimit paths into a full walk.
+// The pod's one video. A list the broker no longer holds, after a broker
+// restart or a clear, leaves the pod nothing to do, and the video stays in
+// the gap for the next list.
 func (w *factWorkerRun) work(ctx context.Context) error {
-	items, err := w.readGap(ctx)
+	item, found, err := w.readItem(ctx)
 	if err != nil {
 		return err
 	}
-	items = w.quickFirst(w.shareOf(items))
-	worked, passed := 0, 0
-	unreported := ""
-	for _, item := range items {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		folder := w.titleFolder(item.Path)
-		if unreported != "" && folder != unreported {
-			w.rescan(ctx, unreported)
-			unreported = ""
-		}
-		if reason := w.passOver(item); reason != "" {
-			w.logf("passed over %s, because %s", w.named(item.Path), reason)
-			passed++
-			continue
-		}
-		w.worker.work(ctx, w, item)
-		worked++
-		unreported = folder
+	if !found {
+		w.logf("the broker holds no video at index %d of the %s list from the job %s, so there is no work",
+			w.index, w.worker.fact, w.list.run)
+		return nil
 	}
-	if unreported != "" {
-		w.rescan(ctx, unreported)
+	item.Listed = w.since
+	if reason := w.passOver(item); reason != "" {
+		w.logf("passed over %s, because %s", w.named(item.Path), reason)
+		return nil
 	}
-	w.logf("worked on %d of the %s in its share, and passed over %d", worked, counted(len(items), "video"), passed)
+	w.worker.work(ctx, w, item)
+	w.rescan(ctx, w.titleFolder(item.Path))
 	return nil
 }
 
-// The fact's gap from the pod's own copy, after the copy holds the enrich run
-// the worker was started after, so every pod of the Job reads a copy that
-// holds at least the same writes. Each video carries the run's finish as the
-// time the gap counts from.
-func (w *factWorkerRun) readGap(ctx context.Context) ([]workItem, error) {
-	if err := awaitCatalogSync(ctx, w.catalog, w.sync, w.syncTimeout); err != nil {
-		return nil, err
-	}
-	items, err := w.catalog.workItems(ctx, w.worker.fact, w.library, time.Now().UTC(), w.refresh)
+// The video at the pod's index, read in a session of its own.
+func (w *factWorkerRun) readItem(ctx context.Context) (workItem, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, workItemTimeout)
+	defer cancel()
+	session, err := openBusSession(ctx, w.dial, w.writer.job)
 	if err != nil {
-		return nil, err
+		return workItem{}, false, err
 	}
-	for index := range items {
-		items[index].Listed = w.since
-	}
-	w.logf("read %s from the %s gap of this pod's copy of the catalog", counted(len(items), "video"),
-		w.worker.fact)
-	return items, nil
-}
-
-// The share with the videos the fact calls quick first. Each group keeps the
-// order of the gap, so the videos of one title folder stay together within
-// a group. A folder whose videos fall in both groups is rescanned once after
-// each group's run of it.
-func (w *factWorkerRun) quickFirst(items []workItem) []workItem {
-	if w.worker.quick == nil {
-		return items
-	}
-	quick, slow := []workItem{}, []workItem{}
-	for _, item := range items {
-		if w.worker.quick(w, item) {
-			quick = append(quick, item)
-		} else {
-			slow = append(slow, item)
-		}
-	}
-	if len(quick) > 0 {
-		w.logf("takes the %s that are quick to work first", counted(len(quick), "video"))
-	}
-	return append(quick, slow...)
+	defer session.close()
+	return readWorkItem(session, w.base, w.list, w.index)
 }
 
 // Why the worker leaves one video of the gap alone, or empty where it works

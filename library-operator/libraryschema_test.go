@@ -340,7 +340,7 @@ func fieldsTheSchemaDrops(schema map[string]any, written any, path string) []str
 // of an Indexed Job takes the hostname <job>-<index>, which must fit a
 // 63-character DNS label. The CRD caps the name, so the longest name it
 // admits still gives every Job a valid name and every worker pod a valid
-// hostname, at the highest index the parallelism cap allows and a
+// hostname, at the highest index the longest work list gives and a
 // creation time far in the future.
 func TestTheLongestLibraryNameLeavesEveryJobNameValid(t *testing.T) {
 	schema := librarySchema(t)
@@ -355,9 +355,7 @@ func TestTheLongestLibraryNameLeavesEveryJobNameValid(t *testing.T) {
 	names := []string{cleanupJobName(name), libraryJobName(name, jobModeWalk, far),
 		libraryJobName(name, jobModeGaps, far)}
 	for _, worker := range factWorkers {
-		highest := schemaField(t, schema, "schema", "openAPIV3Schema", "properties", "spec",
-			"properties", worker.fact, "properties", "parallelism", "maximum").(int)
-		names = append(names, fmt.Sprintf("%s-%d", libraryJobName(name, worker.fact, far), highest-1))
+		names = append(names, fmt.Sprintf("%s-%d", libraryJobName(name, worker.fact, far), maxWorkListLength-1))
 	}
 	for _, one := range names {
 		if len(one) > 63 {

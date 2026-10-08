@@ -50,7 +50,6 @@ func TestTheLongestNamesLeaveEveryBuiltNameValid(t *testing.T) {
 		catalogStoreName(name), progressStoreName(name),
 		datasetsClaimName(name),
 		screenClaimName(name), screenArtClaimName(name),
-		workersClaimName(name),
 	}
 	for _, one := range built {
 		if len(one) > 63 {

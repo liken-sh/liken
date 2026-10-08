@@ -41,6 +41,8 @@ answer is meant to outlive the process that wrote it.
 | `libraries/{namespace}/{name}/status` | the catalog pod's reporter | the operator | yes | [the library report](#the-library-report) |
 | `catalogs/{namespace}/availability` | the catalog pod's reporter | the operator | yes | `online` or `offline` |
 | `libraries/{namespace}/{name}/refresh` | the operator | the catalog pod's reporter | yes | [the refresh times](#the-refresh-times) |
+| `libraries/{namespace}/{name}/missing/{fact}/{job}/{index}` | a library `Job`'s close container | one pod of the fact's worker `Job` | yes | [a work list](#a-work-list) |
+| `libraries/{namespace}/{name}/missing/{fact}/{job}/count` | a library `Job`'s close container | the operator | yes | [a work list](#a-work-list) |
 | `players/{namespace}/{player}/play` | the media browser, or any client | the operator | no | [the play request](#the-play-request) |
 | `players/{namespace}/{player}/audience` | the media browser | the media browser, and any client that wants to know who is in the room | yes | [who is watching](#who-is-watching) |
 | `plays/{namespace}/{play}/audience` | the operator | the progress role, the jellyfin role | yes | [the audience](#the-audience) |
@@ -65,7 +67,8 @@ Every retained topic is cleared with an empty payload when the object
 it names is gone, which is how MQTT drops a retained message, so a
 client that connects later reads nothing for a `Library`, a `Play`, or
 a `Person` that no longer exists. The operator clears the library,
-play, and people topics. The progress role clears its own `forgotten`
+play, and people topics, and each work list once its worker has
+finished. The progress role clears its own `forgotten`
 answer when it reads an empty `forget`. The media browser clears its
 own audience topic when the answer on it lapses. The progress role
 clears each mark once it has recorded it and the retention has run,
@@ -152,6 +155,38 @@ A report that the reporter built before the refresh times reached it
 counts with none. The operator reads `oldestAttempts` against
 `spec.refresh` as well, so a fact with a refresh that has work left starts
 its work from such a report too.
+
+## A work list
+
+`libraries/{namespace}/{name}/missing/{fact}/{job}/{index}` and
+`libraries/{namespace}/{name}/missing/{fact}/{job}/count`
+
+The videos a heavy fact still needs, for the fact's worker `Job`. The
+close container of the library `Job` named `{job}` reads the gap of
+each heavy fact the `Library` turns on, `trickplay` or `appearances`,
+from its copy of the catalog. It publishes each video as one retained
+message, numbered from 0 in the order of the video's path, and then the
+count, retained:
+
+    {"path": "Harbour Lights/Season 01/Harbour Lights - S01E02.mkv", "size": 1468006400, "durationMs": 2710000}
+
+The path is relative to the `Library`'s root. The size is the one the
+walk read, and the worker compares it with the file before it opens
+it. The length tells the trickplay worker how many thumbnails cover the
+video. The count is a decimal number, `3`. The broker reads one
+connection's messages in order, so a count on the broker proves that
+every video before it is there too. The close container reads its own
+count back before it writes its enrich run, and an empty gap publishes
+nothing. One list holds at most 10,000 videos.
+
+The operator subscribes to every count. When the `Job` named `{job}`
+has finished, it starts the fact's worker as an Indexed `Job` with one
+completion per video, and each pod reads the message at its own
+index. The operator clears every topic of a list when that worker has
+finished, when a newer list of the same fact replaces a list no
+worker took, and when the `Library` is gone. The broker keeps retained
+messages in memory, so a broker restart drops every list, and the
+next library `Job` lists the videos again.
 
 ## The reporter's availability
 

@@ -113,11 +113,6 @@ func (o *operator) reconcileCatalogs(ctx context.Context, byNamespace map[string
 				fmt.Fprintf(os.Stderr, "standing the progress endpoints in %s: %v\n", namespace, err)
 			}
 		}
-		// The workers claim follows spec.workers.storageClassName, and
-		// comes down when the field names no class.
-		if err := o.standWorkersClaim(ctx, catalog); err != nil {
-			fmt.Fprintf(os.Stderr, "standing the workers claim in %s: %v\n", namespace, err)
-		}
 		// The jellyfin pair stands beside the progress store while
 		// the Catalog names a Jellyfin server, and comes down when it
 		// names none.

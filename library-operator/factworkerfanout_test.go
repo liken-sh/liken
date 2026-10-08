@@ -5,14 +5,12 @@ import (
 	"io"
 	"strings"
 	"testing"
-	"time"
 )
 
-// The worker Job of a fact the Library spreads over several pods, and the Job
-// of a fact it leaves at one.
+// How many videos of a list a worker runs at once, and where its pods go.
 
-// A movies Library with appearances on, on a GPU template, in the pods given.
-// Zero leaves the field unset, as a Library from before the field has it.
+// A movies Library with appearances on, on a GPU template, at the parallelism
+// given.
 func spreadAppearances(parallelism int) *Library {
 	library := studioMovies()
 	library.Spec.Appearances.Enabled = true
@@ -21,68 +19,12 @@ func spreadAppearances(parallelism int) *Library {
 	return library
 }
 
-// The appearances worker of the Library, as JSON the API server reads.
-func appearancesJobJSON(t *testing.T, library *Library) string {
-	t.Helper()
-	job := buildFactWorkerJob(library, testNamespaceCatalog(), appearancesWorker,
-		jobImages{appearances: "appearances:test"}, "http://library-operator.liken-system.svc/webhook/house/movies", enrichedRun(), testNow)
-	body, err := json.Marshal(job)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(body)
-}
-
-// A Library that sets no parallelism and a Library that sets 1 get the one
-// Job the operator built before the field: one pod, the Job's own backoff,
-// no index, and no spread.
-func TestAWorkerOfOnePodIsTheJobOfBefore(t *testing.T) {
-	unset, one := appearancesJobJSON(t, spreadAppearances(0)), appearancesJobJSON(t, spreadAppearances(1))
-
-	if unset != one {
-		t.Errorf("a parallelism of 1 builds\n%s\nwant the Job with none\n%s", one, unset)
-	}
-	for _, field := range []string{"completionMode", "completions", "parallelism", "backoffLimitPerIndex",
-		"topologySpreadConstraints", workerParallelismVariable} {
-		if strings.Contains(unset, field) {
-			t.Errorf("the Job of one pod carries %s: %s", field, unset)
-		}
-	}
-	if !strings.Contains(unset, `"backoffLimit":2`) {
-		t.Errorf("the Job of one pod = %s, want the backoff limit of a worker", unset)
-	}
-}
-
-// A Library that spreads a worker over three pods gets an Indexed Job of
-// three completions, three at once, each index retried on its own.
-func TestASpreadWorkerIsAnIndexedJob(t *testing.T) {
-	job := buildFactWorkerJob(spreadAppearances(3), testNamespaceCatalog(), appearancesWorker, jobImages{}, "",
-		enrichedRun(), testNow)
-	spec := job.Spec
-
-	if spec.CompletionMode != indexedCompletion || *spec.Completions != 3 || *spec.Parallelism != 3 {
-		t.Errorf("job = %s with %d completions and %d at once, want Indexed, 3 and 3",
-			spec.CompletionMode, *spec.Completions, *spec.Parallelism)
-	}
-	if spec.BackoffLimit != nil || *spec.BackoffLimitPerIndex != scanBackoffLimit {
-		t.Errorf("backoff = %v, per index %d, want none for the Job and the worker's for each index",
-			spec.BackoffLimit, *spec.BackoffLimitPerIndex)
-	}
-	if *spec.ActiveDeadlineSeconds != int64(factWorkerDeadline/time.Second) {
-		t.Errorf("deadline = %d, want the worker's for the whole Job", *spec.ActiveDeadlineSeconds)
-	}
-	if env := envOf(spec.Template.Spec.Containers[0]); env[workerParallelismVariable] != "3" {
-		t.Errorf("env = %v, want the count of pods", env)
-	}
-}
-
-// The pods of a spread worker prefer different nodes, and still run where a
-// node already holds one, so a cluster with fewer GPUs than pods runs them
-// all on the GPUs it has.
-func TestTheSpreadPodsPreferDifferentNodes(t *testing.T) {
-	library := spreadAppearances(3)
-	pod := buildFactWorkerJob(library, testNamespaceCatalog(), appearancesWorker, jobImages{}, "", enrichedRun(),
-		testNow).Spec.Template
+// The pods of a worker prefer different nodes, and still run where a node
+// already holds one, so a cluster with fewer GPUs than running pods runs
+// them all on the GPUs it has.
+func TestTheWorkerPodsPreferDifferentNodes(t *testing.T) {
+	pod := buildFactWorkerJob(spreadAppearances(3), appearancesWorker, jobImages{}, testJobBus, "", enrichedRun(),
+		10, testNow).Spec.Template
 
 	spread := pod.Spec.TopologySpreadConstraints
 	if len(spread) != 1 {
@@ -99,6 +41,16 @@ func TestTheSpreadPodsPreferDifferentNodes(t *testing.T) {
 	}
 	if pod.Spec.ResourceClaims[0].ResourceClaimTemplateName != "appearances-gpu" {
 		t.Errorf("claims = %+v, want each pod's claim from the worker's template", pod.Spec.ResourceClaims)
+	}
+}
+
+// A Library that sets no parallelism runs one video at a time.
+func TestAnUnsetParallelismIsOneVideoAtATime(t *testing.T) {
+	job := buildFactWorkerJob(spreadAppearances(0), appearancesWorker, jobImages{}, testJobBus, "", enrichedRun(),
+		10, testNow)
+
+	if got := *job.Spec.Parallelism; got != 1 {
+		t.Errorf("parallelism = %d, want 1", got)
 	}
 }
 
@@ -119,7 +71,7 @@ func TestEachWorkerReadsItsOwnParallelism(t *testing.T) {
 // An Indexed Job takes its Complete or Failed condition only when every
 // index has ended, so the due rule that reads the conditions holds the next
 // worker back while any pod of the worker runs or waits out its backoff.
-func TestASpreadWorkerHoldsTheNextWorkerUntilEveryIndexEnds(t *testing.T) {
+func TestAWorkerHoldsTheNextWorkerUntilEveryIndexEnds(t *testing.T) {
 	cases := []struct {
 		name   string
 		status JobStatus
@@ -135,34 +87,13 @@ func TestASpreadWorkerHoldsTheNextWorkerUntilEveryIndexEnds(t *testing.T) {
 		t.Run(one.name, func(t *testing.T) {
 			worker := trickplayJob(one.status, "movies-walk-0")
 
-			_, due := factWorkerDue(trickplayMovies(), trickplayWorker, listedReport(3), []Job{worker}, "")
+			due := factWorkerDue(trickplayMovies(), trickplayWorker, enrichedRun(), 3, []Job{worker}, "")
 
 			if due != one.due {
 				t.Errorf("due = %v, want %v", due, one.due)
 			}
 		})
 	}
-}
-
-// The pass names the count of pods in its line when it spreads a worker.
-func TestThePassNamesThePodsOfASpreadWorker(t *testing.T) {
-	cluster := newFakeCluster()
-	library := boundHouse(cluster)
-	library.Spec.Trickplay.Enabled = true
-	library.Spec.Trickplay.Parallelism = 3
-	operator, logged := loggingOperator(t, cluster)
-
-	if err := operator.runFactWorkers(t.Context(), library, testNamespaceCatalog(), listedReport(3), nil, nil,
-		testNow); err != nil {
-		t.Fatal(err)
-	}
-
-	created := cluster.heldJobs()
-	if len(created) != 1 || *created[0].Spec.Parallelism != 3 {
-		t.Fatalf("jobs = %+v, want one trickplay worker of 3 pods", created)
-	}
-	wantOneLine(t, logged, "library house/movies: created the job "+created[0].Metadata.Name,
-		"to work the trickplay gap of 3 videos in 3 pods after the job movies-walk-1")
 }
 
 // The count the API server admits is the count the operator reads: an
@@ -183,40 +114,59 @@ func TestTheOperatorReadsAParallelismTheSchemaAdmits(t *testing.T) {
 				t.Fatal(err)
 			}
 			if got := worker.parallelism(library); got != 16 {
-				t.Errorf("the operator reads %d pods, want 16", got)
+				t.Errorf("the operator reads %d videos at once, want 16", got)
 			}
 		})
 	}
 }
 
-// A pod whose index the Job did not give it right is a Job to repair, so the
-// container fails before it reads the gap.
-func TestAWorkerWithABadIndexFails(t *testing.T) {
-	t.Setenv(libraryFactVariable, factAppearances)
-	t.Setenv(completionIndexVariable, "3")
-	t.Setenv(workerParallelismVariable, "3")
+// A pod with no index, or no list, is a Job to repair, so the container
+// fails before it reads the bus.
+func TestAWorkerWithNoIndexOrListFails(t *testing.T) {
+	cases := []struct {
+		name  string
+		index string
+		list  string
+		want  string
+	}{
+		{name: "no index", list: "movies-walk-1", want: completionIndexVariable},
+		{name: "an index that is not a number", index: "first", list: "movies-walk-1", want: completionIndexVariable},
+		{name: "no list", index: "0", want: workListVariable},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			t.Setenv(libraryFactVariable, factAppearances)
+			t.Setenv(completionIndexVariable, one.index)
+			t.Setenv(workListVariable, one.list)
 
-	_, err := newFactWorkerRun(io.Discard)
+			_, err := newFactWorkerRun(io.Discard)
 
-	if err == nil || !strings.Contains(err.Error(), "no index of 3 pods") {
-		t.Errorf("newFactWorkerRun = %v, want the index refused", err)
+			if err == nil || !strings.Contains(err.Error(), one.want) {
+				t.Errorf("newFactWorkerRun = %v, want %s refused", err, one.want)
+			}
+		})
 	}
 }
 
-// A pod of a Job of several reads its share and marks its temporaries with
-// its index.
-func TestAWorkerReadsItsShareOutOfTheEnvironment(t *testing.T) {
+// A pod reads its list and index, and marks its temporaries with its index.
+func TestAWorkerReadsItsIndexOutOfTheEnvironment(t *testing.T) {
 	t.Setenv(libraryFactVariable, factAppearances)
-	t.Setenv(jobNameVariable, "movies-appearances-1")
-	t.Setenv(completionIndexVariable, "1")
-	t.Setenv(workerParallelismVariable, "3")
+	t.Setenv(libraryNamespaceVariable, "house")
+	t.Setenv(libraryNameVariable, "series")
+	t.Setenv(jobNameVariable, "series-appearances-1")
+	t.Setenv(completionIndexVariable, "41")
+	t.Setenv(workListVariable, "series-walk-1")
 
 	work, err := newFactWorkerRun(io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if work.share != (workerShare{index: 1, count: 3}) || work.writer.job != "movies-appearances-1-appearances-1" {
-		t.Errorf("share = %+v with writer %q, want index 1 of 3 and its own writer", work.share, work.writer.job)
+	if work.list != testWorkList || work.index != 41 || work.base != defaultTopicBase {
+		t.Errorf("worker reads %+v at index %d under %q, want %+v at 41", work.list, work.index, work.base,
+			testWorkList)
+	}
+	if work.writer.job != "series-appearances-1-appearances-41" {
+		t.Errorf("writer = %q, want the Job's name, the fact, and the index", work.writer.job)
 	}
 }

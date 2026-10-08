@@ -22,13 +22,14 @@ import (
 // header's first byte. The low nibble carries per-type flags, which
 // matter here only for a PUBLISH, where bit 0 is the retain flag.
 const (
-	mqttConnect   = 0x10
-	mqttConnack   = 0x20
-	mqttPublish   = 0x30
-	mqttSubscribe = 0x80
-	mqttSuback    = 0x90
-	mqttPingreq   = 0xC0
-	mqttPingresp  = 0xD0
+	mqttConnect    = 0x10
+	mqttConnack    = 0x20
+	mqttPublish    = 0x30
+	mqttSubscribe  = 0x80
+	mqttSuback     = 0x90
+	mqttPingreq    = 0xC0
+	mqttPingresp   = 0xD0
+	mqttDisconnect = 0xE0
 )
 
 // The MQTT 3.1.1 protocol name and level. The name is the literal
@@ -173,6 +174,13 @@ func encodeSubscribe(packetID uint16, filter string) []byte {
 // is the two bytes 0xC0 0x00, and the broker answers with a PINGRESP.
 func encodePingreq() []byte {
 	return []byte{mqttPingreq, 0x00}
+}
+
+// encodeDisconnect builds the packet that ends a connection cleanly. It
+// carries no body, so it is the two bytes 0xE0 0x00, and the broker
+// publishes no will for a client that sends it.
+func encodeDisconnect() []byte {
+	return []byte{mqttDisconnect, 0x00}
 }
 
 // readPacket reads one whole control packet: the fixed-header first

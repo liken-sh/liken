@@ -38,9 +38,8 @@ const (
 // The emptyDir the worker keeps the GPU's compiled kernels in. OpenVINO
 // compiles the models' kernels for the GPU on its first start, which took
 // seconds in the experiments, and reads them from this cache on every start
-// after it. Each pod of a worker Job works its whole share, so one compile
-// serves every video of the share, and a cache that the pod takes with it
-// costs one compile per pod.
+// after it. Each pod works one video, so the cache serves the detect pass
+// and the match pass of that video, and each video pays one compile.
 const appearancesScratch = "/var/cache/appearances"
 
 // The appearances worker. It runs where the Library turns the fact on, on the
@@ -61,18 +60,6 @@ var appearancesWorker = factWorker{
 	parallelism:      func(library *Library) int { return podsOf(library.Spec.Appearances.Parallelism) },
 	scratch:          appearancesScratch,
 	work:             func(ctx context.Context, run *factWorkerRun, item workItem) { run.appearancesOne(ctx, item) },
-	quick:            appearancesQuick,
-}
-
-// Whether a video of the gap needs only the match: a detections record of
-// its size and of the current format is on the volume. A refresh reopens
-// videos the worker answered before, and each of those takes a second,
-// against minutes for a decode.
-// The order reads only the record's first line, and the work itself still
-// checks the models before it skips the decode.
-func appearancesQuick(run *factWorkerRun, item workItem) bool {
-	header, read := readDetectionsHeader(filepath.Join(run.root, item.Path))
-	return read && header.Size == item.Size
 }
 
 // The gap. A feature the probe gave a length to, whose title credits an actor

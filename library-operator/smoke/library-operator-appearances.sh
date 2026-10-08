@@ -10,12 +10,13 @@
 # The tool opens OpenVINO, its plugins, and the models when it runs,
 # not when it starts, so only a run of the passes proves them. The
 # image's own ffmpeg makes a short test video with no faces in a movie
-# folder, and the worker runs on it the way the worker Job runs: the
-# pod program reads its gap from the catalog, runs detect and match, and
-# writes the ledger. A worker pod reads the gap through its own catalog
-# agent, and this script stands in for the agent with a server that
-# answers every query with the one video, because the agent is proved by
-# its own image's smoke test, and the gap query by the Go tests. --device auto loads the GPU plugin and Intel's OpenCL runtime
+# folder, and the worker runs on it the way a pod of the worker Job runs:
+# the pod program reads its one video from the bus, runs detect and
+# match, and writes the ledger. A worker pod reads the retained message
+# at its index from the broker, and this script stands in for the broker
+# with a server that holds that one message, because the broker is
+# upstream's, and the session the pod speaks is proved by the Go tests
+# and on a test cluster. --device auto loads the GPU plugin and Intel's OpenCL runtime
 # to look for a GPU. The runner has none, so the models run on the CPU,
 # and the GPU's compiler is proved on hardware.
 set -euo pipefail
@@ -64,40 +65,81 @@ credits:
 EOF
 size=$(stat -c %s "$work/$video")
 
-# The stand-in catalog: one row of the gap, in the agent's stream of
-# events, for every query. The worker sends one query, the gap, because
-# it waits for no sync target.
+# The stand-in broker: it accepts the pod's connection, answers its
+# subscription with the one retained message of the list, and answers its
+# ping, which tells the pod that no more retained messages follow.
 port=18431
-python3 - "$port" "$video" "$size" <<'PY' &
-import http.server, json, sys
-port, path, size = int(sys.argv[1]), sys.argv[2], int(sys.argv[3])
-body = "\n".join(json.dumps(event) for event in [
-    {"columns": ["path", "size", "duration"]},
-    {"row": [1, [path, size, 4000]]},
-    {"eoq": {"time": 0}},
-]).encode() + b"\n"
-class Catalog(http.server.BaseHTTPRequestHandler):
-    def do_POST(self):
-        self.rfile.read(int(self.headers.get("Content-Length", 0)))
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(body)
-    def log_message(self, *args):
-        pass
-http.server.HTTPServer(("127.0.0.1", port), Catalog).serve_forever()
+list=smoke-walk-1
+topic="liken/library/libraries/smoke/movies/missing/appearances/$list/0"
+python3 - "$port" "$topic" "$video" "$size" <<'PY' &
+import json, socket, struct, sys
+port, topic, path, size = int(sys.argv[1]), sys.argv[2], sys.argv[3], int(sys.argv[4])
+payload = json.dumps({"path": path, "size": size, "durationMs": 4000}).encode()
+
+def length(n):
+    out = bytearray()
+    while True:
+        digit, n = n % 128, n // 128
+        out.append(digit | (0x80 if n else 0))
+        if not n:
+            return bytes(out)
+
+def packet(first, body):
+    return bytes([first]) + length(len(body)) + body
+
+def read(conn):
+    first = conn.recv(1)
+    if not first:
+        return None, None
+    n, shift = 0, 0
+    while True:
+        digit = conn.recv(1)[0]
+        n += (digit & 0x7F) << shift
+        shift += 7
+        if not digit & 0x80:
+            break
+    body = b""
+    while len(body) < n:
+        body += conn.recv(n - len(body))
+    return first[0], body
+
+server = socket.socket()
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(("127.0.0.1", port))
+server.listen()
+while True:
+    conn, _ = server.accept()
+    with conn:
+        while True:
+            first, body = read(conn)
+            if first is None:
+                break
+            kind = first & 0xF0
+            if kind == 0x10:
+                conn.sendall(packet(0x20, b"\x00\x00"))
+            elif kind == 0x80:
+                conn.sendall(packet(0x90, body[:2] + b"\x00"))
+                filter_length = struct.unpack(">H", body[2:4])[0]
+                if body[4:4 + filter_length].decode() == topic:
+                    name = topic.encode()
+                    conn.sendall(packet(0x31, struct.pack(">H", len(name)) + name + payload))
+            elif kind == 0xC0:
+                conn.sendall(packet(0xD0, b""))
+            elif kind == 0xE0:
+                break
 PY
-catalog=$!
-trap 'kill "$catalog" 2>/dev/null; rm -rf "$work"' EXIT
+broker=$!
+trap 'kill "$broker" 2>/dev/null; rm -rf "$work"' EXIT
 for _ in $(seq 50); do
-  curl -s -o /dev/null -X POST "http://127.0.0.1:$port/" && break
+  (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null && break
   sleep 0.1
 done
 
 run --network host --entrypoint /library-operator-pod \
   --env LIBRARY_FACT=appearances --env LIBRARY_KIND=movies --env LIBRARY_ROOT= \
-  --env LIBRARY_CATALOG_API="http://127.0.0.1:$port" \
-  --env JOB_NAME=smoke "$image" worker
+  --env LIBRARY_NAMESPACE=smoke --env LIBRARY_NAME=movies \
+  --env LIBRARY_BUS_ADDRESS="127.0.0.1:$port" --env LIBRARY_WORK_LIST="$list" \
+  --env JOB_COMPLETION_INDEX=0 --env JOB_NAME=smoke "$image" worker
 ledger="$work/$title/.liken/appearances.yaml"
 grep -q 'result: found' "$ledger"
 grep -q 'headshot: missing' "$ledger"
