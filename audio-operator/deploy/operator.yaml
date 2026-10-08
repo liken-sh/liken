@@ -148,7 +148,16 @@ spec:
         - name: pipewire
           image: ghcr.io/liken-sh/audio-operator:latest
           restartPolicy: Always
-          command: ["/usr/bin/pipewire"]
+          # The operator's binary runs PipeWire as its child, and
+          # restarts it in place when the operator writes a new channel
+          # layout into the drop-in directory: the drop-in is newer
+          # than PipeWire's socket. A restart that ended the container
+          # would wait in the kubelet's crash backoff, and every sink
+          # on the machine would stay silent for that wait. A PipeWire
+          # exit that the binary did not cause ends the container, so
+          # the restart count is the count of crashes. restarts.go
+          # holds the details.
+          command: ["/usr/local/bin/audio-operator", "pipewire"]
           env:
             # PipeWire looks for its runtime directory in
             # PIPEWIRE_RUNTIME_DIR first and XDG_RUNTIME_DIR second,
@@ -173,24 +182,6 @@ spec:
             periodSeconds: 2
             failureThreshold: 30
             timeoutSeconds: 10
-          # The restart that applies a new channel layout. The operator
-          # writes the new declaration into the drop-in directory when no
-          # stream plays, and this check fails while the drop-in is newer
-          # than PipeWire's socket, which PipeWire creates at its start.
-          # The kubelet then restarts this container alone, the pod and
-          # the operator stay, and WirePlumber restarts after it.
-          # declarationprobe.go states why every other state passes.
-          #
-          # One failure is enough, because the check fails only on the
-          # one fact the operator wrote to ask for the restart, and the
-          # period of 5 seconds keeps the time between the write and the
-          # restart short, so a stream that starts in it is rare.
-          livenessProbe:
-            exec:
-              command: ["/usr/local/bin/audio-operator", "declaration-loaded"]
-            periodSeconds: 5
-            failureThreshold: 1
-            timeoutSeconds: 5
           securityContext:
             # PipeWire and WirePlumber touch hardware only through the
             # device nodes their claim delivers: the card's control
@@ -227,7 +218,11 @@ spec:
         - name: wireplumber
           image: ghcr.io/liken-sh/audio-operator:latest
           restartPolicy: Always
-          command: ["/usr/bin/wireplumber", "--profile=main-embedded"]
+          # The operator's binary runs WirePlumber as its child, and
+          # starts it again when it exits because a new PipeWire
+          # replaced the one it served. Any other exit ends the
+          # container.
+          command: ["/usr/local/bin/audio-operator", "wireplumber", "--profile=main-embedded"]
           env:
             - name: PIPEWIRE_RUNTIME_DIR
               value: /var/run/audio.liken.sh

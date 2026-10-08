@@ -1,7 +1,6 @@
 package main
 
-// The liveness probe of the PipeWire container: whether PipeWire runs
-// the declaration that is on disk.
+// Whether PipeWire runs the declaration that is on disk.
 //
 // PipeWire reads the drop-in once, while it loads its configuration,
 // and creates its socket after that. A PipeWire that started after the
@@ -13,42 +12,22 @@ package main
 // started.
 //
 // The operator writes a new drop-in for a layout change
-// (layoutdrift.go), and this probe then fails, so the kubelet restarts
-// the PipeWire container alone. The probe holds no state: the file and
-// the socket are the whole record, so an operator that restarts in
-// the window between the write and the restart changes nothing.
+// (layoutdrift.go), and the PipeWire container's first process then
+// restarts PipeWire in place (restarts.go). The check holds no state:
+// the file and the socket are the whole record, so an operator that
+// restarts in the window between the write and the restart changes
+// nothing.
 //
 // The declare init container writes the drop-in before PipeWire
-// starts, so a pod that starts passes. Every state the probe cannot
-// read passes too, because a restart would not repair it and a probe
-// that fails restarts PipeWire forever.
+// starts, so a pod that starts reads as current. Every state the check
+// cannot read reads as current too, because a restart would not repair
+// it and a check that read it as stale would restart PipeWire forever.
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
 )
-
-// declarationMode is the argument that selects this check. The
-// liveness probe on the PipeWire container names it, and the operator
-// container reads the same fact with declarationNewer.
-const declarationMode = "declaration-loaded"
-
-// declarationProbe is the probe. It exits 1 when the drop-in is newer
-// than the running PipeWire, and 0 in every other state, with one line
-// that names the state.
-func declarationProbe() {
-	stale, err := declarationNewer(filepath.Join(pipewireConfigDir, dropInName), socketPath)
-	switch {
-	case err != nil:
-		fmt.Printf("%v; a restart would not change that\n", err)
-	case stale:
-		fatal("the drop-in %s is newer than the PipeWire that runs; "+
-			"only a restart of this container loads it", dropInName)
-	default:
-		fmt.Println("PipeWire runs the declaration on disk")
-	}
-}
 
 // declarationNewer reports whether the drop-in was written after the
 // socket was created.
@@ -64,9 +43,8 @@ func declarationNewer(dropIn, socket string) (bool, error) {
 	return declared.ModTime().After(created.ModTime()), nil
 }
 
-// runningStale is the operator container's form of the probe: true
-// while the drop-in is newer than the running PipeWire. A state it
-// cannot read is not stale, for the probe's reason.
+// runningStale is true while the drop-in is newer than the running
+// PipeWire. A state it cannot read is not stale.
 func runningStale() bool {
 	stale, err := declarationNewer(filepath.Join(pipewireConfigDir, dropInName), socketPath)
 	return err == nil && stale

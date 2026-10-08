@@ -66,7 +66,7 @@ func TestASpecLayoutRewritesTheDeclarationAndPostsLayoutChanged(t *testing.T) {
 		event := posted[0]
 		if event.Type != events.TypeNormal || event.Reason != reasonLayoutChanged || event.InvolvedObject.UID != "uid-1" ||
 			event.Message != "the channel layout changes from no positions to FL,FR,RL,RR from Spec; "+
-				"the kubelet restarts the PipeWire container to apply it" {
+				"PipeWire restarts in its container to apply it" {
 			t.Errorf("the event is %+v", event)
 		}
 	})

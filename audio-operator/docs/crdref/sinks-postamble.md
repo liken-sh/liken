@@ -170,8 +170,9 @@ turns off and on again changes nothing.
 
 PipeWire reads the layout once, when it starts. When a sink's layout
 changes, because `spec.layout` changed or a monitor with another
-layout answers, the operator writes the new declaration and the
-kubelet restarts the PipeWire container. The restart ends every
+layout answers, the operator writes the new declaration, and the
+PipeWire container's first process restarts PipeWire in place, so the
+restart never waits in the kubelet's crash backoff. The restart ends every
 stream on the machine, so the operator waits until no stream plays.
 `LayoutApplied` is `False` with the reason `AwaitingIdle` while it
 waits, and with the reason `Restarting` until the new PipeWire
@@ -219,7 +220,7 @@ change no condition:
 
 | Reason | Type | When |
 |---|---|---|
-| `LayoutChanged` | `Normal` | The operator wrote a new channel layout, and the kubelet restarts the PipeWire container to apply it. |
+| `LayoutChanged` | `Normal` | The operator wrote a new channel layout, and PipeWire restarts in its container to apply it. |
 | `LayoutWriteFailed` | `Warning` | The operator could not write the declaration that holds a new layout. The sink keeps its layout, and each pass tries the write again. |
 | `SpecRefused` | `Warning` | The `spec` states a value the endpoint does not take, such as a codec the speaker does not offer. The message names each refused value. |
 | `PipeWireLost` | `Warning` | A read of PipeWire's graph failed. After 3 failed reads in a row, the operator taints every output and restarts. |

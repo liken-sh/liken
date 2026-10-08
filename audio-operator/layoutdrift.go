@@ -6,11 +6,11 @@ package main
 // configuration, and WirePlumber reads a node's formats once, when it
 // configures the node. So a sink takes a new layout only from a new
 // PipeWire. The operator writes the new declaration over the old one,
-// and the PipeWire container's liveness probe fails while the drop-in
-// is newer than the socket PipeWire created at its start
-// (declarationprobe.go). The kubelet then restarts that one container.
-// WirePlumber exits when its PipeWire goes away, and the kubelet
-// restarts it too, so it configures every node again. The pod stays,
+// and the PipeWire container's first process restarts PipeWire in place
+// when the drop-in is newer than the socket PipeWire created at its
+// start (declarationloaded.go, restarts.go). WirePlumber exits when its
+// PipeWire goes away, and its container's first process starts it
+// again, so it configures every node again. The pod stays,
 // and so do the operator, its watches, and its claims.
 //
 // A layout difference is one of two things: a spec.layout that
@@ -33,11 +33,10 @@ import (
 
 // layoutRestartGrace is how long after writing a new declaration a
 // graph read that fails is the restart and not a PipeWire that stopped
-// answering. The probe runs every 5 seconds, the kubelet stops the
-// container and starts it again, and the startup probe passes within a
-// few seconds of the socket. A minute covers that with room, and a
-// PipeWire that is still silent after it counts toward maxSinkFailures
-// again.
+// answering. The PipeWire container's first process restarts PipeWire
+// within a second or two of the write. A minute covers that with room,
+// and a PipeWire that is still silent after it counts toward
+// maxSinkFailures again.
 const layoutRestartGrace = time.Minute
 
 // The reasons LayoutApplied takes.
@@ -142,7 +141,7 @@ func (r *reconciler) applyLayouts(nodes []declaredNode, declared map[nodeAddress
 	r.restartRequested = time.Now()
 	for _, change := range changes {
 		message := fmt.Sprintf("the channel layout changes from %s to %s; "+
-			"the kubelet restarts the PipeWire container to apply it", change.From, change.To)
+			"PipeWire restarts in its container to apply it", change.From, change.To)
 		fmt.Printf("%s: %s\n", change.Endpoint.Name(), message)
 		r.control.noteSinks([]string{change.Endpoint.Name()}, reasonLayoutChanged, message)
 	}

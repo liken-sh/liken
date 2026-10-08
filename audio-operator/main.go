@@ -123,8 +123,11 @@ func main() {
 		case graphMode:
 			graphProbe()
 			return
-		case declarationMode:
-			declarationProbe()
+		case pipewireMode:
+			runPipewire()
+			return
+		case wireplumberMode:
+			runWireplumber(os.Args[2:])
 			return
 		case captureMode:
 			capture()
@@ -268,7 +271,7 @@ func operate() {
 		speakers: speakers,
 		declared: declared,
 		// The operator reads the same fact as the PipeWire container's
-		// liveness probe, to report a layout that waits for the restart.
+		// first process, to report a layout that waits for the restart.
 		declarationStale: runningStale,
 		readings:         readings,
 		// The reconcile pass fills the inventory and the DRA plugin

@@ -127,7 +127,7 @@ What the hardware declares and what the operator last read. The operator owns ev
 | <span id="status--layoutsource"></span>`layoutSource` | string | no | Where the layout came from. Spec is spec.layout. ELD is the monitor's speaker allocation, capped by the largest LPCM channel count it accepts. ChannelMap is the channel map a USB device describes. None is no positions, and a multichannel stream then plays in stereo. An HDMI sink keeps a layout from the ELD while its monitor is off. Absent on a Bluetooth speaker. One of: `Spec`, `ELD`, `ChannelMap`, `None`. |
 | <span id="status--observed"></span>`observed` | [object](#statusobserved) | no | The last value the operator read for each setting. The operator reads the card's control device for every event it receives. It reads PipeWire's graph for every change PipeWire reports. A change from a physical knob or a client therefore appears here without polling. |
 | <span id="status--claim"></span>`claim` | [object](#statusclaim) | no | The claim that currently allocates the endpoint. This field is absent when no claim allocates it. It identifies the workload that has the speakers. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports whether the endpoint can play now. It is true for a monitor on an HDMI slot, a plug in an analog jack, a connected speaker, and every USB endpoint. Ready reports whether PipeWire has a node for the endpoint. These two conditions expose the same facts as the device's no-monitor and no-sink taints, in a form a person can read. LayoutApplied, on a sink of a sound card, reports whether PipeWire runs the sink with the layout the operator selected. It is False with the reason AwaitingIdle while a new layout waits for every stream on the machine to end, and with the reason Restarting while the kubelet restarts the PipeWire container to load it. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports whether the endpoint can play now. It is true for a monitor on an HDMI slot, a plug in an analog jack, a connected speaker, and every USB endpoint. Ready reports whether PipeWire has a node for the endpoint. These two conditions expose the same facts as the device's no-monitor and no-sink taints, in a form a person can read. LayoutApplied, on a sink of a sound card, reports whether PipeWire runs the sink with the layout the operator selected. It is False with the reason AwaitingIdle while a new layout waits for every stream on the machine to end, and with the reason Restarting while PipeWire restarts in its container to load it. |
 
 ### status.session
 
@@ -238,7 +238,7 @@ The claim that currently allocates the endpoint. This field is absent when no cl
 
 ### status.conditions[]
 
-Connected reports whether the endpoint can play now. It is true for a monitor on an HDMI slot, a plug in an analog jack, a connected speaker, and every USB endpoint. Ready reports whether PipeWire has a node for the endpoint. These two conditions expose the same facts as the device's no-monitor and no-sink taints, in a form a person can read. LayoutApplied, on a sink of a sound card, reports whether PipeWire runs the sink with the layout the operator selected. It is False with the reason AwaitingIdle while a new layout waits for every stream on the machine to end, and with the reason Restarting while the kubelet restarts the PipeWire container to load it.
+Connected reports whether the endpoint can play now. It is true for a monitor on an HDMI slot, a plug in an analog jack, a connected speaker, and every USB endpoint. Ready reports whether PipeWire has a node for the endpoint. These two conditions expose the same facts as the device's no-monitor and no-sink taints, in a form a person can read. LayoutApplied, on a sink of a sound card, reports whether PipeWire runs the sink with the layout the operator selected. It is False with the reason AwaitingIdle while a new layout waits for every stream on the machine to end, and with the reason Restarting while PipeWire restarts in its container to load it.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -420,8 +420,9 @@ turns off and on again changes nothing.
 
 PipeWire reads the layout once, when it starts. When a sink's layout
 changes, because `spec.layout` changed or a monitor with another
-layout answers, the operator writes the new declaration and the
-kubelet restarts the PipeWire container. The restart ends every
+layout answers, the operator writes the new declaration, and the
+PipeWire container's first process restarts PipeWire in place, so the
+restart never waits in the kubelet's crash backoff. The restart ends every
 stream on the machine, so the operator waits until no stream plays.
 `LayoutApplied` is `False` with the reason `AwaitingIdle` while it
 waits, and with the reason `Restarting` until the new PipeWire
@@ -469,7 +470,7 @@ change no condition:
 
 | Reason | Type | When |
 |---|---|---|
-| `LayoutChanged` | `Normal` | The operator wrote a new channel layout, and the kubelet restarts the PipeWire container to apply it. |
+| `LayoutChanged` | `Normal` | The operator wrote a new channel layout, and PipeWire restarts in its container to apply it. |
 | `LayoutWriteFailed` | `Warning` | The operator could not write the declaration that holds a new layout. The sink keeps its layout, and each pass tries the write again. |
 | `SpecRefused` | `Warning` | The `spec` states a value the endpoint does not take, such as a codec the speaker does not offer. The message names each refused value. |
 | `PipeWireLost` | `Warning` | A read of PipeWire's graph failed. After 3 failed reads in a row, the operator taints every output and restarts. |

@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestTheProbeComparesTheDropInWithTheSocket(t *testing.T) {
+func TestTheCheckComparesTheDropInWithTheSocket(t *testing.T) {
 	start := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
 	cases := []struct {
 		name    string
@@ -42,7 +42,7 @@ func TestTheProbeComparesTheDropInWithTheSocket(t *testing.T) {
 
 // A file that is not there is an error, which the probe passes: a
 // restart repairs neither a missing drop-in nor a missing socket.
-func TestTheProbeCannotCompareWhatIsNotThere(t *testing.T) {
+func TestTheCheckCannotCompareWhatIsNotThere(t *testing.T) {
 	dir := t.TempDir()
 	present := filepath.Join(dir, "present")
 	if err := os.WriteFile(present, nil, 0o644); err != nil {

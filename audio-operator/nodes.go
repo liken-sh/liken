@@ -410,7 +410,7 @@ func writeDeclaration(document string) error {
 //
 // The declare init container writes this file before PipeWire starts,
 // and the operator container writes it again for a layout change just
-// before the kubelet restarts PipeWire, so the file is the record of
+// before PipeWire restarts in its container, so the file is the record of
 // what PipeWire builds its graph from. The reconcile pass compares the
 // card's current PCM devices and layouts against it (declared.go).
 func readNodeConfig() (string, error) {

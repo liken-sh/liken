@@ -20,8 +20,8 @@ const (
 	reasonCaptured = "Captured"
 
 	// reasonLayoutChanged is posted on a Sink when the operator writes
-	// a new channel layout and the kubelet restarts the PipeWire
-	// container to apply it.
+	// a new channel layout and PipeWire restarts in its container to
+	// apply it.
 	reasonLayoutChanged = "LayoutChanged"
 
 	// reasonLayoutWriteFailed is posted on a Sink when the operator

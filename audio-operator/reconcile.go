@@ -104,7 +104,7 @@ type reconciler struct {
 
 	// declarationStale reports whether the drop-in is newer than the
 	// PipeWire that runs, which is the window between a layout write
-	// and the restart that applies it (declarationprobe.go). It is nil
+	// and the restart that applies it (declarationloaded.go). It is nil
 	// in a test, which runs no PipeWire.
 	declarationStale func() bool
 

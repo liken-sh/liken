@@ -23,8 +23,11 @@ func containerIn(t *testing.T, daemonSet *appsv1.DaemonSet, name string) corev1.
 
 // A layout change reaches PipeWire through three parts of the pod: the
 // declare container names the Sinks with the machine's name, the
-// operator writes the drop-in, and the PipeWire container's liveness
-// probe asks the kubelet for the restart.
+// operator writes the drop-in, and the PipeWire container's first
+// process restarts PipeWire in place. No liveness probe restarts the
+// container for it, because that restart would wait in the kubelet's
+// crash backoff. WirePlumber's first process starts WirePlumber again
+// after the new PipeWire.
 func TestThePodCarriesALayoutChangeToPipeWire(t *testing.T) {
 	daemonSet := daemonSetIn(t, "deploy/operator.yaml")
 
@@ -46,8 +49,14 @@ func TestThePodCarriesALayoutChangeToPipeWire(t *testing.T) {
 		}
 	}
 
-	probe := containerIn(t, daemonSet, "pipewire").LivenessProbe
-	if probe == nil || probe.Exec == nil || len(probe.Exec.Command) != 2 || probe.Exec.Command[1] != declarationMode {
-		t.Errorf("the PipeWire container's liveness probe is %+v, want the %s check", probe, declarationMode)
+	pipewire := containerIn(t, daemonSet, "pipewire")
+	if pipewire.LivenessProbe != nil {
+		t.Errorf("the PipeWire container has a liveness probe: %+v", pipewire.LivenessProbe)
+	}
+	for name, mode := range map[string]string{"pipewire": pipewireMode, "wireplumber": wireplumberMode} {
+		command := containerIn(t, daemonSet, name).Command
+		if len(command) < 2 || command[0] != "/usr/local/bin/audio-operator" || command[1] != mode {
+			t.Errorf("the %s container runs %q, want the operator's %s mode", name, command, mode)
+		}
 	}
 }
