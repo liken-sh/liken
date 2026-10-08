@@ -29,6 +29,7 @@ package releases
 // that names it.
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -134,14 +135,11 @@ func resolveLatest(source string) (string, error) {
 // final-looking name never points at unverified bytes, which is what
 // lets reruns trust whatever they find already in place.
 func fetchArtifact(base string, artifact machine.ReleaseArtifact, dest string) error {
-	resp, err := http.Get(base + "/" + artifact.Name)
+	resp, err := Get(context.Background(), http.DefaultClient, base+"/"+artifact.Name)
 	if err != nil {
 		return fmt.Errorf("fetching %s: %w", artifact.Name, err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("fetching %s: the server answered %s", artifact.Name, resp.Status)
-	}
 
 	tmp := dest + ".partial"
 	f, err := os.Create(tmp)
@@ -183,13 +181,10 @@ func verifyFile(artifact machine.ReleaseArtifact, path string) error {
 // larger than any reasonable release or channel document, and small
 // enough to hold in memory without concern.
 func fetchDocument(url string) ([]byte, error) {
-	resp, err := http.Get(url)
+	resp, err := Get(context.Background(), http.DefaultClient, url)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("the server answered %s", resp.Status)
-	}
 	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 }

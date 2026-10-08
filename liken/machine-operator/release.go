@@ -155,7 +155,35 @@ func convergeSystemRelease(store machine.ManifestStore, liveCluster *cluster.Clu
 	if !ok {
 		return versionConvergence(cond, stagedHash, rejection)
 	}
+	stagedHash, err := withdrawOtherStage(store, ask, stagedHash)
+	if err != nil {
+		return convergence{condition: notConverged("VersionConverged", "StagingFailed",
+			fmt.Sprintf("release %s waits to download onto slot %s, because the staged record of another release could not be withdrawn: %v",
+				ask.version, ask.slot, err))}
+	}
 	return decideSystemStaging(ask, f.Ensure(ask), m, rejection, stagedHash, t)
+}
+
+// withdrawOtherStage withdraws a staged record that names another
+// release, another slot, or another digest than the ask, and answers
+// the staged hash that remains. It runs before the fetcher starts,
+// because the download writes the slot that the old record names.
+// While the record stands, any reboot that init manages arms a trial
+// of that slot, and the slot would then hold files of two releases.
+// A withdrawal that fails stops the download, so the slot keeps the
+// release that the record names.
+func withdrawOtherStage(store machine.ManifestStore, ask fetchAsk, stagedHash string) (string, error) {
+	if stagedHash == "" {
+		return "", nil
+	}
+	if _, hash, err := machine.RenderSystemRelease(ask.version, ask.slot, ask.digest); err == nil && hash == stagedHash {
+		return stagedHash, nil
+	}
+	if err := store.WithdrawStaged(); err != nil {
+		return stagedHash, err
+	}
+	fmt.Printf("withdrew the staged system release %.12s; the cluster now asks for release %s\n", stagedHash, ask.version)
+	return "", nil
 }
 
 // decideSystemStaging finishes version convergence. A verified

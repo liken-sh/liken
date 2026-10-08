@@ -24,6 +24,11 @@ Status on 2026-10-04:
   (3c594a1c, be5dcace, d57451fa). The exception is the release
   fetchers: `machine-operator/fetch.go` and `releases/fetch.go` still
   call a bare `http.Get`. Part five covers them.
+* Built 2026-10-08: part five, in
+  [milestone 73](completed/73-a-staged-slot-stays-the-release-it-names.md).
+  Both release fetchers download through `releases.Get`, which stops a
+  request that receives no bytes for a minute, and a changed target
+  cancels the running download.
 * No longer applies: the pipefail item in part four. The release
   workflow it names was removed (7faa174e). The bucket listing moved
   into `releases/publish.sh` (ab96344a), which sets `pipefail`.
@@ -446,7 +451,7 @@ transfers. A user-configurable timeout or retry policy is a separate
 interface decision, and the fix for the unbounded wait needs none.
 
 The fix must agree with the open problem
-[staged-slot consistency](open-problems/retargeting-overwrites-staged-releases.md).
+[staged-slot consistency](completed/73-a-staged-slot-stays-the-release-it-names.md).
 A stopped writer can leave a partially updated slot. Stopping the
 writer does not by itself make that slot safe to boot.
 

@@ -110,8 +110,13 @@ column. For a machine that did not move, read its conditions:
   budget. The default budget is one machine at a time, and only one
   leader is down at a time whatever the budget says.
 * `Downloading`: the machine still fetches or verifies the release.
-  A slow link makes this step long. The machine retries a failed
-  download on its own.
+  A slow link makes this step long. A download that receives no bytes
+  for one minute stops, and the machine retries it on its own. The
+  condition's message gives the reason of the last failure.
+* `StagingFailed`: the machine could not write or withdraw a staged
+  record. The message gives the error. When the target changed while
+  another release was staged, the machine does not download the new
+  release until it withdraws the old record.
 * `AwaitingPodRefresh`: the machine runs the new release and waits
   for the pod steward to replace its operator pod from the new
   template. The steward does that after a leader boots the release.

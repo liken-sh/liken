@@ -26,9 +26,13 @@ func slotFirmware(t *testing.T, order ...uint16) string {
 	})
 }
 
+// stagedRelease stages a release record for a slot, and puts that
+// release on the slot, as the operator leaves them once a download
+// verifies.
 func stagedRelease(t *testing.T, root, version, slot string) ([]byte, string) {
 	t.Helper()
-	raw, hash, err := machine.RenderSystemRelease(version, slot, "sha256:abcd")
+	_, digest := slotHoldingRelease(t, slot, version)
+	raw, hash, err := machine.RenderSystemRelease(version, slot, digest)
 	if err != nil {
 		t.Fatal(err)
 	}

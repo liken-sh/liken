@@ -3,6 +3,14 @@ package main
 // The release fetcher runs one background download at a time and
 // never blocks the reconcile loop.
 //
+// One download at a time is a rule about the slot, not about the
+// network. The download writes the inactive slot, so a second writer
+// for another release would interleave its files with the first one's.
+// When the ask changes while a download runs, Ensure cancels that
+// download and starts the new one only after the old goroutine
+// returns. The cancelled download removes its partial file on the
+// way out, and the next run verifies whatever already landed.
+//
 // Reconcile passes never download anything themselves. They ask the
 // fetcher instead. Ensure records what the machine currently needs
 // (an ask: version, digest, source, and destination slot), starts
@@ -47,6 +55,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -58,7 +67,10 @@ import (
 	"strings"
 	"sync"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/liken-sh/liken/liken/machine"
+	"github.com/liken-sh/liken/liken/releases"
 )
 
 // A fetchAsk is one reconcile decision's request: fetch this
@@ -97,6 +109,14 @@ type fetcher struct {
 	mu   sync.Mutex
 	snap fetchSnapshot
 	busy bool
+
+	// cancel ends the running download. It is nil while no download
+	// runs.
+	cancel context.CancelCauseFunc
+
+	// client sends the downloads. A nil client is
+	// http.DefaultClient; a test gives one that reaches its server.
+	client *http.Client
 
 	// The fetcher's running totals, kept beside the snapshot because
 	// they outlive every ask. The snapshot describes one release; a
@@ -140,6 +160,10 @@ var errCorrupt = errors.New("the bytes do not match the release's digests")
 // was never the problem.
 var errLayer = errors.New("this machine's deployment layer is unusable")
 
+// errSuperseded is the cause of a download that Ensure cancelled
+// because the ask changed. It is not a failure of the download.
+var errSuperseded = errors.New("the machine no longer asks for this release")
+
 // Ensure records the ask, starts a download when one is needed and
 // none is running, and returns the current state. It never blocks:
 // the heaviest thing it does is start a goroutine.
@@ -154,6 +178,14 @@ func (f *fetcher) Ensure(ask fetchAsk) fetchSnapshot {
 		// that should clear the hold, so the state resets with the
 		// ask.
 		f.snap = fetchSnapshot{ask: ask, state: fetchIdle, detail: "waiting to start"}
+		if f.busy {
+			// The running download is for the old ask, and it
+			// writes the same slot this one will. It stops at
+			// once, and this ask waits until its goroutine
+			// returns, so that two writers never overlap.
+			f.cancel(errSuperseded)
+			f.snap.detail = "waiting for the previous download to stop"
+		}
 	}
 	if f.busy || f.snap.state == fetchVerified || f.snap.state == fetchRejected {
 		return f.snap
@@ -169,10 +201,11 @@ func (f *fetcher) Ensure(ask fetchAsk) fetchSnapshot {
 	if f.snap.state == fetchFailed {
 		detail = "retrying after: " + f.snap.detail
 	}
-	f.busy = true
+	ctx, cancel := context.WithCancelCause(context.Background())
+	f.busy, f.cancel = true, cancel
 	f.snap.state = fetchRunning
 	f.snap.detail = detail
-	go f.run(ask)
+	go f.run(ctx, ask)
 	return f.snap
 }
 
@@ -180,17 +213,23 @@ func (f *fetcher) Ensure(ask fetchAsk) fetchSnapshot {
 // verdict. If the ask changed while the fetch ran, the verdict
 // describes a release the machine no longer needs, so the function
 // discards it.
-func (f *fetcher) run(ask fetchAsk) {
-	fetched, downloaded, err := fetchRelease(ask)
+func (f *fetcher) run(ctx context.Context, ask fetchAsk) {
+	client := f.client
+	if client == nil {
+		client = http.DefaultClient
+	}
+	fetched, downloaded, err := fetchRelease(ctx, client, ask)
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.busy = false
+	f.cancel(nil)
+	f.busy, f.cancel = false, nil
 	// The totals count what this run did, even when the ask has
 	// moved on. The bytes reached the slot and the failure happened,
-	// whatever the machine wants now.
+	// whatever the machine wants now. A download that Ensure
+	// cancelled did not fail.
 	f.downloaded += downloaded
-	if err != nil {
+	if err != nil && !errors.Is(context.Cause(ctx), errSuperseded) {
 		f.failures++
 	}
 	if f.snap.ask != ask {
@@ -213,19 +252,20 @@ func (f *fetcher) run(ask fetchAsk) {
 }
 
 // fetchRelease runs one complete pass. It fetches and checks the
-// release document, verifies or fetches each artifact, and writes
-// the document itself to the slot last. This order means a slot
-// carrying release.yaml is a slot whose artifacts were complete
-// when the document was written. fetchRelease returns how many
+// release document, removes the slot's old document, verifies or
+// fetches each artifact, and writes the new document to the slot
+// last. This order means a slot carrying release.yaml is a slot whose
+// artifacts were complete when the document was written, and that no
+// writer has changed since. fetchRelease returns how many
 // artifacts it actually downloaded, and how many bytes those
 // artifacts hold. Zero is the idempotent case, where everything was
 // already verified in place. The byte total counts an artifact only
 // after the artifact lands and verifies, so a torn file adds nothing
 // until the run that completes it.
-func fetchRelease(ask fetchAsk) (int, int64, error) {
+func fetchRelease(ctx context.Context, client *http.Client, ask fetchAsk) (int, int64, error) {
 	base := strings.TrimSuffix(ask.source, "/") + "/" + ask.version
 
-	raw, err := fetchBytes(base + "/release.yaml")
+	raw, err := fetchBytes(ctx, client, base+"/release.yaml")
 	if err != nil {
 		return 0, 0, fmt.Errorf("fetching the release document: %w", err)
 	}
@@ -245,6 +285,10 @@ func fetchRelease(ask fetchAsk) (int, int64, error) {
 		return 0, 0, fmt.Errorf("the release document names version %s, not %s: %w", release.Metadata.Name, ask.version, errCorrupt)
 	}
 
+	if err := withdrawSlotDocument(ask.slotDir, raw); err != nil {
+		return 0, 0, fmt.Errorf("removing the slot's previous release document: %w", err)
+	}
+
 	fetched := 0
 	downloaded := int64(0)
 	for _, artifact := range release.Artifacts {
@@ -252,7 +296,7 @@ func fetchRelease(ask fetchAsk) (int, int64, error) {
 		if verifySlotFile(artifact, dest) == nil {
 			continue // already here from an earlier, interrupted run
 		}
-		if err := fetchArtifact(base, artifact, dest); err != nil {
+		if err := fetchArtifact(ctx, client, base, artifact, dest); err != nil {
 			return fetched, downloaded, err
 		}
 		fetched++
@@ -277,6 +321,40 @@ func fetchRelease(ask fetchAsk) (int, int64, error) {
 		return fetched, downloaded, fmt.Errorf("writing the release document to the slot: %w", err)
 	}
 	return fetched, downloaded, nil
+}
+
+// withdrawSlotDocument removes the slot's release document unless it
+// is already the document of this release. The slot then claims no
+// release while its files change, so init cannot arm a trial of a
+// slot that holds part of one release and part of another
+// (armProvingBoot in init/proving.go checks the document and every
+// artifact it names). The removal reaches the disk before the first
+// artifact is written, so a power cut in the middle of the download
+// leaves a slot with no document, not one with the old document.
+//
+// A slot is FAT, where a file's directory entry lives in buffers of
+// the block device, and an fsync of the directory does not write them
+// (flushSlot in init/slotloader.go). So syncfs writes the slot's
+// filesystem back, buffers included, and the fsync of the directory
+// then empties the drive's write cache.
+func withdrawSlotDocument(slotDir string, raw []byte) error {
+	path := filepath.Join(slotDir, "release.yaml")
+	existing, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) || bytes.Equal(existing, raw) {
+		return nil
+	}
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	dir, err := os.Open(slotDir)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	if err := unix.Syncfs(int(dir.Fd())); err != nil {
+		return err
+	}
+	return dir.Sync()
 }
 
 // carryLayer copies the running slot's deployment layer and
@@ -349,15 +427,12 @@ func carryLayer(ask fetchAsk) error {
 // fsync, verify the durable bytes by re-reading them, then rename
 // into place. Verifying before renaming means a final-looking file
 // name never points at unverified bytes.
-func fetchArtifact(base string, artifact machine.ReleaseArtifact, dest string) error {
-	resp, err := http.Get(base + "/" + artifact.Name)
+func fetchArtifact(ctx context.Context, client *http.Client, base string, artifact machine.ReleaseArtifact, dest string) error {
+	resp, err := releases.Get(ctx, client, base+"/"+artifact.Name)
 	if err != nil {
 		return fmt.Errorf("fetching %s: %w", artifact.Name, err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("fetching %s: the server answered %s", artifact.Name, resp.Status)
-	}
 
 	// The size cap protects the slot. An artifact that runs past its
 	// declared size is already wrong, and there is no reason to
@@ -391,15 +466,12 @@ func verifySlotFile(artifact machine.ReleaseArtifact, path string) error {
 // fetchBytes reads a small document whole with an HTTP GET. The
 // 1MiB limit is far larger than any reasonable release.yaml, and
 // small enough to read into memory without concern.
-func fetchBytes(url string) ([]byte, error) {
-	resp, err := http.Get(url)
+func fetchBytes(ctx context.Context, client *http.Client, url string) ([]byte, error) {
+	resp, err := releases.Get(ctx, client, url)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("the server answered %s", resp.Status)
-	}
 	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 }
 

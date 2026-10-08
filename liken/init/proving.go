@@ -43,8 +43,11 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/liken-sh/liken/liken/machine"
@@ -173,6 +176,12 @@ func armProvingBoot(act bootActuator, stateRoot, runningSlot string) {
 		return
 	}
 
+	if err := checkStagedSlot(slotMountPath(record.Slot), record); err != nil {
+		fmt.Fprintf(os.Stderr, "liken: system: slot %s does not hold release %s as staged: %v; rebooting without arming the trial\n",
+			record.Slot, record.Version, err)
+		return
+	}
+
 	if err := act.canArmTrial(record.Slot); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: system: %v; rebooting without arming the trial\n", err)
 		return
@@ -203,6 +212,32 @@ func armProvingBoot(act bootActuator, stateRoot, runningSlot string) {
 	}
 	fmt.Printf("liken: system: %s; the next boot tries release %s on slot %s, once\n",
 		armed, record.Version, record.Slot)
+}
+
+// checkStagedSlot reports whether a slot holds exactly the release
+// that a staged record names. The record is written once, when the
+// download verifies, and the slot can change after that: a new
+// target starts a download of another release onto the same slot,
+// and that download can stop halfway. A trial of such a slot boots
+// the files of two releases under the record of one. So the reboot
+// path reads the slot again before it arms: the document's bytes
+// must hash to the record's digest, and every artifact must match
+// the document. The check reads every artifact, a few hundred
+// megabytes, which costs seconds on the way down, once for each
+// trial.
+func checkStagedSlot(mount string, record *machine.SystemRelease) error {
+	if mount == "" {
+		return fmt.Errorf("the slot is not mounted")
+	}
+	raw, err := os.ReadFile(filepath.Join(mount, "release.yaml"))
+	if err != nil {
+		return fmt.Errorf("the slot carries no release document: %w", err)
+	}
+	sum := sha256.Sum256(raw)
+	if digest := "sha256:" + hex.EncodeToString(sum[:]); digest != record.ReleaseDigest {
+		return fmt.Errorf("the slot's release document has digest %s, and the record names %s", digest, record.ReleaseDigest)
+	}
+	return verifySlotContents(mount)
 }
 
 // fallbackInPlace asserts the standing preference at the proven

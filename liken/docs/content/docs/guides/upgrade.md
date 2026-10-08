@@ -94,6 +94,15 @@ an `Auto` machine: it drains first, and only one leader is ever down
 at a time. Set `rebootPolicy: Auto` on machines that must take their
 turn without an operator.
 
+You can change `spec.version` again before every machine reboots. A
+machine that staged the earlier target withdraws that release first,
+stops its download if one runs, and then downloads the new target
+into the same slot. A reboot in the meantime tries neither release:
+the earlier one is no longer staged, and the new one is staged only
+after its download verifies. Before each trial, the machine checks the slot's release document and every
+artifact against the staged release, and it reboots without the
+trial when they do not match.
+
 ## 4. Watch the rollout
 
     kubectl get machines

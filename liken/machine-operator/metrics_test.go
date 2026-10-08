@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/liken/liken/api"
@@ -237,15 +238,25 @@ func TestADeviceThatDisappearsReportsZero(t *testing.T) {
 	requireSeries(t, scrape(), `liken_devices{class="display"} 0`)
 }
 
+// downloaded is a fetcher that has run one download of the release,
+// from a channel that is up or down.
+func downloaded(t *testing.T, release *fakeRelease, up bool) *fetcher {
+	t.Helper()
+	var f *fetcher
+	synctest.Test(t, func(t *testing.T) {
+		server := serveRelease(t, new(atomic.Int64), release)
+		server.SetDown(!up)
+		f = fetcherFor(server)
+		f.Ensure(askFor(release, t.TempDir(), activeSlot(t)))
+		awaitSettled(f)
+	})
+	return f
+}
+
 func TestTheDownloadCountersReadTheFetchersTotals(t *testing.T) {
 	release := makeRelease("2026.09.10-001")
-	var hits atomic.Int64
-	server := serveRelease(t, release, &hits)
-
-	f := &fetcher{}
+	f := downloaded(t, release, true)
 	_, scrape := observer(t, f)
-	f.Ensure(askFor(release, server.URL, t.TempDir(), activeSlot(t)))
-	awaitSettled(t, f)
 
 	downloaded := 0
 	for _, contents := range release.artifacts {
@@ -257,15 +268,9 @@ func TestTheDownloadCountersReadTheFetchersTotals(t *testing.T) {
 }
 
 func TestADownloadThatFailsCounts(t *testing.T) {
-	release := makeRelease("2026.09.10-001")
-	var hits atomic.Int64
-	server := serveRelease(t, release, &hits)
-	server.Close() // the channel is unreachable, the transient case
-
-	f := &fetcher{}
+	// The channel is unreachable, the transient case.
+	f := downloaded(t, makeRelease("2026.09.10-001"), false)
 	_, scrape := observer(t, f)
-	f.Ensure(askFor(release, server.URL, t.TempDir(), activeSlot(t)))
-	awaitSettled(t, f)
 
 	body := scrape()
 	requireSeries(t, body, "liken_release_download_failures_total 1")
@@ -273,14 +278,8 @@ func TestADownloadThatFailsCounts(t *testing.T) {
 }
 
 func TestRepeatedScrapesLeaveTheCountersUnchanged(t *testing.T) {
-	release := makeRelease("2026.09.10-001")
-	var hits atomic.Int64
-	server := serveRelease(t, release, &hits)
-
-	f := &fetcher{}
+	f := downloaded(t, makeRelease("2026.09.10-001"), true)
 	layer, scrape := observer(t, f)
-	f.Ensure(askFor(release, server.URL, t.TempDir(), activeSlot(t)))
-	awaitSettled(t, f)
 	layer.observeDevices([]kubernetes.SliceDevice{sliceDevice("pci-0000-00-02-0", "display")})
 
 	first, second := scrape(), scrape()
