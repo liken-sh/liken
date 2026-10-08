@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -73,8 +74,9 @@ type fakeCompositor struct {
 	// Which compositor is answering. Every restart is a new one,
 	// and a readback takes no answer from the compositor it ended.
 	session uint64
-	// How long the kubelet holds the container in its crash backoff
-	// before the new compositor starts, and whether it never starts.
+	// How long the new compositor takes to start, as a compositor that
+	// crashed waits in the kubelet's crash backoff, and whether it never
+	// starts.
 	// A backoff runs on the clock, so a test that sets one runs in a
 	// synctest bubble.
 	backoff time.Duration
@@ -129,7 +131,16 @@ func (f *fakeCompositor) serving() servedOutputs {
 	return servedOutputs{session: f.session, modes: maps.Clone(f.current)}
 }
 
-// end is the SIGTERM and the kubelet's restart in one step.
+// pids is the compositor process that runs now. The fake runs one.
+func (f *fakeCompositor) pids() []int {
+	return []int{14}
+}
+
+// signal is the signal and the compositor role's restart in one step.
+func (f *fakeCompositor) signal(int, syscall.Signal) error {
+	return f.end()
+}
+
 func (f *fakeCompositor) end() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -233,7 +244,8 @@ func labPluginWithModule(t *testing.T, results []AllocatedDevice, config string)
 		// timeout reaches it at once.
 		currentModes:   compositor.modes,
 		connectorModes: compositor.connectors,
-		endCompositor:  compositor.end,
+		compositors:    compositor.pids,
+		signal:         compositor.signal,
 		served:         compositor.serving,
 		republish:      compositor.republish,
 		switchTimeout:  200 * time.Millisecond,

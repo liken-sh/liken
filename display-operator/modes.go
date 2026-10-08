@@ -35,6 +35,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/events"
@@ -65,12 +66,13 @@ const modeSwitchTimeout = 10 * time.Second
 const modeSwitchFallback = time.Second
 
 // CompositorReturnLimit bounds the wait for the new compositor to
-// answer at all. The kubelet reads each restart the operator orders as
-// a crash, so a second restart within ten minutes waits in the crash
-// backoff, which doubles up to five minutes. The limit is past that
-// cap, so a compositor in backoff is waited for and never read as a
-// decline. A compositor that does not answer by the limit fails the
-// switch without a decline.
+// answer at all. The compositor role starts weston again at once after
+// a restart the operator orders (restartorders.go). A weston that
+// crashes instead exits its container, and the kubelet holds the next
+// start in its crash backoff, which doubles up to five minutes. The
+// limit is past that cap, so a compositor in backoff is waited for and
+// never read as a decline. A compositor that does not answer by the
+// limit fails the switch without a decline.
 const compositorReturnLimit = 6 * time.Minute
 
 // errModeDeclined marks a switch whose restart ran and whose
@@ -434,11 +436,11 @@ func (p *draPlugin) applyMode(ctx context.Context, output Output, mode string) e
 	p.notices.post(output.Connector, events.TypeNormal, ModeChangedReason,
 		fmt.Sprintf("the mode of %s goes from %s to %s; the compositor restarts, and every screen on the card blanks",
 			output.Connector, reportedMode(current[output.Connector]), mode))
-	// The blast. The kubelet restarts the container, the new
+	// The blast. The compositor role starts weston again, the new
 	// compositor parses the rewritten config, and every client on every
 	// output of this card loses its connection. That is the accepted
 	// cost of a mode change, and the manual's claim guide states it.
-	if err := p.ending(p.endCompositor); err != nil {
+	if err := p.endCompositors(syscall.SIGTERM); err != nil {
 		return fmt.Errorf("ending the compositor: %w", err)
 	}
 	p.metrics.compositorRestarted("mode")
@@ -498,7 +500,8 @@ func (p *draPlugin) rewriteConfig(record map[string]string) error {
 // socket needs no separate check.
 //
 // The wait has two parts. The first waits for the new compositor to
-// answer, for as long as the kubelet's crash backoff can hold it. The
+// answer, for as long as the kubelet's crash backoff can hold a
+// compositor that crashed. The
 // second gives that compositor switchTimeout to serve the mode. Only
 // the second part can decline: a compositor that answers at another
 // mode is the decline, and a compositor that has not answered yet has
@@ -580,21 +583,21 @@ func (p *draPlugin) compositorOutputs() servedOutputs {
 // restart in the middle of a switch would end the compositor the
 // switch is waiting on and fail the prepare.
 func (p *draPlugin) restartCompositor() error {
-	return p.restart("heal", func() error { return p.ending(p.endCompositor) })
+	return p.restart("heal", func() error { return p.endCompositors(syscall.SIGTERM) })
 }
 
 // KillHungCompositor is the restart for a compositor that accepts on
 // its socket and answers nothing. The socket watch orders it after the
 // probe has read Hung for compositorHungLimit. The compositor exits on
-// SIGKILL, the probe reads Down until the kubelet starts the container
+// SIGKILL, the probe reads Down until the compositor role starts weston
 // again, and that Down is the path the taint and the clients already
 // take.
 func (p *draPlugin) killHungCompositor() error {
-	if err := p.restart("hung", func() error { return p.ending(p.killCompositor) }); err != nil {
+	if err := p.restart("hung", func() error { return p.endCompositors(syscall.SIGKILL) }); err != nil {
 		return err
 	}
 	p.notices.post("", events.TypeWarning, CompositorKilledReason,
-		fmt.Sprintf("the compositor answered nothing for %s; the operator ended it, and the kubelet starts it again", compositorHungLimit))
+		fmt.Sprintf("the compositor answered nothing for %s; the operator ended it, and it starts again", compositorHungLimit))
 	return nil
 }
 
@@ -612,27 +615,6 @@ func (p *draPlugin) restart(reason string, end func() error) error {
 		return err
 	}
 	p.metrics.compositorRestarted(reason)
-	return nil
-}
-
-// Ending runs one end of every compositor process and records the
-// processes that ran when it did, so the masterless restart never
-// ends one of them again. The caller holds modeSwitches, which also
-// guards the record. A nil compositors seam records nothing.
-func (p *draPlugin) ending(end func() error) error {
-	var pids []int
-	if p.compositors != nil {
-		pids = p.compositors()
-	}
-	if err := end(); err != nil {
-		return err
-	}
-	if p.ended == nil {
-		p.ended = map[int]bool{}
-	}
-	for _, pid := range pids {
-		p.ended[pid] = true
-	}
 	return nil
 }
 

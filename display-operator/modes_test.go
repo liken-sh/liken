@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -374,13 +376,15 @@ func TestReadModeRecordRefusesAFileItCannotParse(t *testing.T) {
 }
 
 func TestEndingAHungCompositorKillsItAndCountsItAsHung(t *testing.T) {
-	killed := 0
+	var killed []syscall.Signal
 	readings := newMetrics(componentName, "dev")
 	plugin := &draPlugin{
-		killCompositor: func() error {
-			killed++
+		compositors: func() []int { return []int{14} },
+		signal: func(_ int, signal syscall.Signal) error {
+			killed = append(killed, signal)
 			return nil
 		},
+		orders:  restartOrders(t.TempDir()),
 		metrics: readings,
 	}
 
@@ -388,8 +392,8 @@ func TestEndingAHungCompositorKillsItAndCountsItAsHung(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if killed != 1 {
-		t.Errorf("the repair killed the compositor %d times, want 1", killed)
+	if !slices.Equal(killed, []syscall.Signal{syscall.SIGKILL}) {
+		t.Errorf("the repair sent %v, want one SIGKILL", killed)
 	}
 	if got := testutil.ToFloat64(readings.compositorRestarts.WithLabelValues("hung")); got != 1 {
 		t.Errorf("display_compositor_restarts_total{reason=\"hung\"} = %v, want 1", got)
@@ -399,8 +403,8 @@ func TestEndingAHungCompositorKillsItAndCountsItAsHung(t *testing.T) {
 func TestAKillThatFoundNoCompositorCountsNothing(t *testing.T) {
 	readings := newMetrics(componentName, "dev")
 	plugin := &draPlugin{
-		killCompositor: func() error { return fmt.Errorf("no process under /proc runs %s", westonBinary) },
-		metrics:        readings,
+		compositors: func() []int { return nil },
+		metrics:     readings,
 	}
 
 	if err := plugin.killHungCompositor(); err == nil {

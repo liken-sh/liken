@@ -24,9 +24,8 @@ package main
 // app-id is a string the client sets.
 //
 // This file holds two of the pod's three roles: declare, which
-// writes the config, and the compositor role, which execs weston so
-// that weston replaces the process, weston's exit is the container's
-// exit, and the kubelet is the supervision.
+// writes the config, and the compositor role, which runs weston as its
+// child and starts it again after each restart the operator orders.
 //
 // The flags match what the lab machine runs today, weston 14.0.2 with
 // LIBSEAT_BACKEND=noop. That backend opens the device path with a
@@ -40,6 +39,8 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -60,7 +61,7 @@ import (
 const hotplugShim = "/usr/lib/liken/udev-kernel-group.so"
 
 // westonBinary is weston's own path in the image, in full because
-// exec resolves no PATH.
+// the compositor role starts it with no PATH lookup.
 const westonBinary = "/usr/bin/weston"
 
 // configWaitTimeout bounds the compositor role's wait for the
@@ -338,51 +339,12 @@ func compositorProcesses(procRoot string) []int {
 	return pids
 }
 
-// EndCompositor sends SIGTERM to the compositor and lets the
-// kubelet restart it.
-//
-// The signal is the whole mechanism. The compositor's container
-// holds one process, its exit is the container's exit, and the kubelet
-// restarts a container that exited. Nothing in this pod supervises
-// another process.
-//
-// A search that found nothing is a failure to report. A prepare
-// that waited for a mode change nothing started would hold the pod
-// until its timeout with no reason a person can read.
-func endCompositor(procRoot string) error {
-	return signalCompositor(procRoot, syscall.SIGTERM)
-}
-
-// KillCompositor sends SIGKILL to a compositor that accepts on its
-// socket and answers nothing, and lets the kubelet restart it.
-//
-// SIGTERM does not reach a frozen process. A stopped process runs no
-// signal handler until something continues it, so SIGTERM waits with
-// it. The kernel ends a process on SIGKILL whatever the process is
-// doing, so the compositor exits, the container exits with it, and
-// the kubelet starts the container again.
-func killCompositor(procRoot string) error {
-	return signalCompositor(procRoot, syscall.SIGKILL)
-}
-
-func signalCompositor(procRoot string, signal syscall.Signal) error {
-	pids := compositorProcesses(procRoot)
-	if len(pids) == 0 {
-		return fmt.Errorf("no process under %s runs %s", procRoot, westonBinary)
-	}
-	for _, pid := range pids {
-		if err := syscall.Kill(pid, signal); err != nil {
-			return fmt.Errorf("signaling %s at pid %d: %w", westonBinary, pid, err)
-		}
-	}
-	return nil
-}
-
-// compose runs the compositor in place of this process.
+// compose runs the compositor as this process's child.
 //
 // The binary finds the card the claim delivered, which no manifest
-// can name, then execs weston, so the container holds one process
-// and its exit is the exit the kubelet acts on.
+// can name, then runs weston and starts it again after each restart
+// the operator orders (restartorders.go). A weston exit that no order
+// names is this container's exit, and the kubelet acts on it.
 //
 // It starts the compositor whether or not a monitor is on the card.
 // The config's require-outputs=none is what allows that, and it is
@@ -405,19 +367,36 @@ func compose() {
 		fatal("making %s: %v", socketDir, err)
 	}
 
+	orders := restartOrders(restartOrdersPath)
+	if err := orders.clear(); err != nil {
+		fatal("clearing the restart orders in %s: %v", restartOrdersPath, err)
+	}
+
+	// The kubelet stops the container with SIGTERM, and weston takes
+	// the same signal, so it closes the card before the grace period
+	// ends.
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
+
 	// libwayland creates the socket with the process umask and never
 	// chmods it. A umask of 022 leaves the socket 0755, and connect()
 	// needs write permission, so a client running under another uid is
 	// refused.
 	//
-	// The umask survives the exec, and this process creates nothing
-	// else before it, so nothing needs to restore it.
+	// Each weston inherits the umask, and this process creates nothing
+	// after it but weston, so nothing needs to restore it.
 	unix.Umask(0)
 	fmt.Printf("%s: the compositor takes %s\n", DriverName, card)
 	argv := westonArgv(card, westonConfigPath, socketName, os.Getenv(westonLogScopesVariable))
-	if err := syscall.Exec(westonBinary, argv, westonEnvironment(os.Environ(), socketDir)); err != nil {
+	environment := westonEnvironment(os.Environ(), socketDir)
+	status, err := supervise(func() (*exec.Cmd, error) {
+		compositor := &exec.Cmd{Path: westonBinary, Args: argv, Env: environment, Stdout: os.Stdout, Stderr: os.Stderr}
+		return compositor, compositor.Start()
+	}, orders, stop)
+	if err != nil {
 		fatal("running %s: %v", westonBinary, err)
 	}
+	os.Exit(status)
 }
 
 // westonArgv builds the compositor's command line.
@@ -592,7 +571,7 @@ func compositorServing(socketPath string) bool {
 //
 // Two failures need two repairs, so the probe reports two reasons.
 // Down is a socket that refuses the connect or ends it under the probe,
-// and the kubelet starts that container again. Hung is a socket that
+// and a new compositor starts in its place. Hung is a socket that
 // accepts and answers nothing, and that process is still running.
 func probeCompositor(socketPath string) compositorLiveness {
 	socket, err := net.DialTimeout("unix", socketPath, socketDialTimeout)
@@ -669,17 +648,16 @@ func (h *hungCompositor) due(live compositorLiveness, now time.Time) bool {
 }
 
 // Done records that the kill for this outage ran. A second kill in
-// the same outage would end the compositor the kubelet is starting in
-// its place.
+// the same outage would end the compositor that starts in its place.
 func (h *hungCompositor) done() {
 	h.killed = true
 }
 
 // westonRestarts reads how often the kubelet has started the
-// compositor's container again. The count is on this pod's own status,
-// because the compositor is a native sidecar of the pod the operator
-// runs in, and the kubelet is the only party that counts a restart
-// nobody ordered.
+// compositor's container again. The container exits only when weston
+// exits with no restart order, so the count is the count of crashes.
+// It is on this pod's own status, because the compositor is a native
+// sidecar of the pod the operator runs in.
 //
 // A reader with no pod to name is an operator a person runs by hand,
 // and it counts nothing.

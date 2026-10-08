@@ -420,8 +420,10 @@ right now. It appears in two cases:
   the claim on it asked for the monitor that left,
 * nothing answers on the compositor's socket, which covers the
   moment before the compositor's container is up and every restart
-  of that container. The kubelet restarts a dead compositor alone,
-  and the taint lifts on the pass that finds the socket answering.
+  of the compositor. The compositor's container starts weston again
+  after a restart the operator orders, the kubelet restarts the
+  container after a crash, and the taint lifts on the pass that finds
+  the socket answering.
   This case taints the output and draw devices only. A control
   device delivers an i2c node, which needs no compositor. An output
   whose claim is still preparing is not tainted either: a claim that

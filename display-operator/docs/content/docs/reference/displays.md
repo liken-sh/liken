@@ -301,9 +301,10 @@ mode, so the screen takes one modeset, not a modeset to the
 preferred mode and a second one to `spec.mode`. When the compositor
 serves another mode after its restart, the operator records the
 mode in `status.unconfirmed` and does not restart the compositor for
-it again until `spec` changes. A compositor that the kubelet holds in
-its crash backoff has served no mode yet, so the operator waits for
-it to start, up to six minutes, and gives it 10 seconds from then.
+it again until `spec` changes. A compositor that crashed waits in
+the kubelet's crash backoff and has served no mode yet, so the
+operator waits for it to start, up to six minutes, and gives it 10
+seconds from then.
 
 ## The two values of the mode
 
@@ -445,6 +446,6 @@ and `kubectl describe` shows it once, with the count.
 | `LayoutNotFound` | Warning | `LayoutResolved` is `False`: no `Layout` has the name `spec.layout` states. |
 | `WriteUnconfirmed` | Warning | A write is new in `status.unconfirmed`. The message names the control, the value, and what the device read back. |
 | `ModeChanged` | Normal | A mode change restarts the compositor. The message names the mode before and after. Every screen on the card blanks. |
-| `CompositorKilled` | Warning | The compositor answered nothing for 10 seconds, and the operator ended it. The kubelet starts it again. The `Event` is on every `Display` of the node. |
+| `CompositorKilled` | Warning | The compositor answered nothing for 10 seconds, and the operator ended it. The compositor's container starts it again. The `Event` is on every `Display` of the node. |
 | `PanelStandbyFailed` | Warning | The panel did not take the standby after its last claim ended, and stays on. The operator does not try again. |
 | `Captured` | Normal | A capture through the API returned bytes. The message names the subject, the aspect, and the media type. |

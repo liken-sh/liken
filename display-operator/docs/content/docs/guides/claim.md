@@ -199,12 +199,13 @@ one connector restarts it and ends every Wayland client on every
 screen of that machine. The lab measured about 1.3 seconds of
 dark, plus whatever each client takes to come back.
 
-The kubelet counts each of those restarts as a crash of the
-compositor's container. A second restart within ten minutes waits
-in the kubelet's crash backoff, which starts at 10 seconds and
-doubles up to 5 minutes, and the screens stay dark for that wait.
-The operator waits for the compositor to start, and then gives it 10
-seconds to serve the mode. A compositor that serves another mode
+The compositor's container starts weston again at once after each
+restart the operator orders, so a second mode switch is as quick as
+the first. A weston that crashes instead ends its container, and the
+kubelet holds the next start in its crash backoff, which starts at
+10 seconds and doubles up to 5 minutes. The screens stay dark for
+that wait. The operator waits up to six minutes for the compositor
+to start, and then gives it 10 seconds to serve the mode. A compositor that serves another mode
 fails the prepare, and the kubelet's retries of that prepare fail
 without another restart.
 

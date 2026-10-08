@@ -183,13 +183,13 @@ var errNothingToRestart = errors.New("the reported compositor needs no restart")
 // live connection after the card has no master. A read in that time
 // reports the exiting compositor. The operator ended that compositor
 // itself, for a heal, a hung compositor, a mode, or an earlier
-// masterless report, so the record of ended pids skips it. Ending
-// only the reported pid, and never every compositor process, keeps a
-// report from reaching the compositor that starts next.
+// masterless report, so its restart order is still in place, and the
+// restart skips it. Ending only the reported pid, and never every
+// compositor process, keeps a report from reaching the compositor
+// that starts next.
 //
-// The check and the handle on the process both run under the lock,
-// so no other restart runs between them. The pids that no longer run
-// leave the record, so it stays small.
+// The check and the signal both run under the lock, so no other
+// restart runs between them.
 func (p *draPlugin) restartMasterless(ctx context.Context, masterless <-chan int) {
 	for {
 		select {
@@ -214,44 +214,12 @@ func (p *draPlugin) restartMasterless(ctx context.Context, masterless <-chan int
 // EndMasterless ends one reported compositor. The caller holds
 // modeSwitches.
 func (p *draPlugin) endMasterless(pid int) error {
-	running := p.compositors()
-	for old := range p.ended {
-		if !slices.Contains(running, old) {
-			delete(p.ended, old)
-		}
-	}
-	if p.ended[pid] || !slices.Contains(running, pid) {
+	if p.orders.placed(pid) || !slices.Contains(p.compositors(), pid) {
 		return errNothingToRestart
 	}
-	err := p.endProcess(pid)
+	err := p.endCompositor(pid, syscall.SIGTERM)
 	if errors.Is(err, os.ErrProcessDone) {
 		return errNothingToRestart
 	}
-	if err != nil {
-		return err
-	}
-	if p.ended == nil {
-		p.ended = map[int]bool{}
-	}
-	p.ended[pid] = true
-	return nil
-}
-
-// endCompositorProcess sends SIGTERM to one compositor process, and
-// the kubelet starts the container again.
-//
-// The handle from os.FindProcess holds a pidfd on Linux, and it opens
-// right after the running check, under the same lock. From then on
-// the handle refers to the process and not to its number: a process
-// that exits after the handle opens answers os.ErrProcessDone, and the
-// signal never reaches a new process that reuses the number. A number
-// reused between the check and the open is not covered, and that gap
-// is one read of /proc long.
-func endCompositorProcess(pid int) error {
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = process.Release() }()
-	return process.Signal(syscall.SIGTERM)
+	return err
 }

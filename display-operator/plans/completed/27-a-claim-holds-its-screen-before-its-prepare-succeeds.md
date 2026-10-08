@@ -151,7 +151,7 @@ one real decline can cost one more compositor restart after an
 operator restart.
 
 The crash backoff still darkens every screen on the card for its whole
-wait. [The operator's restarts wait in the kubelet's crash backoff](../open-problems/the-operators-restarts-wait-in-crash-backoff.md)
+wait. [Plan 29](29-the-compositor-restarts-inside-its-container.md)
 holds the options.
 
 The panel in the drill answered some DDC/CI reads with the reply to

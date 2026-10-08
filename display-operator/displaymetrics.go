@@ -50,7 +50,7 @@ func (m *metrics) newDisplayMetrics() {
 	})
 	m.compositorContainerRestarts = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "display_compositor_container_restarts_total",
-		Help: "Times the kubelet started the compositor's container again, from this pod's own status.",
+		Help: "Times the kubelet started the compositor's container again after a crash, from this pod's own status.",
 	})
 	m.surfaces = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "display_surfaces",
@@ -136,7 +136,7 @@ func (m *metrics) recordObservation(source string, ok bool, now time.Time) {
 // the socket watch orders after the probe has read Hung for
 // compositorHungLimit. masterless is the restart of a compositor that
 // holds no DRM master, which the card gate reports. A compositor that
-// exited on its own is none of them:
+// exited on its own is none of them: its container exits with it, and
 // display_compositor_container_restarts_total counts that one, from
 // the kubelet's own restart count.
 func (m *metrics) compositorRestarted(reason string) {

@@ -187,13 +187,14 @@ func TestACompositorWithNoMasterRestartsOnce(t *testing.T) {
 			plugin := &draPlugin{
 				card:        "card1",
 				compositors: func() []int { return c.running },
-				endProcess: func(pid int) error {
+				signal: func(pid int, _ syscall.Signal) error {
 					if c.gone {
 						return os.ErrProcessDone
 					}
 					ended = append(ended, pid)
 					return nil
 				},
+				orders:  restartOrders(t.TempDir()),
 				metrics: readings,
 			}
 
@@ -238,18 +239,18 @@ func TestACompositorTheOperatorEndedIsNotRestartedAgain(t *testing.T) {
 			var ended []int
 			readings := newMetrics(componentName, "dev")
 			plugin := &draPlugin{
-				card:           "card1",
-				compositors:    func() []int { return []int{14} },
-				endCompositor:  func() error { return nil },
-				killCompositor: func() error { return nil },
-				endProcess: func(pid int) error {
-					ended = append(ended, pid)
-					return nil
-				},
-				metrics: readings,
+				card:        "card1",
+				compositors: func() []int { return []int{14} },
+				signal:      func(int, syscall.Signal) error { return nil },
+				orders:      restartOrders(t.TempDir()),
+				metrics:     readings,
 			}
 			if err := c.end(plugin); err != nil {
 				t.Fatal(err)
+			}
+			plugin.signal = func(pid int, _ syscall.Signal) error {
+				ended = append(ended, pid)
+				return nil
 			}
 
 			plugin.restartMasterless(context.Background(), masterlessReports(14))
@@ -285,7 +286,7 @@ func startProcess(t *testing.T) *exec.Cmd {
 func TestEndingAMasterlessCompositorSendsItSIGTERM(t *testing.T) {
 	process := startProcess(t)
 
-	if err := endCompositorProcess(process.Process.Pid); err != nil {
+	if err := signalProcess(process.Process.Pid, syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}
 
@@ -307,7 +308,7 @@ func TestEndingACompositorThatHasExitedSignalsNothing(t *testing.T) {
 	_ = process.Process.Kill()
 	_ = process.Wait()
 
-	if err := endCompositorProcess(pid); !errors.Is(err, os.ErrProcessDone) {
+	if err := signalProcess(pid, syscall.SIGTERM); !errors.Is(err, os.ErrProcessDone) {
 		t.Errorf("error = %v, want %v", err, os.ErrProcessDone)
 	}
 }

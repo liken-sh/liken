@@ -114,11 +114,10 @@ spec:
       # container can find the compositor's process and signal it.
       # SIGTERM is how a mode a claim states takes effect: weston
       # parses weston.ini once at startup, so the operator rewrites
-      # the file and ends the compositor, and the kubelet starts it
-      # again on the new config. SIGKILL is how the operator ends a
-      # compositor that accepts on its socket and answers nothing: a
-      # stopped process takes no SIGTERM, and it never exits for the
-      # kubelet to restart.
+      # the file and ends the compositor, and the compositor's
+      # container starts it again on the new config. SIGKILL is how
+      # the operator ends a compositor that accepts on its socket and
+      # answers nothing: a stopped process takes no SIGTERM.
       shareProcessNamespace: true
       # Four containers, ordered by the kubelet: the declare container
       # writes weston.ini and exits, the weston container runs the
@@ -128,9 +127,10 @@ spec:
       # module's capture socket and encodes them on the card's render
       # node. It comes from its own image,
       # ghcr.io/liken-sh/display-capture, which carries ffmpeg. The
-      # kubelet restarts a dead compositor alone, the operator taints
-      # every output for as long as nothing answers on the socket, and
-      # no process in this pod supervises another.
+      # weston container starts weston again after each restart the
+      # operator orders, the kubelet restarts the container after a
+      # crash, and the operator taints every output for as long as
+      # nothing answers on the socket.
       initContainers:
         # The connector enumeration and the config write run as an
         # init step, because the compositor parses weston.ini once at
@@ -163,10 +163,15 @@ spec:
         # The compositor is a native sidecar: an init container whose
         # restartPolicy is Always. The kubelet starts it before the
         # operator container and stops it after, and the argument runs
-        # the image's binary in the mode that execs weston, so weston
-        # is this container's one process and its exit is what the
-        # kubelet acts on.
-        # Before the exec, the entrypoint waits only for the config
+        # the image's binary in the mode that runs weston as its
+        # child. Before the operator ends weston, it writes an order
+        # that names weston's pid in /etc/weston/restarts, and the
+        # binary starts weston again when that pid exits. A weston
+        # exit that no order names ends the container, so the kubelet
+        # restarts it through its crash backoff, and the container's
+        # restart count is the count of crashes. An ordered restart
+        # does not wait in that backoff.
+        # Before weston starts, the entrypoint waits only for the config
         # file that the declare container writes, and it fails when
         # the file does not arrive within 30 seconds. It does not wait
         # for a monitor. The config states require-outputs=none, so
@@ -306,7 +311,8 @@ spec:
             # this container writes when a claim states a mode: the
             # record of what each claim asked for, and the weston.ini
             # regenerated from it. The compositor reads the file at its
-            # next start, which the operator's SIGTERM brings on.
+            # next start, which the operator's SIGTERM brings on. The
+            # restart orders are in this directory too.
             #
             # The layout module's control socket is in this directory
             # too. Only the three containers of this pod mount the

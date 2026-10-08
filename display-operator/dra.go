@@ -31,6 +31,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"google.golang.org/grpc"
@@ -97,29 +98,20 @@ type draPlugin struct {
 	// compositor, and it
 	// reports a compositor with no DRM master.
 	gate *cardGate
-	// CurrentModes reads what each output runs, connectorModes
-	// reads what each connector offers, and endCompositor is the
-	// restart that makes a new mode take. All three are fields
-	// rather than calls to the functions themselves, so a test
-	// drives a prepare with no card node and no compositor behind it.
+	// CurrentModes reads what each output runs, and connectorModes
+	// reads what each connector offers. Both are fields rather than
+	// calls to the functions themselves, so a test drives a prepare
+	// with no card node behind it.
 	currentModes   func() (map[string]string, error)
 	connectorModes func() (map[string][]drmMode, error)
-	endCompositor  func() error
-	// EndProcess is the same restart for one compositor process, the
-	// one that the card gate reports with no DRM master.
-	endProcess func(pid int) error
-	// Compositors lists the compositor processes that run now.
+	// Compositors lists the compositor processes that run now, and
+	// signal sends one of them a signal. Every restart the operator
+	// orders goes through endCompositor (restartorders.go), which
+	// places the order in orders before the signal, so the compositor
+	// role starts weston again instead of exiting.
 	compositors func() []int
-	// Ended records every compositor process that ran when this
-	// operator ended the compositor, for any reason. A process on
-	// its way out can still be reported with no DRM master, and the
-	// masterless restart skips every pid in this record. ModeSwitches
-	// guards it.
-	ended map[int]bool
-	// KillCompositor is the same restart for a compositor that
-	// answers nothing. It sends SIGKILL, because a stopped process
-	// takes no SIGTERM.
-	killCompositor func() error
+	signal      func(pid int, signal syscall.Signal) error
+	orders      restartOrders
 	// What the compositor itself reports about the outputs it
 	// serves, which is what a mode switch reads back. It is nil until
 	// the operator wires the standing Wayland connection, and a nil
@@ -186,10 +178,9 @@ func newDRAPlugin(client *apiclient.Client, card, socketDir string, layout *layo
 		gate:           gate,
 		currentModes:   gate.currentModes,
 		connectorModes: gate.connectorModes,
-		endCompositor:  func() error { return endCompositor(procRoot) },
-		endProcess:     endCompositorProcess,
 		compositors:    func() []int { return compositorProcesses(procRoot) },
-		killCompositor: func() error { return killCompositor(procRoot) },
+		signal:         signalProcess,
+		orders:         restartOrders(restartOrdersPath),
 		switchTimeout:  modeSwitchTimeout,
 		switchFallback: modeSwitchFallback,
 		releaseGrace:   powerReleaseGrace,

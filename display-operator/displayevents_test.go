@@ -8,9 +8,9 @@ package main
 // the test reads the fake API server's Events.
 
 import (
-	"errors"
 	"fmt"
 	"slices"
+	"syscall"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -220,8 +220,12 @@ func TestNoticesWithNoStorePostNothing(t *testing.T) {
 func TestAHungCompositorThatWasEndedPostsOnEveryScreen(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture, notices := screensOfTwoNodes(t)
-		plugin := &draPlugin{killCompositor: func() error { return nil }, notices: notices}
-		missing := &draPlugin{killCompositor: func() error { return errors.New("no compositor runs") }, notices: notices}
+		plugin := &draPlugin{
+			compositors: func() []int { return []int{14} },
+			signal:      func(int, syscall.Signal) error { return nil },
+			notices:     notices,
+		}
+		missing := &draPlugin{compositors: func() []int { return nil }, notices: notices}
 
 		if err := plugin.killHungCompositor(); err != nil {
 			t.Fatal(err)
@@ -230,7 +234,7 @@ func TestAHungCompositorThatWasEndedPostsOnEveryScreen(t *testing.T) {
 		synctest.Wait()
 
 		want := []string{"Warning CompositorKilled the compositor answered nothing for " + compositorHungLimit.String() +
-			"; the operator ended it, and the kubelet starts it again"}
+			"; the operator ended it, and it starts again"}
 		for _, name := range []string{"living-room", "desk"} {
 			if got := eventLines(fixture.events.About("Display", name)); !slices.Equal(got, want) {
 				t.Errorf("%s has the Events %q, want %q", name, got, want)
@@ -306,7 +310,8 @@ func modeSwitchBench(t *testing.T) (*draPlugin, *fakeCompositor) {
 		recordPath:     compositor.record,
 		currentModes:   compositor.modes,
 		connectorModes: compositor.connectors,
-		endCompositor:  compositor.end,
+		compositors:    compositor.pids,
+		signal:         compositor.signal,
 		served:         compositor.serving,
 		republish:      compositor.republish,
 		switchTimeout:  time.Second,

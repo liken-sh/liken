@@ -1,6 +1,10 @@
-# The operator's restarts wait in the kubelet's crash backoff
+# The compositor restarts inside its container
 
-The operator restarts the compositor by ending its process, and the
+Plan 29. Built on 2026-10-08. The drill on stick-1 is recorded below.
+
+This plan began as the open problem "The operator's restarts wait in
+the kubelet's crash backoff". The sections up to "The options" are
+that problem as it was recorded. The operator restarts the compositor by ending its process, and the
 kubelet restarts every container that exits through its crash
 backoff. The first restart after a quiet period starts weston again at
 once. A second restart within about 10 minutes waits 10 seconds before
@@ -73,6 +77,23 @@ connected panel:
 The drill did not record how the 30 s divides into the backoff, the
 kubelet's sync, weston's startup, and the operator's readback.
 
+A drill on stick-1 on 2026-10-08, on release `2026.10.08-003`,
+switched `boe-1080-display`'s `spec.mode` four times, between
+`1280x720@60` and `1920x1080@60`, about 20 s apart, with no claim on
+the screen. The times come from the `weston` container's status:
+
+| Switch | Weston exits | Weston starts | Dark | Backoff |
+|---|---|---|---|---|
+| 1 | 20:44:23 | 20:44:24 | 1 s | none |
+| 2 | 20:44:47 | 20:45:00 | 13 s | 10 s |
+| 3 | 20:45:22 | 20:45:50 | 28 s | 20 s |
+| 4 | 20:46:14 | 20:47:06 | 52 s | 40 s |
+
+Weston exited with code 0 each time, and the kubelet counted each
+exit as a crash. Weston served the new mode within 1 to 3 s of its
+start, so the backoff and the kubelet's sync after it were almost
+all of the dark time.
+
 ## What it costs
 
 A restart that comes more than about 10 minutes after the last one
@@ -103,7 +124,7 @@ no longer the last bound on a mode switch.
 
 ## The options
 
-None is chosen.
+Option 1 is chosen, with the change that "What changed" describes.
 
 1. **Restart weston inside the container.** The container's first
    process stays up, runs weston as its child, and starts weston again
@@ -159,10 +180,52 @@ None is chosen.
    within about 10 minutes darkens every screen on the card for 10 s
    or more. This depends on nothing.
 
+## What changed
+
+The compositor role (`compose` in `weston.go`) no longer replaces
+itself with weston. It runs weston as its child, and it stays up
+(`supervise` in `restartorders.go`).
+
+Before the operator signals a weston process, for any of the four
+reasons, it writes an order: an empty file named by the process's pid
+in `/etc/weston/restarts`, in the volume that the two containers
+share. When weston exits, the compositor role looks for the order of
+its pid. An order means the operator ended weston, so the role
+removes the order and starts weston again at once. No order means
+weston crashed, so the role exits with weston's status, and the
+kubelet's backoff still bounds a crash loop. The role clears the
+directory when its container starts, because a pid from the container
+before can belong to a new process.
+
+Option 1 sent the operator's order to the compositor role as a
+signal. The order is a file instead, for two reasons:
+
+- The masterless restart of plan 24 ends one pid and never the
+  compositor that replaces it. A signal to the compositor role names
+  no pid, so the role could only end whichever weston ran when the
+  signal arrived.
+- The operator kept the pids it had ended in a map in its memory,
+  so a report about a compositor on its way out did not end it a
+  second time. The orders hold the same pids, and the compositor role
+  removes each one when its process exits, so the map is gone. The
+  record now outlives a restart of the operator's container.
+
+Every restart goes through one path, `endCompositor` in
+`restartorders.go`: write the order, then send the signal through a
+pidfd. A signal that finds the process gone takes the order back, so
+a process that exited on its own still reads as a crash.
+
+The kubelet's restart count of the `weston` container, and
+`display_compositor_container_restarts_total` with it, now count
+crashes alone. The readback keeps its two parts and
+`compositorReturnLimit`, because a compositor that crashes still waits
+in the backoff.
+
 ## What is not known
 
-- How the 30 s of each mode switch in the drill divides between the
-  backoff, the kubelet's sync, weston's startup, and the readback.
+The drill of 2026-10-08 above answers how the dark time of a switch
+divides: the backoff and the kubelet's sync are almost all of it.
+
 - How often restarts come within 10 minutes of each other in real
   use. `display_compositor_restarts_total` counts restarts by reason,
   but nobody has read the intervals between them.
@@ -172,4 +235,5 @@ None is chosen.
   DRM backend. If it works, a mode switch needs no restart. A heal, a
   `hung` compositor, and a `masterless` one still need a new process.
 - Whether the clients of each claim reconnect the same way after a
-  restart inside the container as after a container restart.
+  restart inside the container as after a container restart. The
+  drill below answers it for the clients the drill ran.

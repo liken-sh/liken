@@ -60,7 +60,7 @@ rules:
   # prompt. Read-only across every namespace, because a screen serves
   # whichever namespace claims it. The get has a second use: the
   # operator reads its own pod, whose status carries how often the
-  # kubelet started the compositor's container again.
+  # kubelet started the compositor's container again after a crash.
   - apiGroups: [""]
     resources: [pods]
     verbs: [get, list, watch]

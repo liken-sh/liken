@@ -72,7 +72,7 @@ const (
 // the record of who looked at a screen, and when.
 //
 // CompositorKilled is a compositor that answered nothing for
-// compositorHungLimit, which the operator ended so the kubelet starts
+// compositorHungLimit, which the operator ended so its container starts
 // it again. Every screen on the card blanks, so the Event goes on every
 // Display of the node.
 //

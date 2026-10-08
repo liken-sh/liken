@@ -28,7 +28,7 @@ The `component` is `display-operator`, `display-capture`, or
 | display-operator | `display_output_mode_info{output, mode, refresh}` | gauge, info | what is actuated on each panel |
 | display-operator | `display_compositor_restarts_total{reason}` | counter | the restarts the operator orders, by reason; the unbounded-restart problem as a rate |
 | display-operator | `display_compositor_serving` | gauge | the compositor answers the handshake, refuses the connect, or answers nothing |
-| display-operator | `display_compositor_container_restarts_total` | counter | the kubelet's own count, which includes the restarts nobody ordered |
+| display-operator | `display_compositor_container_restarts_total` | counter | the kubelet's count of the compositor's crashes: the exits the operator did not order |
 | display-operator | `display_surfaces{output}` | gauge | what the compositor holds; a stuck surface |
 | display-operator | `display_panel_power{output}`, `display_panel_brightness{output}` | gauge | the DDC state the idle screen drives |
 | display-operator | `display_reconcile_duration_seconds{kind}` | histogram | how long one pass of the reconcile loop took |
@@ -73,6 +73,9 @@ compositor that the operator orders. The `reason` label says why:
 | `hung` | The compositor accepted connections on its socket and answered nothing for 10 seconds. The operator sends `SIGKILL`. |
 | `masterless` | A read of the card found that the compositor holds no DRM master, so it cannot show a frame. The operator restarts each compositor process for this reason at most once. |
 
-A compositor that exits on its own has no reason, and this counter
-does not count it. `display_compositor_container_restarts_total`
-counts it, from the kubelet's restart count.
+The compositor's container starts weston again at once after each of
+these restarts, so the kubelet does not count them. A compositor that
+exits on its own has no reason, and this counter does not count it.
+Its container exits with it, and
+`display_compositor_container_restarts_total` counts it, from the
+kubelet's restart count.

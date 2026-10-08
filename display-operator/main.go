@@ -10,8 +10,9 @@
 //
 // Weston with ivi-shell runs in a container of its own in the same
 // pod, and the operator's own controller module runs inside it. The
-// kubelet starts the compositor, restarts it when it dies, and stops
-// it, so no process in this pod supervises another.
+// compositor's container starts weston again after each restart the
+// operator orders, and the kubelet restarts the container when weston
+// crashes (restartorders.go).
 //
 // The operator uses no private interface into liken. The raw claim,
 // the slices it writes, and the CDI files it leaves for the runtime
@@ -719,7 +720,7 @@ func endHungCompositor(socketPath string, frozen *hungCompositor, repair func() 
 		return
 	}
 	frozen.done()
-	fmt.Printf("the compositor answered nothing on %s for %s: ended, and the kubelet starts it again\n",
+	fmt.Printf("the compositor answered nothing on %s for %s: ended, and it starts again\n",
 		socketPath, compositorHungLimit)
 }
 

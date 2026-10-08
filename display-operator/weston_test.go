@@ -302,19 +302,6 @@ func TestCompositorProcessesFindsNoneWhileTheContainerRestarts(t *testing.T) {
 	}
 }
 
-func TestEndCompositorReportsThatItFoundNone(t *testing.T) {
-	// A restart the operator ordered has to be an ordered restart or a
-	// failure. A search that found nothing and said nothing would leave
-	// a prepare waiting for a mode change that nothing started.
-	err := endCompositor(fakeProc(t, map[string]string{"1": "/usr/bin/display-operator"}))
-	if err == nil {
-		t.Fatal("the search found no compositor and reported no error")
-	}
-	if !strings.Contains(err.Error(), westonBinary) {
-		t.Errorf("error = %q, want it to name %q", err, westonBinary)
-	}
-}
-
 func TestWestonArgvNamesTheCardAndTheConfig(t *testing.T) {
 	argv := westonArgv("card1", "/etc/weston/weston.ini", socketName, "")
 
