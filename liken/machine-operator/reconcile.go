@@ -173,7 +173,9 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	if err == nil {
 		*status = *facts
 	}
-	status.Conditions = api.SetCondition(m.Status.Conditions, factsCondition(err), now)
+	// The pass starts from the conditions this release owns, so one
+	// that a newer release wrote drops here (ownedconditions.go).
+	status.Conditions = api.SetCondition(ownedConditions(m.Status.Conditions), factsCondition(err), now)
 
 	// The operator's own existence is the evidence that promotes a
 	// staged cluster document. If this line runs, the machine joined

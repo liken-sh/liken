@@ -139,16 +139,7 @@ func loadManifestCandidates() (manifestCandidates, error) {
 	if provenErr != nil {
 		fmt.Fprintf(os.Stderr, "liken: storage: the proven manifest is unreadable: %v\n", provenErr)
 	} else if provenRaw != nil {
-		proven, err := machine.Parse(provenRaw)
-		if err != nil {
-			// A proven manifest that does not parse is a corrupted
-			// last-known-good record. This code reports it and
-			// continues without one, rather than fail over a file
-			// whose whole job is recovery.
-			fmt.Fprintf(os.Stderr, "liken: storage: the proven manifest is unreadable: %v\n", err)
-		} else {
-			c.proven = &manifestChoice{m: proven, raw: provenRaw, source: machine.ManifestSourceProven, hash: machine.ManifestHash(provenRaw)}
-		}
+		c.proven = provenCandidate(provenRaw)
 	}
 
 	// A staged manifest is checked before it even becomes a
@@ -170,6 +161,27 @@ func loadManifestCandidates() (manifestCandidates, error) {
 		}
 	}
 	return c, nil
+}
+
+// provenCandidate parses the proven manifest. The parse skips the
+// fields this release does not know (machine.ParseKnown), because a
+// rollback boots an older release under a manifest that a newer one
+// proved, and that manifest still holds this machine's storage and
+// network. The console names each field the boot leaves out. A proven
+// manifest that does not parse even then is a corrupted
+// last-known-good record. This code reports it and continues without
+// one, rather than fail over a file whose whole job is recovery.
+func provenCandidate(raw []byte) *manifestChoice {
+	proven, ignored, err := machine.ParseKnown(raw)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "liken: storage: the proven manifest is unreadable: %v\n", err)
+		return nil
+	}
+	if len(ignored) > 0 {
+		fmt.Fprintf(os.Stderr, "liken: storage: the proven manifest names fields this release does not know, and this boot leaves them out: %s\n",
+			strings.Join(ignored, ", "))
+	}
+	return &manifestChoice{m: proven, raw: raw, source: machine.ManifestSourceProven, hash: machine.ManifestHash(raw)}
 }
 
 // rejectStagedDocument renders the verdict that every staged

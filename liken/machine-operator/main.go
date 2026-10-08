@@ -37,6 +37,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
@@ -76,9 +77,15 @@ func main() {
 	// for a whole fleet, and init already selected this machine's.
 	// The operator trusts that selection instead of repeating the
 	// work.
-	m, err := machine.Load(machine.BootManifestPath)
+	// A rollback can boot this release under a proven manifest that a
+	// newer release wrote, so the read skips the fields this release
+	// does not know, as init's did (machine.ParseKnown).
+	m, ignored, err := machine.LoadKnown(machine.BootManifestPath)
 	if err != nil {
 		fatal("boot manifest: %v", err)
+	}
+	if len(ignored) > 0 {
+		fmt.Printf("the boot manifest names fields this release does not know: %s\n", strings.Join(ignored, ", "))
 	}
 	name := m.Metadata.Name
 	if name == "" {

@@ -391,3 +391,31 @@ func TestSettleStorageRefusesDuplicateMachineStatePartitions(t *testing.T) {
 		t.Errorf("expected the duplicate refusal: %v", err)
 	}
 }
+
+// A proven manifest that a newer release wrote still carries this
+// boot after a rollback, without the fields this release does not
+// know. A corrupted one is still no candidate, and the seed carries
+// the boot.
+func TestAProvenManifestFromANewerReleaseStaysACandidate(t *testing.T) {
+	cases := []struct {
+		name      string
+		raw       string
+		candidate bool
+	}{
+		{name: "a manifest this release knows", raw: "kind: Machine\nmetadata:\n  name: node-1\n", candidate: true},
+		{name: "a field a newer release added", raw: "kind: Machine\nmetadata:\n  name: node-1\nspec:\n  futureDevices: [adapter]\n", candidate: true},
+		{name: "a corrupted manifest", raw: "kind: Machine\nmetadata: [node-1\n"},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			choice := provenCandidate([]byte(one.raw))
+
+			if (choice != nil) != one.candidate {
+				t.Fatalf("candidate = %v, want %v", choice != nil, one.candidate)
+			}
+			if choice != nil && (choice.m.Metadata.Name != "node-1" || choice.hash != machine.ManifestHash([]byte(one.raw))) {
+				t.Errorf("the candidate is %+v, want node-1 with the bytes' own hash", choice)
+			}
+		})
+	}
+}

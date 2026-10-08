@@ -51,12 +51,22 @@ machine at a time. The cluster continues to serve during the rollout.
 
 ### Before you roll back past a spec field
 
-A release that is older than a field in the `Machine` spec cannot
-read a manifest that uses that field. `spec.serio` is such a field:
-releases before it reject a manifest that declares it. A machine
-that declares `spec.serio` and boots an older release cannot use its
-proven manifest, and it falls back to the seed manifest in the
-release's image on that slot:
+A release later than `2026.10.08-002` boots a proven manifest that
+names fields it does not know. It leaves those fields out, and the
+console names each one, for example `the proven manifest names fields
+this release does not know, and this boot leaves them out:
+spec.serio`. The machine keeps its storage, network, and every other
+field. The operator of that release also drops the conditions that
+only a newer release writes, such as `SerioAttached`, so a stale
+condition does not hold the machine `Degraded`. You can roll back to
+such a release without the steps below.
+
+A release up to and including `2026.10.08-002` cannot read a manifest
+that uses a field newer than the release. `spec.serio` is such a
+field: releases before it reject a manifest that declares it. A
+machine that declares `spec.serio` and boots such a release cannot
+use its proven manifest, and it falls back to the seed manifest in
+the release's image on that slot:
 
 * If the image carries a seed for the machine, the machine boots
   under it. The seed is the install-time manifest, so its storage and
@@ -68,8 +78,8 @@ release's image on that slot:
   read it either, and the machine powers off. Recovery needs a new
   install stick.
 
-To roll back a machine that declares `spec.serio`, remove the field
-first:
+To roll back such a machine to a release up to and including
+`2026.10.08-002`, remove the field first:
 
 1. Remove `spec.serio` from the `Machine`:
 
