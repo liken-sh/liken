@@ -1,6 +1,6 @@
 # The compositor restarts inside its container
 
-Plan 29. Built on 2026-10-08. The drill on stick-1 is recorded below.
+Plan 29. Built and drilled on stick-1 on 2026-10-08.
 
 This plan began as the open problem "The operator's restarts wait in
 the kubelet's crash backoff". The sections up to "The options" are
@@ -237,3 +237,17 @@ divides: the backoff and the kubelet's sync are almost all of it.
 - Whether the clients of each claim reconnect the same way after a
   restart inside the container as after a container restart. The
   drill below answers it for the clients the drill ran.
+
+## The drill
+
+The drill ran on stick-1 on 2026-10-08 with
+`2026.10.08-003-dev-001-b3eddd69`, and repeated the four switches
+above, about 20 s apart. Each switch served its mode on the `Display`
+within 2 s of the change to `spec.mode`. The `weston` container's
+restart count stayed at 0, and its log named each ordered restart:
+"the operator ended the compositor at pid 32, and it starts again".
+
+Then a `SIGSEGV` from an ephemeral container ended weston with no
+order. The compositor role exited with status 139, as it should, the
+kubelet counted one restart, and the `Display` was back at
+`Serving`.
