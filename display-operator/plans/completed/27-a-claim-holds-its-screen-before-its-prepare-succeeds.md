@@ -1,7 +1,6 @@
 # A claim holds its screen before its prepare succeeds
 
-Plan 27. Built on 2026-10-08. The drill on stick-1 with the build
-that carries all three changes is still owed.
+Plan 27. Built and drilled on stick-1 on 2026-10-08.
 
 A claim that stated a mode could start a loop of compositor restarts
 that only the kubelet's crash backoff slowed down. The open problem
@@ -122,6 +121,27 @@ that is being deleted. After the second `Play` started, the screen
 switched between the two modes six times in 11 minutes, from 18:23:35
 to 18:34:21, and the last wait in the backoff was at its 5-minute cap. The readback waited out each backoff and recorded no false
 decline.
+
+## Drill 4
+
+Drill 4 ran the steps of drill 3 on stick-1 on 2026-10-08 with
+`2026.10.08-002-dev-005-62f23f63`, which holds all three changes:
+
+| Time | What happened |
+|---|---|
+| 18:53:20 | The first `Play`'s prepare switches to 720p. The compositor is back in 4 s. |
+| 18:53:31 | The `Play` is deleted, and the `Display` pass restores 1080p. |
+| 18:53:32 | The second `Play`'s prepare finds no compositor serving and fails, as it should. Only the draw device takes the taint, and the playback pod stays. |
+| 18:55:00 | The kubelet's retry switches to 720p. The compositor waits 28 s in its backoff, and the prepare waits with it. |
+| 18:55:30 | The second `Play` runs at 720p. |
+
+The compositor restarted three times, once for each change of mode
+that a person asked for. No restart was repeated, the `Display`
+recorded no decline, and the screen never switched back while the
+claim waited. The second `Play` took two minutes to start, because
+the kubelet's retry of a failed prepare waited 76 s and the
+compositor's backoff 28 s more. The delete at 19:03 restored 1080p
+with one more restart, which waited 58 s in the backoff.
 
 ## What stays open
 
