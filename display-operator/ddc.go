@@ -111,6 +111,12 @@ const (
 	ddcRetryDelay = 40 * time.Millisecond
 )
 
+// The gap between the end of one exchange on a bus and the start of the
+// next, when the two belong to different callers. Each caller waits the
+// specification's delays inside its own exchange, and this gap is the
+// same 50ms for the message that follows another caller's (section 4.4).
+const ddcBusGap = 50 * time.Millisecond
+
 // One refusal says nothing about a monitor. A panel that is busy with
 // its own menu, or that just powered on, drops one message and
 // answers the next, so a Get runs up to three attempts. Section 5 asks the host

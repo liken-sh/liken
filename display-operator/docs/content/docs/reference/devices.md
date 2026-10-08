@@ -393,6 +393,12 @@ lands once at the claim's prepare, and a holder that dims the panel
 restores the value it last read from the panel, so the two writers
 never pull in opposite directions.
 
+The operator's own exchanges with one panel take turns. A claim's
+prepare, the `Display` pass, the probe, and a restore each wait for
+the bus, and each waits 50 ms after the last one ends, because a
+panel holds one reply at a time and needs that gap before the next
+message.
+
 The control device exists only while a monitor is connected. It
 takes the `disconnected` taint when a different monitor replaced the
 one the connector carried, the same as the output beside it. It does

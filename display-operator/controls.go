@@ -344,6 +344,13 @@ type panelControls struct {
 	open    func(path string) (controlBus, error)
 	sleep   func(time.Duration)
 	probed  map[string]probedPanel
+	// The probe of each connector that is running now. A pass that
+	// misses the cache while another pass probes waits for that probe
+	// and reads its answer, so two passes read the panel once.
+	probing map[string]chan struct{}
+	// The turn on each bus, by the path of its node (busturn.go).
+	turnsMu sync.Mutex
+	turns   map[string]*busTurn
 	// The clock the retry window is measured on, a field for
 	// the reason sleep is one.
 	now func() time.Time
@@ -419,11 +426,14 @@ func (c *panelControls) busFor(connector string) (controlBus, error) {
 	if path == "" {
 		return nil, fmt.Errorf("%s has no DDC/CI channel", connector)
 	}
+	turn := c.turn(path)
+	turn.take(c.clock, c.pause)
 	bus, err := c.open(path)
 	if err != nil {
+		turn.give(c.clock())
 		return nil, fmt.Errorf("opening %s for %s: %w", path, connector, err)
 	}
-	return bus, nil
+	return &turnBus{controlBus: bus, turn: turn, clock: c.clock}, nil
 }
 
 // Client builds the protocol speaker for one open bus. The sleep the

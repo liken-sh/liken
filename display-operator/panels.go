@@ -42,12 +42,36 @@ func (c *panelControls) factsFor(output Output) panelFacts {
 	if c == nil || !output.Connected {
 		return panelFacts{}
 	}
+	// The cache's lock is not held while the probe reads the panel.
+	// The probe waits for its turn on the bus, and a caller that holds
+	// the bus records what it reads in the cache, so a probe that held
+	// the cache while it waited would wait on that caller forever.
+	for {
+		c.mu.Lock()
+		if probed, known := c.probed[output.Connector]; known && probed.monitor == output.Monitor && !c.askAgain(probed) {
+			c.mu.Unlock()
+			return probed.facts.copy()
+		}
+		running, probing := c.probing[output.Connector]
+		if !probing {
+			break
+		}
+		c.mu.Unlock()
+		<-running
+	}
+	if c.probing == nil {
+		c.probing = map[string]chan struct{}{}
+	}
+	done := make(chan struct{})
+	c.probing[output.Connector] = done
+	c.mu.Unlock()
+
+	facts := c.probe(output.Connector)
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if probed, known := c.probed[output.Connector]; known && probed.monitor == output.Monitor && !c.askAgain(probed) {
-		return probed.facts.copy()
-	}
-	facts := c.probe(output.Connector)
+	delete(c.probing, output.Connector)
+	close(done)
 	if c.probed == nil {
 		c.probed = map[string]probedPanel{}
 	}

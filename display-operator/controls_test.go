@@ -292,6 +292,15 @@ type fakeMonitor struct {
 	// A restore runs on its own goroutine, so the panel it
 	// writes to is reached from two goroutines at once.
 	mu sync.Mutex
+	// How many holders have the node open now, and how many
+	// times a second holder opened it while another held it.
+	holders  int
+	overlaps int
+	// When the last holder closed the node, and how many
+	// messages arrived sooner than the gap a panel needs after
+	// one exchange ends and the next begins.
+	closedAt time.Time
+	rushed   int
 }
 
 // The shared record. Both the panel and the API server write
@@ -396,6 +405,9 @@ func monitorWithout(code byte) *fakeMonitor {
 func (m *fakeMonitor) Write(request []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if !m.closedAt.IsZero() && time.Since(m.closedAt) < ddcBusGap {
+		m.rushed++
+	}
 	if m.silent {
 		m.pending = bytes.Repeat([]byte{0xff}, getReplyLength)
 		// A panel that is waking takes this many writes before
@@ -479,6 +491,8 @@ func (m *fakeMonitor) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.closes++
+	m.holders--
+	m.closedAt = time.Now()
 	return nil
 }
 
@@ -488,6 +502,10 @@ func (m *fakeMonitor) opened() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.opens++
+	m.holders++
+	if m.holders > 1 {
+		m.overlaps++
+	}
 }
 
 // What one control holds now.
