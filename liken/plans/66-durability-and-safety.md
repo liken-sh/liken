@@ -47,7 +47,9 @@ Status on 2026-10-04:
   slice offered the disk and the container started with `/dev/sda`.
   The same drill put two identical USB sticks on `node-2`, which
   loads no driver for them: its status reported one unclaimed entry,
-  and every write landed.
+  and every write landed. On the testbed, release 2026.10.09-003 ran
+  the same break on `stick-1` for 15 seconds: its slice, which holds
+  no disk, did not change, and no CDI spec named the withheld node.
 * Built in release 2026.10.09-002: the first item of part four. The CRD
   declares `status.boot.network` in full, and
   `TestTheSchemaDeclaresEveryField` checks every status and spec field

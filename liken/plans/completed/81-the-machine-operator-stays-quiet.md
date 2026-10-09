@@ -1,10 +1,13 @@
 # 81. The machine operator stays quiet
 
-Milestone 81. Proposed 2026-10-09. It follows milestones 76 to 80,
+Milestone 81. Proposed and built 2026-10-09, and released in
+2026.10.09-003. One finding stays open: on wifi, single SNTP samples
+move the offset past 25 ms several times an hour
+([What the testbed showed](#what-the-testbed-showed)). It follows milestones 76 to 80,
 which removed the ten-second ticker from `machine-operator`'s reconcile
 loop. On the testbed, an idle machine went from about 420 passes an
 hour to between 34 and 50
-([milestone 80](completed/80-the-machine-operator-idles.md#what-the-lab-measured)).
+([milestone 80](80-the-machine-operator-idles.md#what-the-lab-measured)).
 Most of the passes that are left come from two sources: facts that
 `init` republishes, and the echo of the operator's own status write.
 This milestone removes the passes that change nothing.
@@ -147,6 +150,42 @@ commit af8e94aa.
   18 passes an hour on a leader and 12 on the follower. The leaders'
   `watch` passes, about 6 an hour, have no known source yet: the
   follower has none, so a leader's own objects change on a cycle.
+
+## What the testbed showed
+
+Release 2026.10.09-003 reached both testbed machines at 22:24 UTC on
+2026-10-09. A drill then wrote `three` into `stick-1`'s `hardware/cpus`
+fact for 15 seconds. `FactsPublished` went `False` with the new
+message, and the slice did not change, because no device on `stick-1`
+carries a disk in its subtree: its system stick is a storage role and
+was never offered. No CDI spec named the withheld node.
+
+The idle hour from 22:25 to 23:25, beside the hour before the rollout:
+
+| | `liken-1` on -002 | `liken-1` on -003 | `stick-1` on -002 | `stick-1` on -003 |
+| --- | --- | --- | --- | --- |
+| `backstop` | 5 | 10 | 8 | 7 |
+| `facts` | 12 | 0 | 12 | 14 |
+| `machine event` | 8 | 0 | 0 | 0 |
+| `watch` | 6 | 0 | 6 | 0 |
+| All passes | 31 | 10 | 26 | 21 |
+| CPU seconds | 4.7 | 2.8 | 9.4 | 8.0 |
+
+No backstop pass repaired anything. `liken-1` ran its backstop and
+nothing else. The hour before the rollout includes the 30 minutes of
+measurement above.
+
+`stick-1`'s `facts` passes are its clock. Samples of its status one
+poll apart read −30 ms, +37 ms, and −8 ms from the same source, so a
+single SNTP exchange over wifi moves the offset past 25 ms several
+times an hour. This is noise in the measurement, not error in the
+clock. Two answers fit: filter the samples, as NTP does when it keeps
+the exchange with the shortest round trip of the last eight, or raise
+the threshold to a bound that matters to the cluster, such as 100 ms.
+Each publish also wakes two passes, because init writes the five
+`time/` files one at a time. The dev-cluster's leaders ran about six
+`watch` passes an hour whose source nobody has found; `liken-1`, the
+testbed's leader, ran none.
 
 ## Tests
 
