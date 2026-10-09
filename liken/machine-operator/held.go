@@ -11,6 +11,14 @@ package main
 // kernel lets one process at a time open an RTC, so a pod that held it
 // would make that write fail.
 //
+// The TPM is the machine's too. Its authorization on most boards is an
+// empty password for the owner and lockout hierarchies, so a pod that
+// held /dev/tpm0 or /dev/tpmrm0, with no privilege, could set those
+// passwords, clear the TPM, extend its PCRs until the next boot, or fill
+// its storage, and each of those reaches every later user of the TPM.
+// The TPM's nodes are held by their kernel subsystem, whatever their
+// numbers are.
+//
 // The test removes the node, not the device. A board's serial
 // controller can carry the console on one port and a UPS on another,
 // and the UPS port stays claimable. A device left with no node is
@@ -45,10 +53,14 @@ func heldNodes(sysRoot string) map[string]bool {
 	return held
 }
 
+// heldSubsystems are the kernel subsystems whose every node the machine
+// holds: the TPM's raw device, and its resource manager.
+var heldSubsystems = map[string]bool{"tpm": true, "tpmrm": true}
+
 // withoutHeld removes the held nodes from one delivery.
 func withoutHeld(delivery hardware.Delivery, held map[string]bool) hardware.Delivery {
 	delivery.Nodes = slices.DeleteFunc(delivery.Nodes, func(n hardware.DeliveredNode) bool {
-		return held[n.Path]
+		return held[n.Path] || heldSubsystems[n.Subsystem]
 	})
 	return delivery
 }

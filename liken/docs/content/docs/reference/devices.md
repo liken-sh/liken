@@ -65,12 +65,17 @@ slice when these three conditions are true:
    disk belongs to the machine, through a storage role, or to the
    workloads, through a claim, but never to both.
 
-The machine holds three kinds of node, and no claim receives them.
+The machine holds four kinds of node, and no claim receives them.
 The console, which the kernel lists in
 `/sys/class/tty/console/active`, carries the boot and the kernel's
 messages. `/dev/rtc0` is the clock that init writes the system time
-into, and the kernel lets one process at a time open it. A device
-whose only nodes these are does not appear. The third is the tty of a
+into, and the kernel lets one process at a time open it. The TPM's
+nodes, `/dev/tpm*` and `/dev/tpmrm*`, give any process that opens them
+the TPM itself. On most boards the TPM's owner and lockout passwords
+are empty, so a pod with no privilege could set them, clear the TPM,
+or extend its PCRs until the next boot, and each of those reaches every
+later user of the TPM. A device whose only nodes these are does not
+appear. The fourth is the tty of a
 serial line that a `spec.serio` entry matches. The machine holds that line
 attached to the kernel's serio layer, and a pod that received the tty
 could end the attachment under every other claim. See

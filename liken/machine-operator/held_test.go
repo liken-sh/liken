@@ -66,3 +66,24 @@ func TestInventoryWithholdsADeviceTheMachineHolds(t *testing.T) {
 		t.Errorf("devices = %+v, want none: init writes the clock", devices)
 	}
 }
+
+// A TPM is never claimable. A pod that held its nodes could set the
+// owner and lockout passwords, clear it, extend its PCRs until the next
+// boot, or fill its storage: each one lasts beyond the pod and reaches
+// every user of the TPM. So the inventory publishes no TPM, whatever the
+// node is named.
+func TestInventoryWithholdsTheTPM(t *testing.T) {
+	held := heldNodes(t.TempDir())
+	tpm := hardware.Delivery{Nodes: []hardware.DeliveredNode{
+		{Path: "/dev/tpm0", Subsystem: "tpm"},
+		{Path: "/dev/tpmrm0", Subsystem: "tpmrm"},
+	}}
+
+	devices := inventoryDevices([]hardware.Device{
+		{Bus: "platform", Address: "MSFT0101:00", Driver: "tpm_crb_acpi"},
+	}, func(hardware.Device) hardware.Delivery { return withoutHeld(tpm, held) }, nil, nil)
+
+	if len(devices) != 0 {
+		t.Errorf("devices = %+v, want none: the TPM is the machine's", devices)
+	}
+}
