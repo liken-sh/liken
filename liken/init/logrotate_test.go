@@ -208,3 +208,89 @@ func TestShiftLogReportsARenameFailure(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
 	shiftLog(filepath.Join(dir, "k3s.log"), filepath.Join(dir, "k3s.log.1"))
 }
+
+// A log whose directory cannot hold it fails to open, and the caller
+// gets the error, so the supervisor reports it and runs k3s with the
+// console copy alone.
+func TestOpenCappedLogReportsAMissingDirectory(t *testing.T) {
+	if _, err := openCappedLog(filepath.Join(t.TempDir(), "missing", "k3s.log"), k3sLogCap); err == nil {
+		t.Error("a log in a missing directory is an error")
+	}
+}
+
+// An oldest generation that cannot be removed does not stop the
+// rotation. The live file still moves to .1, so this boot starts a
+// fresh log.
+func TestRotateGenerationsContinuesPastAStuckOldestGeneration(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "k3s.log")
+	writeLog(t, log, "current boot")
+	if err := os.MkdirAll(filepath.Join(log+".3", "stuck"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	rotateGenerations(log, 3)
+
+	if got := readLog(t, log+".1"); got != "current boot" {
+		t.Errorf(".1: %q", got)
+	}
+	if _, err := os.Stat(log); !os.IsNotExist(err) {
+		t.Error("the live file moved aside")
+	}
+}
+
+// A log whose descriptor fails to close at the cap still rotates, and
+// the writer continues on a fresh file. A failed close loses at most
+// the old file's last bytes, never the logging that follows.
+func TestCappedLogRotatesPastAFailedClose(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "k3s.log")
+	c, err := openCappedLog(path, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+	if _, err := c.Write([]byte("full\n")); err != nil {
+		t.Fatal(err)
+	}
+	c.f.Close()
+
+	if _, err := c.Write([]byte("next\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := readLog(t, path+".1"); got != "full\n" {
+		t.Errorf("the full log rotated to .1: %q", got)
+	}
+	if got := readLog(t, path); got != "next\n" {
+		t.Errorf("the writer continues on a fresh file: %q", got)
+	}
+}
+
+// A log whose directory disappears cannot reopen after rotation, so
+// file logging goes quiet. Write still reports success, because an
+// error would also stop the console copy in the same `io.MultiWriter`.
+func TestCappedLogGoesQuietWhenItCannotReopen(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "liken")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c, err := openCappedLog(filepath.Join(dir, "k3s.log"), 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Write([]byte("full\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := c.Write([]byte("next\n"))
+
+	if n != len("next\n") || err != nil {
+		t.Errorf("Write never propagates failure: %d, %v", n, err)
+	}
+	if !c.broken {
+		t.Error("the writer marks itself broken")
+	}
+}

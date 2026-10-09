@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/liken-sh/liken/liken/disks"
 	"github.com/liken-sh/liken/liken/machine"
@@ -213,5 +217,176 @@ func TestVerifySlotContentsRejectsAnUnreadableReleaseDocument(t *testing.T) {
 	}
 	if err := verifySlotContents(dir); err == nil {
 		t.Error("a slot whose release document does not parse must not verify")
+	}
+}
+
+// A slot this boot claimed and formatted has no earlier stop to report.
+// Its new boot sector carries no mark, and a read of it would only
+// waste a device open, so the answer is no without asking the device.
+func TestReadFATStopReportsNothingForAVolumeThisBootCreated(t *testing.T) {
+	bootedSlot(t, "A", "")
+	dev := markedVolume(t)
+	if readFATStop(machine.SystemBRole, dev, true) {
+		t.Error("a volume this boot created must not report an unclean stop")
+	}
+	if !isMarked(t, dev) {
+		t.Error("readFATStop must not touch a volume it was told is new")
+	}
+}
+
+// A boot must continue when one boot sector cannot be read, because
+// storage reconciliation fails for a real reason a moment later if the
+// volume is truly gone. So an unreadable mark counts as no mark.
+func TestReadFATStopTreatsAnUnreadableMarkAsClean(t *testing.T) {
+	bootedSlot(t, "A", "")
+	if readFATStop(machine.SystemBRole, filepath.Join(t.TempDir(), "absent"), false) {
+		t.Error("a mark that cannot be read must not be reported as unclean")
+	}
+}
+
+func TestReadFATStopReportsACleanVolume(t *testing.T) {
+	bootedSlot(t, "A", "")
+	if readFATStop(machine.BootHomeRole, cleanVolume(t), false) {
+		t.Error("a released volume must not report an unclean stop")
+	}
+}
+
+// fakeFATCheckMount points the slot check at a temporary directory, so
+// the check can make its mount point without root.
+func fakeFATCheckMount(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "fat-check")
+	old := fatCheckMount
+	fatCheckMount = dir
+	t.Cleanup(func() { fatCheckMount = old })
+	return dir
+}
+
+// tamperedSlot is a slot whose kernel no longer matches the digest its
+// release document names.
+func tamperedSlot(t *testing.T) string {
+	t.Helper()
+	slot := slotWith(t, map[string][]byte{"vmlinuz": []byte("kernel bytes")})
+	if err := os.WriteFile(filepath.Join(slot, "vmlinuz"), []byte("kernel bytez"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return slot
+}
+
+// The status always reports the unclean stop, because it describes the
+// stop that already happened. The mark comes off only where liken can
+// vouch for the volume: an idle slot whose every artifact matches its
+// release document, and the boot home, which this boot rewrites. The
+// booted slot is in use and keeps its mark, and so does a slot whose
+// contents do not check out, so the warning still means something.
+func TestReadFATStopClearsTheMarkOnlyWhereLikenCanVouch(t *testing.T) {
+	cases := []struct {
+		name       string
+		role       machine.StorageRoleName
+		slot       func(t *testing.T) string
+		wantMarked bool
+	}{
+		{"the booted slot", machine.SystemARole, nil, true},
+		{"an idle slot that matches its release", machine.SystemBRole, func(t *testing.T) string {
+			return slotWith(t, map[string][]byte{"vmlinuz": []byte("kernel bytes")})
+		}, false},
+		{"an idle slot with a changed artifact", machine.SystemBRole, tamperedSlot, true},
+		{"an idle slot with no release document", machine.SystemBRole, func(t *testing.T) string {
+			return t.TempDir()
+		}, true},
+		{"the boot home", machine.BootHomeRole, nil, false},
+		{"a role with nothing to vouch for it", machine.MachineStateRole, nil, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			bootedSlot(t, "A", stopMarkUnclean)
+			mounts := fakeStorageMounts(t)
+			fakeFATCheckMount(t)
+			dev := markedVolume(t)
+			if c.slot != nil {
+				mounts.contents[dev] = c.slot(t)
+			}
+
+			if !readFATStop(c.role, dev, false) {
+				t.Error("the unclean stop must reach status whether or not the mark is cleared")
+			}
+			if got := isMarked(t, dev); got != c.wantMarked {
+				t.Errorf("marked after the boot read it = %v, want %v", got, c.wantMarked)
+			}
+		})
+	}
+}
+
+// The check must not set the mark it is about to clear, so it mounts
+// the slot read-only, and it must release the slot before the caller
+// writes the boot sector underneath it.
+func TestCheckSlotArtifactsReadsTheSlotReadOnlyAndReleasesIt(t *testing.T) {
+	mounts := fakeStorageMounts(t)
+	check := fakeFATCheckMount(t)
+	dev := markedVolume(t)
+	mounts.contents[dev] = slotWith(t, map[string][]byte{"vmlinuz": []byte("kernel bytes")})
+
+	if err := checkSlotArtifacts(dev); err != nil {
+		t.Fatal(err)
+	}
+	want := []storageMount{{source: dev, target: check, fstype: "vfat", flags: unix.MS_RDONLY}}
+	if !slices.Equal(mounts.mounts, want) {
+		t.Errorf("mounts = %+v, want %+v", mounts.mounts, want)
+	}
+	if !slices.Equal(mounts.unmountedPaths(), []string{check}) {
+		t.Errorf("the check must release the slot: %+v", mounts.unmounts)
+	}
+}
+
+func TestCheckSlotArtifactsReportsASlotItCannotMount(t *testing.T) {
+	mounts := fakeStorageMounts(t)
+	fakeFATCheckMount(t)
+	mounts.mountErr = unix.EINVAL
+
+	err := checkSlotArtifacts("/dev/vdz9")
+	if err == nil || !strings.Contains(err.Error(), "/dev/vdz9") {
+		t.Errorf("the error must name the slot it could not mount: %v", err)
+	}
+}
+
+// A slot that is still mounted cannot have its boot sector written
+// safely, so a failed release fails the check even when the contents
+// matched. The check then detaches the mount lazily so it does not
+// stay in the way.
+func TestCheckSlotArtifactsFailsWhenTheSlotWillNotRelease(t *testing.T) {
+	mounts := fakeStorageMounts(t)
+	check := fakeFATCheckMount(t)
+	dev := markedVolume(t)
+	mounts.contents[dev] = slotWith(t, map[string][]byte{"vmlinuz": []byte("kernel bytes")})
+	mounts.unmountErrs[check] = unix.EBUSY
+
+	err := checkSlotArtifacts(dev)
+	if err == nil || !strings.Contains(err.Error(), "releasing") {
+		t.Errorf("a slot that will not release must fail the check: %v", err)
+	}
+	want := []storageUnmount{{target: check, flags: 0}, {target: check, flags: unix.MNT_DETACH}}
+	if !slices.Equal(mounts.unmounts, want) {
+		t.Errorf("unmounts = %+v, want %+v", mounts.unmounts, want)
+	}
+}
+
+// The booted slot is the one volume that is in use, so the boot must
+// tell it apart from the idle slot by the kernel command line.
+func TestBootedSlotRoleReadsTheSlotParameter(t *testing.T) {
+	cases := []struct {
+		cmdline string
+		want    string
+	}{
+		{"liken.slot=A\n", string(machine.SystemARole)},
+		{"liken.slot=B\n", string(machine.SystemBRole)},
+		{"rdinit=/liken\n", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.cmdline, func(t *testing.T) {
+			fakeCmdline(t, c.cmdline)
+			if got := bootedSlotRole(); got != c.want {
+				t.Errorf("got %q, want %q", got, c.want)
+			}
+		})
 	}
 }

@@ -288,7 +288,7 @@ func bootClusterDocument(path string) (*cluster.Cluster, string) {
 // own proving boot, there is nothing left to do. The facts identify
 // exactly which bytes this boot ran, and the operator promotes only
 // those bytes.
-func settleClusterLifecycle(root, seedPath string, facts *machine.MachineStatus) {
+func settleClusterLifecycle(root, seedPath string, facts *machine.MachineStatus, out *passOutcome) {
 	if facts == nil || facts.Storage.MachineState.Backing != machine.BackingPartition {
 		return // nothing durable to settle
 	}
@@ -308,8 +308,10 @@ func settleClusterLifecycle(root, seedPath string, facts *machine.MachineStatus)
 		}
 		if err := store.Promote(); err != nil {
 			fmt.Fprintf(os.Stderr, "promoting the cluster document: %v\n", err)
+			out.fail("promoting the cluster document", err)
 			return
 		}
+		out.wrote("promoting the cluster document")
 		fmt.Printf("the cluster document proved out; %.12s is now proven\n", facts.Boot.ClusterManifestHash)
 
 	case machine.ManifestSourceSeed:
@@ -328,8 +330,10 @@ func settleClusterLifecycle(root, seedPath string, facts *machine.MachineStatus)
 		}
 		if err := store.WriteProven(raw); err != nil {
 			fmt.Fprintf(os.Stderr, "recording the seed cluster document as proven: %v\n", err)
+			out.fail("recording the seed cluster document as proven", err)
 			return
 		}
+		out.wrote("recording the seed cluster document as proven")
 		fmt.Printf("the seed cluster document is now proven (%.12s)\n", facts.Boot.ClusterManifestHash)
 	}
 }

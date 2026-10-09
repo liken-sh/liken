@@ -10,6 +10,8 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/liken-sh/liken/liken/api"
@@ -91,5 +93,69 @@ func TestTheDemotionDeletesOnlyTheNodeItRead(t *testing.T) {
 
 	if method != http.MethodDelete || path != "/api/v1/nodes/node-2" || sent.Kind != "DeleteOptions" || sent.Preconditions.UID != "uid-read" {
 		t.Errorf("sent %s %s with %+v, want a DELETE of node-2 whose precondition is uid-read", method, path, sent)
+	}
+}
+
+// demotingNode answers the stale control-plane Node a demotion cleans
+// up, and a server that records each DELETE and answers it with status.
+func demotingNode(t *testing.T, status int) (*nodeObject, *[]string, http.Handler) {
+	t.Helper()
+	node := &nodeObject{}
+	node.Metadata.Name, node.Metadata.UID = "node-2", "uid-read"
+	var deleted []string
+	return node, &deleted, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			deleted = append(deleted, r.URL.Path)
+		}
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(`{}`))
+	})
+}
+
+// The cleanup writes the reboot intent before it deletes the Node,
+// because the delete kills this pod, and the reboot must already be
+// asked for when it does.
+func TestTheDemotionAsksForTheRebootAndDeletesTheNode(t *testing.T) {
+	node, deleted, handler := demotingNode(t, http.StatusOK)
+	runDir := t.TempDir()
+	out := &passOutcome{}
+
+	c := carryOutDemotion(testClient(t, handler), runDir, node, demotion{cleanup: true, condition: api.Condition{Reason: "DemotionRebooting"}}, out)
+
+	intent, err := machine.ReadRebootIntent(runDir)
+	if err != nil || intent == nil || len(*deleted) != 1 || c.Reason != "DemotionRebooting" {
+		t.Errorf("intent %+v (%v), deletes %q, condition %+v; want the intent, one delete, and the cleanup's condition", intent, err, *deleted, c)
+	}
+	if len(out.failures) != 0 || len(out.writes) != 1 {
+		t.Errorf("failures %v and writes %q, want the intent as the one write", out.failures, out.writes)
+	}
+}
+
+// A reboot intent that cannot be written leaves the Node in place,
+// because deleting it would kill this pod with no reboot to follow.
+func TestADemotionWhoseIntentFailsKeepsTheNode(t *testing.T) {
+	node, deleted, handler := demotingNode(t, http.StatusOK)
+	runDir := filepath.Join(t.TempDir(), "missing")
+	out := &passOutcome{}
+
+	c := carryOutDemotion(testClient(t, handler), runDir, node, demotion{cleanup: true}, out)
+
+	if c.Reason != "DemotionFailed" || len(*deleted) != 0 || len(out.failures) != 1 {
+		t.Errorf("condition %+v, deletes %q, failures %v; want DemotionFailed, no delete, and one failure", c, *deleted, out.failures)
+	}
+}
+
+// A delete that fails after the intent landed leaves a failure for the
+// pass to retry, and the reboot goes ahead.
+func TestADemotionWhoseDeleteFailsIsRetried(t *testing.T) {
+	node, _, handler := demotingNode(t, http.StatusServiceUnavailable)
+	runDir := t.TempDir()
+	out := &passOutcome{}
+
+	carryOutDemotion(testClient(t, handler).WithObserver(out.observe), runDir, node, demotion{cleanup: true}, out)
+
+	intent, _ := machine.ReadRebootIntent(runDir)
+	if intent == nil || !slices.Equal(failureKinds(out), []failureKind{transient}) {
+		t.Errorf("intent %+v and failure kinds %v, want the intent and one transient failure", intent, failureKinds(out))
 	}
 }

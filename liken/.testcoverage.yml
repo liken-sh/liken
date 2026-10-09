@@ -24,7 +24,7 @@ profile: coverage.out
 
 threshold:
   # The whole module, everything counted.
-  total: 81
+  total: 85
 
 override:
   # The API group's grammar: the shared shapes, the version format,
@@ -41,7 +41,7 @@ override:
   # the ID databases, and the tests run them against fixture trees.
   # What stays untested is a scattering of I/O error returns.
   - path: ^hardware$
-    threshold: 90
+    threshold: 92
   # The Machine API: pure functions over declared types.
   - path: ^machine$
     threshold: 88
@@ -84,7 +84,7 @@ override:
   # untested is main, and the parts of a pass that need the real facts
   # files and a real kernel, which the QEMU harness exercises.
   - path: ^machine-operator$
-    threshold: 86
+    threshold: 92
   # The cluster operator: the sweep and rollout decisions are pure
   # and tested, and the acting halves, the sweep loop, and the leader
   # election run against miniature API servers. What stays untested is
@@ -96,7 +96,7 @@ override:
   # parsers, planners, derivations, and file-shaped actuators around
   # it are tested here against fakes.
   - path: ^init$
-    threshold: 72
+    threshold: 80
   # mount(8): the option parser, the command-line parser, and the
   # helper lookup are pure, and the tests cover them against the
   # command lines the kubelet really builds. What stays untested is

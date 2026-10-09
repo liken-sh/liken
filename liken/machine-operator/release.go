@@ -25,6 +25,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
@@ -108,18 +109,22 @@ func versionAsk(clusterDoc *cluster.Cluster, facts *machine.MachineStatus) (fetc
 // state here means "not converged yet". What differs is whether
 // time will fix it. A failed fetch deliberately reads as
 // Downloading: a down release server is transient by definition,
-// the fetcher retries every pass, and the condition's message says
-// what failed. A digest mismatch is the opposite. Refetching cannot
-// change what the server publishes, so the machine holds at
-// DigestMismatch (phase Blocked) until the catalog names different
-// bytes, and nothing is ever staged.
+// the fetcher retries after its backoff, and the condition's message
+// says what failed and when the retry starts. The message names the
+// retry's time, not the wait left, so it stays the same from one pass
+// to the next and the status is not written again for it. A digest
+// mismatch is the opposite. Refetching cannot change what the server
+// publishes, so the machine holds at DigestMismatch (phase Blocked)
+// until the catalog names different bytes, and nothing is ever
+// staged.
 func versionCondition(ask fetchAsk, snap fetchSnapshot) api.Condition {
 	switch snap.state {
 	case fetchRejected:
 		return notConverged("VersionConverged", "DigestMismatch", snap.detail)
 	case fetchFailed:
 		return notConverged("VersionConverged", "Downloading",
-			fmt.Sprintf("downloading release %s to slot %s; will retry: %s", ask.version, ask.slot, snap.detail))
+			fmt.Sprintf("downloading release %s to slot %s; will retry at %s: %s",
+				ask.version, ask.slot, snap.retryAt.UTC().Format(time.RFC3339), snap.detail))
 	}
 	return notConverged("VersionConverged", "Downloading",
 		fmt.Sprintf("downloading release %s to slot %s: %s", ask.version, ask.slot, snap.detail))
@@ -148,7 +153,7 @@ func versionConvergence(cond api.Condition, stagedHash string, rejection *machin
 // download verifies, the rest works like the other documents: a
 // staged SystemRelease record, the reboot chain, the drain gate, and
 // the same carryOutConvergence.
-func convergeSystemRelease(store machine.ManifestStore, liveCluster *cluster.Cluster, m *machine.Machine, facts *machine.MachineStatus, f *fetcher, t turn) convergence {
+func convergeSystemRelease(store machine.ManifestStore, liveCluster *cluster.Cluster, m *machine.Machine, facts *machine.MachineStatus, f *fetcher, t turn, out *passOutcome) convergence {
 	rejection, _ := store.LoadRejection()
 	stagedHash := readStagedHash(store)
 	ask, cond, ok := versionAsk(liveCluster, facts)
@@ -157,11 +162,16 @@ func convergeSystemRelease(store machine.ManifestStore, liveCluster *cluster.Clu
 	}
 	stagedHash, err := withdrawOtherStage(store, ask, stagedHash)
 	if err != nil {
+		out.fail("withdrawing another release's staged record", err)
 		return convergence{condition: notConverged("VersionConverged", "StagingFailed",
 			fmt.Sprintf("release %s waits to download onto slot %s, because the staged record of another release could not be withdrawn: %v",
 				ask.version, ask.slot, err))}
 	}
-	return decideSystemStaging(ask, f.Ensure(ask), m, rejection, stagedHash, t)
+	snap := f.Ensure(ask)
+	if snap.state == fetchFailed {
+		out.wakeBy(snap.retryAt)
+	}
+	return decideSystemStaging(ask, snap, m, rejection, stagedHash, t)
 }
 
 // withdrawOtherStage withdraws a staged record that names another
@@ -255,7 +265,7 @@ func decideSystemStaging(ask fetchAsk, snap fetchSnapshot, m *machine.Machine, r
 // install predates any catalog, writes its current standing down as
 // the first proven record, so init's every-boot BootOrder repair
 // has an authority to enforce from the start.
-func settleSystemReleaseLifecycle(root string, facts *machine.MachineStatus) {
+func settleSystemReleaseLifecycle(root string, facts *machine.MachineStatus, out *passOutcome) {
 	if facts == nil || facts.Storage.MachineState.Backing != machine.BackingPartition ||
 		facts.Boot.Slot == "" || facts.Version.Liken == "" {
 		return
@@ -272,8 +282,10 @@ func settleSystemReleaseLifecycle(root string, facts *machine.MachineStatus) {
 		}
 		if err := store.Promote(); err != nil {
 			fmt.Fprintf(os.Stderr, "promoting the system release: %v\n", err)
+			out.fail("promoting the system release", err)
 			return
 		}
+		out.wrote("promoting the system release")
 		fmt.Printf("release %s proved out on slot %s; the store now names it proven\n",
 			record.Version, record.Slot)
 		return
@@ -288,7 +300,9 @@ func settleSystemReleaseLifecycle(root string, facts *machine.MachineStatus) {
 	}
 	if err := store.WriteProven(raw); err != nil {
 		fmt.Fprintf(os.Stderr, "recording the running release as proven: %v\n", err)
+		out.fail("recording the running release as proven", err)
 		return
 	}
+	out.wrote("recording the running release as proven")
 	fmt.Printf("recorded the running release %s on slot %s as proven\n", facts.Version.Liken, facts.Boot.Slot)
 }

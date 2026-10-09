@@ -5,6 +5,7 @@ package main
 // answer becomes the VersionConverged condition.
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -236,7 +237,7 @@ func TestPromotesTheReleaseThisBootProves(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	settleSystemReleaseLifecycle(root, slotFacts("0.2.0", "B"))
+	settleSystemReleaseLifecycle(root, slotFacts("0.2.0", "B"), nil)
 
 	if staged, _ := store.LoadStaged(); staged != nil {
 		t.Error("promotion consumes the staged record")
@@ -266,7 +267,7 @@ func TestPromotionRequiresTheMatchingSlotAndVersion(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			settleSystemReleaseLifecycle(root, slotFacts(tt.bootVersion, tt.bootSlot))
+			settleSystemReleaseLifecycle(root, slotFacts(tt.bootVersion, tt.bootSlot), nil)
 
 			if staged, _ := store.LoadStaged(); staged == nil {
 				t.Error("a trial this boot didn't run must not promote")
@@ -279,7 +280,7 @@ func TestRecordsTheRunningReleaseAsTheFirstProven(t *testing.T) {
 	root := t.TempDir()
 	store := machine.SystemReleases(root)
 
-	settleSystemReleaseLifecycle(root, slotFacts("0.1.0", "A"))
+	settleSystemReleaseLifecycle(root, slotFacts("0.1.0", "A"), nil)
 
 	proven, _ := store.LoadProven()
 	if proven == nil {
@@ -291,8 +292,63 @@ func TestRecordsTheRunningReleaseAsTheFirstProven(t *testing.T) {
 	}
 
 	// And only once. A second pass leaves it alone.
-	settleSystemReleaseLifecycle(root, slotFacts("0.1.0", "A"))
+	settleSystemReleaseLifecycle(root, slotFacts("0.1.0", "A"), nil)
 	if again, _ := store.LoadProven(); string(again) != string(proven) {
 		t.Error("the seed record is written once, not re-asserted")
+	}
+}
+
+// A promotion that cannot write leaves the record staged and a failure
+// for the loop to retry, so a later pass proves the release.
+func TestAReleasePromotionThatCannotWriteIsRetried(t *testing.T) {
+	root := t.TempDir()
+	store := machine.SystemReleases(root)
+	raw, _, err := machine.RenderSystemRelease("0.2.0", "B", "sha256:abcd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteStaged(raw); err != nil {
+		t.Fatal(err)
+	}
+	readOnly(t, filepath.Join(root, "system"))
+	out := &passOutcome{}
+
+	settleSystemReleaseLifecycle(root, slotFacts("0.2.0", "B"), out)
+
+	staged, _ := store.LoadStaged()
+	if staged == nil || len(out.failures) != 1 {
+		t.Errorf("staged %q, failures %v; want the record still staged and one failure", staged, out.failures)
+	}
+}
+
+// A first proven record that cannot be written leaves a failure for
+// the loop to retry, the same as a promotion.
+func TestAFirstProvenReleaseThatCannotBeWrittenIsRetried(t *testing.T) {
+	root := t.TempDir()
+	readOnly(t, root)
+	out := &passOutcome{}
+
+	settleSystemReleaseLifecycle(root, slotFacts("0.1.0", "A"), out)
+
+	if len(out.failures) != 1 {
+		t.Errorf("failures = %v, want one", out.failures)
+	}
+}
+
+// A staged record that does not parse is init's to judge at the next
+// boot, so the operator leaves it in place and reports no failure.
+func TestAnUnparseableStagedReleaseIsLeftForInit(t *testing.T) {
+	root := t.TempDir()
+	store := machine.SystemReleases(root)
+	if err := store.WriteStaged([]byte(":: not a record ::")); err != nil {
+		t.Fatal(err)
+	}
+	out := &passOutcome{}
+
+	settleSystemReleaseLifecycle(root, slotFacts("0.2.0", "B"), out)
+
+	staged, _ := store.LoadStaged()
+	if staged == nil || len(out.failures) != 0 || len(out.writes) != 0 {
+		t.Errorf("staged %q, failures %v, writes %q; want the record left alone", staged, out.failures, out.writes)
 	}
 }

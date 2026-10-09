@@ -110,8 +110,12 @@ column. For a machine that did not move, read its conditions:
   leader is down at a time whatever the budget says.
 * `Downloading`: the machine still fetches or verifies the release.
   A slow link makes this step long. A download that receives no bytes
-  for one minute stops, and the machine retries it on its own. The
-  condition's message gives the reason of the last failure.
+  for one minute stops, and the machine retries it on its own. A
+  download that fails waits 10 seconds before the first retry, and the
+  wait doubles after each failure up to 2 minutes. A change of the
+  target release starts the new download without that wait. The
+  condition's message
+  gives the reason of the last failure and the time of the next retry.
 * `StagingFailed`: the machine could not write or withdraw a staged
   record. The message gives the error. When the target changed while
   another release was staged, the machine does not download the new

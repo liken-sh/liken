@@ -30,3 +30,13 @@ func testClient(t *testing.T, handler http.Handler) *apiclient.Client {
 	}
 	return apiclient.New(apiservertest.Host, server.Client(), credentials)
 }
+
+// readOnly takes write permission away from a directory until the
+// test ends.
+func readOnly(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+}

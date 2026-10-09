@@ -6,12 +6,12 @@ package main
 
 import (
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
 	"github.com/liken-sh/liken/liken/machine"
@@ -61,7 +61,7 @@ func TestANewTargetWithdrawsTheStagedReleaseOfAnother(t *testing.T) {
 				store, _ := stagedStore(t, "0.2.0", one.stagedDigest)
 				f, _ := refusingFetcher(t)
 
-				convergeSystemRelease(store, clusterWithTarget("0.2.0"), autoMachine(), slotBackedFacts("0.1.0", "A"), f, turnAwaiting)
+				convergeSystemRelease(store, clusterWithTarget("0.2.0"), autoMachine(), slotBackedFacts("0.1.0", "A"), f, turnAwaiting, nil)
 				synctest.Wait()
 
 				if staged, _ := store.LoadStaged(); (staged != nil) != one.staged {
@@ -77,7 +77,7 @@ func TestANewTargetWithdrawsAnOlderStagedRelease(t *testing.T) {
 		store, _ := stagedStore(t, "0.1.5", "sha256:"+strings.Repeat("dd", 32))
 		f, requests := refusingFetcher(t)
 
-		conv := convergeSystemRelease(store, clusterWithTarget("0.2.0"), autoMachine(), slotBackedFacts("0.1.0", "A"), f, turnAwaiting)
+		conv := convergeSystemRelease(store, clusterWithTarget("0.2.0"), autoMachine(), slotBackedFacts("0.1.0", "A"), f, turnAwaiting, nil)
 		synctest.Wait()
 
 		if staged, _ := store.LoadStaged(); staged != nil {
@@ -97,7 +97,7 @@ func TestARecordThatStaysStopsTheDownload(t *testing.T) {
 		f, requests := refusingFetcher(t)
 		readOnly(t, filepath.Join(root, "system"))
 
-		conv := convergeSystemRelease(store, clusterWithTarget("0.2.0"), autoMachine(), slotBackedFacts("0.1.0", "A"), f, turnAwaiting)
+		conv := convergeSystemRelease(store, clusterWithTarget("0.2.0"), autoMachine(), slotBackedFacts("0.1.0", "A"), f, turnAwaiting, nil)
 		synctest.Wait()
 
 		if conv.condition.Reason != "StagingFailed" || !strings.Contains(conv.condition.Message, "could not be withdrawn") {
@@ -109,12 +109,27 @@ func TestARecordThatStaysStopsTheDownload(t *testing.T) {
 	})
 }
 
-// readOnly takes write permission away from a directory until the
-// test ends.
-func readOnly(t *testing.T, dir string) {
-	t.Helper()
-	if err := os.Chmod(dir, 0o500); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+// A download that failed asks the loop for a pass at its retry time,
+// and the condition names that time, so its message stays the same
+// from one pass to the next and the status is not written again for
+// it.
+func TestAFailedDownloadAsksForAPassAtItsRetryTime(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store, _ := stagedStore(t, "0.1.5", "sha256:"+strings.Repeat("dd", 32))
+		f, _ := refusingFetcher(t)
+		converge := func(out *passOutcome) convergence {
+			return convergeSystemRelease(store, clusterWithTarget("0.2.0"), autoMachine(), slotBackedFacts("0.1.0", "A"), f, turnAwaiting, out)
+		}
+		converge(nil)
+		failed := awaitSettled(f)
+
+		out := &passOutcome{}
+		first, second := converge(out), converge(nil)
+
+		retryAt := failed.retryAt.UTC().Format(time.RFC3339)
+		if !out.wake.Equal(failed.retryAt) || !strings.Contains(first.condition.Message, retryAt) || first.condition != second.condition {
+			t.Errorf("wake %s, conditions %+v and %+v; want a wake at %s named in one unchanged message",
+				out.wake, first.condition, second.condition, retryAt)
+		}
+	})
 }

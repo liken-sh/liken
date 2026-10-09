@@ -4,13 +4,19 @@ package main
 // what storage settled into, does this machine bind its pod logs onto
 // a disk, and which directory does it bind? The decision is separable
 // from the mount syscall that acts on it, so it runs here as an
-// ordinary process. The mount itself, and the unmount at reboot, need
-// a real machine, and belong to the QEMU harness in dev-cluster/.
+// ordinary process, and a stand-in for `mountFilesystem` records the
+// bind instead of making it. The mount itself, and the unmount at
+// reboot, need a real machine, and belong to the QEMU harness in
+// dev-cluster/.
 
 import (
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/liken-sh/liken/liken/machine"
 )
@@ -71,5 +77,98 @@ func TestPodLogsFollowThePodEphemeralMountPoint(t *testing.T) {
 	}
 	if bind.source != filepath.Join(dir, podLogsSubdir) {
 		t.Errorf("the source follows the role's mount point: %s", bind.source)
+	}
+}
+
+// podLogMachine points the podEphemeral mount and the canonical log
+// path into one temporary directory, and records each bind instead of
+// making it. The paths are relative to that directory, and a file
+// named `blocker` there lets a case make a path impossible to create.
+type podLogMachine struct {
+	root  string
+	binds [][2]string
+}
+
+func newPodLogMachine(t *testing.T, kubeletPath, logsPath string) *podLogMachine {
+	t.Helper()
+	m := &podLogMachine{root: t.TempDir()}
+	if err := os.WriteFile(filepath.Join(m.root, "blocker"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	savedRole, savedDir, savedMount := roleMounts[machine.PodEphemeralRole], podLogsDir, mountFilesystem
+	t.Cleanup(func() {
+		roleMounts[machine.PodEphemeralRole], podLogsDir, mountFilesystem = savedRole, savedDir, savedMount
+	})
+	role := savedRole
+	role.path = filepath.Join(m.root, kubeletPath)
+	roleMounts[machine.PodEphemeralRole] = role
+	podLogsDir = filepath.Join(m.root, logsPath)
+	mountFilesystem = func(source, target, _ string, flags uintptr, _ string) error {
+		if flags == unix.MS_BIND {
+			m.binds = append(m.binds, [2]string{source, target})
+		}
+		return nil
+	}
+	return m
+}
+
+// A machine with podEphemeral on a disk binds a directory on that disk
+// onto the canonical log path. bindPodLogs creates both directories
+// first, because a bind needs an existing source and target.
+func TestBindPodLogsBindsTheDiskDirectoryOntoTheCanonicalPath(t *testing.T) {
+	m := newPodLogMachine(t, "kubelet", "var/log/pods")
+
+	bindPodLogs(onPartition())
+
+	source := filepath.Join(m.root, "kubelet", podLogsSubdir)
+	target := filepath.Join(m.root, "var/log/pods")
+	if !slices.Equal(m.binds, [][2]string{{source, target}}) {
+		t.Errorf("one bind from podEphemeral onto the log path, got %v", m.binds)
+	}
+	for _, dir := range []string{source, target} {
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			t.Errorf("%s exists as a directory before the bind: %v", dir, err)
+		}
+	}
+}
+
+// A machine without podEphemeral binds nothing and creates nothing at
+// the log path, so kubelet writes to the root filesystem's directory.
+func TestBindPodLogsBindsNothingWithoutPodEphemeral(t *testing.T) {
+	m := newPodLogMachine(t, "kubelet", "var/log/pods")
+	status := onPartition()
+	status.PodEphemeral.Backing = machine.BackingMemory
+
+	bindPodLogs(status)
+
+	if len(m.binds) != 0 {
+		t.Errorf("no role means no bind, got %v", m.binds)
+	}
+	if _, err := os.Stat(filepath.Join(m.root, "var/log/pods")); !os.IsNotExist(err) {
+		t.Errorf("the log path is left for kubelet to create: %v", err)
+	}
+}
+
+// A directory that cannot be created stops the bind before the mount.
+// The pod logs stay on the root filesystem, and the boot continues.
+func TestBindPodLogsSkipsTheBindWhenADirectoryFails(t *testing.T) {
+	cases := []struct {
+		name        string
+		kubeletPath string
+		logsPath    string
+	}{
+		{"the source on podEphemeral", "blocker/kubelet", "var/log/pods"},
+		{"the canonical target", "kubelet", "blocker/pods"},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			m := newPodLogMachine(t, one.kubeletPath, one.logsPath)
+
+			bindPodLogs(onPartition())
+
+			if len(m.binds) != 0 {
+				t.Errorf("no bind without both directories, got %v", m.binds)
+			}
+		})
 	}
 }

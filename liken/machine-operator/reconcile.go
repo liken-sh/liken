@@ -4,14 +4,11 @@ package main
 // observes the machine, acts on the spec, and reports status.
 
 import (
-	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"time"
 
-	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/kubernetes"
@@ -29,110 +26,6 @@ var factsTree = machine.FactsTree{Dir: machine.FactsDir}
 // kernel parameters.
 var sysctlRoot = machine.SysctlDir
 
-// carryOutConvergence performs one convergence decision's side
-// effects against one document's store, and returns the condition
-// to publish. An I/O failure downgrades the condition to
-// StagingFailed on the same condition type, so the report stays
-// attached to the right document.
-func carryOutConvergence(conv convergence, store machine.ManifestStore, what string, now time.Time) api.Condition {
-	failed := func(err error) api.Condition {
-		return api.Condition{Type: conv.condition.Type, Status: api.ConditionFalse, Reason: "StagingFailed", Message: err.Error()}
-	}
-	if conv.withdraw {
-		if err := store.WithdrawStaged(); err != nil {
-			fmt.Printf("withdrawing the staged %s: %v\n", what, err)
-		} else {
-			fmt.Printf("withdrew the staged %s; the cluster's copy matches this boot again\n", what)
-		}
-	}
-	if conv.clearRejection {
-		if err := store.ClearRejection(); err != nil {
-			fmt.Printf("clearing the %s rejection record: %v\n", what, err)
-		}
-	}
-	if conv.stage {
-		if err := store.WriteStaged(conv.manifest); err != nil {
-			return failed(err)
-		}
-		fmt.Printf("staged %s %.12s for the next boot\n", what, conv.hash)
-	}
-	if conv.requestReboot {
-		intent := &machine.RebootIntent{
-			Reason:       "applying the staged " + what,
-			ManifestHash: conv.hash,
-			RequestedAt:  now,
-		}
-		if err := machine.WriteRebootIntent(machine.OperatorRunDir, intent); err != nil {
-			return failed(err)
-		}
-		fmt.Printf("requested a reboot to apply %s %.12s\n", what, conv.hash)
-	}
-	if conv.requestRestart {
-		intent := &machine.RestartIntent{
-			Reason:      "applying the staged " + what,
-			RequestedAt: now,
-		}
-		if err := machine.WriteRestartIntent(machine.OperatorRunDir, intent); err != nil {
-			return failed(err)
-		}
-		fmt.Printf("requested a k3s restart to apply %s %.12s\n", what, conv.hash)
-	}
-	if conv.requestLoad {
-		intent := &machine.ModulesIntent{
-			Reason:       "loading the staged " + what + "'s added modules",
-			ManifestHash: conv.hash,
-			RequestedAt:  now,
-		}
-		if err := machine.WriteModulesIntent(machine.OperatorRunDir, intent); err != nil {
-			return failed(err)
-		}
-		fmt.Printf("requested a live module load to apply %s %.12s\n", what, conv.hash)
-	}
-	return conv.condition
-}
-
-// disruptions is one pass's running record of what has already
-// started: whether some document requested the reboot, and whether
-// a drain is holding one back. The documents pass through the gate
-// in a fixed order: the Machine's spec, the cluster document, the
-// system release, the registry credentials, and finally the
-// demotion. The restart suppression in gate depends on this order.
-// A reboot requested by an earlier document silences a later
-// document's restart, never the reverse.
-type disruptions struct {
-	draining  bool
-	rebooting bool
-
-	// events posts the drain's cordon about this Machine.
-	events machineEvents
-}
-
-// gate intercepts one document's convergence decision on its way to
-// its side effects. A reboot already requested this pass covers any
-// restart: the boot path re-renders everything a restart would have
-// applied, so a second intent would only add noise. (Init also
-// prefers the reboot file when both exist, so this guard is not
-// strictly needed, but it does no harm.) A granted reboot goes
-// through the drain first (drain.go): the node is cordoned and
-// emptied before the intent is written, so workloads move to other
-// nodes instead of being killed by the reboot. A pass whose Node
-// read failed skips the drain, because during a demotion there is
-// no Node to cordon, and the reboot must still happen. The Node's
-// copy stops answering after a failed watch (watches.go), so while the
-// API server is down the Node read fails and the drain is skipped the
-// same way. A Node that reads but whose pods do not list holds the
-// reboot (gateThroughDrain): a slow API server must not let a reboot
-// kill pods past their disruption budgets.
-func (d *disruptions) gate(c *apiclient.Client, node *nodeObject, nodeErr error, t turn, now time.Time, conv convergence) convergence {
-	conv.requestRestart = conv.requestRestart && !d.rebooting
-	if conv.requestReboot && t == turnGranted && nodeErr == nil {
-		conv = gateThroughDrain(c, node, conv, now, d.events)
-		d.draining = d.draining || !conv.requestReboot
-	}
-	d.rebooting = d.rebooting || conv.requestReboot
-	return conv
-}
-
 // reconcile is one full pass of the operator's job, always
 // starting from the current state: read the facts init left, apply
 // the spec's sysctls, read back what actually holds, and publish
@@ -141,14 +34,21 @@ func (d *disruptions) gate(c *apiclient.Client, node *nodeObject, nodeErr error,
 // ago, which is what the Kubernetes convention means by status
 // being reconstructible.
 //
-// The pass returns the status write's outcome, and nothing else.
-// Everything above that write reports itself as a condition, which
-// is a fact about the machine. A failed status write is different:
-// it is a fault in the operator, and it means nobody outside this
-// pod can see what the pass observed. That is what the layer 2
-// error counter counts (metrics.go).
-func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb *kubernetes.Heartbeat, mm *machineMetrics) error {
+// The pass returns the status write's error. Everything above that
+// write reports itself as a condition, which is a fact about the
+// machine. A failed status write is different: it is a fault in the
+// operator, and it means nobody outside this pod can see what the pass
+// observed. That is what the layer 2 error counter counts
+// (metrics.go).
+//
+// The pass also records into out each step it did not finish, each
+// write it made, and the earliest time a step asks to run again
+// (outcome.go). The pass's client reports every answer from the API
+// server there, and each step on the machine reports its own failures,
+// so the loop can retry the pass when something failed (retry.go).
+func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb *kubernetes.Heartbeat, mm *machineMetrics, out *passOutcome) error {
 	now := time.Now()
+	r = r.observedBy(out)
 	c := r.client
 
 	// This records what the object held before this pass touched
@@ -173,6 +73,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	if err == nil {
 		*status = *facts
 	}
+	out.failSoon("reading the facts", err)
 	// The pass starts from the conditions this release owns, so one
 	// that a newer release wrote drops here (ownedconditions.go).
 	status.Conditions = api.SetCondition(ownedConditions(m.Status.Conditions), factsCondition(err), now)
@@ -183,8 +84,8 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	// The same evidence, together with the version this boot
 	// reported in the facts, promotes a system release's proving
 	// boot (release.go).
-	settleClusterLifecycle(machine.MachineStateDir, cluster.ClusterManifestPath, facts)
-	settleSystemReleaseLifecycle(machine.MachineStateDir, facts)
+	settleClusterLifecycle(machine.MachineStateDir, cluster.ClusterManifestPath, facts, out)
+	settleSystemReleaseLifecycle(machine.MachineStateDir, facts, out)
 
 	// The imports lifecycle settles on its own evidence. This is not
 	// this operator's existence, but the Ready condition of every OS
@@ -192,7 +93,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	// tarball the boot imported, not only the one this pod runs from
 	// (imports.go).
 	status.Conditions = api.SetCondition(status.Conditions,
-		settleImportsLifecycle(c, machine.MachineStateDir, m.Metadata.Name, facts), now)
+		settleImportsLifecycle(c, machine.MachineStateDir, m.Metadata.Name, facts, out), now)
 
 	// Both sets of kernel parameters, on every pass. Applying the
 	// settings every liken machine holds is what returns a parameter
@@ -200,7 +101,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	// without a reboot. status.sysctls reports the two together, so an
 	// operator sees every parameter liken sets and its actual value in
 	// one place.
-	sysctls, defaultsErr, specErr := applySysctls(sysctlRoot, machine.OSSysctls, m.Spec.Sysctls)
+	sysctls, defaultsErr, specErr := applySysctls(sysctlRoot, machine.OSSysctls, m.Spec.Sysctls, out)
 	status.Sysctls = sysctls
 	status.Conditions = api.SetCondition(status.Conditions, sysctlsCondition(defaultsErr, specErr), now)
 
@@ -222,7 +123,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	// two can never disagree the way they could if this program
 	// depended on the pod's network namespace carrying the host's UTS
 	// namespace along with it.
-	hostEntries, hostsErr := applyHostEntries(hostsPath, m.Metadata.Name, m.Spec.Network.HostEntries)
+	hostEntries, hostsErr := applyHostEntries(hostsPath, m.Metadata.Name, m.Spec.Network.HostEntries, out)
 	status.HostEntries = hostEntries
 	status.Conditions = api.SetCondition(status.Conditions,
 		hostEntriesCondition(m.Spec.Network.HostEntries, hostsErr, podStale), now)
@@ -344,7 +245,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	// delivers (cdi.go). This runs without a Node, because a prepared
 	// claim is a file on this machine, and containerd reads that file
 	// at every container creation.
-	refreshCDISpecs(draSysfsRoot)
+	refreshCDISpecs(draSysfsRoot, out)
 
 	// Convergence checks whether the cluster's copy of each document
 	// matches what this boot actuated. If not, it stages the
@@ -367,7 +268,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	conv := disr.gate(c, node, nodeErr, t, now,
 		decideConvergence(m, facts, machineRejection, readStagedHash(machineStore), t))
 	status.Conditions = api.SetCondition(status.Conditions,
-		carryOutConvergence(conv, machineStore, "spec", now), now)
+		carryOutConvergence(conv, machineStore, machine.OperatorRunDir, "spec", now, out), now)
 	// Each gated document also reports itself in status.pending, so
 	// a client that needs the staged hash has a field instead of a
 	// condition message to read. The list rebuilds on every pass,
@@ -390,7 +291,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 		cconv, liveCluster = convergeClusterDocument(r, clusterStore, clusterName, m, facts, t)
 		cconv = disr.gate(c, node, nodeErr, t, now, cconv)
 		status.Conditions = api.SetCondition(status.Conditions,
-			carryOutConvergence(cconv, clusterStore, "cluster document", now), now)
+			carryOutConvergence(cconv, clusterStore, machine.OperatorRunDir, "cluster document", now, out), now)
 		if cconv.pending != nil {
 			status.Pending = append(status.Pending, *cconv.pending)
 		}
@@ -400,9 +301,9 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 		if liveCluster != nil {
 			systemStore := machine.SystemReleases(machine.MachineStateDir)
 			vconv := disr.gate(c, node, nodeErr, t, now,
-				convergeSystemRelease(systemStore, liveCluster, m, facts, f, t))
+				convergeSystemRelease(systemStore, liveCluster, m, facts, f, t, out))
 			status.Conditions = api.SetCondition(status.Conditions,
-				carryOutConvergence(vconv, systemStore, "system release", now), now)
+				carryOutConvergence(vconv, systemStore, machine.OperatorRunDir, "system release", now, out), now)
 			if vconv.pending != nil {
 				status.Pending = append(status.Pending, *vconv.pending)
 			}
@@ -412,7 +313,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 		rconv := disr.gate(c, node, nodeErr, t, now,
 			convergeRegistryCredentials(r, credentialsStore, m, facts, t))
 		status.Conditions = api.SetCondition(status.Conditions,
-			carryOutConvergence(rconv, credentialsStore, "registry credentials", now), now)
+			carryOutConvergence(rconv, credentialsStore, machine.OperatorRunDir, "registry credentials", now, out), now)
 		if rconv.pending != nil {
 			status.Pending = append(status.Pending, *rconv.pending)
 		}
@@ -429,7 +330,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	// can be asked to reboot too.
 	rreq := disr.gate(c, node, nodeErr, t, now, decideRebootRequest(m, facts, t))
 	status.Conditions = api.SetCondition(status.Conditions,
-		carryOutRebootRequest(machine.OperatorRunDir, rreq, now), now)
+		carryOutRebootRequest(machine.OperatorRunDir, rreq, now, out), now)
 	if rreq.pending != nil {
 		status.Pending = append(status.Pending, *rreq.pending)
 	}
@@ -468,7 +369,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 		// stale Node carries a registered etcd membership, so the
 		// operator must delete it.
 		d := decideDemotion(status.Role, node.Metadata.Labels, m.Spec.RebootPolicyOrDefault(), t)
-		condition := carryOutDemotion(c, node, d)
+		condition := carryOutDemotion(c, machine.OperatorRunDir, node, d, out)
 		status.Conditions = api.SetCondition(status.Conditions, condition, now)
 		disr.rebooting = disr.rebooting || d.cleanup
 
@@ -548,62 +449,4 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	}
 	postStatusEvents(notes, &stored, status)
 	return nil
-}
-
-// publishOwnStatus is kubernetes.PublishStatus for the machine
-// writing about itself, which is the one writer entitled to resolve
-// a conflict, rather than give up on the write. A Machine's status
-// has exactly two other writers: the rollout conductor, granting and
-// reclaiming reboot turns, and the fleet sweep, marking silent
-// machines Lost. If one of them wrote between this pass's read and
-// its write, this machine's observations are still the freshest
-// thing anyone has, because it observes the hardware directly. So
-// the answer is to retry against a fresh read, rather than discard
-// the pass. The merge honors each condition's owner. The
-// conductor's grant carries over from the fresh copy exactly as
-// written, present or absent, with its transition time untouched
-// (the rollout's stall clock measures from that time), and every
-// other field is this pass's own observation. A Lost verdict needs
-// no special handling: overwriting it is exactly how a machine
-// announces that it is back.
-//
-// before is the status the object carried when the pass began,
-// rendered as the JSON a write would send. When this pass observed
-// exactly that, the function writes nothing at all. A settled
-// machine's report is the same every ten seconds, and sending it
-// anyway would make the API server, and every etcd leader behind
-// it, process a write that changes nothing. The kubelet applies the
-// same restraint to Node status, and the machine's liveness does
-// not depend on this write anyway, because that is the heartbeat
-// lease's job. Skipping against a stale working copy is safe for
-// the same reason every skipped event is safe: whatever made the
-// server's copy differ arrives on the watch, and the pass it
-// triggers sees the difference and writes.
-//
-// One retry is enough. A second conflict means the object is
-// changing faster than this pass can read it, and the write that
-// won the race is already queued on the watch, so the pass it
-// triggers will publish moments from now.
-func publishOwnStatus(r *reader, m *machine.Machine, status *machine.MachineStatus, before []byte) error {
-	after, err := json.Marshal(status)
-	if err == nil && bytes.Equal(before, after) {
-		return nil
-	}
-
-	err = r.publishStatus(m, status)
-	if !errors.Is(err, apiclient.ErrConflict) {
-		return err
-	}
-	// This read goes to the API server, not to the watch's copy. It
-	// follows a write that lost to another writer, and the copy can
-	// still lag behind the write that won.
-	fresh, gerr := r.freshMachine(m.Metadata.Name)
-	if gerr != nil {
-		return err
-	}
-	status.Conditions = api.RemoveCondition(slices.Clone(status.Conditions), machine.RebootApprovedCondition)
-	if grant := api.FindCondition(fresh.Status.Conditions, machine.RebootApprovedCondition); grant != nil {
-		status.Conditions = append(status.Conditions, *grant)
-	}
-	return r.publishStatus(fresh, status)
 }

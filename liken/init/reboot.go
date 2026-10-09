@@ -46,6 +46,10 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
+// watchIntentDir watches the intent directory. It is a package
+// variable so a test can hand the watch a channel that has closed.
+var watchIntentDir = machine.WatchDir
+
 // watchForOperatorIntents watches the operator's channel and delivers
 // each intent that lands there. It establishes an inotify watch on the
 // directory, runs an initial scan, and then scans again on every wake.
@@ -59,7 +63,7 @@ import (
 func watchForOperatorIntents(ctx context.Context, dir string,
 	reboots chan<- machine.RebootIntent, restarts chan<- machine.RestartIntent,
 	loads chan<- machine.ModulesIntent) error {
-	wake, err := machine.WatchDir(ctx, dir)
+	wake, err := watchIntentDir(ctx, dir)
 	if err != nil {
 		return fmt.Errorf("watching %s: %w", dir, err)
 	}
@@ -70,7 +74,10 @@ func watchForOperatorIntents(ctx context.Context, dir string,
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-wake:
+		case _, ok := <-wake:
+			if !ok {
+				return fmt.Errorf("the watch on %s stopped", dir)
+			}
 		}
 		if scanIntents(dir, reboots, restarts, loads) {
 			return nil

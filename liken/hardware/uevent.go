@@ -28,6 +28,12 @@ import (
 // signal and drops the rest. For example, a burst of eleven uevents
 // from one USB stick's enumeration needs one re-walk, not eleven.
 //
+// The channel closes when the listener stops for any reason other
+// than the end of the context. A listener that stops loses every
+// event after it, so a caller that receives from a closed channel
+// opens the listener again and walks sysfs again, because changes may
+// have happened while nothing listened.
+//
 // The socket is non-blocking. The reader waits for it in poll, not in
 // a read, so it can also watch a cancel pipe in the same poll and stop
 // the moment the context ends. See watchUevents and readUevents for the
@@ -70,11 +76,21 @@ func watchUevents(ctx context.Context, fd int) (<-chan struct{}, error) {
 		return nil, fmt.Errorf("opening the cancel pipe: %w", err)
 	}
 	notify := make(chan struct{}, 1)
+	// The cancel goroutine also ends when the reader stops on its own,
+	// so a listener that failed leaves no goroutine and no descriptor
+	// behind for the life of the context.
+	done := make(chan struct{})
 	go func() {
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case <-done:
+		}
 		unix.Close(pipe[1])
 	}()
-	go readUevents(fd, pipe[0], notify)
+	go func() {
+		readUevents(fd, pipe[0], notify)
+		close(done)
+	}()
 	return notify, nil
 }
 
@@ -82,6 +98,14 @@ func watchUevents(ctx context.Context, fd int) (<-chan struct{}, error) {
 // socket and the cancel pipe. A ready socket means a datagram to read;
 // a ready cancel pipe means the context is done and the loop returns. It
 // closes the descriptors it owns as it leaves.
+//
+// Every other way out closes notify as well: a poll error, and a socket
+// that poll reports is not open (POLLNVAL) or hung up (POLLHUP). The
+// reader cannot recover from any of them, and it would spin on the last
+// two, because poll keeps reporting them at once. A netlink socket never
+// hangs up while it is open, and an overflow reports POLLERR, which the
+// read below answers with ENOBUFS, so neither ends the reader. Only this
+// goroutine sends on notify, so the close cannot race a send.
 func readUevents(fd, cancelR int, notify chan<- struct{}) {
 	defer unix.Close(fd)
 	defer unix.Close(cancelR)
@@ -96,11 +120,12 @@ func readUevents(fd, cancelR int, notify chan<- struct{}) {
 			// A signal interrupted the wait. Wait again.
 			continue
 		}
-		if err != nil {
+		if err == nil && fds[1].Revents != 0 {
+			// The cancel pipe reports a hangup. The context is done.
 			return
 		}
-		if fds[1].Revents != 0 {
-			// The cancel pipe reports a hangup. The context is done.
+		if err != nil || fds[0].Revents&(unix.POLLNVAL|unix.POLLHUP) != 0 {
+			close(notify)
 			return
 		}
 		size, _, err := unix.Recvfrom(fd, buf, 0)

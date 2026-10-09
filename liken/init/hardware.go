@@ -14,6 +14,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -76,36 +77,57 @@ func discoverUnclaimed(catalog *hardware.Catalog) []machine.UnclaimedDevice {
 // the boot's snapshot, so a disk that appeared between the boot's walk
 // and this watch's start still reads as a change worth publishing.
 func watchHardware(catalog *hardware.Catalog, tree machine.FactsTree, last []machine.UnclaimedDevice, lastDisks []machine.BlockDevice) func(ctx context.Context) error {
+	// walk reads sysfs and publishes what changed since the last walk.
+	// The listener opens first and the walk runs right after, so a
+	// change made before the listener opened, including one made while
+	// a stopped listener was being replaced, still reaches the facts.
+	walk := func() {
+		devices := hardware.DiscoverDevices(sysfsRoot, catalog.PCI)
+		unclaimed := catalog.Unclaimed(devices, serioAttachments.declaredEntries())
+		disks := discoverBlockDevices()
+		for _, line := range hardwareTransitions(last, unclaimed, devices) {
+			fmt.Println(line)
+		}
+		if !slices.EqualFunc(last, unclaimed, unclaimedEqual) || !slices.EqualFunc(lastDisks, disks, blockDeviceEqual) {
+			tree.WriteUnclaimed(unclaimed)
+			tree.WriteBlockDevices(disks)
+		}
+		last, lastDisks = unclaimed, disks
+	}
 	return func(ctx context.Context) error {
-		uevents, err := hardware.ListenForUevents(ctx)
+		uevents, err := listenForUevents(ctx)
 		if err != nil {
 			return err
 		}
 		for {
+			walk()
 			select {
 			case <-ctx.Done():
 				return nil
-			case <-uevents:
+			case _, ok := <-uevents:
+				if !ok {
+					return errUeventsStopped
+				}
 			}
 			// One plugged-in device produces a burst of uevents (the lab
 			// measured eleven for one USB stick). This code waits for
 			// the burst to finish rather than walking once per event.
 			settle(ctx, uevents, time.Second, 5*time.Second)
-
-			devices := hardware.DiscoverDevices(sysfsRoot, catalog.PCI)
-			unclaimed := catalog.Unclaimed(devices, serioAttachments.declaredEntries())
-			disks := discoverBlockDevices()
-			for _, line := range hardwareTransitions(last, unclaimed, devices) {
-				fmt.Println(line)
-			}
-			if !slices.EqualFunc(last, unclaimed, unclaimedEqual) || !slices.EqualFunc(lastDisks, disks, blockDeviceEqual) {
-				tree.WriteUnclaimed(unclaimed)
-				tree.WriteBlockDevices(disks)
-			}
-			last, lastDisks = unclaimed, disks
 		}
 	}
 }
+
+// listenForUevents opens the kernel's uevent socket. It is a package
+// variable so a test can hand a component a listener that has stopped,
+// or one whose wakes the test sends, because a test cannot make the
+// kernel stop the real socket or send it a uevent.
+var listenForUevents = hardware.ListenForUevents
+
+// errUeventsStopped ends a component whose uevent listener stopped.
+// The machine plane starts the component again, which opens a new
+// listener and walks sysfs again before it waits, so a change made
+// while nothing listened is still reported.
+var errUeventsStopped = errors.New("the uevent listener stopped")
 
 // settle drains further uevent signals until quiet lasts a full
 // interval, so a burst of arrivals becomes one walk, but only up to
@@ -118,7 +140,9 @@ func watchHardware(catalog *hardware.Catalog, tree machine.FactsTree, last []mac
 // for minutes because of an unrelated crash-looping pod. Walks are
 // cheap and idempotent, so when the stream will not go quiet, walking
 // anyway is the correct move. Anything that changes during the walk
-// sends another uevent signal.
+// sends another uevent signal. A closed channel means the listener
+// stopped, so the wait ends at once, and the caller's next receive
+// finds the close and opens the listener again.
 func settle(ctx context.Context, uevents <-chan struct{}, quiet, ceiling time.Duration) {
 	deadline := time.NewTimer(ceiling)
 	defer deadline.Stop()
@@ -128,7 +152,10 @@ func settle(ctx context.Context, uevents <-chan struct{}, quiet, ceiling time.Du
 		select {
 		case <-ctx.Done():
 			return
-		case <-uevents:
+		case _, ok := <-uevents:
+			if !ok {
+				return
+			}
 			timer.Reset(quiet)
 		case <-timer.C:
 			return

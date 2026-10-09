@@ -69,12 +69,48 @@ func TestRefreshFollowsADeviceThatEnumeratedAgain(t *testing.T) {
 	prepared(t, fixture)
 
 	fixture.enumerate(t, 9)
-	refreshCDISpecs(draSysfsRoot)
+	refreshCDISpecs(draSysfsRoot, nil)
 
 	paths := specPaths(t, fixture, "claim-1")
 	slices.Sort(paths)
 	if !slices.Equal(paths, []string{"/dev/bus/usb/002/009", "/dev/sda"}) {
 		t.Errorf("paths = %v, want the node this enumeration assigned", paths)
+	}
+}
+
+// A refresh that rewrites a spec records the write in the pass's
+// outcome, and a refresh that finds the spec current records nothing.
+func TestARefreshRecordsTheSpecsItRewrites(t *testing.T) {
+	fixture := newDRAFixture(t)
+	fixture.enumerate(t, 4)
+	prepared(t, fixture)
+	current := &passOutcome{}
+	refreshCDISpecs(draSysfsRoot, current)
+
+	fixture.enumerate(t, 9)
+	rewritten := &passOutcome{}
+	refreshCDISpecs(draSysfsRoot, rewritten)
+
+	if len(current.writes) != 0 || len(rewritten.writes) != 1 {
+		t.Errorf("writes: %q for a current spec and %q after a re-enumeration, want none and one", current.writes, rewritten.writes)
+	}
+}
+
+// A spec that does not decode stays that way until something replaces
+// it, so its failure retries at the slow pace.
+func TestACorruptSpecIsALastingFailure(t *testing.T) {
+	fixture := newDRAFixture(t)
+	fixture.enumerate(t, 4)
+	prepared(t, fixture)
+	if err := os.WriteFile(cdiSpecPath("claim-1"), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := &passOutcome{}
+
+	refreshCDISpecs(draSysfsRoot, out)
+
+	if got := failureKinds(out); !slices.Equal(got, []failureKind{lasting}) {
+		t.Errorf("kinds = %v, want one lasting failure", got)
 	}
 }
 
@@ -90,7 +126,7 @@ func TestRefreshLeavesASpecThatStillMatchesAlone(t *testing.T) {
 	if err := os.Chtimes(path, written, written); err != nil {
 		t.Fatal(err)
 	}
-	refreshCDISpecs(draSysfsRoot)
+	refreshCDISpecs(draSysfsRoot, nil)
 
 	info, err := os.Stat(path)
 	if err != nil {
@@ -112,7 +148,7 @@ func TestRefreshKeepsTheNodesOfHardwareThatLeft(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(draSysfsRoot, "bus", "usb", "devices", "2-1:1.0")); err != nil {
 		t.Fatal(err)
 	}
-	refreshCDISpecs(draSysfsRoot)
+	refreshCDISpecs(draSysfsRoot, nil)
 
 	paths := specPaths(t, fixture, "claim-1")
 	slices.Sort(paths)
@@ -140,7 +176,7 @@ func TestRefreshDeliversTheBusNodeAloneAfterADriverDetach(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(stick, "host0")); err != nil {
 		t.Fatal(err)
 	}
-	refreshCDISpecs(draSysfsRoot)
+	refreshCDISpecs(draSysfsRoot, nil)
 
 	paths := specPaths(t, fixture, "claim-1")
 	if !slices.Equal(paths, []string{"/dev/bus/usb/002/004"}) {
@@ -159,7 +195,7 @@ func TestRefreshDeliversUHIDAfterTheModuleLoads(t *testing.T) {
 	prepared(t, fixture)
 
 	miscDevice(t, draSysfsRoot, "uhid", 239)
-	refreshCDISpecs(draSysfsRoot)
+	refreshCDISpecs(draSysfsRoot, nil)
 
 	paths := specPaths(t, fixture, "claim-1")
 	slices.Sort(paths)
@@ -179,7 +215,7 @@ func TestRefreshIgnoresFilesItDidNotWrite(t *testing.T) {
 	if err := os.WriteFile(foreign, []byte("{}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	refreshCDISpecs(draSysfsRoot)
+	refreshCDISpecs(draSysfsRoot, nil)
 
 	raw, err := os.ReadFile(foreign)
 	if err != nil {

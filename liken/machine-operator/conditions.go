@@ -151,9 +151,9 @@ func awaitingPodRefresh(podStale bool, err error) bool {
 // them differently, and each joins every failure in its own set,
 // because a message that names one bad parameter, when three are
 // failing, would send a person through this loop three times.
-func applySysctls(dir string, defaults, desired map[string]string) (map[string]string, error, error) {
-	observed, defaultsErr := applySysctlSet(dir, defaults)
-	fromSpec, specErr := applySysctlSet(dir, desired)
+func applySysctls(dir string, defaults, desired map[string]string, out *passOutcome) (map[string]string, error, error) {
+	observed, defaultsErr := applySysctlSet(dir, defaults, out)
+	fromSpec, specErr := applySysctlSet(dir, desired, out)
 	maps.Copy(observed, fromSpec)
 	return observed, defaultsErr, specErr
 }
@@ -173,8 +173,9 @@ func applySysctls(dir string, defaults, desired map[string]string) (map[string]s
 //
 // The returned map holds what the kernel now reports, not what the
 // function wrote. If another process resets a value, the next pass
-// finds the divergence and writes it again.
-func applySysctlSet(dir string, desired map[string]string) (map[string]string, error) {
+// finds the divergence and writes it again. The pass's outcome records
+// each write, and each failure for the retry, by the parameter's name.
+func applySysctlSet(dir string, desired map[string]string, out *passOutcome) (map[string]string, error) {
 	var errs []error
 	observed := map[string]string{}
 	for _, name := range slices.Sorted(maps.Keys(desired)) {
@@ -185,8 +186,10 @@ func applySysctlSet(dir string, desired map[string]string) (map[string]string, e
 		}
 		if err := machine.ApplySysctl(dir, name, value); err != nil {
 			errs = append(errs, err)
+			out.fail("writing the sysctl "+name, err)
 			continue
 		}
+		out.wrote("writing the sysctl " + name)
 		if value, err := machine.ReadSysctl(dir, name); err == nil {
 			observed[name] = value
 		}

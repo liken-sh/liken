@@ -67,8 +67,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/liken-sh/liken/liken/hardware"
 )
 
 // These are the roots this file reads and writes. They are variables
@@ -103,7 +101,7 @@ const diskLinksQuiet = 250 * time.Millisecond
 // re-reads the whole truth, so a coalesced or missed event costs
 // nothing.
 func watchDiskLinks(ctx context.Context) error {
-	uevents, err := hardware.ListenForUevents(ctx)
+	uevents, err := listenForUevents(ctx)
 	if err != nil {
 		return err
 	}
@@ -113,7 +111,10 @@ func watchDiskLinks(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-uevents:
+		case _, ok := <-uevents:
+			if !ok {
+				return errUeventsStopped
+			}
 		}
 		// One LUN or local disk arriving produces a burst: the SCSI
 		// target, the SCSI device, the block device, and one event

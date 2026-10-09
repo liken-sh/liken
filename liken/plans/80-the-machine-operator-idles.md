@@ -2,7 +2,7 @@
 
 Milestone 80. Proposed 2026-10-09. The last of five milestones that
 remove the ten-second ticker from `machine-operator`'s reconcile loop.
-[Milestone 76](76-a-pass-reports-what-it-did-not-finish.md) gives the
+[Milestone 76](completed/76-a-pass-reports-what-it-did-not-finish.md) gives the
 series and the table of every job the ticker does. Milestones 76 to 79
 move every job with an event off the ticker. Three jobs remain: the
 heartbeat lease, which needs a clock; the sysctls, which have no
@@ -199,14 +199,24 @@ insurance against a bug that drops a requeue.
 
 ## The ticker
 
-The ticker and its arm in the `select` are deleted. The comments that
-describe the ticker or its cadence change with it:
+The ticker and its arm in the `select` are deleted. Two things the
+ticker does in milestone 76 move to the retry timer first:
+
+- A facts watch whose channel closed opens again on a tick today. It
+  must record a transient failure instead, so the retry timer opens it
+  again at the transient pace and cannot run passes back to back.
+  Without that record, a dead facts watch never opens again.
+- A lasting failure that a person fixes outside the `Machine`, such
+  as a `403` that an RBAC grant fixes, waits up to five minutes for
+  its next try once no tick comes sooner. Decide whether a `403` and
+  a `422` deserve a lower ceiling than a missing kernel parameter. The comments that describe the ticker or its
+cadence change with it:
 
 - `main.go` and the head of `dra.go`;
 - `kubernetes/heartbeat.go`, `kubernetes/apiclient.go`, and
   `kubernetes/resourceslices.go`;
-- `fetch.go`, `release.go`, `watches.go`, `reconcile.go`, `hosts.go`,
-  and `drain.go`;
+- `fetch.go`, `release.go`, `watches.go`, `reconcile.go`,
+  `ownstatus.go`, `hosts.go`, and `drain.go`;
 - `cluster-operator/main.go`, where it describes the machine
   operators' cadence.
 

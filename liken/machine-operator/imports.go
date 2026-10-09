@@ -145,7 +145,7 @@ func decideImportsPromotion(in importsInputs, facts *machine.MachineStatus) impo
 // write. If the promotion write ran first, a badly-timed power cut
 // could prove a store whose latent unpacks are still dirty, which is
 // the exact false claim this lifecycle exists to prevent.
-func settleImportsLifecycle(c *apiclient.Client, root, nodeName string, facts *machine.MachineStatus) api.Condition {
+func settleImportsLifecycle(c *apiclient.Client, root, nodeName string, facts *machine.MachineStatus, out *passOutcome) api.Condition {
 	store := machine.ImportedImagesStore(root)
 	in := importsInputs{}
 	if facts != nil && facts.Boot.ImportsSource == machine.ManifestSourceStaged {
@@ -168,21 +168,30 @@ func settleImportsLifecycle(c *apiclient.Client, root, nodeName string, facts *m
 			}
 		}
 	}
+	out.fail("reading the imports record", in.storeErr)
 	v := decideImportsPromotion(in, facts)
 	if !v.promote {
 		return v.condition
 	}
 	if err := syncContainerStore(); err != nil {
+		out.fail("syncing the container store", err)
 		return convergenceUnknown(v.condition.Type, "PromotionFailed",
 			fmt.Sprintf("syncing the container store before promotion: %v", err))
 	}
 	if err := store.Promote(); err != nil {
+		out.fail("promoting the imports record", err)
 		return convergenceUnknown(v.condition.Type, "PromotionFailed",
 			fmt.Sprintf("promoting the imports record: %v", err))
 	}
+	out.wrote("promoting the imports record")
 	fmt.Printf("proved this boot's imports (%.12s); the container store is trusted\n", facts.Boot.ImportsHash)
 	return v.condition
 }
+
+// containerStoreDir is the container store's tree. It is a package
+// variable for the same reason as sysctlRoot: a test of a promotion
+// points it at a tempdir, so the test syncs no host filesystem.
+var containerStoreDir = machine.K3sAgentDir
 
 // syncContainerStore flushes everything on the container store's
 // filesystem to disk. The store is reachable inside this pod as a
@@ -194,7 +203,7 @@ func settleImportsLifecycle(c *apiclient.Client, root, nodeName string, facts *m
 // this store, including images whose pods never schedule here, can
 // be torn by a crash.
 func syncContainerStore() error {
-	f, err := os.Open(machine.K3sAgentDir)
+	f, err := os.Open(containerStoreDir)
 	if err != nil {
 		return err
 	}

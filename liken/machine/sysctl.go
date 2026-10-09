@@ -15,6 +15,7 @@ package machine
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,7 +42,7 @@ func sysctlPath(dir, name string) (string, error) {
 	// absolute or upward-pointing before the join, instead of
 	// inspecting the result after.
 	if filepath.IsAbs(rel) || rel != filepath.Clean(rel) || strings.HasPrefix(rel, "..") {
-		return "", fmt.Errorf("sysctl name %q escapes %s", name, dir)
+		return "", fmt.Errorf("sysctl name %q escapes %s: %w", name, dir, fs.ErrInvalid)
 	}
 	return filepath.Join(dir, rel), nil
 }

@@ -115,7 +115,7 @@ func bringUpNetwork(spec machine.NetworkSpec, clusterDoc *cluster.Cluster) ([]*c
 	// interface below. Reading it once also means that every error
 	// message can list the same set of ports, which is the list a
 	// person needs to correct the manifest.
-	links, err := netlink.LinkList()
+	links, err := listLinks()
 	if err != nil {
 		return nil, nil, fmt.Errorf("listing interfaces: %w", err)
 	}
@@ -232,13 +232,21 @@ func resolvConf(conns []*connection) string {
 	return b.String()
 }
 
-// The two netlink calls the passes make, as variables so a test can
-// run the whole bring-up with no kernel, including a raise that
-// never returns.
+// The netlink calls the passes make, as variables so a test can run
+// the whole bring-up with no kernel, including a raise that never
+// returns. The link list comes through listLinks (report.go), the
+// same seam the hardware report reads.
 var (
 	linkByName = netlink.LinkByName
 	linkSetUp  = netlink.LinkSetUp
+	addrAdd    = netlink.AddrAdd
+	routeAdd   = netlink.RouteAdd
 )
+
+// requestLease is the DHCP exchange, a variable holding acquireLease
+// so a test can hand the addressing a lease with no wire and no
+// server.
+var requestLease = acquireLease
 
 // bringUpInterface raises one link and gives it an address, using
 // the method that the interface spec chose. Only pass one calls it:
@@ -268,7 +276,7 @@ func addressInterface(link netlink.Link, ifc machine.InterfaceSpec) (*connection
 		return applyStatic(link, ifc)
 	}
 	fmt.Printf("liken: negotiating DHCP on %s\n", ifc.Name)
-	lease, err := acquireLease(ifc.Name)
+	lease, err := requestLease(ifc.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -403,7 +411,7 @@ func applyStatic(link netlink.Link, ifc machine.InterfaceSpec) (*connection, err
 	if err != nil {
 		return nil, fmt.Errorf("address %q: %w", ifc.Address, err)
 	}
-	if err := netlink.AddrAdd(link, addr); err != nil {
+	if err := addrAdd(link, addr); err != nil {
 		return nil, fmt.Errorf("assigning %s: %w", ifc.Address, err)
 	}
 
@@ -421,7 +429,7 @@ func applyStatic(link netlink.Link, ifc machine.InterfaceSpec) (*connection, err
 		}
 		conn.gateway = gw
 		route := &netlink.Route{LinkIndex: link.Attrs().Index, Gw: gw}
-		if err := netlink.RouteAdd(route); err != nil {
+		if err := routeAdd(route); err != nil {
 			return nil, fmt.Errorf("default route via %s: %w", gw, err)
 		}
 	}
@@ -480,7 +488,7 @@ func applyLease(link netlink.Link, lease *nclient4.Lease, ifc machine.InterfaceS
 	ack := lease.ACK
 
 	addr := &net.IPNet{IP: ack.YourIPAddr, Mask: ack.SubnetMask()}
-	if err := netlink.AddrAdd(link, &netlink.Addr{IPNet: addr}); err != nil {
+	if err := addrAdd(link, &netlink.Addr{IPNet: addr}); err != nil {
 		return nil, fmt.Errorf("assigning %s: %w", addr, err)
 	}
 
@@ -509,7 +517,7 @@ func applyLease(link netlink.Link, lease *nclient4.Lease, ifc machine.InterfaceS
 			LinkIndex: link.Attrs().Index,
 			Gw:        conn.gateway,
 		}
-		if err := netlink.RouteAdd(route); err != nil {
+		if err := routeAdd(route); err != nil {
 			return nil, fmt.Errorf("default route via %s: %w", conn.gateway, err)
 		}
 	}

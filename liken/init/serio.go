@@ -38,7 +38,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/liken-sh/liken/liken/hardware"
 	"github.com/liken-sh/liken/liken/machine"
 )
 
@@ -123,7 +122,7 @@ func (r *serioRegistry) declaredEntries() []machine.SerioAttachment {
 // for a uevent.
 func watchSerio(r *serioRegistry, tree machine.FactsTree) func(context.Context) error {
 	return func(ctx context.Context) error {
-		uevents, err := hardware.ListenForUevents(ctx)
+		uevents, err := listenForUevents(ctx)
 		if err != nil {
 			return err
 		}
@@ -135,12 +134,15 @@ func watchSerio(r *serioRegistry, tree machine.FactsTree) func(context.Context) 
 				timer = time.NewTimer(wait)
 				retry = timer.C
 			}
-			waitForSerioWork(ctx, uevents, r.nudge, retry)
+			listening := waitForSerioWork(ctx, uevents, r.nudge, retry)
 			if timer != nil {
 				timer.Stop()
 			}
 			if ctx.Err() != nil {
 				return nil
+			}
+			if !listening {
+				return errUeventsStopped
 			}
 		}
 	}
@@ -151,16 +153,21 @@ func watchSerio(r *serioRegistry, tree machine.FactsTree) func(context.Context) 
 // it settle, or when a refusal's backoff runs out. A holder ends when
 // the kernel hangs up its tty, which comes before the kernel removes
 // the tty, so a walk at the nudge itself would read a tty that is
-// about to leave and report a refusal for one walk.
-func waitForSerioWork(ctx context.Context, uevents, nudge <-chan struct{}, retry <-chan time.Time) {
+// about to leave and report a refusal for one walk. It answers false
+// when the uevent listener stopped.
+func waitForSerioWork(ctx context.Context, uevents, nudge <-chan struct{}, retry <-chan time.Time) bool {
 	select {
 	case <-ctx.Done():
 	case <-nudge:
 		settle(ctx, uevents, serioQuiet, 5*time.Second)
-	case <-uevents:
+	case _, ok := <-uevents:
+		if !ok {
+			return false
+		}
 		settle(ctx, uevents, serioQuiet, 5*time.Second)
 	case <-retry:
 	}
+	return true
 }
 
 // publish runs one walk, prints each status that changed, and

@@ -3,15 +3,21 @@ package main
 // Tests for the clock discipline's decisions: where a machine gets
 // its time, what it reports about its clock, and how much slewing it
 // asks of the kernel at once. The syscalls that act on these
-// decisions, clock_settime and adjtimex, run only as PID 1. Tests
-// for those syscalls belong to the QEMU harness.
+// decisions, clock_settime and adjtimex, run only as PID 1, so the
+// boot step's tests replace them with `fakeClockActions`. Tests for
+// the syscalls themselves belong to the QEMU harness.
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
@@ -106,6 +112,36 @@ func TestTimeSourcesFollowerFallsBackToTheEndpoint(t *testing.T) {
 	sources := timeSources(c, api.RoleFollower, t.TempDir())
 	if !slices.Equal(sources, []string{"10.10.0.1"}) {
 		t.Errorf("got %v", sources)
+	}
+}
+
+// A leader that cannot be resolved leaves the follower asking the
+// endpoint's host. A typo in `nodeCIDR` or a damaged manifest must not
+// leave a follower with no time source.
+func TestTimeSourcesFollowerFallsBackPastAnUnresolvableLeader(t *testing.T) {
+	cases := []struct {
+		name     string
+		nodeCIDR string
+		manifest string
+	}{
+		{"a node network that does not parse", "10.10.0.0/99", "kind: Machine\nmetadata:\n  name: node-1\n"},
+		{"a leader manifest that does not parse", "10.10.0.0/24", "kind: Machine\nmetadata: [node-1\n"},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			c := clusterWithTime(nil, "https://cluster.example.com:6443")
+			c.Spec.Network.NodeCIDR = one.nodeCIDR
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "node-1.yaml"), []byte(one.manifest), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			sources := timeSources(c, api.RoleFollower, dir)
+
+			if !slices.Equal(sources, []string{"cluster.example.com"}) {
+				t.Errorf("got %v", sources)
+			}
+		})
 	}
 }
 
@@ -244,12 +280,173 @@ func TestStepClockAtBootSlewsWhenTheClockIsClose(t *testing.T) {
 	// The responder answers using this same machine's clock, so the
 	// measured offset is only microseconds, far under the step
 	// threshold. This means stepClockAtBoot returns the measurement
-	// without calling clock_settime. An actual step needs a wrong
-	// clock, and only the QEMU harness's -rtc drills can arrange
-	// that.
+	// without calling clock_settime. TestStepClockAtBootStepsAWrongClock
+	// covers the step against a fake clock. A real clock_settime
+	// needs the QEMU harness's -rtc drills.
 	addr := startResponder(t, syncedClock())
 	sync := stepClockAtBoot([]string{addr})
 	if sync == nil || sync.source != addr {
 		t.Fatalf("the first sync comes back for status: %+v", sync)
 	}
+}
+
+// pollAnswer is one scripted poll of the time sources: the offset a
+// source measured, or no answer at all.
+type pollAnswer struct {
+	offset   time.Duration
+	answered bool
+}
+
+func timeAnswer(offset time.Duration) pollAnswer { return pollAnswer{offset: offset, answered: true} }
+
+var noTimeAnswer = pollAnswer{}
+
+var errNoTimeAnswer = errors.New("no time source answered")
+
+// fakeClockActions stands in for the network query and the clock
+// syscalls. Each query takes the next scripted answer, and a script
+// that has run out answers nothing. The fake records each step, slew,
+// and RTC write, so a test checks what the machine did to its clocks.
+type fakeClockActions struct {
+	mu        sync.Mutex
+	polls     []pollAnswer
+	queries   int
+	steps     []time.Time
+	slews     []time.Duration
+	rtcWrites int
+	stepErr   error
+	slewErr   error
+}
+
+func installFakeClock(t *testing.T, polls ...pollAnswer) *fakeClockActions {
+	t.Helper()
+	f := &fakeClockActions{polls: polls}
+	savedQuery, savedSet, savedSlew, savedRTC := queryTimeSources, setSystemClock, slewSystemClock, saveHardwareClock
+	t.Cleanup(func() {
+		queryTimeSources, setSystemClock, slewSystemClock, saveHardwareClock = savedQuery, savedSet, savedSlew, savedRTC
+	})
+	queryTimeSources, setSystemClock, slewSystemClock, saveHardwareClock = f.query, f.step, f.slew, f.writeRTC
+	return f
+}
+
+func (f *fakeClockActions) query(sources []string) (*timeSync, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.queries++
+	next := noTimeAnswer
+	if len(f.polls) > 0 {
+		next, f.polls = f.polls[0], f.polls[1:]
+	}
+	if !next.answered {
+		return nil, errNoTimeAnswer
+	}
+	return &timeSync{source: sources[0], stratum: 2, offset: next.offset, at: time.Now()}, nil
+}
+
+func (f *fakeClockActions) step(to time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.steps = append(f.steps, to)
+	return f.stepErr
+}
+
+func (f *fakeClockActions) slew(offset time.Duration) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.slews = append(f.slews, offset)
+	return f.slewErr
+}
+
+func (f *fakeClockActions) writeRTC() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rtcWrites++
+}
+
+func (f *fakeClockActions) recorded() (queries int, steps []time.Time, slews []time.Duration, rtcWrites int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.queries, slices.Clone(f.steps), slices.Clone(f.slews), f.rtcWrites
+}
+
+// A boot whose clock is 2 seconds slow steps the clock forward by
+// exactly the measured offset before k3s starts. A smaller correction
+// would leave certificates from the cluster's CA in the future.
+func TestStepClockAtBootStepsAWrongClock(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := installFakeClock(t, timeAnswer(2*time.Second))
+		start := time.Now()
+
+		sync := stepClockAtBoot([]string{"10.10.0.1"})
+
+		_, steps, _, _ := f.recorded()
+		if !slices.Equal(steps, []time.Time{start.Add(2 * time.Second)}) {
+			t.Errorf("the clock steps once, to the measured time: %v", steps)
+		}
+		if sync == nil || sync.offset != 2*time.Second || sync.source != "10.10.0.1" {
+			t.Errorf("the measurement comes back for status: %+v", sync)
+		}
+	})
+}
+
+// A refused step does not stop the boot. The measurement still comes
+// back, so status reports what the source said, and the discipline
+// loop slews the clock toward it.
+func TestStepClockAtBootKeepsTheMeasurementWhenTheStepFails(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := installFakeClock(t, timeAnswer(-5*time.Second))
+		f.stepErr = unix.EPERM
+
+		sync := stepClockAtBoot([]string{"10.10.0.1"})
+
+		if sync == nil || sync.offset != -5*time.Second {
+			t.Errorf("a failed step still reports the measurement: %+v", sync)
+		}
+	})
+}
+
+// A boot asks its sources three times over 6 seconds and then boots
+// on the hardware clock. A machine's boot must not wait without limit
+// for a network that may never answer.
+func TestStepClockAtBootGivesUpAfterThreeAttempts(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := installFakeClock(t)
+		start := time.Now()
+
+		sync := stepClockAtBoot([]string{"10.10.0.1"})
+
+		queries, steps, _, _ := f.recorded()
+		if sync != nil || len(steps) != 0 {
+			t.Errorf("no answer means no measurement and no step: %+v %v", sync, steps)
+		}
+		if queries != 3 {
+			t.Errorf("the boot asks 3 times, got %d", queries)
+		}
+		if waited := time.Since(start); waited != 6*time.Second {
+			t.Errorf("the boot waits 1s, 2s, and 3s between attempts, got %v", waited)
+		}
+	})
+}
+
+// A source that answers on the second attempt still sets the boot's
+// time. A close clock is left for the discipline loop to slew, and is
+// never stepped.
+func TestStepClockAtBootTakesALateAnswer(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := installFakeClock(t, noTimeAnswer, timeAnswer(10*time.Millisecond))
+		start := time.Now()
+
+		sync := stepClockAtBoot([]string{"10.10.0.1"})
+
+		_, steps, _, _ := f.recorded()
+		if sync == nil || sync.offset != 10*time.Millisecond {
+			t.Errorf("the second attempt's answer comes back: %+v", sync)
+		}
+		if len(steps) != 0 {
+			t.Errorf("an offset under the step threshold is slewed, not stepped: %v", steps)
+		}
+		if waited := time.Since(start); waited != time.Second {
+			t.Errorf("one failed attempt costs one second, got %v", waited)
+		}
+	})
 }

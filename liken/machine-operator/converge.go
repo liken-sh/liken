@@ -470,15 +470,3 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 		fmt.Sprintf("reboot requested to apply the staged spec (%.12s): %s", hash, diffs))
 	return c
 }
-
-// readStagedHash returns the hash of the document currently staged
-// in the store, or "" when nothing is staged. The function hashes
-// staged bytes even when they fail to parse, because the idempotence
-// check compares bytes, not parsed meaning.
-func readStagedHash(store machine.ManifestStore) string {
-	raw, _ := store.LoadStaged()
-	if raw == nil {
-		return ""
-	}
-	return machine.ManifestHash(raw)
-}

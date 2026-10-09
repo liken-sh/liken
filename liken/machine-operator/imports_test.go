@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -168,14 +169,13 @@ func TestImportsPromotionPromotesWhenTheOSServes(t *testing.T) {
 }
 
 // The observing half, settleImportsLifecycle, gathers the store
-// and pod evidence that the decision judges. These tests stop short
-// of an actual promotion, because promotion's syncfs barrier needs
-// the real container store. The decision tests above already cover
-// that verdict.
+// and pod evidence that the decision judges, and promotes the record
+// when the decision says so. A test points containerStoreDir at a
+// tempdir, so the syncfs barrier flushes no host filesystem.
 
 func TestSettleImportsLifecycleUntrackedBootNeedsNoStore(t *testing.T) {
 	client := testClient(t, (&drainAPI{}).handler())
-	c := settleImportsLifecycle(client, t.TempDir(), "node-1", importsFacts("", ""))
+	c := settleImportsLifecycle(client, t.TempDir(), "node-1", importsFacts("", ""), nil)
 	if c.Status != api.ConditionTrue || c.Reason != "NotTracked" {
 		t.Errorf("got %+v", c)
 	}
@@ -189,7 +189,7 @@ func TestSettleImportsLifecycleReportsAProvingTrial(t *testing.T) {
 	}
 	client := testClient(t, (&drainAPI{}).handler())
 	c := settleImportsLifecycle(client, root, "node-1",
-		importsFacts(machine.ManifestSourceStaged, machine.ManifestHash(raw)))
+		importsFacts(machine.ManifestSourceStaged, machine.ManifestHash(raw)), nil)
 	if c.Status != api.ConditionFalse || c.Reason != "Proving" {
 		t.Errorf("no OS pods listed yet means the trial is still proving: %+v", c)
 	}
@@ -203,7 +203,7 @@ func TestSettleImportsLifecycleSeesAnEarlierPromotion(t *testing.T) {
 	}
 	client := testClient(t, (&drainAPI{}).handler())
 	c := settleImportsLifecycle(client, root, "node-1",
-		importsFacts(machine.ManifestSourceStaged, machine.ManifestHash(raw)))
+		importsFacts(machine.ManifestSourceStaged, machine.ManifestHash(raw)), nil)
 	if c.Status != api.ConditionTrue || c.Reason != "Converged" {
 		t.Errorf("an already-promoted trial is converged: %+v", c)
 	}
@@ -216,8 +216,55 @@ func TestSettleImportsLifecycleIgnoresAStaleStagedRecord(t *testing.T) {
 	}
 	client := testClient(t, (&drainAPI{}).handler())
 	c := settleImportsLifecycle(client, root, "node-1",
-		importsFacts(machine.ManifestSourceStaged, "hash-of-what-this-boot-ran"))
+		importsFacts(machine.ManifestSourceStaged, "hash-of-what-this-boot-ran"), nil)
 	if c.Status != api.ConditionUnknown || c.Reason != "FactsIncomplete" {
 		t.Errorf("a staged record the facts don't describe can't be judged: %+v", c)
+	}
+}
+
+// stagedImportsBoot writes a staged imports record into a fresh state
+// root, and answers the root and the facts of a boot that ran it.
+func stagedImportsBoot(t *testing.T) (string, *machine.MachineStatus) {
+	t.Helper()
+	root := t.TempDir()
+	raw := []byte("kind: ImportedImages\n")
+	if err := machine.ImportedImagesStore(root).WriteStaged(raw); err != nil {
+		t.Fatal(err)
+	}
+	return root, importsFacts(machine.ManifestSourceStaged, machine.ManifestHash(raw))
+}
+
+// When every OS container serves, the pass syncs the container store
+// and promotes the staged record, so the next boot trusts the store.
+func TestSettleImportsLifecyclePromotesWhenTheOSServes(t *testing.T) {
+	containerStoreDir = t.TempDir()
+	t.Cleanup(func() { containerStoreDir = machine.K3sAgentDir })
+	root, facts := stagedImportsBoot(t)
+	server := &drainAPI{pods: []kubernetes.Pod{osPod("liken-dns-abc", osImagePrefix+"dns:1", true)}}
+	out := &passOutcome{}
+
+	c := settleImportsLifecycle(testClient(t, server.handler()), root, "node-1", facts, out)
+
+	proven, _ := machine.ImportedImagesStore(root).LoadProven()
+	if c.Reason != "Converged" || proven == nil || len(out.writes) != 1 {
+		t.Errorf("condition %+v, proven record %q, writes %q; want the record promoted", c, proven, out.writes)
+	}
+}
+
+// A container store that cannot be synced holds the promotion, because
+// a record proved over bytes that are not durable could trust a store
+// that a power cut tore.
+func TestSettleImportsLifecycleHoldsThePromotionWhenTheSyncFails(t *testing.T) {
+	containerStoreDir = filepath.Join(t.TempDir(), "missing")
+	t.Cleanup(func() { containerStoreDir = machine.K3sAgentDir })
+	root, facts := stagedImportsBoot(t)
+	server := &drainAPI{pods: []kubernetes.Pod{osPod("liken-dns-abc", osImagePrefix+"dns:1", true)}}
+	out := &passOutcome{}
+
+	c := settleImportsLifecycle(testClient(t, server.handler()), root, "node-1", facts, out)
+
+	proven, _ := machine.ImportedImagesStore(root).LoadProven()
+	if c.Reason != "PromotionFailed" || proven != nil || len(out.failures) != 1 {
+		t.Errorf("condition %+v, proven record %q, failures %v; want the promotion held and one failure", c, proven, out.failures)
 	}
 }

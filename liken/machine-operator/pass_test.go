@@ -95,7 +95,7 @@ func isolatePass(t *testing.T) {
 
 // passClients builds the operator's client and the watches' dynamic
 // client, both pointed at the fake.
-func passClients(t *testing.T, api *fakeapi.Server) (*apiclient.Client, dynamic.Interface) {
+func passClients(t *testing.T, api http.Handler) (*apiclient.Client, dynamic.Interface) {
 	t.Helper()
 	server := apiservertest.Start(t, api)
 	credentials := t.TempDir()
@@ -140,7 +140,7 @@ func runPasses(t *testing.T, api *fakeapi.Server, r *reader) ([]string, *machine
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := reconcile(r, current, "lab", &fetcher{}, heartbeat, mm); err != nil {
+		if err := reconcile(r, current, "lab", &fetcher{}, heartbeat, mm, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

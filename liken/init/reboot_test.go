@@ -269,3 +269,54 @@ func TestWatchHonorsAnUnreadableRestartIntent(t *testing.T) {
 		t.Errorf("the fallback reason names the problem: %q", intent.Reason)
 	}
 }
+
+// The intent watch ends with an error when its directory watch stops,
+// not with nil, because nil tells the machine plane that a reboot
+// intent was delivered and the watch's work is done for this boot.
+func TestTheIntentWatchEndsWithAnErrorWhenItsWatchStops(t *testing.T) {
+	saved := watchIntentDir
+	t.Cleanup(func() { watchIntentDir = saved })
+	watchIntentDir = func(context.Context, string) (<-chan struct{}, error) {
+		stopped := make(chan struct{})
+		close(stopped)
+		return stopped, nil
+	}
+
+	err := watchForOperatorIntents(t.Context(), t.TempDir(),
+		make(chan machine.RebootIntent, 1), make(chan machine.RestartIntent, 1), make(chan machine.ModulesIntent, 1))
+
+	if err == nil {
+		t.Error("the intent watch answered nil after its watch stopped, which ends it for the boot")
+	}
+}
+
+// unremovableIntent puts a non-empty directory where an intent file
+// belongs. Reading it fails, and removing it fails even for root,
+// because a directory that holds a file cannot be removed.
+func unremovableIntent(t *testing.T, dir, name string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, name, "stuck"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A restart or modules intent that the scan can neither read nor
+// consume still delivers its request, because the file's presence is
+// the trigger. The scan reports the failed removal on the console and
+// does not end the watch, because the machine keeps running after both.
+func TestScanIntentsDeliversIntentsItCannotConsume(t *testing.T) {
+	dir := t.TempDir()
+	unremovableIntent(t, dir, "restart-intent.yaml")
+	unremovableIntent(t, dir, "modules-intent.yaml")
+	restarts := make(chan machine.RestartIntent, 1)
+	loads := make(chan machine.ModulesIntent, 1)
+
+	ended := scanIntents(dir, make(chan machine.RebootIntent, 1), restarts, loads)
+
+	if ended || len(restarts) != 1 || len(loads) != 1 {
+		t.Fatalf("the scan ended the watch: %v, delivered %d restarts and %d loads; want one of each and the watch kept", ended, len(restarts), len(loads))
+	}
+	if restart, load := <-restarts, <-loads; restart.Reason != "an unreadable restart intent" || load.Reason != "an unreadable modules intent" {
+		t.Errorf("the reasons are %q and %q, want the fallbacks that name the problem", restart.Reason, load.Reason)
+	}
+}

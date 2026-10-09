@@ -77,6 +77,24 @@ type Client struct {
 	// writeGuard, when it is set, runs before each send of a request
 	// that is not a GET (WithWriteGuard).
 	writeGuard func() error
+
+	// observer, when it is set, hears the final answer to each request
+	// (WithObserver).
+	observer func(Outcome)
+}
+
+// Outcome is the final answer to one request, for an observer.
+type Outcome struct {
+	Method string
+	Path   string
+
+	// Status is the HTTP status of the last answer, or zero when no
+	// answer came: the connection failed, the context ended, or a
+	// write guard refused the request.
+	Status int
+
+	// Err is the error the caller received, or nil.
+	Err error
 }
 
 // New builds a client from its three parts. InCluster reads them from
@@ -203,6 +221,18 @@ func (c *Client) WithWriteGuard(guard func() error) *Client {
 	return &guarded
 }
 
+// WithObserver answers a client that calls observe with the final
+// answer to each request, after any wait for a 429. A caller that logs
+// a failure and carries on still leaves a record there, so a program
+// can learn from one place that something it sent did not land, and
+// send it again sooner than its next scheduled try. The client it
+// answers shares the connections of c.
+func (c *Client) WithObserver(observe func(Outcome)) *Client {
+	observed := *c
+	observed.observer = observe
+	return &observed
+}
+
 // waitContext answers the context that ends the wait after a 429.
 func (c *Client) waitContext() context.Context {
 	if c.waits != nil {
@@ -235,18 +265,28 @@ func (c *Client) RequestJSON(method, path string, body []byte, out any) error {
 // message. A 429 is sent again after the wait the API server asks for,
 // as maxThrottleWait describes.
 func (c *Client) Request(method, path, contentType string, body []byte, out any) error {
+	status, err := c.request(method, path, contentType, body, out)
+	if c.observer != nil {
+		c.observer(Outcome{Method: method, Path: path, Status: status, Err: err})
+	}
+	return err
+}
+
+// request sends a request until it gets an answer that is not a 429 it
+// can wait out, and answers the last status with the error.
+func (c *Client) request(method, path, contentType string, body []byte, out any) (int, error) {
 	var waited time.Duration
 	for {
-		err := c.send(method, path, contentType, body, out)
+		status, err := c.send(method, path, contentType, body, out)
 		var throttled *throttledError
 		if !errors.As(err, &throttled) || waited+throttled.wait > maxThrottleWait*time.Second {
-			return err
+			return status, err
 		}
 		timer := time.NewTimer(throttled.wait)
 		select {
 		case <-c.waitContext().Done():
 			timer.Stop()
-			return err
+			return status, err
 		case <-timer.C:
 		}
 		waited += throttled.wait
@@ -271,11 +311,12 @@ func (c *Client) Request(method, path, contentType string, body []byte, out any)
 // that long.
 const maxThrottleWait = 10
 
-// send sends one request once.
-func (c *Client) send(method, path, contentType string, body []byte, out any) error {
+// send sends one request once, and answers the HTTP status of the
+// answer, or zero when no answer came.
+func (c *Client) send(method, path, contentType string, body []byte, out any) (int, error) {
 	if c.writeGuard != nil && method != http.MethodGet {
 		if err := c.writeGuard(); err != nil {
-			return fmt.Errorf("%s %s not sent: %w", method, path, err)
+			return 0, fmt.Errorf("%s %s not sent: %w", method, path, err)
 		}
 	}
 	var reader io.Reader
@@ -284,10 +325,10 @@ func (c *Client) send(method, path, contentType string, body []byte, out any) er
 	}
 	req, err := http.NewRequestWithContext(c.context(), method, c.base+path, reader)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if err := c.authorize(req); err != nil {
-		return err
+		return 0, err
 	}
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
@@ -296,27 +337,28 @@ func (c *Client) send(method, path, contentType string, body []byte, out any) er
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer drain(resp.Body)
 
+	status := resp.StatusCode
 	switch {
-	case resp.StatusCode == http.StatusNotFound:
-		return ErrNotFound
-	case resp.StatusCode == http.StatusConflict:
-		return ErrConflict
-	case resp.StatusCode < 200 || resp.StatusCode > 299:
+	case status == http.StatusNotFound:
+		return status, ErrNotFound
+	case status == http.StatusConflict:
+		return status, ErrConflict
+	case status < 200 || status > 299:
 		message := responseText(resp.Body)
 		err := fmt.Errorf("%s %s: %s: %s", method, path, resp.Status, message)
-		if resp.StatusCode == http.StatusTooManyRequests {
+		if status == http.StatusTooManyRequests {
 			seconds := retryAfter(resp.Header.Get("Retry-After"), message)
-			return &throttledError{err: err, wait: time.Duration(seconds) * time.Second, seconds: seconds}
+			return status, &throttledError{err: err, wait: time.Duration(seconds) * time.Second, seconds: seconds}
 		}
-		return err
+		return status, err
 	case out == nil:
-		return nil
+		return status, nil
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return status, json.NewDecoder(resp.Body).Decode(out)
 }
 
 // authorize puts the ServiceAccount token on a request.

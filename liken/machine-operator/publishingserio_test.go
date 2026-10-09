@@ -176,7 +176,7 @@ func TestAnAbsentSerioDeviceFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := refreshCDISpec(t.TempDir(), "claim-1", map[string]hardware.Device{}); err != nil {
+	if err := refreshCDISpec(t.TempDir(), "claim-1", map[string]hardware.Device{}, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -223,7 +223,7 @@ func TestAClaimOnTheTTYFromBeforeTheEntryFailsClosed(t *testing.T) {
 	}
 
 	byName := map[string]hardware.Device{deviceName(pulse8Line): pulse8Line}
-	if err := refreshCDISpec(t.TempDir(), "claim-1", byName); err != nil {
+	if err := refreshCDISpec(t.TempDir(), "claim-1", byName, nil); err != nil {
 		t.Fatal(err)
 	}
 

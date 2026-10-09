@@ -191,6 +191,65 @@ func TestWatchDirStopsAfterCancel(t *testing.T) {
 	refuteWake(t, ch)
 }
 
+// TestWatchClosesItsChannelWhenTheReaderFails proves a reader that
+// cannot go on closes its wake channel, so the caller learns the watch
+// died instead of hearing silence. The descriptor is a number the
+// process never opened, which poll reports with POLLNVAL and a read
+// refuses with EBADF, the same end a real reader meets when the
+// kernel refuses its read.
+func TestWatchClosesItsChannelWhenTheReaderFails(t *testing.T) {
+	w, err := newWatch()
+	if err != nil {
+		t.Fatal(err)
+	}
+	unix.Close(w.fd)
+	w.fd = 1 << 20
+	w.start(testCtx(t))
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case _, ok := <-w.wake:
+			if !ok {
+				return
+			}
+		case <-deadline:
+			t.Fatal("the wake channel did not close after the reader failed")
+		}
+	}
+}
+
+// TestWatchKeepsItsChannelOpenAfterCancel proves the end of the context
+// does not close the channel. A closed channel means the watch failed,
+// and a caller that is shutting down must not read it as one. The test
+// runs the reader itself, so it can wait for the reader to return
+// before it looks at the channel.
+func TestWatchKeepsItsChannelOpenAfterCancel(t *testing.T) {
+	w, err := newWatch()
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		w.run()
+		close(done)
+	}()
+
+	unix.Close(w.cancelW)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the reader did not return after the cancel")
+	}
+	select {
+	case _, ok := <-w.wake:
+		if !ok {
+			t.Fatal("the wake channel closed on a cancel")
+		}
+	default:
+	}
+}
+
 func TestWatchFactsTreeMissingRoot(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "facts")
 	_, err := WatchFactsTree(testCtx(t), missing)

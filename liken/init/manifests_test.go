@@ -1,9 +1,10 @@
 package main
 
 // Tests for manifest selection: finding the machineState partition
-// before any spec exists, and the attempt-order policy. The peek's
-// mount and unmount, and the settle loop's actuation, run only under
-// QEMU. The decisions they act on are pinned here.
+// before any spec exists, and the attempt-order policy. The peek
+// itself is tested in manifestpeek_test.go. The settle loop's
+// actuation runs only under QEMU. The decisions it acts on are pinned
+// here.
 
 import (
 	"errors"

@@ -33,14 +33,12 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/informer"
 	"github.com/liken-sh/liken/liken/cluster"
@@ -184,25 +182,8 @@ func main() {
 	// counter's whole value is that it accumulates (metrics.go).
 	operatorMetrics, machineLayer := serveMetrics(*metricsAddress, f)
 
-	// The core of every operator is a level-triggered loop. Three
-	// things wake it, and every pass reconciles from the current state
-	// as it is, never from the event that woke it, so missing one wake
-	// can never matter. The Kubernetes watches wake the loop when an
-	// object this machine acts on changes, so a conductor's grant or a
-	// person's edit is acted on at once (watches.go names each watch
-	// and what wakes it). The facts watch wakes the loop when init
-	// publishes a change under /run/liken/facts, so a fresh fact like
-	// a time sync reaches status without waiting on a timer. The
-	// ticker wakes the loop on a fixed cadence. It renews the heartbeat
-	// lease, and it catches the changes that no watch reports (the
-	// ticker's own comment below names them).
-	//
-	// The wake channel has one slot, so a burst of changes (the
-	// conductor's grant, the sweeper's verdict, this operator's own
-	// publishes echoing back) makes one wake, and one pass over the
-	// newest state answers the whole burst. That is what
-	// level-triggered means, and it is the same merging an informer's
-	// work queue does.
+	// The loop's wake channel has one slot, so a burst of changes makes
+	// one wake (loop.go).
 	watcher, err := informer.InClusterAt(localAPIEndpoint(clusterDoc, name))
 	if err != nil {
 		fatal("in-cluster config for the watches: %v", err)
@@ -211,23 +192,6 @@ func main() {
 	objects := watchThisMachine(context.Background(), watcher, client, name, clusterName,
 		watch.Signal(wakes), operatorMetrics.WatchRestarted)
 	objects.recorder = recorder
-
-	// The facts watch turns init's writes into wakes. inotify does not
-	// recurse, so the watch reconciles its set with the tree before
-	// every read (Sync, below). A watch that cannot start is not fatal:
-	// the tree may not exist yet this early, so the operator logs the
-	// error, runs on the ticker alone, and retries the watch on a later
-	// ticker pass. The cost of a missing watch is latency, never
-	// correctness.
-	factsWatch, err := machine.WatchFactsTree(context.Background(), machine.FactsDir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "watching the facts tree: %v\n", err)
-	}
-
-	// The heartbeat outlives every pass, because it holds the lease it
-	// last wrote, and a renewal from that copy needs no read
-	// (kubernetes/heartbeat.go).
-	heartbeat := kubernetes.NewHeartbeat(name)
 
 	// The ticker is a clock first: it sets the pace for the
 	// heartbeat, so it runs at the kubelet's own lease cadence of ten
@@ -246,59 +210,28 @@ func main() {
 	// judges come from the watches' copies, so a ticker pass on a
 	// settled machine sends one request: the heartbeat's renewal.
 	ticker := time.NewTicker(10 * time.Second)
-	for {
-		// Sync before the read closes the window between a new subtree
-		// and the watch on it: a directory that init created since the
-		// last pass gets a watch now, before this pass reads the tree.
-		if factsWatch != nil {
-			if err := factsWatch.Sync(); err != nil {
-				fmt.Fprintf(os.Stderr, "syncing the facts watch: %v\n", err)
+	l := &loop{
+		objects:     objects,
+		name:        name,
+		clusterName: clusterName,
+		fetcher:     f,
+		// The heartbeat outlives every pass, because it holds the lease
+		// it last wrote, and a renewal from that copy needs no read
+		// (kubernetes/heartbeat.go).
+		heartbeat: kubernetes.NewHeartbeat(name),
+		operator:  operatorMetrics,
+		layer:     machineLayer,
+		wakes:     wakes,
+		ticks:     ticker.C,
+		watchFactsTree: func(ctx context.Context) (*factsWatch, error) {
+			w, err := machine.WatchFactsTree(ctx, machine.FactsDir)
+			if err != nil {
+				return nil, err
 			}
-		}
-		// Each pass starts from the newest copy of this machine's
-		// object. Status writes change resourceVersion, and
-		// reconciling against a stale copy would make every status
-		// update a conflict. A read that fails keeps the copy the last
-		// pass had; the publish conflict retry handles a stale one.
-		//
-		// A Machine that is gone gets no heartbeat. The lease names the
-		// Machine as its owner, so the garbage collector deletes the
-		// lease with it, and a renewal from the last copy would create
-		// the lease again, owned by a Machine that does not exist, for
-		// the collector to delete again.
-		renewing := heartbeat
-		if fresh, err := objects.machine(name); err == nil {
-			current = fresh
-		} else if errors.Is(err, apiclient.ErrNotFound) {
-			renewing = nil
-		}
-		started := time.Now()
-		err := reconcile(objects, current, clusterName, f, renewing, machineLayer)
-		operatorMetrics.ObserveReconcile(machineKind, time.Since(started), err)
-		select {
-		case <-wakes:
-		case <-factsWake(factsWatch):
-		case <-ticker.C:
-			// A watch that failed to start earlier gets another try
-			// here, once the tree's root is likely to exist.
-			if factsWatch == nil {
-				if w, werr := machine.WatchFactsTree(context.Background(), machine.FactsDir); werr == nil {
-					factsWatch = w
-				}
-			}
-		}
+			return &factsWatch{wake: w.Wake, sync: w.Sync}, nil
+		},
 	}
-}
-
-// factsWake returns the facts watch's wake channel, or a nil channel
-// when there is no watch. A receive on a nil channel blocks forever, so
-// the select arm simply never fires while the watch is down, and the
-// ticker drives the passes on its own.
-func factsWake(w *machine.TreeWatch) <-chan struct{} {
-	if w == nil {
-		return nil
-	}
-	return w.Wake
+	l.run(context.Background(), current)
 }
 
 func fatal(format string, args ...any) {

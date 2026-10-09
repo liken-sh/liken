@@ -118,7 +118,7 @@ func findSystemImage(slotParam, slotMount string) (imagePath string, err error) 
 	// is the last moment at which the device can be asked what the
 	// previous stop left behind (fatstate.go).
 	recordBootedSlotStop(device)
-	if err := unix.Mount(device, slotMount, "vfat", 0, ""); err != nil {
+	if err := mountFilesystem(device, slotMount, "vfat", 0, ""); err != nil {
 		return "", fmt.Errorf("mounting slot %s (%s): %w", slotParam, device, err)
 	}
 	fmt.Printf("liken: system image on slot %s (%s)\n", slotParam, device)

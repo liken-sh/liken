@@ -58,8 +58,10 @@ import (
 
 // fatCheckMount is where a slot is mounted read-only while its
 // contents are checked. A read-only mount does not set the volume's
-// mark, so the check leaves nothing behind to clean up.
-const fatCheckMount = "/run/liken/fat-check"
+// mark, so the check leaves nothing behind to clean up. It is a
+// package variable so a test can point the check at a directory of its
+// own.
+var fatCheckMount = "/run/liken/fat-check"
 
 // bootedSlotStopEnv carries one fact from the initramfs to the rest of
 // the boot: what the slot this machine booted said about its last stop.
@@ -204,14 +206,14 @@ func checkSlotArtifacts(dev string) error {
 	if err := os.MkdirAll(fatCheckMount, 0o755); err != nil {
 		return err
 	}
-	if err := unix.Mount(dev, fatCheckMount, "vfat", unix.MS_RDONLY, ""); err != nil {
+	if err := mountFilesystem(dev, fatCheckMount, "vfat", unix.MS_RDONLY, ""); err != nil {
 		return fmt.Errorf("mounting %s to check it: %w", dev, err)
 	}
 	err := verifySlotContents(fatCheckMount)
-	if unmountErr := unix.Unmount(fatCheckMount, 0); unmountErr != nil {
+	if unmountErr := unmountFilesystem(fatCheckMount, 0); unmountErr != nil {
 		// The check is worthless if the volume is still mounted, since
 		// the device cannot be written underneath it.
-		_ = unix.Unmount(fatCheckMount, unix.MNT_DETACH)
+		_ = unmountFilesystem(fatCheckMount, unix.MNT_DETACH)
 		return fmt.Errorf("releasing %s after checking it: %w", dev, unmountErr)
 	}
 	return err

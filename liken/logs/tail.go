@@ -112,11 +112,20 @@ func awaitFile(ctx context.Context, path string, wake <-chan struct{}) (*os.File
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-wake:
+		case _, ok := <-wake:
+			if !ok {
+				return nil, errWatchStopped
+			}
 		case <-time.After(backstopInterval):
 		}
 	}
 }
+
+// errWatchStopped ends the tailer when its directory watch fails. The
+// relay exits nonzero and the kubelet starts it again, for the same
+// reason a watch that cannot start ends it: a tailer that kept going
+// on the backstop alone would hide the fault.
+var errWatchStopped = errors.New("the watch on the log directory stopped")
 
 // tailFile follows one log file forever, until the context ends. It
 // sends an envelope for each line, using the line's starting byte
@@ -259,7 +268,10 @@ func followGeneration(ctx context.Context, f *os.File, path string, offset int64
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-wake:
+		case _, ok := <-wake:
+			if !ok {
+				return errWatchStopped
+			}
 		case <-time.After(backstopInterval):
 		}
 		st, err := os.Stat(path)

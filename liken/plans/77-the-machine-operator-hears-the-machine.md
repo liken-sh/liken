@@ -2,7 +2,7 @@
 
 Milestone 77. Proposed 2026-10-09. The second of five milestones that
 remove the ten-second ticker from `machine-operator`'s reconcile loop.
-[Milestone 76](76-a-pass-reports-what-it-did-not-finish.md) gives the
+[Milestone 76](completed/76-a-pass-reports-what-it-did-not-finish.md) gives the
 series and the table of every job the ticker does. This milestone
 gives the operator the kernel's events for the state on the machine
 that the ticker finds today: uevents for sysfs, and inotify for

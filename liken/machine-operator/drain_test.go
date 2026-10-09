@@ -5,7 +5,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -383,20 +382,6 @@ func TestGateThroughDrainHoldsWhateverStopsThePodList(t *testing.T) {
 				}
 			})
 		})
-	}
-}
-
-// A pass whose Node read failed skips the drain and lets a granted
-// reboot go ahead: during a demotion, or while the API server is down
-// and the Node's store cannot answer, there is no Node to cordon.
-func TestAGrantedRebootWithNoNodeSkipsTheDrain(t *testing.T) {
-	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Errorf("the gate sent %s %s, want nothing", r.Method, r.URL.Path)
-	}))
-	var d disruptions
-	conv := d.gate(client, nil, errors.New("the API server is down"), turnGranted, drainNow, rebootingConvergence())
-	if !conv.requestReboot || d.draining {
-		t.Errorf("reboot = %v, draining = %v; want the reboot and no drain", conv.requestReboot, d.draining)
 	}
 }
 

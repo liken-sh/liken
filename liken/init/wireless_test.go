@@ -275,12 +275,15 @@ func heldConsole(t *testing.T) string {
 
 func TestParkReleasesTheBootWhenTheRadioJoins(t *testing.T) {
 	// The park is a hold, not a halt: a fix on the network side must
-	// resume the boot with nobody at the machine.
+	// resume the boot with nobody at the machine. A scan and another
+	// refusal before the join must not release it.
 	console := heldConsole(t)
 	r := &radio{
 		ifname: "wlan0", ssid: "homenet", state: machine.WirelessWrongKey,
 		message: "the access point refused the passphrase (WRONG_KEY)", control: stubControl(),
 	}
+	pushEvent(t, r.control, "<3>CTRL-EVENT-SCAN-RESULTS ")
+	pushEvent(t, r.control, `<3>CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="homenet" auth_failures=2 duration=20 reason=WRONG_KEY`)
 	pushEvent(t, r.control, "<3>CTRL-EVENT-CONNECTED - Connection to 04:4a:2c:11:22:33 completed [id=0]")
 
 	park(r, "liken: wireless: wlan0 cannot join homenet")

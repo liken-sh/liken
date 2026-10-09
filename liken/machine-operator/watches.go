@@ -134,6 +134,18 @@ type reader struct {
 	machineVersions *memo.Versions
 }
 
+// observedBy answers a reader for one pass, whose client reports the
+// final answer to each request into the pass's outcome. It shares
+// every copy, memo, and recorder with r. A nil outcome answers r.
+func (r *reader) observedBy(out *passOutcome) *reader {
+	if out == nil {
+		return r
+	}
+	pass := *r
+	pass.client = r.client.WithObserver(out.observe)
+	return &pass
+}
+
 // watchThisMachine opens the watches and returns the reader over their
 // copies. Each change that needs a pass calls wake. clusterName is
 // empty on a machine with no cluster document, which reads no Cluster

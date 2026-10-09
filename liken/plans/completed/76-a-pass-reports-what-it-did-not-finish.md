@@ -1,6 +1,11 @@
 # 76. A pass reports what it did not finish
 
-Milestone 76. Proposed 2026-10-09. The first of five milestones,
+Milestone 76. Proposed and built 2026-10-09. One drill has not run:
+an event reader that stops on a machine. The tests in a `synctest`
+bubble cover it. The QEMU drills are in
+[What the lab measured](#what-the-lab-measured).
+
+The first of five milestones,
 76 through 80, that remove the ten-second ticker from
 `machine-operator`'s reconcile loop, so that a settled machine runs no
 pass until something changes. Many steps of a pass leave a failure to
@@ -106,8 +111,10 @@ report what its backstop repaired. `ObserveReconcile` keeps its
 meaning: its error label still counts a failed status write.
 
 A step can also ask for a later wake: "wake me no later than T". The
-drain's deadline, a `429`'s `Retry-After`, and the download's next
-attempt each use it. The recorder keeps the earliest T.
+download's next attempt uses it, and milestone 79 gives the drain's
+deadline to it. The recorder keeps the earliest T. A `429` sets the opposite bound: the
+retry comes no sooner than its `Retry-After`, because `liken`'s client
+answers a `429` at once and leaves the wait to the loop.
 
 **One wake-at timer.** When a pass ends, the loop sets one timer for
 the earliest moment the outcome asks for, and the timer wakes a pass.
@@ -118,16 +125,28 @@ back needs no special case.
 **The retry delay.** A pass that ends with failures asks for a retry.
 The delay sorts each failure by kind:
 
-- A transient failure (`5xx`, `429` with no `Retry-After`, a timeout, a
-  network error, `EAGAIN`, `EBUSY`) starts at one second and doubles
-  on each pass that still has a transient failure, up to ten seconds,
-  the pace the ticker gives today. So the change can only make such a
-  retry sooner.
+- A transient failure (`5xx`, `429`, `409`, `401`, a timeout, a
+  network error, a `2xx` whose body did not decode, `EIO`, `EBUSY`, and
+  any error with no errno) starts at one second and doubles on each
+  pass that still has a transient failure, up to ten seconds plus the
+  jitter, about the pace the ticker gives today.
 - A failure that will not change by itself (`400`, `403`, `422`,
-  `ENOENT`, `EINVAL`) starts at ten seconds and doubles up to five
-  minutes, so a misconfigured machine does not retry every ten seconds
-  forever. An edit by a person sends a watch event, and that pass
-  tries again at once.
+  `ENOENT`, `EINVAL`, `ENOTDIR`, `EISDIR`, `EACCES`, `EPERM`, `EROFS`,
+  and a sysctl name that escapes `/proc/sys`) starts at ten seconds
+  and doubles up to five minutes, so a misconfigured machine does not
+  retry every ten seconds forever. An edit by a person sends a watch
+  event, and that pass tries again at once.
+
+A request that succeeds withdraws an earlier `409` on the same method
+and path, and no other failure, because the status write and the
+heartbeat each answer a `409` by reading the object again and writing
+once more. Several writes share one path, such as the taints, the
+labels, and the cordon on the `Node`, so a write that lands says
+nothing about another that failed. A read of init's facts that fails
+is transient whatever its errno, because init writes the facts. A CDI
+specification that does not decode is lasting. A fix that the
+operator does not watch, such as an RBAC grant, waits for the lasting
+retry, up to five minutes.
 
 Each delay carries a jitter of up to 10 percent, so a fleet that fails
 together during an API server outage does not retry together. A pass
@@ -147,11 +166,15 @@ that say a `Failed` state exists only between passes change with it.
 **Readers signal their exit.** `hardware.ListenForUevents` and the
 inotify reader in `machine/inotify.go` close their channel when the
 reader returns for any reason other than a cancelled context. A
-closed channel tells the caller the watch died. The loop opens the
-watch again and runs a pass, following the three steps of the rule
-for events: subscribe, read the whole state, and on failure do both
-again. init's callers of the same readers handle the close in the same
-way.
+closed channel tells the caller the watch died. The loop runs a pass,
+which reads the whole facts tree, and opens the watch again on the
+next tick, so a watch that dies the moment it opens costs one pass
+every ten seconds and not a pass after every death. init's components
+return an error, and init's machine plane starts each one again after
+its backoff: the component opens a new listener and walks the whole
+state before it waits. The logs relay exits, and the kubelet starts it
+again. A reader that stops on its own also ends the goroutine that
+waits for its cancel, so it leaves no goroutine or descriptor behind.
 
 **The modules intent.** After milestone 80, the operator writes the
 modules intent once for each pass that an event starts, so init tries
@@ -168,15 +191,83 @@ Each later milestone adds its channel to that function.
 
 ## Tests
 
-In a `synctest` bubble with `kubernetes/apiservertest`:
+The loop's tests run in a `synctest` bubble with
+`kubernetes/apiservertest`. The retry schedule and the outcome's
+sorting are unit tests of `retrySchedule` and `passOutcome`.
 
-- A status publish that the fake API server refuses with a `500`
-  retries after one second of fake time, then two, then four, and stops
-  at ten.
-- A `422` retries after ten seconds and backs off to five minutes.
-- A pass that succeeds stops the timer and resets the delay.
-- A `429` with `Retry-After: 3` retries after three seconds.
+- A status publish that the fake API server refuses with a `503`
+  retries after one second of fake time, then two, four, and eight, and
+  stops at ten, with no ticker.
+- A failure that will not change by itself retries after ten seconds
+  and backs off to five minutes.
+- A pass that succeeds stops the timer and resets the delay, and a
+  settled loop runs no pass in an hour with no wake.
+- A `429` with `Retry-After: 3` retries after three seconds, and a
+  step's wake waits for a `429`'s `Retry-After` too.
+- A `409` followed by a write that lands records no failure.
 - A transient download failure retries after ten seconds and backs off
-  to two minutes. A new ask starts at once.
-- A uevent channel and an inotify channel that close make the loop open
-  them again and run a pass.
+  to two minutes. A new ask starts at once, and an ask that changes
+  back while its download stops starts again with no backoff.
+- A facts watch whose channel closes runs a pass and opens again on
+  the next tick. An inotify reader and a uevent reader that fail close
+  their channels, and a cancel does not. `settle` returns at once on a
+  closed channel, and the logs relay exits. Each of init's uevent
+  components walks the whole state before it waits and ends with
+  `errUeventsStopped` when its listener stops, and the intent watch
+  ends with an error, not with the `nil` that ends it for the boot.
+
+## What the lab measured
+
+`node-1` of the `lab` fleet, on 2026-10-09, under UEFI with the
+virtio hardware shape:
+
+- `make smoke-uefi` installed `node-1` from blank disks with this
+  build, booted the installed disk, and reported Ready after 21
+  seconds.
+- A settled `node-1` logged no unfinished pass in its first minute.
+- A `spec.sysctls` entry for `net.ipv4.conf.drill0.forwarding`, a
+  parameter the kernel does not have, failed with `ENOENT` and sorted
+  as lasting. The log line of each pass named the parameter and a
+  retry due in 10.65 s, 20.81 s, 40.76 s, 1m20.89 s, 2m45.44 s, and
+  then about 5 minutes, with the jitter on each. The ticker still ran
+  a pass every ten seconds, so each pass doubled the delay. When the
+  entry was removed, the log went quiet and `SysctlsApplied` went back
+  to `True`.
+- A Cluster that named a release the release server did not hold got
+  a `404` on each attempt. The server's log recorded the attempts 11,
+  21, 41, 85, and 131 seconds apart: the backoff of 10 seconds doubling
+  to its 2-minute limit, with the jitter. The ticker alone would have
+  sent about 30 requests in those five minutes, and the backoff sent
+  6. `VersionConverged` read `Downloading` with the time of the next
+  retry, and the operator's log stayed quiet, because a download that
+  waits out its backoff is not an unfinished step.
+
+A second drill ran on the same day with the final build, after the
+review fixes:
+
+- `make smoke-uefi` reported `node-1` Ready after 16 seconds.
+- A settled `node-1` wrote no log line in its first 75 seconds.
+- The `drill0` sysctl again failed with `ENOENT` as lasting, with
+  retries due in 10.95 s, 20.66 s, 42.52 s, 1m23.3 s, 2m49.03 s, and
+  then about 5 minutes. When the entry was removed, `SysctlsApplied`
+  went back to `True` and the log went quiet.
+- A `ValidatingWebhookConfiguration` whose `Service` did not exist,
+  with `failurePolicy: Fail`, made the API server answer `500` to each
+  write of `machines/status`. A change to `spec.sysctls` gave the pass
+  a status to write. Each pass logged the `500` as transient, and the
+  passes ran 1.06, 1.01, 4.10, and 5.93 seconds apart, and then every
+  ten seconds. Ticker passes ran inside the 2-second and 8-second waits,
+  and each of those passes doubled the delay again. The machine stayed
+  `Ready` the whole time, because the heartbeat lease is not a status
+  write. When the webhook was deleted, the next pass wrote the status
+  and the log went quiet.
+- The missing release drew attempts 10, 20, 40, and 86 seconds apart,
+  and `VersionConverged` named a retry 2 minutes and 3 seconds after
+  the last one. The operator logged no unfinished pass.
+
+The tests that raised `init`'s coverage put its mount, netlink, DHCP,
+and clock calls behind package variables. A third boot ran on that
+tree: `make smoke-uefi` reported `node-1` Ready after 15 seconds. On
+the next boot, every condition was `True`, every storage role was on
+its partition, and the clock synchronized. The `drill0` sysctl again
+logged retries due in 10.55 s, 21.97 s, 40.47 s, and 1m25.61 s.

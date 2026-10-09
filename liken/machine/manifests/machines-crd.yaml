@@ -33,7 +33,7 @@ metadata:
     # that use its fields (init/schemarevision.go). Raise it in the
     # same change that changes the schema below; a test holds the two
     # together.
-    liken.sh/schema-revision: "7"
+    liken.sh/schema-revision: "8"
 spec:
   group: liken.sh
   names:
@@ -469,9 +469,36 @@ spec:
                     parameter. The manual's Kernel settings page lists
                     every one of them and why liken sets it.
                     status.sysctls reports both sets together, read
-                    back from the kernel.
+                    back from the kernel. A name is the kernel's
+                    dotted name, or the path under /proc/sys with
+                    slashes when one segment holds a dot, as in
+                    net/ipv4/conf/eth0.100/forwarding.
+                  # The cap leaves room for every parameter a machine
+                  # could need. It also bounds the cost of the key
+                  # rule below, and the API server refuses a rule over
+                  # every key of a map that has no bound.
+                  maxProperties: 128
                   additionalProperties:
                     type: string
+                  # A name must name a file under /proc/sys. The
+                  # operator refuses one that is absolute, climbs out
+                  # with "..", or has an empty segment, and retries it
+                  # with a long backoff (machine/sysctl.go), so
+                  # admission refuses it first, where the person who
+                  # wrote it reads why. A dotted name has segments of
+                  # letters, digits, and _:@+-. A slashed name's
+                  # segments may also hold dots, as an interface name
+                  # such as eth0.100 does, but not only dots.
+                  x-kubernetes-validations:
+                    - rule: >-
+                        self.all(key, key.size() <= 255 && key.matches('^([A-Za-z0-9_:@+-]+([.][A-Za-z0-9_:@+-]+)*|[.]*[A-Za-z0-9_:@+-][A-Za-z0-9_:@+.-]*(/[.]*[A-Za-z0-9_:@+-][A-Za-z0-9_:@+.-]*)+)$'))
+                      message: >-
+                        a sysctl name is the kernel's dotted name, such
+                        as vm.max_map_count, or a path under /proc/sys
+                        with slashes, such as
+                        net/ipv4/conf/eth0.100/forwarding. It cannot be
+                        absolute, climb out with "..", or have an empty
+                        segment
                 rlimits:
                   type: object
                   description: >-

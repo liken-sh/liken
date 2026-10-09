@@ -73,6 +73,14 @@ const (
 	kmsgPayloadLimit = 800
 )
 
+// The three kernel files the redirect writes. They are variables only
+// so that a test can point the redirect at files it reads back.
+var (
+	printkDevkmsgPath = "/proc/sys/kernel/printk_devkmsg"
+	printkPath        = "/proc/sys/kernel/printk"
+	kmsgPath          = "/dev/kmsg"
+)
+
 // redirectToKmsg points init's own output at /dev/kmsg. It runs
 // after mountEssentials, because it needs /proc/sys and /dev/kmsg,
 // and before the first machine-plane component starts, so the
@@ -87,7 +95,7 @@ func redirectToKmsg() {
 	// for the whole machine. It must run first, and it is required,
 	// not a tuning option: without it, the redirect would lose lines
 	// that the console used to show.
-	if err := os.WriteFile("/proc/sys/kernel/printk_devkmsg", []byte("on\n"), 0); err != nil {
+	if err := os.WriteFile(printkDevkmsgPath, []byte("on\n"), 0); err != nil {
 		fmt.Printf("liken: logs stay on the console: printk_devkmsg: %v\n", err)
 		return
 	}
@@ -97,11 +105,11 @@ func redirectToKmsg() {
 	// already sets 7; this guards against a quiet= setting in a
 	// future config. This is best effort, because the echo is a
 	// convenience while the buffer is the record of truth.
-	if err := os.WriteFile("/proc/sys/kernel/printk", []byte("7"), 0); err != nil {
+	if err := os.WriteFile(printkPath, []byte("7"), 0); err != nil {
 		fmt.Printf("liken: setting console loglevel: %v\n", err)
 	}
 
-	kmsg, err := os.OpenFile("/dev/kmsg", os.O_WRONLY, 0)
+	kmsg, err := os.OpenFile(kmsgPath, os.O_WRONLY, 0)
 	if err != nil {
 		fmt.Printf("liken: logs stay on the console: /dev/kmsg: %v\n", err)
 		return

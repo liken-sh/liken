@@ -2,7 +2,7 @@
 
 Milestone 79. Proposed 2026-10-09. The fourth of five milestones that
 remove the ten-second ticker from `machine-operator`'s reconcile loop.
-[Milestone 76](76-a-pass-reports-what-it-did-not-finish.md) gives the
+[Milestone 76](completed/76-a-pass-reports-what-it-did-not-finish.md) gives the
 series and the table of every job the ticker does. Three features of
 `machine-operator` wait for objects that other programs change: the
 proof of an upgrade's images, the drain before a reboot, and the
@@ -92,7 +92,7 @@ full pod with and without the `Transform` and requires the same
 **When a copy is not ready.** A read falls back to the API server when
 its copy is not ready (`watches.go`), and the proof and the drain do
 the same. A failed fallback still holds the drain, as the comment in
-`reconcile.go` requires: "A Node that reads but whose pods do not list
+`disruptions.go` requires: "A Node that reads but whose pods do not list
 holds the reboot."
 
 **The drain deadline.** Every pass that holds for the drain asks

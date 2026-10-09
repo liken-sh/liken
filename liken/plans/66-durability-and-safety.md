@@ -239,7 +239,7 @@ not be read are the same input. The fix is a type change:
 delete on an error.
 
 **The drain is skipped on any failed Node read.** This is a bug of
-medium priority. `disruptions.gate` (`machine-operator/reconcile.go`)
+medium priority. `disruptions.gate` (`machine-operator/disruptions.go`)
 calls `gateThroughDrain` only when a reboot is requested, the conductor
 granted a turn, and the Node read succeeded. On a timeout, a server
 error, or any other read failure, it leaves `requestReboot` set. The

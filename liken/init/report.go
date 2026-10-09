@@ -86,8 +86,9 @@ const hardwareReportName = "hardware-report.yaml"
 
 // reportImageMount is where the report loop-mounts the payload's system
 // image to reach its module tree. reportStickMount is where it mounts
-// the stick's filesystem to write the proposal.
-const (
+// the stick's filesystem to write the proposal. They are variables so a
+// test can point the report at directories of its own making.
+var (
 	reportImageMount = "/liken-report-image"
 	reportStickMount = "/liken-report-stick"
 )
@@ -123,19 +124,30 @@ func runHardwareReport() {
 		fmt.Println(line)
 	}
 
-	var message string
-	if writeErr == nil {
-		message = fmt.Sprintf(
-			"liken: this report was written to the stick as %s; press Enter to reboot.",
-			hardwareReportName)
-	} else {
+	if writeErr != nil {
 		fmt.Fprintf(os.Stderr, "liken: report: writing to the stick: %v\n", writeErr)
-		message = fmt.Sprintf(
+	}
+	holdInstallerConsole(reportPrompt(writeErr), false)
+	endReport()
+}
+
+// endReport ends the report boot. It is a package variable so a test
+// can run the whole report boot and see it end, because the real
+// ending reboots the machine and never returns.
+var endReport = rebootAfterReport
+
+// reportPrompt is the held console's last line. It tells the person
+// whether the proposal reached the stick, because a person who pulls
+// the stick on a failed write leaves with no copy of the report.
+func reportPrompt(writeErr error) string {
+	if writeErr != nil {
+		return fmt.Sprintf(
 			"liken: writing %s to the stick FAILED; the text above is the only copy; press Enter to reboot.",
 			hardwareReportName)
 	}
-	holdInstallerConsole(message, false)
-	rebootAfterReport()
+	return fmt.Sprintf(
+		"liken: this report was written to the stick as %s; press Enter to reboot.",
+		hardwareReportName)
 }
 
 // gatherHardwareReport does the observation: it mounts the module tree,
@@ -224,7 +236,7 @@ func gatherHardwareReport() (hardwareReport, installStick) {
 // read-only, so it too changes nothing.
 func mountPayloadModules() (base, pciIDs string, unmount func(), err error) {
 	image := filepath.Join(releasePayloadDir, slotImageName)
-	if err := loopMount(image, reportImageMount); err != nil {
+	if err := mountReportImage(image, reportImageMount); err != nil {
 		return "", "", nil, fmt.Errorf("mounting the payload's system image %s: %w", image, err)
 	}
 	base = filepath.Join(reportImageMount, "lib/modules", kernelRelease())
@@ -232,6 +244,11 @@ func mountPayloadModules() (base, pciIDs string, unmount func(), err error) {
 	unmount = func() { _ = unix.Unmount(reportImageMount, unix.MNT_DETACH) }
 	return base, pciIDs, unmount, nil
 }
+
+// mountReportImage loop-mounts the payload's system image. It is a
+// package variable so a test can stand in for the mount, because a
+// loop device needs privileges a test does not have.
+var mountReportImage = loopMount
 
 // recommendModules turns the machine's unclaimed devices into ordered
 // driver recommendations. For each undriven device it takes the kernel
@@ -342,7 +359,7 @@ func claimableClass(class string) bool {
 // long, and a carrier read before the link trains would report every
 // port dark.
 func observeInterfaces() []reportInterface {
-	links, err := netlink.LinkList()
+	links, err := listLinks()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "liken: report: listing interfaces: %v\n", err)
 		return nil
@@ -356,7 +373,7 @@ func observeInterfaces() []reportInterface {
 		if attrs.Flags&net.FlagLoopback != 0 || len(attrs.HardwareAddr) == 0 {
 			continue
 		}
-		if err := netlink.LinkSetUp(link); err != nil {
+		if err := raiseLink(link); err != nil {
 			fmt.Fprintf(os.Stderr, "liken: report: raising %s: %v\n", attrs.Name, err)
 		}
 		raised = append(raised, link)
@@ -377,11 +394,20 @@ func observeInterfaces() []reportInterface {
 	return interfaces
 }
 
+// listLinks and raiseLink list the machine's interfaces and bring one
+// admin-up. They are package variables so a test can hand the report
+// interfaces of its own, because raising a real link needs privileges a
+// test does not have.
+var (
+	listLinks = netlink.LinkList
+	raiseLink = netlink.LinkSetUp
+)
+
 // linkState reads the kernel's word for an interface's link: up, down,
 // or unknown. operstate is the kernel's own summary of the carrier, in
 // the form a person reads most easily.
 func linkState(name string) string {
-	if state := sysfsString(filepath.Join("/sys/class/net", name), "operstate"); state != "" {
+	if state := sysfsString(filepath.Join(sysfsRoot, "class/net", name), "operstate"); state != "" {
 		return state
 	}
 	return "unknown"
@@ -393,17 +419,39 @@ func linkState(name string) string {
 // each device that arrives or binds a driver announces itself, and the
 // wait ends once a full second passes with no such announcement, or a
 // ceiling passes either way. Without the socket it falls back to a fixed
-// pause, so a probe still has a moment to finish.
+// pause, so a probe still has a moment to finish, and so does a listener
+// that stops during the wait, because settle returns at once when its
+// channel closes.
 func quiesceHardware() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	uevents, err := hardware.ListenForUevents(ctx)
+	uevents, err := listenForUevents(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "liken: report: no uevent socket, pausing instead: %v\n", err)
-		time.Sleep(3 * time.Second)
+		time.Sleep(quiescePause)
 		return
 	}
 	settle(ctx, uevents, time.Second, 10*time.Second)
+	if listenerStopped(uevents) {
+		fmt.Fprintln(os.Stderr, "liken: report: the uevent listener stopped, pausing instead")
+		time.Sleep(quiescePause)
+	}
+}
+
+// quiescePause is how long the report waits for a probe to finish when
+// it cannot hear the probe's uevents.
+const quiescePause = 3 * time.Second
+
+// listenerStopped answers whether a uevent channel is closed. A wake
+// still pending on an open channel is consumed, which costs nothing,
+// because the caller is done waiting.
+func listenerStopped(uevents <-chan struct{}) bool {
+	select {
+	case _, ok := <-uevents:
+		return !ok
+	default:
+		return false
+	}
 }
 
 // writeReportToStick writes the proposal to the root of the
@@ -427,7 +475,7 @@ func writeReportToStick(stick installStick, proposal string) error {
 	if err := os.MkdirAll(reportStickMount, 0o755); err != nil {
 		return err
 	}
-	if err := unix.Mount(device, reportStickMount, "vfat", 0, ""); err != nil {
+	if err := mountStick(device, reportStickMount); err != nil {
 		return fmt.Errorf("mounting the stick %s: %w", device, err)
 	}
 
@@ -437,11 +485,21 @@ func writeReportToStick(stick installStick, proposal string) error {
 	// A plain unmount flushes and detaches the filesystem cleanly. If it
 	// is busy, a lazy detach at least releases it, so a later boot does
 	// not find a stale mount.
-	if err := unix.Unmount(reportStickMount, 0); err != nil {
-		_ = unix.Unmount(reportStickMount, unix.MNT_DETACH)
+	if err := unmountStick(reportStickMount, 0); err != nil {
+		_ = unmountStick(reportStickMount, unix.MNT_DETACH)
 	}
 	return writeErr
 }
+
+// mountStick and unmountStick mount and unmount the stick's FAT volume.
+// They are package variables so a test can stand in for the mount,
+// because a mount needs privileges a test does not have.
+var (
+	mountStick = func(device, target string) error {
+		return unix.Mount(device, target, "vfat", 0, "")
+	}
+	unmountStick = unix.Unmount
+)
 
 // rebootAfterReport restarts the machine. A report boot has no k3s and
 // no role mounts to tear down, so this is the plain restart syscall

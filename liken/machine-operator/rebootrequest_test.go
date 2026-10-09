@@ -190,7 +190,7 @@ func TestCarryOutRebootRequestWritesAnIntentNamingNoManifest(t *testing.T) {
 		machine.RequestRebootAnnotation: shortBootID(requestBootTime)})
 	conv := decideRebootRequest(m, requestFacts(requestBootTime), turnGranted)
 
-	if got := carryOutRebootRequest(dir, conv, testNow); got.Reason != "RebootRequested" {
+	if got := carryOutRebootRequest(dir, conv, testNow, nil); got.Reason != "RebootRequested" {
 		t.Fatalf("the decision's condition comes back: %+v", got)
 	}
 	intent, err := machine.ReadRebootIntent(dir)
@@ -211,7 +211,7 @@ func TestCarryOutRebootRequestWritesNothingWhileItWaits(t *testing.T) {
 		machine.RequestRebootAnnotation: shortBootID(requestBootTime)})
 	conv := decideRebootRequest(m, requestFacts(requestBootTime), turnAwaiting)
 
-	carryOutRebootRequest(dir, conv, testNow)
+	carryOutRebootRequest(dir, conv, testNow, nil)
 	intent, err := machine.ReadRebootIntent(dir)
 	if err != nil {
 		t.Fatal(err)

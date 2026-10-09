@@ -20,57 +20,32 @@ package main
 // different passes, minutes apart, and every pass in between keeps
 // the heartbeat fresh. The lease must never wait on a socket.
 //
-// A complete fetch leaves a bootable slot, and this takes more than
-// downloading the release. The public artifacts are downloaded and
-// verified against the document. Then the machine's own deployment
-// layer is carried over from the slot it is running on (carryLayer),
-// because the layer never travels the network, and no release can
-// supply it.
-//
-// Downloads resume through re-verification, not through byte
-// ranges. Each run first verifies whatever the slot already holds
-// against the release document, and fetches only what fails
-// verification. A torn download, from a power cut or a killed
-// server, leaves either a .partial file, which no verification ever
-// counts, or a final file that either verifies or does not. The next
-// run converges either way. FAT has no journal, so every file lands
-// the way the installer's copies do: temp file, fsync, rename. The
-// function re-reads and verifies the file after writing it, because
-// bytes sitting in the page cache are not durable until they are
-// synced and read back.
-//
 // Failure comes in two kinds, and the distinction matters
 // throughout this file. A transient failure means the server is
 // down or the network dropped. The fetcher retries a transient
-// failure every pass, forever. A corrupt failure means the bytes do
-// not match the digests the catalog promised. The fetcher holds a
-// corrupt failure, without retrying, until the ask itself changes,
-// because refetching cannot change what the server publishes.
-// Corruption is the reason this whole chain of checks exists: the
-// API names the document, the document names the artifacts, and a
-// mismatch anywhere means someone's bytes are wrong. The fetcher
+// failure forever, after a backoff that starts at ten seconds and
+// doubles up to two minutes (fetchRetryLimit). A release server that
+// fails usually stays down for minutes, and every pass would
+// otherwise download again the moment it saw the failure. A corrupt
+// failure means the bytes do not match the digests the catalog
+// promised. The fetcher holds a corrupt failure, without retrying,
+// until the ask itself changes, because refetching cannot change what
+// the server publishes.
+// Corruption is the reason the chain of checks in download.go
+// exists: the API names the document, the document names the
+// artifacts, and a mismatch anywhere means someone's bytes are wrong. The fetcher
 // abandons a corrupt release rather than patching it. The recovery
 // is to publish a corrected release under a new version and point
 // the catalog at it.
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
+	"math/rand/v2"
 	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
 	"sync"
-
-	"golang.org/x/sys/unix"
-
-	"github.com/liken-sh/liken/liken/machine"
-	"github.com/liken-sh/liken/liken/releases"
+	"time"
 )
 
 // A fetchAsk is one reconcile decision's request: fetch this
@@ -93,17 +68,24 @@ const (
 	fetchIdle     fetchState = "Idle"     // nothing started yet
 	fetchRunning  fetchState = "Running"  // a goroutine is downloading
 	fetchVerified fetchState = "Verified" // every artifact on the slot checks out
-	fetchFailed   fetchState = "Failed"   // transient; the next pass retries
+	fetchFailed   fetchState = "Failed"   // transient; retried at retryAt
 	fetchRejected fetchState = "Rejected" // corrupt; held until the ask changes
 )
 
 // A fetchSnapshot is what a reconcile pass sees: the ask the state
-// describes, the state, and a human sentence for condition messages.
+// describes, the state, a human sentence for condition messages, and,
+// for a Failed state, when the retry starts.
 type fetchSnapshot struct {
-	ask    fetchAsk
-	state  fetchState
-	detail string
+	ask     fetchAsk
+	state   fetchState
+	detail  string
+	retryAt time.Time
 }
+
+const (
+	fetchFirstRetry = 10 * time.Second
+	fetchRetryLimit = 2 * time.Minute
+)
 
 type fetcher struct {
 	mu   sync.Mutex
@@ -117,6 +99,16 @@ type fetcher struct {
 	// client sends the downloads. A nil client is
 	// http.DefaultClient; a test gives one that reaches its server.
 	client *http.Client
+
+	// retryDelay is the backoff after the ask's last transient
+	// failure, and zero before the first. A new ask resets it, and so
+	// does a verified download.
+	retryDelay time.Duration
+
+	// jitter answers a number in [0, 1), for the tenth of the delay
+	// that each retry adds at random, so a fleet that failed together
+	// does not retry together. Nil means math/rand.
+	jitter func() float64
 
 	// The fetcher's running totals, kept beside the snapshot because
 	// they outlive every ask. The snapshot describes one release; a
@@ -178,6 +170,7 @@ func (f *fetcher) Ensure(ask fetchAsk) fetchSnapshot {
 		// that should clear the hold, so the state resets with the
 		// ask.
 		f.snap = fetchSnapshot{ask: ask, state: fetchIdle, detail: "waiting to start"}
+		f.retryDelay = 0
 		if f.busy {
 			// The running download is for the old ask, and it
 			// writes the same slot this one will. It stops at
@@ -190,13 +183,13 @@ func (f *fetcher) Ensure(ask fetchAsk) fetchSnapshot {
 	if f.busy || f.snap.state == fetchVerified || f.snap.state == fetchRejected {
 		return f.snap
 	}
+	if f.snap.state == fetchFailed && time.Now().Before(f.snap.retryAt) {
+		return f.snap
+	}
 
-	// A restart after a transient failure keeps the failure's reason.
-	// A Failed state exists only between passes. The pass that reads
-	// it is the same pass that restarts the download, so the
-	// restarted Running state is the only state any condition will
-	// ever see. If that state did not carry the reason the last
-	// attempt failed, no condition could ever report that reason.
+	// A restart after a transient failure keeps the failure's reason,
+	// so a condition written while the retry runs still says what the
+	// last attempt met.
 	detail := "starting"
 	if f.snap.state == fetchFailed {
 		detail = "retrying after: " + f.snap.detail
@@ -232,13 +225,17 @@ func (f *fetcher) run(ctx context.Context, ask fetchAsk) {
 	if err != nil && !errors.Is(context.Cause(ctx), errSuperseded) {
 		f.failures++
 	}
-	if f.snap.ask != ask {
+	// A download that Ensure cancelled describes no verdict, even when
+	// the ask has changed back to it since: Ensure reset the state to
+	// Idle for the new ask, and the next pass starts the download.
+	if f.snap.ask != ask || errors.Is(context.Cause(ctx), errSuperseded) {
 		return
 	}
 	switch {
 	case err == nil:
 		f.snap.state = fetchVerified
 		f.snap.detail = fmt.Sprintf("%d artifacts fetched, the rest already verified in place", fetched)
+		f.retryDelay = 0
 	case errors.Is(err, errLayer):
 		f.snap.state = fetchRejected
 		f.snap.detail = err.Error()
@@ -248,266 +245,14 @@ func (f *fetcher) run(ctx context.Context, ask fetchAsk) {
 	default:
 		f.snap.state = fetchFailed
 		f.snap.detail = err.Error()
+		f.retryDelay = grow(f.retryDelay, true, fetchFirstRetry, fetchRetryLimit)
+		f.snap.retryAt = time.Now().Add(f.retryDelay + time.Duration(float64(f.retryDelay)*f.random()/10))
 	}
 }
 
-// fetchRelease runs one complete pass. It fetches and checks the
-// release document, removes the slot's old document, verifies or
-// fetches each artifact, and writes the new document to the slot
-// last. This order means a slot carrying release.yaml is a slot whose
-// artifacts were complete when the document was written, and that no
-// writer has changed since. fetchRelease returns how many
-// artifacts it actually downloaded, and how many bytes those
-// artifacts hold. Zero is the idempotent case, where everything was
-// already verified in place. The byte total counts an artifact only
-// after the artifact lands and verifies, so a torn file adds nothing
-// until the run that completes it.
-func fetchRelease(ctx context.Context, client *http.Client, ask fetchAsk) (int, int64, error) {
-	base := strings.TrimSuffix(ask.source, "/") + "/" + ask.version
-
-	raw, err := fetchBytes(ctx, client, base+"/release.yaml")
-	if err != nil {
-		return 0, 0, fmt.Errorf("fetching the release document: %w", err)
+func (f *fetcher) random() float64 {
+	if f.jitter == nil {
+		return rand.Float64()
 	}
-
-	// The first check in the trust chain: the document's bytes must
-	// hash to exactly what the catalog promised. Until that check
-	// passes, nothing the document says can be trusted.
-	sum := sha256.Sum256(raw)
-	if digest := "sha256:" + hex.EncodeToString(sum[:]); digest != ask.digest {
-		return 0, 0, fmt.Errorf("the release document's digest %s does not match the catalog's %s: %w", digest, ask.digest, errCorrupt)
-	}
-	release, err := machine.ParseRelease(raw)
-	if err != nil {
-		return 0, 0, fmt.Errorf("the release document does not parse: %v: %w", err, errCorrupt)
-	}
-	if release.Metadata.Name != ask.version {
-		return 0, 0, fmt.Errorf("the release document names version %s, not %s: %w", release.Metadata.Name, ask.version, errCorrupt)
-	}
-
-	if err := withdrawSlotDocument(ask.slotDir, raw); err != nil {
-		return 0, 0, fmt.Errorf("removing the slot's previous release document: %w", err)
-	}
-
-	fetched := 0
-	downloaded := int64(0)
-	for _, artifact := range release.Artifacts {
-		dest := filepath.Join(ask.slotDir, artifact.Name)
-		if verifySlotFile(artifact, dest) == nil {
-			continue // already here from an earlier, interrupted run
-		}
-		if err := fetchArtifact(ctx, client, base, artifact, dest); err != nil {
-			return fetched, downloaded, err
-		}
-		fetched++
-		downloaded += artifact.Size
-	}
-
-	// The deployment layer is the one file the release cannot
-	// supply. It belongs to this cluster alone, so the machine
-	// carries it forward from the slot it is running on. This step
-	// runs between the artifacts and the document deliberately: a
-	// slot with release.yaml is bootable, and a slot without its
-	// layer is not.
-	if err := carryLayer(ask); err != nil {
-		return fetched, downloaded, err
-	}
-
-	// The document lands after the artifacts it describes, written
-	// durably. This makes the slot self-describing: it records
-	// which release it holds, byte for byte, without asking the
-	// network.
-	if err := writeDurably(filepath.Join(ask.slotDir, "release.yaml"), raw); err != nil {
-		return fetched, downloaded, fmt.Errorf("writing the release document to the slot: %w", err)
-	}
-	return fetched, downloaded, nil
-}
-
-// withdrawSlotDocument removes the slot's release document unless it
-// is already the document of this release. The slot then claims no
-// release while its files change, so init cannot arm a trial of a
-// slot that holds part of one release and part of another
-// (armProvingBoot in init/proving.go checks the document and every
-// artifact it names). The removal reaches the disk before the first
-// artifact is written, so a power cut in the middle of the download
-// leaves a slot with no document, not one with the old document.
-//
-// A slot is FAT, where a file's directory entry lives in buffers of
-// the block device, and an fsync of the directory does not write them
-// (flushSlot in init/slotloader.go). So syncfs writes the slot's
-// filesystem back, buffers included, and the fsync of the directory
-// then empties the drive's write cache.
-func withdrawSlotDocument(slotDir string, raw []byte) error {
-	path := filepath.Join(slotDir, "release.yaml")
-	existing, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) || bytes.Equal(existing, raw) {
-		return nil
-	}
-	if err := os.Remove(path); err != nil {
-		return err
-	}
-	dir, err := os.Open(slotDir)
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	if err := unix.Syncfs(int(dir.Fd())); err != nil {
-		return err
-	}
-	return dir.Sync()
-}
-
-// carryLayer copies the running slot's deployment layer and
-// sidecar to the inactive slot. The active slot is the source of
-// truth. Its sidecar was written from verified bytes at install, or
-// by the carry that filled it. So a layer that fails to verify
-// against the active sidecar means the running slot itself is
-// damaged, a condition that no retry and no download can repair.
-// This is why the fetcher holds it the way it holds corruption. The
-// remedy belongs to a person: repair or reinstall the machine.
-func carryLayer(ask fetchAsk) error {
-	sidecar, err := os.ReadFile(filepath.Join(ask.activeSlotDir, machine.LayerSidecarName))
-	if err != nil {
-		return fmt.Errorf("the running slot's deployment layer cannot be vouched for (%v); repair or reinstall this machine: %w", err, errLayer)
-	}
-	digest, err := machine.ParseLayerSidecar(sidecar)
-	if err != nil {
-		return fmt.Errorf("the running slot's layer sidecar is damaged (%v); repair or reinstall this machine: %w", err, errLayer)
-	}
-	verify := func(path string) error {
-		f, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		return machine.VerifyLayer(digest, f)
-	}
-	source := filepath.Join(ask.activeSlotDir, machine.LayerName)
-	if err := verify(source); err != nil {
-		return fmt.Errorf("the running slot's deployment layer does not verify (%v); repair or reinstall this machine: %w", err, errLayer)
-	}
-
-	// This resumes the same way the artifacts do. A layer already
-	// carried, with a sidecar matching the active one, needs nothing
-	// more. A layer from some older install fails this check and
-	// gets replaced. A carry that died between writing the layer and
-	// writing its sidecar resumes by rewriting only the sidecar.
-	dest := filepath.Join(ask.slotDir, machine.LayerName)
-	destSidecar := filepath.Join(ask.slotDir, machine.LayerSidecarName)
-	if verify(dest) != nil {
-		f, err := os.Open(source)
-		if err != nil {
-			return fmt.Errorf("reading the running slot's layer: %w", err)
-		}
-		tmp, err := spillDurably(dest, f)
-		f.Close()
-		if err != nil {
-			return fmt.Errorf("carrying %s: %w", machine.LayerName, err)
-		}
-		if err := verify(tmp); err != nil {
-			os.Remove(tmp)
-			return fmt.Errorf("the carried layer does not verify: %v: %w", err, errLayer)
-		}
-		if err := os.Rename(tmp, dest); err != nil {
-			return err
-		}
-	}
-
-	// The sidecar lands last, written durably. A slot whose sidecar
-	// matches its layer is a slot whose carry completed.
-	if existing, err := os.ReadFile(destSidecar); err != nil || !bytes.Equal(existing, sidecar) {
-		if err := writeDurably(destSidecar, sidecar); err != nil {
-			return fmt.Errorf("carrying %s: %w", machine.LayerSidecarName, err)
-		}
-	}
-	return nil
-}
-
-// fetchArtifact streams one artifact onto the slot: temp file,
-// fsync, verify the durable bytes by re-reading them, then rename
-// into place. Verifying before renaming means a final-looking file
-// name never points at unverified bytes.
-func fetchArtifact(ctx context.Context, client *http.Client, base string, artifact machine.ReleaseArtifact, dest string) error {
-	resp, err := releases.Get(ctx, client, base+"/"+artifact.Name)
-	if err != nil {
-		return fmt.Errorf("fetching %s: %w", artifact.Name, err)
-	}
-	defer resp.Body.Close()
-
-	// The size cap protects the slot. An artifact that runs past its
-	// declared size is already wrong, and there is no reason to
-	// fill a 512Mi filesystem with the rest of it before finding
-	// that out.
-	tmp, err := spillDurably(dest, io.LimitReader(resp.Body, artifact.Size+1))
-	if err != nil {
-		return fmt.Errorf("writing %s: %w", artifact.Name, err)
-	}
-
-	if err := verifySlotFile(artifact, tmp); err != nil {
-		os.Remove(tmp)
-		return fmt.Errorf("%s from the server does not verify: %v: %w", artifact.Name, err, errCorrupt)
-	}
-	return os.Rename(tmp, dest)
-}
-
-// verifySlotFile checks one file on the slot against its
-// artifact's digest and size. It returns an error for any reason
-// the file fails, including that the file does not exist, which is
-// the common case on a first run.
-func verifySlotFile(artifact machine.ReleaseArtifact, path string) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return artifact.Verify(f)
-}
-
-// fetchBytes reads a small document whole with an HTTP GET. The
-// 1MiB limit is far larger than any reasonable release.yaml, and
-// small enough to read into memory without concern.
-func fetchBytes(ctx context.Context, client *http.Client, url string) ([]byte, error) {
-	resp, err := releases.Get(ctx, client, url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-}
-
-// spillDurably writes a stream next to its destination with the
-// same steps the installer applies to file copies: write to a
-// .partial temp file, fsync, close. On any failure, the function
-// removes the temp file, and nothing further sees it. On success,
-// the function returns the temp path for the caller to finish: the
-// caller either verifies first and then renames (fetchArtifact), or
-// renames immediately (writeDurably).
-func spillDurably(dest string, r io.Reader) (string, error) {
-	tmp := dest + ".partial"
-	f, err := os.Create(tmp)
-	if err != nil {
-		return "", err
-	}
-	_, err = io.Copy(f, r)
-	if err == nil {
-		err = f.Sync()
-	}
-	if closeErr := f.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		os.Remove(tmp)
-		return "", err
-	}
-	return tmp, nil
-}
-
-// writeDurably writes bytes already in memory with the same
-// steps: temp file, fsync, rename.
-func writeDurably(dest string, contents []byte) error {
-	tmp, err := spillDurably(dest, bytes.NewReader(contents))
-	if err != nil {
-		return err
-	}
-	return os.Rename(tmp, dest)
+	return f.jitter()
 }

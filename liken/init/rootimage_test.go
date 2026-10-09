@@ -2,16 +2,20 @@ package main
 
 // Tests for locating the system image. Slot selection is pure logic
 // over discovered partitions, and the RAM path is just a file check,
-// so both are tested against fixtures. The loop device and the
-// mounts are tested only under QEMU.
+// so both are tested against fixtures. The slot mount goes through the
+// recorder in mounttable_test.go. The loop device is tested only under
+// QEMU.
 
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestSlotDeviceFindsTheNamedSlot(t *testing.T) {
@@ -257,6 +261,59 @@ func TestFindSystemImageSearchesTheSlotByName(t *testing.T) {
 			t.Errorf("the slot search must report what it looked for: %v", err)
 		}
 	})
+}
+
+// slotBDisk builds a machine whose disk carries slot B as vda1, with a
+// clean FAT32 volume on the partition's node, and no RAM image. It
+// returns the partition's device path.
+func slotBDisk(t *testing.T) string {
+	t.Helper()
+	sys, dev := fakeMachine(t)
+	addDisk(t, sys, dev, "vda", 1<<30, nil)
+	addPartition(t, sys, "vda", "vda1", "liken:systemB", 64<<20)
+	old := ramImage
+	ramImage = filepath.Join(t.TempDir(), "absent.sqfs")
+	t.Cleanup(func() { ramImage = old })
+	return fatVolumeAt(t, filepath.Join(dev, "vda1"), false)
+}
+
+// The early boot mounts the slot for writing, and that mount sets the
+// volume's mark. So the boot must read the mark before it mounts the
+// slot, or every boot would report an unclean stop. The image is then
+// the file on the mounted slot.
+func TestFindSystemImageReadsTheSlotsMarkBeforeMountingIt(t *testing.T) {
+	device := slotBDisk(t)
+	mounts := fakeStorageMounts(t)
+	t.Setenv(bootedSlotStopEnv, "")
+	slotMount := filepath.Join(t.TempDir(), "slot")
+
+	got, err := findSystemImage("B", slotMount)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if want := filepath.Join(slotMount, slotImageName); got != want {
+		t.Errorf("image path = %q, want %q", got, want)
+	}
+	want := []storageMount{{source: device, target: slotMount, fstype: "vfat", flags: 0}}
+	if !slices.Equal(mounts.mounts, want) {
+		t.Errorf("mounts = %+v, want %+v", mounts.mounts, want)
+	}
+	if mark := os.Getenv(bootedSlotStopEnv); mark != stopMarkClean {
+		t.Errorf("recorded mark = %q, want %q, read before the mount set it", mark, stopMarkClean)
+	}
+}
+
+func TestFindSystemImageReportsASlotThatWillNotMount(t *testing.T) {
+	slotBDisk(t)
+	mounts := fakeStorageMounts(t)
+	mounts.mountErr = unix.EIO
+	t.Setenv(bootedSlotStopEnv, "")
+
+	_, err := findSystemImage("B", filepath.Join(t.TempDir(), "slot"))
+	if err == nil || !strings.Contains(err.Error(), "mounting slot B") {
+		t.Errorf("the error must name the slot that did not mount: %v", err)
+	}
 }
 
 func TestLoadBootModulesReportsAMissingIndex(t *testing.T) {

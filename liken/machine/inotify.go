@@ -134,24 +134,35 @@ func (w *watch) closeFds() {
 // write end, which wakes the reader's poll with a hangup. This split of
 // ownership means no descriptor is closed twice: the cancel goroutine
 // closes the write end, and the reader closes the rest as it returns.
+//
+// The cancel goroutine also ends when the reader stops on its own, so a
+// watch that failed leaves no goroutine and no descriptor behind for
+// the life of the context.
 func (w *watch) start(ctx context.Context) {
+	done := make(chan struct{})
 	go func() {
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case <-done:
+		}
 		unix.Close(w.cancelW)
 	}()
-	go w.run()
+	go func() {
+		w.run()
+		close(done)
+	}()
 }
 
 // run is the reader loop. It blocks in poll over the inotify descriptor
 // and the cancel pipe. A ready inotify descriptor means events to
 // drain; a ready cancel pipe means the context is done and the loop
-// returns. A poll error or a drain error also ends the loop, but for
-// good: the reader does not retry, and it never wakes the channel
-// again, so a caller sees silence rather than a signal that the watch
-// died. None of WatchDir, WatchDirMask, or WatchFactsTree add a backstop
-// for that case; a caller that must not miss a change if it happens
-// needs its own, the way logs/tail.go pairs its watch with a timer. It
-// closes the descriptors it owns as it leaves.
+// returns. A poll error or a drain error also ends the loop, for good:
+// the reader does not retry. It closes the wake channel on that way
+// out, and only on that way out, so a caller can tell a watch that
+// died from one whose context ended. A watch that died misses every
+// change after it, so the caller watches again and reads the whole
+// state again. Only this goroutine sends on the channel, so the close
+// cannot race a send. It closes the descriptors it owns as it leaves.
 func (w *watch) run() {
 	defer unix.Close(w.fd)
 	defer unix.Close(w.cancelR)
@@ -166,12 +177,14 @@ func (w *watch) run() {
 			continue
 		}
 		if err != nil {
+			close(w.wake)
 			return
 		}
 		if fds[1].Revents != 0 {
 			return
 		}
 		if !w.drain(buf) {
+			close(w.wake)
 			return
 		}
 	}
@@ -253,7 +266,8 @@ func parseInotifyEvents(buf []byte, visit func(wd int32, mask uint32, name strin
 // cannot end up with a stale watch on a file. The watch exists before
 // the function returns, so a caller that scans right after the call
 // cannot miss a change that lands between the watch and the scan. The
-// context ends the watch. A directory that does not exist is an error.
+// context ends the watch, and a watch that fails closes the channel
+// (run). A directory that does not exist is an error.
 func WatchDirMask(ctx context.Context, dir string, mask uint32) (<-chan struct{}, error) {
 	w, err := newWatch()
 	if err != nil {
@@ -272,8 +286,8 @@ func WatchDirMask(ctx context.Context, dir string, mask uint32) (<-chan struct{}
 // exists before the function returns, so a caller that scans right after
 // the call cannot miss a change that lands between the watch and the
 // scan. The context ends the watch: when it is done, the reader returns
-// and the channel goes quiet. A directory that does not exist is an
-// error.
+// and the channel goes quiet. A watch that fails closes the channel
+// instead (run). A directory that does not exist is an error.
 func WatchDir(ctx context.Context, dir string) (<-chan struct{}, error) {
 	return WatchDirMask(ctx, dir, dirMask)
 }
@@ -284,7 +298,7 @@ func WatchDir(ctx context.Context, dir string) (<-chan struct{}, error) {
 // ones as the tree grows. A caller calls Sync before every read, which
 // reconciles the watch set with the tree on disk and closes the window
 // between a new subdirectory and the watch on it. Wake fires for a
-// change anywhere in the tree.
+// change anywhere in the tree, and closes when the watch fails (run).
 type TreeWatch struct {
 	Wake <-chan struct{}
 

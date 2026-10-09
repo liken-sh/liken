@@ -170,7 +170,7 @@ func TestAPassPostsItsTransitionsAfterTheWriteLands(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			return reconcile(r, current, "lab", &fetcher{}, heartbeat, mm)
+			return reconcile(r, current, "lab", &fetcher{}, heartbeat, mm, nil)
 		}
 
 		if err := pass(); err == nil {
@@ -249,7 +249,7 @@ func TestAPassPostsTheUncordonAfterTheReboot(t *testing.T) {
 		}
 		mm := newMachineMetrics(metrics.NewOperator(component, machine.Version, []string{machineKind}, watchKinds), &fetcher{})
 
-		if err := reconcile(r, current, "lab", &fetcher{}, kubernetes.NewHeartbeat("node-1"), mm); err != nil {
+		if err := reconcile(r, current, "lab", &fetcher{}, kubernetes.NewHeartbeat("node-1"), mm, nil); err != nil {
 			t.Fatal(err)
 		}
 

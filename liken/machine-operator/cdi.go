@@ -39,6 +39,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -178,7 +179,7 @@ func cdiSpecPath(claimUID string) string {
 // injects the nodes at container creation, and a node that moves
 // under a running container stays wrong until the pod restarts. What
 // it prevents is a stale file that every later pod would receive.
-func refreshCDISpecs(sysRoot string) {
+func refreshCDISpecs(sysRoot string, out *passOutcome) {
 	entries, err := os.ReadDir(cdiDir)
 	if err != nil {
 		// No directory means no claim has been prepared on this boot.
@@ -196,8 +197,9 @@ func refreshCDISpecs(sysRoot string) {
 				byName[deviceName(d)] = d
 			}
 		}
-		if err := refreshCDISpec(sysRoot, claimUID, byName); err != nil {
+		if err := refreshCDISpec(sysRoot, claimUID, byName, out); err != nil {
 			fmt.Fprintf(os.Stderr, "device inventory: refreshing claim %s: %v\n", claimUID, err)
+			out.fail("refreshing the CDI specification of claim "+claimUID, err)
 		}
 	}
 }
@@ -225,7 +227,10 @@ func refreshCDISpecs(sysRoot string) {
 // keeps a node the program deleted, and the claim's container can
 // never restart: the runtime injects the spec's nodes at every
 // container creation, and a stat on the deleted node fails it.
-func refreshCDISpec(sysRoot, claimUID string, byName map[string]hardware.Device) error {
+//
+// A spec that does not decode is wrapped in fs.ErrInvalid: nothing but
+// a new prepare replaces it, so the pass's outcome retries it slowly.
+func refreshCDISpec(sysRoot, claimUID string, byName map[string]hardware.Device, out *passOutcome) error {
 	cdiWrites.Lock()
 	defer cdiWrites.Unlock()
 
@@ -240,7 +245,7 @@ func refreshCDISpec(sysRoot, claimUID string, byName map[string]hardware.Device)
 	}
 	var spec cdiSpec
 	if err := json.Unmarshal(raw, &spec); err != nil {
-		return err
+		return fmt.Errorf("decoding %s: %w: %w", cdiSpecPath(claimUID), err, fs.ErrInvalid)
 	}
 	changed := false
 	for i, device := range spec.Devices {
@@ -269,7 +274,11 @@ func refreshCDISpec(sysRoot, claimUID string, byName map[string]hardware.Device)
 	if !changed {
 		return nil
 	}
-	return writeSpecFile(claimUID, spec.Devices)
+	if err := writeSpecFile(claimUID, spec.Devices); err != nil {
+		return err
+	}
+	out.wrote("refreshing the CDI specification of claim " + claimUID)
+	return nil
 }
 
 // claimUIDFromSpecName reads a claim's UID back out of its spec file

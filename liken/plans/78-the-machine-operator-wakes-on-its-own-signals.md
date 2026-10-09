@@ -2,7 +2,7 @@
 
 Milestone 78. Proposed 2026-10-09. The third of five milestones that
 remove the ten-second ticker from `machine-operator`'s reconcile loop.
-[Milestone 76](76-a-pass-reports-what-it-did-not-finish.md) gives the
+[Milestone 76](completed/76-a-pass-reports-what-it-did-not-finish.md) gives the
 series and the table of every job the ticker does. This milestone
 wires three signals that `machine-operator` already has, or nearly
 has, into the loop: a release download that ends, a watch that works

@@ -170,7 +170,7 @@ func TestApplySysctlSetAppliesAndReadsBack(t *testing.T) {
 	observed, err := applySysctlSet(dir, map[string]string{
 		"vm.swappiness":        "10",
 		"vm.overcommit_memory": "1",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestApplySysctlSetSkipsAConvergedParameter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	observed, err := applySysctlSet(dir, map[string]string{"vm.swappiness": "10"})
+	observed, err := applySysctlSet(dir, map[string]string{"vm.swappiness": "10"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +227,7 @@ func TestApplySysctlSetSkipsAMultiValueParameterTheKernelSeparatesWithTabs(t *te
 		t.Fatal(err)
 	}
 
-	observed, err := applySysctlSet(dir, map[string]string{name: "1024 65535"})
+	observed, err := applySysctlSet(dir, map[string]string{name: "1024 65535"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +253,7 @@ func TestApplySysctlSetReportsEveryFailure(t *testing.T) {
 		"vm.swappiness": "10",
 		"vm.missing":    "1",
 		"kernel.absent": "1",
-	})
+	}, nil)
 	if err == nil {
 		t.Fatal("parameters this kernel does not have should fail")
 	}
@@ -271,7 +271,7 @@ func TestApplySysctlsObservesBothSets(t *testing.T) {
 	dir := sysctlDir(t, "vm.watermark_scale_factor", "vm.swappiness")
 	observed, defaultsErr, specErr := applySysctls(dir,
 		map[string]string{"vm.watermark_scale_factor": "100"},
-		map[string]string{"vm.swappiness": "10"})
+		map[string]string{"vm.swappiness": "10"}, nil)
 	if defaultsErr != nil || specErr != nil {
 		t.Fatalf("defaults=%v spec=%v", defaultsErr, specErr)
 	}
@@ -289,7 +289,7 @@ func TestApplySysctlsReportsTheSpecValueForAnOverriddenName(t *testing.T) {
 	dir := sysctlDir(t, name)
 	observed, defaultsErr, specErr := applySysctls(dir,
 		map[string]string{name: "262144"},
-		map[string]string{name: "524288"})
+		map[string]string{name: "524288"}, nil)
 	if defaultsErr != nil || specErr != nil {
 		t.Fatalf("defaults=%v spec=%v", defaultsErr, specErr)
 	}
@@ -302,7 +302,7 @@ func TestApplySysctlsKeepsTheTwoFailuresApart(t *testing.T) {
 	dir := sysctlDir(t, "vm.swappiness")
 	observed, defaultsErr, specErr := applySysctls(dir,
 		map[string]string{"vm.absent_default": "1"},
-		map[string]string{"vm.swappiness": "10", "vm.absent_spec": "1"})
+		map[string]string{"vm.swappiness": "10", "vm.absent_spec": "1"}, nil)
 	if defaultsErr == nil || !strings.Contains(defaultsErr.Error(), "vm.absent_default") {
 		t.Fatalf("the defaults error names its own parameter: %v", defaultsErr)
 	}

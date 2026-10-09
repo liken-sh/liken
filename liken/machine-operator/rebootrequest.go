@@ -110,7 +110,7 @@ func decideRebootRequest(m *machine.Machine, facts *machine.MachineStatus, t tur
 // The intent deliberately carries no manifest hash. That field names
 // the staged document a reboot applies, and this reboot applies
 // none.
-func carryOutRebootRequest(dir string, conv convergence, now time.Time) api.Condition {
+func carryOutRebootRequest(dir string, conv convergence, now time.Time, out *passOutcome) api.Condition {
 	if !conv.requestReboot {
 		return conv.condition
 	}
@@ -119,9 +119,11 @@ func carryOutRebootRequest(dir string, conv convergence, now time.Time) api.Cond
 		RequestedAt: now,
 	}
 	if err := machine.WriteRebootIntent(dir, intent); err != nil {
+		out.fail("writing the requested reboot's intent", err)
 		return api.Condition{Type: rebootRequestCondition, Status: api.ConditionFalse,
 			Reason: "RequestFailed", Message: err.Error()}
 	}
+	out.wrote("writing the requested reboot's intent")
 	fmt.Printf("requested a reboot that a person asked for; nothing is staged to apply (boot %.12s)\n", conv.hash)
 	return conv.condition
 }

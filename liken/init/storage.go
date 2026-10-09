@@ -121,6 +121,17 @@ var roleMounts = map[machine.StorageRoleName]roleMount{
 	machine.PodEphemeralRole:     {path: "/var/lib/kubelet"},
 }
 
+// mountFilesystem and unmountFilesystem are the mount(2) and umount(2)
+// calls that storage reconciliation, its teardown, the slot check, and
+// the early slot mount make. They are package variables so a test can
+// record which device lands on which path with which flags. A test
+// process has no privilege to mount anything, and a mount that only
+// fails would leave every decision after it untested.
+var (
+	mountFilesystem   = unix.Mount
+	unmountFilesystem = unix.Unmount
+)
+
 // isSystemSlot reports whether a role is one of the two system slots
 // that the firmware reads. These two roles use FAT32. Each one is
 // typed as an EFI system partition, so the firmware can find it. Each
@@ -178,7 +189,7 @@ func teardownStorage() {
 	// system at the staging point for a short time while it seeds it.
 	// If this step fails partway through, the file system stays
 	// mounted there.
-	_ = unix.Unmount(clusterStateStaging, 0)
+	_ = unmountFilesystem(clusterStateStaging, 0)
 	unmountRoleMounts(0, true)
 	// machineState is among the file systems that just came off, so
 	// there is nowhere durable to write again until a later attempt
@@ -217,7 +228,7 @@ func unmountRoleMounts(flags int, reportErrors bool) {
 // caller asked for. Every unmount on the way down goes through this
 // function, so the console tells one story about what came apart.
 func detachMount(target string, flags int, reportErrors bool) {
-	err := unix.Unmount(target, flags)
+	err := unmountFilesystem(target, flags)
 	switch {
 	case err == nil:
 		fmt.Printf("liken: storage: unmounted %s\n", target)
@@ -594,7 +605,7 @@ func mountRole(role machine.DeclaredRole, p partition, created bool) error {
 		if err := os.MkdirAll(target, 0o755); err != nil {
 			return fmt.Errorf("mkdir %s: %w", target, err)
 		}
-		if err := unix.Mount(dev, target, fstype, rm.flags, ""); err != nil {
+		if err := mountFilesystem(dev, target, fstype, rm.flags, ""); err != nil {
 			return fmt.Errorf("mounting %s for %s: %w", dev, role.Name, err)
 		}
 	}

@@ -1,8 +1,9 @@
 package main
 
 // This file tests the network functions that produce the same
-// output for the same input. Raising links, DHCP exchanges, and
-// routing tables need a kernel, and their tests run under QEMU.
+// output for the same input. The calls that raise links, add
+// addresses and routes, and run the DHCP exchange are tested against
+// a stand-in kernel in networkbringup_test.go.
 //
 // Checking a manifest's names against the ports a machine has is the
 // reason those functions take a plain list of ports instead of

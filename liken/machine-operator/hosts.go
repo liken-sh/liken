@@ -48,8 +48,15 @@ var hostsPath = "/host/etc/hosts"
 //
 // The returned entries come from a fresh read of the file after this
 // pass, not from the desired list, so the caller's status report is
-// observed, not assumed.
-func applyHostEntries(path, hostname string, desired []machine.HostEntry) ([]machine.HostEntry, error) {
+// observed, not assumed. The pass's outcome records the write, and a
+// failure for the retry.
+func applyHostEntries(path, hostname string, desired []machine.HostEntry, out *passOutcome) ([]machine.HostEntry, error) {
+	entries, err := reconcileHostsFile(path, hostname, desired, out)
+	out.fail("writing the host entries", err)
+	return entries, err
+}
+
+func reconcileHostsFile(path, hostname string, desired []machine.HostEntry, out *passOutcome) ([]machine.HostEntry, error) {
 	render := machine.HostsFile(hostname, desired)
 
 	actual, err := os.ReadFile(path)
@@ -61,6 +68,7 @@ func applyHostEntries(path, hostname string, desired []machine.HostEntry) ([]mac
 		if err := writeFileAtomically(path, render); err != nil {
 			return nil, fmt.Errorf("writing %s: %w", path, err)
 		}
+		out.wrote("writing the host entries")
 	}
 
 	holds, err := os.ReadFile(path)

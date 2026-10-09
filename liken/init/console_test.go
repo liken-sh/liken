@@ -2,21 +2,26 @@ package main
 
 // The kmsg plumbing is tested at the seams that do not need the real
 // device: the line splitter, which is pure; the drainer, fed through
-// an io.Pipe into a fake kmsg; and the console fallback, where the
-// tests swap the package console variable for a buffer, the same
-// pattern as disks_test.go.
+// an io.Pipe into a fake kmsg; the console fallback, where the tests
+// swap the package console variable for a buffer, the same pattern as
+// disks_test.go; and the redirect itself, pointed at regular files for
+// the two sysctls and at a FIFO for /dev/kmsg.
 
 import (
 	"bytes"
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestSplitKmsgLineLeavesShortLinesAlone(t *testing.T) {
@@ -214,4 +219,151 @@ func TestEmitKmsgLineSurvivesAPanickingWriter(t *testing.T) {
 	if !strings.Contains(fallback.String(), "must not be lost") {
 		t.Errorf("the line falls back to the raw console: %q", fallback.String())
 	}
+}
+
+// redirectFiles points the redirect's three kernel files into a
+// temporary directory, as regular files, and restores the paths and
+// init's output streams afterward. When the redirect replaced
+// `os.Stdout` and `os.Stderr`, the cleanup closes the pipes it made,
+// which ends its drainers.
+func redirectFiles(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	savedPaths := []string{printkDevkmsgPath, printkPath, kmsgPath}
+	savedOut, savedErr := os.Stdout, os.Stderr
+	t.Cleanup(func() {
+		printkDevkmsgPath, printkPath, kmsgPath = savedPaths[0], savedPaths[1], savedPaths[2]
+		redirectedOut, redirectedErr := os.Stdout, os.Stderr
+		os.Stdout, os.Stderr = savedOut, savedErr
+		if redirectedOut != savedOut {
+			redirectedOut.Close()
+		}
+		if redirectedErr != savedErr {
+			redirectedErr.Close()
+		}
+	})
+	printkDevkmsgPath = filepath.Join(dir, "printk_devkmsg")
+	printkPath = filepath.Join(dir, "printk")
+	kmsgPath = filepath.Join(dir, "kmsg")
+	for _, path := range []string{printkDevkmsgPath, printkPath, kmsgPath} {
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// kmsgFIFO replaces the redirect's /dev/kmsg with a FIFO and returns
+// its read end, so the test reads each record as a drainer writes it.
+// The read end opens first and without blocking, so the redirect's
+// write-only open finds a reader.
+func kmsgFIFO(t *testing.T) *os.File {
+	t.Helper()
+	if err := os.Remove(kmsgPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Mkfifo(kmsgPath, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := os.OpenFile(kmsgPath, os.O_RDONLY|unix.O_NONBLOCK, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close() })
+	return r
+}
+
+// readKmsgUntil reads records from the FIFO until every wanted record
+// has arrived, and fails the test if they have not arrived in ten
+// seconds.
+func readKmsgUntil(t *testing.T, r *os.File, wants ...string) string {
+	t.Helper()
+	if err := r.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var got strings.Builder
+	chunk := make([]byte, 4096)
+	for !kmsgHoldsAll(got.String(), wants) {
+		n, err := r.Read(chunk)
+		got.Write(chunk[:n])
+		if err != nil {
+			t.Fatalf("waiting for %q, read %q: %v", wants, got.String(), err)
+		}
+	}
+	return got.String()
+}
+
+func kmsgHoldsAll(s string, wants []string) bool {
+	return !slices.ContainsFunc(wants, func(want string) bool { return !strings.Contains(s, want) })
+}
+
+// The redirect turns off the kernel's rate limit on userspace records,
+// sets the console to echo info records, and then carries init's
+// stdout into /dev/kmsg as info records and its stderr as warning
+// records. The liken-logs relay separates init's records from the
+// kernel's by that priority.
+func TestRedirectToKmsgCarriesInitsOutputIntoTheKernelLog(t *testing.T) {
+	dir := redirectFiles(t)
+	kmsg := kmsgFIFO(t)
+
+	redirectToKmsg()
+	fmt.Fprintln(os.Stderr, "liken: a warning")
+
+	readKmsgUntil(t, kmsg,
+		fmt.Sprintf("<%d>liken: init logs via /dev/kmsg from here on", kmsgInfo),
+		fmt.Sprintf("<%d>liken: a warning", kmsgWarning))
+	if got := readKernelFile(t, filepath.Join(dir, "printk_devkmsg")); got != "on\n" {
+		t.Errorf("the rate limit is turned off: printk_devkmsg = %q", got)
+	}
+	if got := readKernelFile(t, filepath.Join(dir, "printk")); got != "7" {
+		t.Errorf("the console echoes info records: printk = %q", got)
+	}
+}
+
+func readKernelFile(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+// A redirect that cannot turn off the rate limit, or cannot open
+// /dev/kmsg, leaves init's output on the console. A rate-limited
+// redirect would drop lines that the console shows.
+func TestRedirectToKmsgStaysOnTheConsoleWhenTheKernelRefuses(t *testing.T) {
+	cases := []struct {
+		name string
+		path *string
+	}{
+		{"printk_devkmsg is not writable", &printkDevkmsgPath},
+		{"/dev/kmsg does not open", &kmsgPath},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			dir := redirectFiles(t)
+			*one.path = filepath.Join(dir, "missing", "file")
+			stdout, stderr := os.Stdout, os.Stderr
+
+			redirectToKmsg()
+
+			if os.Stdout != stdout || os.Stderr != stderr {
+				t.Error("init's output stays on the console")
+			}
+		})
+	}
+}
+
+// The console log level is best effort. A refused write to printk
+// leaves the echo as the kernel set it, and the redirect still carries
+// init's output into /dev/kmsg, because the ring buffer is the record.
+func TestRedirectToKmsgSurvivesARefusedLogLevel(t *testing.T) {
+	dir := redirectFiles(t)
+	printkPath = filepath.Join(dir, "missing", "printk")
+	kmsg := kmsgFIFO(t)
+
+	redirectToKmsg()
+
+	readKmsgUntil(t, kmsg, fmt.Sprintf("<%d>liken: init logs via /dev/kmsg from here on", kmsgInfo))
 }

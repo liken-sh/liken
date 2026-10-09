@@ -54,7 +54,7 @@ import (
 
 // manifestPeekPoint is the private mountpoint for the early look at
 // machineState, used and released before storage reconciliation runs.
-const manifestPeekPoint = "/.liken-machine-state"
+var manifestPeekPoint = "/.liken-machine-state"
 
 // A manifestChoice is one candidate manifest and its identity: the
 // hash travels into facts (and rejections) so the operator can tell
@@ -120,7 +120,7 @@ func loadManifestCandidates() (manifestCandidates, error) {
 	// untouched". Mounting ext4 replays its journal if the last boot
 	// died mid-write, which is the filesystem's recovery mechanism
 	// working exactly as intended.
-	if err := unix.Mount(dev, manifestPeekPoint, "ext4", unix.MS_RDONLY, ""); err != nil {
+	if err := mountFilesystem(dev, manifestPeekPoint, "ext4", unix.MS_RDONLY, ""); err != nil {
 		return c, fmt.Errorf("peeking at machineState on %s: %w", dev, err)
 	}
 	// The store returns bytes. Whether they parse as a Machine is
@@ -129,7 +129,7 @@ func loadManifestCandidates() (manifestCandidates, error) {
 	stagedRaw, stagedErr := store.LoadStaged()
 	provenRaw, provenErr := store.LoadProven()
 	c.rejection, _ = store.LoadRejection()
-	if err := unix.Unmount(manifestPeekPoint, 0); err != nil {
+	if err := unmountFilesystem(manifestPeekPoint, 0); err != nil {
 		// Loud but not fatal: if this mount lingers, a later rewrite
 		// of this disk's table fails with EBUSY and names the problem.
 		fmt.Fprintf(os.Stderr, "liken: storage: unmounting the manifest peek: %v\n", err)
@@ -230,11 +230,11 @@ func touchMachineState(p partition, fn func(root string) error) error {
 	if err := os.MkdirAll(manifestPeekPoint, 0o755); err != nil {
 		return err
 	}
-	if err := unix.Mount(devRoot+"/"+p.name, manifestPeekPoint, "ext4", 0, ""); err != nil {
+	if err := mountFilesystem(devRoot+"/"+p.name, manifestPeekPoint, "ext4", 0, ""); err != nil {
 		return err
 	}
 	ferr := fn(manifestPeekPoint)
-	if err := unix.Unmount(manifestPeekPoint, 0); err != nil {
+	if err := unmountFilesystem(manifestPeekPoint, 0); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: storage: unmounting %s: %v\n", manifestPeekPoint, err)
 	}
 	_ = os.Remove(manifestPeekPoint)

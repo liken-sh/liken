@@ -3,7 +3,12 @@ package hardware
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -62,9 +67,10 @@ func TestHardwareChanged(t *testing.T) {
 	}
 }
 
-// These tests drive the reader without root. A real uevent socket needs
-// privileges, but the reader only needs a non-blocking datagram
-// descriptor to read from and a peer to write to. A socketpair gives
+// These tests drive the reader without a real uevent socket. A test
+// cannot make the kernel send a crafted uevent, but the reader only
+// needs a non-blocking datagram descriptor to read from and a peer to
+// write to. A socketpair gives
 // both, so a test can send a crafted uevent and watch the reader wake or
 // stop. The reader owns the descriptors it reads from, so a test only
 // closes the peer and the cancel pipe's write end.
@@ -146,23 +152,75 @@ func TestReadUeventsSignalsOnChange(t *testing.T) {
 	unix.Close(peer)
 }
 
+// TestReadUeventsStopsOnADescriptorThatIsNotOpen proves the reader
+// stops, and closes its channel, when poll reports that the socket is
+// not an open descriptor. Nothing can repair that descriptor, so a
+// reader that kept polling it would spin, and a reader that returned
+// in silence would leave its caller deaf. The closed channel tells the
+// caller to open the listener again. This test needs a descriptor
+// number the process never opened, not merely one it closed: a
+// just-closed number can be handed back out to something else in the
+// runtime before the reader gets to it. A number far past anything
+// this process could have allocated has no such race, and poll reports
+// it with POLLNVAL. synctest.Wait returns once the reader returns,
+// because a goroutine inside a system call is not durably blocked.
+func TestReadUeventsStopsOnADescriptorThatIsNotOpen(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const neverOpenedFd = 1 << 20
+		cancelR, cancelW := cancelPipe(t)
+		notify := make(chan struct{}, 1)
+		go readUevents(neverOpenedFd, cancelR, notify)
+
+		synctest.Wait()
+
+		if !isClosed(notify) {
+			t.Error("the reader left its channel open on a descriptor that is not open")
+		}
+		unix.Close(cancelW)
+	})
+}
+
+// erroredSocket answers a non-blocking UDP socket with an error queued
+// on it. The socket is connected to a loopback port that nothing holds,
+// so the datagram it sends draws an ICMP port unreachable, and the
+// kernel queues ECONNREFUSED. poll then reports the socket ready, and
+// the read answers the error instead of a datagram, which is how a
+// netlink socket that overflowed delivers ENOBUFS.
+func erroredSocket(t *testing.T) int {
+	t.Helper()
+	closed, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Bind(closed, &unix.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}}); err != nil {
+		t.Fatal(err)
+	}
+	addr, err := unix.Getsockname(closed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unix.Close(closed)
+	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM|unix.SOCK_NONBLOCK, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Connect(fd, addr); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := unix.Write(fd, []byte("anyone there?")); err != nil {
+		t.Fatal(err)
+	}
+	return fd
+}
+
 // TestReadUeventsWakesOnALostDatagram proves the reader wakes the
-// channel when Recvfrom returns an error that is neither EAGAIN nor
-// EINTR. This test needs a descriptor number the process never opened,
-// not merely one it closed: a just-closed number can be handed back out
-// to something else in the runtime before the reader gets to it, which
-// would make the descriptor valid again by the time poll runs. A number
-// far past anything this process could have allocated has no such race;
-// poll reports it ready with POLLNVAL, and Recvfrom on it always fails
-// with EBADF. The reader cannot tell this apart from the error that
-// matters, ENOBUFS, so it takes the same path either way: the datagram
-// is gone, and it wakes the sysfs walk instead of waiting for an
-// unrelated later uevent to trigger it.
+// channel, and keeps reading, when the read answers an error that is
+// neither EAGAIN nor EINTR. The datagram is gone, so the reader wakes
+// the sysfs walk instead of waiting for an unrelated later uevent.
 func TestReadUeventsWakesOnALostDatagram(t *testing.T) {
-	const neverOpenedFd = 1 << 20
 	cancelR, cancelW := cancelPipe(t)
 	notify := make(chan struct{}, 1)
-	go readUevents(neverOpenedFd, cancelR, notify)
+	go readUevents(erroredSocket(t), cancelR, notify)
 
 	awaitSignal(t, notify)
 
@@ -206,6 +264,13 @@ func TestReadUeventsExitsWhenCancelPipeCloses(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("the reader did not exit after the cancel pipe closed")
 	}
+	select {
+	case _, ok := <-notify:
+		if !ok {
+			t.Fatal("the reader closed its channel on a cancel, which tells a caller the listener failed")
+		}
+	default:
+	}
 	unix.Close(peer)
 }
 
@@ -234,4 +299,83 @@ func TestWatchUeventsStopsAfterCancel(t *testing.T) {
 	refuteSignal(t, notify)
 
 	unix.Close(peer)
+}
+
+// socketsAndPipes lists the sockets and pipes the process holds open,
+// by the kernel's name for each one, such as "socket:[1234]". The name
+// carries the inode, so a descriptor number that the runtime reuses for
+// something else does not read as the same socket.
+func socketsAndPipes(t *testing.T) map[string]bool {
+	t.Helper()
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	held := map[string]bool{}
+	for _, e := range entries {
+		target, err := os.Readlink(filepath.Join("/proc/self/fd", e.Name()))
+		if err == nil && (strings.HasPrefix(target, "socket:") || strings.HasPrefix(target, "pipe:")) {
+			held[target] = true
+		}
+	}
+	return held
+}
+
+// opened lists what after holds that before did not.
+func opened(before, after map[string]bool) []string {
+	var names []string
+	for name := range after {
+		if !before[name] {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// isClosed reports whether a wake channel is closed. It drains a wake
+// that is still pending first, because the channel holds one at most.
+func isClosed(ch <-chan struct{}) bool {
+	for {
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				return true
+			}
+		default:
+			return false
+		}
+	}
+}
+
+// TestListenForUeventsReleasesItsDescriptorsOnCancel proves that the
+// real listener opens the kernel's uevent socket and its cancel pipe,
+// and that a cancel closes both without closing the channel. The kernel
+// lets any process receive its uevent broadcasts, so the test needs no
+// root. A component replaces its listener each time one stops, so a
+// listener that kept its socket after a cancel would leak one socket
+// for each restart. The closed channel is how a listener reports a
+// failure, so a cancel must leave it open. synctest.Wait returns once
+// the reader leaves its poll and returns, so a listener that ignored
+// the cancel hangs the test instead of passing it.
+func TestListenForUeventsReleasesItsDescriptorsOnCancel(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		before := socketsAndPipes(t)
+		ctx, cancel := context.WithCancel(t.Context())
+		notify, err := ListenForUevents(ctx)
+		if err != nil {
+			t.Skipf("the uevent socket is not open to this user: %v", err)
+		}
+		held := opened(before, socketsAndPipes(t))
+
+		cancel()
+		synctest.Wait()
+
+		after := socketsAndPipes(t)
+		if len(held) != 2 || slices.ContainsFunc(held, func(name string) bool { return after[name] }) {
+			t.Errorf("the listener opened %q and still holds some of them, want its socket and its cancel pipe, both released", held)
+		}
+		if isClosed(notify) {
+			t.Error("the listener closed its channel on a cancel, which tells a caller the listener failed")
+		}
+	})
 }

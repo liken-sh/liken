@@ -44,9 +44,17 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// podLogsDir is where kubelet writes container logs. This constant is
-// the canonical Kubernetes path, and liken keeps it.
-const podLogsDir = "/var/log/pods"
+// podLogsDir is where kubelet writes container logs. This is the
+// canonical Kubernetes path, and liken keeps it. It is a variable only
+// so that a test can bind into a temporary directory.
+var podLogsDir = "/var/log/pods"
+
+// bindPodLogDir is the bind mount itself. It goes through
+// mountFilesystem, so a test can check what bindPodLogs binds without
+// the privilege to mount.
+func bindPodLogDir(source, target string) error {
+	return mountFilesystem(source, target, "", unix.MS_BIND, "")
+}
 
 // podLogsSubdir is where the logs live on the podEphemeral
 // filesystem. kubelet owns every other directory under its root, so
@@ -110,7 +118,7 @@ func bindPodLogs(storage machine.StorageStatus) {
 		fmt.Fprintf(os.Stderr, "liken: pod logs: creating %s: %v\n", bind.target, err)
 		return
 	}
-	if err := unix.Mount(bind.source, bind.target, "", unix.MS_BIND, ""); err != nil {
+	if err := bindPodLogDir(bind.source, bind.target); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: pod logs: binding %s onto %s: %v\n", bind.source, bind.target, err)
 		return
 	}

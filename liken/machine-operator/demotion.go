@@ -102,15 +102,17 @@ func decideDemotion(role api.Role, nodeLabels map[string]string, rebootPolicy ma
 // first, because deleting the Node kills this pod, so the reboot
 // must already be in progress. Then it deletes the Node instance the
 // pass read, by its UID, which triggers etcd member removal.
-func carryOutDemotion(c *apiclient.Client, node *nodeObject, d demotion) api.Condition {
+func carryOutDemotion(c *apiclient.Client, runDir string, node *nodeObject, d demotion, out *passOutcome) api.Condition {
 	if !d.cleanup {
 		return d.condition
 	}
 	intent := &machine.RebootIntent{Reason: "completing the demotion to follower"}
-	if err := machine.WriteRebootIntent(machine.OperatorRunDir, intent); err != nil {
+	if err := machine.WriteRebootIntent(runDir, intent); err != nil {
+		out.fail("writing the demotion's reboot intent", err)
 		return api.Condition{Type: "NodeCurrent", Status: api.ConditionFalse, Reason: "DemotionFailed",
 			Message: fmt.Sprintf("writing the reboot intent: %v", err)}
 	}
+	out.wrote("writing the demotion's reboot intent")
 	name := node.Metadata.Name
 	if err := deleteNode(c, name, node.Metadata.UID); err != nil {
 		// The reboot is already in progress. The next boot detects

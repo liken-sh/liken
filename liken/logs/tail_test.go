@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -453,5 +454,31 @@ func TestTailerStopsWhenTheWatchCannotStart(t *testing.T) {
 	err := tailFile(context.Background(), path, newEnvelopeWriter(&syncBuffer{}), t.TempDir(), time.Now)
 	if err == nil || errors.Is(err, context.Canceled) {
 		t.Errorf("tailFile should surface the watch error, got %v", err)
+	}
+}
+
+// A directory watch that fails closes its channel. The tailer exits
+// with errWatchStopped, so the relay exits and the kubelet starts it
+// again with a new watch, both while it waits for the file and while it
+// follows one.
+func TestTailerStopsWhenItsWatchStops(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "k3s.log")
+	stopped := make(chan struct{})
+	close(stopped)
+
+	_, awaitErr := awaitFile(context.Background(), path, stopped)
+
+	if err := os.WriteFile(path, []byte("one line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	followErr := followGeneration(context.Background(), f, path, 0, 0, 0, newEnvelopeWriter(io.Discard), t.TempDir(), time.Now, stopped)
+
+	if !errors.Is(awaitErr, errWatchStopped) || !errors.Is(followErr, errWatchStopped) {
+		t.Errorf("awaiting answered %v and following answered %v, want errWatchStopped from both", awaitErr, followErr)
 	}
 }

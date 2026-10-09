@@ -262,7 +262,7 @@ func stepClockAtBoot(sources []string) *timeSync {
 		return nil
 	}
 	for attempt := range 3 {
-		sync, err := querySources(sources)
+		sync, err := queryTimeSources(sources)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "liken: time: measuring: %v\n", err)
 			time.Sleep(time.Duration(attempt+1) * time.Second)
@@ -274,8 +274,7 @@ func stepClockAtBoot(sources []string) *timeSync {
 			return sync
 		}
 		corrected := time.Now().Add(sync.offset)
-		ts := unix.NsecToTimespec(corrected.UnixNano())
-		if err := unix.ClockSettime(unix.CLOCK_REALTIME, &ts); err != nil {
+		if err := setSystemClock(corrected); err != nil {
 			fmt.Fprintf(os.Stderr, "liken: time: stepping the clock: %v\n", err)
 			return sync
 		}
@@ -287,6 +286,24 @@ func stepClockAtBoot(sources []string) *timeSync {
 	}
 	fmt.Fprintln(os.Stderr, "liken: time: no source answered; booting on the hardware clock (the discipline loop keeps trying)")
 	return nil
+}
+
+// The clock's actions are package variables so that a test can run
+// the decisions above and below against fakes. A real query needs a
+// socket, which stops a synctest bubble's clock, and the real clock
+// syscalls need PID 1's privileges. Production code never replaces
+// them.
+var (
+	queryTimeSources  = querySources
+	setSystemClock    = clockSettime
+	slewSystemClock   = slewClock
+	saveHardwareClock = writeRTC
+)
+
+// clockSettime steps the system clock to t with clock_settime.
+func clockSettime(t time.Time) error {
+	ts := unix.NsecToTimespec(t.UnixNano())
+	return unix.ClockSettime(unix.CLOCK_REALTIME, &ts)
 }
 
 // slewAmount limits how much correction one adjtimex call requests.
@@ -422,11 +439,11 @@ func disciplineClock(clk *clock, tree machine.FactsTree, initial machine.TimeSta
 				// Clean shutdown. Leave the hardware clock holding
 				// the best time estimate this machine ever had.
 				if !lastGood.IsZero() {
-					writeRTC()
+					saveHardwareClock()
 				}
 				return nil
 			}
-			sync, err := querySources(clk.sources)
+			sync, err := queryTimeSources(clk.sources)
 			if err != nil {
 				// A failed poll is worth reporting only when it
 				// changes the machine's state. Past the staleness
@@ -442,7 +459,7 @@ func disciplineClock(clk *clock, tree machine.FactsTree, initial machine.TimeSta
 				continue
 			}
 
-			if err := slewClock(sync.offset); err != nil {
+			if err := slewSystemClock(sync.offset); err != nil {
 				fmt.Fprintf(os.Stderr, "liken: time: slewing the clock: %v\n", err)
 			}
 			if current.State != machine.TimeSynchronized {
@@ -455,7 +472,7 @@ func disciplineClock(clk *clock, tree machine.FactsTree, initial machine.TimeSta
 			lastGood = sync.at
 			clk.record(sync)
 			if !rtcWritten {
-				writeRTC()
+				saveHardwareClock()
 				rtcWritten = true
 			}
 			// This drift check compares against the offset that was

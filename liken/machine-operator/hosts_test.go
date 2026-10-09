@@ -18,7 +18,7 @@ func TestApplyHostEntriesWritesAMissingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hosts")
 	desired := []machine.HostEntry{{Address: "10.10.0.20", Names: []string{"nas", "nas.home.arpa"}}}
 
-	observed, err := applyHostEntries(path, "node-1", desired)
+	observed, err := applyHostEntries(path, "node-1", desired, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestApplyHostEntriesSkipsAConvergedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	observed, err := applyHostEntries(path, "node-1", desired)
+	observed, err := applyHostEntries(path, "node-1", desired, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestApplyHostEntriesHealsAHandEditedFile(t *testing.T) {
 	}
 	desired := []machine.HostEntry{{Address: "10.10.0.20", Names: []string{"nas"}}}
 
-	observed, err := applyHostEntries(path, "node-1", desired)
+	observed, err := applyHostEntries(path, "node-1", desired, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestApplyHostEntriesHealsAHandEditedFile(t *testing.T) {
 
 func TestApplyHostEntriesReportsNoEntriesDeclared(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hosts")
-	observed, err := applyHostEntries(path, "node-1", nil)
+	observed, err := applyHostEntries(path, "node-1", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestApplyHostEntriesReportsAWriteError(t *testing.T) {
 	// makes that write fail, and the failure must come back to the
 	// caller.
 	path := filepath.Join(t.TempDir(), "missing-parent", "hosts")
-	if _, err := applyHostEntries(path, "node-1", []machine.HostEntry{{Address: "10.10.0.20", Names: []string{"nas"}}}); err == nil {
+	if _, err := applyHostEntries(path, "node-1", []machine.HostEntry{{Address: "10.10.0.20", Names: []string{"nas"}}}, nil); err == nil {
 		t.Error("expected an error when the file cannot be written")
 	}
 }
@@ -118,7 +118,7 @@ func TestApplyHostEntriesReportsAReadError(t *testing.T) {
 	// This is the read failure the write-on-divergence rule must
 	// still surface, rather than silently trying to overwrite it.
 	path := t.TempDir()
-	if _, err := applyHostEntries(path, "node-1", nil); err == nil {
+	if _, err := applyHostEntries(path, "node-1", nil, nil); err == nil {
 		t.Error("expected an error when the file cannot be read")
 	}
 }

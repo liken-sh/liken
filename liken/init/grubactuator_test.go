@@ -274,3 +274,152 @@ func TestBIOSFirmwareFactsWithoutAGRUBHome(t *testing.T) {
 		t.Errorf("no environment block, no facts to report: %+v", fw)
 	}
 }
+
+func TestGRUBActuatorCanArmWithAnEnvBlock(t *testing.T) {
+	act := installedGRUBHome(t, map[string]string{"default_slot": "A"})
+	if err := act.canArmTrial("B"); err != nil {
+		t.Errorf("an installed environment block can carry a one-shot: %v", err)
+	}
+}
+
+// Without an environment block, GRUB has nowhere to read a one-shot
+// from, so arming must fail rather than report a trial that will never
+// run.
+func TestGRUBActuatorArmTrialFailsWithoutAnEnvBlock(t *testing.T) {
+	home := fakeBootHomeMount(t)
+	act := grubActuator{grubDir: filepath.Join(home, "grub")}
+	if _, err := act.armTrial("B"); err == nil {
+		t.Error("arming with no environment block must fail")
+	}
+	if _, err := os.Stat(act.envPath()); err == nil {
+		t.Error("a failed arm must not create an environment block")
+	}
+}
+
+// The environment block and the boot chain are separate assertions. A
+// torn block must not stop the boot sectors from healing, because a
+// machine whose MBR was zeroed never boots again otherwise.
+func TestGRUBActuatorHealsTheBootSectorsDespiteATornEnvBlock(t *testing.T) {
+	_, dev := installedBIOSDisk(t)
+	grubArtifactsOnSlot(t)
+	act := installedGRUBHome(t, map[string]string{"default_slot": "A"})
+	torn := bytes.Repeat([]byte{0xFF}, 1024)
+	if err := os.WriteFile(act.envPath(), torn, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	act.assertProven("A")
+
+	disk, err := os.ReadFile(filepath.Join(dev, "vdc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if disk[0] != 0xB0 {
+		t.Error("the boot sectors must heal even when the environment block is torn")
+	}
+	env, err := os.ReadFile(act.envPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(env, torn) {
+		t.Error("a block that does not parse must not be rewritten from a guess")
+	}
+}
+
+// Healing writes the boot sectors only from artifacts it can trust and
+// a disk it can read. Each case here leaves a question healing cannot
+// answer, and the boot sectors and grub.cfg must stay as they were.
+func TestGRUBActuatorHealingLeavesTheChainAloneWhenItCannotPlan(t *testing.T) {
+	cases := []struct {
+		name   string
+		slot   string
+		damage func(t *testing.T, sys, slotMount string)
+	}{
+		{"a slot letter that names no slot", "C", func(*testing.T, string, string) {}},
+		{"a slot with no core image", "A", func(t *testing.T, _, slotMount string) {
+			if err := os.Remove(filepath.Join(slotMount, "grub-core.img")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"a core image for another platform", "A", func(t *testing.T, _, slotMount string) {
+			if err := os.WriteFile(filepath.Join(slotMount, "grub-core.img"), make([]byte, 3*disks.SectorSize), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"a disk with no biosBoot partition", "A", func(t *testing.T, sys, _ string) {
+			if err := os.RemoveAll(filepath.Join(sys, "vdc", "vdc1")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sys, dev := installedBIOSDisk(t)
+			slotMount, _, _ := grubArtifactsOnSlot(t)
+			act := installedGRUBHome(t, map[string]string{"default_slot": "A"})
+			c.damage(t, sys, slotMount)
+			before, err := os.ReadFile(filepath.Join(dev, "vdc"))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			act.healBootChain(c.slot)
+
+			after, err := os.ReadFile(filepath.Join(dev, "vdc"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(before, after) {
+				t.Error("the boot sectors must stay as they were")
+			}
+			if _, err := os.Stat(filepath.Join(act.grubDir, "grub.cfg")); err == nil {
+				t.Error("grub.cfg must not be written when healing stops early")
+			}
+		})
+	}
+}
+
+// grub.cfg carries the machine's name. Without a name there is nothing
+// correct to render, so healing fixes the boot sectors and leaves
+// grub.cfg alone rather than write an anonymous one.
+func TestGRUBActuatorHealingLeavesGrubCfgAloneWithoutAMachineName(t *testing.T) {
+	_, dev := installedBIOSDisk(t)
+	grubArtifactsOnSlot(t)
+	act := installedGRUBHome(t, map[string]string{"default_slot": "A"})
+	act.machineName = ""
+
+	act.healBootChain("A")
+
+	disk, err := os.ReadFile(filepath.Join(dev, "vdc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if disk[0] != 0xB0 {
+		t.Error("the boot sectors heal without a machine name")
+	}
+	if _, err := os.Stat(filepath.Join(act.grubDir, "grub.cfg")); err == nil {
+		t.Error("grub.cfg must not be rendered without a machine name")
+	}
+}
+
+// Healing reads the proven slot's artifacts from the slot's mount
+// point, the same one storage reconciliation mounts it on.
+func TestSlotMountPathFollowsTheRoleMounts(t *testing.T) {
+	slotA := fakeSlotAMount(t)
+	slotB := fakeRoleMountPath(t, machine.SystemBRole)
+	cases := []struct {
+		slot string
+		want string
+	}{
+		{"A", slotA},
+		{"B", slotB},
+		{"", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.slot, func(t *testing.T) {
+			if got := slotMountPath(c.slot); got != c.want {
+				t.Errorf("got %q, want %q", got, c.want)
+			}
+		})
+	}
+}
