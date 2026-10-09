@@ -175,7 +175,7 @@ func TestImportsPromotionPromotesWhenTheOSServes(t *testing.T) {
 
 func TestSettleImportsLifecycleUntrackedBootNeedsNoStore(t *testing.T) {
 	client := testClient(t, (&drainAPI{}).handler())
-	c := settleImportsLifecycle(client, t.TempDir(), "node-1", importsFacts("", ""), nil)
+	c := settleImportsLifecycle(&reader{client: client}, t.TempDir(), "node-1", importsFacts("", ""), nil)
 	if c.Status != api.ConditionTrue || c.Reason != "NotTracked" {
 		t.Errorf("got %+v", c)
 	}
@@ -188,7 +188,7 @@ func TestSettleImportsLifecycleReportsAProvingTrial(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := testClient(t, (&drainAPI{}).handler())
-	c := settleImportsLifecycle(client, root, "node-1",
+	c := settleImportsLifecycle(&reader{client: client}, root, "node-1",
 		importsFacts(machine.ManifestSourceStaged, machine.ManifestHash(raw)), nil)
 	if c.Status != api.ConditionFalse || c.Reason != "Proving" {
 		t.Errorf("no OS pods listed yet means the trial is still proving: %+v", c)
@@ -202,7 +202,7 @@ func TestSettleImportsLifecycleSeesAnEarlierPromotion(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := testClient(t, (&drainAPI{}).handler())
-	c := settleImportsLifecycle(client, root, "node-1",
+	c := settleImportsLifecycle(&reader{client: client}, root, "node-1",
 		importsFacts(machine.ManifestSourceStaged, machine.ManifestHash(raw)), nil)
 	if c.Status != api.ConditionTrue || c.Reason != "Converged" {
 		t.Errorf("an already-promoted trial is converged: %+v", c)
@@ -215,7 +215,7 @@ func TestSettleImportsLifecycleIgnoresAStaleStagedRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := testClient(t, (&drainAPI{}).handler())
-	c := settleImportsLifecycle(client, root, "node-1",
+	c := settleImportsLifecycle(&reader{client: client}, root, "node-1",
 		importsFacts(machine.ManifestSourceStaged, "hash-of-what-this-boot-ran"), nil)
 	if c.Status != api.ConditionUnknown || c.Reason != "FactsIncomplete" {
 		t.Errorf("a staged record the facts don't describe can't be judged: %+v", c)
@@ -243,7 +243,7 @@ func TestSettleImportsLifecyclePromotesWhenTheOSServes(t *testing.T) {
 	server := &drainAPI{pods: []kubernetes.Pod{osPod("liken-dns-abc", osImagePrefix+"dns:1", true)}}
 	out := &passOutcome{}
 
-	c := settleImportsLifecycle(testClient(t, server.handler()), root, "node-1", facts, out)
+	c := settleImportsLifecycle(&reader{client: testClient(t, server.handler())}, root, "node-1", facts, out)
 
 	proven, _ := machine.ImportedImagesStore(root).LoadProven()
 	if c.Reason != "Converged" || proven == nil || len(out.writes) != 1 {
@@ -261,7 +261,7 @@ func TestSettleImportsLifecycleHoldsThePromotionWhenTheSyncFails(t *testing.T) {
 	server := &drainAPI{pods: []kubernetes.Pod{osPod("liken-dns-abc", osImagePrefix+"dns:1", true)}}
 	out := &passOutcome{}
 
-	c := settleImportsLifecycle(testClient(t, server.handler()), root, "node-1", facts, out)
+	c := settleImportsLifecycle(&reader{client: testClient(t, server.handler())}, root, "node-1", facts, out)
 
 	proven, _ := machine.ImportedImagesStore(root).LoadProven()
 	if c.Reason != "PromotionFailed" || proven != nil || len(out.failures) != 1 {

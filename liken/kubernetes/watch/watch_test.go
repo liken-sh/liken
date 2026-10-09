@@ -152,10 +152,11 @@ func TestTheLabelIndexReadsOneLabel(t *testing.T) {
 	}
 }
 
-// The two wake rules, through the reflector. WakeOnEdit ignores a
+// The three wake rules, through the reflector. WakeOnEdit ignores a
 // status write and wakes for a spec edit, a deletion mark, a new
 // object, and a removed object. WakeOnChange wakes for the status
-// write too.
+// write too. WakeOnContent wakes for the status write, and ignores a
+// write that moved only the resourceVersion.
 func TestEachHandlerWakesTheLoopForItsChanges(t *testing.T) {
 	statusWrite := newThing("a", "110", 1)
 	statusWrite.Status.Phase = "Ready"
@@ -174,6 +175,8 @@ func TestEachHandlerWakesTheLoopForItsChanges(t *testing.T) {
 		{"an edit handler, a new object", editHandler, event("ADDED", newThing("b", "140", 1)), true},
 		{"an edit handler, a removed object", editHandler, event("DELETED", newThing("a", "150", 1)), true},
 		{"a change handler, a status write", changeHandler, event("MODIFIED", statusWrite), true},
+		{"a content handler, a status write", contentHandler, event("MODIFIED", statusWrite), true},
+		{"a content handler, a new version only", contentHandler, event("MODIFIED", newThing("a", "160", 1)), false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -200,6 +203,9 @@ func TestEachHandlerWakesTheLoopForItsChanges(t *testing.T) {
 func editHandler(wake func()) cache.ResourceEventHandler { return WakeOnEdit[thing](testSource, wake) }
 func changeHandler(wake func()) cache.ResourceEventHandler {
 	return WakeOnChange[thing](testSource, wake)
+}
+func contentHandler(wake func()) cache.ResourceEventHandler {
+	return WakeOnContent[thing](testSource, wake)
 }
 
 // After a gap in the watch, the informer reads the collection again

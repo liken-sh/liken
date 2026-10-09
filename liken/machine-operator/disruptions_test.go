@@ -18,7 +18,7 @@ func TestAGrantedRebootWithNoNodeSkipsTheDrain(t *testing.T) {
 		t.Errorf("the gate sent %s %s, want nothing", r.Method, r.URL.Path)
 	}))
 	var d disruptions
-	conv := d.gate(client, nil, errors.New("the API server is down"), turnGranted, drainNow, rebootingConvergence())
+	conv := d.gate(&reader{client: client}, nil, errors.New("the API server is down"), turnGranted, drainNow, rebootingConvergence())
 	if !conv.requestReboot || d.draining {
 		t.Errorf("reboot = %v, draining = %v; want the reboot and no drain", conv.requestReboot, d.draining)
 	}
@@ -32,7 +32,7 @@ func TestAGrantedRebootWithANodeWaitsForTheDrain(t *testing.T) {
 	fake := &drainAPI{listFail: true}
 	var d disruptions
 
-	conv := d.gate(testClient(t, fake.handler()), drainNode(true, true, drainNow.Format(time.RFC3339)), nil, turnGranted, drainNow, rebootingConvergence())
+	conv := d.gate(&reader{client: testClient(t, fake.handler())}, drainNode(true, true, drainNow.Format(time.RFC3339)), nil, turnGranted, drainNow, rebootingConvergence())
 
 	if conv.requestReboot || !d.draining || d.rebooting {
 		t.Errorf("reboot = %v, draining = %v, rebooting = %v; want the reboot held by the drain", conv.requestReboot, d.draining, d.rebooting)

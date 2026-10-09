@@ -38,6 +38,11 @@ package main
 //     so without this wake a deleted slice would stay deleted until
 //     the next device event.
 //
+// Three waits watch more than these six objects, and only while they
+// wait: the image proof and the drain watch the node's pods, the drain
+// watches the PodDisruptionBudgets, and a feature removal watches the
+// HelmCharts or the Services (waits.go).
+//
 // A watch that the API server accepts again after an outage wakes the
 // loop too, and the pass it starts reads every kind from the API
 // server (reader.throughAPIOnce), because a pass whose writes failed
@@ -160,6 +165,10 @@ type reader struct {
 	// throughAPI makes every read of this pass go to the API server.
 	throughAPI bool
 
+	// waits runs the watches of the waits (waits.go). A nil waits
+	// watches nothing, and those reads go to the API server.
+	waits *waits
+
 	// local keeps the pass's reads of the machine itself across
 	// passes, so a pass that only the ticker woke reads neither sysfs
 	// nor /etc/hosts (machineevents.go). A nil local reads both on
@@ -186,7 +195,8 @@ func (r *reader) observedBy(out *passOutcome) *reader {
 func watchThisMachine(ctx context.Context, watcher dynamic.Interface, client *apiclient.Client,
 	name, clusterName string, wake func(), restarted func(kind string)) *reader {
 	r := &reader{client: client, machineVersions: memo.New(),
-		slicesWritten: &kubernetes.SliceWriter{}, recovered: &atomic.Bool{}}
+		slicesWritten: &kubernetes.SliceWriter{}, recovered: &atomic.Bool{},
+		waits: newWaits(ctx, watcher, wake, name)}
 	start := func(kind string, source informer.Source, handler cache.ResourceEventHandler) *informer.Collection {
 		return informer.Start(ctx, watcher, source, informer.Options{
 			Handler:  handler,

@@ -239,9 +239,9 @@ func decideClusterConvergence(reduced *cluster.Cluster, held []featureHold, m *m
 // reduction needs the API client that the reader holds. It reads
 // nothing unless the edit stops a feature, so an ordinary pass reads
 // only the Cluster's copy. The HelmCharts and the LoadBalancer
-// Services have no watch: they are read only while a retraction
-// waits, and a watch of every Service in the cluster would cost this
-// pod far more than those reads.
+// Services are watched only while a retraction waits on them
+// (waits.go), and the copy of the Services keeps each one's name and
+// type alone.
 func convergeClusterDocument(r *reader, store machine.ManifestStore, clusterName string, m *machine.Machine, facts *machine.MachineStatus, t turn) (convergence, *cluster.Cluster) {
 	liveCluster, err := r.cluster(clusterName)
 	if err != nil {
@@ -251,7 +251,7 @@ func convergeClusterDocument(r *reader, store machine.ManifestStore, clusterName
 	rejection, _ := store.LoadRejection()
 	bootDoc, bootHash := bootClusterDocument(cluster.BootClusterManifestPath)
 	reduced, held := reduceRetraction(bootDoc, liveCluster, func(p cluster.Precondition) (bool, string, error) {
-		return evaluatePrecondition(r.client, p)
+		return evaluatePrecondition(r, p)
 	})
 	return decideClusterConvergence(reduced, held, m, facts, rejection,
 		bootDoc, bootHash, readStagedHash(store), t), liveCluster

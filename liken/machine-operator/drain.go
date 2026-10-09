@@ -26,6 +26,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -161,9 +162,9 @@ func holdsResourceClaim(p kubernetes.Pod) bool {
 // Eviction API returns as soon as the API server accepts the
 // request, long before the pod is gone, so the pod listing is what
 // reports the termination: a terminating pod stays in the listing
-// until the kubelet finishes with it. Each reconcile pass lists the
-// node again and runs this split again, so the wait blocks nothing,
-// and drainDeadline bounds it. Past the deadline decideDrainStep
+// until the kubelet finishes with it. The node's pod watch wakes a pass
+// when a pod leaves, and each pass runs this split again, so the wait
+// blocks nothing, and drainDeadline bounds it. Past the deadline decideDrainStep
 // clears the drain and the reboot proceeds.
 //
 // A driver pod that holds a claim of its own belongs in the second
@@ -213,12 +214,21 @@ type drainStep struct {
 	evict     []kubernetes.Pod
 	remaining int
 	clear     bool
+
+	// deadline is when the drain stops waiting: draining-since plus
+	// drainDeadline. The annotation holds whole seconds, so the
+	// deadline comes from the parsed annotation, not from the time in
+	// memory.
+	deadline time.Time
 }
 
 // decideDrainStep is the drain's decision for one pass. The
 // deadline runs from the draining-since annotation. A node without
 // this annotation gets it recorded now, along with the cordon, if
-// the node is not already unschedulable.
+// the node is not already unschedulable. The pass that reaches the
+// deadline lets the reboot proceed, the same rule Cluster API uses for
+// its drain timeout, so the pass that the deadline's own wake starts
+// does not hold.
 func decideDrainStep(node *nodeObject, pods []kubernetes.Pod, now time.Time) drainStep {
 	var step drainStep
 
@@ -231,10 +241,11 @@ func decideDrainStep(node *nodeObject, pods []kubernetes.Pod, now time.Time) dra
 			patch["spec"] = map[string]any{"unschedulable": true}
 		}
 		step.patch, _ = json.Marshal(patch)
-		since = now
+		since, _ = time.Parse(time.RFC3339, now.Format(time.RFC3339))
 	}
 
-	if now.Sub(since) > drainDeadline {
+	step.deadline = since.Add(drainDeadline)
+	if !now.Before(step.deadline) {
 		step.clear = true // the reboot proceeds; whatever remains stays running through it
 		return step
 	}
@@ -252,32 +263,64 @@ func decideDrainStep(node *nodeObject, pods []kubernetes.Pod, now time.Time) dra
 // progress on the same condition. The cordon posts one Event about
 // the Machine, because it is the start of the drain and the Node
 // carries no record of who cordoned it or why.
-func gateThroughDrain(c *apiclient.Client, node *nodeObject, conv convergence, now time.Time, notes machineEvents) convergence {
-	pods, err := kubernetes.ListPodsOnNode(c, node.Metadata.Name)
+//
+// Three things wake the pass that looks again. The node's pod watch
+// wakes it when a pod leaves, the budget watch wakes it when a budget
+// allows an eviction it refused (waits.go), and the outcome asks for a
+// pass at the deadline.
+func gateThroughDrain(r *reader, node *nodeObject, conv convergence, now time.Time, notes machineEvents, out *passOutcome) convergence {
+	r.watchBudgets()
+	pods, err := r.nodePods(node.Metadata.Name)
 	if err != nil {
 		fmt.Printf("listing pods for the drain: %v\n", err)
 		return holdForDrain(conv, "listing this node's pods failed; retrying")
 	}
 	step := decideDrainStep(node, pods, now)
 	if step.patch != nil {
-		if err := kubernetes.PatchJSON(c, nodesPath+"/"+node.Metadata.Name, step.patch); err != nil {
+		if err := kubernetes.PatchJSON(r.client, nodesPath+"/"+node.Metadata.Name, step.patch); err != nil {
 			fmt.Printf("cordoning %s: %v\n", node.Metadata.Name, err)
 			return holdForDrain(conv, "cordoning this node failed; retrying")
 		}
 		fmt.Printf("cordoned %s ahead of its reboot\n", node.Metadata.Name)
 		notes.normal(reasonCordoned, fmt.Sprintf("cordoned the Node %s ahead of the reboot; %d pods to move", node.Metadata.Name, step.remaining))
 	}
-	for _, p := range step.evict {
-		if err := kubernetes.EvictPod(c, p); err != nil {
-			// A refusal here is usually a PodDisruptionBudget working
-			// as intended. The next pass asks again.
-			fmt.Printf("evicting %s/%s: %v\n", p.Metadata.Namespace, p.Metadata.Name, err)
-		}
-	}
+	evict(r, step.evict, now, out)
 	if step.clear {
 		return conv
 	}
+	out.wakeBy(step.deadline)
 	return holdForDrain(conv, fmt.Sprintf("draining this node ahead of the reboot; %d pods still to move", step.remaining))
+}
+
+// evict asks each pod to leave, and sorts the answers the way
+// `kubectl drain` does (k8s.io/kubectl/pkg/drain). A 404 means the pod
+// is gone already, which happens when the copy is a moment behind. A
+// 429 means a PodDisruptionBudget refused it, and the budget is working
+// as intended: when the answer states a wait, the pass asks for a wake
+// then, and otherwise the budget watch wakes the pass when a budget
+// allows an eviction. Neither is a failure of the pass. Every other
+// refusal, such as a 403, a 5xx, or no answer, reaches the outcome
+// through the pass's observer, for milestone 76's retry.
+func evict(r *reader, pods []kubernetes.Pod, now time.Time, out *passOutcome) {
+	if len(pods) == 0 {
+		return
+	}
+	client := r.client.WithObserver(func(answer apiclient.Outcome) {
+		if answer.Status == http.StatusNotFound || answer.Status == http.StatusTooManyRequests {
+			return
+		}
+		out.observe(answer)
+	})
+	for _, p := range pods {
+		err := kubernetes.EvictPod(client, p)
+		if err == nil {
+			continue
+		}
+		fmt.Printf("evicting %s/%s: %v\n", p.Metadata.Namespace, p.Metadata.Name, err)
+		if seconds := apiclient.RetryAfterSeconds(err); seconds > 0 {
+			out.wakeBy(now.Add(time.Duration(seconds) * time.Second))
+		}
+	}
 }
 
 // holdForDrain keeps reporting the convergence on its own condition

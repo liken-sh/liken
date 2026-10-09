@@ -100,10 +100,12 @@ rules:
   - apiGroups: [resource.k8s.io]
     resources: [resourceclaims]
     verbs: [get]
-  # The drain (drain.go): list to see what still runs on this
-  # machine's node, and create on the eviction subresource to ask
-  # each pod to leave. The watch is of this node's own operator pod
-  # (staleness.go). This uses eviction through the subresource,
+  # The drain (drain.go): list and watch to see what still runs on
+  # this machine's node, and create on the eviction subresource to
+  # ask each pod to leave. One watch is of this node's own operator
+  # pod, all the time (staleness.go). Another is of every pod on the
+  # node, only while the image proof or a drain waits on them
+  # (waits.go). This uses eviction through the subresource,
   # rather than pod delete, deliberately: the API server refuses an
   # eviction when it would violate the workload's
   # PodDisruptionBudget, and that refusal is the entire difference
@@ -114,6 +116,12 @@ rules:
   - apiGroups: [""]
     resources: [pods/eviction]
     verbs: [create]
+  # A drain watches the PodDisruptionBudgets while it runs, so a
+  # budget that allows an eviction it refused wakes the drain at once
+  # (waits.go). The budgets live in every namespace.
+  - apiGroups: [policy]
+    resources: [poddisruptionbudgets]
+    verbs: [list, watch]
   # The retraction barrier (machine-operator/retraction.go): before
   # a feature may stop, the operator counts the objects that only
   # that feature's controller can finish removing. Services answer
@@ -121,15 +129,16 @@ rules:
   # on every LoadBalancer Service, and HelmCharts answer for helm,
   # whose controller owns the removal finalizer on every chart. Both
   # rules cover the whole cluster, because either kind of object can
-  # be created in any namespace. The verb is list and nothing else:
-  # the operator counts these objects and names them in a status
-  # message, and never deletes a deployment's own objects for it.
+  # be created in any namespace. The verbs are list and watch, and
+  # the watch runs only while a removal waits (waits.go): the operator
+  # counts these objects and names them in a status message, and never
+  # deletes a deployment's own objects for it.
   - apiGroups: [""]
     resources: [services]
-    verbs: [list]
+    verbs: [list, watch]
   - apiGroups: [helm.cattle.io]
     resources: [helmcharts]
-    verbs: [list]
+    verbs: [list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

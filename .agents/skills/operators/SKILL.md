@@ -326,7 +326,9 @@ of a `Source`, with the `Handler`, `Synced`, and `Reopened` of its
 `bluetooth-operator` is the reference for the handlers:
 `requestwatch.go` and `editwatch.go` hold them, and `watch_test.go`
 runs them through the real reflector. `liken/kubernetes/watch` holds
-`liken`'s handlers, `WakeOnChange` and `WakeOnEdit`.
+`liken`'s handlers: `WakeOnChange`, `WakeOnEdit`, and `WakeOnContent`
+for a collection whose `Transform` trims each object to the fields the
+pass reads.
 
 - **Imports.** Allowed: `k8s.io/client-go/tools/cache`,
   `k8s.io/client-go/dynamic`, `k8s.io/client-go/rest`, and

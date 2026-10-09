@@ -1,8 +1,13 @@
 # 79. The machine operator watches what it waits for
 
-Milestone 79. Proposed 2026-10-09. The fourth of five milestones that
+Milestone 79. Proposed and built 2026-10-09. Two checks have not run:
+the operator's memory during a drain on a one-gigabyte machine, and a
+drain run by an operator that wakes on `WakeOnContent`. The QEMU drill
+is in [What the lab measured](#what-the-lab-measured).
+
+The fourth of five milestones that
 remove the ten-second ticker from `machine-operator`'s reconcile loop.
-[Milestone 76](completed/76-a-pass-reports-what-it-did-not-finish.md) gives the
+[Milestone 76](76-a-pass-reports-what-it-did-not-finish.md) gives the
 series and the table of every job the ticker does. Three features of
 `machine-operator` wait for objects that other programs change: the
 proof of an upgrade's images, the drain before a reboot, and the
@@ -154,3 +159,75 @@ In a `synctest` bubble with `kubernetes/apiservertest`:
   pod's staleness from the operator's pod.
 - A held feature removal finishes when the last `HelmChart` is
   deleted, and its watch stops.
+
+## What was built
+
+The design above was built in `waits.go`, with these departures:
+
+- A read starts its watch. `nodePods`, `watchBudgets`, `helmCharts`,
+  and `loadBalancerServices` each call `waits.use`, which starts the
+  kind's watch when it is not running, and the loop calls `endPass`
+  after each pass to stop every watch the pass did not read. So no
+  code names when a wait begins or ends: the reads of the pass are the
+  record.
+- The pod watch wakes on `WakeOnContent`, a new handler in
+  `liken/kubernetes/watch`. It wakes when the trimmed copies differ in
+  anything but the `resourceVersion`. `WakeOnChange` woke a pass for
+  every kubelet write to every pod on the node, and each pass of a
+  drain asks every remaining pod to leave again. The QEMU drill below
+  showed the burst. A test proves that a restart count the trim drops
+  wakes nothing, and that a container that becomes Ready wakes the
+  pass.
+- The budget handler also wakes when a budget is deleted, because a
+  deleted budget guards nothing.
+- The `HelmChart` watch wakes only when a chart appears or leaves,
+  because the Helm controller writes each chart's status as it works.
+  A 404 for the kind counts as no charts, because the kind exists only
+  while k3s's Helm controller runs.
+- The `Service` watch has its own `Transform`, `trimService`, which
+  keeps the identity and `spec.type`, and its handler wakes only for a
+  new or deleted `Service` or a change of type.
+- The pod trim keeps the name of every volume, not only the `hostPath`
+  ones, so the trimmed pod converts to the same `kubernetes.Pod` as
+  the full one.
+- `apiclient.RetryAfterSeconds` answers 0 for a `429` that states no
+  wait, so the drain can tell "wait this long" from "no advice". The
+  client's own throttle still waits at least one second.
+- The eviction client's observer drops `404` and `429`, so neither
+  reaches milestone 76's retry.
+- The test of the operator's own pod beside a `liken-cluster-operator`
+  pod was not written. The narrow watch of the operator's own pod is
+  unchanged, and the node-wide copy does not feed `decidePodStale`.
+
+## What the lab measured
+
+`node-1` of the `lab` fleet, on 2026-10-09, under UEFI, with a
+one-replica `busybox` `Deployment` and a `PodDisruptionBudget` of
+`maxUnavailable: 0`. The `Cluster` was pointed at a new release while
+the budget held, and the budget was relaxed to `maxUnavailable: 1` 100
+seconds later.
+
+- The operator cordoned the node and evicted the other 4 pods in the
+  pass that took the reboot turn. In the first 2 seconds it asked for
+  the guarded pod 14 times, once for each pass that a change to the
+  other pods woke. After that it asked once every 10.0 seconds, which
+  is both the API server's `Retry-After` for a budget's refusal and the
+  ticker's period.
+- The pod's `deletionTimestamp` was set 0.12 seconds after the patch
+  that relaxed the budget returned. The node was uncordoned on the new
+  release 19 seconds later, and the image proof promoted the record in
+  the next second.
+- The trim, applied to the 8 pods on the node: a pod's JSON without
+  `managedFields` was 3.5 KB to 7.5 KB, and 0.4 KB to 1.4 KB trimmed.
+
+The release that drained ran the build before `WakeOnContent`, because
+the old release runs the drain before its reboot. The next upgrade
+drains with the new handler. The drill did not measure memory.
+
+## Verification needed
+
+- Measure the operator's memory during a drain on a one-gigabyte
+  screen machine.
+- Repeat the drill on a release that drains with `WakeOnContent`, with
+  a pod that crash-loops on the node: after the first burst, the
+  guarded pod is asked again only at each `Retry-After`.

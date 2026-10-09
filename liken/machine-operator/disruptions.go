@@ -2,8 +2,6 @@ package main
 
 import (
 	"time"
-
-	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // disruptions is one pass's running record of what has already
@@ -20,6 +18,10 @@ type disruptions struct {
 
 	// events posts the drain's cordon about this Machine.
 	events machineEvents
+
+	// out records what the drain did not finish, and when the drain's
+	// deadline wants a pass.
+	out *passOutcome
 }
 
 // gate intercepts one document's convergence decision on its way to
@@ -38,10 +40,10 @@ type disruptions struct {
 // same way. A Node that reads but whose pods do not list holds the
 // reboot (gateThroughDrain): a slow API server must not let a reboot
 // kill pods past their disruption budgets.
-func (d *disruptions) gate(c *apiclient.Client, node *nodeObject, nodeErr error, t turn, now time.Time, conv convergence) convergence {
+func (d *disruptions) gate(r *reader, node *nodeObject, nodeErr error, t turn, now time.Time, conv convergence) convergence {
 	conv.requestRestart = conv.requestRestart && !d.rebooting
 	if conv.requestReboot && t == turnGranted && nodeErr == nil {
-		conv = gateThroughDrain(c, node, conv, now, d.events)
+		conv = gateThroughDrain(r, node, conv, now, d.events, d.out)
 		d.draining = d.draining || !conv.requestReboot
 	}
 	d.rebooting = d.rebooting || conv.requestReboot

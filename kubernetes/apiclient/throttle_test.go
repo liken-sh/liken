@@ -188,7 +188,8 @@ func TestWithContextReplacesAWaitContext(t *testing.T) {
 }
 
 // A 429 the client answered states the seconds the API server asked the
-// caller to wait, and any other error states none.
+// caller to wait. A 429 that stated no wait, and any other error, state
+// none.
 func TestA429StatesTheWaitTheAPIServerAskedFor(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -196,7 +197,7 @@ func TestA429StatesTheWaitTheAPIServerAskedFor(t *testing.T) {
 		want   int
 	}{
 		{"the header", &throttling{refusals: 100, retryAfter: "11"}, 11},
-		{"no advice", &throttling{refusals: 100}, 1},
+		{"no advice", &throttling{refusals: 100}, 0},
 		{"no 429", &throttling{}, 0},
 	}
 	for _, c := range cases {

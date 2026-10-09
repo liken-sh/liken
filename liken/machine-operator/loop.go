@@ -146,6 +146,8 @@ func (l *loop) run(ctx context.Context, current *machine.Machine) error {
 		started := time.Now()
 		err := reconcile(objects, current, l.clusterName, l.fetcher, renewing, l.layer, out)
 		l.operator.ObserveReconcile(machineKind, time.Since(started), err)
+		// A wait's watch runs while the passes read it (waits.go).
+		l.objects.waits.endPass()
 
 		// One timer serves the retry and every step's wake, and each
 		// pass sets it again from its own outcome, so a pass that

@@ -33,7 +33,6 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/machine"
@@ -145,7 +144,7 @@ func decideImportsPromotion(in importsInputs, facts *machine.MachineStatus) impo
 // write. If the promotion write ran first, a badly-timed power cut
 // could prove a store whose latent unpacks are still dirty, which is
 // the exact false claim this lifecycle exists to prevent.
-func settleImportsLifecycle(c *apiclient.Client, root, nodeName string, facts *machine.MachineStatus, out *passOutcome) api.Condition {
+func settleImportsLifecycle(r *reader, root, nodeName string, facts *machine.MachineStatus, out *passOutcome) api.Condition {
 	store := machine.ImportedImagesStore(root)
 	in := importsInputs{}
 	if facts != nil && facts.Boot.ImportsSource == machine.ManifestSourceStaged {
@@ -155,7 +154,7 @@ func settleImportsLifecycle(c *apiclient.Client, root, nodeName string, facts *m
 		case staged != nil:
 			in.stagedHash = machine.ManifestHash(staged)
 			if in.storeErr == nil && in.stagedHash == facts.Boot.ImportsHash {
-				in.pods, in.podsErr = kubernetes.ListPodsOnNode(c, nodeName)
+				in.pods, in.podsErr = r.nodePods(nodeName)
 			}
 		case in.storeErr == nil:
 			// Nothing staged under a Staged boot usually means an

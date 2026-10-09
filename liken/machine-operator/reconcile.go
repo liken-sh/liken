@@ -93,7 +93,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	// tarball the boot imported, not only the one this pod runs from
 	// (imports.go).
 	status.Conditions = api.SetCondition(status.Conditions,
-		settleImportsLifecycle(c, machine.MachineStateDir, m.Metadata.Name, facts, out), now)
+		settleImportsLifecycle(r, machine.MachineStateDir, m.Metadata.Name, facts, out), now)
 
 	// Both sets of kernel parameters, on every pass. Applying the
 	// settings every liken machine holds is what returns a parameter
@@ -273,10 +273,10 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	// through the disruption gate on its way to its side effects,
 	// and the gate depends on the order in which the documents
 	// converge (see disruptions).
-	disr := &disruptions{events: notes}
+	disr := &disruptions{events: notes, out: out}
 	machineStore := machine.MachineManifests(machine.MachineStateDir)
 	machineRejection, _ := machineStore.LoadRejection()
-	conv := disr.gate(c, node, nodeErr, t, now,
+	conv := disr.gate(r, node, nodeErr, t, now,
 		decideConvergence(m, facts, machineRejection, readStagedHash(machineStore), t))
 	status.Conditions = api.SetCondition(status.Conditions,
 		carryOutConvergence(conv, machineStore, machine.OperatorRunDir, "spec", now, out), now)
@@ -300,7 +300,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 		clusterStore := machine.ClusterManifests(machine.MachineStateDir)
 		var cconv convergence
 		cconv, liveCluster = convergeClusterDocument(r, clusterStore, clusterName, m, facts, t)
-		cconv = disr.gate(c, node, nodeErr, t, now, cconv)
+		cconv = disr.gate(r, node, nodeErr, t, now, cconv)
 		status.Conditions = api.SetCondition(status.Conditions,
 			carryOutConvergence(cconv, clusterStore, machine.OperatorRunDir, "cluster document", now, out), now)
 		if cconv.pending != nil {
@@ -311,7 +311,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 		// so it can converge only on a pass that read the Cluster.
 		if liveCluster != nil {
 			systemStore := machine.SystemReleases(machine.MachineStateDir)
-			vconv := disr.gate(c, node, nodeErr, t, now,
+			vconv := disr.gate(r, node, nodeErr, t, now,
 				convergeSystemRelease(systemStore, liveCluster, m, facts, f, t, out))
 			status.Conditions = api.SetCondition(status.Conditions,
 				carryOutConvergence(vconv, systemStore, machine.OperatorRunDir, "system release", now, out), now)
@@ -321,7 +321,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 		}
 
 		credentialsStore := machine.RegistryCredentialsStore(machine.MachineStateDir)
-		rconv := disr.gate(c, node, nodeErr, t, now,
+		rconv := disr.gate(r, node, nodeErr, t, now,
 			convergeRegistryCredentials(r, credentialsStore, m, facts, t))
 		status.Conditions = api.SetCondition(status.Conditions,
 			carryOutConvergence(rconv, credentialsStore, machine.OperatorRunDir, "registry credentials", now, out), now)
@@ -339,7 +339,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	// machine and satisfies the request along the way. This runs
 	// outside the cluster block above, because a standalone machine
 	// can be asked to reboot too.
-	rreq := disr.gate(c, node, nodeErr, t, now, decideRebootRequest(m, facts, t))
+	rreq := disr.gate(r, node, nodeErr, t, now, decideRebootRequest(m, facts, t))
 	status.Conditions = api.SetCondition(status.Conditions,
 		carryOutRebootRequest(machine.OperatorRunDir, rreq, now, out), now)
 	if rreq.pending != nil {

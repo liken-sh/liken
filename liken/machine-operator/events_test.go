@@ -222,7 +222,7 @@ func TestTheDrainPostsTheCordonItApplies(t *testing.T) {
 				client, recorder, recorded := recordingClient(t, c.api.handler())
 				m := &machine.Machine{Metadata: api.ObjectMeta{Name: "node-1"}}
 
-				gateThroughDrain(client, c.node, rebootingConvergence(), drainNow, machineEvents{recorder, machineReference(m)})
+				gateThroughDrain(&reader{client: client}, c.node, rebootingConvergence(), drainNow, machineEvents{recorder, machineReference(m)}, nil)
 
 				if got := posted(recorded); !slices.Equal(got, c.want) {
 					t.Errorf("got %q, want %q", got, c.want)

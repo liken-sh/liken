@@ -315,7 +315,7 @@ func TestEvaluatePreconditionNamesTheObjectsThatRemain(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			holds, blocker, err := evaluatePrecondition(c.client(t), c.precondition)
+			holds, blocker, err := evaluatePrecondition(&reader{client: c.client(t)}, c.precondition)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -334,7 +334,7 @@ func TestEvaluatePreconditionCarriesAFailedRead(t *testing.T) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 	}))
 
-	if _, _, err := evaluatePrecondition(client, cluster.NoLoadBalancerServices); err == nil {
+	if _, _, err := evaluatePrecondition(&reader{client: client}, cluster.NoLoadBalancerServices); err == nil {
 		t.Error("a refused read is not an answer")
 	}
 }
@@ -342,7 +342,7 @@ func TestEvaluatePreconditionCarriesAFailedRead(t *testing.T) {
 func TestAnUnservedHelmChartKindHolds(t *testing.T) {
 	// A cluster that never ran the Helm controller serves no
 	// HelmChart kind at all. There is nothing to wait for.
-	holds, _, err := evaluatePrecondition(collectionServer(t, "/served/nowhere"), cluster.NoHelmCharts)
+	holds, _, err := evaluatePrecondition(&reader{client: collectionServer(t, "/served/nowhere")}, cluster.NoHelmCharts)
 
 	if err != nil || !holds {
 		t.Errorf("holds = %v, err = %v", holds, err)

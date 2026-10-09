@@ -47,9 +47,7 @@ import (
 	"maps"
 	"strings"
 
-	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/cluster"
-	"github.com/liken-sh/liken/liken/kubernetes"
 )
 
 // A featureHold is one feature that keeps running although the
@@ -142,10 +140,10 @@ func withFeature(doc *cluster.Cluster, slug string, cfg *cluster.FeatureConfig) 
 // cluster. Every precondition is a count of objects that only the
 // feature's own controller can finish removing, so an unsatisfied
 // precondition always carries the names of those objects.
-func evaluatePrecondition(c *apiclient.Client, p cluster.Precondition) (bool, string, error) {
+func evaluatePrecondition(r *reader, p cluster.Precondition) (bool, string, error) {
 	switch p {
 	case cluster.NoHelmCharts:
-		charts, err := kubernetes.ListHelmCharts(c)
+		charts, err := r.helmCharts()
 		if err != nil {
 			return false, "", err
 		}
@@ -161,7 +159,7 @@ func evaluatePrecondition(c *apiclient.Client, p cluster.Precondition) (bool, st
 			nameList(names)), nil
 
 	case cluster.NoLoadBalancerServices:
-		services, err := kubernetes.ListLoadBalancerServices(c)
+		services, err := r.loadBalancerServices()
 		if err != nil {
 			return false, "", err
 		}

@@ -12,6 +12,9 @@ package watch
 // only place a person learns why.
 
 import (
+	"maps"
+	"reflect"
+
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/cache"
 
@@ -66,7 +69,34 @@ func WakeOnEdit[T any](source informer.Source, wake func()) cache.ResourceEventH
 	return h.handler()
 }
 
-// wakeHandler is the shared half of the two handlers above. changed
+// WakeOnContent wakes the loop when an object's content changes: a new
+// object, a removed object, and a write that changed anything but the
+// resourceVersion. It is the handler for a collection whose informer
+// trims each object to the fields the pass reads. The kubelet writes a
+// pod's status every few seconds while a container restarts or a probe
+// runs, and each write moves the resourceVersion. After the trim, a
+// write that changed no field the pass reads leaves the two copies
+// equal except for the version, and wakes no pass.
+func WakeOnContent[T any](source informer.Source, wake func()) cache.ResourceEventHandler {
+	h := wakeHandler[T]{source: source, wake: wake, changed: func(before, after *unstructured.Unstructured) bool {
+		return !reflect.DeepEqual(withoutVersion(before), withoutVersion(after))
+	}}
+	return h.handler()
+}
+
+// withoutVersion answers a shallow copy of an object with no
+// resourceVersion, and leaves the informer's copy as it is.
+func withoutVersion(object *unstructured.Unstructured) map[string]any {
+	fields := maps.Clone(object.Object)
+	if metadata, ok := fields["metadata"].(map[string]any); ok {
+		metadata = maps.Clone(metadata)
+		delete(metadata, "resourceVersion")
+		fields["metadata"] = metadata
+	}
+	return fields
+}
+
+// wakeHandler is the shared half of the three handlers above. changed
 // compares the copy the informer held with the new copy. The informer
 // hands an update both copies, so the handler keeps no copy of its own.
 // After a gap in the watch, the informer reads the collection again

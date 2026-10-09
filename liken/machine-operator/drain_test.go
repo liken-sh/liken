@@ -339,7 +339,7 @@ func TestGateThroughDrainHoldsWhenPodsCannotBeListed(t *testing.T) {
 	fake := &drainAPI{listFail: true}
 	client := testClient(t, fake.handler())
 	since := drainNow.Add(-time.Minute).Format(time.RFC3339)
-	conv := gateThroughDrain(client, drainNode(true, true, since), rebootingConvergence(), drainNow, machineEvents{})
+	conv := gateThroughDrain(&reader{client: client}, drainNode(true, true, since), rebootingConvergence(), drainNow, machineEvents{}, nil)
 	if conv.requestReboot {
 		t.Error("a node whose pods can't be listed can't be judged clear; the reboot holds")
 	}
@@ -376,7 +376,7 @@ func TestGateThroughDrainHoldsWhateverStopsThePodList(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				conv := gateThroughDrain(c.client(t), drainNode(true, true, drainNow.Format(time.RFC3339)), rebootingConvergence(), drainNow, machineEvents{})
+				conv := gateThroughDrain(&reader{client: c.client(t)}, drainNode(true, true, drainNow.Format(time.RFC3339)), rebootingConvergence(), drainNow, machineEvents{}, nil)
 				if conv.requestReboot || conv.condition.Reason != "Draining" {
 					t.Errorf("the reboot went ahead at %+v, want it held", conv.condition)
 				}
@@ -388,7 +388,7 @@ func TestGateThroughDrainHoldsWhateverStopsThePodList(t *testing.T) {
 func TestGateThroughDrainHoldsWhenTheCordonFails(t *testing.T) {
 	fake := &drainAPI{patchFail: true}
 	client := testClient(t, fake.handler())
-	conv := gateThroughDrain(client, drainNode(false, false, ""), rebootingConvergence(), drainNow, machineEvents{})
+	conv := gateThroughDrain(&reader{client: client}, drainNode(false, false, ""), rebootingConvergence(), drainNow, machineEvents{}, nil)
 	if conv.requestReboot {
 		t.Error("an uncordoned node must not reboot; new pods could still land on it")
 	}
@@ -401,7 +401,7 @@ func TestGateThroughDrainEvictsAndHolds(t *testing.T) {
 	fake := &drainAPI{pods: []kubernetes.Pod{pod("web", "default")}}
 	client := testClient(t, fake.handler())
 	since := drainNow.Add(-time.Minute).Format(time.RFC3339)
-	conv := gateThroughDrain(client, drainNode(true, true, since), rebootingConvergence(), drainNow, machineEvents{})
+	conv := gateThroughDrain(&reader{client: client}, drainNode(true, true, since), rebootingConvergence(), drainNow, machineEvents{}, nil)
 	if conv.requestReboot {
 		t.Error("a movable pod holds the reboot")
 	}
@@ -424,7 +424,7 @@ func TestGateThroughDrainAsksTheClaimHolderAndNotYetTheDriver(t *testing.T) {
 	}}
 	client := testClient(t, fake.handler())
 	since := drainNow.Add(-time.Minute).Format(time.RFC3339)
-	conv := gateThroughDrain(client, drainNode(true, true, since), rebootingConvergence(), drainNow, machineEvents{})
+	conv := gateThroughDrain(&reader{client: client}, drainNode(true, true, since), rebootingConvergence(), drainNow, machineEvents{}, nil)
 	want := "/api/v1/namespaces/media/pods/movie-lg/eviction"
 	if len(fake.evictions) != 1 || fake.evictions[0] != want {
 		t.Errorf("only the claim holder is asked this pass: %v", fake.evictions)
@@ -443,7 +443,7 @@ func TestGateThroughDrainAsksTheDriverOnceTheClaimHolderIsGone(t *testing.T) {
 	fake := &drainAPI{pods: []kubernetes.Pod{pod("display-operator", "displays", servesDRA)}}
 	client := testClient(t, fake.handler())
 	since := drainNow.Add(-time.Minute).Format(time.RFC3339)
-	gateThroughDrain(client, drainNode(true, true, since), rebootingConvergence(), drainNow, machineEvents{})
+	gateThroughDrain(&reader{client: client}, drainNode(true, true, since), rebootingConvergence(), drainNow, machineEvents{}, nil)
 	want := "/api/v1/namespaces/displays/pods/display-operator/eviction"
 	if len(fake.evictions) != 1 || fake.evictions[0] != want {
 		t.Errorf("the driver's turn: %v", fake.evictions)
@@ -453,7 +453,7 @@ func TestGateThroughDrainAsksTheDriverOnceTheClaimHolderIsGone(t *testing.T) {
 func TestGateThroughDrainCordonsAnEmptyNodeAndReleases(t *testing.T) {
 	fake := &drainAPI{}
 	client := testClient(t, fake.handler())
-	conv := gateThroughDrain(client, drainNode(false, false, ""), rebootingConvergence(), drainNow, machineEvents{})
+	conv := gateThroughDrain(&reader{client: client}, drainNode(false, false, ""), rebootingConvergence(), drainNow, machineEvents{}, nil)
 	if !strings.Contains(fake.patched, `"unschedulable":true`) {
 		t.Errorf("the first pass cordons: %s", fake.patched)
 	}
@@ -466,7 +466,7 @@ func TestGateThroughDrainReleasesAClearNode(t *testing.T) {
 	fake := &drainAPI{pods: []kubernetes.Pod{pod("liken-operator", "liken-system", ownedByDaemonSet)}}
 	client := testClient(t, fake.handler())
 	since := drainNow.Add(-time.Minute).Format(time.RFC3339)
-	conv := gateThroughDrain(client, drainNode(true, true, since), rebootingConvergence(), drainNow, machineEvents{})
+	conv := gateThroughDrain(&reader{client: client}, drainNode(true, true, since), rebootingConvergence(), drainNow, machineEvents{}, nil)
 	if !conv.requestReboot {
 		t.Error("nothing left to move; the reboot proceeds")
 	}
