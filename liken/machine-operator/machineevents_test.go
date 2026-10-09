@@ -364,38 +364,58 @@ func TestLocalReadsReuseOnlyASuccessOnATick(t *testing.T) {
 	}
 }
 
-// A slice that somebody deletes wakes the loop, so the pass writes it
-// again. The pass walks sysfs only on a wake that is not the ticker's,
-// so without this wake the slice would stay deleted. An update, which
-// is what the operator's own write is, wakes nothing.
-func TestADeletedSliceWakesTheLoop(t *testing.T) {
+// The slice watch wakes the loop for a change this operator did not
+// make: another writer's update, and a delete. The operator's own write
+// reaches the watch as an update at the version the write answered, and
+// wakes nothing, so a write that the API server stores in another form
+// cannot wake one pass after another.
+func TestTheSliceWatchWakesOnlyForAnotherWritersChange(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
 		fake := newPassAPI()
 		client, watcher := passClients(t, fake)
-		slice, _ := json.Marshal(fakeapi.Object("resource.k8s.io/v1", "ResourceSlice", "", "node-1-liken.sh", nil))
-		if err := client.RequestJSON(http.MethodPost, kubernetes.ResourceSlicesPath, slice, nil); err != nil {
-			t.Fatal(err)
-		}
 		wakes := make(chan struct{}, 1)
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		r := watchThisMachine(ctx, watcher, client, "node-1", "lab", watch.Signal(wakes), func(string) {})
 		awaitCopies(t, r)
 		<-wakes
+		owner := kubernetes.OwnerReference{APIVersion: "v1", Kind: "Node", Name: "node-1", UID: "uid-node-1"}
+		woke := func() bool {
+			synctest.Wait()
+			select {
+			case <-wakes:
+				return true
+			default:
+				return false
+			}
+		}
 
-		if err := client.RequestJSON(http.MethodPut, kubernetes.ResourceSlicesPath+"/node-1-liken.sh", slice, nil); err != nil {
+		if err := r.sliceWriter().Write(client, "node-1", nil, owner, []kubernetes.SliceDevice{{Name: "usb-1-2"}}); err != nil {
 			t.Fatal(err)
 		}
-		synctest.Wait()
-		wokeOnUpdate := len(wakes) > 0
+		ownCreate := woke()
+		current, err := r.resourceSlice("node-1")
+		if err != nil || current == nil {
+			t.Fatalf("reading the slice: %v", err)
+		}
+		if err := r.sliceWriter().Write(client, "node-1", current, owner, []kubernetes.SliceDevice{{Name: "usb-1-3"}}); err != nil {
+			t.Fatal(err)
+		}
+		ownUpdate := woke()
+		foreign, _ := json.Marshal(fakeapi.Object("resource.k8s.io/v1", "ResourceSlice", "", "node-1-liken.sh", nil))
+		if err := client.RequestJSON(http.MethodPut, kubernetes.ResourceSlicesPath+"/node-1-liken.sh", foreign, nil); err != nil {
+			t.Fatal(err)
+		}
+		foreignUpdate := woke()
 		if err := client.RequestJSON(http.MethodDelete, kubernetes.ResourceSlicesPath+"/node-1-liken.sh", nil, nil); err != nil {
 			t.Fatal(err)
 		}
-		synctest.Wait()
+		deleted := woke()
 
-		if wokeOnUpdate || len(wakes) != 1 {
-			t.Errorf("woke on the update: %v, woke on the delete: %v; want only the delete", wokeOnUpdate, len(wakes) == 1)
+		if ownCreate || ownUpdate || !foreignUpdate || !deleted {
+			t.Errorf("woke on the own create %v, the own update %v, another writer's update %v, the delete %v; want false, false, true, true",
+				ownCreate, ownUpdate, foreignUpdate, deleted)
 		}
 	})
 }
@@ -502,6 +522,47 @@ func TestAFightOverAFileMakesAPassEveryFiveSecondsAtMost(t *testing.T) {
 
 		if passes := watch.syncs.Load() - 1; passes > 4 {
 			t.Errorf("twenty seconds of writes made %d passes, want at most 4", passes)
+		}
+	})
+}
+
+// A watch that recovers from a failure makes the next pass read every
+// kind from the API server, because the copy answers again before the
+// events missed during the outage arrive. The pass after that reads
+// the copies again.
+func TestAPassAfterARecoveryReadsTheAPIServerOnce(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		isolatePass(t)
+		fake := newPassAPI()
+		client, watcher := passClients(t, fake)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		r := watchThisMachine(ctx, watcher, client, "node-1", "lab", func() {}, func(string) {})
+		awaitCopies(t, r)
+		reads := func(pass *reader) []string {
+			fake.Forget()
+			for _, read := range []func() error{
+				func() error { _, err := pass.machine("node-1"); return err },
+				func() error { _, err := pass.node("node-1"); return err },
+				func() error { _, err := pass.cluster("lab"); return err },
+				func() error { _, err := pass.registryCredentials(); return err },
+				func() error { _, err := pass.operatorPods("node-1"); return err },
+				func() error { _, err := pass.resourceSlice("node-1"); return err },
+			} {
+				if err := read(); err != nil && !errors.Is(err, apiclient.ErrNotFound) {
+					t.Fatal(err)
+				}
+			}
+			return fake.Requests()
+		}
+		_, _ = r.freshMachine("node-1")
+
+		r.recovered.Store(true)
+		afterRecovery := reads(r.throughAPIOnce())
+		next := reads(r.throughAPIOnce())
+
+		if len(afterRecovery) != 6 || len(next) != 0 {
+			t.Errorf("the pass after the recovery sent %q, and the next one %q; want six reads and none", afterRecovery, next)
 		}
 	})
 }

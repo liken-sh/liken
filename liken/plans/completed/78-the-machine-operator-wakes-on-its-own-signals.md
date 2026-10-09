@@ -1,8 +1,13 @@
 # 78. The machine operator wakes on its own signals
 
-Milestone 78. Proposed 2026-10-09. The third of five milestones that
+Milestone 78. Proposed and built 2026-10-09. One check has not run: a
+settled `liken-1`, whose GPU publishes a shareable render node, keeping
+one slice `resourceVersion` for ten minutes. The QEMU drills are in
+[What the lab measured](#what-the-lab-measured).
+
+The third of five milestones that
 remove the ten-second ticker from `machine-operator`'s reconcile loop.
-[Milestone 76](completed/76-a-pass-reports-what-it-did-not-finish.md) gives the
+[Milestone 76](76-a-pass-reports-what-it-did-not-finish.md) gives the
 series and the table of every job the ticker does. This milestone
 wires three signals that `machine-operator` already has, or nearly
 has, into the loop: a release download that ends, a watch that works
@@ -12,7 +17,7 @@ the operator did not make.
 ## What happens now
 
 **The release download.** The fetcher in
-[`fetch.go`](../machine-operator/fetch.go) downloads a release in its
+[`fetch.go`](../../machine-operator/fetch.go) downloads a release in its
 own goroutine. When `run` ends, it records `Verified` or `Failed`, or,
 for a download that a new ask replaced, records nothing, and nothing
 wakes the loop. The next tick reads the result, so a verified release
@@ -21,7 +26,7 @@ replacement download starts only on the first pass after the old
 goroutine returns, which is also a tick.
 
 **A watch that works again.** Each watch in
-[`watches.go`](../machine-operator/watches.go) wakes the loop once,
+[`watches.go`](../../machine-operator/watches.go) wakes the loop once,
 after its first sync. The informer calls `Reopened` each time the API
 server accepts a watch after the first
 (`kubernetes/informer/informer.go`), and the operator only counts it
@@ -97,8 +102,59 @@ In a `synctest` bubble with `kubernetes/apiservertest`:
 - A fake API server that drops `allowMultipleAllocations` on write
   gets one write, not a loop of writes.
 
+## What was built
+
+The design above was built as written, with three details:
+
+- The fetcher's wake is a `defer` placed before the fetcher's lock, so
+  it runs after the unlock, and the pass it starts finds the fetcher
+  idle. A download that a retarget stopped wakes too.
+- The informer's `Recovered` fires when the API server accepts a watch
+  after the last attempt failed, whatever the failure. The operator's
+  `Recovered` sets a flag and then wakes the loop. The loop clears the
+  flag at the start of a pass, and that one pass reads every kind from
+  the API server (`reader.throughAPIOnce`). The flag is set before the
+  wake, so whichever pass clears it reads after the recovery.
+- `kubernetes.SliceWriter` holds the version and the devices of the
+  operator's last write. `Write` treats a slice at that version, with
+  the same devices desired, as current, and the slice handler ignores
+  an update at that version. `WriteResourceSlice` stays as a writer
+  with no memory.
+
+The fetcher's test proves the wake on each end of a download: a
+verified one, and one a retarget stopped. No loop test stages a
+release from the wake, because `main` is what joins the fetcher's wake
+to the loop's channel. The QEMU upgrade below is that check.
+
+## What the lab measured
+
+`node-1` of the `lab` fleet, on 2026-10-09, under UEFI with the virtio
+hardware shape. `make smoke-uefi` reported Ready after 25 seconds.
+
+- A Cluster pointed at a new release, 2026.10.09-078, served by `make
+  serve`. The release server logged the last artifact at 15:43:57, and
+  the Machine's `Event` that the release was verified and staged is
+  from 15:43:57 too. The machine took its turn, drained, rebooted into
+  slot B, and reported `Ready` on the new release at 15:44:32, 36
+  seconds after the edit.
+- A `kubectl patch` that removed a device from the slice was
+  overwritten 53 ms after the patch returned. The slice's
+  `resourceVersion` then held for 30 seconds.
+- `kill -9` of k3s from a debug pod: the API server answered again 10
+  seconds later, the kubelet deleted the slice at 15:47:45, and the
+  slice was back within the same half-second poll. The operator's
+  pod did not restart, and its passes retried each failed write on
+  milestone 76's timer through the outage.
+
+The drill cannot isolate the `Recovered` wake on this machine. Every
+pass renews the heartbeat, so an outage always leaves a failed write
+and a running retry timer, and the pass after the recovery has two
+causes. The informer's test and the operator's read-through test
+cover it. The QEMU guest has no shareable device, so the field-dropping
+loop is covered by the `SliceWriter` test alone.
+
 ## Verification needed
 
 - On `liken-1`, confirm that the slice's `resourceVersion` stays the
-  same for ten minutes on a settled node.
-- Restart k3s on a node, and confirm the slice is back within seconds.
+  same for ten minutes on a settled node, with its GPU's shareable
+  render node published.

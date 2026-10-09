@@ -103,7 +103,7 @@ func publishDeviceInventory(r *reader, node *nodeObject, facts *machine.MachineS
 	}
 	current, err := r.resourceSlice(node.Metadata.Name)
 	if err == nil {
-		err = kubernetes.WriteResourceSlice(r.client, node.Metadata.Name, current, owner, devices)
+		err = r.sliceWriter().Write(r.client, node.Metadata.Name, current, owner, devices)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "device inventory: %v\n", err)

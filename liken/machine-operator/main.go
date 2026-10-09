@@ -189,6 +189,7 @@ func main() {
 		fatal("in-cluster config for the watches: %v", err)
 	}
 	wakes := make(chan struct{}, 1)
+	f.wake = watch.Signal(wakes)
 	objects := watchThisMachine(context.Background(), watcher, client, name, clusterName,
 		watch.Signal(wakes), operatorMetrics.WatchRestarted)
 	objects.recorder = recorder
@@ -204,11 +205,9 @@ func main() {
 	// The same pass is also the backstop for the state that no event
 	// announces. A sysctl that another process changes sends no event
 	// that this pod can see (machineevents.go), so the pass writes it
-	// back within ten seconds. A release download that finishes between
-	// passes reaches status on the next one. The
-	// API objects the pass judges come from the watches' copies, so a
-	// ticker pass on a settled machine sends one request: the
-	// heartbeat's renewal.
+	// back within ten seconds. The API objects the pass judges come from
+	// the watches' copies, so a ticker pass on a settled machine sends
+	// one request: the heartbeat's renewal.
 	ticker := time.NewTicker(10 * time.Second)
 
 	// The machine's readers open before the first pass, so a change

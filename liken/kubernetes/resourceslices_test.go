@@ -9,6 +9,7 @@ package kubernetes
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"testing"
 )
 
@@ -166,5 +167,87 @@ func TestEnsureDoesNothingWhenAbsentAndEmpty(t *testing.T) {
 	}
 	if len(fixture.requests) != 1 {
 		t.Errorf("requests = %v, want only the read", fixture.requests)
+	}
+}
+
+// droppingServer stands in for an API server with DRAConsumableCapacity
+// off: it drops allowMultipleAllocations from each device it stores,
+// gives each write the next resourceVersion, and counts the writes.
+type droppingServer struct {
+	stored  *ResourceSlice
+	version int
+	writes  int
+	refuse  bool
+}
+
+func (s *droppingServer) handler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode(s.stored)
+			return
+		}
+		s.writes++
+		if s.refuse {
+			http.Error(w, "etcd is gone", http.StatusServiceUnavailable)
+			return
+		}
+		slice := &ResourceSlice{}
+		_ = json.NewDecoder(r.Body).Decode(slice)
+		for i := range slice.Spec.Devices {
+			slice.Spec.Devices[i].AllowMultipleAllocations = nil
+		}
+		s.version++
+		slice.Metadata.ResourceVersion = strconv.Itoa(s.version)
+		s.stored = slice
+		_ = json.NewEncoder(w).Encode(slice)
+	})
+}
+
+// shareableDevices is one device the writer publishes as shareable, the
+// field the dropping server does not keep.
+func shareableDevices() []SliceDevice {
+	shared := true
+	return []SliceDevice{{Name: "pci-0000-00-02-0", AllowMultipleAllocations: &shared}}
+}
+
+// A slice that holds the writer's own last write is current, even when
+// the server dropped a field of it, so the next pass writes nothing.
+// The writer knows the version as its own, and no other version.
+func TestASliceWriterWritesOnceToAServerThatDropsAField(t *testing.T) {
+	server := &droppingServer{}
+	client := testClient(t, server.handler())
+	w := &SliceWriter{}
+
+	for range 3 {
+		if err := w.Write(client, "node-1", server.stored, testOwner(), shareableDevices()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if server.writes != 1 {
+		t.Errorf("three passes wrote %d times, want 1", server.writes)
+	}
+	if !w.Wrote(server.stored.Metadata.ResourceVersion) || w.Wrote("99") || w.Wrote("") {
+		t.Errorf("Wrote answered wrong for the versions %q, 99, and empty", server.stored.Metadata.ResourceVersion)
+	}
+}
+
+// A new inventory is written even at the writer's own version, and a
+// write that failed leaves the writer remembering nothing, so the next
+// pass compares the devices themselves.
+func TestASliceWriterWritesANewInventoryAndForgetsAFailedWrite(t *testing.T) {
+	server := &droppingServer{}
+	client := testClient(t, server.handler())
+	w := &SliceWriter{}
+	if err := w.Write(client, "node-1", nil, testOwner(), shareableDevices()); err != nil {
+		t.Fatal(err)
+	}
+	ours := server.stored.Metadata.ResourceVersion
+
+	server.refuse = true
+	failed := w.Write(client, "node-1", server.stored, testOwner(), testDevices())
+
+	if failed == nil || server.writes != 2 || w.Wrote(ours) {
+		t.Errorf("the refused write answered %v after %d writes, and the writer still owns %s: %v", failed, server.writes, ours, w.Wrote(ours))
 	}
 }

@@ -18,7 +18,9 @@ package main
 // and returns immediately with the current state. The pass that
 // starts a download and the pass that finds it verified are
 // different passes, minutes apart, and every pass in between keeps
-// the heartbeat fresh. The lease must never wait on a socket.
+// the heartbeat fresh. The lease must never wait on a socket. The
+// download wakes the loop when it ends (fetcher.wake), so the pass
+// that reads the result runs at once.
 //
 // Failure comes in two kinds, and the distinction matters
 // throughout this file. A transient failure means the server is
@@ -104,6 +106,15 @@ type fetcher struct {
 	// failure, and zero before the first. A new ask resets it, and so
 	// does a verified download.
 	retryDelay time.Duration
+
+	// wake wakes the reconcile loop when a download ends, whatever
+	// the end: verified, failed, rejected, or stopped because the ask
+	// changed. The pass it starts reads the result, or starts the
+	// download the new ask needs. A failed download is safe to wake on,
+	// because its backoff (retryAt) gives the next attempt its time; a
+	// download that fails in milliseconds, such as one that meets a
+	// 404, would otherwise start again at once. Nil wakes nothing.
+	wake func()
 
 	// jitter answers a number in [0, 1), for the tenth of the delay
 	// that each retry adds at random, so a fleet that failed together
@@ -213,6 +224,11 @@ func (f *fetcher) run(ctx context.Context, ask fetchAsk) {
 	}
 	fetched, downloaded, err := fetchRelease(ctx, client, ask)
 
+	// The wake runs after the unlock below, because deferred calls run
+	// in reverse, so the pass it starts finds the fetcher idle.
+	if f.wake != nil {
+		defer f.wake()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cancel(nil)

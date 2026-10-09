@@ -30,15 +30,18 @@ package main
 //     change. The kubelet writes the Node's status only when a
 //     condition changes, and the other two change rarely. A cordon, a
 //     label, or a taint that somebody set by hand is reverted at once.
-//   - The ResourceSlice wakes the loop only when it is deleted. The
-//     kubelet deletes a driver's slices when it starts, so a restart
-//     of k3s deletes this node's slice, and the pass writes it again.
-//     The pass walks sysfs only when something woke it other than the
-//     ticker (machineevents.go), so without this wake a deleted slice
-//     would stay deleted until the next device event. An update wakes
-//     nothing, because the operator's own write is an update, and a
-//     write that never compares equal would then write again as fast
-//     as the API server answers.
+//   - The ResourceSlice wakes the loop when it is deleted, or updated
+//     by another writer (sliceHandler). The kubelet deletes a driver's
+//     slices when it starts, so a restart of k3s deletes this node's
+//     slice, and the pass writes it again. The pass walks sysfs only
+//     when something woke it other than the ticker (machineevents.go),
+//     so without this wake a deleted slice would stay deleted until
+//     the next device event.
+//
+// A watch that the API server accepts again after an outage wakes the
+// loop too, and the pass it starts reads every kind from the API
+// server (reader.throughAPIOnce), because a pass whose writes failed
+// during the outage has nothing else to start it.
 //
 // Every watch wakes the loop once when its first read is done. A pass
 // that ran before then read the API server, and a change made between
@@ -67,6 +70,7 @@ package main
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/events"
@@ -77,6 +81,7 @@ import (
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/kubernetes/watch"
 	"github.com/liken-sh/liken/liken/machine"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/cache"
@@ -139,6 +144,22 @@ type reader struct {
 	// again with no harm.
 	machineVersions *memo.Versions
 
+	// slicesWritten remembers this operator's own last write of its
+	// ResourceSlice (kubernetes.SliceWriter). The slice watch reads it
+	// to tell another writer's update from this operator's echo.
+	slicesWritten *kubernetes.SliceWriter
+
+	// recovered is set by a watch that the API server accepts again
+	// after a watch on the same kind failed, and the loop clears it at
+	// the start of the next pass. A copy is marked ready the moment the
+	// resumed watch is accepted, before the events missed during the
+	// outage arrive, so that pass reads every kind from the API server
+	// (throughAPI).
+	recovered *atomic.Bool
+
+	// throughAPI makes every read of this pass go to the API server.
+	throughAPI bool
+
 	// local keeps the pass's reads of the machine itself across
 	// passes, so a pass that only the ticker woke reads neither sysfs
 	// nor /etc/hosts (machineevents.go). A nil local reads both on
@@ -164,11 +185,17 @@ func (r *reader) observedBy(out *passOutcome) *reader {
 // and no Secret, so it opens neither watch.
 func watchThisMachine(ctx context.Context, watcher dynamic.Interface, client *apiclient.Client,
 	name, clusterName string, wake func(), restarted func(kind string)) *reader {
+	r := &reader{client: client, machineVersions: memo.New(),
+		slicesWritten: &kubernetes.SliceWriter{}, recovered: &atomic.Bool{}}
 	start := func(kind string, source informer.Source, handler cache.ResourceEventHandler) *informer.Collection {
 		return informer.Start(ctx, watcher, source, informer.Options{
 			Handler:  handler,
 			Synced:   wake,
 			Reopened: func() { restarted(kind) },
+			Recovered: func() {
+				r.recovered.Store(true)
+				wake()
+			},
 			// A copy stops answering after any failed watch, as the
 			// head of this file says.
 			UnreadyOnWatchError: true,
@@ -182,11 +209,10 @@ func watchThisMachine(ctx context.Context, watcher dynamic.Interface, client *ap
 		LabelSelector: operatorPodLabel, FieldSelector: "spec.nodeName=" + name}
 	slices := informer.Source{Resource: sliceResource, FieldSelector: named(kubernetes.ResourceSliceName(name))}
 
-	r := &reader{client: client, machineVersions: memo.New()}
 	r.machines = start(machineKind, machines, watch.WakeOnChange[machine.Machine](machines, wake))
 	r.nodes = start(nodeKind, nodes, watch.WakeOnChange[nodeObject](nodes, wake))
 	r.ownPods = start(podKind, pods, watch.WakeOnChange[kubernetes.Pod](pods, wake))
-	r.slices = start(resourceSliceKind, slices, cache.ResourceEventHandlerFuncs{DeleteFunc: func(any) { wake() }})
+	r.slices = start(resourceSliceKind, slices, sliceHandler(r.slicesWritten, wake))
 	if clusterName != "" {
 		clusters := informer.Source{Resource: clusterResource, FieldSelector: named(clusterName)}
 		secrets := informer.Source{Resource: secretResource, Namespace: "liken-system",
@@ -197,11 +223,49 @@ func watchThisMachine(ctx context.Context, watcher dynamic.Interface, client *ap
 	return r
 }
 
+// sliceHandler wakes the loop when the slice is deleted, or updated by
+// a writer other than this operator. The kubelet deletes a driver's
+// slices when it starts, so a restart of k3s deletes this node's slice,
+// and the pass writes it again. The operator's own write reaches the
+// watch as an update at the version the write answered, and wakes
+// nothing (kubernetes.SliceWriter). An update that the informer
+// delivers after it reads the collection again, at a resourceVersion
+// that did not move, is no change.
+func sliceHandler(written *kubernetes.SliceWriter, wake func()) cache.ResourceEventHandler {
+	return cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(before, after any) {
+			old, okOld := before.(*unstructured.Unstructured)
+			now, okNew := after.(*unstructured.Unstructured)
+			if !okOld || !okNew || old.GetResourceVersion() == now.GetResourceVersion() || written.Wrote(now.GetResourceVersion()) {
+				return
+			}
+			wake()
+		},
+		DeleteFunc: func(any) { wake() },
+	}
+}
+
+// throughAPIOnce answers the reader for one pass: one that reads every
+// kind from the API server when a watch recovered since the last pass,
+// and r otherwise. The flag is set before the recovery's wake, so the
+// pass that clears it reads after the recovery, whichever pass that is.
+func (r *reader) throughAPIOnce() *reader {
+	if r.recovered == nil || !r.recovered.Swap(false) {
+		return r
+	}
+	pass := *r
+	pass.throughAPI = true
+	return &pass
+}
+
 // machine reads this machine's own Machine. The copy answers only at
 // the version of this operator's own last status write or read, and
 // the pass otherwise reads the API server once, so a pass never starts
 // from a copy older than the status it just wrote.
 func (r *reader) machine(name string) (*machine.Machine, error) {
+	if r.throughAPI {
+		return r.freshMachine(name)
+	}
 	return watch.ReadOne[machine.Machine](r.client,
 		informer.Held{View: r.machines.View(), Versions: r.machineVersions}, name, kubernetes.MachinesPath+"/"+name)
 }
@@ -225,7 +289,7 @@ func (r *reader) publishStatus(m *machine.Machine, status *machine.MachineStatus
 
 // node reads this machine's Node.
 func (r *reader) node(name string) (*nodeObject, error) {
-	if n, found, ok := watch.Get[nodeObject](r.nodes.View(), name); ok {
+	if n, found, ok := watch.Get[nodeObject](r.view(r.nodes), name); ok {
 		return orNotFound(n, found)
 	}
 	return getNode(r.client, name)
@@ -233,7 +297,7 @@ func (r *reader) node(name string) (*nodeObject, error) {
 
 // cluster reads the Cluster this machine belongs to.
 func (r *reader) cluster(name string) (*cluster.Cluster, error) {
-	if c, found, ok := watch.Get[cluster.Cluster](r.clusters.View(), name); ok {
+	if c, found, ok := watch.Get[cluster.Cluster](r.view(r.clusters), name); ok {
 		return orNotFound(c, found)
 	}
 	return kubernetes.GetCluster(r.client, name)
@@ -243,7 +307,7 @@ func (r *reader) cluster(name string) (*cluster.Cluster, error) {
 // absent Secret returns nil, nil, as GetRegistryCredentialsSecret
 // does.
 func (r *reader) registryCredentials() (*kubernetes.Secret, error) {
-	if s, found, ok := watch.Get[kubernetes.Secret](r.credentials.View(), credentialsKey); ok {
+	if s, found, ok := watch.Get[kubernetes.Secret](r.view(r.credentials), credentialsKey); ok {
 		if !found {
 			return nil, nil
 		}
@@ -255,7 +319,7 @@ func (r *reader) registryCredentials() (*kubernetes.Secret, error) {
 // operatorPods reads this node's own machine-operator pod, as a list
 // of one, or none early in a boot.
 func (r *reader) operatorPods(nodeName string) ([]kubernetes.Pod, error) {
-	if pods, ok := watch.List[kubernetes.Pod](r.ownPods.View()); ok {
+	if pods, ok := watch.List[kubernetes.Pod](r.view(r.ownPods)); ok {
 		return pods, nil
 	}
 	return kubernetes.List[kubernetes.Pod](r.client, ownPodPath(nodeName))
@@ -264,13 +328,24 @@ func (r *reader) operatorPods(nodeName string) ([]kubernetes.Pod, error) {
 // resourceSlice reads this node's ResourceSlice, nil when it does not
 // exist.
 func (r *reader) resourceSlice(nodeName string) (*kubernetes.ResourceSlice, error) {
-	if s, found, ok := watch.Get[kubernetes.ResourceSlice](r.slices.View(), kubernetes.ResourceSliceName(nodeName)); ok {
+	if s, found, ok := watch.Get[kubernetes.ResourceSlice](r.view(r.slices), kubernetes.ResourceSliceName(nodeName)); ok {
 		if !found {
 			return nil, nil
 		}
 		return s, nil
 	}
 	return kubernetes.GetResourceSlice(r.client, nodeName)
+}
+
+// view answers a copy's view, or the view of no copy on a pass that
+// reads through the API server, which answers nothing, so the read
+// goes to the API server.
+func (r *reader) view(c *informer.Collection) informer.View {
+	if r.throughAPI {
+		var none *informer.Collection
+		return none.View()
+	}
+	return c.View()
 }
 
 // orNotFound turns a ready store's answer into the answer a direct read
@@ -280,4 +355,13 @@ func orNotFound[T any](item *T, found bool) (*T, error) {
 		return nil, apiclient.ErrNotFound
 	}
 	return item, nil
+}
+
+// sliceWriter answers the reader's slice writer, or a writer with no
+// memory for a reader that has none.
+func (r *reader) sliceWriter() *kubernetes.SliceWriter {
+	if r.slicesWritten == nil {
+		return &kubernetes.SliceWriter{}
+	}
+	return r.slicesWritten
 }

@@ -136,14 +136,15 @@ func (l *loop) run(ctx context.Context, current *machine.Machine) error {
 		// the collector to delete again.
 		out := &passOutcome{}
 		renewing := l.heartbeat
-		if fresh, err := l.objects.observedBy(out).machine(l.name); err == nil {
+		objects := l.objects.throughAPIOnce()
+		if fresh, err := objects.observedBy(out).machine(l.name); err == nil {
 			current = fresh
 		} else if errors.Is(err, apiclient.ErrNotFound) {
 			renewing = nil
 		}
 		l.objects.local.tickOnly = tickOnly
 		started := time.Now()
-		err := reconcile(l.objects, current, l.clusterName, l.fetcher, renewing, l.layer, out)
+		err := reconcile(objects, current, l.clusterName, l.fetcher, renewing, l.layer, out)
 		l.operator.ObserveReconcile(machineKind, time.Since(started), err)
 
 		// One timer serves the retry and every step's wake, and each

@@ -330,3 +330,37 @@ func TestAnAskThatChangesBackRestartsWithNoBackoff(t *testing.T) {
 		}
 	})
 }
+
+// Every download that ends wakes the loop: one that is verified, one
+// that fails, and one that a retarget stopped. The pass the wake starts
+// finds the fetcher idle, so it reads the result or starts the next
+// download.
+func TestEveryDownloadThatEndsWakesTheLoop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		old, wanted := makeRelease("0.2.0"), makeRelease("0.3.0")
+		server := serveHolding(t, old, wanted)
+		slot, active := t.TempDir(), activeSlot(t)
+		f := fetcherFor(server.Server)
+		var wakes atomic.Int64
+		var busyAtWake atomic.Bool
+		f.wake = func() {
+			f.mu.Lock()
+			busyAtWake.Store(busyAtWake.Load() || f.busy)
+			f.mu.Unlock()
+			wakes.Add(1)
+		}
+
+		f.Ensure(askFor(old, slot, active))
+		awaitSettled(f)
+		f.Ensure(askFor(wanted, slot, active))
+		awaitSettled(f)
+		afterStop := wakes.Load()
+		f.Ensure(askFor(wanted, slot, active))
+		awaitSettled(f)
+
+		if afterStop != 1 || wakes.Load() != 2 || busyAtWake.Load() {
+			t.Errorf("woke %d times after the stop and %d after the verified download, busy at a wake: %v; want 1, 2, false",
+				afterStop, wakes.Load(), busyAtWake.Load())
+		}
+	})
+}

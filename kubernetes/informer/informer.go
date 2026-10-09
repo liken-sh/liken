@@ -106,6 +106,15 @@ type Options struct {
 	// of an absent collection.
 	Reopened func()
 
+	// Recovered runs when the API server accepts a watch after the last
+	// attempt to watch the collection failed, such as after an outage of
+	// the API server. A routine reopen follows no failure and does not
+	// count. The copy answers again from that moment, before the
+	// reflector delivers the events missed during the outage, so a
+	// caller that wakes on it reads the collection from the API server
+	// once, not from the copy.
+	Recovered func()
+
 	// Absent, when it is not nil, names the refusals that mean the
 	// collection is not there to watch, such as the 404 of a kind whose
 	// definition another operator installs. The copy then holds an empty
@@ -195,6 +204,14 @@ func Start(ctx context.Context, client dynamic.Interface, source Source, options
 		list.FieldSelector = source.FieldSelector
 	}
 	var opened atomic.Int64
+	// failed records that the last attempt to watch failed, so the next
+	// accepted watch is a recovery (Options.Recovered).
+	var failed atomic.Bool
+	accepted := func() {
+		if failed.Swap(false) && options.Recovered != nil {
+			options.Recovered()
+		}
+	}
 	absent := options.absence()
 	lister := &cache.ListWatch{
 		ListWithContextFunc: func(ctx context.Context, list metav1.ListOptions) (runtime.Object, error) {
@@ -213,10 +230,16 @@ func Start(ctx context.Context, client dynamic.Interface, source Source, options
 				// is no watch the API server accepted, so Reopened does
 				// not count it.
 				c.noteWatch(nil)
+				accepted()
 				return quiet, nil
 			}
 			stream, err := collection.Watch(ctx, list)
 			c.noteWatch(err)
+			if err != nil {
+				failed.Store(true)
+			} else {
+				accepted()
+			}
 			// The first accepted watch is the streaming list of the first
 			// read, or the watch after a plain list.
 			if err == nil && opened.Add(1) > 1 && options.Reopened != nil {

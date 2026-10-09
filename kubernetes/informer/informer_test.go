@@ -132,17 +132,44 @@ func TestAWatchOpenedAgainCounts(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		changed := newThing("a", "150", 2)
 		server := newWatchServer(thingsPath, [][]thing{{newThing("a", "7", 1)}}, []string{event("MODIFIED", changed)})
-		var reopened, updated atomic.Int64
+		var reopened, updated, recovered atomic.Int64
 		Start(t.Context(), testWatcher(t, server), Source{Resource: thingResource}, Options{
-			Handler:  cache.ResourceEventHandlerFuncs{UpdateFunc: func(any, any) { updated.Add(1) }},
-			Reopened: func() { reopened.Add(1) },
+			Handler:   cache.ResourceEventHandlerFuncs{UpdateFunc: func(any, any) { updated.Add(1) }},
+			Reopened:  func() { reopened.Add(1) },
+			Recovered: func() { recovered.Add(1) },
 		})
 		time.Sleep(time.Minute)
 		synctest.Wait()
 
-		if reopened.Load() != 1 || updated.Load() != 1 {
-			t.Errorf("the watch counted %d reopened watches and the handler took %d updates, want 1 and 1",
-				reopened.Load(), updated.Load())
+		if reopened.Load() != 1 || updated.Load() != 1 || recovered.Load() != 0 {
+			t.Errorf("the watch counted %d reopened watches, %d recoveries, and the handler took %d updates, want 1, 0, and 1",
+				reopened.Load(), recovered.Load(), updated.Load())
+		}
+	})
+}
+
+// A watch that the API server accepts after an outage is a recovery,
+// and the outage's failed attempts count once, not once each.
+func TestAWatchAcceptedAfterAnOutageRecovers(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		server := newWatchServer(thingsPath, [][]thing{{newThing("a", "7", 1)}}, []string{})
+		var recovered atomic.Int64
+		Start(t.Context(), testWatcher(t, server), Source{Resource: thingResource}, Options{
+			Recovered: func() { recovered.Add(1) },
+		})
+		synctest.Wait()
+
+		server.failing(http.StatusServiceUnavailable)
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		during := recovered.Load()
+		server.failing(0)
+		time.Sleep(time.Minute)
+		synctest.Wait()
+
+		if server.failed() < 2 || during != 0 || recovered.Load() != 1 {
+			t.Errorf("%d failed watches, %d recoveries during the outage and %d after, want at least 2, 0, and 1",
+				server.failed(), during, recovered.Load())
 		}
 	})
 }

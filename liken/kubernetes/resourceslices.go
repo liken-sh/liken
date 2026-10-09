@@ -34,6 +34,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"reflect"
+	"slices"
+	"sync"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
@@ -165,11 +167,50 @@ func GetResourceSlice(c *apiclient.Client, nodeName string) (*ResourceSlice, err
 
 // WriteResourceSlice makes one node's published slice match its
 // actual inventory, given the slice as it is now (nil when it does
-// not exist). It creates the slice when the node first has devices,
-// replaces the slice when the inventory changed, deletes the slice
-// when the last device is gone, and changes nothing when nothing
-// moved. This is the same compare-then-write pattern as every other
-// liken reconcile, so a steady machine sends no request here.
+// not exist). It is SliceWriter.Write with no memory of an earlier
+// write, for a caller that writes once.
+func WriteResourceSlice(c *apiclient.Client, nodeName string, current *ResourceSlice, owner OwnerReference, devices []SliceDevice) error {
+	return (&SliceWriter{}).Write(c, nodeName, current, owner, devices)
+}
+
+// A SliceWriter writes one node's slice and remembers its own last
+// write: the resourceVersion the API server answered, and the devices
+// the write sent.
+//
+// The memory answers two questions. The first is whether a slice still
+// holds this writer's last write. The API server can return a slice
+// that differs from what was sent: one with DRAConsumableCapacity off
+// drops allowMultipleAllocations from each device. A comparison of the
+// desired devices with the returned ones would then differ on every
+// pass, and each pass would write again. A slice at the version of the
+// writer's own last write, with the same devices desired, is current,
+// whatever the server kept of them. The upstream DRA slice controller
+// meets the same problem (k8s.io/dynamic-resource-allocation/
+// resourceslice), and copies the dropped fields back before it compares.
+//
+// The second is whether a change that a watch delivers is this
+// writer's own echo (Wrote). A watch that woke the loop on its own
+// echo, with a write that never compares equal, would write as fast as
+// the API server answers.
+type SliceWriter struct {
+	mu      sync.Mutex
+	version string
+	sent    []SliceDevice
+}
+
+// Wrote answers whether version is the resourceVersion the API server
+// answered for this writer's last write.
+func (w *SliceWriter) Wrote(version string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return version != "" && version == w.version
+}
+
+// Write creates the slice when the node first has devices, replaces the
+// slice when the inventory changed, deletes the slice when the last
+// device is gone, and changes nothing when nothing moved. This is the
+// same compare-then-write pattern as every other liken reconcile, so a
+// steady machine sends no request here.
 //
 // The Node owns the slice. Neither the Machine nor the operator pod
 // owns it. The inventory is a claim about what is ready to use on
@@ -182,12 +223,11 @@ func GetResourceSlice(c *apiclient.Client, nodeName string) (*ResourceSlice, err
 // The write carries the resourceVersion of the copy it compared. If a
 // conflicting writer changed the object in the meantime, or the copy
 // from a watch is behind this operator's own last write, this update
-// returns apiclient.ErrConflict instead of overwriting that change. A create
-// from a copy that says the slice is absent returns apiclient.ErrConflict too,
-// when the slice exists. The next pass compares against a newer copy
-// and tries again. This is the ordinary optimistic-concurrency loop,
-// and at a ten-second cadence, it needs no retry logic of its own.
-func WriteResourceSlice(c *apiclient.Client, nodeName string, current *ResourceSlice, owner OwnerReference, devices []SliceDevice) error {
+// returns apiclient.ErrConflict instead of overwriting that change. A
+// create from a copy that says the slice is absent returns
+// apiclient.ErrConflict too, when the slice exists. The next pass
+// compares against a newer copy and tries again.
+func (w *SliceWriter) Write(c *apiclient.Client, nodeName string, current *ResourceSlice, owner OwnerReference, devices []SliceDevice) error {
 	name := ResourceSliceName(nodeName)
 	path := ResourceSlicesPath + "/" + name
 
@@ -209,17 +249,14 @@ func WriteResourceSlice(c *apiclient.Client, nodeName string, current *ResourceS
 				Devices:  devices,
 			},
 		}
-		body, err := json.Marshal(slice)
-		if err != nil {
-			return err
-		}
-		return c.RequestJSON(http.MethodPost, ResourceSlicesPath, body, nil)
+		return w.send(c, http.MethodPost, ResourceSlicesPath, slice, devices)
 	}
 
 	if len(devices) == 0 {
+		w.remember("", nil)
 		return c.RequestJSON(http.MethodDelete, path, nil, nil)
 	}
-	if reflect.DeepEqual(current.Spec.Devices, devices) {
+	if reflect.DeepEqual(current.Spec.Devices, devices) || w.holds(current, devices) {
 		return nil
 	}
 
@@ -232,11 +269,40 @@ func WriteResourceSlice(c *apiclient.Client, nodeName string, current *ResourceS
 		ResourceSliceCount: 1,
 	}
 	updated.Spec.Devices = devices
-	body, err := json.Marshal(&updated)
+	return w.send(c, http.MethodPut, path, &updated, devices)
+}
+
+// holds answers whether current is this writer's last write, and the
+// write sent the devices desired now.
+func (w *SliceWriter) holds(current *ResourceSlice, devices []SliceDevice) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return current.Metadata.ResourceVersion != "" && current.Metadata.ResourceVersion == w.version &&
+		reflect.DeepEqual(w.sent, devices)
+}
+
+// send writes the slice and remembers the version the API server
+// answered and the devices sent. A write that fails remembers nothing,
+// because a request that timed out can still have landed, and the next
+// pass then compares the devices themselves.
+func (w *SliceWriter) send(c *apiclient.Client, method, path string, slice *ResourceSlice, devices []SliceDevice) error {
+	body, err := json.Marshal(slice)
 	if err != nil {
 		return err
 	}
-	return c.RequestJSON(http.MethodPut, path, body, nil)
+	var answer ResourceSlice
+	if err := c.RequestJSON(method, path, body, &answer); err != nil {
+		w.remember("", nil)
+		return err
+	}
+	w.remember(answer.Metadata.ResourceVersion, devices)
+	return nil
+}
+
+func (w *SliceWriter) remember(version string, devices []SliceDevice) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.version, w.sent = version, slices.Clone(devices)
 }
 
 // AttrString builds a string-typed attribute value without repeating
