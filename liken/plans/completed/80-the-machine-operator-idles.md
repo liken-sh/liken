@@ -1,7 +1,8 @@
 # 80. The machine operator idles
 
-Milestone 80. Proposed and built 2026-10-09. The checks on `liken-1`
-and the week of the backstop counter on the `lab` fleet have not run.
+Milestone 80. Proposed and built 2026-10-09. The week of the backstop
+counter on the `lab` fleet has not run, and neither has a pass that
+hangs on purpose.
 The QEMU drills are in [What the lab measured](#what-the-lab-measured).
 
 The last of five milestones that
@@ -419,10 +420,34 @@ On the build with the fixes, after the upgrade:
   inside one check of ten seconds. `/etc/hosts` was written back after
   1.0 seconds.
 
+On the testbed, `liken-1` and `stick-1`, after the rollout of release
+2026.10.09-001 on 2026-10-09:
+
+- The rollout took 6 minutes, one machine at a time. `stick-1` took its
+  turn 54 seconds after `liken-1` reported `Ready`, which includes the
+  40-second hold of the `cluster-operator` that started again when
+  `liken-1` rebooted.
+- In 30 idle minutes, `liken-1` ran 20 passes and `stick-1` 15. On the
+  release before, each ran about 420 passes an hour.
+- The lease renewed every 8 or 12 seconds on both.
+- A synthetic `add` uevent on the GPU ran a pass after 1.0 and 0.9
+  seconds, the settle. A `change` uevent runs none, by design.
+- `vm.max_map_count` came back after 6.7 and 8.9 seconds, and
+  `/etc/hosts` after 0.95 and 0.90 seconds.
+- The backstop reported a repair on every one of its passes, and both
+  were real bugs that predate this milestone. A claim on an input
+  device rewrote its CDI spec on every pass, because the comparison
+  read the evdev node's file mode as a pointer. `stick-1`, which joins
+  its network over wifi, wrote its status on every pass, because the
+  Machine schema did not declare `status.boot.network`'s `wireless` and
+  `hostEntries`, and the API server pruned them from each write. Both
+  are fixed, and a test now requires a schema property for every field
+  `MachineSpec` and `MachineStatus` can hold.
+
 ## Verification needed
 
-- On `liken-1`, count the passes per hour on an idle machine, by
-  `liken_machine_passes_total{cause}`.
+- After the next release, confirm the backstop counter stays at zero on
+  the testbed.
 - Watch `liken_machine_backstop_repairs_total` on the `lab` fleet for a
   week. Each increase is a missed wake to fix.
 - Hang a pass on purpose, and confirm that the operator ends itself

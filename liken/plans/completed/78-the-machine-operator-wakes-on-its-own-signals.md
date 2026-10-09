@@ -1,8 +1,7 @@
 # 78. The machine operator wakes on its own signals
 
-Milestone 78. Proposed and built 2026-10-09. One check has not run: a
-settled `liken-1`, whose GPU publishes a shareable render node, keeping
-one slice `resourceVersion` for ten minutes. The QEMU drills are in
+Milestone 78. Proposed and built 2026-10-09. Every check has run. The
+QEMU drills and the testbed's are in
 [What the lab measured](#what-the-lab-measured).
 
 The third of five milestones that
@@ -153,8 +152,12 @@ causes. The informer's test and the operator's read-through test
 cover it. The QEMU guest has no shareable device, so the field-dropping
 loop is covered by the `SliceWriter` test alone.
 
-## Verification needed
+On `liken-1` and `stick-1`, on release 2026.10.09-001, on 2026-10-09:
 
-- On `liken-1`, confirm that the slice's `resourceVersion` stays the
-  same for ten minutes on a settled node, with its GPU's shareable
-  render node published.
+- Every one of the ten `ResourceSlice`s of the two machines, `liken-1`'s
+  GPU among them, kept one `resourceVersion` for 35 minutes after the
+  upgrade's reboot.
+- `kill -9` of k3s on `stick-1`: k3s came back, the kubelet deleted the
+  node's slices, and each operator wrote its slice again. The
+  `liken.sh` slice was back 19 seconds after the kill and then held one
+  `resourceVersion`. No pod on the node restarted.
