@@ -77,6 +77,57 @@ after the write is a new version and wakes a pass.
 changes nothing the inventory reads, such as a power-supply property,
 can be filtered by subsystem in `hardware.InventoryEvent`.
 
+## What the testbed measured
+
+On 2026-10-09, one debug pod on each testbed machine ran for 30 idle
+minutes on release 2026.10.09-002. It logged each facts file whose
+modification time changed, and each kernel uevent from the netlink
+socket, with its action, subsystem, and path.
+
+| Source | `liken-1` | `stick-1` |
+| --- | --- | --- |
+| Time facts republished | 3 | 3 |
+| Other facts rewritten | 0 | 0 |
+| uevents under `/kernel/sunrpc/` | 34 | 0 |
+| uevents of the `nfs` subsystem | 2 | 0 |
+| uevents under `/devices/virtual/` | 24 | 0 |
+| uevents of real devices | 0 | 9 |
+
+Every time publish was the 10-minute floor. The offset never moved
+25 ms, on the wired machine or on the wifi one, so damping the offset
+harder would change nothing. `liken-1`'s uevents came in two bursts
+at 20:40, when a pod with NFS volumes started: the NFS client adds and
+removes RPC clients under `/kernel/sunrpc/`, and the pod's veth pair
+and queues announce themselves under `/devices/virtual/net/`.
+`hardware.InventoryEvent` already dropped `/devices/virtual/` except
+its `misc` class, but it kept every path outside `/devices/`, so the
+`sunrpc` events woke the loop. `stick-1`'s nine events were a
+Bluetooth game controller that disconnected, a real change.
+
+## What was built
+
+* **The echo.** `kubernetes.OwnWrite` remembers the `resourceVersion`
+  of the operator's last status write, and
+  `watch.WakeOnAnotherWritersChange` ignores an update at that
+  version. The write holds the memory until the API server's answer
+  arrives, because the watch can deliver the echo before the answer.
+  The slice writer had the same race: its watch test failed 2 runs in
+  100. Both now share `OwnWrite`.
+* **The time facts.** The measurement picked neither design above.
+  The floor was the source, and the floor exists only for `lastSync`.
+  So the facts drop `lastSync`, and `init` publishes on a change of
+  state, source, or stratum, or an offset 25 ms from the published
+  one. `Synchronized` already means a good measurement within three
+  polls, because `init` reports `Unsynchronized` three polls after the
+  sources stop answering. `status.time.offset` stays, with the
+  printer column, and its description says it is within 25 ms of the
+  measured offset. The CRD keeps `lastSync`, because a machine that
+  still runs an older release writes it, and a schema that dropped it
+  would prune each of that machine's writes and make it write again on
+  every pass.
+* **The machine events.** `hardware.InventoryEvent` keeps only paths
+  under `/devices/`.
+
 ## Tests
 
 In a `synctest` bubble with `kubernetes/apiservertest`:
