@@ -378,8 +378,8 @@ A ZWO ASI camera has no kernel driver, so `liken` does not publish it.
 [Driverless USB devices are not published](../liken/plans/open-problems/driverless-usb-devices-are-not-published.md)
 records that problem. Hot-plug has to reach the `ResourceSlice`
 promptly, which
-[the device inventory waits for the ticker](../liken/plans/open-problems/device-inventory-waits-for-the-ticker.md)
-records. Some cameras, QHY among them, load firmware through udev rules
+[milestone 77](../liken/plans/77-the-machine-operator-hears-the-machine.md)
+plans. Some cameras, QHY among them, load firmware through udev rules
 on the host, and those rules do not run inside a container
 ([indi-docker](https://github.com/seanhoughton/indi-docker)).
 
