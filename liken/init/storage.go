@@ -115,7 +115,7 @@ var roleMounts = map[machine.StorageRoleName]roleMount{
 	machine.SystemARole:          {path: machine.SystemSlotDir("A"), flags: slotMountFlags, fstype: "vfat"},
 	machine.SystemBRole:          {path: machine.SystemSlotDir("B"), flags: slotMountFlags, fstype: "vfat"},
 	machine.MachineStateRole:     {path: machine.MachineStateDir},
-	machine.MachineEphemeralRole: {path: "/tmp", flags: unix.MS_NOSUID | unix.MS_NODEV, mode: 0o1777},
+	machine.MachineEphemeralRole: {path: "/tmp", flags: unix.MS_NOSUID | unix.MS_NODEV, mode: tmpMode},
 	machine.ClusterStateRole:     {path: "/var/lib/rancher"},
 	machine.PodStorageRole:       {path: "/var/lib/liken/pod-storage"},
 	machine.PodEphemeralRole:     {path: "/var/lib/kubelet"},

@@ -117,16 +117,28 @@ func prepareForK3s() {
 	_ = os.MkdirAll("/var/log", 0o755)
 
 	// /tmp exists on every machine. The container runtime stages
-	// kubectl exec sessions there. By Unix convention, /tmp is
-	// world-writable with the sticky bit set. On a machine that
-	// declares the machineEphemeral storage role, a disk partition
-	// is already mounted at /tmp, so this step does nothing there.
-	// On every other machine, /tmp is RAM, like the rest of the root
-	// filesystem. This code calls chmod separately because MkdirAll
-	// applies the umask to the mode it is given, and the sticky bit
-	// must be set exactly.
-	_ = os.MkdirAll("/tmp", 0o1777)
-	_ = os.Chmod("/tmp", 0o1777)
+	// kubectl exec sessions there. On a machine that declares the
+	// machineEphemeral storage role, a disk partition is already
+	// mounted at /tmp, and this sets the same mode on it again. On
+	// every other machine, /tmp is RAM, like the rest of the root
+	// filesystem.
+	openTmp("/tmp")
+}
+
+// tmpMode is the mode of /tmp: writable by every user, with the sticky
+// bit, so a process can delete or rename only the files it owns. Without
+// the sticky bit, one user can replace another's file in /tmp, or plant
+// a symlink where another expects to create a file. Go keeps the sticky
+// bit in its own os.ModeSticky flag, not in the octal 01000 bit, so a
+// mode written as 0o1777 drops it.
+const tmpMode = os.ModeSticky | 0o777
+
+// openTmp makes dir with tmpMode. It sets the mode with chmod after
+// the mkdir, because MkdirAll applies the umask to the mode it is
+// given, and leaves an existing directory's mode as it is.
+func openTmp(dir string) {
+	_ = os.MkdirAll(dir, tmpMode)
+	_ = os.Chmod(dir, tmpMode)
 }
 
 // configureNameResolution writes /etc/hosts and /etc/nsswitch.conf, the

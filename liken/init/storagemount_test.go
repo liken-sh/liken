@@ -170,8 +170,9 @@ func TestMountRoleMountsARecognizedExt4Role(t *testing.T) {
 }
 
 // A new ext4 root is mode 0755 and writable only by root. /tmp must be
-// writable by every user, so the mount applies the role's mode to the
-// mounted root.
+// writable by every user, with the sticky bit, so the mount applies the
+// role's mode to the mounted root. The sticky bit lets only a file's
+// owner delete or rename it, so one user cannot replace another's file.
 func TestMountRoleOpensTmpToEveryUser(t *testing.T) {
 	_, dev := fakeMachine(t)
 	fakeStorageMounts(t)
@@ -183,7 +184,7 @@ func TestMountRoleOpensTmpToEveryUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := modeOf(t, target).Perm(), fs.FileMode(0o777); got != want {
+	if got, want := modeOf(t, target), fs.ModeSticky|0o777; got != want {
 		t.Errorf("mode of /tmp = %v, want %v", got, want)
 	}
 }

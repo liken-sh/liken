@@ -9,6 +9,7 @@ package main
 // that the second pass wins.
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -94,5 +95,35 @@ func TestSpecSysctlsOverrideTheDeclaredDefaults(t *testing.T) {
 	}
 	if got := readParameter(t, dir, untouched); got != machine.OSSysctls[untouched] {
 		t.Errorf("%s: got %q, want the default to stand", untouched, got)
+	}
+}
+
+// /tmp is writable by every user and carries the sticky bit, the Unix
+// convention, so a process can delete or rename only its own files
+// there. The mode is set exactly, whether the directory is new or is a
+// mounted filesystem's root that arrived with mode 0755.
+func TestOpenTmpMakesAStickyDirectoryForEveryUser(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, dir string)
+	}{
+		{"a directory that does not exist", func(t *testing.T, dir string) {}},
+		{"a root that arrived with mode 0755", func(t *testing.T, dir string) {
+			if err := os.Mkdir(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "tmp")
+			c.setup(t, dir)
+
+			openTmp(dir)
+
+			if got, want := modeOf(t, dir), fs.ModeSticky|0o777; got != want {
+				t.Errorf("mode = %v, want %v", got, want)
+			}
+		})
 	}
 }
