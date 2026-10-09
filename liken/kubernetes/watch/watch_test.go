@@ -152,11 +152,12 @@ func TestTheLabelIndexReadsOneLabel(t *testing.T) {
 	}
 }
 
-// The three wake rules, through the reflector. WakeOnEdit ignores a
+// The four wake rules, through the reflector. WakeOnEdit ignores a
 // status write and wakes for a spec edit, a deletion mark, a new
 // object, and a removed object. WakeOnChange wakes for the status
 // write too. WakeOnContent wakes for the status write, and ignores a
-// write that moved only the resourceVersion.
+// write that moved only the resourceVersion. WakeOnAnotherWritersChange
+// ignores the operator's own write and wakes for another writer's.
 func TestEachHandlerWakesTheLoopForItsChanges(t *testing.T) {
 	statusWrite := newThing("a", "110", 1)
 	statusWrite.Status.Phase = "Ready"
@@ -177,6 +178,8 @@ func TestEachHandlerWakesTheLoopForItsChanges(t *testing.T) {
 		{"a change handler, a status write", changeHandler, event("MODIFIED", statusWrite), true},
 		{"a content handler, a status write", contentHandler, event("MODIFIED", statusWrite), true},
 		{"a content handler, a new version only", contentHandler, event("MODIFIED", newThing("a", "160", 1)), false},
+		{"another writer's handler, the own write", anotherWritersHandler, event("MODIFIED", newThing("a", "170", 1)), false},
+		{"another writer's handler, another write", anotherWritersHandler, event("MODIFIED", statusWrite), true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -206,6 +209,11 @@ func changeHandler(wake func()) cache.ResourceEventHandler {
 }
 func contentHandler(wake func()) cache.ResourceEventHandler {
 	return WakeOnContent[thing](testSource, wake)
+}
+
+// anotherWritersHandler counts version 170 as the operator's own write.
+func anotherWritersHandler(wake func()) cache.ResourceEventHandler {
+	return WakeOnAnotherWritersChange[thing](testSource, wake, func(version string) bool { return version == "170" })
 }
 
 // A content handler with an ignore function wakes for no write that

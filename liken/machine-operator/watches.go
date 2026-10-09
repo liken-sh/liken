@@ -149,6 +149,13 @@ type reader struct {
 	// again with no harm.
 	machineVersions *memo.Versions
 
+	// statusWritten remembers this operator's own last status write to
+	// its Machine (kubernetes.OwnWrite). The Machine watch reads it to
+	// tell the conductor's grant or the sweep's verdict from the echo
+	// of the write, which would otherwise wake a second pass for each
+	// write.
+	statusWritten *kubernetes.OwnWrite
+
 	// slicesWritten remembers this operator's own last write of its
 	// ResourceSlice (kubernetes.SliceWriter). The slice watch reads it
 	// to tell another writer's update from this operator's echo.
@@ -215,7 +222,7 @@ func (r *reader) observedBy(out *passOutcome) *reader {
 func watchThisMachine(ctx context.Context, watcher dynamic.Interface, client *apiclient.Client,
 	name, clusterName string, wake func(), restarted func(kind string)) *reader {
 	r := &reader{client: client, machineVersions: memo.New(),
-		slicesWritten: &kubernetes.SliceWriter{}, recovered: &atomic.Bool{},
+		statusWritten: &kubernetes.OwnWrite{}, slicesWritten: &kubernetes.SliceWriter{}, recovered: &atomic.Bool{},
 		waits: newWaits(ctx, watcher, wake, name), sysctls: newSysctlMemory()}
 	start := func(kind string, source informer.Source, handler cache.ResourceEventHandler) *informer.Collection {
 		return informer.Start(ctx, watcher, source, informer.Options{
@@ -239,7 +246,7 @@ func watchThisMachine(ctx context.Context, watcher dynamic.Interface, client *ap
 		LabelSelector: operatorPodLabel, FieldSelector: "spec.nodeName=" + name}
 	slices := informer.Source{Resource: sliceResource, FieldSelector: named(kubernetes.ResourceSliceName(name))}
 
-	r.machines = start(machineKind, machines, watch.WakeOnChange[machine.Machine](machines, wake))
+	r.machines = start(machineKind, machines, watch.WakeOnAnotherWritersChange[machine.Machine](machines, wake, r.statusWritten.Wrote))
 	r.nodes = start(nodeKind, nodes, watch.WakeOnContent[nodeObject](nodes, wake, withoutHeartbeats))
 	r.ownPods = start(podKind, pods, watch.WakeOnChange[kubernetes.Pod](pods, wake))
 	r.slices = start(resourceSliceKind, slices, sliceHandler(r.slicesWritten, wake))
@@ -311,10 +318,28 @@ func (r *reader) freshMachine(name string) (*machine.Machine, error) {
 // that this operator holds no current copy, because a request that
 // timed out can still have landed, so the next read goes to the API
 // server.
+//
+// The write is also this operator's own, so the Machine watch does not
+// wake the loop for its echo.
 func (r *reader) publishStatus(m *machine.Machine, status *machine.MachineStatus) error {
-	return r.machineVersions.Send(m.Metadata.Name, func() (string, error) {
-		return kubernetes.PublishStatus(r.client, m, status)
+	return r.ownStatusWrites().Send(func() (string, error) {
+		var version string
+		err := r.machineVersions.Send(m.Metadata.Name, func() (string, error) {
+			written, err := kubernetes.PublishStatus(r.client, m, status)
+			version = written
+			return written, err
+		})
+		return version, err
 	})
+}
+
+// ownStatusWrites answers the reader's memory of its status writes, or
+// one that remembers nothing for a reader with no watches.
+func (r *reader) ownStatusWrites() *kubernetes.OwnWrite {
+	if r.statusWritten == nil {
+		return &kubernetes.OwnWrite{}
+	}
+	return r.statusWritten
 }
 
 // node reads this machine's Node.

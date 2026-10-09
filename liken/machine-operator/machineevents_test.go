@@ -516,3 +516,56 @@ func TestOnlyAMissingDirectoryLetsTheOperatorRunWithoutTheHostsWatch(t *testing.
 		})
 	}
 }
+
+// The Machine watch wakes the loop for another writer's change, such as
+// the conductor's grant of a reboot turn, and not for the echo of this
+// operator's own status write. Each status write would otherwise cost a
+// second pass that finds nothing to do.
+func TestTheMachineWatchWakesOnlyForAnotherWritersChange(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		isolatePass(t)
+		fake := newPassAPI()
+		client, watcher := passClients(t, fake)
+		wakes := make(chan struct{}, 1)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		r := watchThisMachine(ctx, watcher, client, "node-1", "lab", watch.Signal(wakes), func(string) {})
+		awaitCopies(t, r)
+		<-wakes
+		woke := func() bool {
+			synctest.Wait()
+			select {
+			case <-wakes:
+				return true
+			default:
+				return false
+			}
+		}
+
+		current, err := r.machine("node-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		status := current.Status
+		status.Phase = "Ready"
+		if err := r.publishStatus(current, &status); err != nil {
+			t.Fatal(err)
+		}
+		ownWrite := woke()
+		current, err = r.machine("node-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		granted := *current
+		granted.Status.Phase = "Draining"
+		body, _ := json.Marshal(&granted)
+		if err := client.RequestJSON(http.MethodPut, kubernetes.MachinesPath+"/node-1/status", body, nil); err != nil {
+			t.Fatal(err)
+		}
+		anotherWrite := woke()
+
+		if ownWrite || !anotherWrite {
+			t.Errorf("woke on the own write %v and on another writer's %v; want false, true", ownWrite, anotherWrite)
+		}
+	})
+}

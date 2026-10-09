@@ -71,6 +71,13 @@ correct result.
   makes every pass write, and the write wakes every watcher. Compare
   against what the API server stores, not against what the code
   meant to write.
+- **Do not wake for your own echo.** A watch delivers each write the
+  operator makes, and a wake for it runs a second pass that finds
+  nothing to do. `liken/kubernetes`'s `OwnWrite` remembers the
+  `resourceVersion` the API server answered for the last write, and
+  holds it until the answer arrives, because the watch can deliver the
+  echo first. An update at any other version is another writer's
+  change and wakes the loop.
 - **Scope each watch to what the process owns.** A DaemonSet pod that
   watches every object of a kind wakes on every other node's writes.
   A CRD can declare `selectableFields`, so each pod lists and watches
@@ -328,7 +335,8 @@ of a `Source`, with the `Handler`, `Synced`, and `Reopened` of its
 runs them through the real reflector. `liken/kubernetes/watch` holds
 `liken`'s handlers: `WakeOnChange`, `WakeOnEdit`, and `WakeOnContent`
 for a collection whose `Transform` trims each object to the fields the
-pass reads.
+pass reads, and `WakeOnAnotherWritersChange` for an object whose
+status the pass writes and another writer changes too.
 
 - **Imports.** Allowed: `k8s.io/client-go/tools/cache`,
   `k8s.io/client-go/dynamic`, `k8s.io/client-go/rest`, and

@@ -46,6 +46,20 @@ func WakeOnChange[T any](source informer.Source, wake func()) cache.ResourceEven
 	return h.handler()
 }
 
+// WakeOnAnotherWritersChange is WakeOnChange for an object that the
+// operator writes itself. An update at a version that own answers as
+// the operator's own last write is the echo of that write, and wakes
+// nothing. Every other version wakes the loop, so a change that
+// another writer makes after the operator's write still wakes a pass.
+// It is the handler for an operator's own Machine, whose status the
+// operator writes on a pass, and the cluster operator writes too.
+func WakeOnAnotherWritersChange[T any](source informer.Source, wake func(), own func(version string) bool) cache.ResourceEventHandler {
+	h := wakeHandler[T]{source: source, wake: wake, changed: func(before, after *unstructured.Unstructured) bool {
+		return before.GetResourceVersion() != after.GetResourceVersion() && !own(after.GetResourceVersion())
+	}}
+	return h.handler()
+}
+
 // WakeOnEdit wakes the loop only for an edit: a new object, a removed
 // object, and a write that changed the spec, the deletion mark, or the
 // object's identity. It is the handler for a collection whose spec the
@@ -111,7 +125,7 @@ func contentOf(object *unstructured.Unstructured, ignore []func(map[string]any))
 	return fields
 }
 
-// wakeHandler is the shared half of the three handlers above. changed
+// wakeHandler is the shared half of the four handlers above. changed
 // compares the copy the informer held with the new copy. The informer
 // hands an update both copies, so the handler keeps no copy of its own.
 // After a gap in the watch, the informer reads the collection again
