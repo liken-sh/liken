@@ -111,7 +111,8 @@ spec:
         # spec declares no upstream sources, on purpose), or
         # Unsynchronized (the spec declares sources, but none of them
         # answers, which is an outage). The next column shows the
-        # offset measured at the last exchange.
+        # offset that init last published, which is within 25 ms of
+        # the offset init measures now.
         - name: Time
           type: string
           jsonPath: .status.time.state
@@ -1688,16 +1689,25 @@ spec:
                     offset:
                       type: string
                       description: >-
-                        The clock error measured at the last
-                        exchange, as a duration ("1.28ms"). The value
-                        is positive when this machine is behind its
-                        source.
+                        The clock error that init last published, as
+                        a duration ("1.28ms"). The value is positive
+                        when this machine is behind its source. Init
+                        measures the clock every 64 seconds and
+                        publishes a new offset only when the measured
+                        one moves 25 ms or more from this value, so
+                        the clock error now is within 25 ms of it.
                     lastSync:
                       type: string
                       format: date-time
                       description: >-
                         The last time that the clock agreed with its
-                        source.
+                        source, from a machine that runs release
+                        2026.10.09-002 or older. A newer release
+                        leaves this field out, because the time
+                        changed at every measurement, and each change
+                        cost a status write. On a newer release,
+                        state is Synchronized only within three polls
+                        of a good measurement.
                 hardware:
                   type: object
                   description: >-

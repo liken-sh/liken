@@ -377,13 +377,13 @@ type TimeStatus struct {
 	// as a source.
 	Stratum int `json:"stratum,omitempty"`
 
-	// Offset is the clock error measured at the last exchange, as a
+	// Offset is the clock error that init last published, as a
 	// human-readable duration such as "1.28ms". It is positive when
-	// this machine was behind its source.
+	// this machine was behind its source. Init measures the clock every
+	// 64 seconds and publishes a new offset only when the measured one
+	// moves 25 ms or more from this value, so the clock error now is
+	// within 25 ms of it.
 	Offset string `json:"offset,omitempty"`
-
-	// LastSync is when the clock last agreed with its source.
-	LastSync *time.Time `json:"lastSync,omitempty"`
 }
 
 type HardwareStatus struct {

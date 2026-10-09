@@ -339,9 +339,6 @@ func (t FactsTree) readTimeStatus() (TimeStatus, error) {
 	if ts.Offset, err = t.readFact("time/offset"); err != nil {
 		return TimeStatus{}, err
 	}
-	if ts.LastSync, err = t.readTime("time/lastSync"); err != nil {
-		return TimeStatus{}, err
-	}
 	return ts, nil
 }
 

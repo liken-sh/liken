@@ -129,6 +129,17 @@ func (c *clock) record(measured *timeSync) {
 	c.last = measured
 }
 
+// lastSyncAt answers when the last good measurement was taken, or the
+// zero time before the first one.
+func (c *clock) lastSyncAt() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.last == nil {
+		return time.Time{}
+	}
+	return c.last.at
+}
+
 // timeSources works out where this machine gets its time. It uses
 // declared inputs by role, the same way liken works out other
 // machine state. Leaders ask the Cluster's upstreams. Followers ask
@@ -212,13 +223,11 @@ func timeStatus(sync *timeSync, sources []string) machine.TimeStatus {
 		}
 		return machine.TimeStatus{State: machine.TimeUnsynchronized, Stratum: stratumUnsynchronized}
 	}
-	at := sync.at
 	return machine.TimeStatus{
-		State:    machine.TimeSynchronized,
-		Source:   sync.source,
-		Stratum:  sync.stratum + 1,
-		Offset:   sync.offset.Round(10 * time.Microsecond).String(),
-		LastSync: &at,
+		State:   machine.TimeSynchronized,
+		Source:  sync.source,
+		Stratum: sync.stratum + 1,
+		Offset:  sync.offset.Round(10 * time.Microsecond).String(),
 	}
 }
 
@@ -339,26 +348,25 @@ const syncStaleAfter = 3 * timePollInterval
 // worthRepublishing reports whether a fresh measurement changes the
 // published time facts. A change in state, source, or stratum must
 // always be reported. The offset must be reported only when it has
-// moved past offsetPublishThreshold since the last publish. SNTP
+// moved past offsetPublishThreshold since the last publish, so the
+// published offset is within that threshold of the measured one. SNTP
 // measurements wobble by microseconds on every poll, and each
 // republished fact has a cost: the machine publishes a status update
 // whenever the facts change, and each such write causes a raft round
 // and an fsync on every one of the cluster's leaders. A fleet whose
-// clocks are working correctly should cost etcd nothing extra. The
-// freshness floor limits the one case where suppressing updates could
-// mislead: lastSync must not go so stale that the status reports a
-// silent sync loop, while init is actually still receiving answers
-// from its sources.
-const (
-	offsetPublishThreshold = 25 * time.Millisecond
-	timePublishFloor       = 10 * time.Minute
-)
+// clocks are working correctly should cost etcd nothing extra.
+//
+// Time passing is not news. The facts hold no time of the last sync,
+// because that time would change at every poll, and a machine whose
+// polls stop answering reports Unsynchronized after syncStaleAfter.
+// So Synchronized means a measurement within the last three polls.
+const offsetPublishThreshold = 25 * time.Millisecond
 
-func worthRepublishing(published, fresh machine.TimeStatus, drift, sincePublished time.Duration) bool {
+func worthRepublishing(published, fresh machine.TimeStatus, drift time.Duration) bool {
 	if published.State != fresh.State || published.Source != fresh.Source || published.Stratum != fresh.Stratum {
 		return true
 	}
-	return drift.Abs() >= offsetPublishThreshold || sincePublished >= timePublishFloor
+	return drift.Abs() >= offsetPublishThreshold
 }
 
 // writeRTC copies the system clock into the hardware clock. Linux
@@ -419,16 +427,12 @@ func disciplineClock(clk *clock, tree machine.FactsTree, initial machine.TimeSta
 		// seed the boot step published.
 		current := initial
 
-		lastGood := time.Time{}
-		if current.LastSync != nil {
-			lastGood = *current.LastSync
-		}
+		lastGood := clk.lastSyncAt()
 		// published holds what the time/ subtree currently says. It is
 		// the baseline that every worthRepublishing check compares
 		// against. The boot step published this value, moments ago.
 		published := current
 		publishedOffset, _ := time.ParseDuration(current.Offset)
-		publishedAt := time.Now()
 		// The boot step, or the lack of one, determined whether the RTC
 		// has been written yet. If the boot came up on a wrong
 		// hardware clock, this loop corrects the RTC at the first
@@ -454,7 +458,7 @@ func disciplineClock(clk *clock, tree machine.FactsTree, initial machine.TimeSta
 					current.State = machine.TimeUnsynchronized
 					current.Stratum = stratumUnsynchronized
 					tree.WriteTime(current)
-					published, publishedAt = current, time.Now()
+					published = current
 				}
 				continue
 			}
@@ -480,9 +484,9 @@ func disciplineClock(clk *clock, tree machine.FactsTree, initial machine.TimeSta
 			// Small wobbles accumulate toward the threshold this
 			// way, instead of resetting every 64 seconds.
 			current = timeStatus(sync, clk.sources)
-			if worthRepublishing(published, current, sync.offset-publishedOffset, time.Since(publishedAt)) {
+			if worthRepublishing(published, current, sync.offset-publishedOffset) {
 				tree.WriteTime(current)
-				published, publishedOffset, publishedAt = current, sync.offset, time.Now()
+				published, publishedOffset = current, sync.offset
 			}
 		}
 	}

@@ -100,7 +100,6 @@ func jsonBytes(t *testing.T, v any) string {
 func everythingSet() *MachineStatus {
 	booted := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
 	lease := booted.Add(time.Hour)
-	synced := booted.Add(30 * time.Second)
 	crashed := booted.Add(-5 * time.Minute)
 	refused := booted.Add(-2 * time.Hour)
 	rejected := booted.Add(-time.Hour)
@@ -164,7 +163,7 @@ func everythingSet() *MachineStatus {
 		},
 		Time: TimeStatus{
 			State: TimeSynchronized, Source: "pool.ntp.org",
-			Stratum: 2, Offset: "1.28ms", LastSync: &synced,
+			Stratum: 2, Offset: "1.28ms",
 		},
 		Hardware: HardwareStatus{
 			CPUs: 4, MemoryBytes: 4_294_967_296,

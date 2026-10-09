@@ -30,6 +30,9 @@ func runDiscipline(t *testing.T, initial machine.TimeStatus) (tree machine.Facts
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	clk := newClock([]string{"10.10.0.1"})
+	if initial.State == machine.TimeSynchronized {
+		clk.record(&timeSync{source: initial.Source, stratum: initial.Stratum - 1, at: time.Now()})
+	}
 	go func() { done <- disciplineClock(clk, tree, initial)(ctx) }()
 	return tree, func() {
 		cancel()
@@ -51,13 +54,11 @@ func publishedTime(t *testing.T, tree machine.FactsTree) machine.TimeStatus {
 // bootSynchronized is the status a boot step publishes after a good
 // measurement at the bubble's start.
 func bootSynchronized(offset string) machine.TimeStatus {
-	at := time.Now()
 	return machine.TimeStatus{
-		State:    machine.TimeSynchronized,
-		Source:   "10.10.0.1",
-		Stratum:  3,
-		Offset:   offset,
-		LastSync: &at,
+		State:   machine.TimeSynchronized,
+		Source:  "10.10.0.1",
+		Stratum: 3,
+		Offset:  offset,
 	}
 }
 
@@ -141,26 +142,24 @@ func TestDisciplineClockPublishesDriftButNotWobble(t *testing.T) {
 	})
 }
 
-// Ten minutes of wobble still refresh `lastSync`. Without the refresh,
-// status would show a sync loop that stopped, on a machine whose
-// sources answer every poll.
-func TestDisciplineClockRefreshesLastSyncEveryTenMinutes(t *testing.T) {
+// Ten minutes of wobble rewrite nothing. The test changes the
+// published offset under the loop, and a loop that republished would
+// write the measured offset back over it.
+func TestDisciplineClockRewritesNothingWhileTheClockHoldsSteady(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		start := time.Now()
-		installFakeClock(t, slices.Repeat([]pollAnswer{timeAnswer(time.Millisecond)}, 10)...)
+		installFakeClock(t, slices.Repeat([]pollAnswer{timeAnswer(time.Millisecond)}, 12)...)
 		tree, stop := runDiscipline(t, bootSynchronized("1ms"))
 		defer stop()
-
-		time.Sleep(9*timePollInterval + time.Second)
-		synctest.Wait()
-		if got := publishedTime(t, tree).LastSync; !got.Equal(start) {
-			t.Errorf("nine polls of wobble leave lastSync at the boot's sync, got %v", got)
+		marked := bootSynchronized("7ms")
+		if err := tree.WriteTime(marked); err != nil {
+			t.Fatal(err)
 		}
 
-		time.Sleep(timePollInterval)
+		time.Sleep(12*timePollInterval + time.Second)
 		synctest.Wait()
-		if got := publishedTime(t, tree).LastSync; !got.Equal(start.Add(10 * timePollInterval)) {
-			t.Errorf("the tenth poll passes the ten-minute floor and refreshes lastSync, got %v", got)
+
+		if got := publishedTime(t, tree).Offset; got != "7ms" {
+			t.Errorf("twelve polls of 1ms wobble rewrote the offset to %s", got)
 		}
 	})
 }

@@ -165,7 +165,6 @@ func (t FactsTree) WriteTime(ts TimeStatus) error {
 		t.writeFact("time/source", ts.Source),
 		t.writeFact("time/stratum", formatInt(ts.Stratum)),
 		t.writeFact("time/offset", ts.Offset),
-		t.writeFact("time/lastSync", formatTime(ts.LastSync)),
 	))
 }
 
