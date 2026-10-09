@@ -21,7 +21,8 @@ func factsCondition(err error) api.Condition {
 	if err != nil {
 		return api.Condition{
 			Type: "FactsPublished", Status: api.ConditionFalse,
-			Reason: "FactsUnreadable", Message: err.Error(),
+			Reason:  "FactsUnreadable",
+			Message: err.Error() + "; the device inventory offers no disk until the facts read",
 		}
 	}
 	return api.Condition{Type: "FactsPublished", Status: api.ConditionTrue, Reason: "FactsRead"}

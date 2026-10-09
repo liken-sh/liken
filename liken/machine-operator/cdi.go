@@ -38,6 +38,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -230,6 +231,12 @@ func refreshCDISpecs(sysRoot string, out *passOutcome) {
 // interface before spec.serio declared it: its old nodes are the tty
 // and the usbfs node, which end the attachment (serioFailsClosed).
 //
+// A disk that the protection withholds names withheldNode, for the
+// same reason: the next container fails to start rather than open a
+// disk that may back the machine's own filesystems (protection.go).
+// When the facts read again and the disk backs no role, the refresh
+// writes its nodes back.
+//
 // A device that is present with no driver is a different case: the
 // program under this claim detached the kernel driver, and the
 // kernel driver's nodes went with it. The publish policy resolves
@@ -268,11 +275,13 @@ func refreshCDISpec(sysRoot, claimUID string, byName map[string]hardware.Device,
 			continue
 		}
 		serio := declaredSerio()
-		published, ok := resolveAllocated(allocated, sysRoot, byName, serio)
-		if !ok && serioFailsClosed(allocated, byName, serio) {
-			published, ok = publishedDevice{Nodes: []string{serioAbsentNode}}, true
-		}
-		if !ok {
+		published, err := resolveAllocated(allocated, sysRoot, byName, serio, currentProtection())
+		switch {
+		case errors.Is(err, errWithheld):
+			published = publishedDevice{Nodes: []string{withheldNode}}
+		case err != nil && serioFailsClosed(allocated, byName, serio):
+			published = publishedDevice{Nodes: []string{serioAbsentNode}}
+		case err != nil:
 			continue
 		}
 		nodes := deviceNodes(published.Nodes)

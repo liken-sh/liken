@@ -192,17 +192,34 @@ func WriteResourceSlice(c *apiclient.Client, nodeName string, current *ResourceS
 // writer's own echo (Wrote). A watch that woke the loop on its own
 // echo, with a write that never compares equal, would write as fast as
 // the API server answers.
+//
+// The watch can deliver the echo before the write's answer reaches the
+// writer, because the two travel on different connections. So a write
+// holds the writer's turn until it has recorded the answer, and Wrote
+// waits for the turn. The turn is a channel, not a mutex, so a watch
+// handler that waits for it is durably blocked inside a synctest
+// bubble, and a test can hold a write at that point.
 type SliceWriter struct {
-	mu      sync.Mutex
+	once    sync.Once
+	turn    chan struct{}
 	version string
 	sent    []SliceDevice
 }
 
+// lock takes the writer's turn, and unlock gives it back.
+func (w *SliceWriter) lock() {
+	w.once.Do(func() { w.turn = make(chan struct{}, 1) })
+	w.turn <- struct{}{}
+}
+
+func (w *SliceWriter) unlock() { <-w.turn }
+
 // Wrote answers whether version is the resourceVersion the API server
-// answered for this writer's last write.
+// answered for this writer's last write. It waits for a write in
+// flight to record its answer.
 func (w *SliceWriter) Wrote(version string) bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+	w.lock()
+	defer w.unlock()
 	return version != "" && version == w.version
 }
 
@@ -253,7 +270,7 @@ func (w *SliceWriter) Write(c *apiclient.Client, nodeName string, current *Resou
 	}
 
 	if len(devices) == 0 {
-		w.remember("", nil)
+		w.forget()
 		return c.RequestJSON(http.MethodDelete, path, nil, nil)
 	}
 	if reflect.DeepEqual(current.Spec.Devices, devices) || w.holds(current, devices) {
@@ -275,8 +292,8 @@ func (w *SliceWriter) Write(c *apiclient.Client, nodeName string, current *Resou
 // holds answers whether current is this writer's last write, and the
 // write sent the devices desired now.
 func (w *SliceWriter) holds(current *ResourceSlice, devices []SliceDevice) bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+	w.lock()
+	defer w.unlock()
 	return current.Metadata.ResourceVersion != "" && current.Metadata.ResourceVersion == w.version &&
 		reflect.DeepEqual(w.sent, devices)
 }
@@ -290,19 +307,21 @@ func (w *SliceWriter) send(c *apiclient.Client, method, path string, slice *Reso
 	if err != nil {
 		return err
 	}
+	w.lock()
+	defer w.unlock()
 	var answer ResourceSlice
 	if err := c.RequestJSON(method, path, body, &answer); err != nil {
-		w.remember("", nil)
+		w.version, w.sent = "", nil
 		return err
 	}
-	w.remember(answer.Metadata.ResourceVersion, devices)
+	w.version, w.sent = answer.Metadata.ResourceVersion, slices.Clone(devices)
 	return nil
 }
 
-func (w *SliceWriter) remember(version string, devices []SliceDevice) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.version, w.sent = version, slices.Clone(devices)
+func (w *SliceWriter) forget() {
+	w.lock()
+	defer w.unlock()
+	w.version, w.sent = "", nil
 }
 
 // AttrString builds a string-typed attribute value without repeating

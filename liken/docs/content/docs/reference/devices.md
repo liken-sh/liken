@@ -63,7 +63,16 @@ slice when these three conditions are true:
 3. **The machine does not depend on it.** A device whose subtree holds a
    storage role belongs to the machine, and never to a workload. A
    disk belongs to the machine, through a storage role, or to the
-   workloads, through a claim, but never to both.
+   workloads, through a claim, but never to both. `machine-operator`
+   reads which partitions back a role from the facts that init
+   publishes. When it can't read the facts, it can't tell a system
+   disk from a spare one, so it offers no disk at all, and the
+   Machine's `FactsPublished` condition is `False`. A device with no
+   disk in its subtree, such as a GPU, stays in the slice. A claim
+   that already holds a disk fails to start its next container until
+   the facts read again, and the operator checks each disk again when
+   it prepares a claim, so an allocation from an older slice can't
+   deliver one.
 
 The machine holds four kinds of node, and no claim receives them.
 The console, which the kernel lists in

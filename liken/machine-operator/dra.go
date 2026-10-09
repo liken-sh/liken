@@ -84,7 +84,7 @@ func publishDeviceInventory(r *reader, node *nodeObject, facts *machine.MachineS
 		func(d hardware.Device) hardware.Delivery {
 			return withoutHeld(hardware.InspectDelivery(draSysfsRoot, d), held)
 		},
-		platformBlocks(facts), serio)
+		protectionOf(facts), serio)
 	if len(devices) > maxSliceDevices {
 		fmt.Fprintf(os.Stderr, "device inventory: %d devices exceed one slice's capacity of %d; dropping the overflow\n",
 			len(devices), maxSliceDevices)
@@ -143,25 +143,6 @@ func declaredSerio() []machine.SerioAttachment {
 	return nil
 }
 
-// platformBlocks returns the block devices the machine depends on:
-// every partition that backs a storage role, read straight from the
-// facts. The system slots, the boot path, and the state and pod
-// filesystems are all storage roles, so this one set covers
-// everything the machine cannot lose without failing.
-func platformBlocks(facts *machine.MachineStatus) map[string]bool {
-	blocks := map[string]bool{}
-	if facts == nil {
-		return blocks
-	}
-	for _, name := range machine.StorageRoleNames {
-		role := facts.Storage.Role(name)
-		if role != nil && role.Device != "" {
-			blocks[role.Device] = true
-		}
-	}
-	return blocks
-}
-
 // inventoryDevices applies the publish rule to the devices
 // hardware.DiscoverInventory finds: the pci and usb devices, and the
 // devices on the board that own a node, such as a firmware TPM or a
@@ -185,12 +166,9 @@ func platformBlocks(facts *machine.MachineStatus) map[string]bool {
 //     hardware that workloads do claim. publishing.go carries the
 //     rest of that story.
 //  3. The machine does not depend on the device: nothing in its
-//     subtree backs a storage role. A claim on the system disk
-//     would hand an unprivileged pod the machine's own root
-//     filesystem, so the two claiming systems exclude each other. A
-//     disk belongs either to the machine, as a storage role, or to
-//     the workloads, through DRA, never both. The console and the
-//     clock that init writes leave the delivery before this test,
+//     subtree backs a storage role, and while the facts do not read,
+//     nothing in its subtree is a disk (protection.go). The console
+//     and the clock that init writes leave the delivery before this test,
 //     so a device whose only nodes they are has nothing to deliver
 //     (held.go).
 //
@@ -204,7 +182,7 @@ func platformBlocks(facts *machine.MachineStatus) map[string]bool {
 // the slice is itself the enforcement, ahead of whatever checks a
 // deployment's DeviceClasses perform.
 func inventoryDevices(discovered []hardware.Device,
-	inspect func(hardware.Device) hardware.Delivery, platform map[string]bool,
+	inspect func(hardware.Device) hardware.Delivery, platform protection,
 	serio []machine.SerioAttachment) []kubernetes.SliceDevice {
 	plumbing := map[string]bool{"usb": true, "hub": true, "pcieport": true}
 	var out []kubernetes.SliceDevice
@@ -218,7 +196,7 @@ func inventoryDevices(discovered []hardware.Device,
 		if len(delivery.DevNodes()) == 0 && !bluetoothAdapter(d) {
 			continue
 		}
-		if slices.ContainsFunc(delivery.Blocks(), func(b string) bool { return platform[b] }) {
+		if platform.withholds(delivery) {
 			continue
 		}
 		// One physical device can publish more than one slice

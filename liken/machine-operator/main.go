@@ -126,6 +126,7 @@ func main() {
 	// the boot manifest's entries alone.
 	bootFacts, _ := factsTree.Read()
 	setDeclaredSerio(serioInEffect(m.Spec.Serio, bootFacts))
+	setPlatformProtection(protectionOf(bootFacts))
 	go func() {
 		if err := serveDRAPlugin(context.Background(), client); err != nil {
 			fmt.Fprintf(os.Stderr, "the DRA plugin is not serving: %v\n", err)

@@ -32,6 +32,23 @@ Status on 2026-10-04:
 * No longer applies: the pipefail item in part four. The release
   workflow it names was removed (7faa174e). The bucket listing moved
   into `releases/publish.sh` (ab96344a), which sets `pipefail`.
+* Built 2026-10-09: the first item of part three. A machine whose
+  facts do not read offers no disk, and prepare and the CDI refresh
+  check every disk against the storage roles again
+  (`machine-operator/protection.go`). A test reproduced the bug before
+  the fix: with no facts, the inventory offered a disk that a role
+  held, and prepare delivered `/dev/sda` with no check at all.
+* Built in release 2026.10.09-002: the first item of part four. The CRD
+  declares `status.boot.network` in full, and
+  `TestTheSchemaDeclaresEveryField` checks every status and spec field
+  against the schema.
+* Does not reproduce, 2026-10-09: the duplicate modalias in part four.
+  The API server does refuse a status with two entries for one
+  modalias (a server-side dry run on the testbed answered
+  `Duplicate value`), but no write can carry two. `WriteUnclaimed`
+  names each entry's facts directory by its modalias, so two identical
+  devices write one directory, and the operator copies status from
+  the facts. The status reports one entry for the two devices.
 * Every other item is not built.
 
 The round has six parts: the boot chain's writes, init's process

@@ -108,7 +108,7 @@ func samePublished(a, b publishedDevice) bool {
 // Both devices carry the adapter's identity, so a claim pairs them by
 // address, and neither allows a second allocation.
 func TestTheInventoryPublishesBothSerioDevicesExclusive(t *testing.T) {
-	devices := inventoryDevices([]hardware.Device{pulse8Line}, delivering(attachedDelivery), nil,
+	devices := inventoryDevices([]hardware.Device{pulse8Line}, delivering(attachedDelivery), noRoles,
 		[]machine.SerioAttachment{pulse8Serio})
 
 	var names, subsystems []string

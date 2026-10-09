@@ -22,7 +22,7 @@ func TestInventoryPublishesAUSBDeviceThatNoDriverBinds(t *testing.T) {
 	devices := inventoryDevices([]hardware.Device{
 		{Bus: "usb", Address: "1-2", Driver: "usb", Name: "QEMU QEMU USB CCID", Vendor: "08e6", Product: "4433"},
 		{Bus: "usb", Address: "1-2:1.0", Class: "smart-card", ClassCode: "0b"},
-	}, usbfsOnly, nil, nil)
+	}, usbfsOnly, noRoles, nil)
 
 	if len(devices) != 1 {
 		t.Fatalf("devices = %+v, want the reader", devices)
@@ -58,7 +58,7 @@ func TestInventoryLeavesAUSBDeviceThatADriverServes(t *testing.T) {
 				{Bus: "usb", Address: "1-6", Driver: "usb", Name: "USB Audio and HID"},
 				{Bus: "usb", Address: "1-6:1.3", Class: "hid", ClassCode: "03"},
 				{Bus: "usb", Address: "1-6:1.0", Driver: tc.driver, Class: "audio", ClassCode: "01"},
-			}, usbfsOnly, nil, nil)
+			}, usbfsOnly, noRoles, nil)
 
 			for _, d := range devices {
 				if d.Name == "usb-1-6" {
@@ -133,12 +133,12 @@ func TestACardReaderInSysfsPublishesWholeAndResolvesToItsUsbfsNode(t *testing.T)
 
 	devices := inventoryDevices(discovered, func(d hardware.Device) hardware.Delivery {
 		return hardware.InspectDelivery(sysRoot, d)
-	}, nil, nil)
+	}, noRoles, nil)
 	byName := map[string]hardware.Device{}
 	for _, d := range discovered {
 		byName[deviceName(d)] = d
 	}
-	published, ok := resolveAllocated("usb-1-2", sysRoot, byName, nil)
+	published, err := resolveAllocated("usb-1-2", sysRoot, byName, nil, noRoles)
 
 	var names []string
 	for _, d := range devices {
@@ -147,7 +147,7 @@ func TestACardReaderInSysfsPublishesWholeAndResolvesToItsUsbfsNode(t *testing.T)
 	if !slices.Equal(names, []string{"usb-1-2"}) {
 		t.Errorf("the slice holds %q, want the reader", names)
 	}
-	if !ok || !slices.Equal(published.Nodes, []string{"/dev/bus/usb/001/002"}) {
-		t.Errorf("a claim on the reader resolves to %q (%v), want its usbfs node", published.Nodes, ok)
+	if err != nil || !slices.Equal(published.Nodes, []string{"/dev/bus/usb/001/002"}) {
+		t.Errorf("a claim on the reader resolves to %q (%v), want its usbfs node", published.Nodes, err)
 	}
 }

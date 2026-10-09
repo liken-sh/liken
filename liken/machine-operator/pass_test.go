@@ -85,6 +85,7 @@ func isolatePass(t *testing.T) {
 		factsTree = saved[0].(machine.FactsTree)
 		sysctlRoot, hostsPath, draSysfsRoot, cdiDir = saved[1].(string), saved[2].(string), saved[3].(string), saved[4].(string)
 	})
+	protecting(t, protection{})
 	factsTree = machine.FactsTree{Dir: t.TempDir()}
 	sysctlRoot, draSysfsRoot, cdiDir = t.TempDir(), t.TempDir(), t.TempDir()
 	hostsPath = filepath.Join(t.TempDir(), "hosts")

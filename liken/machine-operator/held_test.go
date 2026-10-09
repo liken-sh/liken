@@ -60,7 +60,7 @@ func TestInventoryWithholdsADeviceTheMachineHolds(t *testing.T) {
 
 	devices := inventoryDevices([]hardware.Device{
 		{Bus: "platform", Address: "rtc_cmos", Driver: "rtc_cmos"},
-	}, func(hardware.Device) hardware.Delivery { return withoutHeld(clock, held) }, nil, nil)
+	}, func(hardware.Device) hardware.Delivery { return withoutHeld(clock, held) }, noRoles, nil)
 
 	if len(devices) != 0 {
 		t.Errorf("devices = %+v, want none: init writes the clock", devices)
@@ -81,7 +81,7 @@ func TestInventoryWithholdsTheTPM(t *testing.T) {
 
 	devices := inventoryDevices([]hardware.Device{
 		{Bus: "platform", Address: "MSFT0101:00", Driver: "tpm_crb_acpi"},
-	}, func(hardware.Device) hardware.Delivery { return withoutHeld(tpm, held) }, nil, nil)
+	}, func(hardware.Device) hardware.Delivery { return withoutHeld(tpm, held) }, noRoles, nil)
 
 	if len(devices) != 0 {
 		t.Errorf("devices = %+v, want none: the TPM is the machine's", devices)

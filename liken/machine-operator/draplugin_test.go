@@ -108,6 +108,7 @@ func newDRAFixture(t *testing.T) *draFixture {
 	origSysfs, origCDI := draSysfsRoot, cdiDir
 	draSysfsRoot, cdiDir = sysfs, cdi
 	t.Cleanup(func() { draSysfsRoot, cdiDir = origSysfs, origCDI })
+	protecting(t, noRoles)
 
 	fixture.plugin = &draPlugin{client: apiclient.New(apiservertest.Host, server.Client(), credentials)}
 	fixture.cdi = cdi

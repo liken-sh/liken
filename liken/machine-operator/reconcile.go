@@ -237,8 +237,13 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 	// The serio list is the spec's and the boot record's together
 	// (dra.go), set here for the DRA plugin as well, so the inventory
 	// and the claims it prepares withhold the same serial lines.
+	//
+	// The facts set the protection the same way: the disks that back
+	// a storage role, or every disk when the facts did not read
+	// (protection.go).
 	serio := serioInEffect(m.Spec.Serio, facts)
 	setDeclaredSerio(serio)
+	setPlatformProtection(protectionOf(facts))
 	if nodeErr == nil {
 		_ = publishDeviceInventory(r, node, facts, serio, mm)
 	}

@@ -34,6 +34,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -159,27 +160,43 @@ func (p *draPlugin) NodePrepareResources(ctx context.Context, req *drav1.NodePre
 // this claim would receive now. The bare names are tried first,
 // exactly: one device's bare name can begin with another's, so a
 // prefix alone identifies nothing.
-func resolveAllocated(name string, sysRoot string, byName map[string]hardware.Device, serio []machine.SerioAttachment) (publishedDevice, bool) {
+//
+// A device that the protection withholds answers errWithheld, and a
+// name that no present device publishes answers errNotPublished.
+func resolveAllocated(name string, sysRoot string, byName map[string]hardware.Device, serio []machine.SerioAttachment, platform protection) (publishedDevice, error) {
 	if device, ok := byName[name]; ok {
-		for _, p := range publishFor(device, claimDelivery(sysRoot, device), serio) {
+		delivery := claimDelivery(sysRoot, device)
+		if platform.withholds(delivery) {
+			return publishedDevice{}, errWithheld
+		}
+		for _, p := range publishFor(device, delivery, serio) {
 			if p.Suffix == "" {
-				return p, true
+				return p, nil
 			}
 		}
-		return publishedDevice{}, false
+		return publishedDevice{}, errNotPublished
 	}
 	for bare, device := range byName {
 		if !strings.HasPrefix(name, bare+"-") {
 			continue
 		}
-		for _, p := range publishFor(device, claimDelivery(sysRoot, device), serio) {
-			if bare+p.Suffix == name {
-				return p, true
+		delivery := claimDelivery(sysRoot, device)
+		for _, p := range publishFor(device, delivery, serio) {
+			if bare+p.Suffix != name {
+				continue
 			}
+			if platform.withholds(delivery) {
+				return publishedDevice{}, errWithheld
+			}
+			return p, nil
 		}
 	}
-	return publishedDevice{}, false
+	return publishedDevice{}, errNotPublished
 }
+
+// errNotPublished is an allocated device name that no present device
+// publishes.
+var errNotPublished = errors.New("it is not in this machine's inventory now")
 
 func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceResponse {
 	fail := func(format string, args ...any) *drav1.NodePrepareResourceResponse {
@@ -219,9 +236,9 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 			// That driver's own plugin prepares it.
 			continue
 		}
-		published, ok := resolveAllocated(result.Device, draSysfsRoot, byName, declaredSerio())
-		if !ok {
-			return fail("allocated device %s is not in this machine's inventory now", result.Device)
+		published, err := resolveAllocated(result.Device, draSysfsRoot, byName, declaredSerio(), currentProtection())
+		if err != nil {
+			return fail("allocated device %s: %v", result.Device, err)
 		}
 		nodes := deviceNodes(published.Nodes)
 		name := claim.Uid + "-" + result.Device

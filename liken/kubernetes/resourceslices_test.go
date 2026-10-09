@@ -9,8 +9,14 @@ package kubernetes
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
+	"testing/synctest"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // slicePublishFixture is a small API server that holds at most one
@@ -250,4 +256,35 @@ func TestASliceWriterWritesANewInventoryAndForgetsAFailedWrite(t *testing.T) {
 	if failed == nil || server.writes != 2 || w.Wrote(ours) {
 		t.Errorf("the refused write answered %v after %d writes, and the writer still owns %s: %v", failed, server.writes, ours, w.Wrote(ours))
 	}
+}
+
+// The watch can deliver the echo of a write before the write's answer
+// reaches the writer. Wrote waits for that answer, so the echo still
+// reads as the writer's own, and the loop does not wake for it.
+func TestWroteWaitsForTheAnswerOfAWriteInFlight(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := &SliceWriter{}
+		echo := make(chan bool, 1)
+		server := apiservertest.Start(t, http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+			slice := &ResourceSlice{}
+			_ = json.NewDecoder(r.Body).Decode(slice)
+			slice.Metadata.ResourceVersion = "7"
+			go func() { echo <- w.Wrote("7") }()
+			synctest.Wait()
+			_ = json.NewEncoder(rw).Encode(slice)
+		}))
+		credentials := t.TempDir()
+		if err := os.WriteFile(filepath.Join(credentials, "token"), []byte("t"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		client := apiclient.New(apiservertest.Host, server.Client(), credentials)
+
+		if err := w.Write(client, "node-1", nil, testOwner(), testDevices()); err != nil {
+			t.Fatal(err)
+		}
+
+		if !<-echo {
+			t.Error("the echo that arrived before the write's answer read as another writer's change")
+		}
+	})
 }
