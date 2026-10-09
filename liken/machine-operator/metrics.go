@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/kubernetes"
@@ -42,10 +43,12 @@ import (
 // reports itself and nothing more: the machine must keep operating
 // whether or not anybody watches it. This pod runs on the host
 // network, so a port another program already holds is the ordinary
-// way that bind fails.
-func serveMetrics(address string, f *fetcher) (*metrics.Operator, *machineMetrics) {
+// way that bind fails. /healthz answers health, for the liveness
+// probe.
+func serveMetrics(address string, f *fetcher, health func() error) (*metrics.Operator, *machineMetrics) {
 	o := metrics.NewOperator(component, machine.Version,
 		[]string{machineKind}, watchKinds)
+	o.SetHealth(health)
 	layer := newMachineMetrics(o, f)
 	if addr, err := o.Serve(address); err != nil {
 		fmt.Fprintf(os.Stderr, "the metrics listener is not serving: %v\n", err)
@@ -65,6 +68,10 @@ type machineMetrics struct {
 	converged     optionalGauge
 	devices       *prometheus.GaugeVec
 	lastCrash     optionalGauge
+	longestPass   prometheus.Gauge
+	longest       float64
+	repairs       *prometheus.CounterVec
+	passes        *prometheus.CounterVec
 
 	// classes remembers every device class this machine has
 	// published. A class whose devices all disappear is set to zero
@@ -130,6 +137,18 @@ func newMachineMetrics(o *metrics.Operator, f *fetcher) *machineMetrics {
 		}, []string{"class"}),
 		lastCrash: newOptionalGauge(metrics.Prefix+"last_crash_timestamp_seconds",
 			"When the newest kernel crash this machine still holds records for happened, in seconds since the epoch."),
+		longestPass: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: metrics.Prefix + "machine_longest_pass_seconds",
+			Help: "The longest reconcile pass since the operator started. The heartbeat stops once the loop is busy for 60 seconds.",
+		}),
+		repairs: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: metrics.Prefix + "machine_backstop_repairs_total",
+			Help: "Writes by a pass that only the backstop started, by step. Each one names a wake the operator does not send.",
+		}, []string{"step"}),
+		passes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: metrics.Prefix + "machine_passes_total",
+			Help: "Reconcile passes, by what started each one: start, watch, machine event, facts, retry, sysctl drift, or backstop.",
+		}, []string{"cause"}),
 		classes: map[string]bool{},
 	}
 
@@ -149,7 +168,8 @@ func newMachineMetrics(o *metrics.Operator, f *fetcher) *machineMetrics {
 	}, func() float64 { return float64(f.DownloadFailures()) })
 
 	o.Registry().MustRegister(m.release, m.bootTimestamp.vec, m.changePending,
-		m.converged.vec, m.devices, m.lastCrash.vec, downloadBytes, downloadFailures)
+		m.converged.vec, m.devices, m.lastCrash.vec, downloadBytes, downloadFailures,
+		m.longestPass, m.repairs, m.passes)
 
 	for _, kind := range pendingTiers {
 		m.changePending.WithLabelValues(tierOf(kind)).Set(0)
@@ -160,6 +180,34 @@ func newMachineMetrics(o *metrics.Operator, f *fetcher) *machineMetrics {
 // observeStatus reads the status that this pass is about to publish.
 // Every value here comes from that one struct, so the graph and the
 // `kubectl get machine -o yaml` output can never disagree.
+// observePass raises the longest pass when took is longer. A nil
+// machineMetrics observes nothing.
+func (m *machineMetrics) observePass(took time.Duration) {
+	if m == nil {
+		return
+	}
+	if took.Seconds() > m.longest {
+		m.longest = took.Seconds()
+		m.longestPass.Set(m.longest)
+	}
+}
+
+// observeWake counts one pass by its cause.
+func (m *machineMetrics) observeWake(cause string) {
+	if m == nil {
+		return
+	}
+	m.passes.WithLabelValues(cause).Inc()
+}
+
+// backstopRepaired counts one write of a backstop pass.
+func (m *machineMetrics) backstopRepaired(step string) {
+	if m == nil {
+		return
+	}
+	m.repairs.WithLabelValues(step).Inc()
+}
+
 func (m *machineMetrics) observeStatus(status *machine.MachineStatus) {
 	// Reset before the set, because a machine that upgrades or falls
 	// back changes both labels. Without the reset, the old release

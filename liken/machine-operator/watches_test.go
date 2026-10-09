@@ -14,6 +14,7 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/kubernetes"
+	"github.com/liken-sh/liken/liken/kubernetes/watch"
 	"github.com/liken-sh/liken/liken/machine"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	utiljson "k8s.io/apimachinery/pkg/util/json"
@@ -107,5 +108,30 @@ func TestTheCopiesDecodeLikeADirectRead(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.kind, c.check)
+	}
+}
+
+// The kubelet rewrites a Node's status every five minutes, with only
+// the heartbeat times in its conditions changed. Such a write wakes no
+// pass, and a write that changes a condition does.
+func TestTheNodeWatchIgnoresTheKubeletsHeartbeat(t *testing.T) {
+	node := func(version, ready, heartbeat string) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "v1", "kind": "Node",
+			"metadata": map[string]any{"name": "node-1", "resourceVersion": version},
+			"status": map[string]any{"conditions": []any{map[string]any{
+				"type": "Ready", "status": ready, "lastHeartbeatTime": heartbeat, "lastTransitionTime": "2026-10-09T15:00:00Z",
+			}}},
+		}}
+	}
+	wakes := 0
+	h := watch.WakeOnContent[nodeObject](informer.Source{Resource: nodeResource}, func() { wakes++ }, withoutHeartbeats)
+
+	h.OnUpdate(node("1", "True", "2026-10-09T16:00:00Z"), node("2", "True", "2026-10-09T16:05:05Z"))
+	heartbeatOnly := wakes
+	h.OnUpdate(node("2", "True", "2026-10-09T16:05:05Z"), node("3", "False", "2026-10-09T16:05:30Z"))
+
+	if heartbeatOnly != 0 || wakes != 1 {
+		t.Errorf("a heartbeat woke %d passes and a Ready change %d, want 0 and 1", heartbeatOnly, wakes-heartbeatOnly)
 	}
 }

@@ -258,6 +258,12 @@ func TestASweepRightAfterItsOwnGrantReadsThatMachineDirectly(t *testing.T) {
 		}, func(string) {})
 		awaitFleetCopies(t, r)
 		cm, _ := fleetMetrics(t)
+		// A new process grants no turn until its first read of the
+		// heartbeats is HeartbeatStaleAfter old (decideRollout).
+		if err := sweep(r, "lab", newChannelPoller(), &engineProbe{}, &podSteward{}, cm); err != nil {
+			t.Fatal(err)
+		}
+		renewFor(t, client, kubernetes.HeartbeatStaleAfter+time.Second, []string{"node-1", "node-2"})
 		fake.Hold()
 
 		if err := sweep(r, "lab", newChannelPoller(), &engineProbe{}, &podSteward{}, cm); err != nil {

@@ -5,6 +5,7 @@ package main
 import (
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/liken-sh/liken/liken/api"
 )
@@ -19,7 +20,7 @@ func TestRolloutADownloadTakesNoSlotOfTheBudget(t *testing.T) {
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 	)
 
-	r := decideRollout(machines, renewals, labCluster(0), "", sweepNow)
+	r := decideRollout(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
 
 	if !slices.Equal(r.grant, []string{"node-4"}) {
 		t.Errorf("grants = %v, want node-4: node-3's download takes no slot of the budget of one", r.grant)

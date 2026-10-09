@@ -22,6 +22,12 @@ process. A pod on the host network shares the node's port space, so it
 takes a port nobody else on the host holds: the machine operator holds
 9200 there, and the bluetooth operator 9250.
 
+The machine operator also serves `/healthz` on its port. It answers
+`500` once the operator's reconcile loop has been busy for 60 seconds.
+At the same limit the operator stops renewing its heartbeat and ends its
+own process, so the kubelet starts it again. `/healthz` is for a person
+or a monitor to read, and no probe depends on it.
+
 ## Metrics
 
 Every liken operator publishes the runtime layer that the Prometheus
@@ -47,6 +53,9 @@ metrics of their own domain:
 | machine-operator | `liken_release_download_failures_total` | counter | a download that keeps failing |
 | machine-operator | `liken_devices{class}` | gauge | a missing GPU or adapter shows as a drop |
 | machine-operator | `liken_last_crash_timestamp_seconds` | gauge | pstore capture; a crash loop is a line |
+| machine-operator | `liken_machine_longest_pass_seconds` | gauge | the longest pass since the operator started; the heartbeat stops at 60 |
+| machine-operator | `liken_machine_backstop_repairs_total{step}` | counter | a write by the five-minute backstop pass, which names a missing wake |
+| machine-operator | `liken_machine_passes_total{cause}` | counter | passes by what started each one; a settled machine runs few |
 | cluster-operator | `liken_machines{phase}` | gauge | fleet by phase |
 | cluster-operator | `liken_disruption_approvals_pending` | gauge | approvals outstanding |
 | cluster-operator | `liken_machines_behind_target` | gauge | nodes not yet on the target release |

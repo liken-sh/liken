@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -23,7 +24,7 @@ import (
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/kubernetes/fakeapi"
 	"github.com/liken-sh/liken/liken/kubernetes/watch"
-	"github.com/liken-sh/liken/liken/machine"
+	"golang.org/x/sys/unix"
 )
 
 // plugInSoundCard writes an audio controller into the fake sysfs: a
@@ -93,9 +94,11 @@ func startLoop(t *testing.T, l *loop) <-chan error {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
-	t.Cleanup(cancel)
-	done := make(chan error, 1)
-	go func() { done <- l.run(ctx, current) }()
+	done, finished := make(chan error, 1), make(chan struct{})
+	// The cleanup waits for the loop to return, so no pass still runs
+	// when isolatePass's cleanup restores the host paths.
+	t.Cleanup(func() { cancel(); <-finished })
+	go func() { done <- l.run(ctx, current); close(finished) }()
 	return done
 }
 
@@ -291,79 +294,6 @@ func TestTheSeamsOpenTheRealReaders(t *testing.T) {
 	}
 }
 
-// A pass that only the ticker woke reads neither sysfs nor the hosts
-// file. A device that arrives with no uevent, and a hosts file that
-// changes with no inotify event, both wait for their event, and the
-// uevent's pass then publishes the device.
-func TestATickReadsNeitherSysfsNorTheHostsFile(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		isolatePass(t)
-		seedSysctls(t)
-		l, _ := testLoop(t, newPassAPI(), &fakeFactsWatch{wake: make(chan struct{}, 1)})
-		ticks := make(chan time.Time)
-		uevents := make(chan struct{}, 1)
-		l.ticks, l.uevents = ticks, uevents
-		startLoop(t, l)
-		synctest.Wait()
-
-		plugInSoundCard(t, draSysfsRoot)
-		if err := os.WriteFile(hostsPath, []byte("127.0.0.1 localhost\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		ticks <- time.Now()
-		synctest.Wait()
-		afterTick := sliceDevices(t, l)
-		hosts, err := os.ReadFile(hostsPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		uevents <- struct{}{}
-		time.Sleep(time.Second)
-		synctest.Wait()
-
-		if len(afterTick) != 0 || string(hosts) != "127.0.0.1 localhost\n" {
-			t.Errorf("the tick's pass published %q and left hosts %q, want nothing read", afterTick, hosts)
-		}
-		if got := sliceDevices(t, l); !slices.Equal(got, []string{"pci-0000-00-1f-3"}) {
-			t.Errorf("the uevent's pass published %q, want the sound card", got)
-		}
-	})
-}
-
-// A tick reuses a read only when its last attempt succeeded. A read
-// that failed runs again on the tick, so the tick's pass records the
-// failure again and the retry timer stays set.
-func TestLocalReadsReuseOnlyASuccessOnATick(t *testing.T) {
-	cases := []struct {
-		name     string
-		tickOnly bool
-		lastErr  error
-		reads    int
-	}{
-		{"a tick after a success", true, nil, 1},
-		{"a tick after a failure", true, os.ErrPermission, 2},
-		{"another wake after a success", false, nil, 2},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			l := &localReads{}
-			reads := 0
-			apply := func(err error) func() ([]machine.HostEntry, error) {
-				return func() ([]machine.HostEntry, error) { reads++; return nil, err }
-			}
-			_, _ = l.hostEntries(apply(tc.lastErr))
-			l.walked(tc.lastErr == nil)
-			l.tickOnly = tc.tickOnly
-
-			_, _ = l.hostEntries(apply(nil))
-
-			if reads != tc.reads || l.walk() != (tc.reads == 2) {
-				t.Errorf("read the hosts file %d times and walk = %v, want %d and %v", reads, l.walk(), tc.reads, tc.reads == 2)
-			}
-		})
-	}
-}
-
 // The slice watch wakes the loop for a change this operator did not
 // make: another writer's update, and a delete. The operator's own write
 // reaches the watch as an update at the version the write answered, and
@@ -436,26 +366,24 @@ func (h *refusingSlices) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.next.ServeHTTP(w, r)
 }
 
-// A slice write that failed leaves the walk not current, so the next
-// tick walks again and writes again, until a write lands.
-func TestATickWalksAgainAfterASliceWriteFailed(t *testing.T) {
+// A slice write that failed is written again on the retry timer, with
+// no other wake, until a write lands.
+func TestAFailedSliceWriteIsWrittenAgainOnTheRetry(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolatePass(t)
 		seedSysctls(t)
 		plugInSoundCard(t, draSysfsRoot)
 		api := &refusingSlices{next: newPassAPI()}
 		l, _ := testLoop(t, api, &fakeFactsWatch{wake: make(chan struct{}, 1)})
-		ticks := make(chan time.Time)
-		l.ticks = ticks
 		startLoop(t, l)
 		synctest.Wait()
 		first := api.writes.Load()
 
-		ticks <- time.Now()
+		time.Sleep(1500 * time.Millisecond)
 		synctest.Wait()
 
 		if first != 1 || api.writes.Load() != 2 {
-			t.Errorf("the slice was written %d times by the first pass and %d after a tick, want 1 and 2", first, api.writes.Load())
+			t.Errorf("the slice was written %d times by the first pass and %d after the retry, want 1 and 2", first, api.writes.Load())
 		}
 	})
 }
@@ -565,4 +493,26 @@ func TestAPassAfterARecoveryReadsTheAPIServerOnce(t *testing.T) {
 			t.Errorf("the pass after the recovery sent %q, and the next one %q; want six reads and none", afterRecovery, next)
 		}
 	})
+}
+
+// A hosts watch whose directory does not exist is the pod template
+// older than the mount, and the operator runs without it. Any other
+// failure to open ends the process.
+func TestOnlyAMissingDirectoryLetsTheOperatorRunWithoutTheHostsWatch(t *testing.T) {
+	cases := []struct {
+		name  string
+		err   error
+		fatal bool
+	}{
+		{"opened", nil, false},
+		{"no directory", fmt.Errorf("watching /host/etc: %w", fs.ErrNotExist), false},
+		{"no inotify instances left", fmt.Errorf("inotify_init1: %w", unix.EMFILE), true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := hostsWatchFailure(c.err) != nil; got != c.fatal {
+				t.Errorf("fatal = %v, want %v", got, c.fatal)
+			}
+		})
+	}
 }

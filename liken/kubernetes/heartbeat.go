@@ -42,9 +42,10 @@ import (
 const heartbeatDir = "/apis/coordination.k8s.io/v1/namespaces/liken-system/leases"
 
 // HeartbeatRenewAfter sets how old the heartbeat must be before the
-// machine's own operator renews it. The value is just under the
-// ten-second reconcile ticker, so every ticker pass renews the
-// lease, and the event-driven passes in between send nothing.
+// machine's own operator renews it. The operator's renewal timer fires
+// at half this period, so a timer that fires a moment early still
+// renews on the next firing, and the lease is renewed every 8 to 12
+// seconds.
 // HeartbeatStaleAfter sets how long a machine may then stay silent
 // before the cluster operator marks it Lost. A single missed
 // renewal may only mean a busy moment. Several missed renewals mean
@@ -128,7 +129,7 @@ func newLease(name, holder string, owner OwnerReference, duration time.Duration,
 // Heartbeat keeps a machine's own lease current. Each machine is the
 // only writer of its own lease, the same way a kubelet is the only
 // writer of its own node lease, so there is no election here, and every
-// failure only means "try again on the next pass."
+// failure only means "try again on the next renewal."
 //
 // A Heartbeat holds the lease as this process last wrote it. The
 // resourceVersion in that copy is what a renewal needs, so a steady
@@ -138,6 +139,12 @@ func newLease(name, holder string, owner OwnerReference, duration time.Duration,
 type Heartbeat struct {
 	name string
 	held *Lease
+
+	// wrote is the time of the last renewal this process wrote, as
+	// the caller's clock gave it. A time from time.Now carries the
+	// monotonic reading, so a step of the wall clock does not change
+	// the age of the last renewal.
+	wrote time.Time
 }
 
 // NewHeartbeat returns the heartbeat of the named machine. It holds no
@@ -146,10 +153,13 @@ func NewHeartbeat(name string) *Heartbeat {
 	return &Heartbeat{name: name}
 }
 
-// Renew renews the lease once it has aged past HeartbeatRenewAfter,
-// and creates it when it does not exist. A pass that finds the held
-// copy fresh sends nothing, so the event-driven passes between two
-// ticker passes cost no request.
+// Renew renews the lease once the last renewal this process wrote has
+// aged past HeartbeatRenewAfter, and creates it when it does not exist.
+// A call that finds the last renewal fresh sends nothing. A new process
+// renews once whatever the lease's renewTime says: a renewTime that a
+// clock wrote before it stepped back reads as a time in the future, so
+// a skip that compared it with the clock would skip every renewal until
+// the clock caught up.
 //
 // The first renewal reads the lease, because the process has no copy
 // yet. After that, the renewal writes from the copy it holds. The
@@ -164,7 +174,7 @@ func NewHeartbeat(name string) *Heartbeat {
 // lease had an owner, or owned by an earlier Machine of the same name,
 // names the current Machine after its next renewal.
 //
-// A nil Heartbeat renews nothing, for a pass whose Machine is gone.
+// A nil Heartbeat renews nothing.
 func (h *Heartbeat) Renew(c *apiclient.Client, owner OwnerReference, now time.Time) {
 	if h == nil {
 		return
@@ -173,7 +183,7 @@ func (h *Heartbeat) Renew(c *apiclient.Client, owner OwnerReference, now time.Ti
 	if h.held == nil && !h.read(c, owner, now) {
 		return
 	}
-	if renewed, err := time.Parse(microTime, h.held.Spec.RenewTime); err == nil && now.Sub(renewed) < HeartbeatRenewAfter {
+	if !h.wrote.IsZero() && now.Sub(h.wrote) < HeartbeatRenewAfter {
 		return
 	}
 	err := h.write(c, path, owner, now)
@@ -206,7 +216,7 @@ func (h *Heartbeat) read(c *apiclient.Client, owner OwnerReference, now time.Tim
 			}
 			return false
 		}
-		h.held = created
+		h.held, h.wrote = created, now
 		return false
 	}
 	if err != nil {
@@ -231,7 +241,7 @@ func (h *Heartbeat) write(c *apiclient.Client, path string, owner OwnerReference
 	if err := c.RequestJSON(http.MethodPut, path, body, written); err != nil {
 		return err
 	}
-	h.held = written
+	h.held, h.wrote = written, now
 	return nil
 }
 

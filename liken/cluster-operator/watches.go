@@ -27,7 +27,10 @@ package main
 //     all the time, and none of it concerns the sweep.
 //   - The heartbeat Leases and the pods wake nothing. The ticker is the
 //     clock that judges a heartbeat's age, and the steward acts on a
-//     machine's version, which arrives as a Machine change.
+//     machine's version, which arrives as a Machine change. The
+//     Leases' handler records when each Lease's renewTime changed, on
+//     this program's clock, and the sweep measures a heartbeat's age
+//     from that record (heartbeats.go).
 //
 // A copy that cannot answer, because its watch has not synced or its
 // last watch failed, is never read as the truth. The sweep reads the
@@ -120,6 +123,11 @@ type fleetReader struct {
 	// otherwise reads that one object from the API server.
 	machineVersions *memo.Versions
 	clusterVersions *memo.Versions
+
+	// sightings records when this program saw each heartbeat Lease
+	// change (heartbeats.go). The Leases' watch writes it, and each
+	// read of the heartbeats passes through it.
+	sightings heartbeatSightings
 }
 
 // watchFleet opens the watches and returns the reader over their
@@ -144,16 +152,17 @@ func watchFleet(ctx context.Context, watcher dynamic.Interface, client *apiclien
 	pods := informer.Source{Resource: podResource, Namespace: "liken-system",
 		LabelSelector: appLabel + " in (" + strings.Join(stewardedDaemonSets, ",") + ")"}
 
-	return &fleetReader{
+	r := &fleetReader{
 		client:          client,
 		machineCopy:     start(machineKind, machines, watch.WakeOnChange[machine.Machine](machines, wake), nil),
 		clusterCopy:     start(clusterKind, clusters, watch.WakeOnEdit[cluster.Cluster](clusters, wake), nil),
-		leaseCopy:       start(leaseKind, leases, nil, nil),
 		daemonSetCopy:   start(daemonSetKind, daemonSets, watch.WakeOnEdit[featureWorkload](daemonSets, wake), nil),
 		podCopy:         start(podKind, pods, nil, cache.Indexers{appLabel: watch.LabelIndex(appLabel)}),
 		machineVersions: memo.New(),
 		clusterVersions: memo.New(),
 	}
+	r.leaseCopy = start(leaseKind, leases, r.sightings.handler(leases), nil)
+	return r
 }
 
 // current answers the view of a copy the sweep may read, or a view
@@ -290,12 +299,19 @@ func (r *fleetReader) cluster(name string) (*cluster.Cluster, error) {
 		informer.Held{View: r.current(r.clusterCopy), Versions: r.clusterVersions}, name, clusterPath(name))
 }
 
-// heartbeats reads every machine's last renewal.
-func (r *fleetReader) heartbeats() (map[string]time.Time, error) {
+// heartbeats answers, for each machine's heartbeat Lease, when this
+// program last saw its renewTime change, on this program's clock
+// (heartbeats.go). now is the sweep's clock, and it stamps a change
+// that this read finds before the watch delivers it.
+func (r *fleetReader) heartbeats(now time.Time) (map[string]time.Time, error) {
 	if leases, ok := watch.List[kubernetes.Lease](r.current(r.leaseCopy)); ok {
-		return kubernetes.Renewals(leases), nil
+		return r.sightings.heard(kubernetes.Renewals(leases), now), nil
 	}
-	return kubernetes.ListHeartbeats(r.client)
+	renewals, err := kubernetes.ListHeartbeats(r.client)
+	if err != nil {
+		return nil, err
+	}
+	return r.sightings.heard(renewals, now), nil
 }
 
 // workloads reads one kind of workload in liken-system for the feature

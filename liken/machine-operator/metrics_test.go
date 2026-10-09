@@ -28,7 +28,7 @@ import (
 // because these tests read the handler directly.
 func observer(t *testing.T, f *fetcher) (*machineMetrics, func() string) {
 	t.Helper()
-	o, layer := serveMetrics("", f)
+	o, layer := serveMetrics("", f, nil)
 	return layer, func() string { return scrapeHandler(t, o.Handler()) }
 }
 
@@ -53,7 +53,7 @@ func scrapeHandler(t *testing.T, handler http.Handler) string {
 }
 
 func TestTheListenerStartsWithThisMachinesMetrics(t *testing.T) {
-	o, layer := serveMetrics("127.0.0.1:0", &fetcher{})
+	o, layer := serveMetrics("127.0.0.1:0", &fetcher{}, nil)
 	if o == nil || layer == nil {
 		t.Fatal("the operator started with no metrics")
 	}

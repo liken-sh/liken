@@ -70,11 +70,10 @@ const (
 // the same in both cases.
 //
 // The client answers a 429 at once, with no wait. Each operator's loop
-// runs again within ten seconds, and that loop is its retry. A pass
-// that waited out a 429 would stretch past what the timing below
-// assumes: the heartbeat Lease that a pass renews carries the time the
-// pass started, and a Lost verdict or a reboot grant is written from
-// what the sweep read when it started.
+// sets a retry from the 429's Retry-After, and that loop is its retry.
+// A pass that waited out a 429 would stretch past what the timing below
+// assumes: a Lost verdict or a reboot grant is written from what the
+// sweep read when it started.
 func InClusterClient(server string) (*apiclient.Client, error) {
 	c, err := apiclient.InCluster(apiclient.InClusterOptions{
 		ServiceAccountDir: serviceAccountDir,
@@ -85,6 +84,15 @@ func InClusterClient(server string) (*apiclient.Client, error) {
 		return nil, err
 	}
 	return c.WithWaitContext(noWait), nil
+}
+
+// Within answers c with every request bound to ctx, for one pass that
+// must end by a deadline. apiclient's WithContext also ends the wait
+// after a 429 with ctx, which would make each request of the pass wait
+// out a 429 for up to ten seconds, so Within keeps the wait that has
+// already ended, and the 429 reaches the pass at once.
+func Within(c *apiclient.Client, ctx context.Context) *apiclient.Client {
+	return c.WithContext(ctx).WithWaitContext(noWait)
 }
 
 // noWait is a context that has already ended, for a client whose wait

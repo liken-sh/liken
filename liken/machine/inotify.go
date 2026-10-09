@@ -48,6 +48,14 @@ package machine
 // content it would have parsed from the lost events is content it never
 // trusted.
 //
+// A watch ends when its directory leaves the path that the caller
+// named: a remove, a rename of another directory over it, a rename of
+// it away, or an unmount. The kernel then drops the watch, or keeps it
+// on an inode that the path no longer names, and no later change at
+// the path reaches the reader. So the reader stops and closes its
+// channel, the same way it does when a read fails, and the caller
+// watches the path again.
+//
 // Cancellation cannot rely on closing the inotify descriptor, because a
 // close does not wake a thread already blocked in a read on that
 // descriptor. So the reader never blocks in the read itself. The
@@ -64,9 +72,14 @@ import (
 	"errors"
 	"io/fs"
 	"path/filepath"
+	"sync"
 
 	"golang.org/x/sys/unix"
 )
+
+// errWatchClosed is what Sync answers once the reader has stopped and
+// closed the inotify descriptor.
+var errWatchClosed = errors.New("the inotify watch is closed")
 
 // dirMask is the event set for a single watched directory. IN_MOVED_TO
 // catches every write that goes through writeAtomic, because that write
@@ -76,15 +89,32 @@ import (
 // that passes a file by mistake into an error instead of a stale watch.
 const dirMask = unix.IN_MOVED_TO | unix.IN_CLOSE_WRITE | unix.IN_ONLYDIR
 
+// selfMask asks for the events on the watched directory itself, so the
+// reader learns that the directory left its path. Every single
+// directory watch adds it to the caller's mask. The kernel sends
+// IN_IGNORED and IN_UNMOUNT without a request.
+const selfMask = unix.IN_DELETE_SELF | unix.IN_MOVE_SELF
+
+// goneMask is the set of events on the watched directory that end the
+// watch. IN_IGNORED arrives every time the kernel drops a watch, after
+// IN_DELETE_SELF for a remove or a rename over the directory, and
+// after IN_UNMOUNT for an unmount. The reader stops on the first of
+// them, so it does not send a wake for a directory that is already
+// gone. IN_MOVE_SELF leaves the watch in place, but on a directory
+// that now has another path, so it ends the watch too.
+const goneMask = unix.IN_IGNORED | unix.IN_UNMOUNT | unix.IN_DELETE_SELF | unix.IN_MOVE_SELF
+
 // treeMask is the event set for a directory inside a recursive tree
 // watch. It adds the events that announce a subdirectory. IN_CREATE and
 // IN_MOVED_TO fire when a new subdirectory appears, so the next Sync
 // finds it and adds a watch. IN_DELETE_SELF fires when a watched
 // directory is removed; the kernel then also delivers IN_IGNORED and
 // drops the watch on its own, so the next Sync only has to forget the
-// bookkeeping.
+// bookkeeping. IN_MOVE_SELF is for the root, which ends the watch when
+// it leaves its path (goneMask). On a subdirectory it is one more
+// wake.
 const treeMask = unix.IN_MOVED_TO | unix.IN_CLOSE_WRITE |
-	unix.IN_CREATE | unix.IN_DELETE_SELF | unix.IN_ONLYDIR
+	unix.IN_CREATE | unix.IN_DELETE_SELF | unix.IN_MOVE_SELF | unix.IN_ONLYDIR
 
 // watch holds the descriptors and the wake channel for one inotify
 // instance. The inotify descriptor is non-blocking, so the reader can
@@ -100,6 +130,32 @@ type watch struct {
 	// name in the watched directory. An overflow still wakes, because
 	// the events it dropped may have named it.
 	name string
+
+	// dir is the watch descriptor of the directory the caller named:
+	// the one directory of a single watch, or the root of a tree. The
+	// reader ends the watch on a goneMask event for it. It is set
+	// before the reader starts and never changes, so the reader reads
+	// it without a lock. Zero matches no record, because the kernel
+	// numbers watch descriptors from one.
+	dir int32
+
+	// fdMu makes the reader's close of fd and a TreeWatch's Sync
+	// exclusive. The reader closes the wake channel before it closes
+	// fd, so a caller can see an open channel, call Sync, and add a
+	// watch to a descriptor number that the process has since given to
+	// another file. fdClosed tells Sync that the reader has stopped.
+	fdMu     sync.Mutex
+	fdClosed bool
+}
+
+// closeFd closes the inotify descriptor once, under fdMu.
+func (w *watch) closeFd() {
+	w.fdMu.Lock()
+	defer w.fdMu.Unlock()
+	if !w.fdClosed {
+		w.fdClosed = true
+		unix.Close(w.fd)
+	}
 }
 
 // newWatch creates a non-blocking inotify instance and the cancel pipe
@@ -129,7 +185,7 @@ func newWatch() (*watch, error) {
 // reader owns the inotify descriptor and the cancel pipe's read end,
 // and the cancel goroutine owns the write end.
 func (w *watch) closeFds() {
-	unix.Close(w.fd)
+	w.closeFd()
 	unix.Close(w.cancelR)
 	unix.Close(w.cancelW)
 }
@@ -169,7 +225,7 @@ func (w *watch) start(ctx context.Context) {
 // state again. Only this goroutine sends on the channel, so the close
 // cannot race a send. It closes the descriptors it owns as it leaves.
 func (w *watch) run() {
-	defer unix.Close(w.fd)
+	defer w.closeFd()
 	defer unix.Close(w.cancelR)
 	fds := []unix.PollFd{
 		{Fd: int32(w.fd), Events: unix.POLLIN},
@@ -199,7 +255,9 @@ func (w *watch) run() {
 // reads until the kernel reports EAGAIN, which means the queue is
 // empty, because the descriptor is non-blocking. It returns whether the
 // reader should keep running: true after a normal drain, false after an
-// error that ends the watch.
+// error or a goneMask event on the watched directory, which end the
+// watch. The check for the directory comes before the check for the
+// name, because IN_IGNORED and IN_UNMOUNT carry no name.
 func (w *watch) drain(buf []byte) bool {
 	for {
 		n, err := unix.Read(w.fd, buf)
@@ -211,11 +269,19 @@ func (w *watch) drain(buf []byte) bool {
 		case err != nil:
 			return false
 		}
-		parseInotifyEvents(buf[:n], func(_ int32, mask uint32, name string) {
-			if w.name == "" || name == w.name || mask&unix.IN_Q_OVERFLOW != 0 {
+		gone := false
+		parseInotifyEvents(buf[:n], func(wd int32, mask uint32, name string) {
+			switch {
+			case gone:
+			case wd == w.dir && mask&goneMask != 0:
+				gone = true
+			case w.name == "" || name == w.name || mask&unix.IN_Q_OVERFLOW != 0:
 				w.signal()
 			}
 		})
+		if gone {
+			return false
+		}
 	}
 }
 
@@ -270,7 +336,8 @@ func parseInotifyEvents(buf []byte, visit func(wd int32, mask uint32, name strin
 // to, so it asks for IN_MODIFY rather than the rename and close that a
 // fact write ends with. IN_ONLYDIR is always added to the mask, so the
 // kernel refuses a watch on a path that is not a directory and a caller
-// cannot end up with a stale watch on a file. The watch exists before
+// cannot end up with a stale watch on a file. selfMask is always added
+// too, so the watch ends when the directory leaves its path. The watch exists before
 // the function returns, so a caller that scans right after the call
 // cannot miss a change that lands between the watch and the scan. The
 // context ends the watch, and a watch that fails closes the channel
@@ -280,10 +347,12 @@ func WatchDirMask(ctx context.Context, dir string, mask uint32) (<-chan struct{}
 	if err != nil {
 		return nil, err
 	}
-	if _, err := unix.InotifyAddWatch(w.fd, dir, mask|unix.IN_ONLYDIR); err != nil {
+	wd, err := unix.InotifyAddWatch(w.fd, dir, mask|selfMask|unix.IN_ONLYDIR)
+	if err != nil {
 		w.closeFds()
 		return nil, err
 	}
+	w.dir = int32(wd)
 	w.start(ctx)
 	return w.wake, nil
 }
@@ -303,18 +372,20 @@ const nameMask = unix.IN_CREATE | unix.IN_MOVED_TO | unix.IN_CLOSE_WRITE |
 // name hosts this way, and init's writes of resolv.conf beside it, and
 // the operator's own temporary file, do not wake a pass. The watch
 // exists before the function returns, the context ends it, and a watch
-// that fails closes the channel (run). A directory that does not exist
-// is an error.
+// that fails or whose directory leaves its path closes the channel
+// (run). A directory that does not exist is an error.
 func WatchName(ctx context.Context, dir, name string) (<-chan struct{}, error) {
 	w, err := newWatch()
 	if err != nil {
 		return nil, err
 	}
 	w.name = name
-	if _, err := unix.InotifyAddWatch(w.fd, dir, nameMask|unix.IN_ONLYDIR); err != nil {
+	wd, err := unix.InotifyAddWatch(w.fd, dir, nameMask|selfMask|unix.IN_ONLYDIR)
+	if err != nil {
 		w.closeFds()
 		return nil, err
 	}
+	w.dir = int32(wd)
 	w.start(ctx)
 	return w.wake, nil
 }
@@ -336,7 +407,9 @@ func WatchDir(ctx context.Context, dir string) (<-chan struct{}, error) {
 // ones as the tree grows. A caller calls Sync before every read, which
 // reconciles the watch set with the tree on disk and closes the window
 // between a new subdirectory and the watch on it. Wake fires for a
-// change anywhere in the tree, and closes when the watch fails (run).
+// change anywhere in the tree, and closes when the watch fails or the
+// root leaves its path (run). A subdirectory that leaves is only a
+// wake, because the next Sync forgets it.
 type TreeWatch struct {
 	Wake <-chan struct{}
 
@@ -348,10 +421,11 @@ type TreeWatch struct {
 // WatchFactsTree establishes a recursive watch over the tree at root.
 // It watches every directory that exists now, then returns, so the
 // caller's first read sees a tree that is already watched. A root that
-// does not exist is an error: during startup the tree may not exist
-// yet, so the caller logs the error, falls back to its timer, and calls
-// WatchFactsTree again later. Sync on the returned watch re-adds the
-// directories once the root appears.
+// does not exist is an error, and machine-operator ends the process on
+// it, so the kubelet starts it again and the new process watches again.
+// The watch ends when the root it found
+// leaves its path, and the caller watches again, so a new root at the
+// path gets a new watch.
 func WatchFactsTree(ctx context.Context, root string) (*TreeWatch, error) {
 	w, err := newWatch()
 	if err != nil {
@@ -367,6 +441,7 @@ func WatchFactsTree(ctx context.Context, root string) (*TreeWatch, error) {
 		w.closeFds()
 		return nil, err
 	}
+	w.dir = int32(t.wds[root])
 	w.start(ctx)
 	return t, nil
 }
@@ -381,6 +456,11 @@ func WatchFactsTree(ctx context.Context, root string) (*TreeWatch, error) {
 // directory that vanishes mid-walk is not an error, because the walk is
 // a snapshot of a tree that another process is writing.
 func (t *TreeWatch) Sync() error {
+	t.w.fdMu.Lock()
+	defer t.w.fdMu.Unlock()
+	if t.w.fdClosed {
+		return errWatchClosed
+	}
 	seen := map[string]bool{}
 	err := filepath.WalkDir(t.root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {

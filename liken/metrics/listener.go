@@ -17,6 +17,7 @@ package metrics
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -36,6 +37,29 @@ func (o *Operator) Handler() http.Handler {
 		// which is the accurate answer.
 		ErrorHandling: promhttp.HTTPErrorOnError,
 	})
+}
+
+// SetHealth gives the listener a /healthz that answers 200 while check
+// answers nil, and 500 with its error otherwise, for a liveness probe.
+// Like a scrape, the check must read only memory. Call it before Serve.
+func (o *Operator) SetHealth(check func() error) {
+	o.health = check
+}
+
+// mux routes the listener's paths.
+func (o *Operator) mux() *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", o.Handler())
+	if check := o.health; check != nil {
+		mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+			if err := check(); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			_, _ = io.WriteString(w, "ok\n")
+		})
+	}
+	return mux
 }
 
 // Serve starts the /metrics listener and returns at once. It returns
@@ -62,10 +86,8 @@ func (o *Operator) Serve(address string) (net.Addr, error) {
 		return nil, err
 	}
 
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", o.Handler())
 	server := &http.Server{
-		Handler: mux,
+		Handler: o.mux(),
 		// A client that opens a connection and sends no headers holds
 		// a goroutine for as long as it stays. This bound releases
 		// that goroutine, and it is the one timeout a metrics

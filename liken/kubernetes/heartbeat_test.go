@@ -94,28 +94,42 @@ func TestHeartbeatRenewsAnAgedLease(t *testing.T) {
 	}
 }
 
-func TestHeartbeatLeavesAFreshLeaseAlone(t *testing.T) {
-	fake := &leaseAPI{}
-	fake.store(testLease("node-1", 5*time.Second))
-	client := testClient(t, fake.handler())
-	before := fake.lease.Spec.RenewTime
-	NewHeartbeat("node-1").Renew(client, testMachineOwner, heartbeatNow)
-	if fake.lease.Spec.RenewTime != before {
-		t.Errorf("a fresh lease should not be rewritten: %s", fake.lease.Spec.RenewTime)
+// A new process renews the lease once whatever its renewTime says. A
+// renewTime that a clock wrote before it stepped back reads as a time
+// in the future, and a skip that compared it with the clock would skip
+// every renewal until the clock caught up.
+func TestANewHeartbeatRenewsOnceWhateverTheLeaseSays(t *testing.T) {
+	cases := []struct {
+		name       string
+		renewedAgo time.Duration
+	}{
+		{"a fresh lease", 5 * time.Second},
+		{"a lease from a clock a minute ahead", -time.Minute},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fake := &leaseAPI{}
+			fake.store(testLease("node-1", c.renewedAgo))
+			client := testClient(t, fake.handler())
+			NewHeartbeat("node-1").Renew(client, testMachineOwner, heartbeatNow)
+			if fake.lease.Spec.RenewTime != heartbeatNow.UTC().Format(microTime) {
+				t.Errorf("renewTime = %s, want the renewal's time", fake.lease.Spec.RenewTime)
+			}
+		})
 	}
 }
 
 // After the first renewal, the heartbeat renews from the lease it
-// wrote. A ticker pass sends one update and no read, and a pass
-// between two ticker passes sends nothing.
+// wrote. A renewal 8 seconds or more after the last one sends one
+// update and no read, and a renewal sooner sends nothing.
 func TestAHeldLeaseRenewsWithNoRead(t *testing.T) {
 	cases := []struct {
 		name  string
 		after time.Duration
 		want  []string
 	}{
-		{"the next ticker pass", 10 * time.Second, []string{http.MethodPut}},
-		{"a pass between ticker passes", 3 * time.Second, nil},
+		{"a renewal after 8 seconds", 8 * time.Second, []string{http.MethodPut}},
+		{"a renewal after 4 seconds", 4 * time.Second, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

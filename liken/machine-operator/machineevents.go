@@ -15,7 +15,8 @@ package main
 // inotify events, but only to a watch on the same mount of procfs,
 // because each mount has inodes of its own. Each container mounts its
 // own /proc, and the host has its own, so a watch in this pod sees
-// this pod's writes alone. The ticker's pass reads them (main.go).
+// this pod's writes alone. The loop checks them on a timer instead
+// (backstop.go).
 //
 // The readers open before the first pass, so a change during the first
 // walk or the first read of a file still sends a wake after it.
@@ -31,6 +32,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"path/filepath"
 	"time"
 
@@ -53,6 +55,20 @@ var listenForUevents = func(ctx context.Context) (<-chan struct{}, error) {
 // hand the loop a watch whose wakes the test sends.
 var watchHostsFile = func(ctx context.Context) (<-chan struct{}, error) {
 	return machine.WatchName(ctx, filepath.Dir(hostsPath), filepath.Base(hostsPath))
+}
+
+// hostsWatchFailure answers the error of a hosts watch that failed to
+// open, unless its directory does not exist. A pod from a template
+// older than the /host/etc mount has no directory, and the operator
+// runs without the watch while hostEntriesCondition reports the missing
+// mount. Any other failure, such as EMFILE or ENOSPC from inotify,
+// would leave the hosts file with no wake for the life of the process,
+// so it ends the process, the same as a reader that stops.
+func hostsWatchFailure(err error) error {
+	if err == nil || errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 // errReaderStopped is what relay answers when its reader closes the
@@ -92,50 +108,5 @@ func relay(ctx context.Context, events <-chan struct{}, wakes chan<- struct{}, s
 			}
 			wake()
 		}
-	}
-}
-
-// localReads keeps the pass's two reads of the machine itself across
-// passes: the walk of sysfs that publishes the inventory and refreshes
-// the claims, and the reconcile of /etc/hosts. Each one has an event
-// for every change, so a pass that only the ticker woke reuses the last
-// result and reads nothing. A read whose last attempt failed runs on
-// every pass until it succeeds, because the retry timer that answers
-// the failure can arrive after a tick, and the tick's pass must not
-// clear the failure it never retried.
-type localReads struct {
-	// tickOnly is true for a pass that the ticker alone woke. The loop
-	// sets it before each pass.
-	tickOnly bool
-
-	hostsCurrent bool
-	hosts        []machine.HostEntry
-
-	inventoryCurrent bool
-}
-
-// hostEntries answers the host entries, from apply unless the pass
-// may reuse the last ones.
-func (l *localReads) hostEntries(apply func() ([]machine.HostEntry, error)) ([]machine.HostEntry, error) {
-	if l != nil && l.tickOnly && l.hostsCurrent {
-		return l.hosts, nil
-	}
-	hosts, err := apply()
-	if l != nil {
-		l.hosts, l.hostsCurrent = hosts, err == nil
-	}
-	return hosts, err
-}
-
-// walk answers whether the pass walks sysfs.
-func (l *localReads) walk() bool {
-	return l == nil || !l.tickOnly || !l.inventoryCurrent
-}
-
-// walked records whether the walk's slice write and claim refresh all
-// succeeded.
-func (l *localReads) walked(ok bool) {
-	if l != nil {
-		l.inventoryCurrent = ok
 	}
 }

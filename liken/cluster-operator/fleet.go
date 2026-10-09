@@ -67,12 +67,12 @@ type fleetSweep struct {
 // or otherwise degraded). Unwell outranks mid-transition. The
 // MachinesReady condition names the affected machines, so nobody has
 // to search for them.
-func decideFleetSweep(machines []machine.Machine, renewals map[string]time.Time, now time.Time) fleetSweep {
+func decideFleetSweep(machines []machine.Machine, heard map[string]time.Time, now time.Time) fleetSweep {
 	s := fleetSweep{tally: cluster.MachineTally{Total: len(machines)}, phases: map[api.Phase]int{}}
 	var transitioning, unwell []string
 	for i := range machines {
 		m := &machines[i]
-		effective := effectivePhase(m, renewals, now)
+		effective := effectivePhase(m, heard, now)
 		if effective == api.PhaseLost && m.Status.Phase != api.PhaseLost {
 			s.lost = append(s.lost, m.Metadata.Name)
 		}
@@ -150,12 +150,12 @@ func sweepFleet(reads *fleetReader, clusterDoc *cluster.Cluster, available strin
 		fmt.Printf("listing machines for the fleet sweep: %v\n", err)
 		return err
 	}
-	renewals, err := reads.heartbeats()
+	heard, err := reads.heartbeats(now)
 	if err != nil {
 		fmt.Printf("listing heartbeats for the fleet sweep: %v\n", err)
 		return err
 	}
-	s := decideFleetSweep(machines, renewals, now)
+	s := decideFleetSweep(machines, heard, now)
 
 	// The rollout decision uses the same listing: which machines may
 	// take their reboot turn now, and which spent grants return to
@@ -168,7 +168,7 @@ func sweepFleet(reads *fleetReader, clusterDoc *cluster.Cluster, available strin
 	// applied template lags, because only a leader's boot can advance
 	// it.
 	appliedVersion := daemonSetVersion(reads, machineOperatorDaemonSet)
-	r := decideRollout(machines, renewals, clusterDoc, appliedVersion, now)
+	r := decideRollout(machines, heard, reads.sightings.since(), clusterDoc, appliedVersion, now)
 	carryOutRollout(reads, machines, r, now)
 
 	// The OS's own pods, the operator's pods and the log relay pods,
@@ -201,7 +201,7 @@ func sweepFleet(reads *fleetReader, clusterDoc *cluster.Cluster, available strin
 		ensureFluxEngine(c, reads.recorder, clusterDoc, seed, probe, now)
 	}
 
-	markLost(reads, machines, s.lost, renewals, now)
+	markLost(reads, machines, s.lost, heard, now)
 	publishClusterStatus(reads, clusterDoc, s, r, fluxTeardown, available, publicKey, now)
 
 	// The fleet's metrics come from the verdict that the write above
@@ -213,10 +213,10 @@ func sweepFleet(reads *fleetReader, clusterDoc *cluster.Cluster, available strin
 
 // markLost writes the Lost verdict onto each machine that the sweep
 // found silent. Each verdict that lands posts MachineLost on the
-// machine, with the last renewal of its heartbeat lease, because the
-// Ready condition holds only that the heartbeat is stale, not since
-// when.
-func markLost(reads *fleetReader, machines []machine.Machine, lost []string, renewals map[string]time.Time, now time.Time) {
+// machine, with the time this program last saw its heartbeat lease
+// renewed, because the Ready condition holds only that the heartbeat
+// is stale, not since when.
+func markLost(reads *fleetReader, machines []machine.Machine, lost []string, heard map[string]time.Time, now time.Time) {
 	for _, m := range machines {
 		if !slices.Contains(lost, m.Metadata.Name) {
 			continue
@@ -247,16 +247,19 @@ func markLost(reads *fleetReader, machines []machine.Machine, lost []string, ren
 			fmt.Printf("marking %s lost: %v\n", m.Metadata.Name, err)
 		} else {
 			fmt.Printf("machine %s has gone silent; marked Lost\n", m.Metadata.Name)
-			reads.recorder.Warning(machineReference(&m), reasonMachineLost, lostMessage(renewals, m.Metadata.Name))
+			reads.recorder.Warning(machineReference(&m), reasonMachineLost, lostMessage(heard, m.Metadata.Name))
 		}
 	}
 }
 
-// lostMessage answers the message of a MachineLost Event: when the
-// machine last renewed its heartbeat lease, or that it never did.
-func lostMessage(renewals map[string]time.Time, name string) string {
-	renewed, heard := renewals[name]
-	if !heard {
+// lostMessage answers the message of a MachineLost Event: when this
+// program last saw the machine renew its heartbeat lease, on this
+// program's clock, or that it never did. The time is the one the
+// verdict measured from, so it is HeartbeatStaleAfter or more before
+// the Event.
+func lostMessage(heard map[string]time.Time, name string) string {
+	renewed, ok := heard[name]
+	if !ok {
 		return "the machine has never renewed a heartbeat lease; marked Lost"
 	}
 	return "the heartbeat lease was last renewed at " + renewed.UTC().Format(time.RFC3339) + "; marked Lost"

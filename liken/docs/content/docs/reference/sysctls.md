@@ -22,12 +22,14 @@ this page, and the values in the machine's
 `spec.sysctls` overrides `liken`'s value for that parameter.
 
 `init` applies both at boot, before k3s starts, `liken`'s values first
-and the spec's second. The `liken` operator applies both again on every
-pass, about every ten seconds. Each pass
-reads each parameter first. It writes the value only when the kernel
-reports a different value, and then it reads the value back. So a
-setting that something else on the machine changed returns within one
-pass, without a reboot. For a name that `spec.sysctls` overrides, the operator applies
+and the spec's second. `machine-operator` applies both again on each
+pass. A pass reads each parameter first. It writes the value only when
+the kernel reports a different value, and then it reads the value back.
+A change through `/proc/sys` sends no event that the operator can see,
+so every ten seconds the operator reads each parameter again, and runs
+a pass when one differs from the value the last pass read back. So a
+setting that something else on the machine changed returns within about
+ten seconds, without a reboot. For a name that `spec.sysctls` overrides, the operator applies
 the spec's value alone, so the kernel never holds `liken`'s value for
 it after the boot:
 

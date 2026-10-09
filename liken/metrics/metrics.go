@@ -54,6 +54,10 @@ type Operator struct {
 	reconcileDuration *prometheus.HistogramVec
 	reconcileErrors   *prometheus.CounterVec
 	watchRestarts     *prometheus.CounterVec
+
+	// health is the program's liveness check, which /healthz answers.
+	// Nil serves no /healthz.
+	health func() error
 }
 
 // reconcileBuckets are the histogram's boundaries, in seconds. A

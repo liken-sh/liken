@@ -20,9 +20,12 @@ import (
 
 // effectivePhase returns a machine's phase, corrected for liveness.
 // It returns the machine's own claim when its heartbeat is fresh,
-// and Lost when the machine has gone silent. A machine with no lease
-// at all has never been heard from. This function judges every
-// machine the same way, including whichever machine hosts this
+// and Lost when the machine has gone silent. heard maps each heartbeat
+// Lease to when this program last saw its renewTime change, on this
+// program's clock (heartbeats.go), so a machine whose clock differs
+// from this program's reads neither Lost early nor Lost late. A machine
+// with no lease at all has never been heard from. This function judges
+// every machine the same way, including whichever machine hosts this
 // program's pod: this program is not itself a machine, so no machine
 // is exempt. Both the fleet sweep and the rollout use this function
 // to judge machines.
@@ -31,9 +34,9 @@ import (
 // grant (see rollout.go) was told to go down. So until the grant is
 // old enough to count as a stall, the sweep treats the machine's
 // silence as a reboot in progress.
-func effectivePhase(m *machine.Machine, renewals map[string]time.Time, now time.Time) api.Phase {
-	renewed, heard := renewals[m.Metadata.Name]
-	if heard && now.Sub(renewed) <= kubernetes.HeartbeatStaleAfter {
+func effectivePhase(m *machine.Machine, heard map[string]time.Time, now time.Time) api.Phase {
+	changed, ok := heard[m.Metadata.Name]
+	if ok && now.Sub(changed) <= kubernetes.HeartbeatStaleAfter {
 		return m.Status.Phase
 	}
 	if grant := api.FindCondition(m.Status.Conditions, machine.RebootApprovedCondition); grant != nil &&

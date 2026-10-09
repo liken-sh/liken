@@ -107,8 +107,8 @@ func main() {
 	// with no event, because an aging Lease is not a write. A granted
 	// reboot turn passes rolloutStallAfter the same way, and the
 	// channel poller and the engine probe keep their own intervals.
-	// Ten seconds keeps those verdicts inside the same window that the
-	// machine operators work on. The objects a sweep judges come from
+	// Ten seconds keeps those verdicts within one sweep of the moment
+	// they come due. The objects a sweep judges come from
 	// the watches' copies, so a tick costs the API server one read: the
 	// flux deploy key Secret while the feature is declared, or the
 	// flux-system Namespace while it is not (watches.go says why those

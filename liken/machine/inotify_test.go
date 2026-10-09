@@ -8,6 +8,7 @@ package machine
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -454,5 +455,151 @@ func TestWatchNameWakesWhenTheNameLeaves(t *testing.T) {
 func TestWatchNameMissingDirectory(t *testing.T) {
 	if _, err := WatchName(testCtx(t), filepath.Join(t.TempDir(), "absent"), "hosts"); err == nil {
 		t.Error("WatchName on a missing directory succeeded, want an error")
+	}
+}
+
+// awaitClosed fails the test if the channel does not close within the
+// same generous limit awaitWake uses. It skips any wakes before the
+// close, because the test asserts only that the watch ended.
+func awaitClosed(t *testing.T, ch <-chan struct{}) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				return
+			}
+		case <-deadline:
+			t.Fatal("the wake channel did not close")
+		}
+	}
+}
+
+// refuteClose fails the test if the channel closes within a short
+// window. Wakes during the window are fine, because the test asserts
+// only that the watch goes on.
+func refuteClose(t *testing.T, ch <-chan struct{}) {
+	t.Helper()
+	window := time.After(500 * time.Millisecond)
+	for {
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				t.Fatal("the wake channel closed, wanted it open")
+			}
+		case <-window:
+			return
+		}
+	}
+}
+
+// watchedDir makes an empty directory that a test can remove or
+// replace, which a t.TempDir() itself must not be.
+func watchedDir(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "etc")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// endings are the ways a watched directory leaves its path. After each
+// one, a watch on the directory sees no change made at the path, so
+// the watch must end and close its channel.
+var endings = []struct {
+	name string
+	end  func(t *testing.T, dir string)
+}{
+	{"removed", func(t *testing.T, dir string) {
+		if err := os.Remove(dir); err != nil {
+			t.Fatal(err)
+		}
+	}},
+	{"renamed over", func(t *testing.T, dir string) {
+		other := dir + ".new"
+		if err := os.Mkdir(other, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// os.Rename refuses a directory as the target, so the test
+		// calls rename(2) itself, the way a tool that swaps a whole
+		// directory into place does.
+		if err := unix.Rename(other, dir); err != nil {
+			t.Fatal(err)
+		}
+	}},
+	{"renamed away", func(t *testing.T, dir string) {
+		if err := os.Rename(dir, dir+".old"); err != nil {
+			t.Fatal(err)
+		}
+	}},
+}
+
+func TestWatchNameClosesWhenTheDirectoryLeaves(t *testing.T) {
+	for _, tc := range endings {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := watchedDir(t)
+			ch := mustWatchName(t, dir, "hosts")
+			tc.end(t, dir)
+			awaitClosed(t, ch)
+		})
+	}
+}
+
+func TestWatchFactsTreeClosesWhenTheRootLeaves(t *testing.T) {
+	for _, tc := range endings {
+		t.Run(tc.name, func(t *testing.T) {
+			root := watchedDir(t)
+			tw, err := WatchFactsTree(testCtx(t), root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.end(t, root)
+			awaitClosed(t, tw.Wake)
+		})
+	}
+}
+
+// A subdirectory that leaves the tree wakes the watch and keeps it
+// open, because the next Sync forgets it and the root still holds the
+// rest of the tree.
+func TestWatchFactsTreeStaysOpenWhenASubdirectoryLeaves(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "modules")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tw, err := WatchFactsTree(testCtx(t), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(sub); err != nil {
+		t.Fatal(err)
+	}
+	awaitWake(t, tw.Wake)
+	refuteClose(t, tw.Wake)
+	renameInto(t, root, "role")
+	awaitWake(t, tw.Wake)
+}
+
+// A Sync after the reader stopped answers an error and adds no watch,
+// because the descriptor number may belong to another file by then.
+func TestSyncAfterTheReaderStoppedAddsNothing(t *testing.T) {
+	root := t.TempDir()
+	ctx, cancel := context.WithCancel(t.Context())
+	w, err := WatchFactsTree(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(root); err != nil {
+		t.Fatal(err)
+	}
+	for range w.Wake {
+	}
+	cancel()
+
+	if err := w.Sync(); !errors.Is(err, errWatchClosed) {
+		t.Errorf("Sync after the reader stopped answered %v, want errWatchClosed", err)
 	}
 }

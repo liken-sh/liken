@@ -47,6 +47,15 @@ package main
 // may be down or granted a turn at a time. The datastore keeps
 // quorum only while a majority of leaders is up, and letting a
 // second leader go down could break that majority.
+//
+// The budget counts a machine as down only when its liveness verdict
+// says so. A new process of this program records each heartbeat Lease
+// as seen when it starts (heartbeats.go), so for its first
+// HeartbeatStaleAfter it reads a machine that is already down by that
+// machine's last written status, which is usually Ready. So the conductor grants no turn and
+// reclaims no grant until its record of the heartbeats is that old,
+// and a machine that was already down reads Lost before the first
+// grant.
 
 import (
 	"fmt"
@@ -56,6 +65,7 @@ import (
 
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/machine"
 )
 
@@ -139,8 +149,19 @@ func available(phase api.Phase) bool {
 // or use a turn would stall the rollout; the guard in
 // machine-operator/conditions.go is what makes a worker's lag
 // survivable in that case.
-func decideRollout(machines []machine.Machine, renewals map[string]time.Time, clusterDoc *cluster.Cluster, appliedVersion string, now time.Time) rollout {
+//
+// heardSince is when this program first read the heartbeat Leases
+// (heartbeatSightings.since). Until HeartbeatStaleAfter has passed
+// since then, a machine that is already down still reads its last
+// status, so the decision grants no turn and reclaims no grant, and
+// the Progressing message says why. A grant and a reclaim both trust
+// that a machine reads available only when it is up. The zero time
+// means the record is old enough.
+func decideRollout(machines []machine.Machine, heard map[string]time.Time, heardSince time.Time,
+	clusterDoc *cluster.Cluster, appliedVersion string, now time.Time) rollout {
 	var r rollout
+	judgedFrom := heardSince.Add(kubernetes.HeartbeatStaleAfter)
+	listening := !heardSince.IsZero() && !now.After(judgedFrom)
 	inFlight := 0 // budget slots occupied: unavailable machines and unspent grants
 	leaderBusy := false
 	leaderAdvancing := false // a leader holds an unspent grant; its boot advances the template
@@ -150,7 +171,7 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 		m := &machines[i]
 		name := m.Metadata.Name
 		leader := slices.Contains(clusterDoc.Spec.Leaders, name)
-		phase := effectivePhase(m, renewals, now)
+		phase := effectivePhase(m, heard, now)
 		grant := api.FindCondition(m.Status.Conditions, machine.RebootApprovedCondition)
 		if clusterDoc.Spec.Version != "" && m.Status.Version.Liken != clusterDoc.Spec.Version {
 			r.behind++
@@ -217,7 +238,7 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 
 	if !holdWorkers {
 		for _, name := range workers {
-			if len(stalled) > 0 || capacity <= 0 {
+			if len(stalled) > 0 || listening || capacity <= 0 {
 				waiting = append(waiting, name)
 				continue
 			}
@@ -227,7 +248,7 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 		}
 	}
 	for _, name := range leaders {
-		if len(stalled) > 0 || capacity <= 0 || leaderBusy {
+		if len(stalled) > 0 || listening || capacity <= 0 || leaderBusy {
 			waiting = append(waiting, name)
 			continue
 		}
@@ -242,6 +263,11 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 		// leader turn that ends the lag.
 		waiting = append(waiting, workers...)
 	}
+	if listening {
+		// A reclaim waits too: the machine reads available from a
+		// status that may be older than the machine's last power-off.
+		r.revoke = nil
+	}
 
 	switch {
 	case len(stalled) > 0:
@@ -254,6 +280,9 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 		message := "taking a reboot turn: " + strings.Join(inProgress, ", ")
 		if len(inProgress) == 0 {
 			message = "reboot turns are waiting on the disruption budget"
+			if listening {
+				message = "reboot turns are waiting on the heartbeats"
+			}
 		}
 		if len(waiting) > 0 {
 			message += "; waiting: " + strings.Join(waiting, ", ")
@@ -261,6 +290,11 @@ func decideRollout(machines []machine.Machine, renewals map[string]time.Time, cl
 		if holdWorkers && len(workers) > 0 {
 			message += fmt.Sprintf("; the applied system-pod template (%s) lags the fleet's target (%s); "+
 				"a leader goes first to advance the template, and workers wait", appliedVersion, clusterDoc.Spec.Version)
+		}
+		if listening {
+			message += fmt.Sprintf("; cluster-operator started reading the heartbeat leases at %s, "+
+				"and grants no turn until %s, when a machine that is down reads Lost",
+				heardSince.Format(time.RFC3339), judgedFrom.Format(time.RFC3339))
 		}
 		r.progressing = api.Condition{
 			Type: "Progressing", Status: api.ConditionTrue, Reason: "RollingOut", Message: message,

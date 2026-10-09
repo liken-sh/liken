@@ -2,7 +2,7 @@
 
 Milestone 79. Proposed and built 2026-10-09. Two checks have not run:
 the operator's memory during a drain on a one-gigabyte machine, and a
-drain run by an operator that wakes on `WakeOnContent`. The QEMU drill
+drain beside a pod that crash-loops and that the drain does not move. The QEMU drill
 is in [What the lab measured](#what-the-lab-measured).
 
 The fourth of five milestones that
@@ -228,6 +228,11 @@ drains with the new handler. The drill did not measure memory.
 
 - Measure the operator's memory during a drain on a one-gigabyte
   screen machine.
-- Repeat the drill on a release that drains with `WakeOnContent`, with
-  a pod that crash-loops on the node: after the first burst, the
-  guarded pod is asked again only at each `Retry-After`.
+- Repeat the drill with a pod that crash-loops on the node and that the
+  drain does not move, such as a `DaemonSet`'s pod: after the first
+  burst, the guarded pod is asked again only when something the pass
+  reads changes.
+
+Milestone 80's drill drained on a release with `WakeOnContent`: after
+the first burst, the guarded pod was asked once in 67 seconds. Its
+crash-looping pod was evictable, and the burst moved it.

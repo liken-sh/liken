@@ -31,7 +31,7 @@ import (
 // before is the status the object carried when the pass began,
 // rendered as the JSON a write would send. When this pass observed
 // exactly that, the function writes nothing at all. A settled
-// machine's report is the same every ten seconds, and sending it
+// machine's report is the same on every pass, and sending it
 // anyway would make the API server, and every etcd leader behind
 // it, process a write that changes nothing. The kubelet applies the
 // same restraint to Node status, and the machine's liveness does

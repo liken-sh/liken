@@ -37,7 +37,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/informer"
@@ -180,7 +179,10 @@ func main() {
 
 	// The metrics registry outlives every pass too, because a
 	// counter's whole value is that it accumulates (metrics.go).
-	operatorMetrics, machineLayer := serveMetrics(*metricsAddress, f)
+	// The liveness check reads the loop's busy mark, so the kubelet's
+	// liveness probe restarts a loop that is stuck (liveness.go).
+	live := newLiveness()
+	operatorMetrics, machineLayer := serveMetrics(*metricsAddress, f, live.check)
 
 	// The loop's wake channel has one slot, so a burst of changes makes
 	// one wake (loop.go).
@@ -194,22 +196,6 @@ func main() {
 		watch.Signal(wakes), operatorMetrics.WatchRestarted)
 	objects.recorder = recorder
 
-	// The ticker is a clock first: it sets the pace for the
-	// heartbeat, so it runs at the kubelet's own lease cadence of ten
-	// seconds (the kubernetes package explains the numbers). The
-	// reconcile pass renews the heartbeat deliberately, instead of a
-	// dedicated goroutine doing it: a heartbeat should prove the
-	// operator is doing its job, and a goroutine would keep
-	// confirming a reconcile loop that had gotten stuck.
-	//
-	// The same pass is also the backstop for the state that no event
-	// announces. A sysctl that another process changes sends no event
-	// that this pod can see (machineevents.go), so the pass writes it
-	// back within ten seconds. The API objects the pass judges come from
-	// the watches' copies, so a ticker pass on a settled machine sends
-	// one request: the heartbeat's renewal.
-	ticker := time.NewTicker(10 * time.Second)
-
 	// The machine's readers open before the first pass, so a change
 	// during that pass still sends a wake after it (machineevents.go).
 	// A pod from a template older than the /host/etc mount has no
@@ -220,8 +206,10 @@ func main() {
 		fatal("listening for uevents: %v", err)
 	}
 	hosts, err := watchHostsFile(context.Background())
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "watching %s: %v\n", hostsPath, err)
+	if err := hostsWatchFailure(err); err != nil {
+		fatal("watching %s: %v", hostsPath, err)
+	} else if hosts == nil {
+		fmt.Fprintf(os.Stderr, "watching %s: the directory does not exist\n", hostsPath)
 	}
 
 	l := &loop{
@@ -229,16 +217,16 @@ func main() {
 		name:        name,
 		clusterName: clusterName,
 		fetcher:     f,
-		// The heartbeat outlives every pass, because it holds the lease
-		// it last wrote, and a renewal from that copy needs no read
-		// (kubernetes/heartbeat.go).
+		// The heartbeat outlives every renewal, because it holds the
+		// lease it last wrote, and a renewal from that copy needs no
+		// read (kubernetes/heartbeat.go).
 		heartbeat: kubernetes.NewHeartbeat(name),
 		operator:  operatorMetrics,
 		layer:     machineLayer,
 		wakes:     wakes,
 		uevents:   uevents,
 		hosts:     hosts,
-		ticks:     ticker.C,
+		live:      live,
 		watchFactsTree: func(ctx context.Context) (*factsWatch, error) {
 			w, err := machine.WatchFactsTree(ctx, machine.FactsDir)
 			if err != nil {

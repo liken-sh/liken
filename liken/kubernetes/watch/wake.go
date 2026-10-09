@@ -71,27 +71,42 @@ func WakeOnEdit[T any](source informer.Source, wake func()) cache.ResourceEventH
 
 // WakeOnContent wakes the loop when an object's content changes: a new
 // object, a removed object, and a write that changed anything but the
-// resourceVersion. It is the handler for a collection whose informer
-// trims each object to the fields the pass reads. The kubelet writes a
-// pod's status every few seconds while a container restarts or a probe
-// runs, and each write moves the resourceVersion. After the trim, a
-// write that changed no field the pass reads leaves the two copies
-// equal except for the version, and wakes no pass.
-func WakeOnContent[T any](source informer.Source, wake func()) cache.ResourceEventHandler {
+// resourceVersion and the managedFields. It is the handler for a
+// collection whose informer trims each object to the fields the pass
+// reads, or whose writers rewrite fields the pass does not read. The
+// kubelet writes a pod's status every few seconds while a container
+// restarts or a probe runs, and each write moves the resourceVersion.
+// After the trim, a write that changed no field the pass reads leaves
+// the two copies equal except for the version, and wakes no pass.
+//
+// Each ignore function removes more fields from a copy of each object
+// before the comparison, for a field that a writer rewrites on a timer,
+// such as the heartbeat times in a Node's conditions.
+func WakeOnContent[T any](source informer.Source, wake func(), ignore ...func(fields map[string]any)) cache.ResourceEventHandler {
 	h := wakeHandler[T]{source: source, wake: wake, changed: func(before, after *unstructured.Unstructured) bool {
-		return !reflect.DeepEqual(withoutVersion(before), withoutVersion(after))
+		return !reflect.DeepEqual(contentOf(before, ignore), contentOf(after, ignore))
 	}}
 	return h.handler()
 }
 
-// withoutVersion answers a shallow copy of an object with no
-// resourceVersion, and leaves the informer's copy as it is.
-func withoutVersion(object *unstructured.Unstructured) map[string]any {
-	fields := maps.Clone(object.Object)
+// contentOf answers a copy of an object with no resourceVersion and no
+// managedFields, and with the fields that each ignore function removes.
+// The informer's copy stays as it is.
+func contentOf(object *unstructured.Unstructured, ignore []func(map[string]any)) map[string]any {
+	var fields map[string]any
+	if len(ignore) > 0 {
+		fields = object.DeepCopy().Object
+	} else {
+		fields = maps.Clone(object.Object)
+	}
 	if metadata, ok := fields["metadata"].(map[string]any); ok {
 		metadata = maps.Clone(metadata)
 		delete(metadata, "resourceVersion")
+		delete(metadata, "managedFields")
 		fields["metadata"] = metadata
+	}
+	for _, drop := range ignore {
+		drop(fields)
 	}
 	return fields
 }

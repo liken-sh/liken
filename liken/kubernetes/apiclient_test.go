@@ -317,8 +317,22 @@ func TestListCarriesTheServersRefusal(t *testing.T) {
 }
 
 // An operator's client answers a 429 at once, with one request, because
-// the operator's own loop is its retry.
+// the operator's own loop is its retry. A client bound to a pass's
+// context still does.
 func TestInClusterClientAnswersA429AtOnce(t *testing.T) {
+	cases := []struct {
+		name  string
+		bound func(*apiclient.Client) *apiclient.Client
+	}{
+		{"the client", func(c *apiclient.Client) *apiclient.Client { return c }},
+		{"the client within a pass's context", func(c *apiclient.Client) *apiclient.Client { return Within(c, t.Context()) }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { answersA429AtOnce(t, c.bound) })
+	}
+}
+
+func answersA429AtOnce(t *testing.T, bound func(*apiclient.Client) *apiclient.Client) {
 	var sent atomic.Int64
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sent.Add(1)
@@ -334,7 +348,7 @@ func TestInClusterClientAnswersA429AtOnce(t *testing.T) {
 	}
 
 	started := time.Now()
-	_, err = GetMachine(client, "node-1")
+	_, err = GetMachine(bound(client), "node-1")
 
 	if !errors.Is(err, apiclient.ErrThrottled) || sent.Load() != 1 || time.Since(started) > 500*time.Millisecond {
 		t.Errorf("err = %v after %d requests and %s, want the 429 at once", err, sent.Load(), time.Since(started))

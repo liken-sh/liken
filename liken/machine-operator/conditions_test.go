@@ -167,10 +167,10 @@ func sysctlDir(t *testing.T, names ...string) string {
 // read the values back.
 func TestApplySysctlSetAppliesAndReadsBack(t *testing.T) {
 	dir := sysctlDir(t, "vm.swappiness", "vm.overcommit_memory")
-	observed, err := applySysctlSet(dir, map[string]string{
+	observed, _, err := applySysctlSet(dir, map[string]string{
 		"vm.swappiness":        "10",
 		"vm.overcommit_memory": "1",
-	}, nil)
+	}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestApplySysctlSetSkipsAConvergedParameter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	observed, err := applySysctlSet(dir, map[string]string{"vm.swappiness": "10"}, nil)
+	observed, _, err := applySysctlSet(dir, map[string]string{"vm.swappiness": "10"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +227,7 @@ func TestApplySysctlSetSkipsAMultiValueParameterTheKernelSeparatesWithTabs(t *te
 		t.Fatal(err)
 	}
 
-	observed, err := applySysctlSet(dir, map[string]string{name: "1024 65535"}, nil)
+	observed, _, err := applySysctlSet(dir, map[string]string{name: "1024 65535"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,11 +249,11 @@ func TestApplySysctlSetReportsEveryFailure(t *testing.T) {
 	// report, so one bad parameter must not hide another. A person
 	// fixing the spec should see the full list in one pass.
 	dir := sysctlDir(t, "vm.swappiness")
-	observed, err := applySysctlSet(dir, map[string]string{
+	observed, _, err := applySysctlSet(dir, map[string]string{
 		"vm.swappiness": "10",
 		"vm.missing":    "1",
 		"kernel.absent": "1",
-	}, nil)
+	}, nil, nil)
 	if err == nil {
 		t.Fatal("parameters this kernel does not have should fail")
 	}
@@ -269,9 +269,9 @@ func TestApplySysctlSetReportsEveryFailure(t *testing.T) {
 
 func TestApplySysctlsObservesBothSets(t *testing.T) {
 	dir := sysctlDir(t, "vm.watermark_scale_factor", "vm.swappiness")
-	observed, defaultsErr, specErr := applySysctls(dir,
+	observed, _, defaultsErr, specErr := applySysctls(dir,
 		map[string]string{"vm.watermark_scale_factor": "100"},
-		map[string]string{"vm.swappiness": "10"}, nil)
+		map[string]string{"vm.swappiness": "10"}, nil, nil)
 	if defaultsErr != nil || specErr != nil {
 		t.Fatalf("defaults=%v spec=%v", defaultsErr, specErr)
 	}
@@ -287,9 +287,9 @@ func TestApplySysctlsObservesBothSets(t *testing.T) {
 func TestApplySysctlsReportsTheSpecValueForAnOverriddenName(t *testing.T) {
 	const name = "vm.max_map_count"
 	dir := sysctlDir(t, name)
-	observed, defaultsErr, specErr := applySysctls(dir,
+	observed, _, defaultsErr, specErr := applySysctls(dir,
 		map[string]string{name: "262144"},
-		map[string]string{name: "524288"}, nil)
+		map[string]string{name: "524288"}, nil, nil)
 	if defaultsErr != nil || specErr != nil {
 		t.Fatalf("defaults=%v spec=%v", defaultsErr, specErr)
 	}
@@ -305,10 +305,10 @@ func TestApplySysctlsWritesNothingForAConvergedOverride(t *testing.T) {
 	const name = "vm.max_map_count"
 	dir := sysctlDir(t, name)
 	defaults, desired := map[string]string{name: "262144"}, map[string]string{name: "524288"}
-	applySysctls(dir, defaults, desired, nil)
+	applySysctls(dir, defaults, desired, nil, nil)
 	out := &passOutcome{}
 
-	observed, _, _ := applySysctls(dir, defaults, desired, out)
+	observed, _, _, _ := applySysctls(dir, defaults, desired, out, nil)
 
 	if len(out.writes) != 0 || observed[name] != "524288" {
 		t.Errorf("a converged pass wrote %q and observed %q, want no write and 524288", out.writes, observed[name])
@@ -317,9 +317,9 @@ func TestApplySysctlsWritesNothingForAConvergedOverride(t *testing.T) {
 
 func TestApplySysctlsKeepsTheTwoFailuresApart(t *testing.T) {
 	dir := sysctlDir(t, "vm.swappiness")
-	observed, defaultsErr, specErr := applySysctls(dir,
+	observed, _, defaultsErr, specErr := applySysctls(dir,
 		map[string]string{"vm.absent_default": "1"},
-		map[string]string{"vm.swappiness": "10", "vm.absent_spec": "1"}, nil)
+		map[string]string{"vm.swappiness": "10", "vm.absent_spec": "1"}, nil, nil)
 	if defaultsErr == nil || !strings.Contains(defaultsErr.Error(), "vm.absent_default") {
 		t.Fatalf("the defaults error names its own parameter: %v", defaultsErr)
 	}

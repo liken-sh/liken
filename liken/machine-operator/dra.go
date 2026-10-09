@@ -73,8 +73,8 @@ const maxSliceDevices = 128
 
 // publishDeviceInventory converges this node's ResourceSlice with
 // what sysfs shows right now. The function logs failures and answers
-// them, so the next pass that is not the ticker's walks again, instead
-// of reporting them as a condition. Inventory is a report about hardware, and a failure to
+// them, and the pass's outcome sets the retry, instead of reporting
+// them as a condition. Inventory is a report about hardware, and a failure to
 // write it is a problem in the operator's own machinery, not a fact
 // about the machine.
 func publishDeviceInventory(r *reader, node *nodeObject, facts *machine.MachineStatus, serio []machine.SerioAttachment, mm *machineMetrics) error {

@@ -7,7 +7,7 @@ package main
 // (outcome.go). A failure that a retry can clear starts at one second
 // and doubles up to ten, so a write that failed because the API server
 // restarted lands within a second or two of the server's return, and
-// no later than about the ten-second pace the loop's ticker sets. A
+// a server that stays away is asked every ten seconds. A
 // failure that will not clear by itself starts at ten seconds and
 // doubles up to five minutes, so a misconfigured machine does not send
 // the same refused request every ten seconds forever. A person who

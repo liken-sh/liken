@@ -138,41 +138,143 @@ func awaitingPodRefresh(podStale bool, err error) bool {
 // namespaces, so it reaches /proc/sys directly.
 //
 // spec.sysctls is an override: a name in both sets is applied with the
-// spec's value alone. init applies the two sets in order at boot,
+// spec's value alone, and the two spellings of one name, dots and
+// slashes, count as one. init applies the two sets in order at boot,
 // default first, and the operator skips the default instead. Each pass
 // compares and writes, so applying both in order would write the
 // default and then the spec's value on every pass of a converged
 // machine, and the kernel would hold the default for a moment each
 // time.
 //
+// After both sets, every parameter is read once more, and that read is
+// what the function answers and what mem keeps. Two names can write
+// one kernel variable: net.ipv4.ip_forward and
+// net.ipv4.conf.all.forwarding are the same switch, and a write of
+// vm.dirty_bytes zeroes vm.dirty_ratio. A read taken right after each
+// write would hold a value that a later write in the same pass changed,
+// and the check of the sysctls (backstop.go) would find it drifted on
+// every check.
+//
 // One failure never stops the function from applying the rest of the
 // parameters. The two errors stay apart because the condition treats
 // them differently, and each joins every failure in its own set,
 // because a message that names one bad parameter, when three are
-// failing, would send a person through this loop three times.
-func applySysctls(dir string, defaults, desired map[string]string, out *passOutcome) (map[string]string, error, error) {
-	observed, defaultsErr := applySysctlSet(dir, withoutKeys(defaults, desired), out)
-	fromSpec, specErr := applySysctlSet(dir, desired, out)
+// failing, would send a person through this loop three times. missing
+// names each parameter whose file does not exist, for the check.
+func applySysctls(dir string, defaults, desired map[string]string, out *passOutcome, mem *sysctlMemory) (map[string]string, []string, error, error) {
+	observed, defaultsMissing, defaultsErr := applySysctlSet(dir, withoutKeys(defaults, desired), out, mem)
+	fromSpec, specMissing, specErr := applySysctlSet(dir, desired, out, mem)
 	maps.Copy(observed, fromSpec)
-	return observed, defaultsErr, specErr
+	for name := range observed {
+		if value, err := machine.ReadSysctl(dir, name); err == nil {
+			observed[name] = value
+		}
+	}
+	mem.readBack(dir, observed)
+	return observed, append(defaultsMissing, specMissing...), defaultsErr, specErr
 }
 
-// withoutKeys answers the entries of m whose names are not in drop.
+// withoutKeys answers the entries of m whose names are not in drop. A
+// name matches in either spelling, net.ipv4.ip_forward or
+// net/ipv4/ip_forward, because both name one file.
 func withoutKeys(m, drop map[string]string) map[string]string {
+	dropped := map[string]bool{}
+	for name := range drop {
+		dropped[sysctlFile(name)] = true
+	}
 	kept := maps.Clone(m)
-	maps.DeleteFunc(kept, func(name, _ string) bool {
-		_, dropped := drop[name]
-		return dropped
-	})
+	maps.DeleteFunc(kept, func(name, _ string) bool { return dropped[sysctlFile(name)] })
 	return kept
+}
+
+// sysctlFile answers the path of a parameter under /proc/sys, with the
+// rule machine.ApplySysctl uses: a name with a slash is a path already,
+// and a name without one has dots for slashes.
+func sysctlFile(name string) string {
+	if strings.Contains(name, "/") {
+		return name
+	}
+	return strings.ReplaceAll(name, ".", "/")
+}
+
+// applySysctl writes one parameter. It is a variable so a test can play
+// a kernel that stores a value in another form, or that changes a second
+// parameter with the first.
+var applySysctl = machine.ApplySysctl
+
+// sysctlMemory keeps what the operator last wrote to each parameter, and
+// what the kernel reported after. The kernel stores some values in
+// another form than the one written: 0x10 reads back as 16, a write of
+// one value to kernel.printk reads back as four, and vm.nr_hugepages
+// reads back as many pages as the kernel could allocate. Compared with
+// the spec's value, such a parameter differs on every pass, and every
+// pass writes it again, which a backstop pass reports as a repair. So a
+// parameter that still reads what the kernel reported after the
+// operator's last write of the same value is current. A write-only
+// parameter, such as vm.drop_caches, refuses every read, so it is
+// written once for each value the spec gives it. Only the loop's
+// goroutine applies sysctls, so the memory has no lock. A nil memory
+// remembers nothing.
+type sysctlMemory struct {
+	written map[string]sysctlWrite
+}
+
+type sysctlWrite struct {
+	value    string
+	readBack string
+	// writeOnly is true for a parameter whose read the kernel refused
+	// after the write.
+	writeOnly bool
+}
+
+func newSysctlMemory() *sysctlMemory {
+	return &sysctlMemory{written: map[string]sysctlWrite{}}
+}
+
+// holds answers whether the parameter is as the operator's last write
+// of value left it.
+func (m *sysctlMemory) holds(name, value, kernel string, readErr error) bool {
+	if m == nil {
+		return false
+	}
+	w, ok := m.written[name]
+	if !ok || w.value != value {
+		return false
+	}
+	if readErr != nil {
+		return w.writeOnly && errors.Is(readErr, fs.ErrPermission)
+	}
+	return !w.writeOnly && sameSysctlValue(kernel, w.readBack)
+}
+
+// wrote records a write of value. readBack completes the record.
+func (m *sysctlMemory) wrote(name, value string) {
+	if m != nil {
+		m.written[name] = sysctlWrite{value: value, writeOnly: true}
+	}
+}
+
+// readBack records what the kernel reports for each parameter written
+// this pass. A parameter the kernel refused to read stays write-only.
+func (m *sysctlMemory) readBack(dir string, observed map[string]string) {
+	if m == nil {
+		return
+	}
+	for name, w := range m.written {
+		if value, ok := observed[name]; ok {
+			w.readBack, w.writeOnly = value, false
+			m.written[name] = w
+		}
+	}
 }
 
 // applySysctlSet reconciles one set of parameters against the kernel,
 // under the same write-on-divergence rule as applyHostEntries
 // (hosts.go): read a parameter first, and write it only when the
-// kernel's reported value differs from the desired one. A converged
-// parameter costs one read and no write, which is the common case on
-// every pass after the first.
+// kernel's reported value differs from the desired one, and from what
+// the kernel reported after the last write of it (sysctlMemory). A
+// converged parameter costs one read and no write, which is the common
+// case on every pass after the first.
 //
 // The comparison ignores how the values are spaced. A parameter that
 // holds several values, such as net.ipv4.ip_local_port_range, is
@@ -184,26 +286,34 @@ func withoutKeys(m, drop map[string]string) map[string]string {
 // function wrote. If another process resets a value, the next pass
 // finds the divergence and writes it again. The pass's outcome records
 // each write, and each failure for the retry, by the parameter's name.
-func applySysctlSet(dir string, desired map[string]string, out *passOutcome) (map[string]string, error) {
+func applySysctlSet(dir string, desired map[string]string, out *passOutcome, mem *sysctlMemory) (map[string]string, []string, error) {
 	var errs []error
+	var missing []string
 	observed := map[string]string{}
 	for _, name := range slices.Sorted(maps.Keys(desired)) {
 		value := desired[name]
-		if current, err := machine.ReadSysctl(dir, name); err == nil && sameSysctlValue(current, value) {
-			observed[name] = current
+		current, readErr := machine.ReadSysctl(dir, name)
+		if mem.holds(name, value, current, readErr) || readErr == nil && sameSysctlValue(current, value) {
+			if readErr == nil {
+				observed[name] = current
+			}
 			continue
 		}
-		if err := machine.ApplySysctl(dir, name, value); err != nil {
+		if err := applySysctl(dir, name, value); err != nil {
 			errs = append(errs, err)
 			out.fail("writing the sysctl "+name, err)
+			if errors.Is(err, fs.ErrNotExist) {
+				missing = append(missing, name)
+			}
 			continue
 		}
 		out.wrote("writing the sysctl " + name)
+		mem.wrote(name, value)
 		if value, err := machine.ReadSysctl(dir, name); err == nil {
 			observed[name] = value
 		}
 	}
-	return observed, errors.Join(errs...)
+	return observed, missing, errors.Join(errs...)
 }
 
 // sameSysctlValue reports whether two spellings of a parameter's value

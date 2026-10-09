@@ -208,6 +208,25 @@ func contentHandler(wake func()) cache.ResourceEventHandler {
 	return WakeOnContent[thing](testSource, wake)
 }
 
+// A content handler with an ignore function wakes for no write that
+// changes only the fields it removes.
+func TestAContentHandlerIgnoresTheFieldsItIsTold(t *testing.T) {
+	stamped := func(phase, version string) *unstructured.Unstructured {
+		item := newThing("a", version, 1)
+		item.Status.Phase = phase
+		return asObject(t, item)
+	}
+	ignorePhase := func(fields map[string]any) { unstructured.RemoveNestedField(fields, "status", "phase") }
+	woke := false
+	h := WakeOnContent[thing](testSource, func() { woke = true }, ignorePhase)
+
+	h.OnUpdate(stamped("Ready", "7"), stamped("Busy", "8"))
+
+	if woke {
+		t.Error("a write that changed only an ignored field woke the loop")
+	}
+}
+
 // After a gap in the watch, the informer reads the collection again
 // and reports the difference. An update whose resourceVersion did not
 // move is no change, and a change handler does not wake for it.

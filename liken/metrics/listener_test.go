@@ -1,8 +1,10 @@
 package metrics
 
 import (
+	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -52,5 +54,35 @@ func TestAPortAlreadyInUseIsAnError(t *testing.T) {
 	}
 	if _, err := NewOperator("liken-cluster-operator", "dev", nil, nil).Serve(held.String()); err == nil {
 		t.Errorf("binding %s twice reported no error", held)
+	}
+}
+
+// /healthz answers 200 while the program's check passes, and 500 with
+// the check's error while it fails, for the kubelet's liveness probe.
+// A program that sets no check serves no /healthz.
+func TestHealthzAnswersTheProgramsCheck(t *testing.T) {
+	cases := []struct {
+		name  string
+		check func() error
+		want  int
+	}{
+		{"a passing check", func() error { return nil }, http.StatusOK},
+		{"a failing check", func() error { return errors.New("the loop is stuck") }, http.StatusInternalServerError},
+		{"no check", nil, http.StatusNotFound},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			o := NewOperator("liken-machine-operator", "dev", nil, nil)
+			if c.check != nil {
+				o.SetHealth(c.check)
+			}
+			answer := httptest.NewRecorder()
+
+			o.mux().ServeHTTP(answer, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+
+			if answer.Code != c.want {
+				t.Errorf("/healthz answered %d, want %d", answer.Code, c.want)
+			}
+		})
 	}
 }

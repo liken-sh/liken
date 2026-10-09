@@ -5,13 +5,11 @@ package main
 //
 // A pass judges six API objects: this machine's Machine, its Node, the
 // Cluster, the registry credentials Secret, this node's own operator
-// pod, and this node's ResourceSlice. The pass runs at least every ten
-// seconds, because the ticker is the heartbeat's clock and the
-// backstop for the kernel state that sends no event. A pass
-// that read each object from the API server would send six requests
-// every ten seconds from every machine, and all but the heartbeat's
-// would find nothing new. So the operator watches each object, keeps a
-// copy in memory, and the pass reads the copies.
+// pod, and this node's ResourceSlice. A pass that read each object from
+// the API server would send six requests on every pass from every
+// machine, and on most passes find nothing new. So the operator watches
+// each object, keeps a copy in memory, and the pass reads the copies,
+// and a change to a copy is what wakes most passes.
 //
 // Each watch is scoped to the one object, or the few objects, this
 // machine reads, by field selector and label selector, so no other
@@ -26,17 +24,19 @@ package main
 //   - The Cluster wakes the loop only on an edit to its spec. The
 //     cluster operator writes the Cluster's status after every change
 //     in the fleet, and none of that concerns one machine.
-//   - The Node, the Secret, and the operator pod wake the loop on every
-//     change. The kubelet writes the Node's status only when a
-//     condition changes, and the other two change rarely. A cordon, a
-//     label, or a taint that somebody set by hand is reverted at once.
+//   - The Node wakes the loop on every change except the heartbeat
+//     times in its conditions (withoutHeartbeats). The kubelet writes
+//     the Node's status every five minutes even when nothing changed,
+//     and a pass for each of those writes would also hide every repair
+//     from the backstop (backstop.go). A cordon, a label, or a taint
+//     that somebody set by hand is reverted at once.
+//   - The Secret and the operator pod wake the loop on every change,
+//     and both change rarely.
 //   - The ResourceSlice wakes the loop when it is deleted, or updated
 //     by another writer (sliceHandler). The kubelet deletes a driver's
 //     slices when it starts, so a restart of k3s deletes this node's
-//     slice, and the pass writes it again. The pass walks sysfs only
-//     when something woke it other than the ticker (machineevents.go),
-//     so without this wake a deleted slice would stay deleted until
-//     the next device event.
+//     slice, and the pass writes it again. Without this wake a deleted
+//     slice would stay deleted until the next pass for another reason.
 //
 // Three waits watch more than these six objects, and only while they
 // wait: the image proof and the drain watch the node's pods, the drain
@@ -165,15 +165,35 @@ type reader struct {
 	// throughAPI makes every read of this pass go to the API server.
 	throughAPI bool
 
+	// sysctls keeps what the operator last wrote to each kernel
+	// parameter (conditions.go). A nil memory remembers nothing.
+	sysctls *sysctlMemory
+
 	// waits runs the watches of the waits (waits.go). A nil waits
 	// watches nothing, and those reads go to the API server.
 	waits *waits
+}
 
-	// local keeps the pass's reads of the machine itself across
-	// passes, so a pass that only the ticker woke reads neither sysfs
-	// nor /etc/hosts (machineevents.go). A nil local reads both on
-	// every pass.
-	local *localReads
+// withoutHeartbeats removes the times that the kubelet rewrites in a
+// Node's conditions on each status report, so a report that changed no
+// condition wakes no pass.
+func withoutHeartbeats(fields map[string]any) {
+	conditions, _, _ := unstructured.NestedSlice(fields, "status", "conditions")
+	for _, c := range conditions {
+		if condition, ok := c.(map[string]any); ok {
+			delete(condition, "lastHeartbeatTime")
+		}
+	}
+	if conditions != nil {
+		_ = unstructured.SetNestedSlice(fields, conditions, "status", "conditions")
+	}
+}
+
+// within answers a reader for one pass whose requests end with ctx.
+func (r *reader) within(ctx context.Context) *reader {
+	pass := *r
+	pass.client = kubernetes.Within(r.client, ctx)
+	return &pass
 }
 
 // observedBy answers a reader for one pass, whose client reports the
@@ -196,7 +216,7 @@ func watchThisMachine(ctx context.Context, watcher dynamic.Interface, client *ap
 	name, clusterName string, wake func(), restarted func(kind string)) *reader {
 	r := &reader{client: client, machineVersions: memo.New(),
 		slicesWritten: &kubernetes.SliceWriter{}, recovered: &atomic.Bool{},
-		waits: newWaits(ctx, watcher, wake, name)}
+		waits: newWaits(ctx, watcher, wake, name), sysctls: newSysctlMemory()}
 	start := func(kind string, source informer.Source, handler cache.ResourceEventHandler) *informer.Collection {
 		return informer.Start(ctx, watcher, source, informer.Options{
 			Handler:  handler,
@@ -220,7 +240,7 @@ func watchThisMachine(ctx context.Context, watcher dynamic.Interface, client *ap
 	slices := informer.Source{Resource: sliceResource, FieldSelector: named(kubernetes.ResourceSliceName(name))}
 
 	r.machines = start(machineKind, machines, watch.WakeOnChange[machine.Machine](machines, wake))
-	r.nodes = start(nodeKind, nodes, watch.WakeOnChange[nodeObject](nodes, wake))
+	r.nodes = start(nodeKind, nodes, watch.WakeOnContent[nodeObject](nodes, wake, withoutHeartbeats))
 	r.ownPods = start(podKind, pods, watch.WakeOnChange[kubernetes.Pod](pods, wake))
 	r.slices = start(resourceSliceKind, slices, sliceHandler(r.slicesWritten, wake))
 	if clusterName != "" {

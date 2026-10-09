@@ -72,6 +72,15 @@ type passOutcome struct {
 	// the machine.
 	writes []string
 
+	// sysctls is what the kernel reported for each parameter the pass
+	// applied, for the loop's check of the sysctls (backstop.go). Nil
+	// means the pass did not reach the step.
+	sysctls map[string]string
+
+	// sysctlsMissing names the parameters the pass could not apply
+	// because their file does not exist, for the same check.
+	sysctlsMissing []string
+
 	// wake is the earliest time a step asked the loop to run a pass
 	// again, or zero.
 	wake time.Time

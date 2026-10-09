@@ -66,11 +66,18 @@ that fails holds its reason on the screen.
 ## A machine shows Lost
 
 The machine stopped sending its heartbeat, so the cluster operator
-wrote the phase on its behalf. The `MachineLost` event gives the time
-of the last heartbeat. The machine is powered off, or it cannot reach
-the cluster. When the machine returns, its next report overwrites the
-phase. If the machine is running and `Lost`, check its network path
-to the leaders.
+wrote the phase on its behalf. The cluster operator marks a machine
+`Lost` when its heartbeat lease in `liken-system` has not changed for
+40 seconds. It measures the 40 seconds on its own clock, from the
+moment it saw the last change, so a machine whose clock is wrong does
+not read `Lost` for that reason. The `MachineLost` event gives the
+time of the last heartbeat, on the cluster operator's clock. The
+machine is powered off, or it cannot reach the cluster. When the
+machine returns, its next report overwrites the phase. If the machine
+is running and `Lost`, check its network path to the leaders, and check
+whether `liken-machine-operator` restarted on that node. The operator
+stops its heartbeat and ends its own process when its reconcile loop has
+been busy for 60 seconds, and the kubelet then starts it again.
 
 ## A machine shows Blocked
 
@@ -218,11 +225,12 @@ starts with the condition's name. The other events are these:
 | Reason | Object | Type | Meaning |
 | --- | --- | --- | --- |
 | `MachineJoined` | `Machine` | `Normal` | The machine's operator created the `Machine` from the boot manifest, because the cluster held none. |
-| `MachineLost` | `Machine` | `Warning` | The heartbeat stopped. The message gives the time of the last heartbeat. |
+| `MachineLost` | `Machine` | `Warning` | The heartbeat stopped. The message gives the time of the last heartbeat, on the cluster operator's clock. |
 | `KernelCrashed` | `Machine` | `Warning` | The boot found a new kernel crash record. [`status.lastCrash`](https://liken.sh/docs/reference/machine/#statuslastcrash) holds it. |
 | `BootRefused` | `Machine` | `Warning` | Init refused a boot and powered the machine off. [`status.lastFailStop`](https://liken.sh/docs/reference/machine/#status--lastfailstop) holds the reason. |
 | `Cordoned` | `Machine` | `Normal` | The operator cordoned the machine's `Node` before a reboot. |
 | `Uncordoned` | `Machine` | `Normal` | The operator returned the `Node` to the scheduler after the reboot. |
+| `BackstopRepaired` | `Machine` | `Warning` | A pass that no event started changed the machine. The message names each step that wrote. The operator missed a wake, which is a bug in `liken`: report it with the message. The machine is correct again. |
 | `RebootTurnGranted` | `Machine` | `Normal` | The cluster granted the machine a reboot turn. |
 | `RebootTurnReclaimed` | `Machine` | `Normal` | The machine no longer needs its turn, and the turn returns to the disruption budget. |
 | `FluxDeployKeyMinted` | `Cluster` | `Normal` | The cluster operator made the deploy key. Register its public half at the forge. |

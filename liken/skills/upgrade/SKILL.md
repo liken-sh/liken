@@ -82,6 +82,13 @@ The cluster grants turns within
 time, whatever the budget says, because the datastore needs a majority
 of the leaders.
 
+When `cluster-operator` starts, for example after the machine that ran
+it loses power, it grants no turn for its first 40 seconds. A machine
+that went down before `cluster-operator` started still shows its last
+status until 40 seconds pass with no heartbeat. After that it reads
+`Lost` and counts against the budget. The Cluster's `Progressing`
+message gives the time that granting resumes.
+
 If a machine's
 [`rebootPolicy`](https://liken.sh/docs/reference/machine/#spec--rebootpolicy) is
 `Manual` (the default), the machine stages the change, reports

@@ -63,6 +63,7 @@ func TestASweepPostsTheLostMachineAndTheClustersTransitions(t *testing.T) {
 			},
 		}
 		reads, recorded := recordingReader(t, fake.handler())
+		fake.sawEachRenewal(reads)
 		cm, _ := fleetMetrics(t)
 
 		if err := sweepFleet(reads, clusterDoc, "", &engineProbe{}, &podSteward{}, cm, sweepNow); err != nil {

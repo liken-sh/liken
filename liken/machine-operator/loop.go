@@ -5,8 +5,9 @@ package main
 //
 // The core of every operator is a level-triggered loop. Every pass
 // reconciles from the current state as it is, never from the event
-// that woke it, so missing one wake can never matter. Five things wake
-// it. The Kubernetes watches wake the loop when an object this machine
+// that woke it, so missing one wake can never matter. Four things wake
+// it, and two timers check what no event reports. The Kubernetes
+// watches wake the loop when an object this machine
 // acts on changes, so a conductor's grant or a person's edit is acted
 // on at once (watches.go names each watch and what wakes it). The facts
 // watch wakes the loop when init publishes a change under
@@ -15,11 +16,12 @@ package main
 // wake the loop when a device or /etc/hosts changes on the machine
 // (machineevents.go). The retry timer wakes the loop when the last
 // pass left a step unfinished, or when a step asked to run again at a
-// set time (retry.go). The ticker wakes the loop on a fixed cadence. It
-// renews the heartbeat lease, and it catches the changes that no event
-// reports (main.go names them at the ticker). A pass that only the
-// ticker woke reads neither sysfs nor /etc/hosts, because both send an
-// event for every change (machineevents.go).
+// set time (retry.go). The check of the sysctls runs a pass when a
+// parameter that the last pass applied reads another value, and the
+// backstop runs a pass after five minutes with no other pass
+// (backstop.go). A settled machine runs no pass until something
+// changes. The heartbeat lease renews on a timer of its own, which
+// stops when the loop is stuck (liveness.go).
 //
 // The wake channel has one slot, so a burst of changes (the
 // conductor's grant, the sweeper's verdict, this operator's own
@@ -62,8 +64,13 @@ type loop struct {
 	uevents <-chan struct{}
 	hosts   <-chan struct{}
 
-	// ticks is the ticker's channel (main).
-	ticks <-chan time.Time
+	// live is the busy mark that the renewal timer reads
+	// (liveness.go). Nil renews no lease.
+	live *liveness
+
+	// backstopJitter answers a number in [0, 1) for the backstop's
+	// delay. Nil means math/rand.
+	backstopJitter func() float64
 
 	// watchFactsTree opens the facts watch. main passes
 	// machine.WatchFactsTree, and a test passes a watch it controls.
@@ -104,11 +111,29 @@ func (l *loop) run(ctx context.Context, current *machine.Machine) error {
 		go func() { stopped <- relayStopped("the hosts watch", relay(ctx, l.hosts, machineWakes, settleEvents)) }()
 	}
 
-	if l.objects.local == nil {
-		l.objects.local = &localReads{}
+	// The lease renews once before the first pass, with the owner from
+	// the Machine that main read, so a machine that boots into a fleet
+	// that already declared it Lost announces itself before its first
+	// status write. After that only the timer renews it.
+	if l.live != nil {
+		l.live.sawMachineOf(current)
+		l.live.renew(l.heartbeat, l.objects.client)
+		go l.live.renewUntil(ctx, l.heartbeat, l.objects.client)
 	}
-	tickOnly := false
+
+	// The loop is busy until it first waits for a wake. The first
+	// renewal above runs before the mark, because its requests run under
+	// no pass's deadline (liveness.go).
+	l.live.markBusy()
+	woke := time.Now()
+
 	var retry *time.Timer
+	sysctlChecks := time.NewTicker(sysctlCheckEvery)
+	defer sysctlChecks.Stop()
+	backstop := time.NewTimer(backstopDelay(l.backstopJitter))
+	defer backstop.Stop()
+	cause := causeStart
+	var sysctls sysctlCheck
 	for {
 		// Sync before the read closes the window between a new subtree
 		// and the watch on it: a directory that init created since the
@@ -120,9 +145,21 @@ func (l *loop) run(ctx context.Context, current *machine.Machine) error {
 		if watchStopped(factsWatch) {
 			return errFactsStopped
 		}
+		// A Sync that fails leaves a new subtree with no watch, so its
+		// writes would wake nothing. The failure goes to the outcome, and
+		// the retry runs Sync again soon.
+		out := &passOutcome{}
 		if err := factsWatch.sync(); err != nil {
 			fmt.Fprintf(os.Stderr, "syncing the facts watch: %v\n", err)
+			out.failSoon("syncing the facts watch", err)
 		}
+		l.layer.observeWake(cause)
+
+		// Every request of the pass ends at passDeadline, so a pass that
+		// is slow but not stuck finishes inside stuckAfter, and only a
+		// pass that is stuck stops the heartbeat (liveness.go).
+		passCtx, endPass := context.WithTimeout(ctx, passDeadline)
+		objects := l.objects.throughAPIOnce().within(passCtx)
 		// Each pass starts from the newest copy of this machine's
 		// object. Status writes change resourceVersion, and
 		// reconciling against a stale copy would make every status
@@ -131,23 +168,31 @@ func (l *loop) run(ctx context.Context, current *machine.Machine) error {
 		//
 		// A Machine that is gone gets no heartbeat. The lease names the
 		// Machine as its owner, so the garbage collector deletes the
-		// lease with it, and a renewal from the last copy would create
-		// the lease again, owned by a Machine that does not exist, for
-		// the collector to delete again.
-		out := &passOutcome{}
-		renewing := l.heartbeat
-		objects := l.objects.throughAPIOnce()
+		// lease with it, and a renewal would create the lease again,
+		// owned by a Machine that does not exist, for the collector to
+		// delete again.
 		if fresh, err := objects.observedBy(out).machine(l.name); err == nil {
 			current = fresh
+			l.live.sawMachineOf(current)
 		} else if errors.Is(err, apiclient.ErrNotFound) {
-			renewing = nil
+			l.live.sawNoMachine()
 		}
-		l.objects.local.tickOnly = tickOnly
 		started := time.Now()
-		err := reconcile(objects, current, l.clusterName, l.fetcher, renewing, l.layer, out)
-		l.operator.ObserveReconcile(machineKind, time.Since(started), err)
+		err := reconcile(objects, current, l.clusterName, l.fetcher, l.layer, out)
+		took := time.Since(started)
+		endPass()
+		l.operator.ObserveReconcile(machineKind, took, err)
+		// The gauge times the whole busy window that the liveness check
+		// judges, from the wake to the end of the pass.
+		l.layer.observePass(time.Since(woke))
 		// A wait's watch runs while the passes read it (waits.go).
 		l.objects.waits.endPass()
+		if out.sysctls != nil {
+			sysctls = sysctlCheck{applied: out.sysctls, missing: out.sysctlsMissing}
+		}
+		if cause == causeBackstop {
+			reportRepairs(out.writes, machineEvents{recorder: l.objects.recorder, machine: machineReference(current)}, l.layer)
+		}
 
 		// One timer serves the retry and every step's wake, and each
 		// pass sets it again from its own outcome, so a pass that
@@ -164,31 +209,117 @@ func (l *loop) run(ctx context.Context, current *machine.Machine) error {
 					describeUnfinished(out.failures), max(0, time.Until(at)).Round(10*time.Millisecond))
 			}
 		}
+		// The backstop counts from the end of the last pass, so a
+		// machine that runs passes for other reasons runs no backstop.
+		// While a retry is due, the retry's pass does the backstop's work,
+		// and a write it makes is the retry's, not a missed wake.
+		backstop.Stop()
+		if retryC == nil {
+			backstop.Reset(backstopDelay(l.backstopJitter))
+		}
 
-		tickOnly = false
-		select {
-		case <-ctx.Done():
+		var stop bool
+		cause, stop, err = l.wait(ctx, waitSources{stopped: stopped, machineWakes: machineWakes, retry: retryC,
+			facts: factsWatch, sysctlChecks: sysctlChecks.C, backstop: backstop.C}, sysctls)
+		if stop {
 			if retry != nil {
 				retry.Stop()
 			}
-			return nil
-		case err := <-stopped:
+			return err
+		}
+		woke = time.Now()
+	}
+}
+
+// The causes of a pass, for the passes_total counter, so each pass on
+// a settled machine can be explained.
+const (
+	causeStart    = "start"
+	causeWatch    = "watch"
+	causeMachine  = "machine event"
+	causeRetry    = "retry"
+	causeFacts    = "facts"
+	causeSysctls  = "sysctl drift"
+	causeBackstop = "backstop"
+)
+
+// waitSources are the channels the loop's select reads.
+type waitSources struct {
+	stopped      <-chan error
+	machineWakes <-chan struct{}
+	retry        <-chan time.Time
+	facts        *factsWatch
+	sysctlChecks <-chan time.Time
+	backstop     <-chan time.Time
+}
+
+// wait waits in the loop's select until something asks for a pass, and
+// answers its cause. It marks the loop busy from the moment the select
+// returns. A check of the sysctls that finds every parameter as the
+// last pass left it goes back to the select with no pass. It answers
+// true, with the error for run to return, when the loop must end.
+//
+// A backstop that fires while another cause is ready gives the pass to
+// that cause, so its writes are not reported as a missed wake: a wake
+// already waiting, and a sysctl that drifted, explain the pass better.
+func (l *loop) wait(ctx context.Context, from waitSources, sysctls sysctlCheck) (string, bool, error) {
+	for {
+		l.live.markIdle()
+		select {
+		case <-ctx.Done():
+			return "", true, nil
+		case err := <-from.stopped:
+			l.live.markBusy()
 			if err != nil {
-				return err
+				return "", true, err
 			}
+			return causeMachine, false, nil
 		case <-l.wakes:
-		case <-machineWakes:
-		case <-retryC:
-		case _, ok := <-factsWatch.wake:
+			l.live.markBusy()
+			return causeWatch, false, nil
+		case <-from.machineWakes:
+			l.live.markBusy()
+			return causeMachine, false, nil
+		case <-from.retry:
+			l.live.markBusy()
+			return causeRetry, false, nil
+		case _, ok := <-from.facts.wake:
+			l.live.markBusy()
 			// A closed channel means the watch died, and init's writes
 			// since then reach nobody.
 			if !ok {
-				return errFactsStopped
+				return "", true, errFactsStopped
 			}
-		case <-l.ticks:
-			tickOnly = true
+			return causeFacts, false, nil
+		case <-from.backstop:
+			l.live.markBusy()
+			return l.backstopCause(from, sysctls), false, nil
+		case <-from.sysctlChecks:
+			l.live.markBusy()
+			if sysctls.drifted(sysctlRoot) {
+				return causeSysctls, false, nil
+			}
 		}
 	}
+}
+
+// backstopCause answers the cause of a pass that the backstop's timer
+// started: another cause that is ready at the same moment, or the
+// backstop itself.
+func (l *loop) backstopCause(from waitSources, sysctls sysctlCheck) string {
+	select {
+	case <-l.wakes:
+		return causeWatch
+	case <-from.machineWakes:
+		return causeMachine
+	case <-from.retry:
+		return causeRetry
+	default:
+	}
+	if sysctls.drifted(sysctlRoot) {
+		return causeSysctls
+	}
+	return causeBackstop
 }
 
 // factsWatch is the part of the facts watch the loop uses: the wake

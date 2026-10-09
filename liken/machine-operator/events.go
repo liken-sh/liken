@@ -48,6 +48,11 @@ const (
 	reasonBootRefused   = "BootRefused"
 	reasonCordoned      = "Cordoned"
 	reasonUncordoned    = "Uncordoned"
+
+	// reasonBackstopRepaired marks a write by a pass that only the
+	// backstop started, which names a wake the code does not send
+	// (backstop.go).
+	reasonBackstopRepaired = "BackstopRepaired"
 )
 
 // machineReference answers the object reference of a Machine, for an
@@ -69,6 +74,10 @@ type machineEvents struct {
 
 func (e machineEvents) normal(reason, message string) {
 	e.recorder.Normal(e.machine, reason, message)
+}
+
+func (e machineEvents) warning(reason, message string) {
+	e.recorder.Warning(e.machine, reason, message)
 }
 
 // postStatusEvents posts the Events of one status write that landed:

@@ -128,7 +128,6 @@ func runPasses(t *testing.T, api *fakeapi.Server, r *reader) ([]string, *machine
 	t.Helper()
 	o := metrics.NewOperator(component, machine.Version, []string{machineKind}, watchKinds)
 	mm := newMachineMetrics(o, &fetcher{})
-	heartbeat := kubernetes.NewHeartbeat("node-1")
 	for pass := range 2 {
 		if pass == 1 {
 			if r.machines != nil {
@@ -140,7 +139,7 @@ func runPasses(t *testing.T, api *fakeapi.Server, r *reader) ([]string, *machine
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := reconcile(r, current, "lab", &fetcher{}, heartbeat, mm, nil); err != nil {
+		if err := reconcile(r, current, "lab", &fetcher{}, mm, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -217,25 +216,6 @@ func TestASettledPassOverTheCopiesSendsNoReads(t *testing.T) {
 			t.Errorf("the pass over the copies published\n%s\nwant the direct pass's\n%s", w, d)
 		}
 	})
-}
-
-// The pass writes the heartbeat lease with this machine's Machine as
-// its owner, so deleting the Machine deletes the lease.
-func TestAPassNamesTheMachineAsItsLeaseOwner(t *testing.T) {
-	isolatePass(t)
-	api := newPassAPI()
-	client, _ := passClients(t, api)
-	runPasses(t, api, &reader{client: client})
-
-	lease := &kubernetes.Lease{}
-	if err := client.RequestJSON(http.MethodGet, "/apis/coordination.k8s.io/v1/namespaces/liken-system/leases/node-1", nil, lease); err != nil {
-		t.Fatal(err)
-	}
-
-	want := []kubernetes.OwnerReference{{APIVersion: "liken.sh/v1alpha1", Kind: "Machine", Name: "node-1", UID: "uid-node-1"}}
-	if !slices.Equal(lease.Metadata.OwnerReferences, want) {
-		t.Errorf("the lease's owners are %+v, want %+v", lease.Metadata.OwnerReferences, want)
-	}
 }
 
 // A pass that runs before the watch delivers this operator's own status

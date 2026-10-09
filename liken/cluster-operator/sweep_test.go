@@ -72,6 +72,19 @@ func (fake *fleetAPI) handler() http.Handler {
 	})
 }
 
+// sawEachRenewal records each of the fake's Lease renewals as seen at
+// the moment the machine made it, the way the Leases' watch of a
+// program that has led since before those renewals records them. A
+// program that sees a Lease for the first time counts it as renewed at
+// that moment (heartbeats.go), so a sweep with no record reads no
+// machine Lost.
+func (fake *fleetAPI) sawEachRenewal(r *fleetReader) *fleetReader {
+	for name, renewed := range fake.renewals {
+		r.sightings.observe(name, renewed, renewed)
+	}
+	return r
+}
+
 func labMachine(name string, phase api.Phase) machine.Machine {
 	m := machine.Machine{Kind: "Machine", Metadata: api.ObjectMeta{Name: name}}
 	m.Status.Phase = phase
@@ -95,7 +108,7 @@ func TestSweepFleetMarksTheSilentMachineAndPublishesTheCluster(t *testing.T) {
 	client := testClient(t, fake.handler())
 
 	cm, _ := fleetMetrics(t)
-	sweepFleet(&fleetReader{client: client}, clusterDoc, "", &engineProbe{}, &podSteward{}, cm, sweepNow)
+	sweepFleet(fake.sawEachRenewal(&fleetReader{client: client}), clusterDoc, "", &engineProbe{}, &podSteward{}, cm, sweepNow)
 
 	lost := fake.statuses["node-2"]
 	if lost == nil || lost.Status.Phase != api.PhaseLost {
@@ -278,7 +291,7 @@ func TestSweepFleetToleratesAClusterStatusWriteFailure(t *testing.T) {
 	client := testClient(t, refusing(fake.handler(), http.MethodPut, "/clusters", http.StatusInternalServerError))
 
 	cm, _ := fleetMetrics(t)
-	sweepFleet(&fleetReader{client: client}, clusterDoc, "", &engineProbe{}, &podSteward{}, cm, sweepNow)
+	sweepFleet(fake.sawEachRenewal(&fleetReader{client: client}), clusterDoc, "", &engineProbe{}, &podSteward{}, cm, sweepNow)
 
 	if lost := fake.statuses["node-2"]; lost == nil || lost.Status.Phase != api.PhaseLost {
 		t.Errorf("the machine verdicts land even when the cluster write fails: %+v", lost)

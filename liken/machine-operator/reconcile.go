@@ -46,7 +46,7 @@ var sysctlRoot = machine.SysctlDir
 // (outcome.go). The pass's client reports every answer from the API
 // server there, and each step on the machine reports its own failures,
 // so the loop can retry the pass when something failed (retry.go).
-func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb *kubernetes.Heartbeat, mm *machineMetrics, out *passOutcome) error {
+func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm *machineMetrics, out *passOutcome) error {
 	now := time.Now()
 	r = r.observedBy(out)
 	c := r.client
@@ -101,8 +101,11 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	// without a reboot. status.sysctls reports the two together, so an
 	// operator sees every parameter liken sets and its actual value in
 	// one place.
-	sysctls, defaultsErr, specErr := applySysctls(sysctlRoot, machine.OSSysctls, m.Spec.Sysctls, out)
+	sysctls, missing, defaultsErr, specErr := applySysctls(sysctlRoot, machine.OSSysctls, m.Spec.Sysctls, out, r.sysctls)
 	status.Sysctls = sysctls
+	if out != nil {
+		out.sysctls, out.sysctlsMissing = sysctls, missing
+	}
 	status.Conditions = api.SetCondition(status.Conditions, sysctlsCondition(defaultsErr, specErr), now)
 
 	// podStale answers whether this pod's own template predates the
@@ -123,9 +126,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	// two can never disagree the way they could if this program
 	// depended on the pod's network namespace carrying the host's UTS
 	// namespace along with it.
-	hostEntries, hostsErr := r.local.hostEntries(func() ([]machine.HostEntry, error) {
-		return applyHostEntries(hostsPath, m.Metadata.Name, m.Spec.Network.HostEntries, out)
-	})
+	hostEntries, hostsErr := applyHostEntries(hostsPath, m.Metadata.Name, m.Spec.Network.HostEntries, out)
 	status.HostEntries = hostEntries
 	status.Conditions = api.SetCondition(status.Conditions,
 		hostEntriesCondition(m.Spec.Network.HostEntries, hostsErr, podStale), now)
@@ -236,27 +237,18 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	// The serio list is the spec's and the boot record's together
 	// (dra.go), set here for the DRA plugin as well, so the inventory
 	// and the claims it prepares withhold the same serial lines.
-	//
-	// A pass that only the ticker woke skips the walk, because a
-	// change to sysfs sends a uevent, and the uevent wakes a pass of
-	// its own (machineevents.go).
 	serio := serioInEffect(m.Spec.Serio, facts)
 	setDeclaredSerio(serio)
-	if r.local.walk() {
-		walked := nodeErr == nil
-		if walked && publishDeviceInventory(r, node, facts, serio, mm) != nil {
-			walked = false
-		}
-
-		// The claims the kubelet already prepared get the same
-		// treatment, because a device that enumerates again moves the
-		// nodes a claim delivers (cdi.go). This runs without a Node,
-		// because a prepared claim is a file on this machine, and
-		// containerd reads that file at every container creation.
-		failures := out.failureCount()
-		refreshCDISpecs(draSysfsRoot, out)
-		r.local.walked(walked && out.failureCount() == failures)
+	if nodeErr == nil {
+		_ = publishDeviceInventory(r, node, facts, serio, mm)
 	}
+
+	// The claims the kubelet already prepared get the same treatment,
+	// because a device that enumerates again moves the nodes a claim
+	// delivers (cdi.go). This runs without a Node, because a prepared
+	// claim is a file on this machine, and containerd reads that file at
+	// every container creation.
+	refreshCDISpecs(draSysfsRoot, out)
 
 	// Convergence checks whether the cluster's copy of each document
 	// matches what this boot actuated. If not, it stages the
@@ -423,30 +415,6 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	// The phase compresses the conditions into the one word a fleet
 	// listing shows (phase.go).
 	status.Phase = decidePhase(status.Conditions)
-
-	// The heartbeat renews this machine's lease, so the fleet can
-	// tell that this status is current, not the final report of a
-	// machine that has since died (the kubernetes package explains
-	// why this is a lease and not a status field). The heartbeat is
-	// deliberately separate from the status write below. Status is
-	// written when the machine's state changes. The heartbeat proves
-	// the reporter is alive. Combining them would make every
-	// heartbeat rewrite the whole object. Either write can fail
-	// while the other lands, and that is the correct outcome: the
-	// machine is alive and will retry on its next pass.
-	//
-	// The heartbeat goes first because of what each write means to
-	// the cluster operator. A machine booting into a fleet that has
-	// already declared it Lost announces its liveness here, so the
-	// sweeper stops writing Lost verdicts onto the very object the
-	// status write below is about to update. Writing status first
-	// would invite that collision on every boot.
-	hb.Renew(c, kubernetes.OwnerReference{
-		APIVersion: api.APIVersion,
-		Kind:       machineKind,
-		Name:       m.Metadata.Name,
-		UID:        m.Metadata.UID,
-	}, now)
 
 	// The metrics read the very status this pass is about to
 	// publish, so a graph and a `kubectl get machine -o yaml` always

@@ -1,8 +1,12 @@
 # 80. The machine operator idles
 
-Milestone 80. Proposed 2026-10-09. The last of five milestones that
+Milestone 80. Proposed and built 2026-10-09. The checks on `liken-1`
+and the week of the backstop counter on the `lab` fleet have not run.
+The QEMU drills are in [What the lab measured](#what-the-lab-measured).
+
+The last of five milestones that
 remove the ten-second ticker from `machine-operator`'s reconcile loop.
-[Milestone 76](completed/76-a-pass-reports-what-it-did-not-finish.md) gives the
+[Milestone 76](76-a-pass-reports-what-it-did-not-finish.md) gives the
 series and the table of every job the ticker does. Milestones 76 to 79
 move every job with an event off the ticker. Three jobs remain: the
 heartbeat lease, which needs a clock; the sysctls, which have no
@@ -277,3 +281,150 @@ In a `synctest` bubble with `kubernetes/apiservertest`:
 - Hang a pass on purpose, and confirm that `cluster-operator` marks
   the machine `Lost` within the limit plus 40 seconds plus one sweep
   tick, and that the kubelet restarts the operator.
+
+## What was built
+
+The design above was built, with these departures. Several came from
+an adversarial review of the first build, in three parts: liveness and
+clocks, the sysctls and the backstop, and every decision that depends
+on time or on state with no wake.
+
+- **No liveness probe.** The renewal timer ends the process itself
+  once the loop has been busy for 60 seconds (`liveness.go`), and the
+  `DaemonSet` has no `livenessProbe`. A kubelet probe also fails while
+  the listener is not open: during the setup before the loop, when
+  port 9200 is taken or moved by `--metrics-address`, and for a binary
+  older than its pod template, which answers `404` on `/healthz`. Each
+  of those would restart an operator that is not stuck. `/healthz`
+  still answers the same check, for a person.
+- **The pass deadline keeps the client's answer to a `429`.**
+  `apiclient`'s `WithContext` also ends the wait after a `429` with the
+  context, so each request of a pass would wait out a `429` for up to
+  ten seconds. `kubernetes.Within` binds the pass's context and keeps
+  the wait that has already ended.
+- **The first renewal runs before the busy mark**, because its requests
+  run under no pass's deadline. The gauge of the longest pass times the
+  whole busy window, from the wake to the end of the pass.
+- **The Node watch ignores the kubelet's heartbeat.** The kubelet
+  rewrites the Node's status every five minutes with only the
+  `lastHeartbeatTime` of each condition changed, which a review measured
+  on `liken-1` at 5 minutes 5 seconds. Each write woke a pass and moved
+  the backstop back, so the backstop fired only when its jitter was
+  under 5 seconds, and most repairs it exists to report were made by
+  an ordinary pass and never counted. `WakeOnContent` takes functions
+  that remove fields before the comparison, and the Node's handler
+  removes the heartbeat times. It also ignores `managedFields`.
+- **The sysctl apply remembers its writes** (`sysctlMemory` in
+  `conditions.go`). The kernel stores some values in another form: `0x10`
+  reads back as `16`, a write of one value to `kernel.printk` reads
+  back as four. Compared with the spec's value, such a parameter was
+  written on every pass, and each backstop pass would have reported
+  the write as a repair. A parameter that still reads what the kernel
+  reported after the last write of the same value is current. A
+  write-only parameter, such as `vm.drop_caches`, is written once for
+  each value.
+- **The sysctls are read back after both sets.** Two names can write
+  one kernel variable, such as `net.ipv4.ip_forward` and
+  `net.ipv4.conf.all.forwarding`. A read taken right after each write
+  held a value that a later write changed, so the check found it
+  drifted on every check. A default is also dropped when the spec names
+  the same file in the other spelling, dots or slashes.
+- **The check reads the parameters that did not exist.** A parameter
+  under an interface in `/devices/virtual`, which sends no uevent the
+  listener keeps, now applies within ten seconds of the interface
+  appearing, not at the lasting retry.
+- **A backstop pass is a backstop pass only when nothing else
+  explains it.** The backstop is not armed while a retry is due,
+  because the retry's pass does the same work, and a write it makes
+  after somebody fixes the cause is the retry's. A backstop that fires
+  while a wake is waiting, or while a sysctl has drifted, gives the
+  pass to that cause.
+- **Each pass counts its cause**, in `liken_machine_passes_total`, so
+  the passes of a settled machine can be explained.
+- **A failed `Sync` of the facts watch** goes into the outcome, and the
+  retry runs it again within a second or two.
+- **The inotify readers end when their directory leaves its path.**
+  The reader dropped `IN_IGNORED` and `IN_UNMOUNT`, which carry no
+  name, so a removed, renamed, or unmounted `/host/etc` left a watch
+  that never woke and never closed. A record of `IN_IGNORED`,
+  `IN_UNMOUNT`, `IN_DELETE_SELF`, or `IN_MOVE_SELF` for the watched
+  directory, or the facts tree's root, now closes the channel, and the
+  operator ends. A hosts watch that fails to open ends the operator
+  unless its directory does not exist. `Sync` and the reader's close
+  of the descriptor are exclusive, so `Sync` cannot add a watch to a
+  descriptor number the process gave to another file.
+- **`cluster-operator` holds the rollout for its first 40 seconds.** A
+  new process records every Lease as seen at its start, so for 40
+  seconds a machine that is already down reads its last status, usually
+  `Ready`. The rollout grants and reclaims no turn until the record is
+  40 seconds old, so a dead leader cannot count as up while a second
+  leader takes its turn.
+- **A `403` and a `422` keep the one five-minute ceiling.** Controller
+  backoffs commonly run longer, and a person who grants RBAC can see
+  the retry's line in the log.
+- **`Heartbeat.Renew` keeps the time of its last write**, from
+  `time.Now`, and a new process renews once whatever the lease's
+  `renewTime` says.
+
+The review also found these, which stay as they are:
+
+- **A hang in uninterruptible sleep is not recovered.** A `syncfs` or a
+  sysfs read in the D state survives `SIGKILL`, so ending the process
+  does nothing. The machine reads `Lost`, as it did before.
+- **An old binary under new RBAC.** During an upgrade, a follower that
+  runs the new binary under the old RBAC cannot open the watches
+  milestone 79 added. Its reads go to the API server, and a change to
+  those kinds waits for the backstop until the new RBAC lands.
+- **A modules intent that `init` refuses** is asked again on every pass,
+  and each backstop pass reports it. It happens only when the operator
+  and `init` disagree about whether a change can load live, which is a
+  bug, so the report is the right signal.
+
+## What the lab measured
+
+`node-1` of the `lab` fleet, on 2026-10-09, under UEFI. `make
+smoke-uefi` installed the first build on blank disks and reported
+`Ready` after 15 seconds.
+
+On the first build, before the review's fixes:
+
+- 10 idle minutes ran 8 passes. The longest pass took 36 ms, and the
+  backstop counter stayed at zero.
+- The lease renewed every 8 or 12 seconds: a timer that fires a moment
+  early skips one firing, as designed.
+- `vm.max_map_count`, written to `65530` from a debug pod, read
+  `524288` again after 2.9 and 4.2 seconds. `/etc/hosts`, overwritten,
+  was written back after 1.0 seconds.
+
+An upgrade to the build with the fixes, with a one-replica `Deployment`
+held by a `PodDisruptionBudget` of `maxUnavailable: 0`, drained on the
+first build:
+
+- The operator asked for the guarded pod 12 times in the first 2
+  seconds, while the cordon moved the other pods, and once in the next
+  67 seconds. The API server stated no `Retry-After` for the budget's
+  refusal, so nothing asked again on a timer.
+- The pod's `deletionTimestamp` was set 0.12 seconds after the patch
+  that relaxed the budget returned.
+
+On the build with the fixes, after the upgrade:
+
+- 10 idle minutes ran 4 passes, half the first build's 8. The longest
+  pass took 68 ms, and the backstop counter stayed at zero.
+- Over the whole drill, `liken_machine_passes_total` counted: 1 at
+  start, 6 woken by a watch, 4 by a machine event (each overwrite of
+  `/etc/hosts` and the operator's own write back), 2 by a sysctl that
+  drifted, 1 by the facts tree, and 1 backstop pass.
+- `vm.max_map_count` read `524288` again after 0.7 and 9.7 seconds, both
+  inside one check of ten seconds. `/etc/hosts` was written back after
+  1.0 seconds.
+
+## Verification needed
+
+- On `liken-1`, count the passes per hour on an idle machine, by
+  `liken_machine_passes_total{cause}`.
+- Watch `liken_machine_backstop_repairs_total` on the `lab` fleet for a
+  week. Each increase is a missed wake to fix.
+- Hang a pass on purpose, and confirm that the operator ends itself
+  after 60 seconds, the kubelet starts it again, and a loop that stays
+  stuck reaches `Lost` as the kubelet's backoff grows.
