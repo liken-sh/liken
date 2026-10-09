@@ -25,8 +25,10 @@ order.
 
 `init` applies both at boot, before k3s starts. The `liken` operator
 applies both again on every pass, about every ten seconds. Each pass
-writes the value and reads it back, so a setting that something else on
-the machine changed returns within one pass, without a reboot.
+reads each parameter first. It writes the value only when the kernel
+reports a different value, and then it reads the value back. So a
+setting that something else on the machine changed returns within one
+pass, without a reboot.
 
 Because `spec.sysctls` is applied second, a name there overrides
 `liken`'s value for that parameter:
