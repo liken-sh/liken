@@ -444,10 +444,16 @@ On the testbed, `liken-1` and `stick-1`, after the rollout of release
   are fixed, and a test now requires a schema property for every field
   `MachineSpec` and `MachineStatus` can hold.
 
+On release 2026.10.09-002, which carries both fixes and holds the TPM
+back from every claim, the rollout took 5 minutes. In 30 idle minutes
+`liken-1` ran 25 passes and `stick-1` 17. Their 8 backstop passes
+repaired nothing, the TPM was gone from both slices, a synthetic `add`
+uevent ran a pass after 1.0 and 1.1 seconds, `vm.max_map_count` came
+back after 5.8 and 7.3 seconds, and `/etc/hosts` after 0.95 and 0.90
+seconds.
+
 ## Verification needed
 
-- After the next release, confirm the backstop counter stays at zero on
-  the testbed.
 - Watch `liken_machine_backstop_repairs_total` on the `lab` fleet for a
   week. Each increase is a missed wake to fix.
 - Hang a pass on purpose, and confirm that the operator ends itself
