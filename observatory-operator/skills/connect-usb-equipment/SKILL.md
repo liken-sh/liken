@@ -29,25 +29,25 @@ the driver its address in KStars, or in the driver's own properties.
 
 ## What can reach a pod
 
-`liken` publishes a USB device only when a kernel driver controls it.
-That decides what works:
+`liken` publishes a USB device when a kernel driver controls it, or
+when no driver binds any part of it, because a program drives it
+through libusb. That decides what works:
 
 | Equipment | How it connects | Reaches a pod |
 |---|---|---|
 | Most mounts: EQMOD cables, Sky-Watcher and Celestron USB ports, LX200 serial | a USB serial chip: FTDI, Prolific PL2303, WCH CH340, or USB CDC-ACM | yes, as a tty |
 | Most focusers and power boxes: MoonLite, Pegasus, and the like | a USB serial chip | yes, as a tty |
 | ZWO EFW filter wheels, ZWO EAF focusers | USB HID | yes, with its USB node |
-| ZWO, QHY, Player One, SVBony, ToupTek, and the other vendor-SDK cameras | the vendor's library over libusb, with no kernel driver | **no** |
-| DSLRs and mirrorless cameras through gphoto2 | libusb, with no kernel driver | **no** |
+| ZWO, QHY, Player One, SVBony, ToupTek, and the other vendor-SDK cameras | the vendor's library over libusb, with no kernel driver | yes, as a whole device with its USB node |
+| DSLRs and mirrorless cameras through gphoto2 | libusb, with no kernel driver | yes, as a whole device with its USB node |
 
-A device with no kernel driver gets no entry in the node's
-`ResourceSlice`, so no claim can select it. The `liken` problem
-[Driverless USB devices are not published](https://github.com/liken-sh/liken/blob/main/liken/plans/open-problems/driverless-usb-devices-are-not-published.md)
-records this, with the ZWO cameras as its example. QHY cameras also
-load their firmware through udev rules on the host, and those rules do
-not run on a `liken` machine. Until that problem is solved, a
-telescope can describe such a camera, but a reservation of that
-telescope waits for the camera's claim and fails.
+A device with no kernel driver publishes whole, named by its USB port,
+such as `usb-1-2`, and a claim on it delivers its USB node and nothing
+else. The `liken`
+[device reference](https://liken.sh/docs/reference/devices/#usb-devices-with-no-kernel-driver)
+gives the rule. QHY cameras also load their firmware through udev
+rules on the host, and those rules do not run on a `liken` machine, so
+a QHY camera that needs its firmware loaded does not work yet.
 
 ## 1. Load the kernel driver
 
@@ -64,12 +64,13 @@ Each entry names the device and the modules that can drive it. The
 USB serial chips use `ftdi_sio`, `pl2303`, `ch341`, or `cdc_acm`, and
 HID devices use `usbhid`. The `liken`
 [hardware modules guide](https://liken.sh/docs/guides/hardware-modules/)
-gives the steps to declare them.
+gives the steps to declare them. A camera that a vendor library or
+gphoto2 drives has no kernel module to declare, so go on to step 2.
 
 ## 2. Find the device
 
-When a driver controls the device, it appears in the node's
-`ResourceSlice`:
+When a driver controls the device, or when the device has no kernel
+driver at all, it appears in the node's `ResourceSlice`:
 
 ```sh
 kubectl get resourceslice <node>-liken.sh -o yaml

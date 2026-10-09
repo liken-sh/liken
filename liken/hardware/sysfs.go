@@ -20,7 +20,9 @@ package hardware
 // many firmware-described stubs, most of which have no driver by
 // design) or children of devices that the pci and usb buses already
 // cover. Walking these other buses would report information that no
-// change to spec.modules could act on.
+// change to spec.modules could act on. The device inventory asks a
+// wider question, and inventory.go answers it from the nodes instead
+// of the buses.
 
 import (
 	"fmt"

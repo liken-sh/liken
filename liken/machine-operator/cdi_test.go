@@ -225,3 +225,70 @@ func TestRefreshIgnoresFilesItDidNotWrite(t *testing.T) {
 		t.Errorf("the other driver's spec = %s, want it untouched", raw)
 	}
 }
+
+// A machine where no claim was prepared on this boot has no CDI
+// directory, and the refresh reads nothing and records nothing.
+func TestTheRefreshWithNoDirectoryDoesNothing(t *testing.T) {
+	isolatePass(t)
+	cdiDir = filepath.Join(t.TempDir(), "absent")
+	out := &passOutcome{}
+
+	refreshCDISpecs(t.TempDir(), out)
+
+	if out.failureCount() != 0 || len(out.writes) != 0 {
+		t.Errorf("the refresh recorded %+v", out)
+	}
+}
+
+// A spec that cannot be read is a failure of the refresh, and a
+// device in it that names another claim is left as it is.
+func TestTheRefreshReportsASpecItCannotRead(t *testing.T) {
+	isolatePass(t)
+	if err := os.Mkdir(cdiSpecPath("claim-1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	foreign := cdiSpec{Version: "0.6.0", Kind: cdiKind, Devices: []cdiDevice{{Name: "claim-9-usb-2-1-1-0"}}}
+	raw, _ := json.Marshal(foreign)
+	if err := os.WriteFile(cdiSpecPath("claim-2"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := &passOutcome{}
+
+	refreshCDISpecs(t.TempDir(), out)
+
+	after, _ := os.ReadFile(cdiSpecPath("claim-2"))
+	if out.failureCount() != 1 || string(after) != string(raw) {
+		t.Errorf("the refresh recorded %d failures and left claim-2 as %s, want 1 and unchanged", out.failureCount(), after)
+	}
+}
+
+// A spec that cannot be written is an error for the prepare to answer,
+// whether the directory cannot be made or the file cannot be written.
+// A spec that cannot be removed is an error for the unprepare.
+func TestTheSpecWritesReportTheirFailures(t *testing.T) {
+	isolatePass(t)
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	readOnly := t.TempDir()
+	if err := os.Chmod(readOnly, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(readOnly, 0o755) })
+	full := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(full, "liken.sh-claim-1.json", "child"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cdiDir = filepath.Join(file, "cdi")
+	noDirectory := writeCDISpec("claim-1", nil)
+	cdiDir = readOnly
+	noFile := writeCDISpec("claim-1", nil)
+	cdiDir = full
+	noRemove := removeCDISpec("claim-1")
+
+	if noDirectory == nil || noFile == nil || noRemove == nil {
+		t.Errorf("errors = %v, %v, %v; want three", noDirectory, noFile, noRemove)
+	}
+}

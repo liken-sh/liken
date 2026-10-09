@@ -67,6 +67,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/liken-sh/liken/liken/hardware"
 )
 
 // These are the roots this file reads and writes. They are variables
@@ -120,7 +122,7 @@ func watchDiskLinks(ctx context.Context) error {
 		// target, the SCSI device, the block device, and one event
 		// per partition. A walk into a half-populated tree would name
 		// the disk wrong, so this waits for the burst to finish.
-		settle(ctx, uevents, diskLinksQuiet, 5*time.Second)
+		hardware.Settle(ctx, uevents, diskLinksQuiet, 5*time.Second)
 		if ctx.Err() != nil {
 			return nil
 		}

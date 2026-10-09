@@ -83,6 +83,15 @@ type passOutcome struct {
 	notBefore time.Time
 }
 
+// failureCount answers how many failures the pass has recorded so far.
+// A nil outcome records none.
+func (o *passOutcome) failureCount() int {
+	if o == nil {
+		return 0
+	}
+	return len(o.failures)
+}
+
 // fail records a failure on the machine itself. The kind comes from the
 // errno, when the error carries one (lastingErrno), or from the io/fs
 // error that a check of the code's own answers: a missing file, or a

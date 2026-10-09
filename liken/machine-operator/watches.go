@@ -7,7 +7,7 @@ package main
 // Cluster, the registry credentials Secret, this node's own operator
 // pod, and this node's ResourceSlice. The pass runs at least every ten
 // seconds, because the ticker is the heartbeat's clock and the
-// backstop for the kernel and file state that sends no event. A pass
+// backstop for the kernel state that sends no event. A pass
 // that read each object from the API server would send six requests
 // every ten seconds from every machine, and all but the heartbeat's
 // would find nothing new. So the operator watches each object, keeps a
@@ -30,9 +30,15 @@ package main
 //     change. The kubelet writes the Node's status only when a
 //     condition changes, and the other two change rarely. A cordon, a
 //     label, or a taint that somebody set by hand is reverted at once.
-//   - The ResourceSlice wakes nothing. This operator is its only
-//     writer, and the ticker pass already walks sysfs to compute the
-//     inventory it compares.
+//   - The ResourceSlice wakes the loop only when it is deleted. The
+//     kubelet deletes a driver's slices when it starts, so a restart
+//     of k3s deletes this node's slice, and the pass writes it again.
+//     The pass walks sysfs only when something woke it other than the
+//     ticker (machineevents.go), so without this wake a deleted slice
+//     would stay deleted until the next device event. An update wakes
+//     nothing, because the operator's own write is an update, and a
+//     write that never compares equal would then write again as fast
+//     as the API server answers.
 //
 // Every watch wakes the loop once when its first read is done. A pass
 // that ran before then read the API server, and a change made between
@@ -132,6 +138,12 @@ type reader struct {
 	// other Node writes are merge patches that a second pass sends
 	// again with no harm.
 	machineVersions *memo.Versions
+
+	// local keeps the pass's reads of the machine itself across
+	// passes, so a pass that only the ticker woke reads neither sysfs
+	// nor /etc/hosts (machineevents.go). A nil local reads both on
+	// every pass.
+	local *localReads
 }
 
 // observedBy answers a reader for one pass, whose client reports the
@@ -174,7 +186,7 @@ func watchThisMachine(ctx context.Context, watcher dynamic.Interface, client *ap
 	r.machines = start(machineKind, machines, watch.WakeOnChange[machine.Machine](machines, wake))
 	r.nodes = start(nodeKind, nodes, watch.WakeOnChange[nodeObject](nodes, wake))
 	r.ownPods = start(podKind, pods, watch.WakeOnChange[kubernetes.Pod](pods, wake))
-	r.slices = start(resourceSliceKind, slices, nil)
+	r.slices = start(resourceSliceKind, slices, cache.ResourceEventHandlerFuncs{DeleteFunc: func(any) { wake() }})
 	if clusterName != "" {
 		clusters := informer.Source{Resource: clusterResource, FieldSelector: named(clusterName)}
 		secrets := informer.Source{Resource: secretResource, Namespace: "liken-system",

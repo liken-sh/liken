@@ -157,6 +157,14 @@ func SubtreeNodes(dir string) []DeliveredNode {
 			return nil
 		}
 		node := DeliveredNode{Path: "/dev/" + devname, Subsystem: subsystemName(path)}
+		if node.Subsystem == "tty" && readAttr(path, "type") == "0" {
+			// The serial core registers a tty for every port it
+			// reserves, whether or not a UART answers there. The 8250
+			// driver reserves 32 at boot, and a port with no UART
+			// reports type 0, PORT_UNKNOWN. Its node opens and then
+			// fails every read and write, so it delivers nothing.
+			return nil
+		}
 		if node.Subsystem == "block" {
 			node.Block = filepath.Base(path)
 		}

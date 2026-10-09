@@ -298,6 +298,23 @@ func TestApplySysctlsReportsTheSpecValueForAnOverriddenName(t *testing.T) {
 	}
 }
 
+// A pass on a machine that already holds the spec's value writes
+// nothing. The OS default for an overridden name is never written, so
+// the kernel never holds it for a moment between the two writes.
+func TestApplySysctlsWritesNothingForAConvergedOverride(t *testing.T) {
+	const name = "vm.max_map_count"
+	dir := sysctlDir(t, name)
+	defaults, desired := map[string]string{name: "262144"}, map[string]string{name: "524288"}
+	applySysctls(dir, defaults, desired, nil)
+	out := &passOutcome{}
+
+	observed, _, _ := applySysctls(dir, defaults, desired, out)
+
+	if len(out.writes) != 0 || observed[name] != "524288" {
+		t.Errorf("a converged pass wrote %q and observed %q, want no write and 524288", out.writes, observed[name])
+	}
+}
+
 func TestApplySysctlsKeepsTheTwoFailuresApart(t *testing.T) {
 	dir := sysctlDir(t, "vm.swappiness")
 	observed, defaultsErr, specErr := applySysctls(dir,

@@ -407,3 +407,52 @@ func TestParseInotifyEventsTruncated(t *testing.T) {
 		t.Errorf("a truncated record should walk to nothing, got %d", count)
 	}
 }
+
+// mustWatchName starts a watch on one name or fails the test.
+func mustWatchName(t *testing.T, dir, name string) <-chan struct{} {
+	t.Helper()
+	ch, err := WatchName(testCtx(t), dir, name)
+	if err != nil {
+		t.Fatalf("WatchName(%q, %q): %v", dir, name, err)
+	}
+	return ch
+}
+
+// A rename onto the watched name wakes the channel. The temporary
+// file the rename starts from has another name, so its create and its
+// close wake nothing, and the one wake is the rename's.
+func TestWatchNameWakesOnARenameOntoTheName(t *testing.T) {
+	dir := t.TempDir()
+	ch := mustWatchName(t, dir, "hosts")
+	renameInto(t, dir, "hosts")
+	awaitWake(t, ch)
+	refuteWake(t, ch)
+}
+
+// A write to another file in the same directory wakes nothing. init
+// writes resolv.conf beside the hosts file in the host's /etc.
+func TestWatchNameIgnoresTheOtherNamesInTheDirectory(t *testing.T) {
+	dir := t.TempDir()
+	ch := mustWatchName(t, dir, "hosts")
+	writeClose(t, dir, "resolv.conf")
+	renameInto(t, dir, "resolv.conf")
+	refuteWake(t, ch)
+}
+
+// A delete of the watched name wakes the channel, because a pass must
+// write the file back.
+func TestWatchNameWakesWhenTheNameLeaves(t *testing.T) {
+	dir := t.TempDir()
+	writeClose(t, dir, "hosts")
+	ch := mustWatchName(t, dir, "hosts")
+	if err := os.Remove(filepath.Join(dir, "hosts")); err != nil {
+		t.Fatal(err)
+	}
+	awaitWake(t, ch)
+}
+
+func TestWatchNameMissingDirectory(t *testing.T) {
+	if _, err := WatchName(testCtx(t), filepath.Join(t.TempDir(), "absent"), "hosts"); err == nil {
+		t.Error("WatchName on a missing directory succeeded, want an error")
+	}
+}

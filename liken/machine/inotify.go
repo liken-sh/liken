@@ -95,6 +95,11 @@ type watch struct {
 	cancelR int
 	cancelW int
 	wake    chan struct{}
+
+	// name, when it is set, limits the wakes to events on that one
+	// name in the watched directory. An overflow still wakes, because
+	// the events it dropped may have named it.
+	name string
 }
 
 // newWatch creates a non-blocking inotify instance and the cancel pipe
@@ -206,8 +211,10 @@ func (w *watch) drain(buf []byte) bool {
 		case err != nil:
 			return false
 		}
-		parseInotifyEvents(buf[:n], func(int32, uint32, string) {
-			w.signal()
+		parseInotifyEvents(buf[:n], func(_ int32, mask uint32, name string) {
+			if w.name == "" || name == w.name || mask&unix.IN_Q_OVERFLOW != 0 {
+				w.signal()
+			}
 		})
 	}
 }
@@ -274,6 +281,37 @@ func WatchDirMask(ctx context.Context, dir string, mask uint32) (<-chan struct{}
 		return nil, err
 	}
 	if _, err := unix.InotifyAddWatch(w.fd, dir, mask|unix.IN_ONLYDIR); err != nil {
+		w.closeFds()
+		return nil, err
+	}
+	w.start(ctx)
+	return w.wake, nil
+}
+
+// nameMask is the event set for one name in a directory: the name
+// appears, by a create or a rename onto it, it is written and closed,
+// or it leaves, by a delete or a rename away.
+const nameMask = unix.IN_CREATE | unix.IN_MOVED_TO | unix.IN_CLOSE_WRITE |
+	unix.IN_DELETE | unix.IN_MOVED_FROM
+
+// WatchName watches one name in a directory and coalesces the events
+// on that name into a wake channel of capacity one. The watch is on
+// the directory, because a writer that replaces the file by a rename
+// installs a new inode, and a watch on the old inode would go quiet at
+// the first rename. The events on every other name in the directory
+// wake nothing. The machine operator watches the host's /etc for the
+// name hosts this way, and init's writes of resolv.conf beside it, and
+// the operator's own temporary file, do not wake a pass. The watch
+// exists before the function returns, the context ends it, and a watch
+// that fails closes the channel (run). A directory that does not exist
+// is an error.
+func WatchName(ctx context.Context, dir, name string) (<-chan struct{}, error) {
+	w, err := newWatch()
+	if err != nil {
+		return nil, err
+	}
+	w.name = name
+	if _, err := unix.InotifyAddWatch(w.fd, dir, nameMask|unix.IN_ONLYDIR); err != nil {
 		w.closeFds()
 		return nil, err
 	}

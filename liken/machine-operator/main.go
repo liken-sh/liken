@@ -201,15 +201,30 @@ func main() {
 	// operator is doing its job, and a goroutine would keep
 	// confirming a reconcile loop that had gotten stuck.
 	//
-	// The same pass is also the backstop for the state on the machine
-	// that no event announces. A sysctl or an /etc/hosts entry that
-	// another process changes sends no event, so the pass writes each
-	// one back within ten seconds. The DRA inventory comes from a walk
-	// of sysfs on each pass. A release download that finishes between
-	// passes reaches status on the next one. The API objects the pass
-	// judges come from the watches' copies, so a ticker pass on a
-	// settled machine sends one request: the heartbeat's renewal.
+	// The same pass is also the backstop for the state that no event
+	// announces. A sysctl that another process changes sends no event
+	// that this pod can see (machineevents.go), so the pass writes it
+	// back within ten seconds. A release download that finishes between
+	// passes reaches status on the next one. The
+	// API objects the pass judges come from the watches' copies, so a
+	// ticker pass on a settled machine sends one request: the
+	// heartbeat's renewal.
 	ticker := time.NewTicker(10 * time.Second)
+
+	// The machine's readers open before the first pass, so a change
+	// during that pass still sends a wake after it (machineevents.go).
+	// A pod from a template older than the /host/etc mount has no
+	// directory to watch. The operator then runs without the hosts
+	// watch, and hostEntriesCondition reports the missing mount.
+	uevents, err := listenForUevents(context.Background())
+	if err != nil {
+		fatal("listening for uevents: %v", err)
+	}
+	hosts, err := watchHostsFile(context.Background())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "watching %s: %v\n", hostsPath, err)
+	}
+
 	l := &loop{
 		objects:     objects,
 		name:        name,
@@ -222,6 +237,8 @@ func main() {
 		operator:  operatorMetrics,
 		layer:     machineLayer,
 		wakes:     wakes,
+		uevents:   uevents,
+		hosts:     hosts,
 		ticks:     ticker.C,
 		watchFactsTree: func(ctx context.Context) (*factsWatch, error) {
 			w, err := machine.WatchFactsTree(ctx, machine.FactsDir)
@@ -231,7 +248,9 @@ func main() {
 			return &factsWatch{wake: w.Wake, sync: w.Sync}, nil
 		},
 	}
-	l.run(context.Background(), current)
+	if err := l.run(context.Background(), current); err != nil {
+		fatal("%v", err)
+	}
 }
 
 func fatal(format string, args ...any) {

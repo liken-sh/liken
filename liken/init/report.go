@@ -431,7 +431,7 @@ func quiesceHardware() {
 		time.Sleep(quiescePause)
 		return
 	}
-	settle(ctx, uevents, time.Second, 10*time.Second)
+	hardware.Settle(ctx, uevents, time.Second, 10*time.Second)
 	if listenerStopped(uevents) {
 		fmt.Fprintln(os.Stderr, "liken: report: the uevent listener stopped, pausing instead")
 		time.Sleep(quiescePause)

@@ -137,14 +137,13 @@ func awaitingPodRefresh(podStale bool, err error) bool {
 // the Machine spec's own. The pod runs privileged in the host's
 // namespaces, so it reaches /proc/sys directly.
 //
-// The order is the same order init uses at boot, and it is what makes
-// spec.sysctls an override: a name in both sets is applied twice, in
-// this order, so the spec's value is the one this pass reports.
-//
-// The returned map merges the two observations with the spec's on top,
-// for the same reason. A name in both sets was read back once before
-// the spec wrote it and once after, and only the second reading
-// describes the kernel as it now stands.
+// spec.sysctls is an override: a name in both sets is applied with the
+// spec's value alone. init applies the two sets in order at boot,
+// default first, and the operator skips the default instead. Each pass
+// compares and writes, so applying both in order would write the
+// default and then the spec's value on every pass of a converged
+// machine, and the kernel would hold the default for a moment each
+// time.
 //
 // One failure never stops the function from applying the rest of the
 // parameters. The two errors stay apart because the condition treats
@@ -152,10 +151,20 @@ func awaitingPodRefresh(podStale bool, err error) bool {
 // because a message that names one bad parameter, when three are
 // failing, would send a person through this loop three times.
 func applySysctls(dir string, defaults, desired map[string]string, out *passOutcome) (map[string]string, error, error) {
-	observed, defaultsErr := applySysctlSet(dir, defaults, out)
+	observed, defaultsErr := applySysctlSet(dir, withoutKeys(defaults, desired), out)
 	fromSpec, specErr := applySysctlSet(dir, desired, out)
 	maps.Copy(observed, fromSpec)
 	return observed, defaultsErr, specErr
+}
+
+// withoutKeys answers the entries of m whose names are not in drop.
+func withoutKeys(m, drop map[string]string) map[string]string {
+	kept := maps.Clone(m)
+	maps.DeleteFunc(kept, func(name, _ string) bool {
+		_, dropped := drop[name]
+		return dropped
+	})
+	return kept
 }
 
 // applySysctlSet reconciles one set of parameters against the kernel,

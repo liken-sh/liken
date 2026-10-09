@@ -7,11 +7,14 @@ package hardware
 // is the same channel that udev listens on, where udev exists. Each
 // datagram is "action@devpath" followed by KEY=VALUE pairs,
 // including the MODALIAS fingerprint, but this listener deliberately
-// reads none of that detail. A uevent only signals that something
-// changed. The sysfs walk re-reads the whole state moments later.
-// This is simpler and more accurate than incrementally mirroring
-// kernel state from event payloads, because a mirror can drift out
-// of sync, while a re-walk cannot.
+// does not read what the event says about the device. A uevent only
+// signals that something changed. The sysfs walk re-reads the whole
+// state moments later. This is simpler and more accurate than
+// incrementally mirroring kernel state from event payloads, because a
+// mirror can drift out of sync, while a re-walk cannot. The listener
+// reads where the event happened, the device path and the subsystem,
+// so that a caller can drop the events that cannot change what its
+// walk reads.
 
 import (
 	"bytes"
@@ -39,6 +42,14 @@ import (
 // the moment the context ends. See watchUevents and readUevents for the
 // wake and the stop.
 func ListenForUevents(ctx context.Context) (<-chan struct{}, error) {
+	return ListenForUeventsMatching(ctx, nil)
+}
+
+// ListenForUeventsMatching is ListenForUevents with one more test: a
+// uevent wakes the channel only when match also accepts it. A nil
+// match accepts every uevent. A lost datagram still wakes the channel,
+// because the listener cannot tell what the lost datagram was.
+func ListenForUeventsMatching(ctx context.Context, match func(Uevent) bool) (<-chan struct{}, error) {
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_DGRAM|unix.SOCK_CLOEXEC|unix.SOCK_NONBLOCK, unix.NETLINK_KOBJECT_UEVENT)
 	if err != nil {
 		return nil, fmt.Errorf("opening the uevent socket: %w", err)
@@ -50,7 +61,7 @@ func ListenForUevents(ctx context.Context) (<-chan struct{}, error) {
 		unix.Close(fd)
 		return nil, fmt.Errorf("binding the uevent socket: %w", err)
 	}
-	notify, err := watchUevents(ctx, fd)
+	notify, err := watchUevents(ctx, fd, match)
 	if err != nil {
 		unix.Close(fd)
 		return nil, err
@@ -70,7 +81,7 @@ func ListenForUevents(ctx context.Context) (<-chan struct{}, error) {
 // poll wakes, and the reader returns. This split of ownership closes
 // every descriptor once: the cancel goroutine closes the write end, and
 // the reader closes fd and the read end as it leaves.
-func watchUevents(ctx context.Context, fd int) (<-chan struct{}, error) {
+func watchUevents(ctx context.Context, fd int, match func(Uevent) bool) (<-chan struct{}, error) {
 	var pipe [2]int
 	if err := unix.Pipe2(pipe[:], unix.O_CLOEXEC|unix.O_NONBLOCK); err != nil {
 		return nil, fmt.Errorf("opening the cancel pipe: %w", err)
@@ -88,7 +99,7 @@ func watchUevents(ctx context.Context, fd int) (<-chan struct{}, error) {
 		unix.Close(pipe[1])
 	}()
 	go func() {
-		readUevents(fd, pipe[0], notify)
+		readUevents(fd, pipe[0], match, notify)
 		close(done)
 	}()
 	return notify, nil
@@ -106,7 +117,7 @@ func watchUevents(ctx context.Context, fd int) (<-chan struct{}, error) {
 // hangs up while it is open, and an overflow reports POLLERR, which the
 // read below answers with ENOBUFS, so neither ends the reader. Only this
 // goroutine sends on notify, so the close cannot race a send.
-func readUevents(fd, cancelR int, notify chan<- struct{}) {
+func readUevents(fd, cancelR int, match func(Uevent) bool, notify chan<- struct{}) {
 	defer unix.Close(fd)
 	defer unix.Close(cancelR)
 	buf := make([]byte, 64<<10)
@@ -147,7 +158,8 @@ func readUevents(fd, cancelR int, notify chan<- struct{}) {
 			// next event with no wake.
 			continue
 		}
-		if !hardwareChanged(buf[:size]) {
+		event, ok := parseUevent(buf[:size])
+		if !ok || !hardwareChanged(event) || (match != nil && !match(event)) {
 			continue
 		}
 		wake(notify)
@@ -175,17 +187,42 @@ func wake(notify chan<- struct{}) {
 	}
 }
 
-// hardwareChanged reports whether one uevent datagram requires a
-// re-walk. Add and remove events change what exists. Bind and unbind
-// events change which driver is bound. Every other event, such as
-// change, move, or the online and offline events for memory blocks,
-// changes nothing that this package reports.
-func hardwareChanged(datagram []byte) bool {
-	action, _, found := bytes.Cut(datagram, []byte("@"))
+// A Uevent is the part of one kernel uevent that the listener reads:
+// what happened, to which device, in which subsystem. DevPath is the
+// device's path under /sys, such as
+// /devices/pci0000:00/0000:00:03.0/usb1/1-2.
+type Uevent struct {
+	Action    string
+	DevPath   string
+	Subsystem string
+}
+
+// parseUevent reads one datagram from the kernel. The datagram is
+// "action@devpath" and then KEY=VALUE pairs, each ended by a NUL. A
+// datagram with no "@" in its first field is not the kernel's: udev's
+// libudev format starts with "libudev".
+func parseUevent(datagram []byte) (Uevent, bool) {
+	fields := bytes.Split(datagram, []byte{0})
+	action, devpath, found := bytes.Cut(fields[0], []byte("@"))
 	if !found {
-		return false
+		return Uevent{}, false
 	}
-	switch string(action) {
+	event := Uevent{Action: string(action), DevPath: string(devpath)}
+	for _, field := range fields[1:] {
+		if value, ok := bytes.CutPrefix(field, []byte("SUBSYSTEM=")); ok {
+			event.Subsystem = string(value)
+		}
+	}
+	return event, true
+}
+
+// hardwareChanged reports whether one uevent requires a re-walk. Add
+// and remove events change what exists. Bind and unbind events change
+// which driver is bound. Every other event, such as change, move, or
+// the online and offline events for memory blocks, changes nothing
+// that this package reports.
+func hardwareChanged(event Uevent) bool {
+	switch event.Action {
 	case "add", "remove", "bind", "unbind":
 		return true
 	}

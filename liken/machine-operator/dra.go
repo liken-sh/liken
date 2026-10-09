@@ -21,9 +21,10 @@ package main
 // is a separate report, to a separate audience, with a separate
 // lifetime. Slices end with the Node; status lives with the Machine.
 // The walk uses the same shared package init uses, so the two
-// reports can never disagree about what a device is. At one walk
-// per ten-second pass, this costs the same as init's
-// uevent-triggered walks: a cost too small to engineer away.
+// reports can never disagree about what a device is. The walk runs
+// on each pass, and a uevent for a device that arrives, leaves, or
+// changes its driver wakes a pass (machineevents.go), so a device
+// reaches the slice about a second after the kernel reports it.
 
 import (
 	"fmt"
@@ -71,16 +72,17 @@ var draNaming = sync.OnceValue(func() *hardware.PCIIDs {
 const maxSliceDevices = 128
 
 // publishDeviceInventory converges this node's ResourceSlice with
-// what sysfs shows right now. The function logs failures and lets
-// the next pass retry them, instead of reporting them as a
-// condition. Inventory is a report about hardware, and a failure to
+// what sysfs shows right now. The function logs failures and answers
+// them, so the next pass that is not the ticker's walks again, instead
+// of reporting them as a condition. Inventory is a report about hardware, and a failure to
 // write it is a problem in the operator's own machinery, not a fact
 // about the machine.
-func publishDeviceInventory(r *reader, node *nodeObject, facts *machine.MachineStatus, serio []machine.SerioAttachment, mm *machineMetrics) {
+func publishDeviceInventory(r *reader, node *nodeObject, facts *machine.MachineStatus, serio []machine.SerioAttachment, mm *machineMetrics) error {
+	held := heldNodes(draSysfsRoot)
 	devices := inventoryDevices(
-		hardware.DiscoverDevices(draSysfsRoot, draNaming()),
+		hardware.DiscoverInventory(draSysfsRoot, draNaming()),
 		func(d hardware.Device) hardware.Delivery {
-			return hardware.InspectDelivery(draSysfsRoot, d)
+			return withoutHeld(hardware.InspectDelivery(draSysfsRoot, d), held)
 		},
 		platformBlocks(facts), serio)
 	if len(devices) > maxSliceDevices {
@@ -106,6 +108,7 @@ func publishDeviceInventory(r *reader, node *nodeObject, facts *machine.MachineS
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "device inventory: %v\n", err)
 	}
+	return err
 }
 
 // serioInEffect is the spec.serio list the machine holds attachments
@@ -159,14 +162,19 @@ func platformBlocks(facts *machine.MachineStatus) map[string]bool {
 	return blocks
 }
 
-// inventoryDevices applies the publish rule. A device is offered to
-// workloads when it passes all three tests:
+// inventoryDevices applies the publish rule to the devices
+// hardware.DiscoverInventory finds: the pci and usb devices, and the
+// devices on the board that own a node, such as a firmware TPM or a
+// laptop's keyboard. A device is offered to workloads when it passes
+// all three tests:
 //
 //  1. The device has a driver and is not part of the bus structure
 //     itself. Undriven hardware belongs in the unclaimed report
 //     instead. usbcore's device nodes, hubs, and PCIe ports are the
 //     structure that the peripherals connect to, not peripherals
-//     themselves.
+//     themselves. A USB device that no driver binds at all is the
+//     exception: a program in userspace drives it, and the device
+//     publishes whole (userspace.go).
 //  2. Claiming the device would deliver something: its subtree
 //     carries device nodes that a pod could receive. A NIC or a
 //     bare controller fails this test, because it is real hardware
@@ -181,7 +189,10 @@ func platformBlocks(facts *machine.MachineStatus) map[string]bool {
 //     would hand an unprivileged pod the machine's own root
 //     filesystem, so the two claiming systems exclude each other. A
 //     disk belongs either to the machine, as a storage role, or to
-//     the workloads, through DRA, never both.
+//     the workloads, through DRA, never both. The console and the
+//     clock that init writes leave the delivery before this test,
+//     so a device whose only nodes they are has nothing to deliver
+//     (held.go).
 //
 // A serial line that init holds a serio attachment for passes the
 // three tests with its tty node, and the policy then publishes the
@@ -198,7 +209,9 @@ func inventoryDevices(discovered []hardware.Device,
 	plumbing := map[string]bool{"usb": true, "hub": true, "pcieport": true}
 	var out []kubernetes.SliceDevice
 	for _, d := range discovered {
-		if d.Driver == "" || plumbing[d.Driver] {
+		if userspace, ok := userspaceDevice(d, discovered); ok {
+			d = userspace
+		} else if d.Driver == "" || plumbing[d.Driver] {
 			continue
 		}
 		delivery := inspect(d)
@@ -321,12 +334,19 @@ func inventoryDevices(discovered []hardware.Device,
 // same device name, which is the behavior a claim against "the UPS
 // on this wall" needs. When the hardware carries a serial number,
 // the serial attribute is what identifies the individual unit.
+//
+// A device on the board takes its name from the firmware, such as
+// MSFT0101:00 for a TPM or acpi.video_bus.0 for the display's
+// brightness keys, so every character a DNS label cannot hold
+// becomes a dash, and the name stops at the label's 63 characters.
 func deviceName(d hardware.Device) string {
-	sanitized := strings.ToLower(d.Address)
-	for _, r := range []string{":", "."} {
-		sanitized = strings.ReplaceAll(sanitized, r, "-")
+	name := []byte(strings.ToLower(d.Bus + "-" + d.Address))
+	for i, c := range name {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') {
+			name[i] = '-'
+		}
 	}
-	return d.Bus + "-" + sanitized
+	return strings.Trim(string(name[:min(len(name), 63)]), "-")
 }
 
 // attributeString limits a free-text value to the API's

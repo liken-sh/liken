@@ -207,7 +207,7 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 	// inventory, so the two can never disagree about which device a
 	// name identifies.
 	byName := map[string]hardware.Device{}
-	for _, d := range hardware.DiscoverDevices(draSysfsRoot, draNaming()) {
+	for _, d := range hardware.DiscoverInventory(draSysfsRoot, draNaming()) {
 		byName[deviceName(d)] = d
 	}
 
@@ -274,7 +274,7 @@ func (h *draHealth) NodeWatchResources(req *healthv1alpha1.NodeWatchResourcesReq
 func (p *draPlugin) NodeUnprepareResources(ctx context.Context, req *drav1.NodeUnprepareResourcesRequest) (*drav1.NodeUnprepareResourcesResponse, error) {
 	devices := sync.OnceValue(func() map[string]hardware.Device {
 		byName := map[string]hardware.Device{}
-		for _, d := range hardware.DiscoverDevices(draSysfsRoot, draNaming()) {
+		for _, d := range hardware.DiscoverInventory(draSysfsRoot, draNaming()) {
 			byName[deviceName(d)] = d
 		}
 		return byName

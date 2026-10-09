@@ -122,3 +122,14 @@ func TestApplyHostEntriesReportsAReadError(t *testing.T) {
 		t.Error("expected an error when the file cannot be read")
 	}
 }
+
+// A line with an address and no name is not an entry.
+func TestParseHostEntriesSkipsALineWithNoName(t *testing.T) {
+	raw := machine.HostsFile("node-1", nil) + "10.0.0.9\n10.0.0.1 nas\n"
+
+	got := parseHostEntries([]byte(raw))
+
+	if len(got) != 1 || got[0].Address != "10.0.0.1" {
+		t.Errorf("entries = %+v, want the nas alone", got)
+	}
+}

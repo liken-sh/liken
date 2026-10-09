@@ -131,7 +131,7 @@ const displaySuffix = "-display"
 // the node, and a sysfs root without it delivers what it delivered
 // before.
 func claimDelivery(sysRoot string, d hardware.Device) hardware.Delivery {
-	delivery := hardware.InspectDelivery(sysRoot, d)
+	delivery := withoutHeld(hardware.InspectDelivery(sysRoot, d), heldNodes(sysRoot))
 	if !bluetoothAdapter(d) {
 		return delivery
 	}

@@ -33,8 +33,8 @@ package main
 // under it: a USB device that is unplugged and plugged back in
 // enumerates again with a new device number, and its usbfs node moves
 // with it. The reconcile pass rewrites every prepared claim's file
-// from the same sysfs walk that publishes the inventory, on the same
-// cadence.
+// from the same sysfs walk that publishes the inventory, and the
+// uevent of the replug wakes that pass.
 
 import (
 	"encoding/json"
@@ -193,7 +193,7 @@ func refreshCDISpecs(sysRoot string, out *passOutcome) {
 		}
 		if byName == nil {
 			byName = map[string]hardware.Device{}
-			for _, d := range hardware.DiscoverDevices(sysRoot, draNaming()) {
+			for _, d := range hardware.DiscoverInventory(sysRoot, draNaming()) {
 				byName[deviceName(d)] = d
 			}
 		}

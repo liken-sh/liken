@@ -6,7 +6,7 @@ remove the ten-second ticker from `machine-operator`'s reconcile loop.
 series and the table of every job the ticker does. Milestones 76 to 79
 move every job with an event off the ticker. Three jobs remain: the
 heartbeat lease, which needs a clock; the sysctls, which have no
-event; and a wake that the code forgot to send, which is a bug that no
+event that the operator can see; and a wake that the code forgot to send, which is a bug that no
 event reports. This milestone gives each one its own mechanism and
 deletes the ticker, so a settled machine runs no pass until something
 changes. It also makes each judgment of the heartbeat read one clock,
@@ -146,9 +146,20 @@ manual tells them to remove the probe too.
 `applySysctls` writes the OS defaults and `spec.sysctls` into
 `/proc/sys` on each pass, and writes a value only when the value it
 reads differs (`conditions.go`), so a value that another process
-changes is written back within ten seconds. `/proc/sys` sends no event
-for a change. A check keeps that pace, but it reads the sysctls in
-place of running a pass. Every ten seconds, an arm of the loop's
+changes is written back within ten seconds. Milestone 77 measured why
+no watch can replace the check. A write through `/proc/sys` does send
+`IN_MODIFY` and `IN_CLOSE_WRITE`, but only to a watch on the same mount
+of procfs, because each mount has inodes of its own. On `node-1`, a
+write through a debug pod's `/proc` reached a watch on that `/proc`
+and not a watch on `/host/proc`, and a write through `/host/proc` the
+other way round. Each container mounts its own `/proc`, so a watch in
+the operator's pod sees only the operator's writes. A value that the
+kernel changes as a side effect of another write sends no event on
+any mount: a write to `net.ipv4.ip_forward` sets
+`net.ipv4.conf.all.forwarding`, and that file got none in a test on a
+workstation's kernel. A check keeps
+the ticker's pace, but it reads the sysctls in place of running a
+pass. Every ten seconds, an arm of the loop's
 `select` reads each name that the last pass applied, and compares the
 value with the value the pass read back after its write, which is
 what `status.sysctls` holds. It wakes a pass only when one differs.
@@ -175,14 +186,21 @@ reports that it lost some. A Kubernetes watch resumes from its last
 version and lists again on `410 Gone`. The uevent socket reports an
 overflow with `ENOBUFS`, and inotify with `IN_Q_OVERFLOW`, and both
 readers wake a pass on it. After milestone 76, a reader that stops
-closes its channel. So a lost event comes from the operator's own
-code: a path that changes state and sends no wake, or a failure that
+closes its channel, and after milestone 77, a closed channel ends the
+operator, so the kubelet starts it again and the new process reads
+everything. So a lost event comes from the operator's own code: a path that changes state and sends no wake, or a failure that
 the outcome does not record. The reviews of this series found several
 of those in its first draft.
 
 So a backstop pass runs every 5 minutes, with a jitter of up to 10
 percent. It is an ordinary pass, and milestone 76's recorder notes
-every write it makes. A backstop pass on a correct machine writes
+every write it makes. It must read everything a pass reads. Milestone
+77 lets a pass that only the ticker woke skip the walk of sysfs and
+the read of `/etc/hosts` (`localReads` in `machineevents.go`), so the
+backstop's wake must not count as the ticker's, or it would skip the
+very reads that find a missed uevent or inotify wake. With the ticker
+gone, `tickOnly` and the reuse it allows go with it, unless the check
+of the sysctls needs a pass of its own. A backstop pass on a correct machine writes
 nothing. A backstop pass that writes anything found a bug, and the
 operator reports each write loudly:
 
@@ -199,30 +217,34 @@ insurance against a bug that drops a requeue.
 
 ## The ticker
 
-The ticker and its arm in the `select` are deleted. Two things the
-ticker does in milestone 76 move to the retry timer first:
+The ticker and its arm in the `select` are deleted. A facts watch that
+dies no longer opens again on a tick: milestone 77 made it end the
+operator, the same as the uevent listener and the hosts watch, so that
+job needs no new home. One thing the ticker does moves to the retry
+timer first:
 
-- A facts watch whose channel closed opens again on a tick today. It
-  must record a transient failure instead, so the retry timer opens it
-  again at the transient pace and cannot run passes back to back.
-  Without that record, a dead facts watch never opens again.
 - A lasting failure that a person fixes outside the `Machine`, such
   as a `403` that an RBAC grant fixes, waits up to five minutes for
   its next try once no tick comes sooner. Decide whether a `403` and
   a `422` deserve a lower ceiling than a missing kernel parameter. The comments that describe the ticker or its
 cadence change with it:
 
-- `main.go` and the head of `dra.go`;
+- `main.go`, `loop.go`, and `machineevents.go`, where milestone 77
+  describes the tick-only pass;
 - `kubernetes/heartbeat.go`, `kubernetes/apiclient.go`, and
   `kubernetes/resourceslices.go`;
 - `fetch.go`, `release.go`, `watches.go`, `reconcile.go`,
-  `ownstatus.go`, `hosts.go`, and `drain.go`;
+  `ownstatus.go`, and `drain.go`;
 - `cluster-operator/main.go`, where it describes the machine
   operators' cadence.
 
 The sysctls reference page (`docs/content/docs/reference/sysctls.md`)
 says the operator applies the values on every pass, about every ten
-seconds. The page changes to describe the check every ten seconds.
+seconds. The page changes to describe the check every ten seconds. The
+check can compare against `status.sysctls` because milestone 77 made a
+pass apply an overridden name once, with the spec's value. Before
+that, a pass wrote the OS default and then the spec's value, and the
+kernel held the default for a moment on every pass.
 
 ## Tests
 

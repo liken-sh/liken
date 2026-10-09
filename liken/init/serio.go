@@ -38,6 +38,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/liken-sh/liken/liken/hardware"
 	"github.com/liken-sh/liken/liken/machine"
 )
 
@@ -159,12 +160,12 @@ func waitForSerioWork(ctx context.Context, uevents, nudge <-chan struct{}, retry
 	select {
 	case <-ctx.Done():
 	case <-nudge:
-		settle(ctx, uevents, serioQuiet, 5*time.Second)
+		hardware.Settle(ctx, uevents, serioQuiet, 5*time.Second)
 	case _, ok := <-uevents:
 		if !ok {
 			return false
 		}
-		settle(ctx, uevents, serioQuiet, 5*time.Second)
+		hardware.Settle(ctx, uevents, serioQuiet, 5*time.Second)
 	case <-retry:
 	}
 	return true

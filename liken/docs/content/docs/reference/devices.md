@@ -41,13 +41,19 @@ Each node publishes one `ResourceSlice`, with the name
     kubectl get resourceslices
     kubectl get resourceslice <node>-liken.sh -o yaml
 
-A device on the PCI bus or the USB bus appears in the slice when
-these three conditions are true:
+The node considers every device on the PCI bus and the USB bus, and
+every device on the board that owns a device node. A board device is
+one that the firmware describes and no bus enumerates: a firmware
+TPM, a laptop's own keyboard behind the i8042 controller, the ACPI
+power button, or a serial port on the board. A device appears in the
+slice when these three conditions are true:
 
 1. **A driver is bound to it.** Hardware with no driver can supply
    nothing, so it goes in the machine's unclaimed report instead. To
    move a device from one report to the other, declare its module in
-   the Machine's `spec.modules`.
+   the Machine's `spec.modules`. A USB device that no driver binds at
+   all is the exception, because a program drives it through libusb.
+   See [USB devices with no kernel driver](#usb-devices-with-no-kernel-driver).
 2. **A claim on it supplies something.** The device's sysfs subtree
    must contain device nodes. A network card is hardware, but it has
    nothing to give a pod, so it never appears. A Bluetooth adapter is
@@ -59,8 +65,13 @@ these three conditions are true:
    disk belongs to the machine, through a storage role, or to the
    workloads, through a claim, but never to both.
 
-One node is withheld from every device: the tty of a serial line
-that a `spec.serio` entry matches. The machine holds that line
+The machine holds three kinds of node, and no claim receives them.
+The console, which the kernel lists in
+`/sys/class/tty/console/active`, carries the boot and the kernel's
+messages. `/dev/rtc0` is the clock that init writes the system time
+into, and the kernel lets one process at a time open it. A device
+whose only nodes these are does not appear. The third is the tty of a
+serial line that a `spec.serio` entry matches. The machine holds that line
 attached to the kernel's serio layer, and a pod that received the tty
 could end the attachment under every other claim. See
 [Serial-line adapters](#serial-line-adapters).
@@ -73,10 +84,21 @@ The slice does not list the bus structure. Hubs, PCIe ports, and the
 USB core's own devices are the structure that peripherals attach to,
 not peripherals.
 
+The node walks its devices again when the kernel sends a uevent for a
+device that arrives, leaves, or changes its driver. The node waits for
+one second with no further uevent, so that the dozen uevents of one
+USB device make one walk, and then writes the slice. So a device
+reaches the slice about a second after the kernel reports it. The
+uevents for the virtual network devices that pods add and remove wake
+no walk.
+
 ## Device names
 
-A device's name is its bus and its address, with dashes in place of
-the punctuation: `pci-0000-00-02-0`, `usb-2-1-1-0`.
+A device's name is its bus and its address, in lowercase, with dashes
+in place of the punctuation: `pci-0000-00-02-0`, `usb-2-1-1-0`. A
+board device's address is the name the firmware gives it, so a
+firmware TPM is `platform-msft0101-00`. A name stops at 63
+characters, the limit of a DNS label.
 
 The address gives the slot, not the unit. If you replace a dongle
 with an identical dongle in the same port, the device name does not
@@ -97,8 +119,8 @@ correct result.
 
 | Attribute | Type | What it is |
 |---|---|---|
-| `bus` | string | `pci` or `usb` |
-| `address` | string | the device's address on that bus: `0000:00:02.0` on PCI, the port path on USB. Every device `liken` publishes for one physical device has the same address |
+| `bus` | string | `pci` or `usb`, or for a board device, the bus the kernel registered it on, such as `platform` |
+| `address` | string | the device's address on that bus: `0000:00:02.0` on PCI, the port path on USB, and the firmware's name for a board device, such as `MSFT0101:00`. Every device `liken` publishes for one physical device has the same address |
 | `driver` | string | the name of the bound driver, such as `i915` |
 | `class` | string | the type of device, in one word: `display`, `multimedia`, `serial-bus` |
 | `classCode` | string | the full class code that the bus published: six hex digits on PCI, two on USB |
@@ -287,6 +309,29 @@ interface with a driver, each interface publishes as its own device,
 and each one delivers the same usbfs node. A pod that holds one of
 these claims can communicate with the whole device.
 
+### USB devices with no kernel driver
+
+Some USB devices have no kernel driver, because the vendor's driver is
+a program that uses libusb. ZWO's astronomy cameras, smart card
+readers that `pcscd` serves, and many software-defined radios are this
+kind. When no interface of a USB device has a driver, the device
+publishes whole, with the name of its port path, such as `usb-1-2`.
+A claim on it delivers the device's usbfs node, and nothing else. The
+`class` and `classCode` attributes come from the device's first
+interface, so a DeviceClass can select a smart card reader by
+`classCode == "0b"`. The device is exclusive.
+
+A device with a driver on any interface does not publish whole. Its
+driven interfaces publish as their own devices, each with the usbfs
+node, and a claim on the whole device would hand the same hardware to
+a second workload. A device leaves the slice while a program holds one
+of its interfaces, because the kernel then shows `usbfs` as that
+interface's driver, and it returns when the program lets go.
+
+A device whose kernel module is not loaded yet also publishes whole,
+until the module binds an interface. Then the driven interface
+publishes in its place.
+
 ### Bluetooth adapters
 
 A claim on a Bluetooth adapter delivers the adapter's usbfs node,
@@ -429,8 +474,9 @@ pod.
 
 ## Hardware that is not published
 
-You cannot claim hardware that has no driver bound to it. `liken` shows
-this hardware in two other places:
+You cannot claim hardware that has no driver bound to it, except a
+whole USB device with no driver on any interface. `liken` shows this
+hardware in two other places:
 
 * The Machine's status lists it as unclaimed hardware, with the
   modules that can drive it.

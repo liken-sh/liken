@@ -5,17 +5,21 @@ package main
 //
 // The core of every operator is a level-triggered loop. Every pass
 // reconciles from the current state as it is, never from the event
-// that woke it, so missing one wake can never matter. Four things wake
+// that woke it, so missing one wake can never matter. Five things wake
 // it. The Kubernetes watches wake the loop when an object this machine
 // acts on changes, so a conductor's grant or a person's edit is acted
 // on at once (watches.go names each watch and what wakes it). The facts
 // watch wakes the loop when init publishes a change under
 // /run/liken/facts, so a fresh fact like a time sync reaches status
-// without waiting on a timer. The retry timer wakes the loop when the
-// last pass left a step unfinished, or when a step asked to run again
-// at a set time (retry.go). The ticker wakes the loop on a fixed
-// cadence. It renews the heartbeat lease, and it catches the changes
-// that no watch reports (main.go names them at the ticker).
+// without waiting on a timer. The uevent listener and the hosts watch
+// wake the loop when a device or /etc/hosts changes on the machine
+// (machineevents.go). The retry timer wakes the loop when the last
+// pass left a step unfinished, or when a step asked to run again at a
+// set time (retry.go). The ticker wakes the loop on a fixed cadence. It
+// renews the heartbeat lease, and it catches the changes that no event
+// reports (main.go names them at the ticker). A pass that only the
+// ticker woke reads neither sysfs nor /etc/hosts, because both send an
+// event for every change (machineevents.go).
 //
 // The wake channel has one slot, so a burst of changes (the
 // conductor's grant, the sweeper's verdict, this operator's own
@@ -52,6 +56,12 @@ type loop struct {
 	// wakes carries the watches' wakes.
 	wakes <-chan struct{}
 
+	// uevents and hosts are the machine's readers (machineevents.go),
+	// opened before the loop starts. A nil channel is a reader that
+	// did not open, and the loop runs without it.
+	uevents <-chan struct{}
+	hosts   <-chan struct{}
+
 	// ticks is the ticker's channel (main).
 	ticks <-chan time.Time
 
@@ -63,17 +73,41 @@ type loop struct {
 }
 
 // run runs passes until ctx ends, starting from current, the Machine
-// that main read or created.
-func (l *loop) run(ctx context.Context, current *machine.Machine) {
+// that main read or created. It answers an error when a reader stops
+// or the facts watch cannot open, and main ends the process on it
+// (machineevents.go gives the reason).
+func (l *loop) run(ctx context.Context, current *machine.Machine) error {
 	// The facts watch turns init's writes into wakes. inotify does not
 	// recurse, so the watch reconciles its set with the tree before
-	// every read (Sync, below). A watch that cannot start is not fatal:
-	// the tree may not exist yet this early, so the operator logs the
-	// error, runs on the ticker alone, and retries the watch on a later
-	// ticker pass. The cost of a missing watch is latency, never
-	// correctness.
-	factsWatch := l.watchFacts(ctx)
+	// every read (Sync, below). init publishes the facts before it
+	// writes /run/liken/machine.yaml and before it starts k3s, and
+	// main exits when machine.yaml is missing, so the tree exists by
+	// now, and a watch that cannot open means something is wrong with
+	// the machine.
+	factsWatch, err := l.watchFactsTree(ctx)
+	if err != nil {
+		return fmt.Errorf("watching the facts tree: %w", err)
+	}
 
+	// The relays turn the machine's events into wakes on a channel of
+	// their own, which the select below reads beside the watches'.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	machineWakes := make(chan struct{}, 1)
+	stopped := make(chan error, 2)
+	if l.uevents != nil {
+		go func() {
+			stopped <- relayStopped("the uevent listener", relay(ctx, l.uevents, machineWakes, settleEvents))
+		}()
+	}
+	if l.hosts != nil {
+		go func() { stopped <- relayStopped("the hosts watch", relay(ctx, l.hosts, machineWakes, settleEvents)) }()
+	}
+
+	if l.objects.local == nil {
+		l.objects.local = &localReads{}
+	}
+	tickOnly := false
 	var retry *time.Timer
 	for {
 		// Sync before the read closes the window between a new subtree
@@ -82,17 +116,12 @@ func (l *loop) run(ctx context.Context, current *machine.Machine) {
 		//
 		// A watch whose channel closed has a closed descriptor, and a
 		// Sync on it would add watches to a descriptor number the
-		// process may have given to something else since. So a closed
-		// channel drops the watch here, and the select below never sees
-		// it.
-		if factsWatch != nil && watchStopped(factsWatch) {
-			fmt.Fprintln(os.Stderr, "the facts watch stopped; watching again on the next tick")
-			factsWatch = nil
+		// process may have given to something else since.
+		if watchStopped(factsWatch) {
+			return errFactsStopped
 		}
-		if factsWatch != nil {
-			if err := factsWatch.sync(); err != nil {
-				fmt.Fprintf(os.Stderr, "syncing the facts watch: %v\n", err)
-			}
+		if err := factsWatch.sync(); err != nil {
+			fmt.Fprintf(os.Stderr, "syncing the facts watch: %v\n", err)
 		}
 		// Each pass starts from the newest copy of this machine's
 		// object. Status writes change resourceVersion, and
@@ -112,6 +141,7 @@ func (l *loop) run(ctx context.Context, current *machine.Machine) {
 		} else if errors.Is(err, apiclient.ErrNotFound) {
 			renewing = nil
 		}
+		l.objects.local.tickOnly = tickOnly
 		started := time.Now()
 		err := reconcile(l.objects, current, l.clusterName, l.fetcher, renewing, l.layer, out)
 		l.operator.ObserveReconcile(machineKind, time.Since(started), err)
@@ -132,34 +162,28 @@ func (l *loop) run(ctx context.Context, current *machine.Machine) {
 			}
 		}
 
+		tickOnly = false
 		select {
 		case <-ctx.Done():
 			if retry != nil {
 				retry.Stop()
 			}
-			return
+			return nil
+		case err := <-stopped:
+			if err != nil {
+				return err
+			}
 		case <-l.wakes:
+		case <-machineWakes:
 		case <-retryC:
-		case _, ok := <-factsWake(factsWatch):
+		case _, ok := <-factsWatch.wake:
 			// A closed channel means the watch died, and init's writes
-			// since then reached nobody. The pass after this select
-			// reads the whole tree, and the next tick opens the watch
-			// again. The tick sets the pace of the reopens, so a watch
-			// that dies the moment it opens costs one pass every ten
-			// seconds, not a pass after every death.
+			// since then reach nobody.
 			if !ok {
-				fmt.Fprintln(os.Stderr, "the facts watch stopped; watching again on the next tick")
-				factsWatch = nil
+				return errFactsStopped
 			}
 		case <-l.ticks:
-			// A watch that failed to start, or died, gets another try
-			// here. Its error was logged when it first failed, so a
-			// tree that stays missing logs nothing on each tick.
-			if factsWatch == nil {
-				if w, err := l.watchFactsTree(ctx); err == nil {
-					factsWatch = w
-				}
-			}
+			tickOnly = true
 		}
 	}
 }
@@ -169,6 +193,19 @@ func (l *loop) run(ctx context.Context, current *machine.Machine) {
 type factsWatch struct {
 	wake <-chan struct{}
 	sync func() error
+}
+
+// errFactsStopped ends the loop when the facts watch's channel
+// closes.
+var errFactsStopped = errors.New("the facts watch stopped")
+
+// relayStopped names the reader in a relay's error, and passes the nil
+// of a relay whose context ended.
+func relayStopped(reader string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", reader, err)
 }
 
 // watchStopped answers whether the facts watch's channel is closed. A
@@ -181,17 +218,6 @@ func watchStopped(w *factsWatch) bool {
 	default:
 		return false
 	}
-}
-
-// watchFacts starts the facts watch, or logs why it cannot and
-// answers nil.
-func (l *loop) watchFacts(ctx context.Context) *factsWatch {
-	w, err := l.watchFactsTree(ctx)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "watching the facts tree: %v\n", err)
-		return nil
-	}
-	return w
 }
 
 // describeUnfinished names the steps a pass did not finish, with the
@@ -209,15 +235,4 @@ func describeUnfinished(failures []passFailure) string {
 		parts = append(parts, fmt.Sprintf("and %d more", len(failures)-named))
 	}
 	return strings.Join(parts, "; ")
-}
-
-// factsWake returns the facts watch's wake channel, or a nil channel
-// when there is no watch. A receive on a nil channel blocks forever, so
-// the select arm simply never fires while the watch is down, and the
-// ticker drives the passes on its own.
-func factsWake(w *factsWatch) <-chan struct{} {
-	if w == nil {
-		return nil
-	}
-	return w.wake
 }

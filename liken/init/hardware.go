@@ -112,7 +112,7 @@ func watchHardware(catalog *hardware.Catalog, tree machine.FactsTree, last []mac
 			// One plugged-in device produces a burst of uevents (the lab
 			// measured eleven for one USB stick). This code waits for
 			// the burst to finish rather than walking once per event.
-			settle(ctx, uevents, time.Second, 5*time.Second)
+			hardware.Settle(ctx, uevents, time.Second, 5*time.Second)
 		}
 	}
 }
@@ -128,42 +128,6 @@ var listenForUevents = hardware.ListenForUevents
 // listener and walks sysfs again before it waits, so a change made
 // while nothing listened is still reported.
 var errUeventsStopped = errors.New("the uevent listener stopped")
-
-// settle drains further uevent signals until quiet lasts a full
-// interval, so a burst of arrivals becomes one walk, but only up to
-// a ceiling. Waiting for true silence does not work on this machine.
-// A node running Kubernetes emits uevents continuously while
-// containers start and stop (every veth pair and overlay device
-// announces itself). A settle that insists on quiet can block for
-// minutes, which is exactly the staleness that the watch exists to
-// prevent. The lab observed this blocking a hot-plugged disk's report
-// for minutes because of an unrelated crash-looping pod. Walks are
-// cheap and idempotent, so when the stream will not go quiet, walking
-// anyway is the correct move. Anything that changes during the walk
-// sends another uevent signal. A closed channel means the listener
-// stopped, so the wait ends at once, and the caller's next receive
-// finds the close and opens the listener again.
-func settle(ctx context.Context, uevents <-chan struct{}, quiet, ceiling time.Duration) {
-	deadline := time.NewTimer(ceiling)
-	defer deadline.Stop()
-	timer := time.NewTimer(quiet)
-	defer timer.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case _, ok := <-uevents:
-			if !ok {
-				return
-			}
-			timer.Reset(quiet)
-		case <-timer.C:
-			return
-		case <-deadline.C:
-			return
-		}
-	}
-}
 
 // hardwareTransitions describes what changed between two walks, in
 // the same style as the rest of the boot's console report. An entry

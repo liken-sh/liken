@@ -7,9 +7,12 @@ package main
 // k3s starts and every boot proves the cold-start order on its own.
 // This file is the second writer: the operator reconciles the same
 // file on every pass, so a later edit lands within one reconcile
-// pass, with no reboot. The two writers share one renderer,
-// machine.HostsFile, so they can only ever produce one shape of the
-// file.
+// pass, with no reboot. When another process rewrites the file, the
+// inotify watch on it wakes a pass, and the pass writes the entries
+// back (machineevents.go). The pass's own write wakes one more pass,
+// which finds the file converged and writes nothing. The two writers
+// share one renderer, machine.HostsFile, so they can only ever produce
+// one shape of the file.
 
 import (
 	"errors"

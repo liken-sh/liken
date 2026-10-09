@@ -7,10 +7,15 @@ package main
 // Each test has a case that refuses its counterexample.
 
 import (
+	"fmt"
 	"maps"
+	"net/http"
 	"testing"
 
 	"github.com/liken-sh/liken/liken/hardware"
+	"github.com/liken-sh/liken/liken/kubernetes"
+	"github.com/liken-sh/liken/liken/machine"
+	"github.com/liken-sh/liken/liken/metrics"
 )
 
 // delivering builds an inspect function that reports the same
@@ -428,5 +433,71 @@ func TestInventoryNamesAreValidDNSLabels(t *testing.T) {
 	}
 	if devices[1].Name != "usb-2-1-4-1-0" {
 		t.Errorf("name = %q, want lowercased with separators dashed", devices[1].Name)
+	}
+}
+
+// A board device takes its name from the firmware, which uses
+// characters a DNS label cannot hold.
+func TestInventoryNamesBoardDevicesAsDNSLabels(t *testing.T) {
+	cases := []struct {
+		device hardware.Device
+		want   string
+	}{
+		{hardware.Device{Bus: "platform", Address: "MSFT0101:00"}, "platform-msft0101-00"},
+		{hardware.Device{Bus: "platform", Address: "acpi.video_bus.0"}, "platform-acpi-video-bus-0"},
+		{hardware.Device{Bus: "platform", Address: "intel_pmc_core.0"}, "platform-intel-pmc-core-0"},
+		{hardware.Device{Bus: "platform", Address: "a-firmware-name-long-enough-to-run-past-the-limit-of-one-label"}, "platform-a-firmware-name-long-enough-to-run-past-the-limit-of-o"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.device.Address, func(t *testing.T) {
+			if got := deviceName(tc.device); got != tc.want {
+				t.Errorf("deviceName = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// A TPM on the platform bus publishes like any device: driven, with
+// nodes to deliver, and exclusive, because nothing has examined
+// whether two workloads can share one.
+func TestInventoryPublishesABoardTPM(t *testing.T) {
+	devices := inventoryDevices([]hardware.Device{
+		{Bus: "platform", Address: "MSFT0101:00", Driver: "tpm_crb_acpi", Modalias: "acpi:MSFT0101:"},
+	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{
+		{Path: "/dev/tpm0", Subsystem: "tpm"},
+		{Path: "/dev/tpmrm0", Subsystem: "tpmrm"},
+	}}), nil, nil)
+
+	if len(devices) != 1 || devices[0].Name != "platform-msft0101-00" {
+		t.Fatalf("devices = %+v, want the TPM", devices)
+	}
+	if got := devices[0].Attributes["driver"].String; got == nil || *got != "tpm_crb_acpi" {
+		t.Errorf("driver = %v, want tpm_crb_acpi", got)
+	}
+	if devices[0].AllowMultipleAllocations != nil {
+		t.Error("a device nobody examined publishes exclusive")
+	}
+}
+
+// One slice holds at most 128 devices. A machine with more publishes
+// the first 128 in name order and drops the rest.
+func TestTheInventoryDropsTheDevicesPastOneSlice(t *testing.T) {
+	isolatePass(t)
+	for i := range maxSliceDevices + 1 {
+		plugInSoundCardAt(t, draSysfsRoot, fmt.Sprintf("0000:%02x:00.0", i+1), i)
+	}
+	client, _ := passClients(t, newPassAPI())
+	o := metrics.NewOperator(component, machine.Version, []string{machineKind}, watchKinds)
+	node := &nodeObject{}
+	node.Metadata.Name, node.Metadata.UID = "node-1", "uid-node-1"
+
+	err := publishDeviceInventory(&reader{client: client}, node, nil, nil, newMachineMetrics(o, &fetcher{}))
+
+	slice := &kubernetes.ResourceSlice{}
+	if readErr := client.RequestJSON(http.MethodGet, kubernetes.ResourceSlicesPath+"/node-1-liken.sh", nil, slice); err != nil || readErr != nil {
+		t.Fatalf("publishing: %v; reading: %v", err, readErr)
+	}
+	if got := len(slice.Spec.Devices); got != maxSliceDevices || slice.Spec.Devices[0].Name != "pci-0000-01-00-0" {
+		t.Errorf("the slice holds %d devices starting at %s, want %d starting at pci-0000-01-00-0", got, slice.Spec.Devices[0].Name, maxSliceDevices)
 	}
 }

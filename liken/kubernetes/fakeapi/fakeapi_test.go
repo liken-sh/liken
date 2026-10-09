@@ -54,6 +54,7 @@ func TestTheFakeAnswersReadsAndWrites(t *testing.T) {
 		{"an unknown collection", http.MethodGet, "/api/v1/pods/x", "", http.StatusNotFound},
 		{"a create", http.MethodPost, "/api/v1/nodes", `{"metadata":{"name":"node-2"}}`, http.StatusCreated},
 		{"an update", http.MethodPut, "/api/v1/nodes/node-1/status", `{"metadata":{"name":"node-1"}}`, http.StatusOK},
+		{"a delete", http.MethodDelete, "/api/v1/nodes/node-1", "", http.StatusOK},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -69,7 +70,8 @@ func TestTheFakeAnswersReadsAndWrites(t *testing.T) {
 }
 
 // A write takes the next resourceVersion, and an open watch receives
-// it after the initial events and the bookmark that ends them. A held
+// it after the initial events and the bookmark that ends them. A delete
+// sends DELETED and removes the object. A held
 // write sends nothing until the release.
 func TestAWatchReceivesEachWrite(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -112,6 +114,16 @@ func TestAWatchReceivesEachWrite(t *testing.T) {
 		if len(fake.Requests()) != 0 {
 			t.Error("Forget left requests behind")
 		}
+
+		request(t, client, http.MethodDelete, "/api/v1/nodes/node-1", "")
+		if got := sent(); !slices.Equal(got, []string{"DELETED"}) {
+			t.Errorf("events after the delete = %q, want DELETED", got)
+		}
+		if got := request(t, client, http.MethodGet, "/api/v1/nodes/node-1", "").StatusCode; got != http.StatusNotFound {
+			t.Errorf("a read after the delete answered %d, want 404", got)
+		}
+		request(t, client, http.MethodPost, "/api/v1/nodes", `{"metadata":{"name":"node-1"}}`)
+		sent()
 
 		fake.Hold()
 		request(t, client, http.MethodPut, "/api/v1/nodes/node-1", `{"metadata":{"name":"node-1"}}`)

@@ -154,6 +154,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if item["metadata"].(map[string]any)["name"] != name {
 				continue
 			}
+			if r.Method == http.MethodDelete {
+				s.store(collection, "DELETED", item)
+				c.Items = append(c.Items[:i], c.Items[i+1:]...)
+				_ = json.NewEncoder(w).Encode(item)
+				return
+			}
 			if r.Method == http.MethodPut {
 				var written map[string]any
 				_ = json.NewDecoder(r.Body).Decode(&written)

@@ -84,62 +84,6 @@ func TestTransitionsNarrateARemoval(t *testing.T) {
 	}
 }
 
-// noisyChannel sends signals continuously, faster than any quiet
-// interval, until the test ends. This is the pattern of a node whose
-// containers are starting and stopping constantly.
-func noisyChannel(t *testing.T) chan struct{} {
-	t.Helper()
-	ch := make(chan struct{}, 1)
-	done := make(chan struct{})
-	t.Cleanup(func() { <-done })
-	go func() {
-		defer close(done)
-		for {
-			select {
-			case <-t.Context().Done():
-				return
-			case ch <- struct{}{}:
-			default:
-			}
-			time.Sleep(5 * time.Millisecond)
-		}
-	}()
-	return ch
-}
-
-func TestSettleReturnsAtTheCeilingUnderConstantNoise(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		started := time.Now()
-		settle(t.Context(), noisyChannel(t), time.Second, 5*time.Second)
-		if elapsed := time.Since(started); elapsed != 5*time.Second {
-			t.Errorf("settle returned after %s, want the 5s ceiling", elapsed)
-		}
-	})
-}
-
-func TestSettleReturnsAtOnceWhenTheListenerStops(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		ch := make(chan struct{})
-		close(ch)
-		started := time.Now()
-		settle(t.Context(), ch, time.Second, 5*time.Second)
-		if elapsed := time.Since(started); elapsed != 0 {
-			t.Errorf("settle returned after %s, want at once for a closed channel", elapsed)
-		}
-	})
-}
-
-func TestSettleReturnsAtQuietWhenTheStreamStops(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		ch := make(chan struct{}, 1)
-		started := time.Now()
-		settle(t.Context(), ch, time.Second, 5*time.Second)
-		if elapsed := time.Since(started); elapsed != time.Second {
-			t.Errorf("settle returned after %s, want the 1s quiet interval", elapsed)
-		}
-	})
-}
-
 func TestTransitionsAreQuietWhenNothingChanged(t *testing.T) {
 	lines := hardwareTransitions([]machine.UnclaimedDevice{stick}, []machine.UnclaimedDevice{stick}, nil)
 	if lines != nil {
@@ -339,21 +283,6 @@ func TestUnclaimedEqualComparesEveryField(t *testing.T) {
 			}
 		})
 	}
-}
-
-// settle returns when its context ends, even while the stream is still
-// noisy, so a component that is shutting down does not wait out the
-// ceiling.
-func TestSettleReturnsWhenTheContextEnds(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
-		defer cancel()
-		started := time.Now()
-		settle(ctx, noisyChannel(t), time.Second, 5*time.Second)
-		if elapsed := time.Since(started); elapsed != 2*time.Second {
-			t.Errorf("settle returned after %s, want 2s, when the context ended", elapsed)
-		}
-	})
 }
 
 // An entry that leaves the unclaimed list is narrated by what made it

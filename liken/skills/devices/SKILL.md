@@ -83,8 +83,9 @@ All three have the same `address`, because they are one card. A claim
 uses that to ask for halves of the same GPU. See
 [Two requests, one card](#two-requests-one-card).
 
-If the hardware you expect is not in the list, no driver is bound to
-it. Look at the hardware the machine reports that it cannot drive:
+If the hardware you expect is not in the list, usually no driver is
+bound to it. Look at the hardware the machine reports that it cannot
+drive:
 
     kubectl get machine <name> -o jsonpath='{.status.hardware.unclaimed}'
 
@@ -353,8 +354,10 @@ If a pod stays in `Pending` with a claim that is not allocated, then
 usually no device matched the claim. Do these checks in this order:
 
 1. `kubectl get resourceslices -o yaml` shows if the device is
-   published. If the device is not there, no driver is bound to it:
-   go back to step 2.
+   published. If the device is not there, usually no driver is bound
+   to it: go back to step 2. The
+   [device reference](https://liken.sh/docs/reference/devices/#what-a-node-publishes)
+   lists every reason a device stays out of the slice.
 2. Compare your selector with the device's attributes. A selector that
    reads an attribute the device does not have errors on that device
    and aborts the allocation, so it never matches. Guard the reference

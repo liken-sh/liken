@@ -397,9 +397,12 @@ spec:
                         resolves a name from the host's own files,
                         such as the NFS mount helper, an answer that
                         does not depend on cluster DNS being up. Init
-                        applies these entries at boot, and the liken
-                        operator applies them again on every pass, so
-                        an edit here takes effect without a reboot.
+                        applies these entries at boot. The liken
+                        operator applies them again when this field
+                        changes, so an edit here takes effect without a
+                        reboot, and when another process writes the
+                        hosts file, so the entries return within about
+                        a second.
                         status.hostEntries reports the entries that the
                         hosts file contains, read back after each
                         pass.

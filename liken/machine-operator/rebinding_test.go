@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/liken-sh/liken/liken/hardware"
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
 )
 
@@ -169,5 +170,21 @@ func TestUnprepareSucceedsWhenTheRepairFails(t *testing.T) {
 				t.Error("the spec file must be gone")
 			}
 		})
+	}
+}
+
+// A spec that cannot be read binds nothing, and the unprepare still
+// answers, so the kubelet can delete the pod.
+func TestUnprepareWithAnUnreadableSpecBindsNothing(t *testing.T) {
+	isolatePass(t)
+	if err := os.Mkdir(cdiSpecPath("claim-1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	walked := false
+
+	rebindClaimDevices("claim-1", func() map[string]hardware.Device { walked = true; return nil })
+
+	if walked {
+		t.Error("the repair walked sysfs for a spec it could not read")
 	}
 }

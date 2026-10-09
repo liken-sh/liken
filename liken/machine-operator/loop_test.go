@@ -2,7 +2,7 @@ package main
 
 // These tests run the reconcile loop in a synctest bubble with no
 // ticker, so every pass after the first comes from a wake the test can
-// name: the retry timer, or a facts watch that died.
+// name: the retry timer, a watch, or one of the machine's readers.
 
 import (
 	"context"
@@ -173,47 +173,6 @@ func (h *countingMachineReads) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	h.next.ServeHTTP(w, r)
 }
 
-// A facts watch that dies closes its channel. The loop runs a pass,
-// because init's writes since the close reached nobody, and opens the
-// watch again on the next tick, so a watch that dies the moment it
-// opens cannot run passes back to back.
-func TestALoopWatchesTheFactsAgainOnTheTickAfterTheWatchDies(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		isolatePass(t)
-		seedSysctls(t)
-		dying := &fakeFactsWatch{wake: make(chan struct{})}
-		next := &fakeFactsWatch{wake: make(chan struct{}, 1)}
-		api := &countingMachineReads{next: newPassAPI()}
-		l, opened := testLoop(t, api, dying, next)
-		ticks := make(chan time.Time)
-		l.ticks = ticks
-		current, err := l.objects.machine("node-1")
-		if err != nil {
-			t.Fatal(err)
-		}
-		ctx, cancel := context.WithCancel(t.Context())
-		done := make(chan struct{})
-		go func() {
-			l.run(ctx, current)
-			close(done)
-		}()
-
-		synctest.Wait()
-		close(dying.wake)
-		synctest.Wait()
-		openedBeforeTick, passesBeforeTick := opened.Load(), api.reads.Load()
-		ticks <- time.Now()
-		synctest.Wait()
-		cancel()
-		<-done
-
-		if openedBeforeTick != 1 || passesBeforeTick-1 != 2 || opened.Load() != 2 || next.syncs.Load() != 1 {
-			t.Errorf("before the tick: opened %d, %d passes; after: opened %d, %d passes on the new watch; want 1, 2, 2, 1",
-				openedBeforeTick, passesBeforeTick-1, opened.Load(), next.syncs.Load())
-		}
-	})
-}
-
 // goneMachine answers node-1's Machine once, for the test's own first
 // read, and 404 after that, as the API server does once a person
 // deletes the Machine. It counts the writes to the heartbeat lease.
@@ -248,51 +207,6 @@ func TestALoopRenewsNoLeaseForAMachineThatIsGone(t *testing.T) {
 
 		if writes := api.leaseWrites.Load(); writes != 0 {
 			t.Errorf("the loop wrote the lease %d times for a Machine that is gone, want none", writes)
-		}
-	})
-}
-
-// A facts watch that cannot open leaves the loop running on its other
-// wakes, and the next tick tries the watch again. The tick runs a pass
-// of its own, so the watch sees the tick's pass and the wake's.
-func TestALoopWhoseFactsWatchCannotOpenTriesAgainOnTheTick(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		isolatePass(t)
-		seedSysctls(t)
-		next := &fakeFactsWatch{wake: make(chan struct{}, 1)}
-		l, _ := testLoop(t, newPassAPI(), next)
-		var attempts atomic.Int64
-		l.watchFactsTree = func(context.Context) (*factsWatch, error) {
-			if attempts.Add(1) == 1 {
-				return nil, os.ErrPermission
-			}
-			return next.watch(), nil
-		}
-		ticks := make(chan time.Time)
-		l.ticks = ticks
-		wakes := make(chan struct{}, 1)
-		l.wakes = wakes
-		current, err := l.objects.machine("node-1")
-		if err != nil {
-			t.Fatal(err)
-		}
-		ctx, cancel := context.WithCancel(t.Context())
-		done := make(chan struct{})
-		go func() {
-			l.run(ctx, current)
-			close(done)
-		}()
-
-		synctest.Wait()
-		ticks <- time.Now()
-		synctest.Wait()
-		wakes <- struct{}{}
-		synctest.Wait()
-		cancel()
-		<-done
-
-		if attempts.Load() != 2 || next.syncs.Load() != 2 {
-			t.Errorf("%d attempts to watch and %d passes on the watch, want 2 and 2", attempts.Load(), next.syncs.Load())
 		}
 	})
 }

@@ -123,7 +123,9 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	// two can never disagree the way they could if this program
 	// depended on the pod's network namespace carrying the host's UTS
 	// namespace along with it.
-	hostEntries, hostsErr := applyHostEntries(hostsPath, m.Metadata.Name, m.Spec.Network.HostEntries, out)
+	hostEntries, hostsErr := r.local.hostEntries(func() ([]machine.HostEntry, error) {
+		return applyHostEntries(hostsPath, m.Metadata.Name, m.Spec.Network.HostEntries, out)
+	})
 	status.HostEntries = hostEntries
 	status.Conditions = api.SetCondition(status.Conditions,
 		hostEntriesCondition(m.Spec.Network.HostEntries, hostsErr, podStale), now)
@@ -234,18 +236,27 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, hb
 	// The serio list is the spec's and the boot record's together
 	// (dra.go), set here for the DRA plugin as well, so the inventory
 	// and the claims it prepares withhold the same serial lines.
+	//
+	// A pass that only the ticker woke skips the walk, because a
+	// change to sysfs sends a uevent, and the uevent wakes a pass of
+	// its own (machineevents.go).
 	serio := serioInEffect(m.Spec.Serio, facts)
 	setDeclaredSerio(serio)
-	if nodeErr == nil {
-		publishDeviceInventory(r, node, facts, serio, mm)
-	}
+	if r.local.walk() {
+		walked := nodeErr == nil
+		if walked && publishDeviceInventory(r, node, facts, serio, mm) != nil {
+			walked = false
+		}
 
-	// The claims the kubelet already prepared get the same treatment,
-	// because a device that enumerates again moves the nodes a claim
-	// delivers (cdi.go). This runs without a Node, because a prepared
-	// claim is a file on this machine, and containerd reads that file
-	// at every container creation.
-	refreshCDISpecs(draSysfsRoot, out)
+		// The claims the kubelet already prepared get the same
+		// treatment, because a device that enumerates again moves the
+		// nodes a claim delivers (cdi.go). This runs without a Node,
+		// because a prepared claim is a file on this machine, and
+		// containerd reads that file at every container creation.
+		failures := out.failureCount()
+		refreshCDISpecs(draSysfsRoot, out)
+		r.local.walked(walked && out.failureCount() == failures)
+	}
 
 	// Convergence checks whether the cluster's copy of each document
 	// matches what this boot actuated. If not, it stages the

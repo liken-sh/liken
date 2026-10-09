@@ -60,10 +60,22 @@ func TestHardwareChanged(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := hardwareChanged([]byte(tc.datagram)); got != tc.want {
+			event, ok := parseUevent([]byte(tc.datagram))
+			if got := ok && hardwareChanged(event); got != tc.want {
 				t.Errorf("hardwareChanged(%q) = %v, want %v", tc.datagram, got, tc.want)
 			}
 		})
+	}
+}
+
+// parseUevent reads where the event happened, so that a caller's
+// match can drop the events under a path or a subsystem its walk does
+// not read.
+func TestParseUeventReadsTheDevicePathAndSubsystem(t *testing.T) {
+	event, ok := parseUevent([]byte("add@/devices/virtual/net/veth1/queues/rx-0\x00ACTION=add\x00DEVPATH=/devices/virtual/net/veth1/queues/rx-0\x00SUBSYSTEM=queues\x00SEQNUM=4242"))
+	want := Uevent{Action: "add", DevPath: "/devices/virtual/net/veth1/queues/rx-0", Subsystem: "queues"}
+	if !ok || event != want {
+		t.Errorf("parseUevent = %+v, %v, want %+v", event, ok, want)
 	}
 }
 
@@ -143,7 +155,7 @@ func TestReadUeventsSignalsOnChange(t *testing.T) {
 	reader, peer := ueventSocketpair(t)
 	cancelR, cancelW := cancelPipe(t)
 	notify := make(chan struct{}, 1)
-	go readUevents(reader, cancelR, notify)
+	go readUevents(reader, cancelR, nil, notify)
 
 	unix.Write(peer, []byte("add@/devices/pci0000:00/usb1"))
 	awaitSignal(t, notify)
@@ -169,7 +181,7 @@ func TestReadUeventsStopsOnADescriptorThatIsNotOpen(t *testing.T) {
 		const neverOpenedFd = 1 << 20
 		cancelR, cancelW := cancelPipe(t)
 		notify := make(chan struct{}, 1)
-		go readUevents(neverOpenedFd, cancelR, notify)
+		go readUevents(neverOpenedFd, cancelR, nil, notify)
 
 		synctest.Wait()
 
@@ -220,7 +232,7 @@ func erroredSocket(t *testing.T) int {
 func TestReadUeventsWakesOnALostDatagram(t *testing.T) {
 	cancelR, cancelW := cancelPipe(t)
 	notify := make(chan struct{}, 1)
-	go readUevents(erroredSocket(t), cancelR, notify)
+	go readUevents(erroredSocket(t), cancelR, nil, notify)
 
 	awaitSignal(t, notify)
 
@@ -234,10 +246,30 @@ func TestReadUeventsIgnoresUnchanged(t *testing.T) {
 	reader, peer := ueventSocketpair(t)
 	cancelR, cancelW := cancelPipe(t)
 	notify := make(chan struct{}, 1)
-	go readUevents(reader, cancelR, notify)
+	go readUevents(reader, cancelR, nil, notify)
 
 	unix.Write(peer, []byte("change@/devices/virtual/block/loop0"))
 	refuteSignal(t, notify)
+
+	unix.Close(cancelW)
+	unix.Close(peer)
+}
+
+// TestReadUeventsDropsWhatTheMatchRefuses proves the caller's match
+// filters the wakes. The match here refuses the virtual network
+// devices, so the add of a veth pair wakes nothing, and the add of a
+// USB device behind it still wakes the channel.
+func TestReadUeventsDropsWhatTheMatchRefuses(t *testing.T) {
+	reader, peer := ueventSocketpair(t)
+	cancelR, cancelW := cancelPipe(t)
+	notify := make(chan struct{}, 1)
+	notVirtual := func(e Uevent) bool { return !strings.HasPrefix(e.DevPath, "/devices/virtual/") }
+	go readUevents(reader, cancelR, notVirtual, notify)
+
+	unix.Write(peer, []byte("add@/devices/virtual/net/veth1\x00SUBSYSTEM=net"))
+	refuteSignal(t, notify)
+	unix.Write(peer, []byte("add@/devices/pci0000:00/0000:00:03.0/usb1/1-2\x00SUBSYSTEM=usb"))
+	awaitSignal(t, notify)
 
 	unix.Close(cancelW)
 	unix.Close(peer)
@@ -254,7 +286,7 @@ func TestReadUeventsExitsWhenCancelPipeCloses(t *testing.T) {
 	notify := make(chan struct{}, 1)
 	done := make(chan struct{})
 	go func() {
-		readUevents(reader, cancelR, notify)
+		readUevents(reader, cancelR, nil, notify)
 		close(done)
 	}()
 
@@ -281,7 +313,7 @@ func TestReadUeventsExitsWhenCancelPipeCloses(t *testing.T) {
 func TestWatchUeventsStopsAfterCancel(t *testing.T) {
 	reader, peer := ueventSocketpair(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	notify, err := watchUevents(ctx, reader)
+	notify, err := watchUevents(ctx, reader, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

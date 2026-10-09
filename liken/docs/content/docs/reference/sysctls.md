@@ -16,22 +16,20 @@ of files under `/usr/lib/sysctl.d`, and systemd applies them at boot.
 
 ## How the values are applied
 
-Two programs apply kernel settings, and they apply them in the same
-order.
+Two programs apply kernel settings: `liken`'s own values, listed on
+this page, and the values in the machine's
+[`spec.sysctls`](/docs/reference/machine/#spec--sysctls). A name in
+`spec.sysctls` overrides `liken`'s value for that parameter.
 
-1. `liken`'s own values, listed on this page.
-2. The values in the machine's
-   [`spec.sysctls`](/docs/reference/machine/#spec--sysctls).
-
-`init` applies both at boot, before k3s starts. The `liken` operator
-applies both again on every pass, about every ten seconds. Each pass
+`init` applies both at boot, before k3s starts, `liken`'s values first
+and the spec's second. The `liken` operator applies both again on every
+pass, about every ten seconds. Each pass
 reads each parameter first. It writes the value only when the kernel
 reports a different value, and then it reads the value back. So a
 setting that something else on the machine changed returns within one
-pass, without a reboot.
-
-Because `spec.sysctls` is applied second, a name there overrides
-`liken`'s value for that parameter:
+pass, without a reboot. For a name that `spec.sysctls` overrides, the operator applies
+the spec's value alone, so the kernel never holds `liken`'s value for
+it after the boot:
 
 ```yaml
 apiVersion: liken.sh/v1alpha1

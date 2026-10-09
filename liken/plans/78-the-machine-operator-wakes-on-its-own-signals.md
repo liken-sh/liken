@@ -30,12 +30,13 @@ every five to ten minutes with client-go's timeouts, so most reopens
 follow no failure. After a real outage, a pass whose writes failed
 runs again only on the next tick, unless an object changed.
 
-**The `ResourceSlice`.** The slice watch has no handler, so a slice
-that somebody deletes is published again only on the next tick. The
-comment in `watches.go` says the operator is the slice's only writer,
-which is not true: the kubelet deletes a driver's slices when it
-starts and after the plugin unregisters, so a restart of k3s deletes
-this node's slice.
+**The `ResourceSlice`.** Milestone 77 gave the slice watch a handler
+that wakes the loop on a delete and on nothing else, because a pass
+that only the ticker woke no longer walks sysfs. The kubelet deletes a
+driver's slices when it starts and after the plugin unregisters, so a
+restart of k3s deletes this node's slice, and the delete's pass writes
+it again. An update that another writer makes wakes nothing, and the
+next pass that something else wakes writes over it.
 
 ## The design
 
@@ -74,12 +75,11 @@ answers. The upstream DRA slice controller met the same loop
 the fields the server dropped back into the desired state before it
 compares.
 
-So the handler wakes on a delete, and on an update whose
-`resourceVersion` is not the version the operator's own last write
-returned. `WriteResourceSlice` records that version from the server's
-answer, and it compares the desired devices against the devices the
-server returned, so a dropped field does not count as a difference.
-The comment in `watches.go` names the kubelet as the other writer.
+So the handler also wakes on an update whose `resourceVersion` is not
+the version the operator's own last write returned.
+`WriteResourceSlice` records that version from the server's answer,
+and it compares the desired devices against the devices the server
+returned, so a dropped field does not count as a difference.
 
 ## Tests
 
@@ -92,7 +92,8 @@ In a `synctest` bubble with `kubernetes/apiservertest`:
 - A watch that the fake API server refuses and then accepts wakes a
   pass, and that pass reads the kind from the server. A routine reopen
   wakes nothing.
-- A deleted `ResourceSlice` is published again with no tick.
+- An update to the `ResourceSlice` that another writer makes is
+  overwritten with no tick.
 - A fake API server that drops `allowMultipleAllocations` on write
   gets one write, not a loop of writes.
 
