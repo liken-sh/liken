@@ -292,3 +292,26 @@ func TestTheSpecWritesReportTheirFailures(t *testing.T) {
 		t.Errorf("errors = %v, %v, %v; want three", noDirectory, noFile, noRemove)
 	}
 }
+
+// A spec's evdev nodes carry a file mode, and a refresh that reads the
+// spec back finds them equal to the nodes it would write, so a claim on
+// an input device is not rewritten on every pass. The mode is a pointer
+// in the spec, and two pointers to the same mode are not equal.
+func TestAnEvdevNodeReadBackFromItsSpecIsCurrent(t *testing.T) {
+	written := deviceNodes([]string{"/dev/input/event3", "/dev/hidraw0"})
+	raw, err := json.Marshal(written)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var read []cdiDeviceNode
+	if err := json.Unmarshal(raw, &read); err != nil {
+		t.Fatal(err)
+	}
+
+	if !sameDeviceNodes(read, deviceNodes([]string{"/dev/input/event3", "/dev/hidraw0"})) {
+		t.Error("the nodes read back from a spec differ from the same nodes built again")
+	}
+	if sameDeviceNodes(read, deviceNodes([]string{"/dev/input/event4", "/dev/hidraw0"})) {
+		t.Error("nodes for another event device compare equal")
+	}
+}

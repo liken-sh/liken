@@ -110,6 +110,17 @@ func deviceNodes(paths []string) []cdiDeviceNode {
 	return nodes
 }
 
+// sameDeviceNodes answers whether two lists grant the same nodes. A
+// node's FileMode is a pointer, so the comparison reads the mode, not
+// the pointer: a spec read back from its file and the nodes built again
+// for the same devices hold equal modes behind different pointers.
+func sameDeviceNodes(a, b []cdiDeviceNode) bool {
+	return slices.EqualFunc(a, b, func(x, y cdiDeviceNode) bool {
+		sameMode := (x.FileMode == nil) == (y.FileMode == nil) && (x.FileMode == nil || *x.FileMode == *y.FileMode)
+		return x.Path == y.Path && x.Type == y.Type && x.Major == y.Major && x.Minor == y.Minor && sameMode
+	})
+}
+
 // evdevFileMode is the mode the runtime gives a node it creates with
 // mknod. The runtime copies the mode of a host node it can stat, but a
 // node in the evdev range can be absent when the container starts, and
@@ -265,7 +276,7 @@ func refreshCDISpec(sysRoot, claimUID string, byName map[string]hardware.Device,
 			continue
 		}
 		nodes := deviceNodes(published.Nodes)
-		if slices.Equal(nodes, device.ContainerEdits.DeviceNodes) {
+		if sameDeviceNodes(nodes, device.ContainerEdits.DeviceNodes) {
 			continue
 		}
 		spec.Devices[i].ContainerEdits.DeviceNodes = nodes

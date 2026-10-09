@@ -33,7 +33,7 @@ metadata:
     # that use its fields (init/schemarevision.go). Raise it in the
     # same change that changes the schema below; a test holds the two
     # together.
-    liken.sh/schema-revision: "8"
+    liken.sh/schema-revision: "9"
 spec:
   group: liken.sh
   names:
@@ -2843,6 +2843,64 @@ spec:
                                   preference order. The machine uses
                                   them in addition to the
                                   nameservers from a DHCP lease.
+                                x-kubernetes-list-type: atomic
+                                items:
+                                  type: string
+                                  maxLength: 253
+                              wireless:
+                                type: object
+                                description: >-
+                                  The wireless network that the
+                                  manifest declared for this
+                                  interface, as
+                                  spec.network.interfaces[].wireless
+                                  gives it. An absent value means
+                                  the interface is wired.
+                                  status.network.interfaces reports
+                                  what the radio joined.
+                                # A record of what the boot actuated
+                                # carries no default: a default here
+                                # would make the stored record differ
+                                # from the one the machine writes,
+                                # and every write would differ again.
+                                properties:
+                                  ssid:
+                                    type: string
+                                    maxLength: 32
+                                    description: >-
+                                      The network's name that the
+                                      manifest declared.
+                                  security:
+                                    type: string
+                                    maxLength: 16
+                                    description: >-
+                                      How the manifest said to join
+                                      the network: wpa-psk or open.
+                        hostEntries:
+                          type: array
+                          description: >-
+                            The entries for /etc/hosts that the
+                            manifest of this boot declared, as
+                            spec.network.hostEntries gives them.
+                            status.hostEntries reports what the hosts
+                            file holds.
+                          x-kubernetes-list-type: map
+                          x-kubernetes-list-map-keys: [address]
+                          items:
+                            type: object
+                            required: [address, names]
+                            properties:
+                              address:
+                                type: string
+                                maxLength: 64
+                                description: >-
+                                  The address that the manifest
+                                  declared.
+                              names:
+                                type: array
+                                description: >-
+                                  The names that the manifest
+                                  declared for this address.
                                 x-kubernetes-list-type: atomic
                                 items:
                                   type: string
