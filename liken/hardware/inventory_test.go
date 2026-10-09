@@ -175,9 +175,12 @@ func TestBoardDevicesTolerateAMissingTree(t *testing.T) {
 	}
 }
 
-// The inventory's uevent match keeps every event outside
+// The inventory's uevent match keeps every device event outside
 // /devices/virtual/, and under it, only the misc class's. The veth
-// pairs and their queues are what pods starting and stopping send.
+// pairs and their queues are what pods starting and stopping send. A
+// kernel object outside /devices/ is no device at all: an NFS mount
+// adds and removes its RPC clients under /kernel/sunrpc/, and a module
+// that loads announces itself under /module/.
 func TestInventoryEvent(t *testing.T) {
 	cases := []struct {
 		devpath string
@@ -190,6 +193,9 @@ func TestInventoryEvent(t *testing.T) {
 		{"/devices/virtual/net/veth0f1c75eb", false},
 		{"/devices/virtual/net/veth0f1c75eb/queues/rx-0", false},
 		{"/devices/virtual/block/loop3", false},
+		{"/kernel/sunrpc/rpc-clients/clnt-5", false},
+		{"/kernel/sunrpc/xprt-switches/switch-3/xprt-3-tcp", false},
+		{"/module/uhid", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.devpath, func(t *testing.T) {

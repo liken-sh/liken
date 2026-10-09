@@ -75,7 +75,7 @@ func usbDevices(sysRoot string) []Device {
 }
 
 // InventoryEvent reports whether a uevent can change what
-// DiscoverInventory and the delivery walks read. Every path outside
+// DiscoverInventory and the delivery walks read. Every device outside
 // /devices/virtual/ can, because the inventory starts from every node
 // outside it. Under /devices/virtual/ the walks read only the misc
 // class, where /dev/uhid and /dev/uinput appear when their modules
@@ -86,7 +86,17 @@ func usbDevices(sysRoot string) []Device {
 // veth pair, and the pair and each of its queues announce themselves.
 // The lab counted 132 such events in two minutes while seven pods
 // started and four stopped, and nothing else under /devices/virtual/.
+//
+// A path outside /devices/ is a kernel object that is no device, and
+// the walks read none. An NFS mount adds and removes RPC clients under
+// /kernel/sunrpc/: a testbed machine that mounted NFS volumes counted
+// 34 such events in 30 minutes. A module announces itself under
+// /module/ when it loads, and the devices it creates send events of
+// their own.
 func InventoryEvent(event Uevent) bool {
+	if !strings.HasPrefix(event.DevPath, "/devices/") {
+		return false
+	}
 	if !strings.HasPrefix(event.DevPath, "/devices/virtual/") {
 		return true
 	}
