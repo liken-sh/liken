@@ -37,7 +37,17 @@ Status on 2026-10-04:
   check every disk against the storage roles again
   (`machine-operator/protection.go`). A test reproduced the bug before
   the fix: with no facts, the inventory offered a disk that a role
-  held, and prepare delivered `/dev/sda` with no check at all.
+  held, and prepare delivered `/dev/sda` with no check at all. The
+  dev-cluster drill wrote `three` into `node-5`'s
+  `hardware/cpus` fact under a pod that held a USB disk.
+  `FactsPublished` went `False`, the slice dropped the disk and the
+  IDE controller and kept the keyboard and the power button, and the
+  claim's next container failed with `failed to stat CDI host device
+  "/dev/liken.sh/device-withheld"`. When the fact read again, the
+  slice offered the disk and the container started with `/dev/sda`.
+  The same drill put two identical USB sticks on `node-2`, which
+  loads no driver for them: its status reported one unclaimed entry,
+  and every write landed.
 * Built in release 2026.10.09-002: the first item of part four. The CRD
   declares `status.boot.network` in full, and
   `TestTheSchemaDeclaresEveryField` checks every status and spec field

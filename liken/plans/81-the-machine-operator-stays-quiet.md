@@ -128,6 +128,26 @@ Bluetooth game controller that disconnected, a real change.
 * **The machine events.** `hardware.InventoryEvent` keeps only paths
   under `/devices/`.
 
+## What the dev-cluster drill showed
+
+On 2026-10-09, four guests (`node-1` to `node-3` and `node-5`) ran
+commit af8e94aa.
+
+* **The echo.** In the 20 minutes after boot, `node-5` ran 26 `facts`
+  passes, each of which wrote its status, and no `watch` pass.
+* **The time facts.** `node-5` stepped its clock 857 ms at boot and
+  then measured −528 ms against another leader. The slew closes about
+  30 ms in each 64-second poll, so each poll moved the offset 25 ms or
+  more, and `init` published each one for about 15 minutes. These are
+  real changes, and they stopped: in the next 15 idle minutes no guest
+  ran a `facts` pass.
+* **Ten idle minutes**, after the clocks settled: no `facts` pass on
+  any guest, one `watch` pass on each leader and none on `node-5`, and
+  about two `backstop` passes on each, with no repair. That is about
+  18 passes an hour on a leader and 12 on the follower. The leaders'
+  `watch` passes, about 6 an hour, have no known source yet: the
+  follower has none, so a leader's own objects change on a cycle.
+
 ## Tests
 
 In a `synctest` bubble with `kubernetes/apiservertest`:
