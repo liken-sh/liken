@@ -213,6 +213,20 @@ def docker(*args):
     ).stdout.strip()
 
 
+def claim_listeners():
+    """Count the listening sockets in weston bound to the claim's name."""
+    table = docker(
+        "exec", WESTON, "sh", "-c",
+        "cat /proc/$(grep -lx weston /proc/[0-9]*/comm | head -1 | cut -d/ -f3)/net/unix",
+    )
+    return sum(
+        1 for line in table.splitlines()[1:]
+        if len(line.split()) == 8
+        and line.split()[5] == "01"
+        and line.split()[7].endswith("/" + CLAIM_SOCKET)
+    )
+
+
 def start_client(name, wayland_display):
     docker(
         "run", "-d", "--name", name,
@@ -410,6 +424,15 @@ def main():
     control.expect_ok("listen %s %s" % (CLAIM_SOCKET, CONNECTOR))
     assert os.path.exists(path), "the module opened no socket at %s again" % path
     report("the module opened %s again" % path)
+
+    # A listener the module closed must leave the compositor too. The
+    # kernel keeps the name a socket bound even after the path is
+    # unlinked, so every listener on the claim's name counts here.
+    listeners = claim_listeners()
+    assert listeners == 1, (
+        "weston holds %d listeners on %s, want the one open now"
+        % (listeners, CLAIM_SOCKET))
+    report("weston holds one listener on %s" % CLAIM_SOCKET)
 
     start_client(CLIENT + "-again", CLAIM_SOCKET)
     surface = control.wait_event("surface").split()

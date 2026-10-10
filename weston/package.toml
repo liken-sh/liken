@@ -6,7 +6,7 @@ name = "weston"
 # The date of the snapshot.debian.org archive that the build installs
 # from, as YYYYMMDD. Every base on Debian uses the same date.
 version = "20260928"
-revision = 3
+revision = 4
 license = "MIT"
 
 # The upstream releases that the snapshot holds, as Debian names them.

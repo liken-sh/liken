@@ -13,11 +13,13 @@
  * visible, and when the operator's connection drops the last
  * committed layout stays on screen.
  *
- * The module binds each claim's listening socket itself and hands the
- * descriptor to wl_display_add_socket_fd, rather than naming the socket
+ * The module binds each claim's listening socket itself and accepts its
+ * clients on an event source of its own, rather than naming the socket
  * to wl_display_add_socket. A socket the module binds has no lock file,
  * so a claim that is unprepared and prepared again gets its socket back
- * inside one compositor lifetime.
+ * inside one compositor lifetime. And because the module owns the event
+ * source, a claim that ends takes its listener out of the compositor:
+ * libwayland has no call that removes a socket it accepts on.
  *
  * The control protocol is lines of text on a Unix stream socket, one
  * request and one reply per line.
@@ -91,21 +93,14 @@ struct output_layer {
 struct listening_socket {
 	char name[NAME_LEN];
 	char connector[NAME_LEN];
-	/* The descriptor libwayland accepts this name's clients on. The
-	 * module binds and listens on it, then hands it to
-	 * wl_display_add_socket_fd, which takes ownership: libwayland
-	 * closes it when the display goes, and closing it under
-	 * libwayland's event source would be unsafe. */
+	/* The listening descriptor and the event source that accepts this
+	 * name's clients, both gone once the name is closed. The event
+	 * loop polls a duplicate of the descriptor but hands the callback
+	 * this one, so it stays open for as long as the source does, and
+	 * the close removes the source first. A listen on a closed name
+	 * binds a new socket at the same path, and this entry holds it. */
 	int fd;
-	/* A closed name keeps its entry, because libwayland has no call
-	 * that removes a listener. The descriptor stays open with no
-	 * path to reach it, and a client that still connects through it
-	 * reports as wayland-0 rather than as the claim that is gone.
-	 * A listen on a closed name binds a new descriptor at the same
-	 * path and this entry holds that one.
-	 * plans/open-problems/a-claims-listener-outlives-the-claim.md
-	 * counts the cost. */
-	bool open;
+	struct wl_event_source *source;
 	struct wl_list link;
 };
 
@@ -491,7 +486,7 @@ socket_path(const char *name, char *out, size_t len)
 /* wl_display_add_socket takes a flock on a lock file beside the socket
  * and holds it for the compositor's life, so it refuses a listen on a
  * name the module closed earlier. The module therefore binds the socket
- * itself and hands the descriptor over, which involves no lock file. A
+ * itself and accepts on it, which involves no lock file. A
  * Deployment with the Recreate strategy and a re-run Job both keep
  * their ResourceClaim, so the kubelet unprepares and prepares the same
  * claim, and both would otherwise wait for a compositor restart.
@@ -531,6 +526,59 @@ bind_listening_socket(const char *path)
 	return fd;
 }
 
+/* A client arriving on one of the module's sockets. libwayland's own
+ * socket handler does the same two calls: wl_client_create gives the
+ * client to the display, and the display's client-created signal reads
+ * which socket it came through. */
+static int
+accept_client(int fd, uint32_t mask, void *data)
+{
+	int client_fd;
+
+	(void)mask;
+	(void)data;
+	client_fd = accept4(fd, NULL, NULL, SOCK_CLOEXEC);
+	if (client_fd < 0) {
+		weston_log("liken-layout: accept failed: %s\n", strerror(errno));
+		return 1;
+	}
+	if (!wl_client_create(compositor->wl_display, client_fd))
+		close(client_fd);
+	return 1;
+}
+
+/* Binds a socket at path and accepts its clients on a source of the
+ * display's event loop, and fills in the entry's descriptor and source. */
+static bool
+listen_at(struct listening_socket *ls, const char *path)
+{
+	int fd;
+
+	fd = bind_listening_socket(path);
+	if (fd < 0)
+		return false;
+	ls->source = wl_event_loop_add_fd(wl_display_get_event_loop(compositor->wl_display),
+					  fd, WL_EVENT_READABLE, accept_client, NULL);
+	if (!ls->source) {
+		weston_log("liken-layout: the compositor did not take %s: %s\n",
+			   path, strerror(errno));
+		close(fd);
+		return false;
+	}
+	ls->fd = fd;
+	return true;
+}
+
+/* Takes a closed name's listener out of the compositor. */
+static void
+stop_listening(struct listening_socket *ls)
+{
+	wl_event_source_remove(ls->source);
+	close(ls->fd);
+	ls->source = NULL;
+	ls->fd = -1;
+}
+
 static void
 do_listen(uint32_t seq, char **save)
 {
@@ -539,7 +587,6 @@ do_listen(uint32_t seq, char **save)
 	struct listening_socket *ls;
 	char path[PATH_MAX];
 	bool is_new = false;
-	int fd;
 
 	if (!name_is_safe(name) || !connector || !connector[0]) {
 		reply_error(seq, "listen takes a socket name and a connector");
@@ -551,7 +598,7 @@ do_listen(uint32_t seq, char **save)
 	}
 
 	ls = socket_named(name);
-	if (ls && ls->open) {
+	if (ls && ls->source) {
 		reply_ok(seq);
 		return;
 	}
@@ -571,30 +618,18 @@ do_listen(uint32_t seq, char **save)
 		is_new = true;
 	}
 
-	fd = bind_listening_socket(path);
-	if (fd < 0) {
+	if (!listen_at(ls, path)) {
 		if (is_new) {
 			wl_list_remove(&ls->link);
 			free(ls);
 		}
-		reply_error(seq, "the module could not bind the socket");
-		return;
-	}
-	if (wl_display_add_socket_fd(compositor->wl_display, fd) < 0) {
-		close(fd);
-		if (is_new) {
-			wl_list_remove(&ls->link);
-			free(ls);
-		}
-		reply_error(seq, "the compositor did not take the socket");
+		reply_error(seq, "the module could not listen on the socket");
 		return;
 	}
 
 	snprintf(ls->connector, sizeof ls->connector, "%s", connector);
-	ls->fd = fd;
-	ls->open = true;
-	weston_log("liken-layout: listening on %s for output %s on descriptor %d\n",
-		   ls->name, ls->connector, ls->fd);
+	weston_log("liken-layout: listening on %s for output %s\n",
+		   ls->name, ls->connector);
 	reply_ok(seq);
 }
 
@@ -610,7 +645,7 @@ do_close(uint32_t seq, char **save)
 		return;
 	}
 	ls = socket_named(name);
-	if (!ls || !ls->open) {
+	if (!ls || !ls->source) {
 		reply_ok(seq);
 		return;
 	}
@@ -622,10 +657,9 @@ do_close(uint32_t seq, char **save)
 		reply_error(seq, "the module could not unlink the socket path");
 		return;
 	}
-	ls->open = false;
-	weston_log("liken-layout: closed %s. Clients on it keep their connections, "
-		   "and descriptor %d stays open with no path\n",
-		   ls->name, ls->fd);
+	stop_listening(ls);
+	weston_log("liken-layout: closed %s. Clients on it keep their connections\n",
+		   ls->name);
 	reply_ok(seq);
 }
 
@@ -657,7 +691,7 @@ read_client_origin(struct wl_client *client, char *out, size_t len)
 	base = base ? base + 1 : addr.sun_path;
 
 	wl_list_for_each(ls, &listening_sockets, link)
-		if (ls->open && strcmp(ls->name, base) == 0) {
+		if (ls->source && strcmp(ls->name, base) == 0) {
 			snprintf(out, len, "%s", ls->name);
 			return;
 		}
@@ -718,7 +752,6 @@ static void
 start_capture_socket(void)
 {
 	struct listening_socket *ls;
-	int fd;
 
 	ls = calloc(1, sizeof *ls);
 	if (!ls) {
@@ -728,24 +761,12 @@ start_capture_socket(void)
 	snprintf(ls->name, sizeof ls->name, "%s", CAPTURE_SOCKET);
 	ls->fd = -1;
 
-	fd = bind_listening_socket(CAPTURE_SOCKET_PATH);
-	if (fd < 0) {
+	if (!listen_at(ls, CAPTURE_SOCKET_PATH)) {
 		free(ls);
 		return;
 	}
-	if (wl_display_add_socket_fd(compositor->wl_display, fd) < 0) {
-		weston_log("liken-layout: the compositor did not take %s: %s\n",
-			   CAPTURE_SOCKET_PATH, strerror(errno));
-		close(fd);
-		free(ls);
-		return;
-	}
-
-	ls->fd = fd;
-	ls->open = true;
 	wl_list_insert(&listening_sockets, &ls->link);
-	weston_log("liken-layout: capture listens on %s on descriptor %d\n",
-		   CAPTURE_SOCKET_PATH, ls->fd);
+	weston_log("liken-layout: capture listens on %s\n", CAPTURE_SOCKET_PATH);
 }
 
 /* weston denies an attempt no authority authorized, so this function

@@ -17,8 +17,8 @@
 # it was, and that a hide with a fade leaves the rectangle painted and
 # dimmer partway through the fade and black after it. It asserts that
 # closing the claim's socket unlinks the path, and that a listen on
-# that same name afterwards opens the path again and reports the
-# client that arrives on it. It asserts that a client on the capture
+# that same name afterwards opens the path again, leaves weston with
+# one listener on the name, and reports the client that arrives on it. It asserts that a client on the capture
 # socket reads complete, and that a client on wayland-0 reads failed
 # with weston's own word, unauthorized.
 #

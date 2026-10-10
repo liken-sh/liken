@@ -274,11 +274,11 @@ target "weston" {
   args = {
     VERSION = "20260928"
   }
-  tags       = ["ghcr.io/liken-sh/weston:20260928-3"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache", "type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20260928-3"]
+  tags       = ["ghcr.io/liken-sh/weston:20260928-4"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache", "type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20260928-4"]
   cache-to = concat(
     CACHE_WRITE == "weston" ? ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "weston" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20260928-3,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "weston" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20260928-4,mode=max,ignore-error=true"] : [],
   )
 }
 
