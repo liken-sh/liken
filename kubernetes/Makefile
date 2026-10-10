@@ -16,8 +16,9 @@ UNTESTED_PACKAGES := go list -f '{{if not (or .TestGoFiles .XTestGoFiles)}}{{.Im
 # rest. The pod build of media-operator and the node build of
 # equipment-operator link informer, and must not link the typed
 # clientset, the informer factories, or leader election, which would
-# more than double each program. These two lists find each import that
-# breaks either rule.
+# more than double each program. Leader election lives in election,
+# which only the build of an operator that elects imports. These two
+# lists find each import that breaks either rule.
 PLAIN_K8S := go list -deps ./apiclient ./memo ./events ./conditions | grep '^k8s.io/'
 INFORMER_HEAVY := go list -deps ./informer | grep -E '^k8s.io/client-go/(kubernetes|informers|dynamic/dynamicinformer|tools/leaderelection)(/|$$)'
 

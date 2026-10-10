@@ -29,6 +29,8 @@ that adds it names the operator. The hooks of that kind now are:
   `Client.WithWriteGuard`, `informer.InClusterAt`, `Options.Indexers`,
   `Options.UnreadyOnWatchError`, `memo.Versions.ForgetAt`, and the
   alias `memo.Meta`, for `liken`'s two operators.
+- `election.Options.ActWhenRefused` and `Options.Unelected`, and
+  `Lead.MayAct`, for `liken`'s cluster operator.
 
 The code the hook runs, such as the transform itself, stays in the
 operator.
@@ -37,8 +39,10 @@ operator.
 `k8s.io`, because some
 programs must not link client-go at all: the pod build of
 `library-operator` checks for it in its `Makefile`. Keep every
-client-go import in `informer`, and keep `informer` to `tools/cache`,
-`dynamic`, and `rest`. The pod build of `media-operator` and the node
+client-go import in `informer` and `election`, and keep `informer` to
+`tools/cache`, `dynamic`, and `rest`. `election` links client-go's
+leader election and the typed client of the coordination group, so
+only the build of an operator that elects imports it. The pod build of `media-operator` and the node
 build of `equipment-operator` link those three, and their `Makefile`s
 fail when a build links the typed clientset, the informer factories,
 or leader election.
