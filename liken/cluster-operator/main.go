@@ -88,7 +88,7 @@ func main() {
 	}
 
 	// Nothing below runs until this copy holds the Lease.
-	leader := lead(stop, newUnelectedGauge(operatorMetrics))
+	leader := lead(stop)
 
 	// The ticker is a clock. A heartbeat ages past the staleness limit
 	// with no event, because an aging Lease is not a write. A granted
@@ -127,7 +127,7 @@ func run(stop, watches context.Context, leader *election.Lead, client *apiclient
 	// Events of the last sweep are written.
 	fleet.recorder = events.New(context.Background(), client, component, events.Options{})
 
-	operate(stop, leader.MayAct, fleet, wakes, ticks, om, cm)
+	operate(stop, fleet, wakes, ticks, om, cm)
 	// The sweep has returned, so no write of the sweep is in flight.
 	// The recorder writes the Events the sweep posted, and Shutdown
 	// returns after its last request has returned. So the Lease is
@@ -146,9 +146,7 @@ func run(stop, watches context.Context, leader *election.Lead, client *apiclient
 // operate finds the Cluster and sweeps the fleet until stop ends. A
 // wake or a tick starts the next sweep, and stop ends the loop only
 // between two sweeps, so the sweep in flight finishes its writes.
-// mayAct blocks before each sweep until this copy may act, and answers
-// false when stop ended first.
-func operate(stop context.Context, mayAct func(context.Context) bool, fleet *fleetReader,
+func operate(stop context.Context, fleet *fleetReader,
 	wakes <-chan struct{}, ticks <-chan time.Time, om *metrics.Operator, cm *clusterMetrics) {
 	// This program takes no configuration at all. It finds the
 	// Cluster it operates in the Clusters' copy, because a fleet has
@@ -175,7 +173,7 @@ func operate(stop context.Context, mayAct func(context.Context) bool, fleet *fle
 	probe := &engineProbe{}
 	steward := &podSteward{}
 
-	for mayAct(stop) {
+	for stop.Err() == nil {
 		started := time.Now()
 		err := sweep(fleet, name, poller, probe, steward, cm)
 		om.ObserveReconcile(clusterKind, time.Since(started), err)

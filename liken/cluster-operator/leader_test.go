@@ -2,11 +2,12 @@ package main
 
 // These tests cover this program's use of kubernetes/election: the
 // Lease it competes for, the prefix on the election's log lines, the
-// gauge of the mode without an election, and the sweep of a copy that
-// leads. The package's own tests cover the election itself.
+// wait of a copy that the API server refuses on the Lease, and the
+// sweep of a copy that leads. The package's own tests cover the election itself.
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -23,73 +24,53 @@ import (
 )
 
 // A copy takes the Lease liken-cluster-operator in liken-system under
-// its pod's name, and logs with this program's prefix. A copy that the
-// API server refuses on the Lease acts without an election, and the
-// gauge says so.
+// its pod's name, and logs with this program's prefix.
 func TestThisProgramElectsOnItsOwnLease(t *testing.T) {
-	cases := []struct {
-		name      string
-		refuse    int
-		held      bool
-		line      string
-		unelected string
-	}{
-		{
-			name:      "a Lease that nobody holds",
-			held:      true,
-			line:      "liken-cluster-operator: holding Lease liken-system/liken-cluster-operator as liken-cluster-operator-a_",
-			unelected: "liken_cluster_operator_unelected 0",
-		},
-		{
-			name:      "a Lease that RBAC refuses",
-			refuse:    http.StatusForbidden,
-			held:      false,
-			line:      "liken-cluster-operator: the API server refuses Lease liken-system/liken-cluster-operator; acting without an election until it answers",
-			unelected: "liken_cluster_operator_unelected 1",
-		},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			o := metrics.NewOperator(component, machine.Version, []string{clusterKind}, []string{machineKind})
-			gauge := newUnelectedGauge(o)
-			gauge(false)
-			var mu sync.Mutex
-			var lines []string
-			synctest.Test(t, func(t *testing.T) {
-				server := electiontest.New("liken-cluster-operator", "liken-system")
-				if c.refuse != 0 {
-					server.Refuse(http.MethodPost, c.refuse)
-				}
-				options := electionOptions("liken-cluster-operator-a", gauge, func(line string) {
-					mu.Lock()
-					defer mu.Unlock()
-					lines = append(lines, line)
-				})
-				options.Exit = func(code int) { t.Errorf("the election exited with %d", code) }
-
-				stop, cancel := context.WithTimeout(t.Context(), election.Duration)
-				defer cancel()
-				leader, err := election.Start(stop, server.Config(t), options)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if held := server.Holder() == leader.Identity(); held != c.held {
-					t.Errorf("holder = %q and identity = %q, want held %v", server.Holder(), leader.Identity(), c.held)
-				}
-				if !strings.HasPrefix(leader.Identity(), "liken-cluster-operator-a_") {
-					t.Errorf("identity = %q, want the pod's name first", leader.Identity())
-				}
-				leader.StepDown()
-			})
-
+	var mu sync.Mutex
+	var lines []string
+	synctest.Test(t, func(t *testing.T) {
+		server := electiontest.New("liken-cluster-operator", "liken-system")
+		options := electionOptions("liken-cluster-operator-a", func(line string) {
 			mu.Lock()
 			defer mu.Unlock()
-			if !logged(lines, c.line) {
-				t.Errorf("the election logged %q, want a line that starts with %q", lines, c.line)
-			}
-			requireSeries(t, scrapeHandler(t, o.Handler()), c.unelected)
+			lines = append(lines, line)
 		})
+		options.Exit = func(code int) { t.Errorf("the election exited with %d", code) }
+
+		leader, err := election.Start(t.Context(), server.Config(t), options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if server.Holder() != leader.Identity() || !strings.HasPrefix(leader.Identity(), "liken-cluster-operator-a_") {
+			t.Errorf("holder = %q and identity = %q, want the Lease held under the pod's name", server.Holder(), leader.Identity())
+		}
+		leader.StepDown()
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if want := "liken-cluster-operator: holding Lease liken-system/liken-cluster-operator as liken-cluster-operator-a_"; !logged(lines, want) {
+		t.Errorf("the election logged %q, want a line that starts with %q", lines, want)
 	}
+}
+
+// A copy that the API server refuses on the Lease waits, as for any
+// other failure of the election, and never acts. Every release that a
+// rollback can target grants this program its Lease, so a refusal is
+// not a release skew.
+func TestACopyThatTheAPIServerRefusesOnTheLeaseWaits(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		server := electiontest.New("liken-cluster-operator", "liken-system")
+		server.Refuse(http.MethodPost, http.StatusForbidden)
+		stop, cancel := context.WithTimeout(t.Context(), election.Duration)
+		defer cancel()
+
+		leader, err := election.Start(stop, server.Config(t), electionOptions("liken-cluster-operator-a", func(string) {}))
+
+		if !errors.Is(err, election.ErrStopped) || leader != nil {
+			t.Errorf("Start = %v, %v; want ErrStopped and no lead", leader, err)
+		}
+	})
 }
 
 func logged(lines []string, prefix string) bool {
@@ -128,7 +109,7 @@ func TestALeaderSweepsAndReleasesTheLeaseAtAShutdown(t *testing.T) {
 			}
 		}))
 		o := metrics.NewOperator(component, machine.Version, []string{clusterKind}, watchKinds)
-		options := electionOptions("liken-cluster-operator-a", newUnelectedGauge(o), func(string) {})
+		options := electionOptions("liken-cluster-operator-a", func(string) {})
 		leader, err := election.Start(stop, lease.Config(t), options)
 		if err != nil {
 			t.Fatal(err)

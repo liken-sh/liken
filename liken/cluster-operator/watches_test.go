@@ -221,7 +221,7 @@ func TestOperateFinishesTheSweepInFlightAtAShutdown(t *testing.T) {
 	o := metrics.NewOperator(component, machine.Version, []string{clusterKind}, watchKinds)
 	cm := newClusterMetrics(o)
 
-	operate(stop, func(ctx context.Context) bool { return ctx.Err() == nil }, &fleetReader{client: client}, make(chan struct{}), make(chan time.Time), o, cm)
+	operate(stop, &fleetReader{client: client}, make(chan struct{}), make(chan time.Time), o, cm)
 
 	if got := fake.ResourceVersion(kubernetes.ClustersPath, "lab"); got == "5" {
 		t.Error("the sweep in flight did not publish the Cluster's status")

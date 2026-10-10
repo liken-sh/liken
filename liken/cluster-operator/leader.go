@@ -12,15 +12,14 @@ package main
 // liken-cluster-operator in liken-system. That package explains the
 // election, its timings, and its limits.
 //
-// Only the copy that holds the Lease opens its watches and sweeps, with
-// one exception: a copy that the API server refuses on the Lease acts
-// without an election. The OS images carry this binary, so a rollback
-// can run it under the RBAC of a release from before the election,
-// which grants no write of the Lease. A copy that waited for the Lease
-// there would grant no reboot, and the rest of the rollback needs its
-// grants. So this program alone turns on election.Options.ActWhenRefused,
-// and checks before each sweep that it may still act, because a copy
-// in that mode stops acting when it finds another holder.
+// Only the copy that holds the Lease opens its watches and sweeps. A
+// copy that the API server refuses on the Lease waits, as for any other
+// failure of the election. The OS images carry this binary, so a
+// rollback runs it under the RBAC that the target release's manifests
+// grant. The Cluster CRD refuses a target older than 2026.09.28-001, the
+// first release whose RBAC grants this program the create and update of
+// its Lease, so every release that a rollback can reach lets a copy
+// take the Lease.
 //
 // The election links client-go's typed clientset. That costs this
 // binary about 13 MB, and it is accepted here because the cluster
@@ -47,17 +46,13 @@ const (
 )
 
 // electionOptions names this program's Lease and pod for the election.
-// setUnelected receives the mode each time it changes, for the gauge
-// (newUnelectedGauge). report receives each line with this program's
-// prefix.
-func electionOptions(pod string, setUnelected func(bool), report func(string)) election.Options {
+// report receives each line with this program's prefix.
+func electionOptions(pod string, report func(string)) election.Options {
 	return election.Options{
-		Name:           leaseName,
-		Namespace:      leaseNamespace,
-		Pod:            pod,
-		Report:         func(line string) { report(component + ": " + line) },
-		ActWhenRefused: true,
-		Unelected:      setUnelected,
+		Name:      leaseName,
+		Namespace: leaseNamespace,
+		Pod:       pod,
+		Report:    func(line string) { report(component + ": " + line) },
 	}
 }
 
@@ -65,7 +60,7 @@ func electionOptions(pod string, setUnelected func(bool), report func(string)) e
 // stop ends first, and whenever the Lease is lost after that. The pod's
 // hostname is its name, which makes the identity readable in `kubectl
 // get lease`.
-func lead(stop context.Context, setUnelected func(bool)) *election.Lead {
+func lead(stop context.Context) *election.Lead {
 	pod, err := os.Hostname()
 	if err != nil {
 		fatal("reading the pod's name for the leader election: %v", err)
@@ -74,7 +69,7 @@ func lead(stop context.Context, setUnelected func(bool)) *election.Lead {
 	if err != nil {
 		fatal("in-cluster config for the leader election: %v", err)
 	}
-	options := electionOptions(pod, setUnelected, func(line string) { fmt.Println(line) })
+	options := electionOptions(pod, func(line string) { fmt.Println(line) })
 	l, err := election.Start(stop, config, options)
 	if errors.Is(err, election.ErrStopped) {
 		os.Exit(0)

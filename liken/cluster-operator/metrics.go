@@ -80,27 +80,6 @@ func newClusterMetrics(o *metrics.Operator) *clusterMetrics {
 	return m
 }
 
-// newUnelectedGauge registers liken_cluster_operator_unelected, which
-// is 1 while this copy acts without an election because the API server
-// refuses its Lease (leader.go), and 0 otherwise. The mode is meant
-// to last only through a release skew, so a graph that stays at 1 says
-// the RBAC for the election never arrived. It answers the setter the
-// election calls.
-func newUnelectedGauge(o *metrics.Operator) func(bool) {
-	gauge := prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: metrics.Prefix + "cluster_operator_unelected",
-		Help: "1 while this copy acts without a leader election, because the API server refuses its Lease.",
-	})
-	o.Registry().MustRegister(gauge)
-	return func(unelected bool) {
-		if unelected {
-			gauge.Set(1)
-		} else {
-			gauge.Set(0)
-		}
-	}
-}
-
 // fleetPhases is the phase vocabulary a machine can hold. The api
 // package defines it and the CRD's enum enforces it, so this label
 // is bounded by a list that only a schema change can grow.
