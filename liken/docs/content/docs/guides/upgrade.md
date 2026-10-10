@@ -43,11 +43,11 @@ and point [`spec.version`](/docs/reference/cluster/#spec--version)
 at it:
 
     spec:
-      version: "2026.07.20-001"
+      version: "2026.10.10-001"
       releases:
         source: https://releases.liken.sh
         catalog:
-          - version: "2026.07.20-001"
+          - version: "2026.10.10-001"
             digest: sha256:<hex>
 
 If `spec.version` names no catalog entry, the API refuses the change

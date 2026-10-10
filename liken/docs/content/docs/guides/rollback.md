@@ -49,6 +49,20 @@ for an upgrade: each machine downloads the older release into its
 inactive slot, verifies it, and reboots on its granted turn, one
 machine at a time. The cluster continues to serve during the rollout.
 
+### The oldest release you can roll back to
+
+The API refuses a `spec.version` older than `2026.09.28-001`, while
+your edit is still open. The cluster operator grants the reboot turns,
+and only the copy that holds its leader election `Lease` acts. A
+rollback runs the cluster operator under the RBAC of the target
+release, and `2026.09.28-001` is the first release whose RBAC lets it
+create and update that `Lease`. Under an older release's RBAC, no copy
+could take the `Lease`, so no machine would get its reboot turn and
+the rollback would stop.
+
+A `Cluster` that already names an older version keeps that value. The
+API checks the rule only when an edit changes `spec.version`.
+
 ### Before you roll back past a spec field
 
 A release later than `2026.10.08-002` boots a proven manifest that

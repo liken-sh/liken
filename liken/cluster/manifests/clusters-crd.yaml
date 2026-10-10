@@ -25,7 +25,7 @@ metadata:
     # older slot's boot cannot downgrade the schema the cluster
     # serves (init/schemarevision.go). Raise it in the same change
     # that changes the schema below; a test holds the two together.
-    liken.sh/schema-revision: "1"
+    liken.sh/schema-revision: "2"
 spec:
   group: liken.sh
   names:
@@ -156,6 +156,26 @@ spec:
                   # machine unable to find the release it was asked
                   # to run.
                   pattern: ^\d{4}\.\d{2}\.\d{2}-\d{3}$
+                  # The rollback floor. The cluster operator elects one
+                  # acting copy with a Lease, and a copy that the API
+                  # server refuses on the Lease waits. A rollback runs
+                  # the cluster operator under the RBAC of the target
+                  # release, and 2026.09.28-001 is the first release
+                  # whose RBAC grants the create and update of that
+                  # Lease. A fleet on an older release would have no
+                  # acting copy, and the rest of the rollback would
+                  # get no reboot turns. The fixed-width grammar makes
+                  # string order the version order. The rule reads
+                  # only this field, so the API server ratchets it: a
+                  # Cluster that already names an older version keeps
+                  # it until an edit changes the field.
+                  x-kubernetes-validations:
+                    - rule: self >= '2026.09.28-001'
+                      message: >-
+                        spec.version must not be older than
+                        2026.09.28-001, the oldest release that a fleet
+                        can roll back to. Older releases do not grant
+                        the cluster operator its leader election Lease
                   description: >-
                     The liken release that the fleet moves toward. An
                     upgrade edits this one field. A Machine spec holds
@@ -164,7 +184,9 @@ spec:
                     (status.version.liken) with this target, and moves
                     toward the target with the same staged change and
                     granted reboot that every other change uses. This
-                    value must name an entry in releases.catalog.
+                    value must name an entry in releases.catalog, and
+                    it must not be older than 2026.09.28-001, the
+                    oldest release that a fleet can roll back to.
                 releases:
                   type: object
                   description: >-
