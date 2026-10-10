@@ -91,20 +91,27 @@ func TestShutdownWritesTheQueue(t *testing.T) {
 // sent again, so a shutdown does not wait out the retries.
 func TestShutdownSendsEachWriteOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		r := record(t, notFound)
+		s := stall(t)
+		s.recorder.Normal(mount, "PodCreated", "Created pod east-mount.")
+		synctest.Wait()
+		s.recorder.Warning(mount, "Unreachable", "The mount did not answer.")
+		s.recorder.Normal(mount, "Reachable", "The mount answered.")
+		s.held.Refuse(2)
 		start := time.Now()
-		r.held.Refuse(1)
 
-		r.recorder.Warning(mount, "Unreachable", "The mount did not answer.")
-		r.recorder.Normal(mount, "Reachable", "The mount answered.")
-		err := r.recorder.Shutdown(t.Context())
+		returned := shutDown(t.Context(), s.recorder)
+		synctest.Wait()
+		close(s.through)
+		err := <-returned
 
-		got := r.held.List()
+		got := s.held.List()
 		if err != nil || len(got) != 1 || got[0].Reason != "Reachable" || time.Since(start) != 0 {
 			t.Errorf("Shutdown answered %v after %v, and the server holds %+v; want nil at once and only the Reachable Event", err, time.Since(start), got)
 		}
-		if !strings.Contains(r.log.String(), "writing the Warning Event Unreachable") {
-			t.Errorf("the log says %q, want the Unreachable Event's failure", r.log.String())
+		for _, reason := range []string{"Normal Event PodCreated", "Warning Event Unreachable"} {
+			if !strings.Contains(s.log.String(), "writing the "+reason) {
+				t.Errorf("the log says %q, want the failure of the %s", s.log.String(), reason)
+			}
 		}
 	})
 }
@@ -187,10 +194,40 @@ func TestShutdownOfAStoppedRecorder(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		recorder := events.New(ctx, apiclient.New(apiservertest.Host, server.Client(), ""), "test-operator", events.Options{})
 		cancel()
+		synctest.Wait()
 
 		var none *events.Recorder
 		if err, nilErr := recorder.Shutdown(t.Context()), none.Shutdown(t.Context()); err != nil || nilErr != nil {
 			t.Errorf("Shutdown answered %v, and %v for a nil recorder, want nil", err, nilErr)
+		}
+	})
+}
+
+// The recorder's own context still ends its work during a Shutdown: the
+// request in flight ends at once, and the queue is not written.
+func TestTheRecordersContextEndsAShutdown(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		held := &eventstest.Events{}
+		through := make(chan struct{})
+		server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			<-through
+			held.ServeHTTP(w, r)
+		}))
+		ctx, cancel := context.WithCancel(t.Context())
+		recorder := events.New(ctx, apiclient.New(apiservertest.Host, server.Client(), ""), "test-operator", events.Options{Log: &syncBuffer{}})
+		recorder.Normal(mount, "PodCreated", "Created pod east-mount.")
+		recorder.Normal(mount, "PodDeleted", "Deleted pod east-mount.")
+		synctest.Wait()
+
+		returned := shutDown(t.Context(), recorder)
+		synctest.Wait()
+		cancel()
+		err := <-returned
+		close(through)
+		synctest.Wait()
+
+		if got := held.List(); err != nil || len(got) != 1 || got[0].Reason != "PodCreated" {
+			t.Errorf("Shutdown answered %v and the server holds %+v, want nil and only the Event that was in flight", err, got)
 		}
 	})
 }
