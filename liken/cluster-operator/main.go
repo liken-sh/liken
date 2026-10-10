@@ -21,7 +21,7 @@
 // Only one copy of this program acts at a time. The Deployment rolls a
 // new pod in beside the old one, and each copy competes for a leader
 // election Lease; only the copy that holds it watches the fleet and
-// writes. leader.go explains the election and its limits.
+// writes. leader.go names the Lease and the reason for the election.
 package main
 
 import (
@@ -34,7 +34,10 @@ import (
 	"syscall"
 	"time"
 
+	"k8s.io/client-go/dynamic"
+
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/election"
 	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/informer"
 	"github.com/liken-sh/liken/liken/cluster"
@@ -84,24 +87,8 @@ func main() {
 		fatal("in-cluster config for the watches: %v", err)
 	}
 
-	// Nothing below runs until this copy holds the Lease, and every
-	// write asks the election first (mayWrite in leader.go).
+	// Nothing below runs until this copy holds the Lease.
 	leader := lead(stop, newUnelectedGauge(operatorMetrics))
-	client = client.WithWriteGuard(leader.mayWrite)
-
-	// The watches start with the lead, so a copy that has never acted
-	// holds no copy of the fleet and opens no stream (watches.go names each watch and
-	// what wakes the loop). The wake channel has one slot, so a burst
-	// of Machine changes makes one wake, and one sweep over the newest
-	// state answers the whole burst.
-	wakes := make(chan struct{}, 1)
-	fleet := watchFleet(context.Background(), watcher, client, watch.Signal(wakes),
-		operatorMetrics.WatchRestarted)
-	// The recorder posts the Events about the Machines and the Cluster
-	// (events.go). It writes through the guarded client, so a replica
-	// that lost the election posts nothing, and from its own goroutine,
-	// so a sweep never waits on an Event.
-	fleet.recorder = events.New(stop, client, component, events.Options{})
 
 	// The ticker is a clock. A heartbeat ages past the staleness limit
 	// with no event, because an aging Lease is not a write. A granted
@@ -114,8 +101,37 @@ func main() {
 	// flux-system Namespace while it is not (watches.go says why those
 	// two stay direct).
 	ticker := time.NewTicker(10 * time.Second)
-	operate(stop, leader.mayAct, fleet, wakes, ticker.C, operatorMetrics, clusterLayer)
-	leader.stepDown()
+	run(stop, context.Background(), leader, client, watcher, ticker.C, operatorMetrics, clusterLayer)
+}
+
+// run is the work of a copy that may act: it opens the watches, sweeps
+// until stop ends, and then steps down. The watches live until watches
+// ends, which in main is the end of the process, so the sweep in
+// flight at a shutdown still reads from them.
+func run(stop, watches context.Context, leader *election.Lead, client *apiclient.Client,
+	watcher dynamic.Interface, ticks <-chan time.Time, om *metrics.Operator, cm *clusterMetrics) {
+	// Every write asks the election first (election.Lead.MayWrite).
+	client = client.WithWriteGuard(leader.MayWrite)
+
+	// The watches start with the lead, so a copy that has never acted
+	// holds no copy of the fleet and opens no stream (watches.go names each watch and
+	// what wakes the loop). The wake channel has one slot, so a burst
+	// of Machine changes makes one wake, and one sweep over the newest
+	// state answers the whole burst.
+	wakes := make(chan struct{}, 1)
+	fleet := watchFleet(watches, watcher, client, watch.Signal(wakes), om.WatchRestarted)
+	// The recorder posts the Events about the Machines and the Cluster
+	// (events.go). It writes through the guarded client, so a replica
+	// that lost the election posts nothing, and from its own goroutine,
+	// so a sweep never waits on an Event.
+	fleet.recorder = events.New(stop, client, component, events.Options{})
+
+	operate(stop, leader.MayAct, fleet, wakes, ticks, om, cm)
+	// The sweep has returned, so no write of the sweep is in flight, and
+	// the write guard refuses every write after the step down. So the
+	// Lease is released at once, and a waiting copy takes it on its
+	// next try.
+	leader.StepDown()
 }
 
 // operate finds the Cluster and sweeps the fleet until stop ends. A

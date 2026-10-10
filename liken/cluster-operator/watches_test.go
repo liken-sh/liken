@@ -24,6 +24,7 @@ import (
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
+	"github.com/liken-sh/liken/kubernetes/election"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/kubernetes"
@@ -298,7 +299,7 @@ func TestTheCopiesAnswerOnlyWhileTheLeaderLeaseInThemIsFresh(t *testing.T) {
 		current bool
 	}{
 		{"renewed a second ago", time.Second, true},
-		{"renewed one retry period ago", operatorLeaseTiming.retryPeriod, true},
+		{"renewed one retry period ago", election.RetryPeriod, true},
 		{"renewed fifteen seconds ago", copyFreshness, false},
 		{"renewed a minute ago", time.Minute, false},
 	}
@@ -330,7 +331,7 @@ func TestAFailedWriteCostsOneReadOfThatMachine(t *testing.T) {
 		name string
 		err  error
 	}{
-		{"a write the guard refused", fmt.Errorf("PUT not sent: %w", errNotLeading)},
+		{"a write the guard refused", fmt.Errorf("PUT not sent: %w", election.ErrNotLeading)},
 		{"a write to an object that is gone", apiclient.ErrNotFound},
 		{"a write that conflicted", apiclient.ErrConflict},
 	}

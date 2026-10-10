@@ -30,11 +30,11 @@ require (
 	golang.org/x/crypto v0.55.0
 	golang.org/x/sys v0.47.0
 	google.golang.org/grpc v1.83.2
-	k8s.io/api v0.36.3
 	// The operators watch the API server through client-go's reflector
 	// (kubernetes/informer), and the cluster operator elects its leader
-	// with client-go's leaderelection. Both follow the same minor as the
-	// API server they talk to, the Kubernetes version k3s/VERSION names.
+	// through kubernetes/election, which uses client-go's leaderelection.
+	// Both follow the same minor as the API server they talk to, the
+	// Kubernetes version k3s/VERSION names.
 	k8s.io/apimachinery v0.36.3
 	k8s.io/client-go v0.36.3
 	// The DRA plugin API that the node's kubelet calls. This side of a
@@ -121,6 +121,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 	honnef.co/go/tools v0.8.1 // indirect
+	k8s.io/api v0.36.3 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260317180543-43fb72c5454a // indirect
 	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2 // indirect

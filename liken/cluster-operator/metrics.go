@@ -82,7 +82,7 @@ func newClusterMetrics(o *metrics.Operator) *clusterMetrics {
 
 // newUnelectedGauge registers liken_cluster_operator_unelected, which
 // is 1 while this copy acts without an election because the API server
-// refuses its Lease (unelected.go), and 0 otherwise. The mode is meant
+// refuses its Lease (leader.go), and 0 otherwise. The mode is meant
 // to last only through a release skew, so a graph that stays at 1 says
 // the RBAC for the election never arrived. It answers the setter the
 // election calls.

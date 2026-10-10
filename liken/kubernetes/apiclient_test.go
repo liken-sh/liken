@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/election"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/machine"
@@ -352,5 +353,17 @@ func answersA429AtOnce(t *testing.T, bound func(*apiclient.Client) *apiclient.Cl
 
 	if !errors.Is(err, apiclient.ErrThrottled) || sent.Load() != 1 || time.Since(started) > 500*time.Millisecond {
 		t.Errorf("err = %v after %d requests and %s, want the 429 at once", err, sent.Load(), time.Since(started))
+	}
+}
+
+// The cluster operator's leader election needs a write that its guard
+// allowed to end before a waiting copy can take the Lease, and the
+// in-cluster client's bound is what ends it. This package keeps its
+// own constant because importing the election package here would link
+// client-go's leader election into the machine operator, so this test
+// holds the two numbers together.
+func TestAnInClusterRequestEndsWithinTheElectionsBound(t *testing.T) {
+	if requestTimeout > election.RequestTimeout {
+		t.Errorf("an in-cluster request may run %v; the election allows %v", requestTimeout, election.RequestTimeout)
 	}
 }

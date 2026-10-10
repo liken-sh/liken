@@ -4,8 +4,8 @@
 # This domain builds two artifacts, following the same pattern as the
 # machine operator: the static binary, and the OCI image tarball that
 # image/oci.sh wraps around it. main.go's header comment explains
-# what this program watches, what it writes, and why it needs no
-# leader election.
+# what this program watches, what it writes, and why it elects a
+# leader.
 include ../version.mk
 DIST ?= dist
 

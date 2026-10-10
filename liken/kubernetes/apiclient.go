@@ -113,8 +113,11 @@ var noWait = func() context.Context {
 // client that stalls on another machine's failure must never make
 // this machine appear dead. The bound matters most to the cluster
 // operator: a write that its leader election allowed is abandoned by
-// this client before a new leader can take the Lease
-// (cluster-operator/leader.go gives the numbers).
+// this client before a new leader can take the Lease. The package
+// kubernetes/election gives the numbers as election.RequestTimeout,
+// which this package does not import because the machine operator
+// must not link client-go's leader election. A test checks that this
+// bound stays within it.
 const requestTimeout = 15 * time.Second
 
 // RetryPause sleeps for about five seconds, increased at random by up

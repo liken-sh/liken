@@ -55,6 +55,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/election"
 	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/informer"
 	"github.com/liken-sh/liken/kubernetes/memo"
@@ -217,7 +218,7 @@ func (r *fleetReader) current(held *informer.Collection) informer.View {
 
 // copyFreshness is how old the copy's view of this program's own
 // leader Lease may be before the sweep stops reading the copies.
-var copyFreshness = operatorLeaseTiming.renewDeadline + operatorLeaseTiming.retryPeriod
+var copyFreshness = election.RenewDeadline + election.RetryPeriod
 
 // machines reads every Machine in the fleet. A copy at another version
 // than this program's own last write or read of the Machine, such as a
