@@ -56,16 +56,6 @@ func (w *workTree) alternate() string {
 	return filepath.Dir(trimLine(string(content)))
 }
 
-// originURL is the remote the work tree follows, read from the
-// bare repository the alternates file names.
-func (w *workTree) originURL() string {
-	content, err := os.ReadFile(filepath.Join(w.alternate(), repositoryURLFile))
-	if err != nil {
-		return ""
-	}
-	return trimLine(string(content))
-}
-
 // exists reports whether create finished. HEAD is what create writes
 // last.
 func (w *workTree) exists() bool {

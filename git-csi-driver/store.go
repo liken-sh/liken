@@ -39,7 +39,7 @@ func newStore(root string) *store {
 }
 
 // repositoryURLFile is the file a bare repository carries beside its
-// objects, so a person and the sweep both read the remote without hashing anything.
+// objects, so a person reads the remote without hashing anything.
 const repositoryURLFile = "url"
 
 // repository is one bare repository, shared by every volume of the same

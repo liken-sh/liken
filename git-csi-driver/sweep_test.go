@@ -91,16 +91,30 @@ func TestTheSweepDeletesTheRefsNoVolumeFollows(t *testing.T) {
 }
 
 func TestTheSweepKeepsTheRefAWorkTreeInTheStoreFollows(t *testing.T) {
-	answering, remote := sweepingNode(t, io.Discard)
-	// A stage that was never published leaves a work tree and no record,
-	// so HEAD is the whole evidence of the ref it follows.
-	unstagedVolume(t, answering, "config", fileURL(remote))
-	repo := answering.store.repository(fileURL(remote))
+	for _, c := range []struct {
+		name  string
+		stage func(t *testing.T, answering *node, url string)
+	}{
+		// A stage that was never published leaves a work tree and no
+		// record, so HEAD is the whole evidence of the ref it follows.
+		{name: "unstaged", stage: func(t *testing.T, answering *node, url string) {
+			unstagedVolume(t, answering, "config", url)
+		}},
+		{name: "staged", stage: func(t *testing.T, answering *node, url string) {
+			stagedVolume(t, answering, "config", url)
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			answering, remote := sweepingNode(t, io.Discard)
+			c.stage(t, answering, fileURL(remote))
+			repo := answering.store.repository(fileURL(remote))
 
-	answering.sweepStore(t.Context())
+			answering.sweepStore(t.Context())
 
-	if got := storeRefs(t, repo); got != refPrefix+"main" {
-		t.Errorf("the repository holds %q, want %q", got, refPrefix+"main")
+			if got := storeRefs(t, repo); got != refPrefix+"main" {
+				t.Errorf("the repository holds %q, want %q", got, refPrefix+"main")
+			}
+		})
 	}
 }
 

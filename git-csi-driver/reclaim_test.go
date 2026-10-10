@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -228,6 +229,81 @@ func TestANodePluginThatMissedTheDeleteReclaimsAtItsStart(t *testing.T) {
 				watchCluster(t, answering, t.Context())
 
 				treeKept(t, answering, "config", url, c.kept)
+			})
+		})
+	}
+}
+
+func TestAHandleNamesOneDirectoryOfTheStore(t *testing.T) {
+	for _, c := range []struct {
+		handle string
+		one    bool
+	}{
+		{handle: "config", one: true},
+		{handle: "", one: false},
+		{handle: ".", one: false},
+		{handle: "..", one: false},
+		{handle: "../volumes", one: false},
+	} {
+		t.Run(c.handle, func(t *testing.T) {
+			if got := oneElement(c.handle); got != c.one {
+				t.Errorf("oneElement(%q) = %v, want %v", c.handle, got, c.one)
+			}
+		})
+	}
+}
+
+func TestAPolicyOfAHandleOutsideTheStoreIsNotRecorded(t *testing.T) {
+	answering, _ := testNode(t, io.Discard)
+	held := csiVolume("..", driverName)
+	held.Spec.PersistentVolumeReclaimPolicy = corev1.PersistentVolumeReclaimDelete
+
+	answering.notePolicy(t.Context(), held)
+
+	if _, err := os.Stat(filepath.Join(answering.store.root, policyFileName)); err == nil {
+		t.Error("the policy was written outside the volume directories")
+	}
+}
+
+func TestTheNodeReportsWhatItCannotRecordOrRemove(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		// close makes the store refuse the write the case needs.
+		close func(t *testing.T, answering *node)
+		says  string
+	}{
+		{
+			name: "a policy it cannot record",
+			close: func(t *testing.T, answering *node) {
+				readOnlyDir(t, answering.store.policyFile("config"))
+				changePolicy(t, answering, "config", corev1.PersistentVolumeReclaimRetain)
+			},
+			says: "the reclaim policy was not recorded",
+		},
+		{
+			name: "a work tree it cannot remove",
+			close: func(t *testing.T, answering *node) {
+				readOnlyDir(t, filepath.Dir(answering.store.volumeDir("config")))
+				deleteVolume(t, answering, "config")
+			},
+			says: "the work tree stayed",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				logs := &logbook{}
+				answering, _ := testNode(t, logs)
+				url := fileURL(bareRemote(t, map[string]string{"a.txt": "one"}))
+				reclaimedVolume(t, answering, "config", "config", corev1.PersistentVolumeReclaimDelete)
+				watchCluster(t, answering, t.Context())
+				unstagedVolume(t, answering, "config", url)
+
+				c.close(t, answering)
+				synctest.Wait()
+
+				if !strings.Contains(logs.String(), c.says) {
+					t.Errorf("the log is %q, want %q in it", logs, c.says)
+				}
 			})
 		})
 	}
