@@ -63,6 +63,16 @@ func (r *renewalClock) Update(ctx context.Context, record resourcelock.LeaderEle
 // wrote renewTime from the clock of this node, so the comparison with
 // this process's clock is sound.
 //
+// A copy in another pod still waits the whole duration, and this
+// package accepts that wait. client-go documents it:
+// LeaderElectionConfig.LeaseDuration is how long a candidate that does
+// not lead waits before it forces the take, measured from the last
+// renewal it observed. Another pod cannot tell a holder that ended from
+// one that paused. A missing pod does not prove that the holder ended:
+// a force delete, or the out-of-service taint on its node, removes the
+// pod from the API while its process can still run. The wait happens
+// at most once for each restart of the only API server of a fleet.
+//
 // The Lease that client-go then updates keeps the resourceVersion of
 // this read, so the take is a conditional write, and a conflict with
 // any other writer ends it.

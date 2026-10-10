@@ -35,8 +35,9 @@ import (
 // operator's own namespace.
 const leaseName = "media-operator"
 
-// requestTimeout limits each request of the operator's client, so a
-// write the guard allowed ends before another copy can take the Lease
+// requestTimeout limits each request of the operator's client, so the
+// client gives up on a write the guard allowed before another copy can
+// take the Lease. The API server can still commit that write later
 // (election.RequestTimeout).
 const requestTimeout = election.RequestTimeout
 

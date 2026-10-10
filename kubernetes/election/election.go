@@ -24,9 +24,12 @@
 //
 // The election is not fencing. A leader that pauses, for example on a
 // stalled node, can resume after its Lease expired and finish a request
-// it had already sent. A leader that runs stops writing, and exits,
-// before another copy can take the Lease, because of the timings below
-// and the write guard.
+// it had already sent. A leader that runs stops sending writes, and
+// exits, before another copy can take the Lease, because of the timings
+// below and the write guard. A write it sent before that can still land
+// after another copy took the Lease (RequestTimeout says why). So a
+// write that must not land late names a precondition that the next
+// leader moves, such as the resourceVersion of the object it changes.
 //
 // The package links client-go's typed clientset for the coordination
 // group. A program that must stay small, such as the pod build of
@@ -72,9 +75,9 @@ import (
 // 15-second duration, the two times would meet.
 //
 // The write guard is stricter than the elector. It refuses a write once
-// the last renewal is one renewal deadline old, at T+10s. A write it
-// allowed is abandoned by the client's request timeout, RequestTimeout,
-// by T+25s, before a new leader can start at T+30s.
+// the last renewal is one renewal deadline old, at T+10s. The client
+// gives up on a write it allowed by T+25s, through RequestTimeout,
+// before a new leader can start at T+30s.
 //
 // The cost is failover time. A waiting copy takes a released Lease on
 // its next read, within about 11 seconds, and an abandoned Lease 30 to
@@ -86,10 +89,17 @@ const (
 )
 
 // RequestTimeout is the longest request the client of an elected
-// operator may send: pass it as apiclient.InClusterOptions.Timeout. A
-// write that the guard allowed just before T+10s must end before a new
-// leader can start at T+30s, less one retry period of margin, so it
-// ends by T+25s. apiclient's default of 30 seconds is too long.
+// operator may send: pass it as apiclient.InClusterOptions.Timeout. The
+// client gives up on a write that the guard allowed just before T+10s
+// by T+25s, one retry period before a new leader can start at T+30s.
+// apiclient's default of 30 seconds is too long.
+//
+// The timeout ends the client's wait, not the write. kube-apiserver
+// keeps running a request's handler after the request timed out, and
+// counts each such handler in apiserver_request_post_timeout_total, so
+// the API server can commit a write after the client gave up on it and
+// after a new leader took the Lease. The timeout bounds how long a
+// leader waits on a write. It does not keep a late write out.
 const RequestTimeout = Duration - RenewDeadline - RetryPeriod
 
 // Options name the Lease and the process that competes for it.

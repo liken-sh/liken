@@ -87,9 +87,11 @@ func (l *leadership) actWhileLeading(stop context.Context, act func(*Client) err
 // leaderRequestTimeout bounds each request of the operator's client.
 // The write guard refuses a write once the last renewal at T is one
 // renewal deadline old, at T+10s, so a write it allowed was sent before
-// T+10s. This timeout abandons that write by T+25s, before a waiting
+// T+10s. The client gives up on that write by T+25s, before a waiting
 // copy can take the Lease at T+30s. The shared client's default of 30
-// seconds would let the write run past T+30s.
+// seconds would let the client wait past T+30s. The API server can
+// still commit the write after the client gave up on it
+// (election.RequestTimeout).
 const leaderRequestTimeout = election.Duration - election.RenewDeadline - election.RetryPeriod
 
 // lead builds the operator's client and starts the election for this

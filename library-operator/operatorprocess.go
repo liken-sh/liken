@@ -59,9 +59,11 @@ func operate() error {
 	stopped, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	// Each request ends within the election's request timeout, so a
-	// write that the guard allowed just before the leader stopped
-	// renewing ends before another copy can take the Lease.
+	// The client gives up on each request within the election's request
+	// timeout. So it stops waiting on a write that the guard allowed
+	// just before the leader stopped renewing, before another copy can
+	// take the Lease. The API server can still commit that write later
+	// (election.RequestTimeout).
 	client, err := inClusterClient(election.RequestTimeout)
 	if err != nil {
 		return fmt.Errorf("in-cluster config: %w", err)

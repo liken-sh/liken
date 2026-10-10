@@ -111,9 +111,12 @@ var noWait = func() context.Context {
 // unlucky pass that hits several dead connections in a row well
 // inside the forty-second heartbeat window (see heartbeat.go): a
 // client that stalls on another machine's failure must never make
-// this machine appear dead. The bound matters most to the cluster
-// operator: a write that its leader election allowed is abandoned by
-// this client before a new leader can take the Lease. The package
+// this machine appear dead. The bound matters to the cluster operator
+// too: this client gives up on a write that its leader election
+// allowed before a new leader can take the Lease. The API server can
+// still commit that write later, so the grant ledger, not this bound,
+// keeps a late reboot grant inside the budget
+// (cluster-operator/rollout.go). The package
 // kubernetes/election gives the numbers as election.RequestTimeout,
 // which this package does not import because the machine operator
 // must not link client-go's leader election. A test checks that this
