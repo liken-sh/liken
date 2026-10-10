@@ -1,9 +1,11 @@
 # 82. The cluster records each reboot turn before it grants it
 
-Milestone 82. Proposed and built 2026-10-10. The drill on the
-dev-cluster has not run yet ([The drills](#the-drills)). It closed the
-last part of the open problem "Coordinate cluster-operator instances",
-the part that its section "What stays open" described: a paused former
+Milestone 82. Proposed and built 2026-10-10. The drill on the `lab`
+fleet ran the same day
+([What the drill showed](#what-the-drill-showed)). The drills on
+liken-1 after a release have not run. It closed the last part of the
+open problem "Coordinate cluster-operator instances", the part that
+its section "What stays open" described: a paused former
 leader of `cluster-operator` can land a reboot grant after a new leader
 made its own decision, and the two grants together exceed the
 disruption budget. The design is option 1 of that document, the grant
@@ -603,6 +605,18 @@ the build:
   `listening` holds grants and confirms, and not adoption or removal.
   The build follows that row: an entry leaves on the API server's
   answer alone, because that answer does not depend on the heartbeats.
+* **The open problem is deleted.** Every part of it now has an
+  answer. This milestone answers the paused leader. Commits 0d0f68c6
+  and 23c9bfd5 removed the mode that acted without an election, and
+  commit 3023a787 set the rollback floor that makes the mode
+  unnecessary. The wait of a copy in another pod for an ended holder's
+  `Lease` is accepted, because client-go documents it, and the
+  comment on `renewalClock.Get` in `kubernetes/election/lock.go` says
+  so. The same pod's case was fixed in plan 80. Two claims of the open
+  problem were wrong, and the comments that repeated them are
+  corrected: a missing pod does not prove that the holder ended, and
+  the client's request timeout does not keep a write it gave up on
+  from landing later.
 * **The election test pauses for two minutes, not 40 seconds.** Copy B
   takes the `Lease` 30 to 41 seconds after A's last renewal, and then
   judges the heartbeats for `HeartbeatStaleAfter`, 40 seconds, before
@@ -635,3 +649,95 @@ failed only on the machine that the ledger gives the turn to. With the ledger, a
 every write. Test 4 ran two copies with real elections: B took the
 `Lease` 89 seconds into the bubble's clock, confirmed `node-2` 70
 seconds later, and A's late grant got `409`.
+
+## What the drill showed
+
+The drill ran on 2026-10-10 on the `dev-cluster`, the `lab` fleet of
+`node-1` to `node-5`, with a budget of one. Each guest had 1 GiB and
+4 vCPUs. One guest measured 1.1 GB of resident memory before the other
+four started, and the laptop had 15 GB available. Three lab releases
+took part: `2026.10.10-910`, built from 23c9bfd5 without the ledger,
+and `2026.10.10-911` and `2026.10.10-912`, built from 303429cc with it.
+The fleet was installed from the working tree at 303429cc. A script
+read the `Cluster` and the `Machine`s in one `kubectl get` every 2 to 3
+seconds, and counted the machines that held a grant or were
+unavailable. The times are UTC.
+
+1. **The API server's behavior.** On liken-1 (k3s v1.36.4), on a
+   scratch CRD `ledgers.drills.example.com` with the ledger's schema,
+   from 19:31:34 to 19:31:52. A status `PUT` that changed nothing
+   kept `resourceVersion` 4859199. A `PUT` from an older version got
+   `409 Conflict`. A status field that the schema does not declare,
+   sent with `--validate=warn`, was absent from the answer, with a
+   warning. With `kubectl`'s default strict validation, the same
+   write got `400`. A second entry for the same `machine` got `422`
+   with `Duplicate value`. The scratch CRD was deleted.
+2. **A rollout with the ledger.** `spec.version` moved to
+   `2026.10.10-911` at 19:35:05. The ledger held one entry at a time,
+   in the order `node-3`, `node-4`, `node-5`, `node-1`, `node-2`, and
+   was empty at 19:38:22. The rollout to `2026.10.10-912`, from
+   19:46:33 to 19:49:58, did the same. No sample showed more than one
+   machine out.
+3. **A stale entry.** With two replicas, at 19:43:14, `kubectl
+   replace --subresource=status` wrote the entry `node-5` at its
+   version 3103 into the `Cluster`. On the next tick, at 19:43:23, the
+   leader confirmed it: `RebootTurnGranted` with the message "the
+   cluster recorded this machine's reboot turn in an earlier sweep,
+   and grants it now". `node-5` asked for no turn, so the next sweep,
+   in the same second, reclaimed the grant, and the entry left.
+4. **A stale grant.** At 19:44:26, the copy of `node-5` saved at
+   version 3103, with a grant added, went through `kubectl replace
+   --subresource=status`. The API server answered `409 Conflict`.
+5. **A paused leader.** Two runs, each with two replicas.
+   * During the rollout to `2026.10.10-911`, at 19:50:12, `kill -STOP`
+     from a `kubectl debug node/node-5 --profile=sysadmin` pod stopped
+     the leader while `node-2` held the turn. The other copy took the
+     `Lease` at 19:51:07, kept `node-2`'s slot until its turn ended,
+     and granted the rest one at a time. `node-2`'s boot applied the
+     new `Deployment` template, which replaced the stopped pod, so the
+     process was killed before the `SIGCONT`.
+   * With no template change, `liken.sh/request-reboot` asked `node-4`,
+     `node-5`, and `node-2` for a reboot. At 19:54:09, `kill -STOP`
+     stopped the leader on `node-1` while `node-4` held the turn. The
+     other copy took the `Lease` at 19:54:44, and granted `node-5` at
+     19:55:34, after it judged the heartbeats for 40 seconds. At
+     19:55:45, `kill -CONT` resumed the stopped process. Its sweep
+     tried two reclaims and two `Cluster` writes, and the write guard
+     refused each one: "not sent: this copy does not hold a current
+     leader Lease: the last renewal was 1m40s ago". At 19:55:55 it
+     logged "lost Lease", and the process exited. The ledger never
+     held more than one entry, and no sample showed more than one
+     machine out.
+6. **Rollback.** `spec.version` moved to `2026.10.10-910` at 19:58:04.
+   A copy that ran the `2026.10.10-911` binary led first, and wrote
+   the entries of `node-2`, `node-4`, and `node-5`. From 19:59:58, a
+   copy with the `2026.10.10-910` binary led, and its status writes
+   removed the ledger: at 20:08:50 `node-3` held a grant with no
+   entry. The served CRD stayed at schema revision 3, with
+   `rebootTurns`.
+7. **Roll forward.** `spec.version` moved to `2026.10.10-912` at
+   20:10:04. A copy with the `2026.10.10-910` binary granted `node-4`
+   and `node-5` with no entry. At 20:11:33 a copy with the
+   `2026.10.10-912` binary took the `Lease`, and its first sweep
+   adopted `node-5`'s grant at version 14711. `node-1` and `node-2`
+   followed one at a time, and the rollout was complete at 20:13:04.
+
+Every grant that the ledger did not name came while a
+`2026.10.10-910` binary led. The `cluster-operator` logs hold one
+"lost Lease", the one that step 5 caused. Each of the three servers
+rebooted at least five times, and no copy lost the `Lease` to a server's
+reboot. A copy handed over the `Lease` only when its own pod was
+evicted or replaced.
+
+Two findings are outside this milestone:
+
+* **`node-1` hung after a reboot.** Its reboot into `2026.10.10-910`
+  at 20:00:04 wrote "reboot: machine restart" on the serial console
+  and nothing after it, for eight minutes, while QEMU used 133% of a
+  CPU. A power cycle at 20:08:45 booted the machine, and the rollout
+  went on. The same guest rebooted four other times in the drill
+  without a hang.
+* **A release resets the `cluster-operator` replicas.** Each leader's
+  boot applies the release's `Deployment` with `replicas: 1`, so the
+  second replica of steps 3 and 5 had to be set again after each
+  rollout.
