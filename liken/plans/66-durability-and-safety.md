@@ -61,6 +61,13 @@ Status on 2026-10-04:
   names each entry's facts directory by its modalias, so two identical
   devices write one directory, and the operator copies status from
   the facts. The status reports one entry for the two devices.
+* Built 2026-10-09: the pipe leak in part two. `run` closes its end of
+  the pipe after it reads the output. A test reproduced the leak
+  before the fix: five calls left five descriptors open. The leak was
+  smaller than the survey said. `reportWhenReady` already polls
+  through `runWithin`, which closes its pipe, so only the `iptables -V`
+  probe of the version facts and `postMortem` called `run`: at most
+  two descriptors in each boot.
 * Every other item is not built.
 
 The round has six parts: the boot chain's writes, init's process
@@ -178,7 +185,7 @@ prints that the proving watch did not stop. The watch should signal
 the reboot and return, so the plane can stop it like any other
 component. `provingWatch` has no test today and gets one here.
 
-**`run` leaks a pipe per call.** `run` (`init/supervisor.go`) takes
+**`run` leaks a pipe per call.** Built 2026-10-09. `run` (`init/supervisor.go`) takes
 `StdoutPipe` and never calls `Wait`, so the parent's end of the pipe
 is never closed. `reportWhenReady` calls it every few seconds for up
 to ten minutes. One `Close` after `ReadAll` fixes it.

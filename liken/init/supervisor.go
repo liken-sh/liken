@@ -694,7 +694,10 @@ func run(path string, args ...string) (string, bool) {
 	}
 	// Reading the pipe to EOF shows that the process finished
 	// writing. The reaper reports how the process died.
+	// The reaper collects the process, so cmd.Wait never runs to
+	// close the pipe, and run closes it itself.
 	buf, _ := io.ReadAll(out)
+	_ = out.Close()
 	status := deaths.await(cmd.Process.Pid)
 	_ = cmd.Process.Release()
 	return strings.TrimRight(string(buf), "\r\n"), status.Exited() && status.ExitStatus() == 0

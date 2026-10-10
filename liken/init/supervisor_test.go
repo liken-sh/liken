@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"testing"
@@ -400,6 +401,34 @@ func TestRunWithinReturnsTheOutputOfACommandThatFinishes(t *testing.T) {
 	out, ok := runWithin(10*time.Second, "echo", "node-1   Ready")
 	if !ok || out != "node-1   Ready" {
 		t.Errorf("runWithin = %q, %v; want the output and success", out, ok)
+	}
+}
+
+// openFiles counts the descriptors this process holds open.
+func openFiles(t *testing.T) int {
+	t.Helper()
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(entries)
+}
+
+// init is PID 1 and runs for the life of the machine, so a command
+// it runs must leave no descriptor behind. The collector is off
+// because the finalizer of an unreachable pipe would close it and
+// hide the leak.
+func TestRunLeavesNoDescriptorOpen(t *testing.T) {
+	reapForTest(t)
+	defer debug.SetGCPercent(debug.SetGCPercent(-1))
+	before := openFiles(t)
+
+	for range 5 {
+		run("echo", "iptables v1.8.11 (legacy)")
+	}
+
+	if after := openFiles(t); after != before {
+		t.Errorf("open descriptors went from %d to %d after five runs", before, after)
 	}
 }
 
