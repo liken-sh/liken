@@ -1,8 +1,9 @@
 # 16, The reclaim policy decides
 
-Built on 2026-10-10. The drill on liken-1 is still owed, and the last
-section of this plan lists it. This plan closes the open problem "A
-kept work tree with no volume".
+Built and drilled on liken-1 on 2026-10-10, with the development
+build `2026.10.10-001-dev-007-7a36a680`. The last section gives what
+the drill measured. This plan closes the open problem "A kept work tree
+with no volume".
 
 ## The problem
 
@@ -107,12 +108,33 @@ The tests run in `synctest` bubbles against a fake API server:
 
 ## The drill
 
-On liken-1, with the development build of this commit:
+On liken-1, with a writeable volume of `https://github.com/liken-sh/.github.git`
+staged by a pod on the node `liken-1`, unarmed so that nothing pushed.
+A pod with the store's directory mounted read-only listed the store.
 
-1. Confirm that the new provisioner deletes `repro-git-delete`, which
-   stayed `Released` before it.
-2. Stage a writeable volume of the `Delete` policy on a node, delete
-   its claim, and confirm that the `PersistentVolume` and the node's
-   tree are both gone.
-3. Do the same with `Retain`, and confirm that the tree stays after a
-   person deletes the `PersistentVolume`.
+1. `repro-git-delete`, a `PersistentVolume` of the `Delete` policy
+   that had stayed `Released` with no `Event` since its claim was
+   deleted, was deleted within a second of the new provisioner taking
+   its `Lease`.
+2. A bound `PersistentVolume` of the `Delete` policy carried the
+   provisioner's finalizer, and the `Retain` one did not. The volume's
+   directory recorded `Delete`. One second after the claim was
+   deleted, the `PersistentVolume` was gone, the node logged
+   `removed the work tree ... unpushed=false`, and the walk removed the
+   bare repository.
+3. Under `Retain`, the `PersistentVolume` stayed `Released` after its
+   claim was deleted. After a person deleted it, the tree and its bare
+   repository stayed.
+4. With the node plugin stopped by a `nodeSelector` that matched no
+   node, the claim of a `Delete` volume was deleted, and the
+   provisioner deleted its `PersistentVolume`. The tree stayed while
+   the plugin was down. The plugin removed it at its next start, and
+   the `Retain` tree stayed through the restart.
+5. A new `PersistentVolume` with the `Retain` tree's handle staged
+   from that tree: the tree's `git/HEAD` kept its time from the first
+   stage. A change of its policy to `Delete` was recorded in the
+   volume's directory within three seconds, and the release removed
+   the tree and the repository.
+
+The drill did not lose a commit to `Delete`, because the remote took
+every push. The tests cover a tree with an unpushed commit.
