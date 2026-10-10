@@ -9,16 +9,21 @@
 // connections, so the test can run in a synctest bubble and wait out
 // the reflector's backoff on the fake clock.
 //
-// It is not a model of the API server. It ignores selectors, answers
-// every list with every object of the collection, and checks no
-// resourceVersion on an update. A test that needs one of those
-// behaviors scripts its own handler.
+// It is not a model of the API server. It ignores selectors and answers
+// every list with every object of the collection. By default it checks
+// no resourceVersion on an update, so a test of a pass need not keep
+// its copies current. A test of optimistic concurrency calls
+// CheckVersions, and the fake then answers an update the way the API
+// server does: 409 for a stale copy, and no new version for a write
+// that changes nothing.
 package fakeapi
 
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -46,6 +51,10 @@ type Server struct {
 	// a write.
 	held   bool
 	queued []queuedEvent
+
+	// checkVersions, while it is true, refuses an update from a stale
+	// copy and keeps the version of an update that changes nothing.
+	checkVersions bool
 }
 
 type queuedEvent struct {
@@ -71,6 +80,20 @@ func (s *Server) Release() {
 		s.send(e.collection, e.line)
 	}
 	s.queued = nil
+}
+
+// CheckVersions makes each update from now on behave as the API
+// server's does. An update that names another resourceVersion than the
+// stored object's gets 409 Conflict. An update that names the stored
+// version and changes nothing stores nothing, sends no event, and
+// answers the stored object at its old version. A test that replays a
+// race between two writers needs both: the first is the
+// compare-and-swap, and the second means that a write which changes
+// nothing does not move the version that other writers compare with.
+func (s *Server) CheckVersions() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.checkVersions = true
 }
 
 // New returns a server that holds the given collections.
@@ -163,6 +186,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodPut {
 				var written map[string]any
 				_ = json.NewDecoder(r.Body).Decode(&written)
+				if s.checkVersions {
+					if version(written) != version(item) {
+						w.WriteHeader(http.StatusConflict)
+						_, _ = w.Write([]byte(`{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"Conflict","code":409}`))
+						return
+					}
+					if sameObject(written, item) {
+						_ = json.NewEncoder(w).Encode(item)
+						return
+					}
+				}
 				s.store(collection, "MODIFIED", written)
 				c.Items[i] = written
 				item = written
@@ -173,6 +207,28 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNotFound)
 	_, _ = w.Write([]byte(`{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"NotFound","code":404}`))
+}
+
+// version answers the resourceVersion an object names.
+func version(object map[string]any) string {
+	metadata, _ := object["metadata"].(map[string]any)
+	v, _ := metadata["resourceVersion"].(string)
+	return v
+}
+
+// sameObject reports whether two copies of an object differ only in
+// their resourceVersion. The API server compares a written object with
+// the stored one the same way before it decides to store anything.
+func sameObject(a, b map[string]any) bool {
+	strip := func(object map[string]any) map[string]any {
+		copied := maps.Clone(object)
+		metadata, _ := object["metadata"].(map[string]any)
+		metadata = maps.Clone(metadata)
+		delete(metadata, "resourceVersion")
+		copied["metadata"] = metadata
+		return copied
+	}
+	return reflect.DeepEqual(strip(a), strip(b))
 }
 
 // store gives a written object the next resourceVersion and sends it to

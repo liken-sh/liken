@@ -63,6 +63,15 @@ the rollback would stop.
 A `Cluster` that already names an older version keeps that value. The
 API checks the rule only when an edit changes `spec.version`.
 
+A release from before
+[`status.rebootTurns`](/docs/reference/cluster/#statusrebootturns)
+runs its rollout without that record. Its `cluster-operator` writes the
+Cluster's status without the field, so the list is empty while that
+release leads, and a copy that paused can then land a grant beyond the
+budget, as on every release before the record. When you roll forward,
+the newer `cluster-operator` adds a record for each grant that the
+older release wrote, before it grants a new turn.
+
 ### Before you roll back past a spec field
 
 A release later than `2026.10.08-002` boots a proven manifest that

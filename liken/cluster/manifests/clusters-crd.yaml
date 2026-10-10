@@ -25,7 +25,7 @@ metadata:
     # older slot's boot cannot downgrade the schema the cluster
     # serves (init/schemarevision.go). Raise it in the same change
     # that changes the schema below; a test holds the two together.
-    liken.sh/schema-revision: "2"
+    liken.sh/schema-revision: "3"
 spec:
   group: liken.sh
   names:
@@ -88,6 +88,13 @@ spec:
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
+        # The machines that hold a reboot turn now, from the grant
+        # ledger. The default listing already has eight columns, so
+        # this one shows only in `kubectl get clusters -o wide`.
+        - name: Turns
+          type: string
+          jsonPath: .status.rebootTurns[*].machine
+          priority: 1
       schema:
         openAPIV3Schema:
           type: object
@@ -482,7 +489,10 @@ spec:
                     This budget sets how many turns can be open at
                     once. The count includes the machines that are
                     down for any other reason, so a fleet that already
-                    has machines down pauses its own rollout.
+                    has machines down pauses its own rollout. The
+                    cluster records each turn in status.rebootTurns
+                    before it grants it, and counts each recorded turn
+                    against this budget.
                   properties:
                     maxUnavailable:
                       type: integer
@@ -1002,10 +1012,10 @@ spec:
               type: object
               description: >-
                 What a reader can observe about the cluster as a
-                whole. The leaders write it. Each leader's operator
-                sweeps the Machine list on every pass and publishes
-                what it found. Only the leaders can do this, because a
-                follower that reaches the API is reaching a leader.
+                whole. cluster-operator writes it. On every pass, it
+                sweeps the Machine list and publishes what it found,
+                and it records each reboot turn here before it grants
+                the turn.
               properties:
                 phase:
                   type: string
@@ -1106,8 +1116,12 @@ spec:
                           read. The MachinesReady message gives the
                           tally and names each machine that is not
                           Ready. The Progressing message names each
-                          machine that holds a reboot turn, and each
-                          machine that waits for one.
+                          machine that holds a reboot turn or is
+                          recorded for one in rebootTurns, and each
+                          machine that waits for one. When the served
+                          schema does not store rebootTurns, the
+                          message says that reboot turns wait for a
+                          Cluster schema that stores it.
                       lastTransitionTime:
                         type: string
                         format: date-time
@@ -1116,6 +1130,61 @@ spec:
                           writes this condition on every pass, but moves this
                           time only when the status changes, so the value
                           gives the age of the current status.
+                rebootTurns:
+                  type: array
+                  description: >-
+                    The grant ledger: each machine that holds a reboot
+                    turn now, or is about to receive one. Before
+                    cluster-operator writes a RebootApproved grant onto
+                    a Machine, it adds the machine here, in a write
+                    that names the Cluster's resourceVersion. A second
+                    copy of cluster-operator that read the same Cluster
+                    gets 409 Conflict on its own write, so two copies
+                    cannot both use one slot of spec.disruption. An
+                    entry leaves only when the Machine is gone, or holds
+                    no grant at a version other than the one the entry
+                    records. When an entry's Machine holds no grant at
+                    the recorded version, cluster-operator writes the
+                    grant itself, because the grant write of the copy
+                    that recorded the entry can still be in flight, and
+                    the API server accepts only one of the two. A grant
+                    that no entry names, such as one from a release
+                    before this field, enters the ledger at the
+                    Machine's current version. The TURNS column of
+                    `kubectl get clusters -o wide` reads the machine
+                    names from this field.
+                  maxItems: 1024
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [machine]
+                  items:
+                    type: object
+                    required: [machine, machineResourceVersion, since]
+                    properties:
+                      machine:
+                        type: string
+                        maxLength: 253
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                        description: >-
+                          The name of the Machine that holds the turn,
+                          and the key of this entry in the list.
+                      machineResourceVersion:
+                        type: string
+                        maxLength: 64
+                        description: >-
+                          The resourceVersion of the Machine that the
+                          grant write names. The API server accepts the
+                          grant only while the Machine is at this
+                          version, so once the Machine is at another
+                          version and holds no grant, no grant that this
+                          entry covers can land. cluster-operator
+                          compares the value only for equality.
+                      since:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When the entry entered the ledger. It tells
+                          you how long a turn has been open while the
+                          Machine holds no grant.
                 machines:
                   type: object
                   description: >-

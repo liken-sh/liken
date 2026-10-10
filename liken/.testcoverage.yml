@@ -70,7 +70,7 @@ override:
   # The fake API server the operators' tests share. Its tests hold it
   # to the answers those tests rely on.
   - path: ^kubernetes/fakeapi$
-    threshold: 92
+    threshold: 95
   # The metrics package: the registry, the collectors for the
   # contract's first two layers, and the listener. The tests scrape
   # every series through a real handler. What stays untested is the

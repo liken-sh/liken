@@ -81,6 +81,16 @@ The cluster grants turns within
 time, whatever the budget says, because the datastore needs a majority
 of the leaders.
 
+`cluster-operator` records each turn in the Cluster's
+[`status.rebootTurns`](/docs/reference/cluster/#statusrebootturns)
+before it grants the turn, and the record counts against the budget.
+The record is a write that names the Cluster's `resourceVersion`, so
+two copies of `cluster-operator` cannot both give one slot of the
+budget to a machine. A copy that paused, for example on a stalled
+node, can send a grant after another copy took over. That grant meets
+the record and adds no turn. A machine's record leaves the list after
+the cluster takes its grant back.
+
 When `cluster-operator` starts, for example after the machine that ran
 it loses power, it grants no turn for its first 40 seconds. A machine
 that went down before `cluster-operator` started still shows its last
@@ -127,6 +137,14 @@ the STATUS column shows each machine's step in the rollout:
 
 The phase of the Cluster shows Updating during the rollout, and Ready
 when the rollout is complete.
+
+The TURNS column of the wide listing names each machine that holds a
+reboot turn:
+
+    kubectl get clusters -o wide
+
+    NAME   STATUS     MACHINES   VERSION          NEWEST           AVAILABLE        LEADERS                        ENDPOINT   AGE   TURNS
+    lab    Updating   4/5        2026.10.12-001   2026.10.12-001   2026.10.12-001   ["node-1","node-2","node-3"]   ...        9d    node-4
 
 If a machine with a granted turn does not return, the cluster sets its
 `Progressing` condition to `False` with the reason `RolloutStalled`.

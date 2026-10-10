@@ -51,6 +51,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -236,6 +238,40 @@ func (r *fleetReader) machines() ([]machine.Machine, error) {
 	return machines, nil
 }
 
+// readTurns reads from the API server each Machine that the ledger
+// names and whose copy holds no grant, and answers the list with each
+// fresh copy in place of the old one. A Machine the API server no
+// longer holds leaves the list. The decision to free a ledger entry's
+// slot compares the Machine's version with the entry's, and a copy
+// older than the entry can differ from it while the grant can still
+// land, so this read must see every write at once. A Machine whose
+// copy holds a grant needs no read, because its slot stays in use
+// either way. A settled fleet has an empty ledger, so this costs about
+// one read for each finished turn.
+func (r *fleetReader) readTurns(turns []cluster.RebootTurn, machines []machine.Machine) ([]machine.Machine, error) {
+	machines = slices.Clone(machines)
+	for _, turn := range turns {
+		i := slices.IndexFunc(machines, func(m machine.Machine) bool { return m.Metadata.Name == turn.Machine })
+		if i >= 0 && api.FindCondition(machines[i].Status.Conditions, machine.RebootApprovedCondition) != nil {
+			continue
+		}
+		fresh, err := memo.ReadFresh[machine.Machine](r.client, r.machineVersions, turn.Machine, machinePath(turn.Machine))
+		switch {
+		case errors.Is(err, apiclient.ErrNotFound):
+			if i >= 0 {
+				machines = slices.Delete(machines, i, i+1)
+			}
+		case err != nil:
+			return nil, err
+		case i >= 0:
+			machines[i] = *fresh
+		default:
+			machines = append(machines, *fresh)
+		}
+	}
+	return machines, nil
+}
+
 func machinePath(name string) string { return kubernetes.MachinesPath + "/" + name }
 
 func clusterPath(name string) string { return kubernetes.ClustersPath + "/" + name }
@@ -276,11 +312,20 @@ func (r *fleetReader) publishStatus(m *machine.Machine, status *machine.MachineS
 
 // publishClusterStatus writes the Cluster's status, and notes the
 // version for the Clusters' copy, so the next sweep does not compare
-// its verdict against a status older than its own last write.
-func (r *fleetReader) publishClusterStatus(clusterDoc *cluster.Cluster) error {
-	return r.clusterVersions.Send(clusterDoc.Metadata.Name, func() (string, error) {
-		return kubernetes.PublishClusterStatus(r.client, clusterDoc)
+// its verdict against a status older than its own last write. It
+// answers the Cluster the API server stored, or nil when the answer
+// held none.
+func (r *fleetReader) publishClusterStatus(clusterDoc *cluster.Cluster) (*cluster.Cluster, error) {
+	var stored *cluster.Cluster
+	err := r.clusterVersions.Send(clusterDoc.Metadata.Name, func() (string, error) {
+		written, err := kubernetes.PublishClusterStatus(r.client, clusterDoc)
+		if err != nil || written == nil {
+			return "", err
+		}
+		stored = written
+		return written.Metadata.ResourceVersion, nil
 	})
+	return stored, err
 }
 
 // clusters reads every Cluster. A fleet has one.

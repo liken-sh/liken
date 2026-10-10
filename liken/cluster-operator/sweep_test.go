@@ -348,7 +348,7 @@ func TestCarryOutRolloutGrantsAndRevokes(t *testing.T) {
 	}, sweepNow.Add(-time.Minute))
 	machines := []machine.Machine{labMachine("node-3", api.PhaseUpdatePending), granted}
 
-	carryOutRollout(&fleetReader{client: client}, machines, rollout{grant: []string{"node-3"}, revoke: []string{"node-4"}}, sweepNow)
+	carryOutRollout(&fleetReader{client: client}, machines, rollout{grant: []string{"node-3"}, revoke: []string{"node-4"}}, []cluster.RebootTurn{{Machine: "node-3"}}, sweepNow)
 
 	grant := fake.statuses["node-3"]
 	if grant == nil || api.FindCondition(grant.Status.Conditions, machine.RebootApprovedCondition) == nil {

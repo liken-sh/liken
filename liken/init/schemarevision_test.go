@@ -637,7 +637,7 @@ var schemaPins = map[string]struct {
 	fingerprint string
 }{
 	"machines-crd.yaml": {9, "670e4bec9311e848d37edc2519cc2449e5eb18a98344aabfe5217c82f63d9c50"},
-	"clusters-crd.yaml": {2, "d15f5f53c5ce9a49047073ccd0782f50b6deeae1461468d6c0ddcd76bae8f5fa"},
+	"clusters-crd.yaml": {3, "680cd7ac9c750affe7dd7dee86340b88a5c05515a290fd1011a13c4fee7b2c89"},
 }
 
 // TestTheSeededCRDsPinTheirSchemaRevision is the enforcement behind

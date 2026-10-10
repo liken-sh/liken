@@ -101,7 +101,10 @@ test controls each answer, or a small stateful one that holds
 collections. `people-operator/fakeapi_test.go` is an operator's own,
 and `liken/kubernetes/fakeapi` serves the tests of `liken`'s
 operators. Neither is a model of the API server; a test that needs a
-selector or a version check scripts its handler.
+selector scripts its handler. A test of optimistic concurrency calls
+`CheckVersions` on `liken/kubernetes/fakeapi`, which then answers a
+stale update with `409` and keeps the version of an update that
+changes nothing (`liken/cluster-operator/pausedleader_test.go`).
 
 Test the operator's handlers through the real reflector, and leave the
 reflector's own faults to upstream. The `operators` skill holds the

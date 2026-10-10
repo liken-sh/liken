@@ -136,3 +136,33 @@ func TestAWatchReceivesEachWrite(t *testing.T) {
 		}
 	})
 }
+
+// With CheckVersions, an update from the stored version lands at the
+// next version, an update from an older version gets 409, and an update
+// that changes nothing keeps the stored version, as the API server
+// answers each of them.
+func TestCheckVersionsAnswersUpdatesAsTheAPIServerDoes(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    string
+		status  int
+		version string
+	}{
+		{"a write from the stored version", `{"metadata":{"name":"node-1","resourceVersion":"5"},"status":{"phase":"Ready"}}`, http.StatusOK, "11"},
+		{"a write from an older version", `{"metadata":{"name":"node-1","resourceVersion":"4"},"status":{"phase":"Ready"}}`, http.StatusConflict, "5"},
+		{"a write that changes nothing", `{"apiVersion":"v1","kind":"Node","metadata":{"name":"node-1","resourceVersion":"5","uid":"uid-node-1"}}`, http.StatusOK, "5"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fake, client := newTestServer(t)
+			fake.CheckVersions()
+
+			if got := request(t, client, http.MethodPut, "/api/v1/nodes/node-1/status", c.body).StatusCode; got != c.status {
+				t.Errorf("status = %d, want %d", got, c.status)
+			}
+			if got := fake.ResourceVersion("/api/v1/nodes", "node-1"); got != c.version {
+				t.Errorf("resourceVersion = %q, want %q", got, c.version)
+			}
+		})
+	}
+}

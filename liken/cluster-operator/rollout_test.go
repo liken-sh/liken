@@ -215,6 +215,10 @@ func TestRolloutKeepsTheGrantThroughTheReboot(t *testing.T) {
 	}
 }
 
+// The reclaim does not free the slot in the same sweep. The ledger
+// keeps node-4's entry until a later sweep reads the Machine without
+// the grant, at another version, because only then can no grant that
+// the entry covers still land.
 func TestRolloutRevokesAfterTheMachineConverges(t *testing.T) {
 	machines, renewals := rolloutInputs(
 		rolloutEntry{"node-1", api.PhaseReady, fresh, false, -1},
@@ -225,8 +229,8 @@ func TestRolloutRevokesAfterTheMachineConverges(t *testing.T) {
 	if !slices.Equal(r.revoke, []string{"node-4"}) {
 		t.Errorf("the turn is spent: %v", r.revoke)
 	}
-	if !slices.Equal(r.grant, []string{"node-5"}) {
-		t.Errorf("the next machine takes its turn: %v", r.grant)
+	if len(r.grant) != 0 {
+		t.Errorf("node-4's entry still holds the slot, so nobody takes a turn yet: %v", r.grant)
 	}
 }
 

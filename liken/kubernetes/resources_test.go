@@ -48,6 +48,21 @@ func TestPublishStatusWritesTheStatusSubresource(t *testing.T) {
 	}
 }
 
+// The answer is the Cluster that the API server stored, so a caller
+// can tell whether the served schema kept each status field it wrote.
+func TestPublishClusterStatusAnswersTheStoredCluster(t *testing.T) {
+	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"metadata":{"name":"lab","resourceVersion":"8"},"status":{"rebootTurns":[{"machine":"node-2","machineResourceVersion":"7","since":"2026-10-10T18:02:11Z"}]}}`))
+	}))
+	stored, err := PublishClusterStatus(client, &cluster.Cluster{Metadata: api.ObjectMeta{Name: "lab"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Metadata.ResourceVersion != "8" || len(stored.Status.RebootTurns) != 1 || stored.Status.RebootTurns[0].MachineResourceVersion != "7" {
+		t.Errorf("stored = %+v, want version 8 with node-2's turn at version 7", stored)
+	}
+}
+
 func TestPublishClusterStatusWritesTheStatusSubresource(t *testing.T) {
 	var path string
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

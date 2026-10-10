@@ -142,12 +142,26 @@ func awaitsApproval(m *machine.Machine) bool {
 // is the whole pass here: with no list of machines there is no
 // verdict to reach, so this is the failure that the layer 2 error
 // counter counts (metrics.go).
+//
+// The order of the writes matters. The Cluster's status goes first,
+// because it carries the grant ledger, and a grant goes out only after
+// the API server stores the grant's entry (rollout.go). The Machine
+// writes follow it: the grants, the confirms, the reclaims, and the
+// Lost verdicts.
 func sweepFleet(reads *fleetReader, clusterDoc *cluster.Cluster, available string, probe *engineProbe,
 	steward *podSteward, cm *clusterMetrics, now time.Time) error {
 	c := reads.client
 	machines, err := reads.machines()
 	if err != nil {
 		fmt.Printf("listing machines for the fleet sweep: %v\n", err)
+		return err
+	}
+	// Each Machine whose ledger entry shows no grant in its copy comes
+	// from the API server, because the decision to free the entry's
+	// slot needs the Machine's current version (rollout.go).
+	machines, err = reads.readTurns(clusterDoc.Status.RebootTurns, machines)
+	if err != nil {
+		fmt.Printf("reading the machines that hold reboot turns: %v\n", err)
 		return err
 	}
 	heard, err := reads.heartbeats(now)
@@ -173,7 +187,6 @@ func sweepFleet(reads *fleetReader, clusterDoc *cluster.Cluster, available strin
 		fmt.Printf("reading the %s DaemonSet for the rollout: %v\n", machineOperatorDaemonSet, err)
 		r = r.withoutGrants(err)
 	}
-	carryOutRollout(reads, machines, r, now)
 
 	// The OS's own pods, the operator's pods and the log relay pods,
 	// are also fleet state. An upgraded machine keeps pods from
@@ -205,8 +218,11 @@ func sweepFleet(reads *fleetReader, clusterDoc *cluster.Cluster, available strin
 		ensureFluxEngine(c, reads.recorder, clusterDoc, seed, probe, now)
 	}
 
+	// The Cluster's status goes first, ahead of every Machine write
+	// (see above).
+	stored := publishClusterStatus(reads, clusterDoc, s, r, fluxTeardown, available, publicKey, now)
+	carryOutRollout(reads, machines, r, stored, now)
 	markLost(reads, machines, s.lost, heard, now)
-	publishClusterStatus(reads, clusterDoc, s, r, fluxTeardown, available, publicKey, now)
 
 	// The fleet's metrics come from the verdict that the write above
 	// carries, so the graph and the Cluster's status report one
@@ -278,12 +294,19 @@ func lostMessage(heard map[string]time.Time, name string) string {
 // that the printer shows. This function also
 // derives the release fields: the catalog's newest version, and the
 // channel's last polled version. The sweep is the only writer of the
-// Cluster's status, so deriving every field is its job. The function
+// Cluster's status, so deriving every field is its job. The same write
+// carries the grant ledger, status.rebootTurns. The function
 // writes the status only when something actually changed, so a
 // settled fleet causes no write. Each condition that transitioned
 // posts its Event after the write lands, so a refused write posts
 // nothing and the next sweep finds the same transition again.
-func publishClusterStatus(reads *fleetReader, clusterDoc *cluster.Cluster, s fleetSweep, r rollout, fluxTeardown *api.Condition, available, publicKey string, now time.Time) {
+//
+// It answers the ledger that the API server holds after the sweep: the
+// one the Cluster already held when nothing changed, the one the
+// write's answer holds, or none when the write failed. A 409 means
+// another copy wrote the status since this sweep read it, so this
+// sweep's grants must not go out.
+func publishClusterStatus(reads *fleetReader, clusterDoc *cluster.Cluster, s fleetSweep, r rollout, fluxTeardown *api.Condition, available, publicKey string, now time.Time) []cluster.RebootTurn {
 	newest := cluster.NewestVersion(clusterDoc.Spec.Releases.Catalog)
 	s.condition.ObservedGeneration = clusterDoc.Metadata.Generation
 	r.progressing.ObservedGeneration = clusterDoc.Metadata.Generation
@@ -318,6 +341,7 @@ func publishClusterStatus(reads *fleetReader, clusterDoc *cluster.Cluster, s fle
 		clusterDoc.Status.Releases.Available != available ||
 		clusterDoc.Status.Flux != flux ||
 		clusterDoc.Status.ObservedGeneration != clusterDoc.Metadata.Generation ||
+		!sameTurns(r.turns, clusterDoc.Status.RebootTurns) ||
 		!slices.Equal(conditions, clusterDoc.Status.Conditions) {
 		updated := *clusterDoc
 		updated.Status.Machines = s.tally
@@ -327,10 +351,55 @@ func publishClusterStatus(reads *fleetReader, clusterDoc *cluster.Cluster, s fle
 		updated.Status.Flux = flux
 		updated.Status.ObservedGeneration = clusterDoc.Metadata.Generation
 		updated.Status.Conditions = conditions
-		if err := reads.publishClusterStatus(&updated); err != nil {
+		updated.Status.RebootTurns = r.turns
+		stored, err := reads.publishClusterStatus(&updated)
+		if err != nil {
 			fmt.Printf("publishing cluster status: %v\n", err)
-			return
+			return nil
 		}
 		postClusterTransitions(reads.recorder, clusterDoc, clusterDoc.Status.Conditions, conditions)
+		if stored == nil {
+			return nil
+		}
+		if !sameTurns(r.turns, stored.Status.RebootTurns) {
+			return schemaPrunedTurns(reads, stored, now)
+		}
+		return stored.Status.RebootTurns
 	}
+	return clusterDoc.Status.RebootTurns
+}
+
+// schemaPrunedTurns reports a Cluster write whose answer lacks the
+// ledger that it sent. The served CRD then comes from a release that
+// does not declare status.rebootTurns, and the API server pruned the
+// field. That happens while a newer cluster-operator runs against an
+// older CRD: in the seconds after the first leader boots a new release,
+// or when a leader on an older release starts k3s again and applies
+// its own copy of the CRD. The sweep grants nothing until the newer
+// schema returns, and the Progressing message says why. The reason
+// stays RollingOut, so the change posts no Event. It answers the
+// ledger the API server stored.
+func schemaPrunedTurns(reads *fleetReader, stored *cluster.Cluster, now time.Time) []cluster.RebootTurn {
+	fmt.Println("the served Cluster schema does not store status.rebootTurns; granting no reboot turn")
+	updated := *stored
+	updated.Status.Conditions = api.SetCondition(slices.Clone(stored.Status.Conditions), api.Condition{
+		Type: "Progressing", Status: api.ConditionTrue, Reason: "RollingOut",
+		ObservedGeneration: stored.Metadata.Generation,
+		Message: "reboot turns are waiting for a Cluster schema that stores status.rebootTurns; " +
+			"the served CustomResourceDefinition comes from an older release",
+	}, now)
+	if _, err := reads.publishClusterStatus(&updated); err != nil {
+		fmt.Printf("publishing cluster status: %v\n", err)
+	}
+	return stored.Status.RebootTurns
+}
+
+// sameTurns reports whether two ledgers hold the same entries in the
+// same order. It compares times with Equal, because a time decoded
+// from the API server carries another location than one the sweep
+// made.
+func sameTurns(a, b []cluster.RebootTurn) bool {
+	return slices.EqualFunc(a, b, func(x, y cluster.RebootTurn) bool {
+		return x.Machine == y.Machine && x.MachineResourceVersion == y.MachineResourceVersion && x.Since.Equal(y.Since)
+	})
 }

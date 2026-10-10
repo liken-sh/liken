@@ -12,6 +12,11 @@ package main
 // liken-cluster-operator in liken-system. That package explains the
 // election, its timings, and its limits.
 //
+// The election is not a fence. A former leader that paused can still
+// land a grant it sent before the pause, after another copy took the
+// Lease. The grant ledger in the Cluster's status, not the election,
+// keeps the disruption budget against that grant (rollout.go).
+//
 // Only the copy that holds the Lease opens its watches and sweeps. A
 // copy that the API server refuses on the Lease waits, as for any other
 // failure of the election. The OS images carry this binary, so a

@@ -137,6 +137,27 @@ If the Cluster's `Progressing` condition is `False` with the reason
 cluster grants no more turns until you examine that machine, so the
 rest of the fleet is safe while you do.
 
+The Cluster's
+[`status.rebootTurns`](https://liken.sh/docs/reference/cluster/#statusrebootturns)
+names each machine that holds a reboot turn, and each entry counts
+against the disruption budget. An entry can name a machine with no
+`RebootApproved` condition, because `cluster-operator` records a turn
+before it grants it, and a copy that stopped between the two writes
+leaves the record alone. `cluster-operator` then writes the grant
+itself, when the machine is available, and the turn goes on as
+normal. It removes the entry when the machine holds no grant and its
+`resourceVersion` differs from the entry's `machineResourceVersion`,
+or when the Machine is gone. A machine that is down keeps its entry
+until it returns or reads `Lost`.
+
+If the `Progressing` message says that reboot turns wait for a Cluster
+schema that stores `status.rebootTurns`, the API server serves the
+Cluster CRD of an older release, and drops the field from each write.
+That happens for a short time after the first leader boots a new
+release, and while a leader on an older release starts k3s again.
+`cluster-operator` grants no turn until the newer CRD returns. The
+leaders apply it again when each one boots the newer release.
+
 ## A machine crashed
 
 The machine keeps a record of a kernel crash through the reboot. The

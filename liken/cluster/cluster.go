@@ -35,6 +35,7 @@ import (
 	"net"
 	"os"
 	"slices"
+	"time"
 
 	"github.com/liken-sh/liken/liken/api"
 	"sigs.k8s.io/yaml"
@@ -109,6 +110,14 @@ type ClusterStatus struct {
 	Releases ClusterReleasesStatus `json:"releases,omitzero"`
 	Flux     ClusterFluxStatus     `json:"flux,omitzero"`
 
+	// RebootTurns is the grant ledger: each machine that holds a
+	// reboot turn, or is about to receive one. The cluster operator
+	// adds a machine here in a write conditional on the Cluster's
+	// resourceVersion before it grants the turn, so two copies of the
+	// operator cannot both use one budget slot
+	// (cluster-operator/rollout.go).
+	RebootTurns []RebootTurn `json:"rebootTurns,omitempty"`
+
 	// ObservedGeneration is the metadata.generation of the spec that
 	// this status judged, stamped by the sweep on every write. The
 	// conditions each carry the same stamp, but a client that only
@@ -147,6 +156,18 @@ type ClusterReleasesStatus struct {
 // feature is not declared, or the key is not minted yet.
 type ClusterFluxStatus struct {
 	PublicKey string `json:"publicKey,omitempty"`
+}
+
+// A RebootTurn is one entry of the grant ledger. Machine names the
+// Machine. MachineResourceVersion is the resourceVersion of the
+// Machine that the grant write names: the API server accepts that
+// write only while the Machine is still at this version, so once the
+// Machine is at another version and holds no grant, no grant that this
+// entry covers can land. Since is when the entry entered the ledger.
+type RebootTurn struct {
+	Machine                string    `json:"machine"`
+	MachineResourceVersion string    `json:"machineResourceVersion"`
+	Since                  time.Time `json:"since"`
 }
 
 // MachineTally counts the cluster's Machines: how many are fully
