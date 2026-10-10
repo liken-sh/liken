@@ -167,8 +167,12 @@ func sweepFleet(reads *fleetReader, clusterDoc *cluster.Cluster, available strin
 	// against the fleet's target so a leader can go first while the
 	// applied template lags, because only a leader's boot can advance
 	// it.
-	appliedVersion := daemonSetVersion(reads, machineOperatorDaemonSet)
+	appliedVersion, err := daemonSetVersion(reads, machineOperatorDaemonSet)
 	r := decideRollout(machines, heard, reads.sightings.since(), clusterDoc, appliedVersion, now)
+	if err != nil {
+		fmt.Printf("reading the %s DaemonSet for the rollout: %v\n", machineOperatorDaemonSet, err)
+		r = r.withoutGrants(err)
+	}
 	carryOutRollout(reads, machines, r, now)
 
 	// The OS's own pods, the operator's pods and the log relay pods,

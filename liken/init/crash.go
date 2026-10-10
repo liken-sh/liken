@@ -333,13 +333,11 @@ func crashSummary(g crashGroup, records string) *machine.CrashStatus {
 // crash-time mtime, into one directory per crash batch. The copies
 // and their directory sync to disk before this function returns,
 // because the caller's next step erases the originals. A directory
-// that already exists means a prior boot preserved this same batch
-// but died before clearing the store, so the copy is already safe
-// and only the clear needs to happen again.
+// that already exists does not prove the copy is whole: a prior boot
+// can die, or fail a write, partway through the batch. So every
+// record is written again, which costs a few kilobytes and happens
+// only while the store still holds the batch.
 func preserveCrashRecords(recs []pstoreRecord, dest string) error {
-	if _, err := os.Stat(dest); err == nil {
-		return nil
-	}
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return err
 	}
@@ -364,12 +362,14 @@ func preserveCrashRecords(recs []pstoreRecord, dest string) error {
 			return err
 		}
 	}
-	dir, err := os.Open(dest)
-	if err != nil {
-		return err
+	// The batch's own entry in the crash store must reach the disk
+	// too, or a power cut can lose the whole directory.
+	for _, d := range []string{dest, filepath.Dir(dest)} {
+		if err := syncDirectory(d); err != nil {
+			return err
+		}
 	}
-	defer dir.Close()
-	return dir.Sync()
+	return nil
 }
 
 // clearPstore erases records from the platform store. Unlinking a

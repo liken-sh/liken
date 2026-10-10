@@ -84,7 +84,7 @@ func newFleetAPI(now time.Time) *fakeapi.Server {
 
 // fleetClients answers the client for plain reads and the client for
 // the watches, both of the given fake.
-func fleetClients(t *testing.T, api *fakeapi.Server) (*apiclient.Client, dynamic.Interface) {
+func fleetClients(t *testing.T, api http.Handler) (*apiclient.Client, dynamic.Interface) {
 	t.Helper()
 	server := apiservertest.Start(t, api)
 	credentials := t.TempDir()

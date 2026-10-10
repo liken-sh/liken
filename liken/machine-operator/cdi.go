@@ -219,13 +219,15 @@ func refreshCDISpecs(sysRoot string, out *passOutcome) {
 // refreshCDISpec rewrites one claim's spec, and writes nothing when
 // every device still delivers what the file says.
 //
-// A device that this machine no longer publishes keeps the nodes it
-// had. The claim names hardware that left, and unprepare ends the
-// claim when its pods do. An empty edit list would start the next
-// pod with no device and no error.
+// A device that this machine no longer publishes names
+// deviceAbsentNode. The claim names hardware that left, and unprepare
+// ends the claim when its pods do. Its old nodes would hand the next
+// container whatever device the kernel gave those names since, and an
+// empty edit list would start that container with no device and no
+// error. When the hardware returns at the same address, the refresh
+// writes its nodes back.
 //
-// A CEC adapter's devices are the exception. Their spec names a node
-// that does not exist until the device returns (serioAbsentNode), so
+// A CEC adapter's devices name their own absent node, serioAbsentNode, so
 // a container fails to start rather than open a node whose number
 // another device may hold. So does a claim allocated to the adapter's
 // interface before spec.serio declared it: its old nodes are the tty
@@ -282,7 +284,7 @@ func refreshCDISpec(sysRoot, claimUID string, byName map[string]hardware.Device,
 		case err != nil && serioFailsClosed(allocated, byName, serio):
 			published = publishedDevice{Nodes: []string{serioAbsentNode}}
 		case err != nil:
-			continue
+			published = publishedDevice{Nodes: []string{deviceAbsentNode}}
 		}
 		nodes := deviceNodes(published.Nodes)
 		if sameDeviceNodes(nodes, device.ContainerEdits.DeviceNodes) {
@@ -300,6 +302,13 @@ func refreshCDISpec(sysRoot, claimUID string, byName map[string]hardware.Device,
 	out.wrote("refreshing the CDI specification of claim " + claimUID)
 	return nil
 }
+
+// deviceAbsentNode is the node a prepared claim's spec names while its
+// hardware is absent. No such node exists, so the runtime fails to
+// create the next container that holds the claim, and the kubelet
+// retries it under its restart backoff. A container that started
+// before the hardware left keeps the nodes it received.
+const deviceAbsentNode = "/dev/liken.sh/device-absent"
 
 // claimUIDFromSpecName reads a claim's UID back out of its spec file
 // name. A name that does not fit the pattern belongs to another

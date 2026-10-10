@@ -64,9 +64,10 @@ Driver failed to start (exit status=1)
 
 The liveness probe fails, and the kubelet restarts the container in the
 same pod, with the same prepared claim. The scheduler never evaluates
-the pod again, so the pod stays in `CrashLoopBackOff`. The
-[stale grants problem](removed-devices-retain-stale-grants.md) describes
-what the CDI spec gives the restarted container in this state.
+the pod again, so the pod stays in `CrashLoopBackOff`. While the claim's
+port is empty, its CDI spec names a node that does not exist, so a
+restarted container fails to start rather than receive whatever device
+took the old node's name.
 
 ## The manual repair
 
@@ -113,12 +114,13 @@ None of these is a selected design.
 
 ## Relation to stale grants
 
-The [stale grants problem](removed-devices-retain-stale-grants.md)
-asks that a prepared device which no longer resolves fail the container
-start. It excludes a change to serial identity and following hardware
-to a new port, because those change what a claim represents. This
-problem is that decision. The safeguard in the stale grants problem
-makes the failure clear. It does not make a moved device work again.
+A prepared device that no longer resolves fails the next container
+start: its CDI spec names `/dev/liken.sh/device-absent` until the
+hardware returns to the same port (`refreshCDISpec` in
+[cdi.go](../../machine-operator/cdi.go)). That safeguard makes the
+failure clear and safe. It does not make a moved device work again,
+because following a unit to a new port changes what a claim
+represents. This problem is that decision.
 
 ## Verification needed
 

@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -283,18 +285,56 @@ func TestSettleCrashKeepsPstoreWhenPreserveFails(t *testing.T) {
 	}
 }
 
-func TestSettleCrashSkipsRepreservingAKnownCrash(t *testing.T) {
-	panicPstore(t)
+// A boot that died, or failed a write, partway through the copy
+// leaves a directory that holds part of the batch. The next boot
+// must finish the copy before it clears the store, or the clear
+// erases the only copy of the records the directory lacks.
+func TestSettleCrashFinishesACopyThatAPriorBootLeftPartial(t *testing.T) {
+	pstore := panicPstore(t)
+	stateDir := t.TempDir()
+	partial := filepath.Join(stateDir, "crash", crashT.UTC().Format(crashDirFormat))
+	if err := os.MkdirAll(partial, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(partial, "dmesg-efi_pstore-172172172101001"), []byte("Panic#1 Pa"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want := pstoreContents(t, pstore)
+
+	settleCrashRecords(stateDir, true)
+
+	if got := pstoreContents(t, partial); !maps.Equal(got, want) {
+		t.Errorf("preserved %q, want every record of the batch, whole", slices.Sorted(maps.Keys(got)))
+	}
+}
+
+// pstoreContents reads every file in a directory by name.
+func pstoreContents(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := map[string]string{}
+	for _, e := range entries {
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		contents[e.Name()] = string(data)
+	}
+	return contents
+}
+
+// A prior boot that preserved the whole batch but died before the
+// clear leaves the same records in both places. This boot keeps the
+// copy and retries the clear.
+func TestSettleCrashRetriesTheClearOfAPreservedBatch(t *testing.T) {
+	pstore := panicPstore(t)
 	stateDir := t.TempDir()
 	known := filepath.Join(stateDir, "crash", crashT.UTC().Format(crashDirFormat))
-	if err := os.MkdirAll(known, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	sentinel := filepath.Join(known, "dmesg-efi_pstore-172172172101001")
-	if err := os.WriteFile(sentinel, dump("Panic#1 Part1", "<0>[ 12.3] Kernel panic - not syncing: sysrq triggered crash"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(sentinel, crashT, crashT); err != nil {
+	want := pstoreContents(t, pstore)
+	if err := os.CopyFS(known, os.DirFS(pstore)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -303,12 +343,10 @@ func TestSettleCrashSkipsRepreservingAKnownCrash(t *testing.T) {
 	if got == nil || got.Records != known {
 		t.Fatalf("the known directory is the record's home: %+v", got)
 	}
-	preserved, _ := os.ReadDir(known)
-	if len(preserved) != 1 {
-		t.Errorf("a crash a prior boot preserved is not copied again: %d files", len(preserved))
+	if preserved := pstoreContents(t, known); !maps.Equal(preserved, want) {
+		t.Errorf("preserved %q, want the batch unchanged", slices.Sorted(maps.Keys(preserved)))
 	}
-	left, _ := os.ReadDir(pstoreDir)
-	if len(left) != 0 {
+	if left, _ := os.ReadDir(pstore); len(left) != 0 {
 		t.Errorf("the clear that failed last boot is retried: %d remain", len(left))
 	}
 }

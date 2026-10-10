@@ -59,6 +59,18 @@ type lineWriter struct {
 	buf    bytes.Buffer
 }
 
+// teeOutput sends a command's output to its log file and to the
+// console. Both streams share one writer, because os/exec copies two
+// different writers from two goroutines, and the capped log has no
+// lock: a rotation under one copier would close the file under the
+// other. With one comparable writer, os/exec gives both streams one
+// pipe and one copier.
+func teeOutput(cmd *exec.Cmd, logf, console io.Writer) {
+	out := io.MultiWriter(logf, &lineWriter{dest: console, prefix: "k3s | "})
+	cmd.Stdout = out
+	cmd.Stderr = out
+}
+
 func (w *lineWriter) Write(p []byte) (int, error) {
 	w.buf.Write(p)
 	for {
@@ -431,8 +443,7 @@ func startK3s(role api.Role) (*exec.Cmd, io.Closer, error) {
 	if len(k3sMemoryDiscipline) > 0 {
 		cmd.Env = append(os.Environ(), k3sMemoryDiscipline...)
 	}
-	cmd.Stdout = io.MultiWriter(logf, &lineWriter{dest: console, prefix: "k3s | "})
-	cmd.Stderr = io.MultiWriter(logf, &lineWriter{dest: console, prefix: "k3s | "})
+	teeOutput(cmd, logf, console)
 	if err := deaths.start(cmd); err != nil {
 		logf.Close()
 		return nil, nil, fmt.Errorf("starting k3s: %w", err)

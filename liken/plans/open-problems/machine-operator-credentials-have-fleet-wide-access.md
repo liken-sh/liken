@@ -24,11 +24,12 @@ The cluster-scoped permissions include:
 | `resourceclaims` | get |
 | `pods` | list, watch |
 | `pods/eviction` | create |
-| `services`, `helmcharts` | list |
+| `poddisruptionbudgets` | list, watch |
+| `services`, `helmcharts` | list, watch |
 
 Separate namespaced roles permit get, create, and update on any `Lease`
-in `liken-system`, and get, list, and watch on the single
-`registry-credentials` `Secret`. The secret rule has `resourceNames`; the node, status, slice, and lease
+in `liken-system`, create and patch on `Event`s in `default`, and get,
+list, and watch on the single `registry-credentials` `Secret`. The secret rule has `resourceNames`; the node, status, slice, and lease
 rules do not. There is no lease-delete permission.
 
 `watchThisMachine` in [watches.go](../../machine-operator/watches.go)

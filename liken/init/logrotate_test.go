@@ -7,7 +7,9 @@ package main
 // take paths as inputs.
 
 import (
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -292,5 +294,21 @@ func TestCappedLogGoesQuietWhenItCannotReopen(t *testing.T) {
 	}
 	if !c.broken {
 		t.Error("the writer marks itself broken")
+	}
+}
+
+// k3s writes to stdout and stderr at once, and both streams end in
+// the one capped log, whose size and rotation have no lock. The race
+// detector fails this test if two goroutines ever write the log.
+func TestTeeOutputWritesTheLogFromOneGoroutine(t *testing.T) {
+	logf, err := openCappedLog(filepath.Join(t.TempDir(), "k3s.log"), 256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", "-c", `for i in $(seq 1000); do echo "out $i"; echo "err $i" >&2; done`)
+	teeOutput(cmd, logf, io.Discard)
+
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
 	}
 }

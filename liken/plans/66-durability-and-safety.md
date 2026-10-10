@@ -68,6 +68,18 @@ Status on 2026-10-04:
   through `runWithin`, which closes its pipe, so only the `iptables -V`
   probe of the version facts and `postMortem` called `run`: at most
   two descriptors in each boot.
+* Built 2026-10-10, each with a test that failed first:
+  - the half-copied crash batch in part one. `preserveCrashRecords`
+    writes every record again when the batch's directory exists.
+  - the two writers of the k3s log in part two. Both streams share one
+    writer, so `os/exec` copies them from one goroutine.
+  - both of part three's smaller cases. `daemonSetVersion` returns its
+    error, and a sweep that cannot read the template grants no turn.
+    The flux janitor stops when a controller delete fails.
+  - the condition list in part four.
+* Checked against the code on 2026-10-10: the survey's other claims.
+  Each item below carries a correction where the code or the fix
+  differs from the survey.
 * Every other item is not built.
 
 The round has six parts: the boot chain's writes, init's process
@@ -103,6 +115,12 @@ file has the same gap, and a boot home with a `.partial` file and no
 The fix is `unix.Sync()` after each of those writes, which is what the
 installer, the loader writer, and the report already do.
 
+Correction, 2026-10-10: the reboot path does flush. `rebootMachine`
+(`init/reboot.go`) arms the trial, shuts the plane down, remounts each
+disk read-only, and calls `unix.Sync()` before the reboot syscall. The
+gaps are the promotion's write of `default_slot`, which stays unflushed
+until the kernel writes it back, and the `grub.cfg` heal.
+
 **The readback after that write reads the page cache.** The same file
 re-reads what it just wrote, and its comment says this check is as
 reliable as the UEFI dialect's readback of `BootOrder`. The UEFI
@@ -119,6 +137,10 @@ The wrong comment says one directory fsync is enough, so code that
 follows it keeps adding new call sites without a flush. This milestone deletes it and makes every FAT writer call
 `unix.Sync()`.
 
+Correction, 2026-10-10: the install sequence calls `unix.Sync()` after
+`installGRUB` returns and before it reports success, so the installed
+`grub.cfg` reaches the disk. Only the local comment and call are wrong.
+
 **A half-copied crash batch is read as complete.** `preserveCrashRecords`
 (`init/crash.go`) returns at once when the destination directory
 exists, and it creates that directory before it writes any file. A
@@ -126,6 +148,13 @@ machine that dies during the copy leaves a partial directory. The next
 boot takes the "already safe" branch and then clears pstore, which
 erases the only remaining copy. The fix copies into a `.partial`
 directory and renames it when every file is written.
+
+Built 2026-10-10, without the `.partial` directory. A power cut is not
+needed to reach this: any write error during the copy leaves the same
+partial directory. `preserveCrashRecords` now writes every record
+again, which costs a few kilobytes and happens only while pstore still
+holds the batch. It also syncs the crash store's own directory, so the
+batch's entry reaches the disk.
 
 **The primary and backup GPT have no barrier between them.**
 `WriteTableInPlace` (`disks/gpt.go`) writes all five chunks of both
@@ -135,11 +164,26 @@ backup is already overwritten, and then `ReadGPT` reports neither copy
 readable. The fix is one `Sync` after the primary table and one after
 the backup, so that at every moment one complete table exists.
 
+Correction, 2026-10-10: that order does not protect a relocation. When
+the disk grew, the new backup goes to the new end of the disk, where
+`ReadGPT` looks for it, so a torn primary write after it leaves no
+readable copy. The safe order is the backup first, a `Sync`, then the
+primary and a `Sync`. The single `Sync` is in `writeTableBytes`, so
+`WriteTable` has the same gap.
+
 **`LastUsableLBA` is off by one.** `disks/gpt.go` says the last usable
 sector is 34 sectors from the end and returns the one 35 from the end.
 The test pins the wrong value. This is conservative and loses one
 sector, and it makes `liken`'s tables disagree with every other
 partitioner. Fix the function and the test together.
+
+Correction, 2026-10-10: the fix alone is not safe. Every existing
+remainder partition ends 35 sectors from the end, so after the fix
+`planGrowth` (`init/grow.go`) plans a one-sector growth on every
+machine. On the system disk the kernel refuses to read the new table
+while the boot slot is mounted, and storage fails. The fix needs a
+tolerance of one sector in `planGrowth`, and a test that a remainder
+at the old end stays untouched.
 
 ## Part two: init supervises processes safely
 
@@ -161,12 +205,22 @@ line state, or the file it rotates. A rotate can close the file under
 the other writer. A runtime panic in PID 1 is a kernel panic. The fix
 is one writer for both streams, or a mutex in `cappedLogFile`.
 
+Built 2026-10-10, with one writer for both streams (`teeOutput` in
+`init/supervisor.go`). Correction: the race did not panic. A write to
+a closed file returns an error, `cappedLogFile` marks itself broken,
+and file logging stops for the rest of the boot while the console copy
+continues.
+
 **The wpa_supplicant control channel can panic on close.**
 `wpaControl.close` (`init/wpactrl.go`) closes the event channel under
 the lock, and the read goroutine sends on that channel without the
 lock. Closing the socket first does not stop a goroutine that is
 already past `Read`. A send on a closed channel panics. The fix is a
 done channel the reader checks, or a close that waits for the reader.
+
+Note, 2026-10-10: `close` has one caller, for a radio that settles
+after the shutdown began, so this can happen at most once, during a
+shutdown.
 
 **Two waits have no bound after SIGKILL.** `stopK3s` receives on the
 death channel with no timeout after the kill. On the reboot path this
@@ -176,6 +230,15 @@ machine plane is cancelled, the reaper has already returned, so
 nothing will ever send. Both receives get a deadline, and a miss is printed and
 reported.
 
+Correction, 2026-10-10: `stopK3s` runs before `rebootMachine`, while
+the reaper still runs. The hang it can meet is a k3s in uninterruptible
+sleep, such as on hung storage, that SIGKILL cannot end, and then a
+requested reboot never reaches the reboot syscall. `stopSupplicants`
+already bounds each supplicant's stop, so only `endSupplicant` at
+bring-up waits with no bound. A missed wait on the restart path must
+not start a second k3s beside the first, so the deadline needs a
+decision on what a miss does there.
+
 **The proving watchdog blocks its own shutdown.** `provingWatch`
 (`init/proving.go`) calls `rebootMachine` from inside a machine-plane
 component. `rebootMachine` shuts the plane down and waits on the
@@ -184,6 +247,14 @@ watchdog reboot waits the full ten-second shutdown timeout and then
 prints that the proving watch did not stop. The watch should signal
 the reboot and return, so the plane can stop it like any other
 component. `provingWatch` has no test today and gets one here.
+
+Note, 2026-10-10: this path also skips `stopK3s`, so `superviseK3s`
+starts k3s again during the ten-second shutdown, and the new k3s keeps
+`clusterState` open. A watch that sends the reboot through
+`rebootRequests` would also stop the `wedge-k3s` fault drill, whose
+main goroutine reads no requests. And it would pass through
+`stopK3s`, whose wait after SIGKILL has no bound, on the boot that a
+stuck k3s most likely caused. The bound above comes first.
 
 **`run` leaks a pipe per call.** Built 2026-10-09. `run` (`init/supervisor.go`) takes
 `StdoutPipe` and never calls `Wait`, so the parent's end of the pipe
@@ -196,6 +267,13 @@ write fails, and `mintNodePassword` never runs. That mint exists to
 stop k3s from writing its own password with a torn-write window that
 locks a machine out of its cluster. The password matters more than
 the symlink, so the fix runs `mintNodePassword` first.
+
+Correction, 2026-10-10: minting first does not help. When the symlink
+fails, k3s reads its password on the RAM root, not the minted file,
+and on a first join the next boot would present a password that the
+leader never recorded. The symlink fails only when its path already
+exists, so the fix accepts a symlink that already names the same
+directory, and treats any other failure as a boot fault.
 
 ## Part three: the operators refuse instead of guessing
 
@@ -274,6 +352,13 @@ not be read are the same input. The fix is a type change:
 `DiscoverDevices` returns an error, and the slice writer refuses to
 delete on an error.
 
+Correction, 2026-10-10: the live path is `SliceWriter.Write`
+(`kubernetes/resourceslices.go`), called from `machine-operator/dra.go`.
+`usbDevices` and `boardDevices` (`hardware/inventory.go`) turn an
+unreadable directory into an empty list the same way. Whether a failed
+walk keeps the last offer or withdraws it needs a decision: this
+milestone's rule withholds an offer it cannot show is safe.
+
 **The drain is skipped on any failed Node read.** This is a bug of
 medium priority. `disruptions.gate` (`machine-operator/disruptions.go`)
 calls `gateThroughDrain` only when a reboot is requested, the conductor
@@ -288,6 +373,8 @@ skips eviction. The machine then follows its shutdown sequence without
 the Eviction API, so no `PodDisruptionBudget` protects its workloads.
 The convergence still reports the normal reboot-requested result, and
 it reports no drain-read failure. No test covers the gate.
+(Correction, 2026-10-10: `TestAGrantedRebootWithNoNodeSkipsTheDrain`
+now asserts the skip on purpose, with a server error as its input.)
 
 A temporary fixture called the gate with a read error, a granted turn,
 and a convergence that requested a reboot. The result still requested
@@ -333,6 +420,12 @@ the Node. When it is False, the three conditions that depend on the
 Node are written as `Unknown`, with a message that names the read
 error. The drain fix above reports through the same condition.
 
+Correction, 2026-10-10: `NodeCurrent` carries forward the same way, so
+four conditions are stamped, not three. `Unknown` would turn `Ready`
+False on every failed read, and a machine whose phase changes can hold
+the fleet's reboot turns. The smaller fix keeps the previous
+`observedGeneration` on each condition the pass carried forward.
+
 **No request has a deadline.** Built in 3c594a1c, be5dcace, and
 d57451fa, as a fifteen-second limit on each request rather than a
 context per pass. The release fetchers remain, in part five.
@@ -354,6 +447,12 @@ which turns the leader-first gate off for that sweep. The flux janitor
 (`cluster-operator/janitor.go`) sets `deleted` only on success and
 falls through to stripping finalizers when a delete failed for a
 reason other than not-found. Both return the error instead.
+
+Built 2026-10-10. A sweep that cannot read the machine-operator
+DaemonSet grants no turn, and reclaims spent grants as before. The
+janitor stops when a controller delete fails for a reason other than
+not-found. A failed delete reaches stage 3 only when the controller
+Deployment has no pods, so it was rare.
 
 ## Part four: the CRD schema and CI workflows match the code
 
@@ -383,7 +482,16 @@ refused, and the machine goes Lost with no way out but a spec edit.
 The rules move to `spec.storage`, where only a spec write triggers
 them.
 
-**The condition roll-up omits four conditions the code sets.** The
+Correction, 2026-10-10: the rules cannot move. A rule under
+`spec.storage` cannot read `self.status`. The fix keeps the rules at
+the root and adds a transition guard that passes any write that leaves
+`spec.storage` unchanged, as a status write does.
+
+**The condition roll-up omits four conditions the code sets.** Built
+2026-10-10. Six were missing: `WirelessJoined` and `SerioAttached` as
+well. The description also says that `Ready` excludes `SerioAttached`,
+and `TestTheCRDDescribesEveryCondition` checks the list against the
+conditions a pass owns. The
 `conditions` description in the schema lists the conditions by name,
 and the manual's reference page generates from it. `HostEntriesApplied`,
 `NodeTaintsApplied`, `ModuleParametersApplied`, and
@@ -416,6 +524,12 @@ only `make smoke-uefi`, and it requires a green checks run for the
 commit, not a green build run. A commit whose BIOS drill failed can
 be tagged and published, and releases are immutable. The release
 workflow runs both drills.
+
+Correction, 2026-10-10: that workflow is gone. The publish job runs
+`make release` and `make smoke-uefi`, and it needs the checks job,
+whose build ran both drills on the same commit. So the BIOS chain is
+drilled on the development build of the commit, not on the build
+stamped with the release's version.
 
 **Two Make gaps ship stale files.** `image/Makefile` lists the
 programs the image copies from each vendored domain, and the comment

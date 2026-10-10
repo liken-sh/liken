@@ -188,7 +188,7 @@ func TestAnAbsentSerioDeviceFailsClosed(t *testing.T) {
 	if err := json.Unmarshal(raw, &spec); err != nil {
 		t.Fatal(err)
 	}
-	want := [][]string{{serioAbsentNode}, {serioAbsentNode}, {"/dev/sda"}}
+	want := [][]string{{serioAbsentNode}, {serioAbsentNode}, {deviceAbsentNode}}
 	for i, device := range spec.Devices {
 		var paths []string
 		for _, node := range device.ContainerEdits.DeviceNodes {

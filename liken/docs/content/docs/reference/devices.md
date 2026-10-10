@@ -318,6 +318,15 @@ every claim that the kubelet prepared, so the next pod receives the
 current node. A container that already runs keeps the node that it
 received, and it receives the current node when the pod restarts.
 
+While the hardware is unplugged, the pass writes a node that does not
+exist into the claim's specification instead. The old node would be
+unsafe, because the kernel gives its name to the next device that
+arrives: another USB disk becomes `/dev/sda`. A container that starts
+while the hardware is away fails to start, and the kubelet retries it
+under its restart backoff. When the hardware returns to the same
+port, the next pass writes its nodes back, and the container starts at
+its next retry.
+
 usbfs has no interface boundary. If a device has more than one
 interface with a driver, each interface publishes as its own device,
 and each one delivers the same usbfs node. A pod that holds one of

@@ -23,7 +23,14 @@ import (
 // reboot turn.
 func awaitTurn(t *testing.T, client *apiclient.Client) {
 	t.Helper()
-	waiting, err := kubernetes.GetMachine(client, "node-2")
+	awaitTurnOf(t, client, "node-2")
+}
+
+// awaitTurnOf makes one machine of newFleetAPI's fleet ask for a
+// reboot turn.
+func awaitTurnOf(t *testing.T, client *apiclient.Client, name string) {
+	t.Helper()
+	waiting, err := kubernetes.GetMachine(client, name)
 	if err != nil {
 		t.Fatal(err)
 	}

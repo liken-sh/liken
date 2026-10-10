@@ -137,15 +137,41 @@ func TestRefreshLeavesASpecThatStillMatchesAlone(t *testing.T) {
 	}
 }
 
-func TestRefreshKeepsTheNodesOfHardwareThatLeft(t *testing.T) {
-	// The claim names hardware that is gone. Unprepare ends the claim
-	// when its pods do. An empty edit list would start the next pod
-	// with no device in it and no error.
+// The claim names hardware that left. Its old nodes would be worse
+// than none: the kernel gives /dev/sda to the next disk that arrives,
+// and the next container under this claim would open that disk. So
+// the spec names a node that does not exist, and the next container
+// fails to start until the hardware returns.
+func TestRefreshNamesAnAbsentNodeForHardwareThatLeft(t *testing.T) {
 	fixture := newDRAFixture(t)
 	fixture.enumerate(t, 4)
 	prepared(t, fixture)
 
-	if err := os.RemoveAll(filepath.Join(draSysfsRoot, "bus", "usb", "devices", "2-1:1.0")); err != nil {
+	// The stick leaves port 2-1, and another stick in port 2-2 takes
+	// /dev/sda.
+	usb := filepath.Join(draSysfsRoot, "bus", "usb", "devices")
+	if err := os.Rename(filepath.Join(usb, "2-1:1.0"), filepath.Join(usb, "2-2:1.0")); err != nil {
+		t.Fatal(err)
+	}
+	refreshCDISpecs(draSysfsRoot, nil)
+
+	if paths := specPaths(t, fixture, "claim-1"); !slices.Equal(paths, []string{deviceAbsentNode}) {
+		t.Errorf("paths = %v, want the absent node alone", paths)
+	}
+}
+
+func TestRefreshRestoresTheNodesOfHardwareThatReturned(t *testing.T) {
+	fixture := newDRAFixture(t)
+	fixture.enumerate(t, 4)
+	prepared(t, fixture)
+	stick := filepath.Join(draSysfsRoot, "bus", "usb", "devices", "2-1:1.0")
+	aside := filepath.Join(t.TempDir(), "unplugged")
+
+	if err := os.Rename(stick, aside); err != nil {
+		t.Fatal(err)
+	}
+	refreshCDISpecs(draSysfsRoot, nil)
+	if err := os.Rename(aside, stick); err != nil {
 		t.Fatal(err)
 	}
 	refreshCDISpecs(draSysfsRoot, nil)
@@ -153,7 +179,7 @@ func TestRefreshKeepsTheNodesOfHardwareThatLeft(t *testing.T) {
 	paths := specPaths(t, fixture, "claim-1")
 	slices.Sort(paths)
 	if !slices.Equal(paths, []string{"/dev/bus/usb/002/004", "/dev/sda"}) {
-		t.Errorf("paths = %v, want the nodes the claim was prepared with", paths)
+		t.Errorf("paths = %v, want the stick's nodes back", paths)
 	}
 }
 

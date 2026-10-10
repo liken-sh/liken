@@ -183,6 +183,28 @@ func TestJanitorFluxKillsTheControllersFirst(t *testing.T) {
 	}
 }
 
+// A controller whose delete failed still exists, though its pods may
+// be gone for a moment, as during a rollout. So the pass stops: a
+// controller that comes back would run the prune finalizers that
+// stage 3 strips, over a sync object that stage 3 deletes.
+func TestJanitorFluxStopsWhenAControllerDeleteFails(t *testing.T) {
+	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == fluxNamespacePath:
+			w.Write([]byte(plantedNamespace))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/deployments/"):
+			w.Write([]byte(`{"metadata": {"name": "x"}}`))
+		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/deployments/"):
+			w.WriteHeader(http.StatusInternalServerError)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/pods"):
+			w.Write([]byte(`{"items": []}`))
+		default:
+			t.Errorf("a failed controller delete stops the pass: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	janitorFlux(c, retractedCluster())
+}
+
 // Stage 2: deployments gone, but a controller pod still terminating
 // means nothing more happens this pass.
 func TestJanitorFluxWaitsOutTerminatingControllers(t *testing.T) {

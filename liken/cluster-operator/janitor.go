@@ -274,19 +274,28 @@ func janitorFlux(c *apiclient.Client, clusterDoc *cluster.Cluster) *api.Conditio
 
 	// Stage 1: the controllers must die before anything else is
 	// touched. A successful delete means this pass's work is done;
-	// the pod check below needs a fresh observation anyway.
-	deleted := false
+	// the pod check below needs a fresh observation anyway. A delete
+	// that failed also ends the pass, because the Deployment still
+	// exists: its pods can be gone for a moment, and a controller
+	// that comes back would run the prune finalizers that stage 3
+	// strips.
+	stop := false
 	for _, name := range []string{"source-controller", "kustomize-controller"} {
 		path := "/apis/apps/v1/namespaces/flux-system/deployments/" + name
 		if err := c.RequestJSON(http.MethodGet, path, nil, nil); errors.Is(err, apiclient.ErrNotFound) {
 			continue
 		}
-		if err := c.RequestJSON(http.MethodDelete, path+"?propagationPolicy=Background", nil, nil); err == nil {
+		err := c.RequestJSON(http.MethodDelete, path+"?propagationPolicy=Background", nil, nil)
+		switch {
+		case err == nil:
 			fmt.Printf("liken planted this flux and the cluster no longer declares it; deleted the %s Deployment\n", name)
-			deleted = true
+			stop = true
+		case !errors.Is(err, apiclient.ErrNotFound):
+			fmt.Printf("flux teardown, deleting the %s Deployment: %v\n", name, err)
+			stop = true
 		}
 	}
-	if deleted {
+	if stop {
 		return nil
 	}
 

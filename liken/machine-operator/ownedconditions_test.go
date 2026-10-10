@@ -1,8 +1,14 @@
 package main
 
 import (
+	"os"
+	"slices"
+	"strings"
 	"testing"
 	"testing/synctest"
+	"unicode"
+
+	"sigs.k8s.io/yaml"
 
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/kubernetes"
@@ -61,4 +67,51 @@ func TestEveryConditionAPassWritesIsOwned(t *testing.T) {
 			}
 		}
 	})
+}
+
+// conditionsDescription reads the description of status.conditions
+// from the Machine CRD, the text the reference page publishes.
+func conditionsDescription(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile("../machine/manifests/machines-crd.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var crd struct {
+		Spec struct {
+			Versions []struct {
+				Schema struct {
+					OpenAPIV3Schema struct {
+						Properties struct {
+							Status struct {
+								Properties struct {
+									Conditions struct {
+										Description string `json:"description"`
+									} `json:"conditions"`
+								} `json:"properties"`
+							} `json:"status"`
+						} `json:"properties"`
+					} `json:"openAPIV3Schema"`
+				} `json:"schema"`
+			} `json:"versions"`
+		} `json:"spec"`
+	}
+	if err := yaml.Unmarshal(raw, &crd); err != nil {
+		t.Fatal(err)
+	}
+	return crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties.Status.Properties.Conditions.Description
+}
+
+// A reader learns what each condition reports from the reference
+// page, so the CRD's description names every condition a pass writes.
+func TestTheCRDDescribesEveryCondition(t *testing.T) {
+	described := strings.FieldsFunc(conditionsDescription(t), func(r rune) bool {
+		return !unicode.IsLetter(r)
+	})
+
+	for conditionType := range ownedConditionTypes {
+		if !slices.Contains(described, conditionType) {
+			t.Errorf("the description of status.conditions does not name %s", conditionType)
+		}
+	}
 }

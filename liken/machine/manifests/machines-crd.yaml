@@ -3634,23 +3634,33 @@ spec:
                     on this machine, in the standard Kubernetes
                     form. Each pass writes every condition again.
                     Ready is the roll-up, and it is True only when
-                    every other condition is True. The other
+                    every other condition is True, except
+                    SerioAttached and RebootApproved. The other
                     conditions each report one check: FactsPublished
-                    for the facts that init writes, SysctlsApplied,
-                    StorageReady, ModulesLoaded, FeaturesReady, and
-                    NodeLabelsApplied for the parts of the spec that
-                    the operator applies, NodeHealthy for the Node's
-                    own Ready condition, NodeCurrent for the cleanup
-                    after a demotion, and SpecConverged,
-                    ClusterConverged, VersionConverged,
-                    CredentialsConverged, and ImportsConverged for
-                    the documents and the release that this boot ran
-                    under. RebootApproved is the one condition that
-                    another program writes: the cluster operator
-                    adds it to grant this machine a reboot turn, and
-                    removes it to take the grant back. Its absence
-                    carries the meaning, so it has no False state,
-                    and Ready does not count it.
+                    for the facts that init writes; SysctlsApplied,
+                    HostEntriesApplied, StorageReady, ModulesLoaded,
+                    ModuleParametersApplied, FeaturesReady,
+                    WirelessJoined, NodeLabelsApplied, and
+                    NodeTaintsApplied for the parts of the spec that
+                    init or the operator applies; NodeHealthy for the
+                    Node's own Ready condition; NodeCurrent for the
+                    cleanup after a demotion; RebootRequestHonored
+                    for the reboot that the
+                    liken.sh/request-reboot annotation asks for; and
+                    SpecConverged, ClusterConverged,
+                    VersionConverged, CredentialsConverged, and
+                    ImportsConverged for the documents and the
+                    release that this boot ran under. SerioAttached
+                    reports the serial-line adapters that spec.serio
+                    declares. An adapter that is unplugged or
+                    refused leaves the rest of the machine working,
+                    so Ready does not count it. RebootApproved is
+                    the one condition that another program writes:
+                    the cluster operator adds it to grant this
+                    machine a reboot turn, and removes it to take
+                    the grant back. Its absence carries the meaning,
+                    so it has no False state, and Ready does not
+                    count it.
                   # A conditions array is a map with one entry per
                   # type. This declaration (list-type map, keyed by
                   # type) lets the API server refuse duplicate types.

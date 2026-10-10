@@ -41,9 +41,11 @@ package main
 // machine.
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/machine"
 )
@@ -130,15 +132,20 @@ func stewardOSPods(r *fleetReader, machines []machine.Machine, steward *podStewa
 // release whose manifests are actually applied. It returns "" when
 // the DaemonSet does not exist yet, or predates this annotation,
 // because both cases mean there is nothing yet to compare a machine's
-// running version against. The rollout gate reads this same function
-// for the machine-operator DaemonSet, on the same terms
-// (fleet.go, rollout.go).
-func daemonSetVersion(r *fleetReader, name string) string {
+// running version against. Any other failure is an error, not "",
+// because "" turns off the rollout's template gate, and a failed read
+// does not show that the template is current. The rollout gate reads
+// this same function for the machine-operator DaemonSet, on the same
+// terms (fleet.go, rollout.go).
+func daemonSetVersion(r *fleetReader, name string) (string, error) {
 	ds, err := r.daemonSet(name)
-	if err != nil {
-		return ""
+	if errors.Is(err, apiclient.ErrNotFound) {
+		return "", nil
 	}
-	return ds.Metadata.Annotations[osVersionAnnotation]
+	if err != nil {
+		return "", err
+	}
+	return ds.Metadata.Annotations[osVersionAnnotation], nil
 }
 
 // stewardDaemonSet reads one DaemonSet's shipped version, lists its
@@ -153,7 +160,11 @@ func daemonSetVersion(r *fleetReader, name string) string {
 // It answers whether it read the DaemonSet's pods, or found no
 // DaemonSet to read them for.
 func stewardDaemonSet(r *fleetReader, machines []machine.Machine, name string, steward *podSteward, now time.Time) bool {
-	dsVersion := daemonSetVersion(r, name)
+	dsVersion, err := daemonSetVersion(r, name)
+	if err != nil {
+		fmt.Printf("reading the %s DaemonSet for the steward: %v\n", name, err)
+		return false
+	}
 	if dsVersion == "" {
 		return true // no DaemonSet, or nothing applied yet, to steward toward
 	}

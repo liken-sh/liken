@@ -308,6 +308,23 @@ func decideRollout(machines []machine.Machine, heard map[string]time.Time, heard
 	return r
 }
 
+// withoutGrants holds every turn of a sweep that could not read the
+// machine-operator DaemonSet, because the sweep cannot tell whether
+// the applied template lags the fleet's target. Reclaiming a spent
+// grant does not depend on the template, so the reclaims stand.
+func (r rollout) withoutGrants(err error) rollout {
+	if len(r.grant) == 0 {
+		return r
+	}
+	r.progressing = api.Condition{
+		Type: "Progressing", Status: api.ConditionTrue, Reason: "RollingOut",
+		Message: fmt.Sprintf("reboot turns are waiting on a read of the applied system-pod template: %v; waiting: %s",
+			err, strings.Join(r.grant, ", ")),
+	}
+	r.grant = nil
+	return r
+}
+
 // carryOutRollout writes the verdict onto the fleet: it adds grants
 // to the named Machines, and removes spent grants. These are writes
 // to other machines' statuses, and they are safe for the same reason
