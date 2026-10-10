@@ -159,7 +159,7 @@ node's clock.
 Every singleton operator elects through `kubernetes/election`:
 `liken`'s cluster operator, `media-operator`, `library-operator`,
 `equipment-operator`, `observatory-operator`, and `people-operator`
-([plan 80](../../../plans/80-one-leader-election.md)). So each one takes
+([plan 80](../../../plans/completed/80-one-leader-election.md)). So each one takes
 or clears the expired `Lease` of an earlier process of its own pod.
 
 One case stays open:
