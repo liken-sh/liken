@@ -126,6 +126,15 @@ Root plan 78 holds the rule and the reasons. In short:
   apart, and patches the count of a repeat within 10 minutes. A nil
   recorder posts nothing. An `Event` about a cluster-scoped object goes
   in `default`. Grant `create` and `patch` on `events`.
+- **The shutdown.** The recorder writes from its own goroutine, so an
+  elected operator's last write can be an `Event`. Pass `events.New` a
+  context that outlives the last pass, such as `context.Background()`.
+  After the last pass, and after every other writer has stopped, call
+  `Recorder.Shutdown` with a context of `events.ShutdownTimeout`. It
+  sends each queued `Event` once and returns after the last request has
+  returned. Call `Lead.StepDown` only when it answers nil; an error
+  means a write can still be in flight, so the process exits holding
+  the `Lease`.
 - **The condition type.** Declare conditions as `conditions.Condition`,
   with an alias where a component names its own type. Set one with
   `Recorder.SetCondition(object, &list, next, bad)`, where `bad` is the

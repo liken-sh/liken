@@ -48,9 +48,23 @@
 // A component needs the RBAC verbs create and patch on events in each
 // namespace it posts to.
 //
+// The recorder's goroutine ends with the context New takes, and a
+// request in flight then ends at once. An Event still queued is lost,
+// and a request that the client cut off can still land on the API
+// server after the goroutine returns. A component that must know when
+// its last write has returned, such as an elected operator that
+// releases its Lease after its last write, passes New a context that
+// outlives its last pass, and calls Shutdown after that pass:
+//
+//	ctx, cancel := context.WithTimeout(context.Background(), events.ShutdownTimeout)
+//	defer cancel()
+//	if recorder.Shutdown(ctx) == nil {
+//		lead.StepDown()
+//	}
+//
 // A test serves eventstest.Events in front of its fake API server,
-// through apiservertest, and reads what the recorder wrote from it. The recorder's goroutine
-// ends with the context New takes, so a test passes t.Context().
+// through apiservertest, and reads what the recorder wrote from it. A
+// test passes New t.Context().
 package events
 
 import (
@@ -61,6 +75,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -93,6 +108,17 @@ type Recorder struct {
 	queue   chan Event
 	dropped atomic.Uint64
 
+	// mu guards stopping, so that no post queues an Event after
+	// Shutdown began and the goroutine may have read the queue for the
+	// last time. stop closes when Shutdown begins, abandon when the
+	// context of Shutdown ends, and done when the goroutine returns.
+	mu          sync.Mutex
+	stopping    bool
+	stop        chan struct{}
+	abandon     chan struct{}
+	abandonOnce sync.Once
+	done        chan struct{}
+
 	// series is read and written only by the goroutine that writes
 	// the queue.
 	series *series
@@ -112,7 +138,8 @@ type Options struct {
 	Log io.Writer
 }
 
-// New starts a recorder that writes until ctx ends. component is the
+// New starts a recorder that writes until ctx ends, or until Shutdown
+// has written the queue. component is the
 // reportingComponent of each Event, such as machine-operator.
 func New(ctx context.Context, client *apiclient.Client, component string, options Options) *Recorder {
 	instance := options.Instance
@@ -130,6 +157,9 @@ func New(ctx context.Context, client *apiclient.Client, component string, option
 		log:       log,
 		queue:     make(chan Event, queueLength),
 		series:    newSeries(),
+		stop:      make(chan struct{}),
+		abandon:   make(chan struct{}),
+		done:      make(chan struct{}),
 	}
 	go r.run(ctx)
 	return r
@@ -180,6 +210,12 @@ func (r *Recorder) post(object ObjectReference, eventType, reason, message strin
 		ReportingComponent: r.component,
 		ReportingInstance:  r.instance,
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.stopping {
+		r.logf("dropped the %s Event %s on the %s %s: the recorder has shut down", eventType, reason, object.Kind, object.Name)
+		return
+	}
 	select {
 	case r.queue <- event:
 	default:
@@ -189,14 +225,94 @@ func (r *Recorder) post(object ObjectReference, eventType, reason, message strin
 	}
 }
 
-// run writes the queue until ctx ends.
+// ShutdownTimeout is the time an operator gives Shutdown. A queue of a
+// few Events writes in milliseconds, and an API server that does not
+// answer in 5 seconds will not answer before the pod's grace period
+// ends. The rest of the default grace period of 30 seconds covers the
+// release of a Lease, which kubernetes/election bounds at 16 seconds.
+const ShutdownTimeout = 5 * time.Second
+
+// Shutdown stops the recorder and writes the Events it holds. It
+// follows client-go's event broadcaster: a later Normal or Warning
+// drops its Event, each Event still queued is sent once, and a write
+// that fails is logged and not sent again. An Event that waits to be
+// sent again is given up at once. Shutdown answers nil when the queue
+// is empty and the last request has returned, so the caller's next
+// step, such as the release of a Lease, comes after every write of the
+// recorder.
+//
+// Unlike client-go's Shutdown, it waits for that last request. When ctx
+// ends first, Shutdown answers ctx's error at once, and a request can
+// still be in flight. The recorder then sends nothing after that
+// request returns, and logs how many Events it did not write.
+func (r *Recorder) Shutdown(ctx context.Context) error {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	if !r.stopping {
+		r.stopping = true
+		close(r.stop)
+	}
+	r.mu.Unlock()
+	select {
+	case <-r.done:
+		return nil
+	case <-ctx.Done():
+	}
+	r.abandonOnce.Do(func() { close(r.abandon) })
+	return fmt.Errorf("the Event recorder's last write had not returned: %w", ctx.Err())
+}
+
+// run writes the queue until ctx ends, or until Shutdown has emptied
+// it.
 func (r *Recorder) run(ctx context.Context) {
+	defer close(r.done)
+	for {
+		// A Shutdown takes the queue to drain, which stops when the
+		// context of Shutdown ends. The select below picks at random
+		// when the queue and stop are both ready, so stop is read
+		// first.
+		select {
+		case <-r.stop:
+			r.drain(ctx)
+			return
+		default:
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-r.stop:
+			r.drain(ctx)
+			return
+		case event := <-r.queue:
+			r.write(ctx, event)
+		}
+	}
+}
+
+// drain sends each Event left in the queue once, after Shutdown. No
+// post adds to the queue once Shutdown began, so an empty queue is the
+// end.
+func (r *Recorder) drain(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-r.abandon:
+			if left := len(r.queue); left > 0 {
+				r.logf("the shutdown ran out of time, so these queued Events were not written: %d", left)
+			}
+			return
+		default:
+		}
+		select {
 		case event := <-r.queue:
-			r.write(ctx, event)
+			if err := r.writeOnce(event); err != nil {
+				r.logFailure(event, err)
+			}
+		default:
+			return
 		}
 	}
 }
@@ -210,13 +326,17 @@ func (r *Recorder) write(ctx context.Context, event Event) {
 			return
 		}
 		if attempt == attempts {
-			r.logf("writing the %s Event %s on the %s %s: %v", event.Type, event.Reason, event.InvolvedObject.Kind, event.InvolvedObject.Name, err)
+			r.logFailure(event, err)
 			return
 		}
 		timer := time.NewTimer(retryWait)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
+			return
+		case <-r.stop:
+			timer.Stop()
+			r.logFailure(event, err)
 			return
 		case <-timer.C:
 		}
@@ -251,6 +371,12 @@ func (r *Recorder) writeOnce(event Event) error {
 	}
 	r.series.put(key, entry{name: created.Metadata.Name, count: 1, last: event.LastTimestamp})
 	return nil
+}
+
+// logFailure logs the last failure of an Event that the recorder gives
+// up on.
+func (r *Recorder) logFailure(event Event, err error) {
+	r.logf("writing the %s Event %s on the %s %s: %v", event.Type, event.Reason, event.InvolvedObject.Kind, event.InvolvedObject.Name, err)
 }
 
 func (r *Recorder) logf(format string, args ...any) {
