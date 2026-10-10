@@ -145,13 +145,21 @@ func (p *channelPoller) poll(source string) {
 	p.available = latest
 }
 
-// fetchChannelDocument sends a GET request for the channel document,
-// using a client with a bounded size and time limit. The document is
-// only a few lines of YAML, so the size limit is generous. The time
-// limit stops a stuck server from keeping the poll in progress
-// forever.
+// fetchChannelDocument sends a GET request for the channel document
+// through the default transport.
 func fetchChannelDocument(url string) ([]byte, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
+	return fetchChannelDocumentVia(nil, url)
+}
+
+// fetchChannelDocumentVia sends a GET request for the channel document
+// through transport, or through the default transport when transport
+// is nil, using a client with a bounded size and time limit. The
+// document is only a few lines of YAML, so the size limit is generous.
+// The time limit stops a stuck server from keeping the poll in progress
+// forever. A test passes a transport that reaches its fake server
+// without a socket.
+func fetchChannelDocumentVia(transport http.RoundTripper, url string) ([]byte, error) {
+	client := &http.Client{Transport: transport, Timeout: 30 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
 		return nil, err

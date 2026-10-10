@@ -38,27 +38,33 @@ func requireSeries(t *testing.T, body, line string) {
 	}
 }
 
-func TestTheListenerStartsWithTheFleetsOwnMetrics(t *testing.T) {
-	o, layer := serveMetrics("127.0.0.1:0")
-	if o == nil || layer == nil {
-		t.Fatal("the operator started with no metrics")
+// The registry holds both layers when no listener serves it: the
+// build info that every liken process publishes, and the fleet's own
+// gauges. An owner who runs no Prometheus gives no address, and a bad
+// address makes the listener fail. In both cases the operator still
+// counts, so turning the listener on again needs no restart of
+// anything else. Neither address opens a socket, so the test scrapes
+// the handler that the listener serves.
+func TestTheRegistryHoldsTheFleetsOwnMetricsWithoutAListener(t *testing.T) {
+	cases := []struct {
+		name    string
+		address string
+	}{
+		{"no address", ""},
+		{"an address the listener refuses", "127.0.0.1:-1"},
 	}
-	// The registry answers with both layers: the build info every
-	// liken process publishes, and the fleet's own gauges.
-	body := scrapeHandler(t, o.Handler())
-	requireSeries(t, body, `liken_machines{phase="Ready"} 0`)
-	if len(series(body, "liken_build_info")) != 1 {
-		t.Errorf("the scrape has no build info: %q", series(body, "liken_build_info"))
-	}
-}
-
-func TestAnEmptyAddressStillBuildsTheRegistry(t *testing.T) {
-	// An owner who runs no Prometheus gives the port back. The
-	// operator still counts, so turning the listener on again needs
-	// no restart of anything else.
-	o, layer := serveMetrics("")
-	if o == nil || layer == nil {
-		t.Fatal("the operator started with no metrics")
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			o, layer := serveMetrics(c.address)
+			if o == nil || layer == nil {
+				t.Fatal("the operator started with no metrics")
+			}
+			body := scrapeHandler(t, o.Handler())
+			requireSeries(t, body, `liken_machines{phase="Ready"} 0`)
+			if len(series(body, "liken_build_info")) != 1 {
+				t.Errorf("the scrape has no build info: %q", series(body, "liken_build_info"))
+			}
+		})
 	}
 }
 

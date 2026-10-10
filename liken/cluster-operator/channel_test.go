@@ -3,18 +3,18 @@ package main
 // Tests for the channel poller. Each test injects the fetch
 // function, then calls Observe the way the sweep does, and checks
 // what the poller asks for and remembers. A separate test checks the
-// real HTTP fetch against a local server.
+// HTTP fetch against a fake server.
 
 import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 	"github.com/liken-sh/liken/liken/cluster"
 	"github.com/liken-sh/liken/liken/machine"
 )
@@ -188,28 +188,29 @@ func TestNoSourceMeansNothingAvailable(t *testing.T) {
 }
 
 func TestFetchChannelDocumentSpeaksHTTP(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/releases/channel.yaml" {
-			http.NotFound(w, r)
-			return
+	synctest.Test(t, func(t *testing.T) {
+		server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/releases/channel.yaml" {
+				http.NotFound(w, r)
+				return
+			}
+			_, _ = w.Write(channelDocument("2026.07.13-002"))
+		}))
+
+		raw, err := fetchChannelDocumentVia(server, apiservertest.Host+"/releases/channel.yaml")
+		if err != nil {
+			t.Fatal(err)
 		}
-		_, _ = w.Write(channelDocument("2026.07.13-002"))
-	}))
-	defer server.Close()
+		channel, err := machine.ParseChannel(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if channel.Latest != "2026.07.13-002" {
+			t.Errorf("latest: %q", channel.Latest)
+		}
 
-	raw, err := fetchChannelDocument(server.URL + "/releases/channel.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	channel, err := machine.ParseChannel(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if channel.Latest != "2026.07.13-002" {
-		t.Errorf("latest: %q", channel.Latest)
-	}
-
-	if _, err := fetchChannelDocument(server.URL + "/absent/channel.yaml"); err == nil {
-		t.Error("a 404 must be an error, not an empty document")
-	}
+		if _, err := fetchChannelDocumentVia(server, apiservertest.Host+"/absent/channel.yaml"); err == nil {
+			t.Error("a 404 must be an error, not an empty document")
+		}
+	})
 }

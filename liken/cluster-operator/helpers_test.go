@@ -8,7 +8,6 @@ package main
 import (
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -33,13 +32,13 @@ func fleetMetrics(t *testing.T) (*clusterMetrics, func() string) {
 
 // scrapeHandler reads a registry the way Prometheus reads it: one
 // HTTP GET against the real handler, and the text document that
-// comes back.
+// comes back. apiservertest serves the handler over in-memory
+// connections, so a test in a synctest bubble can scrape too.
 func scrapeHandler(t *testing.T, handler http.Handler) string {
 	t.Helper()
-	server := httptest.NewServer(handler)
-	t.Cleanup(server.Close)
+	server := apiservertest.Start(t, handler)
 
-	resp, err := http.Get(server.URL + "/metrics")
+	resp, err := server.Client().Get(apiservertest.Host + "/metrics")
 	if err != nil {
 		t.Fatal(err)
 	}
