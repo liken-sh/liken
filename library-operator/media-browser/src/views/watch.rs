@@ -33,7 +33,7 @@ pub const MARK_HEIGHT: f32 = 48.0;
 
 // The size of the status and of a mark's words: a step under a playback
 // button's word, so the line reads after the row.
-const SIZE: f32 = 19.0;
+const SIZE: f32 = 20.0;
 
 // The space between the status and the first mark, and between two marks.
 const STATUS_GAP: f32 = 28.0;

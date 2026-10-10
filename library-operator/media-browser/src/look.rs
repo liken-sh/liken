@@ -100,55 +100,55 @@ pub const CLEAR: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.0);
 
 /// The size of the focused title's name under its poster, in logical
 /// pixels, large enough to read from a couch.
-pub const NAME: f32 = 23.0;
+pub const NAME: f32 = 24.0;
 
 /// The size of the one line under every slot of a wall.
-pub const CAPTION: f32 = 18.0;
+pub const CAPTION: f32 = 19.0;
 
 /// The size of the two lines under a headshot in a stripe. A headshot is
 /// narrower than a poster, so its lines are smaller than a wall's caption
 /// to fit a full name.
-pub const FACE: f32 = 16.0;
+pub const FACE: f32 = 17.0;
 
 /// The size of a page's title, where the item has no logo.
-pub const TITLE: f32 = 53.0;
+pub const TITLE: f32 = 54.0;
 
 /// The size of a title inside a header of a fixed height, where the item
 /// has no logo.
-pub const HEAD_TITLE: f32 = 38.0;
+pub const HEAD_TITLE: f32 = 39.0;
 
 /// The size of a page's facts line.
-pub const FACTS: f32 = 21.0;
+pub const FACTS: f32 = 22.0;
 
 /// The size of a page's tagline.
-pub const TAGLINE: f32 = 23.0;
+pub const TAGLINE: f32 = 24.0;
 
 /// The size of a page's plot.
-pub const PLOT: f32 = 20.0;
+pub const PLOT: f32 = 21.0;
 
 /// The size of the word in a button.
-pub const BUTTON: f32 = 21.0;
+pub const BUTTON: f32 = 22.0;
 
 /// The size of the heading over a strip, over a stripe, and over a season's
 /// divider.
-pub const HEADING: f32 = 20.0;
+pub const HEADING: f32 = 21.0;
 
 /// The size of the word in a control of a wall's band.
-pub const CONTROL: f32 = 18.0;
+pub const CONTROL: f32 = 19.0;
 
 /// The size of a score on the ratings line, a step over the facts line
 /// it sits under, so the number reads first and the site's scale after
 /// it reads second.
-pub const SCORE: f32 = 24.0;
+pub const SCORE: f32 = 25.0;
 
 /// The size of the credits and the cast on a page.
-pub const CREDITS: f32 = 18.0;
+pub const CREDITS: f32 = 19.0;
 
 /// The size of the number in the volume row.
-pub const ROW_NAME: f32 = 28.0;
+pub const ROW_NAME: f32 = 29.0;
 
 /// The size of secondary text: details and placeholder titles.
-pub const DETAIL: f32 = 20.0;
+pub const DETAIL: f32 = 21.0;
 
 /// How long the page takes to leave when a person chooses a title, in
 /// seconds. The mark fades in over the same span.

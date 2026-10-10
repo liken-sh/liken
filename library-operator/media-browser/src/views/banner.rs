@@ -45,15 +45,18 @@ const INDICATOR_HEIGHT: f32 = 4.0;
 const INDICATOR_GAP: f32 = 10.0;
 const FOOT: f32 = 28.0;
 
-/// The height the frame takes on a page this tall.
+/// The height the frame takes on a page this tall. The least rounds up,
+/// not to the nearest pixel, because a least that rounds down makes the
+/// frame a fraction of a pixel shorter than its text, and the tagline's
+/// last line then overlaps the indicators.
 pub fn height(page: f32) -> f32 {
-    (page * SHARE).max(least()).round()
+    (page * SHARE).round().max(least().ceil())
 }
 
 // The least the frame can be: the space over the head, the head, the
 // facts line, the genres line, the ratings row, the tagline, the gaps
 // between them, and the indicator row over the foot. Every size here is
-// a fixed number of pixels, so a page under about 925 pixels tall takes
+// a fixed number of pixels, so a page under about 943 pixels tall takes
 // this and not the share, and the column never runs into the indicators.
 fn least() -> f32 {
     TOP + LOGO_HEIGHT
@@ -229,7 +232,7 @@ mod tests {
 
     #[test]
     fn a_short_page_gives_the_frame_the_height_its_text_needs() {
-        assert_eq!(height(720.0), 370.0);
+        assert_eq!(height(720.0), 377.0);
         assert!(height(720.0) > 720.0 * SHARE);
     }
 
