@@ -32,8 +32,11 @@ the component's name as a prefix, such as
 prefixed tag now, and the release workflow does not run for one. The
 OS's tags before `2026.08.18-002` carry a `v` prefix.
 
-`corrosion`, outside this repository, versions with semver, because it
-is a general library.
+`corrosion`, outside this repository, uses the same CalVer scheme with
+its own tags. `make -C liken release` on its `liken` branch tags the
+next serial of the day and publishes `ghcr.io/liken-sh/corrosion` at
+that tag. `library-operator/corrosion/Dockerfile` pins that image by
+tag and digest.
 
 ## What a tag releases
 
