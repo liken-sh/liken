@@ -9,7 +9,8 @@ document records that remaining concern and the options for it.
 
 ## What milestone 71 answered
 
-`cluster-operator/leader.go` runs client-go's leader election on the
+`cluster-operator/leader.go` elects through the shared package
+`kubernetes/election`, which runs client-go's leader election, on the
 `liken-cluster-operator` `Lease` in `liken-system`. Only the copy that
 holds it watches the fleet and writes. The `Deployment` rolls a new
 pod in beside the old one, and `replicas: 2` is safe once every node
@@ -79,7 +80,9 @@ change.
 
 ## A refused `Lease` turns the election off
 
-[unelected.go](../../cluster-operator/unelected.go) serves a rollback
+[unelected.go](../../../kubernetes/election/unelected.go) in
+`kubernetes/election` serves a rollback. Only the cluster operator turns
+it on, with `Options.ActWhenRefused`. It serves a rollback
 onto a release from before the election. That release's RBAC grants
 no write of the `Lease`, so a copy that waited for the `Lease` would
 never act, and the rollback would stop. The copy acts without an
@@ -97,8 +100,8 @@ come from a missing grant. Two cases follow from one such answer:
   from its own view of the fleet. That is the budget overrun that the
   election exists to prevent.
 * **The leader.** A 403 on a renewal turns the mode on while the copy
-  leads. `mayWrite` in [leader.go](../../cluster-operator/leader.go)
-  then allows every write and does not check the age of the last
+  leads. `Lead.MayWrite` in
+  [election.go](../../../kubernetes/election/election.go) then allows every write and does not check the age of the last
   renewal, so the guard's limit, one renewal deadline after the last
   renewal, does not apply. A renewal that succeeds turns the mode off
   again. If none does, the elector stops the lead and the process
@@ -116,14 +119,15 @@ code.
    one `Lease` duration, 30 seconds. A single stray 403 then changes
    nothing. A rollback onto the older RBAC waits 30 seconds longer
    for the cluster operator's writes. For the leader, keep the
-   renewal-age check in `mayWrite` while the mode is on, so a refused
-   renewal cannot extend the lead. This changes only the cluster
-   operator.
+   renewal-age check in `Lead.MayWrite` while the mode is on, so a
+   refused renewal cannot extend the lead. The change is in
+   `kubernetes/election`, and it affects only the cluster operator,
+   because only the cluster operator sets `ActWhenRefused`.
 2. **Remove the mode.** When no release that a `Cluster` can roll back
    to is older than the election, every copy runs under RBAC that
    grants the `Lease`, and a refusal is an ordinary failure of the
-   election. Deleting `unelected.go` then closes the window
-   completely. This needs a rule for which releases a rollback may
+   election. Removing `ActWhenRefused` from the cluster operator then
+   closes the window completely. This needs a rule for which releases a rollback may
    target, which does not exist yet.
 
 The recommendation is option 1 now, and option 2 when the release
@@ -143,15 +147,22 @@ holder can run on another node with another clock. So each copy that
 reads the ended process's `Lease` waits a whole duration, 30 seconds,
 from that first read, and the fleet has no acting copy in that time.
 
-`renewalClock.Get` and `clearIfHeld` in
-[leader.go](../../cluster-operator/leader.go) close this case for the
-same pod. A process can take or clear a `Lease` that an earlier
+`renewalClock.Get` in [lock.go](../../../kubernetes/election/lock.go)
+and `Lead.clearIfHeld` in
+[election.go](../../../kubernetes/election/election.go) close this case
+for the same pod. A process can take or clear a `Lease` that an earlier
 process of its own pod held, once the last renewal is one duration
 old. The kubelet starts a container's process again only after the
 one before it ended, and that process wrote `renewTime` from the same
 node's clock.
 
-Two cases stay open:
+Every singleton operator elects through `kubernetes/election`:
+`liken`'s cluster operator, `media-operator`, `library-operator`,
+`equipment-operator`, `observatory-operator`, and `people-operator`
+([plan 80](../../../plans/80-one-leader-election.md)). So each one takes
+or clears the expired `Lease` of an earlier process of its own pod.
+
+One case stays open:
 
 * **Another pod.** A copy in another pod cannot tell an ended holder
   from a paused one. On a test cluster with one server, the server's
@@ -162,26 +173,18 @@ Two cases stay open:
   `Lease` or clears it before it stops, if the API server answers it
   first. The wait stays when the stop comes before that answer. It
   happens at most once for each reboot of the only server.
-* **The other operators.** `media-operator`, `library-operator`, and
-  `equipment-operator` each carry a copy of this election, with the
-  same scheme of one new identity for each process. Each copy has
-  `clearIfHeld` for its own process, and none takes or clears a `Lease`
-  that an earlier process of its pod held. Their identities start with
-  the pod's name from the `POD_NAME` variable, not the hostname.
 
 ### What would close it
 
-1. **Copy the change** to the three operators' `leader.go`. It needs
-   no design choice.
-2. **Read the holder's pod.** The identity starts with the pod's name.
-   A copy could read that pod, and treat a pod that does not exist as
-   ended. A pod that is terminating can still run its process, so only
-   a missing pod is proof, and the change needs a read of pods in the
-   cluster operator's RBAC. The gain is at most one `Lease` duration
-   for each reboot of the only server.
+**Read the holder's pod.** The identity starts with the pod's name.
+A copy could read that pod, and treat a pod that does not exist as
+ended. A pod that is terminating can still run its process, so only a
+missing pod is proof, and the change needs a read of pods in each
+operator's RBAC. The gain is at most one `Lease` duration for each
+reboot of the only server.
 
-The recommendation is option 1 now. Option 2 is not worth its RBAC
-for a fleet with more than one server, where the API server stays up.
+The read is not worth its RBAC for a fleet with more than one server,
+where the API server stays up.
 
 Not known: whether a fleet with three servers loses the `Lease` when
 the server that a copy's connection uses reboots. The in-cluster

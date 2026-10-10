@@ -70,9 +70,17 @@ package.
 
 `observatory-operator` and `people-operator` elect through the package,
 and their `Deployment`s move to `RollingUpdate` with `maxSurge: 1` and
-`maxUnavailable: 0`, as the other four have. Each `Deployment` gains
+`maxUnavailable: 0`, as the `Deployment`s of the cluster operator,
+`media-operator`, and `library-operator` have. Each `Deployment` gains
 `POD_NAME` and `POD_NAMESPACE`, and each RBAC gains the `Role` of its
 `Lease`.
+
+`equipment-operator` keeps `Recreate`. Its pod uses the host network
+and declares port 9260, so the scheduler places no two of its pods on
+one node. A `RollingUpdate` on a one-node cluster leaves the new pod
+`Pending`, and the rollout never finishes. Its election still guards
+against a second copy that a node partition or a larger replica count
+starts.
 
 ### What stays a plain singleton
 
