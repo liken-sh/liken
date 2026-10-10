@@ -373,7 +373,7 @@ func operate() {
 	playerVerbose := os.Getenv(playerVerboseVariable)
 	metricsAddress := os.Getenv(metricsAddressVariable)
 
-	client, err := inClusterClient()
+	client, err := inClusterClient(requestTimeout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "in-cluster config: %v\n", err)
 		os.Exit(1)
@@ -399,6 +399,11 @@ func operate() {
 	stop, cancelSignals := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancelSignals()
 	leader := lead(stop)
+	// Every write from here on goes through the write guard: the passes,
+	// the bus handler, the volume engine, and the Event recorder. The
+	// reads before the lead go through the client without it, and the
+	// guard allows reads anyway.
+	client = leader.guard(client)
 
 	// One wake channel serves the two watches and the bus handler,
 	// because a wake carries no information beyond "read the collection

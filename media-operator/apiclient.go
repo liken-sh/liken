@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
@@ -17,9 +18,10 @@ import (
 var serviceAccountDir = apiclient.ServiceAccountDir
 
 // inClusterClient builds the client from the pod's environment and its
-// ServiceAccount.
-func inClusterClient() (*apiclient.Client, error) {
-	return apiclient.InCluster(apiclient.InClusterOptions{ServiceAccountDir: serviceAccountDir})
+// ServiceAccount. timeout limits one request, and zero takes apiclient's
+// default.
+func inClusterClient(timeout time.Duration) (*apiclient.Client, error) {
+	return apiclient.InCluster(apiclient.InClusterOptions{ServiceAccountDir: serviceAccountDir, Timeout: timeout})
 }
 
 // The two content types this client sends besides JSON. An apply is a

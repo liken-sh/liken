@@ -219,13 +219,23 @@ holds, and then counts what it found. client-go's leader election
 writes lines of its own beside these:
 
     kubectl -n liken-system logs deploy/media-operator
-    media.liken.sh: holding lease liken-system/media-operator as media-operator-7d9f8b6c5d-x2k4p_1a2b3c4d
+    media.liken.sh: holding Lease liken-system/media-operator as media-operator-7d9f8b6c5d-x2k4p_1a2b3c4d
     media.liken.sh: operating 0 plays and 0 remotes over bus.liken-system.svc:1883
 
-A copy that logs `waiting for lease liken-system/media-operator`
+A copy that logs `waiting for Lease liken-system/media-operator`
 instead is a second copy. It takes over within about 11 seconds when
 the holder shuts down, and 30 to 41 seconds after the holder's last
-renewal when the holder stops without a shutdown.
+renewal when the holder stops without a shutdown. When the kubelet
+restarts the holder's container in the same pod, the new process takes
+the `Lease` of its earlier process as soon as the last renewal is 30
+seconds old. It does not wait another 30 seconds from its first read
+of the `Lease`.
+
+A leader that cannot renew the `Lease`, for example while the API
+server restarts, sends no write to the API server once its last
+renewal is 10 seconds old. client-go's election gives up 15 seconds
+after the last renewal, and the operator exits within 25 seconds of
+it, before a waiting copy can take the `Lease`.
 
 The capabilities agent's log has one line for each GPU, with the
 driver's name and every capability it publishes:

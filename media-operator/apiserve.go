@@ -280,7 +280,7 @@ func writeReport(line string) { fmt.Fprintln(os.Stderr, line) }
 // which the process cannot listen without; then the readiness latch
 // and the listener.
 func runAPI() {
-	client, err := inClusterClient()
+	client, err := inClusterClient(0)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "in-cluster config: %v\n", err)
 		os.Exit(1)
