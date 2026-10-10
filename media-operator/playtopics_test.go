@@ -195,55 +195,59 @@ func TestADeletingPlayIsReleasedOnlyOnceItsPodIsGone(t *testing.T) {
 // a run of its own, so nothing the earlier run left on the desk reads as
 // this run's state.
 func TestAPlayRecreatedUnderTheSameNameStartsClean(t *testing.T) {
-	cluster := newFakeCluster()
-	leaving := playOnPlayer("movie", "theater", "2026-09-08T10:00:00Z")
-	leaving.Metadata.DeletionTimestamp = "2026-09-08T10:30:00Z"
-	leaving.Metadata.Finalizers = []string{playFinalizer}
-	cluster.plays["movie"] = leaving
-	cluster.players["theater"] = housePlayer()
-	media, broker := busOperator(t, cluster)
-	media.reports.fold("house", "movie", playReport{Item: 1, Position: "0:00:08", Ended: true})
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		leaving := playOnPlayer("movie", "theater", "2026-09-08T10:00:00Z")
+		leaving.Metadata.DeletionTimestamp = "2026-09-08T10:30:00Z"
+		leaving.Metadata.Finalizers = []string{playFinalizer}
+		cluster.plays["movie"] = leaving
+		cluster.players["theater"] = housePlayer()
+		media, broker := busOperator(t, cluster)
+		media.reports.fold("house", "movie", playReport{Item: 1, Position: "0:00:08", Ended: true})
 
-	media.pass()
-	mustClearPlayTopics(t, broker, "house", "movie")
+		media.pass()
+		mustClearPlayTopics(t, broker, "house", "movie")
 
-	cluster.plays["movie"] = playOnPlayer("movie", "theater", "2026-09-08T11:00:00Z")
-	media.pass()
+		cluster.plays["movie"] = playOnPlayer("movie", "theater", "2026-09-08T11:00:00Z")
+		media.pass()
 
-	if media.reports.latestFor("house", "movie") != nil {
-		t.Error("the recreated Play reads the released run's report")
-	}
-	if media.reports.endedFor("house", "movie") {
-		t.Error("the recreated Play starts ended")
-	}
-	held := cluster.plays["movie"].Metadata.Finalizers
-	if !reflect.DeepEqual(held, []string{playFinalizer}) {
-		t.Errorf("finalizers = %v, want the recreated Play held by %q", held, playFinalizer)
-	}
+		if media.reports.latestFor("house", "movie") != nil {
+			t.Error("the recreated Play reads the released run's report")
+		}
+		if media.reports.endedFor("house", "movie") {
+			t.Error("the recreated Play starts ended")
+		}
+		held := cluster.plays["movie"].Metadata.Finalizers
+		if !reflect.DeepEqual(held, []string{playFinalizer}) {
+			t.Errorf("finalizers = %v, want the recreated Play held by %q", held, playFinalizer)
+		}
+	})
 }
 
 // This operator removes only its own finalizer, so the library operator's
 // finalizer on the same Play keeps the Play until that operator's own work
 // is done.
 func TestAReleaseLeavesAnotherOperatorsFinalizerAlone(t *testing.T) {
-	const otherFinalizer = "library.liken.sh/progress"
-	cluster := newFakeCluster()
-	play := playOnPlayer("movie", "theater", "2026-09-08T10:00:00Z")
-	play.Metadata.DeletionTimestamp = "2026-09-08T10:30:00Z"
-	play.Metadata.Finalizers = []string{otherFinalizer, playFinalizer}
-	cluster.plays["movie"] = play
-	media, broker := busOperator(t, cluster)
+	synctest.Test(t, func(t *testing.T) {
+		const otherFinalizer = "library.liken.sh/progress"
+		cluster := newFakeCluster()
+		play := playOnPlayer("movie", "theater", "2026-09-08T10:00:00Z")
+		play.Metadata.DeletionTimestamp = "2026-09-08T10:30:00Z"
+		play.Metadata.Finalizers = []string{otherFinalizer, playFinalizer}
+		cluster.plays["movie"] = play
+		media, broker := busOperator(t, cluster)
 
-	media.pass()
+		media.pass()
 
-	mustClearPlayTopics(t, broker, "house", "movie")
-	held, standing := cluster.plays["movie"]
-	if !standing {
-		t.Fatal("the release took the other operator's finalizer with its own")
-	}
-	if !reflect.DeepEqual(held.Metadata.Finalizers, []string{otherFinalizer}) {
-		t.Errorf("finalizers = %v, want %v", held.Metadata.Finalizers, []string{otherFinalizer})
-	}
+		mustClearPlayTopics(t, broker, "house", "movie")
+		held, standing := cluster.plays["movie"]
+		if !standing {
+			t.Fatal("the release took the other operator's finalizer with its own")
+		}
+		if !reflect.DeepEqual(held.Metadata.Finalizers, []string{otherFinalizer}) {
+			t.Errorf("finalizers = %v, want %v", held.Metadata.Finalizers, []string{otherFinalizer})
+		}
+	})
 }
 
 // A failed write anywhere on the two paths leaves the finalizer where it
@@ -271,26 +275,28 @@ func TestAFailedWriteLeavesAPlayHeld(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			cluster := newFakeCluster()
-			play := playOnPlayer("movie", "theater", "2026-09-08T10:00:00Z")
-			if test.deleting {
-				play.Metadata.DeletionTimestamp = "2026-09-08T10:30:00Z"
-				play.Metadata.Finalizers = []string{playFinalizer}
-			}
-			cluster.plays["movie"] = play
-			cluster.fails[test.fails] = true
-			media, _ := busOperator(t, cluster)
+			synctest.Test(t, func(t *testing.T) {
+				cluster := newFakeCluster()
+				play := playOnPlayer("movie", "theater", "2026-09-08T10:00:00Z")
+				if test.deleting {
+					play.Metadata.DeletionTimestamp = "2026-09-08T10:30:00Z"
+					play.Metadata.Finalizers = []string{playFinalizer}
+				}
+				cluster.plays["movie"] = play
+				cluster.fails[test.fails] = true
+				media, _ := busOperator(t, cluster)
 
-			media.pass()
+				media.pass()
 
-			held, standing := cluster.plays["movie"]
-			if !standing {
-				t.Fatal("a failed write released the Play")
-			}
-			if test.deleting && !held.Metadata.holds(playFinalizer) {
-				t.Errorf("finalizers = %v, want the operator to keep %q",
-					held.Metadata.Finalizers, playFinalizer)
-			}
+				held, standing := cluster.plays["movie"]
+				if !standing {
+					t.Fatal("a failed write released the Play")
+				}
+				if test.deleting && !held.Metadata.holds(playFinalizer) {
+					t.Errorf("finalizers = %v, want the operator to keep %q",
+						held.Metadata.Finalizers, playFinalizer)
+				}
+			})
 		})
 	}
 }

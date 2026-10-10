@@ -8,23 +8,26 @@ package main
 import (
 	"net/http"
 	"testing"
+	"testing/synctest"
 )
 
 // An audio redirect names the first sink in its Location and links the
 // rest, so the response says the other sinks exist without a read of
 // the Player.
 func TestAnAudioRedirectLinksTheOtherSinks(t *testing.T) {
-	fixture := newAPIFixture(t)
-	fixture.server.audio = testAudioBase
-	fixture.plane.players[testAPIPlayer] = shapedPlayer(true, 2, true)
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		fixture.server.audio = testAudioBase
+		fixture.plane.players[testAPIPlayer] = shapedPlayer(true, 2, true)
 
-	recorder := fixture.get(playerPathFor("audio.opus"))
+		recorder := fixture.get(playerPathFor("audio.opus"))
 
-	mustMatch(t, recorder.Code, http.StatusTemporaryRedirect)
-	mustMatch(t, recorder.Header().Get("Location"),
-		testAudioBase+"/v1/audio/sinks/hdmi-0-pch/audio.opus")
-	mustContain(t, recorder.Header().Values("Link"),
-		`<`+testAudioBase+`/v1/audio/sinks/aa-bb-cc-dd-ee-ff/audio.opus>; rel="https://liken.sh/rel/audio"`)
+		mustMatch(t, recorder.Code, http.StatusTemporaryRedirect)
+		mustMatch(t, recorder.Header().Get("Location"),
+			testAudioBase+"/v1/audio/sinks/hdmi-0-pch/audio.opus")
+		mustContain(t, recorder.Header().Values("Link"),
+			`<`+testAudioBase+`/v1/audio/sinks/aa-bb-cc-dd-ee-ff/audio.opus>; rel="https://liken.sh/rel/audio"`)
+	})
 }
 
 // The detail of a 409 names the action that clears it, and the action
@@ -42,13 +45,15 @@ func TestTheDetailOfA409NamesTheAction(t *testing.T) {
 	}
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
-			fixture := newAPIFixture(t)
-			fixture.plane.players[testAPIPlayer] = shapedPlayer(true, row.sinks, row.playing)
+			synctest.Test(t, func(t *testing.T) {
+				fixture := newAPIFixture(t)
+				fixture.plane.players[testAPIPlayer] = shapedPlayer(true, row.sinks, row.playing)
 
-			recorder := fixture.get(playerPathFor("audio.wav"))
+				recorder := fixture.get(playerPathFor("audio.wav"))
 
-			mustMatch(t, recorder.Code, http.StatusConflict)
-			mustMatch(t, problemOf(t, recorder).Detail, row.detail)
+				mustMatch(t, recorder.Code, http.StatusConflict)
+				mustMatch(t, problemOf(t, recorder).Detail, row.detail)
+			})
 		})
 	}
 }
@@ -71,12 +76,14 @@ func TestEachUpstreamCarriesItsOwnKnobs(t *testing.T) {
 // The health paths obey the same method rules as every other route: a
 // POST is 405 with Allow, and an OPTIONS is 204.
 func TestTheHealthPathsRefuseOtherMethods(t *testing.T) {
-	fixture := newAPIFixture(t)
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
 
-	refused := fixture.call(http.MethodPost, healthTemplate, nil)
-	options := fixture.call(http.MethodOptions, readyTemplate, nil)
+		refused := fixture.call(http.MethodPost, healthTemplate, nil)
+		options := fixture.call(http.MethodOptions, readyTemplate, nil)
 
-	mustMatch(t, refused.Code, http.StatusMethodNotAllowed)
-	mustMatch(t, refused.Header().Get("Allow"), apiAllowedMethods)
-	mustMatch(t, options.Code, http.StatusNoContent)
+		mustMatch(t, refused.Code, http.StatusMethodNotAllowed)
+		mustMatch(t, refused.Header().Get("Allow"), apiAllowedMethods)
+		mustMatch(t, options.Code, http.StatusNoContent)
+	})
 }

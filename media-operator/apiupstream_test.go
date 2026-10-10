@@ -95,12 +95,14 @@ func TestTheHeaderDeadlineBoundsOnlyTheWaitForHeaders(t *testing.T) {
 // runs for as long as the caller reads it. Only the request headers
 // are bounded.
 func TestThisApiBoundsTheRequestHeadersAndNotTheResponse(t *testing.T) {
-	fixture := newAPIFixture(t)
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
 
-	listener := fixture.server.listener(":8443")
+		listener := fixture.server.listener(":8443")
 
-	mustMatch(t, listener.ReadHeaderTimeout, serverReadHeaderTimeout)
-	mustMatch(t, listener.WriteTimeout, time.Duration(0))
-	mustMatch(t, listener.IdleTimeout, time.Duration(0))
-	mustMatch(t, listener.ReadTimeout, time.Duration(0))
+		mustMatch(t, listener.ReadHeaderTimeout, serverReadHeaderTimeout)
+		mustMatch(t, listener.WriteTimeout, time.Duration(0))
+		mustMatch(t, listener.IdleTimeout, time.Duration(0))
+		mustMatch(t, listener.ReadTimeout, time.Duration(0))
+	})
 }

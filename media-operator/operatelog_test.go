@@ -7,6 +7,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"testing/synctest"
 )
 
 // loggingOperator is testOperator with its lines collected.
@@ -157,19 +158,21 @@ func TestASupersededPlayLogsItsDelete(t *testing.T) {
 // A Play a person deleted is released once its pod is gone, and the
 // release is its one line.
 func TestADeletedPlayLogsItsRelease(t *testing.T) {
-	cluster := newFakeCluster()
-	play := housePlay("https://nas/film.mkv")
-	play.Metadata.DeletionTimestamp = "2026-01-01T00:00:00Z"
-	play.Metadata.Finalizers = []string{playFinalizer}
-	cluster.plays["movie"] = play
-	media, _ := busOperator(t, cluster)
-	var log logBuffer
-	media.log = &log
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		play := housePlay("https://nas/film.mkv")
+		play.Metadata.DeletionTimestamp = "2026-01-01T00:00:00Z"
+		play.Metadata.Finalizers = []string{playFinalizer}
+		cluster.plays["movie"] = play
+		media, _ := busOperator(t, cluster)
+		var log logBuffer
+		media.log = &log
 
-	media.pass()
+		media.pass()
 
-	mustMatchAll(t, linesAbout(&log, "play house/movie"), []string{
-		"play house/movie: deleted, so its playback pod is gone and its topics are cleared",
+		mustMatchAll(t, linesAbout(&log, "play house/movie"), []string{
+			"play house/movie: deleted, so its playback pod is gone and its topics are cleared",
+		})
 	})
 }
 
@@ -230,19 +233,21 @@ func TestAFocusMoveLogsItsReason(t *testing.T) {
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
-			o, _ := caughtUpFocusOperator(t)
-			var log logBuffer
-			o.log = &log
-			if each.mark != "" {
-				o.focus.setMark(key, each.mark)
-			}
-			if each.cycle {
-				o.focus.requestCycle(key)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				o, _ := caughtUpFocusOperator(t)
+				var log logBuffer
+				o.log = &log
+				if each.mark != "" {
+					o.focus.setMark(key, each.mark)
+				}
+				if each.cycle {
+					o.focus.requestCycle(key)
+				}
 
-			o.reconcileFocus(each.players)
+				o.reconcileFocus(each.players)
 
-			mustMatchAll(t, log.lines(), each.want)
+				mustMatchAll(t, log.lines(), each.want)
+			})
 		})
 	}
 }

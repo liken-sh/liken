@@ -6,6 +6,7 @@ package main
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -48,51 +49,57 @@ func expectNoReportWake(t *testing.T, wake <-chan struct{}) {
 }
 
 func TestFoldStoresTheReportAndWakesTheLoop(t *testing.T) {
-	desk, wake := reportDesk(t)
+	synctest.Test(t, func(t *testing.T) {
+		desk, wake := reportDesk(t)
 
-	desk.fold("house", "movie", runningReport())
+		desk.fold("house", "movie", runningReport())
 
-	stored := desk.latestFor("house", "movie")
-	if stored == nil {
-		t.Fatal("the desk holds no report for house/movie")
-	}
-	if stored.Item != 1 || stored.Position != "0:01:00" || stored.Duration != "1:30:00" {
-		t.Errorf("stored report = %+v", *stored)
-	}
-	waitForReportWake(t, wake)
+		stored := desk.latestFor("house", "movie")
+		if stored == nil {
+			t.Fatal("the desk holds no report for house/movie")
+		}
+		if stored.Item != 1 || stored.Position != "0:01:00" || stored.Duration != "1:30:00" {
+			t.Errorf("stored report = %+v", *stored)
+		}
+		waitForReportWake(t, wake)
+	})
 }
 
 // A position that only advances updates the desk but wakes nothing, so a
 // one-second bus cadence does not become a one-second write. The bare
 // position waits for the operator's tick instead.
 func TestFoldOnAPositionAdvanceStoresButDoesNotWake(t *testing.T) {
-	desk, wake := reportDesk(t)
-	desk.fold("house", "movie", runningReport())
-	waitForReportWake(t, wake)
+	synctest.Test(t, func(t *testing.T) {
+		desk, wake := reportDesk(t)
+		desk.fold("house", "movie", runningReport())
+		waitForReportWake(t, wake)
 
-	advanced := runningReport()
-	advanced.Position = "0:01:05"
-	desk.fold("house", "movie", advanced)
+		advanced := runningReport()
+		advanced.Position = "0:01:05"
+		desk.fold("house", "movie", advanced)
 
-	stored := desk.latestFor("house", "movie")
-	if stored == nil || stored.Position != "0:01:05" {
-		t.Errorf("stored report = %+v, want the advanced position", stored)
-	}
-	expectNoReportWake(t, wake)
+		stored := desk.latestFor("house", "movie")
+		if stored == nil || stored.Position != "0:01:05" {
+			t.Errorf("stored report = %+v, want the advanced position", stored)
+		}
+		expectNoReportWake(t, wake)
+	})
 }
 
 // A pause is what a person waits to see, so a report that flips it wakes
 // the loop even when the item has not changed.
 func TestFoldOnAPauseChangeWakes(t *testing.T) {
-	desk, wake := reportDesk(t)
-	desk.fold("house", "movie", runningReport())
-	waitForReportWake(t, wake)
+	synctest.Test(t, func(t *testing.T) {
+		desk, wake := reportDesk(t)
+		desk.fold("house", "movie", runningReport())
+		waitForReportWake(t, wake)
 
-	paused := runningReport()
-	paused.Paused = true
-	desk.fold("house", "movie", paused)
+		paused := runningReport()
+		paused.Paused = true
+		desk.fold("house", "movie", paused)
 
-	waitForReportWake(t, wake)
+		waitForReportWake(t, wake)
+	})
 }
 
 // The ending is what a person is watching the screen for, so a report
@@ -100,34 +107,38 @@ func TestFoldOnAPauseChangeWakes(t *testing.T) {
 // stand where they were. The pass it wakes is what turns the idle screen
 // back on.
 func TestFoldOnTheEndingRecordsTheMarkAndWakes(t *testing.T) {
-	desk, wake := reportDesk(t)
-	desk.fold("house", "movie", runningReport())
-	waitForReportWake(t, wake)
+	synctest.Test(t, func(t *testing.T) {
+		desk, wake := reportDesk(t)
+		desk.fold("house", "movie", runningReport())
+		waitForReportWake(t, wake)
 
-	ended := runningReport()
-	ended.Ended = true
-	desk.fold("house", "movie", ended)
+		ended := runningReport()
+		ended.Ended = true
+		desk.fold("house", "movie", ended)
 
-	mustMatch(t, desk.endedFor("house", "movie"), true)
-	waitForReportWake(t, wake)
+		mustMatch(t, desk.endedFor("house", "movie"), true)
+		waitForReportWake(t, wake)
+	})
 }
 
 // The sidecar publishes the ending and then goes offline, which drops the
 // report. The mark outlives the drop, because the pod lives on for seconds
 // after the film is over and the unit is idle for every one of them.
 func TestTheEndingOutlivesTheOfflineDrop(t *testing.T) {
-	desk, wake := reportDesk(t)
-	ended := runningReport()
-	ended.Ended = true
-	desk.fold("house", "movie", ended)
-	waitForReportWake(t, wake)
+	synctest.Test(t, func(t *testing.T) {
+		desk, wake := reportDesk(t)
+		ended := runningReport()
+		ended.Ended = true
+		desk.fold("house", "movie", ended)
+		waitForReportWake(t, wake)
 
-	desk.availability("house", "movie", false, "")
+		desk.availability("house", "movie", false, "")
 
-	if stored := desk.latestFor("house", "movie"); stored != nil {
-		t.Errorf("the offline run's report = %+v, want none", *stored)
-	}
-	mustMatch(t, desk.endedFor("house", "movie"), true)
+		if stored := desk.latestFor("house", "movie"); stored != nil {
+			t.Errorf("the offline run's report = %+v, want none", *stored)
+		}
+		mustMatch(t, desk.endedFor("house", "movie"), true)
+	})
 }
 
 // A run reports its own ending, so a Play recreated under the same name
@@ -162,53 +173,59 @@ func TestTheDeskDropsTheEndingWithTheRun(t *testing.T) {
 }
 
 func TestTheNewestReportIsTheOneTheDeskHolds(t *testing.T) {
-	desk, wake := reportDesk(t)
+	synctest.Test(t, func(t *testing.T) {
+		desk, wake := reportDesk(t)
 
-	desk.fold("house", "movie", runningReport())
-	later := playReport{Item: 2, Paused: true, Position: "0:45:00", Duration: "1:30:00"}
-	desk.fold("house", "movie", later)
+		desk.fold("house", "movie", runningReport())
+		later := playReport{Item: 2, Paused: true, Position: "0:45:00", Duration: "1:30:00"}
+		desk.fold("house", "movie", later)
 
-	stored := desk.latestFor("house", "movie")
-	if stored == nil {
-		t.Fatal("the desk holds no report for house/movie")
-	}
-	if stored.Item != 2 || stored.Position != "0:45:00" || !stored.Paused {
-		t.Errorf("stored report = %+v, want the second one", *stored)
-	}
-	// Two folds leave one wake, because the pass that answers it reads
-	// the whole collection.
-	waitForReportWake(t, wake)
-	expectNoReportWake(t, wake)
+		stored := desk.latestFor("house", "movie")
+		if stored == nil {
+			t.Fatal("the desk holds no report for house/movie")
+		}
+		if stored.Item != 2 || stored.Position != "0:45:00" || !stored.Paused {
+			t.Errorf("stored report = %+v, want the second one", *stored)
+		}
+		// Two folds leave one wake, because the pass that answers it reads
+		// the whole collection.
+		waitForReportWake(t, wake)
+		expectNoReportWake(t, wake)
+	})
 }
 
 // A Play marked offline drops its retained report, so a status the
 // broker still holds does not read as a live Play.
 func TestAvailabilityOfflineDropsTheReportAndWakes(t *testing.T) {
-	desk, wake := reportDesk(t)
-	desk.fold("house", "movie", runningReport())
-	waitForReportWake(t, wake)
+	synctest.Test(t, func(t *testing.T) {
+		desk, wake := reportDesk(t)
+		desk.fold("house", "movie", runningReport())
+		waitForReportWake(t, wake)
 
-	desk.availability("house", "movie", false, "")
+		desk.availability("house", "movie", false, "")
 
-	if stored := desk.latestFor("house", "movie"); stored != nil {
-		t.Errorf("the offline run's report = %+v, want none", *stored)
-	}
-	waitForReportWake(t, wake)
+		if stored := desk.latestFor("house", "movie"); stored != nil {
+			t.Errorf("the offline run's report = %+v, want none", *stored)
+		}
+		waitForReportWake(t, wake)
+	})
 }
 
 // A Play marked online keeps whatever report it has and wakes nothing,
 // because the next report refills the status on its own.
 func TestAvailabilityOnlineKeepsTheReportAndDoesNotWake(t *testing.T) {
-	desk, wake := reportDesk(t)
-	desk.fold("house", "movie", runningReport())
-	waitForReportWake(t, wake)
+	synctest.Test(t, func(t *testing.T) {
+		desk, wake := reportDesk(t)
+		desk.fold("house", "movie", runningReport())
+		waitForReportWake(t, wake)
 
-	desk.availability("house", "movie", true, "")
+		desk.availability("house", "movie", true, "")
 
-	if desk.latestFor("house", "movie") == nil {
-		t.Error("an online signal dropped the report")
-	}
-	expectNoReportWake(t, wake)
+		if desk.latestFor("house", "movie") == nil {
+			t.Error("an online signal dropped the report")
+		}
+		expectNoReportWake(t, wake)
+	})
 }
 
 func TestTheDeskForgetsARunThatIsGoneAndKeepsTheOneThatIsNot(t *testing.T) {

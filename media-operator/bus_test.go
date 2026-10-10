@@ -15,8 +15,10 @@ import (
 	"time"
 )
 
-// busTestTimeout bounds every wait: long enough that a loaded machine
-// still passes, short enough that a broken client fails in seconds.
+// busTestTimeout bounds every wait. Each test that waits runs in a
+// synctest bubble, so the bound passes on the bubble's clock, and a
+// client that never answers fails the test at once instead of hanging
+// it.
 const busTestTimeout = 2 * time.Second
 
 // A brokerPublish is one message the broker read from the client.
@@ -174,28 +176,27 @@ func waitForConnect(t *testing.T, connected <-chan *Bus) {
 // connection. A caller whose publish must not be lost reads it before it
 // publishes.
 func TestTheBusReportsWhetherItHoldsASession(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	waitForConnect(t, connected)
-	if !bus.Connected() {
-		t.Fatal("the client reports no session after its CONNACK")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 1, nil, nil)
+		waitForConnect(t, connected)
+		if !bus.Connected() {
+			t.Fatal("the client reports no session after its CONNACK")
+		}
 
-	waitForDisconnect(t, bus, brokers[0])
+		waitForDisconnect(t, bus, brokers[0])
+	})
 }
 
 // waitForDisconnect closes the broker's end of the connection and waits for
-// the client to report that it holds no session. The scripted dialer hands out
-// no second connection, so the client stays disconnected for the rest of the
-// test.
+// the client to settle, then fails the test if the client still reports a
+// session. The scripted dialer hands out no second connection, so the client
+// stays disconnected for the rest of the test. It runs in a synctest bubble.
 func waitForDisconnect(t *testing.T, bus *Bus, broker *fakeBroker) {
 	t.Helper()
 	broker.conn.Close()
-	deadline := time.Now().Add(busTestTimeout)
-	for bus.Connected() {
-		if time.Now().After(deadline) {
-			t.Fatal("the client still reports a session after the broker closed")
-		}
-		time.Sleep(time.Millisecond)
+	synctest.Wait()
+	if bus.Connected() {
+		t.Fatal("the client still reports a session after the broker closed")
 	}
 }
 
@@ -224,58 +225,64 @@ func waitForPublish(t *testing.T, values <-chan brokerPublish) brokerPublish {
 // The client connects, calls onConnect, and re-sends every remembered
 // subscription on that connection.
 func TestBusConnectsAndSendsRememberedSubscriptions(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	bus.Subscribe("liken/media/plays/+/+/status")
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 1, nil, nil)
+		bus.Subscribe("liken/media/plays/+/+/status")
 
-	waitForConnect(t, connected)
-	if got := waitForString(t, brokers[0].subs); got != "liken/media/plays/+/+/status" {
-		t.Errorf("subscription = %q", got)
-	}
+		waitForConnect(t, connected)
+		if got := waitForString(t, brokers[0].subs); got != "liken/media/plays/+/+/status" {
+			t.Errorf("subscription = %q", got)
+		}
+	})
 }
 
 // A publish from the caller reaches the broker with its topic, its
 // payload, and its retain flag.
 func TestBusPublishesToTheBroker(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	waitForConnect(t, connected)
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 1, nil, nil)
+		waitForConnect(t, connected)
 
-	bus.Publish("liken/media/plays/house/movie/status", []byte(`{"item":1}`), true)
+		bus.Publish("liken/media/plays/house/movie/status", []byte(`{"item":1}`), true)
 
-	got := waitForPublish(t, brokers[0].pubs)
-	if got.topic != "liken/media/plays/house/movie/status" {
-		t.Errorf("topic = %q", got.topic)
-	}
-	if string(got.payload) != `{"item":1}` {
-		t.Errorf("payload = %q", got.payload)
-	}
-	if !got.retained {
-		t.Error("the publish was not retained")
-	}
+		got := waitForPublish(t, brokers[0].pubs)
+		if got.topic != "liken/media/plays/house/movie/status" {
+			t.Errorf("topic = %q", got.topic)
+		}
+		if string(got.payload) != `{"item":1}` {
+			t.Errorf("payload = %q", got.payload)
+		}
+		if !got.retained {
+			t.Error("the publish was not retained")
+		}
+	})
 }
 
 // A message the broker pushes reaches the handler with its topic and
 // payload.
 func TestBusDeliversAnInboundPublishToTheHandler(t *testing.T) {
-	received := make(chan brokerPublish, 1)
-	handler := func(topic string, payload []byte) {
-		received <- brokerPublish{topic: topic, payload: append([]byte(nil), payload...)}
-	}
-	_, brokers, connected := startBus(t, 1, nil, handler)
-	waitForConnect(t, connected)
-
-	brokers[0].push("liken/media/plays/house/movie/status", []byte(`{"paused":true}`))
-
-	select {
-	case got := <-received:
-		if got.topic != "liken/media/plays/house/movie/status" {
-			t.Errorf("topic = %q", got.topic)
+	synctest.Test(t, func(t *testing.T) {
+		received := make(chan brokerPublish, 1)
+		handler := func(topic string, payload []byte) {
+			received <- brokerPublish{topic: topic, payload: append([]byte(nil), payload...)}
 		}
-		if string(got.payload) != `{"paused":true}` {
-			t.Errorf("payload = %q", got.payload)
+		_, brokers, connected := startBus(t, 1, nil, handler)
+		waitForConnect(t, connected)
+
+		brokers[0].push("liken/media/plays/house/movie/status", []byte(`{"paused":true}`))
+
+		select {
+		case got := <-received:
+			if got.topic != "liken/media/plays/house/movie/status" {
+				t.Errorf("topic = %q", got.topic)
+			}
+			if string(got.payload) != `{"paused":true}` {
+				t.Errorf("payload = %q", got.payload)
+			}
+		case <-time.After(busTestTimeout):
+			t.Fatal("the handler read nothing the broker pushed")
 		}
-	case <-time.After(busTestTimeout):
-		t.Fatal("the handler read nothing the broker pushed")
-	}
+	})
 }
 
 // A dropped connection reconnects, and the remembered subscription
@@ -399,30 +406,34 @@ func TestRunReturnsWhileItWaitsOutABackoff(t *testing.T) {
 // reaches the ordinary one. A reader tells the state it catches up on
 // from a change made now.
 func TestARetainedMessageReachesTheRetainedHandler(t *testing.T) {
-	live := make(chan string, 2)
-	retained := make(chan string, 2)
-	_, brokers, connected := startBusWith(t, 1, nil,
-		func(topic string, _ []byte) { live <- topic },
-		func(topic string, _ []byte) { retained <- topic })
-	waitForConnect(t, connected)
+	synctest.Test(t, func(t *testing.T) {
+		live := make(chan string, 2)
+		retained := make(chan string, 2)
+		_, brokers, connected := startBusWith(t, 1, nil,
+			func(topic string, _ []byte) { live <- topic },
+			func(topic string, _ []byte) { retained <- topic })
+		waitForConnect(t, connected)
 
-	brokers[0].push("liken/media/players/house/theater/volume", []byte(`{"level":0.5,"muted":false}`))
-	brokers[0].forward("liken/media/players/house/theater/volume", []byte(`{"level":0.55,"muted":false}`))
+		brokers[0].push("liken/media/players/house/theater/volume", []byte(`{"level":0.5,"muted":false}`))
+		brokers[0].forward("liken/media/players/house/theater/volume", []byte(`{"level":0.55,"muted":false}`))
 
-	mustMatch(t, waitForTopic(t, retained), "liken/media/players/house/theater/volume")
-	mustMatch(t, waitForTopic(t, live), "liken/media/players/house/theater/volume")
+		mustMatch(t, waitForTopic(t, retained), "liken/media/players/house/theater/volume")
+		mustMatch(t, waitForTopic(t, live), "liken/media/players/house/theater/volume")
+	})
 }
 
 // A client with no retained handler reads every message through its one
 // handler, the retained ones too.
 func TestWithNoRetainedHandlerEveryMessageReachesTheHandler(t *testing.T) {
-	live := make(chan string, 2)
-	_, brokers, connected := startBus(t, 1, nil, func(topic string, _ []byte) { live <- topic })
-	waitForConnect(t, connected)
+	synctest.Test(t, func(t *testing.T) {
+		live := make(chan string, 2)
+		_, brokers, connected := startBus(t, 1, nil, func(topic string, _ []byte) { live <- topic })
+		waitForConnect(t, connected)
 
-	brokers[0].push("liken/media/remotes/house/sofa/focus", []byte("theater"))
+		brokers[0].push("liken/media/remotes/house/sofa/focus", []byte("theater"))
 
-	mustMatch(t, waitForTopic(t, live), "liken/media/remotes/house/sofa/focus")
+		mustMatch(t, waitForTopic(t, live), "liken/media/remotes/house/sofa/focus")
+	})
 }
 
 func waitForTopic(t *testing.T, topics <-chan string) string {

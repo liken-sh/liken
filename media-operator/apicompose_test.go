@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +19,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 func TestComposeArgumentsCarryTheOffsetOfEachTrack(t *testing.T) {
@@ -90,19 +91,21 @@ func TestTheCodecsParameterIsCopiedWholeFromTheUpstream(t *testing.T) {
 // The -itsoffset the mux is given is the difference of the two header
 // instants, audio minus screen, measured on this API's own clock.
 func TestTheOffsetComesFromTheTwoHeaderInstants(t *testing.T) {
-	fixture := newAPIFixture(t)
-	fixture.plane.players[testAPIPlayer] = shapedPlayer(true, 1, true)
-	arguments := filepath.Join(t.TempDir(), "arguments")
-	fixture.server.ffmpeg = recordingFFmpeg(t, arguments)
-	fixture.server.now = time.Now
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		fixture.plane.players[testAPIPlayer] = shapedPlayer(true, 1, true)
+		arguments := filepath.Join(t.TempDir(), "arguments")
+		fixture.server.ffmpeg = recordingFFmpeg(t, arguments)
+		fixture.server.now = time.Now
 
-	recorder := fixture.get(playerPathFor("media.mp4"))
+		recorder := fixture.get(playerPathFor("media.mp4"))
 
-	mustMatch(t, recorder.Code, http.StatusOK)
-	written, err := os.ReadFile(arguments)
-	mustSucceed(t, err)
-	mustContain(t, strings.Split(strings.TrimSpace(string(written)), "\n"), "0.040000")
-	mustMatch(t, fixture.lines[0].OffsetSeconds, 0.04)
+		mustMatch(t, recorder.Code, http.StatusOK)
+		written, err := os.ReadFile(arguments)
+		mustSucceed(t, err)
+		mustContain(t, strings.Split(strings.TrimSpace(string(written)), "\n"), "0.040000")
+		mustMatch(t, fixture.lines[0].OffsetSeconds, 0.04)
+	})
 }
 
 // recordingFFmpeg is a stand-in for ffmpeg. It writes down the
@@ -173,20 +176,22 @@ func TestAnUpstreamAnswerMapsToThisAPIsOwnStatus(t *testing.T) {
 	}
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
-			fixture := newAPIFixture(t)
-			fixture.display.status = row.status
-			fixture.display.contentType = row.contentType
-			fixture.display.body = []byte(row.body)
-			fixture.display.retryAfter = row.retryAfter
+			synctest.Test(t, func(t *testing.T) {
+				fixture := newAPIFixture(t)
+				fixture.display.status = row.status
+				fixture.display.contentType = row.contentType
+				fixture.display.body = []byte(row.body)
+				fixture.display.retryAfter = row.retryAfter
 
-			recorder := fixture.get(playerPathFor("media.mp4"))
+				recorder := fixture.get(playerPathFor("media.mp4"))
 
-			mustMatch(t, recorder.Code, row.want)
-			document := problemOf(t, recorder)
-			mustMatch(t, document.Type, row.kind)
-			mustMatch(t, document.Detail, row.detail)
-			mustMatch(t, strings.HasPrefix(document.Upstream, fixture.display.url), true)
-			mustMatch(t, recorder.Header().Get("Retry-After"), row.relayed)
+				mustMatch(t, recorder.Code, row.want)
+				document := problemOf(t, recorder)
+				mustMatch(t, document.Type, row.kind)
+				mustMatch(t, document.Detail, row.detail)
+				mustMatch(t, strings.HasPrefix(document.Upstream, fixture.display.url), true)
+				mustMatch(t, recorder.Header().Get("Retry-After"), row.relayed)
+			})
 		})
 	}
 }
@@ -194,30 +199,34 @@ func TestAnUpstreamAnswerMapsToThisAPIsOwnStatus(t *testing.T) {
 // A refused connection is a 503 with Retry-After, because a sibling
 // that is restarting comes back and a retry clears it.
 func TestAnUnreachableUpstreamIsAServiceUnavailable(t *testing.T) {
-	fixture := newAPIFixture(t)
-	fixture.server.display = "http://127.0.0.1:1"
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		fixture.server.display = "http://127.0.0.1:1"
 
-	recorder := fixture.get(playerPathFor("media.mp4"))
+		recorder := fixture.get(playerPathFor("media.mp4"))
 
-	mustMatch(t, recorder.Code, http.StatusServiceUnavailable)
-	mustMatch(t, recorder.Header().Get("Retry-After"), retryAfterSeconds)
+		mustMatch(t, recorder.Code, http.StatusServiceUnavailable)
+		mustMatch(t, recorder.Header().Get("Retry-After"), retryAfterSeconds)
+	})
 }
 
 // The composition limit is this API's own bound, and it answers the
 // shared capture-busy type with Retry-After, the way a busy sidecar
 // does.
 func TestTheCompositionLimitAnswersCaptureBusy(t *testing.T) {
-	fixture := newAPIFixture(t)
-	fixture.server.compositions = make(chan struct{}, 1)
-	fixture.server.maxCompositions = 1
-	fixture.server.compositions <- struct{}{}
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		fixture.server.compositions = make(chan struct{}, 1)
+		fixture.server.maxCompositions = 1
+		fixture.server.compositions <- struct{}{}
 
-	recorder := fixture.get(playerPathFor("media.mp4"))
+		recorder := fixture.get(playerPathFor("media.mp4"))
 
-	mustMatch(t, recorder.Code, http.StatusServiceUnavailable)
-	mustMatch(t, recorder.Header().Get("Retry-After"), retryAfterSeconds)
-	mustMatch(t, problemOf(t, recorder).Type, problemCaptureBusy)
-	mustMatch(t, len(fixture.display.made()), 0)
+		mustMatch(t, recorder.Code, http.StatusServiceUnavailable)
+		mustMatch(t, recorder.Header().Get("Retry-After"), retryAfterSeconds)
+		mustMatch(t, problemOf(t, recorder).Type, problemCaptureBusy)
+		mustMatch(t, len(fixture.display.made()), 0)
+	})
 }
 
 // A capture that produces bytes leaves a Captured Event on the Player,
@@ -371,64 +380,70 @@ func TestASoundOnlyCompositionCarriesNoVideoInput(t *testing.T) {
 // display request, with a codecs parameter that names Opus alone and
 // no rel/screen link.
 func TestTwoSinksAndNoScreenComposeTheSoundAlone(t *testing.T) {
-	fixture := newAPIFixture(t)
-	fixture.server.now = time.Now
-	fixture.server.ffmpeg = recordingFFmpeg(t, filepath.Join(t.TempDir(), "arguments"))
-	fixture.plane.players[testAPIPlayer] = shapedPlayer(false, 2, true)
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		fixture.server.now = time.Now
+		fixture.server.ffmpeg = recordingFFmpeg(t, filepath.Join(t.TempDir(), "arguments"))
+		fixture.plane.players[testAPIPlayer] = shapedPlayer(false, 2, true)
 
-	recorder := fixture.get(playerPathFor("media.mp4"))
+		recorder := fixture.get(playerPathFor("media.mp4"))
 
-	mustMatch(t, recorder.Code, http.StatusOK)
-	mustMatch(t, recorder.Header().Get("Content-Type"), `video/mp4; codecs="Opus"`)
-	mustMatch(t, len(fixture.display.made()), 0)
-	mustMatch(t, len(fixture.audio.made()), 2)
-	for _, link := range recorder.Header().Values("Link") {
-		if strings.Contains(link, relScreen) {
-			t.Errorf("a composition with no screen sent %s", link)
+		mustMatch(t, recorder.Code, http.StatusOK)
+		mustMatch(t, recorder.Header().Get("Content-Type"), `video/mp4; codecs="Opus"`)
+		mustMatch(t, len(fixture.display.made()), 0)
+		mustMatch(t, len(fixture.audio.made()), 2)
+		for _, link := range recorder.Header().Values("Link") {
+			if strings.Contains(link, relScreen) {
+				t.Errorf("a composition with no screen sent %s", link)
+			}
 		}
-	}
+	})
 }
 
 // A composition refused at the limit carries the problem document
 // alone: no Content-Disposition, no Accept-Ranges, no
 // Content-Location, and only the service links.
 func TestARefusedCompositionCarriesNoCaptureFields(t *testing.T) {
-	fixture := newAPIFixture(t)
-	fixture.server.compositions = make(chan struct{}, 1)
-	fixture.server.maxCompositions = 1
-	fixture.server.compositions <- struct{}{}
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		fixture.server.compositions = make(chan struct{}, 1)
+		fixture.server.maxCompositions = 1
+		fixture.server.compositions <- struct{}{}
 
-	recorder := fixture.get(playerPathFor("media"))
+		recorder := fixture.get(playerPathFor("media"))
 
-	mustMatch(t, recorder.Code, http.StatusServiceUnavailable)
-	for _, field := range []string{"Content-Disposition", "Accept-Ranges", "Content-Location"} {
-		mustMatch(t, recorder.Header().Get(field), "")
-	}
-	mustMatch(t, recorder.Header().Get("Cache-Control"), "")
-	for _, link := range recorder.Header().Values("Link") {
-		for _, relation := range []string{relScreen, relAudio, relAlternate} {
-			if strings.Contains(link, relation) {
-				t.Errorf("a refused composition sent %s", link)
+		mustMatch(t, recorder.Code, http.StatusServiceUnavailable)
+		for _, field := range []string{"Content-Disposition", "Accept-Ranges", "Content-Location"} {
+			mustMatch(t, recorder.Header().Get(field), "")
+		}
+		mustMatch(t, recorder.Header().Get("Cache-Control"), "")
+		for _, link := range recorder.Header().Values("Link") {
+			for _, relation := range []string{relScreen, relAudio, relAlternate} {
+				if strings.Contains(link, relation) {
+					t.Errorf("a refused composition sent %s", link)
+				}
 			}
 		}
-	}
+	})
 }
 
 // An upstream refusal relayed to the client carries the problem
 // document alone, with none of the capture fields and only the three
 // service links.
 func TestARelayedFaultCarriesNoCaptureFields(t *testing.T) {
-	fixture := newAPIFixture(t)
-	fixture.display.status = http.StatusNotFound
-	fixture.display.contentType = problemContentType
-	fixture.display.body = []byte(`{"type":"about:blank","status":404,"detail":"no Display named boe-1080"}`)
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		fixture.display.status = http.StatusNotFound
+		fixture.display.contentType = problemContentType
+		fixture.display.body = []byte(`{"type":"about:blank","status":404,"detail":"no Display named boe-1080"}`)
 
-	recorder := fixture.get(playerPathFor("media.mp4"))
+		recorder := fixture.get(playerPathFor("media.mp4"))
 
-	mustMatch(t, recorder.Code, http.StatusNotFound)
-	mustMatch(t, recorder.Header().Get("Content-Disposition"), "")
-	mustMatch(t, recorder.Header().Get("Accept-Ranges"), "")
-	mustMatch(t, len(recorder.Header().Values("Link")), 3)
+		mustMatch(t, recorder.Code, http.StatusNotFound)
+		mustMatch(t, recorder.Header().Get("Content-Disposition"), "")
+		mustMatch(t, recorder.Header().Get("Accept-Ranges"), "")
+		mustMatch(t, len(recorder.Header().Values("Link")), 3)
+	})
 }
 
 // The stderr the log line carries is the end of what ffmpeg wrote. An
@@ -464,20 +479,22 @@ func TestAShortStderrIsKeptWhole(t *testing.T) {
 // API and never answers a 307, so a caller behind one port-forward
 // reads the bytes without reaching display-api by name.
 func TestAScreenOnlyMediaStreamsWithNoRedirect(t *testing.T) {
-	fixture := newAPIFixture(t)
-	fixture.server.now = time.Now
-	fixture.server.ffmpeg = copyingFFmpegOne(t)
-	fixture.display.body = []byte("screen")
-	fixture.plane.players[testAPIPlayer] = shapedPlayer(true, 0, false)
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		fixture.server.now = time.Now
+		fixture.server.ffmpeg = copyingFFmpegOne(t)
+		fixture.display.body = []byte("screen")
+		fixture.plane.players[testAPIPlayer] = shapedPlayer(true, 0, false)
 
-	recorder := fixture.get(playerPathFor("media.mp4"))
+		recorder := fixture.get(playerPathFor("media.mp4"))
 
-	mustMatch(t, recorder.Code, http.StatusOK)
-	mustMatch(t, recorder.Header().Get("Location"), "")
-	mustMatch(t, recorder.Body.String(), "screen")
-	mustMatch(t, len(fixture.display.made()), 1)
-	mustMatch(t, len(fixture.audio.made()), 0)
-	mustMatch(t, recorder.Header().Get("Content-Type"), "video/mp4")
+		mustMatch(t, recorder.Code, http.StatusOK)
+		mustMatch(t, recorder.Header().Get("Location"), "")
+		mustMatch(t, recorder.Body.String(), "screen")
+		mustMatch(t, len(fixture.display.made()), 1)
+		mustMatch(t, len(fixture.audio.made()), 0)
+		mustMatch(t, recorder.Header().Get("Content-Type"), "video/mp4")
+	})
 }
 
 // PROSE: a Player that resolves one sink and no screen is one audio
@@ -485,21 +502,23 @@ func TestAScreenOnlyMediaStreamsWithNoRedirect(t *testing.T) {
 // never answers a 307, and its Content-Type names Opus with no video
 // element.
 func TestASinkOnlyMediaStreamsWithNoRedirect(t *testing.T) {
-	fixture := newAPIFixture(t)
-	fixture.server.now = time.Now
-	fixture.server.ffmpeg = copyingFFmpegOne(t)
-	fixture.audio.contentType = "audio/ogg"
-	fixture.audio.body = []byte("sound")
-	fixture.plane.players[testAPIPlayer] = shapedPlayer(false, 1, true)
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		fixture.server.now = time.Now
+		fixture.server.ffmpeg = copyingFFmpegOne(t)
+		fixture.audio.contentType = "audio/ogg"
+		fixture.audio.body = []byte("sound")
+		fixture.plane.players[testAPIPlayer] = shapedPlayer(false, 1, true)
 
-	recorder := fixture.get(playerPathFor("media.mp4"))
+		recorder := fixture.get(playerPathFor("media.mp4"))
 
-	mustMatch(t, recorder.Code, http.StatusOK)
-	mustMatch(t, recorder.Header().Get("Location"), "")
-	mustMatch(t, recorder.Body.String(), "sound")
-	mustMatch(t, len(fixture.audio.made()), 1)
-	mustMatch(t, len(fixture.display.made()), 0)
-	mustMatch(t, recorder.Header().Get("Content-Type"), `video/mp4; codecs="Opus"`)
+		mustMatch(t, recorder.Code, http.StatusOK)
+		mustMatch(t, recorder.Header().Get("Location"), "")
+		mustMatch(t, recorder.Body.String(), "sound")
+		mustMatch(t, len(fixture.audio.made()), 1)
+		mustMatch(t, len(fixture.display.made()), 0)
+		mustMatch(t, recorder.Header().Get("Content-Type"), `video/mp4; codecs="Opus"`)
+	})
 }
 
 // PROSE: copyingFFmpegOne is a stand-in ffmpeg for a one-input
@@ -517,16 +536,18 @@ func copyingFFmpegOne(t *testing.T) string {
 // Player that resolves neither a screen nor a sink is not answered by
 // a sentence about sound alone.
 func TestAZeroStreamComposedRefusalNamesTheWholeUnit(t *testing.T) {
-	fixture := newAPIFixture(t)
-	fixture.plane.players[testAPIPlayer] = shapedPlayer(false, 0, false)
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		fixture.plane.players[testAPIPlayer] = shapedPlayer(false, 0, false)
 
-	recorder := fixture.get(playerPathFor("media.mp4"))
+		recorder := fixture.get(playerPathFor("media.mp4"))
 
-	mustMatch(t, recorder.Code, http.StatusConflict)
-	document := problemOf(t, recorder)
-	mustMatch(t, document.Type, problemNotPlaying)
-	mustMatch(t, document.Detail,
-		"run a Play on this Player; it resolves nothing to capture until one runs")
+		mustMatch(t, recorder.Code, http.StatusConflict)
+		document := problemOf(t, recorder)
+		mustMatch(t, document.Type, problemNotPlaying)
+		mustMatch(t, document.Detail,
+			"run a Play on this Player; it resolves nothing to capture until one runs")
+	})
 }
 
 // The composed response's headers reach the client when this API
@@ -534,6 +555,12 @@ func TestAZeroStreamComposedRefusalNamesTheWholeUnit(t *testing.T) {
 // drill read HTTP/2 200 at 4.32 s while the log line reported the
 // headers at 0.496 s, because net/http holds a written status until
 // the body fills its buffer.
+//
+// The test runs outside a synctest bubble, on the real clock, because
+// the composition runs a stand-in ffmpeg as a child process. This API
+// reads the child's output from an OS pipe, and that read is not
+// durably blocked, so a bubble's clock would never reach the end of the
+// siblings' 600 ms hold.
 func TestTheComposedHeadersReachTheClientBeforeTheFirstByte(t *testing.T) {
 	fixture := newAPIFixture(t)
 	fixture.server.now = time.Now
@@ -544,9 +571,8 @@ func TestTheComposedHeadersReachTheClientBeforeTheFirstByte(t *testing.T) {
 	fixture.audio.bodyDelay = 600 * time.Millisecond
 	fixture.display.body = []byte("frame")
 
-	public := httptest.NewServer(fixture.server.handler())
-	defer public.Close()
-	request, err := http.NewRequest(http.MethodGet, public.URL+playerPathFor("media.mp4"), nil)
+	public := apiservertest.Start(t, fixture.server.handler())
+	request, err := http.NewRequest(http.MethodGet, apiservertest.Host+playerPathFor("media.mp4"), nil)
 	mustSucceed(t, err)
 	request.Header.Set("Authorization", "Bearer "+testAPIToken)
 

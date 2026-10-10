@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 )
 
 // The ending report is what labels the pod, and the label is what the
@@ -101,29 +102,31 @@ func TestAnEndingPublishesIdleBeforeTheRestOfThePass(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			cluster := runningCluster(housePlayer())
-			cluster.plays["movie"].Status.Phase = test.phase
-			release := cluster.hold(test.request)
-			defer release()
-			media, broker := busOperator(t, cluster)
-			media.reports.fold("house", "movie", playReport{Item: 1, Position: "1:58:03", Ended: true})
+			synctest.Test(t, func(t *testing.T) {
+				cluster := runningCluster(housePlayer())
+				cluster.plays["movie"].Status.Phase = test.phase
+				release := cluster.hold(test.request)
+				defer release()
+				media, broker := busOperator(t, cluster)
+				media.reports.fold("house", "movie", playReport{Item: 1, Position: "1:58:03", Ended: true})
 
-			passed := make(chan struct{})
-			go func() {
-				defer close(passed)
-				media.pass()
-			}()
-			status := mustPublishPlayerStatus(t, broker, "house", "theater")
-			release()
-			<-passed
+				passed := make(chan struct{})
+				go func() {
+					defer close(passed)
+					media.pass()
+				}()
+				status := mustPublishPlayerStatus(t, broker, "house", "theater")
+				release()
+				<-passed
 
-			mustMatch(t, status.Activity, playerIdle)
-			mustMatch(t, status.Play == nil, true)
-			// The held request is on the pass's path, so the publish above
-			// happened before it and not in place of it.
-			if !slices.Contains(cluster.requests, test.request) {
-				t.Errorf("requests = %v, want the pass to reach %q", cluster.requests, test.request)
-			}
+				mustMatch(t, status.Activity, playerIdle)
+				mustMatch(t, status.Play == nil, true)
+				// The held request is on the pass's path, so the publish above
+				// happened before it and not in place of it.
+				if !slices.Contains(cluster.requests, test.request) {
+					t.Errorf("requests = %v, want the pass to reach %q", cluster.requests, test.request)
+				}
+			})
 		})
 	}
 }
@@ -133,51 +136,57 @@ func TestAnEndingPublishesIdleBeforeTheRestOfThePass(t *testing.T) {
 // the moment the idle status is read, so no list read stood between the
 // report and the screen.
 func TestAnEndingAnswersFromTheLastPassWithNoRead(t *testing.T) {
-	cluster := runningCluster(housePlayer())
-	media, broker := busOperator(t, cluster)
-	warmSnapshot(media, cluster)
+	synctest.Test(t, func(t *testing.T) {
+		cluster := runningCluster(housePlayer())
+		media, broker := busOperator(t, cluster)
+		warmSnapshot(media, cluster)
 
-	media.handleBusMessage(playStatusTopic(defaultTopicBase, "house", "movie"), endingReport(t))
+		media.handleBusMessage(playStatusTopic(defaultTopicBase, "house", "movie"), endingReport(t))
 
-	status := mustPublishPlayerStatus(t, broker, "house", "theater")
-	mustMatch(t, status.Activity, playerIdle)
-	mustMatch(t, status.Play == nil, true)
-	mustMatchAll(t, cluster.requests, nil)
+		status := mustPublishPlayerStatus(t, broker, "house", "theater")
+		mustMatch(t, status.Activity, playerIdle)
+		mustMatch(t, status.Play == nil, true)
+		mustMatchAll(t, cluster.requests, nil)
+	})
 }
 
 // An operator that has finished no pass holds no lists to answer from,
 // so the fold publishes nothing and the pass answers the ending. A
 // restarted operator reads its first ending in this state.
 func TestAnEndingWithNoSnapshotIsLeftToThePass(t *testing.T) {
-	cluster := runningCluster(housePlayer())
-	media, broker := busOperator(t, cluster)
+	synctest.Test(t, func(t *testing.T) {
+		cluster := runningCluster(housePlayer())
+		media, broker := busOperator(t, cluster)
 
-	media.handleBusMessage(playStatusTopic(defaultTopicBase, "house", "movie"), endingReport(t))
+		media.handleBusMessage(playStatusTopic(defaultTopicBase, "house", "movie"), endingReport(t))
 
-	mustPublishNothingYet(t, broker, media.bus)
-	mustMatchAll(t, cluster.requests, nil)
+		mustPublishNothingYet(t, broker, media.bus)
+		mustMatchAll(t, cluster.requests, nil)
 
-	media.pass()
+		media.pass()
 
-	status := mustPublishPlayerStatus(t, broker, "house", "theater")
-	mustMatch(t, status.Activity, playerIdle)
+		status := mustPublishPlayerStatus(t, broker, "house", "theater")
+		mustMatch(t, status.Activity, playerIdle)
+	})
 }
 
 // The sidecar keeps the mark set in every report after the ending, so
 // the same run reports it over and over. Only the report the ending
 // began on publishes: the mark on the desk says the rest are repeats.
 func TestASecondEndingReportPublishesNothing(t *testing.T) {
-	cluster := runningCluster(housePlayer())
-	media, broker := busOperator(t, cluster)
-	warmSnapshot(media, cluster)
-	topic := playStatusTopic(defaultTopicBase, "house", "movie")
+	synctest.Test(t, func(t *testing.T) {
+		cluster := runningCluster(housePlayer())
+		media, broker := busOperator(t, cluster)
+		warmSnapshot(media, cluster)
+		topic := playStatusTopic(defaultTopicBase, "house", "movie")
 
-	media.handleBusMessage(topic, endingReport(t))
-	mustMatch(t, mustPublishPlayerStatus(t, broker, "house", "theater").Activity, playerIdle)
+		media.handleBusMessage(topic, endingReport(t))
+		mustMatch(t, mustPublishPlayerStatus(t, broker, "house", "theater").Activity, playerIdle)
 
-	media.handleBusMessage(topic, endingReport(t))
+		media.handleBusMessage(topic, endingReport(t))
 
-	mustPublishNothingYet(t, broker, media.bus)
+		mustPublishNothingYet(t, broker, media.bus)
+	})
 }
 
 // warmSnapshot fills the operator's memory the way a finished pass

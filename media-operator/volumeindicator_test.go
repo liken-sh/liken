@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"testing"
+	"testing/synctest"
 )
 
 // denonWithOverlay is the house Denon with its own on-screen overlay.
@@ -83,18 +84,20 @@ func TestAPassMarksTheLevelOfAReceiverWithItsOwnOverlay(t *testing.T) {
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
-			cluster := volumeCluster()
-			receiver := cluster.receivers["den-receiver"]
-			receiver.Spec.Volume.Indicator = receiverIndicatorReceiver
-			receiver.Status.Zones[mainZone] = ReceiverZone{Volume: "36"}
-			receiver.Status.Conditions = []ReceiverCondition{
-				{Type: receiverReachableCondition, Status: each.reachable},
-			}
-			media, broker := caughtUpOperator(t, cluster)
+			synctest.Test(t, func(t *testing.T) {
+				cluster := volumeCluster()
+				receiver := cluster.receivers["den-receiver"]
+				receiver.Spec.Volume.Indicator = receiverIndicatorReceiver
+				receiver.Status.Zones[mainZone] = ReceiverZone{Volume: "36"}
+				receiver.Status.Conditions = []ReceiverCondition{
+					{Type: receiverReachableCondition, Status: each.reachable},
+				}
+				media, broker := caughtUpOperator(t, cluster)
 
-			media.pass()
+				media.pass()
 
-			mustMatch(t, string(mustPublishVolume(t, broker).payload), each.want)
+				mustMatch(t, string(mustPublishVolume(t, broker).payload), each.want)
+			})
 		})
 	}
 }
@@ -127,20 +130,22 @@ func TestTheSidecarTellsTheDisplayWhetherToDraw(t *testing.T) {
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
-			server, client := net.Pipe()
-			t.Cleanup(func() { server.Close() })
-			lines := readAsync(server)
-			c := &commander{
-				volumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
-				mpv:         client,
-			}
-			// An empty retained payload decodes to no level, the way a
-			// unit with nothing retained starts.
-			c.handleRetained(c.volumeTopic, []byte(each.retained))
+			synctest.Test(t, func(t *testing.T) {
+				server, client := net.Pipe()
+				t.Cleanup(func() { server.Close() })
+				lines := readAsync(server)
+				c := &commander{
+					volumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
+					mpv:         client,
+				}
+				// An empty retained payload decodes to no level, the way a
+				// unit with nothing retained starts.
+				c.handleRetained(c.volumeTopic, []byte(each.retained))
 
-			c.handle(c.volumeTopic, []byte(each.live))
+				c.handle(c.volumeTopic, []byte(each.live))
 
-			mustMatch(t, waitForLine(t, lines), each.want)
+				mustMatch(t, waitForLine(t, lines), each.want)
+			})
 		})
 	}
 }

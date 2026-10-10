@@ -70,7 +70,7 @@ func testReader(t *testing.T) (*reader, *fakeBroker) {
 		availabilityTopic: remoteAvailabilityTopic(defaultTopicBase, "house", "sofa"),
 		codesTopic:        remoteCodesTopic(defaultTopicBase, "house", "sofa"),
 		keysTopic:         remoteKeysTopic(defaultTopicBase, "house", "sofa"),
-		repeatCtx:         context.Background(),
+		repeatCtx:         t.Context(),
 		keys:              keyState{table: baseKeys},
 	}, brokers[0]
 }

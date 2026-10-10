@@ -52,21 +52,23 @@ func TestParseNextReadsOneObject(t *testing.T) {
 // first item, after the presentation, and again on every replay the
 // display asks for.
 func TestTheSidecarSendsTheNextBlockAtTheStartAndOnAReplay(t *testing.T) {
-	c, lines := bridgeToMPV(t)
-	c.next = json.RawMessage(`{"title":"E05"}`)
-	c.presentations = []json.RawMessage{json.RawMessage(`{"title":"First"}`)}
+	synctest.Test(t, func(t *testing.T) {
+		c, lines := bridgeToMPV(t)
+		c.next = json.RawMessage(`{"title":"E05"}`)
+		c.presentations = []json.RawMessage{json.RawMessage(`{"title":"First"}`)}
 
-	changes := make(chan propertyChange, 8)
-	go feedChanges(changes, changeOf("playlist-pos", "0"), changeOf("playlist-pos", "1"))
-	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, nil, io.Discard)
+		changes := make(chan propertyChange, 8)
+		go feedChanges(changes, changeOf("playlist-pos", "0"), changeOf("playlist-pos", "1"))
+		runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, nil, io.Discard)
 
-	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","presentation","{\"title\":\"First\"}"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","next","{\"title\":\"E05\"}"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","presentation","{}"]}`)
+		mustMatch(t, waitForLine(t, lines), `{"command":["script-message","presentation","{\"title\":\"First\"}"]}`)
+		mustMatch(t, waitForLine(t, lines), `{"command":["script-message","next","{\"title\":\"E05\"}"]}`)
+		mustMatch(t, waitForLine(t, lines), `{"command":["script-message","presentation","{}"]}`)
 
-	c.serveMessage([]string{presentationRequestMessage})
-	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","presentation","{}"]}`)
-	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","next","{\"title\":\"E05\"}"]}`)
+		c.serveMessage([]string{presentationRequestMessage})
+		mustMatch(t, waitForLine(t, lines), `{"command":["script-message","presentation","{}"]}`)
+		mustMatch(t, waitForLine(t, lines), `{"command":["script-message","next","{\"title\":\"E05\"}"]}`)
+	})
 }
 
 // A Play with no next block sends the display nothing after the
@@ -79,27 +81,29 @@ func TestASidecarWithNoNextBlockSendsNone(t *testing.T) {
 		c.serveMessage([]string{presentationRequestMessage})
 
 		mustMatch(t, waitForLine(t, lines), `{"command":["script-message","presentation","{}"]}`)
-		mustNoLine(t, lines, 100*time.Millisecond)
+		mustNoLine(t, lines)
 	})
 }
 
 // The display's ask becomes one message on the Player's commands topic,
 // not retained, with the block's own request.
 func TestTheAskPublishesOnThePlayersCommandsTopic(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	waitForConnect(t, connected)
-	c := &commander{
-		bus:                 bus,
-		playerCommandsTopic: playerCommandsTopic(defaultTopicBase, "house", "theater"),
-		next:                json.RawMessage(nextBlockValue("/media/1/next.jpg")),
-	}
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 1, nil, nil)
+		waitForConnect(t, connected)
+		c := &commander{
+			bus:                 bus,
+			playerCommandsTopic: playerCommandsTopic(defaultTopicBase, "house", "theater"),
+			next:                json.RawMessage(nextBlockValue("/media/1/next.jpg")),
+		}
 
-	c.serveMessage([]string{nextRequestMessage})
+		c.serveMessage([]string{nextRequestMessage})
 
-	published := waitForPublish(t, brokers[0].pubs)
-	mustMatch(t, published.topic, c.playerCommandsTopic)
-	mustMatch(t, published.retained, false)
-	mustMatch(t, string(published.payload), `{"action":"play-next","request":{"library":"living-room/shows"}}`)
+		published := waitForPublish(t, brokers[0].pubs)
+		mustMatch(t, published.topic, c.playerCommandsTopic)
+		mustMatch(t, published.retained, false)
+		mustMatch(t, string(published.payload), `{"action":"play-next","request":{"library":"living-room/shows"}}`)
+	})
 }
 
 // A sidecar with no next block, or one that read no Player, publishes
@@ -132,34 +136,36 @@ func TestTheAskPublishesNothingWithoutABlockOrAPlayer(t *testing.T) {
 // the report with the ended mark reaches the bus first, and only then
 // does quit reach mpv.
 func TestTheTerminationSignalPublishesTheEndingBeforeTheQuitReachesMpv(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	waitForConnect(t, connected)
-	server, client := net.Pipe()
-	t.Cleanup(func() { server.Close() })
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 1, nil, nil)
+		waitForConnect(t, connected)
+		server, client := net.Pipe()
+		t.Cleanup(func() { server.Close() })
 
-	c := &commander{
-		statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
-		bus:         bus,
-		mpv:         client,
-		lastReport:  playReport{Item: 1, Position: "0:20:00"},
-		haveReport:  true,
-	}
+		c := &commander{
+			statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
+			bus:         bus,
+			mpv:         client,
+			lastReport:  playReport{Item: 1, Position: "0:20:00"},
+			haveReport:  true,
+		}
 
-	signals := make(chan os.Signal, 1)
-	stopped := make(chan struct{})
-	go c.exitOnSignal(t.Context(), signals, func() { close(stopped) })
-	signals <- syscall.SIGTERM
+		signals := make(chan os.Signal, 1)
+		stopped := make(chan struct{})
+		go c.exitOnSignal(t.Context(), signals, func() { close(stopped) })
+		signals <- syscall.SIGTERM
 
-	ending := waitForPublish(t, brokers[0].pubs)
-	mustMatch(t, ending.topic, c.statusTopic)
-	mustMatch(t, endedReport(t, ending.payload), playReport{Item: 1, Position: "0:20:00", Ended: true})
-	mustMatchAll(t, readLines(t, server, 1), []string{`{"command":["quit","0"]}`})
+		ending := waitForPublish(t, brokers[0].pubs)
+		mustMatch(t, ending.topic, c.statusTopic)
+		mustMatch(t, endedReport(t, ending.payload), playReport{Item: 1, Position: "0:20:00", Ended: true})
+		mustMatchAll(t, readLines(t, server, 1), []string{`{"command":["quit","0"]}`})
 
-	select {
-	case <-stopped:
-	case <-time.After(time.Second):
-		t.Fatal("the run never ended")
-	}
+		select {
+		case <-stopped:
+		case <-time.After(time.Second):
+			t.Fatal("the run never ended")
+		}
+	})
 }
 
 // A run that ends on its own leaves the signal handler nothing to do, so

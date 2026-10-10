@@ -215,6 +215,13 @@ func writeLogLine(line apiLogLine) {
 // current pool, rather than once, so a rotated sibling CA reaches the
 // next connection with no restart.
 func siblingClient(trust *trustStore) *http.Client {
+	return siblingClientOver(trust, (&net.Dialer{}).DialContext)
+}
+
+// siblingClientOver is siblingClient with the dial that opens the
+// connection under each TLS handshake, so a test can hand the
+// handshake one end of a pipe.
+func siblingClientOver(trust *trustStore, dial func(ctx context.Context, network, address string) (net.Conn, error)) *http.Client {
 	transport := &http.Transport{
 		DialContext: (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 10 * time.Second}).DialContext,
 		DialTLSContext: func(ctx context.Context, network, address string) (net.Conn, error) {
@@ -222,8 +229,16 @@ func siblingClient(trust *trustStore) *http.Client {
 			if err != nil {
 				return nil, err
 			}
-			dialer := &tls.Dialer{Config: &tls.Config{RootCAs: trust.pool(), ServerName: host, MinVersion: tls.VersionTLS12}}
-			return dialer.DialContext(ctx, network, address)
+			raw, err := dial(ctx, network, address)
+			if err != nil {
+				return nil, err
+			}
+			conn := tls.Client(raw, &tls.Config{RootCAs: trust.pool(), ServerName: host, MinVersion: tls.VersionTLS12})
+			if err := conn.HandshakeContext(ctx); err != nil {
+				_ = raw.Close()
+				return nil, err
+			}
+			return conn, nil
 		},
 		IdleConnTimeout: 30 * time.Second,
 	}

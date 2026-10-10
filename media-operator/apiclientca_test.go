@@ -113,16 +113,18 @@ func (f *apiFixture) callOver(target string, state *tls.ConnectionState, header 
 // subject organization values, which is what the SubjectAccessReview
 // has to carry for a rule written for that person to answer.
 func TestAVerifiedClientCertificateIsTheCaller(t *testing.T) {
-	fixture := newAPIFixture(t)
-	authority := newClientAuthority(t)
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		authority := newClientAuthority(t)
 
-	recorder := fixture.callOver(playerPathFor(""),
-		authority.verified(t, "admin", []string{"system:masters"}), nil)
+		recorder := fixture.callOver(playerPathFor(""),
+			authority.verified(t, "admin", []string{"system:masters"}), nil)
 
-	mustMatch(t, recorder.Code, http.StatusOK)
-	mustMatch(t, len(fixture.plane.reviews), 1)
-	mustMatch(t, fixture.plane.reviews[0].Spec.User, "admin")
-	mustMatchAll(t, fixture.plane.reviews[0].Spec.Groups, []string{"system:masters"})
+		mustMatch(t, recorder.Code, http.StatusOK)
+		mustMatch(t, len(fixture.plane.reviews), 1)
+		mustMatch(t, fixture.plane.reviews[0].Spec.User, "admin")
+		mustMatchAll(t, fixture.plane.reviews[0].Spec.Groups, []string{"system:masters"})
+	})
 }
 
 // kubectl describe player answers with the Captured Event, so the
@@ -147,72 +149,82 @@ func TestTheCapturedEventNamesTheCertificateUser(t *testing.T) {
 // A certificate that named a caller is the caller, and the token beside
 // it is never reviewed.
 func TestTheCertificateComesBeforeTheToken(t *testing.T) {
-	fixture := newAPIFixture(t)
-	authority := newClientAuthority(t)
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		authority := newClientAuthority(t)
 
-	recorder := fixture.callOver(playerPathFor(""),
-		authority.verified(t, "admin", []string{"system:masters"}),
-		http.Header{"Authorization": {"Bearer " + testAPIToken}})
+		recorder := fixture.callOver(playerPathFor(""),
+			authority.verified(t, "admin", []string{"system:masters"}),
+			http.Header{"Authorization": {"Bearer " + testAPIToken}})
 
-	mustMatch(t, recorder.Code, http.StatusOK)
-	mustMatch(t, fixture.plane.reviews[0].Spec.User, "admin")
-	mustMatch(t, fixture.plane.tokenReviews, 0)
+		mustMatch(t, recorder.Code, http.StatusOK)
+		mustMatch(t, fixture.plane.reviews[0].Spec.User, "admin")
+		mustMatch(t, fixture.plane.tokenReviews, 0)
+	})
 }
 
 // Only a chain the listener verified names a caller, so an offered
 // certificate falls to the token beside it.
 func TestAnUnverifiedCertificateNamesNobody(t *testing.T) {
-	fixture := newAPIFixture(t)
-	authority := newClientAuthority(t)
-	offered := &tls.ConnectionState{
-		PeerCertificates: []*x509.Certificate{authority.leaf(t, "admin", []string{"system:masters"}).Leaf},
-	}
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		authority := newClientAuthority(t)
+		offered := &tls.ConnectionState{
+			PeerCertificates: []*x509.Certificate{authority.leaf(t, "admin", []string{"system:masters"}).Leaf},
+		}
 
-	recorder := fixture.callOver(playerPathFor(""), offered,
-		http.Header{"Authorization": {"Bearer " + testAPIToken}})
+		recorder := fixture.callOver(playerPathFor(""), offered,
+			http.Header{"Authorization": {"Bearer " + testAPIToken}})
 
-	mustMatch(t, recorder.Code, http.StatusOK)
-	mustMatch(t, fixture.plane.reviews[0].Spec.User, testAPISubject)
-	mustMatch(t, fixture.plane.tokenReviews, 1)
+		mustMatch(t, recorder.Code, http.StatusOK)
+		mustMatch(t, fixture.plane.reviews[0].Spec.User, testAPISubject)
+		mustMatch(t, fixture.plane.tokenReviews, 1)
+	})
 }
 
 // A leaf with no common name names no user, so the request falls to the
 // token and ends in the ordinary 401 when it carries none.
 func TestACertificateWithNoCommonNameNamesNobody(t *testing.T) {
-	fixture := newAPIFixture(t)
-	authority := newClientAuthority(t)
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		authority := newClientAuthority(t)
 
-	recorder := fixture.callOver(playerPathFor(""),
-		authority.verified(t, "", []string{"system:masters"}), http.Header{})
+		recorder := fixture.callOver(playerPathFor(""),
+			authority.verified(t, "", []string{"system:masters"}), http.Header{})
 
-	mustMatch(t, recorder.Code, http.StatusUnauthorized)
-	mustMatch(t, recorder.Header().Get("WWW-Authenticate"), `Bearer realm="`+apiRealm+`"`)
+		mustMatch(t, recorder.Code, http.StatusUnauthorized)
+		mustMatch(t, recorder.Header().Get("WWW-Authenticate"), `Bearer realm="`+apiRealm+`"`)
+	})
 }
 
 // Neither credential is the bare challenge, RFC 6750 section 3.
 func TestNoCertificateAndNoTokenIsRefused(t *testing.T) {
-	fixture := newAPIFixture(t)
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
 
-	recorder := fixture.callOver(playerPathFor(""), &tls.ConnectionState{}, http.Header{})
+		recorder := fixture.callOver(playerPathFor(""), &tls.ConnectionState{}, http.Header{})
 
-	mustMatch(t, recorder.Code, http.StatusUnauthorized)
-	mustMatch(t, recorder.Header().Get("WWW-Authenticate"), `Bearer realm="`+apiRealm+`"`)
+		mustMatch(t, recorder.Code, http.StatusUnauthorized)
+		mustMatch(t, recorder.Header().Get("WWW-Authenticate"), `Bearer realm="`+apiRealm+`"`)
+	})
 }
 
 // The grant cache is keyed on the leaf, so one certificate costs one
 // access review and a second certificate never reuses the first one's
 // grant.
 func TestTheGrantCacheKeysOnTheCertificate(t *testing.T) {
-	fixture := newAPIFixture(t)
-	authority := newClientAuthority(t)
-	state := authority.verified(t, "admin", []string{"system:masters"})
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		authority := newClientAuthority(t)
+		state := authority.verified(t, "admin", []string{"system:masters"})
 
-	fixture.callOver(playerPathFor(""), state, nil)
-	fixture.callOver(playerPathFor(""), state, nil)
-	mustMatch(t, len(fixture.plane.reviews), 1)
+		fixture.callOver(playerPathFor(""), state, nil)
+		fixture.callOver(playerPathFor(""), state, nil)
+		mustMatch(t, len(fixture.plane.reviews), 1)
 
-	fixture.callOver(playerPathFor(""), authority.verified(t, "admin", []string{"system:masters"}), nil)
-	mustMatch(t, len(fixture.plane.reviews), 2)
+		fixture.callOver(playerPathFor(""), authority.verified(t, "admin", []string{"system:masters"}), nil)
+		mustMatch(t, len(fixture.plane.reviews), 2)
+	})
 }
 
 // authenticationConfigMap is the API server's own ConfigMap, holding
@@ -399,8 +411,10 @@ func TestAConfigMapWithNoAuthorityIsReported(t *testing.T) {
 }
 
 // The API served over its own TLS configuration, with the anchors the
-// test set, so a caller meets the policy a cluster caller meets.
-func listenOver(t *testing.T, fixture *apiFixture) (base string, serverAnchor *x509.CertPool) {
+// test set, so a caller meets the policy a cluster caller meets. The
+// listener is a pipeListener, so the handshake runs in the test's
+// bubble, and a caller dials it with the dial this answers.
+func listenOver(t *testing.T, fixture *apiFixture) (base string, serverAnchor *x509.CertPool, dial dialFunc) {
 	t.Helper()
 	authority, err := mintAuthority(time.Now())
 	mustSucceed(t, err)
@@ -410,8 +424,7 @@ func listenOver(t *testing.T, fixture *apiFixture) (base string, serverAnchor *x
 	mustSucceed(t, err)
 	fixture.server.holdCertificate(&pair)
 
-	socket, err := net.Listen("tcp", "127.0.0.1:0")
-	mustSucceed(t, err)
+	socket := newPipeListener()
 	// The log slice is the fixture's own and no lock guards it, so a
 	// listener that answers on goroutines of its own writes no lines.
 	fixture.server.log = nil
@@ -425,15 +438,19 @@ func listenOver(t *testing.T, fixture *apiFixture) (base string, serverAnchor *x
 
 	serverAnchor = x509.NewCertPool()
 	mustMatch(t, serverAnchor.AppendCertsFromPEM(authority.certPEM), true)
-	return "https://" + socket.Addr().String(), serverAnchor
+	return "https://localhost", serverAnchor, socket.dial
 }
+
+// A dialFunc opens a connection the way net.Dialer.DialContext does.
+type dialFunc func(ctx context.Context, network, address string) (net.Conn, error)
 
 // The client a caller dials the listener with, offering the leaves it
 // holds and naming the server leaf's own name.
-func callerWith(anchor *x509.CertPool, offered ...tls.Certificate) *http.Client {
+func callerWith(dial dialFunc, anchor *x509.CertPool, offered ...tls.Certificate) *http.Client {
 	return &http.Client{
 		Timeout: 10 * time.Second,
 		Transport: &http.Transport{
+			DialContext:       dial,
 			ForceAttemptHTTP2: true,
 			TLSClientConfig: &tls.Config{
 				RootCAs:      anchor,
@@ -449,33 +466,35 @@ func callerWith(anchor *x509.CertPool, offered ...tls.Certificate) *http.Client 
 // authority is the caller, a leaf of any other authority never
 // reaches a route, and a token answers on the same listener.
 func TestTheListenerTakesTheClusterAuthorityAlone(t *testing.T) {
-	fixture := newAPIFixture(t)
-	authority, foreign := newClientAuthority(t), newClientAuthority(t)
-	pool := x509.NewCertPool()
-	mustMatch(t, pool.AppendCertsFromPEM(authority.certPEM), true)
-	fixture.server.anchors.set(pool)
-	base, anchor := listenOver(t, fixture)
-	target := base + playerPathFor("")
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		authority, foreign := newClientAuthority(t), newClientAuthority(t)
+		pool := x509.NewCertPool()
+		mustMatch(t, pool.AppendCertsFromPEM(authority.certPEM), true)
+		fixture.server.anchors.set(pool)
+		base, anchor, dial := listenOver(t, fixture)
+		target := base + playerPathFor("")
 
-	resp, err := callerWith(anchor, authority.leaf(t, "admin", []string{"system:masters"})).Get(target)
-	mustSucceed(t, err)
-	mustSucceed(t, resp.Body.Close())
-	mustMatch(t, resp.StatusCode, http.StatusOK)
-	mustMatch(t, fixture.plane.reviews[0].Spec.User, "admin")
-	// The listener answers its own TLS configuration on every
-	// handshake, and that configuration names the protocols. A
-	// configuration that named none would drop every caller to
-	// HTTP/1.1 and nothing else would say so.
-	mustMatch(t, resp.Proto, "HTTP/2.0")
+		resp, err := callerWith(dial, anchor, authority.leaf(t, "admin", []string{"system:masters"})).Get(target)
+		mustSucceed(t, err)
+		mustSucceed(t, resp.Body.Close())
+		mustMatch(t, resp.StatusCode, http.StatusOK)
+		mustMatch(t, fixture.plane.reviews[0].Spec.User, "admin")
+		// The listener answers its own TLS configuration on every
+		// handshake, and that configuration names the protocols. A
+		// configuration that named none would drop every caller to
+		// HTTP/1.1 and nothing else would say so.
+		mustMatch(t, resp.Proto, "HTTP/2.0")
 
-	_, err = callerWith(anchor, foreign.leaf(t, "admin", nil)).Get(target)
-	mustFail(t, err)
+		_, err = callerWith(dial, anchor, foreign.leaf(t, "admin", nil)).Get(target)
+		mustFail(t, err)
 
-	request, err := http.NewRequest(http.MethodGet, target, nil)
-	mustSucceed(t, err)
-	request.Header.Set("Authorization", "Bearer "+testAPIToken)
-	answered, err := callerWith(anchor).Do(request)
-	mustSucceed(t, err)
-	mustSucceed(t, answered.Body.Close())
-	mustMatch(t, answered.StatusCode, http.StatusOK)
+		request, err := http.NewRequest(http.MethodGet, target, nil)
+		mustSucceed(t, err)
+		request.Header.Set("Authorization", "Bearer "+testAPIToken)
+		answered, err := callerWith(dial, anchor).Do(request)
+		mustSucceed(t, err)
+		mustSucceed(t, answered.Body.Close())
+		mustMatch(t, answered.StatusCode, http.StatusOK)
+	})
 }

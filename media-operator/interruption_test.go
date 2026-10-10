@@ -8,6 +8,7 @@ package main
 
 import (
 	"testing"
+	"testing/synctest"
 )
 
 // interruption is one way a run's pod stops while its Play goes on. stop
@@ -119,9 +120,11 @@ func interrupt(t *testing.T, each interruption) (*fakeCluster, *operator, *logBu
 func TestAnInterruptedRunMovesItsUnitForwardOnly(t *testing.T) {
 	for _, each := range interruptions {
 		t.Run(each.name, func(t *testing.T) {
-			_, _, log := interrupt(t, each)
+			synctest.Test(t, func(t *testing.T) {
+				_, _, log := interrupt(t, each)
 
-			mustMatchAll(t, activityLines(log), each.want)
+				mustMatchAll(t, activityLines(log), each.want)
+			})
 		})
 	}
 }
@@ -131,14 +134,16 @@ func TestAnInterruptedRunMovesItsUnitForwardOnly(t *testing.T) {
 func TestAnInterruptedRunLabelsTheNewPodsEnding(t *testing.T) {
 	for _, each := range interruptions {
 		t.Run(each.name, func(t *testing.T) {
-			cluster, media, _ := interrupt(t, each)
-			fresh := cluster.pods["movie-playback"]
+			synctest.Test(t, func(t *testing.T) {
+				cluster, media, _ := interrupt(t, each)
+				fresh := cluster.pods["movie-playback"]
 
-			media.handleBusMessage(playStatusTopic(defaultTopicBase, "house", "movie"),
-				[]byte(`{"item":1,"position":"1:58:03","ended":true,"pod":"`+fresh.Metadata.UID+`"}`))
-			media.pass()
+				media.handleBusMessage(playStatusTopic(defaultTopicBase, "house", "movie"),
+					[]byte(`{"item":1,"position":"1:58:03","ended":true,"pod":"`+fresh.Metadata.UID+`"}`))
+				media.pass()
 
-			mustMatch(t, fresh.Metadata.Labels[endingLabelKey], endingLabelValue)
+				mustMatch(t, fresh.Metadata.Labels[endingLabelKey], endingLabelValue)
+			})
 		})
 	}
 }
@@ -149,14 +154,16 @@ func TestAnInterruptedRunLabelsTheNewPodsEnding(t *testing.T) {
 func TestALateOfflineFromADeadPodLeavesTheNewPodsReport(t *testing.T) {
 	for _, each := range interruptions {
 		t.Run(each.name, func(t *testing.T) {
-			_, media, log := interrupt(t, each)
+			synctest.Test(t, func(t *testing.T) {
+				_, media, log := interrupt(t, each)
 
-			media.handleBusMessage(playAvailabilityTopic(defaultTopicBase, "house", "movie"),
-				[]byte("offline old-pod"))
-			media.pass()
+				media.handleBusMessage(playAvailabilityTopic(defaultTopicBase, "house", "movie"),
+					[]byte("offline old-pod"))
+				media.pass()
 
-			mustMatchAll(t, activityLines(log), each.want)
-			mustMatch(t, media.reports.latestFor("house", "movie") != nil, true)
+				mustMatchAll(t, activityLines(log), each.want)
+				mustMatch(t, media.reports.latestFor("house", "movie") != nil, true)
+			})
 		})
 	}
 }

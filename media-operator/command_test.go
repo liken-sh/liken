@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"path/filepath"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -36,40 +35,42 @@ func readLines(t *testing.T, conn net.Conn, n int) []string {
 // mpv is a pipe here, so the test reads the line the command sidecar
 // writes.
 func TestACommandOnTheCommandsTopicBecomesAnMpvCommand(t *testing.T) {
-	server, client := net.Pipe()
-	defer server.Close()
+	synctest.Test(t, func(t *testing.T) {
+		server, client := net.Pipe()
+		defer server.Close()
 
-	lines := make(chan string, 4)
-	go func() {
-		scanner := bufio.NewScanner(server)
-		for scanner.Scan() {
-			lines <- scanner.Text()
-		}
-	}()
-
-	c := &commander{mpv: client}
-	payload, err := json.Marshal(mediaCommand{Action: actionSeek, Amount: 30})
-	if err != nil {
-		t.Fatal(err)
-	}
-	c.handle(c.commandsTopic, payload)
-
-	// A seek writes two commands: the no-osd seek, then the summon that
-	// makes the display draw the new position.
-	want := []string{
-		`{"command":["no-osd","seek",30],"request_id":1}`,
-		`{"command":["script-message","summon"]}`,
-	}
-	for _, expected := range want {
-		select {
-		case line := <-lines:
-			if line != expected {
-				t.Errorf("mpv command = %q, want %q", line, expected)
+		lines := make(chan string, 4)
+		go func() {
+			scanner := bufio.NewScanner(server)
+			for scanner.Scan() {
+				lines <- scanner.Text()
 			}
-		case <-time.After(time.Second):
-			t.Fatal("no command reached mpv")
+		}()
+
+		c := &commander{mpv: client}
+		payload, err := json.Marshal(mediaCommand{Action: actionSeek, Amount: 30})
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
+		c.handle(c.commandsTopic, payload)
+
+		// A seek writes two commands: the no-osd seek, then the summon that
+		// makes the display draw the new position.
+		want := []string{
+			`{"command":["no-osd","seek",30],"request_id":1}`,
+			`{"command":["script-message","summon"]}`,
+		}
+		for _, expected := range want {
+			select {
+			case line := <-lines:
+				if line != expected {
+					t.Errorf("mpv command = %q, want %q", line, expected)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("no command reached mpv")
+			}
+		}
+	})
 }
 
 // A payload that does not decode, and an action the sidecar has no case
@@ -108,78 +109,82 @@ func TestACommandThatDoesNotDecodeOrHasNoCaseWritesNothing(t *testing.T) {
 // on every advance. The block is the one baked for that playlist
 // position, and it travels as one string argument.
 func TestTheSidecarForwardsThePresentationOnEachItem(t *testing.T) {
-	server, client := net.Pipe()
-	defer server.Close()
+	synctest.Test(t, func(t *testing.T) {
+		server, client := net.Pipe()
+		defer server.Close()
 
-	lines := make(chan string, 4)
-	go func() {
-		scanner := bufio.NewScanner(server)
-		for scanner.Scan() {
-			lines <- scanner.Text()
-		}
-	}()
-
-	c := &commander{
-		mpv: client,
-		presentations: []json.RawMessage{
-			json.RawMessage(`{"title":"First"}`),
-			json.RawMessage(`{"title":"Second"}`),
-		},
-	}
-
-	changes := make(chan propertyChange, 8)
-	go feedChanges(changes,
-		changeOf("playlist-pos", "0"),
-		changeOf("time-pos", "1.0"),
-		changeOf("playlist-pos", "1"),
-	)
-	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, nil, io.Discard)
-
-	want := []string{
-		`{"command":["script-message","presentation","{\"title\":\"First\"}"]}`,
-		`{"command":["script-message","presentation","{\"title\":\"Second\"}"]}`,
-	}
-	for _, each := range want {
-		select {
-		case line := <-lines:
-			if line != each {
-				t.Errorf("presentation = %q, want %q", line, each)
+		lines := make(chan string, 4)
+		go func() {
+			scanner := bufio.NewScanner(server)
+			for scanner.Scan() {
+				lines <- scanner.Text()
 			}
-		case <-time.After(time.Second):
-			t.Fatalf("no presentation reached mpv, want %q", each)
+		}()
+
+		c := &commander{
+			mpv: client,
+			presentations: []json.RawMessage{
+				json.RawMessage(`{"title":"First"}`),
+				json.RawMessage(`{"title":"Second"}`),
+			},
 		}
-	}
+
+		changes := make(chan propertyChange, 8)
+		go feedChanges(changes,
+			changeOf("playlist-pos", "0"),
+			changeOf("time-pos", "1.0"),
+			changeOf("playlist-pos", "1"),
+		)
+		runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, nil, io.Discard)
+
+		want := []string{
+			`{"command":["script-message","presentation","{\"title\":\"First\"}"]}`,
+			`{"command":["script-message","presentation","{\"title\":\"Second\"}"]}`,
+		}
+		for _, each := range want {
+			select {
+			case line := <-lines:
+				if line != each {
+					t.Errorf("presentation = %q, want %q", line, each)
+				}
+			case <-time.After(time.Second):
+				t.Fatalf("no presentation reached mpv, want %q", each)
+			}
+		}
+	})
 }
 
 // An item the sidecar has no baked block for forwards {}, so the display
 // always receives a definite value.
 func TestTheSidecarForwardsEmptyForAMissingBlock(t *testing.T) {
-	server, client := net.Pipe()
-	defer server.Close()
+	synctest.Test(t, func(t *testing.T) {
+		server, client := net.Pipe()
+		defer server.Close()
 
-	lines := make(chan string, 4)
-	go func() {
-		scanner := bufio.NewScanner(server)
-		for scanner.Scan() {
-			lines <- scanner.Text()
+		lines := make(chan string, 4)
+		go func() {
+			scanner := bufio.NewScanner(server)
+			for scanner.Scan() {
+				lines <- scanner.Text()
+			}
+		}()
+
+		c := &commander{mpv: client}
+
+		changes := make(chan propertyChange, 8)
+		go feedChanges(changes, changeOf("playlist-pos", "0"))
+		runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, nil, io.Discard)
+
+		want := `{"command":["script-message","presentation","{}"]}`
+		select {
+		case line := <-lines:
+			if line != want {
+				t.Errorf("presentation = %q, want %q", line, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("no presentation reached mpv")
 		}
-	}()
-
-	c := &commander{mpv: client}
-
-	changes := make(chan propertyChange, 8)
-	go feedChanges(changes, changeOf("playlist-pos", "0"))
-	runReporter(t.Context(), changes, func(playReport) error { return nil }, c.present, nil, io.Discard)
-
-	want := `{"command":["script-message","presentation","{}"]}`
-	select {
-	case line := <-lines:
-		if line != want {
-			t.Errorf("presentation = %q, want %q", line, want)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("no presentation reached mpv")
-	}
+	})
 }
 
 // The display broadcasts the exit press, and the sidecar publishes the
@@ -188,30 +193,32 @@ func TestTheSidecarForwardsEmptyForAMissingBlock(t *testing.T) {
 // the broker, and net.Pipe blocks a write nobody reads, so a sidecar that
 // quit first would publish nothing and the wait would fail.
 func TestTheExitPressPublishesTheEndingBeforeTheQuitReachesMpv(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	waitForConnect(t, connected)
-	server, client := net.Pipe()
-	t.Cleanup(func() { server.Close() })
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 1, nil, nil)
+		waitForConnect(t, connected)
+		server, client := net.Pipe()
+		t.Cleanup(func() { server.Close() })
 
-	c := &commander{
-		statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
-		bus:         bus,
-		mpv:         client,
-		lastReport:  playReport{Item: 1, Position: "0:20:00"},
-		haveReport:  true,
-	}
+		c := &commander{
+			statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
+			bus:         bus,
+			mpv:         client,
+			lastReport:  playReport{Item: 1, Position: "0:20:00"},
+			haveReport:  true,
+		}
 
-	messages := make(chan clientMessage, 1)
-	messages <- clientMessage{Args: []string{exitMessage}}
-	close(messages)
-	go c.serveMessages(messages)
+		messages := make(chan clientMessage, 1)
+		messages <- clientMessage{Args: []string{exitMessage}}
+		close(messages)
+		go c.serveMessages(messages)
 
-	ending := waitForPublish(t, brokers[0].pubs)
-	mustMatch(t, ending.topic, c.statusTopic)
-	mustMatch(t, ending.retained, true)
-	mustMatch(t, endedReport(t, ending.payload), playReport{Item: 1, Position: "0:20:00", Ended: true})
+		ending := waitForPublish(t, brokers[0].pubs)
+		mustMatch(t, ending.topic, c.statusTopic)
+		mustMatch(t, ending.retained, true)
+		mustMatch(t, endedReport(t, ending.payload), playReport{Item: 1, Position: "0:20:00", Ended: true})
 
-	mustMatchAll(t, readLines(t, server, 1), []string{`{"command":["quit","0"]}`})
+		mustMatchAll(t, readLines(t, server, 1), []string{`{"command":["quit","0"]}`})
+	})
 }
 
 // The grace between the ending and the quit is what a fade runs under:
@@ -253,30 +260,32 @@ func TestTheQuitWaitsOutTheGraceAfterTheEnding(t *testing.T) {
 // hold the pod for two graces. The grace here is a second, which the
 // test would spend if the guard were missing.
 func TestASecondExitOnAnEndedRunWaitsNoGrace(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	waitForConnect(t, connected)
-	server, client := net.Pipe()
-	t.Cleanup(func() { server.Close() })
-	lines := readAsync(server)
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 1, nil, nil)
+		waitForConnect(t, connected)
+		server, client := net.Pipe()
+		t.Cleanup(func() { server.Close() })
+		lines := readAsync(server)
 
-	c := &commander{
-		statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
-		bus:         bus,
-		mpv:         client,
-		grace:       time.Second,
-		lastReport:  playReport{Item: 1, Position: "0:20:00", Ended: true},
-		haveReport:  true,
-		ended:       true,
-	}
+		c := &commander{
+			statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
+			bus:         bus,
+			mpv:         client,
+			grace:       time.Second,
+			lastReport:  playReport{Item: 1, Position: "0:20:00", Ended: true},
+			haveReport:  true,
+			ended:       true,
+		}
 
-	started := time.Now()
-	c.exit()
-	waited := time.Since(started)
+		started := time.Now()
+		c.exit()
+		waited := time.Since(started)
 
-	ending := waitForPublish(t, brokers[0].pubs)
-	mustMatch(t, endedReport(t, ending.payload), playReport{Item: 1, Position: "0:20:00", Ended: true})
-	mustMatch(t, waitForLine(t, lines), `{"command":["quit","0"]}`)
-	mustMatch(t, waited < c.grace, true)
+		ending := waitForPublish(t, brokers[0].pubs)
+		mustMatch(t, endedReport(t, ending.payload), playReport{Item: 1, Position: "0:20:00", Ended: true})
+		mustMatch(t, waitForLine(t, lines), `{"command":["quit","0"]}`)
+		mustMatch(t, waited < c.grace, true)
+	})
 }
 
 // The two endings the sidecar observes on mpv's socket: mpv reaches the end
@@ -300,46 +309,48 @@ func TestTheSidecarPublishesTheEndingWhenTheRunEnds(t *testing.T) {
 
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "mpv.sock")
-			useSocket(t, path)
-			listener, err := net.Listen("unix", path)
-			mustSucceed(t, err)
-			t.Cleanup(func() { listener.Close() })
+			synctest.Test(t, func(t *testing.T) {
+				// conn is mpv's end of the socket. The sidecar writes its
+				// observe commands first, and a pipe holds no buffer, so
+				// mpv's end reads and discards them.
+				sidecar, conn := net.Pipe()
+				t.Cleanup(func() {
+					sidecar.Close()
+					conn.Close()
+				})
+				go func() { _, _ = io.Copy(io.Discard, conn) }()
 
-			bus, brokers, connected := startBus(t, 1, nil, nil)
-			waitForConnect(t, connected)
-			c := &commander{
-				statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
-				bus:         bus,
-			}
+				bus, brokers, connected := startBus(t, 1, nil, nil)
+				waitForConnect(t, connected)
+				c := &commander{
+					statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
+					bus:         bus,
+				}
 
-			ctx, stop := context.WithCancel(context.Background())
-			t.Cleanup(stop)
-			done := make(chan struct{})
-			go func() {
-				defer close(done)
-				c.report(ctx)
-			}()
+				ctx, stop := context.WithCancel(t.Context())
+				t.Cleanup(stop)
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					c.reportOver(ctx, sidecar)
+				}()
 
-			conn, err := listener.Accept()
-			mustSucceed(t, err)
-			t.Cleanup(func() { conn.Close() })
+				// The position arrives first, which reports nothing because mpv
+				// has not named an item, and the item arrives second and sends
+				// the one report of this run.
+				writeEvent(t, conn, `{"event":"property-change","name":"time-pos","data":1200.0}`)
+				writeEvent(t, conn, `{"event":"property-change","name":"playlist-pos","data":0}`)
+				running := waitForPublish(t, brokers[0].pubs)
+				mustMatch(t, reportOf(t, running.payload), playReport{Item: 1, Position: "0:20:00"})
 
-			// The position arrives first, which reports nothing because mpv
-			// has not named an item, and the item arrives second and sends
-			// the one report of this run.
-			writeEvent(t, conn, `{"event":"property-change","name":"time-pos","data":1200.0}`)
-			writeEvent(t, conn, `{"event":"property-change","name":"playlist-pos","data":0}`)
-			running := waitForPublish(t, brokers[0].pubs)
-			mustMatch(t, reportOf(t, running.payload), playReport{Item: 1, Position: "0:20:00"})
+				one.end(conn, stop)
 
-			one.end(conn, stop)
-
-			ending := waitForPublish(t, brokers[0].pubs)
-			mustMatch(t, ending.topic, c.statusTopic)
-			mustMatch(t, ending.retained, true)
-			mustMatch(t, endedReport(t, ending.payload), playReport{Item: 1, Position: "0:20:00", Ended: true})
-			<-done
+				ending := waitForPublish(t, brokers[0].pubs)
+				mustMatch(t, ending.topic, c.statusTopic)
+				mustMatch(t, ending.retained, true)
+				mustMatch(t, endedReport(t, ending.payload), playReport{Item: 1, Position: "0:20:00", Ended: true})
+				<-done
+			})
 		})
 	}
 }
@@ -347,58 +358,64 @@ func TestTheSidecarPublishesTheEndingWhenTheRunEnds(t *testing.T) {
 // The mark stays set for the rest of the run, so a subscriber that reads
 // any later report reads the same ending.
 func TestEveryReportAfterTheEndingCarriesTheMark(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	waitForConnect(t, connected)
-	c := &commander{
-		statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
-		bus:         bus,
-		lastReport:  playReport{Item: 1, Position: "0:20:00"},
-		haveReport:  true,
-	}
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 1, nil, nil)
+		waitForConnect(t, connected)
+		c := &commander{
+			statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
+			bus:         bus,
+			lastReport:  playReport{Item: 1, Position: "0:20:00"},
+			haveReport:  true,
+		}
 
-	c.endRun()
-	waitForPublish(t, brokers[0].pubs)
-	mustSucceed(t, c.send(playReport{Item: 1, Position: "0:20:01"}))
+		c.endRun()
+		waitForPublish(t, brokers[0].pubs)
+		mustSucceed(t, c.send(playReport{Item: 1, Position: "0:20:01"}))
 
-	later := waitForPublish(t, brokers[0].pubs)
-	mustMatch(t, endedReport(t, later.payload), playReport{Item: 1, Position: "0:20:01", Ended: true})
+		later := waitForPublish(t, brokers[0].pubs)
+		mustMatch(t, endedReport(t, later.payload), playReport{Item: 1, Position: "0:20:01", Ended: true})
+	})
 }
 
 // Every report names the pod that sent it, the ending included, so the
 // operator can refuse the ending of a pod it has already replaced.
 func TestEveryReportNamesThePodThatSentIt(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	waitForConnect(t, connected)
-	c := &commander{
-		statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
-		podUID:      "pod-one",
-		bus:         bus,
-	}
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 1, nil, nil)
+		waitForConnect(t, connected)
+		c := &commander{
+			statusTopic: playStatusTopic(defaultTopicBase, "house", "movie"),
+			podUID:      "pod-one",
+			bus:         bus,
+		}
 
-	mustSucceed(t, c.send(playReport{Item: 1, Position: "0:20:00"}))
-	running := waitForPublish(t, brokers[0].pubs)
-	c.endRun()
-	ending := waitForPublish(t, brokers[0].pubs)
+		mustSucceed(t, c.send(playReport{Item: 1, Position: "0:20:00"}))
+		running := waitForPublish(t, brokers[0].pubs)
+		c.endRun()
+		ending := waitForPublish(t, brokers[0].pubs)
 
-	mustMatch(t, reportOf(t, running.payload), playReport{Item: 1, Position: "0:20:00", Pod: "pod-one"})
-	mustMatch(t, endedReport(t, ending.payload), playReport{Item: 1, Position: "0:20:00", Ended: true, Pod: "pod-one"})
+		mustMatch(t, reportOf(t, running.payload), playReport{Item: 1, Position: "0:20:00", Pod: "pod-one"})
+		mustMatch(t, endedReport(t, ending.payload), playReport{Item: 1, Position: "0:20:00", Ended: true, Pod: "pod-one"})
+	})
 }
 
 // The availability names the pod too, the online the sidecar publishes
 // and the Last Will the broker publishes for a dead pod, so the operator
 // can refuse a late offline from a pod that is gone.
 func TestTheAvailabilityNamesThePodThatSentIt(t *testing.T) {
-	bus, brokers, connected := startBus(t, 1, nil, nil)
-	waitForConnect(t, connected)
-	c := &commander{
-		availabilityTopic: playAvailabilityTopic(defaultTopicBase, "house", "movie"),
-		podUID:            "pod-one",
-	}
+	synctest.Test(t, func(t *testing.T) {
+		bus, brokers, connected := startBus(t, 1, nil, nil)
+		waitForConnect(t, connected)
+		c := &commander{
+			availabilityTopic: playAvailabilityTopic(defaultTopicBase, "house", "movie"),
+			podUID:            "pod-one",
+		}
 
-	c.onConnect(bus)
+		c.onConnect(bus)
 
-	mustMatch(t, string(waitForPublish(t, brokers[0].pubs).payload), "online pod-one")
-	mustMatch(t, string(c.will().Payload), "offline pod-one")
+		mustMatch(t, string(waitForPublish(t, brokers[0].pubs).payload), "online pod-one")
+		mustMatch(t, string(c.will().Payload), "offline pod-one")
+	})
 }
 
 // A run that never reported publishes no ending, the rule the reporter
@@ -423,17 +440,19 @@ func TestARunThatNeverReportedPublishesNoEnding(t *testing.T) {
 // message with the level and the mute, and sets nothing in mpv, which
 // plays at unity.
 func TestALiveLevelSendsTheDisplayTheLevel(t *testing.T) {
-	server, client := net.Pipe()
-	t.Cleanup(func() { server.Close() })
-	lines := readAsync(server)
+	synctest.Test(t, func(t *testing.T) {
+		server, client := net.Pipe()
+		t.Cleanup(func() { server.Close() })
+		lines := readAsync(server)
 
-	c := &commander{
-		volumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
-		mpv:         client,
-	}
-	c.handle(c.volumeTopic, []byte(`{"level":0.63,"muted":true}`))
+		c := &commander{
+			volumeTopic: playerVolumeTopic(defaultTopicBase, "house", "theater"),
+			mpv:         client,
+		}
+		c.handle(c.volumeTopic, []byte(`{"level":0.63,"muted":true}`))
 
-	mustMatch(t, waitForLine(t, lines), `{"command":["script-message","volume-changed","0.63","yes","yes"]}`)
+		mustMatch(t, waitForLine(t, lines), `{"command":["script-message","volume-changed","0.63","yes","yes"]}`)
+	})
 }
 
 // The level the broker delivers at subscribe is the level the room
@@ -516,14 +535,15 @@ func waitForLine(t *testing.T, lines <-chan string) string {
 	}
 }
 
-// mustNoLine fails when the sidecar writes anything to mpv inside this
-// window.
-func mustNoLine(t *testing.T, lines <-chan string, window time.Duration) {
+// mustNoLine fails when the sidecar wrote anything to mpv by the time
+// every goroutine in the test's synctest bubble has settled.
+func mustNoLine(t *testing.T, lines <-chan string) {
 	t.Helper()
+	synctest.Wait()
 	select {
 	case line := <-lines:
 		t.Fatalf("the sidecar wrote %s, and should have written nothing", line)
-	case <-time.After(window):
+	default:
 	}
 }
 
@@ -850,22 +870,24 @@ func positions(reports []playReport) []string {
 // before the display connected reaches nobody, and the display would then
 // never learn the item's type or ask for its art.
 func TestTheSidecarAnswersThePresentationRequest(t *testing.T) {
-	bridge, lines := bridgeToMPV(t)
-	bridge.presentations = []json.RawMessage{
-		json.RawMessage(`{"title":"First"}`),
-		json.RawMessage(`{"type":"music","hint":"album"}`),
-	}
-	bridge.item = 2
+	synctest.Test(t, func(t *testing.T) {
+		bridge, lines := bridgeToMPV(t)
+		bridge.presentations = []json.RawMessage{
+			json.RawMessage(`{"title":"First"}`),
+			json.RawMessage(`{"type":"music","hint":"album"}`),
+		}
+		bridge.item = 2
 
-	go bridge.serveMessages(requestFor(presentationRequestMessage))
+		go bridge.serveMessages(requestFor(presentationRequestMessage))
 
-	want := `{"command":["script-message","presentation","{\"type\":\"music\",\"hint\":\"album\"}"]}`
-	select {
-	case line := <-lines:
-		mustMatch(t, line, want)
-	case <-time.After(time.Second):
-		t.Fatal("the sidecar answered nothing")
-	}
+		want := `{"command":["script-message","presentation","{\"type\":\"music\",\"hint\":\"album\"}"]}`
+		select {
+		case line := <-lines:
+			mustMatch(t, line, want)
+		case <-time.After(time.Second):
+			t.Fatal("the sidecar answered nothing")
+		}
+	})
 }
 
 // Before mpv says which item plays there is no block to answer with, and the
@@ -908,7 +930,7 @@ func TestASocketThatOpensGetsNoLevel(t *testing.T) {
 		driveInBackground(t, c, client)
 
 		skipObserves(t, lines)
-		mustNoLine(t, lines, 100*time.Millisecond)
+		mustNoLine(t, lines)
 	})
 }
 

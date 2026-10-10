@@ -1099,15 +1099,17 @@ func TestAPassClearsTheKeyTableOfADepartedRemote(t *testing.T) {
 // A pass writes the focused Player onto the Remote's status, so
 // kubectl answers which unit a controller drives.
 func TestAPassWritesTheFocusedPlayerOntoTheRemote(t *testing.T) {
-	cluster := newFakeCluster()
-	cluster.players["theater"] = housePlayerWithRemote()
-	cluster.remotes["sofa"] = houseRemote("gamepad")
-	cluster.keymaps["gamepad"] = testKeymap()
-	media, _ := caughtUpOperator(t, cluster)
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		cluster.players["theater"] = housePlayerWithRemote()
+		cluster.remotes["sofa"] = houseRemote("gamepad")
+		cluster.keymaps["gamepad"] = testKeymap()
+		media, _ := caughtUpOperator(t, cluster)
 
-	media.pass()
+		media.pass()
 
-	mustMatch(t, cluster.remotes["sofa"].Status.Player, "theater")
+		mustMatch(t, cluster.remotes["sofa"].Status.Player, "theater")
+	})
 }
 
 // A pass writes the Peripheral of the device the Remote's standing claim
@@ -1855,17 +1857,19 @@ func keysRemote(cluster *fakeCluster) *Remote {
 // The pass compiles a Remote's table and publishes it retained, so the
 // standing pod reads the current table the instant it connects.
 func TestPublishKeysPublishesARetainedTable(t *testing.T) {
-	cluster := newFakeCluster()
-	media, broker := keysOperator(t, cluster)
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		media, broker := keysOperator(t, cluster)
 
-	media.publishKeys(keysRemote(cluster), media.loadKeymaps(), map[string]bool{})
+		media.publishKeys(keysRemote(cluster), media.loadKeymaps(), map[string]bool{})
 
-	published := waitForPublish(t, broker.pubs)
-	mustMatch(t, published.topic, remoteKeysTopic(defaultTopicBase, "house", "sofa"))
-	mustMatch(t, published.retained, true)
-	var table []compiledBinding
-	mustSucceed(t, json.Unmarshal(published.payload, &table))
-	mustMatch(t, len(table), len(baseKeys)+2)
+		published := waitForPublish(t, broker.pubs)
+		mustMatch(t, published.topic, remoteKeysTopic(defaultTopicBase, "house", "sofa"))
+		mustMatch(t, published.retained, true)
+		var table []compiledBinding
+		mustSucceed(t, json.Unmarshal(published.payload, &table))
+		mustMatch(t, len(table), len(baseKeys)+2)
+	})
 }
 
 // The keys topic is retained, so an unchanged table republishes nothing
@@ -1954,53 +1958,57 @@ func playersOperator(t *testing.T, cluster *fakeCluster) (*operator, *fakeBroker
 // status goes out in bus time, seconds before the pod terminates, so the
 // idle screen draws over the dying film.
 func TestAReportedEndingPublishesTheIdleStatus(t *testing.T) {
-	cluster := newFakeCluster()
-	media, broker := playersOperator(t, cluster)
-	player := Player{
-		Metadata: ObjectMeta{Name: "theater", Namespace: "house"},
-		Status:   PlayerStatus{Activity: playerPlaying, Play: "movie"},
-	}
-	play := Play{
-		Metadata: ObjectMeta{Name: "movie", Namespace: "house"},
-		Spec:     PlaySpec{Players: []string{"theater"}},
-		Status:   PlayStatus{Phase: phaseRunning},
-	}
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		media, broker := playersOperator(t, cluster)
+		player := Player{
+			Metadata: ObjectMeta{Name: "theater", Namespace: "house"},
+			Status:   PlayerStatus{Activity: playerPlaying, Play: "movie"},
+		}
+		play := Play{
+			Metadata: ObjectMeta{Name: "movie", Namespace: "house"},
+			Spec:     PlaySpec{Players: []string{"theater"}},
+			Status:   PlayStatus{Phase: phaseRunning},
+		}
 
-	media.handleBusMessage(playStatusTopic(defaultTopicBase, "house", "movie"),
-		[]byte(`{"item":1,"position":"0:20:00","ended":true}`))
-	media.reconcilePlayers([]Player{player}, []Play{play}, "", nil)
+		media.handleBusMessage(playStatusTopic(defaultTopicBase, "house", "movie"),
+			[]byte(`{"item":1,"position":"0:20:00","ended":true}`))
+		media.reconcilePlayers([]Player{player}, []Play{play}, "", nil)
 
-	status := waitForPublish(t, broker.pubs)
-	mustMatch(t, status.topic, playerStatusTopic(defaultTopicBase, "house", "theater"))
-	var state playerBusStatus
-	mustSucceed(t, json.Unmarshal(status.payload, &state))
-	mustMatch(t, state.Activity, playerIdle)
-	mustMatch(t, state.Play == nil, true)
+		status := waitForPublish(t, broker.pubs)
+		mustMatch(t, status.topic, playerStatusTopic(defaultTopicBase, "house", "theater"))
+		var state playerBusStatus
+		mustSucceed(t, json.Unmarshal(status.payload, &state))
+		mustMatch(t, state.Activity, playerIdle)
+		mustMatch(t, state.Play == nil, true)
 
-	// The Play is still what the API server holds it to be, so kubectl
-	// still lists the run for the seconds the pod takes to terminate.
-	mustMatch(t, play.Status.Phase, phaseRunning)
+		// The Play is still what the API server holds it to be, so kubectl
+		// still lists the run for the seconds the pod takes to terminate.
+		mustMatch(t, play.Status.Phase, phaseRunning)
+	})
 }
 
 // Every pass publishes each unit's presentable state to its retained
 // status topic, so an idle pod that just started reads the current state
 // from the broker.
 func TestAPassPublishesTheRetainedPlayerStatus(t *testing.T) {
-	cluster := newFakeCluster()
-	media, broker := playersOperator(t, cluster)
-	player := settledPlayer(housePlayerWithRemote())
-	player.Spec.DisplayName = "Studio Lab"
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		media, broker := playersOperator(t, cluster)
+		player := settledPlayer(housePlayerWithRemote())
+		player.Spec.DisplayName = "Studio Lab"
 
-	media.reconcilePlayers([]Player{player}, nil, "", nil)
+		media.reconcilePlayers([]Player{player}, nil, "", nil)
 
-	published := waitForPublish(t, broker.pubs)
-	mustMatch(t, published.topic, playerStatusTopic(defaultTopicBase, "house", "theater"))
-	mustMatch(t, published.retained, true)
-	var status playerBusStatus
-	mustSucceed(t, json.Unmarshal(published.payload, &status))
-	mustMatch(t, status.DisplayName, "Studio Lab")
-	mustMatch(t, status.Activity, playerIdle)
-	mustMatchAll(t, componentNames(status), []string{"display-output", "audio-sink", "sofa"})
+		published := waitForPublish(t, broker.pubs)
+		mustMatch(t, published.topic, playerStatusTopic(defaultTopicBase, "house", "theater"))
+		mustMatch(t, published.retained, true)
+		var status playerBusStatus
+		mustSucceed(t, json.Unmarshal(published.payload, &status))
+		mustMatch(t, status.DisplayName, "Studio Lab")
+		mustMatch(t, status.Activity, playerIdle)
+		mustMatchAll(t, componentNames(status), []string{"display-output", "audio-sink", "sofa"})
+	})
 }
 
 // The status topic is retained, so a settled unit republishes nothing on
@@ -2031,47 +2039,51 @@ func TestThePlayerStatusRepublishesOnlyOnChange(t *testing.T) {
 // device that sleeps reads away on the next pass, so the screen dims the
 // name it drew.
 func TestAPeripheralReachesThePublishedPlayerStatus(t *testing.T) {
-	cluster := newFakeCluster()
-	media, broker := playersOperator(t, cluster)
-	key := controllerKey("house", "sofa")
-	charged := bonded("aa-bb-cc-dd-ee-ff", conditionTrue)
-	charged.Status.Battery = &PeripheralBattery{Percentage: 62}
-	media.peripherals = holding(key, charged)
-	player := settledPlayer(housePlayerWithRemote())
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		media, broker := playersOperator(t, cluster)
+		key := controllerKey("house", "sofa")
+		charged := bonded("aa-bb-cc-dd-ee-ff", conditionTrue)
+		charged.Status.Battery = &PeripheralBattery{Percentage: 62}
+		media.peripherals = holding(key, charged)
+		player := settledPlayer(housePlayerWithRemote())
 
-	media.reconcilePlayers([]Player{player}, nil, "", nil)
+		media.reconcilePlayers([]Player{player}, nil, "", nil)
 
-	var status playerBusStatus
-	mustSucceed(t, json.Unmarshal(waitForPublish(t, broker.pubs).payload, &status))
-	remote := status.Components[len(status.Components)-1]
-	mustMatch(t, remote.Kind, remoteComponent)
-	mustMatch(t, remote.Connected != nil && *remote.Connected, true)
-	mustMatch(t, remote.Battery != nil && *remote.Battery == 62, true)
+		var status playerBusStatus
+		mustSucceed(t, json.Unmarshal(waitForPublish(t, broker.pubs).payload, &status))
+		remote := status.Components[len(status.Components)-1]
+		mustMatch(t, remote.Kind, remoteComponent)
+		mustMatch(t, remote.Connected != nil && *remote.Connected, true)
+		mustMatch(t, remote.Battery != nil && *remote.Battery == 62, true)
 
-	media.peripherals = holding(key, bonded("aa-bb-cc-dd-ee-ff", "False"))
-	media.reconcilePlayers([]Player{player}, nil, "", nil)
+		media.peripherals = holding(key, bonded("aa-bb-cc-dd-ee-ff", "False"))
+		media.reconcilePlayers([]Player{player}, nil, "", nil)
 
-	mustSucceed(t, json.Unmarshal(waitForPublish(t, broker.pubs).payload, &status))
-	remote = status.Components[len(status.Components)-1]
-	mustMatch(t, remote.Connected != nil && !*remote.Connected, true)
+		mustSucceed(t, json.Unmarshal(waitForPublish(t, broker.pubs).payload, &status))
+		remote = status.Components[len(status.Components)-1]
+		mustMatch(t, remote.Connected != nil && !*remote.Connected, true)
+	})
 }
 
 // A Player the cluster no longer holds has its retained status cleared
 // with an empty publish, so a deleted unit leaves nothing on the bus for a
 // subscriber to draw.
 func TestADeletedPlayerClearsItsRetainedStatus(t *testing.T) {
-	cluster := newFakeCluster()
-	media, broker := playersOperator(t, cluster)
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		media, broker := playersOperator(t, cluster)
 
-	media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, nil, "", nil)
-	waitForPublish(t, broker.pubs)
+		media.reconcilePlayers([]Player{settledPlayer(housePlayer())}, nil, "", nil)
+		waitForPublish(t, broker.pubs)
 
-	media.reconcilePlayers(nil, nil, "", nil)
+		media.reconcilePlayers(nil, nil, "", nil)
 
-	cleared := waitForPublish(t, broker.pubs)
-	mustMatch(t, cleared.topic, playerStatusTopic(defaultTopicBase, "house", "theater"))
-	mustMatch(t, len(cleared.payload), 0)
-	mustMatch(t, cleared.retained, true)
+		cleared := waitForPublish(t, broker.pubs)
+		mustMatch(t, cleared.topic, playerStatusTopic(defaultTopicBase, "house", "theater"))
+		mustMatch(t, len(cleared.payload), 0)
+		mustMatch(t, cleared.retained, true)
+	})
 }
 
 // caughtUpOperator wires a whole operator to a fake broker, with the
@@ -2105,18 +2117,19 @@ func mustPublishVolume(t *testing.T, broker *fakeBroker) brokerPublish {
 	}
 }
 
-// mustPublishNoVolume drains the broker for the window a publish would
-// take and fails on any message that reached the unit's volume topic.
+// mustPublishNoVolume drains the broker once every goroutine in the
+// test's synctest bubble has settled, and fails on any message that
+// reached the unit's volume topic.
 func mustPublishNoVolume(t *testing.T, broker *fakeBroker) {
 	t.Helper()
-	deadline := time.After(100 * time.Millisecond)
+	synctest.Wait()
 	for {
 		select {
 		case got := <-broker.pubs:
 			if got.topic == theaterVolumeTopic() {
 				t.Fatalf("a level reached the bus: %+v", got)
 			}
-		case <-deadline:
+		default:
 			return
 		}
 	}
@@ -2129,14 +2142,15 @@ func settledPlayer(player *Player) Player {
 	return *player
 }
 
-// mustPublishNothing proves nothing reached the broker in the window a
-// publish would have taken.
+// mustPublishNothing proves nothing reached the broker once every
+// goroutine in the test's synctest bubble has settled.
 func mustPublishNothing(t *testing.T, broker *fakeBroker) {
 	t.Helper()
+	synctest.Wait()
 	select {
 	case got := <-broker.pubs:
 		t.Fatalf("a publish reached the bus: %+v", got)
-	case <-time.After(50 * time.Millisecond):
+	default:
 	}
 }
 

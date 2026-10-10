@@ -28,12 +28,14 @@ func woke(wake <-chan struct{}) bool {
 // A fresh document is a status the pass must rewrite, so it wakes the
 // loop.
 func TestADeclaredCodeSetWakesTheLoop(t *testing.T) {
-	wake := make(chan struct{}, 1)
-	desk := newCodesDesk(wake)
+	synctest.Test(t, func(t *testing.T) {
+		wake := make(chan struct{}, 1)
+		desk := newCodesDesk(wake)
 
-	desk.setCodes(controllerKey("house", "sofa"), testDeclared())
+		desk.setCodes(controllerKey("house", "sofa"), testDeclared())
 
-	mustMatch(t, woke(wake), true)
+		mustMatch(t, woke(wake), true)
+	})
 }
 
 // The retained topic delivers the same document on every reconnect, so
@@ -54,16 +56,18 @@ func TestARepeatedCodeSetWakesNothing(t *testing.T) {
 // A controller whose nodes vanished clears its topic, and the desk
 // then holds nothing for it.
 func TestAClearedDocumentLeavesTheDeskHoldingNothing(t *testing.T) {
-	wake := make(chan struct{}, 1)
-	desk := newCodesDesk(wake)
-	desk.setCodes(controllerKey("house", "sofa"), testDeclared())
-	<-wake
+	synctest.Test(t, func(t *testing.T) {
+		wake := make(chan struct{}, 1)
+		desk := newCodesDesk(wake)
+		desk.setCodes(controllerKey("house", "sofa"), testDeclared())
+		<-wake
 
-	desk.clear(controllerKey("house", "sofa"))
+		desk.clear(controllerKey("house", "sofa"))
 
-	_, held := desk.codesFor(controllerKey("house", "sofa"))
-	mustMatch(t, held, false)
-	mustMatch(t, woke(wake), true)
+		_, held := desk.codesFor(controllerKey("house", "sofa"))
+		mustMatch(t, held, false)
+		mustMatch(t, woke(wake), true)
+	})
 }
 
 // A retained document outlives the pod that wrote it, so a document

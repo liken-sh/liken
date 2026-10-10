@@ -212,18 +212,20 @@ func TestReconcileFocusCyclesToAnIdlePlayer(t *testing.T) {
 // retained message is the press's feedback, so it goes out whether or not the
 // value changed.
 func TestACycleWithOneBoundPlayerRepublishesTheSameMark(t *testing.T) {
-	o, broker := focusBrokerOperator(t)
-	key := controllerKey("house", "sofa")
-	players := []Player{focusPlayer("theater", "sofa")}
-	o.focus.setMark(key, "theater")
+	synctest.Test(t, func(t *testing.T) {
+		o, broker := focusBrokerOperator(t)
+		key := controllerKey("house", "sofa")
+		players := []Player{focusPlayer("theater", "sofa")}
+		o.focus.setMark(key, "theater")
 
-	o.focus.requestCycle(key)
-	o.reconcileFocus(players)
+		o.focus.requestCycle(key)
+		o.reconcileFocus(players)
 
-	published := waitForPublish(t, broker.pubs)
-	mustMatch(t, published.topic, remoteFocusTopic(defaultTopicBase, "house", "sofa"))
-	mustMatch(t, string(published.payload), "theater")
-	mustMatch(t, published.retained, true)
+		published := waitForPublish(t, broker.pubs)
+		mustMatch(t, published.topic, remoteFocusTopic(defaultTopicBase, "house", "sofa"))
+		mustMatch(t, string(published.payload), "theater")
+		mustMatch(t, published.retained, true)
+	})
 }
 
 // A mark on a Player that no longer names the Remote moves to the
@@ -285,13 +287,15 @@ func caughtUpFocusOperator(t *testing.T) (*operator, *fakeBroker) {
 // A controller with no mark after the catch-up is set on the first
 // Player of its set, so it always drives a unit that lists it.
 func TestReconcileFocusSetsAMarkTheBrokerDoesNotHold(t *testing.T) {
-	o, broker := caughtUpFocusOperator(t)
+	synctest.Test(t, func(t *testing.T) {
+		o, broker := caughtUpFocusOperator(t)
 
-	o.reconcileFocus([]Player{focusPlayer("theater", "sofa")})
+		o.reconcileFocus([]Player{focusPlayer("theater", "sofa")})
 
-	published := waitForPublish(t, broker.pubs)
-	mustMatch(t, published.topic, remoteFocusTopic(defaultTopicBase, "house", "sofa"))
-	mustMatch(t, string(published.payload), "theater")
+		published := waitForPublish(t, broker.pubs)
+		mustMatch(t, published.topic, remoteFocusTopic(defaultTopicBase, "house", "sofa"))
+		mustMatch(t, string(published.payload), "theater")
+	})
 }
 
 // An operator that starts before the broker's catch-up holds no mark, and
@@ -318,16 +322,18 @@ func TestReconcileFocusWritesNoMarkBeforeTheCatchUp(t *testing.T) {
 // One pass settles the mark and publishes it on the unit's bus
 // status, so the focus indicator is never a pass behind the press.
 func TestOnePassMarksTheFocusedRemoteOnTheBusStatus(t *testing.T) {
-	cluster := newFakeCluster()
-	cluster.players["theater"] = housePlayerWithRemote()
-	cluster.remotes["sofa"] = houseRemote("gamepad")
-	cluster.keymaps["gamepad"] = testKeymap()
-	media, _ := caughtUpOperator(t, cluster)
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		cluster.players["theater"] = housePlayerWithRemote()
+		cluster.remotes["sofa"] = houseRemote("gamepad")
+		cluster.keymaps["gamepad"] = testKeymap()
+		media, _ := caughtUpOperator(t, cluster)
 
-	media.pass()
+		media.pass()
 
-	topic := playerStatusTopic(defaultTopicBase, "house", "theater")
-	mustMatch(t, strings.Contains(media.playerStatuses.payloadFor(topic), `"focused":true`), true)
+		topic := playerStatusTopic(defaultTopicBase, "house", "theater")
+		mustMatch(t, strings.Contains(media.playerStatuses.payloadFor(topic), `"focused":true`), true)
+	})
 }
 
 // A stored value that changes wakes the loop, because the Player bus

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -32,33 +33,35 @@ func activityLines(log *logBuffer) []string {
 // that pass still holds the Play in its list, so the Play must name
 // nothing from its deletion mark on, not only while the mark stands.
 func TestADeletedPlayNeverTurnsItsPlayerBackToPlaying(t *testing.T) {
-	cluster := runningCluster(housePlayer())
-	cluster.plays["movie"].Metadata.Finalizers = []string{playFinalizer}
-	cluster.podsLinger["movie-playback"] = true
-	media, _ := busOperator(t, cluster)
-	var log logBuffer
-	media.log = &log
-	media.pass()
+	synctest.Test(t, func(t *testing.T) {
+		cluster := runningCluster(housePlayer())
+		cluster.plays["movie"].Metadata.Finalizers = []string{playFinalizer}
+		cluster.podsLinger["movie-playback"] = true
+		media, _ := busOperator(t, cluster)
+		var log logBuffer
+		media.log = &log
+		media.pass()
 
-	// A person deletes the Play. The pass deletes its pod, which stays
-	// while its containers stop.
-	cluster.plays["movie"].Metadata.DeletionTimestamp = "2026-09-09T10:30:00Z"
-	media.pass()
+		// A person deletes the Play. The pass deletes its pod, which stays
+		// while its containers stop.
+		cluster.plays["movie"].Metadata.DeletionTimestamp = "2026-09-09T10:30:00Z"
+		media.pass()
 
-	// The sidecar reports the ending on the pod's SIGTERM.
-	media.handleBusMessage(playStatusTopic(defaultTopicBase, "house", "movie"),
-		[]byte(`{"item":1,"position":"1:00:00","ended":true}`))
+		// The sidecar reports the ending on the pod's SIGTERM.
+		media.handleBusMessage(playStatusTopic(defaultTopicBase, "house", "movie"),
+			[]byte(`{"item":1,"position":"1:00:00","ended":true}`))
 
-	// The pod is gone, so the pass clears the run's topics and releases
-	// the Play, and the pass after it reads the Play gone.
-	delete(cluster.pods, "movie-playback")
-	media.pass()
-	media.pass()
+		// The pod is gone, so the pass clears the run's topics and releases
+		// the Play, and the pass after it reads the Play gone.
+		delete(cluster.pods, "movie-playback")
+		media.pass()
+		media.pass()
 
-	mustMatch(t, len(cluster.plays), 0)
-	mustMatchAll(t, activityLines(&log), []string{
-		"player house/theater: activity Idle, was Playing, published to " +
-			playerStatusTopic(defaultTopicBase, "house", "theater"),
+		mustMatch(t, len(cluster.plays), 0)
+		mustMatchAll(t, activityLines(&log), []string{
+			"player house/theater: activity Idle, was Playing, published to " +
+				playerStatusTopic(defaultTopicBase, "house", "theater"),
+		})
 	})
 }
 
@@ -138,21 +141,25 @@ func passWithAnEndingDuringIt(t *testing.T) (*fakeCluster, *operator, *logBuffer
 // An ending that arrives while the pass works on a unit is not
 // published over with the Playing the pass derived before it.
 func TestAnEndingDuringThePassIsNotPublishedOver(t *testing.T) {
-	_, media, log := passWithAnEndingDuringIt(t)
-	media.pass()
+	synctest.Test(t, func(t *testing.T) {
+		_, media, log := passWithAnEndingDuringIt(t)
+		media.pass()
 
-	mustMatchAll(t, activityLines(log), []string{
-		"player house/theater: activity Idle, was Playing, published to " +
-			playerStatusTopic(defaultTopicBase, "house", "theater"),
+		mustMatchAll(t, activityLines(log), []string{
+			"player house/theater: activity Idle, was Playing, published to " +
+				playerStatusTopic(defaultTopicBase, "house", "theater"),
+		})
 	})
 }
 
 // The Player's status and the media_players gauge say the state the
 // pass published, not the state it derived before an ending arrived.
 func TestAnEndingDuringThePassReachesTheStatusAndTheGauge(t *testing.T) {
-	cluster, media, _ := passWithAnEndingDuringIt(t)
+	synctest.Test(t, func(t *testing.T) {
+		cluster, media, _ := passWithAnEndingDuringIt(t)
 
-	mustMatch(t, cluster.players["theater"].Status.Activity, playerIdle)
-	mustMatch(t, testutil.ToFloat64(media.metrics.players.WithLabelValues("living-room", playerMetricIdle)), 1.0)
-	mustMatch(t, testutil.ToFloat64(media.metrics.players.WithLabelValues("living-room", playerMetricPlaying)), 0.0)
+		mustMatch(t, cluster.players["theater"].Status.Activity, playerIdle)
+		mustMatch(t, testutil.ToFloat64(media.metrics.players.WithLabelValues("living-room", playerMetricIdle)), 1.0)
+		mustMatch(t, testutil.ToFloat64(media.metrics.players.WithLabelValues("living-room", playerMetricPlaying)), 0.0)
+	})
 }

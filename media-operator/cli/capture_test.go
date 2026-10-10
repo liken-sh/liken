@@ -4,9 +4,11 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/synctest"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 func TestTargetFromOptions(t *testing.T) {
@@ -70,51 +72,53 @@ func TestCaptureRouteRejectsUnknownFormat(t *testing.T) {
 }
 
 func TestStreamCaptureWritesOnlyMediaBytes(t *testing.T) {
-	const media = "\x00\x00\x00\x18ftypmp42media-bytes"
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/media/namespaces/house/players/living-room/media.mp4" {
-			t.Errorf("path = %q", r.URL.Path)
-		}
-		if r.Header.Get("Accept") != "video/mp4" {
-			t.Errorf("Accept = %q", r.Header.Get("Accept"))
-		}
-		if r.Header.Get("Authorization") != "Bearer secret" {
-			t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
-		}
-		io.WriteString(w, media)
-	}))
-	defer server.Close()
+	synctest.Test(t, func(t *testing.T) {
+		const media = "\x00\x00\x00\x18ftypmp42media-bytes"
+		server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/v1/media/namespaces/house/players/living-room/media.mp4" {
+				t.Errorf("path = %q", r.URL.Path)
+			}
+			if r.Header.Get("Accept") != "video/mp4" {
+				t.Errorf("Accept = %q", r.Header.Get("Accept"))
+			}
+			if r.Header.Get("Authorization") != "Bearer secret" {
+				t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
+			}
+			io.WriteString(w, media)
+		}))
 
-	var out strings.Builder
-	err := streamCapture(context.Background(), server.Client(), server.URL, "secret",
-		captureTarget{Namespace: "house", Name: "living-room", Format: "mp4"}, &out)
-	if err != nil {
-		t.Fatalf("streamCapture: %v", err)
-	}
-	if out.String() != media {
-		t.Fatalf("out = %q, want %q", out.String(), media)
-	}
+		var out strings.Builder
+		err := streamCapture(t.Context(), server.Client(), apiservertest.Host, "secret",
+			captureTarget{Namespace: "house", Name: "living-room", Format: "mp4"}, &out)
+		if err != nil {
+			t.Fatalf("streamCapture: %v", err)
+		}
+		if out.String() != media {
+			t.Fatalf("out = %q, want %q", out.String(), media)
+		}
+	})
 }
 
 func TestStreamCaptureCarriesTheServerWords(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusConflict)
-		io.WriteString(w, "run a Play on this Player")
-	}))
-	defer server.Close()
+	synctest.Test(t, func(t *testing.T) {
+		server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusConflict)
+			io.WriteString(w, "run a Play on this Player")
+		}))
 
-	var out strings.Builder
-	err := streamCapture(context.Background(), server.Client(), server.URL, "",
-		captureTarget{Namespace: "house", Name: "living-room", Format: "mp4"}, &out)
-	if err == nil {
-		t.Fatal("streamCapture returned no error for a 409")
-	}
-	if !strings.Contains(err.Error(), "run a Play on this Player") {
-		t.Fatalf("error %q does not carry the server's words", err)
-	}
-	if out.Len() != 0 {
-		t.Fatalf("out carried %q on an error", out.String())
-	}
+		var out strings.Builder
+		err := streamCapture(t.Context(), server.Client(), apiservertest.Host, "",
+			captureTarget{Namespace: "house", Name: "living-room", Format: "mp4"}, &out)
+		if err == nil {
+			t.Fatal("streamCapture returned no error for a 409")
+		}
+		if !strings.Contains(err.Error(), "run a Play on this Player") {
+			t.Fatalf("error %q does not carry the server's words", err)
+		}
+		if out.Len() != 0 {
+			t.Fatalf("out carried %q on an error", out.String())
+		}
+	})
 }
 
 func TestRunCaptureRejectsBadOptionsBeforeTheCluster(t *testing.T) {

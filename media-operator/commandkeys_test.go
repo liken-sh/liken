@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"net"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -75,65 +76,75 @@ func nextLine(t *testing.T, lines <-chan string) string {
 // A key press on the focused controller reaches mpv as the command
 // this pod binds it to.
 func TestAFocusedKeyPressReachesMpv(t *testing.T) {
-	c, _, lines := keyTestCommander(t)
-	events, _ := keyTestTopics()
-	focusHere(c)
+	synctest.Test(t, func(t *testing.T) {
+		c, _, lines := keyTestCommander(t)
+		events, _ := keyTestTopics()
+		focusHere(c)
 
-	c.handle(events, mustEncode(t, keyEvent{Key: "KEY_PLAYPAUSE", Value: 1}))
+		c.handle(events, mustEncode(t, keyEvent{Key: "KEY_PLAYPAUSE", Value: 1}))
 
-	mustMatch(t, nextLine(t, lines), `{"command":["no-osd","cycle","pause"],"request_id":1}`)
+		mustMatch(t, nextLine(t, lines), `{"command":["no-osd","cycle","pause"],"request_id":1}`)
+	})
 }
 
 // A held arrow reaches the display on every repeat, because an arrow
 // is one of the four kinds a person holds. The repeat carries a third
 // word, so the display logs the press alone.
 func TestAHeldArrowReachesTheDisplayOnTheRepeat(t *testing.T) {
-	c, _, lines := keyTestCommander(t)
-	events, _ := keyTestTopics()
-	focusHere(c)
+	synctest.Test(t, func(t *testing.T) {
+		c, _, lines := keyTestCommander(t)
+		events, _ := keyTestTopics()
+		focusHere(c)
 
-	c.handle(events, mustEncode(t, keyEvent{Key: "KEY_RIGHT", Value: 2}))
+		c.handle(events, mustEncode(t, keyEvent{Key: "KEY_RIGHT", Value: 2}))
 
-	mustMatch(t, nextLine(t, lines), `{"command":["script-message","right","repeat"]}`)
+		mustMatch(t, nextLine(t, lines), `{"command":["script-message","right","repeat"]}`)
+	})
 }
 
 // A press whose mark names another Player reaches mpv not at all, so a
 // controller pointed at another room does not drive this film.
 func TestAPressFromAnUnfocusedControllerReachesMpvNotAtAll(t *testing.T) {
-	c, _, lines := keyTestCommander(t)
-	events, focus := keyTestTopics()
-	c.handle(focus, []byte("gaming"))
+	synctest.Test(t, func(t *testing.T) {
+		c, _, lines := keyTestCommander(t)
+		events, focus := keyTestTopics()
+		c.handle(focus, []byte("gaming"))
 
-	c.handle(events, mustEncode(t, keyEvent{Key: "KEY_PLAYPAUSE", Value: 1}))
-	c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionSubtitles}))
+		c.handle(events, mustEncode(t, keyEvent{Key: "KEY_PLAYPAUSE", Value: 1}))
+		c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionSubtitles}))
 
-	mustMatch(t, nextLine(t, lines), `{"command":["osd-auto","cycle","sub"],"request_id":1}`)
+		mustMatch(t, nextLine(t, lines), `{"command":["osd-auto","cycle","sub"],"request_id":1}`)
+	})
 }
 
 // A press that arrives before any mark reaches mpv not at all, because
 // the gate is closed until the operator marks the controller.
 func TestAPressBeforeAnyMarkReachesMpvNotAtAll(t *testing.T) {
-	c, _, lines := keyTestCommander(t)
-	events, _ := keyTestTopics()
+	synctest.Test(t, func(t *testing.T) {
+		c, _, lines := keyTestCommander(t)
+		events, _ := keyTestTopics()
 
-	c.handle(events, mustEncode(t, keyEvent{Key: "KEY_PLAYPAUSE", Value: 1}))
-	c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionSubtitles}))
+		c.handle(events, mustEncode(t, keyEvent{Key: "KEY_PLAYPAUSE", Value: 1}))
+		c.handle(c.commandsTopic, mustEncode(t, mediaCommand{Action: actionSubtitles}))
 
-	mustMatch(t, nextLine(t, lines), `{"command":["osd-auto","cycle","sub"],"request_id":1}`)
+		mustMatch(t, nextLine(t, lines), `{"command":["osd-auto","cycle","sub"],"request_id":1}`)
+	})
 }
 
 // The cycle key asks the operator to move the mark, on the remote's own
 // cycle topic, and reaches mpv not at all.
 func TestTheCycleKeyPublishesTheCycleRequest(t *testing.T) {
-	c, broker, _ := keyTestCommander(t)
-	events, focus := keyTestTopics()
-	focusHere(c)
+	synctest.Test(t, func(t *testing.T) {
+		c, broker, _ := keyTestCommander(t)
+		events, focus := keyTestTopics()
+		focusHere(c)
 
-	c.handle(events, mustEncode(t, keyEvent{Key: "KEY_CYCLEWINDOWS", Value: 1}))
+		c.handle(events, mustEncode(t, keyEvent{Key: "KEY_CYCLEWINDOWS", Value: 1}))
 
-	published := waitForPublish(t, broker.pubs)
-	mustMatch(t, published.topic, focus+focusCycleSuffix)
-	mustMatch(t, published.retained, false)
+		published := waitForPublish(t, broker.pubs)
+		mustMatch(t, published.topic, focus+focusCycleSuffix)
+		mustMatch(t, published.retained, false)
+	})
 }
 
 // A volume key is the operator's: it sets the room's level from the
@@ -142,19 +153,21 @@ func TestTheCycleKeyPublishesTheCycleRequest(t *testing.T) {
 func TestAVolumeKeyIsLeftToTheOperator(t *testing.T) {
 	for _, key := range []string{"KEY_VOLUMEUP", "KEY_VOLUMEDOWN", "KEY_MUTE", "KEY_UNMUTE"} {
 		t.Run(key, func(t *testing.T) {
-			c, broker, lines := keyTestCommander(t)
-			var log logBuffer
-			c.log = &log
-			events, _ := keyTestTopics()
-			focusHere(c)
+			synctest.Test(t, func(t *testing.T) {
+				c, broker, lines := keyTestCommander(t)
+				var log logBuffer
+				c.log = &log
+				events, _ := keyTestTopics()
+				focusHere(c)
 
-			for _, value := range []int32{1, 2, 0} {
-				c.handle(events, mustEncode(t, keyEvent{Key: key, Value: value}))
-			}
+				for _, value := range []int32{1, 2, 0} {
+					c.handle(events, mustEncode(t, keyEvent{Key: key, Value: value}))
+				}
 
-			mustPublishNothing(t, broker)
-			mustNoLine(t, lines, 100*time.Millisecond)
-			mustMatch(t, len(log.lines()), 0)
+				mustPublishNothing(t, broker)
+				mustNoLine(t, lines)
+				mustMatch(t, len(log.lines()), 0)
+			})
 		})
 	}
 }

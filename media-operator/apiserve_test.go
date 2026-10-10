@@ -9,9 +9,9 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"encoding/pem"
+	"io"
+	"log"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -78,14 +78,16 @@ func TestTheServingCertificateIsTheOneLastHeld(t *testing.T) {
 }
 
 func TestTheOriginIsTheConfiguredBaseOrTheRequestsOwn(t *testing.T) {
-	fixture := newAPIFixture(t)
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
 
-	recorder := fixture.get(apiBasePath + "/openapi.json")
-	mustMatch(t, serverListed(t, recorder.Body.Bytes()), "https://example.com")
+		recorder := fixture.get(apiBasePath + "/openapi.json")
+		mustMatch(t, serverListed(t, recorder.Body.Bytes()), "https://example.com")
 
-	fixture.server.publicBase = "https://media.example"
-	recorder = fixture.get(apiBasePath + "/openapi.json")
-	mustMatch(t, serverListed(t, recorder.Body.Bytes()), "https://media.example")
+		fixture.server.publicBase = "https://media.example"
+		recorder = fixture.get(apiBasePath + "/openapi.json")
+		mustMatch(t, serverListed(t, recorder.Body.Bytes()), "https://media.example")
+	})
 }
 
 func serverListed(t *testing.T, body []byte) string {
@@ -97,17 +99,28 @@ func serverListed(t *testing.T, body []byte) string {
 	return document.Servers[0].URL
 }
 
+// downServer is an API server that refuses every connection, the way a
+// port with no server does.
+func downServer(t *testing.T) *apiservertest.Server {
+	t.Helper()
+	server := apiservertest.Start(t, http.NotFoundHandler())
+	server.SetDown(true)
+	return server
+}
+
 // An API server that will not answer a review is a 503 with
 // Retry-After, because the fault is not in this API and a retry
 // clears it.
 func TestAnApiServerThatWillNotAnswerIsAServiceUnavailable(t *testing.T) {
-	fixture := newAPIFixture(t)
-	fixture.server.client = apiclient.New("http://127.0.0.1:1", http.DefaultClient, "")
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		fixture.server.client = apiclient.New(apiservertest.Host, downServer(t).Client(), "")
 
-	recorder := fixture.get(playerPathFor("screen.png"))
+		recorder := fixture.get(playerPathFor("screen.png"))
 
-	mustMatch(t, recorder.Code, http.StatusServiceUnavailable)
-	mustMatch(t, recorder.Header().Get("Retry-After"), retryAfterSeconds)
+		mustMatch(t, recorder.Code, http.StatusServiceUnavailable)
+		mustMatch(t, recorder.Header().Get("Retry-After"), retryAfterSeconds)
+	})
 }
 
 // The log line is one JSON object per request on standard output, so
@@ -164,34 +177,45 @@ func TestReadinessLatchesOnAnAnsweringApiServer(t *testing.T) {
 	answering := apiservertest.Start(t, plane.handler()).Client()
 
 	mustMatch(t, reviewsAnswer(newAuthorizer(apiclient.New(apiservertest.Host, answering, ""))), true)
-	mustMatch(t, reviewsAnswer(newAuthorizer(apiclient.New("http://127.0.0.1:1", http.DefaultClient, ""))), false)
+	mustMatch(t, reviewsAnswer(newAuthorizer(apiclient.New(apiservertest.Host, downServer(t).Client(), ""))), false)
 }
 
 // A sibling is reached only through an anchor the trust store holds:
 // with the sibling's CA in a ConfigMap the dial succeeds, and with no
-// anchor it fails. The dial is a real TLS handshake on a socket, which
-// a synctest bubble cannot wait on, so the stores read their ConfigMaps
-// in a bubble and the dials run outside it.
+// anchor it fails. The sibling serves TLS on a pipeListener, so the
+// handshake runs in the bubble with the stores.
 func TestASiblingIsReachedOnlyThroughATrustedAnchor(t *testing.T) {
-	sibling := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("hello"))
-	}))
-	defer sibling.Close()
-	anchor := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: sibling.Certificate().Raw})
-	empty := newTrustStore(defaultAPINamespace, displayCAConfigMapName)
-	trusted := newTrustStore(defaultAPINamespace, displayCAConfigMapName)
 	synctest.Test(t, func(t *testing.T) {
+		authority, err := mintAuthority(time.Now())
+		mustSucceed(t, err)
+		certPEM, keyPEM, err := authority.mintLeaf(time.Now(), "localhost")
+		mustSucceed(t, err)
+		pair, err := tls.X509KeyPair(certPEM, keyPEM)
+		mustSucceed(t, err)
+		socket := newPipeListener()
+		sibling := &http.Server{
+			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte("hello"))
+			}),
+			TLSConfig: &tls.Config{Certificates: []tls.Certificate{pair}},
+			ErrorLog:  log.New(io.Discard, "", 0),
+		}
+		go func() { _ = sibling.ServeTLS(socket, "", "") }()
+		t.Cleanup(func() { _ = sibling.Close() })
+
+		empty := newTrustStore(defaultAPINamespace, displayCAConfigMapName)
+		trusted := newTrustStore(defaultAPINamespace, displayCAConfigMapName)
 		followedTrust(t, clusterHolding(t, ""), empty)
-		followedTrust(t, clusterHolding(t, string(anchor)), trusted)
+		followedTrust(t, clusterHolding(t, string(authority.certPEM)), trusted)
+
+		_, err = siblingClientOver(empty, socket.dial).Get("https://localhost/")
+		mustFail(t, err)
+		response, err := siblingClientOver(trusted, socket.dial).Get("https://localhost/")
+
+		mustSucceed(t, err)
+		drain(response.Body)
+		mustMatch(t, response.StatusCode, http.StatusOK)
 	})
-
-	_, err := siblingClient(empty).Get(sibling.URL)
-	mustFail(t, err)
-	response, err := siblingClient(trusted).Get(sibling.URL)
-
-	mustSucceed(t, err)
-	drain(response.Body)
-	mustMatch(t, response.StatusCode, http.StatusOK)
 }
 
 // clusterHolding stands in for an API server that holds one CA
@@ -212,6 +236,12 @@ func clusterHolding(t *testing.T, anchor string) *coreAPI {
 // A body that goes quiet past the idle timeout ends the composition
 // and the upstream request, so the client reads a truncated stream
 // instead of waiting forever.
+//
+// The test runs outside a synctest bubble, on the real clock, because
+// the composition runs a stand-in ffmpeg as a child process. This API
+// reads the child's output from an OS pipe, and that read is not
+// durably blocked, so a bubble's clock would never reach the idle
+// bound.
 func TestABodyThatGoesQuietEndsTheComposition(t *testing.T) {
 	held := upstreamIdleTimeout
 	upstreamIdleTimeout = 50 * time.Millisecond
@@ -233,49 +263,55 @@ func TestABodyThatGoesQuietEndsTheComposition(t *testing.T) {
 // audience, because each public API reviews the audience it is named
 // for and one token cannot open both.
 func TestEachSiblingIsCalledWithItsOwnToken(t *testing.T) {
-	fixture := newAPIFixture(t)
-	fixture.server.now = time.Now
-	fixture.server.ffmpeg = recordingFFmpeg(t, filepath.Join(t.TempDir(), "arguments"))
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		fixture.server.now = time.Now
+		fixture.server.ffmpeg = recordingFFmpeg(t, filepath.Join(t.TempDir(), "arguments"))
 
-	fixture.get(playerPathFor("media.mp4"))
+		fixture.get(playerPathFor("media.mp4"))
 
-	mustMatchAll(t, fixture.display.sent(), []string{"Bearer token-for-display-api"})
-	mustMatchAll(t, fixture.audio.sent(), []string{"Bearer token-for-audio-api"})
+		mustMatchAll(t, fixture.display.sent(), []string{"Bearer token-for-display-api"})
+		mustMatchAll(t, fixture.audio.sent(), []string{"Bearer token-for-audio-api"})
+	})
 }
 
 // A sibling with no projected token is a 503 whose detail names the
 // file this API could not read, so the owner sees which volume is
 // missing.
 func TestASiblingWithNoProjectedTokenIsAServiceUnavailable(t *testing.T) {
-	fixture := newAPIFixture(t)
-	siblingTokenPaths[upstreamAudio] = filepath.Join(t.TempDir(), "absent")
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		siblingTokenPaths[upstreamAudio] = filepath.Join(t.TempDir(), "absent")
 
-	recorder := fixture.get(playerPathFor("media.mp4"))
+		recorder := fixture.get(playerPathFor("media.mp4"))
 
-	mustMatch(t, recorder.Code, http.StatusServiceUnavailable)
-	mustMatch(t, strings.Contains(problemOf(t, recorder).Detail, "reading the audio token"), true)
+		mustMatch(t, recorder.Code, http.StatusServiceUnavailable)
+		mustMatch(t, strings.Contains(problemOf(t, recorder).Detail, "reading the audio token"), true)
+	})
 }
 
 // A cluster may run this API before it runs the siblings. Every route
 // this API answers for itself still answers, and only a composition
 // through the absent sibling fails, with that sibling's own reason.
 func TestTheApiServesWhileASiblingAnchorIsAbsent(t *testing.T) {
-	fixture := newAPIFixture(t)
-	fixture.server.display = testDisplayBase
-	fixture.server.audio = testAudioBase
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newAPIFixture(t)
+		fixture.server.display = testDisplayBase
+		fixture.server.audio = testAudioBase
 
-	mustMatch(t, fixture.get(apiBasePath).Code, http.StatusOK)
-	mustMatch(t, fixture.get(playerPathFor("")).Code, http.StatusOK)
-	redirect := fixture.get(playerPathFor("screen.png"))
-	mustMatch(t, redirect.Code, http.StatusTemporaryRedirect)
-	mustMatch(t, redirect.Header().Get("Location"),
-		testDisplayBase+"/v1/display/displays/boe-1080/screen.png")
+		mustMatch(t, fixture.get(apiBasePath).Code, http.StatusOK)
+		mustMatch(t, fixture.get(playerPathFor("")).Code, http.StatusOK)
+		redirect := fixture.get(playerPathFor("screen.png"))
+		mustMatch(t, redirect.Code, http.StatusTemporaryRedirect)
+		mustMatch(t, redirect.Header().Get("Location"),
+			testDisplayBase+"/v1/display/displays/boe-1080/screen.png")
 
-	refused := fixture.get(playerPathFor("media.mp4"))
+		refused := fixture.get(playerPathFor("media.mp4"))
 
-	mustMatch(t, refused.Code, http.StatusServiceUnavailable)
-	mustMatch(t, refused.Header().Get("Retry-After"), retryAfterSeconds)
-	mustMatch(t, problemOf(t, refused).Detail != "", true)
+		mustMatch(t, refused.Code, http.StatusServiceUnavailable)
+		mustMatch(t, refused.Header().Get("Retry-After"), retryAfterSeconds)
+		mustMatch(t, problemOf(t, refused).Detail != "", true)
+	})
 }
 
 // A pair that another writer puts in the Secret serves the next

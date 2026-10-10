@@ -12,6 +12,7 @@ package main
 import (
 	"encoding/json"
 	"testing"
+	"testing/synctest"
 )
 
 // The three places that publish a unit's status: the start of a pass,
@@ -75,12 +76,14 @@ func TestARestartStatesNoModeAndThenTheUnitsMode(t *testing.T) {
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
-			media, broker := busOperator(t, each.cluster())
-			media.idleDisplayClass = "display-draw"
+			synctest.Test(t, func(t *testing.T) {
+				media, broker := busOperator(t, each.cluster())
+				media.idleDisplayClass = "display-draw"
 
-			media.pass()
+				media.pass()
 
-			mustMatchAll(t, publishedPowers(t, broker, media.bus), []string{"none", each.want})
+				mustMatchAll(t, publishedPowers(t, broker, media.bus), []string{"none", each.want})
+			})
 		})
 	}
 }

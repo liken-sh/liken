@@ -263,28 +263,32 @@ func TestAPressThatMovesNoLevel(t *testing.T) {
 // A pass after the broker's catch-up publishes the unit's level,
 // retained, as a fraction of the device's max.
 func TestAPassPublishesTheUnitsLevel(t *testing.T) {
-	cluster := volumeCluster()
-	cluster.receivers["den-receiver"].Status.Zones[mainZone] = ReceiverZone{Volume: "36"}
-	media, broker := caughtUpOperator(t, cluster)
+	synctest.Test(t, func(t *testing.T) {
+		cluster := volumeCluster()
+		cluster.receivers["den-receiver"].Status.Zones[mainZone] = ReceiverZone{Volume: "36"}
+		media, broker := caughtUpOperator(t, cluster)
 
-	media.pass()
+		media.pass()
 
-	published := mustPublishVolume(t, broker)
-	mustMatch(t, published.retained, true)
-	mustMatch(t, string(published.payload), `{"level":0.5,"muted":false}`)
+		published := mustPublishVolume(t, broker)
+		mustMatch(t, published.retained, true)
+		mustMatch(t, string(published.payload), `{"level":0.5,"muted":false}`)
+	})
 }
 
 // A level the broker already holds is not published again, so an
 // operator restart draws no indicator on the screens.
 func TestAPassPublishesNoLevelTheBrokerHolds(t *testing.T) {
-	cluster := volumeCluster()
-	cluster.receivers["den-receiver"].Status.Zones[mainZone] = ReceiverZone{Volume: "36"}
-	media, broker := caughtUpOperator(t, cluster)
-	media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":0.5,"muted":false}`))
+	synctest.Test(t, func(t *testing.T) {
+		cluster := volumeCluster()
+		cluster.receivers["den-receiver"].Status.Zones[mainZone] = ReceiverZone{Volume: "36"}
+		media, broker := caughtUpOperator(t, cluster)
+		media.handleBusMessage(theaterVolumeTopic(), []byte(`{"level":0.5,"muted":false}`))
 
-	media.pass()
+		media.pass()
 
-	mustPublishNoVolume(t, broker)
+		mustPublishNoVolume(t, broker)
+	})
 }
 
 // A power ask on the unit's power topic goes into the session's
@@ -340,23 +344,25 @@ func screenAskOn(at, screen string) *Television {
 // the pass relays nothing for it. Each new ask after that goes once to
 // the Player's power topic, not retained.
 func TestTheScreenAsksAreRelayedOnce(t *testing.T) {
-	cluster := newFakeCluster()
-	cluster.televisions["den-tv"] = screenAskOn("2026-10-04T12:00:00.000Z", "Wake")
-	media, broker := caughtUpOperator(t, cluster)
-	media.ensure.set(playerKey("house", "theater"), unitReceiver{name: "den-receiver"})
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		cluster.televisions["den-tv"] = screenAskOn("2026-10-04T12:00:00.000Z", "Wake")
+		media, broker := caughtUpOperator(t, cluster)
+		media.ensure.set(playerKey("house", "theater"), unitReceiver{name: "den-receiver"})
 
-	media.relayScreenAsks()
-	mustPublishNothing(t, broker)
+		media.relayScreenAsks()
+		mustPublishNothing(t, broker)
 
-	cluster.televisions["den-tv"] = screenAskOn("2026-10-04T12:05:00.000Z", "Sleep")
-	media.relayScreenAsks()
-	media.relayScreenAsks()
+		cluster.televisions["den-tv"] = screenAskOn("2026-10-04T12:05:00.000Z", "Sleep")
+		media.relayScreenAsks()
+		media.relayScreenAsks()
 
-	published := waitForPublish(t, broker.pubs)
-	mustMatch(t, published.topic, playerPowerTopic(defaultTopicBase, "house", "theater"))
-	mustMatch(t, string(published.payload), `{"action":"sleep"}`)
-	mustMatch(t, published.retained, false)
-	mustPublishNothing(t, broker)
+		published := waitForPublish(t, broker.pubs)
+		mustMatch(t, published.topic, playerPowerTopic(defaultTopicBase, "house", "theater"))
+		mustMatch(t, string(published.payload), `{"action":"sleep"}`)
+		mustMatch(t, published.retained, false)
+		mustPublishNothing(t, broker)
+	})
 }
 
 // A screen client in the screen mode handles power itself, so an ask for
@@ -374,16 +380,18 @@ func TestAScreenAskForAUnitWithNoReceiverIsNotRelayed(t *testing.T) {
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
-			cluster := newFakeCluster()
-			cluster.televisions["den-tv"] = screenAskOn("2026-10-04T12:00:00.000Z", "Wake")
-			media, broker := caughtUpOperator(t, cluster)
-			each.shape(media)
-			media.relayScreenAsks()
+			synctest.Test(t, func(t *testing.T) {
+				cluster := newFakeCluster()
+				cluster.televisions["den-tv"] = screenAskOn("2026-10-04T12:00:00.000Z", "Wake")
+				media, broker := caughtUpOperator(t, cluster)
+				each.shape(media)
+				media.relayScreenAsks()
 
-			cluster.televisions["den-tv"] = screenAskOn("2026-10-04T12:05:00.000Z", "Sleep")
-			media.relayScreenAsks()
+				cluster.televisions["den-tv"] = screenAskOn("2026-10-04T12:05:00.000Z", "Sleep")
+				media.relayScreenAsks()
 
-			mustPublishNothing(t, broker)
+				mustPublishNothing(t, broker)
+			})
 		})
 	}
 }

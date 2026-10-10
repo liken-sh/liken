@@ -415,10 +415,8 @@ func isNavigation(action string) bool {
 	return false
 }
 
-// report is the reporting side of the run. It dials mpv, observes the
-// four properties the status is made of, and turns each change into a
-// report on the bus. It ends when mpv's socket closes, which is how mpv
-// says the run is over, or when the context ends on the grace signal.
+// report is the reporting side of the run. It dials mpv's socket and
+// reports over the connection until the run ends.
 func (c *commander) report(ctx context.Context) {
 	conn, err := dialMPV(ctx, mpvSocketPath)
 	if err != nil {
@@ -426,6 +424,15 @@ func (c *commander) report(ctx context.Context) {
 		return
 	}
 	defer conn.Close()
+	c.reportOver(ctx, conn)
+}
+
+// reportOver observes the four properties the status is made of on
+// mpv's connection, and turns each change into a report on the bus. It
+// ends when mpv's socket closes, which is how mpv says the run is over,
+// or when the context ends on the grace signal. It takes the connection
+// from report, so a test can hand it one end of a pipe.
+func (c *commander) reportOver(ctx context.Context, conn net.Conn) {
 	// The read blocks until mpv writes, which can be minutes apart in a
 	// paused film, so closing the socket is what ends the read when the
 	// context ends. A running mpv ends the read by closing its own end.
