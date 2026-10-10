@@ -42,6 +42,10 @@ type publisher struct {
 	owner    OwnerReference
 	known    map[string]controller
 
+	// keepOut is the set of retired controllers the last pass received.
+	// attach leaves them out for the same reason the pass does.
+	keepOut map[string]bool
+
 	// relays holds one virtual input device for each evdev node each
 	// bonded controller registers. The claim delivers the virtual node,
 	// so the publisher derives the no-input-node taint from the relay
@@ -79,6 +83,8 @@ type publisher struct {
 // reports a controller as usable in the same pass that gives it a
 // virtual node.
 func (p *publisher) reconcile(readPairedSet pairedSetReader, readAdapter adapterAddressReader, keepOut map[string]bool) bool {
+	p.keepOut = keepOut
+
 	// The adapter address scopes discovery to this operator's own radio.
 	// Until bluetoothd replies, the address stays zero and discovery
 	// keeps every device, which is correct on the single-adapter machine
@@ -178,6 +184,24 @@ func (p *publisher) relay(controllers map[string]controller, nodes map[string][]
 		classes[mac] = p.relays.classes(mac)
 	}
 	return virtual, classes
+}
+
+// attach opens the evdev nodes that the published controllers
+// registered since the last pass, and does nothing else. The loop calls
+// it for each uevent and does not wait for the settle window, because
+// the kernel keeps no backlog for a reader that opens a node late, so
+// each press before the open is lost. The pass at the end of the window
+// writes the slice from the relays that attach left.
+//
+// It acts only on the controllers the last pass published. A controller
+// paired since then gets its relay from the pass that publishes it.
+func (p *publisher) attach() {
+	nodes := nodesByMAC(discoverHIDDevices(draSysfsRoot, p.adapter))
+	for mac := range without(p.known, p.keepOut) {
+		if len(nodes[mac]) > 0 {
+			p.relays.ensure(mac, nodes[mac])
+		}
+	}
 }
 
 // reportMoved prints one line for each controller that joins the moved

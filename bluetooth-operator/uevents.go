@@ -5,8 +5,12 @@ package main
 // The kernel broadcasts every device add and remove on a netlink
 // socket, NETLINK_KOBJECT_UEVENT. Each datagram is "action@devpath"
 // followed by KEY=VALUE pairs, each part ending in a NUL byte. A HID
-// add tells this program that a controller's evdev nodes exist,
-// moments before bluetoothd reports the connection over D-Bus.
+// add tells this program that a controller connected, moments before
+// bluetoothd reports the connection over D-Bus. The HID driver then
+// registers the controller's evdev nodes, and the kernel sends an
+// input add for each one. The relay opens a node on its input add and
+// does not wait for the settle window, because the kernel keeps no
+// backlog for a reader that opens a node late.
 //
 // A power supply change tells the loop that a controller's battery
 // reported a new level or a new charging status, so the Peripheral
@@ -36,15 +40,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"golang.org/x/sys/unix"
 )
 
 // kernelEvent reports one change the loop acts on: a Bluetooth HID
-// device that appeared or left, with the peer address it resolved, or
-// a power supply whose reading changed, which names no address because
-// the datagram carries none and the pass re-reads sysfs anyway.
+// device that appeared or left, or an evdev node that appeared under
+// one, each with the peer address it resolved. It also reports a power
+// supply whose reading changed, which names no address because the
+// datagram carries none and the pass re-reads sysfs anyway.
 //
 // Lost marks the third kind: a receive that lost datagrams. It names
 // no subsystem, because the lost datagrams could be any of them, and
@@ -56,11 +62,12 @@ type kernelEvent struct {
 	Lost      bool
 }
 
-// The two subsystems this operator reads events from. hid carries a
-// controller's arrival and departure, and power_supply carries a
-// battery's change.
+// The three subsystems this operator reads events from. hid carries a
+// controller's arrival and departure, input carries each evdev node the
+// controller registers, and power_supply carries a battery's change.
 const (
 	subsystemHID         = "hid"
+	subsystemInput       = "input"
 	subsystemPowerSupply = "power_supply"
 )
 
@@ -107,6 +114,21 @@ func (d *devpathMACs) resolve(action, devpath, uniq string) string {
 	return mac
 }
 
+// under names the controller whose HID device holds a device below it
+// in sysfs, such as an evdev node. The node's own datagram carries no
+// HID_UNIQ, and the HID device's add came first, so the map holds the
+// address. It returns an empty string for a device under no controller.
+func (d *devpathMACs) under(devpath string) string {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	for parent, mac := range d.macs {
+		if strings.HasPrefix(devpath, parent+"/") {
+			return mac
+		}
+	}
+	return ""
+}
+
 // parseUevent splits one datagram into its action, its DEVPATH, and
 // its key-value pairs. A datagram that does not start with
 // "action@devpath" is a libudev message on the same socket, and the
@@ -131,13 +153,15 @@ func parseUevent(datagram []byte) (action, devpath string, values map[string]str
 }
 
 // kernelEventFrom turns one datagram into an event, when the datagram
-// is one of the two kinds the loop acts on, and reports false for
-// every other uevent the kernel sends.
+// is one of the kinds the loop acts on, and reports false for every
+// other uevent the kernel sends.
 //
-// The subsystem test drops every other subsystem's events. A
-// controller that connects produces a HID add, an input add for each
-// input device under it, and several more, and the operator needs one
-// wake for the burst. Its settle window (main.go) collapses the rest.
+// The tests drop every other subsystem's events, and every input
+// device that is not a controller's evdev node. A controller that
+// connects produces a HID add, an input add for each input device and
+// each node under it, and several more. The relay opens each node on
+// its own event (main.go), and the settle window collapses the burst
+// into one pass.
 func kernelEventFrom(datagram []byte, macs *devpathMACs) (kernelEvent, bool) {
 	action, devpath, values, ok := parseUevent(datagram)
 	if !ok {
@@ -153,6 +177,18 @@ func kernelEventFrom(datagram []byte, macs *devpathMACs) (kernelEvent, bool) {
 			return kernelEvent{}, false
 		}
 		return kernelEvent{Subsystem: subsystemHID, Action: action, MAC: mac}, true
+	case subsystemInput:
+		// The inputN device above a node and a joydev node are not
+		// nodes the relay opens, and a node that leaves ends the read
+		// of the relay's pump on its own.
+		if action != "add" || !strings.HasPrefix(values["DEVNAME"], "input/event") {
+			return kernelEvent{}, false
+		}
+		mac := macs.under(devpath)
+		if mac == "" {
+			return kernelEvent{}, false
+		}
+		return kernelEvent{Subsystem: subsystemInput, Action: action, MAC: mac}, true
 	case subsystemPowerSupply:
 		// A battery reports a new level or a new charging status as a change
 		// on its power supply. An add is not a wake on its own, because the

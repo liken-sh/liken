@@ -49,47 +49,54 @@ func fakeSysfs(t *testing.T, devices ...fakeHID) string {
 		t.Fatal(err)
 	}
 	for _, device := range devices {
-		dir := filepath.Join(root, "devices", device.Dir)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		writeUevent(t, dir, device.Uevent)
-		for i, devname := range device.Nodes {
-			// The kernel puts an evdev node two levels below the HID
-			// device: input/inputN/eventM.
-			nodeDir := filepath.Join(dir, "input", "input"+string(rune('0'+i)), filepath.Base(devname))
-			if err := os.MkdirAll(nodeDir, 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(nodeDir, "dev"), []byte("13:64\n"), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			writeUevent(t, nodeDir, map[string]string{"DEVNAME": devname, "MAJOR": "13"})
-		}
-		if device.Battery != nil {
-			supply := filepath.Join(dir, "power_supply", device.Battery.Name)
-			if err := os.MkdirAll(supply, 0o755); err != nil {
-				t.Fatal(err)
-			}
-			for file, value := range map[string]string{
-				"capacity": device.Battery.Capacity,
-				"status":   device.Battery.Status,
-			} {
-				if value == "" {
-					continue
-				}
-				if err := os.WriteFile(filepath.Join(supply, file), []byte(value+"\n"), 0o644); err != nil {
-					t.Fatal(err)
-				}
-			}
-		}
-		base := filepath.Base(device.Dir)
-		target := filepath.Join("..", "..", "..", "devices", device.Dir)
-		if err := os.Symlink(target, filepath.Join(busDir, base)); err != nil {
-			t.Fatal(err)
-		}
+		addHID(t, root, device)
 	}
 	return root
+}
+
+// addHID puts one device into a tree that fakeSysfs built, the way the
+// kernel registers a controller that connects.
+func addHID(t *testing.T, root string, device fakeHID) {
+	t.Helper()
+	dir := filepath.Join(root, "devices", device.Dir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeUevent(t, dir, device.Uevent)
+	for i, devname := range device.Nodes {
+		// The kernel puts an evdev node two levels below the HID
+		// device: input/inputN/eventM.
+		nodeDir := filepath.Join(dir, "input", "input"+string(rune('0'+i)), filepath.Base(devname))
+		if err := os.MkdirAll(nodeDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(nodeDir, "dev"), []byte("13:64\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		writeUevent(t, nodeDir, map[string]string{"DEVNAME": devname, "MAJOR": "13"})
+	}
+	if device.Battery != nil {
+		supply := filepath.Join(dir, "power_supply", device.Battery.Name)
+		if err := os.MkdirAll(supply, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for file, value := range map[string]string{
+			"capacity": device.Battery.Capacity,
+			"status":   device.Battery.Status,
+		} {
+			if value == "" {
+				continue
+			}
+			if err := os.WriteFile(filepath.Join(supply, file), []byte(value+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	base := filepath.Base(device.Dir)
+	target := filepath.Join("..", "..", "..", "devices", device.Dir)
+	if err := os.Symlink(target, filepath.Join(root, "bus", "hid", "devices", base)); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // sysfsFor points the walk at a tree this test owns, and puts the

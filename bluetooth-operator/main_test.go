@@ -145,7 +145,7 @@ func TestWakesEndsWhenAnySourceCloses(t *testing.T) {
 				retries := make(chan struct{})
 				requests := make(chan struct{})
 				edits := make(chan struct{})
-				out := wakes(t.Context(), uevents, bluez, retries, requests, edits)
+				out, _ := wakes(t.Context(), uevents, bluez, retries, requests, edits)
 
 				switch i {
 				case 0:
@@ -180,7 +180,7 @@ func TestWakesPassesEachSourceThrough(t *testing.T) {
 		retries := make(chan struct{}, 1)
 		requests := make(chan struct{}, 1)
 		edits := make(chan struct{}, 1)
-		out := wakes(t.Context(), uevents, bluez, retries, requests, edits)
+		out, _ := wakes(t.Context(), uevents, bluez, retries, requests, edits)
 
 		uevents <- kernelEvent{Subsystem: "hid", Action: "add", MAC: "a0:ab:51:33:b7:12"}
 		synctest.Wait()
@@ -215,7 +215,7 @@ func TestWakesPassesEachSourceThrough(t *testing.T) {
 func TestWakesRunsTheBackstopEachInterval(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		quiet := make(chan struct{})
-		out := wakes(t.Context(), make(chan kernelEvent), quiet, quiet, quiet, quiet)
+		out, _ := wakes(t.Context(), make(chan kernelEvent), quiet, quiet, quiet, quiet)
 
 		time.Sleep(backstopInterval - time.Nanosecond)
 		synctest.Wait()
@@ -230,8 +230,9 @@ func TestWakesRunsTheBackstopEachInterval(t *testing.T) {
 	})
 }
 
-// The loop prints what woke it. A HID event names its controller, a
-// power supply change names none, and a lost datagram says so.
+// The loop prints what woke it. A HID event and an evdev node's add
+// name their controller, a power supply change names none, and a lost
+// datagram says so.
 func TestKernelEventLine(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -242,6 +243,11 @@ func TestKernelEventLine(t *testing.T) {
 			name:  "a HID add",
 			event: kernelEvent{Subsystem: "hid", Action: "add", MAC: "a0:ab:51:33:b7:12"},
 			want:  "controller A0:AB:51:33:B7:12: hid add",
+		},
+		{
+			name:  "an evdev node's add",
+			event: kernelEvent{Subsystem: "input", Action: "add", MAC: "a0:ab:51:33:b7:12"},
+			want:  "controller A0:AB:51:33:B7:12: input add",
 		},
 		{
 			name:  "a battery change",

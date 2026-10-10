@@ -46,7 +46,7 @@ import (
 
 const (
 	// settleWindow is how long the loop waits for quiet after the last
-	// event before it writes. A controller that connects produces a
+	// event before it runs a pass. A controller that connects produces a
 	// burst of uevents and a burst of D-Bus signals, and one write
 	// covers the whole burst.
 	//
@@ -54,6 +54,14 @@ const (
 	// cluster, because the scheduler event that a slice change raises
 	// includes no queueing hint. Hardware that flaps must not turn into
 	// a cluster-wide scheduling storm.
+	//
+	// The relay does not wait for the window. The kernel keeps no
+	// backlog for a reader that opens an evdev node late, so each press
+	// before the open is lost. A Bluetooth LE remote that wakes on a
+	// press sends that press about one second after its HID device
+	// appears. So each uevent opens the new nodes at once
+	// (publisher.attach), and the pass at the end of the window
+	// publishes them.
 	settleWindow = 1500 * time.Millisecond
 
 	// settleLimit bounds the wait. A controller that reconnects in a
@@ -194,7 +202,8 @@ func main() {
 	retries := make(chan struct{}, 1)
 	requests, requestStore := watchPairingRequests(ctx, watcher, time.Now)
 	edits := watchEdits(ctx, watcher, nodeName)
-	settled := settle(ctx, wakes(ctx, uevents, blueZChanges, retries, requests, edits.wakes()), settleWindow, settleLimit)
+	woken, attaches := wakes(ctx, uevents, blueZChanges, retries, requests, edits.wakes())
+	settled := settle(ctx, woken, settleWindow, settleLimit)
 
 	// readings is this operator's Prometheus registry. Every method on
 	// it accepts a nil receiver and records nothing, so wiring it in
@@ -307,14 +316,26 @@ func main() {
 
 	pass()
 
+	switch err := loop(ctx, settled, attaches, blueZGone, pass, publish.attach); {
+	case errors.Is(err, errShutdown):
+		// The slice stays. The operator's pod restarts for ordinary
+		// reasons while a consumer holds a prepared claim, and the
+		// Node's ownership of the slice retracts it when this node
+		// really leaves.
+		return
+	default:
+		fatal("%v", err)
+	}
+}
+
+// loop runs a pass for each settled wake and an attach for each
+// uevent, until the operator must stop, and answers why it stopped.
+// Both run on this goroutine, so the publisher has one owner.
+func loop(ctx context.Context, settled, attaches, blueZGone <-chan struct{}, pass, attach func()) error {
 	for {
 		select {
 		case <-ctx.Done():
-			// The slice stays. The operator's pod restarts for ordinary
-			// reasons while a consumer holds a prepared claim, and the
-			// Node's ownership of the slice retracts it when this node
-			// really leaves.
-			return
+			return errShutdown
 		case <-blueZGone:
 			// bluetoothd owns the HID sessions, and its death
 			// disconnects every controller at once. An operator that
@@ -322,21 +343,19 @@ func main() {
 			// longer deliver. The published devices keep their taints
 			// from the last pass until the replacement pod corrects
 			// them.
-			fatal("bluetoothd left the bus")
+			return errBlueZGone
 		case _, ok := <-settled:
-			switch err := exitReason(ctx, ok); {
-			case err == nil:
-				pass()
-			case errors.Is(err, errShutdown):
-				return
-			default:
-				fatal("%v", err)
+			if err := exitReason(ctx, ok); err != nil {
+				return err
 			}
+			pass()
+		case <-attaches:
+			attach()
 		}
 	}
 }
 
-// The two ways the loop's event sources can end.
+// The ways the loop can end.
 var (
 	// errShutdown is the ordinary one. The context was cancelled, so
 	// the closed channels are the shutdown's own doing and the
@@ -348,6 +367,9 @@ var (
 	// lost, so channels that close while the operator is still meant
 	// to be running mean it can no longer read the paired set.
 	errSourcesClosed = errors.New("the event sources closed while running; the D-Bus connection is gone")
+
+	// errBlueZGone ends the operator when bluetoothd leaves the bus.
+	errBlueZGone = errors.New("bluetoothd left the bus")
 )
 
 // exitReason says whether the loop must end, and why. A nil answer
@@ -368,14 +390,22 @@ func exitReason(ctx context.Context, ok bool) error {
 // Peripherals, and the loop's own retries into one channel. None of
 // them holds state that the loop uses, so the merge loses nothing:
 // each wake means look again.
-func wakes(ctx context.Context, uevents <-chan kernelEvent, blueZChanges, retries, requests, edits <-chan struct{}) <-chan struct{} {
+//
+// Each uevent also goes to the second channel, which the loop reads
+// without the settle window, so the relay opens a new evdev node at
+// once. Every uevent goes there, not only an input add, because the
+// uevent channel drops an event when it is full, and the dropped event
+// can be the input add.
+func wakes(ctx context.Context, uevents <-chan kernelEvent, blueZChanges, retries, requests, edits <-chan struct{}) (<-chan struct{}, <-chan struct{}) {
 	out := make(chan struct{}, 1)
-	wake := func() {
+	attaches := make(chan struct{}, 1)
+	send := func(to chan<- struct{}) {
 		select {
-		case out <- struct{}{}:
+		case to <- struct{}{}:
 		default:
 		}
 	}
+	wake := func() { send(out) }
 	go func() {
 		defer close(out)
 		tick := time.NewTicker(backstopInterval)
@@ -389,6 +419,7 @@ func wakes(ctx context.Context, uevents <-chan kernelEvent, blueZChanges, retrie
 					return
 				}
 				fmt.Println(kernelEventLine(event))
+				send(attaches)
 				wake()
 			case _, ok := <-blueZChanges:
 				if !ok {
@@ -415,7 +446,7 @@ func wakes(ctx context.Context, uevents <-chan kernelEvent, blueZChanges, retrie
 			}
 		}
 	}()
-	return out
+	return out, attaches
 }
 
 // kernelEventLine says what one uevent reported. A HID event names its

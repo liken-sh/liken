@@ -106,9 +106,9 @@ func (c *controllerRelay) reads(path string) bool {
 // is asleep or switched off, and that is an ordinary pass: the virtual
 // devices stay.
 //
-// The reconcile loop calls ensure on every pass, and the kernel's
-// uevents already wake the loop when a node appears, so nothing here
-// polls for a node that is not there.
+// The loop calls ensure for each uevent, before the settle window
+// ends, and again on every pass. The kernel sends an input add when a
+// node appears, so nothing here polls for a node that is not there.
 func (r *relays) ensure(mac string, nodes []string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -347,6 +347,10 @@ func (r *relays) read(mac string, relay *nodeRelay, path string, want delivery) 
 	relay.source, relay.sourcePath, relay.narrowed = source, path, false
 	relay.narrow(mac, want.classes)
 	relay.tune(mac, want.axes)
+	// A press that arrives before this open is lost. The line lets a
+	// person compare the time of the open with the time of the
+	// controller's input add.
+	fmt.Printf("relay: reading %s of controller %s into %s\n", path, publishedMAC(mac), relay.device.node())
 	go r.pump(mac, relay, source)
 }
 

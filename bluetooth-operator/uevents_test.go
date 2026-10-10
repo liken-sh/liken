@@ -132,6 +132,69 @@ func TestHIDRemoveResolvesThroughTheMap(t *testing.T) {
 	}
 }
 
+// An evdev node's uevent carries no HID_UNIQ. It names its controller
+// through the HID device it registers under, whose add came first, so
+// the relay can open the node before the settle window ends. An input
+// device that is not an evdev node, such as the inputN parent or a
+// joydev node, is not one the relay opens.
+func TestAnEvdevNodeNamesItsController(t *testing.T) {
+	const hid = "/devices/virtual/misc/uhid/0005:054C:0CE6.0001"
+	const mac = "a0:ab:51:33:b7:12"
+
+	cases := []struct {
+		name     string
+		datagram []byte
+		want     kernelEvent
+		wantOK   bool
+	}{
+		{
+			name:     "an evdev node under a controller",
+			datagram: datagram("add@"+hid+"/input/input21/event5", "SUBSYSTEM=input", "DEVNAME=input/event5"),
+			want:     kernelEvent{Subsystem: "input", Action: "add", MAC: mac},
+			wantOK:   true,
+		},
+		{
+			name:     "the input device above the node",
+			datagram: datagram("add@"+hid+"/input/input21", "SUBSYSTEM=input"),
+			wantOK:   false,
+		},
+		{
+			name:     "a joydev node",
+			datagram: datagram("add@"+hid+"/input/input21/js0", "SUBSYSTEM=input", "DEVNAME=input/js0"),
+			wantOK:   false,
+		},
+		{
+			name:     "an evdev node that leaves",
+			datagram: datagram("remove@"+hid+"/input/input21/event5", "SUBSYSTEM=input", "DEVNAME=input/event5"),
+			wantOK:   false,
+		},
+		{
+			name: "an evdev node under another HID device",
+			datagram: datagram("add@/devices/virtual/misc/uhid/0005:054C:0CE6.00011/input/input22/event6",
+				"SUBSYSTEM=input", "DEVNAME=input/event6"),
+			wantOK: false,
+		},
+		{
+			name:     "a USB keyboard's evdev node",
+			datagram: datagram("add@/devices/pci0000:00/usb1/1-1/input/input3/event2", "SUBSYSTEM=input", "DEVNAME=input/event2"),
+			wantOK:   false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			macs := newDevpathMACs()
+			macs.resolve("add", hid, mac)
+			event, ok := kernelEventFrom(c.datagram, macs)
+			if ok != c.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, c.wantOK)
+			}
+			if ok && event != c.want {
+				t.Fatalf("event = %+v, want %+v", event, c.want)
+			}
+		})
+	}
+}
+
 func TestDevpathMACsPrefersTheDatagram(t *testing.T) {
 	const devpath = "/devices/virtual/misc/uhid/0005:054C:0CE6.0001"
 	macs := newDevpathMACs()
