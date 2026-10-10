@@ -693,9 +693,19 @@ UNTESTED_PACKAGES := go list -f '{{if not (or .TestGoFiles .XTestGoFiles)}}{{.Im
 # time. This list finds each import that breaks the rule.
 INIT_HEAVY := go list -deps ./init | grep -E '^(net/http|github\.com/liken-sh/liken/kubernetes)(/|$$)' | grep -vx 'github\.com/liken-sh/liken/kubernetes/conditions'
 
+# The machine operator runs on every machine, and it never elects a
+# leader, so it must not link the packages that only an electing
+# operator needs: client-go's leader election, the typed clientset, the
+# informer factories, and the shared module's election package. Together
+# they add over 13 MB to the binary on every machine. It reads and
+# watches through the dynamic client and the shared informer package,
+# and this list finds each import that breaks the rule.
+MACHINE_OPERATOR_HEAVY := go list -deps ./machine-operator | grep -E '^(k8s\.io/client-go/(kubernetes|informers|tools/leaderelection)|github\.com/liken-sh/liken/kubernetes/election)(/|$$)'
+
 test-go:
 	test -z "$$($(UNTESTED_PACKAGES))" || { echo 'packages with no test file:'; $(UNTESTED_PACKAGES); exit 1; }
 	test -z "$$($(INIT_HEAVY))" || { echo 'init links net/http or the shared kubernetes module:'; $(INIT_HEAVY); exit 1; }
+	test -z "$$($(MACHINE_OPERATOR_HEAVY))" || { echo 'machine-operator links leader election, the typed clientset, or the informer factories:'; $(MACHINE_OPERATOR_HEAVY); exit 1; }
 	go mod tidy -diff
 	go vet ./...
 	go tool staticcheck ./...
