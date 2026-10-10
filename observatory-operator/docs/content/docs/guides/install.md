@@ -59,6 +59,8 @@ The base creates:
 
 * the CRDs of the `observatory.liken.sh` group
 * a `ServiceAccount`, a `ClusterRole`, and a `ClusterRoleBinding`
+* a `Role` and a `RoleBinding` that let the operator hold its `Lease`,
+  `observatory-operator` in `liken-system`
 * the operator, a `Deployment` with one replica in `liken-system`, the
   namespace of every `liken` operator
 
@@ -185,6 +187,37 @@ parks the dome, and stops the pods. That takes a few minutes, mostly
 for the camera's warm-up. When the command returns, the equipment is
 safe to power off.
 
+## Rollouts and failover
+
+Only one copy of the operator acts at a time: the copy that holds the
+`Lease` `observatory-operator` in `liken-system`. Two copies that
+acted at once would both run the same reservation's steps on the same
+devices. Every other copy only reads the `Lease`. It opens no watch,
+creates no pod, and sends nothing to a device. To see which pod leads:
+
+```sh
+kubectl -n liken-system get lease observatory-operator
+```
+
+A rollout starts the new pod beside the old one, and the new pod logs
+that it waits for the `Lease`. When the old pod stops, it stops its
+reservations' steps and closes its INDI connections. It waits until
+its last write to the API server returns, and then it releases the
+`Lease`. The
+new pod takes the `Lease` within about 11 seconds. It reads which
+reservation holds each telescope from the reservations' status, and
+continues each reservation from the step that its status records. The
+INDI servers and the device pods run through the rollout, so a
+connected device stays connected.
+
+When the leading pod cannot renew the `Lease`, for example because
+its node lost the network, it stops writing 10 seconds after its last
+renewal, and exits within 25 seconds of it. A waiting copy takes the `Lease` 30 to 41
+seconds after the last renewal, so the two copies never act at the
+same time. The base runs one replica, so the waiting copy is the
+replacement pod that Kubernetes starts on another node, or the same
+pod after the kubelet restarts it.
+
 ## Upgrade from a base that created `observatory`
 
 The base of releases before `2026.10.08-002` created the namespace
@@ -203,7 +236,8 @@ Flux then deletes the old `Deployment`, `ServiceAccount`, `Role`,
 and `RoleBinding` in `observatory`, and creates the operator in
 `liken-system`. With `kubectl apply -k`, delete those four yourself
 before you apply the new base, so two copies of the operator never
-run at once. The new
+run at once. The old copy holds no `Lease`, so the election does not
+keep it apart from the new one. The new
 operator finds the pods of a running reservation where they are, in
 `observatory`.
 

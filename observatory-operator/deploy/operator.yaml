@@ -1,34 +1,66 @@
 # The operator: one unprivileged Deployment in liken-system. It reads
 # the resources in every namespace, runs each reserved telescope's pods
 # in the telescope's namespace, and drives the devices through each
-# INDI server's Service. It
-# keeps no state outside the API server: a reservation's status records
-# every step, and a new pod continues from it.
+# INDI server's Service. It keeps no state outside the API server: a
+# reservation's status records every step, and a copy that takes the
+# Lease continues from it.
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: observatory-operator
 spec:
+  # One replica is enough, because the kubelet restarts a crashed
+  # operator. Two copies that acted at once would each run the same
+  # reservation's steps on the same devices, so only the copy that
+  # holds the Lease observatory-operator acts (leader.go). Every other
+  # copy waits for it.
   replicas: 1
   selector:
     matchLabels:
       app: observatory-operator
-  # One copy, and Recreate, so two copies never run at once during a
-  # rollout. The operator records which reservation holds each
-  # telescope in its memory, from the reservations' status, and two
-  # copies would each run the same steps on the same devices.
+  # A rollout starts the new pod beside the old one, and stops the old
+  # one only when the new one runs. The new pod waits for the Lease while
+  # the old one leads. On SIGTERM the old pod stops its runners, its
+  # status writer, and its INDI connections, waits for their last
+  # writes, and releases the Lease. The new pod takes it on its next
+  # read, within about 11 seconds, and reads the holder of each
+  # telescope from the reservations' status. So the image pull happens
+  # while the old pod still leads.
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   template:
     metadata:
       labels:
         app: observatory-operator
     spec:
       serviceAccountName: observatory-operator
+      # A shutdown waits until every writer has returned, and the client
+      # ends each request in 15 s at most. Then the release waits up to
+      # 11 s for client-go's election to end, and up to 5 s more for the
+      # release that follows a late renewal. One write in flight and the
+      # release take up to 31 s, past the default grace of 30 s, so the
+      # grace is 60 s. A kill before the release leaves the Lease to
+      # expire, and a waiting copy then takes it 30 to 41 s after the
+      # last renewal instead of within about 11 s.
+      terminationGracePeriodSeconds: 60
       containers:
         - name: operator
           image: ghcr.io/liken-sh/observatory-operator:latest
+          # The pod's name and namespace name the Lease and the identity
+          # that holds it, so the operator exits when either is unset.
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           securityContext:
             runAsNonRoot: true
             runAsUser: 65534

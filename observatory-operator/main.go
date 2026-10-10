@@ -14,9 +14,19 @@ import (
 	"os/signal"
 	"syscall"
 
+	"k8s.io/client-go/rest"
+
 	"github.com/liken-sh/liken/kubernetes/apiclient"
-	"github.com/liken-sh/liken/kubernetes/events"
+	"github.com/liken-sh/liken/kubernetes/election"
 	"github.com/liken-sh/liken/kubernetes/informer"
+)
+
+// The pod's name and namespace, from the downward API in
+// deploy/operator.yaml. They name the Lease and the identity that
+// holds it.
+const (
+	podNameVariable      = "POD_NAME"
+	podNamespaceVariable = "POD_NAMESPACE"
 )
 
 func main() {
@@ -26,19 +36,39 @@ func main() {
 	}
 }
 
+// operate builds the clients, which send nothing yet, and then waits
+// for the Lease before it opens a watch or writes (leader.go). A
+// SIGTERM ends the namespaces' work, and the Lease is released when
+// the last writer has returned.
 func operate() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
-	client, err := apiclient.InCluster(apiclient.InClusterOptions{})
+	namespace, pod := os.Getenv(podNamespaceVariable), os.Getenv(podNameVariable)
+	if namespace == "" || pod == "" {
+		return fmt.Errorf("%s and %s are unset, so the operator cannot name its Lease", podNamespaceVariable, podNameVariable)
+	}
+	config, err := rest.InClusterConfig()
 	if err != nil {
 		return err
 	}
+	// The stop ends the wait after a 429, and does not cut off a
+	// request in flight, so a write either returns before the release
+	// or was never sent.
+	client, err := apiclient.InCluster(apiclient.InClusterOptions{Timeout: election.RequestTimeout})
+	if err != nil {
+		return err
+	}
+	client = client.WithWaitContext(ctx)
 	watcher, err := informer.InCluster()
 	if err != nil {
 		return err
 	}
-	n := newNamespaces(client, nil)
-	n.recorder = events.New(ctx, client, managedBy, events.Options{Log: n.logs})
-	n.run(ctx, func(ctx context.Context, changed *bell) *stores { return startWatches(ctx, watcher, changed) })
-	return nil
+	options := election.Options{
+		Name: leaseName, Namespace: namespace, Pod: pod,
+		Report: func(line string) { fmt.Fprintf(os.Stderr, "observatory-operator: %s\n", line) },
+	}
+	return actWhileLeading(ctx, config, options, func(mayWrite func() error) {
+		n := leadingNamespaces(ctx, client, mayWrite, nil, nil, "")
+		n.run(ctx, func(ctx context.Context, changed *bell) *stores { return startWatches(ctx, watcher, changed) })
+	})
 }

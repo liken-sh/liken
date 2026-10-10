@@ -7,11 +7,12 @@ package main
 // start at its creation time, and then by name. So the same
 // reservations always take the telescope in the same order.
 //
-// The operator runs as one copy (deploy/operator.yaml), so the holder
-// of each telescope is kept in memory. The status is the record: a
-// reservation whose Wait step is Done holds its telescope until it is
-// Released, and a new copy of the operator reads the holders from the
-// status of each reservation before any runner starts.
+// Only one copy of the operator acts, the one that holds the Lease
+// (leader.go), so the holder of each telescope is kept in memory. The
+// status is the record: a reservation whose Wait step is Done holds
+// its telescope until it is Released, and a copy that takes the Lease
+// reads the holders from the status of each reservation before any
+// runner starts.
 
 import (
 	"slices"

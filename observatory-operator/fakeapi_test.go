@@ -69,6 +69,16 @@ type fakeAPI struct {
 	statusRefusals int
 	// jobs plays the Job controller (fakejobs_test.go).
 	jobs fakeJobController
+	// heard receives each request before the server answers it, the
+	// Events' requests included, when a test sets it (hear).
+	heard func(*http.Request)
+}
+
+// hear calls heard with each request the server receives from now on.
+func (a *fakeAPI) hear(heard func(*http.Request)) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.heard = heard
 }
 
 // refuse makes the server refuse the next creates and deletes.
@@ -113,7 +123,16 @@ func startFakeAPI(t *testing.T) *fakeAPI {
 
 		recorded: &eventstest.Events{},
 	}
-	api.server = apiservertest.Start(t, api.recorded.Around(api))
+	answer := api.recorded.Around(api)
+	api.server = apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		api.mu.Lock()
+		heard := api.heard
+		api.mu.Unlock()
+		if heard != nil {
+			heard(r)
+		}
+		answer.ServeHTTP(w, r)
+	}))
 	// The reflector waits out its backoff after a refused list without
 	// reading its context, so the bubble waits past it (apiservertest).
 	t.Cleanup(func() { time.Sleep(time.Minute) })
