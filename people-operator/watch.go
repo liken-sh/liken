@@ -39,6 +39,8 @@ const recheckInterval = 6 * time.Hour
 const retryDelay = 30 * time.Second
 
 // run watches until the context ends, and runs a pass for each wake.
+// It returns after the pass in flight, once the watches have ended, so
+// the caller may release the Lease when it returns.
 func (o *operator) run(ctx context.Context, watcher dynamic.Interface) {
 	wake := make(chan struct{}, 1)
 	signal := func() { poke(wake) }
@@ -63,14 +65,19 @@ func (o *operator) run(ctx context.Context, watcher dynamic.Interface) {
 	for {
 		select {
 		case <-ctx.Done():
-			<-people.Done()
-			<-pods.Done()
-			return
 		case <-wake:
 		case <-recheck.C:
 			rechecking = true
 		case <-deadline:
 		case <-retry:
+		}
+		// select picks at random among the cases that are ready, so a
+		// wake that came with the stop is checked here and starts no
+		// pass.
+		if ctx.Err() != nil {
+			<-people.Done()
+			<-pods.Done()
+			return
 		}
 		next, err := o.pass(ctx, rechecking)
 		retry = nil

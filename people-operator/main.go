@@ -15,14 +15,17 @@ import (
 	"os/signal"
 	"syscall"
 
+	"k8s.io/client-go/rest"
+
 	"github.com/liken-sh/liken/kubernetes/apiclient"
-	"github.com/liken-sh/liken/kubernetes/events"
+	"github.com/liken-sh/liken/kubernetes/election"
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// The downward API sets these, so the operator can read its own pod
-// for the image a baker pod runs, and start nfs:// baker pods in its
-// own namespace.
+// The downward API sets these. The operator reads its own pod for the
+// image a baker pod runs, starts nfs:// baker pods in its own
+// namespace, holds its Lease in that namespace, and names its pod in
+// the Lease's holder.
 const (
 	podNameVariable      = "POD_NAME"
 	podNamespaceVariable = "POD_NAMESPACE"
@@ -38,6 +41,9 @@ func main() {
 	}
 }
 
+// operate builds the in-cluster clients and runs the operator's
+// process (leader.go). A SIGTERM from the kubelet ends the process
+// after the Person in flight, and the process then releases the Lease.
 func operate() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
@@ -46,21 +52,26 @@ func operate() error {
 	if name == "" || namespace == "" {
 		return fmt.Errorf("%s and %s must be set", podNameVariable, podNamespaceVariable)
 	}
-	client, err := apiclient.InCluster(apiclient.InClusterOptions{})
+	client, err := apiclient.InCluster(apiclient.InClusterOptions{Timeout: election.RequestTimeout})
 	if err != nil {
 		return err
 	}
-	client = client.WithContext(ctx)
 	watcher, err := informer.InCluster()
 	if err != nil {
 		return err
 	}
-	image, err := ownImage(client, namespace, name)
+	lease, err := rest.InClusterConfig()
 	if err != nil {
 		return err
 	}
-	bakers := &bakers{client: client, image: image, namespace: namespace}
-	recorder := events.New(ctx, client, component, events.Options{Instance: name})
-	newOperator(client, http.DefaultTransport, bakers, recorder).run(ctx, watcher)
-	return nil
+	return process{
+		client:    client.WithWaitContext(ctx),
+		watcher:   watcher,
+		lease:     lease,
+		transport: http.DefaultTransport,
+		pod:       name,
+		namespace: namespace,
+		report:    func(line string) { fmt.Fprintf(os.Stderr, "people-operator: %s\n", line) },
+		exit:      os.Exit,
+	}.operate(ctx)
 }

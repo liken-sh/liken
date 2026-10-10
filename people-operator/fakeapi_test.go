@@ -63,6 +63,20 @@ type fakeAPI struct {
 	// absent holds the namespaces that do not exist, where a pod
 	// create answers 404 as a real API server does.
 	absent map[string]bool
+
+	// statusDelay holds each status write this long before it lands,
+	// the way a loaded API server does. statusLanded runs as each
+	// status write lands.
+	statusDelay  time.Duration
+	statusLanded func()
+}
+
+// slowStatusWrites holds each status write for delay, and runs landed
+// as each one lands.
+func (a *fakeAPI) slowStatusWrites(delay time.Duration, landed func()) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.statusDelay, a.statusLanded = delay, landed
 }
 
 // dropNamespace makes a namespace one that does not exist.
@@ -266,6 +280,10 @@ func (a *fakeAPI) writeStatus(w http.ResponseWriter, r *http.Request, name strin
 	var written map[string]any
 	_ = json.NewDecoder(r.Body).Decode(&written)
 	a.mu.Lock()
+	delay := a.statusDelay
+	a.mu.Unlock()
+	time.Sleep(delay)
+	a.mu.Lock()
 	defer a.mu.Unlock()
 	held, exists := a.objects[peoplePath][name]
 	if !exists {
@@ -283,7 +301,11 @@ func (a *fakeAPI) writeStatus(w http.ResponseWriter, r *http.Request, name strin
 	}
 	next := clone(held)
 	next["status"] = written["status"]
-	_ = json.NewEncoder(w).Encode(a.store(peoplePath, name, next, "MODIFIED"))
+	stored := a.store(peoplePath, name, next, "MODIFIED")
+	if a.statusLanded != nil {
+		a.statusLanded()
+	}
+	_ = json.NewEncoder(w).Encode(stored)
 }
 
 func (a *fakeAPI) createPod(w http.ResponseWriter, r *http.Request, namespace string) {

@@ -60,6 +60,12 @@ func (o *operator) pass(ctx context.Context, recheck bool) (time.Time, error) {
 	var next time.Time
 	var problems []error
 	for index := range people {
+		// The stop ends the pass between two Persons, so a shutdown
+		// waits for the writes of one Person and no more. The next copy
+		// answers the rest.
+		if ctx.Err() != nil {
+			return next, errors.Join(problems...)
+		}
 		p := &people[index]
 		deadline, err := o.answer(ctx, p, pods, podsHeld, recheck)
 		if err != nil {
@@ -101,6 +107,11 @@ func (o *operator) answer(ctx context.Context, p *person, pods map[string]pod, p
 	if read, inProcess := o.sources[ref.Scheme]; inProcess {
 		out.reason = read.successReason()
 		out.reading, out.err = read.read(ctx, ref, knownVersion(p), personColour(p.Metadata.Name))
+		// A read that the stop cut off says nothing about the source,
+		// so it writes no FetchFailed. The next copy reads it again.
+		if ctx.Err() != nil {
+			return time.Time{}, nil
+		}
 		return time.Time{}, o.settle(p, out)
 	}
 	mount, baked, err := bakedScheme(ref, o.bakers.namespace)

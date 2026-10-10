@@ -9,21 +9,43 @@ kind: Deployment
 metadata:
   name: people-operator
 spec:
+  # One replica is enough, because the kubelet restarts a crashed
+  # operator. Two are safe: the Lease named people-operator lets one
+  # copy act, and the other waits and takes over when the first stops
+  # (leader.go says what two acting copies would break).
   replicas: 1
   selector:
     matchLabels:
       app: people-operator
-  # Recreate, so two copies never run at once during a rollout. Two
-  # copies would each read every picture, and their status writes to
-  # one Person would conflict.
+  # A rollout starts the new pod beside the old one, and stops the old
+  # one only when the new one runs. The new pod waits for the Lease while
+  # the old one leads. On SIGTERM the old pod finishes the Person it
+  # answers and releases the Lease, and the new pod takes it on its next
+  # read, within about 11 seconds. So the image pull happens while the
+  # old pod still leads.
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   template:
     metadata:
       labels:
         app: people-operator
     spec:
       serviceAccountName: people-operator
+      # A shutdown finishes the writes of the Person in flight, and then
+      # releases the Lease. Those writes are a status write, which reads
+      # the Person again and writes once more after a conflict, and the
+      # delete of a finished baker pod, and the client bounds each
+      # request at 15 s. The release waits up to 11 s for client-go's
+      # election to end (its 10 s renew deadline and 1 s), and then up to
+      # 5 s for the release that follows a late renewal, 16 s in all. The
+      # default 30 s grace would leave the writes 14 s, and 60 s leaves
+      # them 44 s. A kill before the release leaves the Lease to expire,
+      # and a waiting copy then takes it 30 to 41 s after the last
+      # renewal instead of within about 11 s.
+      terminationGracePeriodSeconds: 60
       containers:
         # The operator reads this container's image from its own pod,
         # and a baker pod runs the same image, so the tag below pins
@@ -32,7 +54,10 @@ spec:
           image: ghcr.io/liken-sh/people-operator:latest
           env:
             # The operator reads its own pod for the image, and starts
-            # an nfs:// baker pod in its own namespace.
+            # an nfs:// baker pod in its own namespace. The two values
+            # also name the Lease the operator holds and the identity it
+            # holds it under, so the operator exits when either is
+            # unset.
             - name: POD_NAME
               valueFrom:
                 fieldRef:
