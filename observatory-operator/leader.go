@@ -38,10 +38,14 @@ const leaseName = "observatory-operator"
 // the lead's write guard for its client.
 //
 // act returns on a shutdown only after every goroutine that writes has
-// returned (namespaces.run), so the release comes after the last write
-// to the API and the last command to a device. A copy that stop ends
-// before it leads holds nothing and returns nil.
-func actWhileLeading(stop context.Context, config *rest.Config, options election.Options, act func(mayWrite func() error)) error {
+// returned (namespaces.run) and the Event recorder's last write has
+// returned (namespaces.finish), so the release comes after the last
+// write to the API and the last command to a device. When act answers
+// an error, a write can still be in flight, so the Lease is not
+// released: the process exits holding it, and a waiting copy takes it
+// when it expires. A copy that stop ends before it leads holds nothing
+// and returns nil.
+func actWhileLeading(stop context.Context, config *rest.Config, options election.Options, act func(mayWrite func() error) error) error {
 	lead, err := election.Start(stop, config, options)
 	if errors.Is(err, election.ErrStopped) {
 		return nil
@@ -49,7 +53,9 @@ func actWhileLeading(stop context.Context, config *rest.Config, options election
 	if err != nil {
 		return fmt.Errorf("leader election: %w", err)
 	}
-	act(lead.MayWrite)
+	if err := act(lead.MayWrite); err != nil {
+		return fmt.Errorf("%w; leaving the Lease to expire", err)
+	}
 	lead.StepDown()
 	return nil
 }
@@ -58,14 +64,25 @@ func actWhileLeading(stop context.Context, config *rest.Config, options election
 // that mayWrite guards. The Events recorder writes through the same
 // client, so the guard covers every write the process sends: a copy
 // whose last renewal of the Lease is too old sends nothing, and after
-// the release nothing writes.
-func leadingNamespaces(ctx context.Context, client *apiclient.Client, mayWrite func() error,
+// the release nothing writes. The recorder outlives the stop, so the
+// Events of the last pass are written, and finish shuts it down before
+// the release.
+func leadingNamespaces(client *apiclient.Client, mayWrite func() error,
 	dialer indi.Dialer, logs io.Writer, instance string) *namespaces {
 	guarded := client.WithWriteGuard(mayWrite)
 	n := newNamespaces(guarded, dialer)
 	if logs != nil {
 		n.logs = logs
 	}
-	n.recorder = events.New(ctx, guarded, managedBy, events.Options{Instance: instance, Log: n.logs})
+	n.recorder = events.New(context.Background(), guarded, managedBy, events.Options{Instance: instance, Log: n.logs})
 	return n
+}
+
+// finish shuts the Event recorder down after run has returned, and
+// answers an error when the recorder's last write did not return in
+// time.
+func (n *namespaces) finish() error {
+	ctx, cancel := context.WithTimeout(context.Background(), events.ShutdownTimeout)
+	defer cancel()
+	return n.recorder.Shutdown(ctx)
 }

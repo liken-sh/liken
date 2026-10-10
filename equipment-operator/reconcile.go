@@ -1052,7 +1052,8 @@ func operateAsLeader(ctx context.Context, client *Client, config settings) error
 
 // serve proves the collection can be read, starts the watch, and runs
 // the loop until ctx ends. It answers errStillWriting when a goroutine
-// that can write did not stop in time (work.go).
+// that can write did not stop in time (work.go), or when the Event
+// recorder's last write did not return in time.
 func serve(ctx context.Context, client *Client, config settings, readings *metrics) error {
 	err := untilAnswered(ctx, func() error {
 		_, err := ListReceivers(client.withContext(ctx))
@@ -1063,8 +1064,10 @@ func serve(ctx context.Context, client *Client, config settings, readings *metri
 	}
 
 	// serve returns only after the goroutines it started stop, so none
-	// of them reads the API after it.
-	recorder := events.New(ctx, client.Client, "equipment-operator", events.Options{})
+	// of them reads the API after it. The recorder outlives ctx, so the
+	// Events of the last pass are written, and serve shuts it down after
+	// every loop that posts has returned.
+	recorder := events.New(context.Background(), client.Client, "equipment-operator", events.Options{})
 	operator := newController(client, readings)
 	operator.recorder = recorder
 	if config.dial != nil {
@@ -1086,8 +1089,14 @@ func serve(ctx context.Context, client *Client, config settings, readings *metri
 	started.Go(func() { buses.run(ctx, readings) })
 	operator.run(ctx)
 	started.Wait()
+	shutdown, cancel := context.WithTimeout(context.Background(), events.ShutdownTimeout)
+	defer cancel()
+	recorded := recorder.Shutdown(shutdown)
 	if !operator.stopped {
-		return errStillWriting
+		return fmt.Errorf("a receiver unit or a session did not stop in time: %w", errStillWriting)
+	}
+	if recorded != nil {
+		return fmt.Errorf("%w: %w", errStillWriting, recorded)
 	}
 	return nil
 }

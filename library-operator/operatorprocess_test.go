@@ -19,6 +19,7 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
 	"github.com/liken-sh/liken/kubernetes/election"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -90,7 +91,7 @@ func TestStartProcessRefusesWhatItCannotName(t *testing.T) {
 				settings := processSettings{busAddress: testBusAddress, namespace: testOperatorNamespace,
 					pod: one.pod, topicBase: defaultTopicBase, port: "8080"}
 
-				_, _, _, err := startProcess(t.Context(), settings,
+				_, _, _, err := startProcess(settings,
 					apiclient.New(apiservertest.Host, server.Client(), ""), server.Config(),
 					func(int) {}, io.Discard)
 
@@ -145,7 +146,7 @@ func TestTheOperatorProcessRunsUntilTheStop(t *testing.T) {
 		stopped, stop := context.WithCancel(t.Context())
 		var log strings.Builder
 
-		library, leader, watching, err := startProcess(stopped, settings,
+		library, leader, watching, err := startProcess(settings,
 			apiclient.New(apiservertest.Host, server.Client(), ""), config,
 			func(code int) { t.Errorf("the process exited with %d", code) }, &log)
 		if err != nil {
@@ -251,7 +252,10 @@ type leading struct{}
 
 func (leading) await(context.Context) bool { return true }
 
-func (leading) stepDown(quiet func() bool) { quiet() }
+func (leading) stepDown(quiet func() bool, recorder *events.Recorder) {
+	quiet()
+	_ = recorder.Shutdown(context.Background())
+}
 
 // waiting is a Lease another copy holds for the whole test.
 type waiting struct{}
@@ -261,7 +265,7 @@ func (waiting) await(stop context.Context) bool {
 	return false
 }
 
-func (waiting) stepDown(func() bool) {}
+func (waiting) stepDown(func() bool, *events.Recorder) {}
 
 // A copy that waits for the Lease serves its webhook, and reads,
 // watches, and writes nothing until it leads. It holds the path the

@@ -480,7 +480,8 @@ func operate() {
 		close(busDone)
 	}()
 	// quiet ends the bus session and answers whether it ended in time.
-	// stepDown runs it before it releases the Lease.
+	// stepDown runs it, and then shuts the recorder down, before it
+	// releases the Lease.
 	quiet := func() bool {
 		stopBus()
 		select {
@@ -508,7 +509,7 @@ func operate() {
 	watcher, err := informer.InCluster()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "in-cluster config for the watches: %v\n", err)
-		leader.stepDown(quiet)
+		leader.stepDown(quiet, media.recorder)
 		os.Exit(1)
 	}
 	watching, stopWatching := context.WithCancel(context.Background())
@@ -518,11 +519,11 @@ func operate() {
 	cancelFirstRead()
 	if err != nil {
 		if stop.Err() != nil {
-			leader.stepDown(quiet)
+			leader.stepDown(quiet, media.recorder)
 			return
 		}
 		fmt.Fprintf(os.Stderr, "watching the cluster: %v\n", err)
-		leader.stepDown(quiet)
+		leader.stepDown(quiet, media.recorder)
 		os.Exit(1)
 	}
 	media.reports.readPodsFrom(media.view)
@@ -538,7 +539,7 @@ func operate() {
 		case <-wake:
 		case <-ticker.C:
 		case <-stop.Done():
-			leader.stepDown(quiet)
+			leader.stepDown(quiet, media.recorder)
 			return
 		}
 	}

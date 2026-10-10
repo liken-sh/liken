@@ -66,7 +66,7 @@ func operate() error {
 	if err != nil {
 		return fmt.Errorf("in-cluster config: %w", err)
 	}
-	library, leader, watching, err := startProcess(stopped, settings, client, inClusterConfig(), os.Exit, os.Stdout)
+	library, leader, watching, err := startProcess(settings, client, inClusterConfig(), os.Exit, os.Stdout)
 	if err != nil {
 		return err
 	}
@@ -119,7 +119,7 @@ func readSettings() (processSettings, error) {
 // serves the watches and the Lease. A test calls it with connections to
 // a fake API server. exit ends the process after a lost Lease, and log
 // receives the election's lines.
-func startProcess(stopped context.Context, s processSettings, client *apiclient.Client, config *rest.Config,
+func startProcess(s processSettings, client *apiclient.Client, config *rest.Config,
 	exit func(int), log io.Writer) (*operator, *leadership, dynamic.Interface, error) {
 	watching, err := dynamic.NewForConfig(config)
 	if err != nil {
@@ -147,9 +147,11 @@ func startProcess(stopped context.Context, s processSettings, client *apiclient.
 
 	library := newOperator(client, stamped, s.busAddress, s.topicBase, s.namespace, ":"+s.port)
 	library.mediaTopicBase = s.mediaTopicBase
-	// The recorder's queue ends with the stop signal. The instance is the
-	// pod's name, which os.Hostname answers in the pod.
-	library.recorder = events.New(stopped, client, eventComponent, events.Options{})
+	// The recorder outlives the stop signal, so the Events of the last
+	// pass are written, and stepDown shuts it down before the release.
+	// The instance is the pod's name, which os.Hostname answers in the
+	// pod.
+	library.recorder = events.New(context.Background(), client, eventComponent, events.Options{})
 	library.metricsAddress = s.metricsAddress
 	if library.metricsAddress != "" {
 		library.metrics = newMetrics(stamped.version)
@@ -176,10 +178,11 @@ func inClusterConfig() *rest.Config {
 // lease is the election run takes part in. await blocks until this
 // process holds the Lease, and answers false when the stop signal comes
 // first. stepDown releases the Lease after the last pass, once quiet
-// has stopped everything else that acts.
+// has stopped everything else that acts and the recorder has written
+// its last Event.
 type lease interface {
 	await(stop context.Context) bool
-	stepDown(quiet func() bool)
+	stepDown(quiet func() bool, recorder *events.Recorder)
 }
 
 // Run is the operator without the process around it, so a test drives
@@ -238,7 +241,7 @@ func (o *operator) run(stopped context.Context, report io.Writer, watching dynam
 		case <-time.After(busStopTimeout):
 			return false
 		}
-	})
+	}, o.recorder)
 
 	// The first read of every collection has the same bound as a pass.
 	// The pass acts on what the watches hold, so it starts only once the

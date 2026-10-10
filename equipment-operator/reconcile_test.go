@@ -59,13 +59,39 @@ type fakeAPI struct {
 	// for a five-second wait, and statusThrottles counts those answers.
 	throttlingStatus bool
 	statusThrottles  int
+	// eventGate holds each Event write until releaseEvents.
+	eventGate chan struct{}
 }
 
 func startFakeAPI(t *testing.T) *fakeAPI {
 	t.Helper()
 	api := &fakeAPI{written: make(chan ReceiverStatus, 64), powers: make(chan equipment.Power, 64), events: &eventstest.Events{}}
-	api.client = testAPIClient(t, api.events.Around(http.HandlerFunc(api.handle)))
+	answer := api.events.Around(http.HandlerFunc(api.handle))
+	api.client = testAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		api.mutex.Lock()
+		gate := api.eventGate
+		api.mutex.Unlock()
+		if gate != nil && strings.Contains(r.URL.Path, "/events") {
+			<-gate
+		}
+		answer.ServeHTTP(w, r)
+	}))
 	return api
+}
+
+// gateEvents makes every Event write wait until releaseEvents, so a
+// test can hold the recorder's request open.
+func (a *fakeAPI) gateEvents() {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	a.eventGate = make(chan struct{})
+}
+
+func (a *fakeAPI) releaseEvents() {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	close(a.eventGate)
+	a.eventGate = nil
 }
 
 func (a *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {

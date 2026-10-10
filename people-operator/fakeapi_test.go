@@ -69,6 +69,17 @@ type fakeAPI struct {
 	// status write lands.
 	statusDelay  time.Duration
 	statusLanded func()
+	// eventDelay and eventLanded do the same for each Event write.
+	eventDelay  time.Duration
+	eventLanded func()
+}
+
+// slowEventWrites holds each Event write for delay, and runs landed as
+// each one lands.
+func (a *fakeAPI) slowEventWrites(delay time.Duration, landed func()) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.eventDelay, a.eventLanded = delay, landed
 }
 
 // slowStatusWrites holds each status write for delay, and runs landed
@@ -102,7 +113,17 @@ func startFakeAPI(t *testing.T) *fakeAPI {
 
 		recorded: &eventstest.Events{},
 	}
-	api.server = apiservertest.Start(t, api.recorded.Around(api))
+	answer := api.recorded.Around(api)
+	api.server = apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		api.mu.Lock()
+		delay, landed := api.eventDelay, api.eventLanded
+		api.mu.Unlock()
+		if landed != nil && strings.Contains(r.URL.Path, "/events") {
+			time.Sleep(delay)
+			landed()
+		}
+		answer.ServeHTTP(w, r)
+	}))
 	// The reflector waits out its backoff after a refused list without
 	// reading its context, so the bubble waits past it (apiservertest).
 	t.Cleanup(func() { time.Sleep(time.Minute) })

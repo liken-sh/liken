@@ -22,6 +22,7 @@ import (
 	"context"
 
 	"github.com/liken-sh/liken/kubernetes/election"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"k8s.io/client-go/rest"
 )
 
@@ -66,13 +67,20 @@ func (l *leadership) await(stop context.Context) bool {
 // stepDown ends this process's lead on a shutdown. The caller calls it
 // after the last pass. It runs quiet first, which stops the bus
 // session, so the next leader's session under the same client id does
-// not meet this one. Then it releases the Lease. quiet answers false
-// when the session did not stop in time, and then the Lease is not
-// released: the process exits holding it, and a waiting copy takes it
-// when it expires.
-func (l *leadership) stepDown(quiet func() bool) {
+// not meet this one. Then it shuts the Event recorder down, because the
+// recorder writes the Events of the last pass from its own goroutine.
+// Then it releases the Lease. When the session or the recorder does not
+// stop in time, the Lease is not released: the process exits holding
+// it, and a waiting copy takes it when it expires.
+func (l *leadership) stepDown(quiet func() bool, recorder *events.Recorder) {
 	if !quiet() {
 		l.report("the bus session did not stop; leaving the Lease to expire")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), events.ShutdownTimeout)
+	defer cancel()
+	if err := recorder.Shutdown(ctx); err != nil {
+		l.report(err.Error() + "; leaving the Lease to expire")
 		return
 	}
 	l.StepDown()

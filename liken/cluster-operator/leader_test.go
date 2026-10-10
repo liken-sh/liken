@@ -16,6 +16,7 @@ import (
 
 	"github.com/liken-sh/liken/kubernetes/election"
 	"github.com/liken-sh/liken/kubernetes/election/electiontest"
+	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/machine"
 	"github.com/liken-sh/liken/liken/metrics"
@@ -102,14 +103,25 @@ func logged(lines []string, prefix string) bool {
 
 // A copy that holds the Lease sweeps through the guarded client, so its
 // writes reach the API server, and at a shutdown it finishes the sweep
-// in flight and then releases the Lease for the copy that waits.
+// in flight, writes the Events the sweep posted, and then releases the
+// Lease for the copy that waits.
 func TestALeaderSweepsAndReleasesTheLeaseAtAShutdown(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		lease := electiontest.New(leaseName, leaseNamespace)
 		stop, shutdown := context.WithCancel(t.Context())
 		defer shutdown()
 		fleetAPI := newFleetAPI(time.Now())
+		recorded := &eventstest.Events{}
+		var mu sync.Mutex
+		var eventHolders []string
 		client, watcher := fleetClients(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.Contains(r.URL.Path, "/events") {
+				mu.Lock()
+				eventHolders = append(eventHolders, lease.Holder())
+				mu.Unlock()
+				recorded.ServeHTTP(w, r)
+				return
+			}
 			fleetAPI.ServeHTTP(w, r)
 			if r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/clusters/lab/status") {
 				shutdown()
@@ -128,6 +140,16 @@ func TestALeaderSweepsAndReleasesTheLeaseAtAShutdown(t *testing.T) {
 
 		if got := fleetAPI.ResourceVersion(kubernetes.ClustersPath, "lab"); got == "5" {
 			t.Error("the leader's sweep did not publish the Cluster's status")
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if len(eventHolders) == 0 {
+			t.Error("the leader's sweep wrote no Event")
+		}
+		for i, holder := range eventHolders {
+			if holder != leader.Identity() {
+				t.Errorf("Event %d of %d landed with the Lease held by %q, want %q", i+1, len(eventHolders), holder, leader.Identity())
+			}
 		}
 		if lease.Holder() != "" {
 			t.Errorf("holder after the shutdown = %q, want the Lease released", lease.Holder())

@@ -48,9 +48,11 @@ func goWork(ctx context.Context, work func()) {
 // errStillWriting, and the process leaves its Lease to expire.
 const workStopWait = 5 * time.Second
 
-// errStillWriting says that a goroutine that can write did not stop
-// within workStopWait, so the process must not release its Lease.
-var errStillWriting = errors.New("a receiver unit or a session did not stop in time, so the operator leaves its Lease to expire")
+// errStillWriting says that a write can still be in flight, because a
+// goroutine that can write did not stop within workStopWait, or the
+// Event recorder's last write did not return within
+// events.ShutdownTimeout. The process must not release its Lease.
+var errStillWriting = errors.New("a write can still be in flight, so the operator leaves its Lease to expire")
 
 // awaitWork waits for group, and answers false when within ends first.
 func awaitWork(group *sync.WaitGroup, within time.Duration) bool {

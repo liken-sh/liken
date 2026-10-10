@@ -202,9 +202,11 @@ kubectl -n liken-system get lease observatory-operator
 A rollout starts the new pod beside the old one, and the new pod logs
 that it waits for the `Lease`. When the old pod stops, it stops its
 reservations' steps and closes its INDI connections. It waits until
-its last write to the API server returns, and then it releases the
-`Lease`. The
-new pod takes the `Lease` within about 11 seconds. It reads which
+its last write to the API server returns, the `Event`s it posted
+included, and then it releases the `Lease`. The new pod takes the
+`Lease` within about 11 seconds. When an `Event` write does not return
+within 5 seconds, the old pod exits without the release, and the new
+pod takes the `Lease` when it expires, 30 to 41 seconds later. It reads which
 reservation holds each telescope from the reservations' status, and
 continues each reservation from the step that its status records. The
 INDI servers and the device pods run through the rollout, so a

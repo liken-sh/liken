@@ -19,6 +19,7 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
 	"github.com/liken-sh/liken/kubernetes/election"
 	"github.com/liken-sh/liken/kubernetes/election/electiontest"
+	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
@@ -30,8 +31,10 @@ const testPod = "observatory-operator-7d9f-x2k4q"
 type candidate struct {
 	api *fakeAPI
 	// acting closes when the copy starts to act, and done when
-	// actWhileLeading returns.
+	// actWhileLeading returns. n is the operator of every namespace,
+	// set before acting closes.
 	acting chan struct{}
+	n      *namespaces
 	done   chan struct{}
 	stop   context.CancelFunc
 }
@@ -70,10 +73,11 @@ func startCandidate(t *testing.T, leases *electiontest.Server) *candidate {
 	c := &candidate{api: api, acting: make(chan struct{}), done: make(chan struct{}), stop: stop}
 	go func() {
 		defer close(c.done)
-		err := actWhileLeading(ctx, leases.Config(t), options, func(mayWrite func() error) {
+		err := actWhileLeading(ctx, leases.Config(t), options, func(mayWrite func() error) error {
+			c.n = leadingNamespaces(client, mayWrite, dialer, logs, testPod)
 			close(c.acting)
-			n := leadingNamespaces(ctx, client, mayWrite, dialer, logs, testPod)
-			n.run(ctx, func(ctx context.Context, changed *bell) *stores { return startWatches(ctx, watcher, changed) })
+			c.n.run(ctx, func(ctx context.Context, changed *bell) *stores { return startWatches(ctx, watcher, changed) })
+			return c.n.finish()
 		})
 		if err != nil {
 			t.Errorf("actWhileLeading = %v", err)
@@ -181,6 +185,56 @@ func TestTheLeaseIsReleasedAfterTheLastWrite(t *testing.T) {
 	})
 }
 
+// An Event that the recorder is writing when the shutdown comes lands
+// while the Lease still names this copy, and the release waits for it.
+func TestTheLeaseIsReleasedAfterTheRecordersLastWrite(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		leases := electiontest.New(leaseName, "liken-system")
+		c := startCandidate(t, leases)
+		<-c.acting
+		synctest.Wait()
+		through := make(chan struct{})
+		var landed []string
+		var mu sync.Mutex
+		c.api.hear(func(r *http.Request) {
+			if !strings.Contains(r.URL.Path, "/events") {
+				return
+			}
+			<-through
+			mu.Lock()
+			defer mu.Unlock()
+			landed = append(landed, leases.Holder())
+		})
+		c.n.recorder.Normal(events.ObjectReference{Kind: "Telescope", Namespace: testNamespace, Name: "east"},
+			"Activating", "Starting the equipment.")
+		synctest.Wait()
+
+		go c.halt()
+		synctest.Wait()
+		holderWhileWriting := leases.Holder()
+		close(through)
+		<-c.done
+
+		if !strings.HasPrefix(holderWhileWriting, testPod+"_") {
+			t.Errorf("the Lease named %q while an Event was in flight, want this copy", holderWhileWriting)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if len(landed) == 0 {
+			t.Fatal("no Event landed")
+		}
+		for i, holder := range landed {
+			if !strings.HasPrefix(holder, testPod+"_") {
+				t.Errorf("Event %d of %d landed with the Lease held by %q, want this copy", i+1, len(landed), holder)
+			}
+		}
+		if leases.Holder() != "" {
+			t.Errorf("the Lease names %q after the shutdown, want no holder", leases.Holder())
+		}
+	})
+}
+
 // A copy that cannot name its Lease fails, and does not act.
 func TestACopyWithNoLeaseNameDoesNotAct(t *testing.T) {
 	t.Parallel()
@@ -189,7 +243,10 @@ func TestACopyWithNoLeaseNameDoesNotAct(t *testing.T) {
 		acted := false
 
 		err := actWhileLeading(t.Context(), leases.Config(t), election.Options{Name: leaseName, Namespace: "liken-system"},
-			func(func() error) { acted = true })
+			func(func() error) error {
+				acted = true
+				return nil
+			})
 
 		if err == nil || acted {
 			t.Errorf("actWhileLeading = %v and acted = %v, want an error and no act", err, acted)

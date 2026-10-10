@@ -148,6 +148,38 @@ func TestAStillWritingOperatorKeepsTheLease(t *testing.T) {
 	})
 }
 
+// serve returns only after the Event recorder's last write has
+// returned, so actWhileLeading releases the Lease after the Events of
+// the last pass land.
+func TestServeReturnsAfterTheRecordersLastWrite(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		receiver := startFakeDenon(t)
+		api.setReceivers(testReceiver("theater", receiver.address()))
+		api.gateEvents()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		config := settings{networkDiscoveryOff: true, dial: testNetwork.dial, listen: testNetwork.bind}
+		returned := make(chan error, 1)
+		go func() { returned <- serve(ctx, api.client, config, testMetrics(t)) }()
+		api.waitForStatus(t, connected)
+		synctest.Wait()
+
+		cancel()
+		synctest.Wait()
+		select {
+		case err := <-returned:
+			t.Fatalf("serve returned %v while an Event write was in flight", err)
+		default:
+		}
+		api.releaseEvents()
+
+		mustSucceed(t, <-returned)
+		mustMatch(t, len(api.events.About("Receiver", "theater")) > 0, true)
+	})
+}
+
 // A shutdown that arrives while the copy waits ends the wait with no
 // Lease, runs nothing, and leaves the holder alone.
 func TestAStopWhileWaitingRunsNothing(t *testing.T) {

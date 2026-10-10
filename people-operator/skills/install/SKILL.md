@@ -45,8 +45,11 @@ pod that read a picture, and one of them would mark a picture that
 baked as failed.
 
 A rollout starts the new pod beside the old one. The old pod finishes
-the `Person` it is answering and releases the `Lease` when it stops,
-and the new pod takes it within about 11 seconds. A leader that can't
+the `Person` it is answering, writes the `Event`s it posted, and
+releases the `Lease` when it stops, and the new pod takes it within
+about 11 seconds. When an `Event` write does not return within 5
+seconds, the old pod exits without the release, and the new pod takes
+the `Lease` when it expires. A leader that can't
 renew the `Lease`, such as one on a node the control plane can't
 reach, stops writing 10 seconds after its last renewal and then exits.
 A waiting copy takes a `Lease` that nobody renews 30 to 41 seconds

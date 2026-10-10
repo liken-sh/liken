@@ -20,6 +20,7 @@ import (
 	"os"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/events"
 )
 
 // requestTimeout takes apiclient's default in the pod build, where lead
@@ -46,4 +47,4 @@ func (*leadership) guard(client *apiclient.Client) *apiclient.Client {
 	return client.WithWriteGuard(func() error { return errNoLease })
 }
 
-func (*leadership) stepDown(func() bool) {}
+func (*leadership) stepDown(func() bool, *events.Recorder) {}

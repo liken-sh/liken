@@ -9,7 +9,9 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -125,8 +127,8 @@ func TestAWaitingCopyActsWhenTheLeaseExpires(t *testing.T) {
 	})
 }
 
-// A stop during a status write waits for the write to land, and only
-// then releases the Lease.
+// A stop during a status write waits for the write to land, and for the
+// Events the write posts, and only then releases the Lease.
 func TestTheLeaseIsReleasedAfterTheLastWrite(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newProcessWorld(t)
@@ -135,6 +137,13 @@ func TestTheLeaseIsReleasedAfterTheLastWrite(t *testing.T) {
 		synctest.Wait()
 		landed := make(chan bool, 1)
 		w.api.slowStatusWrites(5*time.Second, func() { landed <- w.heldByThisProcess() })
+		var mu sync.Mutex
+		var eventsLanded []bool
+		w.api.slowEventWrites(2*time.Second, func() {
+			mu.Lock()
+			defer mu.Unlock()
+			eventsLanded = append(eventsLanded, w.heldByThisProcess())
+		})
 		w.api.putPerson(ada(""))
 		time.Sleep(time.Second)
 
@@ -143,6 +152,11 @@ func TestTheLeaseIsReleasedAfterTheLastWrite(t *testing.T) {
 		}
 		if held := <-landed; !held {
 			t.Error("the status write landed after the release")
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if len(eventsLanded) == 0 || slices.Contains(eventsLanded, false) {
+			t.Errorf("the Events landed while held: %v, want at least one, each while this process held the Lease", eventsLanded)
 		}
 		if got := w.lease.Holder(); got != "" {
 			t.Errorf("the Lease names %q after the shutdown, want no holder", got)

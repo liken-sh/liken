@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -66,13 +67,15 @@ type process struct {
 // ends. A copy that never led answers nil when stop ends, because it
 // holds nothing.
 //
-// The release comes after run returns. run returns only after the pass
-// in flight has answered its Person, and every write of that pass
-// returns before the next request is sent, so no write of the pass is
-// in flight when the Lease is free. The Event recorder writes from its
-// own goroutine, which stop ends. An Event write that stop cut off can
-// still land after the release, and an Event is the one write that
-// another copy does not read or overwrite.
+// The release comes after run returns and the Event recorder has shut
+// down. run returns only after the pass in flight has answered its
+// Person, and every write of that pass returns before the next request
+// is sent. The recorder writes the Events of the last pass from its own
+// goroutine, and Shutdown returns after its last request has returned.
+// So no write is in flight when the Lease is free. When the recorder's
+// last write does not return in time, operate answers the error and
+// keeps the Lease: the process exits holding it, and a waiting copy
+// takes it when it expires.
 func (p process) operate(stop context.Context) error {
 	lead, err := election.Start(stop, p.lease, election.Options{
 		Name:      leaseName,
@@ -96,8 +99,13 @@ func (p process) operate(stop context.Context) error {
 		return err
 	}
 	bakers := &bakers{client: client, image: image, namespace: p.namespace}
-	recorder := events.New(stop, client, component, events.Options{Instance: p.pod, Log: p.eventLog})
+	recorder := events.New(context.Background(), client, component, events.Options{Instance: p.pod, Log: p.eventLog})
 	newOperator(client, p.transport, bakers, recorder).run(stop, p.watcher)
+	ctx, cancel := context.WithTimeout(context.Background(), events.ShutdownTimeout)
+	defer cancel()
+	if err := recorder.Shutdown(ctx); err != nil {
+		return fmt.Errorf("%w; leaving the Lease to expire", err)
+	}
 	lead.StepDown()
 	return nil
 }

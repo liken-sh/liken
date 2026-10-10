@@ -10,15 +10,19 @@ package main
 // synctest bubble, on the fake clock.
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/liken-sh/liken/kubernetes/election"
 	"github.com/liken-sh/liken/kubernetes/election/electiontest"
+	"github.com/liken-sh/liken/kubernetes/events"
+	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 )
 
 const testLeaseNamespace = "liken-system"
@@ -81,7 +85,7 @@ func TestAStepDownQuietsTheBusBeforeItReleasesTheLease(t *testing.T) {
 		leader.stepDown(func() bool {
 			holderWhileQuieting = server.Holder()
 			return true
-		})
+		}, nil)
 
 		mustMatch(t, holderWhileQuieting, leader.Identity())
 		mustMatch(t, server.Holder(), "")
@@ -95,12 +99,94 @@ func TestAStepDownWhoseBusDoesNotStopKeepsTheLease(t *testing.T) {
 		server := electiontest.New(leaseName, testLeaseNamespace)
 		leader := newLeader(t, server)
 
-		leader.stepDown(func() bool { return false })
+		leader.stepDown(func() bool { return false }, nil)
 
 		mustMatch(t, server.Holder(), leader.Identity())
 		lines := leader.reported()
 		mustMatch(t, lines[len(lines)-1],
 			"media.liken.sh: the bus session did not stop; leaving the Lease to expire")
+	})
+}
+
+// heldEvents is an Event recorder whose API server holds each write
+// until the test lets it through, and notes the Lease's holder as each
+// write lands.
+type heldEvents struct {
+	recorder *events.Recorder
+	through  chan struct{}
+
+	mu      sync.Mutex
+	holders []string
+}
+
+func holdEvents(t *testing.T, server *electiontest.Server) *heldEvents {
+	h := &heldEvents{through: make(chan struct{})}
+	recorded := &eventstest.Events{}
+	client := testAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-h.through
+		h.mu.Lock()
+		h.holders = append(h.holders, server.Holder())
+		h.mu.Unlock()
+		recorded.ServeHTTP(w, r)
+	}))
+	h.recorder = events.New(context.Background(), client, operatorComponent, events.Options{})
+	return h
+}
+
+func (h *heldEvents) landedWhileHeldBy() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]string(nil), h.holders...)
+}
+
+// A shutdown waits for the Event the recorder is writing, and releases
+// the Lease after it lands, so no Event of this copy lands while another
+// copy leads.
+func TestAStepDownReleasesTheLeaseAfterTheRecordersLastWrite(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		server := electiontest.New(leaseName, testLeaseNamespace)
+		leader := newLeader(t, server)
+		held := holdEvents(t, server)
+		held.recorder.Normal(playRef(testPlay()), "Started", "Started the run.")
+		synctest.Wait()
+
+		stepped := make(chan struct{})
+		go func() {
+			leader.stepDown(func() bool { return true }, held.recorder)
+			close(stepped)
+		}()
+		synctest.Wait()
+		holderWhileWriting := server.Holder()
+		close(held.through)
+		<-stepped
+
+		mustMatch(t, holderWhileWriting, leader.Identity())
+		mustMatchAll(t, held.landedWhileHeldBy(), []string{leader.Identity()})
+		mustMatch(t, server.Holder(), "")
+	})
+}
+
+// A recorder whose last write does not return in time keeps the Lease,
+// so the write can land before another copy leads.
+func TestAStepDownWhoseRecorderDoesNotStopKeepsTheLease(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		server := electiontest.New(leaseName, testLeaseNamespace)
+		leader := newLeader(t, server)
+		held := holdEvents(t, server)
+		held.recorder.Normal(playRef(testPlay()), "Started", "Started the run.")
+		synctest.Wait()
+		start := time.Now()
+
+		leader.stepDown(func() bool { return true }, held.recorder)
+		waited := time.Since(start)
+		close(held.through)
+		synctest.Wait()
+
+		mustMatch(t, waited, events.ShutdownTimeout)
+		mustMatch(t, server.Holder(), leader.Identity())
+		lines := leader.reported()
+		mustMatch(t, lines[len(lines)-1],
+			"media.liken.sh: the Event recorder's last write had not returned: context deadline exceeded; leaving the Lease to expire")
 	})
 }
 
@@ -132,7 +218,7 @@ func TestTheGuardedClientSendsNoWriteAfterTheStepDown(t *testing.T) {
 		}
 		mustSucceed(t, write())
 
-		leader.stepDown(func() bool { return true })
+		leader.stepDown(func() bool { return true }, nil)
 
 		mustMatch(t, errors.Is(write(), election.ErrNotLeading), true)
 		mustSucceed(t, client.Request(http.MethodGet, playPath("den", "film"), "", nil, nil))

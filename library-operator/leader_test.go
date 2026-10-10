@@ -11,6 +11,7 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"slices"
 	"strings"
 	"sync"
@@ -19,8 +20,12 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 	"github.com/liken-sh/liken/kubernetes/election"
 	"github.com/liken-sh/liken/kubernetes/election/electiontest"
+	"github.com/liken-sh/liken/kubernetes/events"
+	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 )
 
 func newLeaseServer() *electiontest.Server {
@@ -116,7 +121,7 @@ func TestAStepDownQuietsTheBusBeforeItReleasesTheLease(t *testing.T) {
 		leader.stepDown(func() bool {
 			holderWhileQuieting = server.Holder()
 			return true
-		})
+		}, nil)
 
 		if holderWhileQuieting != leader.Identity() {
 			t.Errorf("holder while the bus stopped = %q, want %q", holderWhileQuieting, leader.Identity())
@@ -138,13 +143,104 @@ func TestAStepDownWhoseBusDoesNotStopKeepsTheLease(t *testing.T) {
 		server := newLeaseServer()
 		leader := holdingCandidate(t, server, "library-operator-a")
 
-		leader.stepDown(func() bool { return false })
+		leader.stepDown(func() bool { return false }, nil)
 		time.Sleep(election.RetryPeriod)
 
 		if server.Holder() != leader.Identity() {
 			t.Errorf("holder = %q, want the Lease still held by %q", server.Holder(), leader.Identity())
 		}
 		want := "library.liken.sh: the bus session did not stop; leaving the Lease to expire"
+		if lines := leader.lineLog(); !slices.Contains(lines, want) {
+			t.Errorf("lines = %q, want %q", lines, want)
+		}
+	})
+}
+
+// heldEvents is an Event recorder whose API server holds each write
+// until the test lets it through, and notes the Lease's holder as each
+// write lands.
+type heldEvents struct {
+	recorder *events.Recorder
+	through  chan struct{}
+
+	mu      sync.Mutex
+	holders []string
+}
+
+func holdEvents(t *testing.T, server *electiontest.Server) *heldEvents {
+	h := &heldEvents{through: make(chan struct{})}
+	recorded := &eventstest.Events{}
+	api := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-h.through
+		h.mu.Lock()
+		h.holders = append(h.holders, server.Holder())
+		h.mu.Unlock()
+		recorded.ServeHTTP(w, r)
+	}))
+	client := apiclient.New(apiservertest.Host, api.Client(), "")
+	h.recorder = events.New(context.Background(), client, eventComponent, events.Options{})
+	return h
+}
+
+func (h *heldEvents) landedWhileHeldBy() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.holders)
+}
+
+var movies = events.ObjectReference{Kind: "Library", Namespace: "house", Name: "movies"}
+
+// A shutdown waits for the Event the recorder is writing, and releases
+// the Lease after it lands, so no Event of this copy lands while another
+// copy leads.
+func TestAStepDownReleasesTheLeaseAfterTheRecordersLastWrite(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		server := newLeaseServer()
+		leader := holdingCandidate(t, server, "library-operator-a")
+		held := holdEvents(t, server)
+		held.recorder.Normal(movies, "ScanStarted", "Started a scan.")
+		synctest.Wait()
+
+		stepped := make(chan struct{})
+		go func() {
+			leader.stepDown(func() bool { return true }, held.recorder)
+			close(stepped)
+		}()
+		synctest.Wait()
+		holderWhileWriting := server.Holder()
+		close(held.through)
+		<-stepped
+
+		if holderWhileWriting != leader.Identity() {
+			t.Errorf("holder while the Event was in flight = %q, want %q", holderWhileWriting, leader.Identity())
+		}
+		if landed := held.landedWhileHeldBy(); !slices.Equal(landed, []string{leader.Identity()}) {
+			t.Errorf("the Events landed while the Lease named %q, want only %q", landed, leader.Identity())
+		}
+		if server.Holder() != "" {
+			t.Errorf("holder after the step down = %q, want the Lease released", server.Holder())
+		}
+	})
+}
+
+// A recorder whose last write does not return in time keeps the Lease,
+// so the write can land before another copy leads.
+func TestAStepDownWhoseRecorderDoesNotStopKeepsTheLease(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		server := newLeaseServer()
+		leader := holdingCandidate(t, server, "library-operator-a")
+		held := holdEvents(t, server)
+		held.recorder.Normal(movies, "ScanStarted", "Started a scan.")
+		synctest.Wait()
+
+		leader.stepDown(func() bool { return true }, held.recorder)
+		close(held.through)
+		synctest.Wait()
+
+		if server.Holder() != leader.Identity() {
+			t.Errorf("holder = %q, want the Lease still held by %q", server.Holder(), leader.Identity())
+		}
+		want := "library.liken.sh: the Event recorder's last write had not returned: context deadline exceeded; leaving the Lease to expire"
 		if lines := leader.lineLog(); !slices.Contains(lines, want) {
 			t.Errorf("lines = %q, want %q", lines, want)
 		}

@@ -28,6 +28,7 @@ import (
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/election"
+	"github.com/liken-sh/liken/kubernetes/events"
 )
 
 // leaseName names the Lease the operator's copies compete for, in the
@@ -69,13 +70,20 @@ func (l *leadership) guard(client *apiclient.Client) *apiclient.Client {
 // stepDown ends this process's lead on a shutdown. The caller calls it
 // after the last pass. It runs quiet first, which stops the bus session,
 // because a press or a report on the bus can write to the API. Then it
-// releases the Lease. quiet answers false when the session did not stop
-// in time, and then the Lease is not released: the process exits
-// holding it, and a waiting copy takes it when it expires, after any
-// write the session still makes can land.
-func (l *leadership) stepDown(quiet func() bool) {
+// shuts the Event recorder down, because the recorder writes the Events
+// of the last pass from its own goroutine. Then it releases the Lease.
+// When the session or the recorder does not stop in time, the Lease is
+// not released: the process exits holding it, and a waiting copy takes
+// it when it expires, after any write still in flight can land.
+func (l *leadership) stepDown(quiet func() bool, recorder *events.Recorder) {
 	if !quiet() {
 		l.report("the bus session did not stop; leaving the Lease to expire")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), events.ShutdownTimeout)
+	defer cancel()
+	if err := recorder.Shutdown(ctx); err != nil {
+		l.report(err.Error() + "; leaving the Lease to expire")
 		return
 	}
 	l.StepDown()

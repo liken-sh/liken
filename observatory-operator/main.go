@@ -67,8 +67,9 @@ func operate() error {
 		Name: leaseName, Namespace: namespace, Pod: pod,
 		Report: func(line string) { fmt.Fprintf(os.Stderr, "observatory-operator: %s\n", line) },
 	}
-	return actWhileLeading(ctx, config, options, func(mayWrite func() error) {
-		n := leadingNamespaces(ctx, client, mayWrite, nil, nil, "")
+	return actWhileLeading(ctx, config, options, func(mayWrite func() error) error {
+		n := leadingNamespaces(client, mayWrite, nil, nil, "")
 		n.run(ctx, func(ctx context.Context, changed *bell) *stores { return startWatches(ctx, watcher, changed) })
+		return n.finish()
 	})
 }

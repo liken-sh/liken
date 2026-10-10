@@ -123,14 +123,23 @@ func run(stop, watches context.Context, leader *election.Lead, client *apiclient
 	// The recorder posts the Events about the Machines and the Cluster
 	// (events.go). It writes through the guarded client, so a replica
 	// that lost the election posts nothing, and from its own goroutine,
-	// so a sweep never waits on an Event.
-	fleet.recorder = events.New(stop, client, component, events.Options{})
+	// so a sweep never waits on an Event. It outlives stop, so the
+	// Events of the last sweep are written.
+	fleet.recorder = events.New(context.Background(), client, component, events.Options{})
 
 	operate(stop, leader.MayAct, fleet, wakes, ticks, om, cm)
-	// The sweep has returned, so no write of the sweep is in flight, and
-	// the write guard refuses every write after the step down. So the
-	// Lease is released at once, and a waiting copy takes it on its
-	// next try.
+	// The sweep has returned, so no write of the sweep is in flight.
+	// The recorder writes the Events the sweep posted, and Shutdown
+	// returns after its last request has returned. So the Lease is
+	// released after the last write, and a waiting copy takes it on its
+	// next try. A recorder whose last write did not return in time
+	// leaves the Lease to expire, after that write can land.
+	flush, cancel := context.WithTimeout(context.Background(), events.ShutdownTimeout)
+	defer cancel()
+	if err := fleet.recorder.Shutdown(flush); err != nil {
+		fmt.Printf("%v; leaving the Lease to expire\n", err)
+		return
+	}
 	leader.StepDown()
 }
 
