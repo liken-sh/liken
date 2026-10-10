@@ -225,6 +225,7 @@ func main() {
 	restart := &privacyRestart{client: client, namespace: namespace, pod: podName, recorder: recorder}
 	objects := newInventory(client, newBlueZRadio(conn), held, nodeName, namespace, readings)
 	objects.recorder = recorder
+	objects.inputs.recorder = recorder
 	objects.node = nodeReference(owner)
 	// The pass reads the objects the watches hold from their stores
 	// (objectcache.go).

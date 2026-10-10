@@ -5,8 +5,9 @@ package main
 // a Node.
 //
 // An Event records what just happened: a window opened or closed, a
-// device paired, a bond or a radio went away, a change of privacy
-// restarted the pod, or the trace turned on or off. A condition and a
+// device paired, a bond or a radio went away, the input recovery
+// powered the adapter off and on, a change of privacy restarted the
+// pod, or the trace turned on or off. A condition and a
 // status field hold what is true now, and the API server deletes an
 // Event an hour after its last write, so each fact here is also in a
 // status field or a log line.
@@ -54,6 +55,17 @@ const (
 	// operator could not make the virtual input device that a claim
 	// on the controller receives.
 	reasonInputRelayFailed = "InputRelayFailed"
+
+	// reasonAdapterPowerCycled is Normal, on a Peripheral: bluetoothd
+	// did not disconnect the controller when the input recovery asked,
+	// so the operator powered the adapter off and on, which dropped
+	// every link on the adapter (inputrecovery.go).
+	reasonAdapterPowerCycled = "AdapterPowerCycled"
+
+	// reasonAdapterPowerOnFailed is a Warning, on a Peripheral: the
+	// input recovery powered the adapter off, and bluetoothd refused to
+	// power it on again. Nothing powers it on until the pod restarts.
+	reasonAdapterPowerOnFailed = "AdapterPowerOnFailed"
 
 	// reasonRadioClaimed is Normal, on the Node: bluetoothd in this
 	// pod reports the radio, and the operator serves it.

@@ -210,13 +210,25 @@ kernel is stuck. After 15 seconds in that state, the operator calls
 `Disconnect` and then `Connect` on the controller through
 `bluetoothd`, which runs the input profile again.
 
-When a reconnect does not bring the HID device back, the operator
-waits a minute before the next one. The wait doubles after each
-reconnect that does not help, up to 15 minutes. A device that has
-never delivered input, such as a speaker that lists a HID profile and
-never opens it, is never reconnected. The operator posts no `Event`
-for a reconnect. The `operator` container's log has a line when it
-starts one and when it finishes:
+`bluetoothd` can also report a link that the kernel no longer has.
+Then the `Disconnect` fails or gets no reply, and a `Connect` would
+do nothing. So when the `Disconnect` fails, the operator powers the
+adapter off and on through `bluetoothd` instead. The power cycle
+drops every link on the adapter, not only the stuck one: each
+controller connects again on its next press, and the operator pages
+each speaker again. The operator posts an `AdapterPowerCycled`
+`Event` on the stuck controller's `Peripheral`. If `bluetoothd` does
+not power the adapter on again, the operator posts an
+`AdapterPowerOnFailed` Warning, and the adapter stays off until you
+delete the operator's pod on that node.
+
+When a reconnect or a power cycle does not bring the HID device back,
+the operator waits a minute before the next one. The wait doubles
+after each one that does not help, up to 15 minutes. A device that
+has never delivered input, such as a speaker that lists a HID profile
+and never opens it, is never reconnected. The operator posts no
+`Event` for a reconnect. The `operator` container's log has a line
+when it starts a reconnect or a power cycle and when it finishes:
 
     kubectl -n liken-system logs ds/bluetooth-operator -c operator
 

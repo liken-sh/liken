@@ -264,6 +264,17 @@ because `liken` publishes the adapter as a device that allocates
 once. The kernel arbitrates nothing between two stacks on one
 adapter.
 
+When the `bluetoothd` container starts, it powers every adapter off
+at the kernel before `bluetoothd` runs, and `bluetoothd` then powers
+each adapter on. A `bluetoothd` that was killed or crashed leaves its
+links up, and a new `bluetoothd` that inherits such a link marks the
+device connected but never opens its input, so the controller sends
+nothing. The power-off ends those links. Each controller connects
+again on its next press, the same as after any restart of the pod.
+The `bluetoothd` container's log has a line for each adapter:
+
+    kubectl -n liken-system logs ds/bluetooth-operator -c bluetoothd
+
 ## Verify
 
     kubectl get pods -n liken-system -l app=bluetooth-operator
@@ -286,7 +297,8 @@ the next step.
 ## Read the Events
 
 The operator posts a Kubernetes `Event` when a window opens or
-closes, a device pairs, a bond, a relay, or the radio fails, a
+closes, a device pairs, a bond, a relay, or the radio fails, the
+operator powers the adapter off and on to recover a controller, a
 change of privacy restarts the pod, or the trace turns on or off.
 Read them with `kubectl describe` on the object. A `Peripheral`, an `Adapter`, and a `Node` are
 cluster-scoped, so their `Event`s are in `default`, and
@@ -303,6 +315,8 @@ cluster-scoped, so their `Event`s are in `default`, and
 | `Paired` | Normal | `PairingRequest`, `Peripheral` | The device holds a bond, and the operator created its `Peripheral`. |
 | `BondLost` | Warning | `Peripheral` | `bluetoothd` holds no bond with the device any more. The `Peripheral` stays until you delete it. |
 | `InputRelayFailed` | Warning | `Peripheral` | The operator could not make the virtual input device that a claim on the controller receives. |
+| `AdapterPowerCycled` | Normal | `Peripheral` | `bluetoothd` did not disconnect a controller that has a link and no input, so the operator powered the adapter off and on. Every link on the adapter dropped. |
+| `AdapterPowerOnFailed` | Warning | `Peripheral` | The operator powered the adapter off to recover the controller, and `bluetoothd` did not power it on again. Delete the operator's pod on that node to power the adapter on. |
 | `RadioClaimed` | Normal | `Node` | `bluetoothd` in the pod reports the radio. |
 | `RadioLost` | Warning | `Node` | The radio is gone from `bluetoothd`: the adapter was unplugged or reset. |
 | `PrivacyChanged` | Normal | `Adapter` | `spec.privacy` differs from the value `bluetoothd` started with, and the operator deletes its own pod so that `bluetoothd` starts with the new value. |
@@ -313,7 +327,8 @@ Energy remote drops its link between presses, so the `Connected`
 condition and the `bluetooth_disconnects_total` metric hold those
 changes. A reconnect of a controller that holds a link with no input
 posts no `Event` either, and the `operator` container's log records
-it, as [Pair a controller](/docs/guides/pair-a-controller/#when-a-connected-controller-sends-no-input)
+it. A power cycle of the adapter for the same controller posts
+`AdapterPowerCycled`, as [Pair a controller](/docs/guides/pair-a-controller/#when-a-connected-controller-sends-no-input)
 describes. The API server deletes an `Event` an hour after its last
 write. The status and the pod's log keep each fact longer.
 

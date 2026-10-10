@@ -1,5 +1,5 @@
 // start-bluetoothd starts the pod's D-Bus system bus, waits for the
-// bus socket, and then becomes bluetoothd.
+// bus socket, powers the adapters off, and then becomes bluetoothd.
 //
 // The bus belongs to this pod. bluetoothd's whole API is the D-Bus
 // system bus, and a pod has no host bus to join, so this image includes
@@ -13,6 +13,10 @@
 // no shell. Three static binaries and their configuration are
 // the whole of it, and a shell would be a fourth binary added only to
 // run this program.
+//
+// Before the exec, it powers every adapter off at the kernel, so that
+// bluetoothd starts with no connection that an earlier bluetoothd
+// left behind (poweroff.go).
 //
 // The exec at the end makes bluetoothd this container's process, so
 // the kubelet's TERM reaches bluetoothd directly and bluetoothd writes
@@ -135,10 +139,9 @@ func run() error {
 		return err
 	}
 
-	// -n keeps bluetoothd in the foreground, because it daemonizes by
-	// default and a daemonized process would leave this container with
-	// nothing running in it.
-	return syscall.Exec(bluetoothdPath, []string{bluetoothdPath, "-n"}, os.Environ())
+	// The power-off comes last, after the bus is up, so that the
+	// adapters are off for the shortest time (poweroff.go).
+	return becomeBluetoothd(openManagement, os.Stdout, syscall.Exec)
 }
 
 // busSocket reads the socket path out of a D-Bus address. Only the
@@ -223,8 +226,10 @@ var privacyValues = map[string]bool{
 // AutoEnable powers the adapter on when bluetoothd starts. bluetoothd
 // leaves an adapter down otherwise, so without this a machine that
 // reboots comes back with its radio off and its bonds unreachable, and
-// somebody has to run bluetoothctl to turn it on. No deployment has a
-// reason to turn it off, so it has no setting.
+// somebody has to run bluetoothctl to turn it on. This program also
+// powers every adapter off before bluetoothd starts (poweroff.go), so
+// AutoEnable is what powers each one on again after every start. No
+// deployment has a reason to turn it off, so it has no setting.
 func writeMainConf(path, settings string) error {
 	privacy := "off"
 	contents, err := os.ReadFile(settings)

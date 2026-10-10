@@ -42,8 +42,8 @@
 
 FROM alpine:3.22 AS daemons
 
-ARG BLUEZ_VERSION=5.82
-ARG BLUEZ_SHA256=0739fa608a837967ee6d5572b43fb89946a938d1c6c26127158aaefd743a790b
+ARG BLUEZ_VERSION=5.87
+ARG BLUEZ_SHA256=26bdcf2cebd7310c6f598850606b037ef0c515fe6608ebc54d22c50c4c32b35f
 ARG DBUS_VERSION=1.16.2
 ARG DBUS_SHA256=0ba2a1a4b16afe7bceb2c07e9ce99a8c2c3508e5dec290dbb643384bd6beb7e2
 
@@ -116,11 +116,11 @@ RUN ./configure \
 # calls any method on org.bluez, so a person starts one connection or
 # reads one property with no shell.
 #
-# The three additions cost 3,042,456 bytes on a 7,851,292-byte
-# image: btmgmt 500,008, btmon 2,114,552, and dbus-send 427,896,
-# each after strip. btmon is the largest because its decoder tables
-# name every HCI command, event, and profile. dbus-monitor stays
-# out: it costs 415,608 bytes and watches the same events btmon
+# The three additions cost 4,190,512 bytes on a 14,352,243-byte
+# image, measured uncompressed: btmgmt 1,525,056, btmon 2,237,560, and
+# dbus-send 427,896, each after strip. btmon is the largest because
+# its decoder tables name every HCI command, event, and profile.
+# dbus-monitor stays out: it costs 415,608 bytes and watches the same events btmon
 # already reports, one layer up.
 #
 # btmgmt is a noinst_PROGRAMS entry in Makefile.tools, so make

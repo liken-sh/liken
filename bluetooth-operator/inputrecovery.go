@@ -23,11 +23,32 @@ package main
 // input node that exists is always found. A stuck controller is one
 // whose HID device does not exist at all, and only bluetoothd can
 // create it. So the repair is a new connection: Device1.Disconnect,
-// then Device1.Connect, which runs the input profile again. The
-// Connect is not optional. BlueZ turns off the passive-scan reconnect
-// of a Low Energy device on a Disconnect call until a Connect call
-// turns it on again, so a Disconnect alone would leave a remote that
-// cannot reconnect until bluetoothd restarts.
+// then Device1.Connect, which runs the input profile again on a
+// controller that answers. The operator trusts every device it pairs,
+// and BlueZ keeps the passive-scan reconnect of a trusted Low Energy
+// device on through a Disconnect call, so a remote that sleeps through
+// the Connect still connects on its next press.
+//
+// The Disconnect can fail on a link that exists only in bluetoothd.
+// bluetoothd can report a device Connected after the kernel dropped
+// the link, and then the kernel answers the disconnect with "no link".
+// BlueZ 5.82 sends no reply to the D-Bus call in that case, so the
+// call runs out its timeout. BlueZ 5.87 reads the same answer as a
+// completed disconnect and replies. A Connect after a failed
+// Disconnect would not help: BlueZ answers a Connect on a Low Energy
+// device it holds as connected with success at once, and does
+// nothing. So when the Disconnect fails, for any reason and on any
+// release, the operator powers the adapter off and on through
+// bluetoothd. The power-off makes bluetoothd drop every connection it
+// holds, stale or not, and the power-on makes the kernel restore the
+// passive-scan reconnect of each bonded Low Energy device.
+//
+// The power cycle drops every other link on the adapter too: each
+// controller and each speaker disconnects. The operator accepts that,
+// because the recovery is rare, the stuck controller sends no input
+// until its link is gone, and each bonded device connects again: a
+// controller on its next press, and a speaker when the connector
+// pages it (connect.go).
 //
 // Two clocks bound the repair. The grace gives an ordinary connect the
 // time to create its HID device, which takes about a second. The wait
@@ -40,6 +61,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/events"
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
 )
@@ -76,6 +99,10 @@ type inputRecovery struct {
 	// changes state the pass reads from bluetoothd and from sysfs, and
 	// the goroutine that finishes it is not the loop.
 	wake func()
+
+	// recorder posts the Events of a power cycle (events.go). A nil
+	// recorder posts nothing.
+	recorder *events.Recorder
 
 	mu sync.Mutex
 
@@ -179,9 +206,9 @@ func (r *inputRecovery) stuck(device deviceState, pass *inventoryPass) {
 	go r.reconnect(device)
 }
 
-// reconnect runs the two blocking calls and then wakes the loop, so
-// the next pass reads the HID device the new connection made, or
-// reads that there is still none.
+// reconnect runs the blocking calls and then wakes the loop, so the
+// next pass reads the HID device the new connection made, or reads
+// that there is still none.
 func (r *inputRecovery) reconnect(device deviceState) {
 	defer r.attempts.Done()
 	defer r.wake()
@@ -192,17 +219,45 @@ func (r *inputRecovery) reconnect(device deviceState) {
 	}()
 	name := publishedMAC(device.Address.Directory())
 	if err := r.radio.Disconnect(device.Address); err != nil {
-		fmt.Printf("controller %s: the disconnect before the reconnect failed: %v\n", name, err)
+		fmt.Printf("controller %s: bluetoothd did not disconnect it: %v; powering the adapter off and on\n", name, err)
+		r.powerCycle(device, err)
 		return
 	}
 	if err := r.radio.Connect(device.Address); err != nil {
 		// A remote that went back to sleep between the two calls does not
-		// answer the Connect. The call still turns the passive-scan
-		// reconnect back on, so the next press connects it.
+		// answer the Connect. It is trusted, so its passive-scan
+		// reconnect is still on, and the next press connects it.
 		fmt.Printf("controller %s: the reconnect failed: %v\n", name, err)
 		return
 	}
 	fmt.Printf("controller %s: reconnected\n", name)
+}
+
+// powerCycle powers the adapter off and on after bluetoothd did not
+// disconnect one controller. It runs inside a reconnect, so the wait
+// between two reconnects also bounds how often it runs.
+//
+// A failed power-off changed nothing, so it posts no Event, and the
+// next reconnect tries again after the wait. A failed power-on leaves
+// the radio off, and nothing in the operator powers it on again.
+// bluetoothd powers the adapter on when it starts, so a new pod does,
+// and the Warning tells a person to delete this one.
+func (r *inputRecovery) powerCycle(device deviceState, cause error) {
+	name := publishedMAC(device.Address.Directory())
+	about := controllerReference(macFromDeviceName(device.Address.Key()))
+	if err := r.radio.SetAdapterPowered(false); err != nil {
+		fmt.Printf("controller %s: powering the adapter off failed: %v\n", name, err)
+		return
+	}
+	if err := r.radio.SetAdapterPowered(true); err != nil {
+		fmt.Printf("controller %s: the adapter is off, and powering it on failed: %v\n", name, err)
+		r.recorder.Warning(about, reasonAdapterPowerOnFailed, fmt.Sprintf(
+			"the operator powered the adapter off to recover the controller, and bluetoothd did not power it on again: %v. Delete the operator's pod on this node to power the adapter on.", err))
+		return
+	}
+	fmt.Printf("controller %s: powered the adapter off and on; every link on it dropped\n", name)
+	r.recorder.Normal(about, reasonAdapterPowerCycled, fmt.Sprintf(
+		"bluetoothd did not disconnect the controller (%v), so the operator powered the adapter off and on. Every link on the adapter dropped, and each bonded device can connect again.", cause))
 }
 
 // forget drops everything held about a controller that has its HID

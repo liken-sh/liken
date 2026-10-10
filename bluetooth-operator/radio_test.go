@@ -163,6 +163,16 @@ type fakeRadio struct {
 	// nil channel is a call that returns at once.
 	connectHolds chan struct{}
 
+	// disconnectErr makes Disconnect fail and leave the device
+	// connected, the way a call fails when bluetoothd sends no reply
+	// before the call's timeout.
+	disconnectErr error
+
+	// powerOffErr and powerOnErr make SetAdapterPowered fail for one
+	// value and leave the adapter as it was.
+	powerOffErr error
+	powerOnErr  error
+
 	// mu covers the fields above, because Connect runs on its own
 	// goroutine while the pass reads the snapshot on the loop's.
 	mu sync.Mutex
@@ -284,7 +294,31 @@ func (r *fakeRadio) Connect(device bonds.Address) error {
 
 func (r *fakeRadio) Disconnect(device bonds.Address) error {
 	r.record("Disconnect %s", device.Key())
+	r.mu.Lock()
+	err := r.disconnectErr
+	r.mu.Unlock()
+	if err != nil {
+		return err
+	}
 	r.update(device, func(state *deviceState) { state.Connected = false })
+	return nil
+}
+
+// SetAdapterPowered drops every link when it powers the adapter off,
+// the way bluetoothd's adapter_stop removes every connection it holds.
+func (r *fakeRadio) SetAdapterPowered(powered bool) error {
+	r.record("SetAdapterPowered %t", powered)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := map[bool]error{false: r.powerOffErr, true: r.powerOnErr}[powered]; err != nil {
+		return err
+	}
+	r.snapshot.Adapter.Powered = powered
+	if !powered {
+		for index := range r.snapshot.Devices {
+			r.snapshot.Devices[index].Connected = false
+		}
+	}
 	return nil
 }
 

@@ -25,9 +25,11 @@ threshold:
 
 override:
   # The bluetoothd supervisor: what is testable is the argument
-  # building. Starting the daemon needs a real bus.
+  # building and the power-off over a fake management channel.
+  # Starting the daemon needs a real bus, and opening the channel
+  # needs a real adapter.
   - path: ^bluetoothd$
-    threshold: 49
+    threshold: 58
   # start-btmon: the supervisor, the watch, and the child are tested.
   # main and run name the real settings directory and the real btmon.
   - path: ^bluetoothd/btmon$

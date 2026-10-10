@@ -6,7 +6,9 @@ package main
 // are paired, and which of them are connected. The pairing API needs
 // more. It opens a discovery window, it pairs a device a person
 // approved, it trusts that device so it reconnects on its own, it
-// renames a device and the radio itself, and it removes a bond. Every
+// renames a device and the radio itself, and it removes a bond. The
+// input recovery reconnects a controller, and powers the radio off and
+// on when bluetoothd does not disconnect one (inputrecovery.go). Every
 // one of those is a D-Bus call into bluetoothd, and one interface
 // collects them so that a test can drive the controllers above
 // without a bus.
@@ -175,6 +177,10 @@ type radio interface {
 	// not connectable answers no bonded device, so the reconcile pass
 	// asserts it on.
 	SetAdapterConnectable(connectable bool) error
+
+	// SetAdapterPowered powers the radio on or off through bluetoothd.
+	// A power-off drops every link on the radio.
+	SetAdapterPowered(powered bool) error
 
 	SetDeviceAlias(device bonds.Address, alias string) error
 	SetDeviceTrusted(device bonds.Address, trusted bool) error
@@ -407,6 +413,14 @@ func (r *blueZRadio) SetAdapterConnectable(connectable bool) error {
 		return err
 	}
 	return r.setProperty(path, adapterInterface, "Connectable", connectable)
+}
+
+func (r *blueZRadio) SetAdapterPowered(powered bool) error {
+	path, err := r.adapterPath()
+	if err != nil {
+		return err
+	}
+	return r.setProperty(path, adapterInterface, "Powered", powered)
 }
 
 func (r *blueZRadio) SetDeviceAlias(device bonds.Address, alias string) error {
