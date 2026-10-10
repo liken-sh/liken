@@ -108,13 +108,6 @@ type Options struct {
 	// Exit ends the process after a lost Lease, with code 1. It is
 	// os.Exit unless a test sets it.
 	Exit func(code int)
-
-	// ActWhenRefused makes the copy act without an election while the
-	// API server refuses the Lease (unelected.go). Only liken's cluster
-	// operator sets it, for the reason unelected.go gives. Unelected
-	// receives the mode each time it changes.
-	ActWhenRefused bool
-	Unelected      func(bool)
 }
 
 // Lead is this process's part in the election.
@@ -137,12 +130,6 @@ type Lead struct {
 	// stepping marks an end this process chose, a shutdown, so the end
 	// of the election is not a loss.
 	stepping atomic.Bool
-
-	// unelected is true while this copy acts without an election.
-	// modeChanged receives a signal each time it flips, and when the
-	// lead starts.
-	unelected   atomic.Bool
-	modeChanged chan struct{}
 }
 
 // New builds the election. The identity is the pod's name and a random
@@ -164,12 +151,11 @@ func New(config *rest.Config, options Options) (*Lead, error) {
 	suffix := make([]byte, 4)
 	_, _ = rand.Read(suffix)
 	l := &Lead{
-		options:     options,
-		identity:    options.Pod + "_" + hex.EncodeToString(suffix),
-		leases:      leases,
-		started:     make(chan struct{}),
-		done:        make(chan struct{}),
-		modeChanged: make(chan struct{}, 1),
+		options:  options,
+		identity: options.Pod + "_" + hex.EncodeToString(suffix),
+		leases:   leases,
+		started:  make(chan struct{}),
+		done:     make(chan struct{}),
 	}
 	l.lock = &renewalClock{
 		Interface: &resourcelock.LeaseLock{
@@ -177,8 +163,7 @@ func New(config *rest.Config, options Options) (*Lead, error) {
 			Client:     leases,
 			LockConfig: resourcelock.ResourceLockConfig{Identity: l.identity},
 		},
-		pod:  options.Pod + "_",
-		lead: l,
+		pod: options.Pod + "_",
 	}
 	report := options.Report
 	subject := l.subject()
@@ -197,8 +182,6 @@ func New(config *rest.Config, options Options) (*Lead, error) {
 			OnStartedLeading: func(context.Context) {
 				report(fmt.Sprintf("holding %s as %s", subject, l.identity))
 				close(l.started)
-				l.leaseAnswered(false)
-				l.signalMode()
 			},
 			OnNewLeader: func(holder string) {
 				if holder != "" && holder != l.identity {
@@ -261,12 +244,20 @@ func (l *Lead) Run() {
 	}()
 }
 
-// Await returns true when this process may act: it holds the Lease, or
-// it acts without an election (unelected.go). It returns false when stop
-// ends first. After a false return the election has ended and this
-// process holds nothing.
+// Await returns true when this process holds the Lease and may act. It
+// returns false when stop ends first. After a false return the election
+// has ended and this process holds nothing.
+//
+// A copy acts only while it holds the Lease. An error on a request of
+// the Lease, a 403 Forbidden among them, is an ordinary failure of the
+// election: a waiting copy keeps waiting, and a leader stops writing at
+// the write guard and exits when the elector gives up.
 func (l *Lead) Await(stop context.Context) bool {
-	if l.MayAct(stop) {
+	select {
+	case <-l.started:
+	case <-stop.Done():
+	}
+	if stop.Err() == nil {
 		return true
 	}
 	l.end()
@@ -295,9 +286,6 @@ var ErrNotLeading = errors.New("this copy does not hold a current leader Lease")
 // passes with no success, which is up to one retry period later, so the
 // guard stops writes first.
 func (l *Lead) MayWrite() error {
-	if l.unelected.Load() && !l.stepping.Load() {
-		return nil
-	}
 	if !l.Leads() || l.stepping.Load() {
 		return ErrNotLeading
 	}

@@ -4,8 +4,6 @@ import "time"
 
 // These give the tests in election_test the state they check.
 
-func (l *Lead) Unelected() bool          { return l.unelected.Load() }
-func (l *Lead) Acting() bool             { return l.acting() }
 func (l *Lead) Started() <-chan struct{} { return l.started }
 func (l *Lead) LastRenewal() time.Time   { return l.lock.lastRenewal() }
 

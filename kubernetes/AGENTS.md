@@ -29,8 +29,6 @@ that adds it names the operator. The hooks of that kind now are:
   `Client.WithWriteGuard`, `informer.InClusterAt`, `Options.Indexers`,
   `Options.UnreadyOnWatchError`, `memo.Versions.ForgetAt`, and the
   alias `memo.Meta`, for `liken`'s two operators.
-- `election.Options.ActWhenRefused` and `Options.Unelected`, and
-  `Lead.MayAct`, for `liken`'s cluster operator.
 
 The code the hook runs, such as the transform itself, stays in the
 operator.

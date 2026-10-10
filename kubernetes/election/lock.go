@@ -26,17 +26,12 @@ type renewalClock struct {
 	// A pod's name is a DNS subdomain, which has no underscore, so the
 	// prefix names this pod and no other.
 	pod string
-
-	// lead receives the answers of the Lease that decide the mode of
-	// unelected.go.
-	lead *Lead
 }
 
 func (r *renewalClock) Create(ctx context.Context, record resourcelock.LeaderElectionRecord) error {
 	sent := time.Now()
 	err := r.Interface.Create(ctx, record)
 	r.mark(sent, record, err)
-	r.lead.classifyWrite(err, true)
 	return err
 }
 
@@ -44,7 +39,6 @@ func (r *renewalClock) Update(ctx context.Context, record resourcelock.LeaderEle
 	sent := time.Now()
 	err := r.Interface.Update(ctx, record)
 	r.mark(sent, record, err)
-	r.lead.classifyWrite(err, false)
 	return err
 }
 
@@ -74,7 +68,6 @@ func (r *renewalClock) Update(ctx context.Context, record resourcelock.LeaderEle
 // any other writer ends it.
 func (r *renewalClock) Get(ctx context.Context) (*resourcelock.LeaderElectionRecord, []byte, error) {
 	record, raw, err := r.Interface.Get(ctx)
-	r.lead.classifyRead(record, err)
 	if err == nil && r.abandonedByThisPod(record.HolderIdentity, record.RenewTime.Time,
 		record.LeaseDurationSeconds, time.Now()) {
 		free := *record

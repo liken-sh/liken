@@ -43,24 +43,16 @@ func newServer() *electiontest.Server {
 }
 
 // candidate is one operator process under test, with the exit code it
-// would have ended with, or -1. exits closes when it exits. unelected
-// holds the last mode Options.Unelected received.
+// would have ended with, or -1. exits closes when it exits.
 type candidate struct {
 	*election.Lead
-	exitCode  atomic.Int32
-	exits     chan struct{}
-	unelected atomic.Bool
+	exitCode atomic.Int32
+	exits    chan struct{}
 }
 
 func (c *candidate) exited() bool { return c.exitCode.Load() >= 0 }
 
 func newCandidate(t *testing.T, server *electiontest.Server, pod string) *candidate {
-	return newCandidateActing(t, server, pod, false)
-}
-
-// newCandidateActing is a candidate that acts without an election while
-// the API server refuses the Lease, when refused is true.
-func newCandidateActing(t *testing.T, server *electiontest.Server, pod string, refused bool) *candidate {
 	t.Helper()
 	c := &candidate{exits: make(chan struct{})}
 	c.exitCode.Store(-1)
@@ -82,8 +74,6 @@ func newCandidateActing(t *testing.T, server *electiontest.Server, pod string, r
 				close(c.exits)
 			})
 		},
-		ActWhenRefused: refused,
-		Unelected:      c.unelected.Store,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -141,11 +131,6 @@ func TestAStepDownReleasesTheLease(t *testing.T) {
 		if err := leader.MayWrite(); err == nil {
 			t.Error("a copy that stepped down still allows writes")
 		}
-		stop, cancel := context.WithTimeout(t.Context(), election.RetryPeriod)
-		defer cancel()
-		if leader.MayAct(stop) {
-			t.Error("a copy that stepped down may still act")
-		}
 	})
 }
 
@@ -192,47 +177,6 @@ func TestAWaitingCopyTakesAReleasedLeaseAtOnce(t *testing.T) {
 
 		if !awaitWithin(replacement, nextTry) {
 			t.Fatalf("the new copy did not take the released Lease within %s, its longest wait between tries", nextTry)
-		}
-	})
-}
-
-// A leader that cannot renew refuses writes one renewal deadline after
-// its last renewal, before the election gives up, and then exits. It
-// exits before a waiting copy can take the Lease, which is one Lease
-// duration after the last renewal a waiting copy read. The renewal
-// after that exit is one retry period later at the earliest, so the
-// exit comes at most the duration less one retry period after the last
-// renewal.
-func TestALeaderThatCannotRenewExits(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		server := newServer()
-		leader := newCandidate(t, server, "an-operator-a")
-		if !leadsAtOnce(leader) {
-			t.Fatal("the copy did not take a Lease that nobody holds")
-		}
-		renewed := leader.LastRenewal()
-
-		server.Refuse(http.MethodPut, http.StatusInternalServerError)
-
-		time.Sleep(election.RenewDeadline)
-		synctest.Wait()
-		if err := leader.MayWrite(); err == nil || leader.exited() {
-			t.Errorf("one renewal deadline after the last renewal, MayWrite = %v and exited = %v; want writes refused before the exit",
-				err, leader.exited())
-		}
-		select {
-		case <-leader.exits:
-		case <-time.After(election.Duration):
-			t.Fatal("the leader kept acting with no renewal")
-		}
-		if exit, limit := time.Since(renewed), election.Duration-election.RetryPeriod; exit > limit {
-			t.Errorf("the leader exited %s after its last renewal, want at most %s", exit, limit)
-		}
-		if err := leader.MayWrite(); err == nil {
-			t.Error("a leader that exited still allows writes")
-		}
-		if code := leader.exitCode.Load(); code != 1 {
-			t.Errorf("exit code = %d, want 1", code)
 		}
 	})
 }
