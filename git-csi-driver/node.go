@@ -43,9 +43,7 @@ type node struct {
 	// clock is what each watch measures the quiesce and the sweep
 	// against.
 	clock clock
-	// How long a work tree nothing stages is kept, and how often
-	// the driver walks the store to find one.
-	sweepAfter time.Duration
+	// How often the driver walks the store's bare repositories.
 	sweepEvery time.Duration
 	// mounted asks the kernel whether a path is still a mount. A restarted
 	// driver asks it about every record.
@@ -66,12 +64,6 @@ type node struct {
 	staged   map[string]*volume
 	watchers map[string]*watcher
 	armings  map[string]context.CancelFunc
-	// The work trees the sweep kept because they hold commits that the
-	// followed ref does not, by the repository each one follows.
-	abandoned map[string]abandonedTree
-	// The unstage time of each work tree the last sweep pass kept, by
-	// volume. Only the sweep reads and writes it, one pass at a time.
-	kept map[string]time.Time
 }
 
 // newNode builds the service. base is the driver's run, so every fetch
@@ -88,7 +80,6 @@ func newNode(base context.Context, cfg *config, posting *events, readings *metri
 		quiesce:    defaultQuiesce,
 		sweep:      defaultSweep,
 		clock:      wallClock{},
-		sweepAfter: cfg.sweepAfter,
 		sweepEvery: defaultSweepEvery,
 		demandMin:  cfg.demandMin,
 		mountinfo:  mountTable,
@@ -98,7 +89,6 @@ func newNode(base context.Context, cfg *config, posting *events, readings *metri
 		staged:     map[string]*volume{},
 		watchers:   map[string]*watcher{},
 		armings:    map[string]context.CancelFunc{},
-		abandoned:  map[string]abandonedTree{},
 	}
 	answering.arms = newArming(answering, posting.client, logger)
 	answering.demands = newDemanding(answering, posting.client, logger)

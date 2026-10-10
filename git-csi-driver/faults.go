@@ -73,9 +73,6 @@ func (v *volume) stageFaults() []stageFault {
 			fmt.Sprintf("the remote holds no %s, so the driver pushes nothing until the ref exists again",
 				v.attributes.ref)})
 	}
-	if v.abandoned != "" {
-		found = append(found, stageFault{reasonAbandoned, v.abandoned})
-	}
 	return found
 }
 

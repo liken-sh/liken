@@ -1,27 +1,36 @@
 # The controller plugin validates a VolumeAttributesClass, marks the
-# PersistentVolumes a webhook names, and holds no volume, so one
-# replica serves the whole cluster and a restart costs nothing. A
+# PersistentVolumes a webhook names, deletes a released
+# PersistentVolume of the Delete reclaim policy, and holds no volume, so
+# one replica serves the whole cluster and a restart costs nothing. A
 # second replica is safe too: the driver container answers each
-# webhook and each CSI call on its own, and the resizer sidecar acts
-# only while it holds its Lease.
+# webhook and each CSI call on its own, and each sidecar acts only while
+# it holds its Lease.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: git-csi-driver-controller
 ---
-# The rules the external-resizer's own release notes list, and the two
-# the driver container needs beside them. The driver patches a
-# PersistentVolume to demand a pull, and it reads the Secret a webhook
-# path names. RBAC cannot narrow the Secret rule to the ones a volume
-# names, so the driver holds get on every Secret in the cluster.
+# The rules the external-resizer and the external-provisioner list in
+# their own deploy directories, and the two the driver container needs
+# beside them. The driver patches a PersistentVolume to demand a pull,
+# and it reads the Secret a webhook path names. RBAC cannot narrow the
+# Secret rule to the ones a volume names, so the driver holds get on
+# every Secret in the cluster. The provisioner's rules for snapshots,
+# VolumeAttachments, and CSIStorageCapacity are left out, because the
+# driver declares no snapshot, no attach, and no capacity, and the
+# provisioner then reads none of them.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: git-csi-driver-controller
 rules:
+  # The provisioner deletes a released PersistentVolume of the Delete
+  # reclaim policy, and patches its finalizer onto a bound one, so a
+  # person who deletes the PersistentVolume first still reaches
+  # DeleteVolume.
   - apiGroups: [""]
     resources: [persistentvolumes]
-    verbs: [get, list, watch, patch, update]
+    verbs: [get, list, watch, patch, update, delete]
   - apiGroups: [""]
     resources: [persistentvolumeclaims]
     verbs: [get, list, watch, patch, update]
@@ -43,6 +52,14 @@ rules:
   - apiGroups: [storage.k8s.io]
     resources: [volumeattributesclasses]
     verbs: [get, list, watch]
+  # The provisioner reads a claim's StorageClass, and the nodes and
+  # their CSINode objects for topology, before it calls CreateVolume.
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses, csinodes]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get, list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -57,13 +74,15 @@ subjects:
     name: git-csi-driver-controller
     namespace: liken-system
 ---
-# The resizer sidecar elects one leader through a Lease in the
-# controller's namespace, so only one replica writes a claim's status.
-# client-go's leader election reads, creates, and renews the one Lease.
-# The sidecar names it external-resizer- and the driver name with each
-# character that is not a letter, a digit, or a dash made a dash. RBAC
-# cannot narrow create to one name, because the name of an object that
-# does not exist yet is not in the request's path.
+# Each sidecar elects one leader through a Lease in the controller's
+# namespace, so only one replica writes a claim's status or deletes a
+# PersistentVolume. client-go's leader election reads, creates, and
+# renews each Lease. Each sidecar makes its Lease name from the driver
+# name, with each character that is not a letter, a digit, or a dash
+# made a dash: the resizer puts external-resizer- before it, and the
+# provisioner uses it alone. RBAC cannot narrow create to one name,
+# because the name of an object that does not exist yet is not in the
+# request's path.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -71,7 +90,7 @@ metadata:
 rules:
   - apiGroups: [coordination.k8s.io]
     resources: [leases]
-    resourceNames: [external-resizer-git-liken-sh]
+    resourceNames: [external-resizer-git-liken-sh, git-liken-sh]
     verbs: [get, update]
   - apiGroups: [coordination.k8s.io]
     resources: [leases]
@@ -110,15 +129,16 @@ kind: Deployment
 metadata:
   name: git-csi-driver-controller
 spec:
-  # One replica, because the plugin holds no volume and a claim
-  # whose class is not validated for a minute costs nothing. 2 is safe:
-  # the resizers elect one leader, and either driver container answers
-  # a webhook.
+  # One replica, because the plugin holds no volume, and a claim
+  # whose class is not validated for a minute or a PersistentVolume
+  # that is deleted a minute late costs nothing. 2 is safe: each kind
+  # of sidecar elects one leader, and either driver container answers a
+  # webhook.
   replicas: 1
   # The new pod starts before the old one stops, so the webhook is
-  # down for a moment at most during a rollout. The new resizer takes
-  # the Lease when the old one's expires, up to 30 seconds after the
-  # old pod stops, and a class change waits that long.
+  # down for a moment at most during a rollout. Each new sidecar takes
+  # its Lease when the old one's expires, up to 30 seconds after the
+  # old pod stops, and a class change or a delete waits that long.
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -201,6 +221,42 @@ spec:
             # the resizer catches SIGTERM.
             - --leader-election
             - --leader-election-lease-duration=30s
+          securityContext:
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: socket
+              mountPath: /csi
+        # The external-provisioner sidecar deletes a released
+        # PersistentVolume of the Delete reclaim policy: it calls
+        # DeleteVolume, then deletes the object. It reads a
+        # PersistentVolume a person wrote, with no
+        # pv.kubernetes.io/provisioned-by annotation, by the driver
+        # name in spec.csi.driver. Each node plugin then removes its own
+        # work tree of the volume. The sidecar also calls CreateVolume
+        # for a claim whose StorageClass names git.liken.sh, and posts
+        # the refusal on that claim.
+        - name: provisioner
+          image: registry.k8s.io/sig-storage/csi-provisioner:v6.3.0
+          args:
+            - --csi-address=/csi/csi.sock
+            # The same Lease timing as the resizer above, for the same
+            # reasons: two provisioners that both delete one
+            # PersistentVolume race on it.
+            - --leader-election
+            - --leader-election-lease-duration=30s
+            - --feature-gates=ReleaseLeaderElectionOnExit=true
+            # The driver holds no snapshot, so the sidecar watches for
+            # none.
+            - --snapshot-orphan-sweep-interval=0
           securityContext:
             capabilities:
               drop: ["ALL"]

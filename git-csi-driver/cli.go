@@ -63,9 +63,6 @@ type config struct {
 	nodeID   string
 	store    string
 	metrics  string
-	// sweepAfter is how long a work tree nothing stages is kept before
-	// the sweep removes it.
-	sweepAfter time.Duration
 	// demandMin is how long a demanded pull waits after the last pull
 	// of the same repository on this node.
 	demandMin time.Duration
@@ -154,10 +151,6 @@ func parseNode(args []string, out io.Writer) (*config, error) {
 	// An empty --metrics serves no metrics.
 	metrics := flags.String("metrics", ":9200",
 		"the address the metrics listener takes; empty serves none")
-	// A deleted PersistentVolume does not end its work tree, so a work
-	// tree nothing stages for this long is removed. sweep.go says why.
-	sweepAfter := flags.Duration("sweep-after", defaultSweepAfter,
-		"how long a work tree nothing stages is kept before it is removed")
 	// A burst of demands on one repository costs one pull per interval.
 	demandMin := flags.Duration("demand-min-interval", defaultDemandMin,
 		"how long a demanded pull waits after the last pull of the same repository")
@@ -169,12 +162,11 @@ func parseNode(args []string, out io.Writer) (*config, error) {
 		return nil, report(out, errors.New("--node-id is required"))
 	}
 	return &config{
-		endpoint:   *endpoint,
-		nodeID:     *nodeID,
-		store:      *store,
-		metrics:    *metrics,
-		sweepAfter: *sweepAfter,
-		demandMin:  *demandMin,
+		endpoint:  *endpoint,
+		nodeID:    *nodeID,
+		store:     *store,
+		metrics:   *metrics,
+		demandMin: *demandMin,
 	}, nil
 }
 

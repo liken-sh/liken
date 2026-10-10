@@ -30,10 +30,9 @@ func testNode(t testing.TB, logs io.Writer) (*node, *recordedMounts) {
 	answering := newNode(
 		t.Context(),
 		&config{
-			nodeID:     "node-1",
-			store:      filepath.Join(t.TempDir(), "store"),
-			sweepAfter: defaultSweepAfter,
-			demandMin:  defaultDemandMin,
+			nodeID:    "node-1",
+			store:     filepath.Join(t.TempDir(), "store"),
+			demandMin: defaultDemandMin,
 		},
 		fakeEvents(t, logs),
 		newMetrics(),

@@ -34,21 +34,18 @@ const (
 	reasonPushed     = "GitVolumePushed"
 	reasonPushFailed = "GitVolumePushFailed"
 	reasonSkipped    = "GitVolumeFileSkipped"
-	// The three the side branch and the sweep add: the volume
-	// moved to its side branch, a person merged it back, and the sweep
-	// removed a work tree nothing stages.
+	// The two the side branch adds: the volume moved to its side
+	// branch, and a person merged it back.
 	reasonDiverged = "GitVolumeDiverged"
 	reasonHealed   = "GitVolumeHealed"
-	reasonSwept    = "GitVolumeSwept"
 	// A push the remote rejected was rebased onto what the remote
 	// holds now, and landed on the ref.
 	reasonRebased = "GitVolumeRebased"
-	// The three faults a stage finds in a writeable volume: upstream
-	// moved while the tree held uncommitted writes, the remote deleted
-	// the ref, and another volume's work tree holds unpushed commits.
+	// The two faults a stage finds in a writeable volume: upstream
+	// moved while the tree held uncommitted writes, and the remote
+	// deleted the ref.
 	reasonUpstreamMoved = "GitVolumeUpstreamMoved"
 	reasonRefDeleted    = "GitVolumeRefDeleted"
-	reasonAbandoned     = "GitVolumeAbandonedWork"
 	// The PersistentVolume names a stage Secret and no publish Secret.
 	// Such a volume works until the driver restarts, and then fetches
 	// and pushes nothing until the kubelet stages it again.

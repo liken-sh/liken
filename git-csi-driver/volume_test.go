@@ -96,17 +96,6 @@ func TestTheConditionSaysWhatIsWrongFirst(t *testing.T) {
 			says:     "Diverged: the tree pushes to main.config, not main",
 		},
 		{
-			name: "a work tree the sweep kept",
-			held: &volume{
-				attributes: &attributes{ref: "main"},
-				commit:     "d633176146e997",
-				kind:       writeableVolume,
-				abandoned:  "the work tree of old holds unpushed commits and was unstaged 745h ago",
-			},
-			abnormal: true,
-			says:     "the work tree of old holds unpushed commits and was unstaged 745h ago",
-		},
-		{
 			name: "a class the driver cannot read",
 			held: &volume{
 				attributes: &attributes{ref: "main"},

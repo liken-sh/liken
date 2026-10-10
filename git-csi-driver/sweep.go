@@ -1,65 +1,26 @@
 package main
 
-// sweep.go removes what nothing stages any more. The node plugin
-// watches PersistentVolumes, but a deleted one does not say that its
-// work tree is finished with: a person can make a new PersistentVolume
-// with the same volume handle, and its first stage reuses the tree. So
-// age is the evidence the sweep uses.
+// sweep.go walks the store's bare repositories. A bare repository is
+// shared by every volume of its URL on the node, so it outlives any one
+// volume: it goes when no volume and no work tree names it any more, and
+// the refs in it go when no volume follows them. A read-only volume
+// leaves the store at every unstage, and nothing reports that to the
+// repository it read from, so the walk finds it. reclaim.go removes the
+// work trees, and runs this walk after each removal.
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
-
-	corev1 "k8s.io/api/core/v1"
 )
 
-// defaultSweepAfter is how long a work tree nothing stages is kept.
-// defaultSweepEvery is how often the driver looks.
-const (
-	defaultSweepAfter = 720 * time.Hour
-	defaultSweepEvery = time.Hour
-)
-
-// unstagedFile is the file the unstage writes in the volume's directory, which is
-// the whole record of when a node last held the volume.
-const unstagedFile = "unstaged"
-
-// abandonedTree is a work tree the sweep kept because it holds
-// commits that the followed ref does not, named in the report of the next volume
-// that stages the same repository.
-type abandonedTree struct {
-	id       string
-	unstaged time.Time
-}
-
-// markUnstaged records the moment the kubelet took the volume off
-// this node.
-func (n *node) markUnstaged(ctx context.Context, held *volume) {
-	content := time.Now().UTC().Format(time.RFC3339) + "\n"
-	path := filepath.Join(held.directory, unstagedFile)
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		n.logger.WarnContext(ctx, "the unstage time was not written",
-			"volume", held.id, "error", err)
-	}
-}
-
-// unstagedAt reads that record, and answers false for a volume
-// that no unstage has ever left one for.
-func unstagedAt(directory string) (time.Time, bool) {
-	content, err := os.ReadFile(filepath.Join(directory, unstagedFile))
-	if err != nil {
-		return time.Time{}, false
-	}
-	when, err := time.Parse(time.RFC3339, trimLine(string(content)))
-	if err != nil {
-		return time.Time{}, false
-	}
-	return when, true
-}
+// defaultSweepEvery is how often the driver walks the repositories. The
+// hour is a clock and not a search for a change: a repository that
+// stays an hour after its last volume costs disk and nothing else, and
+// the walk runs git gc on each repository that stays.
+const defaultSweepEvery = time.Hour
 
 // sweeping walks the store on the interval until the driver
 // stops.
@@ -76,11 +37,9 @@ func (n *node) sweeping(ctx context.Context) {
 	}
 }
 
-// sweepStore is one pass: the work trees first, then the bare
-// repositories the trees that stayed no longer name, then a measure of
-// what is left.
+// sweepStore is one pass: the bare repositories no volume names, then a
+// measure of what is left.
 func (n *node) sweepStore(ctx context.Context) {
-	n.sweepVolumes(ctx)
 	n.sweepRepositories(ctx)
 	n.measureStore(ctx)
 }
@@ -96,122 +55,6 @@ func (n *node) measureStore(ctx context.Context) {
 		return
 	}
 	n.readings.setStoreBytes(size)
-}
-
-func (n *node) sweepVolumes(ctx context.Context) {
-	entries, err := os.ReadDir(filepath.Join(n.store.root, "volumes"))
-	if err != nil {
-		return
-	}
-	kept := map[string]time.Time{}
-	for _, entry := range entries {
-		n.sweepVolume(ctx, entry.Name(), kept)
-	}
-	n.kept = kept
-}
-
-// sweepVolume removes one work tree the node does not hold, whose
-// last unstage is older than the age, whose every commit the last push
-// sent, and that is not diverged. It reads only the tree's own refs and
-// config, never the remote. A tree with commits that no push sent, or a
-// diverged tree, is kept and named instead.
-func (n *node) sweepVolume(ctx context.Context, id string, kept map[string]time.Time) {
-	if n.holds(id) {
-		return
-	}
-	work := n.store.tree(id)
-	if !work.exists() {
-		return
-	}
-	when, found := unstagedAt(work.directory)
-	if !found || time.Since(when) <= n.sweepAfter {
-		return
-	}
-	head := work.refCommit(ctx, "HEAD")
-	if head == "" {
-		return
-	}
-	if work.refCommit(ctx, pushedRef) != head || work.divergedBranch(ctx) != "" {
-		kept[id] = when
-		n.abandon(ctx, work, id, when)
-		return
-	}
-	if err := os.RemoveAll(work.directory); err != nil {
-		n.logger.WarnContext(ctx, "the work tree stayed", "volume", id, "error", err)
-		return
-	}
-	n.logger.InfoContext(ctx, "swept the work tree", "volume", id, "unstaged", when)
-	n.swept(ctx, id, when)
-}
-
-// holds reports the volumes this node has staged or published,
-// which the sweep never touches.
-func (n *node) holds(id string) bool {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	_, staged := n.staged[id]
-	_, published := n.volumes[id]
-	return staged || published
-}
-
-// abandon records the tree by the repository it follows, because
-// the volume that reports it is the next one to stage that repository.
-func (n *node) abandon(ctx context.Context, work *workTree, id string, when time.Time) {
-	url := work.originURL()
-	// A kept tree stays until a volume stages it again or a person
-	// removes it, and the sweep passes over it every hour. The line goes
-	// out on the first pass of this process that keeps the tree, and
-	// again only after a later unstage, so a kept tree adds one line to
-	// the log for each run of the plugin and not one line an hour.
-	if last, logged := n.kept[id]; !logged || !last.Equal(when) {
-		n.logger.InfoContext(ctx, "the work tree holds unpushed commits",
-			"volume", id, "url", url, "unstaged", when)
-	}
-	if url == "" {
-		return
-	}
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	n.abandoned[url] = abandonedTree{id: id, unstaged: when}
-}
-
-// noteAbandoned puts the age of another volume's work tree in
-// this volume's report, which is where a person learns that work stays
-// on this node with no claim to reach it.
-func (n *node) noteAbandoned(staging *volume) {
-	n.mu.Lock()
-	one, found := n.abandoned[staging.attributes.url]
-	n.mu.Unlock()
-	if !found || one.id == staging.id {
-		return
-	}
-	staging.reportAbandoned(fmt.Sprintf(
-		"the work tree of %s holds unpushed commits and was unstaged %s ago",
-		one.id, age(one.unstaged)))
-}
-
-// swept posts the Event where a claim is known, which is where
-// the PersistentVolume outlived the work tree instead of the other way
-// around.
-func (n *node) swept(ctx context.Context, id string, when time.Time) {
-	if n.arms.client == nil {
-		return
-	}
-	claim, err := n.arms.claimOf(ctx, id)
-	if err != nil {
-		n.logger.InfoContext(ctx, "the swept volume names no claim",
-			"volume", id, "reason", err)
-		return
-	}
-	n.events.postClaim(claim, corev1.EventTypeNormal, reasonSwept,
-		fmt.Sprintf("swept: the work tree was unstaged %s ago and held nothing unpushed",
-			age(when)))
-}
-
-// age is the whole hours since the moment, which is the number a
-// volume's report and an Event carry.
-func age(when time.Time) string {
-	return fmt.Sprintf("%dh", int(time.Since(when).Hours()))
 }
 
 func (n *node) sweepRepositories(ctx context.Context) {
@@ -347,28 +190,22 @@ func (r *repository) deleteRef(ctx context.Context, ref string) error {
 	return err
 }
 
-// collect packs the repository and prunes the objects no ref has named
-// since the sweep age. --auto costs nothing on a pass where nothing
-// changed. gc.autoDetach=false keeps the work in the foreground, under
-// the repository's lock, and brings a failure back to this log instead
-// of a gc.log file in the repository.
+// collect packs the repository and prunes the objects no ref names,
+// at git's own age for that, gc.pruneExpire, two weeks by default. Each
+// fetch into the repository runs git maintenance run --auto, which runs
+// the same git gc --auto, so one age applies to both. --auto costs nothing on a pass where nothing changed.
+// gc.autoDetach=false keeps the work in the foreground, under the
+// repository's lock, and brings a failure back to this log instead of a
+// gc.log file in the repository.
 func (n *node) collect(ctx context.Context, repo *repository) {
 	_, err := runGit(ctx, repo.dir, nil, "-c", "gc.autoDetach=false",
-		"gc", "--quiet", "--auto", "--prune="+pruneDate(n.sweepAfter))
+		"gc", "--quiet", "--auto")
 	if err != nil {
 		// A repository that was not collected is logged, and the pass
 		// finishes.
 		n.logger.WarnContext(ctx, "the repository was not collected",
 			"repository", repo.name, "error", err)
 	}
-}
-
-// pruneDate is the sweep age before now, written as a timestamp. Git's
-// own age forms are unsafe here: it reads "720h" as this moment, and a
-// count of seconds above 99999999 as a second of the epoch. A date says
-// the age the driver means for every value of --sweep-after.
-func pruneDate(after time.Duration) string {
-	return time.Now().Add(-after).UTC().Format(time.RFC3339)
 }
 
 // held is every volume this node has published or staged.

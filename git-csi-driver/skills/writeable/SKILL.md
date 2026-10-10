@@ -42,7 +42,10 @@ spec:
       namespace: home
 ```
 
-`capacity` is required by the API, and the driver ignores it. The
+`capacity` is required by the API, and the driver ignores it.
+`Retain` keeps the node's work tree when you delete the
+`PersistentVolume`, and `Delete` removes it. [Work trees the node
+keeps](#work-trees-the-node-keeps) says when to choose each. The
 access mode must be `ReadWriteOncePod`. `ReadWriteOnce` allows two pods
 on one node to write the same tree, and the driver refuses it.
 
@@ -214,20 +217,35 @@ with its modes and empty directories replayed.
 ## Work trees the node keeps
 
 A work tree stays on the node after the pod stops, so the next stage on
-the same node is not a clone. Once an hour the driver removes work trees
-that nothing has staged for `--sweep-after`, 30 days by default, and
-whose every commit the last push sent. A tree with unpushed commits, or
-a diverged tree, is never removed. The log names it once each time the
-plugin starts, and the abnormal gauge of the
-next volume of the same repository names its age, so a person learns
-that work stays on the node with no claim that reaches it. When no
-volume of that repository comes, the tree stays until a person removes
-it from the store.
+the same node is not a clone. The `PersistentVolume`'s
+`persistentVolumeReclaimPolicy` decides what happens to the tree on
+each node that staged it when you delete the volume. A
+`PersistentVolume` that you write takes `Retain` unless it names a
+policy.
 
-The same hourly pass deletes the refs under `refs/git-csi/` that no
-volume follows, and runs `git gc` in each bare repository that stays.
-The node's store then does not grow with every ref a volume ever
-followed.
+- **`Retain`** keeps each tree. A new `PersistentVolume` with the same
+  `volumeHandle` stages from the tree on the same node, and its next
+  push sends any commit that the last unstage could not push.
+  [Restore](#restore) and [the credential](#the-credential) use this.
+  The driver never removes a `Retain` tree.
+- **`Delete`** removes each tree, with any commit in it that no push
+  sent. When you delete the claim, the `external-provisioner` deletes
+  the released `PersistentVolume`, and the node plugin on each node
+  removes its own tree. You can also delete the `PersistentVolume`
+  first. A node plugin that is down at the time removes its tree when
+  it starts again.
+
+The driver never deletes the remote repository under either policy.
+The pod's unstage pushes before the volume leaves the node, so `Delete`
+loses only a commit whose push failed. The node plugin's log names
+each tree it removes, and says whether the tree held an unpushed commit
+or a side branch.
+
+Once an hour, and after each tree it removes, the driver deletes the
+refs under `refs/git-csi/` that no volume follows, removes each bare
+repository that no volume and no work tree names, and runs `git gc` in
+each one that stays. The node's store then does not grow with every ref
+a volume ever followed.
 
 ## What the driver does not serve
 
@@ -240,9 +258,9 @@ object it names, and a writeable volume takes no `depth`.
 The pod's events and the claim's events include `GitVolumeArmed`,
 `GitVolumeUnarmed`, `GitVolumePending`, `GitVolumePushed`,
 `GitVolumePushFailed`, `GitVolumeFileSkipped`, `GitVolumeRebased`,
-`GitVolumeDiverged`, `GitVolumeHealed`, `GitVolumeSwept`,
-`GitVolumeNoPublishSecret`, `GitVolumeUpstreamMoved`,
-`GitVolumeRefDeleted`, and `GitVolumeAbandonedWork`. The node plugin's `/metrics`
+`GitVolumeDiverged`, `GitVolumeHealed`,
+`GitVolumeNoPublishSecret`, `GitVolumeUpstreamMoved`, and
+`GitVolumeRefDeleted`. The node plugin's `/metrics`
 listener exports `git_csi_volume_abnormal`, one while anything is wrong
 with a volume, and `git_csi_armed`, `git_csi_pending_paths`,
 `git_csi_unpushed_commits`, `git_csi_last_push_timestamp_seconds`,

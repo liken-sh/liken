@@ -148,12 +148,11 @@ func TestParseDefaultsTheEndpointAndTheStore(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 	want := config{
-		endpoint:   "unix:///csi/csi.sock",
-		nodeID:     "node-1",
-		store:      "/var/lib/liken/pod-storage/git-csi",
-		metrics:    ":9200",
-		sweepAfter: defaultSweepAfter,
-		demandMin:  defaultDemandMin,
+		endpoint:  "unix:///csi/csi.sock",
+		nodeID:    "node-1",
+		store:     "/var/lib/liken/pod-storage/git-csi",
+		metrics:   ":9200",
+		demandMin: defaultDemandMin,
 	}
 	if *cfg != want {
 		t.Errorf("parse = %+v, want %+v", *cfg, want)
@@ -167,19 +166,17 @@ func TestParseTakesEveryFlag(t *testing.T) {
 		"--node-id", "node-1",
 		"--store", "/srv/git-csi",
 		"--metrics", "127.0.0.1:9200",
-		"--sweep-after", "48h",
 		"--demand-min-interval", "30s",
 	}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 	want := config{
-		endpoint:   "unix:///run/csi/csi.sock",
-		nodeID:     "node-1",
-		store:      "/srv/git-csi",
-		metrics:    "127.0.0.1:9200",
-		sweepAfter: 48 * time.Hour,
-		demandMin:  30 * time.Second,
+		endpoint:  "unix:///run/csi/csi.sock",
+		nodeID:    "node-1",
+		store:     "/srv/git-csi",
+		metrics:   "127.0.0.1:9200",
+		demandMin: 30 * time.Second,
 	}
 	if *cfg != want {
 		t.Errorf("parse = %+v, want %+v", *cfg, want)
@@ -263,7 +260,9 @@ func TestEachSubcommandRefusesTheOtherFlags(t *testing.T) {
 		{name: "the node takes no webhook", args: []string{"node", "--node-id", "n", "--webhook", ":8080"}},
 		{name: "the controller takes no node id", args: []string{"controller", "--node-id", "n"}},
 		{name: "the controller takes no store", args: []string{"controller", "--store", "/srv"}},
-		{name: "the controller takes no sweep", args: []string{"controller", "--sweep-after", "1h"}},
+		// A work tree goes by its PersistentVolume's reclaim policy, and
+		// by no age.
+		{name: "the node takes no sweep age", args: []string{"node", "--node-id", "n", "--sweep-after", "1h"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			out := &bytes.Buffer{}

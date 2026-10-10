@@ -202,17 +202,21 @@ commits, and pushes. Its store holds one bare repository per URL and
 one work tree per writeable volume. On `liken` the store is on the
 pod-storage partition, beside every other volume on the node. The plugin watches the claims bound to its
 volumes to learn their current class.
-Once an hour it sweeps the store. It removes work trees that no volume
-has staged for the configured age, bare repositories that no work tree
-uses, and refs under `refs/git-csi/` that no volume follows. It runs
-`git gc` in each remaining repository. This bounds storage for a node
-that serves one repository over a long period.
+It removes a work tree when the `PersistentVolume` that carries it is
+deleted with the `Delete` reclaim policy, and keeps it under `Retain`.
+Once an hour, and after each tree it removes, it sweeps the store. It
+removes bare repositories that no volume and no work tree uses, and
+refs under `refs/git-csi/` that no volume follows. It runs `git gc` in
+each remaining repository. This bounds storage for a node that serves
+one repository over a long period.
 
 **The controller plugin** is one small `Deployment`. It implements
-`ControllerModifyVolume` and nothing else. It validates a class and
+`ControllerModifyVolume` and `DeleteVolume`. It validates a class and
 refuses a bad parameter, and the `external-resizer` sidecar records the
-result on the claim. There is no `CreateVolume` and no
-`DeleteVolume`.
+result on the claim. `DeleteVolume` answers success and removes
+nothing, so the `external-provisioner` sidecar deletes a released
+`PersistentVolume` of the `Delete` policy. There is no
+`CreateVolume`.
 
 **The node plugin** declares `STAGE_UNSTAGE_VOLUME`, `GET_VOLUME_STATS`,
 and `SINGLE_NODE_MULTI_WRITER`. The last one makes the kubelet send the
@@ -303,15 +307,19 @@ without it reads the events.
 - **A secret inside a configuration value is pushed.** The ignore list
   and the size guard catch files, not values. A private repository on
   a private forge is the mitigation.
-- **The node plugin never learns that a `PersistentVolume` was
-  deleted.** An age-based sweep removes work trees that are fully
-  pushed and have not been staged for a long time.
-- **An upstream rewrite older than the sweep age can take an object a
-  work tree needs.** A work tree reads the repository's objects through
-  alternates, and `git gc` at the sweep prunes what no ref has named
-  for `--sweep-after`. An object stays reachable from the followed
-  ref's history until upstream rewrites that history, and a rewrite
-  older than the sweep age is the one case the store does not protect.
+- **A `Delete` volume's unpushed commits go with its work trees.**
+  The `PersistentVolume`'s reclaim policy decides what happens to the
+  work tree on each node when the volume is deleted, as it does for
+  every volume in Kubernetes: `Retain` keeps the tree, and `Delete`
+  removes it. The unstage pushes first, so `Delete` loses only a commit
+  whose push failed. Plan 16 builds this.
+- **An upstream rewrite older than git's prune age can take an object
+  a work tree needs.** A work tree reads the repository's objects
+  through alternates, and `git gc` prunes what no ref has named for
+  `gc.pruneExpire`, two weeks by default. An object stays reachable
+  from the followed ref's history until upstream rewrites that history,
+  and a rewrite older than the prune age is the one case the store does
+  not protect.
 - **A forge inside the cluster creates a restore dependency.** A cluster
   that hosts its own forge cannot restore a volume onto a fresh node
   while the forge is down. `offline: allowStale` and the node's cache

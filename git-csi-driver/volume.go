@@ -90,12 +90,10 @@ type volume struct {
 	oldest   time.Time
 	lastPush time.Time
 	// The side branch every push goes to while the tree and
-	// upstream have both moved, whether the remote holds the ref at all,
-	// and the work tree the sweep left on this node with commits nothing
-	// pushed.
+	// upstream have both moved, and whether the remote holds the ref at
+	// all.
 	diverged   string
 	refDeleted bool
-	abandoned  string
 	// What report() last said, so the gauge and the log carry a
 	// volume's health at the moment it turns and never on every poll.
 	abnormal bool
@@ -144,14 +142,6 @@ func (v *volume) refIsDeleted() bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return v.refDeleted
-}
-
-// reportAbandoned records the work tree of this repository the
-// sweep found with commits nothing pushed.
-func (v *volume) reportAbandoned(message string) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	v.abandoned = message
 }
 
 // authorEnv is the class's author where a class arms the volume,
@@ -422,8 +412,6 @@ func (v *volume) standingReport() (bool, string) {
 	case v.overdue(time.Now()):
 		return true, fmt.Sprintf("%d unpushed commits, the oldest older than %s",
 			v.unpushed, v.rules.maxLatency)
-	case v.abandoned != "":
-		return true, v.abandoned
 	case v.kind == writeableVolume && !v.armed && len(v.pending) > 0:
 		return true, fmt.Sprintf("unarmed: %d paths pending, no class on claim %s/%s",
 			len(v.pending), v.claim.namespace, v.claim.name)

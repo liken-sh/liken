@@ -17,8 +17,10 @@ The base creates the `CSIDriver` object,
 the `ServiceAccount`s and their roles, the
 `DaemonSet` that runs the node plugin beside the kubelet's registrar,
 and the `Deployment` that runs the controller plugin beside the
-`external-resizer`. The `external-resizer` sends a claim's class
-change to the driver.
+`external-resizer` and the `external-provisioner`. The
+`external-resizer` sends a claim's class change to the driver. The
+`external-provisioner` deletes a released `PersistentVolume` of the
+`Delete` reclaim policy, and provisions nothing.
 
 ```yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -62,7 +64,6 @@ a flag through a kustomize patch on the container's `args`.
 | `--node-id` | none | The node's name, which the base takes from the pod's `spec.nodeName`. |
 | `--store` | `/var/lib/liken/pod-storage/git-csi` | Where the node plugin keeps its bare repositories, trees, and records. On `liken` this is the pod-storage partition. |
 | `--metrics` | `:9200` | Where the node plugin serves its Prometheus metrics. An empty value serves none. |
-| `--sweep-after` | `720h` | How long the plugin keeps a work tree that nothing stages, and how old an object that no ref names must be before `git gc` prunes it. |
 | `--demand-min-interval` | `10s` | How long a demanded pull waits after the last pull of the same repository on the node. A burst of demands inside that interval costs one pull. |
 
 `git-csi-driver controller` takes these flags.
@@ -84,4 +85,7 @@ The base runs one controller pod. To run two, patch the `Deployment`
 named `git-csi-driver-controller` to `replicas: 2`. Either pod answers
 a webhook. The `external-resizer` in each pod acts only while it holds
 the `Lease` named `external-resizer-git-liken-sh` in `liken-system`,
-so one resizer at a time writes a claim's status.
+so one resizer at a time writes a claim's status. The
+`external-provisioner` acts only while it holds the `Lease` named
+`git-liken-sh`, so one provisioner at a time deletes a
+`PersistentVolume`.

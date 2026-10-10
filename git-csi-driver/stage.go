@@ -84,6 +84,7 @@ func (n *node) NodeStageVolume(
 	// the work another tree left, so what the volume reports is taken
 	// once here, after all of it.
 	n.noteHealth(ctx, arriving)
+	n.notePolicyOf(ctx, id)
 
 	n.mu.Lock()
 	n.staged[id] = arriving
@@ -150,7 +151,6 @@ func (n *node) stageTree(ctx context.Context, staging *volume, repo *repository)
 	if err != nil {
 		return status.Error(codes.Internal, err.Error())
 	}
-	n.noteAbandoned(staging)
 
 	if !staging.work.exists() {
 		if err := staging.work.create(ctx, staging.attributes.ref, commit); err != nil {
@@ -254,7 +254,8 @@ func (n *node) restore(ctx context.Context, staging *volume) {
 }
 
 // NodeUnstageVolume stops the loops and keeps the work tree, because
-// the next stage on this node starts from what the pod wrote.
+// the next stage on this node starts from what the pod wrote. The tree
+// goes only when its PersistentVolume is gone, by reclaim.go.
 func (n *node) NodeUnstageVolume(
 	ctx context.Context, request *csi.NodeUnstageVolumeRequest,
 ) (*csi.NodeUnstageVolumeResponse, error) {
@@ -276,7 +277,6 @@ func (n *node) NodeUnstageVolume(
 	// only after what it holds has reached the remote.
 	if found && staged.writeable() {
 		n.push(ctx, staged)
-		n.markUnstaged(ctx, staged)
 		n.mu.Lock()
 		n.disarm(staged)
 		n.mu.Unlock()
@@ -284,6 +284,9 @@ func (n *node) NodeUnstageVolume(
 	if found && staged.kind == readOnlyClaim {
 		n.unstageReadOnly(ctx, staged)
 	}
+	// The PersistentVolume of a Delete volume can be deleted while the
+	// node still unstages it, and the delete then left the tree alone.
+	n.reclaim(ctx, id)
 	n.logger.InfoContext(ctx, "unstaged", "volume", id)
 	return &csi.NodeUnstageVolumeResponse{}, nil
 }

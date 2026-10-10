@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -42,19 +43,42 @@ func TestTheControllerDeclaresTheControllerService(t *testing.T) {
 	}
 }
 
-func TestTheControllerDeclaresModifyVolumeAlone(t *testing.T) {
+// csi-provisioner reads CREATE_DELETE_VOLUME before it starts, and
+// calls DeleteVolume for a released PersistentVolume of the Delete
+// reclaim policy only when the controller declares it.
+func TestTheControllerDeclaresModifyVolumeAndDeleteVolume(t *testing.T) {
 	client := csi.NewControllerClient(startController(t))
 	answer, err := client.ControllerGetCapabilities(t.Context(),
 		&csi.ControllerGetCapabilitiesRequest{})
 	if err != nil {
 		t.Fatalf("ControllerGetCapabilities: %v", err)
 	}
-	declared := answer.GetCapabilities()
-	if len(declared) != 1 {
-		t.Fatalf("ControllerGetCapabilities answered %v, want MODIFY_VOLUME alone", declared)
+	var declared []csi.ControllerServiceCapability_RPC_Type
+	for _, one := range answer.GetCapabilities() {
+		declared = append(declared, one.GetRpc().GetType())
 	}
-	if got := declared[0].GetRpc().GetType(); got != csi.ControllerServiceCapability_RPC_MODIFY_VOLUME {
-		t.Errorf("ControllerGetCapabilities declared %v, want MODIFY_VOLUME", got)
+	want := []csi.ControllerServiceCapability_RPC_Type{
+		csi.ControllerServiceCapability_RPC_MODIFY_VOLUME,
+		csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
+	}
+	if !slices.Equal(declared, want) {
+		t.Errorf("ControllerGetCapabilities declared %v, want %v", declared, want)
+	}
+}
+
+func TestDeleteVolumeAnswersForEveryVolumeItNames(t *testing.T) {
+	client := csi.NewControllerClient(startController(t))
+	if _, err := client.DeleteVolume(t.Context(),
+		&csi.DeleteVolumeRequest{VolumeId: "config"}); err != nil {
+		t.Errorf("DeleteVolume: %v", err)
+	}
+}
+
+func TestDeleteVolumeRefusesACallThatNamesNoVolume(t *testing.T) {
+	client := csi.NewControllerClient(startController(t))
+	_, err := client.DeleteVolume(t.Context(), &csi.DeleteVolumeRequest{})
+	if got := status.Code(err); got != codes.InvalidArgument {
+		t.Errorf("DeleteVolume answered %v, want %v", got, codes.InvalidArgument)
 	}
 }
 
@@ -137,13 +161,6 @@ func TestTheControllerServesNoOtherCall(t *testing.T) {
 			name: "CreateVolume",
 			call: func(ctx context.Context) error {
 				_, err := client.CreateVolume(ctx, &csi.CreateVolumeRequest{})
-				return err
-			},
-		},
-		{
-			name: "DeleteVolume",
-			call: func(ctx context.Context) error {
-				_, err := client.DeleteVolume(ctx, &csi.DeleteVolumeRequest{})
 				return err
 			},
 		},

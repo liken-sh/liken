@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 	"testing/synctest"
-	"time"
 
 	kevents "github.com/liken-sh/liken/kubernetes/events"
 )
@@ -95,19 +94,6 @@ func TestAStageFaultIsPostedOnTheClaim(t *testing.T) {
 				driverCommit(t, answering, held, map[string]string{"c.txt": "three"})
 				git(t, remote, "update-ref", "-d", "refs/heads/main")
 				restaged(t, answering, request)
-			},
-		},
-		{
-			name:   "another work tree holds unpushed commits",
-			reason: reasonAbandoned,
-			says:   "the work tree of old holds unpushed commits",
-			stage: func(t *testing.T, answering *node, remote string) {
-				answering.sweepAfter = time.Hour
-				old := unstagedVolume(t, answering, "old", fileURL(remote))
-				unstagedAgo(t, answering, "old", 30*time.Hour)
-				driverCommit(t, answering, old, map[string]string{"c.txt": "three"})
-				answering.sweepStore(t.Context())
-				stagedVolume(t, answering, "config", fileURL(remote))
 			},
 		},
 	} {

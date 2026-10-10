@@ -1,13 +1,15 @@
 package main
 
 // controller.go implements the CSI Controller service, which validates a
-// class and changes no volume.
+// class and answers the delete of a volume. It changes no volume itself.
 
 import (
 	"context"
 	"log/slog"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -61,20 +63,27 @@ func (controllerNode) NodeGetInfo(
 	return nil, unimplemented("NodeGetInfo", "the controller plugin holds no node's volumes")
 }
 
-// ControllerGetCapabilities declares MODIFY_VOLUME alone, because the
-// driver provisions nothing and attaches nothing.
+// ControllerGetCapabilities declares MODIFY_VOLUME, for a class
+// change, and CREATE_DELETE_VOLUME, because csi-provisioner deletes a
+// released PersistentVolume of the Delete reclaim policy only for a
+// driver that declares it. The driver attaches nothing, and CreateVolume
+// refuses every call.
 func (c *controller) ControllerGetCapabilities(
 	context.Context, *csi.ControllerGetCapabilitiesRequest,
 ) (*csi.ControllerGetCapabilitiesResponse, error) {
-	return &csi.ControllerGetCapabilitiesResponse{
-		Capabilities: []*csi.ControllerServiceCapability{{
+	declared := []csi.ControllerServiceCapability_RPC_Type{
+		csi.ControllerServiceCapability_RPC_MODIFY_VOLUME,
+		csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
+	}
+	answer := &csi.ControllerGetCapabilitiesResponse{}
+	for _, one := range declared {
+		answer.Capabilities = append(answer.Capabilities, &csi.ControllerServiceCapability{
 			Type: &csi.ControllerServiceCapability_Rpc{
-				Rpc: &csi.ControllerServiceCapability_RPC{
-					Type: csi.ControllerServiceCapability_RPC_MODIFY_VOLUME,
-				},
+				Rpc: &csi.ControllerServiceCapability_RPC{Type: one},
 			},
-		}},
-	}, nil
+		})
+	}
+	return answer, nil
 }
 
 // ControllerModifyVolume validates the class and changes nothing
@@ -89,16 +98,30 @@ func (c *controller) ControllerModifyVolume(
 	return &csi.ControllerModifyVolumeResponse{}, nil
 }
 
+// CreateVolume refuses, because a person writes each PersistentVolume
+// with the repository it mounts. csi-provisioner calls it only for a
+// claim whose StorageClass names this driver, and posts the refusal on
+// that claim.
 func (c *controller) CreateVolume(
 	context.Context, *csi.CreateVolumeRequest,
 ) (*csi.CreateVolumeResponse, error) {
-	return nil, unimplemented("CreateVolume", "never; a person makes the repository")
+	return nil, unimplemented("CreateVolume",
+		"never; a person writes each PersistentVolume of the driver")
 }
 
+// DeleteVolume answers success for every volume, and removes nothing
+// here. The data of a git volume is the work tree on each node that
+// staged it, and each node plugin removes its own when it reads that
+// the PersistentVolume is deleted. The remote repository is never the
+// volume's to delete. csi-provisioner deletes the PersistentVolume once
+// this call answers.
 func (c *controller) DeleteVolume(
-	context.Context, *csi.DeleteVolumeRequest,
+	_ context.Context, request *csi.DeleteVolumeRequest,
 ) (*csi.DeleteVolumeResponse, error) {
-	return nil, unimplemented("DeleteVolume", "never; the driver removes no repository")
+	if request.GetVolumeId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "volume_id: the call names no volume")
+	}
+	return &csi.DeleteVolumeResponse{}, nil
 }
 
 func (c *controller) ControllerPublishVolume(

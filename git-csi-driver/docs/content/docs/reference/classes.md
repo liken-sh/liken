@@ -33,11 +33,9 @@ first bad one.
 | `GitVolumeRebased` | A rejected push rebased the tree onto upstream and landed, with the count of commits and the upstream commit. |
 | `GitVolumeDiverged` | The volume moved to its side branch, after a push still rejected after three rebases, an aborted rebase, or a file the application and upstream both changed. |
 | `GitVolumeHealed` | Upstream took the side branch's work, and the volume is back on its ref. |
-| `GitVolumeSwept` | The sweep removed a work tree nothing had staged for `--sweep-after`. |
 | `GitVolumeNoPublishSecret` | The `PersistentVolume` names `nodeStageSecretRef` and no `nodePublishSecretRef`, so a restart of the driver loses the credential. Posted once for each stage and for each restart. |
 | `GitVolumeUpstreamMoved` | The stage found that upstream moved while the tree held uncommitted writes, so it left the tree as it was. Posted on the claim when the driver finds it after the stage. |
 | `GitVolumeRefDeleted` | The stage found that the remote no longer holds the ref, so the driver pushes nothing until the ref exists again. Posted on the claim when the driver finds it after the stage. |
-| `GitVolumeAbandonedWork` | The stage found the work tree of another volume of the same repository that holds commits nothing pushed. Posted on the claim when the driver finds it after the stage. |
 
 Each fault, a failed push, a failed fetch, and an upstream that moved,
 posts its event at the first failure after a success, and does not post
@@ -50,8 +48,8 @@ hold back the event of a fault of another kind.
 an unarmed volume with pending paths, a failed push, a skipped file, an
 unpushed commit older than `push.maxLatency`, an invalid class, a ref
 that moved upstream while the tree held uncommitted writes, a diverged
-volume, a ref the remote no longer holds, and an abandoned work tree of
-the same repository on the node. The driver's log says which.
+volume, and a ref the remote no longer holds. The driver's log says
+which.
 
 ## Metrics
 

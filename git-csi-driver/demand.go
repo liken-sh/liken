@@ -70,6 +70,11 @@ type demanding struct {
 	// builds the watch, after the watch ends, and in a driver outside a
 	// cluster.
 	held atomic.Pointer[cache.Indexer]
+	// listed is true from the moment the watch's first read of the
+	// cluster is in the store until the watch ends. Before that read,
+	// the store holds no PersistentVolume at all, which says nothing
+	// about whether one was deleted.
+	listed atomic.Bool
 }
 
 // handleIndex names the index of the store by volume handle. The
@@ -105,6 +110,18 @@ func (d *demanding) heldVolume(handle string) (*corev1.PersistentVolume, bool) {
 	return held, isVolume
 }
 
+// carried reports whether a PersistentVolume of the driver carries the
+// handle. It answers true while the watch has not read the cluster,
+// because a removal on that answer would remove a live volume's tree.
+func (d *demanding) carried(handle string) bool {
+	store := d.held.Load()
+	if store == nil || !d.listed.Load() {
+		return true
+	}
+	found, err := (*store).ByIndex(handleIndex, handle)
+	return err != nil || len(found) > 0
+}
+
 func newDemanding(answering *node, client kubernetes.Interface, logger *slog.Logger) *demanding {
 	return &demanding{
 		node:   answering,
@@ -118,7 +135,9 @@ func newDemanding(answering *node, client kubernetes.Interface, logger *slog.Log
 // driver outside a cluster holds no client, so it reads no demand. The
 // first read takes every PersistentVolume once, which catches a demand
 // written while no watch was open, and the watch carries every demand
-// after it.
+// after it. The same first read is when the node can tell which work
+// trees lost their PersistentVolume while the plugin was down, so
+// reclaimAll runs once it is in the store.
 //
 // Every add and every update is read, because a demand is an
 // annotation, and an annotation changes no generation. read acts only
@@ -151,13 +170,28 @@ func (d *demanding) follow(ctx context.Context) {
 	}.informer()
 	d.held.Store(&store)
 	defer d.held.Store(nil)
+	// cache.WaitForCacheSync returns false when the context ends first,
+	// and the watch then reclaims nothing.
+	first := make(chan struct{})
+	go func() {
+		defer close(first)
+		if cache.WaitForCacheSync(ctx.Done(), informer.HasSynced) {
+			d.listed.Store(true)
+			d.node.reclaimAll(ctx)
+		}
+	}()
 	informer.RunWithContext(ctx)
+	<-first
+	d.listed.Store(false)
 }
 
 // deleted forgets the demand of a PersistentVolume the watch reports
-// deleted. A read after a gap in the watch reports a PersistentVolume
-// it no longer holds as a tombstone, which carries the last copy the
-// informer held.
+// deleted, and reclaims the work tree of its handle by the policy the
+// PersistentVolume had last. A read after a gap in the watch reports a
+// PersistentVolume it no longer holds as a tombstone, which carries the
+// last copy the informer held. The informer takes the object out of
+// its store before it calls the handler, so carried answers for the
+// PersistentVolumes that are left.
 func (d *demanding) deleted(ctx context.Context, object any) {
 	held, isVolume := unwrapped(object).(*corev1.PersistentVolume)
 	if !isVolume {
@@ -170,11 +204,23 @@ func (d *demanding) deleted(ctx context.Context, object any) {
 		return
 	}
 	d.forget(held)
+	if held.Spec.CSI == nil || held.Spec.CSI.Driver != driverName {
+		return
+	}
+	// Another PersistentVolume that carries the same handle keeps the
+	// tree, and keeps the policy the tree records too.
+	if d.carried(held.Spec.CSI.VolumeHandle) {
+		return
+	}
+	d.node.notePolicy(ctx, held)
+	d.node.reclaim(ctx, held.Spec.CSI.VolumeHandle)
 }
 
-// read acts on one PersistentVolume. It acts only when the volume is
-// this driver's, only when this node staged the handle, and only when
-// the demand is later than what the volume's last fetch answered. It
+// read acts on one PersistentVolume. It records the reclaim policy of
+// a volume of this driver whose work tree the node holds. It acts on a
+// demand only when the volume is this driver's, only when this node
+// staged the handle, and only when the demand is later than what the
+// volume's last fetch answered. It
 // records the demand for a handle this node has not staged, because a
 // stage fetches before it adds the volume to the node, and a demand
 // that arrives between the two is read again when the stage ends.
@@ -188,6 +234,7 @@ func (d *demanding) read(ctx context.Context, held *corev1.PersistentVolume) {
 	if source == nil || source.Driver != driverName {
 		return
 	}
+	d.node.notePolicy(ctx, held)
 	asked := held.Annotations[demandAnnotation]
 	if asked == "" {
 		return
