@@ -73,8 +73,8 @@ import (
 //
 // The write guard is stricter than the elector. It refuses a write once
 // the last renewal is one renewal deadline old, at T+10s. A write it
-// allowed is abandoned by the client's 15-second request timeout
-// (apiclient) by T+25s, before a new leader can start at T+30s.
+// allowed is abandoned by the client's request timeout, RequestTimeout,
+// by T+25s, before a new leader can start at T+30s.
 //
 // The cost is failover time. A waiting copy takes a released Lease on
 // its next read, within about 11 seconds, and an abandoned Lease 30 to
@@ -84,6 +84,13 @@ const (
 	RenewDeadline = 10 * time.Second
 	RetryPeriod   = 5 * time.Second
 )
+
+// RequestTimeout is the longest request the client of an elected
+// operator may send: pass it as apiclient.InClusterOptions.Timeout. A
+// write that the guard allowed just before T+10s must end before a new
+// leader can start at T+30s, less one retry period of margin, so it
+// ends by T+25s. apiclient's default of 30 seconds is too long.
+const RequestTimeout = Duration - RenewDeadline - RetryPeriod
 
 // Options name the Lease and the process that competes for it.
 type Options struct {
@@ -281,7 +288,8 @@ func (l *Lead) Leads() bool {
 var ErrNotLeading = errors.New("this copy does not hold a current leader Lease")
 
 // MayWrite is the client's write guard: pass it to
-// apiclient.Client.WithWriteGuard. It allows a write only while this
+// apiclient.Client.WithWriteGuard, on a client whose requests end
+// within RequestTimeout. It allows a write only while this
 // process leads and its last renewal is younger than one renewal
 // deadline. The elector itself gives up only after the renewal deadline
 // passes with no success, which is up to one retry period later, so the
