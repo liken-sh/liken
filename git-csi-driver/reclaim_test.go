@@ -78,15 +78,17 @@ func deleteVolume(t *testing.T, answering *node, name string) {
 }
 
 // watchCluster starts the node's watch on PersistentVolumes and
-// returns once its first read of the cluster is in the store. The watch
-// checks for that read on client-go's 100-millisecond poll, so the
-// sleep moves the bubble's clock to it.
+// returns once its first read of the cluster is in the store and the
+// reclaim that follows that read has finished. The watch checks for the
+// read on client-go's 100-millisecond poll, so the sleep moves the
+// bubble's clock to it.
 func watchCluster(t *testing.T, answering *node, ctx context.Context) {
 	t.Helper()
 	go answering.demands.follow(ctx)
 	for !answering.demands.listed.Load() {
 		time.Sleep(10 * time.Millisecond)
 	}
+	synctest.Wait()
 }
 
 // treeKept fails unless the store still holds the volume's directory
