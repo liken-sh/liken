@@ -119,6 +119,7 @@ func (o *operator) runLibrary(ctx context.Context, library *Library, report *lib
 	if report != nil {
 		plan.sync = syncTargetFor(report.Runs)
 	}
+	providers = o.confirmProviderKeys(ctx, library, providers, now)
 	job := buildLibraryJob(library, providers, o.languages, plan, o.jobImages(), o.jobBus(), now)
 	_, err := o.createJob(ctx, job)
 	if err != nil && !errors.Is(err, apiclient.ErrConflict) {

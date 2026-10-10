@@ -138,6 +138,11 @@ func (o *operator) checkProvider(ctx context.Context, provider *MetadataProvider
 	if verdict.reason == "" {
 		return err
 	}
+	return o.writeProviderVerdict(ctx, provider, verdict, at)
+}
+
+// writeProviderVerdict writes one verdict onto the provider's status.
+func (o *operator) writeProviderVerdict(ctx context.Context, provider *MetadataProvider, verdict providerVerdict, at time.Time) error {
 	// A write that another writer's change refused with a 409 reads the
 	// provider again, derives the status from the fresh copy, and writes
 	// once more (memo.SettleStatus).

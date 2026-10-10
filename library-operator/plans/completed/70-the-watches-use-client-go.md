@@ -329,9 +329,10 @@ An OMDb key that has spent its calls for the day reads as
 the same `401` as a key it does not accept. A verdict whose status
 write fails is written from the operator's note on the next pass, with
 no second call. A `Secret` deleted after a `Reachable` verdict still
-shows only at the next hourly call:
-[A deleted `Secret` keeps a provider
-`Ready`](../open-problems/a-deleted-secret-keeps-a-provider-ready.md).
+shows only at the next hourly call. (2026-10-10: that open problem is
+closed. The pass now reads each `Ready` provider's `Secret` before it
+creates a `Job`, and writes `NoSecret` when the `Secret` or its key is
+gone.)
 
 ## The drill that is owed
 

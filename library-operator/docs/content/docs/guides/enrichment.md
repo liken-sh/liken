@@ -81,8 +81,12 @@ The operator checks that each provider answers with one call: when it
 starts, when you edit the provider, and then once an hour. A provider
 that gives no usable answer, refuses its key, or has no `Secret` or key
 is checked every five minutes until it is `Reachable`. The operator reads the
-`Secret` only for that call, so a key you fix or a `Secret` you create
-shows as `Reachable` within five minutes. An OMDb key that has spent
+`Secret` for that call, so a key you fix or a `Secret` you create
+shows as `Reachable` within five minutes. It also reads the `Secret`
+of each `Reachable` provider just before it creates a `Library`'s
+`Job`. A `Secret` that you deleted, or that lost its key, then shows as
+`NoSecret` at once, and the `Job` leaves that provider out instead of
+waiting for a `Secret` that is gone. An OMDb key that has spent
 its calls for the day shows as `LimitReached`, not `Refused`, and is
 checked once an hour, so the check does not spend calls the key does
 not have. A `secretKeyRef` passes the
