@@ -1,8 +1,8 @@
 # 80, One leader election for every singleton operator
 
-Proposed, built, and drilled on liken-1 on 2026-10-10, except for
-the cluster operator, which no drill has run yet (see "The drill on
-liken-1"). The work moves the leader election into a new
+Proposed, built, and drilled on liken-1 on 2026-10-10. The cluster
+operator's drill ran later the same day, on `liken` 2026.10.10-002
+(see "The drill of the cluster operator on liken-1"). The work moves the leader election into a new
 package, `kubernetes/election`, and makes every singleton operator
 elect through it: `liken`'s cluster operator, `media-operator`,
 `library-operator`, `equipment-operator`, `observatory-operator`, and
@@ -167,3 +167,41 @@ do, because it waits a whole duration from that read. So the take of
 an expired `Lease` of the same pod (`renewalClock.Get`) ran. In the
 other three, the first read came less than 4 seconds after the last
 renewal, and the two rules give times too close to tell apart.
+
+## The drill of the cluster operator on liken-1
+
+Run on 2026-10-10 on liken-1, after the fleet moved to `liken`
+2026.10.10-002, the first release whose OS image carries the cluster
+operator that elects through `kubernetes/election`. One replica ran,
+on the machine `liken-1`, because the cluster pins the cluster
+operator to its one leader. The times come from the container log's
+timestamps and from the `Lease`, read every half second.
+
+### The handover in a rollout
+
+`kubectl rollout restart` on `liken-cluster-operator`, whose
+strategy is `RollingUpdate` with `maxSurge` 1 and `maxUnavailable` 0.
+
+| Release | Waiting | Holding | Handover |
+|---|---|---|---|
+| 21:01:22.071 | 21:01:22.032 | 21:01:31.757 | 9.7 s |
+
+The new process read the `Lease` 39 milliseconds before the old one
+released it, logged `waiting for Lease`, and took it on its next read.
+The handover is within the 11 seconds that a waiting copy takes to
+read the `Lease` again, as for the other five operators.
+
+### The restart in place
+
+A `kubectl debug node/liken-1 --profile=sysadmin` pod sent `SIGKILL`
+to the leader's process at 21:01:51, and the kubelet started the
+container again in the same pod.
+
+| Last renewal | First read | Holding | From the renewal | From the first read |
+|---|---|---|---|---|
+| 21:01:46.779 | 21:01:51.981 | 21:02:19.174 | 32.4 s | 27.2 s |
+
+The new process took the `Lease` 27.2 seconds after its first read,
+less than the 30 seconds that client-go alone waits from that read.
+So the take of an expired `Lease` of the same pod
+(`renewalClock.Get`) ran in the cluster operator too.

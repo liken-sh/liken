@@ -3,7 +3,9 @@
 Milestone 82. Proposed and built 2026-10-10. The drill on the `lab`
 fleet ran the same day
 ([What the drill showed](#what-the-drill-showed)). The drills on
-liken-1 after a release have not run. It closed the last part of the
+liken-1 ran the same day, after the release 2026.10.10-002
+([What the drill on liken-1 showed](#what-the-drill-on-liken-1-showed)).
+It closed the last part of the
 open problem "Coordinate cluster-operator instances", the part that
 its section "What stays open" described: a paused former
 leader of `cluster-operator` can land a reboot grant after a new leader
@@ -741,3 +743,87 @@ Two findings are outside this milestone:
   boot applies the release's `Deployment` with `replicas: 1`, so the
   second replica of steps 3 and 5 had to be set again after each
   rollout.
+
+## What the drill on liken-1 showed
+
+The drill ran on 2026-10-10 on liken-1, two machines, `liken-1` and
+`stick-1`, with a budget of one. `liken-1` is the one leader, and the
+cluster pins `cluster-operator` to it, so both replicas of steps 3
+and 5 ran on `liken-1`. The fleet moved from 2026.10.10-001, without
+the ledger, to 2026.10.10-002, with it. Three readers recorded the
+drill: a script that read the `Cluster` and the `Machine`s every 2
+seconds, a `kubectl get --watch` on the `Cluster` and one on the
+`Machine`s, which printed each object's `resourceVersion`, and the
+`Event`s. The API server gives every write one `resourceVersion` from
+one counter, so the versions order the `Cluster` writes and the grant
+writes. The times are UTC. Step 1 ran before the release, and its
+result is in "What the drill showed".
+
+2. **Upgrade into the ledger.** `spec.version` moved to
+   2026.10.10-002 at 20:55:17.
+   * At 20:56:41, the 2026.10.10-001 binary granted `liken-1` its
+     turn, with no entry, because that binary has no ledger. `stick-1`
+     waited.
+   * `liken-1` came back on 2026.10.10-002 at 20:57:33. At 20:57:36,
+     a copy with the new binary took the `Lease`, and its first sweep
+     adopted the open grant: the entry `liken-1` at version 4875773.
+     At 20:57:43, the copy of the release's `Deployment` template took
+     the `Lease` from it.
+   * At 20:58:33, the sweep reclaimed `liken-1`'s turn and wrote the
+     entry `stick-1` at version 4875412. The grant followed in the
+     same second.
+   * `stick-1` came back on 2026.10.10-002 at 21:00:10. The first
+     reclaim of its turn got `409 Conflict`, the next sweep reclaimed
+     it, and the ledger was empty by 21:00:13.
+
+   The ledger held one entry at a time, and no sample showed two
+   machines with a grant. The rollout took 4 minutes and 56 seconds.
+3. **A stale entry.** With two replicas, at 21:03:48, `kubectl
+   replace --subresource=status` wrote the entry `stick-1` at its
+   version 4877379 into the `Cluster`, at `Cluster` version 4878031.
+   At 21:03:49, the leader confirmed it: the grant write made
+   `stick-1` version 4878034, and `RebootTurnGranted` said "the
+   cluster recorded this machine's reboot turn in an earlier sweep,
+   and grants it now". `stick-1` asked for no turn, so the next sweep
+   reclaimed the grant at version 4878038, and the entry left at
+   `Cluster` version 4878040. No other machine asked for a turn.
+4. **A stale grant.** At 21:04:25, the copy of `stick-1` saved at
+   version 4877379, with a grant added, went through `kubectl replace
+   --subresource=status`. The API server answered `409 Conflict`, and
+   `stick-1` stayed at version 4878038 with no grant.
+5. **A paused leader.** Two runs, each with two replicas and
+   `liken.sh/request-reboot` on `stick-1`. Only `stick-1` asked for a
+   turn. A grant to `liken-1` reboots the one API server and stops
+   both copies of `cluster-operator`, so no run raced a second grant.
+   * In the first run, `kill -STOP` from a `kubectl debug
+     node/liken-1 --profile=sysadmin` pod stopped the leader at
+     21:05:07, in the same second that `stick-1` asked for its turn,
+     before any grant. The leader's last renewal was at 21:05:04.401.
+     The other copy took the `Lease` at 21:05:42.946, 38.5 seconds
+     later. It wrote the entry `stick-1` at 21:06:32, at `Cluster`
+     version 4878568, and the grant at `stick-1` version 4878569. At
+     21:06:41, while `stick-1` held its turn, `kill -CONT` resumed the
+     stopped process. It logged no write, and at 21:06:51 it logged
+     "lost Lease" and exited. The kubelet started it again as a copy
+     that waits.
+   * In the second run, the leader wrote the entry `stick-1` at
+     `Cluster` version 4879617 and the grant at `stick-1` version
+     4879622, at 21:10:11. `kill -STOP` stopped it at 21:10:12, while
+     `stick-1` held the turn. Its last renewal was at 21:10:08.310.
+     The other copy took the `Lease` at 21:10:43.364, 35.1 seconds
+     later, and kept `stick-1`'s entry. At 21:10:52, `kill -CONT`
+     resumed the stopped process. Its sweep tried three `Cluster`
+     status writes, and the write guard refused each one: "not sent:
+     this copy does not hold a current leader Lease: the last renewal
+     was 44s ago". At 21:11:02 it logged "lost Lease" and exited.
+     `stick-1` came back at 21:11:38, and the entry left in the same
+     second.
+
+   In both runs, the ledger never held more than one entry, and each
+   resumed process exited 10 seconds after `SIGCONT`. Before "lost
+   Lease", each one logged client-go's "Failed to renew lease" with
+   "client rate limiter Wait returned an error: context deadline
+   exceeded".
+
+Step 6, the rollback, was not part of the drill on liken-1. The
+second replica and the debug pod were removed after step 5.
