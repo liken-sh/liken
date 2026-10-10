@@ -336,6 +336,11 @@ func (m *metrics) Handler() http.Handler {
 	})
 }
 
+// listen is net.Listen. It is a variable so a test sees the bind and
+// hands Serve a listener in memory, which keeps a synctest bubble's
+// clock moving where a real socket stops it.
+var listen = net.Listen
+
 // Serve starts the /metrics listener and returns at once, with the
 // address the listener holds so a caller can report the real port
 // after asking for port 0. An empty address turns the listener off,
@@ -349,7 +354,7 @@ func (m *metrics) Serve(ctx context.Context, address string) (net.Addr, error) {
 	if address == "" {
 		return nil, nil
 	}
-	listener, err := net.Listen("tcp", address)
+	listener, err := listen("tcp", address)
 	if err != nil {
 		return nil, err
 	}

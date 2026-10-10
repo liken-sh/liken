@@ -52,6 +52,12 @@ type access struct {
 	// connections.
 	transport http.RoundTripper
 
+	// dial opens the connections of the watches, or nil for client-go's
+	// own dialer. A test that serves the API server over TLS on its
+	// network in memory hands in that network's dial, because client-go
+	// refuses a Transport beside a CA file.
+	dial dialFunc
+
 	// versions is the memo of each kind this process writes, which each
 	// write notes and each read from a store consults (objectcache.go).
 	versions objectVersions
@@ -73,9 +79,10 @@ func NewClient(base string, httpClient *http.Client, credentials string) *Client
 }
 
 // InClusterClient builds the client from the pod's environment and its
-// ServiceAccount.
-func InClusterClient() (*Client, error) {
-	shared, err := apiclient.InCluster(apiclient.InClusterOptions{ServiceAccountDir: serviceAccountDir})
+// ServiceAccount. timeout bounds each request, and zero takes the
+// shared client's default.
+func InClusterClient(timeout time.Duration) (*Client, error) {
+	shared, err := apiclient.InCluster(apiclient.InClusterOptions{ServiceAccountDir: serviceAccountDir, Timeout: timeout})
 	if err != nil {
 		return nil, err
 	}

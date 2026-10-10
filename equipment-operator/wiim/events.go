@@ -99,7 +99,7 @@ func (c *Client) startEvents(ctx context.Context) {
 		c.reportEventLoss("cannot find a local address the device reaches")
 		return
 	}
-	listener, err := net.Listen("tcp", ":0")
+	listener, err := c.Listen("tcp", ":0")
 	if err != nil {
 		c.reportEventLoss("cannot open the callback listener: %v", err)
 		return

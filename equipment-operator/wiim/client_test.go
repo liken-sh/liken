@@ -1,5 +1,5 @@
-// The client against a fake amp on a real TLS socket, plus the parsing
-// and the setters.
+// The client against a fake amp that serves TLS on the test network,
+// plus the parsing and the setters.
 
 package wiim
 
@@ -7,11 +7,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/equipment"
@@ -42,7 +42,7 @@ const (
 // fakeAmp answers the commands a live amp answers, with one canned
 // answer each.
 type fakeAmp struct {
-	server *httptest.Server
+	address string
 
 	mutex    sync.Mutex
 	commands []string
@@ -82,8 +82,7 @@ func startFakeAmp(t *testing.T) *fakeAmp {
 		ledCommand:          "1",
 		buttonsCommand:      "0",
 	}}
-	amp.server = httptest.NewTLSServer(http.HandlerFunc(amp.handle))
-	t.Cleanup(amp.server.Close)
+	amp.address = testNetwork.serve(t, http.HandlerFunc(amp.handle), true)
 	return amp
 }
 
@@ -130,7 +129,7 @@ func isSetter(command string) bool {
 }
 
 func (f *fakeAmp) client(listener func(equipment.Event)) *Client {
-	return NewClient(f.server.Listener.Addr().String(), listener)
+	return testClient(f.address, listener)
 }
 
 func (f *fakeAmp) sent() []string {
@@ -153,86 +152,90 @@ func drainEvents(events <-chan equipment.Event) {
 
 // One poll fills every family of the snapshot.
 func TestPollFoldsEveryFamily(t *testing.T) {
-	amp := startFakeAmp(t)
-	client := amp.client(nil)
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeAmp(t)
+		client := amp.client(nil)
 
-	if !client.poll(context.Background()) {
-		t.Fatal("the poll did not answer")
-	}
-	status := client.Status()
+		if !client.poll(context.Background()) {
+			t.Fatal("the poll did not answer")
+		}
+		status := client.Status()
 
-	mustMatch(t, client.Address(), amp.server.Listener.Addr().String())
-	mustMatch(t, status.Device.Name, "Test Amp")
-	mustMatch(t, status.Device.Model, "WiiM_Amp_4layer")
-	mustMatch(t, status.Device.UUID, "FF98F2F7AABBCCDDEEFF0011")
-	mustMatch(t, status.Device.MACs.Ethernet, "00:11:22:33:44:58")
-	mustMatch(t, status.Device.Internet, true)
-	mustMatch(t, status.Device.Capabilities.PresetKeys, 12)
-	mustMatch(t, status.Device.Security.AES, "1.0")
-	mustMatch(t, status.Device.TemperatureCPU, 32)
+		mustMatch(t, client.Address(), amp.address)
+		mustMatch(t, status.Device.Name, "Test Amp")
+		mustMatch(t, status.Device.Model, "WiiM_Amp_4layer")
+		mustMatch(t, status.Device.UUID, "FF98F2F7AABBCCDDEEFF0011")
+		mustMatch(t, status.Device.MACs.Ethernet, "00:11:22:33:44:58")
+		mustMatch(t, status.Device.Internet, true)
+		mustMatch(t, status.Device.Capabilities.PresetKeys, 12)
+		mustMatch(t, status.Device.Security.AES, "1.0")
+		mustMatch(t, status.Device.TemperatureCPU, 32)
 
-	mustMatch(t, status.Network.Interface, "ethernet")
-	mustMatch(t, status.Network.Address, "192.0.2.10")
-	mustMatch(t, status.Network.SSID, "Test")
-	mustMatch(t, status.Network.Static.Ethernet.Enabled, true)
-	mustMatch(t, status.Network.Static.Ethernet.Gateway, "192.0.2.1")
+		mustMatch(t, status.Network.Interface, "ethernet")
+		mustMatch(t, status.Network.Address, "192.0.2.10")
+		mustMatch(t, status.Network.SSID, "Test")
+		mustMatch(t, status.Network.Static.Ethernet.Enabled, true)
+		mustMatch(t, status.Network.Static.Ethernet.Gateway, "192.0.2.1")
 
-	mustMatch(t, status.Playback.Status, "play")
-	mustMatch(t, status.Playback.Source, "optical")
-	mustMatch(t, status.Playback.Volume, 31)
-	mustMatch(t, status.Playback.Title, "Have a Cigar")
-	mustMatch(t, status.Playback.Artist, "Pink Floyd")
+		mustMatch(t, status.Playback.Status, "play")
+		mustMatch(t, status.Playback.Source, "optical")
+		mustMatch(t, status.Playback.Volume, 31)
+		mustMatch(t, status.Playback.Title, "Have a Cigar")
+		mustMatch(t, status.Playback.Artist, "Pink Floyd")
 
-	mustMatch(t, status.NowPlaying.Title, "Have a Cigar")
-	mustMatch(t, status.NowPlaying.SampleRate, 44100)
-	mustMatch(t, status.NowPlaying.BitDepth, 24)
+		mustMatch(t, status.NowPlaying.Title, "Have a Cigar")
+		mustMatch(t, status.NowPlaying.SampleRate, 44100)
+		mustMatch(t, status.NowPlaying.BitDepth, 24)
 
-	mustMatch(t, status.Audio.Balance, 0.5)
-	mustMatch(t, status.Audio.MaxVolume, 100)
-	mustMatch(t, status.Audio.Output.Mode, 7)
-	mustMatch(t, status.Audio.Output.Name, "Speaker Out")
-	mustMatch(t, status.Audio.Output.Available[0].SampleRates, []int{44100, 48000})
-	mustMatch(t, status.Audio.RemoteVolumeStep, 1)
-	mustMatch(t, status.Audio.ButtonVolumeStep, 2)
-	mustMatch(t, status.Audio.PlayModeVolumes[1].Name, "optical")
-	mustMatch(t, status.Audio.Subwoofer.Crossover, 80.0)
-	mustMatch(t, status.Audio.SPDIFDelayMS, 800)
+		mustMatch(t, status.Audio.Balance, 0.5)
+		mustMatch(t, status.Audio.MaxVolume, 100)
+		mustMatch(t, status.Audio.Output.Mode, 7)
+		mustMatch(t, status.Audio.Output.Name, "Speaker Out")
+		mustMatch(t, status.Audio.Output.Available[0].SampleRates, []int{44100, 48000})
+		mustMatch(t, status.Audio.RemoteVolumeStep, 1)
+		mustMatch(t, status.Audio.ButtonVolumeStep, 2)
+		mustMatch(t, status.Audio.PlayModeVolumes[1].Name, "optical")
+		mustMatch(t, status.Audio.Subwoofer.Crossover, 80.0)
+		mustMatch(t, status.Audio.SPDIFDelayMS, 800)
 
-	mustMatch(t, status.Equalizer.Enabled, true)
-	mustMatch(t, status.Equalizer.Presets, []string{"Flat", "Rock"})
+		mustMatch(t, status.Equalizer.Enabled, true)
+		mustMatch(t, status.Equalizer.Presets, []string{"Flat", "Rock"})
 
-	mustMatch(t, status.Timers.SleepSeconds, 300)
-	mustMatch(t, status.Timers.Alarms[0].Enabled, true)
-	mustMatch(t, status.Timers.PowerMode.Idle, 120)
+		mustMatch(t, status.Timers.SleepSeconds, 300)
+		mustMatch(t, status.Timers.Alarms[0].Enabled, true)
+		mustMatch(t, status.Timers.PowerMode.Idle, 120)
 
-	mustMatch(t, status.Bluetooth.PairStatus, 3)
-	mustMatch(t, status.Bluetooth.Paired[0].Name, "Phone")
-	mustMatch(t, status.Bluetooth.Remote.Connected, true)
+		mustMatch(t, status.Bluetooth.PairStatus, 3)
+		mustMatch(t, status.Bluetooth.Paired[0].Name, "Phone")
+		mustMatch(t, status.Bluetooth.Remote.Connected, true)
 
-	mustMatch(t, status.Presets[0].Source, "TuneIn")
+		mustMatch(t, status.Presets[0].Source, "TuneIn")
 
-	mustMatch(t, status.Controls.LED, true)
-	mustMatch(t, status.Controls.Buttons, false)
-	mustMatch(t, status.Controls.CECPower, true)
+		mustMatch(t, status.Controls.LED, true)
+		mustMatch(t, status.Controls.Buttons, false)
+		mustMatch(t, status.Controls.CECPower, true)
+	})
 }
 
 // The contract carries one main zone, power always on, and the volume
 // the player reported.
 func TestStateCarriesTheMainZone(t *testing.T) {
-	amp := startFakeAmp(t)
-	client := amp.client(nil)
-	client.poll(context.Background())
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeAmp(t)
+		client := amp.client(nil)
+		client.poll(context.Background())
 
-	state := client.State()
-	mustMatch(t, state.Reachable, equipment.ConditionTrue)
-	zone, held := state.Zone(equipment.MainZone)
-	mustMatch(t, held, true)
-	mustMatch(t, zone.Power, equipment.PowerOn)
-	mustMatch(t, zone.Input, "optical")
-	mustMatch(t, zone.Volume, 31)
-	mustMatch(t, zone.VolumeMax, 100)
-	mustMatch(t, zone.Sleep, 5)
-	mustMatch(t, client.VolumeResolution(), 1)
+		state := client.State()
+		mustMatch(t, state.Reachable, equipment.ConditionTrue)
+		zone, held := state.Zone(equipment.MainZone)
+		mustMatch(t, held, true)
+		mustMatch(t, zone.Power, equipment.PowerOn)
+		mustMatch(t, zone.Input, "optical")
+		mustMatch(t, zone.Volume, 31)
+		mustMatch(t, zone.VolumeMax, 100)
+		mustMatch(t, zone.Sleep, 5)
+		mustMatch(t, client.VolumeResolution(), 1)
+	})
 }
 
 func TestStateBeforeTheDeviceAnswers(t *testing.T) {
@@ -249,21 +252,23 @@ func TestStateBeforeTheDeviceAnswers(t *testing.T) {
 // A device whose uuid does not match the declared identity is not
 // driven, and reports unreachable.
 func TestIdentityMismatchReportsUnreachable(t *testing.T) {
-	amp := startFakeAmp(t)
-	client := amp.client(nil)
-	client.UUID = "FF98F2F70000000000000000"
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeAmp(t)
+		client := amp.client(nil)
+		client.UUID = "FF98F2F70000000000000000"
 
-	for range pollFailures {
-		if client.poll(context.Background()) {
-			t.Fatal("a mismatched uuid answered as the expected device")
+		for range pollFailures {
+			if client.poll(context.Background()) {
+				t.Fatal("a mismatched uuid answered as the expected device")
+			}
 		}
-	}
-	mustMatch(t, client.State().Reachable, equipment.ConditionFalse)
-	for _, command := range amp.sent() {
-		if command != statusCommand {
-			t.Fatalf("a mismatched device was sent %q", command)
+		mustMatch(t, client.State().Reachable, equipment.ConditionFalse)
+		for _, command := range amp.sent() {
+			if command != statusCommand {
+				t.Fatalf("a mismatched device was sent %q", command)
+			}
 		}
-	}
+	})
 }
 
 func TestIdentityMatchesNormalizesTheSpellings(t *testing.T) {
@@ -311,281 +316,292 @@ func TestAClientWithNoAddressSendsNothing(t *testing.T) {
 }
 
 func TestAFailedPollReportsUnreachable(t *testing.T) {
-	amp := startFakeAmp(t)
-	amp.mutex.Lock()
-	amp.failing = http.StatusInternalServerError
-	amp.mutex.Unlock()
-	client := amp.client(nil)
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeAmp(t)
+		amp.mutex.Lock()
+		amp.failing = http.StatusInternalServerError
+		amp.mutex.Unlock()
+		client := amp.client(nil)
 
-	for range pollFailures {
-		if client.poll(context.Background()) {
-			t.Fatal("a failing device answered as reachable")
+		for range pollFailures {
+			if client.poll(context.Background()) {
+				t.Fatal("a failing device answered as reachable")
+			}
 		}
-	}
-	mustMatch(t, client.State().Reachable, equipment.ConditionFalse)
+		mustMatch(t, client.State().Reachable, equipment.ConditionFalse)
+	})
 }
 
 // One poll the device misses leaves the last answer standing, and the
 // polls after it call the device unreachable.
 func TestOneMissedPollLeavesTheDeviceReachable(t *testing.T) {
-	amp := startFakeAmp(t)
-	client := amp.client(nil)
-	client.poll(context.Background())
-	mustMatch(t, client.State().Reachable, equipment.ConditionTrue)
-
-	amp.mutex.Lock()
-	amp.failing = http.StatusInternalServerError
-	amp.mutex.Unlock()
-	client.poll(context.Background())
-	mustMatch(t, client.State().Reachable, equipment.ConditionTrue)
-
-	for i := 1; i < pollFailures; i++ {
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeAmp(t)
+		client := amp.client(nil)
 		client.poll(context.Background())
-	}
-	mustMatch(t, client.State().Reachable, equipment.ConditionFalse)
+		mustMatch(t, client.State().Reachable, equipment.ConditionTrue)
+
+		amp.mutex.Lock()
+		amp.failing = http.StatusInternalServerError
+		amp.mutex.Unlock()
+		client.poll(context.Background())
+		mustMatch(t, client.State().Reachable, equipment.ConditionTrue)
+
+		for i := 1; i < pollFailures; i++ {
+			client.poll(context.Background())
+		}
+		mustMatch(t, client.State().Reachable, equipment.ConditionFalse)
+	})
 }
 
 // A poll the device answers clears the run of misses, so a device that
 // stumbles once does not go unreachable on a later run counted from the
 // stumble.
 func TestAnAnsweredPollClearsTheMisses(t *testing.T) {
-	amp := startFakeAmp(t)
-	client := amp.client(nil)
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeAmp(t)
+		client := amp.client(nil)
 
-	amp.mutex.Lock()
-	amp.failing = http.StatusInternalServerError
-	amp.mutex.Unlock()
-	for i := 0; i < pollFailures-1; i++ {
-		client.poll(context.Background())
-	}
+		amp.mutex.Lock()
+		amp.failing = http.StatusInternalServerError
+		amp.mutex.Unlock()
+		for i := 0; i < pollFailures-1; i++ {
+			client.poll(context.Background())
+		}
 
-	amp.mutex.Lock()
-	amp.failing = 0
-	amp.mutex.Unlock()
-	if !client.poll(context.Background()) {
-		t.Fatal("the device answered and the poll reported failure")
-	}
-	mustMatch(t, client.State().Reachable, equipment.ConditionTrue)
+		amp.mutex.Lock()
+		amp.failing = 0
+		amp.mutex.Unlock()
+		if !client.poll(context.Background()) {
+			t.Fatal("the device answered and the poll reported failure")
+		}
+		mustMatch(t, client.State().Reachable, equipment.ConditionTrue)
 
-	amp.mutex.Lock()
-	amp.failing = http.StatusInternalServerError
-	amp.mutex.Unlock()
-	for i := 0; i < pollFailures-1; i++ {
-		client.poll(context.Background())
-	}
-	mustMatch(t, client.State().Reachable, equipment.ConditionTrue)
+		amp.mutex.Lock()
+		amp.failing = http.StatusInternalServerError
+		amp.mutex.Unlock()
+		for i := 0; i < pollFailures-1; i++ {
+			client.poll(context.Background())
+		}
+		mustMatch(t, client.State().Reachable, equipment.ConditionTrue)
+	})
 }
 
 // A source with no track answers "Failed", and the track is cleared.
 func TestAMissOnNowPlayingClearsTheTrack(t *testing.T) {
-	amp := startFakeAmp(t)
-	client := amp.client(nil)
-	client.poll(context.Background())
-	if client.Status().NowPlaying == nil {
-		t.Fatal("the first poll did not read a track")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeAmp(t)
+		client := amp.client(nil)
+		client.poll(context.Background())
+		if client.Status().NowPlaying == nil {
+			t.Fatal("the first poll did not read a track")
+		}
 
-	amp.mutex.Lock()
-	amp.answers[metaCommand] = "Failed"
-	amp.mutex.Unlock()
-	client.poll(context.Background())
-	mustMatch(t, client.Status().NowPlaying, (*NowPlaying)(nil))
+		amp.mutex.Lock()
+		amp.answers[metaCommand] = "Failed"
+		amp.mutex.Unlock()
+		client.poll(context.Background())
+		mustMatch(t, client.Status().NowPlaying, (*NowPlaying)(nil))
+	})
 }
 
 // A command the device does not carry leaves its family as it was.
 func TestAnUnknownCommandLeavesItsFamily(t *testing.T) {
-	amp := startFakeAmp(t)
-	client := amp.client(nil)
-	client.poll(context.Background())
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeAmp(t)
+		client := amp.client(nil)
+		client.poll(context.Background())
 
-	amp.mutex.Lock()
-	delete(amp.answers, eqListCommand)
-	amp.mutex.Unlock()
-	client.poll(context.Background())
-	mustMatch(t, client.Status().Equalizer.Presets, []string{"Flat", "Rock"})
+		amp.mutex.Lock()
+		delete(amp.answers, eqListCommand)
+		amp.mutex.Unlock()
+		client.poll(context.Background())
+		mustMatch(t, client.Status().Equalizer.Presets, []string{"Flat", "Rock"})
+	})
 }
 
 // A poll that moves nothing still pokes the listener, so the status
 // writer records the observation.
 func TestAPollThatMovedNothingStillReports(t *testing.T) {
-	amp := startFakeAmp(t)
-	events := make(chan equipment.Event, 16)
-	client := amp.client(func(event equipment.Event) { events <- event })
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeAmp(t)
+		events := make(chan equipment.Event, 16)
+		client := amp.client(func(event equipment.Event) { events <- event })
 
-	client.poll(context.Background())
-	<-events
-	client.poll(context.Background())
-	select {
-	case event := <-events:
-		mustMatch(t, event.Zone, equipment.MainZone)
-	case <-time.After(time.Second):
-		t.Fatal("a quiet poll reported nothing")
-	}
+		client.poll(context.Background())
+		<-events
+		client.poll(context.Background())
+		select {
+		case event := <-events:
+			mustMatch(t, event.Zone, equipment.MainZone)
+		case <-time.After(time.Second):
+			t.Fatal("a quiet poll reported nothing")
+		}
+	})
 }
 
 // A hand on the device moves the volume, and the listener hears it as a
 // volume event rather than a reachability change.
 func TestAChangedVolumeReachesTheListener(t *testing.T) {
-	amp := startFakeAmp(t)
-	events := make(chan equipment.Event, 16)
-	client := amp.client(func(event equipment.Event) { events <- event })
-	client.poll(context.Background())
-	drainEvents(events)
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeAmp(t)
+		events := make(chan equipment.Event, 16)
+		client := amp.client(func(event equipment.Event) { events <- event })
+		client.poll(context.Background())
+		drainEvents(events)
 
-	amp.mutex.Lock()
-	amp.answers[playerCommand] = strings.Replace(playerJSON, `"vol":"31"`, `"vol":"40"`, 1)
-	amp.mutex.Unlock()
-	client.poll(context.Background())
+		amp.mutex.Lock()
+		amp.answers[playerCommand] = strings.Replace(playerJSON, `"vol":"31"`, `"vol":"40"`, 1)
+		amp.mutex.Unlock()
+		client.poll(context.Background())
 
-	select {
-	case event := <-events:
-		mustMatch(t, event.Field, equipment.EventVolume)
-	case <-time.After(time.Second):
-		t.Fatal("a changed volume reported nothing")
-	}
+		select {
+		case event := <-events:
+			mustMatch(t, event.Field, equipment.EventVolume)
+		case <-time.After(time.Second):
+			t.Fatal("a changed volume reported nothing")
+		}
+	})
 }
 
 // A setter takes the level it just sent, so a press moves the room
 // before the next poll and two presses in one poll window each count.
 func TestASetterTakesTheLevelItSent(t *testing.T) {
-	amp := startFakeAmp(t)
-	events := make(chan equipment.Event, 16)
-	client := amp.client(func(event equipment.Event) { events <- event })
-	client.poll(context.Background())
-	drainEvents(events)
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeAmp(t)
+		events := make(chan equipment.Event, 16)
+		client := amp.client(func(event equipment.Event) { events <- event })
+		client.poll(context.Background())
+		drainEvents(events)
 
-	if err := client.SetVolume(equipment.MainZone, 42); err != nil {
-		t.Fatal(err)
-	}
-	mustMatch(t, client.State().Zones[equipment.MainZone].Volume, 42)
-	select {
-	case event := <-events:
-		mustMatch(t, event.Field, equipment.EventVolume)
-	case <-time.After(time.Second):
-		t.Fatal("a taken volume reported nothing")
-	}
+		if err := client.SetVolume(equipment.MainZone, 42); err != nil {
+			t.Fatal(err)
+		}
+		mustMatch(t, client.State().Zones[equipment.MainZone].Volume, 42)
+		select {
+		case event := <-events:
+			mustMatch(t, event.Field, equipment.EventVolume)
+		case <-time.After(time.Second):
+			t.Fatal("a taken volume reported nothing")
+		}
 
-	if err := client.SetMute(equipment.MainZone, true); err != nil {
-		t.Fatal(err)
-	}
-	mustMatch(t, client.State().Zones[equipment.MainZone].Mute, true)
+		if err := client.SetMute(equipment.MainZone, true); err != nil {
+			t.Fatal(err)
+		}
+		mustMatch(t, client.State().Zones[equipment.MainZone].Mute, true)
+	})
 }
 
 // A setter the device refuses takes nothing, so the held state never
 // claims a level that did not land.
 func TestARefusedSetterTakesNothing(t *testing.T) {
-	amp := startFakeAmp(t)
-	client := amp.client(nil)
-	client.poll(context.Background())
-	before := client.State().Zones[equipment.MainZone].Volume
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeAmp(t)
+		client := amp.client(nil)
+		client.poll(context.Background())
+		before := client.State().Zones[equipment.MainZone].Volume
 
-	amp.mutex.Lock()
-	amp.setter = "unknown command"
-	amp.mutex.Unlock()
-	if err := client.SetVolume(equipment.MainZone, 42); err == nil {
-		t.Fatal("the device refused the set and the client reported no error")
-	}
-	mustMatch(t, client.State().Zones[equipment.MainZone].Volume, before)
+		amp.mutex.Lock()
+		amp.setter = "unknown command"
+		amp.mutex.Unlock()
+		if err := client.SetVolume(equipment.MainZone, 42); err == nil {
+			t.Fatal("the device refused the set and the client reported no error")
+		}
+		mustMatch(t, client.State().Zones[equipment.MainZone].Volume, before)
+	})
 }
 
 // Run keeps polling until its context ends.
 func TestRunPollsUntilTheContextEnds(t *testing.T) {
-	amp := startFakeAmp(t)
-	client := amp.client(nil)
-	restore := pollInterval
-	pollInterval = 5 * time.Millisecond
-	t.Cleanup(func() { pollInterval = restore })
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeAmp(t)
+		client := amp.client(nil)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		client.Run(ctx)
-		close(done)
-	}()
-	deadline := time.After(3 * time.Second)
-	for client.State().Reachable != equipment.ConditionTrue {
-		select {
-		case <-deadline:
-			t.Fatal("Run never reached the device")
-		case <-time.After(2 * time.Millisecond):
-		}
-	}
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("Run did not stop with its context")
-	}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			client.Run(ctx)
+			close(done)
+		}()
+		synctest.Wait()
+		mustMatch(t, client.State().Reachable, equipment.ConditionTrue)
+		cancel()
+		<-done
+	})
 }
 
 // Each setter reaches its own wire command.
 func TestTheSettersReachTheirWireCommands(t *testing.T) {
-	amp := startFakeAmp(t)
-	client := amp.client(nil)
-
 	cases := []struct {
 		name string
-		send func() error
+		send func(*Client) error
 		want string
 	}{
-		{"volume", func() error { return client.SetVolume(equipment.MainZone, 42) }, "setPlayerCmd:vol:42"},
-		{"volume over the top", func() error { return client.SetVolume(equipment.MainZone, 500) }, "setPlayerCmd:vol:100"},
-		{"volume under zero", func() error { return client.SetVolume(equipment.MainZone, -5) }, "setPlayerCmd:vol:0"},
-		{"mute on", func() error { return client.SetMute(equipment.MainZone, true) }, "setPlayerCmd:mute:1"},
-		{"mute off", func() error { return client.SetMute(equipment.MainZone, false) }, "setPlayerCmd:mute:0"},
-		{"input", func() error { return client.SetInput(equipment.MainZone, "optical") }, "setPlayerCmd:switchmode:optical"},
-		{"sleep", func() error { return client.SetSleep(equipment.MainZone, 10) }, "setShutdown:600"},
-		{"sleep off", func() error { return client.SetSleep(equipment.MainZone, 0) }, "setShutdown:-1"},
-		{"power on is a no-op", func() error { return client.SetPower(equipment.MainZone, true) }, ""},
+		{"volume", func(c *Client) error { return c.SetVolume(equipment.MainZone, 42) }, "setPlayerCmd:vol:42"},
+		{"volume over the top", func(c *Client) error { return c.SetVolume(equipment.MainZone, 500) }, "setPlayerCmd:vol:100"},
+		{"volume under zero", func(c *Client) error { return c.SetVolume(equipment.MainZone, -5) }, "setPlayerCmd:vol:0"},
+		{"mute on", func(c *Client) error { return c.SetMute(equipment.MainZone, true) }, "setPlayerCmd:mute:1"},
+		{"mute off", func(c *Client) error { return c.SetMute(equipment.MainZone, false) }, "setPlayerCmd:mute:0"},
+		{"input", func(c *Client) error { return c.SetInput(equipment.MainZone, "optical") }, "setPlayerCmd:switchmode:optical"},
+		{"sleep", func(c *Client) error { return c.SetSleep(equipment.MainZone, 10) }, "setShutdown:600"},
+		{"sleep off", func(c *Client) error { return c.SetSleep(equipment.MainZone, 0) }, "setShutdown:-1"},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			amp.mutex.Lock()
-			amp.commands = nil
-			amp.mutex.Unlock()
-			mustSucceed(t, one.send())
-			if one.want == "" {
-				mustMatch(t, amp.sent(), []string(nil))
-				return
-			}
-			mustMatch(t, amp.sent(), []string{one.want})
+			synctest.Test(t, func(t *testing.T) {
+				amp := startFakeAmp(t)
+
+				mustSucceed(t, one.send(amp.client(nil)))
+				mustMatch(t, amp.sent(), []string{one.want})
+			})
 		})
 	}
 }
 
+// Power on is a no-op, because a WiiM has no standby to leave.
+func TestPowerOnSendsNothing(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeAmp(t)
+
+		mustSucceed(t, amp.client(nil).SetPower(equipment.MainZone, true))
+		mustMatch(t, amp.sent(), []string(nil))
+	})
+}
+
 // A WiiM reports no sound mode, so the compare is of the two words.
 func TestAWiimComparesSoundModesByTheirWords(t *testing.T) {
-	client := startFakeAmp(t).client(nil)
-	mustMatch(t, client.SameSoundMode("STEREO", "STEREO"), true)
-	mustMatch(t, client.SameSoundMode("STEREO", ""), false)
+	synctest.Test(t, func(t *testing.T) {
+		client := startFakeAmp(t).client(nil)
+		mustMatch(t, client.SameSoundMode("STEREO", "STEREO"), true)
+		mustMatch(t, client.SameSoundMode("STEREO", ""), false)
+	})
 }
 
 // The setters reject what the device cannot do: an unknown zone, a
 // power-off, a sound mode, an unknown input, and an out-of-range timer.
 func TestTheSettersRejectWhatTheDeviceCannotDo(t *testing.T) {
-	amp := startFakeAmp(t)
-	client := amp.client(nil)
-
 	cases := []struct {
 		name string
-		send func() error
+		send func(*Client) error
 	}{
-		{"power off", func() error { return client.SetPower(equipment.MainZone, false) }},
-		{"sound mode", func() error { return client.SetSoundMode(equipment.MainZone, "STEREO") }},
-		{"unknown input", func() error { return client.SetInput(equipment.MainZone, "coaxial") }},
-		{"sleep over the top", func() error { return client.SetSleep(equipment.MainZone, maxSleepMinutes+1) }},
-		{"sleep under zero", func() error { return client.SetSleep(equipment.MainZone, -1) }},
-		{"power on an unknown zone", func() error { return client.SetPower("zone2", true) }},
-		{"input on an unknown zone", func() error { return client.SetInput("zone2", "optical") }},
-		{"volume on an unknown zone", func() error { return client.SetVolume("zone2", 1) }},
-		{"mute on an unknown zone", func() error { return client.SetMute("zone2", true) }},
-		{"sleep on an unknown zone", func() error { return client.SetSleep("zone2", 1) }},
+		{"power off", func(c *Client) error { return c.SetPower(equipment.MainZone, false) }},
+		{"sound mode", func(c *Client) error { return c.SetSoundMode(equipment.MainZone, "STEREO") }},
+		{"unknown input", func(c *Client) error { return c.SetInput(equipment.MainZone, "coaxial") }},
+		{"sleep over the top", func(c *Client) error { return c.SetSleep(equipment.MainZone, maxSleepMinutes+1) }},
+		{"sleep under zero", func(c *Client) error { return c.SetSleep(equipment.MainZone, -1) }},
+		{"power on an unknown zone", func(c *Client) error { return c.SetPower("zone2", true) }},
+		{"input on an unknown zone", func(c *Client) error { return c.SetInput("zone2", "optical") }},
+		{"volume on an unknown zone", func(c *Client) error { return c.SetVolume("zone2", 1) }},
+		{"mute on an unknown zone", func(c *Client) error { return c.SetMute("zone2", true) }},
+		{"sleep on an unknown zone", func(c *Client) error { return c.SetSleep("zone2", 1) }},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			if err := one.send(); err == nil {
-				t.Fatalf("%s did not error", one.name)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				if err := one.send(startFakeAmp(t).client(nil)); err == nil {
+					t.Fatalf("%s did not error", one.name)
+				}
+			})
 		})
 	}
 }
@@ -672,47 +688,49 @@ func TestAtoiAndAtofRejectNonNumbers(t *testing.T) {
 
 // A setter the device refuses carries the device's own words.
 func TestASetterFailureCarriesTheDeviceWords(t *testing.T) {
-	amp := startFakeAmp(t)
-	amp.mutex.Lock()
-	amp.setter = "unknown command"
-	amp.mutex.Unlock()
-	client := amp.client(nil)
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeAmp(t)
+		amp.mutex.Lock()
+		amp.setter = "unknown command"
+		amp.mutex.Unlock()
+		client := amp.client(nil)
 
-	err := client.SetVolume(equipment.MainZone, 10)
-	if err == nil || !strings.Contains(err.Error(), "unknown command") {
-		t.Fatalf("a refused setter did not carry the device's words: %v", err)
-	}
+		err := client.SetVolume(equipment.MainZone, 10)
+		if err == nil || !strings.Contains(err.Error(), "unknown command") {
+			t.Fatalf("a refused setter did not carry the device's words: %v", err)
+		}
+	})
 }
 
 // Run backs off while the device is down, and reports it unreachable.
 func TestRunBacksOffWhenTheDeviceIsDown(t *testing.T) {
-	restore, restoreMax := pollInterval, maxBackoff
-	t.Cleanup(func() { pollInterval, maxBackoff = restore, restoreMax })
-	pollInterval, maxBackoff = time.Millisecond, 5*time.Millisecond
+	synctest.Test(t, func(t *testing.T) {
+		client := testClient("127.0.0.1:1", nil)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		client.Run(ctx)
 
-	client := NewClient("127.0.0.1:1", nil)
-	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
-	defer cancel()
-	client.Run(ctx)
-
-	mustMatch(t, client.State().Reachable, equipment.ConditionFalse)
+		mustMatch(t, client.State().Reachable, equipment.ConditionFalse)
+	})
 }
 
 // The survey is not complete until one poll has read every family, so
 // the controller knows the device's own facts are in hand before it
 // applies a declared setting.
 func TestASurveyCompletesAfterOnePoll(t *testing.T) {
-	amp := startFakeAmp(t)
-	var client *Client
-	var surveyedAtEvent []bool
-	client = amp.client(func(equipment.Event) { surveyedAtEvent = append(surveyedAtEvent, client.Surveyed()) })
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeAmp(t)
+		var client *Client
+		var surveyedAtEvent []bool
+		client = amp.client(func(equipment.Event) { surveyedAtEvent = append(surveyedAtEvent, client.Surveyed()) })
 
-	mustMatch(t, client.Surveyed(), false)
-	client.poll(context.Background())
-	mustMatch(t, client.Surveyed(), true)
-	// The poll's own event reports the survey, so a listener that waits
-	// for it needs no other event.
-	mustMatch(t, surveyedAtEvent[len(surveyedAtEvent)-1], true)
+		mustMatch(t, client.Surveyed(), false)
+		client.poll(context.Background())
+		mustMatch(t, client.Surveyed(), true)
+		// The poll's own event reports the survey, so a listener that waits
+		// for it needs no other event.
+		mustMatch(t, surveyedAtEvent[len(surveyedAtEvent)-1], true)
+	})
 }
 
 // A device that fails a poll is asked again no sooner than a healthy

@@ -9,6 +9,7 @@ package main
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/wiim"
@@ -22,6 +23,7 @@ func rewired(t *testing.T, receiver Receiver, move func(*controller, *Receiver))
 	api := startFakeAPI(t)
 	operator := newController(api.client, testMetrics(t))
 	operator.dial = testNetwork.dial
+	operator.listen = testNetwork.bind
 	operator.now = func() time.Time { return statusNow }
 	log := &logBuffer{}
 	operator.log = log
@@ -56,7 +58,7 @@ func TestARewiredUnitKeepsTheSessionThatStands(t *testing.T) {
 			func(t *testing.T) func(*controller, *Receiver) {
 				amp := startFakeWiim(t)
 				return func(operator *controller, _ *Receiver) {
-					operator.discovery.store([]wiim.Device{{UUID: "FF98F2F78136CE45A780D8A1", Address: amp.server.Listener.Addr().String()}})
+					operator.discovery.store([]wiim.Device{{UUID: "FF98F2F78136CE45A780D8A1", Address: amp.address}})
 				}
 			},
 		},
@@ -73,13 +75,15 @@ func TestARewiredUnitKeepsTheSessionThatStands(t *testing.T) {
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			t.Parallel()
-			log := rewired(t, one.receiver(t), one.move(t))
+			synctest.Test(t, func(t *testing.T) {
+				log := rewired(t, one.receiver(t), one.move(t))
 
-			mustDeepEqual(t, linesWith(log, "session for Player"), []string{
-				"Receiver theater: a session for Player house/theater started: input GAME, active true, awake true; the operator found it when it started, so it sends nothing for these flags",
-				"Receiver theater: a session for Player house/theater started: input GAME, active true, awake true; the unit that held it before the wiring changed handed it over, so it sends nothing for these flags",
+				mustDeepEqual(t, linesWith(log, "session for Player"), []string{
+					"Receiver theater: a session for Player house/theater started: input GAME, active true, awake true; the operator found it when it started, so it sends nothing for these flags",
+					"Receiver theater: a session for Player house/theater started: input GAME, active true, awake true; the unit that held it before the wiring changed handed it over, so it sends nothing for these flags",
+				})
+				mustDeepEqual(t, linesWith(log, "sent"), []string(nil))
 			})
-			mustDeepEqual(t, linesWith(log, "sent"), []string(nil))
 		})
 	}
 }

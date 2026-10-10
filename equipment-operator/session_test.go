@@ -1,6 +1,6 @@
 package main
 
-// The session against a fake receiver on a real socket.
+// The session against a fake receiver on the test network.
 
 import (
 	"context"

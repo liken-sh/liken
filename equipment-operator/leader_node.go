@@ -25,13 +25,13 @@ type leadership struct{}
 // lead refuses to run the Deployment's operator from the node build,
 // because the node build cannot take the Lease that keeps the operator
 // to one acting copy.
-func lead(*Client, settings) *leadership {
+func lead(settings) *leadership {
 	fmt.Fprintf(os.Stderr, "%s runs the node workload only; the operator runs from %s\n",
 		nodeBinary, operatorBinary)
 	os.Exit(1)
 	return nil
 }
 
-func (*leadership) actWhileLeading(context.Context, func() error) (bool, error) {
+func (*leadership) actWhileLeading(context.Context, func(*Client) error) (bool, error) {
 	return false, nil
 }

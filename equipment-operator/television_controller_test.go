@@ -214,17 +214,19 @@ func runDeploymentLoop(t *testing.T, api *cecAPI) {
 // clock.
 func TestTheDeploymentLoopFollowsADisplaysAddress(t *testing.T) {
 	t.Parallel()
-	api := startCECAPI(t)
-	api.putBus(scannedBus("den", tvDevice, receiverDevice))
-	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
-	api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
-	runDeploymentLoop(t, api)
-	api.waitForTelevision(t, "lounge", func(television Television) bool { return len(television.Status.Displays) == 1 })
+	synctest.Test(t, func(t *testing.T) {
+		api := startCECAPI(t)
+		api.putBus(scannedBus("den", tvDevice, receiverDevice))
+		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
+		api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
+		runDeploymentLoop(t, api)
+		api.waitForTelevision(t, "lounge", func(television Television) bool { return len(television.Status.Displays) == 1 })
 
-	api.moveDisplay("acm-0001-receiver", "1.4.0.0")
+		api.moveDisplay("acm-0001-receiver", "1.4.0.0")
 
-	api.waitForTelevision(t, "lounge", func(television Television) bool {
-		return len(television.Status.Displays) == 1 && television.Status.Displays[0].PhysicalAddress == "1.4.0.0"
+		api.waitForTelevision(t, "lounge", func(television Television) bool {
+			return len(television.Status.Displays) == 1 && television.Status.Displays[0].PhysicalAddress == "1.4.0.0"
+		})
 	})
 }
 
@@ -239,7 +241,7 @@ func runServe(t *testing.T, api *cecAPI) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = serve(ctx, api.client, settings{dial: testNetwork.dial}, testMetrics(t))
+		_ = serve(ctx, api.client, settings{dial: testNetwork.dial, listen: testNetwork.bind}, testMetrics(t))
 	}()
 	t.Cleanup(func() {
 		cancel()

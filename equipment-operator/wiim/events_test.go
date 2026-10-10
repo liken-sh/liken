@@ -8,10 +8,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/equipment"
@@ -20,7 +20,7 @@ import (
 // fakeEvents is a device's UPnP event side: it takes a SUBSCRIBE, keeps
 // the callback, and sends NOTIFYs to it on command.
 type fakeEvents struct {
-	server *httptest.Server
+	address string
 
 	mutex               sync.Mutex
 	callbacks           map[string]string
@@ -35,8 +35,7 @@ type fakeEvents struct {
 func startFakeEvents(t *testing.T) *fakeEvents {
 	t.Helper()
 	events := &fakeEvents{callbacks: map[string]string{}, sids: map[string]string{}}
-	events.server = httptest.NewServer(http.HandlerFunc(events.handle))
-	t.Cleanup(events.server.Close)
+	events.address = testNetwork.serve(t, http.HandlerFunc(events.handle), false)
 	return events
 }
 
@@ -108,7 +107,8 @@ func (f *fakeEvents) notify(t *testing.T, path, seq, body string) {
 	req.Header.Set("SEQ", seq)
 	req.Header.Set("NT", "upnp:event")
 	req.Header.Set("NTS", "upnp:propchange")
-	resp, err := http.DefaultClient.Do(req)
+	device := &http.Client{Transport: &http.Transport{DialContext: testNetwork.dial, DisableKeepAlives: true}}
+	resp, err := device.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,8 +121,8 @@ func listenerWithEvents(t *testing.T) (*Client, *fakeEvents, <-chan equipment.Ev
 	t.Helper()
 	events := startFakeEvents(t)
 	got := make(chan equipment.Event, 16)
-	client := NewClient("127.0.0.1:1", func(event equipment.Event) { got <- event })
-	client.upnpBase = events.server.URL
+	client := testClient("127.0.0.1:1", func(event equipment.Event) { got <- event })
+	client.upnpBase = "http://" + events.address
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	client.startEvents(ctx)
@@ -153,123 +153,137 @@ func avTransportBody(state string) string {
 // The subscribe takes both services and renews into the next term only
 // when the grant is near its end.
 func TestTheSubscriptionTakesBothServicesOnce(t *testing.T) {
-	client, events, _ := listenerWithEvents(t)
+	synctest.Test(t, func(t *testing.T) {
+		client, events, _ := listenerWithEvents(t)
 
-	mustMatch(t, client.subscribed(renderControlPath), true)
-	mustMatch(t, client.subscribed(avTransportPath), true)
-	events.mutex.Lock()
-	renewals := events.renewals
-	events.mutex.Unlock()
-	mustMatch(t, renewals, 0)
+		mustMatch(t, client.subscribed(renderControlPath), true)
+		mustMatch(t, client.subscribed(avTransportPath), true)
+		events.mutex.Lock()
+		renewals := events.renewals
+		events.mutex.Unlock()
+		mustMatch(t, renewals, 0)
 
-	client.manageSubscriptions(context.Background())
-	events.mutex.Lock()
-	renewals = events.renewals
-	events.mutex.Unlock()
-	mustMatch(t, renewals, 0)
+		client.manageSubscriptions(context.Background())
+		events.mutex.Lock()
+		renewals = events.renewals
+		events.mutex.Unlock()
+		mustMatch(t, renewals, 0)
 
-	client.subscriptionsMutex.Lock()
-	client.subscriptions[renderControlPath].expires = time.Now()
-	client.subscriptionsMutex.Unlock()
-	client.manageSubscriptions(context.Background())
-	events.mutex.Lock()
-	renewals = events.renewals
-	events.mutex.Unlock()
-	mustMatch(t, renewals, 1)
+		client.subscriptionsMutex.Lock()
+		client.subscriptions[renderControlPath].expires = time.Now()
+		client.subscriptionsMutex.Unlock()
+		client.manageSubscriptions(context.Background())
+		events.mutex.Lock()
+		renewals = events.renewals
+		events.mutex.Unlock()
+		mustMatch(t, renewals, 1)
+	})
 }
 
 // A volume event moves the equipment state and reaches the listener
 // with no poll.
 func TestAVolumeEventMovesTheState(t *testing.T) {
-	client, events, got := listenerWithEvents(t)
+	synctest.Test(t, func(t *testing.T) {
+		client, events, got := listenerWithEvents(t)
 
-	events.notify(t, renderControlPath, "0", renderControlBody("30", "0"))
+		events.notify(t, renderControlPath, "0", renderControlBody("30", "0"))
 
-	select {
-	case event := <-got:
-		mustMatch(t, event.Field, equipment.EventVolume)
-	case <-time.After(time.Second):
-		t.Fatal("a volume event reported nothing")
-	}
-	mustMatch(t, client.State().Zones[equipment.MainZone].Volume, 30)
+		select {
+		case event := <-got:
+			mustMatch(t, event.Field, equipment.EventVolume)
+		case <-time.After(time.Second):
+			t.Fatal("a volume event reported nothing")
+		}
+		mustMatch(t, client.State().Zones[equipment.MainZone].Volume, 30)
+	})
 }
 
 // A change event names only what moved, so the field it leaves out
 // keeps its value.
 func TestAVolumeDeltaLeavesMuteStanding(t *testing.T) {
-	client, events, _ := listenerWithEvents(t)
+	synctest.Test(t, func(t *testing.T) {
+		client, events, _ := listenerWithEvents(t)
 
-	events.notify(t, renderControlPath, "0", renderControlBody("30", "1"))
-	mustMatch(t, client.State().Zones[equipment.MainZone].Mute, true)
+		events.notify(t, renderControlPath, "0", renderControlBody("30", "1"))
+		mustMatch(t, client.State().Zones[equipment.MainZone].Mute, true)
 
-	events.notify(t, renderControlPath, "1", envelope(`<Event xmlns="urn:schemas-upnp-org:metadata-1-0/RCS/"><InstanceID val="0"><Volume channel="Master" val="35"/></InstanceID></Event>`))
-	mustMatch(t, client.State().Zones[equipment.MainZone].Volume, 35)
-	mustMatch(t, client.State().Zones[equipment.MainZone].Mute, true)
+		events.notify(t, renderControlPath, "1", envelope(`<Event xmlns="urn:schemas-upnp-org:metadata-1-0/RCS/"><InstanceID val="0"><Volume channel="Master" val="35"/></InstanceID></Event>`))
+		mustMatch(t, client.State().Zones[equipment.MainZone].Volume, 35)
+		mustMatch(t, client.State().Zones[equipment.MainZone].Mute, true)
+	})
 }
 
 // A mute event reaches the listener as a mute.
 func TestAMuteEventReachesTheListener(t *testing.T) {
-	_, events, got := listenerWithEvents(t)
+	synctest.Test(t, func(t *testing.T) {
+		_, events, got := listenerWithEvents(t)
 
-	events.notify(t, renderControlPath, "0", renderControlBody("30", "0"))
-	drainEvents(got)
-	events.notify(t, renderControlPath, "1", envelope(`<Event xmlns="urn:schemas-upnp-org:metadata-1-0/RCS/"><InstanceID val="0"><Mute channel="Master" val="1"/></InstanceID></Event>`))
+		events.notify(t, renderControlPath, "0", renderControlBody("30", "0"))
+		drainEvents(got)
+		events.notify(t, renderControlPath, "1", envelope(`<Event xmlns="urn:schemas-upnp-org:metadata-1-0/RCS/"><InstanceID val="0"><Mute channel="Master" val="1"/></InstanceID></Event>`))
 
-	select {
-	case event := <-got:
-		mustMatch(t, event.Field, equipment.EventMute)
-	case <-time.After(time.Second):
-		t.Fatal("a mute event reported nothing")
-	}
+		select {
+		case event := <-got:
+			mustMatch(t, event.Field, equipment.EventMute)
+		case <-time.After(time.Second):
+			t.Fatal("a mute event reported nothing")
+		}
+	})
 }
 
 // A transport event writes the play state in the word getPlayerStatus
 // uses, so the snapshot does not name one state two ways.
 func TestATransportEventWritesThePlayState(t *testing.T) {
-	client, events, _ := listenerWithEvents(t)
+	synctest.Test(t, func(t *testing.T) {
+		client, events, _ := listenerWithEvents(t)
 
-	events.notify(t, avTransportPath, "0", avTransportBody("PLAYING"))
-	mustMatch(t, client.Status().Playback.Status, "play")
+		events.notify(t, avTransportPath, "0", avTransportBody("PLAYING"))
+		mustMatch(t, client.Status().Playback.Status, "play")
 
-	events.notify(t, avTransportPath, "1", avTransportBody("PAUSED_PLAYBACK"))
-	mustMatch(t, client.Status().Playback.Status, "pause")
+		events.notify(t, avTransportPath, "1", avTransportBody("PAUSED_PLAYBACK"))
+		mustMatch(t, client.Status().Playback.Status, "pause")
 
-	events.notify(t, avTransportPath, "2", avTransportBody("STOPPED"))
-	mustMatch(t, client.Status().Playback.Status, "stop")
+		events.notify(t, avTransportPath, "2", avTransportBody("STOPPED"))
+		mustMatch(t, client.Status().Playback.Status, "stop")
+	})
 }
 
 // A NOTIFY for a SID the client did not take is not its own.
 func TestANotifyForAnotherSubscriptionIsDropped(t *testing.T) {
-	client, events, _ := listenerWithEvents(t)
+	synctest.Test(t, func(t *testing.T) {
+		client, events, _ := listenerWithEvents(t)
 
-	events.notify(t, renderControlPath, "0", renderControlBody("30", "0"))
-	mustMatch(t, client.State().Zones[equipment.MainZone].Volume, 30)
+		events.notify(t, renderControlPath, "0", renderControlBody("30", "0"))
+		mustMatch(t, client.State().Zones[equipment.MainZone].Volume, 30)
 
-	events.mutex.Lock()
-	events.sids[renderControlPath] = "uuid:someone-else"
-	events.mutex.Unlock()
-	events.notify(t, renderControlPath, "1", renderControlBody("10", "0"))
-	mustMatch(t, client.State().Zones[equipment.MainZone].Volume, 30)
+		events.mutex.Lock()
+		events.sids[renderControlPath] = "uuid:someone-else"
+		events.mutex.Unlock()
+		events.notify(t, renderControlPath, "1", renderControlBody("10", "0"))
+		mustMatch(t, client.State().Zones[equipment.MainZone].Volume, 30)
+	})
 }
 
 // A poll does not undo an event: while the subscription is live, the
 // poll's own read of the volume is discarded.
 func TestAPollDoesNotUndoAnEvent(t *testing.T) {
-	client, events, _ := listenerWithEvents(t)
-	events.notify(t, renderControlPath, "0", renderControlBody("30", "0"))
-	events.notify(t, avTransportPath, "0", avTransportBody("PLAYING"))
+	synctest.Test(t, func(t *testing.T) {
+		client, events, _ := listenerWithEvents(t)
+		events.notify(t, renderControlPath, "0", renderControlBody("30", "0"))
+		events.notify(t, avTransportPath, "0", avTransportBody("PLAYING"))
 
-	next := client.Status()
-	next.Playback.Volume = 29
-	next.Playback.Status = "stop"
-	client.mergeEvents(&next)
-	mustMatch(t, next.Playback.Volume, 30)
-	mustMatch(t, next.Playback.Status, "play")
+		next := client.Status()
+		next.Playback.Volume = 29
+		next.Playback.Status = "stop"
+		client.mergeEvents(&next)
+		mustMatch(t, next.Playback.Volume, 30)
+		mustMatch(t, next.Playback.Status, "play")
+	})
 }
 
 // With no subscription, the poll owns every field.
 func TestAPollOwnsTheFieldsWithNoSubscription(t *testing.T) {
-	client := NewClient("127.0.0.1:1", nil)
+	client := testClient("127.0.0.1:1", nil)
 
 	next := client.Status()
 	next.Playback.Volume = 29
@@ -279,62 +293,68 @@ func TestAPollOwnsTheFieldsWithNoSubscription(t *testing.T) {
 
 // A device that refuses the subscription leaves the client on the poll.
 func TestARefusedSubscriptionLeavesThePoll(t *testing.T) {
-	events := startFakeEvents(t)
-	events.refuse = true
-	client := NewClient("127.0.0.1:1", nil)
-	client.upnpBase = events.server.URL
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	client.startEvents(ctx)
-	defer client.stopEvents()
+	synctest.Test(t, func(t *testing.T) {
+		events := startFakeEvents(t)
+		events.refuse = true
+		client := testClient("127.0.0.1:1", nil)
+		client.upnpBase = "http://" + events.address
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		client.startEvents(ctx)
+		defer client.stopEvents()
 
-	client.manageSubscriptions(ctx)
+		client.manageSubscriptions(ctx)
 
-	mustMatch(t, client.subscribed(renderControlPath), false)
-	mustMatch(t, client.subscribed(avTransportPath), false)
+		mustMatch(t, client.subscribed(renderControlPath), false)
+		mustMatch(t, client.subscribed(avTransportPath), false)
+	})
 }
 
 // Stopping the client tells the device the callbacks are done.
 func TestStoppingTheClientUnsubscribes(t *testing.T) {
-	events := startFakeEvents(t)
-	client := NewClient("127.0.0.1:1", nil)
-	client.upnpBase = events.server.URL
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	client.startEvents(ctx)
-	client.manageSubscriptions(ctx)
+	synctest.Test(t, func(t *testing.T) {
+		events := startFakeEvents(t)
+		client := testClient("127.0.0.1:1", nil)
+		client.upnpBase = "http://" + events.address
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		client.startEvents(ctx)
+		client.manageSubscriptions(ctx)
 
-	client.stopEvents()
+		client.stopEvents()
 
-	events.mutex.Lock()
-	unsubscribed := append([]string(nil), events.unsubscribed...)
-	events.mutex.Unlock()
-	mustMatch(t, len(unsubscribed), 2)
+		events.mutex.Lock()
+		unsubscribed := append([]string(nil), events.unsubscribed...)
+		events.mutex.Unlock()
+		mustMatch(t, len(unsubscribed), 2)
+	})
 }
 
 // A subscription reports both outcomes through the command counter the
 // way every other request does.
 func TestASubscriptionReportsACommand(t *testing.T) {
-	events := startFakeEvents(t)
-	reported := make(chan string, 8)
-	client := NewClient("127.0.0.1:1", nil)
-	client.Reporter = func(status string) { reported <- status }
-	client.upnpBase = events.server.URL
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	client.startEvents(ctx)
-	defer client.stopEvents()
+	synctest.Test(t, func(t *testing.T) {
+		events := startFakeEvents(t)
+		reported := make(chan string, 8)
+		client := testClient("127.0.0.1:1", nil)
+		client.Reporter = func(status string) { reported <- status }
+		client.upnpBase = "http://" + events.address
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		client.startEvents(ctx)
+		defer client.stopEvents()
 
-	client.manageSubscriptions(ctx)
-	mustMatch(t, <-reported, CommandOK)
-	mustMatch(t, <-reported, CommandOK)
+		client.manageSubscriptions(ctx)
+		mustMatch(t, <-reported, CommandOK)
+		mustMatch(t, <-reported, CommandOK)
 
-	events.mutex.Lock()
-	events.refuse = true
-	events.mutex.Unlock()
-	client.dropSubscription(renderControlPath)
-	client.manageSubscriptions(ctx)
-	mustMatch(t, <-reported, CommandFailed)
+		events.mutex.Lock()
+		events.refuse = true
+		events.mutex.Unlock()
+		client.dropSubscription(renderControlPath)
+		client.manageSubscriptions(ctx)
+		mustMatch(t, <-reported, CommandFailed)
+	})
 }
 
 // The parse pins the shape a live Amp pushes, including the escaped
@@ -372,44 +392,48 @@ func TestTheUPnPBaseKeepsTheHost(t *testing.T) {
 // A renewal the device refuses drops the subscription, so the next
 // pass subscribes it again.
 func TestARejectedRenewalDropsTheSubscription(t *testing.T) {
-	client, events, _ := listenerWithEvents(t)
+	synctest.Test(t, func(t *testing.T) {
+		client, events, _ := listenerWithEvents(t)
 
-	events.mutex.Lock()
-	events.refuse = true
-	events.mutex.Unlock()
-	client.subscriptionsMutex.Lock()
-	client.subscriptions[renderControlPath].expires = time.Now()
-	client.subscriptionsMutex.Unlock()
-	client.manageSubscriptions(context.Background())
+		events.mutex.Lock()
+		events.refuse = true
+		events.mutex.Unlock()
+		client.subscriptionsMutex.Lock()
+		client.subscriptions[renderControlPath].expires = time.Now()
+		client.subscriptionsMutex.Unlock()
+		client.manageSubscriptions(context.Background())
 
-	mustMatch(t, client.subscribed(renderControlPath), false)
+		mustMatch(t, client.subscribed(renderControlPath), false)
+	})
 }
 
 // A 200 that names no SID is not a subscription.
 func TestASubscriptionWithNoSIDIsRefused(t *testing.T) {
-	events := startFakeEvents(t)
-	events.noSID = true
-	client := NewClient("127.0.0.1:1", nil)
-	client.upnpBase = events.server.URL
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	client.startEvents(ctx)
-	defer client.stopEvents()
+	synctest.Test(t, func(t *testing.T) {
+		events := startFakeEvents(t)
+		events.noSID = true
+		client := testClient("127.0.0.1:1", nil)
+		client.upnpBase = "http://" + events.address
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		client.startEvents(ctx)
+		defer client.stopEvents()
 
-	client.manageSubscriptions(ctx)
-	mustMatch(t, client.subscribed(renderControlPath), false)
+		client.manageSubscriptions(ctx)
+		mustMatch(t, client.subscribed(renderControlPath), false)
+	})
 }
 
 // A pass with no event listener reads nothing and reports nothing.
 func TestManageSubscriptionsWithoutAListener(t *testing.T) {
-	client := NewClient("127.0.0.1:1", nil)
+	client := testClient("127.0.0.1:1", nil)
 	client.manageSubscriptions(context.Background())
 	mustMatch(t, client.subscribed(renderControlPath), false)
 }
 
 // A grant with no usable number falls back to the default term.
 func TestARecordedSubscriptionTakesTheDefaultTerm(t *testing.T) {
-	client := NewClient("127.0.0.1:1", nil)
+	client := testClient("127.0.0.1:1", nil)
 	client.recordSubscription(renderControlPath, "uuid:x", 0)
 	client.subscriptionsMutex.Lock()
 	sub := client.subscriptions[renderControlPath]
@@ -423,18 +447,20 @@ func TestARecordedSubscriptionTakesTheDefaultTerm(t *testing.T) {
 // A body that is not a propertyset, one with no fields, and one for an
 // unknown service all move nothing.
 func TestAnEventThatCarriesNothingIsIgnored(t *testing.T) {
-	client, events, _ := listenerWithEvents(t)
+	synctest.Test(t, func(t *testing.T) {
+		client, events, _ := listenerWithEvents(t)
 
-	events.notify(t, renderControlPath, "0", "not xml")
-	events.notify(t, renderControlPath, "1", envelope(""))
-	mustMatch(t, client.State().Zones[equipment.MainZone].Volume, equipment.Unknown)
+		events.notify(t, renderControlPath, "0", "not xml")
+		events.notify(t, renderControlPath, "1", envelope(""))
+		mustMatch(t, client.State().Zones[equipment.MainZone].Volume, equipment.Unknown)
 
-	if _, ok := parseEvent("/upnp/event/other", []byte(renderControlBody("30", "0"))); ok {
-		t.Fatal("an event for an unknown service parsed as one")
-	}
-	if _, ok := parseEvent(avTransportPath, []byte(envelope(`<Event xmlns="urn:schemas-upnp-org:metadata-1-0/AVT/"><InstanceID val="0"><TransportStatus val="OK"/></InstanceID></Event>`))); ok {
-		t.Fatal("a transport event with no state parsed as one")
-	}
+		if _, ok := parseEvent("/upnp/event/other", []byte(renderControlBody("30", "0"))); ok {
+			t.Fatal("an event for an unknown service parsed as one")
+		}
+		if _, ok := parseEvent(avTransportPath, []byte(envelope(`<Event xmlns="urn:schemas-upnp-org:metadata-1-0/AVT/"><InstanceID val="0"><TransportStatus val="OK"/></InstanceID></Event>`))); ok {
+			t.Fatal("a transport event with no state parsed as one")
+		}
+	})
 }
 
 // A volume field for another channel is not the master's.
@@ -458,18 +484,20 @@ func TestAnUnknownTransportStateKeepsItsWord(t *testing.T) {
 // it answers a SUBSCRIBE, so the second subscription cannot reuse that
 // connection. Every subscription opens its own.
 func TestASubscriptionOpensItsOwnConnection(t *testing.T) {
-	events := startFakeEvents(t)
-	events.closeAfterSubscribe = true
-	client := NewClient("127.0.0.1:1", nil)
-	client.upnpBase = events.server.URL
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	client.startEvents(ctx)
-	defer client.stopEvents()
+	synctest.Test(t, func(t *testing.T) {
+		events := startFakeEvents(t)
+		events.closeAfterSubscribe = true
+		client := testClient("127.0.0.1:1", nil)
+		client.upnpBase = "http://" + events.address
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		client.startEvents(ctx)
+		defer client.stopEvents()
 
-	client.manageSubscriptions(ctx)
-	mustMatch(t, client.subscribed(renderControlPath), true)
-	mustMatch(t, client.subscribed(avTransportPath), true)
+		client.manageSubscriptions(ctx)
+		mustMatch(t, client.subscribed(renderControlPath), true)
+		mustMatch(t, client.subscribed(avTransportPath), true)
+	})
 }
 
 // The device closes the connection after it answers a SUBSCRIBE, so the
@@ -477,7 +505,7 @@ func TestASubscriptionOpensItsOwnConnection(t *testing.T) {
 // transport retries a request on a reused connection that failed, which
 // hides the close in a test but not at the device.
 func TestTheSubscriptionClientOpensEachConnection(t *testing.T) {
-	client := NewClient("127.0.0.1:1", nil)
+	client := testClient("127.0.0.1:1", nil)
 	transport, ok := client.upnp.Transport.(*http.Transport)
 	if !ok {
 		t.Fatalf("the subscription client holds %T, not an http.Transport", client.upnp.Transport)

@@ -49,9 +49,12 @@ type settings struct {
 	// networkDiscoveryOff is true when the Deployment turned network
 	// discovery off. The zero value is on, the default.
 	networkDiscoveryOff bool
-	// dial reaches the Denon receivers. Nil, which readSettings leaves,
-	// dials over TCP.
+	// dial reaches the receivers and their UPnP descriptions. Nil, which
+	// readSettings leaves, dials over TCP.
 	dial dialFunc
+	// listen opens the listener each WiiM sends its events to. Nil,
+	// which readSettings leaves, listens on TCP.
+	listen listenFunc
 }
 
 // readSettings takes the configuration from the environment alone.

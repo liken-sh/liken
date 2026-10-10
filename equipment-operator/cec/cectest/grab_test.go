@@ -7,28 +7,27 @@ package cectest_test
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/cec"
 	"github.com/liken-sh/equipment-operator/cec/cectest"
 )
 
-// claimsHeard reads what a follower receives for a while, and answers
+// claimsHeard reads every message a follower has queued, and answers
 // the Active Source messages in the order they arrived.
-func claimsHeard(t *testing.T, follower *cec.Device, within time.Duration) []string {
+func claimsHeard(t *testing.T, follower *cec.Device) []string {
 	t.Helper()
 	var claims []string
-	deadline := time.Now().Add(within)
-	for time.Now().Before(deadline) {
-		message, err := follower.Receive(10 * time.Millisecond)
+	for {
+		message, err := follower.Receive(0)
 		if err != nil {
-			continue
+			return claims
 		}
 		if opcode, _ := message.Opcode(); opcode == cec.OpActiveSource {
 			claims = append(claims, message.String())
 		}
 	}
-	return claims
 }
 
 func TestAGrabbingPeerTakesTheInputBack(t *testing.T) {
@@ -44,26 +43,29 @@ func TestAGrabbingPeerTakesTheInputBack(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			bus := cectest.NewBus()
-			bus.Add(cectest.Peer{Logical: 8, Physical: 0x1500, PrimaryType: 4, Grabs: c.grabs, GrabAfter: time.Millisecond})
-			_, sender := playing(t, bus, 0x1300, "node-1")
-			_, listener := playing(t, bus, 0x1400, "node-2")
+			synctest.Test(t, func(t *testing.T) {
+				bus := cectest.NewBus()
+				bus.Add(cectest.Peer{Logical: 8, Physical: 0x1500, PrimaryType: 4, Grabs: c.grabs, GrabAfter: time.Millisecond})
+				_, sender := playing(t, bus, 0x1300, "node-1")
+				_, listener := playing(t, bus, 0x1400, "node-2")
 
-			for range c.sends {
-				_, err := sender.Transmit(cec.ActiveSource(4, 0x1300), 0, 0)
-				mustSucceed(t, err)
-				time.Sleep(20 * time.Millisecond)
-			}
-
-			claims := claimsHeard(t, listener, 50*time.Millisecond)
-			if len(claims) != len(c.claims) {
-				t.Fatalf("heard %v, want %v", claims, c.claims)
-			}
-			for index := range claims {
-				if claims[index] != c.claims[index] {
-					t.Errorf("heard %v, want %v", claims, c.claims)
+				for range c.sends {
+					_, err := sender.Transmit(cec.ActiveSource(4, 0x1300), 0, 0)
+					mustSucceed(t, err)
+					time.Sleep(20 * time.Millisecond)
 				}
-			}
+
+				time.Sleep(50 * time.Millisecond)
+				claims := claimsHeard(t, listener)
+				if len(claims) != len(c.claims) {
+					t.Fatalf("heard %v, want %v", claims, c.claims)
+				}
+				for index := range claims {
+					if claims[index] != c.claims[index] {
+						t.Errorf("heard %v, want %v", claims, c.claims)
+					}
+				}
+			})
 		})
 	}
 }

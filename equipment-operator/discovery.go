@@ -55,6 +55,8 @@ const (
 type discovery struct {
 	client *Client
 	wake   func()
+	// dial reaches each device's UPnP description.
+	dial dialFunc
 	// receivers holds the Receiver watch's store, which reconcile reads.
 	receivers *watchStore
 	// log takes a line for each Receiver discovery creates or deletes.
@@ -100,6 +102,7 @@ func newDiscovery(client *Client, wake func()) *discovery {
 	return &discovery{
 		client:       client,
 		wake:         wake,
+		dial:         dialTCP,
 		log:          os.Stderr,
 		now:          time.Now,
 		devices:      map[string]wiim.Device{},

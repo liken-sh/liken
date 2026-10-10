@@ -24,6 +24,7 @@ func sessionOperator(t *testing.T, api *cecAPI) *controller {
 	api.showing(lounge(""), "acm-0001-receiver")
 	operator := newController(api.client, testMetrics(t))
 	operator.dial = testNetwork.dial
+	operator.listen = testNetwork.bind
 	operator.log = &logBuffer{}
 	t.Cleanup(operator.stopAll)
 	return operator

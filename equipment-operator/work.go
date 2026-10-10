@@ -42,9 +42,9 @@ func goWork(ctx context.Context, work func()) {
 // after a 429 ends with that context too (withWaits). What is left is a
 // goroutine that is sending a request: one sent before the context
 // ended, or one a goroutine sends before it reads that its context
-// ended. Such a request ends within the shared client's request
-// timeout, 30 seconds, which is longer than this wait. A request that
-// the API server holds past this wait makes serve answer
+// ended. Such a request ends within the operator's request timeout,
+// 15 seconds (leaderRequestTimeout), which is longer than this wait. A
+// request that the API server holds past this wait makes serve answer
 // errStillWriting, and the process leaves its Lease to expire.
 const workStopWait = 5 * time.Second
 

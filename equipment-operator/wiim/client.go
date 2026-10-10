@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -86,6 +87,17 @@ type Client struct {
 	// drives it. An empty value skips the check.
 	UUID string
 
+	// Dial opens each connection to the device: the HTTPS commands, the
+	// event subscriptions, and the read of the description. NewClient
+	// sets a TCP dialer, and a test sets a dialer that reaches its fake
+	// device in memory.
+	Dial func(ctx context.Context, network, address string) (net.Conn, error)
+
+	// Listen opens the callback listener that the device sends its events
+	// to. NewClient sets net.Listen, and a test sets a listener in memory
+	// that its fake device can reach.
+	Listen func(network, address string) (net.Listener, error)
+
 	http *http.Client
 
 	mutex     sync.Mutex
@@ -124,24 +136,34 @@ type Client struct {
 // state after every poll. The address is a hint; set UUID to hold the
 // client to the device's identity.
 func NewClient(address string, listener func(equipment.Event)) *Client {
-	return &Client{
+	c := &Client{
 		address:       address,
 		listener:      listener,
 		upnpBase:      upnpBaseFor(address),
 		subscriptions: map[string]*subscription{},
-		upnp: &http.Client{
-			Timeout:   requestTimeout,
-			Transport: &http.Transport{DisableKeepAlives: true},
-		},
-		http: &http.Client{
-			Timeout: requestTimeout,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
-		},
-		state:     newStatus(),
-		reachable: equipment.ConditionUnknown,
+		Dial:          (&net.Dialer{}).DialContext,
+		Listen:        net.Listen,
+		state:         newStatus(),
+		reachable:     equipment.ConditionUnknown,
 	}
+	c.upnp = &http.Client{
+		Timeout:   requestTimeout,
+		Transport: &http.Transport{DisableKeepAlives: true, DialContext: c.dial},
+	}
+	c.http = &http.Client{
+		Timeout: requestTimeout,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			DialContext:     c.dial,
+		},
+	}
+	return c
+}
+
+// dial opens a connection through Dial. The transports call it on each
+// dial, so a Dial that a caller sets after NewClient still reaches them.
+func (c *Client) dial(ctx context.Context, network, address string) (net.Conn, error) {
+	return c.Dial(ctx, network, address)
 }
 
 // State returns the latest device state translated into equipment

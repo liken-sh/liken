@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/wiim"
@@ -79,16 +80,18 @@ func TestNetworkDiscoveryOffSearchesForNothing(t *testing.T) {
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			searches := countedDiscovery(t, amp)
-			api := startFakeAPI(t)
-			equipment := startFakeDenon(t)
-			api.setReceivers(testReceiver("theater", equipment.address()))
-			config := settings{networkDiscoveryOff: one.off, dial: testNetwork.dial}
+			synctest.Test(t, func(t *testing.T) {
+				searches := countedDiscovery(t, amp)
+				api := startFakeAPI(t)
+				equipment := startFakeDenon(t)
+				api.setReceivers(testReceiver("theater", equipment.address()))
+				config := settings{networkDiscoveryOff: one.off, dial: testNetwork.dial, listen: testNetwork.bind}
 
-			runServeUntil(t, api, config, func() { one.settled(t, api) })
+				runServeUntil(t, api, config, func() { one.settled(t, api) })
 
-			mustMatch(t, searches.Load() > 0, one.searched)
-			mustMatch(t, slices.Contains(api.appliedReceivers(), created), one.created)
+				mustMatch(t, searches.Load() > 0, one.searched)
+				mustMatch(t, slices.Contains(api.appliedReceivers(), created), one.created)
+			})
 		})
 	}
 }
@@ -110,36 +113,38 @@ func waitForApply(t *testing.T, api *fakeAPI, name string) {
 // and names the setting, so the reason no Receiver appears is in the
 // log.
 func TestNetworkDiscoveryOffWritesOneLine(t *testing.T) {
-	searches := countedDiscovery(t, wiim.Device{UUID: firstUUID, Address: "192.0.2.1"})
-	api := startFakeAPI(t)
-	api.setReceivers()
-	operator := startController(t, api)
-	operator.networkDiscoveryOff = true
-	log := &logBuffer{}
-	operator.log = log
-	ctx, cancel := context.WithCancel(t.Context())
-	stopped := make(chan struct{})
-	go func() {
-		defer close(stopped)
-		operator.run(ctx)
-	}()
-	deadline := time.After(testTimeout)
-	for log.lines()[0] == "" {
-		select {
-		case <-deadline:
-			t.Fatal("the loop wrote no line")
-		case <-time.After(time.Millisecond):
+	synctest.Test(t, func(t *testing.T) {
+		searches := countedDiscovery(t, wiim.Device{UUID: firstUUID, Address: "192.0.2.1"})
+		api := startFakeAPI(t)
+		api.setReceivers()
+		operator := startController(t, api)
+		operator.networkDiscoveryOff = true
+		log := &logBuffer{}
+		operator.log = log
+		ctx, cancel := context.WithCancel(t.Context())
+		stopped := make(chan struct{})
+		go func() {
+			defer close(stopped)
+			operator.run(ctx)
+		}()
+		deadline := time.After(testTimeout)
+		for log.lines()[0] == "" {
+			select {
+			case <-deadline:
+				t.Fatal("the loop wrote no line")
+			case <-time.After(time.Millisecond):
+			}
 		}
-	}
-	cancel()
-	select {
-	case <-stopped:
-	case <-time.After(testTimeout):
-		t.Fatal("the loop did not stop")
-	}
+		cancel()
+		select {
+		case <-stopped:
+		case <-time.After(testTimeout):
+			t.Fatal("the loop did not stop")
+		}
 
-	lines := log.lines()
-	mustMatch(t, len(lines), 1)
-	mustMatch(t, strings.HasPrefix(lines[0], networkDiscoveryVariable+" is off"), true)
-	mustMatch(t, searches.Load(), int64(0))
+		lines := log.lines()
+		mustMatch(t, len(lines), 1)
+		mustMatch(t, strings.HasPrefix(lines[0], networkDiscoveryVariable+" is off"), true)
+		mustMatch(t, searches.Load(), int64(0))
+	})
 }

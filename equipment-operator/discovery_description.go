@@ -32,7 +32,7 @@ func (d *discovery) judge(ctx context.Context, found []wiim.Device) {
 		if _, held := d.described(device.UUID); held {
 			continue
 		}
-		description, err := upnp.Fetch(ctx, device.Description)
+		description, err := upnp.FetchVia(ctx, d.dial, device.Description)
 		if err != nil {
 			if d.markUnread(device.UUID) {
 				fmt.Fprintf(d.log, "discovery could not read the UPnP description of the LinkPlay device %s at %s, so its getStatusEx project decides whether it is a WiiM: %v\n",

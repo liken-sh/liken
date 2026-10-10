@@ -12,9 +12,9 @@ import (
 	"github.com/liken-sh/equipment-operator/equipment"
 )
 
-// The bound on every wait in these tests: long enough that a loaded
-// machine still passes, short enough that a broken program fails in
-// seconds.
+// The bound on every wait in these tests. The tests wait on the fake
+// clock of a synctest bubble, so the bound only decides when a broken
+// program fails.
 const testTimeout = 2 * time.Second
 
 func mustSucceed(t *testing.T, err error) {

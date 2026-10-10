@@ -39,29 +39,33 @@ func TestSettersRejectAnUnknownZone(t *testing.T) {
 // third zone each carry its Z2 or Z3 prefix and never the main zone's
 // command.
 func TestTheZoneSettersReachTheirOwnWireLines(t *testing.T) {
-	harness := startHarness(t)
-	drainQueries(t, harness)
-
 	cases := []struct {
 		name string
-		send func() error
+		send func(*Client) error
 		want string
 	}{
-		{"zone2 power on", func() error { return harness.client.SetPower("zone2", true) }, "Z2ON"},
-		{"zone2 power off", func() error { return harness.client.SetPower("zone2", false) }, "Z2OFF"},
-		{"zone3 power on", func() error { return harness.client.SetPower("zone3", true) }, "Z3ON"},
-		{"zone3 input", func() error { return harness.client.SetInput("zone3", "TV") }, "Z3TV"},
-		{"zone2 volume", func() error { return harness.client.SetVolume("zone2", 101) }, "Z2MV505"},
-		{"zone3 mute on", func() error { return harness.client.SetMute("zone3", true) }, "Z3MUON"},
-		{"zone2 mute off", func() error { return harness.client.SetMute("zone2", false) }, "Z2MUOFF"},
-		{"zone3 sleep", func() error { return harness.client.SetSleep("zone3", 30) }, "Z3SLP030"},
-		{"zone2 sleep off", func() error { return harness.client.SetSleep("zone2", 0) }, "Z2SLPOFF"},
-		{"main sleep", func() error { return harness.client.SetSleep(equipment.MainZone, 60) }, "SLP060"},
+		{"zone2 power on", func(c *Client) error { return c.SetPower("zone2", true) }, "Z2ON"},
+		{"zone2 power off", func(c *Client) error { return c.SetPower("zone2", false) }, "Z2OFF"},
+		{"zone3 power on", func(c *Client) error { return c.SetPower("zone3", true) }, "Z3ON"},
+		{"zone3 input", func(c *Client) error { return c.SetInput("zone3", "TV") }, "Z3TV"},
+		{"zone2 volume", func(c *Client) error { return c.SetVolume("zone2", 101) }, "Z2MV505"},
+		{"zone3 mute on", func(c *Client) error { return c.SetMute("zone3", true) }, "Z3MUON"},
+		{"zone2 mute off", func(c *Client) error { return c.SetMute("zone2", false) }, "Z2MUOFF"},
+		{"zone3 sleep", func(c *Client) error { return c.SetSleep("zone3", 30) }, "Z3SLP030"},
+		{"zone2 sleep off", func(c *Client) error { return c.SetSleep("zone2", 0) }, "Z2SLPOFF"},
+		{"main sleep", func(c *Client) error { return c.SetSleep(equipment.MainZone, 60) }, "SLP060"},
 	}
+	t.Parallel()
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			mustSucceed(t, one.send())
-			mustMatch(t, harness.receiver.waitForCommand(t), one.want)
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				harness := startHarness(t)
+				drainQueries(t, harness)
+
+				mustSucceed(t, one.send(harness.client))
+				mustMatch(t, harness.receiver.waitForCommand(t), one.want)
+			})
 		})
 	}
 }
@@ -136,26 +140,30 @@ func TestSettingsCarriesTheParsedSnapshot(t *testing.T) {
 // Every setter reaches the wire. The zone argument is main for now, and
 // the receiver's own command is what the fake reads back.
 func TestTheSettersSendEveryCommand(t *testing.T) {
-	harness := startHarness(t)
-	drainQueries(t, harness)
-
 	cases := []struct {
 		name string
-		send func()
+		send func(*Client)
 		want string
 	}{
-		{"power on", func() { harness.client.SetPower(equipment.MainZone, true) }, PowerOnCommand},
-		{"power to standby", func() { harness.client.SetPower(equipment.MainZone, false) }, powerStandbyCommand},
-		{"select input", func() { harness.client.SetInput(equipment.MainZone, "GAME") }, "SIGAME"},
-		{"mute on", func() { harness.client.SetMute(equipment.MainZone, true) }, MuteOnCommand},
-		{"mute off", func() { harness.client.SetMute(equipment.MainZone, false) }, MuteOffCommand},
-		{"sound mode", func() { harness.client.SetSoundMode(equipment.MainZone, "STEREO") }, "MSSTEREO"},
-		{"volume", func() { harness.client.SetVolume(equipment.MainZone, 101) }, "MV505"},
+		{"power on", func(c *Client) { c.SetPower(equipment.MainZone, true) }, PowerOnCommand},
+		{"power to standby", func(c *Client) { c.SetPower(equipment.MainZone, false) }, powerStandbyCommand},
+		{"select input", func(c *Client) { c.SetInput(equipment.MainZone, "GAME") }, "SIGAME"},
+		{"mute on", func(c *Client) { c.SetMute(equipment.MainZone, true) }, MuteOnCommand},
+		{"mute off", func(c *Client) { c.SetMute(equipment.MainZone, false) }, MuteOffCommand},
+		{"sound mode", func(c *Client) { c.SetSoundMode(equipment.MainZone, "STEREO") }, "MSSTEREO"},
+		{"volume", func(c *Client) { c.SetVolume(equipment.MainZone, 101) }, "MV505"},
 	}
+	t.Parallel()
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
-			one.send()
-			mustMatch(t, harness.receiver.waitForCommand(t), one.want)
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				harness := startHarness(t)
+				drainQueries(t, harness)
+
+				one.send(harness.client)
+				mustMatch(t, harness.receiver.waitForCommand(t), one.want)
+			})
 		})
 	}
 }

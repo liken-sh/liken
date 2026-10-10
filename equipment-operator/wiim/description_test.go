@@ -5,10 +5,10 @@ package wiim
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 )
 
 // wiimAmpDescription is the root of a WiiM Amp's description, cut to
@@ -28,53 +28,58 @@ const wiimAmpDescription = `<?xml version="1.0"?>
 func describedAmp(t *testing.T, code int) (*fakeAmp, *Client, *atomic.Int64) {
 	t.Helper()
 	reads := &atomic.Int64{}
-	upnp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upnp := testNetwork.serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reads.Add(1)
 		mustMatch(t, r.URL.Path, descriptionPath)
 		w.WriteHeader(code)
 		_, _ = w.Write([]byte(wiimAmpDescription))
-	}))
-	t.Cleanup(upnp.Close)
+	}), false)
 	amp := startFakeAmp(t)
 	client := amp.client(nil)
-	client.upnpBase = upnp.URL
+	client.upnpBase = "http://" + upnp
 	return amp, client, reads
 }
 
 func TestTheClientReadsTheModelAfterAnAnsweredPoll(t *testing.T) {
 	t.Parallel()
-	_, client, reads := describedAmp(t, http.StatusOK)
-	client.poll(context.Background())
+	synctest.Test(t, func(t *testing.T) {
+		_, client, reads := describedAmp(t, http.StatusOK)
+		client.poll(context.Background())
 
-	client.describe(context.Background())
-	client.describe(context.Background())
+		client.describe(context.Background())
+		client.describe(context.Background())
 
-	mustMatch(t, client.State().Model, "WiiM Amp")
-	mustMatch(t, client.State().Manufacturer, "Linkplay Technology Inc.")
-	mustMatch(t, reads.Load(), int64(1))
+		mustMatch(t, client.State().Model, "WiiM Amp")
+		mustMatch(t, client.State().Manufacturer, "Linkplay Technology Inc.")
+		mustMatch(t, reads.Load(), int64(1))
+	})
 }
 
 func TestTheClientReadsNoModelBeforeTheAmpAnswers(t *testing.T) {
 	t.Parallel()
-	_, client, reads := describedAmp(t, http.StatusOK)
+	synctest.Test(t, func(t *testing.T) {
+		_, client, reads := describedAmp(t, http.StatusOK)
 
-	client.describe(context.Background())
+		client.describe(context.Background())
 
-	mustMatch(t, reads.Load(), int64(0))
-	mustMatch(t, client.State().Model, "")
+		mustMatch(t, reads.Load(), int64(0))
+		mustMatch(t, client.State().Model, "")
+	})
 }
 
 // A device that is not a WiiM gets getStatusEx and nothing else, so
 // the client never reads its description.
 func TestTheClientReadsNoModelFromAnotherBrand(t *testing.T) {
 	t.Parallel()
-	amp, client, reads := describedAmp(t, http.StatusOK)
-	amp.answers[statusCommand] = strings.Replace(statusExJSON, `"project":"WiiM_Amp_4layer"`, `"project":"ARYLIC_A50TE"`, 1)
-	client.poll(context.Background())
+	synctest.Test(t, func(t *testing.T) {
+		amp, client, reads := describedAmp(t, http.StatusOK)
+		amp.answers[statusCommand] = strings.Replace(statusExJSON, `"project":"WiiM_Amp_4layer"`, `"project":"ARYLIC_A50TE"`, 1)
+		client.poll(context.Background())
 
-	client.describe(context.Background())
+		client.describe(context.Background())
 
-	mustMatch(t, reads.Load(), int64(0))
+		mustMatch(t, reads.Load(), int64(0))
+	})
 }
 
 // A failed read waits out describeRetryInterval before the next one,
@@ -82,12 +87,14 @@ func TestTheClientReadsNoModelFromAnotherBrand(t *testing.T) {
 // poll.
 func TestTheClientWaitsBeforeItReadsAFailedDescriptionAgain(t *testing.T) {
 	t.Parallel()
-	_, client, reads := describedAmp(t, http.StatusNotFound)
-	client.poll(context.Background())
+	synctest.Test(t, func(t *testing.T) {
+		_, client, reads := describedAmp(t, http.StatusNotFound)
+		client.poll(context.Background())
 
-	client.describe(context.Background())
-	client.describe(context.Background())
+		client.describe(context.Background())
+		client.describe(context.Background())
 
-	mustMatch(t, reads.Load(), int64(1))
-	mustMatch(t, client.State().Model, "")
+		mustMatch(t, reads.Load(), int64(1))
+		mustMatch(t, client.State().Model, "")
+	})
 }

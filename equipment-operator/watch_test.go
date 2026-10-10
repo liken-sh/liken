@@ -6,9 +6,7 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"encoding/pem"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -318,27 +316,31 @@ func TestAWatchThatEndsIsOpenedAgainAndCounted(t *testing.T) {
 // the log.
 func TestTheWatchesUseTheServiceAccount(t *testing.T) {
 	t.Parallel()
-	server := newWatchServer(cecBusesPath, equipmentAPIVersion, "CECBus", []string{"[]"})
-	tokens := make(chan string, 64)
-	api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		tokens <- r.Header.Get("Authorization")
-		server.handler(t).ServeHTTP(w, r)
-	}))
-	t.Cleanup(api.Close)
-	credentials := t.TempDir()
-	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: api.Certificate().Raw})
-	mustSucceed(t, os.WriteFile(filepath.Join(credentials, "ca.crt"), caPEM, 0o600))
-	mustSucceed(t, os.WriteFile(filepath.Join(credentials, "token"), []byte("watch-token"), 0o600))
+	synctest.Test(t, func(t *testing.T) {
+		server := newWatchServer(cecBusesPath, equipmentAPIVersion, "CECBus", []string{"[]"})
+		tokens := make(chan string, 64)
+		certificate := testCertificate(t)
+		api := "https://" + testNetwork.serveHTTP(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			tokens <- r.Header.Get("Authorization")
+			server.handler(t).ServeHTTP(w, r)
+		}), &certificate)
+		credentials := t.TempDir()
+		mustSucceed(t, os.WriteFile(filepath.Join(credentials, "ca.crt"), testCAPEM(certificate), 0o600))
+		mustSucceed(t, os.WriteFile(filepath.Join(credentials, "token"), []byte("watch-token"), 0o600))
+		client := NewClient(api, http.DefaultClient, credentials)
+		client.dial = testNetwork.dial
 
-	wakes := runWatch(t, NewClient(api.URL, http.DefaultClient, credentials), watchCECBuses, nil)
+		wakes := runWatch(t, client, watchCECBuses, nil)
 
-	awaitWake(t, wakes, testTimeout)
-	mustMatch(t, <-tokens, "Bearer watch-token")
+		awaitWake(t, wakes, testTimeout)
+		mustMatch(t, <-tokens, "Bearer watch-token")
 
-	missing := NewClient(api.URL, http.DefaultClient, t.TempDir())
-	watchCECBuses(t.Context(), missing, make(chan struct{}, 1), nil, nil)
-	_, err := missing.watcher()
-	mustFail(t, err)
+		missing := NewClient(api, http.DefaultClient, t.TempDir())
+		missing.dial = testNetwork.dial
+		watchCECBuses(t.Context(), missing, make(chan struct{}, 1), nil, nil)
+		_, err := missing.watcher()
+		mustFail(t, err)
+	})
 }
 
 // A Receiver as the API server sends it converts to the same struct

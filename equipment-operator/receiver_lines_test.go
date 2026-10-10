@@ -18,6 +18,7 @@ func loggedController(t *testing.T, api *fakeAPI) (*controller, *logBuffer) {
 	t.Helper()
 	operator := newController(api.client, testMetrics(t))
 	operator.dial = testNetwork.dial
+	operator.listen = testNetwork.bind
 	operator.now = func() time.Time { return statusNow }
 	log := &logBuffer{}
 	operator.log = log
@@ -143,16 +144,18 @@ func TestARestartAgainstASettledReceiverWritesNoLine(t *testing.T) {
 // A command the driver refuses states the driver's own error.
 func TestARefusedSpecPowerStatesTheDriversError(t *testing.T) {
 	t.Parallel()
-	amp := startFakeWiim(t)
-	_, unit := waitingWiim(t, amp)
-	log := &logBuffer{}
-	unit.log = newReceiverLog(log, "studio")
-	unit.generation.Store(3)
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeWiim(t)
+		_, unit := waitingWiim(t, amp)
+		log := &logBuffer{}
+		unit.log = newReceiverLog(log, "studio")
+		unit.generation.Store(3)
 
-	unit.setPower(equipment.PowerStandby)
+		unit.setPower(equipment.PowerStandby)
 
-	mustDeepEqual(t, log.lines(), []string{
-		"Receiver studio: generation 3 asks power Standby; sent power Standby; the command failed: a WiiM has no standby command; power off is not supported",
+		mustDeepEqual(t, log.lines(), []string{
+			"Receiver studio: generation 3 asks power Standby; sent power Standby; the command failed: a WiiM has no standby command; power off is not supported",
+		})
 	})
 }
 
@@ -183,17 +186,19 @@ func TestASessionsStartFlagsAndEndAreOneLineEach(t *testing.T) {
 // On sends nothing. The line says why.
 func TestASpecPowerOnForAWiimSaysNothingWasSent(t *testing.T) {
 	t.Parallel()
-	amp := startFakeWiim(t)
-	_, unit := waitingWiim(t, amp)
-	log := &logBuffer{}
-	unit.log = newReceiverLog(log, "studio")
-	unit.client = startFakeAPI(t).client
-	unit.generation.Store(3)
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeWiim(t)
+		_, unit := waitingWiim(t, amp)
+		log := &logBuffer{}
+		unit.log = newReceiverLog(log, "studio")
+		unit.client = startFakeAPI(t).client
+		unit.generation.Store(3)
 
-	unit.setPower(equipment.PowerOn)
+		unit.setPower(equipment.PowerOn)
 
-	mustDeepEqual(t, log.lines(), []string{
-		"Receiver studio: generation 3 asks power On; sent nothing, because the receiver reports power On",
+		mustDeepEqual(t, log.lines(), []string{
+			"Receiver studio: generation 3 asks power On; sent nothing, because the receiver reports power On",
+		})
+		mustDeepEqual(t, amp.sent(), []string(nil))
 	})
-	mustDeepEqual(t, amp.sent(), []string(nil))
 }

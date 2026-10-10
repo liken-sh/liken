@@ -18,18 +18,21 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 )
 
-// The multicast groups the two discovery paths reach. They are
-// variables so a test points them at a loopback responder instead of
-// the real multicast address.
+// The multicast groups the two discovery paths reach.
 var (
 	mdnsGroup = &net.UDPAddr{IP: net.IPv4(224, 0, 0, 251), Port: 5353}
 	ssdpGroup = &net.UDPAddr{IP: net.IPv4(239, 255, 255, 250), Port: 1900}
 )
 
+// listenPacket opens the socket each search sends from and reads its
+// answers on. It is net.ListenPacket, and a variable so a test answers
+// the searches in memory on the fake clock of a synctest bubble.
+var listenPacket = net.ListenPacket
+
 // queryInterval is how often each path repeats its search across the
 // discovery window. Multicast drops a packet, so a search that runs
 // once misses a device; the window lets the repeats fill the gap.
-var queryInterval = time.Second
+const queryInterval = time.Second
 
 // ssdpMX is the MX an M-SEARCH states: the longest a renderer may wait,
 // at a random point, before it answers. One second is the least UPnP
@@ -41,8 +44,8 @@ const ssdpMX = 1
 // The per-attempt read windows. An mDNS responder answers a shared
 // record within 120 ms. An SSDP renderer answers at any point up to
 // ssdpMX, so its read stays open that long and a margin more for the
-// network. They are variables so a test holds the wait short.
-var (
+// network.
+const (
 	mdnsReadTimeout = 250 * time.Millisecond
 	ssdpReadTimeout = ssdpMX*time.Second + 250*time.Millisecond
 )
@@ -137,14 +140,14 @@ type mdnsInstance struct {
 // reads the answers until the read window closes, merging any complete
 // device into the set.
 func browseMDNS(ctx context.Context, devices map[string]Device) {
-	conn, err := net.ListenUDP("udp4", nil)
+	conn, err := listenPacket("udp4", ":0")
 	if err != nil {
 		return
 	}
 	defer conn.Close()
 
 	query := mdnsQuery()
-	if _, err := conn.WriteToUDP(query, mdnsGroup); err != nil {
+	if _, err := conn.WriteTo(query, mdnsGroup); err != nil {
 		return
 	}
 
@@ -152,7 +155,7 @@ func browseMDNS(ctx context.Context, devices map[string]Device) {
 	_ = conn.SetReadDeadline(time.Now().Add(mdnsReadTimeout))
 	buffer := make([]byte, 1500)
 	for {
-		n, _, err := conn.ReadFromUDP(buffer)
+		n, _, err := conn.ReadFrom(buffer)
 		if err != nil {
 			break
 		}
@@ -295,7 +298,7 @@ var ssdpRequest = []byte(fmt.Sprintf("M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.2
 // searchSSDP sends one M-SEARCH and reads the answers until the read
 // window closes, merging every device it can parse into the set.
 func searchSSDP(ctx context.Context, devices map[string]Device) {
-	conn, err := net.ListenPacket("udp4", ":0")
+	conn, err := listenPacket("udp4", ":0")
 	if err != nil {
 		return
 	}

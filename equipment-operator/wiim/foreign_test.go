@@ -7,6 +7,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"testing/synctest"
 
 	"github.com/liken-sh/equipment-operator/equipment"
 )
@@ -44,47 +45,57 @@ func arylicAmp(t *testing.T) *fakeAmp {
 }
 
 func TestPollOfAnotherBrandReadsOnlyStatusEx(t *testing.T) {
-	amp := arylicAmp(t)
-	client := amp.client(nil)
-	client.poll(context.Background())
+	synctest.Test(t, func(t *testing.T) {
+		amp := arylicAmp(t)
+		client := amp.client(nil)
+		client.poll(context.Background())
 
-	mustMatch(t, amp.sent(), []string{statusCommand})
+		mustMatch(t, amp.sent(), []string{statusCommand})
+	})
 }
 
 func TestPollOfAnotherBrandNamesTheProject(t *testing.T) {
-	amp := arylicAmp(t)
-	var projects []string
-	client := amp.client(nil)
-	client.Foreign = func(project string) { projects = append(projects, project) }
-	client.poll(context.Background())
-	client.poll(context.Background())
+	synctest.Test(t, func(t *testing.T) {
+		amp := arylicAmp(t)
+		var projects []string
+		client := amp.client(nil)
+		client.Foreign = func(project string) { projects = append(projects, project) }
+		client.poll(context.Background())
+		client.poll(context.Background())
 
-	mustMatch(t, projects, []string{"ARYLIC_A50TE"})
-	mustMatch(t, client.Surveyed(), false)
+		mustMatch(t, projects, []string{"ARYLIC_A50TE"})
+		mustMatch(t, client.Surveyed(), false)
+	})
 }
 
 func TestPollOfAnotherBrandLeavesTheDeviceUnreachableAfterMisses(t *testing.T) {
-	amp := arylicAmp(t)
-	client := amp.client(nil)
-	for range pollFailures {
-		client.poll(context.Background())
-	}
+	synctest.Test(t, func(t *testing.T) {
+		amp := arylicAmp(t)
+		client := amp.client(nil)
+		for range pollFailures {
+			client.poll(context.Background())
+		}
 
-	mustMatch(t, client.State().Reachable, equipment.ConditionFalse)
+		mustMatch(t, client.State().Reachable, equipment.ConditionFalse)
+	})
 }
 
 func TestPollOfAWiiMNeverCallsForeign(t *testing.T) {
-	amp := startFakeAmp(t)
-	client := amp.client(nil)
-	client.Foreign = func(string) { t.Fatal("a WiiM was called foreign") }
-	mustMatch(t, client.poll(context.Background()), true)
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeAmp(t)
+		client := amp.client(nil)
+		client.Foreign = func(string) { t.Fatal("a WiiM was called foreign") }
+		mustMatch(t, client.poll(context.Background()), true)
+	})
 }
 
 func TestPollOfADeviceWithNoProjectIsNotJudged(t *testing.T) {
-	amp := startFakeAmp(t)
-	amp.answers[statusCommand] = strings.Replace(statusExJSON, `"project":"WiiM_Amp_4layer"`, `"project":""`, 1)
-	client := amp.client(nil)
-	client.Foreign = func(string) { t.Fatal("a device with no project was called foreign") }
-	mustMatch(t, client.poll(context.Background()), true)
-	mustMatch(t, client.Surveyed(), true)
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeAmp(t)
+		amp.answers[statusCommand] = strings.Replace(statusExJSON, `"project":"WiiM_Amp_4layer"`, `"project":""`, 1)
+		client := amp.client(nil)
+		client.Foreign = func(string) { t.Fatal("a device with no project was called foreign") }
+		mustMatch(t, client.poll(context.Background()), true)
+		mustMatch(t, client.Surveyed(), true)
+	})
 }

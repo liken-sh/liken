@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
-	"time"
+	"testing/synctest"
 
 	"github.com/liken-sh/equipment-operator/cec"
 )
@@ -35,29 +35,24 @@ func (c *collected) counts() (int, int) {
 }
 
 func TestReadPassesOnMessagesAndEventsUntilItsContextEnds(t *testing.T) {
-	bus := room()
-	_, device := joined(t, bus)
-	ctx, cancel := context.WithCancel(t.Context())
-	seen := &collected{}
-	done := make(chan error, 1)
-	go func() { done <- cec.Read(ctx, device, seen.message, seen.event) }()
+	synctest.Test(t, func(t *testing.T) {
+		bus := room()
+		_, device := joined(t, bus)
+		ctx, cancel := context.WithCancel(t.Context())
+		seen := &collected{}
+		done := make(chan error, 1)
+		go func() { done <- cec.Read(ctx, device, seen.message, seen.event) }()
 
-	bus.Send(cec.ActiveSource(8, 0x1500))
-	deadline := time.Now().Add(2 * time.Second)
-	for messages, events := seen.counts(); messages == 0 || events == 0; messages, events = seen.counts() {
-		if time.Now().After(deadline) {
+		bus.Send(cec.ActiveSource(8, 0x1500))
+		synctest.Wait()
+		messages, events := seen.counts()
+		if messages == 0 || events == 0 {
 			t.Fatalf("read passed on %d messages and %d events", messages, events)
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	cancel()
+		cancel()
 
-	select {
-	case err := <-done:
-		mustSucceed(t, err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("read did not stop with its context")
-	}
+		mustSucceed(t, <-done)
+	})
 }
 
 func TestReadEndsWhenTheAdapterLeaves(t *testing.T) {

@@ -9,8 +9,11 @@ import (
 	"time"
 )
 
-// The bound on every wait in these tests: long enough that a loaded
-// machine still passes, short enough that a broken program fails in
+// The bound on every wait in these tests. A test in a synctest bubble
+// waits on the fake clock, so there the bound only decides when a
+// broken program fails. The tests against the vivid adapters wait on
+// the real clock, so the bound is long enough that a loaded machine
+// still passes, and short enough that a broken program fails in
 // seconds.
 const testTimeout = 2 * time.Second
 

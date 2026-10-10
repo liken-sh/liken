@@ -86,7 +86,8 @@ workloads use the `CECBus` types in `cecbus.go` and the API calls in
 `cecbus_client.go`.
 
 The image holds two builds of the program. The `Deployment` runs
-`/equipment-operator`, which holds the leader election in `leader.go`.
+`/equipment-operator`, which elects one acting copy through
+`kubernetes/election` in `leader.go`.
 The `DaemonSet` runs `/equipment-operator-node`, built with the tag
 `node`, which leaves the election and client-go's typed clientset out
 (`leader_node.go`). `make test` vets both builds, and fails when the

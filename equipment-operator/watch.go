@@ -41,7 +41,7 @@ var (
 // way the shared client does. The watches and the Deployment's leader
 // election both use it.
 func (c *Client) restConfig() *rest.Config {
-	config := &rest.Config{Host: c.base, Transport: c.transport}
+	config := &rest.Config{Host: c.base, Transport: c.transport, Dial: c.dial}
 	if c.credentials != "" {
 		config.TLSClientConfig.CAFile = c.credentials + "/ca.crt"
 		config.BearerTokenFile = c.credentials + "/token"

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"os"
 	"os/signal"
 	"reflect"
@@ -62,6 +63,7 @@ type receiverUnit struct {
 	recorder    *events.Recorder
 	reference   events.ObjectReference
 	dial        dialFunc
+	listen      listenFunc
 	now         func() time.Time
 	driver      equipment.Driver
 	denonClient *denon.Client
@@ -693,8 +695,10 @@ type controller struct {
 	// recorder posts each Receiver's condition transitions as Events.
 	// Nil posts none.
 	recorder *events.Recorder
-	// dial reaches each Denon receiver.
+	// dial reaches each receiver and each UPnP description, and listen
+	// opens the listener each WiiM sends its events to.
 	dial      dialFunc
+	listen    listenFunc
 	wake      chan struct{}
 	now       func() time.Time
 	readings  *metrics
@@ -725,6 +729,7 @@ func newController(client *Client, readings *metrics) *controller {
 	c := &controller{
 		client:    client,
 		dial:      dialTCP,
+		listen:    net.Listen,
 		wake:      make(chan struct{}, 1),
 		now:       time.Now,
 		readings:  readings,
@@ -879,6 +884,7 @@ func (c *controller) start(parent context.Context, receiver *Receiver) *receiver
 		reference: reference("Receiver", receiver.Metadata),
 		sessions:  c.sessions,
 		dial:      c.dial,
+		listen:    c.listen,
 		now:       c.now,
 		readings:  c.readings,
 		log:       newReceiverLog(c.log, receiver.Metadata.Name),
@@ -924,6 +930,8 @@ func (u *receiverUnit) startDriver(receiver *Receiver, address string, report fu
 		client := wiim.NewClient(address, u.observe)
 		client.UUID = receiver.Spec.Wiim.UUID
 		client.Reporter = report
+		client.Dial = u.dial
+		client.Listen = u.listen
 		client.Foreign = func(project string) {
 			if u.foreign != nil {
 				u.foreign(receiver.Spec.Wiim.UUID, project, address)
@@ -971,6 +979,7 @@ func (c *controller) startDiscovery(ctx context.Context) {
 		fmt.Fprintf(c.log, "%s is off: the operator sends no mDNS or SSDP search and creates no Receiver, and a WiiM Receiver reaches its amp only at spec.wiim.address\n", networkDiscoveryVariable)
 		return
 	}
+	c.discovery.dial = c.dial
 	goWork(ctx, func() { c.discovery.run(ctx) })
 }
 
@@ -1005,19 +1014,13 @@ func drainPokes(wake <-chan struct{}) {
 }
 
 // operate reads the configuration, waits for the Lease, and then hands
-// it to operateAsLeader. Every failure here ends the process, because
-// the kubelet restarts the pod with backoff and the failure shows in
-// kubectl instead of hiding in a retry loop.
+// the leader's client to operateAsLeader. Every failure here ends the
+// process, because the kubelet restarts the pod with backoff and the
+// failure shows in kubectl instead of hiding in a retry loop.
 func operate() {
 	config, err := readSettings()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-
-	client, err := InClusterClient()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "in-cluster config: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -1027,7 +1030,7 @@ func operate() {
 	// arrives while the copy waits for the Lease ends the wait.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
-	_, err = lead(client, config).actWhileLeading(ctx, func() error {
+	_, err = lead(config).actWhileLeading(ctx, func(client *Client) error {
 		return operateAsLeader(ctx, client, config)
 	})
 	if err != nil {
@@ -1066,6 +1069,9 @@ func serve(ctx context.Context, client *Client, config settings, readings *metri
 	operator.recorder = recorder
 	if config.dial != nil {
 		operator.dial = config.dial
+	}
+	if config.listen != nil {
+		operator.listen = config.listen
 	}
 	operator.networkDiscoveryOff = config.networkDiscoveryOff
 	var started sync.WaitGroup

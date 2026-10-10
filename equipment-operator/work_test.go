@@ -46,6 +46,7 @@ func TestAShutdownEndsTheWaitOfAWriteThatMetA429(t *testing.T) {
 		api.mutex.Unlock()
 		operator := newController(api.client, testMetrics(t))
 		operator.dial = testNetwork.dial
+		operator.listen = testNetwork.bind
 		operator.networkDiscoveryOff = true
 		operator.now = func() time.Time { return statusNow }
 		ctx, cancel := context.WithCancel(context.Background())
@@ -88,6 +89,7 @@ func TestTheLoopWaitsForAWriteInFlightBeforeItReturns(t *testing.T) {
 		api.setReceivers(receiver)
 		operator := newController(api.client, testMetrics(t))
 		operator.dial = testNetwork.dial
+		operator.listen = testNetwork.bind
 		operator.networkDiscoveryOff = true
 		operator.now = func() time.Time { return statusNow }
 		ctx, cancel := context.WithCancel(context.Background())

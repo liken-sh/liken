@@ -176,25 +176,27 @@ func TestASessionThatSleepsAsksTheTVForNothing(t *testing.T) {
 // outcome and not as a failed command.
 func TestAPowerPressInAWiimRoomTurnsTheTVOff(t *testing.T) {
 	t.Parallel()
-	amp := startFakeWiim(t)
-	client, _ := waitingWiim(t, amp)
-	log := &logBuffer{}
-	lines := newReceiverLog(log, "studio")
-	api, room := televisionRoom(t, lines, "On")
-	applied := make(chan equipment.Power, 4)
-	spec := ReceiverSession{Player: "theater", Input: "GAME"}
-	held := startSession(t.Context(), "studio", spec, client, lines, func(power equipment.Power) { applied <- power }, room)
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeWiim(t)
+		client, _ := waitingWiim(t, amp)
+		log := &logBuffer{}
+		lines := newReceiverLog(log, "studio")
+		api, room := televisionRoom(t, lines, "On")
+		applied := make(chan equipment.Power, 4)
+		spec := ReceiverSession{Player: "theater", Input: "GAME"}
+		held := startSession(t.Context(), "studio", spec, client, lines, func(power equipment.Power) { applied <- power }, room)
 
-	powerAsk(held, "toggle")
+		powerAsk(held, "toggle")
 
-	loungeSession(t, api, func(session TelevisionSession) bool { return session.StandbyAt != "" })
-	press := "Receiver studio: status.session.powerAsk asks toggle, and Television lounge reports power On; "
-	mustDeepEqual(t, waitForLines(t, log, "asks toggle", 2), []string{
-		press + "asked Television lounge to go to standby",
-		press + "sent the receiver nothing, because it has no standby command, so it stays on",
+		loungeSession(t, api, func(session TelevisionSession) bool { return session.StandbyAt != "" })
+		press := "Receiver studio: status.session.powerAsk asks toggle, and Television lounge reports power On; "
+		mustDeepEqual(t, waitForLines(t, log, "asks toggle", 2), []string{
+			press + "asked Television lounge to go to standby",
+			press + "sent the receiver nothing, because it has no standby command, so it stays on",
+		})
+		time.Sleep(quietPeriod)
+		mustMatch(t, len(applied), 0)
 	})
-	time.Sleep(quietPeriod)
-	mustMatch(t, len(applied), 0)
 }
 
 // fixedDriver is a driver that reports one state and accepts every

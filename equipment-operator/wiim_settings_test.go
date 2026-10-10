@@ -8,12 +8,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
-	"time"
+	"testing/synctest"
 
 	"github.com/liken-sh/equipment-operator/equipment"
 	"github.com/liken-sh/equipment-operator/wiim"
@@ -21,10 +20,10 @@ import (
 
 // fakeWiim is a small stateful amp: the reads answer what the setters
 // last set, so a poll reflects a declared setting and the confirm path
-// is exercised. It is a real TLS server, because the driver's client
-// skips certificate verification and speaks HTTPS.
+// is exercised. It serves TLS on the test network, because the
+// driver's client speaks HTTPS and skips certificate verification.
 type fakeWiim struct {
-	server *httptest.Server
+	address string
 
 	mutex    sync.Mutex
 	name     string
@@ -37,8 +36,8 @@ type fakeWiim struct {
 func startFakeWiim(t *testing.T) *fakeWiim {
 	t.Helper()
 	amp := &fakeWiim{name: "Studio", led: true}
-	amp.server = httptest.NewTLSServer(http.HandlerFunc(amp.handle))
-	t.Cleanup(amp.server.Close)
+	certificate := testCertificate(t)
+	amp.address = testNetwork.serveHTTP(t, http.HandlerFunc(amp.handle), &certificate)
 	return amp
 }
 
@@ -103,12 +102,16 @@ func digit(on bool) string {
 
 // waitingWiim starts a client, waits until its first poll reaches the
 // device and its first survey of the device's settings ends, and hands
-// back the unit the controller would own. The unit applies no declared
+// back the unit the controller would own. It runs in a synctest bubble,
+// and the first poll has ended when every goroutine in the bubble
+// waits. The unit applies no declared
 // setting before the survey, so a test that waited only for the poll
 // could apply before it and see nothing sent.
 func waitingWiim(t *testing.T, amp *fakeWiim) (*wiim.Client, *receiverUnit) {
 	t.Helper()
-	client := wiim.NewClient(amp.server.Listener.Addr().String(), nil)
+	client := wiim.NewClient(amp.address, nil)
+	client.Dial = testNetwork.dial
+	client.Listen = testNetwork.bind
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -119,13 +122,9 @@ func waitingWiim(t *testing.T, amp *fakeWiim) (*wiim.Client, *receiverUnit) {
 		cancel()
 		<-done
 	})
-	deadline := time.After(testTimeout)
-	for client.State().Reachable != equipment.ConditionTrue || !client.Surveyed() {
-		select {
-		case <-deadline:
-			t.Fatal("the client never reached the fake amp")
-		case <-time.After(time.Millisecond):
-		}
+	synctest.Wait()
+	if client.State().Reachable != equipment.ConditionTrue || !client.Surveyed() {
+		t.Fatal("the client never reached the fake amp")
 	}
 	return client, &receiverUnit{name: "studio", driver: client, wiimClient: client, log: newReceiverLog(io.Discard, "studio"), budget: newSendBudget(), settled: newSettledRecord(ReceiverStoredStatus{}, ReceiverSpec{})}
 }
@@ -135,46 +134,44 @@ func waitingWiim(t *testing.T, amp *fakeWiim) (*wiim.Client, *receiverUnit) {
 // reports, not with a memory it lost in the restart.
 func TestARestartAgainstASettledWiimSendsNothing(t *testing.T) {
 	t.Parallel()
-	amp := startFakeWiim(t)
-	_, unit := waitingWiim(t, amp)
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeWiim(t)
+		_, unit := waitingWiim(t, amp)
 
-	name, led := "Studio", true
-	want := wiim.Settings{Device: wiim.DeviceSettings{Name: &name, LED: &led}}
+		name, led := "Studio", true
+		want := wiim.Settings{Device: wiim.DeviceSettings{Name: &name, LED: &led}}
 
-	unit.setWiimSettings(want)
-	unit.setWiimSettings(want)
-	time.Sleep(50 * time.Millisecond)
-	mustDeepEqual(t, amp.sent(), []string(nil))
+		unit.setWiimSettings(want)
+		unit.setWiimSettings(want)
+		synctest.Wait()
+		mustDeepEqual(t, amp.sent(), []string(nil))
+	})
 }
 
 // One declared field the device reports at another value sends that
 // field and nothing beside it.
 func TestOneDifferingWiimFieldSendsOnlyThatField(t *testing.T) {
 	t.Parallel()
-	amp := startFakeWiim(t)
-	_, unit := waitingWiim(t, amp)
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeWiim(t)
+		_, unit := waitingWiim(t, amp)
 
-	name, led := "Studio", false
-	unit.setWiimSettings(wiim.Settings{Device: wiim.DeviceSettings{Name: &name, LED: &led}})
+		name, led := "Studio", false
+		unit.setWiimSettings(wiim.Settings{Device: wiim.DeviceSettings{Name: &name, LED: &led}})
+		synctest.Wait()
 
-	deadline := time.After(testTimeout)
-	for len(amp.sent()) < 1 {
-		select {
-		case <-deadline:
-			t.Fatal("the operator sent nothing")
-		case <-time.After(time.Millisecond):
-		}
-	}
-	time.Sleep(50 * time.Millisecond)
-	mustDeepEqual(t, amp.sent(), []string{"LED_SWITCH_SET:0"})
+		mustDeepEqual(t, amp.sent(), []string{"LED_SWITCH_SET:0"})
+	})
 }
 
 func TestAnUndeclaredWiimSettingSendsNothing(t *testing.T) {
 	t.Parallel()
-	amp := startFakeWiim(t)
-	_, unit := waitingWiim(t, amp)
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeWiim(t)
+		_, unit := waitingWiim(t, amp)
 
-	unit.setWiimSettings(wiim.Settings{})
-	time.Sleep(50 * time.Millisecond)
-	mustDeepEqual(t, amp.sent(), []string(nil))
+		unit.setWiimSettings(wiim.Settings{})
+		synctest.Wait()
+		mustDeepEqual(t, amp.sent(), []string(nil))
+	})
 }

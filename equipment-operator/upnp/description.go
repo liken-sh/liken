@@ -34,24 +34,13 @@ const timeout = 2 * time.Second
 // without end.
 const maxBytes = 64 << 10
 
-// client reads every description. A description is plain HTTP, and each
-// read is one request, so the client keeps no connection open.
-var client = &http.Client{
-	Timeout:   timeout,
-	Transport: &http.Transport{DisableKeepAlives: true},
-}
-
-// Fetch reads the description at one URL with one GET. A description it
-// cannot read, or one that names no model, is an error that carries the
-// device's own answer, so a log line states why the device was not read.
-func Fetch(ctx context.Context, url string) (Description, error) {
-	return fetch(ctx, client, url)
-}
-
-// FetchVia reads the description the way Fetch does, over a connection
-// that dial opens. A driver that reaches its device through a dialer of
-// its own reads the description through the same dialer, so the read
-// goes where the driver's connection goes.
+// FetchVia reads the description at one URL with one GET, over a
+// connection that dial opens. A description it cannot read, or one that
+// names no model, is an error that carries the device's own answer, so
+// a log line states why the device was not read. Each caller passes the
+// dialer that reaches its devices, so the read goes where the caller's
+// own connection to the device goes. The client keeps no connection
+// open, because each read is one request.
 func FetchVia(ctx context.Context, dial func(ctx context.Context, network, address string) (net.Conn, error), url string) (Description, error) {
 	return fetch(ctx, &http.Client{
 		Timeout:   timeout,

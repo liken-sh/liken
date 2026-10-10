@@ -44,6 +44,7 @@ func TestARestartAdoptsTheSessionsFlags(t *testing.T) {
 		fake := startFakeDenon(t)
 		operator := newController(api.client, testMetrics(t))
 		operator.dial = testNetwork.dial
+		operator.listen = testNetwork.bind
 		operator.now = func() time.Time { return statusNow }
 		log := &logBuffer{}
 		operator.log = log

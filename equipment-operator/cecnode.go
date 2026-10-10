@@ -96,7 +96,7 @@ func serveCEC(ctx context.Context, devices string) error {
 		return err
 	}
 	defer device.Close()
-	client, err := InClusterClient()
+	client, err := InClusterClient(0)
 	if err != nil {
 		return fmt.Errorf("in-cluster config: %w", err)
 	}

@@ -6,15 +6,14 @@ package main
 
 import (
 	"encoding/json"
-	"encoding/pem"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/equipment-operator/equipment"
@@ -264,34 +263,26 @@ func TestAServerErrorCarriesTheServersMessage(t *testing.T) {
 // refreshes that file as each token nears expiry.
 func TestTheClientSendsTheServiceAccountTokenOnEveryRequest(t *testing.T) {
 	t.Parallel()
-	credentials := t.TempDir()
-	mustSucceed(t, os.WriteFile(filepath.Join(credentials, "token"), []byte("first-token"), 0o600))
+	synctest.Test(t, func(t *testing.T) {
+		credentials := t.TempDir()
+		mustSucceed(t, os.WriteFile(filepath.Join(credentials, "token"), []byte("first-token"), 0o600))
 
-	sent := make(chan string, 4)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sent <- r.Header.Get("Authorization")
-		_ = json.NewEncoder(w).Encode(ReceiverList{})
-	}))
-	t.Cleanup(server.Close)
-	client := NewClient(server.URL, server.Client(), credentials)
+		sent := make(chan string, 4)
+		server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			sent <- r.Header.Get("Authorization")
+			_ = json.NewEncoder(w).Encode(ReceiverList{})
+		}))
+		client := NewClient(apiservertest.Host, server.Client(), credentials)
 
-	_, err := ListReceivers(client)
-	mustSucceed(t, err)
-	mustMatch(t, <-sent, "Bearer first-token")
+		_, err := ListReceivers(client)
+		mustSucceed(t, err)
+		mustMatch(t, <-sent, "Bearer first-token")
 
-	mustSucceed(t, os.WriteFile(filepath.Join(credentials, "token"), []byte("second-token"), 0o600))
-	_, err = ListReceivers(client)
-	mustSucceed(t, err)
-	mustMatch(t, <-sent, "Bearer second-token")
-}
-
-// A certificate in PEM form, taken from a test server's own
-// certificate, so the pool the client builds holds a real one.
-func testCAPEM(t *testing.T) []byte {
-	t.Helper()
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	t.Cleanup(server.Close)
-	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+		mustSucceed(t, os.WriteFile(filepath.Join(credentials, "token"), []byte("second-token"), 0o600))
+		_, err = ListReceivers(client)
+		mustSucceed(t, err)
+		mustMatch(t, <-sent, "Bearer second-token")
+	})
 }
 
 // A service account directory the test controls, holding whatever CA
@@ -314,9 +305,9 @@ func useServiceAccountDir(t *testing.T, caPEM []byte) string {
 func TestInClusterClientReadsThePodsOwnConfig(t *testing.T) {
 	t.Setenv("KUBERNETES_SERVICE_HOST", "10.43.0.1")
 	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
-	dir := useServiceAccountDir(t, testCAPEM(t))
+	dir := useServiceAccountDir(t, testCAPEM(testCertificate(t)))
 
-	client, err := InClusterClient()
+	client, err := InClusterClient(0)
 	mustSucceed(t, err)
 	mustMatch(t, client.base, "https://10.43.0.1:443")
 	mustMatch(t, client.credentials, dir)
@@ -340,7 +331,7 @@ func TestInClusterClientRefusesAConfigItCannotBuild(t *testing.T) {
 			t.Setenv("KUBERNETES_SERVICE_PORT", "443")
 			useServiceAccountDir(t, each.caPEM)
 
-			_, err := InClusterClient()
+			_, err := InClusterClient(0)
 			mustFail(t, err)
 		})
 	}

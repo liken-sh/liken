@@ -287,23 +287,38 @@ func TestReportCommandOnANilMetricsIsANoOp(t *testing.T) {
 	m.reportCommand(commandOK)
 }
 
+// listenInMemory hands Serve a listener on the test network until the
+// test ends, and answers the HTTP client that reaches it. The listener
+// is a variable that every test shares, so a test that calls it does
+// not run in parallel with another.
+func listenInMemory(t *testing.T) *http.Client {
+	t.Helper()
+	restore := listen
+	listen = testNetwork.bind
+	t.Cleanup(func() { listen = restore })
+	transport := &http.Transport{DialContext: testNetwork.dial, DisableKeepAlives: true}
+	return &http.Client{Transport: transport}
+}
+
 func TestTheListenerServesTheRegistry(t *testing.T) {
-	t.Parallel()
-	m := testMetrics(t)
-	ctx, cancel := context.WithCancel(t.Context())
-	t.Cleanup(cancel)
+	synctest.Test(t, func(t *testing.T) {
+		scraper := listenInMemory(t)
+		m := testMetrics(t)
+		ctx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(cancel)
 
-	addr, err := m.Serve(ctx, "127.0.0.1:0")
-	mustSucceed(t, err)
+		addr, err := m.Serve(ctx, "127.0.0.1:0")
+		mustSucceed(t, err)
 
-	resp, err := http.Get("http://" + addr.String() + "/metrics")
-	mustSucceed(t, err)
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	mustSucceed(t, err)
-	if !strings.Contains(string(body), "liken_build_info") {
-		t.Errorf("the listener served no build info:\n%s", body)
-	}
+		resp, err := scraper.Get("http://" + addr.String() + "/metrics")
+		mustSucceed(t, err)
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		mustSucceed(t, err)
+		if !strings.Contains(string(body), "liken_build_info") {
+			t.Errorf("the listener served no build info:\n%s", body)
+		}
+	})
 }
 
 func TestAnEmptyAddressServesNoMetrics(t *testing.T) {
@@ -316,25 +331,19 @@ func TestAnEmptyAddressServesNoMetrics(t *testing.T) {
 }
 
 func TestTheListenerStopsWhenItsContextEnds(t *testing.T) {
-	t.Parallel()
-	m := testMetrics(t)
-	ctx, cancel := context.WithCancel(t.Context())
+	synctest.Test(t, func(t *testing.T) {
+		scraper := listenInMemory(t)
+		m := testMetrics(t)
+		ctx, cancel := context.WithCancel(t.Context())
 
-	addr, err := m.Serve(ctx, "127.0.0.1:0")
-	mustSucceed(t, err)
-	cancel()
+		addr, err := m.Serve(ctx, "127.0.0.1:0")
+		mustSucceed(t, err)
+		cancel()
+		synctest.Wait()
 
-	deadline := time.After(testTimeout)
-	for {
-		if _, err := http.Get("http://" + addr.String() + "/metrics"); err != nil {
-			return
-		}
-		select {
-		case <-deadline:
-			t.Fatal("the listener still answers after its context ended")
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
+		_, err = scraper.Get("http://" + addr.String() + "/metrics")
+		mustFail(t, err)
+	})
 }
 
 // Send drops a command it cannot queue, and a queued command that

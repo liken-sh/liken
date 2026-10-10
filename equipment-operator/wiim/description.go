@@ -33,7 +33,7 @@ func (c *Client) describe(ctx context.Context) {
 	if skip {
 		return
 	}
-	description, err := upnp.Fetch(ctx, c.upnpBase+descriptionPath)
+	description, err := upnp.FetchVia(ctx, c.dial, c.upnpBase+descriptionPath)
 	c.mutex.Lock()
 	if err != nil {
 		// The model stays empty; the status shows the project under
