@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/election"
 	"github.com/liken-sh/liken/kubernetes/events"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -25,90 +27,135 @@ import (
 // the next leader's session does not meet it.
 const busStopTimeout = 5 * time.Second
 
+// processSettings are what the Deployment tells the operator through
+// its environment.
+type processSettings struct {
+	busAddress     string
+	namespace      string
+	pod            string
+	topicBase      string
+	mediaTopicBase string
+	port           string
+	metricsAddress string
+}
+
 // Operate reads the operator's environment and returns its failure
-// instead of exiting, so main is the only place that ends the process
-// and a test drives the whole setup. A missing setting fails here,
-// before the first pass, because a pod that cannot name the images it
-// creates has nothing to reconcile with. The one exit that is not
-// main's is a lost Lease (leader.go says why).
+// instead of exiting, so main is the only place that ends the process.
+// A missing setting fails here, before the first pass, because a pod
+// that cannot name the images it creates has nothing to reconcile with.
+// The one exit that is not main's is a lost Lease (the
+// kubernetes/election package says why).
 func operate() error {
-	busAddress := os.Getenv(busAddressVariable)
-	if busAddress == "" {
-		return fmt.Errorf("%s is unset; the Deployment must name the broker", busAddressVariable)
-	}
-	// The namespace the operator's own Service is in, which is
-	// what the address it reports on every Library names, and where its
-	// Lease is. The Deployment reads it off the pod with the downward API.
-	namespace := os.Getenv(operatorNamespaceVariable)
-	if namespace == "" {
-		return fmt.Errorf("%s is unset; the Deployment must name the operator's namespace", operatorNamespaceVariable)
-	}
-	// The pod's name is this process's part in the Lease.
-	pod := os.Getenv(podNameVariable)
-	if pod == "" {
-		return fmt.Errorf("%s is unset; the Deployment must name the operator's pod", podNameVariable)
-	}
-	// The topic base has a default, because a cluster that runs one
-	// bus needs no policy for it.
-	topicBase := os.Getenv(topicBaseVariable)
-	if topicBase == "" {
-		topicBase = defaultTopicBase
-	}
-	mediaTopicBase := mediaTopicBaseOf(os.Getenv(mediaTopicBaseVariable))
-	// The port the webhook endpoint answers on, with a default,
-	// because a cluster that takes the manifest as it ships needs no
-	// policy for it.
-	port := os.Getenv(webhookPortVariable)
-	if port == "" {
-		port = defaultWebhookPort
-	}
-
-	client, err := inClusterClient()
-	if err != nil {
-		return fmt.Errorf("in-cluster config: %w", err)
-	}
-	config := inClusterConfig()
-	watching, err := dynamic.NewForConfig(config)
-	if err != nil {
-		return fmt.Errorf("the client for the watches: %w", err)
-	}
-	leader, err := newLeadership(config, namespace, pod, os.Exit,
-		func(line string) { fmt.Println(line) })
-	if err != nil {
-		return fmt.Errorf("leader election: %w", err)
-	}
-
-	// The kubelet stops the pod with SIGTERM, and a person who runs
-	// the binary by hand stops it with SIGINT. Both end the context,
-	// and the process exits with a zero status.
-	stopped, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
-	defer stop()
-
-	// The stop signal is registered before the pod read, so a SIGTERM
-	// during start-up reaches the handler, and the read has the same
-	// timeout as a pass.
-	naming, endNaming := context.WithTimeout(context.Background(), passTimeout)
-	defer endNaming()
-	stamped, err := operatorImages(naming, client, namespace)
+	settings, err := readSettings()
 	if err != nil {
 		return err
 	}
 
-	library := newOperator(client, stamped, busAddress, topicBase, namespace, ":"+port)
-	library.mediaTopicBase = mediaTopicBase
-	// The recorder's queue ends with the stop signal. The instance is the
-	// pod's name, which os.Hostname answers in the pod.
-	library.recorder = events.New(stopped, client, eventComponent, events.Options{})
+	// The kubelet stops the pod with SIGTERM, and a person who runs
+	// the binary by hand stops it with SIGINT. Both end the context,
+	// and the process exits with a zero status. The stop signal is
+	// registered before the first request, so a SIGTERM during start-up
+	// reaches the handler.
+	stopped, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
 
+	// Each request ends within the election's request timeout, so a
+	// write that the guard allowed just before the leader stopped
+	// renewing ends before another copy can take the Lease.
+	client, err := inClusterClient(election.RequestTimeout)
+	if err != nil {
+		return fmt.Errorf("in-cluster config: %w", err)
+	}
+	library, leader, watching, err := startProcess(stopped, settings, client, inClusterConfig(), os.Exit, os.Stdout)
+	if err != nil {
+		return err
+	}
+	return library.run(stopped, os.Stdout, watching, leader)
+}
+
+// readSettings reads the settings from the environment, and names the
+// first one that is missing.
+func readSettings() (processSettings, error) {
+	s := processSettings{busAddress: os.Getenv(busAddressVariable)}
+	if s.busAddress == "" {
+		return s, fmt.Errorf("%s is unset; the Deployment must name the broker", busAddressVariable)
+	}
+	// The namespace the operator's own Service is in, which is
+	// what the address it reports on every Library names, and where its
+	// Lease is. The Deployment reads it off the pod with the downward API.
+	s.namespace = os.Getenv(operatorNamespaceVariable)
+	if s.namespace == "" {
+		return s, fmt.Errorf("%s is unset; the Deployment must name the operator's namespace", operatorNamespaceVariable)
+	}
+	// The pod's name is this process's part in the Lease.
+	s.pod = os.Getenv(podNameVariable)
+	if s.pod == "" {
+		return s, fmt.Errorf("%s is unset; the Deployment must name the operator's pod", podNameVariable)
+	}
+	// The topic base has a default, because a cluster that runs one
+	// bus needs no policy for it.
+	s.topicBase = os.Getenv(topicBaseVariable)
+	if s.topicBase == "" {
+		s.topicBase = defaultTopicBase
+	}
+	s.mediaTopicBase = mediaTopicBaseOf(os.Getenv(mediaTopicBaseVariable))
+	// The port the webhook endpoint answers on, with a default,
+	// because a cluster that takes the manifest as it ships needs no
+	// policy for it.
+	s.port = os.Getenv(webhookPortVariable)
+	if s.port == "" {
+		s.port = defaultWebhookPort
+	}
 	// The metrics listener's address, with no default: milestone 65
 	// says an empty address serves no metrics, so a cluster that wants
 	// none only has to leave the variable unset.
-	library.metricsAddress = os.Getenv(metricsAddressVariable)
+	s.metricsAddress = os.Getenv(metricsAddressVariable)
+	return s, nil
+}
+
+// startProcess builds the operator from its settings and its two
+// connections to the API server, and starts the election. client sends
+// every write and every read the watches do not answer, and config
+// serves the watches and the Lease. A test calls it with connections to
+// a fake API server. exit ends the process after a lost Lease, and log
+// receives the election's lines.
+func startProcess(stopped context.Context, s processSettings, client *apiclient.Client, config *rest.Config,
+	exit func(int), log io.Writer) (*operator, *leadership, dynamic.Interface, error) {
+	watching, err := dynamic.NewForConfig(config)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("the client for the watches: %w", err)
+	}
+	leader, err := newLeadership(config, s.namespace, s.pod, exit,
+		func(line string) { fmt.Fprintln(log, line) })
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("leader election: %w", err)
+	}
+	// Every write the operator sends, from a pass and from the Event
+	// recorder, asks the election first, so a copy that cannot show a
+	// current renewal of the Lease stops writing before another copy can
+	// take it. The guard refuses no read, so the read of the operator's
+	// own pod below runs before the lead.
+	client = client.WithWriteGuard(leader.MayWrite)
+
+	// The read of the operator's own pod has the same timeout as a pass.
+	naming, endNaming := context.WithTimeout(context.Background(), passTimeout)
+	defer endNaming()
+	stamped, err := operatorImages(naming, client, s.namespace)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	library := newOperator(client, stamped, s.busAddress, s.topicBase, s.namespace, ":"+s.port)
+	library.mediaTopicBase = s.mediaTopicBase
+	// The recorder's queue ends with the stop signal. The instance is the
+	// pod's name, which os.Hostname answers in the pod.
+	library.recorder = events.New(stopped, client, eventComponent, events.Options{})
+	library.metricsAddress = s.metricsAddress
 	if library.metricsAddress != "" {
 		library.metrics = newMetrics(stamped.version)
 	}
-	leader.run()
-	return library.run(stopped, os.Stdout, watching, leader)
+	leader.Run()
+	return library, leader, watching, nil
 }
 
 // inClusterConfig is the configuration of the watches and the Lease,

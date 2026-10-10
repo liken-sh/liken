@@ -7,10 +7,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
-	"time"
+	"testing/synctest"
 )
 
 // One message the role published, as the recording publish function
@@ -203,13 +206,37 @@ func TestAnAudienceOfAnotherNamespaceLandsNowhere(t *testing.T) {
 // The role runs the webhook server, the bus, and the write loop until
 // the context ends.
 func TestTheRoleRunsUntilItIsStopped(t *testing.T) {
-	role, _, _ := standJellyfinRole(t, jellyfinFixture())
-	role.bus = newBus("nowhere", "jellyfin-house", nil, nil, role.onMessage)
-	jellyfinTicksEvery(t, time.Millisecond)
+	synctest.Test(t, func(t *testing.T) {
+		role, _, _ := standJellyfinRole(t, jellyfinFixture())
+		role.bus = newBus("nowhere", "jellyfin-house", nil, nil, role.onMessage)
+		role.bus.dial = func(context.Context) (net.Conn, error) { return nil, errors.New("no broker") }
+		listener := newPipeListener()
+		role.open = func(string, string) (net.Listener, error) { return listener, nil }
+		stopped, stop := context.WithCancel(t.Context())
+		served := make(chan struct{})
+		go func() {
+			role.serve(stopped)
+			close(served)
+		}()
+		synctest.Wait()
 
-	stopped, stop := context.WithTimeout(t.Context(), 50*time.Millisecond)
-	defer stop()
-	role.serve(stopped)
+		answer, err := listener.Client().Get("http://jellyfin-house/healthz")
+		if err != nil {
+			t.Fatal(err)
+		}
+		drain(answer.Body)
+		stop()
+		synctest.Wait()
+
+		if answer.StatusCode != http.StatusOK {
+			t.Errorf("health = %d while the role ran, want %d", answer.StatusCode, http.StatusOK)
+		}
+		select {
+		case <-served:
+		default:
+			t.Error("the role did not return after the stop")
+		}
+	})
 }
 
 // A port the role cannot listen on ends the role, because a Jellyfin
@@ -217,21 +244,12 @@ func TestTheRoleRunsUntilItIsStopped(t *testing.T) {
 func TestAPortTheRoleCannotListenOnEndsIt(t *testing.T) {
 	role, _, logged := standJellyfinRole(t, jellyfinFixture())
 	role.bus = newBus("nowhere", "jellyfin-house", nil, nil, role.onMessage)
-	role.listen = "256.256.256.256:8080"
-	jellyfinTicksEvery(t, time.Millisecond)
+	// The default listener refuses a port of -1 before it opens a socket.
+	role.listen = "127.0.0.1:-1"
 
 	role.serve(t.Context())
 
 	if !strings.Contains(logged.String(), "the webhook server stopped") {
 		t.Errorf("log = %q, want the server that could not listen", logged.String())
 	}
-}
-
-// Moves the write loop's pass to a wait a test can hold, and puts it
-// back afterwards.
-func jellyfinTicksEvery(t *testing.T, interval time.Duration) {
-	t.Helper()
-	held := jellyfinWriteInterval
-	jellyfinWriteInterval = interval
-	t.Cleanup(func() { jellyfinWriteInterval = held })
 }

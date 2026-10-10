@@ -132,6 +132,14 @@ pod beside the old one. The old pod finishes its pass and releases the
 seconds. A copy that waits for the `Lease` still takes webhooks, and
 it serves each one when it leads.
 
+A copy that cannot renew the `Lease`, for example while the API server
+restarts, stops writing 10 seconds after its last renewal and exits.
+The kubelet restarts the container in the same pod. Because the
+earlier holder was a process of the same pod, the new process takes the
+`Lease` on its first read after the `Lease` expires, 30 seconds after
+the last renewal. A copy in another pod waits 30 seconds from the
+moment it first reads that `Lease`.
+
 The `ClusterRole` is cluster-wide because a `Library` can be in any
 namespace. Its grants, by object:
 

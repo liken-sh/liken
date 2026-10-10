@@ -63,6 +63,12 @@ const (
 type phaseBoard struct {
 	dir     string
 	running *os.File
+	// changes opens the stream of changes to the directory in place of
+	// the inotify watch, when it is set. A test on synctest's fake clock
+	// sets it, because a read of an inotify descriptor waits in the
+	// runtime's poller, and the fake clock does not move while a
+	// goroutine waits there.
+	changes func(ctx context.Context) (<-chan struct{}, error)
 }
 
 func newPhaseBoard(dir string) *phaseBoard {
@@ -204,6 +210,9 @@ const phaseWatchEvents = syscall.IN_CREATE | syscall.IN_MOVED_TO | syscall.IN_CL
 // context ends. The channel holds one pending change and drops the rest,
 // because a waiter reads every mark again when it wakes.
 func (b *phaseBoard) watch(ctx context.Context) (<-chan struct{}, error) {
+	if b.changes != nil {
+		return b.changes(ctx)
+	}
 	fd, err := syscall.InotifyInit1(syscall.IN_CLOEXEC | syscall.IN_NONBLOCK)
 	if err != nil {
 		return nil, fmt.Errorf("watching %s: %w", b.dir, err)

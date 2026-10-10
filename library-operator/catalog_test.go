@@ -10,11 +10,12 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // capturedStatement is one posted statement decoded back from the wire:
@@ -99,9 +100,8 @@ func parseStatements(body []byte) []capturedStatement {
 
 func testCatalog(t *testing.T, rec *catalogRecorder) *Catalog {
 	t.Helper()
-	server := httptest.NewServer(rec)
-	t.Cleanup(server.Close)
-	return NewCatalog(server.URL, server.Client())
+	server := apiservertest.Start(t, rec)
+	return NewCatalog(apiservertest.Host, server.Client())
 }
 
 func TestUpsertMoviesPostsAParameterizedUpsert(t *testing.T) {
@@ -502,9 +502,9 @@ func TestPostSurfacesADecodeError(t *testing.T) {
 
 func TestPostSurfacesATransportError(t *testing.T) {
 	rec := &catalogRecorder{}
-	server := httptest.NewServer(rec)
-	catalog := NewCatalog(server.URL, server.Client())
-	server.Close()
+	server := apiservertest.Start(t, rec)
+	catalog := NewCatalog(apiservertest.Host, server.Client())
+	server.SetDown(true)
 
 	_, err := catalog.UpsertMovies(context.Background(), []movieRow{{Id: "movie:tmdb:1001"}})
 	if err == nil {

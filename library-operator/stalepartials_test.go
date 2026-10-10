@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -100,36 +101,38 @@ func TestTheWalkFindsTheStalePartialsOfATitle(t *testing.T) {
 // it found to the close container on the phases volume, and the close
 // container removes them and logs each one.
 func TestTheCloseContainerRemovesTheStalePartialsTheScanFound(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	run, log := closingJob(t, catalog, scanPhase)
-	writeFile(t, filepath.Join(run.root, "Film (1999)", "Film (1999).mkv"), "video")
-	agedFile(t, filepath.Join(run.root, staleTemporary), staleAge)
-	agedFile(t, filepath.Join(run.root, staleToolRecord), staleAge)
-	fresh := filepath.Join(run.root, "Film (1999)", likenDirectory, "appearances",
-		"Film (1999).mkv.jsonl.partial-movies-appearances-b2-7")
-	agedFile(t, fresh, freshAge)
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		run, log := closingJob(t, catalog, scanPhase)
+		writeFile(t, filepath.Join(run.root, "Film (1999)", "Film (1999).mkv"), "video")
+		agedFile(t, filepath.Join(run.root, staleTemporary), staleAge)
+		agedFile(t, filepath.Join(run.root, staleToolRecord), staleAge)
+		fresh := filepath.Join(run.root, "Film (1999)", likenDirectory, "appearances",
+			"Film (1999).mkv.jsonl.partial-movies-appearances-b2-7")
+		agedFile(t, fresh, freshAge)
 
-	scan, _, _ := scanJob(t, run.root, libraryKindMovies, "")
-	scan.board = newPhaseBoard(run.board.dir)
-	if err := scan.runPhase(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan error, 1)
-	go func() { done <- run.runJob(t.Context()) }()
-	confirmTheRun(t, catalog, workerEnrich, run.job)
-	if err := <-done; err != nil {
-		t.Fatalf("the job failed: %v", err)
-	}
-
-	for _, gone := range []string{staleTemporary, staleToolRecord} {
-		if _, err := os.Stat(filepath.Join(run.root, gone)); !os.IsNotExist(err) {
-			t.Errorf("%s is still there (%v), want it removed", gone, err)
+		scan, _, _ := scanJob(t, run.root, libraryKindMovies, "")
+		scan.board = newPhaseBoard(run.board.dir)
+		if err := scan.runPhase(t.Context()); err != nil {
+			t.Fatal(err)
 		}
-	}
-	if _, err := os.Stat(fresh); err != nil {
-		t.Errorf("the fresh partial file is gone: %v", err)
-	}
-	if got := strings.Count(log.String(), "removed the stale partial file"); got != 2 {
-		t.Errorf("log = %q, want one line for each of the two files", log)
-	}
+		done := make(chan error, 1)
+		go func() { done <- run.runJob(t.Context()) }()
+		confirmTheRun(t, catalog, workerEnrich, run.job)
+		if err := <-done; err != nil {
+			t.Fatalf("the job failed: %v", err)
+		}
+
+		for _, gone := range []string{staleTemporary, staleToolRecord} {
+			if _, err := os.Stat(filepath.Join(run.root, gone)); !os.IsNotExist(err) {
+				t.Errorf("%s is still there (%v), want it removed", gone, err)
+			}
+		}
+		if _, err := os.Stat(fresh); err != nil {
+			t.Errorf("the fresh partial file is gone: %v", err)
+		}
+		if got := strings.Count(log.String(), "removed the stale partial file"); got != 2 {
+			t.Errorf("log = %q, want one line for each of the two files", log)
+		}
+	})
 }

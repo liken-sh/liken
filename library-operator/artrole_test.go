@@ -309,7 +309,7 @@ func TestAnArtFactOutsideTheScopeIsLeftAlone(t *testing.T) {
 // the work.
 func TestAnArtFactEndsWhenTheCatalogFails(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		work, _ := testEnricher(t, libraryKindMovies, t.TempDir(), NewCatalog("http://127.0.0.1:1", http.DefaultClient))
+		work, _ := testEnricher(t, libraryKindMovies, t.TempDir(), NewCatalog(unreachableAddress, refusedClient()))
 		client, _ := newArtTMDb(t, map[string]string{})
 
 		if err := work.artGap(t.Context(), factPoster, tmdbArtLine(client)); err == nil {

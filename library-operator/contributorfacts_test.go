@@ -548,7 +548,7 @@ func TestAContributorOutsideTheScopeIsLeftAlone(t *testing.T) {
 func TestAContributorFactEndsWhenTheCatalogFails(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		work, _ := testEnricher(t, libraryKindMovies, t.TempDir(),
-			NewCatalog("http://127.0.0.1:1", http.DefaultClient))
+			NewCatalog(unreachableAddress, refusedClient()))
 		client, _ := newPersonTMDb(t, map[string]string{})
 
 		if err := work.contributorGap(t.Context(), factContributorIDs, client); err == nil {

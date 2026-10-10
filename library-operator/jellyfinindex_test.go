@@ -8,10 +8,11 @@ package main
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // One index over a fake Jellyfin, with a clock the test moves and a log
@@ -205,12 +206,11 @@ const jellyfinCancelWindow = 2 * time.Second
 func TestABuildEndsWithACallerThatIsCancelled(t *testing.T) {
 	stopping, stop := context.WithCancel(t.Context())
 	defer stop()
-	blocked := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+	blocked := apiservertest.Start(t, http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
 		stop()
 		<-request.Context().Done()
 	}))
-	t.Cleanup(blocked.Close)
-	index := newJellyfinIndex(newJellyfinAPI(blocked.URL+"/", "the-key", blocked.Client()),
+	index := newJellyfinIndex(newJellyfinAPI(apiservertest.Host+"/", "the-key", blocked.Client()),
 		newJellyfinClock().now, nil)
 
 	started := time.Now()

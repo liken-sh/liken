@@ -9,11 +9,11 @@ import (
 	"context"
 	"errors"
 	"io/fs"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -24,7 +24,7 @@ func closingJob(t *testing.T, catalog *Catalog, needs ...string) (*closeRun, *by
 	work, log := testEnricher(t, libraryKindMovies, t.TempDir(), catalog)
 	work.job = "movies-walk-1"
 	work.needs = needs
-	work.board = newPhaseBoard(t.TempDir())
+	work.board = tickingBoard(t)
 	shortSettle(t)
 	return &closeRun{enricher: work, handoffTimeout: scanTestTimeout}, log
 }
@@ -40,42 +40,44 @@ func shortSettle(t *testing.T) {
 // The container writes the start while the phases run, waits for their
 // marks, and writes the finished run with the failure one phase wrote.
 func TestTheCloseContainerWaitsForEveryPhaseAndNamesTheFailures(t *testing.T) {
-	catalog, agent := newSQLiteCatalog(t)
-	run, _ := closingJob(t, catalog, factProbe, factIdentity)
-	probe, identity := newPhaseBoard(run.board.dir), newPhaseBoard(run.board.dir)
-	for _, phase := range []struct {
-		board *phaseBoard
-		name  string
-	}{{probe, factProbe}, {identity, factIdentity}} {
-		if err := phase.board.start(phase.name); err != nil {
+	synctest.Test(t, func(t *testing.T) {
+		catalog, agent := newSQLiteCatalog(t)
+		run, _ := closingJob(t, catalog, factProbe, factIdentity)
+		probe, identity := newPhaseBoard(run.board.dir), newPhaseBoard(run.board.dir)
+		for _, phase := range []struct {
+			board *phaseBoard
+			name  string
+		}{{probe, factProbe}, {identity, factIdentity}} {
+			if err := phase.board.start(phase.name); err != nil {
+				t.Fatal(err)
+			}
+		}
+		done := make(chan error, 1)
+		go func() { done <- run.runJob(t.Context()) }()
+
+		started := awaitRun(t, catalog, func(held libraryRun) bool { return !held.Started.IsZero() })
+		if !started.Finished.IsZero() {
+			t.Fatalf("run = %+v, want a start with no finish while the phases run", started)
+		}
+		if err := probe.finish(factProbe, nil); err != nil {
 			t.Fatal(err)
 		}
-	}
-	done := make(chan error, 1)
-	go func() { done <- run.runJob(t.Context()) }()
+		if err := identity.finish(factIdentity, errors.New("the key was refused")); err != nil {
+			t.Fatal(err)
+		}
+		confirmTheRun(t, catalog, workerEnrich, run.job)
+		if err := <-done; err != nil {
+			t.Fatalf("the job failed: %v", err)
+		}
 
-	started := awaitRun(t, catalog, func(held libraryRun) bool { return !held.Started.IsZero() })
-	if !started.Finished.IsZero() {
-		t.Fatalf("run = %+v, want a start with no finish while the phases run", started)
-	}
-	if err := probe.finish(factProbe, nil); err != nil {
-		t.Fatal(err)
-	}
-	if err := identity.finish(factIdentity, errors.New("the key was refused")); err != nil {
-		t.Fatal(err)
-	}
-	confirmTheRun(t, catalog, workerEnrich, run.job)
-	if err := <-done; err != nil {
-		t.Fatalf("the job failed: %v", err)
-	}
-
-	finished := awaitRun(t, catalog, func(held libraryRun) bool { return !held.Finished.IsZero() })
-	if finished.Failure != "the key was refused" {
-		t.Errorf("failure = %q, want the identity phase's", finished.Failure)
-	}
-	if got := agent.rowCount(t, "runs"); got != 1 {
-		t.Errorf("runs = %d, want the one row of the enrich worker", got)
-	}
+		finished := awaitRun(t, catalog, func(held libraryRun) bool { return !held.Finished.IsZero() })
+		if finished.Failure != "the key was refused" {
+			t.Errorf("failure = %q, want the identity phase's", finished.Failure)
+		}
+		if got := agent.rowCount(t, "runs"); got != 1 {
+			t.Errorf("runs = %d, want the one row of the enrich worker", got)
+		}
+	})
 }
 
 // The enrich run of this Job, once it matches.
@@ -100,55 +102,59 @@ func awaitRun(t *testing.T, catalog *Catalog, matches func(libraryRun) bool) lib
 // A scan container from an image built before the phases volume writes no
 // mark, and its finished runs row ends the wait in the mark's place.
 func TestTheCloseContainerTakesAFinishedWalkForTheScansMark(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	run, _ := closingJob(t, catalog, scanPhase)
-	done := make(chan error, 1)
-	go func() { done <- run.runJob(t.Context()) }()
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		run, _ := closingJob(t, catalog, scanPhase)
+		done := make(chan error, 1)
+		go func() { done <- run.runJob(t.Context()) }()
 
-	awaitRun(t, catalog, func(held libraryRun) bool { return !held.Started.IsZero() })
-	if _, _, err := catalog.UpsertRun(t.Context(), run.library, libraryRun{
-		Worker: workerScan, Job: run.job, Started: time.Now().UTC(), Finished: time.Now().UTC(),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	confirmTheRun(t, catalog, workerEnrich, run.job)
+		awaitRun(t, catalog, func(held libraryRun) bool { return !held.Started.IsZero() })
+		if _, _, err := catalog.UpsertRun(t.Context(), run.library, libraryRun{
+			Worker: workerScan, Job: run.job, Started: time.Now().UTC(), Finished: time.Now().UTC(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		confirmTheRun(t, catalog, workerEnrich, run.job)
 
-	if err := <-done; err != nil {
-		t.Fatalf("the job failed: %v", err)
-	}
+		if err := <-done; err != nil {
+			t.Fatalf("the job failed: %v", err)
+		}
+	})
 }
 
 // The close container derives every set of a movies library again, from
 // the member rows the phases wrote, and deletes a set with no member left.
 func TestTheCloseContainerDerivesTheSets(t *testing.T) {
-	root := setTree(t,
-		setTitle{folder: "Quiet Harbor (1998)", title: "Quiet Harbor", released: "1998-06-12", tmdb: "1", set: "Quiet Harbor Collection", colID: "1570"},
-		setTitle{folder: "Northwind (1970)", title: "Northwind", released: "1970-03-04", tmdb: "3", set: "Northwind Trilogy"},
-	)
-	scan, agent := sqliteScanner(t, root)
-	scan.fullWalk(context.Background())
-	// The art phase writes a title's art column, and the Northwind title
-	// leaves its set.
-	if _, err := agent.db.Exec(`UPDATE movies SET art = 'Quiet Harbor (1998)/poster.jpg' WHERE title = 'Quiet Harbor'`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := agent.db.Exec(`UPDATE movies SET set_id = '' WHERE title = 'Northwind'`); err != nil {
-		t.Fatal(err)
-	}
-	run, _ := closingJob(t, scan.catalog)
-	done := make(chan error, 1)
-	go func() { done <- run.runJob(t.Context()) }()
-	confirmTheRun(t, scan.catalog, workerEnrich, run.job)
-	if err := <-done; err != nil {
-		t.Fatalf("the job failed: %v", err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		root := setTree(t,
+			setTitle{folder: "Quiet Harbor (1998)", title: "Quiet Harbor", released: "1998-06-12", tmdb: "1", set: "Quiet Harbor Collection", colID: "1570"},
+			setTitle{folder: "Northwind (1970)", title: "Northwind", released: "1970-03-04", tmdb: "3", set: "Northwind Trilogy"},
+		)
+		scan, agent := sqliteScanner(t, root)
+		scan.fullWalk(context.Background())
+		// The art phase writes a title's art column, and the Northwind title
+		// leaves its set.
+		if _, err := agent.db.Exec(`UPDATE movies SET art = 'Quiet Harbor (1998)/poster.jpg' WHERE title = 'Quiet Harbor'`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := agent.db.Exec(`UPDATE movies SET set_id = '' WHERE title = 'Northwind'`); err != nil {
+			t.Fatal(err)
+		}
+		run, _ := closingJob(t, scan.catalog)
+		done := make(chan error, 1)
+		go func() { done <- run.runJob(t.Context()) }()
+		confirmTheRun(t, scan.catalog, workerEnrich, run.job)
+		if err := <-done; err != nil {
+			t.Fatalf("the job failed: %v", err)
+		}
 
-	if got := setRowOf(t, agent, "house/movies", "set:tmdb:1570").Art; got != "Quiet Harbor (1998)/poster.jpg" {
-		t.Errorf("art = %q, want the art the phase wrote", got)
-	}
-	if count := agent.rowCount(t, "sets"); count != 1 {
-		t.Errorf("sets = %d, want the set with no member gone", count)
-	}
+		if got := setRowOf(t, agent, "house/movies", "set:tmdb:1570").Art; got != "Quiet Harbor (1998)/poster.jpg" {
+			t.Errorf("art = %q, want the art the phase wrote", got)
+		}
+		if count := agent.rowCount(t, "sets"); count != 1 {
+			t.Errorf("sets = %d, want the set with no member gone", count)
+		}
+	})
 }
 
 // seedOldTallies writes one row this worker left more than the retention ago,
@@ -166,61 +172,69 @@ func seedOldTallies(t *testing.T, catalog *Catalog, library, worker string) {
 // The Job deletes its worker's old counts where it writes its start, so the
 // table holds the retention and no more.
 func TestTheCloseContainerSweepsTheOldTallies(t *testing.T) {
-	catalog, agent := newSQLiteCatalog(t)
-	run, _ := closingJob(t, catalog)
-	seedOldTallies(t, catalog, run.library, workerEnrich)
-	done := make(chan error, 1)
-	go func() { done <- run.runJob(t.Context()) }()
-	confirmTheRun(t, catalog, workerEnrich, run.job)
-	if err := <-done; err != nil {
-		t.Fatalf("the job failed: %v", err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		catalog, agent := newSQLiteCatalog(t)
+		run, _ := closingJob(t, catalog)
+		seedOldTallies(t, catalog, run.library, workerEnrich)
+		done := make(chan error, 1)
+		go func() { done <- run.runJob(t.Context()) }()
+		confirmTheRun(t, catalog, workerEnrich, run.job)
+		if err := <-done; err != nil {
+			t.Fatalf("the job failed: %v", err)
+		}
 
-	if held := talliesHeld(t, agent, run.library); len(held) != 0 {
-		t.Errorf("the table holds %v, want the old run's rows gone", held)
-	}
+		if held := talliesHeld(t, agent, run.library); len(held) != 0 {
+			t.Errorf("the table holds %v, want the old run's rows gone", held)
+		}
+	})
 }
 
 // A sweep the catalog refuses is logged and never ends the run, because a
 // count is not the work.
 func TestASweepTheCatalogRefusesNeverEndsTheRun(t *testing.T) {
-	catalog, agent := newSQLiteCatalog(t)
-	run, log := closingJob(t, catalog)
-	seedOldTallies(t, catalog, run.library, workerEnrich)
-	agent.transactionsLeft = 2
-	ctx, stop := context.WithTimeout(t.Context(), 50*time.Millisecond)
-	defer stop()
+	synctest.Test(t, func(t *testing.T) {
+		catalog, agent := newSQLiteCatalog(t)
+		run, log := closingJob(t, catalog)
+		seedOldTallies(t, catalog, run.library, workerEnrich)
+		agent.transactionsLeft = 2
+		ctx, stop := context.WithTimeout(t.Context(), 50*time.Millisecond)
+		defer stop()
 
-	_ = run.runJob(ctx)
+		_ = run.runJob(ctx)
 
-	if !strings.Contains(log.String(), "could not sweep the tallies") {
-		t.Errorf("log = %q, want the refused sweep", log.String())
-	}
+		if !strings.Contains(log.String(), "could not sweep the tallies") {
+			t.Errorf("log = %q, want the refused sweep", log.String())
+		}
+	})
 }
 
 // A container that cannot reach its agent writes no start and fails.
 func TestTheCloseContainerFailsWhereItCannotReachItsAgent(t *testing.T) {
-	run, _ := closingJob(t, NewCatalog("http://127.0.0.1:1", &http.Client{Timeout: time.Second}))
+	synctest.Test(t, func(t *testing.T) {
+		run, _ := closingJob(t, NewCatalog(unreachableAddress, refusedClient()))
 
-	if err := run.runJob(t.Context()); err == nil {
-		t.Error("the job reported no error, want the unreachable agent's")
-	}
+		if err := run.runJob(t.Context()); err == nil {
+			t.Error("the job reported no error, want the unreachable agent's")
+		}
+	})
 }
 
 // A container stopped while it waits for the phases ends with the stop.
 func TestTheCloseContainerEndsItsWaitWhenStopped(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	run, _ := closingJob(t, catalog, factProbe)
-	ctx, stop := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- run.runJob(ctx) }()
-	awaitRun(t, catalog, func(held libraryRun) bool { return !held.Started.IsZero() })
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		run, _ := closingJob(t, catalog, factProbe)
+		ctx, stop := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- run.runJob(ctx) }()
+		awaitRun(t, catalog, func(held libraryRun) bool { return !held.Started.IsZero() })
 
-	stop()
+		stop()
 
-	if err := <-done; !errors.Is(err, context.Canceled) {
-		t.Errorf("runJob = %v, want the stop", err)
-	}
+		if err := <-done; !errors.Is(err, context.Canceled) {
+			t.Errorf("runJob = %v, want the stop", err)
+		}
+	})
 }
 
 // The container reads the Job it closes and the wait it makes out of the
@@ -261,44 +275,48 @@ func TestACloseContainerWithNoWorkerFails(t *testing.T) {
 // reads: the close container removes it with every file in it, and leaves
 // the .liken directory of each title folder as it is.
 func TestTheCloseContainerRemovesTheLikenDirectoryAtTheRoot(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	run, log := closingJob(t, catalog)
-	rootLiken := filepath.Join(run.root, likenDirectory)
-	writeFile(t, filepath.Join(rootLiken, likenLedgerName(factIdentity)), "attempts: []\n")
-	writeFile(t, filepath.Join(rootLiken, "worklists", "house", "movies", "trickplay.jsonl"), "{}\n")
-	titleLedger := filepath.Join(run.root, "A Quiet Field (1950)", likenDirectory, likenLedgerName(factIdentity))
-	writeFile(t, titleLedger, "attempts: []\n")
-	done := make(chan error, 1)
-	go func() { done <- run.runJob(t.Context()) }()
-	confirmTheRun(t, catalog, workerEnrich, run.job)
-	if err := <-done; err != nil {
-		t.Fatalf("the job failed: %v", err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		run, log := closingJob(t, catalog)
+		rootLiken := filepath.Join(run.root, likenDirectory)
+		writeFile(t, filepath.Join(rootLiken, likenLedgerName(factIdentity)), "attempts: []\n")
+		writeFile(t, filepath.Join(rootLiken, "worklists", "house", "movies", "trickplay.jsonl"), "{}\n")
+		titleLedger := filepath.Join(run.root, "A Quiet Field (1950)", likenDirectory, likenLedgerName(factIdentity))
+		writeFile(t, titleLedger, "attempts: []\n")
+		done := make(chan error, 1)
+		go func() { done <- run.runJob(t.Context()) }()
+		confirmTheRun(t, catalog, workerEnrich, run.job)
+		if err := <-done; err != nil {
+			t.Fatalf("the job failed: %v", err)
+		}
 
-	if _, err := os.Lstat(rootLiken); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("the root's %s is still there: %v", likenDirectory, err)
-	}
-	if _, err := os.Stat(titleLedger); err != nil {
-		t.Errorf("the title's ledger is gone: %v", err)
-	}
-	if !strings.Contains(log.String(), "removed the .liken directory at the library root") {
-		t.Errorf("log = %q, want the line that names the remove", log)
-	}
+		if _, err := os.Lstat(rootLiken); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("the root's %s is still there: %v", likenDirectory, err)
+		}
+		if _, err := os.Stat(titleLedger); err != nil {
+			t.Errorf("the title's ledger is gone: %v", err)
+		}
+		if !strings.Contains(log.String(), "removed the .liken directory at the library root") {
+			t.Errorf("log = %q, want the line that names the remove", log)
+		}
+	})
 }
 
 // A root with no .liken directory is the state the remove leaves, so the
 // close container removes nothing and says nothing about it.
 func TestARootWithNoLikenDirectoryIsLeftAlone(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	run, log := closingJob(t, catalog)
-	done := make(chan error, 1)
-	go func() { done <- run.runJob(t.Context()) }()
-	confirmTheRun(t, catalog, workerEnrich, run.job)
-	if err := <-done; err != nil {
-		t.Fatalf("the job failed: %v", err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		run, log := closingJob(t, catalog)
+		done := make(chan error, 1)
+		go func() { done <- run.runJob(t.Context()) }()
+		confirmTheRun(t, catalog, workerEnrich, run.job)
+		if err := <-done; err != nil {
+			t.Fatalf("the job failed: %v", err)
+		}
 
-	if strings.Contains(log.String(), likenDirectory+" directory") {
-		t.Errorf("log = %q, want no line about the root", log)
-	}
+		if strings.Contains(log.String(), likenDirectory+" directory") {
+			t.Errorf("log = %q, want no line about the root", log)
+		}
+	})
 }

@@ -7,9 +7,10 @@ package main
 
 import (
 	"database/sql"
-	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // The time every test here records at, so a written row carries a value
@@ -22,9 +23,8 @@ var testRecordedAt = time.Unix(1_700_000_000, 0).UTC()
 func newSQLiteProgressStore(t *testing.T) (*progressStore, *sql.DB) {
 	t.Helper()
 	db := newSQLiteProgress(t)
-	server := httptest.NewServer(&sqliteAgent{db: db})
-	t.Cleanup(server.Close)
-	return newProgressStore(server.URL, server.Client()), db
+	server := apiservertest.Start(t, &sqliteAgent{db: db})
+	return newProgressStore(apiservertest.Host, server.Client()), db
 }
 
 // The first position report creates the row, stamps the time it
@@ -353,9 +353,8 @@ func TestForgettingAPersonLeavesThePlaysAndTheOthers(t *testing.T) {
 func TestTheStoreAnswersTheFailureItsAgentGives(t *testing.T) {
 	db := newSQLiteProgress(t)
 	agent := &sqliteAgent{db: db, transactionsLeft: 1}
-	server := httptest.NewServer(agent)
-	t.Cleanup(server.Close)
-	store := newProgressStore(server.URL, server.Client())
+	server := apiservertest.Start(t, agent)
+	store := newProgressStore(apiservertest.Host, server.Client())
 
 	_, err := store.recordPosition(t.Context(), "play-1", 0, 10, 3600, testRecordedAt)
 

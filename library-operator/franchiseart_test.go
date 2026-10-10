@@ -3,13 +3,14 @@ package main
 import (
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // linkedFranchiseFile is a franchise directory that carries its art as links,
@@ -29,8 +30,11 @@ order:
 // artHost is an art host that answers every path with one image, and counts
 // what it was asked for. The type it answers is what names the file the fetch
 // writes, so a case drives a png by asking for one.
+// artHostAddress is the address the art links name.
+const artHostAddress = "https://art.test"
+
 type artHost struct {
-	server *httptest.Server
+	server *apiservertest.Server
 
 	mutex sync.Mutex
 	asked []string
@@ -47,9 +51,10 @@ type artHost struct {
 func newArtHost(t *testing.T) *artHost {
 	t.Helper()
 	host := &artHost{status: http.StatusOK, kind: "image/jpeg", body: "the image"}
-	// The links are https, which the file's own schema requires, so the host
-	// serves TLS and answers through the client httptest builds for it.
-	host.server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// The links are https, which the file's own schema requires. The
+	// host answers every address over in-memory connections, so the
+	// links name an https address that no network resolves.
+	host.server = apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host.mutex.Lock()
 		host.asked = append(host.asked, r.URL.Path)
 		host.agent = r.Header.Get("User-Agent")
@@ -59,7 +64,6 @@ func newArtHost(t *testing.T) *artHost {
 		w.WriteHeader(status)
 		_, _ = io.WriteString(w, body)
 	}))
-	t.Cleanup(host.server.Close)
 	return host
 }
 
@@ -79,7 +83,7 @@ func (h *artHost) file(keys ...string) string {
 		body += "art:\n"
 	}
 	for _, key := range keys {
-		body += "  " + key + ": " + h.server.URL + "/kestrel/" + key + "\n"
+		body += "  " + key + ": " + artHostAddress + "/kestrel/" + key + "\n"
 	}
 	return body + "order:\n  - movie: tmdb:1101\n"
 }
@@ -138,7 +142,7 @@ func TestTheArtFetchWritesEveryLinkUnderItsKodiName(t *testing.T) {
 		t.Fatal(err)
 	}
 	item, held := ledger.itemAt("poster")
-	if !held || item.Source != host.server.URL+"/kestrel/poster" {
+	if !held || item.Source != artHostAddress+"/kestrel/poster" {
 		t.Errorf("the ledger holds %+v, want the link the poster came from", item)
 	}
 }
@@ -429,18 +433,18 @@ func TestTheArtFetchKeepsAFileWhoseMarkItCouldNotWrite(t *testing.T) {
 func TestTheArtFetchSkipsALinkItCannotReach(t *testing.T) {
 	host := newArtHost(t)
 	closed := newArtHost(t)
-	address := closed.server.URL
-	closed.server.Close()
+	closed.server.SetDown(true)
 	cases := []struct {
 		name string
+		host *artHost
 		url  string
 	}{
-		{"a host that answers nothing", address + "/kestrel/poster"},
-		{"a url the client cannot build", "https://art.example/%zz"},
+		{"a host that answers nothing", closed, artHostAddress + "/kestrel/poster"},
+		{"a url the client cannot build", host, "https://art.example/%zz"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			fetch, checkout, claim := artFetchOf(t, host, map[string]string{
+			fetch, checkout, claim := artFetchOf(t, testCase.host, map[string]string{
 				"Kestrel/franchise.yaml": "name: Kestrel\nart:\n  poster: " + testCase.url +
 					"\norder:\n  - movie: tmdb:1101\n"})
 

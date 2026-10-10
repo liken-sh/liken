@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"net/http"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -192,7 +191,7 @@ func TestTheLedgerFolderOfAFileIsTheOneTheWalkReads(t *testing.T) {
 
 func TestAnEnricherThatCannotReachItsSidecarFails(t *testing.T) {
 	work, _ := testEnricher(t, libraryKindMovies, t.TempDir(),
-		NewCatalog("http://127.0.0.1:1", &http.Client{Timeout: time.Second}))
+		NewCatalog(unreachableAddress, refusedClient()))
 
 	if _, err := work.gaps(t.Context(), factProbe, ledgerTime); err == nil {
 		t.Error("the gap read reported no error, want one")

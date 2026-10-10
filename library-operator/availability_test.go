@@ -5,7 +5,6 @@ package main
 
 import (
 	"testing"
-	"time"
 )
 
 // a namespace the desk holds nothing for reads offline, which is the
@@ -45,12 +44,14 @@ func TestReportersWakeTheLoopOnAChangeAlone(t *testing.T) {
 	}
 }
 
-// woke reads the wake channel without blocking the test.
+// woke reads the wake channel without blocking the test. A fold wakes
+// the loop before it returns, so a wake that is not there yet never
+// comes.
 func woke(wake chan struct{}) bool {
 	select {
 	case <-wake:
 		return true
-	case <-time.After(50 * time.Millisecond):
+	default:
 		return false
 	}
 }

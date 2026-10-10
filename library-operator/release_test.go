@@ -6,6 +6,7 @@ package main
 import (
 	"net/http"
 	"testing"
+	"testing/synctest"
 )
 
 // the whole release rule: the cleanup Job exited zero, which it does
@@ -32,22 +33,24 @@ func TestDepartReleasesWhenTheCleanupJobSucceeds(t *testing.T) {
 // the release empties the retained report and availability, so a later
 // subscriber reads nothing.
 func TestDepartClearsTheRetainedTopics(t *testing.T) {
-	cluster := newFakeCluster()
-	library := departingMovies(cluster)
-	done := houseJob("movies-cleanup", workerCleanup, JobStatus{Succeeded: 1})
-	cluster.holdJob(&done)
-	operator, broker := operatorOnABroker(t, cluster)
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		library := departingMovies(cluster)
+		done := houseJob("movies-cleanup", workerCleanup, JobStatus{Succeeded: 1})
+		cluster.holdJob(&done)
+		operator, broker := operatorOnABroker(t, cluster)
 
-	if err := operator.depart(t.Context(), library, standingCatalog(), []Job{done}); err != nil {
-		t.Fatal(err)
-	}
-
-	cleared := clearedTopics(t, broker, len(libraryTopics("", "")))
-	for _, topic := range libraryTopics("house", "movies") {
-		if !cleared[topic] {
-			t.Errorf("%s was not cleared", topic)
+		if err := operator.depart(t.Context(), library, standingCatalog(), []Job{done}); err != nil {
+			t.Fatal(err)
 		}
-	}
+
+		cleared := clearedTopics(t, broker, len(libraryTopics("", "")))
+		for _, topic := range libraryTopics("house", "movies") {
+			if !cleared[topic] {
+				t.Errorf("%s was not cleared", topic)
+			}
+		}
+	})
 }
 
 // a conflict is read again next pass and an absent Library is the goal;

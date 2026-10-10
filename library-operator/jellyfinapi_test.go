@@ -11,11 +11,11 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // Every request names the key, this client, and this device, in the
@@ -268,12 +268,11 @@ func TestAListingThatCarriesNoItemsReadsAsAnEmptyPage(t *testing.T) {
 // wrote, for an answer the fixture server cannot produce.
 func standJellyfinAnswer(t *testing.T, answer string) *jellyfinAPI {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", jsonContentType)
 		_, _ = io.WriteString(w, answer)
 	}))
-	t.Cleanup(server.Close)
-	return newJellyfinAPI(server.URL, "the-key", server.Client())
+	return newJellyfinAPI(apiservertest.Host, "the-key", server.Client())
 }
 
 // Reads one whole listing into a slice, which is what a test asserts on
@@ -424,7 +423,7 @@ func TestAWriteTheServerRefusedIsAnError(t *testing.T) {
 
 // A server that is not there is an error and not a panic.
 func TestAServerThatIsNotThereIsAnError(t *testing.T) {
-	api := newJellyfinAPI("http://127.0.0.1:1", "the-key", &http.Client{Timeout: time.Second})
+	api := newJellyfinAPI(unreachableAddress, "the-key", refusedClient())
 
 	err := api.items(context.Background(), jellyfinWorksListing, func(jellyfinItem) {})
 

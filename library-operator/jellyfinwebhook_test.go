@@ -7,10 +7,11 @@ package main
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // One post of the plugin, as JSON. Every value is a string, because a
@@ -239,10 +240,9 @@ func TestThePathsTheRoleAnswers(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			role, _, _ := standJellyfinRole(t, jellyfinFixture())
-			server := httptest.NewServer(role.handler())
-			t.Cleanup(server.Close)
+			server := apiservertest.Start(t, role.handler())
 
-			request, err := http.NewRequestWithContext(t.Context(), test.method, server.URL+test.path, nil)
+			request, err := http.NewRequestWithContext(t.Context(), test.method, apiservertest.Host+test.path, nil)
 			if err != nil {
 				t.Fatalf("building the request: %v", err)
 			}
@@ -262,10 +262,9 @@ func TestThePathsTheRoleAnswers(t *testing.T) {
 // Posts one body to the role's own endpoint and answers the status.
 func jellyfinPosted(t *testing.T, role *jellyfin, body []byte) int {
 	t.Helper()
-	server := httptest.NewServer(role.handler())
-	t.Cleanup(server.Close)
+	server := apiservertest.Start(t, role.handler())
 
-	answer, err := server.Client().Post(server.URL+"/webhook", jsonContentType, strings.NewReader(string(body)))
+	answer, err := server.Client().Post(apiservertest.Host+"/webhook", jsonContentType, strings.NewReader(string(body)))
 	if err != nil {
 		t.Fatalf("posting: %v", err)
 	}

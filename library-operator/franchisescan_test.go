@@ -5,12 +5,14 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // franchiseScanner is one franchises scan Job over a checkout, wired to a
@@ -128,7 +130,7 @@ func TestEveryFranchiseScanWalksTheCheckout(t *testing.T) {
 func refusingCatalog(t *testing.T, transactions int, queries bool) *Catalog {
 	t.Helper()
 	answered := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, queriesPath) {
 			if !queries {
 				w.WriteHeader(http.StatusInternalServerError)
@@ -150,8 +152,7 @@ func refusingCatalog(t *testing.T, transactions int, queries bool) *Catalog {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"results": results})
 	}))
-	t.Cleanup(server.Close)
-	return NewCatalog(server.URL, server.Client())
+	return NewCatalog(apiservertest.Host, server.Client())
 }
 
 // A scan whose catalog refuses a step fails the Job, so Kubernetes runs it
@@ -246,37 +247,41 @@ func lastRunPosted(t *testing.T, recorder *catalogRecorder) []any {
 // A Job that walked its checkout writes a finished run with no
 // failure, the run a catalog pod confirms.
 func TestTheFranchiseScanJobWritesItsRun(t *testing.T) {
-	checkout := franchiseCheckout(t, map[string]string{"Example Saga/franchise.yaml": wholeFranchiseFile})
-	scan, recorder, catalog := franchiseScanJob(t, checkout)
-	done := make(chan error, 1)
-	go func() { done <- scan.runJob(t.Context()) }()
+	synctest.Test(t, func(t *testing.T) {
+		checkout := franchiseCheckout(t, map[string]string{"Example Saga/franchise.yaml": wholeFranchiseFile})
+		scan, recorder, catalog := franchiseScanJob(t, checkout)
+		done := make(chan error, 1)
+		go func() { done <- scan.runJob(t.Context()) }()
 
-	confirmTheRunOf(t, catalog, "house/franchises", scan.worker(), scan.job)
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
+		confirmTheRunOf(t, catalog, "house/franchises", scan.worker(), scan.job)
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
 
-	params := lastRunPosted(t, recorder)
-	if params[7] != "" {
-		t.Errorf("the run carries the failure %v, want none", params[7])
-	}
+		params := lastRunPosted(t, recorder)
+		if params[7] != "" {
+			t.Errorf("the run carries the failure %v, want none", params[7])
+		}
+	})
 }
 
 // A Job whose checkout is not there writes a run that names the failure,
 // which the operator reads as the Failed phase.
 func TestTheFranchiseScanJobReportsACheckoutItCouldNotRead(t *testing.T) {
-	scan, recorder, catalog := franchiseScanJob(t, filepath.Join(t.TempDir(), "no-such-checkout"))
-	done := make(chan error, 1)
-	go func() { done <- scan.runJob(t.Context()) }()
+	synctest.Test(t, func(t *testing.T) {
+		scan, recorder, catalog := franchiseScanJob(t, filepath.Join(t.TempDir(), "no-such-checkout"))
+		done := make(chan error, 1)
+		go func() { done <- scan.runJob(t.Context()) }()
 
-	confirmTheRunOf(t, catalog, "house/franchises", scan.worker(), scan.job)
-	if err := <-done; err == nil {
-		t.Fatal("the job succeeded, want it failed on a checkout it could not read")
-	}
+		confirmTheRunOf(t, catalog, "house/franchises", scan.worker(), scan.job)
+		if err := <-done; err == nil {
+			t.Fatal("the job succeeded, want it failed on a checkout it could not read")
+		}
 
-	params := lastRunPosted(t, recorder)
-	failure, _ := params[7].(string)
-	if failure == "" {
-		t.Error("the run carries no failure, want the walk it could not finish")
-	}
+		params := lastRunPosted(t, recorder)
+		failure, _ := params[7].(string)
+		if failure == "" {
+			t.Error("the run carries no failure, want the walk it could not finish")
+		}
+	})
 }

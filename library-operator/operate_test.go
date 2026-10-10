@@ -8,6 +8,7 @@ package main
 import (
 	"net/http"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -34,46 +35,50 @@ func TestPassReconcilesEveryLibraryAndForgetsTheRest(t *testing.T) {
 // the bus, so a pass that drops one clears the topics behind it and
 // leaves a live library's own topics alone.
 func TestPassClearsTheTopicsOfALibraryTheCollectionDoesNotHold(t *testing.T) {
-	cluster := newFakeCluster()
-	boundHouse(cluster)
-	operator, broker := operatorOnABroker(t, cluster)
-	operator.reports.fold("house", "movies", libraryReport{Titles: 12})
-	operator.reports.fold("house", "gone", libraryReport{Titles: 3})
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		boundHouse(cluster)
+		operator, broker := operatorOnABroker(t, cluster)
+		operator.reports.fold("house", "movies", libraryReport{Titles: 12})
+		operator.reports.fold("house", "gone", libraryReport{Titles: 3})
 
-	operator.pass()
+		operator.pass()
 
-	cleared := clearedTopics(t, broker, len(libraryTopics("", "")))
-	for _, topic := range libraryTopics("house", "gone") {
-		if !cleared[topic] {
-			t.Errorf("%s was not cleared", topic)
+		cleared := clearedTopics(t, broker, len(libraryTopics("", "")))
+		for _, topic := range libraryTopics("house", "gone") {
+			if !cleared[topic] {
+				t.Errorf("%s was not cleared", topic)
+			}
 		}
-	}
-	for _, topic := range libraryTopics("house", "movies") {
-		if cleared[topic] {
-			t.Errorf("%s was cleared, and the library still stands", topic)
+		for _, topic := range libraryTopics("house", "movies") {
+			if cleared[topic] {
+				t.Errorf("%s was cleared, and the library still stands", topic)
+			}
 		}
-	}
+	})
 }
 
 // Litter from a deletion an older release made reaches the desk over
 // the subscription at startup, and the first pass clears it.
 func TestPassClearsTheLitterOfALibraryItNeverSaw(t *testing.T) {
-	cluster := newFakeCluster()
-	operator, broker := operatorOnABroker(t, cluster)
-	operator.handleBusMessage(libraryStatusTopic(defaultTopicBase, "studio", "films"),
-		[]byte(`{"titles":4}`))
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		operator, broker := operatorOnABroker(t, cluster)
+		operator.handleBusMessage(libraryStatusTopic(defaultTopicBase, "studio", "films"),
+			[]byte(`{"titles":4}`))
 
-	operator.pass()
+		operator.pass()
 
-	cleared := clearedTopics(t, broker, len(libraryTopics("", "")))
-	for _, topic := range libraryTopics("studio", "films") {
-		if !cleared[topic] {
-			t.Errorf("%s was not cleared", topic)
+		cleared := clearedTopics(t, broker, len(libraryTopics("", "")))
+		for _, topic := range libraryTopics("studio", "films") {
+			if !cleared[topic] {
+				t.Errorf("%s was not cleared", topic)
+			}
 		}
-	}
-	if operator.reports.latestFor("studio", "films") != nil {
-		t.Error("the desk kept the report of a library that never existed")
-	}
+		if operator.reports.latestFor("studio", "films") != nil {
+			t.Error("the desk kept the report of a library that never existed")
+		}
+	})
 }
 
 // the operator's own clear comes back on its subscription, and folding
@@ -320,24 +325,26 @@ func TestHandleBusMessageIgnoresWhatItCannotRead(t *testing.T) {
 // a reporter that connects publishes online on its namespace's own
 // topic, and that one flag stands for every Library of the namespace.
 func TestHandleBusMessageMarksANamespacesReporterOnline(t *testing.T) {
-	library := testOperator(t, newFakeCluster())
-	woken := make(chan struct{}, 1)
-	library.reporters = newReporters(woken)
+	synctest.Test(t, func(t *testing.T) {
+		library := testOperator(t, newFakeCluster())
+		woken := make(chan struct{}, 1)
+		library.reporters = newReporters(woken)
 
-	library.handleBusMessage(catalogAvailabilityTopic(defaultTopicBase, "house"),
-		[]byte(availabilityOnline))
+		library.handleBusMessage(catalogAvailabilityTopic(defaultTopicBase, "house"),
+			[]byte(availabilityOnline))
 
-	select {
-	case <-woken:
-	case <-time.After(time.Second):
-		t.Fatal("the availability woke no pass")
-	}
-	if !library.reporters.onlineFor("house") {
-		t.Error("the desk holds the namespace offline after an online message")
-	}
-	if library.reports.latestFor("house", "movies") != nil {
-		t.Error("an availability message folded a report")
-	}
+		select {
+		case <-woken:
+		case <-time.After(time.Second):
+			t.Fatal("the availability woke no pass")
+		}
+		if !library.reporters.onlineFor("house") {
+			t.Error("the desk holds the namespace offline after an online message")
+		}
+		if library.reports.latestFor("house", "movies") != nil {
+			t.Error("an availability message folded a report")
+		}
+	})
 }
 
 // a reporter that leaves the bus takes every Library of its namespace

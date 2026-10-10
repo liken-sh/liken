@@ -8,22 +8,22 @@ import (
 	"context"
 	"maps"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // streamingServer answers every query with a fixed body and status, so a
 // test drives the stream the client reads.
 func streamingServer(t *testing.T, status int, body string) *Catalog {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
 	}))
-	t.Cleanup(server.Close)
-	return NewCatalog(server.URL, server.Client())
+	return NewCatalog(apiservertest.Host, server.Client())
 }
 
 func TestQueryStringsReadsEveryRow(t *testing.T) {

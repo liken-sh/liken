@@ -6,12 +6,13 @@ package main
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // a provider with a Secret the cluster holds, over a server the test
@@ -32,11 +33,15 @@ func seedProvider(cluster *fakeCluster, name, namespace string, facts ...string)
 // reaches the internet.
 func providerOperator(t *testing.T, cluster *fakeCluster, handler http.Handler) *operator {
 	t.Helper()
-	provider := httptest.NewServer(handler)
-	t.Cleanup(provider.Close)
+	provider := apiservertest.Start(t, handler)
 	operator := testOperator(t, cluster)
-	return operatorOnProviderBase(operator, provider.URL)
+	operator.providerClient.Transport = routedHosts{providerHost: provider}
+	return operatorOnProviderBase(operator, "http://"+providerHost)
 }
+
+// providerHost is the host every provider block of providerOperator
+// names.
+const providerHost = "provider.test"
 
 // every provider block the operator holds calls the same test server, so a
 // check reaches no address of the internet.
@@ -484,7 +489,7 @@ func TestProviderCheckOnAProviderThatDoesNotAnswer(t *testing.T) {
 		Type: conditionReady, Status: ConditionFalse, Reason: reasonNoSecret,
 	}}
 	cluster.secrets["tmdb-key"] = tmdbSecret("token", "the-key")
-	operator := operatorOnProviderBase(testOperator(t, cluster), "http://127.0.0.1:1")
+	operator := operatorOnProviderBase(testOperator(t, cluster), unreachableAddress)
 
 	operator.checkProviders(t.Context(), []MetadataProvider{*provider}, testNow)
 
@@ -592,18 +597,18 @@ func TestTheCheckOfAPeerTubeInstance(t *testing.T) {
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			asked := ""
-			instance := httptest.NewServer(http.HandlerFunc(
+			instance := apiservertest.Start(t, http.HandlerFunc(
 				func(w http.ResponseWriter, r *http.Request) {
 					asked = r.URL.Path
 					w.WriteHeader(http.StatusOK)
 				}))
-			t.Cleanup(instance.Close)
 			cluster := newFakeCluster()
 			provider := providerOfBlock("tube", providerBlockPeerTube)
-			provider.Spec.PeerTube.Endpoint = instance.URL + one.suffix
+			provider.Spec.PeerTube.Endpoint = "http://tube.test" + one.suffix
 			cluster.providers["tube"] = provider
 			operator := testOperator(t, cluster)
-			operator.providerBases[providerBlockPeerTube] = "http://127.0.0.1:1"
+			operator.providerBases[providerBlockPeerTube] = unreachableAddress
+			operator.providerClient.Transport = routedHosts{"tube.test": instance}
 
 			operator.checkProviders(t.Context(), []MetadataProvider{*provider}, testNow)
 
@@ -624,17 +629,17 @@ func TestTheCheckOfAPeerTubeInstance(t *testing.T) {
 // result back.
 func TestTheCheckOfTheInternetArchive(t *testing.T) {
 	asked := url.URL{}
-	archive := httptest.NewServer(http.HandlerFunc(
+	archive := apiservertest.Start(t, http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
 			asked = *r.URL
 			w.WriteHeader(http.StatusOK)
 		}))
-	t.Cleanup(archive.Close)
 	cluster := newFakeCluster()
 	provider := providerOfBlock("archive", providerBlockArchive)
 	cluster.providers["archive"] = provider
 	operator := testOperator(t, cluster)
-	operator.providerBases[providerBlockArchive] = archive.URL
+	operator.providerBases[providerBlockArchive] = "http://archive.test"
+	operator.providerClient.Transport = routedHosts{"archive.test": archive}
 
 	operator.checkProviders(t.Context(), []MetadataProvider{*provider}, testNow)
 
@@ -657,7 +662,7 @@ func TestTheCheckOfTheInternetArchive(t *testing.T) {
 func TestTheCheckOfAPeerTubeInstanceThatDoesNotAnswer(t *testing.T) {
 	cluster := newFakeCluster()
 	provider := providerOfBlock("tube", providerBlockPeerTube)
-	provider.Spec.PeerTube.Endpoint = "http://127.0.0.1:1"
+	provider.Spec.PeerTube.Endpoint = unreachableAddress
 	cluster.providers["tube"] = provider
 
 	testOperator(t, cluster).checkProviders(t.Context(), []MetadataProvider{*provider}, testNow)

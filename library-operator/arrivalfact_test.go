@@ -6,7 +6,6 @@ package main
 
 import (
 	"bytes"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -300,7 +299,7 @@ func TestTheArrivalFactWorksOverTheFolderItsJobNames(t *testing.T) {
 
 func TestTheArrivalFactFailsWhereItCannotReadItsGap(t *testing.T) {
 	work, _ := testEnricher(t, libraryKindMovies, t.TempDir(),
-		NewCatalog("http://127.0.0.1:1", &http.Client{Timeout: time.Second}))
+		NewCatalog(unreachableAddress, refusedClient()))
 
 	if err := work.arrivalFact(t.Context()); err == nil {
 		t.Error("the fact reported no error, want the unreachable catalog's")

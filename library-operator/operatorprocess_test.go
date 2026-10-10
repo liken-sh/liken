@@ -7,19 +7,18 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
-	"sync"
-	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
+	"github.com/liken-sh/liken/kubernetes/election"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -55,6 +54,54 @@ func TestOperateRequiresItsEnvironment(t *testing.T) {
 	}
 }
 
+// The watches and the Lease reach the API server at the address the
+// environment names, with the CA and the token file of the
+// ServiceAccount, and send JSON. The token is named by its file, so
+// client-go reads it again after the kubelet rotates it.
+func TestTheInClusterConfigReadsTheServiceAccount(t *testing.T) {
+	t.Setenv("KUBERNETES_SERVICE_HOST", "10.43.0.1")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "443")
+
+	config := inClusterConfig()
+
+	if config.Host != "https://10.43.0.1:443" || config.ContentType != "application/json" ||
+		config.BearerTokenFile != serviceAccountDir+"/token" || config.CAFile != serviceAccountDir+"/ca.crt" {
+		t.Errorf("config = %s %s %s %s, want the Service's address, JSON, and the ServiceAccount's files",
+			config.Host, config.ContentType, config.BearerTokenFile, config.CAFile)
+	}
+}
+
+// The process does not start without a pod to name in the Lease, or
+// without its own pod to read the images from.
+func TestStartProcessRefusesWhatItCannotName(t *testing.T) {
+	cases := []struct {
+		name string
+		pod  string
+		want string
+	}{
+		{name: "no pod for the Lease", pod: "", want: "leader election"},
+		{name: "a pod the cluster does not hold", pod: "library-operator-gone", want: "library-operator-gone"},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			t.Setenv(podNameVariable, one.pod)
+			synctest.Test(t, func(t *testing.T) {
+				server := newFakeCluster().start(t)
+				settings := processSettings{busAddress: testBusAddress, namespace: testOperatorNamespace,
+					pod: one.pod, topicBase: defaultTopicBase, port: "8080"}
+
+				_, _, _, err := startProcess(t.Context(), settings,
+					apiclient.New(apiservertest.Host, server.Client(), ""), server.Config(),
+					func(int) {}, io.Discard)
+
+				if err == nil || !strings.Contains(err.Error(), one.want) {
+					t.Errorf("err = %v, want it to name %q", err, one.want)
+				}
+			})
+		})
+	}
+}
+
 func TestOperateRefusesOutsideACluster(t *testing.T) {
 	t.Setenv(scannerImageVariable, testScannerImage)
 	t.Setenv(corrosionImageVariable, testCorrosionImage)
@@ -72,102 +119,70 @@ func TestOperateRefusesOutsideACluster(t *testing.T) {
 	}
 }
 
-// TestClusterEnvironment builds the pod's whole environment: the
-// images, the broker, the two address variables, a mounted CA and
-// token, and an API server that answers as Kubernetes does, with the
-// Lease the operator takes. The returned channel closes when that
-// server is reached.
-func testClusterEnvironment(t *testing.T, cluster *fakeCluster) (chan struct{}, *leaseServer) {
-	t.Helper()
-	leases := newLeaseServer()
-	cluster.leases = leases
-	reached := make(chan struct{})
-	var once sync.Once
-	handler := cluster.handler()
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		once.Do(func() { close(reached) })
-		handler.ServeHTTP(w, r)
-	}))
-	t.Cleanup(server.Close)
-
-	host, port, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "https://"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("KUBERNETES_SERVICE_HOST", host)
-	t.Setenv("KUBERNETES_SERVICE_PORT", port)
-	// The operator derives its images from its own pod, so the fake
-	// cluster serves one and the downward API variable names it.
-	cluster.pods[testOperatorPod] = operatorPod(testScannerImage)
-	t.Setenv(podNameVariable, testOperatorPod)
+// The process runs until the stop, and the stop leaves the Lease
+// released, so a waiting copy takes it at once. Its writes go through
+// the write guard: the walk Job of the first pass lands while the
+// process leads, and the same client refuses a write once it has
+// stepped down.
+func TestTheOperatorProcessRunsUntilTheStop(t *testing.T) {
 	t.Setenv(scannerImageVariable, "")
 	t.Setenv(corrosionImageVariable, "")
 	t.Setenv(browserImageVariable, "")
-	// Port 1 answers nothing, so the bus reconnects for the length of
-	// the test and no pass waits on it.
-	t.Setenv(busAddressVariable, "127.0.0.1:1")
-	t.Setenv(topicBaseVariable, "")
-	t.Setenv(operatorNamespaceVariable, testOperatorNamespace)
-	// Port zero is a port the kernel picks, so the webhook server of one
-	// test never collides with another's.
-	t.Setenv(webhookPortVariable, "0")
+	// The operator derives its images from its own pod, which the
+	// downward API variable names.
+	t.Setenv(podNameVariable, testOperatorPod)
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		boundHouse(cluster)
+		cluster.pods[testOperatorPod] = operatorPod(testScannerImage)
+		leases := newLeaseServer()
+		cluster.leases = leases
+		server := cluster.start(t)
+		config := server.Config()
+		config.ContentType = "application/json"
+		settings := processSettings{busAddress: testBusAddress, namespace: testOperatorNamespace,
+			pod: testOperatorPod, topicBase: defaultTopicBase, port: "8080"}
+		stopped, stop := context.WithCancel(t.Context())
+		var log strings.Builder
 
-	directory := testServiceAccountDir(t, testCertificatePEM(t, server))
-	if err := os.WriteFile(filepath.Join(directory, "token"), []byte("a-service-account-token"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	serviceAccountDir = directory
-	t.Cleanup(func() { serviceAccountDir = apiclient.ServiceAccountDir })
-	return reached, leases
-}
-
-// The process runs until SIGTERM, and a SIGTERM leaves the Lease
-// released, so a waiting copy takes it at once.
-func TestOperateRunsUntilTheStopSignal(t *testing.T) {
-	cluster := newFakeCluster()
-	boundHouse(cluster)
-	reached, leases := testClusterEnvironment(t, cluster)
-	returned := make(chan error, 1)
-	go func() { returned <- operate() }()
-
-	select {
-	case <-reached:
-	case err := <-returned:
-		t.Fatalf("operate returned %v before it reached the API server", err)
-	case <-time.After(10 * time.Second):
-		t.Fatal("operate did not reach the API server")
-	}
-	// The first pass runs only once the process holds the Lease and has
-	// read the collections, so the walk it starts proves both.
-	deadline := time.Now().Add(10 * time.Second)
-	for !cluster.heldWalk("house", "movies") {
-		if time.Now().After(deadline) {
-			t.Fatal("operate ran no pass")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if !strings.HasPrefix(leases.holder(), testOperatorPod+"_") {
-		t.Errorf("holder = %q while the pass ran, want this pod", leases.holder())
-	}
-
-	// The request above happens only after operate registers for the
-	// signal, so this signal always reaches operate's handler and never
-	// the default one, which would end the test binary.
-	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
-		t.Fatal(err)
-	}
-
-	select {
-	case err := <-returned:
+		library, leader, watching, err := startProcess(stopped, settings,
+			apiclient.New(apiservertest.Host, server.Client(), ""), config,
+			func(code int) { t.Errorf("the process exited with %d", code) }, &log)
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("operate did not return after SIGTERM")
-	}
-	if holder := leases.holder(); holder != "" {
-		t.Errorf("holder = %q, want the Lease released", holder)
-	}
+		library.listen = func(string, string) (net.Listener, error) { return newPipeListener(), nil }
+		library.bus.dial = func(context.Context) (net.Conn, error) { return nil, errors.New("no broker") }
+		returned := make(chan error, 1)
+		go func() { returned <- library.run(stopped, &log, watching, leader) }()
+		synctest.Wait()
+
+		if !cluster.heldWalk("house", "movies") {
+			t.Error("the process ran no pass")
+		}
+		if !strings.HasPrefix(leases.Holder(), testOperatorPod+"_") {
+			t.Errorf("holder = %q while the pass ran, want this pod", leases.Holder())
+		}
+
+		stop()
+		synctest.Wait()
+
+		select {
+		case err := <-returned:
+			if err != nil {
+				t.Fatal(err)
+			}
+		default:
+			t.Fatal("the process did not return after the stop")
+		}
+		if holder := leases.Holder(); holder != "" {
+			t.Errorf("holder = %q, want the Lease released", holder)
+		}
+		err = library.client.Request(http.MethodPost, podsPath(testOperatorNamespace), jsonContentType, []byte("{}"), nil)
+		if !errors.Is(err, election.ErrNotLeading) {
+			t.Errorf("a write after the step down answered %v, want %v", err, election.ErrNotLeading)
+		}
+	})
 }
 
 // The loop reconciles before it waits, so one pass runs even when the
@@ -249,20 +264,39 @@ func (waiting) await(stop context.Context) bool {
 func (waiting) stepDown(func() bool) {}
 
 // A copy that waits for the Lease serves its webhook, and reads,
-// watches, and writes nothing until it leads.
+// watches, and writes nothing until it leads. It holds the path the
+// webhook names for the pass it runs once it leads.
 func TestACopyThatWaitsForTheLeaseActsOnNothing(t *testing.T) {
-	cluster := newFakeCluster()
-	boundHouse(cluster)
-	library := testOperator(t, cluster)
-	library.webhookAddress = "127.0.0.1:0"
-	stopped, stop := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer stop()
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		boundHouse(cluster)
+		library := testOperator(t, cluster)
+		listener := newPipeListener()
+		library.listen = func(string, string) (net.Listener, error) { return listener, nil }
+		stopped, stop := context.WithCancel(t.Context())
+		returned := make(chan error, 1)
+		go func() { returned <- library.run(stopped, io.Discard, testWatching(t, cluster), waiting{}) }()
+		synctest.Wait()
 
-	if err := library.run(stopped, io.Discard, testWatching(t, cluster), waiting{}); err != nil {
-		t.Fatal(err)
-	}
+		answer, err := listener.Client().Post("http://library-operator/webhook/house/movies",
+			"application/json", strings.NewReader(`{"movie":{"folderPath":"/srv/media/Some Film (1999)"}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		drain(answer.Body)
+		time.Sleep(time.Hour)
+		stop()
+		synctest.Wait()
 
-	if requests := cluster.countRequests("", ""); requests != 0 || cluster.watching(librariesPath) != 0 {
-		t.Errorf("%d requests and %d watches while waiting, want none", requests, cluster.watching(librariesPath))
-	}
+		if answer.StatusCode != http.StatusNoContent || len(library.paths.held("house", "movies")) != 1 {
+			t.Errorf("status = %d and held = %q, want the webhook answered and its path held",
+				answer.StatusCode, library.paths.held("house", "movies"))
+		}
+		if requests := cluster.countRequests("", ""); requests != 0 || cluster.watching(librariesPath) != 0 {
+			t.Errorf("%d requests and %d watches while waiting, want none", requests, cluster.watching(librariesPath))
+		}
+		if err := <-returned; err != nil {
+			t.Fatal(err)
+		}
+	})
 }

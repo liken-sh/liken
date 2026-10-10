@@ -3,13 +3,11 @@ package main
 import (
 	"context"
 	"errors"
-	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 )
 
 // The answers these tests hand the container, as ffprobe itself wrote them
@@ -216,7 +214,7 @@ func TestTheProbeWorksOverTheFolderItsJobNames(t *testing.T) {
 
 func TestTheProbeFailsWhereItCannotReadItsGap(t *testing.T) {
 	work, _ := testEnricher(t, libraryKindMovies, t.TempDir(),
-		NewCatalog("http://127.0.0.1:1", &http.Client{Timeout: time.Second}))
+		NewCatalog(unreachableAddress, refusedClient()))
 
 	if err := work.probeGap(t.Context(), answeringProbe(ffprobeOfOneFile)); err == nil {
 		t.Error("the probe reported no error, want the unreachable sidecar's")

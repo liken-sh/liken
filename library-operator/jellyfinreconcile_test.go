@@ -9,8 +9,11 @@ package main
 
 import (
 	"context"
+	"errors"
+	"net"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
@@ -35,6 +38,11 @@ func standReconcileRole(t *testing.T, fake *fakeBackfillJellyfin) (*jellyfin, *j
 	role := newJellyfinOn("house", defaultTopicBase, defaultMediaTopicBase, "127.0.0.1:0",
 		newJellyfinAPI(apiservertest.Host, "the-key", server.Client()), newJellyfinClock().now,
 		messages.publish, &strings.Builder{})
+	// The webhook server listens on a pipe, and the bus refuses its dial,
+	// so the role reaches no network.
+	role.open = func(string, string) (net.Listener, error) { return newPipeListener(), nil }
+	role.bus = newBus("nowhere", "jellyfin-house", nil, nil, role.onMessage)
+	role.bus.dial = func(context.Context) (net.Conn, error) { return nil, errors.New("no broker") }
 	return role, messages
 }
 
@@ -85,26 +93,37 @@ func TestTheReconcileSkipsThePositionTheRoleWrote(t *testing.T) {
 	}
 }
 
+// Moves the write loop's pass to a wait a test can hold, and puts it
+// back afterwards.
+func jellyfinTicksEvery(t *testing.T, interval time.Duration) {
+	t.Helper()
+	held := jellyfinWriteInterval
+	jellyfinWriteInterval = interval
+	t.Cleanup(func() { jellyfinWriteInterval = held })
+}
+
 // The progress role's online starts the reconcile once the listener is up.
 func TestTheProgressRoleOnlineStartsTheReconcile(t *testing.T) {
-	role, messages := standReconcileRole(t, toggledWhileDown())
-	role.bus = newBus("nowhere", "jellyfin-house", nil, nil, role.onMessage)
-	jellyfinTicksEvery(t, time.Hour)
+	synctest.Test(t, func(t *testing.T) {
+		role, messages := standReconcileRole(t, toggledWhileDown())
+		jellyfinTicksEvery(t, time.Hour)
+		stopped, stop := context.WithCancel(t.Context())
+		served := make(chan struct{})
 
-	role.onMessage(progressAvailabilityTopic(defaultTopicBase, "house"), []byte(availabilityOnline))
-	stopped, stop := context.WithTimeout(t.Context(), 5*time.Second)
-	defer stop()
-	go func() {
-		for stopped.Err() == nil && messages.count() == 0 {
-			time.Sleep(time.Millisecond)
-		}
+		role.onMessage(progressAvailabilityTopic(defaultTopicBase, "house"), []byte(availabilityOnline))
+		go func() {
+			role.serve(stopped)
+			close(served)
+		}()
+		synctest.Wait()
+		published := messages.count()
 		stop()
-	}()
-	role.serve(stopped)
+		<-served
 
-	if messages.count() != 1 {
-		t.Errorf("messages = %+v, want the one outside play", messages.held)
-	}
+		if published != 1 {
+			t.Errorf("messages = %+v, want the one outside play", messages.held)
+		}
+	})
 }
 
 // The progress role's offline starts nothing, because an outside play is
@@ -123,8 +142,9 @@ func TestTheProgressRoleOfflineStartsNothing(t *testing.T) {
 // made during the read would reach no webhook.
 func TestARoleThatCannotListenRunsNoReconcile(t *testing.T) {
 	role, messages := standReconcileRole(t, toggledWhileDown())
-	role.bus = newBus("nowhere", "jellyfin-house", nil, nil, role.onMessage)
-	role.listen = "256.256.256.256:8080"
+	// The default listener refuses a port of -1 before it opens a socket.
+	role.open = nil
+	role.listen = "127.0.0.1:-1"
 
 	role.onMessage(progressAvailabilityTopic(defaultTopicBase, "house"), []byte(availabilityOnline))
 	role.serve(t.Context())

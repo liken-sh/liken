@@ -91,22 +91,24 @@ func TestARefreshOnTheBusRepublishesTheReport(t *testing.T) {
 // retained, so a reporter that starts later reads them. The walk is not a
 // gap, so it does not travel.
 func TestAPassPublishesTheRefreshTimesOfALibrary(t *testing.T) {
-	cluster := newFakeCluster()
-	library := boundHouse(cluster)
-	library.Spec.Refresh = map[string]time.Time{factCredits: testNow, refreshWalk: testNow}
-	operator, broker := operatorOnTheBus(t, cluster)
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		library := boundHouse(cluster)
+		library.Spec.Refresh = map[string]time.Time{factCredits: testNow, refreshWalk: testNow}
+		operator, broker := operatorOnTheBus(t, cluster)
 
-	operator.pass()
+		operator.pass()
 
-	message := waitForTopic(t, broker, libraryRefreshTopic(defaultTopicBase, "house", "movies"))
-	if !message.retained {
-		t.Error("the refresh times were not retained")
-	}
-	sent := parseRefresh(string(message.payload))
-	if !sent[factCredits].Equal(testNow) {
-		t.Errorf("refresh = %v, want the credits time", sent)
-	}
-	if _, held := sent[refreshWalk]; held {
-		t.Errorf("refresh = %v, want no walk", sent)
-	}
+		message := waitForTopic(t, broker, libraryRefreshTopic(defaultTopicBase, "house", "movies"))
+		if !message.retained {
+			t.Error("the refresh times were not retained")
+		}
+		sent := parseRefresh(string(message.payload))
+		if !sent[factCredits].Equal(testNow) {
+			t.Errorf("refresh = %v, want the credits time", sent)
+		}
+		if _, held := sent[refreshWalk]; held {
+			t.Errorf("refresh = %v, want no walk", sent)
+		}
+	})
 }

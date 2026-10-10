@@ -6,7 +6,6 @@ package main
 // for a merge.
 
 import (
-	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -311,7 +310,7 @@ func TestAMergeGapOpensThePhaseThatRunsItsFact(t *testing.T) {
 // the work. The merge and the move both read one.
 func TestTheMergeAndTheMoveEndWhenTheCatalogFails(t *testing.T) {
 	work, _ := testEnricher(t, libraryKindMovies, t.TempDir(),
-		NewCatalog("http://127.0.0.1:1", http.DefaultClient))
+		NewCatalog(unreachableAddress, refusedClient()))
 
 	if err := work.mergeContributors(t.Context()); err == nil {
 		t.Error("the merge reported no error, want one")

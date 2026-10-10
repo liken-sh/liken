@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,6 +14,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // What a worker container does with its gap: which videos it passes over,
@@ -91,18 +92,21 @@ func (r *webhookRecorder) named() []string {
 	return slices.Clone(r.paths)
 }
 
-func recordWebhooks(t *testing.T, status int) (*webhookRecorder, string) {
+// recordWebhooks points the worker's rescan requests at a recorder that
+// answers with status, over in-memory connections.
+func recordWebhooks(t *testing.T, work *factWorkerRun, status int) *webhookRecorder {
 	t.Helper()
 	recorder := &webhookRecorder{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+	server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		body, _ := io.ReadAll(request.Body)
 		recorder.mutex.Lock()
 		recorder.paths = append(recorder.paths, extractWebhookPath(body))
 		recorder.mutex.Unlock()
 		w.WriteHeader(status)
 	}))
-	t.Cleanup(server.Close)
-	return recorder, server.URL + webhookPathPrefix + "house/movies"
+	work.webhook = apiservertest.Host + webhookPathPrefix + "house/movies"
+	work.client = server.Client()
+	return recorder
 }
 
 // The gap can be hours old when the worker reaches a video, so the worker
@@ -170,8 +174,7 @@ func TestAWorkerWorksTheVideoAtItsIndex(t *testing.T) {
 	}
 	var worked []string
 	work, _ := listWorker(t, recordingWorker(&worked), libraryKindSeries, root, items, 2)
-	webhooks, address := recordWebhooks(t, http.StatusNoContent)
-	work.webhook = address
+	webhooks := recordWebhooks(t, work, http.StatusNoContent)
 
 	if err := work.work(t.Context()); err != nil {
 		t.Fatal(err)
@@ -217,8 +220,7 @@ func TestAWorkerAsksForNoRescanOfAVideoItPassedOver(t *testing.T) {
 	items := []workItem{{Path: filepath.Join(trickplayFolder, trickplayFile), Size: 5, DurationMs: 100000}}
 	var worked []string
 	work, _ := listWorker(t, recordingWorker(&worked), libraryKindMovies, t.TempDir(), items, 0)
-	webhooks, address := recordWebhooks(t, http.StatusNoContent)
-	work.webhook = address
+	webhooks := recordWebhooks(t, work, http.StatusNoContent)
 
 	if err := work.work(t.Context()); err != nil {
 		t.Fatal(err)
@@ -236,8 +238,7 @@ func TestARefusedRescanIsLogged(t *testing.T) {
 	items := []workItem{listedVideo(t, root, "A Quiet Field (1950)/A Quiet Field (1950).mkv", "one", time.Time{})}
 	var worked []string
 	work, log := listWorker(t, recordingWorker(&worked), libraryKindMovies, root, items, 0)
-	_, address := recordWebhooks(t, http.StatusNotFound)
-	work.webhook = address
+	recordWebhooks(t, work, http.StatusNotFound)
 
 	if err := work.work(t.Context()); err != nil {
 		t.Fatal(err)

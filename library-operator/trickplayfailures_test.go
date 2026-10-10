@@ -16,7 +16,7 @@ import (
 // A gap read that fails is an error, so the worker fails and works no part of
 // a gap it could not read whole.
 func TestAGapReadThatIsRefusedIsAnError(t *testing.T) {
-	catalog := NewCatalog("http://127.0.0.1:1", &http.Client{Timeout: time.Second})
+	catalog := NewCatalog(unreachableAddress, refusedClient())
 
 	if _, err := catalog.workItems(t.Context(), factTrickplay, trickplayLibrary, ledgerTime, time.Time{}); err == nil {
 		t.Error("the gap read answered, want the refused read as an error")

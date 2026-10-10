@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"testing/synctest"
 )
 
 // A Person as people-operator holds it, with the resourceVersion a
@@ -44,65 +45,69 @@ func TestAPassHoldsEveryPerson(t *testing.T) {
 // A deleting Person is asked for once, on a topic every namespace's
 // store reads, and the object stays until they all answer.
 func TestADeletingPersonIsAskedForOnceAndHeld(t *testing.T) {
-	cluster := newFakeCluster()
-	boundHouse(cluster)
-	person := seedPerson(cluster, "person-a")
-	person.Metadata.Finalizers = []string{progressFinalizer}
-	person.Metadata.DeletionTimestamp = "2026-09-06T21:14:02Z"
-	operator, broker := operatorOnABroker(t, cluster)
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		boundHouse(cluster)
+		person := seedPerson(cluster, "person-a")
+		person.Metadata.Finalizers = []string{progressFinalizer}
+		person.Metadata.DeletionTimestamp = "2026-09-06T21:14:02Z"
+		operator, broker := operatorOnABroker(t, cluster)
 
-	operator.pass()
-	operator.pass()
-	operator.bus.Publish("liken/library/drills/marker", []byte("done"), false)
+		operator.pass()
+		operator.pass()
+		operator.bus.Publish("liken/library/drills/marker", []byte("done"), false)
 
-	message := waitForPublish(t, broker.pubs)
-	if message.topic != personForgetTopic(defaultTopicBase, "person-a") || !message.retained {
-		t.Fatalf("published on %s, want a retained ask on the forget topic", message.topic)
-	}
-	ask := personForgetRequest{}
-	if err := json.Unmarshal(message.payload, &ask); err != nil {
-		t.Fatal(err)
-	}
-	if ask.At == "" {
-		t.Errorf("ask = %+v, want the time the operator asked", ask)
-	}
-	if next := waitForPublish(t, broker.pubs); next.topic != "liken/library/drills/marker" {
-		t.Errorf("the second pass published on %s, want nothing before the marker", next.topic)
-	}
-	if cluster.heldPerson("person-a") == nil {
-		t.Error("the person is gone before any store answered")
-	}
+		message := waitForPublish(t, broker.pubs)
+		if message.topic != personForgetTopic(defaultTopicBase, "person-a") || !message.retained {
+			t.Fatalf("published on %s, want a retained ask on the forget topic", message.topic)
+		}
+		ask := personForgetRequest{}
+		if err := json.Unmarshal(message.payload, &ask); err != nil {
+			t.Fatal(err)
+		}
+		if ask.At == "" {
+			t.Errorf("ask = %+v, want the time the operator asked", ask)
+		}
+		if next := waitForPublish(t, broker.pubs); next.topic != "liken/library/drills/marker" {
+			t.Errorf("the second pass published on %s, want nothing before the marker", next.topic)
+		}
+		if cluster.heldPerson("person-a") == nil {
+			t.Error("the person is gone before any store answered")
+		}
+	})
 }
 
 // Every namespace that holds a Catalog has to answer before the Person
 // goes, and the two topics the exchange stood on go with it.
 func TestAForgottenPersonIsReleasedAndTheTopicsCleared(t *testing.T) {
-	cluster := newFakeCluster()
-	boundHouse(cluster)
-	person := seedPerson(cluster, "person-a")
-	person.Metadata.Finalizers = []string{progressFinalizer}
-	person.Metadata.DeletionTimestamp = "2026-09-06T21:14:02Z"
-	operator, broker := operatorOnABroker(t, cluster)
-	publishForgotten(operator, "person-a", testLibraryNamespace)
+	synctest.Test(t, func(t *testing.T) {
+		cluster := newFakeCluster()
+		boundHouse(cluster)
+		person := seedPerson(cluster, "person-a")
+		person.Metadata.Finalizers = []string{progressFinalizer}
+		person.Metadata.DeletionTimestamp = "2026-09-06T21:14:02Z"
+		operator, broker := operatorOnABroker(t, cluster)
+		publishForgotten(operator, "person-a", testLibraryNamespace)
 
-	operator.pass()
+		operator.pass()
 
-	if cluster.heldPerson("person-a") != nil {
-		t.Error("the person is held after every store answered")
-	}
-	waitForPublish(t, broker.pubs)
-	cleared := clearedTopics(t, broker, 2)
-	for _, topic := range []string{
-		personForgetTopic(defaultTopicBase, "person-a"),
-		personForgottenTopic(defaultTopicBase, "person-a", testLibraryNamespace),
-	} {
-		if !cleared[topic] {
-			t.Errorf("the release cleared %v, want %s among them", cleared, topic)
+		if cluster.heldPerson("person-a") != nil {
+			t.Error("the person is held after every store answered")
 		}
-	}
-	if operator.marks.forgottenBy("person-a") != nil {
-		t.Error("the desk still holds the answers about a person that is gone")
-	}
+		waitForPublish(t, broker.pubs)
+		cleared := clearedTopics(t, broker, 2)
+		for _, topic := range []string{
+			personForgetTopic(defaultTopicBase, "person-a"),
+			personForgottenTopic(defaultTopicBase, "person-a", testLibraryNamespace),
+		} {
+			if !cleared[topic] {
+				t.Errorf("the release cleared %v, want %s among them", cleared, topic)
+			}
+		}
+		if operator.marks.forgottenBy("person-a") != nil {
+			t.Error("the desk still holds the answers about a person that is gone")
+		}
+	})
 }
 
 // A namespace that has not answered holds the Person, because that

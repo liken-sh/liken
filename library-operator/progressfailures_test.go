@@ -8,25 +8,24 @@ package main
 import (
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // refusingProgress is one role whose agent refuses every write and
 // every read, so a test drives the failure each handler answers.
 func refusingProgress(t *testing.T) (*progress, *strings.Builder) {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = io.WriteString(w, "the agent is unwell")
 	}))
-	t.Cleanup(server.Close)
 
 	logged := &strings.Builder{}
 	role := newProgressOn("house", defaultTopicBase, defaultMediaTopicBase,
-		newProgressStore(server.URL, server.Client()), logged)
+		newProgressStore(apiservertest.Host, server.Client()), logged)
 	role.bus = newBus("nowhere", "progress-house", nil, nil, role.onMessage)
 	return role, logged
 }
@@ -149,11 +148,10 @@ func TestAMessageOnAnotherTopicWritesNothing(t *testing.T) {
 // hands back, so a query that names a column the schema does not have
 // never reads as an empty answer.
 func TestTheStoreAnswersAnErrorEvent(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"error":"no such column: nowhere"}`+"\n")
 	}))
-	t.Cleanup(server.Close)
-	store := newProgressStore(server.URL, server.Client())
+	store := newProgressStore(apiservertest.Host, server.Client())
 
 	err := store.recordOutside(t.Context(), "play-1", outsidePlay{})
 
@@ -177,11 +175,10 @@ func TestTheStoreRefusesAShortAnswer(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_, _ = io.WriteString(w, testCase.body)
 			}))
-			t.Cleanup(server.Close)
-			store := newProgressStore(server.URL, server.Client())
+			store := newProgressStore(apiservertest.Host, server.Client())
 
 			_, err := store.recordPosition(t.Context(), "play-1", 0, 1, 2, testRecordedAt)
 
@@ -195,7 +192,7 @@ func TestTheStoreRefusesAShortAnswer(t *testing.T) {
 // A store whose address is no address answers the failure rather than
 // hiding it, on the write and on the read alike.
 func TestTheStoreAnswersAnAddressItCannotReach(t *testing.T) {
-	store := newProgressStore("http://127.0.0.1:1", &http.Client{Timeout: time.Second})
+	store := newProgressStore(unreachableAddress, refusedClient())
 
 	if err := store.forgetPerson(t.Context(), "person-b"); err == nil {
 		t.Error("the store hid a write it could not send")

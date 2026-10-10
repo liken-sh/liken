@@ -7,12 +7,13 @@ import (
 	"bytes"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // the sweeper reads its library from the environment, because it holds no
@@ -167,16 +168,15 @@ func TestTheCleanupJobFailsWithNoConfirmation(t *testing.T) {
 // because a Job that waited to be confirmed for rows it never deleted would
 // time out with nothing to show.
 func TestTheSweepLogsAFailureAndFailsTheJob(t *testing.T) {
-	unwell := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	unwell := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte("the agent is unwell"))
 	}))
-	t.Cleanup(unwell.Close)
 	var logged bytes.Buffer
 	sweep := &sweeper{
 		library: "house/movies",
 		job:     "cleanup-1",
-		catalog: NewCatalog(unwell.URL, unwell.Client()),
+		catalog: NewCatalog(apiservertest.Host, unwell.Client()),
 		log:     &logged,
 	}
 

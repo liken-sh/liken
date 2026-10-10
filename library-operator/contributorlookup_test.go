@@ -6,7 +6,6 @@ package main
 // entry that stays.
 
 import (
-	"net/http"
 	"path/filepath"
 	"testing"
 	"testing/synctest"
@@ -244,7 +243,7 @@ func TestTheLookupByIDReadsEverySchemeAndSurvivesTheCatalog(t *testing.T) {
 		{
 			name: "a catalog that cannot be read",
 			catalog: func(t *testing.T, _ string) *Catalog {
-				return NewCatalog("http://127.0.0.1:1", http.DefaultClient)
+				return NewCatalog(unreachableAddress, refusedClient())
 			},
 			want: ".contributors/th/theodore-harker",
 		},

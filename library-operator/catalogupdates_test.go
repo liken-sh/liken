@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -133,7 +134,7 @@ func TestFollowUpdatesReadsEveryEventAndSurfacesTheRest(t *testing.T) {
 // A stream against an agent that answers no request is an error, so
 // the reporter opens it again after its backoff.
 func TestFollowUpdatesFailsOnAnAgentItCannotReach(t *testing.T) {
-	catalog := NewCatalog("http://127.0.0.1:1", http.DefaultClient)
+	catalog := NewCatalog(unreachableAddress, refusedClient())
 
 	if err := catalog.followUpdates(t.Context(), "movies", func() {}, func() {}); err == nil {
 		t.Error("the stream returned no error, want the failed request")
@@ -143,36 +144,38 @@ func TestFollowUpdatesFailsOnAnAgentItCannotReach(t *testing.T) {
 // A row written to a table reaches that table's stream, which is the
 // signal the reporter republishes on, and no other table's stream.
 func TestAWriteReachesItsOwnTablesUpdateStream(t *testing.T) {
-	catalog, _ := newSQLiteCatalog(t)
-	movies := make(chan struct{}, 4)
-	series := make(chan struct{}, 4)
-	var streams sync.WaitGroup
-	for table, changes := range map[string]chan struct{}{"movies": movies, "series": series} {
-		streams.Add(1)
-		opened := make(chan struct{})
-		go func() {
-			defer streams.Done()
-			_ = catalog.followUpdates(t.Context(), table,
-				sync.OnceFunc(func() { close(opened) }),
-				func() { changes <- struct{}{} })
-		}()
-		<-opened
-	}
-	t.Cleanup(streams.Wait)
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		movies := make(chan struct{}, 4)
+		series := make(chan struct{}, 4)
+		var streams sync.WaitGroup
+		for table, changes := range map[string]chan struct{}{"movies": movies, "series": series} {
+			streams.Add(1)
+			opened := make(chan struct{})
+			go func() {
+				defer streams.Done()
+				_ = catalog.followUpdates(t.Context(), table,
+					sync.OnceFunc(func() { close(opened) }),
+					func() { changes <- struct{}{} })
+			}()
+			<-opened
+		}
+		t.Cleanup(streams.Wait)
 
-	if err := upsertWalk(t.Context(), catalog,
-		walkOfOneTitle("house/movies", "movie:tmdb:1", "One (2001)", "movie:path:one-2001")); err != nil {
-		t.Fatal(err)
-	}
+		if err := upsertWalk(t.Context(), catalog,
+			walkOfOneTitle("house/movies", "movie:tmdb:1", "One (2001)", "movie:path:one-2001")); err != nil {
+			t.Fatal(err)
+		}
 
-	select {
-	case <-movies:
-	case <-time.After(scanTestTimeout):
-		t.Fatal("the write never reached the movies stream")
-	}
-	select {
-	case <-series:
-		t.Error("the write reached the stream of a table it did not name")
-	case <-time.After(50 * time.Millisecond):
-	}
+		select {
+		case <-movies:
+		case <-time.After(scanTestTimeout):
+			t.Fatal("the write never reached the movies stream")
+		}
+		select {
+		case <-series:
+			t.Error("the write reached the stream of a table it did not name")
+		case <-time.After(50 * time.Millisecond):
+		}
+	})
 }

@@ -357,7 +357,7 @@ func TestAnIdentityItemReadsTheTableItsScopeNames(t *testing.T) {
 func TestTheIdentityFactFailsWhereItCannotReadItsGap(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		work, _ := testEnricher(t, libraryKindMovies, t.TempDir(),
-			NewCatalog("http://127.0.0.1:1", &http.Client{Timeout: time.Second}))
+			NewCatalog(unreachableAddress, refusedClient()))
 		client, _ := newFakeTMDb(t, nil)
 
 		if err := work.identityGap(t.Context(), client); err == nil {

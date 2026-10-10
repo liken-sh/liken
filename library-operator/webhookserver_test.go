@@ -12,7 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
+	"testing/synctest"
 )
 
 // a webhook reaches the Library its path names, and the changed path
@@ -153,7 +153,7 @@ func TestHoldingAPathWakesTheLoop(t *testing.T) {
 
 	select {
 	case <-woken:
-	case <-time.After(time.Second):
+	default:
 		t.Fatal("the webhook woke no pass")
 	}
 }
@@ -170,52 +170,44 @@ func TestWebhookURLNamesTheOperatorsService(t *testing.T) {
 
 // the server runs until the operator stops, and it stops with it.
 func TestServeWebhooksRunsUntilTheOperatorStops(t *testing.T) {
-	operator := testOperator(t, newFakeCluster())
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	address := listener.Addr().String()
-	if err := listener.Close(); err != nil {
-		t.Fatal(err)
-	}
-	stopped, stop := context.WithCancel(context.Background())
-	returned := make(chan error, 1)
-	go func() { returned <- operator.serveWebhooks(stopped, address) }()
+	synctest.Test(t, func(t *testing.T) {
+		operator := testOperator(t, newFakeCluster())
+		listener := newPipeListener()
+		operator.listen = func(string, string) (net.Listener, error) { return listener, nil }
+		stopped, stop := context.WithCancel(t.Context())
+		returned := make(chan error, 1)
+		go func() { returned <- operator.serveWebhooks(stopped, testWebhookAddress) }()
+		synctest.Wait()
 
-	waitForWebhook(t, address, "/webhook/house/movies")
-	stop()
-
-	select {
-	case err := <-returned:
+		answer, err := listener.Client().Post("http://library-operator/webhook/house/movies",
+			"application/json", strings.NewReader("{}"))
 		if err != nil {
-			t.Fatalf("err = %v, want a clean shutdown", err)
+			t.Fatal(err)
 		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("the webhook server did not stop with the operator")
-	}
-}
+		drain(answer.Body)
+		stop()
+		synctest.Wait()
 
-// waitForWebhook posts to the endpoint until it answers, so the test
-// never races the listener coming up.
-func waitForWebhook(t *testing.T, address, path string) {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		response, err := http.Post("http://"+address+path, "application/json", strings.NewReader("{}"))
-		if err == nil {
-			drain(response.Body)
-			return
+		if answer.StatusCode != http.StatusNoContent {
+			t.Errorf("status = %d, want %d", answer.StatusCode, http.StatusNoContent)
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal("the webhook endpoint never answered")
+		select {
+		case err := <-returned:
+			if err != nil {
+				t.Fatalf("err = %v, want a clean shutdown", err)
+			}
+		default:
+			t.Fatal("the webhook server did not stop with the operator")
+		}
+	})
 }
 
 // an address nothing can listen on ends the server, and the operator
 // reports it rather than standing with an address nothing answers.
 func TestServeWebhooksReportsAnAddressItCannotBind(t *testing.T) {
 	operator := testOperator(t, newFakeCluster())
+	// The default listener refuses a port of -1 before it opens a socket.
+	operator.listen = nil
 
 	err := operator.serveWebhooks(context.Background(), "127.0.0.1:-1")
 

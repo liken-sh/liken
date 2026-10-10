@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -127,6 +128,9 @@ type operator struct {
 	// its own webhook server listens on.
 	namespace      string
 	webhookAddress string
+	// listen opens the webhook server's listener. Nil means net.Listen.
+	// A test sets a listener of its own, which needs no socket.
+	listen func(network, address string) (net.Listener, error)
 
 	// Whether each namespace's reporter is on the bus, which is
 	// what "online" means for every Library of that namespace.

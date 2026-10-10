@@ -6,9 +6,10 @@ package main
 // is proved against a stateful fake in prune_test.go.
 
 import (
-	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // recordingCatalog builds a catalog client and the recorder behind it,
@@ -16,9 +17,8 @@ import (
 func recordingCatalog(t *testing.T) (*Catalog, *catalogRecorder) {
 	t.Helper()
 	recorder := &catalogRecorder{}
-	server := httptest.NewServer(recorder)
-	t.Cleanup(server.Close)
-	return NewCatalog(server.URL, server.Client()), recorder
+	server := apiservertest.Start(t, recorder)
+	return NewCatalog(apiservertest.Host, server.Client()), recorder
 }
 
 // sqlKinds reads the leading verb-and-table of every posted statement,

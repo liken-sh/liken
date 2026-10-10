@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"path"
 	"slices"
@@ -1136,6 +1137,11 @@ func testOperator(t *testing.T, cluster *fakeCluster) *operator {
 			ffmpeg: testFFmpegImage, appearances: testAppearancesImage},
 		testBusAddress, defaultTopicBase, testOperatorNamespace, testWebhookAddress)
 	operator.watched = listReads{client: operator.client}
+	// The provider checks reach no network. A test that serves a
+	// provider routes its host to the provider's handler.
+	operator.providerClient.Transport = refusedTransport{}
+	// The webhook server listens on a pipe, which needs no socket.
+	operator.listen = func(string, string) (net.Listener, error) { return newPipeListener(), nil }
 	// The recorder ends with the test. A test that reads the Events runs
 	// in a synctest bubble and waits for the queue to drain.
 	operator.recorder = events.New(t.Context(), operator.client, eventComponent,

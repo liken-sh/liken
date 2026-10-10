@@ -236,7 +236,7 @@ func TestEveryRequestCountsUnderItsStatusClass(t *testing.T) {
 // that cannot be reached is the same fault to a reader.
 func TestARequestWithNoAnswerCountsAsAnError(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		requests := newProviderRequests(providerBlockTMDb, "http://127.0.0.1:1", http.DefaultTransport, nil)
+		requests := newProviderRequests(providerBlockTMDb, unreachableAddress, refusedTransport{}, nil)
 		record := newTallies(nil, "house/movies", workerEnrich, "enrich-1", nfoContainerName, time.Now())
 		requests.recordTo(record)
 

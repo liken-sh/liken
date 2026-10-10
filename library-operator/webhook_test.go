@@ -6,11 +6,12 @@ package main
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // testScanner builds a scanner over a fixture root with a recording
@@ -126,11 +127,10 @@ func TestResolveWebhookPath(t *testing.T) {
 
 func TestWebhookRescansTheNamedPath(t *testing.T) {
 	scan, recorder := testScanner(t, "testdata/movies", libraryKindMovies)
-	server := httptest.NewServer(scan.webhookHandler())
-	t.Cleanup(server.Close)
+	server := apiservertest.Start(t, scan.webhookHandler())
 
 	body := `{"movie":{"folderPath":"/srv/media/Action/Some Film (1999)"}}`
-	response, err := http.Post(server.URL, "application/json", strings.NewReader(body))
+	response, err := server.Client().Post(apiservertest.Host, "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,13 +149,12 @@ func TestWebhookRescansTheNamedPath(t *testing.T) {
 
 func TestWebhookFallsBackToAFullWalk(t *testing.T) {
 	scan, recorder := testScanner(t, "testdata/movies", libraryKindMovies)
-	server := httptest.NewServer(scan.webhookHandler())
-	t.Cleanup(server.Close)
+	server := apiservertest.Start(t, scan.webhookHandler())
 
 	// A payload that maps to no path on the volume drives a full walk,
 	// so every title is written and not just one.
 	body := `{"movie":{"folderPath":"/srv/media/Nowhere"}}`
-	response, err := http.Post(server.URL, "application/json", strings.NewReader(body))
+	response, err := server.Client().Post(apiservertest.Host, "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,10 +167,9 @@ func TestWebhookFallsBackToAFullWalk(t *testing.T) {
 
 func TestWebhookRejectsGet(t *testing.T) {
 	scan, recorder := testScanner(t, "testdata/movies", libraryKindMovies)
-	server := httptest.NewServer(scan.webhookHandler())
-	t.Cleanup(server.Close)
+	server := apiservertest.Start(t, scan.webhookHandler())
 
-	response, err := http.Get(server.URL)
+	response, err := server.Client().Get(apiservertest.Host)
 	if err != nil {
 		t.Fatal(err)
 	}

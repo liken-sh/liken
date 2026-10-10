@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -155,7 +154,7 @@ func TestTheSyncTargetComesOffTheEnvironment(t *testing.T) {
 
 func TestAContainerThatCannotReachItsAgentFailsTheWait(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		work := syncingEnricher(t, NewCatalog("http://127.0.0.1:1", &http.Client{Timeout: time.Second}))
+		work := syncingEnricher(t, NewCatalog(unreachableAddress, refusedClient()))
 
 		if err := work.awaitCatalogSync(t.Context()); err == nil {
 			t.Error("the wait ended with no read of its own, want the unreachable agent's error")

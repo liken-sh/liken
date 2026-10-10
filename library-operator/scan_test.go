@@ -10,11 +10,13 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // scanTestTimeout bounds every wait: long enough that a loaded machine
@@ -439,60 +441,64 @@ func runsPosted(recorder *catalogRecorder) []capturedStatement {
 // hold, so the confirmation proves a standing pod holds everything the
 // walk wrote.
 func TestTheScanJobWritesItsRunFirstAndLast(t *testing.T) {
-	scan, recorder, catalog := scanJob(t, "testdata/movies", libraryKindMovies, "")
-	done := make(chan error, 1)
-	go func() { done <- scan.runJob(t.Context()) }()
+	synctest.Test(t, func(t *testing.T) {
+		scan, recorder, catalog := scanJob(t, "testdata/movies", libraryKindMovies, "")
+		done := make(chan error, 1)
+		go func() { done <- scan.runJob(t.Context()) }()
 
-	confirmTheRun(t, catalog, scan.worker(), scan.job)
-	if err := <-done; err != nil {
-		t.Fatalf("the job failed: %v", err)
-	}
+		confirmTheRun(t, catalog, scan.worker(), scan.job)
+		if err := <-done; err != nil {
+			t.Fatalf("the job failed: %v", err)
+		}
 
-	posted := recorder.all()
-	if !strings.HasPrefix(posted[0].sql, "INSERT INTO runs") {
-		t.Errorf("the first statement was %q, want the run", posted[0].sql)
-	}
-	if !strings.HasPrefix(posted[len(posted)-1].sql, "INSERT INTO runs") {
-		t.Errorf("the last statement was %q, want the run", posted[len(posted)-1].sql)
-	}
-	runs := runsPosted(recorder)
-	if len(runs) != 3 {
-		t.Fatalf("the job posted %d runs, want the started one, the finished one, and the write it names", len(runs))
-	}
-	if runs[0].params[4] != float64(0) {
-		t.Errorf("the first run finished at %v, want no finish time", runs[0].params[4])
-	}
-	if runs[1].params[4] == float64(0) {
-		t.Error("the finished run carries no finish time")
-	}
-	if runs[1].params[1] != workerScan || runs[1].params[2] != "scan-1" {
-		t.Errorf("the run names %v/%v, want the scan worker and this Job", runs[1].params[1], runs[1].params[2])
-	}
-	if runs[2].params[8] != sqliteAgentActor || runs[2].params[9] == float64(0) {
-		t.Errorf("the last run names %v at version %v, want the write the finished run made",
-			runs[2].params[8], runs[2].params[9])
-	}
+		posted := recorder.all()
+		if !strings.HasPrefix(posted[0].sql, "INSERT INTO runs") {
+			t.Errorf("the first statement was %q, want the run", posted[0].sql)
+		}
+		if !strings.HasPrefix(posted[len(posted)-1].sql, "INSERT INTO runs") {
+			t.Errorf("the last statement was %q, want the run", posted[len(posted)-1].sql)
+		}
+		runs := runsPosted(recorder)
+		if len(runs) != 3 {
+			t.Fatalf("the job posted %d runs, want the started one, the finished one, and the write it names", len(runs))
+		}
+		if runs[0].params[4] != float64(0) {
+			t.Errorf("the first run finished at %v, want no finish time", runs[0].params[4])
+		}
+		if runs[1].params[4] == float64(0) {
+			t.Error("the finished run carries no finish time")
+		}
+		if runs[1].params[1] != workerScan || runs[1].params[2] != "scan-1" {
+			t.Errorf("the run names %v/%v, want the scan worker and this Job", runs[1].params[1], runs[1].params[2])
+		}
+		if runs[2].params[8] != sqliteAgentActor || runs[2].params[9] == float64(0) {
+			t.Errorf("the last run names %v at version %v, want the write the finished run made",
+				runs[2].params[8], runs[2].params[9])
+		}
+	})
 }
 
 // The finished run carries what the walk read, so a person reads
 // the unidentified folders and the sweep off the Library's status.
 func TestTheFinishedRunCarriesWhatTheWalkRead(t *testing.T) {
-	scan, recorder, catalog := scanJob(t, "testdata/movies", libraryKindMovies, "")
-	done := make(chan error, 1)
-	go func() { done <- scan.runJob(t.Context()) }()
+	synctest.Test(t, func(t *testing.T) {
+		scan, recorder, catalog := scanJob(t, "testdata/movies", libraryKindMovies, "")
+		done := make(chan error, 1)
+		go func() { done <- scan.runJob(t.Context()) }()
 
-	confirmTheRun(t, catalog, scan.worker(), scan.job)
-	if err := <-done; err != nil {
-		t.Fatalf("the job failed: %v", err)
-	}
+		confirmTheRun(t, catalog, scan.worker(), scan.job)
+		if err := <-done; err != nil {
+			t.Fatalf("the job failed: %v", err)
+		}
 
-	runs := runsPosted(recorder)
-	scan.mutex.Lock()
-	unidentified := float64(scan.report.Unidentified)
-	scan.mutex.Unlock()
-	if runs[1].params[5] != unidentified {
-		t.Errorf("the run names %v unidentified folders, want the %v the walk read", runs[1].params[5], unidentified)
-	}
+		runs := runsPosted(recorder)
+		scan.mutex.Lock()
+		unidentified := float64(scan.report.Unidentified)
+		scan.mutex.Unlock()
+		if runs[1].params[5] != unidentified {
+			t.Errorf("the run names %v unidentified folders, want the %v the walk read", runs[1].params[5], unidentified)
+		}
+	})
 }
 
 // The worker a Job's runs row carries: a Job that names a folder is
@@ -510,24 +516,26 @@ func TestTheWorkerAJobWrites(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			scan, recorder, catalog := scanJob(t, "testdata/movies", libraryKindMovies, testCase.scanPath)
-			done := make(chan error, 1)
-			go func() { done <- scan.runJob(t.Context()) }()
+			synctest.Test(t, func(t *testing.T) {
+				scan, recorder, catalog := scanJob(t, "testdata/movies", libraryKindMovies, testCase.scanPath)
+				done := make(chan error, 1)
+				go func() { done <- scan.runJob(t.Context()) }()
 
-			confirmTheRun(t, catalog, scan.worker(), scan.job)
-			if err := <-done; err != nil {
-				t.Fatalf("the job failed: %v", err)
-			}
-
-			runs := runsPosted(recorder)
-			if len(runs) != 3 {
-				t.Fatalf("the job posted %d runs, want the two writes of the walk and the write it names", len(runs))
-			}
-			for _, run := range runs {
-				if run.params[1] != testCase.want {
-					t.Errorf("the run names the %v worker, want %v", run.params[1], testCase.want)
+				confirmTheRun(t, catalog, scan.worker(), scan.job)
+				if err := <-done; err != nil {
+					t.Fatalf("the job failed: %v", err)
 				}
-			}
+
+				runs := runsPosted(recorder)
+				if len(runs) != 3 {
+					t.Fatalf("the job posted %d runs, want the two writes of the walk and the write it names", len(runs))
+				}
+				for _, run := range runs {
+					if run.params[1] != testCase.want {
+						t.Errorf("the run names the %v worker, want %v", run.params[1], testCase.want)
+					}
+				}
+			})
 		})
 	}
 }
@@ -535,38 +543,42 @@ func TestTheWorkerAJobWrites(t *testing.T) {
 // A Job that names a folder rescans that folder alone, which is
 // what a webhook drives, and it never walks the whole root.
 func TestTheScanJobRescansTheFolderItIsGiven(t *testing.T) {
-	scan, recorder, catalog := scanJob(t, "testdata/movies", libraryKindMovies, webhookFolderPath)
-	done := make(chan error, 1)
-	go func() { done <- scan.runJob(t.Context()) }()
+	synctest.Test(t, func(t *testing.T) {
+		scan, recorder, catalog := scanJob(t, "testdata/movies", libraryKindMovies, webhookFolderPath)
+		done := make(chan error, 1)
+		go func() { done <- scan.runJob(t.Context()) }()
 
-	confirmTheRun(t, catalog, scan.worker(), scan.job)
-	if err := <-done; err != nil {
-		t.Fatalf("the job failed: %v", err)
-	}
+		confirmTheRun(t, catalog, scan.worker(), scan.job)
+		if err := <-done; err != nil {
+			t.Fatalf("the job failed: %v", err)
+		}
 
-	if !postedWith(recorder, "movie:path:the-long-survey-1982-1080p-bluray-x264-group") {
-		t.Error("the job did not upsert the folder it was given")
-	}
-	if scan.report.Titles != 0 {
-		t.Errorf("the job read %d titles, want the one folder it was given and no walk of the root", scan.report.Titles)
-	}
+		if !postedWith(recorder, "movie:path:the-long-survey-1982-1080p-bluray-x264-group") {
+			t.Error("the job did not upsert the folder it was given")
+		}
+		if scan.report.Titles != 0 {
+			t.Errorf("the job read %d titles, want the one folder it was given and no walk of the root", scan.report.Titles)
+		}
+	})
 }
 
 // A folder that maps onto nothing on the volume falls back to the
 // whole root, so a Job is never worse than a full walk.
 func TestTheScanJobFallsBackToTheWholeRoot(t *testing.T) {
-	scan, _, catalog := scanJob(t, "testdata/movies", libraryKindMovies, "/nothing/on/this/volume")
-	done := make(chan error, 1)
-	go func() { done <- scan.runJob(t.Context()) }()
+	synctest.Test(t, func(t *testing.T) {
+		scan, _, catalog := scanJob(t, "testdata/movies", libraryKindMovies, "/nothing/on/this/volume")
+		done := make(chan error, 1)
+		go func() { done <- scan.runJob(t.Context()) }()
 
-	confirmTheRun(t, catalog, scan.worker(), scan.job)
-	if err := <-done; err != nil {
-		t.Fatalf("the job failed: %v", err)
-	}
+		confirmTheRun(t, catalog, scan.worker(), scan.job)
+		if err := <-done; err != nil {
+			t.Fatalf("the job failed: %v", err)
+		}
 
-	if scan.report.Titles != 3 {
-		t.Errorf("the job read %d titles, want the three the root holds", scan.report.Titles)
-	}
+		if scan.report.Titles != 3 {
+			t.Errorf("the job read %d titles, want the three the root holds", scan.report.Titles)
+		}
+	})
 }
 
 // A confirmation that never arrives fails the Job, so its rows stay
@@ -589,36 +601,37 @@ func TestTheScanJobFailsWithNoConfirmation(t *testing.T) {
 // to be confirmed, so the failure is visible in the run, and the Job then
 // fails.
 func TestAFailedWalkStillWritesItsRunAndWaits(t *testing.T) {
-	scan, recorder, catalog := scanJob(t, "testdata/movies", libraryKindMovies, "")
-	scan.root = filepath.Join(t.TempDir(), "gone")
-	done := make(chan error, 1)
-	go func() { done <- scan.runJob(t.Context()) }()
+	synctest.Test(t, func(t *testing.T) {
+		scan, recorder, catalog := scanJob(t, "testdata/movies", libraryKindMovies, "")
+		scan.root = filepath.Join(t.TempDir(), "gone")
+		done := make(chan error, 1)
+		go func() { done <- scan.runJob(t.Context()) }()
 
-	confirmTheRun(t, catalog, scan.worker(), scan.job)
-	err := <-done
+		confirmTheRun(t, catalog, scan.worker(), scan.job)
+		err := <-done
 
-	if err == nil {
-		t.Fatal("the job returned no error, want the failed walk")
-	}
-	runs := runsPosted(recorder)
-	if len(runs) != 3 {
-		t.Fatalf("the job posted %d runs, want the two writes of the walk and the write it names", len(runs))
-	}
-	if runs[1].params[4] == float64(0) {
-		t.Error("the run of a failed walk carries no finish time")
-	}
+		if err == nil {
+			t.Fatal("the job returned no error, want the failed walk")
+		}
+		runs := runsPosted(recorder)
+		if len(runs) != 3 {
+			t.Fatalf("the job posted %d runs, want the two writes of the walk and the write it names", len(runs))
+		}
+		if runs[1].params[4] == float64(0) {
+			t.Error("the run of a failed walk carries no finish time")
+		}
+	})
 }
 
 // A catalog that refuses the first run fails the Job before it
 // walks, because a Job whose run never landed waits for a confirmation
 // that cannot come.
 func TestTheScanJobFailsWhenItCannotWriteItsRun(t *testing.T) {
-	unwell := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	unwell := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
-	t.Cleanup(unwell.Close)
 	scan, _, _ := scanJob(t, "testdata/movies", libraryKindMovies, "")
-	scan.catalog = NewCatalog(unwell.URL, unwell.Client())
+	scan.catalog = NewCatalog(apiservertest.Host, unwell.Client())
 
 	if err := scan.runJob(t.Context()); err == nil {
 		t.Error("the job returned no error, want the refused run")

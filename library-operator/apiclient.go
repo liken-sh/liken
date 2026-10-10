@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
@@ -23,9 +24,14 @@ import (
 var serviceAccountDir = apiclient.ServiceAccountDir
 
 // inClusterClient builds the client from the pod's environment and its
-// ServiceAccount.
-func inClusterClient() (*apiclient.Client, error) {
-	return apiclient.InCluster(apiclient.InClusterOptions{ServiceAccountDir: serviceAccountDir})
+// ServiceAccount. timeout limits each request. The caller names it,
+// because the operator's limit comes from the election, and this file is
+// in the pod build, which must not link the election package.
+func inClusterClient(timeout time.Duration) (*apiclient.Client, error) {
+	return apiclient.InCluster(apiclient.InClusterOptions{
+		ServiceAccountDir: serviceAccountDir,
+		Timeout:           timeout,
+	})
 }
 
 // inClusterBase is the address the in-cluster client reaches the API

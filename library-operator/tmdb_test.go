@@ -229,7 +229,7 @@ func TestAnAnswerThatIsNotJSONIsAnError(t *testing.T) {
 
 func TestAProviderThatDoesNotAnswerIsAnError(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		client := newTMDbClient("http://127.0.0.1:1", "a-token", http.DefaultTransport)
+		client := newTMDbClient(unreachableAddress, "a-token", refusedTransport{})
 		client.http = &http.Client{Timeout: time.Second}
 
 		if _, err := client.runtime(t.Context(), libraryKindMovies, 1002); err == nil {

@@ -6,27 +6,23 @@ package main
 
 import (
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // The credentials are empty, so the client sends no bearer token and
 // reads nothing from disk.
 func testAPIClient(t *testing.T, handler http.Handler) *apiclient.Client {
 	t.Helper()
-	server := httptest.NewServer(handler)
-	t.Cleanup(server.Close)
-	return apiclient.New(server.URL, server.Client(), "")
+	server := apiservertest.Start(t, handler)
+	return apiclient.New(apiservertest.Host, server.Client(), "")
 }
 
 func TestServerVersionReadsTheVersionEndpoint(t *testing.T) {
@@ -46,29 +42,6 @@ func TestServerVersionReadsTheVersionEndpoint(t *testing.T) {
 	if asked != "GET /version" {
 		t.Errorf("request = %q, want GET /version", asked)
 	}
-}
-
-// A directory in the shape the kubelet mounts, holding whatever CA
-// bytes the test wants the client to read.
-func testServiceAccountDir(t *testing.T, ca string) string {
-	t.Helper()
-	directory := t.TempDir()
-	if ca != "" {
-		if err := os.WriteFile(filepath.Join(directory, "ca.crt"), []byte(ca), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return directory
-}
-
-// The PEM the client must trust: the certificate an httptest TLS
-// server presents.
-func testCertificatePEM(t *testing.T, server *httptest.Server) string {
-	t.Helper()
-	return string(pem.EncodeToMemory(&pem.Block{
-		Type:  "CERTIFICATE",
-		Bytes: server.Certificate().Raw,
-	}))
 }
 
 // One request a verb made, in the terms these tests assert on: the

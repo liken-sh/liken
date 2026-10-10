@@ -6,6 +6,7 @@ package main
 // cover the lock that keeps two edits of one .nfo file apart.
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -13,6 +14,35 @@ import (
 	"testing"
 	"time"
 )
+
+// phaseTick is how often the board of tickingBoard wakes its waiters.
+const phaseTick = 100 * time.Millisecond
+
+// tickingBoard is a phases volume of its own whose waiters wake on each
+// tick of the clock, in place of an inotify event, so a phase or a close
+// container runs in a synctest bubble. TestTheWatchWakesOnAMarkAndOnAnEndedProcess
+// proves the inotify watch itself.
+func tickingBoard(t *testing.T) *phaseBoard {
+	t.Helper()
+	board := newPhaseBoard(t.TempDir())
+	board.changes = func(ctx context.Context) (<-chan struct{}, error) {
+		changed := make(chan struct{}, 1)
+		go func() {
+			ticker := time.NewTicker(phaseTick)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					markChanged(changed)
+				}
+			}
+		}()
+		return changed, nil
+	}
+	return board
+}
 
 // The phases volume of one test pod.
 func testBoard(t *testing.T) *phaseBoard {

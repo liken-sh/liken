@@ -8,11 +8,11 @@ package main
 import (
 	"errors"
 	"io"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
@@ -21,9 +21,8 @@ import (
 // listener serves, so a test proves what a real scrape would read.
 func scrape(t *testing.T, m *metrics) string {
 	t.Helper()
-	server := httptest.NewServer(promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{}))
-	t.Cleanup(server.Close)
-	resp, err := server.Client().Get(server.URL)
+	server := apiservertest.Start(t, promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{}))
+	resp, err := server.Client().Get(apiservertest.Host)
 	if err != nil {
 		t.Fatal(err)
 	}

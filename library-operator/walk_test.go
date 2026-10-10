@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -170,43 +171,45 @@ func TestThePoolAndOneWorkerSkipTheSameIgnoredFolders(t *testing.T) {
 // pool. The rule blocks until all eight have arrived, so a walk that reads one
 // folder at a time never finishes this test.
 func TestTheWalkReadsAFolderPerWorkerAtOnce(t *testing.T) {
-	root := t.TempDir()
-	for i := range walkWorkers {
-		writeFile(t, filepath.Join(root, string(rune('A'+i)), "movie.mkv"), "video")
-	}
-	inside := make(chan struct{}, walkWorkers)
-	release := make(chan struct{})
-	rule := folderRule{
-		isTitle: func(string) bool { return true },
-		scan: func(string, *walkResult) {
-			inside <- struct{}{}
-			<-release
-		},
-	}
-
-	read := 0
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for range walkTree(context.Background(), root, rule) {
-			read++
+	synctest.Test(t, func(t *testing.T) {
+		root := t.TempDir()
+		for i := range walkWorkers {
+			writeFile(t, filepath.Join(root, string(rune('A'+i)), "movie.mkv"), "video")
 		}
-	}()
-
-	for worker := range walkWorkers {
-		select {
-		case <-inside:
-		case <-time.After(scanTestTimeout):
-			close(release)
-			t.Fatalf("%d workers read a folder at once, want %d", worker, walkWorkers)
+		inside := make(chan struct{}, walkWorkers)
+		release := make(chan struct{})
+		rule := folderRule{
+			isTitle: func(string) bool { return true },
+			scan: func(string, *walkResult) {
+				inside <- struct{}{}
+				<-release
+			},
 		}
-	}
-	close(release)
-	<-done
 
-	if read != walkWorkers {
-		t.Errorf("folders = %d, want the %d the tree holds", read, walkWorkers)
-	}
+		read := 0
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for range walkTree(context.Background(), root, rule) {
+				read++
+			}
+		}()
+
+		for worker := range walkWorkers {
+			select {
+			case <-inside:
+			case <-time.After(scanTestTimeout):
+				close(release)
+				t.Fatalf("%d workers read a folder at once, want %d", worker, walkWorkers)
+			}
+		}
+		close(release)
+		<-done
+
+		if read != walkWorkers {
+			t.Errorf("folders = %d, want the %d the tree holds", read, walkWorkers)
+		}
+	})
 }
 
 // A cancelled context stops the pool between folders, both before the walk
@@ -254,25 +257,27 @@ func TestTheWalkStopsOnACancelledContext(t *testing.T) {
 // The count of goroutines returns to what it was, so a walk that ends early
 // leaks none.
 func TestTheWalkEndsWhenTheCollectorStops(t *testing.T) {
-	root := moviesTree(t)
-	running := runtime.NumGoroutine()
+	synctest.Test(t, func(t *testing.T) {
+		root := moviesTree(t)
+		running := runtime.NumGoroutine()
 
-	read := 0
-	for range walkTree(context.Background(), root, movieFolderRule(folderScan{root: root, library: "house/movies", kind: libraryKindMovies})) {
-		read++
-		break
-	}
+		read := 0
+		for range walkTree(context.Background(), root, movieFolderRule(folderScan{root: root, library: "house/movies", kind: libraryKindMovies})) {
+			read++
+			break
+		}
 
-	if read != 1 {
-		t.Errorf("folders = %d, want the one the caller read", read)
-	}
-	deadline := time.Now().Add(scanTestTimeout)
-	for runtime.NumGoroutine() > running && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if left := runtime.NumGoroutine(); left > running {
-		t.Errorf("goroutines = %d, want no more than the %d before the walk", left, running)
-	}
+		if read != 1 {
+			t.Errorf("folders = %d, want the one the caller read", read)
+		}
+		deadline := time.Now().Add(scanTestTimeout)
+		for runtime.NumGoroutine() > running && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		if left := runtime.NumGoroutine(); left > running {
+			t.Errorf("goroutines = %d, want no more than the %d before the walk", left, running)
+		}
+	})
 }
 
 // What a worker classifies one directory as: a title folder, a grouping

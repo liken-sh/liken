@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net"
 	"net/http"
 	"os"
 	"slices"
@@ -196,7 +197,15 @@ func (o *operator) serveWebhooks(stopped context.Context, address string) error 
 			fmt.Fprintf(os.Stderr, "shutting the webhook server down: %v\n", err)
 		}
 	}()
-	if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+	listen := o.listen
+	if listen == nil {
+		listen = net.Listen
+	}
+	listener, err := listen("tcp", address)
+	if err != nil {
+		return err
+	}
+	if err := server.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	return nil

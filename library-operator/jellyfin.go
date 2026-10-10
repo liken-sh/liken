@@ -43,10 +43,13 @@ type jellyfin struct {
 	topicBase string
 	mediaBase string
 	listen    string
-	api       *jellyfinAPI
-	index     *jellyfinIndex
-	out       *jellyfinOutbound
-	marks     *jellyfinMarks
+	// open opens the webhook server's listener. Nil means net.Listen. A
+	// test sets a listener of its own, which needs no socket.
+	open  func(network, address string) (net.Listener, error)
+	api   *jellyfinAPI
+	index *jellyfinIndex
+	out   *jellyfinOutbound
+	marks *jellyfinMarks
 	// One slot, so every ask that arrives while a reconcile runs folds
 	// into one more reconcile after it.
 	reconciles chan struct{}
@@ -186,7 +189,11 @@ func (j *jellyfin) serve(stopped context.Context) {
 		<-done
 	}()
 
-	listener, err := net.Listen("tcp", j.listen)
+	open := j.open
+	if open == nil {
+		open = net.Listen
+	}
+	listener, err := open("tcp", j.listen)
 	if err != nil {
 		j.logf("the webhook server stopped: %v", err)
 		return

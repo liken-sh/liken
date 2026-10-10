@@ -11,11 +11,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
 // fakeRow is one catalog row, holding the columns the prune and the set
@@ -106,9 +107,8 @@ func newFakeCatalog(t *testing.T) (*Catalog, *fakeCatalog) {
 		fileItems:          map[string]bool{},
 		seen:               map[string]int64{},
 	}
-	server := httptest.NewServer(fake)
-	t.Cleanup(server.Close)
-	return NewCatalog(server.URL, server.Client()), fake
+	server := apiservertest.Start(t, fake)
+	return NewCatalog(apiservertest.Host, server.Client()), fake
 }
 
 func (f *fakeCatalog) ServeHTTP(w http.ResponseWriter, r *http.Request) {

@@ -6,6 +6,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"testing/synctest"
 )
 
 // The work lists the close container publishes before it writes the
@@ -40,65 +41,71 @@ func listingJob(t *testing.T, catalog *Catalog, dial func(context.Context) (net.
 // The list is on the broker, count last, by the time the finished run is in
 // the catalog, so the operator that reads the run finds the list.
 func TestTheCloseContainerPublishesTheListBeforeTheRun(t *testing.T) {
-	catalog := trickplayGapCatalog(t, "B Film (2001)/B Film (2001).mkv", "A Film (2000)/A Film (2000).mkv")
-	broker := newRetainBroker(t)
-	run := listingJob(t, catalog, broker.dial)
-	done := make(chan error, 1)
-	go func() { done <- run.runJob(t.Context()) }()
+	synctest.Test(t, func(t *testing.T) {
+		catalog := trickplayGapCatalog(t, "B Film (2001)/B Film (2001).mkv", "A Film (2000)/A Film (2000).mkv")
+		broker := newRetainBroker(t)
+		run := listingJob(t, catalog, broker.dial)
+		done := make(chan error, 1)
+		go func() { done <- run.runJob(t.Context()) }()
 
-	confirmTheRun(t, catalog, workerEnrich, run.job)
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
+		confirmTheRun(t, catalog, workerEnrich, run.job)
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
 
-	list := trickplayListOf("movies-walk-1")
-	if count, _ := broker.retainedOn(list.countTopic(defaultTopicBase)); string(count) != "2" {
-		t.Errorf("count = %q, want 2", count)
-	}
-	first, _ := broker.retainedOn(list.itemTopic(defaultTopicBase, 0))
-	if !strings.Contains(string(first), `"path":"A Film (2000)/A Film (2000).mkv"`) {
-		t.Errorf("index 0 = %s, want the first video by path", first)
-	}
+		list := trickplayListOf("movies-walk-1")
+		if count, _ := broker.retainedOn(list.countTopic(defaultTopicBase)); string(count) != "2" {
+			t.Errorf("count = %q, want 2", count)
+		}
+		first, _ := broker.retainedOn(list.itemTopic(defaultTopicBase, 0))
+		if !strings.Contains(string(first), `"path":"A Film (2000)/A Film (2000).mkv"`) {
+			t.Errorf("index 0 = %s, want the first video by path", first)
+		}
+	})
 }
 
 // An empty gap publishes no list.
 func TestAnEmptyGapPublishesNoList(t *testing.T) {
-	catalog := trickplayGapCatalog(t)
-	broker := newRetainBroker(t)
-	run := listingJob(t, catalog, broker.dial)
-	done := make(chan error, 1)
-	go func() { done <- run.runJob(t.Context()) }()
+	synctest.Test(t, func(t *testing.T) {
+		catalog := trickplayGapCatalog(t)
+		broker := newRetainBroker(t)
+		run := listingJob(t, catalog, broker.dial)
+		done := make(chan error, 1)
+		go func() { done <- run.runJob(t.Context()) }()
 
-	confirmTheRun(t, catalog, workerEnrich, run.job)
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
+		confirmTheRun(t, catalog, workerEnrich, run.job)
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
 
-	if held := broker.retainedUnder(defaultTopicBase); len(held) != 0 {
-		t.Errorf("the broker holds %v, want nothing", held)
-	}
+		if held := broker.retainedUnder(defaultTopicBase); len(held) != 0 {
+			t.Errorf("the broker holds %v, want nothing", held)
+		}
+	})
 }
 
 // A list the broker did not take is a failure in the run, so the operator
 // reads why no worker started.
 func TestAListThatDidNotPublishFailsTheRun(t *testing.T) {
-	catalog := trickplayGapCatalog(t, "A Film (2000)/A Film (2000).mkv")
-	run := listingJob(t, catalog, func(context.Context) (net.Conn, error) {
-		return nil, errors.New("connection refused")
+	synctest.Test(t, func(t *testing.T) {
+		catalog := trickplayGapCatalog(t, "A Film (2000)/A Film (2000).mkv")
+		run := listingJob(t, catalog, func(context.Context) (net.Conn, error) {
+			return nil, errors.New("connection refused")
+		})
+		done := make(chan error, 1)
+		go func() { done <- run.runJob(t.Context()) }()
+
+		confirmTheRun(t, catalog, workerEnrich, run.job)
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+
+		finished := awaitRun(t, catalog, func(held libraryRun) bool { return !held.Finished.IsZero() })
+		if !strings.Contains(finished.Failure, "the trickplay work list") ||
+			!strings.Contains(finished.Failure, "connection refused") {
+			t.Errorf("failure = %q, want the list's", finished.Failure)
+		}
 	})
-	done := make(chan error, 1)
-	go func() { done <- run.runJob(t.Context()) }()
-
-	confirmTheRun(t, catalog, workerEnrich, run.job)
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-
-	finished := awaitRun(t, catalog, func(held libraryRun) bool { return !held.Finished.IsZero() })
-	if !strings.Contains(finished.Failure, "the trickplay work list") ||
-		!strings.Contains(finished.Failure, "connection refused") {
-		t.Errorf("failure = %q, want the list's", finished.Failure)
-	}
 }
 
 // The close container of a Library that runs a heavy fact names the fact and

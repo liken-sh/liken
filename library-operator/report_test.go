@@ -9,10 +9,6 @@ import (
 	"time"
 )
 
-// reportWakeTimeout is how long a test waits for a wake before it
-// calls the loop unwoken.
-const reportWakeTimeout = time.Second
-
 // reportDesk builds a desk on a wake channel one deep, because that is
 // the channel the operator's loop hands the real one.
 func reportDesk(t *testing.T) (*reports, chan struct{}) {
@@ -32,17 +28,18 @@ func walkedReport() libraryReport {
 	}
 }
 
-func waitForReportWake(t *testing.T, wake <-chan struct{}) {
+// expectReportWake and expectNoReportWake need no waiting: the wake is
+// already there or it is not, because fold and availability poke it
+// before they return.
+func expectReportWake(t *testing.T, wake <-chan struct{}) {
 	t.Helper()
 	select {
 	case <-wake:
-	case <-time.After(reportWakeTimeout):
+	default:
 		t.Fatal("no wake reached the loop")
 	}
 }
 
-// expectNoReportWake needs no waiting: the wake is already there or it
-// is not, because fold and availability poke it before they return.
 func expectNoReportWake(t *testing.T, wake <-chan struct{}) {
 	t.Helper()
 	select {
@@ -67,7 +64,7 @@ func TestFoldStoresTheReportAndWakesTheLoop(t *testing.T) {
 	if !stored.LastWalk.Equal(walkedReport().LastWalk) {
 		t.Errorf("last walk = %v, want %v", stored.LastWalk, walkedReport().LastWalk)
 	}
-	waitForReportWake(t, wake)
+	expectReportWake(t, wake)
 }
 
 // A report is a whole observation, so the newest one is the one the
@@ -90,7 +87,7 @@ func TestTheNewestReportIsTheOneTheDeskHolds(t *testing.T) {
 	}
 	// Two folds leave one wake, because the pass that answers it reads
 	// the whole collection.
-	waitForReportWake(t, wake)
+	expectReportWake(t, wake)
 	expectNoReportWake(t, wake)
 }
 
@@ -114,7 +111,7 @@ func TestTheDeskForgetsALibraryThatIsGoneAndKeepsTheOneThatIsNot(t *testing.T) {
 	desk.fold("house", "movies", walkedReport())
 	desk.fold("attic", "series", walkedReport())
 	desk.fold("attic", "photos", walkedReport())
-	waitForReportWake(t, wake)
+	expectReportWake(t, wake)
 
 	dropped := desk.retain(map[string]bool{libraryKey("house", "movies"): true})
 
@@ -143,7 +140,7 @@ func TestALibraryKeyNamesTheNamespaceAndTheName(t *testing.T) {
 func TestAReportThatRepeatsTheHeldOneWakesNoPass(t *testing.T) {
 	desk, wake := reportDesk(t)
 	desk.fold("house", "movies", walkedReport())
-	waitForReportWake(t, wake)
+	expectReportWake(t, wake)
 
 	desk.fold("house", "movies", walkedReport())
 
@@ -188,7 +185,7 @@ func TestAReportWakesAPassOnlyForAChangeThePassActsOn(t *testing.T) {
 		t.Run(one.name, func(t *testing.T) {
 			desk, wake := reportDesk(t)
 			desk.fold("house", "movies", base())
-			waitForReportWake(t, wake)
+			expectReportWake(t, wake)
 			changed := base()
 			one.change(&changed)
 
