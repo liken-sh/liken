@@ -250,3 +250,24 @@ func TestAJobsNameIsADNSLabel(t *testing.T) {
 		t.Errorf("names repeat: %v", names)
 	}
 }
+
+// A device whose train a person deleted with its reservation runs the
+// Job of its deactivation on the server that its pod runs on, so the
+// Job's environment still names that INDI server.
+func TestAJobOfADeviceWhoseTrainIsDeletedNamesItsServer(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := startWorld(t)
+		w.amend(observatory.DustCapKind, "east", func(spec map[string]any) {
+			spec["deactivation"] = []any{map[string]any{"job": map[string]any{"image": "busybox:1.37", "args": []any{"true"}}}}
+		})
+		readyOf(w)
+		w.deleteDuringAbort(named{observatory.OpticalTrainKind, "east-imaging"})
+		w.gone(observatory.ReservationKind, "east-tonight", 15*time.Minute)
+		want := []string{"LIKEN_OBSERVATORY=lab", "LIKEN_TELESCOPE=east", "LIKEN_RESOURCE=DustCap/east", "LIKEN_TRIGGER=deactivation",
+			"INDI_HOST=east-telescope.observatory.svc", "INDI_PORT=7624"}
+		if got := environment(jobNamed(t, w, "dustcap-east-deactivation-")); !slices.Equal(got, want) {
+			t.Errorf("env = %v, want %v", got, want)
+		}
+	})
+}

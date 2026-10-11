@@ -28,10 +28,13 @@ import (
 )
 
 // stepRun is one resource's run in a step, with the transition time it
-// answers.
+// answers. on is the server that a device left, for a run that acts
+// through the driver that still runs there (procCall.on), and zero for
+// every other run.
 type stepRun struct {
 	res   resource
 	since time.Time
+	on    serverRef
 }
 
 // stepPlan is the tiers of one step, in the order they run.
@@ -74,11 +77,11 @@ func (p *stepPlan) event() event {
 func tier(t *tree, ref serverRef, devices []*device, since time.Time) []stepRun {
 	var out []stepRun
 	for _, d := range devices {
-		r := t.ofDevice(d)
+		run := stepRun{res: t.ofDevice(d), since: since}
 		if on, placed := t.server(d); !placed || on != ref {
-			r = leaver(t, d, ref)
+			run.res, run.on = leaver(t, d, ref), ref
 		}
-		out = append(out, stepRun{r, since})
+		out = append(out, run)
 	}
 	return out
 }
@@ -88,7 +91,7 @@ func tier(t *tree, ref serverRef, devices []*device, since time.Time) []stepRun 
 // (deviceTiers).
 func siteTiers(t *tree, site *observatory.Observatory, devices []*device, since time.Time) [][]stepRun {
 	ref := serverRef{observatory.ObservatoryKind, site.Metadata.Name}
-	tiers := [][]stepRun{{{ofObservatory(site), since}}}
+	tiers := [][]stepRun{{{res: ofObservatory(site), since: since}}}
 	for _, devices := range deviceTiers(t, [][]*device{devices}) {
 		tiers = append(tiers, tier(t, ref, devices, since))
 	}
@@ -111,7 +114,7 @@ func telescopeTiers(t *tree, telescope *observatory.Telescope, devices []*device
 			own = append(own, d)
 		}
 	}
-	tiers := [][]stepRun{{{ofTelescope(telescope), since}}}
+	tiers := [][]stepRun{{{res: ofTelescope(telescope), since: since}}}
 	for _, devices := range deviceTiers(t, [][]*device{own, trains}) {
 		tiers = append(tiers, tier(t, ref, devices, since))
 	}
@@ -146,7 +149,7 @@ func (r *runner) runTiers(ctx context.Context, w *stepWork, plan *stepPlan, from
 			group.Go(func() {
 				errs[i] = r.o.runProcedure(ctx, procCall{
 					res: m.res, trigger: plan.trigger, actions: m.res.actionsOf(plan.trigger),
-					since: m.since, rerun: true, ending: ending, event: ev,
+					since: m.since, rerun: true, ending: ending, on: m.on, event: ev,
 				})
 			})
 		}

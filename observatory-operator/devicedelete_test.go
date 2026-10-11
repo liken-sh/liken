@@ -22,6 +22,14 @@ const parkCap = "east-telescope Dust Cover Simulator.CAP_PARK PARK=On UNPARK=Off
 // telescope's main camera from its cooled setpoint.
 const warmCamera = "east-telescope CCD Simulator.CCD_TEMPERATURE CCD_TEMPERATURE_VALUE=5"
 
+// outputsOff are the changes that switch off the outputs of Switch
+// east that power the devices of the east-imaging train.
+var outputsOff = []string{
+	"east-telescope Simulator IO.DIGITAL_OUTPUT_1 OFF=On ON=Off",
+	"east-telescope Simulator IO.DIGITAL_OUTPUT_2 OFF=On ON=Off",
+	"east-telescope Simulator IO.DIGITAL_OUTPUT_3 OFF=On ON=Off",
+}
+
 // disconnectCamera is the change that disconnects the east telescope's
 // main camera in the Disconnect step.
 const disconnectCamera = "east-telescope CCD Simulator.CONNECTION CONNECT=Off DISCONNECT=On"
@@ -278,19 +286,45 @@ func TestADeviceDeletedWithItsReservationRunsItsDeactivation(t *testing.T) {
 	}
 }
 
+// named is one resource of a kind.
+type named struct {
+	kind observatory.Kind
+	name string
+}
+
+// deleteDuringAbort deletes the east reservation, and deletes the
+// resources while an exposure holds its Abort step. The Deactivation
+// step then finds them deleted, as it does when a person deletes them
+// in one command with the reservation and the operator reads the
+// reservation's delete first.
+func (w *world) deleteDuringAbort(resources ...named) {
+	w.t.Helper()
+	w.indi.setState("east-telescope", "CCD Simulator", "CCD_EXPOSURE", "Busy")
+	w.indi.hold("CCD Simulator", "CCD_ABORT_EXPOSURE")
+	w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
+	w.until(time.Minute, "the Abort step does not abort the exposure", func() bool {
+		return w.indi.count("east-telescope", "CCD Simulator.CCD_ABORT_EXPOSURE") > 0
+	})
+	for _, r := range resources {
+		w.api.deleteNamed(kindCollection(r.kind), r.name)
+	}
+	time.Sleep(time.Minute)
+	synctest.Wait()
+	w.indi.setState("east-telescope", "CCD Simulator", "CCD_EXPOSURE", "Ok")
+}
+
 // A device whose reservation is deleted together with the resource
 // that places it, or with the device itself, as `kubectl delete -f` of
 // the whole inventory does, runs its deactivation in the reservation's
 // Deactivation step. The step finds each device on the server its pod
 // runs on, so a train that is gone at once does not take its cap, its
 // panel, or its camera out of the step, whether those are deleted too
-// or stay, and a dome on an Observatory that stays parks.
+// or stay, and a dome on an Observatory that stays parks. The release
+// steps after it find the devices the same way: the Switch switches off
+// the outputs of the train's devices, a deleted Switch switches them
+// off too, and the deleted dome disconnects before its server stops.
 func TestADeviceDeletedWithItsPlaceRunsItsDeactivation(t *testing.T) {
 	t.Parallel()
-	type named struct {
-		kind observatory.Kind
-		name string
-	}
 	cases := []struct {
 		name    string
 		deletes []named
@@ -299,13 +333,16 @@ func TestADeviceDeletedWithItsPlaceRunsItsDeactivation(t *testing.T) {
 	}{
 		{"a dust cap and a camera with their train",
 			[]named{{observatory.OpticalTrainKind, "east-imaging"}, {observatory.DustCapKind, "east"}, {observatory.CameraKind, "east-main"}},
-			[]named{{observatory.DustCapKind, "east"}, {observatory.CameraKind, "east-main"}}, []string{parkCap, warmCamera, disconnectCamera}},
+			[]named{{observatory.DustCapKind, "east"}, {observatory.CameraKind, "east-main"}}, append([]string{parkCap, warmCamera, disconnectCamera}, outputsOff...)},
 		{"a train whose camera and panel stay",
 			[]named{{observatory.OpticalTrainKind, "east-imaging"}, {observatory.DustCapKind, "east"}},
-			[]named{{observatory.DustCapKind, "east"}, {observatory.CameraKind, "east-main"}, {observatory.FlatPanelKind, "east"}}, []string{parkCap, warmCamera, disconnectCamera}},
+			[]named{{observatory.DustCapKind, "east"}, {observatory.CameraKind, "east-main"}, {observatory.FlatPanelKind, "east"}}, append([]string{parkCap, warmCamera, disconnectCamera}, outputsOff...)},
+		{"a Switch whose telescope stays",
+			[]named{{observatory.SwitchKind, "east"}},
+			nil, outputsOff},
 		{"a dome whose observatory stays",
 			[]named{{observatory.DomeKind, "lab"}},
-			[]named{{observatory.DomeKind, "lab"}}, []string{"lab-observatory Dome Simulator.DOME_PARK PARK=On UNPARK=Off"}},
+			[]named{{observatory.DomeKind, "lab"}}, []string{"lab-observatory Dome Simulator.DOME_PARK PARK=On UNPARK=Off", "lab-observatory Dome Simulator.CONNECTION CONNECT=Off DISCONNECT=On"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -313,18 +350,7 @@ func TestADeviceDeletedWithItsPlaceRunsItsDeactivation(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				w := startWorld(t)
 				readyOf(w)
-				w.indi.setState("east-telescope", "CCD Simulator", "CCD_EXPOSURE", "Busy")
-				w.indi.hold("CCD Simulator", "CCD_ABORT_EXPOSURE")
-				w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
-				w.until(time.Minute, "the Abort step does not abort the exposure", func() bool {
-					return w.indi.count("east-telescope", "CCD Simulator.CCD_ABORT_EXPOSURE") > 0
-				})
-				for _, d := range c.deletes {
-					w.api.deleteNamed(kindCollection(d.kind), d.name)
-				}
-				time.Sleep(time.Minute)
-				synctest.Wait()
-				w.indi.setState("east-telescope", "CCD Simulator", "CCD_EXPOSURE", "Ok")
+				w.deleteDuringAbort(c.deletes...)
 				for _, d := range c.deletes {
 					w.gone(d.kind, d.name, 10*time.Minute)
 				}

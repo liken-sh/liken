@@ -279,27 +279,20 @@ func (o *operator) startRunner(ctx context.Context, r *observatory.Reservation) 
 	})
 }
 
-// sweep deletes the pods, Services, and ConfigMaps of each server that
-// no reservation holds. A runner deletes them itself at the end of
-// deactivation, so the sweep finds them only when a reservation went
-// away without deactivation, such as one whose finalizer a person
-// removed.
+// sweep deletes the pods, claims, Services, and ConfigMaps of each
+// server that no reservation holds. A runner deletes them itself at the
+// end of deactivation, so the sweep finds them only when a reservation
+// went away without deactivation, such as one whose finalizer a person
+// removed. The deletes go out in stopServer's order, the objects of the
+// devices before the servers' own, so no device's container starts
+// again while its server stops. A delete that the API server refuses is
+// not sent again here: the next pass finds the object and sends it.
 func (o *operator) sweep(t *tree, held map[string]bool) error {
+	unheld := func(l map[string]string) bool { return !held[l[labelServer]] }
+	servers := func(l map[string]string) bool { return unheld(l) && l[labelRole] == roleServer }
 	var problems []error
-	for name, p := range t.pods {
-		if server := p.Metadata.Labels[labelServer]; !held[server] && p.Metadata.DeletionTimestamp == nil {
-			problems = append(problems, o.deleteObject(podPath(o.namespace, name)))
-		}
-	}
-	for name, s := range t.services {
-		if server := s.Metadata.Labels[labelServer]; !held[server] {
-			problems = append(problems, o.deleteObject(servicePath(o.namespace, name)))
-		}
-	}
-	for name, files := range t.configMaps {
-		if server := files.Metadata.Labels[labelServer]; !held[server] {
-			problems = append(problems, o.deleteObject(configMapPath(o.namespace, name)))
-		}
+	for _, object := range append(t.selectedObjects(o.namespace, withoutServers(unheld)), t.selectedObjects(o.namespace, servers)...) {
+		problems = append(problems, o.deleteObject(object.path))
 	}
 	return joinErrors(problems)
 }

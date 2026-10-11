@@ -201,7 +201,8 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 	// the pod of its driver runs, because a client that dials the
 	// endpoint of a device with no pod finds no driver there.
 	at, readable := ref.String(), placed
-	if left := hasPod && (!placed || p.Metadata.Labels[labelServer] != ref.String()); left {
+	left := hasPod && (!placed || p.Metadata.Labels[labelServer] != ref.String())
+	if left {
 		at, readable = p.Metadata.Labels[labelServer], p.Metadata.DeletionTimestamp == nil
 	}
 	if hasPod && (placed || readable) {
@@ -229,9 +230,16 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 	standing := o.standingOf(t, d)
 	// A pod that a device's server no longer runs is one that a Ready
 	// runner deletes (moves.go), or one that deactivation deletes. It
-	// reads as stopping once its driver is gone from that server.
-	stray := hasPod && !defined && (!placed || p.Metadata.Labels[labelServer] != ref.String())
-	next.Phase = devicePhase(hasPod && (stray || p.Metadata.DeletionTimestamp != nil), hasPod, defined, standing, connection, fault)
+	// reads as stopping once its driver is gone from that server. Its
+	// device is releasing there whatever its parents say, so a device
+	// that the Disconnect step disconnects on the server it left reads
+	// Disconnecting, and not Starting, until its pod is gone.
+	stray := left && !defined
+	phaseStanding := standing
+	if left {
+		phaseStanding = releasing
+	}
+	next.Phase = devicePhase(hasPod && (stray || p.Metadata.DeletionTimestamp != nil), hasPod, defined, phaseStanding, connection, fault)
 	if refused {
 		next.Phase = observatory.DeviceError
 	}

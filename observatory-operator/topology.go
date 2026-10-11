@@ -249,36 +249,44 @@ func (t *tree) podNames(selected func(labels map[string]string) bool) []string {
 }
 
 // deleteSelected sends the deletes of the pods, the Services, the
-// ConfigMaps, and the claims that select returns true for, and does
-// not wait for them. A pod that is terminating already gets no second
-// delete.
+// ConfigMaps, and the claims that select returns true for
+// (selectedObjects), and does not wait for them.
 func (o *operator) deleteSelected(ctx context.Context, report func(string), t *tree, selected func(labels map[string]string) bool) error {
+	for _, object := range t.selectedObjects(o.namespace, selected) {
+		if err := o.send(ctx, report, "deleting "+object.what, func() error { return o.deleteObject(object.path) }); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// selectedObject is one object to delete: what a person reads, such as
+// "pod east-mount", and its path.
+type selectedObject struct{ what, path string }
+
+// selectedObjects answers the objects that select returns true for, in
+// a fixed order: each pod by name with its claim, then the Services,
+// then the ConfigMaps. A pod that is terminating already, and its
+// claim, are left out, because they need no second delete.
+func (t *tree) selectedObjects(namespace string, selected func(labels map[string]string) bool) []selectedObject {
+	var out []selectedObject
 	for _, name := range t.podNames(selected) {
 		if t.pods[name].Metadata.DeletionTimestamp != nil {
 			continue
 		}
-		if err := o.send(ctx, report, fmt.Sprintf("deleting pod %s", name), func() error { return o.deleteObject(podPath(o.namespace, name)) }); err != nil {
-			return err
-		}
-		if err := o.send(ctx, report, fmt.Sprintf("deleting ResourceClaim %s", name), func() error { return o.deleteObject(claimPath(o.namespace, name)) }); err != nil {
-			return err
+		out = append(out, selectedObject{"pod " + name, podPath(namespace, name)}, selectedObject{"ResourceClaim " + name, claimPath(namespace, name)})
+	}
+	for _, name := range sortedKeys(t.services) {
+		if selected(t.services[name].Metadata.Labels) {
+			out = append(out, selectedObject{"Service " + name, servicePath(namespace, name)})
 		}
 	}
-	for name, svc := range t.services {
-		if selected(svc.Metadata.Labels) {
-			if err := o.send(ctx, report, fmt.Sprintf("deleting Service %s", name), func() error { return o.deleteObject(servicePath(o.namespace, name)) }); err != nil {
-				return err
-			}
+	for _, name := range sortedKeys(t.configMaps) {
+		if selected(t.configMaps[name].Metadata.Labels) {
+			out = append(out, selectedObject{"ConfigMap " + name, configMapPath(namespace, name)})
 		}
 	}
-	for name, files := range t.configMaps {
-		if selected(files.Metadata.Labels) {
-			if err := o.send(ctx, report, fmt.Sprintf("deleting ConfigMap %s", name), func() error { return o.deleteObject(configMapPath(o.namespace, name)) }); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return out
 }
 
 // stopServer deletes the pods and objects of a server's devices, then
@@ -294,9 +302,7 @@ func (o *operator) deleteSelected(ctx context.Context, report func(string), t *t
 // indiserver when the server's delete arrives, and no driver starts.
 // Every caller disconnects the server's devices before the stop.
 func (o *operator) stopServer(ctx context.Context, report func(string), ref serverRef) ([]string, error) {
-	devices := func(l map[string]string) bool {
-		return l[labelServer] == ref.String() && l[labelRole] != roleServer
-	}
+	devices := withoutServers(func(l map[string]string) bool { return l[labelServer] == ref.String() })
 	t := o.snapshot()
 	first := t.podNames(devices)
 	if err := o.deleteSelected(ctx, report, t, devices); err != nil {
@@ -306,6 +312,13 @@ func (o *operator) stopServer(ctx context.Context, report func(string), ref serv
 	stopped := append(first, rest...)
 	sort.Strings(stopped)
 	return slices.Compact(stopped), err
+}
+
+// withoutServers narrows a selection to the objects that are not a
+// server's own: the pods and objects of its devices and its guider,
+// which stopServer and the sweep delete before the server's pod.
+func withoutServers(selected func(labels map[string]string) bool) func(map[string]string) bool {
+	return func(l map[string]string) bool { return selected(l) && l[labelRole] != roleServer }
 }
 
 // onServer selects the objects of one server whose kind passes keep.

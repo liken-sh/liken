@@ -35,8 +35,13 @@ func (o *operator) setOutputs(ctx context.Context, t *tree, devices []*device, p
 			continue
 		}
 		// A Switch belongs to a telescope or an observatory, never to a
-		// train, so its server is known unless it is on the shelf.
+		// train, so its server is known unless it is on the shelf. A
+		// Switch that a person deleted is on the server its pod runs on
+		// until the release stops it, and switches its outputs off there.
 		ref, installed := t.server(sw)
+		if !installed && !power {
+			ref, installed = t.runningOn(sw)
+		}
 		if !installed {
 			if power {
 				return nil, fmt.Errorf("the Switch %s, which spec.power names, is on the shelf: set its spec.telescope or spec.observatory", name)

@@ -76,10 +76,16 @@ func jobEnvironment(t *tree, r resource, trigger string) []envVar {
 	return env
 }
 
-// serverOf answers the INDI server of a resource: a device's server,
-// or the server that a Telescope or an Observatory runs.
+// serverOf answers the INDI server of a resource: the server that a
+// device's driver runs on, or the server that a Telescope or an
+// Observatory runs. The pod places a device before its parents do
+// (tree.runningOn), because a device that left its server, or whose
+// train a person deleted, runs its deactivation where its driver runs.
 func serverOf(t *tree, r resource) (serverRef, bool) {
 	if r.device != nil {
+		if ref, running := t.runningOn(r.device); running {
+			return ref, true
+		}
 		return t.server(r.device)
 	}
 	return serverRef{r.kind, r.name()}, true

@@ -63,17 +63,56 @@ func TestAServerStopsAfterItsDevicePods(t *testing.T) {
 		w.releasePod("lab-dome")
 		w.phase("east-tonight", observatory.ReservationReleased, 15*time.Minute)
 
-		sent := deletes.sent()
-		for _, order := range []struct{ device, server string }{
+		devicesFirst(t, deletes.sent(), []podOrder{
 			{"east-switch", "east-telescope"},
 			{"lab-dome", "lab-observatory"},
 			{"lab-weatherstation", "lab-observatory"},
-		} {
-			device, server := slices.Index(sent, order.device), slices.Index(sent, order.server)
-			if device < 0 || server < 0 || device > server {
-				t.Errorf("deleted pod %s at %d and its server's pod %s at %d, want the device's pod first, in %v",
-					order.device, device, order.server, server, sent)
-			}
+		})
+	})
+}
+
+// podOrder is a device's pod and the pod of the server it runs on.
+type podOrder struct{ device, server string }
+
+// devicesFirst checks that each device's pod was deleted before its
+// server's pod.
+func devicesFirst(t *testing.T, sent []string, orders []podOrder) {
+	t.Helper()
+	for _, order := range orders {
+		device, server := slices.Index(sent, order.device), slices.Index(sent, order.server)
+		if device < 0 || server < 0 || device > server {
+			t.Errorf("deleted pod %s at %d and its server's pod %s at %d, want the device's pod first, in %v",
+				order.device, device, order.server, server, sent)
 		}
+	}
+}
+
+// A person removes the finalizer of a Ready reservation by hand while
+// the operator is down, so the reservation goes with no deactivation.
+// The operator that returns sweeps the pods that no reservation holds,
+// and sends the deletes of each server's device pods before the delete
+// of the server's pod.
+func TestTheSweepStopsAServerAfterItsDevicePods(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := readyWorld(t)
+		w.halt()
+		object, _ := w.api.object(kindCollection(observatory.ReservationKind), "east-tonight")
+		w.api.mu.Lock()
+		w.api.store(kindCollection(observatory.ReservationKind), "east-tonight", object, "DELETED")
+		w.api.mu.Unlock()
+		deletes := &podDeletes{}
+		w.api.hear(deletes.hear)
+		w.start()
+		w.until(time.Minute, "the sweep leaves pods", func() bool { return len(w.api.names(podsCollection)) == 0 })
+
+		devicesFirst(t, deletes.sent(), []podOrder{
+			{"east-switch", "east-telescope"},
+			{"east-mount", "east-telescope"},
+			{"east-main-camera", "east-telescope"},
+			{"east-guider", "east-telescope"},
+			{"lab-dome", "lab-observatory"},
+			{"lab-weatherstation", "lab-observatory"},
+		})
 	})
 }

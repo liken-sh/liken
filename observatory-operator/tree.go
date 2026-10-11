@@ -205,6 +205,25 @@ func (t *tree) devicesRunningOn(s serverRef) []*device {
 	return out
 }
 
+// releasedOn answers the devices that the release of one server acts
+// on, in the order of t.devices: the devices that the tree places there
+// (devicesOn), and the devices that only the pod of their driver places
+// there (devicesRunningOn), because a person deleted them or their
+// train.
+func (t *tree) releasedOn(s serverRef) []*device {
+	placed := map[*device]bool{}
+	for _, d := range t.devicesOn(s) {
+		placed[d] = true
+	}
+	var out []*device
+	for _, d := range t.devices {
+		if on, running := t.runningOn(d); placed[d] || (running && on == s) {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 // serverNamed answers the server of a Telescope or an Observatory in
 // the tree by the name of its pod.
 func (t *tree) serverNamed(name string) (serverRef, bool) {

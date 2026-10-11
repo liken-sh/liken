@@ -6,6 +6,7 @@ package main
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -85,6 +86,41 @@ func TestAReleasedDeviceNamesNoServer(t *testing.T) {
 		wheel, _ := decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east")
 		if s := wheel.Status; s.Phase != observatory.DeviceIdle || s.Endpoint != nil || s.IndiDevice != "" || s.Slot != nil {
 			t.Errorf("the released filter wheel = %s on %q at %+v, slot %+v", s.Phase, s.IndiDevice, s.Endpoint, s.Slot)
+		}
+	})
+}
+
+// A person deletes the reservation and its OpticalTrain in one
+// command. The devices of the train stay, and their pods are the only
+// record of the server they ran on. The Disconnect step disconnects
+// them there, and each one reads Disconnecting from then until its pod
+// is gone, and Idle after that, with no Starting phase or Event.
+func TestADeviceWhoseTrainIsDeletedIsNeverStarting(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := readyWorld(t)
+		w.indi.slowShim(10 * time.Second)
+		devices := []named{{observatory.CameraKind, "east-main"}, {observatory.FocuserKind, "east"}, {observatory.FlatPanelKind, "east"}}
+		before := map[named]int{}
+		for _, d := range devices {
+			before[d] = len(typedEvents(w.api, d.kind, d.name))
+		}
+		w.api.mu.Lock()
+		since := w.api.version
+		w.api.mu.Unlock()
+		w.deleteDuringAbort(named{observatory.OpticalTrainKind, "east-imaging"})
+		w.gone(observatory.ReservationKind, "east-tonight", 15*time.Minute)
+		w.settle()
+		for _, d := range devices {
+			phases := devicePhases(w.api, d.kind, d.name, since)
+			if slices.Contains(phases, string(observatory.DeviceStarting)) || !slices.Contains(phases, string(observatory.DeviceDisconnecting)) ||
+				phases[len(phases)-1] != string(observatory.DeviceIdle) {
+				t.Errorf("the phases of %s %s were %q, want Disconnecting, never Starting, and Idle at the end", d.kind.Name, d.name, phases)
+			}
+			release := typedEvents(w.api, d.kind, d.name)[before[d]:]
+			if slices.ContainsFunc(release, func(e string) bool { return strings.Contains(e, " Starting: ") }) {
+				t.Errorf("the Events of %s %s during the release were %q, want no Starting", d.kind.Name, d.name, release)
+			}
 		}
 	})
 }

@@ -221,20 +221,31 @@ func (r *runner) disconnect(ctx context.Context, w *stepWork) (outcome, error) {
 
 // stopTelescopeDevices stops the drivers of the telescope's devices,
 // apart from the ones that power the others, on the server that keeps
-// running, and then deletes their pods (setDrivers).
+// running, and then deletes their pods (setDrivers). A device that only
+// its pod places on the server, because a person deleted it or its
+// train, keeps its pod with its driver stopped until PowerOff has
+// switched its output off: the pod is the only record of the server
+// that the device ran on (tree.runningOn).
 func (r *runner) stopTelescopeDevices(ctx context.Context, w *stepWork) (outcome, error) {
 	ref := serverRef{observatory.TelescopeKind, r.res.Spec.Telescope}
 	t := r.o.snapshot()
-	switches, _ := t.partition(t.devicesOn(ref))
+	switches, _ := t.partition(t.releasedOn(ref))
 	if _, _, err := r.o.setDrivers(ctx, w.report, ref, switches); err != nil {
 		return outcome{}, err
 	}
-	powering := map[string]bool{}
+	kept := map[string]bool{}
 	for _, d := range driverDevices(switches) {
-		powering[d.key()] = true
+		kept[d.key()] = true
+	}
+	for _, d := range t.devicesRunningOn(ref) {
+		if on, placed := t.server(d); !placed || on != ref {
+			if runner, ok := t.runnerOf(d); ok {
+				kept[runner.key()] = true
+			}
+		}
 	}
 	stopped, err := r.o.stopPods(ctx, w.report, func(l map[string]string) bool {
-		return l[labelServer] == ref.String() && l[labelRole] == roleDevice && !powering[l[labelKind]+"/"+l[labelResource]]
+		return l[labelServer] == ref.String() && l[labelRole] == roleDevice && !kept[l[labelKind]+"/"+l[labelResource]]
 	})
 	if err != nil {
 		return outcome{}, err
@@ -247,11 +258,14 @@ func (r *runner) stopTelescopeDevices(ctx context.Context, w *stepWork) (outcome
 
 // powerOff switches off the outputs that the telescope's devices name,
 // then stops the Switch pods and the telescope's server. The server
-// stops last, because the operator reaches a Switch through it.
+// stops last, because the operator reaches a Switch through it. A
+// device that only its pod places on the server (tree.releasedOn) has
+// its output switched off too, so a camera whose train a person deleted
+// with the reservation loses its power as it would in any release.
 func (r *runner) powerOff(ctx context.Context, w *stepWork) (outcome, error) {
 	t := r.o.snapshot()
 	ref := serverRef{observatory.TelescopeKind, r.res.Spec.Telescope}
-	devices := t.devicesOn(ref)
+	devices := t.releasedOn(ref)
 	notes, err := r.o.setOutputs(ctx, t, devices, false)
 	if err != nil {
 		return outcome{}, err
@@ -304,7 +318,7 @@ func (r *runner) stopSite(ctx context.Context, w *stepWork) (outcome, error) {
 	if _, running := t.pods[ref.String()]; !running {
 		return skipped("no server running for Observatory %s", site)
 	}
-	devices := t.devicesOn(ref)
+	devices := t.releasedOn(ref)
 	switches, others := t.partition(devices)
 	live, did := r.o.connectedHandles(ctx, w.report, t, ref, inOrder(others, siteOrder))
 	live = owners(live)

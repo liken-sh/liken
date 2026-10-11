@@ -39,7 +39,7 @@ goes on.
 | `Deactivation` | Runs the deactivation procedures, from the bottom of the tree up: those of the devices of the telescope's trains, then the `Telescope`'s own devices' and its own. When the last telescope in the observatory ends, it then runs the observatory's devices' and the `Observatory`'s own. Every device is still connected. | none: each action's timeout |
 | `StopGuider` | Deletes the guider's pod, `Service`, and `ConfigMap`, while its camera and mount are still connected. | 2 min |
 | `Disconnect` | Disconnects the devices in the reverse order of `Connect`. | 2 min |
-| `StopDevices` | Deletes the device pods. | 2 min |
+| `StopDevices` | Stops the drivers of the devices that are not `Switch` devices, and deletes their pods. A device whose pod is the only record of its server, because a person deleted the device or its train, keeps its pod until `PowerOff`. | 2 min |
 | `PowerOff` | Switches the outputs off, then stops the `Switch` pods and the telescope's server. | 5 min |
 | `StopSite` | Disconnects the observatory's devices, switches their outputs off, and stops its server, unless a reservation of another telescope in the observatory is active. | 5 min |
 
@@ -175,6 +175,12 @@ device runs in the tier of its telescope or observatory. An
 cap still closes, its flat panel still goes dark, and its camera still
 aborts its exposure, warms, and disconnects in order, whether a person
 deleted those devices too or not. A deleted `Dome` parks the same way.
+The pod of such a device is the only record of the server it ran on,
+so `StopDevices` stops its driver and leaves the pod. `PowerOff` then
+switches off the output that the device's `spec.power` names, and
+deletes the pod before the server's pod. A deleted `Switch` switches
+its outputs off the same way, and a deleted `Dome` disconnects in
+`StopSite` before the observatory's server stops.
 A device whose train a person deletes while the reservation is `Ready`
 leaves its server and runs its `deactivation` first, as a device put
 on the shelf does.
