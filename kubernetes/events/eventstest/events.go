@@ -32,6 +32,7 @@ type Events struct {
 	held     []events.Event
 	created  int
 	refusals int
+	leaving  map[string]int
 	mux      *http.ServeMux
 }
 
@@ -70,6 +71,27 @@ func (e *Events) Refuse(count int) {
 	defer e.mu.Unlock()
 	e.refusals = count
 }
+
+// Terminate makes the server refuse each create in namespace with the
+// 403 the API server answers while it deletes the namespace.
+func (e *Events) Terminate(namespace string) { e.leave(namespace, http.StatusForbidden) }
+
+// DeleteNamespace makes the server answer each create in namespace with
+// 404, the way the API server answers once the namespace is gone.
+func (e *Events) DeleteNamespace(namespace string) { e.leave(namespace, http.StatusNotFound) }
+
+func (e *Events) leave(namespace string, status int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.leaving == nil {
+		e.leaving = map[string]int{}
+	}
+	e.leaving[namespace] = status
+}
+
+// terminating is the body of the API server's 403 to a create in a
+// namespace it is deleting. Callers read the cause, not the message.
+const terminating = `{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"Forbidden","details":{"causes":[{"reason":"NamespaceTerminating"}]},"code":403}`
 
 // Expire deletes every Event, the way the API server's TTL does an
 // hour after an Event's last write.
@@ -131,6 +153,14 @@ func (e *Events) create(w http.ResponseWriter, r *http.Request) {
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	switch e.leaving[namespace] {
+	case http.StatusForbidden:
+		http.Error(w, terminating, http.StatusForbidden)
+		return
+	case http.StatusNotFound:
+		http.Error(w, "the namespace does not exist", http.StatusNotFound)
+		return
+	}
 	if e.refused(w) {
 		return
 	}

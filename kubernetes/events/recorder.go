@@ -28,7 +28,9 @@
 // queue, so a reconcile pass never waits on an Event and never fails
 // because of one. The goroutine sends a failed write again (attempts),
 // and logs one line when the last attempt fails. A full queue drops
-// the Event and counts it (Dropped).
+// the Event and counts it (Dropped). An Event in a namespace that is
+// gone, or that the API server is deleting, is dropped at once with no
+// log line.
 //
 // A repeat of the same Event on the same object within the window
 // patches count and lastTimestamp on the Event the recorder wrote, in
@@ -213,14 +215,14 @@ func (r *Recorder) post(object ObjectReference, eventType, reason, message strin
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.stopping {
-		r.logf("dropped the %s Event %s on the %s %s: the recorder has shut down", eventType, reason, object.Kind, object.Name)
+		r.logf("dropped the %s Event %s on the %s: the recorder has shut down", eventType, reason, describe(object))
 		return
 	}
 	select {
 	case r.queue <- event:
 	default:
 		if r.dropped.Add(1) == 1 {
-			r.logf("dropped the %s Event %s on the %s %s: %d Events wait to be written", eventType, reason, object.Kind, object.Name, queueLength)
+			r.logf("dropped the %s Event %s on the %s: %d Events wait to be written", eventType, reason, describe(object), queueLength)
 		}
 	}
 }
@@ -308,7 +310,7 @@ func (r *Recorder) drain(ctx context.Context) {
 		}
 		select {
 		case event := <-r.queue:
-			if err := r.writeOnce(event); err != nil {
+			if err := r.writeOnce(event); err != nil && !leaving(err) {
 				r.logFailure(event, err)
 			}
 		default:
@@ -322,7 +324,7 @@ func (r *Recorder) drain(ctx context.Context) {
 func (r *Recorder) write(ctx context.Context, event Event) {
 	for attempt := 1; ; attempt++ {
 		err := r.writeOnce(event)
-		if err == nil {
+		if err == nil || leaving(err) {
 			return
 		}
 		if attempt == attempts {
@@ -373,10 +375,31 @@ func (r *Recorder) writeOnce(event Event) error {
 	return nil
 }
 
+// leaving reports whether a write failed because the Event's namespace
+// is gone or the API server is deleting it. The delete would remove the
+// Event with the namespace, so no person would read it, and the
+// recorder drops it with no retry and no log line. A namespace delete
+// removes objects in no set order, so an operator that watches it
+// changes the conditions of the objects left, and posts a burst of
+// these Events. A post answers 404 only when the namespace is gone,
+// because writeOnce handles the 404 of a patch.
+func leaving(err error) bool {
+	return errors.Is(err, apiclient.ErrNamespaceTerminating) || errors.Is(err, apiclient.ErrNotFound)
+}
+
 // logFailure logs the last failure of an Event that the recorder gives
 // up on.
 func (r *Recorder) logFailure(event Event, err error) {
-	r.logf("writing the %s Event %s on the %s %s: %v", event.Type, event.Reason, event.InvolvedObject.Kind, event.InvolvedObject.Name, err)
+	r.logf("writing the %s Event %s on the %s: %v", event.Type, event.Reason, describe(event.InvolvedObject), err)
+}
+
+// describe names an object for a log line: its kind, and its namespace
+// and name. Two namespaces can hold objects of the same kind and name.
+func describe(object ObjectReference) string {
+	if object.Namespace == "" {
+		return object.Kind + " " + object.Name
+	}
+	return object.Kind + " " + object.Namespace + "/" + object.Name
 }
 
 func (r *Recorder) logf(format string, args ...any) {

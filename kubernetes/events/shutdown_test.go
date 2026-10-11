@@ -148,7 +148,7 @@ func TestAnEventAfterShutdownIsDropped(t *testing.T) {
 		r.recorder.Normal(mount, "PodCreated", "Created pod east-mount.")
 		synctest.Wait()
 
-		if len(r.held.List()) != 0 || !strings.Contains(r.log.String(), "dropped the Normal Event PodCreated on the Mount east-mount: the recorder has shut down") {
+		if len(r.held.List()) != 0 || !strings.Contains(r.log.String(), "dropped the Normal Event PodCreated on the Mount observatory/east-mount: the recorder has shut down") {
 			t.Errorf("the server holds %d Events and the log says %q, want none and one drop", len(r.held.List()), r.log.String())
 		}
 	})

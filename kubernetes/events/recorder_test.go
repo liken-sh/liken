@@ -238,13 +238,65 @@ func TestAWriteThatFailsEveryAttemptIsLoggedOnce(t *testing.T) {
 		synctest.Wait()
 
 		lines := strings.Split(strings.TrimSpace(r.log.String()), "\n")
-		if len(lines) != 1 || !strings.HasPrefix(lines[0], "test-operator: writing the Warning Event Unreachable on the Mount east-mount: ") {
+		if len(lines) != 1 || !strings.HasPrefix(lines[0], "test-operator: writing the Warning Event Unreachable on the Mount observatory/east-mount: ") {
 			t.Errorf("the log says %q, want one line about the Unreachable Event", lines)
 		}
 		if got := r.held.List(); len(got) != 1 || got[0].Reason != "Reachable" {
 			t.Errorf("the server holds %+v, want only the Reachable Event", got)
 		}
 	})
+}
+
+// node is a cluster-scoped object, whose Events go in default.
+var node = events.ObjectReference{APIVersion: "v1", Kind: "Node", Name: "node-1", UID: "uid-2"}
+
+// The log line of a failed write about a cluster-scoped object names
+// no namespace.
+func TestAFailedWriteAboutAClusterScopedObjectNamesNoNamespace(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := record(t, notFound)
+		r.held.Refuse(3)
+
+		r.recorder.Warning(node, "Unreachable", "The node did not answer.")
+		time.Sleep(time.Minute)
+		synctest.Wait()
+
+		if log := r.log.String(); !strings.HasPrefix(log, "test-operator: writing the Warning Event Unreachable on the Node node-1: ") {
+			t.Errorf("the log says %q, want one line about the Node node-1", log)
+		}
+	})
+}
+
+// An Event in a namespace that is gone, or that the API server is
+// deleting, is dropped at once with no log line, and the next Event is
+// written.
+func TestAnEventInANamespaceThatIsGoingIsDroppedQuietly(t *testing.T) {
+	cases := []struct {
+		name  string
+		leave func(*eventstest.Events, string)
+	}{
+		{"terminating", (*eventstest.Events).Terminate},
+		{"deleted", (*eventstest.Events).DeleteNamespace},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				r := record(t, notFound)
+				c.leave(r.held, "observatory")
+
+				r.recorder.Warning(mount, "ParentMissing", "Missing Telescope east.")
+				r.recorder.Normal(node, "Rebooted", "The node rebooted.")
+				synctest.Wait()
+
+				if log := r.log.String(); log != "" {
+					t.Errorf("the log says %q, want nothing", log)
+				}
+				if got := r.held.List(); len(got) != 1 || got[0].Reason != "Rebooted" {
+					t.Errorf("the server holds %+v, want only the Rebooted Event", got)
+				}
+			})
+		})
+	}
 }
 
 // While the API server does not answer, the queue fills, and the

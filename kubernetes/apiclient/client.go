@@ -47,6 +47,12 @@ var (
 	ErrConflict = errors.New("conflict: something else wrote this object first")
 )
 
+// ErrNamespaceTerminating is the 403 that refuses a create in a
+// namespace the API server is deleting. The delete removes everything
+// in the namespace, so a caller drops the write instead of sending it
+// again.
+var ErrNamespaceTerminating = errors.New("the namespace is being deleted")
+
 // ErrThrottled is a 429 that lasted longer than the client waits for it
 // (maxThrottleWait), or past the end of the client's context. A caller
 // that must not give up, such as an operator's first read at start,
@@ -349,6 +355,9 @@ func (c *Client) send(method, path, contentType string, body []byte, out any) (i
 		return status, ErrConflict
 	case status < 200 || status > 299:
 		message := responseText(resp.Body)
+		if status == http.StatusForbidden && terminating(message) {
+			return status, fmt.Errorf("%s %s: %w", method, path, ErrNamespaceTerminating)
+		}
 		err := fmt.Errorf("%s %s: %s: %s", method, path, resp.Status, message)
 		if status == http.StatusTooManyRequests {
 			seconds := retryAfter(resp.Header.Get("Retry-After"), message)
@@ -435,6 +444,26 @@ func RetryAfterSeconds(err error) int {
 func responseText(body io.Reader) string {
 	message, _ := io.ReadAll(io.LimitReader(body, 2048))
 	return strings.TrimRightFunc(string(message), unicode.IsSpace)
+}
+
+// terminating reports whether a 403's Status names the cause
+// NamespaceTerminating. The cause is the API server's stable signal;
+// the message beside it is prose that can change between releases.
+func terminating(message string) bool {
+	var answer struct {
+		Details struct {
+			Causes []struct {
+				Reason string `json:"reason"`
+			} `json:"causes"`
+		} `json:"details"`
+	}
+	_ = json.Unmarshal([]byte(message), &answer)
+	for _, cause := range answer.Details.Causes {
+		if cause.Reason == "NamespaceTerminating" {
+			return true
+		}
+	}
+	return false
 }
 
 // maxDrain limits the read below. The largest answer an operator asks

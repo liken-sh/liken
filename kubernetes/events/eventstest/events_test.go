@@ -89,6 +89,34 @@ func TestEventsRefusesWhatTheAPIServerRefuses(t *testing.T) {
 	}
 }
 
+// A create in a namespace that is being deleted answers the API
+// server's 403, and one in a namespace that is gone answers 404.
+func TestEventsRefusesACreateInANamespaceThatIsGoing(t *testing.T) {
+	cases := []struct {
+		name  string
+		leave func(*eventstest.Events, string)
+		want  int
+	}{
+		{"terminating", (*eventstest.Events).Terminate, http.StatusForbidden},
+		{"deleted", (*eventstest.Events).DeleteNamespace, http.StatusNotFound},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				held := &eventstest.Events{}
+				server := apiservertest.Start(t, held)
+				c.leave(held, "observatory")
+
+				status, _ := sendTo(t, server, http.MethodPost, "/api/v1/namespaces/observatory/events", "application/json", podEvent)
+
+				if status != c.want || len(held.List()) != 0 {
+					t.Errorf("the fake answered %d and holds %+v, want %d and nothing", status, held.List(), c.want)
+				}
+			})
+		})
+	}
+}
+
 // A merge patch changes the fields it names, merges an object into an
 // object, and removes a field it sets to null.
 func TestEventsAppliesAMergePatch(t *testing.T) {
