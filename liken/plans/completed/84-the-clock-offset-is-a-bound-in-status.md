@@ -1,7 +1,8 @@
 # 84. The clock offset is a bound in status
 
 Milestone 84. Proposed and built 2026-10-11, released in
-2026.10.11-002, and corrected after the testbed drill
+2026.10.11-002, corrected twice after testbed drills, and drilled on
+the testbed in 2026.10.11-004
 ([What the testbed showed](#what-the-testbed-showed)). It follows
 milestone 81, which
 stopped `init` from republishing the time facts on every poll, and it
@@ -236,6 +237,23 @@ that drift, about 50 ppm over each 64-second poll, and the first
 filter had corrected it at every poll. Selecting by the error bound
 above, with age weighed in, replaced selection by round trip alone.
 
+Release 2026.10.11-004 carried the selection by error bound, and both
+machines were Ready on it at 17:11 UTC. Over the next 20 minutes, one
+sample a minute:
+
+| | `liken-1`, wired | `stick-1`, wifi |
+| --- | --- | --- |
+| `liken_time_offset_seconds` | 2.80 ms to 3.67 ms | 0.28 ms to 5.29 ms |
+| Bound in status | `±5ms` throughout | `±5ms`, `±25ms` for 3 polls after the 5.29 ms reading, then `±5ms` |
+| `facts` passes | 1 | 3 |
+| `ClockSynchronized` | `True`, `Synchronized` | `True`, `Synchronized` |
+
+Before this milestone, `stick-1`'s readings swung from −30 ms to
++37 ms on consecutive polls, and it ran 69 `facts` passes in the 18
+hours before the rollout. `liken-1`'s steady 3 ms is its drift over
+one poll, which a frequency correction would remove; `init` corrects
+only the offset.
+
 The console line for a new bound reached the log relay as
 `\xc2\xb15ms`, because the kernel escapes every byte outside
 printable ASCII when a reader reads `/dev/kmsg`. The console line now
@@ -247,4 +265,6 @@ Roll the release onto the testbed. On `liken-1` and `stick-1`, check
 that the `Offset` column shows a bound, that `ClockSynchronized` is
 `True`, and that `liken_time_offset_seconds` moves between scrapes.
 Count the `facts` passes in an idle hour on `stick-1` against the 14
-of milestone 81.
+of milestone 81. The checks ran on 2026.10.11-004, above. The idle
+hour has not run; the 20 minutes above held 3 `facts` passes on
+`stick-1`, one of them the boot's.
