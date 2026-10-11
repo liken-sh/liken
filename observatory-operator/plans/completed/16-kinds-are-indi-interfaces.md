@@ -496,6 +496,55 @@ The drill found two small things. Neither one affects a reservation:
   deleted their pods, when the INDI server they connect to stopped
   first.
 
+### Second drill
+
+The second drill ran on 2026-10-11 against
+`2026.10.11-004-dev-016-a2a7bc67`. Three fixes landed after the first
+drill: bde12a71 clears `status.endpoint` when the driver's pod is
+gone, 3e22936e deletes the device pods before their INDI server, and
+747d3270 runs the deactivation of a device deleted with its parent.
+A run on `2026.10.11-004-dev-015-cd6ed7bf` found that a bulk delete
+skipped the deactivation of `Camera east-main` and `FlatPanel east`,
+which stayed while their `OpticalTrain` was deleted, and a2a7bc67
+fixed that. The operator rolled out with no restart, all 19 CRDs were
+established, and the 27 objects in `observatory` were unchanged.
+
+| Check | Result |
+|---|---|
+| Idle after the bump | Every device `Idle`, and `Focuser spare` `Inventory`. No object had `status.endpoint`. |
+| Reserve `east` | `Ready` in 40 s. `FilterWheel east` and `Camera east-main` reported `Ready` with `indiDevice` `CCD Simulator` and the endpoint `east-telescope.observatory.svc:7624`, and `east-main-camera` was the one pod for the two. |
+| The camera's `ACTIVE_FILTER` | `CCD Simulator`. The `FilterWheel` showed typed `slot` and `filters`, and the camera's 17 `status.properties` held no `FILTER_SLOT` or `FILTER_NAME`. |
+| A frame through the wheel | Slot 3 gave `FILTER = 'Green'`, and slot 7 gave `FILTER = 'SII'`. The `FilterWheel` followed to slot 7. |
+| Reserve `west` as well | `Ready` in 6 s. |
+| `Event`s | 154 while both reservations ran, each with a count of 1. |
+| End both `Reservation`s | `west` released in 19 s and `east` in 1 min 9 s. The deactivation warmed the camera, closed the dust cap, and parked both mounts and the dome. `FilterWheel east` went `Idle`, every device pod stopped, and no object kept `status.endpoint`. |
+| Device pods at stop (3e22936e) | A pod watch through both releases saw every `restartCount` stay at 0. |
+| Bulk delete (747d3270, a2a7bc67) | One `kubectl delete` of `Reservation east-bulk`, `OpticalTrain east-imaging`, and `DustCap east` while `east` was `Ready`. Before the finalizers were released, the cap closed, `Camera east-main` warmed to 5 °C with its cooler off, `FlatPanel east` ran its deactivation, and the mount and the dome parked. The Disconnect step disconnected `Camera east-main` first. The release took 1 min 8 s, and every pod stopped. |
+
+Each object, compact JSON, read with `--show-managed-fields` while
+`east` was `Ready`. The sizes are within 50 bytes of the first drill:
+
+| Object | Whole | `managedFields` | `status` | `status.properties` |
+|---|---|---|---|---|
+| `Camera east-main` | 19,464 | 5,092 | 13,303 | 17 |
+| `FilterWheel east` | 3,486 | 1,390 | 1,186 | 0 |
+| `Mount east` | 17,978 | 3,268 | 13,588 | 29 |
+
+With both telescopes `Ready` for 5 minutes, the operator used 58 to
+65m of CPU and 18 to 20 MiB, with one sample of 71m 30 s after `west`
+became `Ready`. In one minute, the watches saw 270 changes, 54 each
+on `Mount east`, `Mount west`, and the three `Camera`s, the same as
+the first drill.
+
+The bulk delete showed two smaller faults. The PowerOff step did not
+switch off outputs 1, 2, and 3 of `Switch east`, which a normal
+release switches off, because `powerOff` finds devices through
+`tree.devicesOn`, and that reaches a train's devices only through the
+train. As their pods stopped, the six devices of the deleted train
+each posted a `Starting` `Event`, though no pod started. Five said
+"Starting on east-telescope", and `FilterWheel east` said "Waiting
+for activation to create pod east-main-camera".
+
 ## Deferred
 
 - **`PowerBox`.** `POWER` shares no property shapes with `OUTPUT`, 14
