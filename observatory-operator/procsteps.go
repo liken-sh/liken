@@ -9,6 +9,12 @@ package main
 // parks before the dome does, with no order declared. Each step waits
 // until every run it started has ended, so the next lifecycle step
 // never begins under a procedure that still runs.
+//
+// Activation runs the devices that the tree places on each server.
+// Deactivation runs the devices whose driver's pod runs on each server,
+// whether or not their parents still place them there, because a person
+// can delete a device or its train with the reservation, and a driver
+// that still runs can still close a dust cap or warm a camera.
 
 import (
 	"context"
@@ -60,15 +66,16 @@ func (p *stepPlan) event() event {
 	}}
 }
 
-// tier answers the resources of a list of devices with one transition
-// time. A deleted device whose driver still runs is a resource in the
-// place it left, as a leaver is (leaves.go), so its deactivation
-// resolves its references there.
-func tier(t *tree, devices []*device, since time.Time) []stepRun {
+// tier answers the resources of a list of devices on one server with
+// one transition time. A device that its parents no longer place on the
+// server, while its driver still runs there, is a resource in the place
+// it left, as a leaver is (leaves.go), so its deactivation resolves its
+// references there.
+func tier(t *tree, ref serverRef, devices []*device, since time.Time) []stepRun {
 	var out []stepRun
 	for _, d := range devices {
 		r := t.ofDevice(d)
-		if ref, ok := t.lastServer(d); ok {
+		if on, placed := t.server(d); !placed || on != ref {
 			r = leaver(t, d, ref)
 		}
 		out = append(out, stepRun{r, since})
@@ -76,36 +83,28 @@ func tier(t *tree, devices []*device, since time.Time) []stepRun {
 	return out
 }
 
-// siteTiers are the Observatory and its devices, the devices that run
-// a driver before the devices they serve (deviceTiers). A deleted
-// device whose driver still runs on the observatory's server is one of
-// its devices (tree.deletedOn).
-func siteTiers(t *tree, site *observatory.Observatory, since time.Time) [][]stepRun {
+// siteTiers are the Observatory and the devices of its server, the
+// devices that run a driver before the devices they serve
+// (deviceTiers).
+func siteTiers(t *tree, site *observatory.Observatory, devices []*device, since time.Time) [][]stepRun {
 	ref := serverRef{observatory.ObservatoryKind, site.Metadata.Name}
 	tiers := [][]stepRun{{{ofObservatory(site), since}}}
-	for _, devices := range deviceTiers(t, [][]*device{append(t.devicesOn(ref), t.deletedOn(ref)...)}) {
-		tiers = append(tiers, tier(t, devices, since))
+	for _, devices := range deviceTiers(t, [][]*device{devices}) {
+		tiers = append(tiers, tier(t, ref, devices, since))
 	}
 	return tiers
 }
 
-// telescopeTiers are the Telescope, its own devices, and the devices
-// of its trains, the devices that run a driver before the devices they
-// serve (deviceTiers). A deleted device joins the tiers of the server
-// its driver still runs on (tree.deletedOn), in the group that its
-// spec names, and not through its parents: `kubectl delete -f` of an
-// inventory removes an OpticalTrain at once, and its dust cap still
-// has to close.
-func telescopeTiers(t *tree, telescope *observatory.Telescope, since time.Time) [][]stepRun {
-	name := telescope.Metadata.Name
-	own := withoutDeletedDevices(directDevices(t, observatory.TelescopeKind, name))
-	var trains []*device
-	for _, train := range sortedNames(t.trains) {
-		if t.trains[train].Spec.Telescope == name {
-			trains = append(trains, withoutDeletedDevices(t.trainDevices(train))...)
-		}
-	}
-	for _, d := range t.deletedOn(serverRef{observatory.TelescopeKind, name}) {
+// telescopeTiers are the Telescope, the devices of its server that name
+// no train, and the devices that name one, the devices that run a
+// driver before the devices they serve (deviceTiers). A device's own
+// spec.opticalTrain sorts it, not the train: in the Deactivation step a
+// device whose train a person deleted still runs on the server and
+// still has to run its deactivation after the devices of the telescope.
+func telescopeTiers(t *tree, telescope *observatory.Telescope, devices []*device, since time.Time) [][]stepRun {
+	ref := serverRef{observatory.TelescopeKind, telescope.Metadata.Name}
+	var own, trains []*device
+	for _, d := range devices {
 		if d.object.Spec.OpticalTrain != "" {
 			trains = append(trains, d)
 		} else {
@@ -114,28 +113,9 @@ func telescopeTiers(t *tree, telescope *observatory.Telescope, since time.Time) 
 	}
 	tiers := [][]stepRun{{{ofTelescope(telescope), since}}}
 	for _, devices := range deviceTiers(t, [][]*device{own, trains}) {
-		tiers = append(tiers, tier(t, devices, since))
+		tiers = append(tiers, tier(t, ref, devices, since))
 	}
 	return tiers
-}
-
-// withoutDeletedDevices answers devices without the ones that a person
-// deleted, which deletedOn places by their pods.
-func withoutDeletedDevices(devices []*device) []*device {
-	return slices.DeleteFunc(devices, func(d *device) bool { return deleting(d.object.Metadata) })
-}
-
-// withoutDeleted answers tiers without the devices that a person
-// deleted. Such a device runs on no server, so its activation would
-// wait for a driver that may never start (tree.server).
-func withoutDeleted(tiers [][]stepRun) [][]stepRun {
-	out := make([][]stepRun, 0, len(tiers))
-	for _, members := range tiers {
-		out = append(out, slices.DeleteFunc(slices.Clone(members), func(m stepRun) bool {
-			return m.res.device != nil && deleting(m.res.meta)
-		}))
-	}
-	return out
 }
 
 // withoutLacking answers tiers without the devices whose INDI device
@@ -264,8 +244,9 @@ func (r *runner) activation(ctx context.Context, w *stepWork) (outcome, error) {
 	if held := r.o.activity.get(scopeKey); held.active {
 		scopeSince = held.since
 	}
-	siteRuns := siteTiers(t, site, siteSince)
-	plan := &stepPlan{trigger: observatory.TriggerActivation, tiers: r.o.withoutLacking(withoutDeleted(append(siteRuns, telescopeTiers(t, telescope, scopeSince)...)))}
+	siteRuns := siteTiers(t, site, t.devicesOn(serverRef{observatory.ObservatoryKind, site.Metadata.Name}), siteSince)
+	scopeRuns := telescopeTiers(t, telescope, t.devicesOn(serverRef{observatory.TelescopeKind, telescope.Metadata.Name}), scopeSince)
+	plan := &stepPlan{trigger: observatory.TriggerActivation, tiers: r.o.withoutLacking(append(siteRuns, scopeRuns...))}
 	err = r.runTiers(ctx, w, plan, 0, len(siteRuns), false)
 	lock.release()
 	if err != nil {
@@ -325,7 +306,8 @@ func (r *runner) deactivation(ctx context.Context, w *stepWork) (outcome, error)
 	var notes []string
 	if activated := r.step(observatory.StepActivation); activated != nil && activated.StartTime != nil {
 		since := r.o.activity.set(telescopeKey(telescope.Metadata.Name), false, start, r.name)
-		plan.tiers = reversed(telescopeTiers(t, telescope, since))
+		ref := serverRef{observatory.TelescopeKind, telescope.Metadata.Name}
+		plan.tiers = reversed(telescopeTiers(t, telescope, t.devicesRunningOn(ref), since))
 	} else {
 		notes = append(notes, "Telescope "+telescope.Metadata.Name+" was not activated")
 	}
@@ -349,7 +331,9 @@ func (r *runner) deactivation(ctx context.Context, w *stepWork) (outcome, error)
 	}
 	since := r.o.activity.set(key, false, stamp(), r.name)
 	first := len(plan.tiers)
-	plan.tiers = append(plan.tiers, reversed(siteTiers(r.o.snapshot(), site, since))...)
+	now := r.o.snapshot()
+	siteRef := serverRef{observatory.ObservatoryKind, site.Metadata.Name}
+	plan.tiers = append(plan.tiers, reversed(siteTiers(now, site, now.devicesRunningOn(siteRef), since))...)
 	if err := r.runTiers(ctx, w, plan, first, len(plan.tiers), true); err != nil {
 		return outcome{}, err
 	}

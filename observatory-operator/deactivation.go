@@ -97,16 +97,18 @@ func (r *runner) endUnstarted(ctx context.Context) {
 // time is noted, and the step acts on the others.
 const settleWait = 30 * time.Second
 
-// liveHandles answers the connected devices among the telescope's
-// devices that are not Switch devices, in connect order. A device whose
-// pod does not run is left out.
+// liveHandles answers the connected devices among the devices whose
+// driver's pod runs on the telescope's server (tree.devicesRunningOn)
+// that are not Switch devices, in connect order. The pod and not the
+// parents places each device, so a camera whose train a person deleted
+// still has its exposure aborted and disconnects in order.
 func (r *runner) liveHandles(ctx context.Context, w *stepWork) ([]handle, []string) {
 	t := r.o.snapshot()
-	ref, _, devices, err := r.telescope(t)
+	ref, _, _, err := r.telescope(t)
 	if err != nil {
 		return nil, nil
 	}
-	_, others := t.partition(devices)
+	_, others := t.partition(t.devicesRunningOn(ref))
 	return r.o.connectedHandles(ctx, w.report, t, ref, inOrder(others, connectOrder))
 }
 

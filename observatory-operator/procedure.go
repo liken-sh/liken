@@ -471,10 +471,11 @@ func (o *operator) deviceHandle(ctx context.Context, c procCall, report func(str
 		return handle{}, skip(fmt.Sprintf("%s is not served: %s", c.res, refusal))
 	}
 	if !placed && c.ending {
-		// A device deleted together with its reservation runs its
-		// deactivation in the reservation's Deactivation step, through
-		// the driver that still runs on the server it left.
-		ref, placed = t.lastServer(d)
+		// A device that a person deleted, or whose train a person
+		// deleted, runs its deactivation in the reservation's
+		// Deactivation step through the driver that still runs on the
+		// server it left.
+		ref, placed = t.runningOn(d)
 	}
 	if !placed {
 		return handle{}, skip(fmt.Sprintf("%s is on the shelf", c.res))

@@ -32,7 +32,8 @@ package main
 // -f` of a whole observatory deletes them, runs its deactivation in
 // the reservation's Deactivation step instead. The Ready runner that
 // would find it leaving has stopped, and the step reaches it through
-// the server it left (tree.lastServer).
+// the server it left (tree.runningOn). So does a device whose train is
+// deleted together with its reservation.
 
 import (
 	"context"

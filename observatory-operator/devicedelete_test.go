@@ -18,6 +18,14 @@ import (
 // parkCap is the change that closes the east telescope's dust cap.
 const parkCap = "east-telescope Dust Cover Simulator.CAP_PARK PARK=On UNPARK=Off"
 
+// warmCamera is the change that warms the sensor of the east
+// telescope's main camera from its cooled setpoint.
+const warmCamera = "east-telescope CCD Simulator.CCD_TEMPERATURE CCD_TEMPERATURE_VALUE=5"
+
+// disconnectCamera is the change that disconnects the east telescope's
+// main camera in the Disconnect step.
+const disconnectCamera = "east-telescope CCD Simulator.CONNECTION CONNECT=Off DISCONNECT=On"
+
 // claimDustCap gives the east dust cap a claim, as a dust cap on real
 // hardware states one, and keeps the rest of its spec.
 func (w *world) claimDustCap() {
@@ -270,12 +278,13 @@ func TestADeviceDeletedWithItsReservationRunsItsDeactivation(t *testing.T) {
 	}
 }
 
-// A device deleted with its reservation and with the resource that
-// places it, as `kubectl delete -f` of the whole inventory does, runs
-// its deactivation in the reservation's Deactivation step. The step
-// finds the device on the server its pod runs on, so a train that is
-// gone at once does not take its cap and its camera out of the step,
-// and a dome on an Observatory that stays parks.
+// A device whose reservation is deleted together with the resource
+// that places it, or with the device itself, as `kubectl delete -f` of
+// the whole inventory does, runs its deactivation in the reservation's
+// Deactivation step. The step finds each device on the server its pod
+// runs on, so a train that is gone at once does not take its cap, its
+// panel, or its camera out of the step, whether those are deleted too
+// or stay, and a dome on an Observatory that stays parks.
 func TestADeviceDeletedWithItsPlaceRunsItsDeactivation(t *testing.T) {
 	t.Parallel()
 	type named struct {
@@ -286,14 +295,17 @@ func TestADeviceDeletedWithItsPlaceRunsItsDeactivation(t *testing.T) {
 		name    string
 		deletes []named
 		runs    []named
-		change  string
+		changes []string
 	}{
 		{"a dust cap and a camera with their train",
 			[]named{{observatory.OpticalTrainKind, "east-imaging"}, {observatory.DustCapKind, "east"}, {observatory.CameraKind, "east-main"}},
-			[]named{{observatory.DustCapKind, "east"}, {observatory.CameraKind, "east-main"}}, parkCap},
+			[]named{{observatory.DustCapKind, "east"}, {observatory.CameraKind, "east-main"}}, []string{parkCap, warmCamera, disconnectCamera}},
+		{"a train whose camera and panel stay",
+			[]named{{observatory.OpticalTrainKind, "east-imaging"}, {observatory.DustCapKind, "east"}},
+			[]named{{observatory.DustCapKind, "east"}, {observatory.CameraKind, "east-main"}, {observatory.FlatPanelKind, "east"}}, []string{parkCap, warmCamera, disconnectCamera}},
 		{"a dome whose observatory stays",
 			[]named{{observatory.DomeKind, "lab"}},
-			[]named{{observatory.DomeKind, "lab"}}, "lab-observatory Dome Simulator.DOME_PARK PARK=On UNPARK=Off"},
+			[]named{{observatory.DomeKind, "lab"}}, []string{"lab-observatory Dome Simulator.DOME_PARK PARK=On UNPARK=Off"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -316,8 +328,11 @@ func TestADeviceDeletedWithItsPlaceRunsItsDeactivation(t *testing.T) {
 				for _, d := range c.deletes {
 					w.gone(d.kind, d.name, 10*time.Minute)
 				}
-				if !slices.Contains(w.indi.changes(), c.change) {
-					t.Errorf("changes = %q\nwant %q", w.indi.changes(), c.change)
+				w.gone(observatory.ReservationKind, "east-tonight", 10*time.Minute)
+				for _, change := range c.changes {
+					if !slices.Contains(w.indi.changes(), change) {
+						t.Errorf("changes = %q\nwant %q", w.indi.changes(), change)
+					}
 				}
 				for _, d := range c.runs {
 					if n := startedRuns(w.api, d.kind, d.name, observatory.TriggerDeactivation); n != 1 {

@@ -174,13 +174,15 @@ func (t *tree) server(d *device) (serverRef, bool) {
 	return serverRef{observatory.ObservatoryKind, p.Name}, true
 }
 
-// lastServer answers the server that a deleted device ran on, while the
-// pod of its driver still runs there and the device has the pod
-// (podOf): a served device has it while it holds the finalizer. The
-// finalizer keeps the deleted device's object until its deactivation
-// ran through that driver, and the answer lets the run reach it.
-func (t *tree) lastServer(d *device) (serverRef, bool) {
-	if !deleting(d.object.Metadata) {
+// runningOn answers the server that the pod of a device's driver runs
+// on, while the device holds the finalizer and has the pod (podOf): a
+// served device has its owner's pod while it holds the finalizer. The
+// pod places a device that leaves the tree of its parents, because a
+// person deleted the device or the parent that places it, and the
+// finalizer keeps the device's object until its deactivation ran
+// through that driver.
+func (t *tree) runningOn(d *device) (serverRef, bool) {
+	if !holdsFinalizer(d.object.Metadata) {
 		return serverRef{}, false
 	}
 	_, p, running := t.podOf(d)
@@ -190,18 +192,13 @@ func (t *tree) lastServer(d *device) (serverRef, bool) {
 	return t.serverNamed(p.Metadata.Labels[labelServer])
 }
 
-// deletedOn answers the devices that a person deleted, that still hold
-// the finalizer, and whose driver's pod still runs on one server
-// (lastServer), in the order of t.devices. The pod, not the spec,
-// places such a device, because a parent deleted with it can be gone
-// already, and the device's deactivation runs where its driver runs.
-func (t *tree) deletedOn(s serverRef) []*device {
+// devicesRunningOn answers the devices whose driver's pod runs on one
+// server (runningOn), in the order of t.devices, whatever their parents
+// say: the devices whose deactivation that server's driver can run.
+func (t *tree) devicesRunningOn(s serverRef) []*device {
 	var out []*device
 	for _, d := range t.devices {
-		if !holdsFinalizer(d.object.Metadata) {
-			continue
-		}
-		if on, ok := t.lastServer(d); ok && on == s {
+		if on, ok := t.runningOn(d); ok && on == s {
 			out = append(out, d)
 		}
 	}

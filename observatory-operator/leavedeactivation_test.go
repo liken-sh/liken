@@ -30,21 +30,27 @@ func (w *world) moveDevice(kind observatory.Kind, name, field, parent string) {
 
 func TestADeviceThatLeavesAnActiveParentRunsItsDeactivation(t *testing.T) {
 	t.Parallel()
+	moved := func(kind observatory.Kind, name, field, parent string) func(*world) {
+		return func(w *world) { w.moveDevice(kind, name, field, parent) }
+	}
 	cases := []struct {
-		name          string
-		kind          observatory.Kind
-		device, pod   string
-		field, parent string
+		name        string
+		kind        observatory.Kind
+		device, pod string
+		leave       func(w *world)
 		// parkMount parks the mount first, because the dome's lock
 		// refuses a park while a mount is unparked.
 		parkMount bool
 		sent      string
 	}{
-		{"a dust cap put on the shelf", observatory.DustCapKind, "east", "east-dustcap", "", "", false,
+		{"a dust cap put on the shelf", observatory.DustCapKind, "east", "east-dustcap", moved(observatory.DustCapKind, "east", "", ""), false,
 			"east-telescope Dust Cover Simulator.CAP_PARK PARK=On UNPARK=Off"},
-		{"a dust cap moved to another telescope", observatory.DustCapKind, "east", "east-dustcap", "opticalTrain", "west-imaging", false,
+		{"a dust cap moved to another telescope", observatory.DustCapKind, "east", "east-dustcap", moved(observatory.DustCapKind, "east", "opticalTrain", "west-imaging"), false,
 			"east-telescope Dust Cover Simulator.CAP_PARK PARK=On UNPARK=Off"},
-		{"a dome put on the shelf", observatory.DomeKind, "lab", "lab-dome", "", "", true,
+		{"a dust cap whose train is deleted", observatory.DustCapKind, "east", "east-dustcap",
+			func(w *world) { w.api.deleteNamed(kindCollection(observatory.OpticalTrainKind), "east-imaging") }, false,
+			"east-telescope Dust Cover Simulator.CAP_PARK PARK=On UNPARK=Off"},
+		{"a dome put on the shelf", observatory.DomeKind, "lab", "lab-dome", moved(observatory.DomeKind, "lab", "", ""), true,
 			"lab-observatory Dome Simulator.DOME_PARK PARK=On UNPARK=Off"},
 	}
 	for _, c := range cases {
@@ -56,7 +62,7 @@ func TestADeviceThatLeavesAnActiveParentRunsItsDeactivation(t *testing.T) {
 					w.indi.ask("east-telescope", "Telescope Simulator", "TELESCOPE_PARK", "PARK=On", "UNPARK=Off")
 					w.settle()
 				}
-				w.moveDevice(c.kind, c.device, c.field, c.parent)
+				c.leave(w)
 				run := w.runEnds(c.kind, c.device, observatory.TriggerDeactivation, 5*time.Minute)
 				if run.State != observatory.StepDone {
 					t.Errorf("the deactivation = %s %q, want Done", run.State, run.Summary)
