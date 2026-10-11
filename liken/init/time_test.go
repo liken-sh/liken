@@ -163,8 +163,18 @@ func TestTimeStatusAfterASync(t *testing.T) {
 	if status.Stratum != 3 {
 		t.Errorf("a stratum-2 source makes this machine stratum 3, got %d", status.Stratum)
 	}
-	if status.Offset != "1.28ms" {
-		t.Errorf("offset: got %q", status.Offset)
+	if status.Offset != "±5ms" {
+		t.Errorf("status holds the bound the offset fits inside, got %q", status.Offset)
+	}
+}
+
+// A boot that stepped the clock measured it before the step, so its
+// offset says nothing about the clock now, and status holds no bound
+// until the first poll.
+func TestTimeStatusAfterAStepHoldsNoBound(t *testing.T) {
+	sync := &timeSync{source: "time.cloudflare.com", stratum: 2, offset: 2 * time.Second, stepped: true}
+	if got := timeStatus(sync, []string{"time.cloudflare.com"}).Offset; got != "" {
+		t.Errorf("got %q", got)
 	}
 }
 
@@ -185,51 +195,6 @@ func TestTimeStatusNeverSynced(t *testing.T) {
 	}
 	if status.Stratum != 16 {
 		t.Errorf("unsynchronized reports stratum 16, got %d", status.Stratum)
-	}
-}
-
-func synchronizedStatus(source string, stratum int) machine.TimeStatus {
-	return machine.TimeStatus{State: machine.TimeSynchronized, Source: source, Stratum: stratum}
-}
-
-func TestWorthRepublishingOnAnyStateSourceOrStratumChange(t *testing.T) {
-	published := synchronizedStatus("10.10.0.1", 3)
-	if worthRepublishing(published, machine.TimeStatus{State: machine.TimeUnsynchronized}, 0) != true {
-		t.Error("losing sync is always news")
-	}
-	if worthRepublishing(published, synchronizedStatus("10.10.0.2", 3), 0) != true {
-		t.Error("a different source is news")
-	}
-	if worthRepublishing(published, synchronizedStatus("10.10.0.1", 4), 0) != true {
-		t.Error("a different stratum is news")
-	}
-}
-
-func TestWorthRepublishingIgnoresJitter(t *testing.T) {
-	published := synchronizedStatus("10.10.0.1", 3)
-	if worthRepublishing(published, published, 800*time.Microsecond) {
-		t.Error("sub-threshold wobble is not news; every republish is an etcd write on every machine")
-	}
-}
-
-func TestWorthRepublishingReportsRealDrift(t *testing.T) {
-	published := synchronizedStatus("10.10.0.1", 3)
-	if !worthRepublishing(published, published, 30*time.Millisecond) {
-		t.Error("a clock that moved past the threshold is news")
-	}
-	if !worthRepublishing(published, published, -30*time.Millisecond) {
-		t.Error("drift is news in either direction")
-	}
-}
-
-// A clock that holds steady publishes nothing, however long it holds.
-// Each publish costs a status write and an etcd write on every leader,
-// and the state already turns Unsynchronized when the polls stop
-// answering.
-func TestWorthRepublishingIgnoresTimePassing(t *testing.T) {
-	published := synchronizedStatus("10.10.0.1", 3)
-	if worthRepublishing(published, published, time.Millisecond) {
-		t.Error("a steady clock republished")
 	}
 }
 
@@ -292,13 +257,23 @@ func TestStepClockAtBootSlewsWhenTheClockIsClose(t *testing.T) {
 }
 
 // pollAnswer is one scripted poll of the time sources: the offset a
-// source measured, or no answer at all.
+// source measured and the round trip it took, or no answer at all.
 type pollAnswer struct {
 	offset   time.Duration
+	delay    time.Duration
 	answered bool
 }
 
-func timeAnswer(offset time.Duration) pollAnswer { return pollAnswer{offset: offset, answered: true} }
+// timeAnswer is an answer over a quiet wired path, with a round trip
+// of one millisecond.
+func timeAnswer(offset time.Duration) pollAnswer {
+	return pollAnswer{offset: offset, delay: time.Millisecond, answered: true}
+}
+
+// timeAnswerOver is an answer whose round trip took delay.
+func timeAnswerOver(offset, delay time.Duration) pollAnswer {
+	return pollAnswer{offset: offset, delay: delay, answered: true}
+}
 
 var noTimeAnswer = pollAnswer{}
 
@@ -341,7 +316,7 @@ func (f *fakeClockActions) query(sources []string) (*timeSync, error) {
 	if !next.answered {
 		return nil, errNoTimeAnswer
 	}
-	return &timeSync{source: sources[0], stratum: 2, offset: next.offset, at: time.Now()}, nil
+	return &timeSync{source: sources[0], stratum: 2, offset: next.offset, delay: next.delay, at: time.Now()}, nil
 }
 
 func (f *fakeClockActions) step(to time.Time) error {
@@ -384,8 +359,8 @@ func TestStepClockAtBootStepsAWrongClock(t *testing.T) {
 		if !slices.Equal(steps, []time.Time{start.Add(2 * time.Second)}) {
 			t.Errorf("the clock steps once, to the measured time: %v", steps)
 		}
-		if sync == nil || sync.offset != 2*time.Second || sync.source != "10.10.0.1" {
-			t.Errorf("the measurement comes back for status: %+v", sync)
+		if sync == nil || sync.offset != 2*time.Second || sync.source != "10.10.0.1" || !sync.stepped {
+			t.Errorf("the measurement comes back for status, marked as stepped: %+v", sync)
 		}
 	})
 }

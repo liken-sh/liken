@@ -516,7 +516,7 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	// as long as it runs. A free-running machine has no source to
 	// follow, and its status already states this.
 	if len(clk.sources) > 0 {
-		plane.start("the clock", disciplineClock(clk, factsTree, initialTime))
+		plane.start("the clock", disciplineClock(clk, factsTree, machine.ClockDir, initialTime))
 	}
 	// Only leaders serve time, because only leaders receive time
 	// requests. Followers sync from the leaders themselves.

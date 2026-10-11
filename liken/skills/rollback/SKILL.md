@@ -81,7 +81,8 @@ console names each one, for example `the proven manifest names fields
 this release does not know, and this boot leaves them out:
 spec.serio`. The machine keeps its storage, network, and every other
 field. The operator of that release also drops the conditions that
-only a newer release writes, such as `SerioAttached`, so a stale
+only a newer release writes, such as `SerioAttached` and
+`ClockSynchronized`, so a stale
 condition does not hold the machine `Degraded`. You can roll back to
 such a release without the steps below.
 
@@ -122,5 +123,6 @@ To roll back such a machine to a release up to and including
 
 The older release does not know the `SerioAttached` condition, so it
 keeps whatever value the condition had. If that value is `False`, the
-machine reads as `Degraded` after the rollback. Remove the condition
+machine reads as `Degraded` after the rollback. The same is true of
+`ClockSynchronized`. Remove the condition
 from the status with `kubectl edit machine <name> --subresource=status`.

@@ -157,15 +157,18 @@ func (t FactsTree) writeInterfaceWireless(base string, w *WirelessStatus) error 
 	)
 }
 
-// WriteTime publishes the state of the machine's clock. The clock loop
-// owns this subtree and rewrites it as it disciplines the clock.
+// WriteTime publishes the standing of the machine's clock. The clock
+// loop owns this record and rewrites it while the machine runs, so the
+// four fields are one record file, and one rename replaces them
+// together. Each publish is then one inotify event and one reconcile
+// pass.
 func (t FactsTree) WriteTime(ts TimeStatus) error {
-	return t.report(firstError(
-		t.writeFact("time/state", string(ts.State)),
-		t.writeFact("time/source", ts.Source),
-		t.writeFact("time/stratum", formatInt(ts.Stratum)),
-		t.writeFact("time/offset", ts.Offset),
-	))
+	return t.report(t.writeRecordFact("time/standing", [][2]string{
+		{"state", string(ts.State)},
+		{"source", ts.Source},
+		{"stratum", formatInt(ts.Stratum)},
+		{"offset", ts.Offset},
+	}))
 }
 
 // WriteHardwareBasics publishes the machine's processor count and total

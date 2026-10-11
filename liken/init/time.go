@@ -74,11 +74,8 @@ import (
 )
 
 // timePollInterval sets how often the discipline loop measures the
-// clock. 64 seconds is NTP's classic starting interval (minpoll 6,
-// or 2^6 seconds). This interval is frequent enough to catch drift
-// measured in parts per million, and infrequent enough that it does
-// not burden an upstream time source.
-const timePollInterval = 64 * time.Second
+// clock (machine/clock.go gives the reason for 64 seconds).
+const timePollInterval = machine.ClockPollInterval
 
 // stepThreshold is the offset below which a boot does not step the
 // clock. Below this offset, the slew absorbs the error faster than
@@ -98,13 +95,17 @@ const (
 )
 
 // timeSync records one successful measurement: which source
-// answered, its stratum, how far off this machine's clock was, and
-// when the measurement happened.
+// answered, its stratum, how far off this machine's clock was, how
+// long the exchange's round trip took, and when the measurement
+// happened. A boot measurement that stepped the clock is marked,
+// because its offset describes the clock before the step.
 type timeSync struct {
 	source  string
 	stratum int
 	offset  time.Duration
+	delay   time.Duration
 	at      time.Time
+	stepped bool
 }
 
 // clock holds the machine's timekeeping state. Two components share
@@ -209,13 +210,18 @@ func declaredNodeAddress(clusterDoc *cluster.Cluster, manifestDir, name string) 
 	return ""
 }
 
-// timeStatus reports the clock's state as machine status. It reports
-// the same facts that the console prints, in a form other systems
-// can query. A machine that has sources but has not synced yet is
-// Unsynchronized, at stratum 16. A machine with no sources at all is
-// deliberately FreeRunning, at stratum 10. Neither state is reported
-// as Synchronized, because that word is reserved for a clock that is
-// currently following a source that is itself synchronized.
+// timeStatus reports the clock's standing as machine status. It
+// reports the same facts that the console prints, in a form other
+// systems can query. A machine that has sources but has not synced yet
+// is Unsynchronized, at stratum 16. A machine with no sources at all
+// is deliberately FreeRunning, at stratum 10. Neither state is
+// reported as Synchronized, because that word is reserved for a clock
+// that is currently following a source that is itself synchronized.
+//
+// The offset is a bound, such as "±5ms" (clockbound.go). A boot that
+// stepped the clock publishes no bound, because its measurement
+// describes the clock before the step, and the first poll after it
+// publishes one.
 func timeStatus(sync *timeSync, sources []string) machine.TimeStatus {
 	if sync == nil {
 		if len(sources) == 0 {
@@ -223,12 +229,15 @@ func timeStatus(sync *timeSync, sources []string) machine.TimeStatus {
 		}
 		return machine.TimeStatus{State: machine.TimeUnsynchronized, Stratum: stratumUnsynchronized}
 	}
-	return machine.TimeStatus{
+	status := machine.TimeStatus{
 		State:   machine.TimeSynchronized,
 		Source:  sync.source,
 		Stratum: sync.stratum + 1,
-		Offset:  sync.offset.Round(10 * time.Microsecond).String(),
 	}
+	if !sync.stepped {
+		status.Offset = machine.OffsetBoundOf(sync.offset).String()
+	}
+	return status
 }
 
 // querySources asks each source in turn and uses the first valid
@@ -252,6 +261,7 @@ func querySources(sources []string) (*timeSync, error) {
 			source:  source,
 			stratum: int(response.Stratum),
 			offset:  response.ClockOffset,
+			delay:   response.RTT,
 			at:      time.Now(),
 		}, nil
 	}
@@ -291,6 +301,7 @@ func stepClockAtBoot(sources []string) *timeSync {
 			sync.offset.Round(time.Millisecond), sync.source, sync.stratum,
 			corrected.Format(time.RFC3339))
 		sync.at = time.Now()
+		sync.stepped = true
 		return sync
 	}
 	fmt.Fprintln(os.Stderr, "liken: time: no source answered; booting on the hardware clock (the discipline loop keeps trying)")
@@ -340,34 +351,8 @@ func slewClock(offset time.Duration) error {
 }
 
 // syncStaleAfter is how long the loop keeps reporting synchronized
-// after its last good measurement. Three missed polls means the
-// source is gone, not just busy, and status must stop reporting
-// synchronized at that point.
-const syncStaleAfter = 3 * timePollInterval
-
-// worthRepublishing reports whether a fresh measurement changes the
-// published time facts. A change in state, source, or stratum must
-// always be reported. The offset must be reported only when it has
-// moved past offsetPublishThreshold since the last publish, so the
-// published offset is within that threshold of the measured one. SNTP
-// measurements wobble by microseconds on every poll, and each
-// republished fact has a cost: the machine publishes a status update
-// whenever the facts change, and each such write causes a raft round
-// and an fsync on every one of the cluster's leaders. A fleet whose
-// clocks are working correctly should cost etcd nothing extra.
-//
-// Time passing is not news. The facts hold no time of the last sync,
-// because that time would change at every poll, and a machine whose
-// polls stop answering reports Unsynchronized after syncStaleAfter.
-// So Synchronized means a measurement within the last three polls.
-const offsetPublishThreshold = 25 * time.Millisecond
-
-func worthRepublishing(published, fresh machine.TimeStatus, drift time.Duration) bool {
-	if published.State != fresh.State || published.Source != fresh.Source || published.Stratum != fresh.Stratum {
-		return true
-	}
-	return drift.Abs() >= offsetPublishThreshold
-}
+// after its last good measurement (machine.ClockStaleAfter).
+const syncStaleAfter = machine.ClockStaleAfter
 
 // writeRTC copies the system clock into the hardware clock. Linux
 // never does this by itself. On a traditional distribution, a
@@ -409,35 +394,39 @@ func writeRTC() {
 }
 
 // disciplineClock builds the machine plane's time component. It
-// measures, slews, publishes, sleeps, and repeats. The clock loop is
-// the only writer of the time/ subtree, so it keeps a local copy of the
-// clock's state and needs no lock: no other component ever writes those
-// files. disciplineClock prints transitions rather than every poll: a
-// sync gained, a sync lost, and an offset only when the offset exceeds
-// the step threshold, which means drift is outrunning the slew. The
-// facts follow the same rule. The loop rewrites the time/ files only
-// when worthRepublishing reports that the measurement matters, and never
-// for microsecond wobble; between writes it holds the latest value in
-// its local copy.
-func disciplineClock(clk *clock, tree machine.FactsTree, initial machine.TimeStatus) func(context.Context) error {
+// measures, filters, slews, records, publishes, sleeps, and repeats.
+//
+// Each answered poll goes through the clock filter (clockfilter.go),
+// and the selected sample drives three outputs. The clock slews by it
+// once. The reading, the exact offset, goes to the file under
+// readingDir on every answered poll, where machine-operator reads it
+// for Prometheus. The standing goes to the facts tree, and from there
+// to status, only when it changes: a new state, source, or stratum,
+// or a new bound on the offset (clockbound.go). A healthy clock
+// rewrites the facts tree never, so it costs the API server nothing.
+//
+// The loop is the only writer of the time standing, so it keeps the
+// published standing in a local copy and needs no lock. It prints
+// transitions rather than every poll: a sync gained, a sync lost, a
+// new bound, and an offset past the step threshold, which means drift
+// is outrunning the slew.
+func disciplineClock(clk *clock, tree machine.FactsTree, readingDir string, initial machine.TimeStatus) func(context.Context) error {
 	return func(ctx context.Context) error {
-		// current holds the clock's state. This loop is the only writer
-		// of the time/ subtree, so a local copy lets the loop read a
-		// consistent value as it makes its decisions. It starts from the
-		// seed the boot step published.
-		current := initial
-
+		// published holds what the time standing currently says. The
+		// boot step published it, moments ago.
+		published := initial
 		lastGood := clk.lastSyncAt()
-		// published holds what the time/ subtree currently says. It is
-		// the baseline that every worthRepublishing check compares
-		// against. The boot step published this value, moments ago.
-		published := current
-		publishedOffset, _ := time.ParseDuration(current.Offset)
+		filter := &clockFilter{}
+		hold := &boundHold{}
+		publish := func(next machine.TimeStatus) {
+			tree.WriteTime(next)
+			published = next
+		}
 		// The boot step, or the lack of one, determined whether the RTC
 		// has been written yet. If the boot came up on a wrong
 		// hardware clock, this loop corrects the RTC at the first
 		// sync it achieves.
-		rtcWritten := current.State == machine.TimeSynchronized
+		rtcWritten := published.State == machine.TimeSynchronized
 		for {
 			if !sleepUnlessCancelled(ctx, timePollInterval) {
 				// Clean shutdown. Leave the hardware clock holding
@@ -452,26 +441,32 @@ func disciplineClock(clk *clock, tree machine.FactsTree, initial machine.TimeSta
 				// A failed poll is worth reporting only when it
 				// changes the machine's state. Past the staleness
 				// window, the machine stops reporting a synchronized
-				// clock.
-				if current.State == machine.TimeSynchronized && time.Since(lastGood) > syncStaleAfter {
+				// clock, and it drops the bound, because the bound
+				// is a claim about a measurement that is now too old.
+				if published.State == machine.TimeSynchronized && time.Since(lastGood) > syncStaleAfter {
 					fmt.Fprintf(os.Stderr, "liken: time: lost every source (%v); the clock is on its own\n", err)
-					current.State = machine.TimeUnsynchronized
-					current.Stratum = stratumUnsynchronized
-					tree.WriteTime(current)
-					published = current
+					lost := published
+					lost.State = machine.TimeUnsynchronized
+					lost.Stratum = stratumUnsynchronized
+					lost.Offset = ""
+					publish(lost)
+					hold.reset()
 				}
 				continue
 			}
 
-			if err := slewSystemClock(sync.offset); err != nil {
-				fmt.Fprintf(os.Stderr, "liken: time: slewing the clock: %v\n", err)
+			selected, fresh := filter.observe(*sync)
+			if fresh {
+				if err := slewSystemClock(selected.offset); err != nil {
+					fmt.Fprintf(os.Stderr, "liken: time: slewing the clock: %v\n", err)
+				}
 			}
-			if current.State != machine.TimeSynchronized {
+			if published.State != machine.TimeSynchronized {
 				fmt.Printf("liken: time: synchronized to %s (stratum %d), offset %s\n",
-					sync.source, sync.stratum, sync.offset.Round(10*time.Microsecond))
-			} else if sync.offset.Abs() >= stepThreshold {
+					selected.source, selected.stratum, selected.offset.Round(10*time.Microsecond))
+			} else if fresh && selected.offset.Abs() >= stepThreshold {
 				fmt.Printf("liken: time: offset %s from %s exceeds the slew's pace; correcting over several polls\n",
-					sync.offset.Round(time.Millisecond), sync.source)
+					selected.offset.Round(time.Millisecond), selected.source)
 			}
 			lastGood = sync.at
 			clk.record(sync)
@@ -479,14 +474,23 @@ func disciplineClock(clk *clock, tree machine.FactsTree, initial machine.TimeSta
 				saveHardwareClock()
 				rtcWritten = true
 			}
-			// This drift check compares against the offset that was
-			// last published, not the offset from the last poll.
-			// Small wobbles accumulate toward the threshold this
-			// way, instead of resetting every 64 seconds.
-			current = timeStatus(sync, clk.sources)
-			if worthRepublishing(published, current, sync.offset-publishedOffset) {
-				tree.WriteTime(current)
-				published, publishedOffset = current, sync.offset
+			if err := machine.WriteClockReading(readingDir, machine.ClockReading{
+				Offset: selected.offset, Delay: selected.delay, Source: selected.source, At: sync.at,
+			}); err != nil {
+				fmt.Fprintf(os.Stderr, "liken: time: writing the reading: %v\n", err)
+			}
+
+			next := timeStatus(&selected, clk.sources)
+			if next.State != published.State || next.Source != published.Source || next.Stratum != published.Stratum {
+				publish(next)
+				hold.reset()
+				continue
+			}
+			if bound, changed := hold.next(published.Offset, machine.OffsetBoundOf(selected.offset)); changed {
+				fmt.Printf("liken: time: offset within %s of %s (was %s); last measured %s\n",
+					bound, selected.source, orUnknown(published.Offset), selected.offset.Round(10*time.Microsecond))
+				next.Offset = bound
+				publish(next)
 			}
 		}
 	}

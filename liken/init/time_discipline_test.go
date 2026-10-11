@@ -1,8 +1,9 @@
 package main
 
 // Tests for the discipline loop that runs after boot: when it
-// publishes a measurement, when it reports that the sources are gone,
-// and when it writes the hardware clock. Each test runs the loop in a
+// publishes the standing, when it writes the reading, when it slews,
+// when it reports that the sources are gone, and when it writes the
+// hardware clock. Each test runs the loop in a
 // synctest bubble, so a 64-second poll takes no real time, and the
 // loop measures through the scripted sources of `fakeClockActions`.
 
@@ -19,11 +20,13 @@ import (
 )
 
 // runDiscipline starts the loop over a facts tree that already holds
-// the boot step's status, the way main starts it. The returned stop
-// function cancels the loop and waits for it to return.
-func runDiscipline(t *testing.T, initial machine.TimeStatus) (tree machine.FactsTree, stop func()) {
+// the boot step's status, the way main starts it. The loop writes its
+// reading to the returned readingDir. The returned stop function
+// cancels the loop and waits for it to return.
+func runDiscipline(t *testing.T, initial machine.TimeStatus) (tree machine.FactsTree, readingDir string, stop func()) {
 	t.Helper()
 	tree = machine.FactsTree{Dir: t.TempDir()}
+	readingDir = t.TempDir()
 	if err := tree.WriteTime(initial); err != nil {
 		t.Fatal(err)
 	}
@@ -33,8 +36,8 @@ func runDiscipline(t *testing.T, initial machine.TimeStatus) (tree machine.Facts
 	if initial.State == machine.TimeSynchronized {
 		clk.record(&timeSync{source: initial.Source, stratum: initial.Stratum - 1, at: time.Now()})
 	}
-	go func() { done <- disciplineClock(clk, tree, initial)(ctx) }()
-	return tree, func() {
+	go func() { done <- disciplineClock(clk, tree, readingDir, initial)(ctx) }()
+	return tree, readingDir, func() {
 		cancel()
 		if err := <-done; err != nil {
 			t.Errorf("the loop ends cleanly at shutdown: %v", err)
@@ -69,13 +72,13 @@ func bootSynchronized(offset string) machine.TimeStatus {
 func TestDisciplineClockPublishesTheFirstSync(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := installFakeClock(t, timeAnswer(3*time.Millisecond))
-		tree, stop := runDiscipline(t, timeStatus(nil, []string{"10.10.0.1"}))
+		tree, _, stop := runDiscipline(t, timeStatus(nil, []string{"10.10.0.1"}))
 
 		time.Sleep(timePollInterval + time.Second)
 		synctest.Wait()
 
 		got := publishedTime(t, tree)
-		if got.State != machine.TimeSynchronized || got.Source != "10.10.0.1" || got.Stratum != 3 || got.Offset != "3ms" {
+		if got.State != machine.TimeSynchronized || got.Source != "10.10.0.1" || got.Stratum != 3 || got.Offset != "±5ms" {
 			t.Errorf("the first sync is published: %+v", got)
 		}
 		_, _, slews, rtcWrites := f.recorded()
@@ -100,7 +103,7 @@ func TestDisciplineClockPublishesDespiteAFailedSlew(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := installFakeClock(t, timeAnswer(3*time.Millisecond))
 		f.slewErr = unix.EPERM
-		tree, stop := runDiscipline(t, timeStatus(nil, []string{"10.10.0.1"}))
+		tree, _, stop := runDiscipline(t, timeStatus(nil, []string{"10.10.0.1"}))
 		defer stop()
 
 		time.Sleep(timePollInterval + time.Second)
@@ -112,45 +115,100 @@ func TestDisciplineClockPublishesDespiteAFailedSlew(t *testing.T) {
 	})
 }
 
-// The loop leaves the published offset alone while it wobbles by
-// microseconds, and publishes it when it moves 25ms or more from the
-// published value. Each publish is a status write that costs a raft
-// round on every leader.
-func TestDisciplineClockPublishesDriftButNotWobble(t *testing.T) {
+// A worse bound publishes at the poll that measures it. A better
+// bound publishes only at the third poll in a row inside it, so a
+// clock near a boundary does not write status at each crossing.
+func TestDisciplineClockPublishesAWorseBoundAtOnceAndABetterOneAfterThreePolls(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		installFakeClock(t, timeAnswer(1500*time.Microsecond), timeAnswer(30*time.Millisecond), timeAnswer(200*time.Millisecond))
-		tree, stop := runDiscipline(t, bootSynchronized("1ms"))
+		// Each answer has a shorter round trip than the last, so the
+		// filter selects each one as it arrives.
+		installFakeClock(t,
+			timeAnswerOver(200*time.Millisecond, 9*time.Millisecond),
+			timeAnswerOver(3*time.Millisecond, 8*time.Millisecond),
+			timeAnswerOver(3*time.Millisecond, 7*time.Millisecond),
+			timeAnswerOver(3*time.Millisecond, 6*time.Millisecond))
+		tree, _, stop := runDiscipline(t, bootSynchronized("±5ms"))
 		defer stop()
 
 		time.Sleep(timePollInterval + time.Second)
 		synctest.Wait()
-		if got := publishedTime(t, tree).Offset; got != "1ms" {
-			t.Errorf("a 0.5ms wobble is not published, got %q", got)
+		if got := publishedTime(t, tree).Offset; got != "±1s" {
+			t.Errorf("a worse bound publishes at once, got %q", got)
+		}
+
+		time.Sleep(2 * timePollInterval)
+		synctest.Wait()
+		if got := publishedTime(t, tree).Offset; got != "±1s" {
+			t.Errorf("two better polls publish nothing, got %q", got)
 		}
 
 		time.Sleep(timePollInterval)
 		synctest.Wait()
-		if got := publishedTime(t, tree).Offset; got != "30ms" {
-			t.Errorf("a 29ms drift is published, got %q", got)
-		}
-
-		time.Sleep(timePollInterval)
-		synctest.Wait()
-		if got := publishedTime(t, tree).Offset; got != "200ms" {
-			t.Errorf("an offset past the step threshold is published, got %q", got)
+		if got := publishedTime(t, tree).Offset; got != "±5ms" {
+			t.Errorf("the third better poll publishes, got %q", got)
 		}
 	})
 }
 
-// Ten minutes of wobble rewrite nothing. The test changes the
-// published offset under the loop, and a loop that republished would
-// write the measured offset back over it.
+// Over wifi, the samples with a long round trip swing by tens of
+// milliseconds. The filter keeps the short one, so the clock slews
+// once, and the bound holds.
+func TestDisciplineClockFiltersOutSlowRoundTrips(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := installFakeClock(t,
+			timeAnswerOver(-2*time.Millisecond, 4*time.Millisecond),
+			timeAnswerOver(-30*time.Millisecond, 40*time.Millisecond),
+			timeAnswerOver(37*time.Millisecond, 45*time.Millisecond))
+		tree, _, stop := runDiscipline(t, bootSynchronized("±5ms"))
+		defer stop()
+
+		time.Sleep(3*timePollInterval + time.Second)
+		synctest.Wait()
+
+		if got := publishedTime(t, tree).Offset; got != "±5ms" {
+			t.Errorf("noise on slow round trips moved the bound to %q", got)
+		}
+		if _, _, slews, _ := f.recorded(); !slices.Equal(slews, []time.Duration{-2 * time.Millisecond}) {
+			t.Errorf("the clock slews once, by the short round trip: %v", slews)
+		}
+	})
+}
+
+// Every answered poll writes the reading, the exact filtered offset
+// that Prometheus scrapes, even when the standing does not change.
+func TestDisciplineClockWritesTheReadingAtEveryAnsweredPoll(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		installFakeClock(t, timeAnswer(1200*time.Microsecond), timeAnswerOver(1300*time.Microsecond, 500*time.Microsecond))
+		_, readingDir, stop := runDiscipline(t, bootSynchronized("±5ms"))
+		defer stop()
+
+		time.Sleep(2*timePollInterval + time.Second)
+		synctest.Wait()
+
+		got, err := machine.ReadClockReading(readingDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := machine.ClockReading{
+			Offset: 1300 * time.Microsecond, Delay: 500 * time.Microsecond,
+			Source: "10.10.0.1", At: time.Now().Add(-time.Second),
+		}
+		if !got.At.Equal(want.At) || got.Offset != want.Offset || got.Delay != want.Delay || got.Source != want.Source {
+			t.Errorf("got %+v, want %+v", got, want)
+		}
+	})
+}
+
+// A steady clock rewrites nothing, however long it holds. The test
+// changes the published standing under the loop, and a loop that
+// republished would write its own standing back over it.
 func TestDisciplineClockRewritesNothingWhileTheClockHoldsSteady(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		installFakeClock(t, slices.Repeat([]pollAnswer{timeAnswer(time.Millisecond)}, 12)...)
-		tree, stop := runDiscipline(t, bootSynchronized("1ms"))
+		tree, _, stop := runDiscipline(t, bootSynchronized("±1ms"))
 		defer stop()
-		marked := bootSynchronized("7ms")
+		marked := bootSynchronized("±1ms")
+		marked.Source = "marker"
 		if err := tree.WriteTime(marked); err != nil {
 			t.Fatal(err)
 		}
@@ -158,8 +216,8 @@ func TestDisciplineClockRewritesNothingWhileTheClockHoldsSteady(t *testing.T) {
 		time.Sleep(12*timePollInterval + time.Second)
 		synctest.Wait()
 
-		if got := publishedTime(t, tree).Offset; got != "7ms" {
-			t.Errorf("twelve polls of 1ms wobble rewrote the offset to %s", got)
+		if got := publishedTime(t, tree).Source; got != "marker" {
+			t.Errorf("twelve steady polls rewrote the standing, source %q", got)
 		}
 	})
 }
@@ -170,7 +228,7 @@ func TestDisciplineClockRewritesNothingWhileTheClockHoldsSteady(t *testing.T) {
 func TestDisciplineClockReportsLostSourcesAfterThreeMissedPolls(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		installFakeClock(t)
-		tree, stop := runDiscipline(t, bootSynchronized("1ms"))
+		tree, _, stop := runDiscipline(t, bootSynchronized("±1ms"))
 		defer stop()
 
 		time.Sleep(3*timePollInterval + time.Second)
@@ -182,8 +240,8 @@ func TestDisciplineClockReportsLostSourcesAfterThreeMissedPolls(t *testing.T) {
 		time.Sleep(timePollInterval)
 		synctest.Wait()
 		got := publishedTime(t, tree)
-		if got.State != machine.TimeUnsynchronized || got.Stratum != stratumUnsynchronized {
-			t.Errorf("the fourth missed poll reports the clock on its own: %+v", got)
+		if got.State != machine.TimeUnsynchronized || got.Stratum != stratumUnsynchronized || got.Offset != "" {
+			t.Errorf("the fourth missed poll reports the clock on its own, with no bound: %+v", got)
 		}
 	})
 }
@@ -194,7 +252,7 @@ func TestDisciplineClockReportsLostSourcesAfterThreeMissedPolls(t *testing.T) {
 func TestDisciplineClockLeavesTheRTCAloneWithoutGoodTime(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := installFakeClock(t)
-		_, stop := runDiscipline(t, timeStatus(nil, []string{"10.10.0.1"}))
+		_, _, stop := runDiscipline(t, timeStatus(nil, []string{"10.10.0.1"}))
 
 		time.Sleep(3 * timePollInterval)
 		stop()

@@ -57,8 +57,9 @@ package machine
 //     of key=value lines.
 //
 // Rule 5 applies to four boot records, boot/manifest,
-// boot/clusterManifest, boot/credentials, and boot/imports, and to
-// each element of the two serio lists, serio/ and boot/serio/. Each of
+// boot/clusterManifest, boot/credentials, and boot/imports, to the
+// clock's standing, time/standing, and to each element of the two
+// serio lists, serio/ and boot/serio/. Each of
 // these is rewritten while the machine runs. A rename replaces one
 // inode in one step, so a rename of one file is the only write that a
 // concurrent reader can never see half done. The paired fields of each

@@ -50,6 +50,7 @@ func serveMetrics(address string, f *fetcher, health func() error) (*metrics.Ope
 		[]string{machineKind}, watchKinds)
 	o.SetHealth(health)
 	layer := newMachineMetrics(o, f)
+	o.Registry().MustRegister(clockCollector{dir: machine.ClockDir, now: time.Now})
 	if addr, err := o.Serve(address); err != nil {
 		fmt.Fprintf(os.Stderr, "the metrics listener is not serving: %v\n", err)
 	} else if addr != nil {

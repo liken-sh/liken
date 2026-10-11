@@ -33,7 +33,7 @@ metadata:
     # that use its fields (init/schemarevision.go). Raise it in the
     # same change that changes the schema below; a test holds the two
     # together.
-    liken.sh/schema-revision: "9"
+    liken.sh/schema-revision: "10"
 spec:
   group: liken.sh
   names:
@@ -111,8 +111,8 @@ spec:
         # spec declares no upstream sources, on purpose), or
         # Unsynchronized (the spec declares sources, but none of them
         # answers, which is an outage). The next column shows the
-        # offset that init last published, which is within 25 ms of
-        # the offset init measures now.
+        # bound that the clock's offset fits inside, such as ±5ms. The
+        # exact offset is the metric liken_time_offset_seconds.
         - name: Time
           type: string
           jsonPath: .status.time.state
@@ -1689,25 +1689,22 @@ spec:
                     offset:
                       type: string
                       description: >-
-                        The clock error that init last published, as
-                        a duration ("1.28ms"). The value is positive
-                        when this machine is behind its source. Init
-                        measures the clock every 64 seconds and
-                        publishes a new offset only when the measured
-                        one moves 25 ms or more from this value, so
-                        the clock error now is within 25 ms of it.
-                    lastSync:
-                      type: string
-                      format: date-time
-                      description: >-
-                        The last time that the clock agreed with its
-                        source, from a machine that runs release
-                        2026.10.09-002 or older. A newer release
-                        leaves this field out, because the time
-                        changed at every measurement, and each change
-                        cost a status write. On a newer release,
-                        state is Synchronized only within three polls
-                        of a good measurement.
+                        The bound that the clock's error fits inside:
+                        ±1ms, ±5ms, ±25ms, ±128ms, ±1s, or >1s. Init
+                        measures the clock every 64 seconds, keeps
+                        the measurement with the shortest round trip
+                        of the last eight, and publishes the smallest
+                        bound it fits inside. A worse bound publishes
+                        at once, and a better bound after three polls
+                        in a row inside it. Status holds a bound and
+                        not the exact error, because the exact error
+                        changes at every poll and each change would
+                        cost a status write. The exact error is the
+                        metric liken_time_offset_seconds that
+                        machine-operator serves. The field is empty
+                        while state is not Synchronized, and after a
+                        boot that stepped the clock until the first
+                        poll.
                 hardware:
                   type: object
                   description: >-
@@ -3635,7 +3632,8 @@ spec:
                     form. Each pass writes every condition again.
                     Ready is the roll-up, and it is True only when
                     every other condition is True, except
-                    SerioAttached and RebootApproved. The other
+                    SerioAttached, ClockSynchronized, and
+                    RebootApproved. The other
                     conditions each report one check: FactsPublished
                     for the facts that init writes; SysctlsApplied,
                     HostEntriesApplied, StorageReady, ModulesLoaded,
@@ -3654,7 +3652,12 @@ spec:
                     reports the serial-line adapters that spec.serio
                     declares. An adapter that is unplugged or
                     refused leaves the rest of the machine working,
-                    so Ready does not count it. RebootApproved is
+                    so Ready does not count it. ClockSynchronized
+                    reports status.time: it is False when the time
+                    sources stop answering, or when the clock is
+                    more than 128ms from its source. An upstream
+                    outage reaches every leader at once, so Ready
+                    does not count it. RebootApproved is
                     the one condition that another program writes:
                     the cluster operator adds it to grant this
                     machine a reboot turn, and removes it to take

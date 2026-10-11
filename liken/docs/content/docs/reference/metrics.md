@@ -56,9 +56,62 @@ metrics of their own domain:
 | machine-operator | `liken_machine_longest_pass_seconds` | gauge | the longest pass since the operator started; the heartbeat stops at 60 |
 | machine-operator | `liken_machine_backstop_repairs_total{step}` | counter | a write by the five-minute backstop pass, which names a missing wake |
 | machine-operator | `liken_machine_passes_total{cause}` | counter | passes by what started each one; a settled machine runs few |
+| machine-operator | `liken_time_offset_seconds` | gauge | the clock's exact error; see [the clock](#the-clock) |
+| machine-operator | `liken_time_last_sync_timestamp_seconds` | gauge | when a time source last answered |
 | cluster-operator | `liken_machines{phase}` | gauge | fleet by phase |
 | cluster-operator | `liken_disruption_approvals_pending` | gauge | approvals outstanding |
 | cluster-operator | `liken_machines_behind_target` | gauge | nodes not yet on the target release |
+
+## The clock
+
+You can see a machine's clock in three places, and each one answers a
+different question.
+
+**Is the clock fine now?** `kubectl get machine` shows the clock's
+state and a bound on its error:
+
+```
+NAME      ROLE       STATUS   ...   TIME           OFFSET
+liken-1   leader     Ready    ...   Synchronized   ±5ms
+```
+
+The bound is one of `±1ms`, `±5ms`, `±25ms`, `±128ms`, `±1s`, or
+`>1s`, and it is
+[`status.time.offset`](/docs/reference/machine/#statustime). The
+condition `ClockSynchronized` is `False` when the time sources stop
+answering, or when the bound is `±1s` or worse, which is more error
+than a slew can correct. Each change of the condition posts an event,
+and `init` prints a console line each time the bound changes. The
+condition does not count toward `Ready`, because an upstream outage
+reaches every leader at once.
+
+**How has the clock moved?** `liken_time_offset_seconds` is the exact
+error, measured every 64 seconds. Status holds only the bound because
+the exact error changes at every measurement, and each status write
+costs the API server and etcd. The machine operator reads the
+measurement only when Prometheus scrapes, so the metric costs nothing
+while nobody scrapes it. The series is absent when the last answer is
+more than three measurements old, and
+`liken_time_last_sync_timestamp_seconds` then shows when the source
+went quiet. The fleet dashboard draws the offset of every machine.
+
+**What is the exact error now?** Without Prometheus, read the same
+endpoint through the API server:
+
+```sh
+pod=$(kubectl -n liken-system get pod -o name \
+  -l app.kubernetes.io/name=liken-machine-operator \
+  --field-selector spec.nodeName=<machine>)
+kubectl get --raw \
+  "/api/v1/namespaces/liken-system/pods/${pod#pod/}:9200/proxy/metrics" \
+  | grep '^liken_time_'
+```
+
+Each measurement is one SNTP exchange. `init` keeps the last eight,
+and uses the one with the shortest round trip, because a short round
+trip has the least room for the two directions to differ. On wifi,
+single exchanges vary by tens of milliseconds, and this filter keeps
+that noise out of the clock, the bound, and the metric.
 
 ## The monitoring component
 

@@ -163,7 +163,7 @@ func everythingSet() *MachineStatus {
 		},
 		Time: TimeStatus{
 			State: TimeSynchronized, Source: "pool.ntp.org",
-			Stratum: 2, Offset: "1.28ms",
+			Stratum: 2, Offset: "±5ms",
 		},
 		Hardware: HardwareStatus{
 			CPUs: 4, MemoryBytes: 4_294_967_296,

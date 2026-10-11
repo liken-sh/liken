@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/liken-sh/liken/liken/api"
@@ -324,20 +325,19 @@ func (t FactsTree) readInterfaceWireless(base string) (*WirelessStatus, error) {
 }
 
 func (t FactsTree) readTimeStatus() (TimeStatus, error) {
-	ts := TimeStatus{}
-	state, err := t.readFact("time/state")
+	record, err := t.readRecordFact("time/standing")
 	if err != nil {
 		return TimeStatus{}, err
 	}
-	ts.State = TimeState(state)
-	if ts.Source, err = t.readFact("time/source"); err != nil {
-		return TimeStatus{}, err
+	ts := TimeStatus{
+		State:  TimeState(record["state"]),
+		Source: record["source"],
+		Offset: record["offset"],
 	}
-	if ts.Stratum, err = t.readInt("time/stratum"); err != nil {
-		return TimeStatus{}, err
-	}
-	if ts.Offset, err = t.readFact("time/offset"); err != nil {
-		return TimeStatus{}, err
+	if stratum := record["stratum"]; stratum != "" {
+		if ts.Stratum, err = strconv.Atoi(stratum); err != nil {
+			return TimeStatus{}, fmt.Errorf("%s: stratum: %w", filepath.Join(t.Dir, "time", "standing"), err)
+		}
 	}
 	return ts, nil
 }

@@ -192,6 +192,9 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 	status.Conditions = api.SetCondition(status.Conditions,
 		wirelessCondition(status.Network.Interfaces), now)
 
+	status.Conditions = api.SetCondition(status.Conditions,
+		clockCondition(status.Time), now)
+
 	// Storage compares the spec's declared roles against the facts'
 	// report of where each is actually backed. The operator cannot
 	// observe the disks directly, because claiming happened before

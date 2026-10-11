@@ -53,12 +53,10 @@ var phasePrecedence = []api.Phase{
 // one resolves with a reboot and the other never will without a
 // different edit.
 //
-// SerioAttached indicates nothing either. An adapter that is unplugged
-// or refused leaves the machine working, and its workloads that do not
-// use the adapter run as before, so the condition reports the adapter
-// and leaves the machine's health to the others.
+// The conditions in reportsOnly indicate nothing either (reportsOnly
+// gives the reasons).
 func conditionPhase(c api.Condition) api.Phase {
-	if c.Type == "Ready" || c.Type == serioAttachedCondition || c.Status == api.ConditionTrue {
+	if c.Type == "Ready" || reportsOnly(c.Type) || c.Status == api.ConditionTrue {
 		return ""
 	}
 	switch c.Reason {
@@ -156,7 +154,7 @@ func readyCondition(conditions []api.Condition) api.Condition {
 	ready := api.Condition{Type: "Ready", Status: api.ConditionTrue, Reason: "Reconciled"}
 	for _, condition := range conditions {
 		if condition.Type == "Ready" || condition.Type == machine.RebootApprovedCondition ||
-			condition.Type == serioAttachedCondition {
+			reportsOnly(condition.Type) {
 			continue
 		}
 		if condition.Status != api.ConditionTrue {
@@ -185,4 +183,16 @@ func decidePhase(conditions []api.Condition) api.Phase {
 		}
 	}
 	return api.PhaseReady
+}
+
+// reportsOnly answers whether a condition reports one part of the
+// machine and leaves the machine's health to the others, so neither
+// the phase nor the Ready roll-up reads it. SerioAttached is one: an
+// adapter that is unplugged or refused leaves the machine working, and
+// its workloads that do not use the adapter run as before.
+// ClockSynchronized is the other: an upstream outage makes every
+// leader Unsynchronized at once, and a fleet that turns Degraded
+// together stalls every reboot turn.
+func reportsOnly(conditionType string) bool {
+	return conditionType == serioAttachedCondition || conditionType == clockSynchronizedCondition
 }

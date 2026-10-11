@@ -377,12 +377,12 @@ type TimeStatus struct {
 	// as a source.
 	Stratum int `json:"stratum,omitempty"`
 
-	// Offset is the clock error that init last published, as a
-	// human-readable duration such as "1.28ms". It is positive when
-	// this machine was behind its source. Init measures the clock every
-	// 64 seconds and publishes a new offset only when the measured one
-	// moves 25 ms or more from this value, so the clock error now is
-	// within 25 ms of it.
+	// Offset is the bound that the clock's error fits inside, such as
+	// "±5ms" (OffsetBound in clock.go). A worse bound publishes at the
+	// poll that measures it, and a better bound after three polls in a
+	// row inside it. The exact error goes to Prometheus, not here,
+	// because it changes at every poll. Offset is empty while State is
+	// not Synchronized, and after a boot step until the first poll.
 	Offset string `json:"offset,omitempty"`
 }
 
