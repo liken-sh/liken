@@ -77,7 +77,9 @@ kubectl describe pod east-mount -n observatory
   device. Check that the machine publishes the device and that the
   `DeviceClass` selects it, as
   [Connect USB equipment](https://liken.sh/observatory/docs/guides/connect-usb-equipment/) describes.
-  A camera on a vendor SDK, such as a ZWO ASI, cannot be claimed today.
+  A camera on a vendor SDK, such as a ZWO ASI, publishes whole under
+  its port path, such as `usb-1-2`, so select it by its vendor and
+  product.
 * **The image does not pull.** A vendor's driver image is large. The
   ToupTek image is over 300 MB, so the first pull on a slow link can
   take most of the deadline. Run the step again once the image is on

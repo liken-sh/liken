@@ -305,8 +305,9 @@ registers, such as `hidraw`, supplies that driver's protocol only, so
 it cannot take the place of the usbfs node.
 
 A program that uses libusb cannot share an interface with a kernel
-driver, so it detaches the kernel driver while it runs. `liken`
-publishes only devices that have a driver, so the device leaves the
+driver, so it detaches the kernel driver while it runs. The kernel
+then shows `usbfs` as the interface's driver, and `liken` does not
+publish an interface that a program holds, so the device leaves the
 node's slice for as long as the pod runs. When the pod stops and its
 claim ends, the node binds a kernel driver to the interface again, and
 the device returns to the slice at the next reconcile pass.

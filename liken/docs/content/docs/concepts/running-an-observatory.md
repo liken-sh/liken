@@ -47,8 +47,12 @@ operating system publishes. A device resource can hold a claim, and
 the operator creates a `ResourceClaim` from it for that device's pod.
 You write a `DeviceClass` for each piece of equipment, which selects
 the device by its vendor, product, and serial number. USB serial and HID
-equipment works. A camera that needs a vendor's SDK, or gphoto2, does
-not work, because it has no kernel driver.
+equipment reaches the pod as its device node. A camera that a vendor's
+SDK or gphoto2 drives has no kernel driver, so `liken` publishes it
+whole, and a claim delivers its USB node. See
+[USB devices with no kernel driver](/docs/reference/devices/#usb-devices-with-no-kernel-driver).
+A QHY camera that loads its firmware through udev rules on the host
+does not work yet.
 
 The device pods run the project's `indi` images: one image of
 `indiserver` and every core INDI driver, and one image for each family

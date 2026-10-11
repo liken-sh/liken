@@ -22,8 +22,8 @@ mount, and you run the session from KStars.
 The operator is under development, and it has no release yet. Its
 tests and the drills on a test cluster run against the INDI
 simulators. Real hardware connects through the same resources, but no
-drill has run on real equipment yet, and some cameras cannot reach a
-pod at all. [Connect USB equipment](/docs/guides/connect-usb-equipment/)
+drill has run on real equipment yet, and a QHY camera that loads its
+firmware through udev rules on the host does not work. [Connect USB equipment](/docs/guides/connect-usb-equipment/)
 gives the details.
 
 Start here:

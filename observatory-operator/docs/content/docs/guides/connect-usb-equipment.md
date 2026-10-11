@@ -19,8 +19,8 @@ Two warnings come first.
   through the same Kubernetes machinery that other `liken` operators
   use for their hardware, but whether each INDI driver can open its
   device as the pod's user has not been checked.
-* Most dedicated astronomy cameras cannot reach a pod today. The next
-  section explains which equipment works.
+* A QHY camera that loads its firmware through udev rules on the host
+  does not work yet. The next section explains which equipment works.
 
 Equipment on the network, such as a mount with a Wi-Fi adapter or a
 weather station that serves its data over HTTP, needs no claim. Give
