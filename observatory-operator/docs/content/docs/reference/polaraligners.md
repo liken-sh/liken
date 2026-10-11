@@ -8,7 +8,7 @@ toc: true
 
 # `PolarAligner`
 
-A `PolarAligner` moves a mount's polar axis in altitude and azimuth: an INDI driver with `PAC_INTERFACE`.
+A `PolarAligner` moves a mount's polar axis in altitude and azimuth: an INDI device that serves `PAC_INTERFACE`.
 
 ## spec
 

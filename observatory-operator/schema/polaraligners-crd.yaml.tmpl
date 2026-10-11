@@ -1,5 +1,5 @@
 # A `PolarAligner` moves a mount's polar axis in altitude and azimuth:
-# an INDI driver with `PAC_INTERFACE`.
+# an INDI device that serves `PAC_INTERFACE`.
 #
 # A device resource is inventory: `observatory-operator` starts its pod
 # only while a `Reservation` needs it. The fields that every device
@@ -70,7 +70,7 @@ spec:
                 characters
           description: >-
             A `PolarAligner` moves a mount's polar axis in altitude and
-            azimuth: an INDI driver with `PAC_INTERFACE`.
+            azimuth: an INDI device that serves `PAC_INTERFACE`.
           required: [spec]
           properties:
             spec:

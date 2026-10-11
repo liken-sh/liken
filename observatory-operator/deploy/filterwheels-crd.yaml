@@ -3,8 +3,8 @@
 # device.yaml.tmpl, procedures.yaml.tmpl, and indi/standard/; DO NOT
 # EDIT.
 #
-# A `FilterWheel` holds the filters in front of a camera: an INDI driver
-# with `FILTER_INTERFACE`.
+# A `FilterWheel` holds the filters in front of a camera: an INDI device
+# that serves `FILTER_INTERFACE`.
 #
 # A device resource is inventory: `observatory-operator` starts its pod
 # only while a `Reservation` needs it. The fields that every device
@@ -78,7 +78,7 @@ spec:
                 characters
           description: >-
             A `FilterWheel` holds the filters in front of a camera: an
-            INDI driver with `FILTER_INTERFACE`.
+            INDI device that serves `FILTER_INTERFACE`.
           required: [spec]
           properties:
             spec:

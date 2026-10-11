@@ -4,7 +4,7 @@
 # EDIT.
 #
 # A `WeatherStation` reports the weather at the site and whether it is
-# safe to observe: an INDI driver with `WEATHER_INTERFACE`.
+# safe to observe: an INDI device that serves `WEATHER_INTERFACE`.
 #
 # A device resource is inventory: `observatory-operator` starts its pod
 # only while a `Reservation` needs it. The fields that every device
@@ -75,7 +75,7 @@ spec:
                 63 characters
           description: >-
             A `WeatherStation` reports the weather at the site and
-            whether it is safe to observe: an INDI driver with
+            whether it is safe to observe: an INDI device that serves
             `WEATHER_INTERFACE`. It runs on the observatory's own INDI
             server, and the `Observatory`'s status reports the worst
             safety status of its stations.

@@ -12,4 +12,4 @@ install the operator, describe your equipment, give it the USB devices
 it needs, reserve a telescope, automate the equipment, and guide with
 PHD2. The reference lists the drivers and their images, what
 each status field means, the objects the operator creates, and every
-field of the 20 resources.
+field of the 19 resources.

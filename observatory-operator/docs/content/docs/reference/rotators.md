@@ -8,7 +8,7 @@ toc: true
 
 # `Rotator`
 
-A `Rotator` turns the camera in one light path: an INDI driver with `ROTATOR_INTERFACE`.
+A `Rotator` turns the camera in one light path: an INDI device that serves `ROTATOR_INTERFACE`.
 
 ## spec
 

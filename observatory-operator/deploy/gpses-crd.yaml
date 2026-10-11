@@ -2,7 +2,7 @@
 # gpses-crd.yaml.tmpl, gpses-fields.yaml, device.yaml.tmpl,
 # procedures.yaml.tmpl, and indi/standard/; DO NOT EDIT.
 #
-# A `GPS` gives a telescope its place and time: an INDI driver with
+# A `GPS` gives a telescope its place and time: an INDI device that serves
 # `GPS_INTERFACE`.
 #
 # A device resource is inventory: `observatory-operator` starts its pod
@@ -77,9 +77,9 @@ spec:
                 <name>-gps, and a Service name holds at most 63
                 characters
           description: >-
-            A `GPS` gives a telescope its place and time: an INDI driver
-            with `GPS_INTERFACE`. The mount snoops it on the telescope's
-            server.
+            A `GPS` gives a telescope its place and time: an INDI device
+            that serves `GPS_INTERFACE`. The mount snoops it on the
+            telescope's server.
           required: [spec]
           properties:
             spec:

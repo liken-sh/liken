@@ -6,7 +6,8 @@ weight: 70
 # Objects the operator creates
 
 The operator creates pods, `Service`s, `ResourceClaim`s, `ConfigMap`s,
-and `Job`s in the `observatory` namespace while a reservation runs, and
+and `Job`s in the namespace of the observatory's resources while a
+reservation runs, and
 deletes all but the `Job`s when it ends. Kubernetes deletes each `Job`
 an hour after it finishes. Their names, ports, and labels are stable,
 so your own `Service` or `NetworkPolicy` can select them. Do not edit
@@ -23,6 +24,11 @@ The operator names each pod, `Service`, and `ResourceClaim` it creates
 together. Give a device the name of its telescope, and add a word only
 when the telescope has two devices of one kind, as the example does
 for its cameras.
+
+A resource that names another in `spec.device` gets no pod, no
+`Service`, and no `ResourceClaim`. The pod of the resource that runs
+the driver serves it: in the example, the pod `east-main-camera` serves
+the `Camera` `east-main` and the `FilterWheel` `east`.
 
 A generated name must be a DNS label of 63 characters or fewer,
 because each shim dials its device by the `Service` name. So every

@@ -2,7 +2,7 @@
 # focusers-crd.yaml.tmpl, focusers-fields.yaml, device.yaml.tmpl,
 # procedures.yaml.tmpl, and indi/standard/; DO NOT EDIT.
 #
-# A `Focuser` moves the focus of one light path: an INDI driver with
+# A `Focuser` moves the focus of one light path: an INDI device that serves
 # `FOCUSER_INTERFACE`.
 #
 # A device resource is inventory: `observatory-operator` starts its pod
@@ -74,7 +74,7 @@ spec:
                 characters
           description: >-
             A `Focuser` moves the focus of one light path: an INDI
-            driver with `FOCUSER_INTERFACE`.
+            device that serves `FOCUSER_INTERFACE`.
           required: [spec]
           properties:
             spec:

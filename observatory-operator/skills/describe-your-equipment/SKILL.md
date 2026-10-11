@@ -146,22 +146,30 @@ The parent field depends on the kind:
 | `opticalTrain` | `Camera`, `FilterWheel`, `Focuser`, `Rotator`, `DustCap`, `FlatPanel` |
 | `telescope` or `observatory`, at most one | `Switch`, `Receiver` |
 
-Each kind takes the settings of its INDI interface, and the
-reservation's `Configure` step writes each one that you state, once,
-before the holder starts:
+Each kind takes the settings of its INDI interface, one spec field
+for each standard property that a person sets, and the reservation's
+`Configure` step writes each one that you state, once, before the
+holder starts. For example:
 
-* A `Camera` takes `gain` and `offset`.
+* A `Camera` takes `gain`, `offset`, and `captureFormat`.
 * A `FilterWheel` takes `filters`, the filter in each slot from slot 1,
   such as `[Luminance, Red, Green, Blue, H_Alpha, OIII, SII]`.
-* A device that runs a driver takes `power`, the output of a `Switch`
-  that powers it.
-  [Automate the equipment](https://liken.sh/observatory/docs/guides/automate-the-equipment/#power-devices-from-a-switch)
-  covers power.
+* A `Focuser` takes `maxPosition`, `backlash`, and `reverseMotion`.
+* A `Switch` takes `outputLabels`, the name of each output.
 
-The operator does not write a setting again during the session, so a
+A field that you leave out keeps the value that the driver sets. A
+driver that lacks a property or a member that you state gets a note in
+the `Configure` step's summary, and the step goes on. The operator
+writes the settings again only when the device's driver restarts, so a
 client such as Ekos can change a camera's gain for one frame.
-`kubectl explain mount.spec` prints every field of a kind with its
-unit, and the [reference](https://liken.sh/observatory/docs/reference/) lists them all.
+`kubectl explain focuser.spec` prints every field of a kind with its
+INDI property and its unit, and the [reference](https://liken.sh/observatory/docs/reference/)
+lists them all.
+
+A device that runs a driver also takes `power`, the output of a
+`Switch` that powers it.
+[Automate the equipment](https://liken.sh/observatory/docs/guides/automate-the-equipment/#power-devices-from-a-switch)
+covers power.
 
 ## A device that another device serves
 
@@ -216,8 +224,9 @@ message says which:
 * `spec.device` names a resource on another INDI server, because one
   INDI device runs on one server.
 * The resource it names serves another resource of the same kind.
-* The resource it names does not exist, or names a `spec.device` of
-  its own.
+* The resource it names does not exist, is of the same kind, names a
+  `spec.device` of its own, or runs on no server, such as a resource
+  on the shelf.
 
 A driver serves a kind only when it defines that kind's properties
 after it connects, such as `FILTER_SLOT` for a `FilterWheel`. A QHY

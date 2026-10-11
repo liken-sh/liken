@@ -2,8 +2,8 @@
 # receivers-crd.yaml.tmpl, receivers-fields.yaml, device.yaml.tmpl,
 # procedures.yaml.tmpl, and indi/standard/; DO NOT EDIT.
 #
-# A `Receiver` is a radio receiver, such as an RTL-SDR: an INDI driver
-# with `SPECTROGRAPH_INTERFACE`.
+# A `Receiver` is a radio receiver, such as an RTL-SDR: an INDI device
+# that serves `SPECTROGRAPH_INTERFACE`.
 #
 # A device resource is inventory: `observatory-operator` starts its pod
 # only while a `Reservation` needs it. The fields that every device
@@ -82,7 +82,7 @@ spec:
                 characters
           description: >-
             A `Receiver` is a radio receiver, such as an RTL-SDR: an
-            INDI driver with `SPECTROGRAPH_INTERFACE`.
+            INDI device that serves `SPECTROGRAPH_INTERFACE`.
           required: [spec]
           properties:
             spec:

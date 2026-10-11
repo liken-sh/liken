@@ -1,5 +1,5 @@
 # The docs domain builds the manual at liken.sh/observatory/. The
-# reference page of each of the 20 resources is generated, never
+# reference page of each of the 19 resources is generated, never
 # edited: crdref, the generator the brand component publishes, renders
 # each one from its CRD in deploy/, so a schema edit is a manual edit.
 # GENERATED lists those pages, and each rule names the generator's

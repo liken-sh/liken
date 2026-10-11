@@ -1,7 +1,7 @@
 # 05, The property schema
 
 Proposed on 2026-10-05. Not built. Replaced on 2026-10-11 by
-[plan 16](../16-kinds-are-indi-interfaces.md), which takes the standard
+[plan 16](../completed/16-kinds-are-indi-interfaces.md), which takes the standard
 set of each interface from a bare driver in place of the simulators,
 because each simulator adds properties of its own. This document stays
 as the record of the first design.

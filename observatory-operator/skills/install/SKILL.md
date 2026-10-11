@@ -20,7 +20,7 @@ You need:
 * A `liken` cluster. The simulators need no device, so any node can
   run them.
 * `kubectl` with cluster-admin access, because the install creates
-  20 CRDs.
+  19 CRDs.
 * KStars on your desktop, for the last part. Any INDI client works
   the same way.
 

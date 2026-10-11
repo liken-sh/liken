@@ -231,7 +231,9 @@ spec:
 ```
 
 Several devices can name one output, as they do when a USB hub sits on
-one 12 V line.
+one 12 V line. A resource that names another in `spec.device` takes no
+`power`, because the resource that runs its driver holds the power of
+the device.
 
 The operator switches an output through INDI's output interface: the
 property `DIGITAL_OUTPUT_<n>` of the switch's driver. The simulator
@@ -244,7 +246,7 @@ before you rely on `power`.
 
 A `job` action runs a container once, for anything the other actions
 cannot do, such as switching a dew heater's relay or posting to a
-webhook. The operator creates a Kubernetes `Job` in the `observatory`
+webhook. The operator creates a Kubernetes `Job` in the resource's
 namespace, and the action ends when the `Job` ends:
 
 ```yaml
@@ -280,8 +282,8 @@ equipment. The INDI server images hold `indi_getprop` and
 `indi_setprop`, so you can drive a simulator through `kubectl exec`.
 
 Turn the simulated weather unsafe with a strong wind. The simulator
-publishes its readings every 60 seconds, so the second command asks
-for them now:
+publishes its weather parameters every 60 seconds, so the second
+command asks for them now:
 
 ```sh
 kubectl -n observatory exec lab-observatory -- indi_setprop "Weather Simulator.WEATHER_CONTROL.Wind;Gust=40;30"

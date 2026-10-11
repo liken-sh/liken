@@ -8,7 +8,7 @@ toc: true
 
 # `WeatherStation`
 
-A `WeatherStation` reports the weather at the site and whether it is safe to observe: an INDI driver with `WEATHER_INTERFACE`. It runs on the observatory's own INDI server, and the `Observatory`'s status reports the worst safety status of its stations.
+A `WeatherStation` reports the weather at the site and whether it is safe to observe: an INDI device that serves `WEATHER_INTERFACE`. It runs on the observatory's own INDI server, and the `Observatory`'s status reports the worst safety status of its stations.
 
 ## spec
 

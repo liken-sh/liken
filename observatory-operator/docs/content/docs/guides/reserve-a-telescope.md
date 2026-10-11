@@ -60,8 +60,8 @@ operator:
 3. starts a pod for each device, and waits for each driver to appear
    on the server
 4. connects each device
-5. writes the site's location, the optics, and the camera and filter
-   wheel settings to the drivers
+5. writes the settings that each device's spec states, the site's
+   location, and the optics to the drivers
 6. runs the activation procedures that you declared, such as
    unparking the dome and cooling the camera
 7. starts PHD2, if the telescope has a `Guider`

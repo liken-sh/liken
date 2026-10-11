@@ -8,7 +8,7 @@ toc: true
 
 # `Mount`
 
-A `Mount` is the device that points a `Telescope`: an INDI driver with `TELESCOPE_INTERFACE`. INDI and ASCOM call these drivers telescopes, and here the `Telescope` is the whole instrument. The operator writes the observatory's location and time to the mount when it configures it.
+A `Mount` is the device that points a `Telescope`: an INDI device that serves `TELESCOPE_INTERFACE`. INDI and ASCOM call a mount a telescope, and here the `Telescope` is the whole instrument. The operator writes the observatory's location and time to the mount when it configures it.
 
 ## spec
 

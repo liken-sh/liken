@@ -8,7 +8,7 @@ toc: true
 
 # `FlatPanel`
 
-A `FlatPanel` lights the optical tube evenly for flat frames: an INDI driver with `LIGHTBOX_INTERFACE`. Deactivation switches its light off.
+A `FlatPanel` lights the optical tube evenly for flat frames: an INDI device that serves `LIGHTBOX_INTERFACE`. Deactivation switches its light off.
 
 ## spec
 

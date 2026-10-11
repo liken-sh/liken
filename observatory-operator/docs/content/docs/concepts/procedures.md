@@ -228,9 +228,9 @@ simulator from your desktop while a reservation holds a telescope. The
 observatory's devices run on the pod `lab-observatory`, and each
 telescope's devices on its own pod, such as `east-telescope`.
 
-The weather simulator decides `Safe` from its readings. A strong wind
-turns it unsafe. The simulator publishes its readings each 60 seconds,
-so the second command asks it to publish them now:
+The weather simulator decides `Safe` from its weather parameters. A
+strong wind turns it unsafe. The simulator publishes its parameters
+each 60 seconds, so the second command asks it to publish them now:
 
 ```sh
 kubectl -n observatory exec lab-observatory -- indi_setprop "Weather Simulator.WEATHER_CONTROL.Wind;Gust=40;30"

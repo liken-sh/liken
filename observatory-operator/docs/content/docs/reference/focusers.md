@@ -8,7 +8,7 @@ toc: true
 
 # `Focuser`
 
-A `Focuser` moves the focus of one light path: an INDI driver with `FOCUSER_INTERFACE`.
+A `Focuser` moves the focus of one light path: an INDI device that serves `FOCUSER_INTERFACE`.
 
 ## spec
 

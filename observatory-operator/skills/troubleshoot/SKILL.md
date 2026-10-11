@@ -1,6 +1,6 @@
 ---
 name: troubleshoot
-description: "Find why a reservation failed or waits, from the step and the device its status names: a missing parent, two devices on one driver, a pod that stays Pending, a device that does not connect, a park that a lock refused, or a delete that does not finish. Then run the failed step again with the retry annotation. Use when a Reservation is Failed or stuck, when a device reports Error, or when a resource will not delete."
+description: "Find why a reservation failed or waits, from the step and the device its status names: a missing parent, two devices on one driver, a pod that stays Pending, a device that does not connect, a device that does not serve its kind, a park that a lock refused, or a delete that does not finish. Then run the failed step again with the retry annotation. Use when a Reservation is Failed or stuck, when a device reports Error, or when a resource will not delete."
 ---
 
 This skill is the guide at https://liken.sh/observatory/docs/guides/troubleshoot/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
@@ -24,7 +24,7 @@ Then read the device that the summary names, and the operator's log:
 
 ```sh
 kubectl describe mount east -n observatory
-kubectl logs -n observatory deployment/observatory-operator
+kubectl logs -n liken-system deployment/observatory-operator
 ```
 
 The sections below follow the steps in the order they run.
@@ -98,6 +98,33 @@ The INDI server's log shows the driver's own messages:
 ```sh
 kubectl logs -n observatory east-telescope
 ```
+
+## A device reports Error: its driver does not serve the kind
+
+After `Connect`, the operator checks that each device defines the
+properties of its resource's kind, such as `FILTER_SLOT` for a
+`FilterWheel` or `CCD_EXPOSURE` for a `Camera`. A resource whose device
+does not reports `Error`, and its `Ready` message names the property,
+such as
+`INDI device <device> defines no FILTER_SLOT after it connects, so it serves no FilterWheel`.
+The step's summary names it too, and the rest of the telescope starts.
+
+* **A camera with a built-in wheel and no wheel attached.** Attach the
+  wheel, or delete the `FilterWheel`. When the driver defines the
+  property later, the resource reports `Connected`, gets its settings,
+  and runs its activation.
+* **The wrong driver.** Some drivers claim an interface in
+  `DRIVER_INTERFACE` and define none of its properties. The operator
+  reads the properties, not the claim. Check the driver's properties in
+  KStars, and choose the driver that defines them.
+
+A resource that names another in `spec.device` reports `Error` before
+it connects when the operator cannot serve it from that resource: the
+resource does not exist, is on another INDI server or on none, runs no
+driver of its own, or serves another resource of the same kind
+already. The `Ready` message names the case.
+[Describe your equipment](https://liken.sh/observatory/docs/guides/describe-your-equipment/#a-device-that-another-device-serves)
+gives the rules.
 
 ## An activation or trigger action fails
 

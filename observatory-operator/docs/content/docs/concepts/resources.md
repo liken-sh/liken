@@ -52,14 +52,33 @@ resource whose driver serves it, on the same INDI server. The
 resource that runs the driver gets the pod, the claim, and the power.
 A device serves its interface when its driver defines the
 interface's properties after it connects, and a resource whose device
-does not reports `Error`. [Describe your
+does not reports `Error`. The interface bit in the driver's
+`DRIVER_INTERFACE` does not decide, because some drivers set a bit late
+or claim an interface whose properties they never define. [Describe
+your
 equipment](/docs/guides/describe-your-equipment/#a-device-that-another-device-serves)
 shows how to write one.
 
-| Kind | Short name | Parent field | Key reading in `kubectl get` |
+| Kind | INDI interface | A device serves it when it defines |
+|---|---|---|
+| `Mount` | `TELESCOPE` | `EQUATORIAL_EOD_COORD` |
+| `Camera` | `CCD` | `CCD_EXPOSURE` |
+| `FilterWheel` | `FILTER` | `FILTER_SLOT` |
+| `Focuser` | `FOCUSER` | `FOCUS_MOTION` |
+| `Rotator` | `ROTATOR` | `ABS_ROTATOR_ANGLE` |
+| `DustCap` | `DUSTCAP` | `CAP_PARK` |
+| `FlatPanel` | `LIGHTBOX` | `FLAT_LIGHT_CONTROL` |
+| `PolarAligner` | `PAC` | `PAC_MANUAL_ADJUSTMENT` |
+| `GPS` | `GPS` | `GPS_REFRESH` |
+| `Dome` | `DOME` | `DOME_MOTION` or `DOME_SHUTTER` |
+| `WeatherStation` | `WEATHER` | `WEATHER_STATUS` |
+| `Switch` | `OUTPUT` and `INPUT` | `DIGITAL_OUTPUT_1` or `DIGITAL_INPUT_1` |
+| `Receiver` | `SPECTROGRAPH` | `RECEIVER_SETTINGS` |
+
+| Kind | Short name | Parent field | What `kubectl get` shows |
 |---|---|---|---|
-| `Observatory` | `obs` | none | `weather` |
-| `Telescope` | `tel` | `observatory` | the server's host and port |
+| `Observatory` | `obs` | none | latitude, longitude, the worst `weather` |
+| `Telescope` | `tel` | `observatory` | the reservation, its holder, the server's host and port |
 | `OpticalTube` | `ota` | `telescope` | `aperture`, `focalLength` in mm |
 | `OpticalTrain` | `train` | `telescope` | its camera |
 | `Mount` | `mnt` | `telescope` | RA as `19h17m21s`, Dec as `+12°34′56″`, state |
@@ -70,7 +89,7 @@ shows how to write one.
 | `Focuser` | `foc` | `opticalTrain` | position |
 | `Rotator` | `rot` | `opticalTrain` | angle |
 | `DustCap` | `cap` | `opticalTrain` | `Open`, `Closed`, or `Moving` |
-| `FlatPanel` | `flat` | `opticalTrain` | `Lit` or `Dark`, brightness |
+| `FlatPanel` | `flat` | `opticalTrain` | `LightOn` or `LightOff`, brightness |
 | `Dome` | none | `observatory` | azimuth, shutter, park |
 | `WeatherStation` | `weather` | `observatory` | safety |
 | `Switch` | `sw` | `telescope` or `observatory` | the outputs that are on |
@@ -98,14 +117,28 @@ Every device kind shares these spec fields:
   pod starts, and deactivation switches it off after the pod stops.
 - `claim` is a `ResourceClaimSpec` for real hardware. A simulator needs
   none.
+- `device` is `{kind, name}`: the resource whose driver serves this
+  one, in place of `driver`.
 
-The other spec fields are the few that activation needs:
-`Observatory.spec.location`, the tube's
-`aperture` and `focalLength` in millimeters, the camera's `gain` and
-`offset`, the filter wheel's `filters`, the guider's `opticalTrain` and `pulses`, and the
-reservation's `telescope`, `holder`, `start`, and `end`. A device
-kind's status has a typed field for each standard property of its INDI
-interface, and the resource that runs the driver lists every other
-property in `status.properties`. [Reading the
+A device resource names `driver` or `device`, never both, and a
+served resource takes no `power` and no `claim`. `spec.device` cannot
+change, and a resource cannot gain it or lose it after it is created.
+
+Each device kind's spec also has a field for each standard property of
+its INDI interface that a person sets, such as a camera's `gain` and
+`offset`, a filter wheel's `filters`, and a focuser's `maxPosition`.
+The reservation's `Configure` step writes each one that the spec
+states, once. The operator writes them again only when the device's
+driver restarts, so a client such as Ekos can change a camera's gain
+for one frame. The settings that the tree decides, such as `ACTIVE_DEVICES`
+and `GEOGRAPHIC_COORD`, are never spec fields. The other kinds' spec
+fields are `Observatory.spec.location`, the tube's `aperture` and
+`focalLength` in millimeters, the guider's `opticalTrain` and
+`pulses`, and the reservation's `telescope`, `holder`, `start`, and
+`end`.
+
+A device kind's status has a typed field for each standard property of
+its INDI interface, and the resource that runs the driver lists every
+other property in `status.properties`. [Reading the
 status](/docs/reference/reading-the-status/) states which object holds
 each property. `kubectl explain` prints every field with its unit.

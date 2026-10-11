@@ -1,7 +1,9 @@
 # 16, Kinds are INDI interfaces
 
-Proposed on 2026-10-11. Not built. This plan replaces
-[plan 05](rejected/05-the-property-schema.md) and the open problem "A
+Proposed on 2026-10-11. Built on 2026-10-11, all six steps, and
+tested against the fakes and the transcripts. The drill on liken-1
+has not run. This plan replaces
+[plan 05](../rejected/05-the-property-schema.md) and the open problem "A
 reading rewrites the whole property list", whose measurements it
 carries. It breaks the `observatory.liken.sh` API with no conversion,
 because no observatory runs on it outside the test clusters.
@@ -465,5 +467,5 @@ drivers build from a bake file that only the make target uses.
 - Standard properties: <https://docs.indilib.org/drivers/standard-properties/>
 - [docs#7](https://github.com/indilib/docs/issues/7): the standard
   properties page is maintained by hand.
-- Root [plan 74](../../plans/74-astrophotography.md): what
+- Root [plan 74](../../../plans/74-astrophotography.md): what
   `astrophotography-operator` reads from these resources.

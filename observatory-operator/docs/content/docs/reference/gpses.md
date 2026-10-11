@@ -8,7 +8,7 @@ toc: true
 
 # `GPS`
 
-A `GPS` gives a telescope its place and time: an INDI driver with `GPS_INTERFACE`. The mount snoops it on the telescope's server.
+A `GPS` gives a telescope its place and time: an INDI device that serves `GPS_INTERFACE`. The mount snoops it on the telescope's server.
 
 ## spec
 

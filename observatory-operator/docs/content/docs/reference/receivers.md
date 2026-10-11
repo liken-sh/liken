@@ -8,7 +8,7 @@ toc: true
 
 # `Receiver`
 
-A `Receiver` is a radio receiver, such as an RTL-SDR: an INDI driver with `SPECTROGRAPH_INTERFACE`.
+A `Receiver` is a radio receiver, such as an RTL-SDR: an INDI device that serves `SPECTROGRAPH_INTERFACE`.
 
 ## spec
 

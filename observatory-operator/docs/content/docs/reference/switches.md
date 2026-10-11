@@ -8,7 +8,7 @@ toc: true
 
 # `Switch`
 
-A `Switch` is a relay board or a power box's outputs: an INDI driver with `OUTPUT_INTERFACE` or `INPUT_INTERFACE`. A device's `spec.power` names one of its outputs, and a reservation switches that output on before the device starts and off after it stops.
+A `Switch` is a relay board or a power box's outputs: an INDI device that serves `OUTPUT_INTERFACE` or `INPUT_INTERFACE`. A device's `spec.power` names one of its outputs, and a reservation switches that output on before the device starts and off after it stops.
 
 ## spec
 

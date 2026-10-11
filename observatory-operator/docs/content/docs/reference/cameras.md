@@ -8,7 +8,7 @@ toc: true
 
 # `Camera`
 
-A `Camera` is an imaging or guiding camera: an INDI driver with `CCD_INTERFACE`. It belongs to one `OpticalTrain`, and the operator writes the camera's `ACTIVE_DEVICES` from that train, so the camera snoops the mount, focuser, filter wheel, and rotator of its own light path.
+A `Camera` is an imaging or guiding camera: an INDI device that serves `CCD_INTERFACE`. It belongs to one `OpticalTrain`, and the operator writes the camera's `ACTIVE_DEVICES` from that train, so the camera snoops the mount, focuser, filter wheel, and rotator of its own light path.
 
 ## spec
 

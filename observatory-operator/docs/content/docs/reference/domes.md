@@ -8,7 +8,7 @@ toc: true
 
 # `Dome`
 
-A `Dome` is the observatory's dome or roll-off roof: an INDI driver with `DOME_INTERFACE`. It runs on the observatory's own INDI server.
+A `Dome` is the observatory's dome or roll-off roof: an INDI device that serves `DOME_INTERFACE`. It runs on the observatory's own INDI server.
 
 ## spec
 

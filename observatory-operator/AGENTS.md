@@ -32,7 +32,7 @@ operator's pods to the properties that plan 03 measured, and
 `observatory/` holds the Go type of each kind, and `deploy/` holds one
 CRD for each kind. Four CRDs are written by hand: `OpticalTube`,
 `OpticalTrain`, `Guider`, and `Reservation`. `schema/` generates the
-other 16, the kinds with procedures, so the parts that several kinds
+other 15, the kinds with procedures, so the parts that several kinds
 share have one source:
 
 - `<plural>-crd.yaml.tmpl` is the CRD of one kind, with the fields

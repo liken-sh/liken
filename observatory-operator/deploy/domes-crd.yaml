@@ -2,8 +2,8 @@
 # domes-crd.yaml.tmpl, domes-fields.yaml, device.yaml.tmpl,
 # procedures.yaml.tmpl, and indi/standard/; DO NOT EDIT.
 #
-# A `Dome` is the observatory's dome or roll-off roof: an INDI driver
-# with `DOME_INTERFACE`.
+# A `Dome` is the observatory's dome or roll-off roof: an INDI device
+# that serves `DOME_INTERFACE`.
 #
 # A device resource is inventory: `observatory-operator` starts its pod
 # only while a `Reservation` needs it. The fields that every device
@@ -81,8 +81,8 @@ spec:
                 characters
           description: >-
             A `Dome` is the observatory's dome or roll-off roof: an INDI
-            driver with `DOME_INTERFACE`. It runs on the observatory's
-            own INDI server.
+            device that serves `DOME_INTERFACE`. It runs on the
+            observatory's own INDI server.
           required: [spec]
           properties:
             spec:

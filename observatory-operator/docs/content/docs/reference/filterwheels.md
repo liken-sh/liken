@@ -8,7 +8,7 @@ toc: true
 
 # `FilterWheel`
 
-A `FilterWheel` holds the filters in front of a camera: an INDI driver with `FILTER_INTERFACE`.
+A `FilterWheel` holds the filters in front of a camera: an INDI device that serves `FILTER_INTERFACE`.
 
 ## spec
 

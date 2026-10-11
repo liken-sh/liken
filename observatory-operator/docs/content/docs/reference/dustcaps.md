@@ -8,7 +8,7 @@ toc: true
 
 # `DustCap`
 
-A `DustCap` covers the front of an optical tube: an INDI driver with `DUSTCAP_INTERFACE`. Activation opens it, and deactivation closes it.
+A `DustCap` covers the front of an optical tube: an INDI device that serves `DUSTCAP_INTERFACE`. Activation opens it, and deactivation closes it.
 
 ## spec
 

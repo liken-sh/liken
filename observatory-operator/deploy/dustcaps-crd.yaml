@@ -2,7 +2,7 @@
 # dustcaps-crd.yaml.tmpl, dustcaps-fields.yaml, device.yaml.tmpl,
 # procedures.yaml.tmpl, and indi/standard/; DO NOT EDIT.
 #
-# A `DustCap` covers the front of an optical tube: an INDI driver with
+# A `DustCap` covers the front of an optical tube: an INDI device that serves
 # `DUSTCAP_INTERFACE`.
 #
 # A device resource is inventory: `observatory-operator` starts its pod
@@ -74,8 +74,8 @@ spec:
                 characters
           description: >-
             A `DustCap` covers the front of an optical tube: an INDI
-            driver with `DUSTCAP_INTERFACE`. Activation opens it, and
-            deactivation closes it.
+            device that serves `DUSTCAP_INTERFACE`. Activation opens it,
+            and deactivation closes it.
           required: [spec]
           properties:
             spec:
