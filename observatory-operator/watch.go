@@ -1,6 +1,6 @@
 package main
 
-// The watches. One watch follows each of the 20 kinds of the group in
+// The watches. One watch follows each of the 19 kinds of the group in
 // every namespace, and four more follow the pods, the Services, the
 // ConfigMaps, and the Jobs the operator created, selected by its label.
 // All of them run on client-go's reflector through the shared informer
@@ -132,7 +132,7 @@ func listOf[T any](s *stores, collection *informer.Collection, namespace string)
 	return items
 }
 
-// watchCount is the number of watches: the 20 kinds, the pods, the
+// watchCount is the number of watches: the 19 kinds, the pods, the
 // Services, the ConfigMaps, and the Jobs.
 var watchCount = int32(len(observatory.Kinds) + 4)
 

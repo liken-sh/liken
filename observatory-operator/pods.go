@@ -201,11 +201,12 @@ func serverPod(namespace string, server serverRef, ownerUID string, devices []*d
 }
 
 // driverList answers the annotation of a server's devices: the address
-// of each device's Service, one on each line, in the order of the
-// devices.
+// of the Service of each device that runs a driver, one on each line,
+// in the order of the devices. A served device runs on its owner's
+// driver, so it has no line.
 func driverList(devices []*device) (string, error) {
 	var b strings.Builder
-	for _, d := range devices {
+	for _, d := range driverDevices(devices) {
 		object, err := objectName(d.kind, d.name())
 		if err != nil {
 			return "", fmt.Errorf("%s %s: %w", d.kind.Name, d.name(), err)

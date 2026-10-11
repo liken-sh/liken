@@ -133,12 +133,12 @@ func TestADriverThatLacksAPropertyIsNotedAndSkipped(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.put(observatory.CameraKind, "east-guide", map[string]any{"opticalTrain": "east-guiding", "driver": map[string]any{"name": "indi_simulator_guide"}, "activation": []any{map[string]any{"cool": map[string]any{"celsius": -5}}}, "offset": 3})
-		w.put(observatory.FilterWheelKind, "east", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_wheel"},
+		w.put(observatory.FilterWheelKind, "east", map[string]any{"opticalTrain": "east-imaging", "device": map[string]any{"kind": "Camera", "name": "east-main"},
 			"filters": []any{"L", "R", "G", "B", "Ha", "OIII", "SII", "Dark", "Spare"}})
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		r := w.phase("east-tonight", observatory.ReservationReady, 15*time.Minute)
 		notes := map[observatory.StepName][]string{
-			observatory.StepConfigure:  {"no CCD_OFFSET on Camera east-guide", "no slot for 1 of the filters on FilterWheel east (8 slots)"},
+			observatory.StepConfigure:  {"no CCD_OFFSET on Camera east-guide", "no member for 1 of the values of FILTER_NAME on FilterWheel east (8 members)"},
 			observatory.StepActivation: {"Camera east-guide cool: -5 °C within 0.5 °C Skipped: No cooler on Camera east-guide: CCD_TEMPERATURE is read-only"},
 		}
 		for name, want := range notes {
@@ -282,8 +282,8 @@ func TestADeviceThatRefusesAChangeFailsItsStep(t *testing.T) {
 		{"Telescope Simulator", "CONNECTION", observatory.StepConnect, false},
 		{"Telescope Simulator", "GEOGRAPHIC_COORD", observatory.StepConfigure, false},
 		{"GPS Simulator", "GEOGRAPHIC_COORD", observatory.StepConfigure, false},
-		{"Filter Simulator", "FILTER_NAME", observatory.StepConfigure, false},
-		{"CCD Simulator", "ACTIVE_DEVICES", observatory.StepConfigure, false},
+		{"CCD Simulator", "FILTER_NAME", observatory.StepConfigure, false},
+		{"Guide Simulator", "ACTIVE_DEVICES", observatory.StepConfigure, false},
 		{"CCD Simulator", "CCD_GAIN", observatory.StepConfigure, false},
 		{"CCD Simulator", "CCD_OFFSET", observatory.StepConfigure, false},
 		{"CCD Simulator", "SCOPE_INFO", observatory.StepConfigure, false},

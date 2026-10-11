@@ -116,6 +116,9 @@ func TestEveryNameInTheExampleExists(t *testing.T) {
 		if power, held := spec["power"].(map[string]any); held {
 			named["power.switch"] = "Switch/" + power["switch"].(string)
 		}
+		if device, held := spec["device"].(map[string]any); held {
+			named["device"] = device["kind"].(string) + "/" + device["name"].(string)
+		}
 		for field, target := range named {
 			if !exists[target] {
 				t.Errorf("%s %s: spec.%s names %s, which the example lacks",

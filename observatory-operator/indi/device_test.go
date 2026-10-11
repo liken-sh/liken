@@ -168,3 +168,72 @@ func TestConnectDeviceReportsADriverThatStaysDisconnected(t *testing.T) {
 		}
 	})
 }
+
+// Sync returns once the device's driver has answered a getProperties
+// that names the device, so a property that the driver defined after
+// CONNECTION and before that answer is in the store.
+func TestSyncWaitsForEverythingTheDriverWroteBefore(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c, server := connectedBaseline(t, "dustcover")
+		server.mute()
+		synced := make(chan error, 1)
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+			defer cancel()
+			synced <- c.Sync(ctx, server.device)
+		}()
+		request := server.awaitElement("getProperties", 2)
+		if request.Device != server.device {
+			t.Errorf("getProperties names %q, want %q", request.Device, server.device)
+		}
+		synctest.Wait()
+		select {
+		case err := <-synced:
+			t.Fatalf("Sync returned %v before the driver answered", err)
+		default:
+		}
+		server.send(`<defSwitchVector device="` + server.device + `" name="CAP_PARK" state="Idle" perm="rw" rule="OneOfMany"><defSwitch name="PARK">Off</defSwitch><defSwitch name="UNPARK">On</defSwitch></defSwitchVector>`)
+		server.send(`<defSwitchVector device="` + server.device + `" name="CONNECTION" state="Ok" perm="rw" rule="OneOfMany"><defSwitch name="CONNECT">On</defSwitch><defSwitch name="DISCONNECT">Off</defSwitch></defSwitchVector>`)
+		if err := <-synced; err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := c.Property(server.device, "CAP_PARK"); !ok {
+			t.Error("CAP_PARK is not in the store after Sync")
+		}
+	})
+}
+
+func TestSyncFails(t *testing.T) {
+	cases := []struct {
+		name  string
+		after func(*replayServer)
+		want  error
+	}{
+		{"when the connection ends", func(s *replayServer) { s.drop() }, ErrDisconnected},
+		{"when the device goes", func(s *replayServer) { s.send(`<delProperty device="` + s.device + `"/>`) }, ErrDeleted},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				client, server := connectedBaseline(t, "dustcover")
+				server.mute()
+				synced := make(chan error, 1)
+				go func() { synced <- client.Sync(context.Background(), server.device) }()
+				server.awaitElement("getProperties", 2)
+				c.after(server)
+				if err := <-synced; !errors.Is(err, c.want) {
+					t.Errorf("Sync = %v, want %v", err, c.want)
+				}
+			})
+		})
+	}
+}
+
+func TestSyncNeedsTheDevice(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c, _ := connectedBaseline(t, "dustcover")
+		if err := c.Sync(context.Background(), "Nobody"); !errors.Is(err, ErrNotDefined) {
+			t.Errorf("Sync = %v, want ErrNotDefined", err)
+		}
+	})
+}

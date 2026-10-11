@@ -112,8 +112,6 @@ func readings(kind observatory.Kind, r reader) any {
 		}
 	case observatory.WeatherStationKind:
 		return weatherReadings(r)
-	case observatory.SkyQualityMeterKind:
-		return observatory.SkyQualityMeterReadings{Brightness: r.number("SKY_QUALITY", "SKY_BRIGHTNESS")}
 	case observatory.SwitchKind:
 		return switchReadings(r)
 	case observatory.ReceiverKind:

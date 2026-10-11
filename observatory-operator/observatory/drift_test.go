@@ -25,7 +25,7 @@ var kindTypes = map[string]any{
 	"Focuser": Focuser{}, "Rotator": Rotator{}, "DustCap": DustCap{},
 	"FlatPanel": FlatPanel{}, "PolarAligner": PolarAligner{}, "GPS": GPS{},
 	"Dome": Dome{}, "WeatherStation": WeatherStation{},
-	"SkyQualityMeter": SkyQualityMeter{}, "Switch": Switch{},
+	"Switch":   Switch{},
 	"Receiver": Receiver{}, "Guider": Guider{}, "Reservation": Reservation{},
 }
 

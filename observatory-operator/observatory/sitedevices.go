@@ -1,15 +1,14 @@
 package observatory
 
 // The devices of the site: the dome and the weather station belong to
-// the Observatory, and a sky quality meter, a switch, or a receiver
-// belongs to either the Observatory or one Telescope.
+// the Observatory, and a switch or a receiver belongs to either the
+// Observatory or one Telescope.
 
 type (
-	Dome            = Object[DomeSpec, DomeStatus]
-	WeatherStation  = Object[WeatherStationSpec, WeatherStationStatus]
-	SkyQualityMeter = Object[SkyQualityMeterSpec, SkyQualityMeterStatus]
-	Switch          = Object[SwitchSpec, SwitchStatus]
-	Receiver        = Object[ReceiverSpec, ReceiverStatus]
+	Dome           = Object[DomeSpec, DomeStatus]
+	WeatherStation = Object[WeatherStationSpec, WeatherStationStatus]
+	Switch         = Object[SwitchSpec, SwitchStatus]
+	Receiver       = Object[ReceiverSpec, ReceiverStatus]
 )
 
 // DomeSpec describes a device with INDI's DOME_INTERFACE: a dome or a
@@ -100,32 +99,6 @@ type WeatherParameter struct {
 	// as WEATHER_FORECAST, shows the number alone.
 	Text   string `json:"text,omitempty"`
 	Safety Safety `json:"safety,omitempty"`
-}
-
-// SkyQualityMeterSpec describes a sky quality meter: a driver with
-// INDI's AUX_INTERFACE that defines SKY_QUALITY.
-type SkyQualityMeterSpec struct {
-	TelescopeOrObservatoryDevice
-	Procedures[Action]
-}
-
-type SkyQualityMeterStatus struct {
-	DeviceStatus
-	Readings SkyQualityMeterReadings `json:"readings,omitzero"`
-	Display  SkyQualityMeterDisplay  `json:"display,omitzero"`
-}
-
-// SkyQualityMeterDisplay holds the brightness with its unit, such as
-// 21.3 mag/arcsec², for the printer columns.
-type SkyQualityMeterDisplay struct {
-	Brightness string `json:"brightness,omitempty"`
-}
-
-// SkyQualityMeterReadings come from SKY_QUALITY.
-type SkyQualityMeterReadings struct {
-	// Brightness is the sky's brightness in magnitudes per square
-	// arcsecond. A higher number is a darker sky.
-	Brightness *float64 `json:"brightness,omitempty"`
 }
 
 // SwitchSpec describes a device with INDI's OUTPUT_INTERFACE or

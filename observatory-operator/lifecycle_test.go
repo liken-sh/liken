@@ -54,9 +54,9 @@ func TestAReservationActivatesTheTelescopeAndReleasesIt(t *testing.T) {
 		pods := w.api.names(podsCollection)
 		slices.Sort(pods)
 		wantPods := []string{
-			"east-dustcap", "east-filterwheel", "east-flatpanel", "east-focuser", "east-gps", "east-guide-camera",
+			"east-dustcap", "east-flatpanel", "east-focuser", "east-gps", "east-guide-camera",
 			"east-guider", "east-main-camera", "east-mount", "east-polaraligner", "east-receiver", "east-rotator", "east-switch",
-			"east-telescope", "lab-dome", "lab-observatory", "lab-skyqualitymeter", "lab-weatherstation",
+			"east-telescope", "lab-dome", "lab-observatory", "lab-weatherstation",
 		}
 		if !slices.Equal(pods, wantPods) {
 			t.Errorf("pods = %v\nwant %v", pods, wantPods)

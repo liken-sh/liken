@@ -34,7 +34,6 @@ rules:
       - gpses
       - domes
       - weatherstations
-      - skyqualitymeters
       - switches
       - receivers
       - guiders
@@ -59,7 +58,6 @@ rules:
       - gpses/status
       - domes/status
       - weatherstations/status
-      - skyqualitymeters/status
       - switches/status
       - receivers/status
       - guiders/status
@@ -85,7 +83,6 @@ rules:
       - gpses
       - domes
       - weatherstations
-      - skyqualitymeters
       - switches
       - receivers
     verbs: [patch]

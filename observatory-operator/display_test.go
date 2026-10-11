@@ -123,8 +123,6 @@ func TestTheDisplayOfEachKind(t *testing.T) {
 		{"a focuser", observatory.FocuserKind, observatory.FocuserReadings{Position: ptr(int64(52000))}, observatory.FocuserDisplay{Position: "52000 steps"}},
 		{"a rotator", observatory.RotatorKind, observatory.RotatorReadings{Angle: ptr(90.0)}, observatory.RotatorDisplay{Angle: "90°"}},
 		{"a flat panel", observatory.FlatPanelKind, observatory.FlatPanelReadings{Brightness: ptr(128.0)}, observatory.FlatPanelDisplay{Brightness: "128 of 255"}},
-		{"a sky quality meter", observatory.SkyQualityMeterKind, observatory.SkyQualityMeterReadings{Brightness: ptr(21.3)},
-			observatory.SkyQualityMeterDisplay{Brightness: "21.3 mag/arcsec²"}},
 		{"a receiver", observatory.ReceiverKind, observatory.ReceiverReadings{Frequency: ptr(1420405752.0)}, observatory.ReceiverDisplay{Frequency: "1420.406 MHz"}},
 		{"a mount with no readings", observatory.MountKind, nil, observatory.MountDisplay{}},
 		{"a kind with nothing to show", observatory.GPSKind, observatory.GPSReadings{}, nil},

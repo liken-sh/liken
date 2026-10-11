@@ -27,7 +27,7 @@ func TestADeviceTakenOffAReadyTelescopeStopsOnTheRunningServer(t *testing.T) {
 
 		w.put(observatory.FocuserKind, "east", map[string]any{"driver": map[string]any{"name": "indi_simulator_focus"}})
 		w.until(time.Minute, "the focuser's pod stays", func() bool {
-			return !slices.Contains(w.api.names(podsCollection), "east-focuser") && len(w.indi.connected("east-telescope")) == 11
+			return !slices.Contains(w.api.names(podsCollection), "east-focuser") && len(w.indi.connected("east-telescope")) == 10
 		})
 		time.Sleep(2 * statusWindow)
 		synctest.Wait()
@@ -126,12 +126,16 @@ func TestADeviceTakenOffTheObservatoryStopsOnItsRunningServer(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
 		site := serverRef{observatory.ObservatoryKind, "lab"}.String()
-		before, _ := w.api.object(podsCollection, site)
 		connected := len(w.indi.connected(site))
+		w.put(observatory.ReceiverKind, "lab", map[string]any{"observatory": "lab", "driver": map[string]any{"name": "indi_simulator_receiver"}})
+		w.until(time.Minute, "the receiver does not join the observatory's server", func() bool {
+			return len(w.indi.connected(site)) == connected+1
+		})
+		before, _ := w.api.object(podsCollection, site)
 
-		w.put(observatory.SkyQualityMeterKind, "lab", map[string]any{"driver": map[string]any{"name": "indi_simulator_sqm"}})
-		w.until(time.Minute, "the meter stays on the observatory's server", func() bool {
-			return !slices.Contains(w.api.names(podsCollection), "lab-skyqualitymeter") && len(w.indi.connected(site)) == connected-1
+		w.put(observatory.ReceiverKind, "lab", map[string]any{"driver": map[string]any{"name": "indi_simulator_receiver"}})
+		w.until(time.Minute, "the receiver stays on the observatory's server", func() bool {
+			return !slices.Contains(w.api.names(podsCollection), "lab-receiver") && len(w.indi.connected(site)) == connected
 		})
 
 		after, _ := w.api.object(podsCollection, site)
@@ -141,7 +145,7 @@ func TestADeviceTakenOffTheObservatoryStopsOnItsRunningServer(t *testing.T) {
 		if !slices.Contains(w.indi.connected(site), "Dome Simulator") {
 			t.Errorf("connected = %q, want the dome", w.indi.connected(site))
 		}
-		want := "DriverStopped: Stopped the driver of SkyQualityMeter lab on server " + site + " while Reservation east-tonight is Ready. The server did not restart."
+		want := "DriverStopped: Stopped the driver of Receiver lab on server " + site + " while Reservation east-tonight is Ready. The server did not restart."
 		if got := eventsAbout(w.api, observatory.ObservatoryKind, "lab", reasonDriverStopped); !slices.Equal(got, []string{want}) {
 			t.Errorf("Events = %q, want %q", got, want)
 		}

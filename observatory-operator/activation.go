@@ -183,15 +183,28 @@ func (r *runner) startSite(ctx context.Context, w *stepWork) (outcome, error) {
 	if _, err := r.o.startServer(ctx, w.report, ref, site.Metadata.UID, devices); err != nil {
 		return outcome{}, err
 	}
-	switches, others := partition(devices)
+	switches, others := t.partition(devices)
 	notes, err := r.powerSwitches(ctx, w, ref, switches, devices)
 	if err != nil {
 		return outcome{}, err
 	}
 	ordered := inOrder(others, siteOrder)
-	handles, err := r.startAndConnect(ctx, w, ref, ordered)
+	handles, lacking, err := r.startAndConnect(ctx, w, ref, ordered)
 	if err != nil {
 		return outcome{}, err
+	}
+	notes = append(notes, lacking...)
+	// The observatory's devices have no Configure step of their own, so
+	// the settings that their specs state go here, once for the
+	// reservation that starts them.
+	for _, h := range r.o.handlesOf(r.o.snapshot(), ref, devices) {
+		if !h.serving() {
+			continue
+		}
+		if _, err := writeSettings(ctx, h, &notes); err != nil {
+			r.o.fault(h.d, err)
+			return outcome{}, err
+		}
 	}
 	configured, err := domePolicies(ctx, t, site, handles)
 	if err != nil {
@@ -202,37 +215,75 @@ func (r *runner) startSite(ctx context.Context, w *stepWork) (outcome, error) {
 }
 
 // powerSwitches starts and connects the Switch devices of a server, and
-// switches on the outputs that the devices name.
+// switches on the outputs that the devices name. It answers what it
+// switched, and each resource whose device does not serve its
+// interface.
 func (r *runner) powerSwitches(ctx context.Context, w *stepWork, ref serverRef, switches, powered []*device) ([]string, error) {
-	if _, err := r.startAndConnect(ctx, w, ref, switches); err != nil {
-		return nil, err
-	}
-	return r.o.setOutputs(ctx, r.o.snapshot(), powered, true)
-}
-
-// startAndConnect starts the pods of the devices, waits until each
-// driver defines its device on the server, and connects them in order.
-func (r *runner) startAndConnect(ctx context.Context, w *stepWork, ref serverRef, devices []*device) (map[string]handle, error) {
-	if _, err := r.o.startDevices(ctx, w.report, ref, devices); err != nil {
-		return nil, err
-	}
-	if err := r.o.waitReady(ctx, w.report, devices); err != nil {
-		return nil, err
-	}
-	handles, err := r.o.waitDefined(ctx, w.report, ref, devices)
+	_, lacking, err := r.startAndConnect(ctx, w, ref, switches)
 	if err != nil {
 		return nil, err
 	}
+	notes, err := r.o.setOutputs(ctx, r.o.snapshot(), powered, true)
+	return append(notes, lacking...), err
+}
+
+// startAndConnect starts the pods of the devices, waits until each
+// driver defines its device on the server, and connects them in order
+// (connectAll). It answers each resource whose device does not serve
+// its interface, for the step's summary.
+func (r *runner) startAndConnect(ctx context.Context, w *stepWork, ref serverRef, devices []*device) (map[string]handle, []string, error) {
+	if _, err := r.o.startDevices(ctx, w.report, ref, devices); err != nil {
+		return nil, nil, err
+	}
+	if err := r.o.waitReady(ctx, w.report, devices); err != nil {
+		return nil, nil, err
+	}
+	handles, err := r.o.waitDefined(ctx, w.report, ref, devices)
+	if err != nil {
+		return nil, nil, err
+	}
+	var ordered []handle
 	for _, d := range devices {
-		h := handles[d.key()]
+		ordered = append(ordered, handles[d.key()])
+	}
+	_, lacking, err := r.connectAll(ctx, w, ordered)
+	return handles, lacking, err
+}
+
+// connectAll connects the INDI device of each handle that runs a
+// driver, in order, and then checks that each device serves the
+// interface of each resource on it (detect). A resource whose device
+// does not serve its interface reports Error, and the others go on,
+// because one camera with no wheel attached must not stop the
+// telescope. It answers each INDI device it connected, with the
+// resources it serves, in order, and then each resource whose device
+// does not serve its interface.
+func (r *runner) connectAll(ctx context.Context, w *stepWork, handles []handle) (connected, lacking []string, err error) {
+	for _, h := range owners(handles) {
 		w.report("connecting " + h.String())
 		err := h.connect(ctx)
-		r.o.fault(d, err)
+		r.o.fault(h.d, err)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
-	return handles, nil
+	served := map[string][]string{}
+	for _, h := range handles {
+		switch {
+		case !r.o.detect(ctx, h):
+			lacking = append(lacking, h.String()+" is not served: "+lowerFirst(missingInterface(h).Error()))
+		case !h.d.runsDriver():
+			served[h.name] = append(served[h.name], h.String())
+		}
+	}
+	for _, h := range owners(handles) {
+		text := h.String()
+		if names := served[h.name]; len(names) > 0 {
+			text += " with " + strings.Join(names, ", ")
+		}
+		connected = append(connected, text)
+	}
+	return connected, lacking, nil
 }
 
 // telescope answers the reservation's telescope server and its devices.
@@ -262,7 +313,7 @@ func (r *runner) powerOn(ctx context.Context, w *stepWork) (outcome, error) {
 	if _, err := r.o.startServer(ctx, w.report, ref, telescope.Metadata.UID, devices); err != nil {
 		return outcome{}, err
 	}
-	switches, _ := partition(devices)
+	switches, _ := t.partition(devices)
 	notes, err := r.powerSwitches(ctx, w, ref, switches, devices)
 	if err != nil {
 		return outcome{}, err
@@ -283,7 +334,7 @@ func (r *runner) startTelescopeDevices(ctx context.Context, w *stepWork) (outcom
 	if err != nil {
 		return outcome{}, err
 	}
-	_, others := partition(devices)
+	_, others := t.partition(devices)
 	if len(others) == 0 {
 		return skipped("no devices besides Switches")
 	}
@@ -296,18 +347,18 @@ func (r *runner) startTelescopeDevices(ctx context.Context, w *stepWork) (outcom
 	if _, err := r.o.waitDefined(ctx, w.report, ref, others); err != nil {
 		return outcome{}, err
 	}
-	return done("started %d devices on %s", len(others), ref)
+	return done("started %d devices on %s", len(driverDevices(others)), ref)
 }
 
 // telescopeHandles answers the handles of the telescope's devices that
-// are not Switch devices, in connect order.
+// do not power the others, in connect order.
 func (r *runner) telescopeHandles(ctx context.Context, w *stepWork) (*tree, []handle, error) {
 	t := r.o.snapshot()
 	ref, _, devices, err := r.telescope(t)
 	if err != nil {
 		return nil, nil, err
 	}
-	_, others := partition(devices)
+	_, others := t.partition(devices)
 	ordered := inOrder(others, connectOrder)
 	byKey, err := r.o.waitDefined(ctx, w.report, ref, ordered)
 	if err != nil {
@@ -320,7 +371,8 @@ func (r *runner) telescopeHandles(ctx context.Context, w *stepWork) (*tree, []ha
 	return t, handles, nil
 }
 
-// connect connects the telescope's devices in connectOrder.
+// connect connects the telescope's devices in connectOrder, each INDI
+// device once, through the resource that runs its driver (connectAll).
 func (r *runner) connect(ctx context.Context, w *stepWork) (outcome, error) {
 	_, handles, err := r.telescopeHandles(ctx, w)
 	if err != nil {
@@ -329,15 +381,9 @@ func (r *runner) connect(ctx context.Context, w *stepWork) (outcome, error) {
 	if len(handles) == 0 {
 		return skipped("no devices besides Switches")
 	}
-	var connected []string
-	for _, h := range handles {
-		w.report("connecting " + h.String())
-		err := h.connect(ctx)
-		r.o.fault(h.d, err)
-		if err != nil {
-			return outcome{}, err
-		}
-		connected = append(connected, h.String())
+	connected, lacking, err := r.connectAll(ctx, w, handles)
+	if err != nil {
+		return outcome{}, err
 	}
-	return done("connected in order: %s", strings.Join(connected, ", "))
+	return done("%s", strings.Join(append([]string{"connected in order: " + strings.Join(connected, ", ")}, lacking...), "; "))
 }

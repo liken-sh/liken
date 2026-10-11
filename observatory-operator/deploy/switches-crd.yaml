@@ -8,7 +8,7 @@
 # A device resource is inventory: `observatory-operator` starts its pod
 # only while a `Reservation` needs it. The fields that every device
 # shares come from `device.yaml.tmpl`, and the procedure schema from
-# `procedures.yaml.tmpl`, so all 14 device CRDs hold the same copy. The
+# `procedures.yaml.tmpl`, so all 13 device CRDs hold the same copy. The
 # typed fields of INDI's standard properties come from
 # `switches-fields.yaml`.
 apiVersion: apiextensions.k8s.io/v1
@@ -86,13 +86,23 @@ spec:
           properties:
             spec:
               type: object
-              required: [driver]
               description: >-
                 One switch, with INDI's `OUTPUT_INTERFACE` or
                 `INPUT_INTERFACE`.
               x-kubernetes-validations:
                 - rule: "!(has(self.telescope) && has(self.observatory))"
                   message: "set at most one parent: spec.telescope or spec.observatory"
+                - rule: "has(self.driver) != has(self.device)"
+                  message: "set exactly one of spec.driver and spec.device"
+                - rule: "!has(self.device) || (!has(self.power) && !has(self.claim))"
+                  message: >-
+                    spec.power and spec.claim belong to the resource
+                    that runs the driver, which spec.device names
+                - rule: "has(self.device) == has(oldSelf.device)"
+                  message: >-
+                    a resource keeps spec.driver or spec.device for its
+                    life: delete it and create it again to change which
+                    one it has
               properties:
                 telescope:
                   type: string
@@ -126,7 +136,8 @@ spec:
                     `image`, the operator runs the image that the `indi`
                     build lists for the driver, so `name` must then be
                     an INDI driver that the image holds, such as
-                    `indi_simulator_ccd`.
+                    `indi_simulator_ccd`. Set `driver` or `device`, not
+                    both.
                   x-kubernetes-validations:
                     - rule: "has(self.image) || self.name.matches('^indi_[a-z0-9_]+$')"
                       message: "driver.name must match ^indi_[a-z0-9_]+$ when driver.image is not set"
@@ -153,6 +164,42 @@ spec:
                         writable `/tmp`. An image built `FROM
                         ghcr.io/liken-sh/indi` meets all three.
                         Optional.
+                device:
+                  type: object
+                  required: [kind, name]
+                  description: >-
+                    The resource whose driver serves this device, in
+                    place of a driver of its own. INDI puts every
+                    interface of one driver on one device, so a camera
+                    with a built-in filter wheel serves a `FilterWheel`,
+                    and a flat panel with a motorized cover serves a
+                    `DustCap`. The resource it names runs the driver,
+                    holds the pod, the claim, and the power, and must be
+                    on the same INDI server. The operator connects that
+                    device before this one's activation, and runs this
+                    one's deactivation before that device stops. Set
+                    `driver` or `device`, not both. The field cannot
+                    change, and a resource that runs a driver cannot
+                    gain it: delete the resource and create it again to
+                    move it to another device.
+                  x-kubernetes-validations:
+                    - rule: "self == oldSelf"
+                      message: >-
+                        spec.device cannot change: delete the resource
+                        and create it again to move it to another device
+                  properties:
+                    kind:
+                      type: string
+                      enum: [Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, Switch, Receiver]
+                      description: >-
+                        The kind of the resource that runs the driver,
+                        such as `Camera`.
+                    name:
+                      type: string
+                      minLength: 1
+                      maxLength: 253
+                      pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                      description: "The name of that resource in this namespace."
                 power:
                   type: object
                   required: [switch, output]
@@ -348,7 +395,7 @@ spec:
                           properties:
                             kind:
                               type: string
-                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, Switch, Receiver, Guider]
                               description: >-
                                 The kind of the resource whose condition
                                 it reads. With no `kind`, the condition
@@ -398,7 +445,7 @@ spec:
                           properties:
                             kind:
                               type: string
-                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, Switch, Receiver, Guider]
                               description: >-
                                 The kind of the resource.
                             name:
@@ -543,7 +590,7 @@ spec:
                           properties:
                             kind:
                               type: string
-                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, Switch, Receiver, Guider]
                               description: >-
                                 The kind of the resource whose condition
                                 it reads. With no `kind`, the condition
@@ -593,7 +640,7 @@ spec:
                           properties:
                             kind:
                               type: string
-                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, Switch, Receiver, Guider]
                               description: >-
                                 The kind of the resource.
                             name:
@@ -634,7 +681,7 @@ spec:
                         properties:
                           kind:
                             type: string
-                            enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                            enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, Switch, Receiver, Guider]
                             description: >-
                               The kind of the resource whose condition
                               it reads. With no `kind`, the condition is
@@ -808,7 +855,7 @@ spec:
                                 properties:
                                   kind:
                                     type: string
-                                    enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                                    enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, Switch, Receiver, Guider]
                                     description: >-
                                       The kind of the resource whose
                                       condition it reads. With no
@@ -861,7 +908,7 @@ spec:
                                 properties:
                                   kind:
                                     type: string
-                                    enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                                    enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, Switch, Receiver, Guider]
                                     description: >-
                                       The kind of the resource.
                                   name:
@@ -1057,10 +1104,32 @@ spec:
                   description: >-
                     The name that the driver gives its device on the
                     INDI server, such as `CCD Simulator`. KStars shows
-                    this name.
+                    this name. A device that another resource serves
+                    names that resource's device.
+                endpoint:
+                  type: object
+                  required: [service, host, port]
+                  description: >-
+                    The INDI server that runs the device, while the
+                    device is installed. A client such as KStars reaches
+                    the device at this address by the name in
+                    `indiDevice`.
+                  properties:
+                    service:
+                      type: string
+                      description: "The name of the server's `Service`."
+                    host:
+                      type: string
+                      description: "The DNS name of the server's `Service` in the cluster."
+                    port:
+                      type: integer
+                      format: int32
+                      description: "The INDI port, 7624."
                 driver:
                   type: string
-                  description: "The driver that the device's pod runs."
+                  description: >-
+                    The driver that the device's pod runs. A device that
+                    another resource serves has no pod of its own.
                 image:
                   type: string
                   description: >-

@@ -6,7 +6,7 @@ weight: 10
 
 # The resources
 
-You describe an observatory with 20 kinds of resource in the API
+You describe an observatory with 19 kinds of resource in the API
 group `observatory.liken.sh/v1alpha1`. Most of them describe the
 site, the telescopes, and each piece of equipment. A `Reservation`
 gives someone the use of a telescope, and an `OpticalTrain` and a
@@ -39,9 +39,22 @@ Each device's parent field is optional. A device with no parent is on
 the shelf: its spec describes it in full, with its driver, image,
 power, and claim, but it is installed nowhere. The operator creates
 no pod, no `Service`, and no `ResourceClaim` for it, because a claim
-would reserve the hardware. A `SkyQualityMeter`, a `Switch`, or a
-`Receiver` names at most one of `telescope` and `observatory`. To
-install a device, set its parent field.
+would reserve the hardware. A `Switch` or a `Receiver` names at most
+one of `telescope` and `observatory`. To install a device, set its
+parent field.
+
+Each device kind is one INDI interface, such as `CCD` for a `Camera`
+and `FILTER` for a `FilterWheel`. One INDI driver can serve several
+interfaces on one device: a camera with a built-in filter wheel, or a
+Flip-Flat, which is a dust cap and a flat panel. So a device resource
+either runs a driver in `spec.driver`, or names in `spec.device` the
+resource whose driver serves it, on the same INDI server. The
+resource that runs the driver gets the pod, the claim, and the power.
+A device serves its interface when its driver defines the
+interface's properties after it connects, and a resource whose device
+does not reports `Error`. [Describe your
+equipment](/docs/guides/describe-your-equipment/#a-device-that-another-device-serves)
+shows how to write one.
 
 | Kind | Short name | Parent field | Key reading in `kubectl get` |
 |---|---|---|---|
@@ -60,7 +73,6 @@ install a device, set its parent field.
 | `FlatPanel` | `flat` | `opticalTrain` | `Lit` or `Dark`, brightness |
 | `Dome` | none | `observatory` | azimuth, shutter, park |
 | `WeatherStation` | `weather` | `observatory` | safety |
-| `SkyQualityMeter` | `sqm` | `telescope` or `observatory` | brightness in mag/arcsec² |
 | `Switch` | `sw` | `telescope` or `observatory` | the outputs that are on |
 | `Receiver` | `rx` | `telescope` or `observatory` | frequency in MHz |
 | `Guider` | none | `telescope` | phase, PHD2's state, RMS in arcsec |

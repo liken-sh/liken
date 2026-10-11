@@ -181,9 +181,6 @@ func deviceDisplay(d *device, readings any, maximum func(property, member string
 			}
 			return quantity(v, 0, "")
 		})}
-	case observatory.SkyQualityMeterKind:
-		r, _ := readings.(observatory.SkyQualityMeterReadings)
-		return observatory.SkyQualityMeterDisplay{Brightness: optionalText(r.Brightness, func(v float64) string { return quantity(v, 2, "mag/arcsec²") })}
 	case observatory.ReceiverKind:
 		r, _ := readings.(observatory.ReceiverReadings)
 		return observatory.ReceiverDisplay{Frequency: optionalText(r.Frequency, frequency)}

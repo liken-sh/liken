@@ -4,7 +4,7 @@
 # A device resource is inventory: `observatory-operator` starts its pod
 # only while a `Reservation` needs it. The fields that every device
 # shares come from `device.yaml.tmpl`, and the procedure schema from
-# `procedures.yaml.tmpl`, so all 14 device CRDs hold the same copy. The
+# `procedures.yaml.tmpl`, so all 13 device CRDs hold the same copy. The
 # typed fields of INDI's standard properties come from
 # `switches-fields.yaml`.
 apiVersion: apiextensions.k8s.io/v1
@@ -82,13 +82,13 @@ spec:
           properties:
             spec:
               type: object
-              required: [driver]
               description: >-
                 One switch, with INDI's `OUTPUT_INTERFACE` or
                 `INPUT_INTERFACE`.
               x-kubernetes-validations:
                 - rule: "!(has(self.telescope) && has(self.observatory))"
                   message: "set at most one parent: spec.telescope or spec.observatory"
+{{ include "device rules" . | indent 16 }}
               properties:
                 telescope:
                   type: string

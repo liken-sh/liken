@@ -4,7 +4,7 @@
 # A device resource is inventory: `observatory-operator` starts its pod
 # only while a `Reservation` needs it. The fields that every device
 # shares come from `device.yaml.tmpl`, and the procedure schema from
-# `procedures.yaml.tmpl`, so all 14 device CRDs hold the same copy. The
+# `procedures.yaml.tmpl`, so all 13 device CRDs hold the same copy. The
 # typed fields of INDI's standard properties come from
 # `gpses-fields.yaml`.
 #
@@ -80,8 +80,9 @@ spec:
           properties:
             spec:
               type: object
-              required: [driver]
               description: "One GPS receiver, with INDI's `GPS_INTERFACE`."
+              x-kubernetes-validations:
+{{ include "device rules" . | indent 16 }}
               properties:
                 telescope:
                   type: string

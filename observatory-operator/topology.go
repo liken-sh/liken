@@ -85,21 +85,25 @@ func (o *operator) ensureServer(ctx context.Context, report func(string), ref se
 	return o.ensure(ctx, report, built, svc, nil)
 }
 
-// startDevices gives each device the finalizer, creates its pod, its
-// Service, and its claim, and answers the devices whose pod it
-// created. The tree of now decides which camera a Guider names, so a
-// Guider created during a reservation places its camera at the next
-// start of the camera's pod.
+// startDevices gives each device that runs a driver the finalizer,
+// with each device that it serves, creates its pod, its Service, and
+// its claim, and answers the devices whose pod it created. A served
+// device has no pod of its own. The tree of now decides which camera a
+// Guider names, so a Guider created during a reservation places its
+// camera at the next start of the camera's pod.
 func (o *operator) startDevices(ctx context.Context, report func(string), ref serverRef, devices []*device) ([]*device, error) {
 	t := o.snapshot()
 	var started []*device
-	for _, d := range devices {
+	for _, d := range driverDevices(devices) {
 		built, svc, claim, err := devicePod(o.namespace, ref, d, t.guides(ref, d))
 		if err != nil {
 			o.fault(d, err)
 			return started, fmt.Errorf("%s %s: %w", d.kind.Name, d.name(), err)
 		}
 		if err := o.holdDevice(ctx, report, d); err != nil {
+			return started, err
+		}
+		if err := o.holdServed(ctx, report, t, d); err != nil {
 			return started, err
 		}
 		created, err := o.ensure(ctx, report, built, svc, claim)
@@ -119,7 +123,7 @@ func (o *operator) startDevices(ctx context.Context, report func(string), ref se
 // the device on.
 func (o *operator) waitReady(ctx context.Context, report func(string), devices []*device) error {
 	return o.waitFor(ctx, report, func(t *tree) (bool, string, error) {
-		for _, d := range devices {
+		for _, d := range driverDevices(devices) {
 			name, err := objectName(d.kind, d.name())
 			if err != nil {
 				return false, "", err
@@ -166,14 +170,20 @@ func (o *operator) waitDefined(ctx context.Context, report func(string), ref ser
 			if _, found := handles[d.key()]; found {
 				continue
 			}
-			if holder, taken := t.driverTakenBy(d); taken {
+			runner, ok := t.runnerOf(d)
+			if !ok {
+				err := fmt.Errorf("%s %s: %s", d.kind.Name, d.name(), firstNonEmpty(t.verdict(d).refusal, "spec.device names no resource that runs a driver"))
+				o.fault(d, err)
+				return false, "", err
+			}
+			if holder, taken := t.driverTakenBy(runner); taken {
 				err := fmt.Errorf("%s %s: %s", d.kind.Name, d.name(), sharedDriver(holder, ref))
 				o.fault(d, err)
 				return false, "", err
 			}
-			name := indiName(server.client, d)
+			name := t.indiName(server.client, d)
 			if name == "" {
-				waiting = firstNonEmpty(waiting, fmt.Sprintf("waiting for driver %s of %s %s on %s", d.object.Spec.Driver.Name, d.kind.Name, d.name(), ref))
+				waiting = firstNonEmpty(waiting, fmt.Sprintf("waiting for driver %s of %s %s on %s", runner.object.Spec.Driver.Name, runner.kind.Name, runner.name(), ref))
 				continue
 			}
 			handles[d.key()] = handle{d: d, server: server, name: name}
@@ -195,10 +205,14 @@ func (o *operator) handlesOf(t *tree, ref serverRef, devices []*device) []handle
 	for _, d := range devices {
 		// A device whose driver another device runs would find that
 		// device's name.
-		if _, taken := t.driverTakenBy(d); taken {
+		runner, ok := t.runnerOf(d)
+		if !ok {
 			continue
 		}
-		if name := indiName(server.client, d); name != "" {
+		if _, taken := t.driverTakenBy(runner); taken {
+			continue
+		}
+		if name := t.indiName(server.client, d); name != "" {
 			out = append(out, handle{d: d, server: server, name: name})
 		}
 	}
@@ -277,8 +291,6 @@ func onServer(ref serverRef, keep func(kind string) bool) func(map[string]string
 	}
 }
 
-func isSwitch(kind string) bool { return kind == observatory.SwitchKind.Name }
-
 func names(devices []*device) string {
 	var out []string
 	for _, d := range devices {
@@ -287,14 +299,35 @@ func names(devices []*device) string {
 	return strings.Join(out, ", ")
 }
 
-// partition splits devices into the Switch devices and the others.
-func partition(devices []*device) (switches, others []*device) {
+// partition splits devices into the ones that power the others and the
+// rest. A device powers the others when its INDI device serves a
+// Switch: a Switch that runs its driver, or the owner of a served
+// Switch, such as a power box that a Focuser owns. Each served device
+// goes with its owner, because the two are one INDI device.
+func (t *tree) partition(devices []*device) (switches, others []*device) {
 	for _, d := range devices {
-		if d.kind == observatory.SwitchKind {
+		owner, _ := t.ownerOf(d)
+		if t.powers(owner) {
 			switches = append(switches, d)
 		} else {
 			others = append(others, d)
 		}
 	}
 	return switches, others
+}
+
+// powers reports whether an owner's INDI device serves a Switch.
+func (t *tree) powers(owner *device) bool {
+	if owner == nil {
+		return false
+	}
+	if owner.kind == observatory.SwitchKind {
+		return true
+	}
+	for _, d := range t.servedBy(owner) {
+		if d.kind == observatory.SwitchKind {
+			return true
+		}
+	}
+	return false
 }

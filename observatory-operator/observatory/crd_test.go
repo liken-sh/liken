@@ -136,7 +136,7 @@ var shortNames = map[string][]string{
 	"FilterWheel": {"fw"}, "Focuser": {"foc"}, "Rotator": {"rot"},
 	"DustCap": {"cap"}, "FlatPanel": {"flat"}, "PolarAligner": {"pac"},
 	"GPS": nil, "Dome": nil, "WeatherStation": {"weather"},
-	"SkyQualityMeter": {"sqm"}, "Switch": {"sw"}, "Receiver": {"rx"},
+	"Switch": {"sw"}, "Receiver": {"rx"},
 	"Guider": nil, "Reservation": {"rsv"},
 }
 

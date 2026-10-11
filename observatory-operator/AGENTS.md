@@ -112,8 +112,8 @@ holds each one:
 ### Tests
 
 The transcripts in `indi/testdata/` are the bytes that a real
-`indiserver` sent with one simulator behind it, for each of the 15
-simulators that plan 06 gives a kind. Each directory has `baseline.xml`,
+`indiserver` sent with one simulator behind it, for each of the 14
+simulators that a kind runs. Each directory has `baseline.xml`,
 `connect.xml`, and `disconnect.xml`, and the focuser and the dome have
 more steps. `replay_test.go` serves them to a client that dials
 through `WithDialer`, over a `net.Pipe`, so the tests run in a
@@ -169,7 +169,11 @@ annotation (`retry.go`). The runner's `Activation` and
 `procedure.go` runs one trigger's actions, `action.go`, `cooler.go`,
 and `jobs.go` carry out one action, `resources.go` resolves a
 procedure's references, `runs.go` holds the record of each run, and
-`activity.go` the `Active` condition. Each of them waits on a bell and reads the watches' stores again. `changed`
+`activity.go` the `Active` condition. `served.go` holds the rules of
+a device that another resource's driver serves, `interfaces.go` what
+the operator does with each INDI interface and how it detects one,
+and `settings.go` the Configure step's write of each setting in a
+spec. Each of them waits on a bell and reads the watches' stores again. `changed`
 rings on every watch event, every INDI event, and every change that a
 PHD2 reports, and `structure` on the same events except an INDI
 property's update or message, and except a PHD2 change other than its
@@ -212,7 +216,10 @@ fakes, so a step's deadline of 20 minutes takes no real time:
   driver never answers, or refuse it, so its driver answers Alert.
   `fakelocks_test.go` gives the fake mount and dome the lock policies
   of INDI's base classes, and hands each report that a client relays
-  to the driver that snoops it.
+  to the driver that snoops it. `fakevariants_test.go` joins the
+  transcripts of several simulators into a driver that no simulator
+  is, such as a Flip-Flat, which serves a `DustCap` and a `FlatPanel`
+  on one device.
 - `fakeguider_test.go` runs a fake PHD2 from `phd2/phd2test` in each
   guider pod that is Ready, and starts a new one, with nothing
   connected, for each new pod.

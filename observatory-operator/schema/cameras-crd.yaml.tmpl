@@ -4,7 +4,7 @@
 # A device resource is inventory: `observatory-operator` starts its pod
 # only while a `Reservation` needs it. The fields that every device
 # shares come from `device.yaml.tmpl`, and the procedure schema from
-# `procedures.yaml.tmpl`, so all 14 device CRDs hold the same copy. The
+# `procedures.yaml.tmpl`, so all 13 device CRDs hold the same copy. The
 # typed fields of INDI's standard properties come from
 # `cameras-fields.yaml`.
 apiVersion: apiextensions.k8s.io/v1
@@ -91,12 +91,13 @@ spec:
           properties:
             spec:
               type: object
-              required: [driver]
               description: >-
                 One camera, with INDI's `CCD_INTERFACE`. The operator
                 writes each setting that the spec states when a
                 reservation configures the camera, and leaves the others
                 as the driver sets them.
+              x-kubernetes-validations:
+{{ include "device rules" . | indent 16 }}
               properties:
                 opticalTrain:
                   type: string

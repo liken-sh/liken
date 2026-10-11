@@ -35,7 +35,6 @@ GENERATED := $(REFERENCE)/observatories.md \
 	$(REFERENCE)/guiders.md \
 	$(REFERENCE)/domes.md \
 	$(REFERENCE)/weatherstations.md \
-	$(REFERENCE)/skyqualitymeters.md \
 	$(REFERENCE)/switches.md \
 	$(REFERENCE)/gpses.md \
 	$(REFERENCE)/polaraligners.md \
@@ -106,8 +105,6 @@ $(REFERENCE)/domes.md: ../deploy/domes-crd.yaml $(CRDREF_SOURCES)
 $(REFERENCE)/weatherstations.md: ../deploy/weatherstations-crd.yaml $(CRDREF_SOURCES)
 	$(CRDREF) -title WeatherStation -weight 170 $< $@
 
-$(REFERENCE)/skyqualitymeters.md: ../deploy/skyqualitymeters-crd.yaml $(CRDREF_SOURCES)
-	$(CRDREF) -title SkyQualityMeter -weight 175 $< $@
 
 $(REFERENCE)/switches.md: ../deploy/switches-crd.yaml $(CRDREF_SOURCES)
 	$(CRDREF) -title Switch -weight 180 $< $@

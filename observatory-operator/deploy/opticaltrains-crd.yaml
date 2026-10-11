@@ -147,7 +147,7 @@ spec:
                     properties:
                       kind:
                         type: string
-                        enum: [Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver]
+                        enum: [Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, Switch, Receiver]
                         description: "The device's kind."
                       name:
                         type: string

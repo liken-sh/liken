@@ -179,16 +179,22 @@ type fakeDriver struct {
 
 var transcriptCache sync.Map
 
+// transcriptPair is what a driver defines before it connects and what
+// it defines when it connects.
+type transcriptPair struct{ baseline, connect []*fakeProperty }
+
 func newFakeDriver(t *testing.T, exec string) *fakeDriver {
-	dir := strings.TrimPrefix(exec, "indi_simulator_")
-	type pair struct{ baseline, connect []*fakeProperty }
-	cached, ok := transcriptCache.Load(dir)
+	cached, ok := transcriptCache.Load(exec)
 	if !ok {
-		base := filepath.Join("indi", "testdata", dir)
-		cached = pair{definitions(t, filepath.Join(base, "baseline.xml")), definitions(t, filepath.Join(base, "connect.xml"))}
-		transcriptCache.Store(dir, cached)
+		if v, isVariant := fakeVariants[exec]; isVariant {
+			cached = v.transcripts(t, exec)
+		} else {
+			base := filepath.Join("indi", "testdata", strings.TrimPrefix(exec, "indi_simulator_"))
+			cached = transcriptPair{definitions(t, filepath.Join(base, "baseline.xml")), definitions(t, filepath.Join(base, "connect.xml"))}
+		}
+		transcriptCache.Store(exec, cached)
 	}
-	p := cached.(pair)
+	p := cached.(transcriptPair)
 	d := &fakeDriver{}
 	for _, prop := range p.baseline {
 		d.props = append(d.props, prop.copy())
@@ -302,6 +308,14 @@ type indiWorld struct {
 	// presets holds the switch that a driver turns On when it defines a
 	// property, by "<device>.<property>" (fakepresets_test.go).
 	presets map[string]string
+	// texts holds the text that a driver gives a member when it
+	// defines its property, by "<device>.<property>.<member>"
+	// (fakepresets_test.go).
+	texts map[string]string
+	// withheld holds the properties, as "<device>.<property>", that a
+	// driver leaves out when it connects, until reveal defines them
+	// (fakepresets_test.go).
+	withheld map[string]bool
 	// shimDelay is the time from a change of a server pod's annotation
 	// to the shim's start or stop of a driver (fakeshim_test.go).
 	shimDelay time.Duration
@@ -316,7 +330,7 @@ type indiWorld struct {
 }
 
 func startIndiWorld(t *testing.T, api *fakeAPI) *indiWorld {
-	w := &indiWorld{t: t, api: api, servers: map[string]*fakeServer{}, held: map[string]bool{}, refused: map[string]bool{}, moving: map[string]bool{}, lateDials: map[string]int{}, presets: map[string]string{}}
+	w := &indiWorld{t: t, api: api, servers: map[string]*fakeServer{}, held: map[string]bool{}, refused: map[string]bool{}, moving: map[string]bool{}, lateDials: map[string]int{}, presets: map[string]string{}, texts: map[string]string{}, withheld: map[string]bool{}}
 	go w.follow(t.Context())
 	return w
 }
@@ -511,7 +525,12 @@ func (w *indiWorld) answer(name string, s *fakeServer, c *fakeConn, v xmlVector)
 	defer w.mu.Unlock()
 	tag := v.XMLName.Local
 	if tag == "getProperties" {
+		// indiserver hands a getProperties that names a device to that
+		// device's driver alone.
 		for _, link := range sortedKeys(s.drivers) {
+			if v.Device != "" && s.drivers[link].device != v.Device {
+				continue
+			}
 			s.drivers[link].reloadDomePolicy()
 			for _, prop := range s.drivers[link].props {
 				c.send(prop.def())
@@ -599,6 +618,9 @@ func (w *indiWorld) answer(name string, s *fakeServer, c *fakeConn, v xmlVector)
 	case connect && !d.connected:
 		d.connected = true
 		for _, prop := range d.onConnect {
+			if w.withheld[d.device+"."+prop.Name] {
+				continue
+			}
 			added := prop.copy()
 			w.applyPreset(added)
 			d.props = append(d.props, added)

@@ -8,49 +8,48 @@ type Kind struct {
 }
 
 // The kinds, from the top of the tree down: the site and its
-// telescopes, the optics, the 14 device kinds, the guider, and the
-// reservation. The 14 device kinds are the ones that have a simulator
-// in the indi-simulators image.
+// telescopes, the optics, the 13 device kinds, the guider, and the
+// reservation. Each device kind is one INDI interface, and each has a
+// simulator in the indi-simulators image.
 var (
 	ObservatoryKind  = Kind{"Observatory", "observatories"}
 	TelescopeKind    = Kind{"Telescope", "telescopes"}
 	OpticalTubeKind  = Kind{"OpticalTube", "opticaltubes"}
 	OpticalTrainKind = Kind{"OpticalTrain", "opticaltrains"}
 
-	MountKind           = Kind{"Mount", "mounts"}
-	CameraKind          = Kind{"Camera", "cameras"}
-	FilterWheelKind     = Kind{"FilterWheel", "filterwheels"}
-	FocuserKind         = Kind{"Focuser", "focusers"}
-	RotatorKind         = Kind{"Rotator", "rotators"}
-	DustCapKind         = Kind{"DustCap", "dustcaps"}
-	FlatPanelKind       = Kind{"FlatPanel", "flatpanels"}
-	PolarAlignerKind    = Kind{"PolarAligner", "polaraligners"}
-	GPSKind             = Kind{"GPS", "gpses"}
-	DomeKind            = Kind{"Dome", "domes"}
-	WeatherStationKind  = Kind{"WeatherStation", "weatherstations"}
-	SkyQualityMeterKind = Kind{"SkyQualityMeter", "skyqualitymeters"}
-	SwitchKind          = Kind{"Switch", "switches"}
-	ReceiverKind        = Kind{"Receiver", "receivers"}
+	MountKind          = Kind{"Mount", "mounts"}
+	CameraKind         = Kind{"Camera", "cameras"}
+	FilterWheelKind    = Kind{"FilterWheel", "filterwheels"}
+	FocuserKind        = Kind{"Focuser", "focusers"}
+	RotatorKind        = Kind{"Rotator", "rotators"}
+	DustCapKind        = Kind{"DustCap", "dustcaps"}
+	FlatPanelKind      = Kind{"FlatPanel", "flatpanels"}
+	PolarAlignerKind   = Kind{"PolarAligner", "polaraligners"}
+	GPSKind            = Kind{"GPS", "gpses"}
+	DomeKind           = Kind{"Dome", "domes"}
+	WeatherStationKind = Kind{"WeatherStation", "weatherstations"}
+	SwitchKind         = Kind{"Switch", "switches"}
+	ReceiverKind       = Kind{"Receiver", "receivers"}
 
 	GuiderKind      = Kind{"Guider", "guiders"}
 	ReservationKind = Kind{"Reservation", "reservations"}
 )
 
-// DeviceKinds lists the 14 device kinds, in the order of plan 06's
+// DeviceKinds lists the 13 device kinds, in the order of plan 06's
 // table. A reservation connects them in its own order, which plan 07
 // gives.
 var DeviceKinds = []Kind{
 	MountKind, CameraKind, FilterWheelKind, FocuserKind, RotatorKind,
 	DustCapKind, FlatPanelKind, PolarAlignerKind, GPSKind, DomeKind,
-	WeatherStationKind, SkyQualityMeterKind, SwitchKind, ReceiverKind,
+	WeatherStationKind, SwitchKind, ReceiverKind,
 }
 
-// Kinds lists all 20 kinds.
+// Kinds lists all 19 kinds.
 var Kinds = []Kind{
 	ObservatoryKind, TelescopeKind, OpticalTubeKind, OpticalTrainKind,
 	MountKind, CameraKind, FilterWheelKind, FocuserKind, RotatorKind,
 	DustCapKind, FlatPanelKind, PolarAlignerKind, GPSKind, DomeKind,
-	WeatherStationKind, SkyQualityMeterKind, SwitchKind, ReceiverKind,
+	WeatherStationKind, SwitchKind, ReceiverKind,
 	GuiderKind, ReservationKind,
 }
 

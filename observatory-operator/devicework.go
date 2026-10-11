@@ -9,30 +9,29 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strconv"
 
 	"github.com/liken-sh/liken/observatory-operator/indi"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
 // connectOrder is the order in which Connect connects a telescope's
-// devices. The cameras come last, because a camera snoops the mount,
-// the focuser, the filter wheel, the rotator, and the sky quality meter
-// of its train, and reads their values when it connects. Disconnect
-// runs in the reverse order. The Switch devices connect earlier, in
-// PowerOn, because they power the others.
+// devices, by the kind of the resource that runs each driver. The
+// cameras come last, because a camera snoops the mount, the focuser,
+// the filter wheel, and the rotator of its train, and reads their
+// values when it connects. Disconnect runs in the reverse order. The
+// Switch devices connect earlier, in PowerOn, because they power the
+// others.
 var connectOrder = []observatory.Kind{
 	observatory.MountKind, observatory.GPSKind, observatory.PolarAlignerKind,
 	observatory.FocuserKind, observatory.FilterWheelKind, observatory.RotatorKind,
-	observatory.DustCapKind, observatory.FlatPanelKind, observatory.SkyQualityMeterKind,
+	observatory.DustCapKind, observatory.FlatPanelKind,
 	observatory.ReceiverKind, observatory.CameraKind,
 }
 
 // siteOrder is the order in which StartSite connects an observatory's
 // own devices, after its Switch devices.
 var siteOrder = []observatory.Kind{
-	observatory.WeatherStationKind, observatory.SkyQualityMeterKind,
-	observatory.DomeKind, observatory.ReceiverKind,
+	observatory.WeatherStationKind, observatory.DomeKind, observatory.ReceiverKind,
 }
 
 // inOrder answers the devices in the order of kinds, and by name in
@@ -79,26 +78,6 @@ func activeDevices(ctx context.Context, h handle, want map[string]string) (bool,
 		return false, nil
 	}
 	return h.setTexts(ctx, "ACTIVE_DEVICES", values)
-}
-
-// filterNames writes a filter wheel's filters to FILTER_NAME, one name
-// for each slot from slot 1, and notes the names that have no slot.
-func filterNames(ctx context.Context, h handle, filters []string, notes *[]string) (bool, error) {
-	p, ok := h.property(ctx, "FILTER_NAME")
-	if !ok {
-		*notes = append(*notes, fmt.Sprintf("no FILTER_NAME on %s", h))
-		return false, nil
-	}
-	values := map[string]string{}
-	for i, name := range filters {
-		member := "FILTER_SLOT_NAME_" + strconv.Itoa(i+1)
-		if _, has := p.Member(member); !has {
-			*notes = append(*notes, fmt.Sprintf("no slot for %d of the filters on %s (%d slots)", len(filters)-i, h, len(p.Members)))
-			break
-		}
-		values[member] = name
-	}
-	return h.setTexts(ctx, "FILTER_NAME", values)
 }
 
 // optional writes a setting that a person may leave out, to a property

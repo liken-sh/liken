@@ -43,8 +43,8 @@ properties:
     description: "Opens or closes the shutter."
   DOME_SHUTTER_PARK_POLICY:
     field: shutterParkPolicy
-    role: setting
-    description: "Whether the driver closes the shutter when the dome parks, opens it when the dome unparks, or both."
+    role: tree
+    description: "Whether the driver closes the shutter when the dome parks, opens it when the dome unparks, or both. The operator turns both on, so the shutter follows the park."
   DOME_SPEED:
     field: speed
     role: setting

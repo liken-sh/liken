@@ -74,7 +74,25 @@ func TestTheAPIServerAcceptsAndRefuses(t *testing.T) {
 		{"a camera on the shelf", CameraKind,
 			map[string]any{"driver": simulator("indi_simulator_ccd")}, ""},
 		{"a camera with no driver", CameraKind,
-			map[string]any{"opticalTrain": "east-imaging"}, "spec.driver: Required value"},
+			map[string]any{"opticalTrain": "east-imaging"}, "set exactly one of spec.driver and spec.device"},
+		{"a filter wheel that a camera serves", FilterWheelKind,
+			map[string]any{"opticalTrain": "east-imaging", "device": map[string]any{"kind": "Camera", "name": "east-main"},
+				"filters": []any{"L", "R", "G", "B"}}, ""},
+		{"a filter wheel with a driver and a serving camera", FilterWheelKind,
+			map[string]any{"opticalTrain": "east-imaging", "driver": simulator("indi_simulator_wheel"),
+				"device": map[string]any{"kind": "Camera", "name": "east-main"}},
+			"set exactly one of spec.driver and spec.device"},
+		{"a served dust cap with power of its own", DustCapKind,
+			map[string]any{"opticalTrain": "east-imaging", "device": map[string]any{"kind": "FlatPanel", "name": "east"},
+				"power": map[string]any{"switch": "east", "output": 3}},
+			"spec.power and spec.claim belong to the resource that runs the driver"},
+		{"a served dust cap with a claim of its own", DustCapKind,
+			map[string]any{"opticalTrain": "east-imaging", "device": map[string]any{"kind": "FlatPanel", "name": "east"},
+				"claim": map[string]any{}},
+			"spec.power and spec.claim belong to the resource that runs the driver"},
+		{"a device served by a kind that does not exist", FilterWheelKind,
+			map[string]any{"opticalTrain": "east-imaging", "device": map[string]any{"kind": "Telescope", "name": "east"}},
+			"spec.device.kind: Unsupported value"},
 		{"a driver that is not an INDI driver, with no image", CameraKind,
 			map[string]any{"opticalTrain": "east-imaging", "driver": simulator("ccd")},
 			"driver.name must match ^indi_[a-z0-9_]+$"},
@@ -281,10 +299,42 @@ func TestAReservationKeepsItsTelescope(t *testing.T) {
 	}
 }
 
+// A served resource keeps the device that serves it, and a resource
+// keeps spec.driver or spec.device for its life. Moving one is a delete
+// and a create, so the operator never meets a pointer that changed
+// while the old device still runs it.
+func TestAServedResourceKeepsItsDevice(t *testing.T) {
+	served := func(camera string) map[string]any {
+		return map[string]any{"opticalTrain": "east-imaging", "device": map[string]any{"kind": "Camera", "name": camera}}
+	}
+	driven := map[string]any{"opticalTrain": "east-imaging", "driver": simulator("indi_simulator_wheel")}
+	cases := []struct {
+		name     string
+		old, now map[string]any
+		refusal  string
+	}{
+		{"the same device, other filters", served("east-main"), map[string]any{"opticalTrain": "east-imaging",
+			"device": map[string]any{"kind": "Camera", "name": "east-main"}, "filters": []any{"L"}}, ""},
+		{"another train on the same device", served("east-main"), map[string]any{"opticalTrain": "east-guiding",
+			"device": map[string]any{"kind": "Camera", "name": "east-main"}}, ""},
+		{"another device", served("east-main"), served("east-guide"), "spec.device cannot change"},
+		{"a driver in place of the device", served("east-main"), driven, "a resource keeps spec.driver or spec.device for its life"},
+		{"a device in place of the driver", driven, served("east-main"), "a resource keeps spec.driver or spec.device for its life"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			errs := validate(t, FilterWheelKind, resource(FilterWheelKind, c.now), resource(FilterWheelKind, c.old))
+			if got := errs.ToAggregate(); !refuses(got, c.refusal) {
+				t.Errorf("errors = %v, want %q", got, c.refusal)
+			}
+		})
+	}
+}
+
 // Every kind caps its name at 32 characters. observatory-operator names
 // the pod and Service of a device, a Telescope, or an Observatory
 // <name>-<kind>, a Service name holds at most 63 characters, and the
-// longest kind, SkyQualityMeter, leaves 47. A Job's labels carry the name
+// longest kind, WeatherStation, leaves 48. A Job's labels carry the name
 // of the resource whose trigger ran it, and a label value holds at most
 // 63. One cap for every kind leaves room for a longer kind.
 func TestEveryKindCapsItsName(t *testing.T) {

@@ -17,10 +17,10 @@ One dome or roll-off roof, with INDI's `DOME_INTERFACE`. While an `Observatory` 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="spec--observatory"></span>`observatory` | string | no | The name of the `Observatory` that the device belongs to. The device runs on the observatory's own INDI server. Optional. With no `observatory`, the device is on the shelf, and the operator creates nothing for it. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
-| <span id="spec--driver"></span>`driver` | [object](#specdriver) | yes | The INDI driver that runs the device. With no `image`, the operator runs the image that the `indi` build lists for the driver, so `name` must then be an INDI driver that the image holds, such as `indi_simulator_ccd`. |
+| <span id="spec--driver"></span>`driver` | [object](#specdriver) | no | The INDI driver that runs the device. With no `image`, the operator runs the image that the `indi` build lists for the driver, so `name` must then be an INDI driver that the image holds, such as `indi_simulator_ccd`. Set `driver` or `device`, not both. |
+| <span id="spec--device"></span>`device` | [object](#specdevice) | no | The resource whose driver serves this device, in place of a driver of its own. INDI puts every interface of one driver on one device, so a camera with a built-in filter wheel serves a `FilterWheel`, and a flat panel with a motorized cover serves a `DustCap`. The resource it names runs the driver, holds the pod, the claim, and the power, and must be on the same INDI server. The operator connects that device before this one's activation, and runs this one's deactivation before that device stops. Set `driver` or `device`, not both. The field cannot change, and a resource that runs a driver cannot gain it: delete the resource and create it again to move it to another device. |
 | <span id="spec--power"></span>`power` | [object](#specpower) | no | The `Switch` output that powers the device. Activation switches the output on before the device's pod starts, and deactivation switches it off after the pod stops. Optional. With no power, a person powers the device on and off by hand. |
 | <span id="spec--claim"></span>`claim` | object | no | A `ResourceClaimSpec` of the `resource.k8s.io` API, for real hardware. The operator creates a `ResourceClaim` from it for the device's pod. The API server validates it when the operator creates the claim. Optional. A simulator needs no claim. |
-| <span id="spec--shutterparkpolicy"></span>`shutterParkPolicy` | []string | no | Whether the driver closes the shutter when the dome parks, opens it when the dome unparks, or both. The operator writes it to `DOME_SHUTTER_PARK_POLICY` once, in the `Configure` step of each reservation. Optional. |
 | <span id="spec--speed"></span>`speed` | number | no | The speed of the dome's rotation, in revolutions per minute. The operator writes it to `DOME_SPEED` once, in the `Configure` step of each reservation. Optional. |
 | <span id="spec--presets"></span>`presets` | [object](#specpresets) | no | Three azimuths, in degrees, that `gotoPreset` turns the dome to. The operator writes it to `Presets` once, in the `Configure` step of each reservation. Optional. |
 | <span id="spec--autosync"></span>`autoSync` | string | no | Whether the dome follows the mount, so the shutter stays in front of the telescope. The operator writes it to `DOME_AUTOSYNC` once, in the `Configure` step of each reservation. Optional. One of: `DOME_AUTOSYNC_ENABLE`, `DOME_AUTOSYNC_DISABLE`. |
@@ -37,12 +37,21 @@ One dome or roll-off roof, with INDI's `DOME_INTERFACE`. While an `Observatory` 
 
 ### spec.driver
 
-The INDI driver that runs the device. With no `image`, the operator runs the image that the `indi` build lists for the driver, so `name` must then be an INDI driver that the image holds, such as `indi_simulator_ccd`.
+The INDI driver that runs the device. With no `image`, the operator runs the image that the `indi` build lists for the driver, so `name` must then be an INDI driver that the image holds, such as `indi_simulator_ccd`. Set `driver` or `device`, not both.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specdriver--name"></span>`name` | string | yes | The driver's executable, such as `indi_simulator_ccd`. The device's pod runs it under `socat`, so the name holds no path, no space, no comma, and no colon. Pattern: `^[A-Za-z0-9_][A-Za-z0-9_.+-]*$`. |
 | <span id="specdriver--image"></span>`image` | string | no | The container image that holds the driver, used as written. The image must hold `/usr/bin/socat` and the driver on `PATH`, and must run as user 1000 with a read-only root filesystem and a writable `/tmp`. An image built `FROM ghcr.io/liken-sh/indi` meets all three. Optional. |
+
+### spec.device
+
+The resource whose driver serves this device, in place of a driver of its own. INDI puts every interface of one driver on one device, so a camera with a built-in filter wheel serves a `FilterWheel`, and a flat panel with a motorized cover serves a `DustCap`. The resource it names runs the driver, holds the pod, the claim, and the power, and must be on the same INDI server. The operator connects that device before this one's activation, and runs this one's deactivation before that device stops. Set `driver` or `device`, not both. The field cannot change, and a resource that runs a driver cannot gain it: delete the resource and create it again to move it to another device.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specdevice--kind"></span>`kind` | string | yes | The kind of the resource that runs the driver, such as `Camera`. One of: `Mount`, `Camera`, `FilterWheel`, `Focuser`, `Rotator`, `DustCap`, `FlatPanel`, `PolarAligner`, `GPS`, `Dome`, `WeatherStation`, `Switch`, `Receiver`. |
+| <span id="specdevice--name"></span>`name` | string | yes | The name of that resource in this namespace. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
 
 ### spec.power
 
@@ -114,7 +123,7 @@ One condition, and the status it must have.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specactivationrequires--kind"></span>`kind` | string | no | The kind of the resource whose condition it reads. With no `kind`, the condition is the resource's own. A `kind` of `Observatory` or `Telescope` with no `name` means the resource's own observatory or telescope. One of: `Observatory`, `Telescope`, `OpticalTube`, `OpticalTrain`, `Mount`, `Camera`, `FilterWheel`, `Focuser`, `Rotator`, `DustCap`, `FlatPanel`, `PolarAligner`, `GPS`, `Dome`, `WeatherStation`, `SkyQualityMeter`, `Switch`, `Receiver`, `Guider`. |
+| <span id="specactivationrequires--kind"></span>`kind` | string | no | The kind of the resource whose condition it reads. With no `kind`, the condition is the resource's own. A `kind` of `Observatory` or `Telescope` with no `name` means the resource's own observatory or telescope. One of: `Observatory`, `Telescope`, `OpticalTube`, `OpticalTrain`, `Mount`, `Camera`, `FilterWheel`, `Focuser`, `Rotator`, `DustCap`, `FlatPanel`, `PolarAligner`, `GPS`, `Dome`, `WeatherStation`, `Switch`, `Receiver`, `Guider`. |
 | <span id="specactivationrequires--name"></span>`name` | string | no | The name of the resource, in this namespace. A device kind needs a name. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
 | <span id="specactivationrequires--type"></span>`type` | string | yes | The condition's type, such as `Safe` or `Parked`. |
 | <span id="specactivationrequires--status"></span>`status` | string | no | The status that the condition must have: `True`, `False`, or `Unknown`. The default is `True`. One of: `True`, `False`, `Unknown`. Default: `True`. |
@@ -125,7 +134,7 @@ One resource, by its kind and name.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specactivationafter--kind"></span>`kind` | string | yes | The kind of the resource. One of: `Observatory`, `Telescope`, `OpticalTube`, `OpticalTrain`, `Mount`, `Camera`, `FilterWheel`, `Focuser`, `Rotator`, `DustCap`, `FlatPanel`, `PolarAligner`, `GPS`, `Dome`, `WeatherStation`, `SkyQualityMeter`, `Switch`, `Receiver`, `Guider`. |
+| <span id="specactivationafter--kind"></span>`kind` | string | yes | The kind of the resource. One of: `Observatory`, `Telescope`, `OpticalTube`, `OpticalTrain`, `Mount`, `Camera`, `FilterWheel`, `Focuser`, `Rotator`, `DustCap`, `FlatPanel`, `PolarAligner`, `GPS`, `Dome`, `WeatherStation`, `Switch`, `Receiver`, `Guider`. |
 | <span id="specactivationafter--name"></span>`name` | string | no | The name of the resource. With no `name`, the reference names every resource of the kind in the observatory, or the resource's own `Observatory` or `Telescope`. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
 
 ### spec.deactivation[]
@@ -166,7 +175,7 @@ One condition, and the status it must have.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specdeactivationrequires--kind"></span>`kind` | string | no | The kind of the resource whose condition it reads. With no `kind`, the condition is the resource's own. A `kind` of `Observatory` or `Telescope` with no `name` means the resource's own observatory or telescope. One of: `Observatory`, `Telescope`, `OpticalTube`, `OpticalTrain`, `Mount`, `Camera`, `FilterWheel`, `Focuser`, `Rotator`, `DustCap`, `FlatPanel`, `PolarAligner`, `GPS`, `Dome`, `WeatherStation`, `SkyQualityMeter`, `Switch`, `Receiver`, `Guider`. |
+| <span id="specdeactivationrequires--kind"></span>`kind` | string | no | The kind of the resource whose condition it reads. With no `kind`, the condition is the resource's own. A `kind` of `Observatory` or `Telescope` with no `name` means the resource's own observatory or telescope. One of: `Observatory`, `Telescope`, `OpticalTube`, `OpticalTrain`, `Mount`, `Camera`, `FilterWheel`, `Focuser`, `Rotator`, `DustCap`, `FlatPanel`, `PolarAligner`, `GPS`, `Dome`, `WeatherStation`, `Switch`, `Receiver`, `Guider`. |
 | <span id="specdeactivationrequires--name"></span>`name` | string | no | The name of the resource, in this namespace. A device kind needs a name. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
 | <span id="specdeactivationrequires--type"></span>`type` | string | yes | The condition's type, such as `Safe` or `Parked`. |
 | <span id="specdeactivationrequires--status"></span>`status` | string | no | The status that the condition must have: `True`, `False`, or `Unknown`. The default is `True`. One of: `True`, `False`, `Unknown`. Default: `True`. |
@@ -177,7 +186,7 @@ One resource, by its kind and name.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specdeactivationafter--kind"></span>`kind` | string | yes | The kind of the resource. One of: `Observatory`, `Telescope`, `OpticalTube`, `OpticalTrain`, `Mount`, `Camera`, `FilterWheel`, `Focuser`, `Rotator`, `DustCap`, `FlatPanel`, `PolarAligner`, `GPS`, `Dome`, `WeatherStation`, `SkyQualityMeter`, `Switch`, `Receiver`, `Guider`. |
+| <span id="specdeactivationafter--kind"></span>`kind` | string | yes | The kind of the resource. One of: `Observatory`, `Telescope`, `OpticalTube`, `OpticalTrain`, `Mount`, `Camera`, `FilterWheel`, `Focuser`, `Rotator`, `DustCap`, `FlatPanel`, `PolarAligner`, `GPS`, `Dome`, `WeatherStation`, `Switch`, `Receiver`, `Guider`. |
 | <span id="specdeactivationafter--name"></span>`name` | string | no | The name of the resource. With no `name`, the reference names every resource of the kind in the observatory, or the resource's own `Observatory` or `Telescope`. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
 
 ### spec.triggers[]
@@ -195,7 +204,7 @@ The condition, and the status that fires the trigger.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="spectriggerswhen--kind"></span>`kind` | string | no | The kind of the resource whose condition it reads. With no `kind`, the condition is the resource's own. A `kind` of `Observatory` or `Telescope` with no `name` means the resource's own observatory or telescope. One of: `Observatory`, `Telescope`, `OpticalTube`, `OpticalTrain`, `Mount`, `Camera`, `FilterWheel`, `Focuser`, `Rotator`, `DustCap`, `FlatPanel`, `PolarAligner`, `GPS`, `Dome`, `WeatherStation`, `SkyQualityMeter`, `Switch`, `Receiver`, `Guider`. |
+| <span id="spectriggerswhen--kind"></span>`kind` | string | no | The kind of the resource whose condition it reads. With no `kind`, the condition is the resource's own. A `kind` of `Observatory` or `Telescope` with no `name` means the resource's own observatory or telescope. One of: `Observatory`, `Telescope`, `OpticalTube`, `OpticalTrain`, `Mount`, `Camera`, `FilterWheel`, `Focuser`, `Rotator`, `DustCap`, `FlatPanel`, `PolarAligner`, `GPS`, `Dome`, `WeatherStation`, `Switch`, `Receiver`, `Guider`. |
 | <span id="spectriggerswhen--name"></span>`name` | string | no | The name of the resource, in this namespace. A device kind needs a name. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
 | <span id="spectriggerswhen--type"></span>`type` | string | yes | The condition's type, such as `Safe` or `Parked`. |
 | <span id="spectriggerswhen--status"></span>`status` | string | no | The status that the condition must have: `True`, `False`, or `Unknown`. The default is `True`. One of: `True`, `False`, `Unknown`. Default: `True`. |
@@ -239,7 +248,7 @@ One condition, and the status it must have.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="spectriggersrunrequires--kind"></span>`kind` | string | no | The kind of the resource whose condition it reads. With no `kind`, the condition is the resource's own. A `kind` of `Observatory` or `Telescope` with no `name` means the resource's own observatory or telescope. One of: `Observatory`, `Telescope`, `OpticalTube`, `OpticalTrain`, `Mount`, `Camera`, `FilterWheel`, `Focuser`, `Rotator`, `DustCap`, `FlatPanel`, `PolarAligner`, `GPS`, `Dome`, `WeatherStation`, `SkyQualityMeter`, `Switch`, `Receiver`, `Guider`. |
+| <span id="spectriggersrunrequires--kind"></span>`kind` | string | no | The kind of the resource whose condition it reads. With no `kind`, the condition is the resource's own. A `kind` of `Observatory` or `Telescope` with no `name` means the resource's own observatory or telescope. One of: `Observatory`, `Telescope`, `OpticalTube`, `OpticalTrain`, `Mount`, `Camera`, `FilterWheel`, `Focuser`, `Rotator`, `DustCap`, `FlatPanel`, `PolarAligner`, `GPS`, `Dome`, `WeatherStation`, `Switch`, `Receiver`, `Guider`. |
 | <span id="spectriggersrunrequires--name"></span>`name` | string | no | The name of the resource, in this namespace. A device kind needs a name. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
 | <span id="spectriggersrunrequires--type"></span>`type` | string | yes | The condition's type, such as `Safe` or `Parked`. |
 | <span id="spectriggersrunrequires--status"></span>`status` | string | no | The status that the condition must have: `True`, `False`, or `Unknown`. The default is `True`. One of: `True`, `False`, `Unknown`. Default: `True`. |
@@ -250,7 +259,7 @@ One resource, by its kind and name.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="spectriggersrunafter--kind"></span>`kind` | string | yes | The kind of the resource. One of: `Observatory`, `Telescope`, `OpticalTube`, `OpticalTrain`, `Mount`, `Camera`, `FilterWheel`, `Focuser`, `Rotator`, `DustCap`, `FlatPanel`, `PolarAligner`, `GPS`, `Dome`, `WeatherStation`, `SkyQualityMeter`, `Switch`, `Receiver`, `Guider`. |
+| <span id="spectriggersrunafter--kind"></span>`kind` | string | yes | The kind of the resource. One of: `Observatory`, `Telescope`, `OpticalTube`, `OpticalTrain`, `Mount`, `Camera`, `FilterWheel`, `Focuser`, `Rotator`, `DustCap`, `FlatPanel`, `PolarAligner`, `GPS`, `Dome`, `WeatherStation`, `Switch`, `Receiver`, `Guider`. |
 | <span id="spectriggersrunafter--name"></span>`name` | string | no | The name of the resource. With no `name`, the reference names every resource of the kind in the observatory, or the resource's own `Observatory` or `Telescope`. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
 
 ## status
@@ -263,8 +272,9 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--phase"></span>`phase` | string | no | The device's state in one word. `Inventory`: the device is on the shelf, with no parent, and the operator creates nothing for it. `Idle`: the device is installed, but no reservation of its telescope or its observatory is active, so it has no pod. `Starting`: a reservation's activation began, or the device's pod starts. `Connecting`: the operator asked the driver to connect. `Connected`: the driver reports the device connected. `Disconnecting`: the operator asked the driver to disconnect, or stops the pod. `Error`: a step failed, and the `Ready` condition gives the reason. One of: `Inventory`, `Idle`, `Starting`, `Connecting`, `Connected`, `Disconnecting`, `Error`. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | `Ready` is `True` while the device is connected. `ParentFound` is `False` when a resource that the spec names, up to the `Observatory`, does not exist, and its message names the missing resource. A device on the shelf names no parent, and its `ParentFound` is `True` with the reason `NoParent`. While a device is connected, it also reports the state that the triggers of procedures read, by kind: a `Dome` `Parked` and `Open` (the shutter), a `Mount` `Parked`, a `DustCap` `Open`, a `FlatPanel` `Lit` (the light), a `Camera` `Cooling` (the cooler), and a `WeatherStation` `Safe`. A park, a shutter, or a cover that moves is `Unknown` with the reason `Moving`. `Safe` is `False` with the reason `Warning` or `Danger`. A device that is not connected has none of them. |
 | <span id="status--procedures"></span>`procedures` | [\[\]object](#statusprocedures) | no | The last run of each trigger of the resource's procedures: `activation`, `deactivation`, and `triggers[0]` and so on for each item of `spec.triggers`. An operator that restarts resumes a run from this record. |
-| <span id="status--indidevice"></span>`indiDevice` | string | no | The name that the driver gives its device on the INDI server, such as `CCD Simulator`. KStars shows this name. |
-| <span id="status--driver"></span>`driver` | string | no | The driver that the device's pod runs. |
+| <span id="status--indidevice"></span>`indiDevice` | string | no | The name that the driver gives its device on the INDI server, such as `CCD Simulator`. KStars shows this name. A device that another resource serves names that resource's device. |
+| <span id="status--endpoint"></span>`endpoint` | [object](#statusendpoint) | no | The INDI server that runs the device, while the device is installed. A client such as KStars reaches the device at this address by the name in `indiDevice`. |
+| <span id="status--driver"></span>`driver` | string | no | The driver that the device's pod runs. A device that another resource serves has no pod of its own. |
 | <span id="status--image"></span>`image` | string | no | The image that the device's pod runs, after the operator resolved it. |
 | <span id="status--pod"></span>`pod` | string | no | The name of the device's pod, while it exists. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the device's pod. |
@@ -272,7 +282,7 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--activedevices"></span>`activeDevices` | [object](#statusactivedevices) | no | The INDI devices whose state the dome reads. The status holds what the driver reports in `ACTIVE_DEVICES`. The operator decides it from the resources around the device, so it is not in spec. |
 | <span id="status--mountpolicy"></span>`mountPolicy` | [object](#statusmountpolicy) | no | Whether the mount's park locks the dome's park: `MOUNT_LOCKS` or `MOUNT_IGNORED`. The status holds what the driver reports in `MOUNT_POLICY`. The operator decides it from the resources around the device, so it is not in spec. |
 | <span id="status--shutter"></span>`shutter` | [object](#statusshutter) | no | Opens or closes the shutter. The status holds what the driver reports in `DOME_SHUTTER`. Clients such as KStars and Ekos change it. |
-| <span id="status--shutterparkpolicy"></span>`shutterParkPolicy` | [object](#statusshutterparkpolicy) | no | Whether the driver closes the shutter when the dome parks, opens it when the dome unparks, or both. The status holds what the driver reports in `DOME_SHUTTER_PARK_POLICY`. `spec.shutterParkPolicy` sets it. |
+| <span id="status--shutterparkpolicy"></span>`shutterParkPolicy` | [object](#statusshutterparkpolicy) | no | Whether the driver closes the shutter when the dome parks, opens it when the dome unparks, or both. The operator turns both on, so the shutter follows the park. The status holds what the driver reports in `DOME_SHUTTER_PARK_POLICY`. The operator decides it from the resources around the device, so it is not in spec. |
 | <span id="status--motion"></span>`motion` | [object](#statusmotion) | no | Turns the dome clockwise or counterclockwise, as seen from above, or moves the roof. The status holds what the driver reports in `DOME_MOTION`. Clients such as KStars and Ekos change it. |
 | <span id="status--speed"></span>`speed` | [object](#statusspeed) | no | The speed of the dome's rotation, in revolutions per minute. The status holds what the driver reports in `DOME_SPEED`. `spec.speed` sets it. |
 | <span id="status--relativeposition"></span>`relativePosition` | [object](#statusrelativeposition) | no | Turns the dome by this many degrees in the direction of `motion`. The status holds what the driver reports in `REL_DOME_POSITION`. Clients such as KStars and Ekos change it. |
@@ -334,6 +344,16 @@ One action.
 | <span id="statusproceduresactions--stoptime"></span>`stopTime` | string | no | When the action ended. |
 | <span id="statusproceduresactions--summary"></span>`summary` | string | no | What the action waits for or did. |
 
+### status.endpoint
+
+The INDI server that runs the device, while the device is installed. A client such as KStars reaches the device at this address by the name in `indiDevice`.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusendpoint--service"></span>`service` | string | yes | The name of the server's `Service`. |
+| <span id="statusendpoint--host"></span>`host` | string | yes | The DNS name of the server's `Service` in the cluster. |
+| <span id="statusendpoint--port"></span>`port` | integer | yes | The INDI port, 7624. |
+
 ### status.properties[]
 
 One INDI property.
@@ -393,7 +413,7 @@ Opens or closes the shutter. The status holds what the driver reports in `DOME_S
 
 ### status.shutterParkPolicy
 
-Whether the driver closes the shutter when the dome parks, opens it when the dome unparks, or both. The status holds what the driver reports in `DOME_SHUTTER_PARK_POLICY`. `spec.shutterParkPolicy` sets it.
+Whether the driver closes the shutter when the dome parks, opens it when the dome unparks, or both. The operator turns both on, so the shutter follows the park. The status holds what the driver reports in `DOME_SHUTTER_PARK_POLICY`. The operator decides it from the resources around the device, so it is not in spec.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

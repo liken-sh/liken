@@ -71,6 +71,9 @@ func (r *runner) steady(ctx context.Context) {
 		if site, ok := t.observatories[telescope.Spec.Observatory]; ok {
 			r.reapplySite(ctx, t, site, appeared)
 		}
+		for _, s := range []serverRef{ref, site} {
+			r.judgeInterfaces(ctx, t, s)
+		}
 		r.keepWaiting(ctx, wake)
 	}
 }
@@ -130,9 +133,16 @@ func (r *runner) keepServer(ctx context.Context, t *tree, ref serverRef, owner o
 	if err != nil {
 		return err
 	}
+	joining := joiningServed(t, devices)
 	started, err := r.o.startDevices(ctx, nil, ref, devices)
 	r.recordDevicePods(started)
 	if err != nil {
+		return err
+	}
+	r.configureJoined(ctx, t, ref, joining)
+	// A served device that left deactivates through its owner's
+	// driver, so it goes before setDrivers stops any driver.
+	if err := r.leaveServed(ctx, t, ref); err != nil {
 		return err
 	}
 	joined, left, err := r.o.setDrivers(ctx, nil, ref, devices)
@@ -264,45 +274,51 @@ func (a *appearances) take(server, device string) bool {
 }
 
 // reapply connects and configures each of the telescope's devices that
-// came back disconnected, and turns its Switch outputs on again.
+// came back disconnected, and turns its Switch outputs on again. A
+// device comes back as one INDI device, so the resource that runs its
+// driver connects it, and then each resource it serves is checked and
+// configured again.
 func (r *runner) reapply(ctx context.Context, t *tree, ref serverRef, appeared *appearances) {
 	devices := t.devicesOn(ref)
-	switches, others := partition(devices)
+	switches, others := t.partition(devices)
 	all := r.o.handlesOf(t, ref, inOrder(others, connectOrder))
 	_, site, err := r.siteOf(t)
 	if err != nil {
 		return
 	}
-	for _, h := range r.o.handlesOf(t, ref, switches) {
-		if !appeared.take(ref.String(), h.name) || h.connected() {
+	for _, group := range byDevice(r.o.handlesOf(t, ref, switches)) {
+		if !appeared.take(ref.String(), group[0].name) || group[0].connected() {
 			continue
 		}
-		r.again(ctx, h, func(ctx context.Context) error {
-			if err := h.connect(ctx); err != nil {
+		r.again(ctx, group, func(ctx context.Context) error {
+			if err := connectGroup(ctx, r.o, group); err != nil {
 				return err
 			}
 			_, err := r.o.setOutputs(ctx, r.o.snapshot(), devices, true)
 			return err
 		})
 	}
-	for _, h := range all {
-		if !appeared.take(ref.String(), h.name) || h.connected() {
+	for _, group := range byDevice(all) {
+		if !appeared.take(ref.String(), group[0].name) || group[0].connected() {
 			continue
 		}
-		r.again(ctx, h, func(ctx context.Context) error {
-			if err := h.connect(ctx); err != nil {
+		r.again(ctx, group, func(ctx context.Context) error {
+			if err := connectGroup(ctx, r.o, group); err != nil {
 				return err
 			}
 			var notes []string
-			if _, err := configureDevice(ctx, t, site, h, all, &notes); err != nil {
-				return err
-			}
-			if setpoint := coolSetpoint(h.d); h.d.kind == observatory.CameraKind && setpoint != nil {
-				// The setpoint of the camera's activation goes back, and
-				// the cooler works toward it while the holder works. The
-				// runner does not wait.
-				_, err := optional(ctx, h, "CCD_TEMPERATURE", map[string]float64{"CCD_TEMPERATURE_VALUE": *setpoint}, &notes)
-				return err
+			for _, h := range group {
+				if _, err := configureDevice(ctx, t, site, h, all, &notes); err != nil {
+					return err
+				}
+				if setpoint := coolSetpoint(h.d); interfaces[h.d.kind].cooler && setpoint != nil && h.serving() {
+					// The setpoint of the camera's activation goes back,
+					// and the cooler works toward it while the holder
+					// works. The runner does not wait.
+					if _, err := optional(ctx, h, "CCD_TEMPERATURE", map[string]float64{"CCD_TEMPERATURE_VALUE": *setpoint}, &notes); err != nil {
+						return err
+					}
+				}
 			}
 			return nil
 		})
@@ -314,35 +330,77 @@ func (r *runner) reapply(ctx context.Context, t *tree, ref serverRef, appeared *
 func (r *runner) reapplySite(ctx context.Context, t *tree, site *observatory.Observatory, appeared *appearances) {
 	ref := serverRef{observatory.ObservatoryKind, site.Metadata.Name}
 	devices := t.devicesOn(ref)
-	switches, others := partition(devices)
+	switches, others := t.partition(devices)
 	ordered := append(switches, inOrder(others, siteOrder)...)
-	for _, h := range r.o.handlesOf(t, ref, ordered) {
-		if !appeared.take(ref.String(), h.name) || h.connected() {
+	for _, group := range byDevice(r.o.handlesOf(t, ref, ordered)) {
+		if !appeared.take(ref.String(), group[0].name) || group[0].connected() {
 			continue
 		}
-		r.again(ctx, h, func(ctx context.Context) error {
+		r.again(ctx, group, func(ctx context.Context) error {
 			lock := r.o.siteLock(site.Metadata.Name)
 			if err := lock.acquire(ctx); err != nil {
 				return err
 			}
 			defer lock.release()
-			if err := h.connect(ctx); err != nil {
+			if err := connectGroup(ctx, r.o, group); err != nil {
 				return err
 			}
-			if h.d.kind == observatory.SwitchKind {
+			if t.powers(group[0].d) {
 				_, err := r.o.setOutputs(ctx, r.o.snapshot(), devices, true)
 				return err
 			}
-			_, err := domePolicies(ctx, t, site, map[string]handle{h.d.key(): h})
+			var notes []string
+			byKey := map[string]handle{}
+			for _, h := range group {
+				if _, err := configureDevice(ctx, t, site, h, nil, &notes); err != nil {
+					return err
+				}
+				byKey[h.d.key()] = h
+			}
+			_, err := domePolicies(ctx, t, site, byKey)
 			return err
 		})
 	}
 }
 
-// again runs the work for one device that came back, and records a
-// failure in the device's status. A failure does not end the
-// reservation: the holder may still use the other devices.
-func (r *runner) again(ctx context.Context, h handle, work func(context.Context) error) {
+// byDevice groups handles by their INDI device, in the order of the
+// first handle of each, with the handle of the resource that runs the
+// driver first in each group. A handle of a served resource whose
+// owner is not among the handles is left out: its owner's group
+// answers for the device.
+func byDevice(handles []handle) [][]handle {
+	var out [][]handle
+	at := map[string]int{}
+	for _, h := range owners(handles) {
+		at[h.name] = len(out)
+		out = append(out, []handle{h})
+	}
+	for _, h := range handles {
+		if i, ok := at[h.name]; ok && !h.d.runsDriver() {
+			out[i] = append(out[i], h)
+		}
+	}
+	return out
+}
+
+// connectGroup connects one INDI device through the resource that runs
+// its driver, and checks each resource it serves (detect).
+func connectGroup(ctx context.Context, o *operator, group []handle) error {
+	if err := group[0].connect(ctx); err != nil {
+		return err
+	}
+	for _, h := range group {
+		o.detect(ctx, h)
+	}
+	return nil
+}
+
+// again runs the work for one INDI device that came back, and records
+// a failure in the status of the resource that runs its driver. A
+// failure does not end the reservation: the holder may still use the
+// other devices.
+func (r *runner) again(ctx context.Context, group []handle, work func(context.Context) error) {
+	h := group[0]
 	ctx, cancel := context.WithTimeout(ctx, reapplyLimit)
 	defer cancel()
 	err := h.server.lock.acquire(ctx)
@@ -350,8 +408,8 @@ func (r *runner) again(ctx context.Context, h handle, work func(context.Context)
 		defer h.server.lock.release()
 		err = work(ctx)
 	}
-	r.o.fault(h.d, err)
 	if err != nil {
+		r.o.fault(h.d, err)
 		r.o.logf("setting up %s again failed: %v", h, err)
 	}
 }

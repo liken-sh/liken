@@ -119,7 +119,7 @@ func (o *operator) setDrivers(ctx context.Context, report func(string), ref serv
 		return nil, nil, nil
 	}
 	before := strings.Fields(have)
-	for _, d := range devices {
+	for _, d := range driverDevices(devices) {
 		object, _ := objectName(d.kind, d.name())
 		if !slices.Contains(before, object+":"+strconv.Itoa(devicePort)) {
 			joined = append(joined, d)

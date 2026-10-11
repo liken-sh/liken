@@ -8,14 +8,15 @@ package main
 
 import (
 	"encoding/json"
+	"slices"
 	"sync"
 
 	"github.com/liken-sh/liken/kubernetes/memo"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// deviceObject is one device resource of any of the 14 device kinds.
-// The spec holds every field that any device kind has, so one type
+// deviceObject is one device resource of any of the 13 device kinds.
+// The spec holds the fields that every device kind has, so one type
 // reads them all, and the status holds the readings of the kind as
 // JSON. The CRD of each kind refuses the fields it does not have, so a
 // field that does not belong to a kind is always empty here.
@@ -35,9 +36,21 @@ type deviceSpec struct {
 	Observatory  string `json:"observatory,omitempty"`
 	observatory.DeviceSpec
 	observatory.Procedures[action]
-	Gain    *float64 `json:"gain,omitempty"`
-	Offset  *float64 `json:"offset,omitempty"`
-	Filters []string `json:"filters,omitempty"`
+	// raw is the spec as the API server holds it. Each kind's settings
+	// differ, so the Configure step decodes them from it into the
+	// kind's own type (settings.go).
+	raw []byte
+}
+
+// UnmarshalJSON reads the fields that every kind shares, and keeps the
+// whole spec for the settings of the kind.
+func (s *deviceSpec) UnmarshalJSON(body []byte) error {
+	type shared deviceSpec
+	if err := json.Unmarshal(body, (*shared)(s)); err != nil {
+		return err
+	}
+	s.raw = slices.Clone(body)
+	return nil
 }
 
 type deviceStatus struct {
@@ -92,6 +105,8 @@ type tree struct {
 	// taken is computed once from the devices (shareddrivers.go).
 	takenOnce sync.Once
 	taken     map[*device]*device
+	// served holds the owner of each served device (served.go).
+	served servedVerdicts
 }
 
 // parent answers the resource above a device, from the parent field
@@ -135,11 +150,16 @@ func (t *tree) server(d *device) (serverRef, bool) {
 }
 
 // devicesOn answers the devices that one server runs, in the order of
-// t.devices. A device whose driver another device on the server runs
-// is left out (shareddrivers.go).
+// t.devices: the devices that run a driver, and the devices that one
+// of them serves. A device whose driver another device on the server
+// runs is left out (shareddrivers.go), and so is a served device that
+// the tree refuses (served.go).
 func (t *tree) devicesOn(s serverRef) []*device {
 	var out []*device
 	for _, d := range t.placedOn(s) {
+		if _, owned := t.ownerOf(d); !owned {
+			continue
+		}
 		if _, taken := t.driverTakenBy(d); !taken {
 			out = append(out, d)
 		}

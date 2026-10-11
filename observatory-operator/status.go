@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
@@ -161,19 +162,21 @@ func writeStatus[T any, P memo.Object[T]](recorder *events.Recorder, client *api
 	}
 }
 
-// deviceStatus composes one device's status from its pod and from what
-// its driver reports on its server.
+// deviceStatus composes one device's status from the pod of the driver
+// that serves it and from what that driver reports on its server. A
+// served device reads its owner's pod and INDI device (served.go).
 func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 	var next deviceStatus
 	next.ObservedGeneration = d.object.Metadata.Generation
-	next.Driver = d.object.Spec.Driver.Name
-	if image, err := drivers.Resolve(d.object.Spec.Driver); err == nil {
-		next.Image = image
+	if d.runsDriver() {
+		next.Driver = d.object.Spec.Driver.Name
+		if image, err := drivers.Resolve(d.object.Spec.Driver); err == nil {
+			next.Image = image
+		}
 	}
 	fault := o.faultOf(d)
-	name, _ := objectName(d.kind, d.name())
-	p, hasPod := t.pods[name]
-	if hasPod {
+	name, p, hasPod := t.podOf(d)
+	if hasPod && d.runsDriver() {
 		next.Pod, next.Node = name, p.Spec.NodeName
 	}
 	var connection indi.Property
@@ -182,10 +185,14 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 	maximum := func(string, string) (float64, bool) { return 0, false }
 	ref, placed := t.server(d)
 	// A device whose driver another device runs has no device of its
-	// own on the server. The device of that name is the other one's.
-	holder, taken := t.driverTakenBy(d)
-	if taken {
-		fault = sharedDriver(holder, ref)
+	// own on the server. The device of that name is the other one's. A
+	// served device that the tree refuses has none either.
+	refused := false
+	if holder, taken := t.driverTakenBy(d); taken {
+		fault, refused = sharedDriver(holder, ref), true
+	}
+	if v := t.verdict(d); v.refusal != "" {
+		fault, refused = v.refusal, true
 	}
 	// A device that left its server, by a move or a delete, keeps its
 	// pod there while its deactivation runs (leaves.go). Its status
@@ -195,15 +202,22 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 	if left := hasPod && (!placed || p.Metadata.Labels[labelServer] != ref.String()); left {
 		at, readable = p.Metadata.Labels[labelServer], p.Metadata.DeletionTimestamp == nil
 	}
-	if server, open := o.servers.get(at); readable && !taken && hasPod && open && server.client.Connected() {
-		if indiDevice := indiName(server.client, d); indiDevice != "" {
+	if placed || readable {
+		next.Endpoint = &observatory.Endpoint{Service: at, Host: serviceHost(at, o.namespace), Port: serverPort}
+	}
+	serving := false
+	if server, open := o.servers.get(at); readable && !refused && hasPod && open && server.client.Connected() {
+		if indiDevice := t.indiName(server.client, d); indiDevice != "" {
 			r := reader{c: server.client, name: indiDevice}
 			next.IndiDevice = indiDevice
-			next.Properties = properties(r)
+			if d.runsDriver() {
+				next.Properties = properties(r)
+			}
 			next.Readings = readings(d.kind, r)
 			connection, defined = r.property("CONNECTION")
 			maximum = r.maximum
 			device = &r
+			serving = serves(server.client, indiDevice, d.kind)
 		}
 	}
 	next.Display = deviceDisplay(d, next.Readings, maximum)
@@ -213,14 +227,29 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 	// reads as stopping once its driver is gone from that server.
 	stray := hasPod && !defined && (!placed || p.Metadata.Labels[labelServer] != ref.String())
 	next.Phase = devicePhase(hasPod && (stray || p.Metadata.DeletionTimestamp != nil), hasPod, defined, standing, connection, fault)
-	if taken {
+	if refused {
 		next.Phase = observatory.DeviceError
+	}
+	// A connected device that does not serve its resource's interface
+	// is Error once a step or a runner has decided so (detect), and
+	// Connecting until then. A device that defines the properties later
+	// is Connected at once.
+	lacking := o.lackingOf(d)
+	detecting := next.Phase == observatory.DeviceConnected && !serving
+	if detecting && lacking != "" {
+		next.Phase, fault, detecting = observatory.DeviceError, lacking, false
+	} else if detecting {
+		next.Phase = observatory.DeviceConnecting
 	}
 	parent := parentCondition(t.missingParent(d))
 	if standing == onShelf {
 		parent = shelved()
 	}
-	ready := condition(observatory.ConditionReady, observatory.ConditionFalse, string(next.Phase), deviceMessage(next, d.kind, ref, name, fault, standing))
+	message := deviceMessage(next, d.kind, ref, name, fault, standing)
+	if detecting {
+		message = fmt.Sprintf("Waiting for %s to define %s", next.IndiDevice, strings.Join(observatory.Standards[d.kind].Detect, " or "))
+	}
+	ready := condition(observatory.ConditionReady, observatory.ConditionFalse, string(next.Phase), message)
 	if next.Phase == observatory.DeviceConnected {
 		ready = condition(observatory.ConditionReady, observatory.ConditionTrue, string(next.Phase), deviceMessage(next, d.kind, ref, name, "", standing))
 	}

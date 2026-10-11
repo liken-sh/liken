@@ -104,33 +104,22 @@ type switchTarget struct {
 	doing, did, found string
 }
 
-// switchTargets maps each kind and state to the switch that reaches it.
-var switchTargets = map[string]switchTarget{
-	"Dome/Parked":    {"DOME_PARK", "PARK", "parking", "parked", "parked"},
-	"Dome/Unparked":  {"DOME_PARK", "UNPARK", "unparking", "unparked", "unparked"},
-	"Mount/Parked":   {"TELESCOPE_PARK", "PARK", "parking", "parked", "parked"},
-	"Mount/Unparked": {"TELESCOPE_PARK", "UNPARK", "unparking", "unparked", "unparked"},
-	"DustCap/Open":   {"CAP_PARK", "UNPARK", "opening", "opened", "open"},
-	"DustCap/Closed": {"CAP_PARK", "PARK", "closing", "closed", "closed"},
-	"FlatPanel/Lit":  {"FLAT_LIGHT_CONTROL", "FLAT_LIGHT_ON", "switching on the light of", "switched on the light of", "lit"},
-	"FlatPanel/Dark": {"FLAT_LIGHT_CONTROL", "FLAT_LIGHT_OFF", "switching off the light of", "switched off the light of", "dark"},
-}
-
 // act carries out one action on a connected device. wait holds the
 // action's deadline, and ctx outlives it, for the one action that must
 // finish after its deadline: the cooler's switch-off after a warm-up.
 func (o *operator) act(ctx, wait context.Context, h handle, a action, report func(string)) (string, error) {
+	of := interfaces[h.d.kind]
 	switch {
-	case a.Cool != nil && h.d.kind == observatory.CameraKind:
+	case a.Cool != nil && of.cooler:
 		return cool(wait, h, *a.Cool, report)
-	case a.Warm != nil && h.d.kind == observatory.CameraKind:
+	case a.Warm != nil && of.cooler:
 		return warm(ctx, wait, h, *a.Warm, report)
 	case a.State != "":
-		target, ok := switchTargets[h.d.kind.Name+"/"+a.State]
+		target, ok := of.states[a.State]
 		if !ok {
 			return "", fmt.Errorf("a %s has no state %s", h.d.kind.Name, a.State)
 		}
-		if h.d.kind == observatory.DomeKind || h.d.kind == observatory.MountKind {
+		if of.locks {
 			// The park locks decide this move, so each driver holds
 			// the current park states before the move arrives
 			// (locks.go).

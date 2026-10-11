@@ -70,16 +70,19 @@ func tier(t *tree, devices []*device, since time.Time) []stepRun {
 	return out
 }
 
-// siteTiers are the Observatory and its devices.
+// siteTiers are the Observatory and its devices, the devices that run
+// a driver before the devices they serve (deviceTiers).
 func siteTiers(t *tree, site *observatory.Observatory, since time.Time) [][]stepRun {
-	return [][]stepRun{
-		{{ofObservatory(site), since}},
-		tier(t, t.devicesOn(serverRef{observatory.ObservatoryKind, site.Metadata.Name}), since),
+	tiers := [][]stepRun{{{ofObservatory(site), since}}}
+	for _, devices := range deviceTiers(t, [][]*device{t.devicesOn(serverRef{observatory.ObservatoryKind, site.Metadata.Name})}) {
+		tiers = append(tiers, tier(t, devices, since))
 	}
+	return tiers
 }
 
 // telescopeTiers are the Telescope, its own devices, and the devices
-// of its trains.
+// of its trains, the devices that run a driver before the devices they
+// serve (deviceTiers).
 func telescopeTiers(t *tree, telescope *observatory.Telescope, since time.Time) [][]stepRun {
 	name := telescope.Metadata.Name
 	var trains []*device
@@ -88,11 +91,11 @@ func telescopeTiers(t *tree, telescope *observatory.Telescope, since time.Time) 
 			trains = append(trains, t.trainDevices(train)...)
 		}
 	}
-	return [][]stepRun{
-		{{ofTelescope(telescope), since}},
-		tier(t, directDevices(t, observatory.TelescopeKind, name), since),
-		tier(t, trains, since),
+	tiers := [][]stepRun{{{ofTelescope(telescope), since}}}
+	for _, devices := range deviceTiers(t, [][]*device{directDevices(t, observatory.TelescopeKind, name), trains}) {
+		tiers = append(tiers, tier(t, devices, since))
 	}
+	return tiers
 }
 
 // withoutDeleted answers tiers without the devices that a person
@@ -103,6 +106,21 @@ func withoutDeleted(tiers [][]stepRun) [][]stepRun {
 	for _, members := range tiers {
 		out = append(out, slices.DeleteFunc(slices.Clone(members), func(m stepRun) bool {
 			return m.res.device != nil && deleting(m.res.meta)
+		}))
+	}
+	return out
+}
+
+// withoutLacking answers tiers without the devices whose INDI device
+// does not serve their interface (detect). Such a device has no run of
+// the transition, so if its driver defines the interface later, its
+// activation runs then, as a device's that joins a Ready session
+// (judgeInterfaces).
+func (o *operator) withoutLacking(tiers [][]stepRun) [][]stepRun {
+	out := make([][]stepRun, 0, len(tiers))
+	for _, members := range tiers {
+		out = append(out, slices.DeleteFunc(slices.Clone(members), func(m stepRun) bool {
+			return m.res.device != nil && o.lackingOf(m.res.device) != ""
 		}))
 	}
 	return out
@@ -219,14 +237,15 @@ func (r *runner) activation(ctx context.Context, w *stepWork) (outcome, error) {
 	if held := r.o.activity.get(scopeKey); held.active {
 		scopeSince = held.since
 	}
-	plan := &stepPlan{trigger: observatory.TriggerActivation, tiers: withoutDeleted(append(siteTiers(t, site, siteSince), telescopeTiers(t, telescope, scopeSince)...))}
-	err = r.runTiers(ctx, w, plan, 0, 2, false)
+	siteRuns := siteTiers(t, site, siteSince)
+	plan := &stepPlan{trigger: observatory.TriggerActivation, tiers: r.o.withoutLacking(withoutDeleted(append(siteRuns, telescopeTiers(t, telescope, scopeSince)...)))}
+	err = r.runTiers(ctx, w, plan, 0, len(siteRuns), false)
 	lock.release()
 	if err != nil {
 		return outcome{}, err
 	}
 	r.o.activity.set(scopeKey, true, scopeSince, r.name)
-	if err := r.runTiers(ctx, w, plan, 2, len(plan.tiers), false); err != nil {
+	if err := r.runTiers(ctx, w, plan, len(siteRuns), len(plan.tiers), false); err != nil {
 		return outcome{}, err
 	}
 	return ran(plan, r.coolerNotes(t, telescope))

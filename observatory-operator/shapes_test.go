@@ -63,30 +63,36 @@ func TestASmallTelescopeSkipsWhatItLacks(t *testing.T) {
 	}
 }
 
-// A driver that lacks a property that a step writes is noted, and the
-// step goes on.
-func TestDriversThatLackTheirKindsPropertiesAreNoted(t *testing.T) {
+// A resource whose driver does not define its interface's properties
+// reports Error, and the rest of the telescope starts. The polar
+// aligner's driver defines no CCD_EXPOSURE, so it serves no Camera, and
+// the steps send it nothing for the camera.
+func TestADeviceWhoseDriverLacksItsInterfaceReportsError(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
-		// A camera and a filter wheel that run drivers of other kinds:
-		// the sky quality meter defines no CCD_TEMPERATURE, no
-		// ACTIVE_DEVICES, no CCD_GAIN, and no SCOPE_INFO, and the polar
-		// aligner no FILTER_NAME.
-		w.put(observatory.CameraKind, "east-odd", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_sqm"}, "activation": []any{map[string]any{"cool": map[string]any{"celsius": -5}}}, "gain": 1})
-		w.put(observatory.FilterWheelKind, "east-odd", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_pac"}, "filters": []any{"L"}})
+		w.put(observatory.CameraKind, "east-odd", map[string]any{"opticalTrain": "east-imaging", "driver": map[string]any{"name": "indi_simulator_pac"},
+			"activation": []any{map[string]any{"cool": map[string]any{"celsius": -5}}}, "gain": 1})
 		w.api.deleteNamed(kindCollection(observatory.PolarAlignerKind), "east")
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		r := w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
-		notes := map[observatory.StepName][]string{
-			observatory.StepConfigure:  {"no CCD_GAIN on Camera east-odd", "no SCOPE_INFO on Camera east-odd", "no FILTER_NAME on FilterWheel east-odd"},
-			observatory.StepActivation: {"Camera east-odd cool: -5 °C within 0.5 °C Skipped: No cooler on Camera east-odd: no CCD_TEMPERATURE"},
+		time.Sleep(2 * statusWindow)
+		synctest.Wait()
+
+		lacks := "INDI device Alignment Correction Simulator defines no CCD_EXPOSURE after it connects, so it serves no Camera"
+		if message := stepText(stepOf(r, observatory.StepConnect)); !strings.Contains(message, "Camera east-odd is not served: "+lacks) {
+			t.Errorf("Connect: %q does not note %q", message, lacks)
 		}
-		for name, want := range notes {
-			for _, note := range want {
-				if message := stepText(stepOf(r, name)); !strings.Contains(message, note) {
-					t.Errorf("%s: %q does not note %q", name, message, note)
-				}
+		if message := stepText(stepOf(r, observatory.StepActivation)); strings.Contains(message, "east-odd") {
+			t.Errorf("Activation: %q runs the camera's activation", message)
+		}
+		camera, _ := decode[observatory.Camera](t, w.api, kindCollection(observatory.CameraKind), "east-odd")
+		if ready := conditionOf(camera.Status.Conditions, observatory.ConditionReady); camera.Status.Phase != observatory.DeviceError || ready.Message != "Failed: "+lacks {
+			t.Errorf("camera = %s, Ready = %+v", camera.Status.Phase, ready)
+		}
+		for _, change := range w.indi.changes() {
+			if strings.Contains(change, "Alignment Correction Simulator.") && !strings.Contains(change, ".CONNECTION ") {
+				t.Errorf("the steps sent %q to a device that serves no Camera", change)
 			}
 		}
 	})
@@ -191,6 +197,22 @@ func TestAClaimLivesAsLongAsItsDevicesPod(t *testing.T) {
 		})
 		if names := w.api.names(claimsCollection); len(names) != 0 {
 			t.Errorf("claims after the release: %v", names)
+		}
+	})
+}
+
+// The observatory's devices start in StartSite, so its summary names a
+// resource there whose device does not serve its interface. The GPS
+// simulator defines no RECEIVER_SETTINGS.
+func TestStartSiteNamesADeviceThatLacksItsInterface(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := startWorld(t)
+		w.put(observatory.ReceiverKind, "lab", map[string]any{"observatory": "lab", "driver": map[string]any{"name": "indi_simulator_gps"}})
+		r := readyOf(w)
+		want := "Receiver lab is not served: INDI device GPS Simulator defines no RECEIVER_SETTINGS after it connects, so it serves no Receiver"
+		if summary := stepOf(r, observatory.StepStartSite).Summary; !strings.Contains(summary, want) {
+			t.Errorf("StartSite = %q, want %q", summary, want)
 		}
 	})
 }

@@ -7,7 +7,8 @@ package main
 // and stay open.
 //
 // A device gets the finalizer just before the operator creates its pod
-// for a held server (startDevices). A device with a deletionTimestamp
+// for a held server (startDevices), and a served device with the
+// device that serves it (served.go). A device with a deletionTimestamp
 // is placed on no server (tree.go), so a running server treats it as a
 // device that left: it runs the device's deactivation, stops its
 // driver, and deletes its pod and its claim (leaves.go, moves.go). The
@@ -132,15 +133,17 @@ func (o *operator) holdDevice(ctx context.Context, report func(string), d *devic
 // gone and that no held server runs: a deleted device after the
 // cleanup of its pod, and every device of a reservation that was
 // Released. A device on a held server keeps it while its pod is gone,
-// because the runner creates the pod again.
+// because the runner creates the pod again. A served device's pod is
+// the pod of the driver that its spec.device names, so it keeps the
+// finalizer while that driver runs: a Ready runner removes it once the
+// served device's deactivation has run (leaveServed).
 func (o *operator) releaseDevices(t *tree, held map[string]bool) error {
 	var problems []error
 	for _, d := range t.devices {
 		if !holdsFinalizer(d.object.Metadata) {
 			continue
 		}
-		name, err := objectName(d.kind, d.name())
-		if err == nil && t.pods[name] != nil {
+		if _, p, running := t.podOf(d); running && p != nil {
 			continue
 		}
 		if ref, placed := t.server(d); placed && held[ref.String()] {

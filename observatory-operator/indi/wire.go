@@ -306,6 +306,10 @@ func getProperties() []byte {
 	return []byte(`<getProperties version="` + protocolVersion + `"/>` + "\n")
 }
 
+func getDeviceProperties(device string) []byte {
+	return []byte(`<getProperties version="` + protocolVersion + `" device=` + attribute(device) + `/>` + "\n")
+}
+
 func enableBLOB(r blobRequest) []byte {
 	var b bytes.Buffer
 	b.WriteString("<enableBLOB device=" + attribute(r.device))

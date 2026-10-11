@@ -17,10 +17,17 @@ import (
 // creates no pod, no Service, and no ResourceClaim for it, because a
 // claim would reserve the hardware.
 
-// DeviceSpec holds the fields that every device kind shares.
+// DeviceSpec holds the fields that every device kind shares. A device
+// either runs a driver or names, in Device, the resource whose driver
+// serves it, and the CRD admits exactly one of the two. INDI puts every
+// interface of one driver on one device, so a camera with a built-in
+// filter wheel serves a FilterWheel through the camera's own driver.
+// The resource that runs the driver owns the device: it alone has the
+// pod, the claim, and the power.
 type DeviceSpec struct {
-	Driver Driver `json:"driver"`
-	Power  *Power `json:"power,omitempty"`
+	Driver Driver    `json:"driver,omitzero"`
+	Device *ServedBy `json:"device,omitempty"`
+	Power  *Power    `json:"power,omitempty"`
 	// Claim is a ResourceClaimSpec, as resource.k8s.io states it. The
 	// operator creates a ResourceClaim from it for the device's pod. A
 	// simulator needs no claim. The field stays raw JSON, so the
@@ -37,6 +44,14 @@ type DeviceSpec struct {
 type Driver struct {
 	Name  string `json:"name"`
 	Image string `json:"image,omitempty"`
+}
+
+// ServedBy names the device resource whose driver serves a device: a
+// resource of another kind on the same INDI server, which runs a
+// driver of its own.
+type ServedBy struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
 }
 
 // Power names the Switch output that powers the device. Activation
@@ -85,7 +100,7 @@ type ObservatoryDevice struct {
 func (d ObservatoryDevice) Parent() Parent { return parent(ObservatoryKind, d.Observatory) }
 
 // TelescopeOrObservatoryDevice is a device that can belong to either
-// level: a SkyQualityMeter, a Switch, or a Receiver. The CRD admits at
+// level: a Switch or a Receiver. The CRD admits at
 // most one of the two parent fields.
 type TelescopeOrObservatoryDevice struct {
 	Telescope   string `json:"telescope,omitempty"`
@@ -144,8 +159,13 @@ type DeviceStatus struct {
 	Phase              DevicePhase `json:"phase,omitempty"`
 	Conditions         []Condition `json:"conditions,omitempty"`
 	// IndiDevice is the name that the driver gives its device on the
-	// INDI server, such as "CCD Simulator".
+	// INDI server, such as "CCD Simulator". A device that another
+	// resource serves names that resource's device.
 	IndiDevice string `json:"indiDevice,omitempty"`
+	// Endpoint is the INDI server that runs the device, while the
+	// device is installed. A client reaches the device at Endpoint as
+	// IndiDevice, with no need to follow spec.device.
+	Endpoint *Endpoint `json:"endpoint,omitempty"`
 	// Driver and Image are the driver and the image that the device's
 	// pod runs, after the operator resolved the image.
 	Driver string `json:"driver,omitempty"`

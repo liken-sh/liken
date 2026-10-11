@@ -8,7 +8,6 @@ import "github.com/liken-sh/liken/observatory-operator/indi"
 // the standard properties that the operator writes when a reservation
 // configures the device.
 type DomeSettings struct {
-	ShutterParkPolicy []string              `json:"shutterParkPolicy,omitempty" indi:"DOME_SHUTTER_PARK_POLICY"`
 	Speed             *float64              `json:"speed,omitempty" indi:"DOME_SPEED"`
 	Presets           *DomePresetsSpec      `json:"presets,omitempty" indi:"Presets"`
 	AutoSync          string                `json:"autoSync,omitempty" indi:"DOME_AUTOSYNC"`

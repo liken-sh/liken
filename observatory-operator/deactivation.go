@@ -106,7 +106,7 @@ func (r *runner) liveHandles(ctx context.Context, w *stepWork) ([]handle, []stri
 	if err != nil {
 		return nil, nil
 	}
-	_, others := partition(devices)
+	_, others := t.partition(devices)
 	return r.o.connectedHandles(ctx, w.report, t, ref, inOrder(others, connectOrder))
 }
 
@@ -121,7 +121,7 @@ func (o *operator) connectedHandles(ctx context.Context, report func(string), t 
 	}
 	var running []*device
 	for _, d := range devices {
-		if name, err := objectName(d.kind, d.name()); err == nil && t.pods[name] != nil && t.pods[name].ready() {
+		if _, p, ok := t.podOf(d); ok && p.ready() {
 			running = append(running, d)
 		}
 	}
@@ -182,14 +182,11 @@ func (r *runner) abort(ctx context.Context, w *stepWork) (outcome, error) {
 		return nil
 	}
 	for _, h := range handles {
-		var err error
-		switch h.d.kind {
-		case observatory.CameraKind:
-			err = stop(h, "CCD_EXPOSURE", "CCD_ABORT_EXPOSURE")
-		case observatory.MountKind:
-			err = stop(h, "EQUATORIAL_EOD_COORD", "TELESCOPE_ABORT_MOTION")
+		of := interfaces[h.d.kind]
+		if of.abort == "" || !h.serving() {
+			continue
 		}
-		if err != nil {
+		if err := stop(h, of.watched, of.abort); err != nil {
 			return outcome{}, err
 		}
 	}
@@ -200,9 +197,11 @@ func (r *runner) abort(ctx context.Context, w *stepWork) (outcome, error) {
 }
 
 // disconnect disconnects the telescope's devices in the reverse order
-// of Connect.
+// of Connect. A served device is its owner's INDI device, so only the
+// owner disconnects.
 func (r *runner) disconnect(ctx context.Context, w *stepWork) (outcome, error) {
 	handles, notes := r.liveHandles(ctx, w)
+	handles = owners(handles)
 	if len(handles) == 0 {
 		return skipped("%s", strings.Join(append([]string{"no device connected"}, notes...), "; "))
 	}
@@ -219,16 +218,21 @@ func (r *runner) disconnect(ctx context.Context, w *stepWork) (outcome, error) {
 }
 
 // stopTelescopeDevices stops the drivers of the telescope's devices,
-// apart from its Switch devices, on the server that keeps running, and
-// then deletes their pods (setDrivers).
+// apart from the ones that power the others, on the server that keeps
+// running, and then deletes their pods (setDrivers).
 func (r *runner) stopTelescopeDevices(ctx context.Context, w *stepWork) (outcome, error) {
 	ref := serverRef{observatory.TelescopeKind, r.res.Spec.Telescope}
-	switches, _ := partition(r.o.snapshot().devicesOn(ref))
+	t := r.o.snapshot()
+	switches, _ := t.partition(t.devicesOn(ref))
 	if _, _, err := r.o.setDrivers(ctx, w.report, ref, switches); err != nil {
 		return outcome{}, err
 	}
+	powering := map[string]bool{}
+	for _, d := range driverDevices(switches) {
+		powering[d.key()] = true
+	}
 	stopped, err := r.o.stopPods(ctx, w.report, func(l map[string]string) bool {
-		return l[labelServer] == ref.String() && l[labelRole] == roleDevice && !isSwitch(l[labelKind])
+		return l[labelServer] == ref.String() && l[labelRole] == roleDevice && !powering[l[labelKind]+"/"+l[labelResource]]
 	})
 	if err != nil {
 		return outcome{}, err
@@ -250,10 +254,10 @@ func (r *runner) powerOff(ctx context.Context, w *stepWork) (outcome, error) {
 	if err != nil {
 		return outcome{}, err
 	}
-	switches, _ := partition(devices)
+	switches, _ := t.partition(devices)
 	live, missing := r.o.connectedHandles(ctx, w.report, t, ref, switches)
 	notes = append(notes, missing...)
-	for _, h := range live {
+	for _, h := range owners(live) {
 		if err := h.disconnect(ctx); err != nil {
 			return outcome{}, err
 		}
@@ -299,8 +303,9 @@ func (r *runner) stopSite(ctx context.Context, w *stepWork) (outcome, error) {
 		return skipped("no server running for Observatory %s", site)
 	}
 	devices := t.devicesOn(ref)
-	switches, others := partition(devices)
+	switches, others := t.partition(devices)
 	live, did := r.o.connectedHandles(ctx, w.report, t, ref, inOrder(others, siteOrder))
+	live = owners(live)
 	slices.Reverse(live)
 	for _, h := range live {
 		if err := h.disconnect(ctx); err != nil {
@@ -314,7 +319,7 @@ func (r *runner) stopSite(ctx context.Context, w *stepWork) (outcome, error) {
 	did = append(did, notes...)
 	liveSwitches, missing := r.o.connectedHandles(ctx, w.report, t, ref, switches)
 	did = append(did, missing...)
-	for _, h := range liveSwitches {
+	for _, h := range owners(liveSwitches) {
 		if err := h.disconnect(ctx); err != nil {
 			return outcome{}, err
 		}

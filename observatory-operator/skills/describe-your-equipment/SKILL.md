@@ -59,7 +59,7 @@ kind, such as the cameras `east-main` and `east-guide`.
 A resource name is at most 32 characters, and the API server refuses
 a longer one when you apply it. The generated name must fit in the 63
 characters of a `Service` name, and the cap leaves room for the
-longest kind, `skyqualitymeter`.
+longest kind, `weatherstation`.
 
 ## Describe the site
 
@@ -144,19 +144,91 @@ The parent field depends on the kind:
 | `observatory` | `Dome`, `WeatherStation` |
 | `telescope` | `Mount`, `GPS`, `PolarAligner`, `Guider` |
 | `opticalTrain` | `Camera`, `FilterWheel`, `Focuser`, `Rotator`, `DustCap`, `FlatPanel` |
-| `telescope` or `observatory`, at most one | `SkyQualityMeter`, `Switch`, `Receiver` |
+| `telescope` or `observatory`, at most one | `Switch`, `Receiver` |
 
-A few kinds take settings that the operator writes during activation:
+Each kind takes the settings of its INDI interface, and the
+reservation's `Configure` step writes each one that you state, once,
+before the holder starts:
 
 * A `Camera` takes `gain` and `offset`.
 * A `FilterWheel` takes `filters`, the filter in each slot from slot 1,
   such as `[Luminance, Red, Green, Blue, H_Alpha, OIII, SII]`.
-* Any device takes `power`, the output of a `Switch` that powers it.
+* A device that runs a driver takes `power`, the output of a `Switch`
+  that powers it.
   [Automate the equipment](https://liken.sh/observatory/docs/guides/automate-the-equipment/#power-devices-from-a-switch)
   covers power.
 
+The operator does not write a setting again during the session, so a
+client such as Ekos can change a camera's gain for one frame.
 `kubectl explain mount.spec` prints every field of a kind with its
 unit, and the [reference](https://liken.sh/observatory/docs/reference/) lists them all.
+
+## A device that another device serves
+
+Some drivers serve more than one kind. A QHY camera drives its filter
+wheel through the camera's cable, and a Flip-Flat is a dust cap and a
+flat panel in one box. INDI puts every interface of one driver on one
+device, so one driver serves both resources. Write the resource that
+runs the driver as usual, and name it in the other resource's
+`spec.device`, in place of a driver:
+
+```yaml
+apiVersion: observatory.liken.sh/v1alpha1
+kind: Camera
+metadata:
+  name: east-main
+spec:
+  opticalTrain: east-imaging
+  driver:
+    name: indi_qhy_ccd
+---
+apiVersion: observatory.liken.sh/v1alpha1
+kind: FilterWheel
+metadata:
+  name: east
+spec:
+  opticalTrain: east-imaging
+  device: {kind: Camera, name: east-main}
+  filters: [L, R, G, B, Ha, OIII, SII]
+```
+
+The resource that runs the driver owns the device. It gets the pod,
+the claim, and `power`, so the API server refuses a `power` or a
+`claim` on the resource that names it. The operator connects the
+owner, and the served resource's activation runs after that. The
+served resource's deactivation runs before the owner's, so a
+Flip-Flat's cap closes before its light goes off and before the
+device stops. A delete of either resource waits for its deactivation.
+`spec.device` cannot change, and a resource cannot trade `driver` for
+`device` or back. To move a served resource to another device, delete
+it and create it again.
+
+The camera's `ACTIVE_FILTER` then names the camera itself, which is
+how INDI's camera finds the filter of its own wheel for each frame's
+header.
+
+The served resource reports the device that serves it in
+`status.indiDevice`, and the INDI server in `status.endpoint`, so a
+client reaches it with no need to follow `spec.device`. The operator
+refuses a served resource with `Error` in these cases, and its `Ready`
+message says which:
+
+* `spec.device` names a resource on another INDI server, because one
+  INDI device runs on one server.
+* The resource it names serves another resource of the same kind.
+* The resource it names does not exist, or names a `spec.device` of
+  its own.
+
+A driver serves a kind only when it defines that kind's properties
+after it connects, such as `FILTER_SLOT` for a `FilterWheel`. A QHY
+camera with no wheel attached defines none, so the `FilterWheel`
+reports `Error` and names the property, and the rest of the telescope
+starts. The reservation's `Connect` step, or `StartSite` for the
+observatory's devices, names it in its summary too. If the driver
+defines the property later, the resource reports `Connected`, gets its
+settings, and runs its activation. The interface that the driver claims in `DRIVER_INTERFACE`
+does not decide, because some cameras claim a wheel that they do not
+have.
 
 ## Choose the driver
 
@@ -193,7 +265,9 @@ after its driver's model, and a second copy of a driver on the same
 server breaks the first. So the devices of one telescope must each
 name a different driver, and the devices of the observatory too. The
 operator refuses a reservation when two devices on one server name one
-driver, and its message names both devices and the driver. Two
+driver, and its message names both devices and the driver. A
+resource that `spec.device` serves runs no driver of its own, so this
+rule does not count it. Two
 telescopes can each run the same driver, because each telescope has
 its own server.
 

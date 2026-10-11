@@ -53,7 +53,9 @@ func (t *tree) sharedDrivers() map[*device]*device {
 		driver string
 	}
 	runs := map[slot]*device{}
-	for _, d := range t.devices {
+	// A served device runs no driver, so it shares none.
+	devices := driverDevices(t.devices)
+	for _, d := range devices {
 		if ref, placed := t.server(d); placed {
 			at := slot{ref, d.object.Spec.Driver.Name}
 			if other, ok := runs[at]; !ok || t.runsBefore(ref, d, other) {
@@ -62,7 +64,7 @@ func (t *tree) sharedDrivers() map[*device]*device {
 		}
 	}
 	taken := map[*device]*device{}
-	for _, d := range t.devices {
+	for _, d := range devices {
 		if ref, placed := t.server(d); placed {
 			if holder := runs[slot{ref, d.object.Spec.Driver.Name}]; holder != d {
 				taken[d] = holder

@@ -10,13 +10,16 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// configure writes each setting that the resources state: the
-// observatory's location to the mount and the GPS, the mount's
-// DOME_POLICY, each camera's ACTIVE_DEVICES from its train, the camera's
-// gain, offset, and the tube's aperture and focal length, and the
-// filter wheel's names. It then relays the domes' park state to the
-// mount (locks.go), so the mount holds it before a procedure unparks
-// it.
+// configure writes each setting that the resources state, once for the
+// reservation: the settings in each device's spec (settings.go), and
+// the settings that the tree decides, which no spec states. Those are
+// the observatory's location to the mount and the GPS, the mount's
+// ACTIVE_GPS and DOME_POLICY, and each camera's ACTIVE_DEVICES from its
+// train and SCOPE_INFO from the train's tube. It then relays the domes'
+// park state to the mount (locks.go), so the mount holds it before a
+// procedure unparks it. The operator does not drive a setting back
+// while the reservation runs, so a client such as a sequencer can
+// change a camera's gain for one frame.
 func (r *runner) configure(ctx context.Context, w *stepWork) (outcome, error) {
 	t, handles, err := r.telescopeHandles(ctx, w)
 	if err != nil {
@@ -26,11 +29,21 @@ func (r *runner) configure(ctx context.Context, w *stepWork) (outcome, error) {
 	if err != nil {
 		return outcome{}, err
 	}
+	ref, _, devices, err := r.telescope(t)
+	if err != nil {
+		return outcome{}, err
+	}
+	switches, _ := t.partition(devices)
+	all := append(r.o.handlesOf(t, ref, switches), handles...)
 	var notes, wrote []string
-	for _, h := range handles {
+	for _, h := range all {
 		w.report("configuring " + h.String())
 		changed, err := configureDevice(ctx, t, site, h, handles, &notes)
-		r.o.fault(h.d, err)
+		// A device that does not serve its interface keeps the fault
+		// that detect recorded.
+		if err != nil || h.serving() {
+			r.o.fault(h.d, err)
+		}
 		if err != nil {
 			return outcome{}, err
 		}
@@ -47,18 +60,37 @@ func (r *runner) configure(ctx context.Context, w *stepWork) (outcome, error) {
 	return done("%s", strings.Join(append([]string{message}, notes...), "; "))
 }
 
-// configureDevice writes one device's settings, and answers whether it
-// sent any.
+// configureDevice writes one resource's settings to the INDI device
+// that serves it, and answers whether it sent any. A resource whose
+// device does not serve its interface reports Error already (detect),
+// and gets nothing.
 func configureDevice(ctx context.Context, t *tree, site *observatory.Observatory, h handle, all []handle, notes *[]string) (bool, error) {
+	if !h.serving() {
+		return false, nil
+	}
 	var changes []bool
 	note := func(changed bool, err error) error {
 		changes = append(changes, changed)
 		return err
 	}
-	var err error
+	err := note(writeSettings(ctx, h, notes))
+	if err == nil {
+		err = configureTree(ctx, t, site, h, all, notes, note)
+	}
+	for _, c := range changes {
+		if c {
+			return true, err
+		}
+	}
+	return false, err
+}
+
+// configureTree writes the settings that the tree decides for the
+// interfaces that have them.
+func configureTree(ctx context.Context, t *tree, site *observatory.Observatory, h handle, all []handle, notes *[]string, note func(bool, error) error) error {
 	switch h.d.kind {
 	case observatory.MountKind:
-		err = note(location(ctx, h, site.Spec.Location))
+		err := note(location(ctx, h, site.Spec.Location))
 		if err == nil {
 			err = note(activeDevices(ctx, h, map[string]string{"ACTIVE_GPS": nameOf(all, observatory.GPSKind, "")}))
 		}
@@ -70,47 +102,31 @@ func configureDevice(ctx context.Context, t *tree, site *observatory.Observatory
 		if err == nil {
 			err = note(lockPolicy(ctx, h, "DOME_POLICY", "DOME_LOCKS", "DOME_IGNORED", len(domesOf(t, site)) > 0, notes))
 		}
+		return err
 	case observatory.GPSKind:
-		err = note(location(ctx, h, site.Spec.Location))
-	case observatory.FilterWheelKind:
-		if len(h.d.object.Spec.Filters) > 0 {
-			err = note(filterNames(ctx, h, h.d.object.Spec.Filters, notes))
-		}
+		return note(location(ctx, h, site.Spec.Location))
 	case observatory.CameraKind:
-		err = configureCamera(ctx, t, h, all, notes, note)
+		return configureCamera(ctx, t, h, all, notes, note)
 	}
-	for _, c := range changes {
-		if c {
-			return true, err
-		}
-	}
-	return false, err
+	return nil
 }
 
-// configureCamera writes ACTIVE_DEVICES from the camera's train, the
-// gain and the offset, and SCOPE_INFO from the train's tube.
+// configureCamera writes ACTIVE_DEVICES from the camera's train, and
+// SCOPE_INFO from the train's tube. Each member of ACTIVE_DEVICES names
+// the INDI device that serves the train's resource of that kind, so a
+// camera that serves its train's FilterWheel names itself in
+// ACTIVE_FILTER, which is how INDI's camera reads the filter of its own
+// wheel.
 func configureCamera(ctx context.Context, t *tree, h handle, all []handle, notes *[]string, note func(bool, error) error) error {
 	train := h.d.object.Spec.OpticalTrain
 	snooped := map[string]string{
-		"ACTIVE_TELESCOPE":  nameOf(all, observatory.MountKind, ""),
-		"ACTIVE_FOCUSER":    nameOf(all, observatory.FocuserKind, train),
-		"ACTIVE_FILTER":     nameOf(all, observatory.FilterWheelKind, train),
-		"ACTIVE_ROTATOR":    nameOf(all, observatory.RotatorKind, train),
-		"ACTIVE_SKYQUALITY": nameOf(all, observatory.SkyQualityMeterKind, ""),
+		"ACTIVE_TELESCOPE": nameOf(all, observatory.MountKind, ""),
+		"ACTIVE_FOCUSER":   nameOf(all, observatory.FocuserKind, train),
+		"ACTIVE_FILTER":    nameOf(all, observatory.FilterWheelKind, train),
+		"ACTIVE_ROTATOR":   nameOf(all, observatory.RotatorKind, train),
 	}
 	if err := note(activeDevices(ctx, h, snooped)); err != nil {
 		return err
-	}
-	spec := h.d.object.Spec
-	if spec.Gain != nil {
-		if err := note(optional(ctx, h, "CCD_GAIN", map[string]float64{"GAIN": *spec.Gain}, notes)); err != nil {
-			return err
-		}
-	}
-	if spec.Offset != nil {
-		if err := note(optional(ctx, h, "CCD_OFFSET", map[string]float64{"OFFSET": *spec.Offset}, notes)); err != nil {
-			return err
-		}
 	}
 	if trainObject, ok := t.trains[train]; ok {
 		if tube, ok := t.tubes[trainObject.Spec.OpticalTube]; ok {
@@ -125,7 +141,7 @@ func configureCamera(ctx context.Context, t *tree, h handle, all []handle, notes
 
 // nameOf answers the INDI name of the first device of a kind among the
 // handles, on one train when train is not empty, or "" when there is
-// none.
+// none. A served resource's handle names its owner's device.
 func nameOf(handles []handle, kind observatory.Kind, train string) string {
 	for _, h := range handles {
 		if h.d.kind == kind && (train == "" || h.d.object.Spec.OpticalTrain == train) {

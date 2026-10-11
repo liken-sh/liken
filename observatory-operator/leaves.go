@@ -56,23 +56,35 @@ func leavers(t *tree, ref serverRef, pods []string) []resource {
 		if now, placed := t.server(d); placed && now == ref {
 			continue
 		}
-		r := t.ofDevice(d)
-		r.telescope, r.observatory = "", ref.name
-		if ref.kind == observatory.TelescopeKind {
-			r.telescope, r.observatory = ref.name, ""
-			if telescope, ok := t.telescopes[ref.name]; ok {
-				r.observatory = telescope.Spec.Observatory
-			}
-		}
-		out = append(out, r)
+		out = append(out, leaver(t, d, ref))
 	}
 	return out
 }
 
-// deactivateLeavers runs, in parallel, the deactivation of each device
+// leaver answers a device that left a server as a resource in the place
+// it left, so its run acts there.
+func leaver(t *tree, d *device, ref serverRef) resource {
+	r := t.ofDevice(d)
+	r.telescope, r.observatory = "", ref.name
+	if ref.kind == observatory.TelescopeKind {
+		r.telescope, r.observatory = ref.name, ""
+		if telescope, ok := t.telescopes[ref.name]; ok {
+			r.observatory = telescope.Spec.Observatory
+		}
+	}
+	return r
+}
+
+// deactivateLeavers runs the deactivation of each device whose pod
+// left an Active server (deactivateLeft).
+func (o *operator) deactivateLeavers(ctx context.Context, t *tree, ref serverRef, pods []string) {
+	o.deactivateLeft(ctx, ref, leavers(t, ref, pods))
+}
+
+// deactivateLeft runs, in parallel, the deactivation of each device
 // that left an Active server, and returns when every run has ended.
 // Each action's timeout bounds its run.
-func (o *operator) deactivateLeavers(ctx context.Context, t *tree, ref serverRef, pods []string) {
+func (o *operator) deactivateLeft(ctx context.Context, ref serverRef, left []resource) {
 	key := telescopeKey(ref.name)
 	if ref.kind == observatory.ObservatoryKind {
 		key = observatoryKey(ref.name)
@@ -82,7 +94,7 @@ func (o *operator) deactivateLeavers(ctx context.Context, t *tree, ref serverRef
 		return
 	}
 	var group sync.WaitGroup
-	for _, r := range leavers(t, ref, pods) {
+	for _, r := range left {
 		if len(r.procedures.Deactivation) == 0 || (deleting(r.meta) && len(r.procedures.Activation) > 0 && !o.activated(r, state.since)) {
 			continue
 		}

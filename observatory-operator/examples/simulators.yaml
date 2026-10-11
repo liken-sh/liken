@@ -13,7 +13,7 @@
 #
 # The tree, from the top down:
 #
-#   Observatory lab                 Dome, WeatherStation, SkyQualityMeter
+#   Observatory lab                 Dome, WeatherStation
 #    ├─ Telescope east              Mount, GPS, PolarAligner, Switch,
 #    │   │                          Receiver, Guider
 #    │   ├─ OpticalTube east-refractor
@@ -142,16 +142,6 @@ metadata:
 spec:
   observatory: lab
   driver: {name: indi_simulator_weather}
----
-# A sky quality meter can belong to the site or to one telescope. This
-# one is on the roof, so it belongs to the site.
-apiVersion: observatory.liken.sh/v1alpha1
-kind: SkyQualityMeter
-metadata:
-  name: lab
-spec:
-  observatory: lab
-  driver: {name: indi_simulator_sqm}
 ---
 # The first telescope has a device of every kind. Its mount, its trains,
 # and its other devices run on one INDI server, because a camera snoops
@@ -282,19 +272,24 @@ spec:
   deactivation:
   - warm: {celsius: 5}
 ---
-# The filter wheel, the focuser, and the rotator share output 2, the
-# way a USB hub on one 12 V line does.
+# The filter wheel is built into the main camera, the way a QHY
+# camera's wheel is: the CCD simulator serves INDI's filter interface
+# beside its own, on one INDI device. So the wheel names the camera in
+# spec.device and runs no driver of its own, and the camera's pod
+# serves both. The camera's ACTIVE_FILTER names the camera itself, so
+# each frame's header names the filter in the light path.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: FilterWheel
 metadata:
   name: east
 spec:
   opticalTrain: east-imaging
-  driver: {name: indi_simulator_wheel}
-  power: {switch: east, output: 2}
+  device: {kind: Camera, name: east-main}
   # The filter in each slot, from slot 1. The simulator has 8 slots.
   filters: [Luminance, Red, Green, Blue, H_Alpha, OIII, SII, Dark]
 ---
+# The focuser and the rotator share output 2, the way a USB hub on one
+# 12 V line does.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Focuser
 metadata:

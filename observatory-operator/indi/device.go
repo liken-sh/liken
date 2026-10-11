@@ -51,3 +51,42 @@ func (c *Client) setConnection(ctx context.Context, device, member string) error
 	}
 	return nil
 }
+
+// Sync waits until the client holds everything that a device's driver
+// wrote before the call, such as the properties that a driver defines
+// just after it reports CONNECTION, with no timer. It asks for the
+// device's properties with getProperties. indiserver hands a
+// getProperties that names a device to that device's driver
+// (indiserver/ClInfo.cpp), and the driver answers it by defining its
+// properties again, CONNECTION among them (DefaultDevice::ISGetProperties
+// in libs/indibase/defaultdevice.cpp). A driver answers in the order it
+// reads, so its answer comes after everything it wrote before, and the
+// next report of CONNECTION shows that the client has applied all of
+// it. It fails when the connection ends or the device deletes
+// CONNECTION, and ctx bounds the wait.
+func (c *Client) Sync(ctx context.Context, device string) error {
+	c.mutex.Lock()
+	opened, sequence := c.store.connection, c.store.sequence
+	e := c.store.entry(device, connection)
+	defined := uint64(0)
+	if e != nil {
+		defined = e.defined
+	}
+	c.mutex.Unlock()
+	if e == nil {
+		return fmt.Errorf("%w: %s.%s", ErrNotDefined, device, connection)
+	}
+	if err := c.write(getDeviceProperties(device)); err != nil {
+		return err
+	}
+	return c.waitFor(ctx, func(s *Store) (bool, error) {
+		if !s.connected || s.connection != opened {
+			return false, fmt.Errorf("%w: waiting for %s", ErrDisconnected, device)
+		}
+		e := s.entry(device, connection)
+		if e == nil || e.defined != defined {
+			return false, fmt.Errorf("%w: waiting for %s.%s", ErrDeleted, device, connection)
+		}
+		return e.updated > sequence, nil
+	})
+}

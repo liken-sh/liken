@@ -68,7 +68,7 @@ func TestADeviceOnTheShelfGetsNothing(t *testing.T) {
 			}
 		}
 		lab, _ := decode[observatory.Observatory](t, w.api, kindCollection(observatory.ObservatoryKind), "lab")
-		if len(lab.Status.Devices) != 3 || lab.Status.Phase != observatory.PhaseReady {
+		if len(lab.Status.Devices) != 2 || lab.Status.Phase != observatory.PhaseReady {
 			t.Errorf("lab = %+v", lab.Status)
 		}
 	})

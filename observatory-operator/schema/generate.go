@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -143,6 +144,11 @@ type Standard struct {
 	// property, such as WEATHER_PARAMETERS, whose WEATHER_TEMPERATURE
 	// names the property of that parameter's limits.
 	NamedBy []string
+	// Settings answers a new value of the kind's settings, such as a
+	// *CameraSettings, which a spec decodes into. It is nil for a kind
+	// with no settings. Each field's indi tag names the property that
+	// the operator writes the field to.
+	Settings func() any
 }
 
 // Standards holds the standard set of each device kind that has one.
@@ -164,6 +170,9 @@ var Standards = map[Kind]Standard{
 			goStrings(k.Interfaces), goStrings(k.Detect), goStrings(names))
 		if len(namedBy) > 0 {
 			fmt.Fprintf(&b, "\t\tNamedBy: %s,\n", goStrings(namedBy))
+		}
+		if slices.ContainsFunc(k.Fields, func(p property) bool { return p.Role == roleSetting }) {
+			fmt.Fprintf(&b, "\t\tSettings: func() any { return new(%sSettings) },\n", k.Kind)
 		}
 		b.WriteString("\t},\n")
 	}

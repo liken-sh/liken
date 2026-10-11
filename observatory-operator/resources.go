@@ -1,6 +1,6 @@
 package main
 
-// The resources that state procedures: the 14 device kinds, the
+// The resources that state procedures: the 13 device kinds, the
 // Telescope, and the Observatory. One type reads them all, with the
 // place of each in the tree, so a procedure resolves its references
 // the same way on every kind.

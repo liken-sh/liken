@@ -17,7 +17,7 @@ and guides through PHD2's event server.
 The Go module `github.com/liken-sh/liken/observatory-operator` holds
 the operator and four packages:
 
-- [`observatory/`](observatory/) holds the 20 kinds of
+- [`observatory/`](observatory/) holds the 19 kinds of
   `observatory.liken.sh/v1alpha1` as Go types. The operator reads and
   writes them, and `astrophotography-operator` will import them to read
   a telescope's state and to create a `Reservation`.

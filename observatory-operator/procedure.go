@@ -452,9 +452,12 @@ func (o *operator) predecessors(ctx context.Context, c procCall, a action, repor
 	})
 }
 
-// deviceHandle answers the device of a call on its server, connected.
-// A run that ends the device's activity skips a device that is not
-// connected, and any other run fails on one.
+// deviceHandle answers the INDI device that serves a call's resource
+// on its server, connected. A run that ends the device's activity
+// skips a device that is not connected, and any other run fails on
+// one. A run skips a served resource that the tree refuses, and a
+// resource whose device does not serve its interface, because each
+// reports Error already and the rest of the telescope goes on.
 func (o *operator) deviceHandle(ctx context.Context, c procCall, report func(string)) (handle, error) {
 	t := o.snapshot()
 	d, ok := t.device(c.res.kind, c.res.name())
@@ -464,24 +467,34 @@ func (o *operator) deviceHandle(ctx context.Context, c procCall, report func(str
 	ref, placed := t.server(d)
 	if c.on != (serverRef{}) {
 		ref, placed = c.on, true
+	} else if refusal := t.verdict(d).refusal; refusal != "" {
+		return handle{}, skip(fmt.Sprintf("%s is not served: %s", c.res, refusal))
 	}
 	if !placed {
 		return handle{}, skip(fmt.Sprintf("%s is on the shelf", c.res))
 	}
+	var h handle
 	if c.ending {
 		live, _ := o.connectedHandles(ctx, report, t, ref, []*device{d})
 		if len(live) == 0 {
 			return handle{}, skip(fmt.Sprintf("%s is not connected", c.res))
 		}
-		return live[0], nil
+		h = live[0]
+	} else {
+		byKey, err := o.waitDefined(ctx, report, ref, []*device{d})
+		if err != nil {
+			return handle{}, err
+		}
+		h = byKey[d.key()]
+		if !h.connected() {
+			return handle{}, fmt.Errorf("%s is not connected", c.res)
+		}
 	}
-	byKey, err := o.waitDefined(ctx, report, ref, []*device{d})
-	if err != nil {
-		return handle{}, err
-	}
-	h := byKey[d.key()]
-	if !h.connected() {
-		return handle{}, fmt.Errorf("%s is not connected", c.res)
+	// After an operator restart, the connection to the server defines
+	// each device again, and the interface's properties can follow the
+	// device's CONNECTION, so the check waits for them (detect).
+	if !o.detect(ctx, h) {
+		return handle{}, skip(missingInterface(h).Error())
 	}
 	return h, nil
 }

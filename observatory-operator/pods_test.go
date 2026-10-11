@@ -215,7 +215,7 @@ func TestEachObjectIsNamedForItsResourceThenItsKind(t *testing.T) {
 	}{
 		{observatory.MountKind, "east", "east-mount"},
 		{observatory.CameraKind, "east-guide", "east-guide-camera"},
-		{observatory.SkyQualityMeterKind, "lab", "lab-skyqualitymeter"},
+		{observatory.WeatherStationKind, "lab", "lab-weatherstation"},
 	}
 	for _, c := range cases {
 		t.Run(c.want, func(t *testing.T) {

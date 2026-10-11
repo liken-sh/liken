@@ -24,14 +24,19 @@ import (
 // that and goes on.
 const propertyWait = 3 * time.Second
 
-// indiName answers the INDI device that a resource's driver defines on
-// its server, or "" while the driver has not defined it. Every driver
-// defines DRIVER_INFO, whose DRIVER_EXEC is the program's name, which
-// is the resource's spec.driver.name because socat starts the driver by
-// that name. A server runs one device for each driver
-// (shareddrivers.go), so the program's name finds one device.
-func indiName(c *indi.Client, d *device) string {
-	return definedBy(c, d.object.Spec.Driver.Name)
+// indiName answers the INDI device that serves a resource on a server,
+// or "" while its driver has not defined it. Every driver defines
+// DRIVER_INFO, whose DRIVER_EXEC is the program's name, which is the
+// runner's spec.driver.name because socat starts the driver by that
+// name. A server runs one device for each driver (shareddrivers.go),
+// so the program's name finds one device. A served resource's runner is
+// the resource that its spec.device names (served.go).
+func (t *tree) indiName(c *indi.Client, d *device) string {
+	runner, ok := t.runnerOf(d)
+	if !ok {
+		return ""
+	}
+	return definedBy(c, runner.object.Spec.Driver.Name)
 }
 
 // handle is one device on its server.

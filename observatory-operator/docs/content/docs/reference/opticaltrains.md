@@ -48,6 +48,6 @@ One device, with its phase.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="statusdevices--kind"></span>`kind` | string | yes | The device's kind. One of: `Mount`, `Camera`, `FilterWheel`, `Focuser`, `Rotator`, `DustCap`, `FlatPanel`, `PolarAligner`, `GPS`, `Dome`, `WeatherStation`, `SkyQualityMeter`, `Switch`, `Receiver`. |
+| <span id="statusdevices--kind"></span>`kind` | string | yes | The device's kind. One of: `Mount`, `Camera`, `FilterWheel`, `Focuser`, `Rotator`, `DustCap`, `FlatPanel`, `PolarAligner`, `GPS`, `Dome`, `WeatherStation`, `Switch`, `Receiver`. |
 | <span id="statusdevices--name"></span>`name` | string | yes | The device's name. |
 | <span id="statusdevices--phase"></span>`phase` | string | no | The device's `status.phase`. One of: `Inventory`, `Idle`, `Starting`, `Connecting`, `Connected`, `Disconnecting`, `Error`. |

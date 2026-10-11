@@ -231,8 +231,7 @@ func domesOf(t *tree, site *observatory.Observatory) []*device {
 		if d.kind != observatory.DomeKind || !deleting(d.object.Metadata) {
 			continue
 		}
-		name, _ := objectName(d.kind, d.name())
-		if p, ok := t.pods[name]; ok && p.Metadata.Labels[labelServer] == siteRef.String() {
+		if _, p, ok := t.podOf(d); ok && p.Metadata.Labels[labelServer] == siteRef.String() {
 			domes = append(domes, d)
 		}
 	}

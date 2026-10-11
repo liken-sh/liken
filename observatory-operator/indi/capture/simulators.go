@@ -7,7 +7,7 @@ import "fmt"
 // has a directory of transcripts in indi/testdata/.
 var Simulators = []string{
 	"telescope", "ccd", "guide", "wheel", "focus", "rotator", "dome",
-	"weather", "dustcover", "lightpanel", "gps", "pac", "sqm", "io",
+	"weather", "dustcover", "lightpanel", "gps", "pac", "io",
 	"receiver",
 }
 

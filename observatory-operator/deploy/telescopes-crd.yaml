@@ -223,7 +223,7 @@ spec:
                           properties:
                             kind:
                               type: string
-                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, Switch, Receiver, Guider]
                               description: >-
                                 The kind of the resource whose condition
                                 it reads. With no `kind`, the condition
@@ -273,7 +273,7 @@ spec:
                           properties:
                             kind:
                               type: string
-                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, Switch, Receiver, Guider]
                               description: >-
                                 The kind of the resource.
                             name:
@@ -418,7 +418,7 @@ spec:
                           properties:
                             kind:
                               type: string
-                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, Switch, Receiver, Guider]
                               description: >-
                                 The kind of the resource whose condition
                                 it reads. With no `kind`, the condition
@@ -468,7 +468,7 @@ spec:
                           properties:
                             kind:
                               type: string
-                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                              enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, Switch, Receiver, Guider]
                               description: >-
                                 The kind of the resource.
                             name:
@@ -509,7 +509,7 @@ spec:
                         properties:
                           kind:
                             type: string
-                            enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                            enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, Switch, Receiver, Guider]
                             description: >-
                               The kind of the resource whose condition
                               it reads. With no `kind`, the condition is
@@ -683,7 +683,7 @@ spec:
                                 properties:
                                   kind:
                                     type: string
-                                    enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                                    enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, Switch, Receiver, Guider]
                                     description: >-
                                       The kind of the resource whose
                                       condition it reads. With no
@@ -736,7 +736,7 @@ spec:
                                 properties:
                                   kind:
                                     type: string
-                                    enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver, Guider]
+                                    enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, Switch, Receiver, Guider]
                                     description: >-
                                       The kind of the resource.
                                   name:
@@ -984,7 +984,7 @@ spec:
                           properties:
                             kind:
                               type: string
-                              enum: [Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver]
+                              enum: [Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, Switch, Receiver]
                               description: "The device's kind."
                             name:
                               type: string
@@ -1004,7 +1004,7 @@ spec:
                     properties:
                       kind:
                         type: string
-                        enum: [Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, SkyQualityMeter, Switch, Receiver]
+                        enum: [Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, Switch, Receiver]
                         description: "The device's kind."
                       name:
                         type: string

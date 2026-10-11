@@ -50,7 +50,7 @@ func shelfMessage(kind observatory.Kind) string {
 		return "Not installed in a telescope"
 	case observatory.DomeKind, observatory.WeatherStationKind:
 		return "Not installed in an observatory"
-	case observatory.SkyQualityMeterKind, observatory.SwitchKind, observatory.ReceiverKind:
+	case observatory.SwitchKind, observatory.ReceiverKind:
 		return "Not installed in a telescope or an observatory"
 	}
 	return "Not installed in an optical train"

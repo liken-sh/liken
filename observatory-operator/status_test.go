@@ -117,7 +117,7 @@ func TestTheTreeReportsDownward(t *testing.T) {
 
 		lab, _ := decode[observatory.Observatory](t, w.api, kindCollection(observatory.ObservatoryKind), "lab")
 		if lab.Status.Phase != observatory.PhaseReady || !slices.Equal(lab.Status.Telescopes, []string{"east", "west"}) ||
-			!slices.Equal(lab.Status.Reservations, []string{"east-tonight"}) || lab.Status.Server == nil || len(lab.Status.Devices) != 3 {
+			!slices.Equal(lab.Status.Reservations, []string{"east-tonight"}) || lab.Status.Server == nil || len(lab.Status.Devices) != 2 {
 			t.Errorf("lab = %+v", lab.Status)
 		}
 		if lab.Status.Weather == "" {
@@ -273,7 +273,7 @@ func TestAServerThatRestartsIsSetUpAgain(t *testing.T) {
 		w := readyWorld(t)
 		w.api.deleteNamed(podsCollection, "east-telescope")
 		w.until(time.Minute, "the devices are not connected again", func() bool {
-			return len(w.indi.connected("east-telescope")) == 12
+			return len(w.indi.connected("east-telescope")) == 11
 		})
 		if r, _ := w.reservation("east-tonight"); r.Status.Phase != observatory.ReservationReady {
 			t.Errorf("the reservation is %s", r.Status.Phase)

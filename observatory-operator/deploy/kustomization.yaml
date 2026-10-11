@@ -19,7 +19,7 @@ resources:
   - telescopes-crd.yaml
   - opticaltubes-crd.yaml
   - opticaltrains-crd.yaml
-  # The 14 device kinds, in the order of plan 06's table.
+  # The 13 device kinds, in the order of plan 06's table.
   - mounts-crd.yaml
   - cameras-crd.yaml
   - filterwheels-crd.yaml
@@ -31,7 +31,6 @@ resources:
   - gpses-crd.yaml
   - domes-crd.yaml
   - weatherstations-crd.yaml
-  - skyqualitymeters-crd.yaml
   - switches-crd.yaml
   - receivers-crd.yaml
   # The guider, and the reservation that activates a telescope.
