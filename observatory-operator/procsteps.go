@@ -77,10 +77,13 @@ func tier(t *tree, devices []*device, since time.Time) []stepRun {
 }
 
 // siteTiers are the Observatory and its devices, the devices that run
-// a driver before the devices they serve (deviceTiers).
+// a driver before the devices they serve (deviceTiers). A deleted
+// device whose driver still runs on the observatory's server is one of
+// its devices (tree.deletedOn).
 func siteTiers(t *tree, site *observatory.Observatory, since time.Time) [][]stepRun {
+	ref := serverRef{observatory.ObservatoryKind, site.Metadata.Name}
 	tiers := [][]stepRun{{{ofObservatory(site), since}}}
-	for _, devices := range deviceTiers(t, [][]*device{t.devicesOn(serverRef{observatory.ObservatoryKind, site.Metadata.Name})}) {
+	for _, devices := range deviceTiers(t, [][]*device{append(t.devicesOn(ref), t.deletedOn(ref)...)}) {
 		tiers = append(tiers, tier(t, devices, since))
 	}
 	return tiers
@@ -88,20 +91,38 @@ func siteTiers(t *tree, site *observatory.Observatory, since time.Time) [][]step
 
 // telescopeTiers are the Telescope, its own devices, and the devices
 // of its trains, the devices that run a driver before the devices they
-// serve (deviceTiers).
+// serve (deviceTiers). A deleted device joins the tiers of the server
+// its driver still runs on (tree.deletedOn), in the group that its
+// spec names, and not through its parents: `kubectl delete -f` of an
+// inventory removes an OpticalTrain at once, and its dust cap still
+// has to close.
 func telescopeTiers(t *tree, telescope *observatory.Telescope, since time.Time) [][]stepRun {
 	name := telescope.Metadata.Name
+	own := withoutDeletedDevices(directDevices(t, observatory.TelescopeKind, name))
 	var trains []*device
 	for _, train := range sortedNames(t.trains) {
 		if t.trains[train].Spec.Telescope == name {
-			trains = append(trains, t.trainDevices(train)...)
+			trains = append(trains, withoutDeletedDevices(t.trainDevices(train))...)
+		}
+	}
+	for _, d := range t.deletedOn(serverRef{observatory.TelescopeKind, name}) {
+		if d.object.Spec.OpticalTrain != "" {
+			trains = append(trains, d)
+		} else {
+			own = append(own, d)
 		}
 	}
 	tiers := [][]stepRun{{{ofTelescope(telescope), since}}}
-	for _, devices := range deviceTiers(t, [][]*device{directDevices(t, observatory.TelescopeKind, name), trains}) {
+	for _, devices := range deviceTiers(t, [][]*device{own, trains}) {
 		tiers = append(tiers, tier(t, devices, since))
 	}
 	return tiers
+}
+
+// withoutDeletedDevices answers devices without the ones that a person
+// deleted, which deletedOn places by their pods.
+func withoutDeletedDevices(devices []*device) []*device {
+	return slices.DeleteFunc(devices, func(d *device) bool { return deleting(d.object.Metadata) })
 }
 
 // withoutDeleted answers tiers without the devices that a person

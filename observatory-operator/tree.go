@@ -190,6 +190,24 @@ func (t *tree) lastServer(d *device) (serverRef, bool) {
 	return t.serverNamed(p.Metadata.Labels[labelServer])
 }
 
+// deletedOn answers the devices that a person deleted, that still hold
+// the finalizer, and whose driver's pod still runs on one server
+// (lastServer), in the order of t.devices. The pod, not the spec,
+// places such a device, because a parent deleted with it can be gone
+// already, and the device's deactivation runs where its driver runs.
+func (t *tree) deletedOn(s serverRef) []*device {
+	var out []*device
+	for _, d := range t.devices {
+		if !holdsFinalizer(d.object.Metadata) {
+			continue
+		}
+		if on, ok := t.lastServer(d); ok && on == s {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 // serverNamed answers the server of a Telescope or an Observatory in
 // the tree by the name of its pod.
 func (t *tree) serverNamed(name string) (serverRef, bool) {

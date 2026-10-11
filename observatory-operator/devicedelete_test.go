@@ -269,3 +269,62 @@ func TestADeviceDeletedWithItsReservationRunsItsDeactivation(t *testing.T) {
 		})
 	}
 }
+
+// A device deleted with its reservation and with the resource that
+// places it, as `kubectl delete -f` of the whole inventory does, runs
+// its deactivation in the reservation's Deactivation step. The step
+// finds the device on the server its pod runs on, so a train that is
+// gone at once does not take its cap and its camera out of the step,
+// and a dome on an Observatory that stays parks.
+func TestADeviceDeletedWithItsPlaceRunsItsDeactivation(t *testing.T) {
+	t.Parallel()
+	type named struct {
+		kind observatory.Kind
+		name string
+	}
+	cases := []struct {
+		name    string
+		deletes []named
+		runs    []named
+		change  string
+	}{
+		{"a dust cap and a camera with their train",
+			[]named{{observatory.OpticalTrainKind, "east-imaging"}, {observatory.DustCapKind, "east"}, {observatory.CameraKind, "east-main"}},
+			[]named{{observatory.DustCapKind, "east"}, {observatory.CameraKind, "east-main"}}, parkCap},
+		{"a dome whose observatory stays",
+			[]named{{observatory.DomeKind, "lab"}},
+			[]named{{observatory.DomeKind, "lab"}}, "lab-observatory Dome Simulator.DOME_PARK PARK=On UNPARK=Off"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				w := startWorld(t)
+				readyOf(w)
+				w.indi.setState("east-telescope", "CCD Simulator", "CCD_EXPOSURE", "Busy")
+				w.indi.hold("CCD Simulator", "CCD_ABORT_EXPOSURE")
+				w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
+				w.until(time.Minute, "the Abort step does not abort the exposure", func() bool {
+					return w.indi.count("east-telescope", "CCD Simulator.CCD_ABORT_EXPOSURE") > 0
+				})
+				for _, d := range c.deletes {
+					w.api.deleteNamed(kindCollection(d.kind), d.name)
+				}
+				time.Sleep(time.Minute)
+				synctest.Wait()
+				w.indi.setState("east-telescope", "CCD Simulator", "CCD_EXPOSURE", "Ok")
+				for _, d := range c.deletes {
+					w.gone(d.kind, d.name, 10*time.Minute)
+				}
+				if !slices.Contains(w.indi.changes(), c.change) {
+					t.Errorf("changes = %q\nwant %q", w.indi.changes(), c.change)
+				}
+				for _, d := range c.runs {
+					if n := startedRuns(w.api, d.kind, d.name, observatory.TriggerDeactivation); n != 1 {
+						t.Errorf("the deactivation of %s %s started %d times, want once", d.kind.Name, d.name, n)
+					}
+				}
+			})
+		})
+	}
+}

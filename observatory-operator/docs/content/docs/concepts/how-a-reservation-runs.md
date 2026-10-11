@@ -164,6 +164,15 @@ device deleted during activation goes when the reservation is `Ready`,
 with no procedure, because the `Activation` step did not run its
 `activation`.
 
+A device that a person deletes together with its reservation, as
+`kubectl delete -f` of a whole inventory does, runs its `deactivation`
+in the reservation's `Deactivation` step, in its usual tier. The step
+finds each deleted device on the server where its pod still runs, and
+not through its parents. An `OpticalTrain` carries no finalizer, so it
+is gone at once, and the dust cap on it still closes and its camera
+still warms before the operator removes their finalizers. A deleted
+`Dome` parks the same way.
+
 A `Telescope` that a person deletes during a session ends the
 reservation that holds it, as `spec.end` does. The deactivation steps
 run, from `Abort`, on the telescope and its devices, which stay while
