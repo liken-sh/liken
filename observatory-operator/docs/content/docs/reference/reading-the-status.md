@@ -43,7 +43,13 @@ the wheel's slot writes the `FilterWheel` alone.
   serve the resource. A client reaches the resource there, a served
   one too, with no need to follow `spec.device`. `driver`, `image`,
   `pod`, and `node`: what runs, and where, for the resource that runs
-  the driver. `indiDevice` is the name that KStars shows.
+  the driver. `indiDevice` is the name that KStars shows. The status
+  says what is true now, so `endpoint`, `pod`, and `node` are present
+  only while the pod of the driver runs, and `indiDevice` only while
+  the driver defines the device on its server. When a reservation
+  ends, the device moves to the shelf, or the pod of the resource that
+  serves it stops, the operator removes these fields. An `Idle`
+  device and an `Inventory` device have none of them.
 - The typed fields: one for each standard property of the kind's
   interface that the driver defines, such as `status.temperature` and
   `status.gain` of a `Camera`, or `status.slot` and `status.filters`

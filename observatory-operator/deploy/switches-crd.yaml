@@ -1105,15 +1105,22 @@ spec:
                     The name that the driver gives its device on the
                     INDI server, such as `CCD Simulator`. KStars shows
                     this name. A device that another resource serves
-                    names that resource's device.
+                    names that resource's device. The field is present
+                    only while the driver runs and defines the device on
+                    its server, so an `Idle` device and a device on the
+                    shelf have none.
                 endpoint:
                   type: object
                   required: [service, host, port]
                   description: >-
-                    The INDI server that runs the device, while the
-                    device is installed. A client such as KStars reaches
-                    the device at this address by the name in
-                    `indiDevice`.
+                    The INDI server that runs the device. A client such
+                    as KStars reaches the device at this address by the
+                    name in `indiDevice`. The field is present only
+                    while the pod of the device's driver runs, which for
+                    a device that another resource serves is that
+                    resource's pod. When a reservation ends, or the
+                    device moves to the shelf, the operator removes the
+                    field.
                   properties:
                     service:
                       type: string
@@ -1140,7 +1147,7 @@ spec:
                   description: "The name of the device's pod, while it exists."
                 node:
                   type: string
-                  description: "The node that runs the device's pod."
+                  description: "The node that runs the device's pod, while the pod exists."
                 limits:
                   type: object
                   description: >-

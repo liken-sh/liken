@@ -161,11 +161,12 @@ type DeviceStatus struct {
 	Conditions         []Condition `json:"conditions,omitempty"`
 	// IndiDevice is the name that the driver gives its device on the
 	// INDI server, such as "CCD Simulator". A device that another
-	// resource serves names that resource's device.
+	// resource serves names that resource's device. It is present only
+	// while the driver runs and defines the device on its server.
 	IndiDevice string `json:"indiDevice,omitempty"`
-	// Endpoint is the INDI server that runs the device, while the
-	// device is installed. A client reaches the device at Endpoint as
-	// IndiDevice, with no need to follow spec.device.
+	// Endpoint is the INDI server that runs the device, while the pod
+	// of the device's driver runs. A client reaches the device at
+	// Endpoint as IndiDevice, with no need to follow spec.device.
 	Endpoint *Endpoint `json:"endpoint,omitempty"`
 	// Driver and Image are the driver and the image that the device's
 	// pod runs, after the operator resolved the image.

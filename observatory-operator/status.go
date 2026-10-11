@@ -197,12 +197,14 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 	// A device that left its server, by a move or a delete, keeps its
 	// pod there while its deactivation runs (leaves.go). Its status
 	// reads that server until the driver stops, so a person who watches
-	// the delete reads the cap close.
+	// the delete reads the cap close. A device names a server only while
+	// the pod of its driver runs, because a client that dials the
+	// endpoint of a device with no pod finds no driver there.
 	at, readable := ref.String(), placed
 	if left := hasPod && (!placed || p.Metadata.Labels[labelServer] != ref.String()); left {
 		at, readable = p.Metadata.Labels[labelServer], p.Metadata.DeletionTimestamp == nil
 	}
-	if placed || readable {
+	if hasPod && (placed || readable) {
 		next.Endpoint = &observatory.Endpoint{Service: at, Host: serviceHost(at, o.namespace), Port: serverPort}
 	}
 	serving := false

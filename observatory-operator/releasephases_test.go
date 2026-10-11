@@ -66,3 +66,26 @@ func TestAReleasedDeviceIsNeverStarting(t *testing.T) {
 		}
 	})
 }
+
+// A device that its server no longer runs names no server and no INDI
+// device: a client that reads the endpoint of an Idle device would
+// dial a server that is gone. The filter wheel that the camera serves
+// leaves with the camera's pod.
+func TestAReleasedDeviceNamesNoServer(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := readyWorld(t)
+		at := time.Now().Add(time.Minute).UTC().Format(time.RFC3339)
+		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop", "end": at})
+		w.phase("east-tonight", observatory.ReservationReleased, 15*time.Minute)
+		w.settle()
+		camera, _ := decode[observatory.Camera](t, w.api, kindCollection(observatory.CameraKind), "east-main")
+		if s := camera.Status; s.Phase != observatory.DeviceIdle || s.Endpoint != nil || s.IndiDevice != "" || s.Pod != "" || s.Node != "" {
+			t.Errorf("the released camera = %s on %q at %+v, pod %q on %q", s.Phase, s.IndiDevice, s.Endpoint, s.Pod, s.Node)
+		}
+		wheel, _ := decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east")
+		if s := wheel.Status; s.Phase != observatory.DeviceIdle || s.Endpoint != nil || s.IndiDevice != "" || s.Slot != nil {
+			t.Errorf("the released filter wheel = %s on %q at %+v, slot %+v", s.Phase, s.IndiDevice, s.Endpoint, s.Slot)
+		}
+	})
+}
