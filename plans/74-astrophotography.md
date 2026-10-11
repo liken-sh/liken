@@ -374,13 +374,13 @@ mount or focuser behind an FTDI, PL2303, or CH340 chip publishes a tty.
 A ZWO filter wheel is a HID device, so it publishes a device with its
 usbfs node.
 
-A ZWO ASI camera has no kernel driver, so `liken` does not publish it.
-The open problem "Driverless USB devices are not published" recorded
-that problem. Hot-plug has to reach the `ResourceSlice` promptly.
+A ZWO ASI camera has no kernel driver, so it publishes whole, by its
+port path, and a claim delivers its usbfs node. A uevent wakes the pass
+that publishes it, so hot-plug reaches the `ResourceSlice` promptly.
 [Milestone 77](../liken/plans/completed/77-the-machine-operator-hears-the-machine.md)
-built both: a USB device that no driver binds publishes whole, and a
-uevent wakes the pass that publishes it. Some cameras, QHY among them, load firmware through udev rules
-on the host, and those rules do not run inside a container
+built both, and closed the open problem "Driverless USB devices are not
+published". Some cameras, QHY among them, load firmware through udev
+rules on the host, and those rules do not run inside a container
 ([indi-docker](https://github.com/seanhoughton/indi-docker)).
 
 display-operator keeps a dark monitor's device in the `ResourceSlice`,
