@@ -100,3 +100,26 @@ func TestClockFilterKeepsTheOffsetASlewHasNotAppliedYet(t *testing.T) {
 		t.Errorf("got %v", selected.offset)
 	}
 }
+
+// An old sample's error bound grows by 6.4ms of drift for each poll of
+// age, the same as half of a 12.8ms longer round trip. So a sample one
+// poll newer wins while its round trip is less than 12.8ms longer.
+func TestClockFilterWeighsAgeAgainstRoundTrip(t *testing.T) {
+	cases := map[string]struct {
+		newDelay time.Duration
+		want     time.Duration
+	}{
+		"a newer sample 10ms slower wins":  {10 * time.Millisecond, 4 * time.Millisecond},
+		"a newer sample 15ms slower loses": {15 * time.Millisecond, time.Millisecond},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			selected := observeAll(&clockFilter{},
+				sample(0, "10.0.0.1", time.Millisecond, 0),
+				sample(1, "10.0.0.1", 4*time.Millisecond, tc.newDelay))
+			if selected.offset != tc.want {
+				t.Errorf("got %v", selected.offset)
+			}
+		})
+	}
+}

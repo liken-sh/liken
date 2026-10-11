@@ -13,16 +13,39 @@ package main
 //
 // NTP's answer is the clock filter of RFC 5905, section 10, and this
 // file keeps its core. The filter holds the last eight samples from
-// one source and selects the one with the shortest round trip. A
-// short trip leaves little room for its two directions to differ, so
-// its offset is the closest to the truth. The slew, the bound in
-// status, and the reading for Prometheus all take the selected sample.
+// one source and prefers the one with the shortest round trip. A short
+// trip leaves little room for its two directions to differ, so its
+// offset is the closest to the truth.
+//
+// An old sample has a second kind of error: the clock has drifted
+// since it was measured. RFC 5905 grows each sample's error bound at
+// 15 ppm of its age, a rate that holds because ntpd also corrects the
+// clock's frequency. liken slews the offset and leaves the frequency
+// alone, so the clock drifts at whatever rate its crystal runs: about
+// 50 ppm on the testbed's leader. So the filter selects the sample
+// with the smallest error bound, half its round trip plus its age at
+// driftTolerance. On a quiet wired path the newest sample nearly
+// always wins, and on wifi an old sample wins only while the new ones
+// are noisier than the drift since it. The slew, the bound in status,
+// and the reading for Prometheus all take the selected sample.
 
 import "time"
 
 // filterSamples is how many polls the filter remembers, the same eight
 // as NTP's.
 const filterSamples = 8
+
+// driftTolerance bounds how fast an undisciplined clock drifts: 100
+// ppm, or 6.4 ms over one poll. It is twice the drift the testbed's
+// leader showed, and inside the range of an ordinary crystal.
+const driftTolerance = 100e-6
+
+// errorBound is the most a sample's offset can be wrong by at now: half
+// its round trip, for the asymmetry of the path, plus the drift since
+// it was measured.
+func errorBound(s filterSample, now time.Time) time.Duration {
+	return s.delay/2 + time.Duration(float64(now.Sub(s.at))*driftTolerance)
+}
 
 // filterSample is one sample and the total correction the kernel had
 // applied to the clock when the sample was measured.
@@ -38,7 +61,8 @@ type clockFilter struct {
 	requested time.Duration
 }
 
-// observe adds one poll's sample and answers the selected sample, with
+// observe adds one poll's sample and answers the sample with the
+// smallest error bound, with
 // its offset corrected to the clock's error now. applied is the total
 // correction the kernel has applied to the clock so far, which is the
 // total requested less the part of the last slew still pending.
@@ -65,7 +89,7 @@ func (f *clockFilter) observe(s timeSync, applied time.Duration) timeSync {
 	}
 	best := f.samples[0]
 	for _, candidate := range f.samples[1:] {
-		if candidate.delay < best.delay {
+		if errorBound(candidate, s.at) < errorBound(best, s.at) {
 			best = candidate
 		}
 	}

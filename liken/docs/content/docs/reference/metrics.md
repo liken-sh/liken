@@ -108,10 +108,12 @@ kubectl get --raw \
 ```
 
 Each measurement is one SNTP exchange. `init` keeps the last eight,
-and uses the one with the shortest round trip, because a short round
-trip has the least room for the two directions to differ. On wifi,
-single exchanges vary by tens of milliseconds, and this filter keeps
-that noise out of the clock, the bound, and the metric.
+corrects each one for the slews applied since it was measured, and
+uses the one with the smallest error bound: half its round trip, for
+the asymmetry of the path, plus 100 ppm of its age, for the drift of
+the clock since. On wifi, single exchanges vary by tens of
+milliseconds, and this filter keeps that noise out of the clock, the
+bound, and the metric.
 
 ## The monitoring component
 

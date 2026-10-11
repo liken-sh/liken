@@ -57,12 +57,17 @@ reaches the API server.
 ### A clock filter
 
 `init` keeps the last eight samples from its current source, each
-with its offset and its round-trip delay, and uses the offset of the
-sample with the shortest delay. This is NTP's clock filter
+with its offset and its round-trip delay. This is NTP's clock filter
 (RFC 5905, section 10). A short round trip leaves little room for
 the two directions of the trip to differ, and that difference is what
-the offset calculation cannot cancel. The filter drops a sample older
-than eight polls, and it starts empty when the source changes.
+the offset calculation cannot cancel. An old sample also carries the
+drift of the clock since it was measured. RFC 5905 grows that part of
+a sample's error at 15 ppm, because ntpd also corrects the clock's
+frequency. `init` corrects only the offset, so the filter grows it at
+100 ppm, twice the drift that `liken-1` showed, and selects the sample
+whose error bound, half its round trip plus its drift since, is
+smallest. The filter drops a sample older than eight polls, and it
+starts empty when the source changes.
 
 A sample measured the clock as it was when the sample was taken, and
 each slew since then has removed part of that error. So the filter
@@ -187,8 +192,9 @@ costs more than it gives.
 
 ## Tests
 
-- The filter selects the sample with the shortest delay, drops samples
-  older than eight polls, and starts empty when the source changes.
+- The filter selects the sample with the smallest error bound, drops
+  samples older than eight polls, and starts empty when the source
+  changes.
 - The filter subtracts from each sample the correction applied since
   it was measured, and keeps the part of a slew still pending.
 - A worse bound publishes at the poll that measures it. A better bound
@@ -219,6 +225,16 @@ after the clock had been slewed by it. The filter as first built
 slewed once by each selected sample and reported the sample's offset
 as measured. The correction for applied slews above replaced that
 rule.
+
+Release 2026.10.11-003 carried that correction, and it reached both
+machines at 16:37 UTC. The readings then read exactly 0 on most polls,
+and `liken-1` went to `±25ms` for six minutes. After a slew applied,
+the sample that had driven it read 0 and kept the shortest round trip,
+so the loop slewed by 0, and the clock's drift went uncorrected until
+a newer sample won. `liken-1`'s steady 3.2 ms before this milestone was
+that drift, about 50 ppm over each 64-second poll, and the first
+filter had corrected it at every poll. Selecting by the error bound
+above, with age weighed in, replaced selection by round trip alone.
 
 The console line for a new bound reached the log relay as
 `\xc2\xb15ms`, because the kernel escapes every byte outside

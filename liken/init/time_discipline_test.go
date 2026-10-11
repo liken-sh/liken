@@ -177,7 +177,8 @@ func TestDisciplineClockFiltersOutSlowRoundTrips(t *testing.T) {
 // A machine that boots 37ms off slews by the shortest round trip, and
 // once the slew has applied, that sample reports a clock that is right.
 // The bound falls at the third poll after the correction, not after the
-// sample ages out of the filter eight polls later.
+// sample ages out of the filter eight polls later, and the reading
+// follows the newer samples as the old one's drift bound grows.
 func TestDisciplineClockReportsTheErrorThatRemainsAfterASlew(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		installFakeClock(t,
@@ -194,8 +195,27 @@ func TestDisciplineClockReportsTheErrorThatRemainsAfterASlew(t *testing.T) {
 		if got := publishedTime(t, tree).Offset; got != "±1ms" {
 			t.Errorf("the bound after the slew is %q", got)
 		}
-		if got, _ := machine.ReadClockReading(readingDir); got.Offset != 0 {
+		if got, _ := machine.ReadClockReading(readingDir); got.Offset != 500*time.Microsecond {
 			t.Errorf("the reading after the slew is %v", got.Offset)
+		}
+	})
+}
+
+// A clock that drifts 3ms between polls on a quiet wired path is
+// slewed back by 3ms at every poll. An old sample with the same round
+// trip measured the clock before that drift, so it must not win.
+func TestDisciplineClockCorrectsDriftAtEveryPoll(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := installFakeClock(t, timeAnswer(3*time.Millisecond), timeAnswer(3*time.Millisecond), timeAnswer(3*time.Millisecond))
+		_, _, stop := runDiscipline(t, bootSynchronized("±5ms"))
+		defer stop()
+
+		time.Sleep(3*timePollInterval + time.Second)
+		synctest.Wait()
+
+		want := []time.Duration{3 * time.Millisecond, 3 * time.Millisecond, 3 * time.Millisecond}
+		if _, _, slews, _ := f.recorded(); !slices.Equal(slews, want) {
+			t.Errorf("slews %v, want %v", slews, want)
 		}
 	})
 }
