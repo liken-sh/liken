@@ -90,4 +90,4 @@ must hold.
 | [13](completed/13-procedures-on-conditions.md) | Built: each resource states its own procedures, triggered by conditions; the policy flags and the hard-coded `Prepare` and `Secure` go; drilled twice on the test cluster |
 | [14](completed/14-named-states-and-clean-deletes.md) | Built: readings name one state instead of a pair of booleans, and a finalizer runs a deleted resource's deactivation; drilled on the test cluster |
 | [15](completed/15-the-operator-watches-every-namespace.md) | Built: the operator runs in `liken-system`, watches every namespace, and runs each observatory in the namespace of its resources; drilled on liken-1 |
-| [16](completed/16-kinds-are-indi-interfaces.md) | Built: each device kind is one INDI interface, one INDI device serves several resources, and typed fields come from the standard set that a bare driver captures; the drill on liken-1 has not run |
+| [16](completed/16-kinds-are-indi-interfaces.md) | Built: each device kind is one INDI interface, one INDI device serves several resources, and typed fields come from the standard set that a bare driver captures; drilled on liken-1 on 2026-10-11 |

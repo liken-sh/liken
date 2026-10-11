@@ -1,8 +1,9 @@
 # 16, Kinds are INDI interfaces
 
 Proposed on 2026-10-11. Built on 2026-10-11, all six steps, and
-tested against the fakes and the transcripts. The drill on liken-1
-has not run. This plan replaces
+tested against the fakes and the transcripts. Drilled on liken-1 on
+2026-10-11, with INDI simulators; "The drill" below records the
+results. This plan replaces
 [plan 05](../rejected/05-the-property-schema.md) and the open problem "A
 reading rewrites the whole property list", whose measurements it
 carries. It breaks the `observatory.liken.sh` API with no conversion,
@@ -439,6 +440,61 @@ that the camera's pod is the only pod for the two, and that a captured
 frame's header names its filter. Read both objects' sizes and their
 `managedFields`, and the operator's CPU with two telescopes Ready,
 against the figures above.
+
+### Results
+
+The drill ran on 2026-10-11 against `2026.10.11-004-dev-009-35065a74`.
+The old operator released the `SkyQualityMeter lab` and the
+`FilterWheel east` that ran its own driver before the bump, because
+Flux prunes the `SkyQualityMeter` CRD and `spec.device` cannot replace
+`spec.driver` on an existing object. After the bump, all 19 CRDs were
+established, the operator rolled out with no restart, and every device
+in `observatory` was `Idle`.
+
+| Check | Result |
+|---|---|
+| Reserve `east` | `Ready` in 42 s. `FilterWheel east` and `Camera east-main` both reported `Ready`, with `indiDevice` `CCD Simulator` and the endpoint `east-telescope.observatory.svc:7624`. `east-main-camera` was the one pod for the two. |
+| The camera's `ACTIVE_FILTER` | `CCD Simulator`, the camera itself. The `FilterWheel` showed `slot` and `filters` as typed fields, and the camera's `status.properties` held 17 properties, with no `FILTER_SLOT` or `FILTER_NAME`. |
+| A frame through the wheel | Slot 3 gave `FILTER = 'Green'` in the FITS header, and slot 5 gave `FILTER = 'H_Alpha'`. The `FilterWheel` followed to slot 5 and `H_Alpha`. |
+| Reserve `west` as well | `Ready` in 7 s. |
+| End both `Reservation`s | `west` released in 19 s and `east` in 1 min 12 s. The deactivation warmed the camera, closed the dust cap, and parked both mounts and the dome. `FilterWheel east` went `Idle` with its camera, and every device pod stopped. |
+| `Event`s | One for each transition and action. No `Event` counted more than 2, and a change of slot posted none. |
+
+Each object, compact JSON, read with `--show-managed-fields` while
+`east` was `Ready`:
+
+| Object | Whole | `managedFields` | `status` | `status.properties` |
+|---|---|---|---|---|
+| `Camera east-main`, step 0 | 53,965 | 29,290 | 23,594 | 71 |
+| `Camera east-main` | 19,512 | 5,092 | 13,351 | 17 |
+| `FilterWheel east` | 3,490 | 1,390 | 1,190 | 0 |
+| `Mount east` | 17,989 | 3,268 | 13,599 | 29 |
+
+The camera's status entry in `managedFields` was 4,377 bytes, against
+28,411 in step 0. Its status was 13.4 KB, against 12.5 KB on the
+fakes.
+
+With both telescopes `Ready` for 5 minutes, the operator used 60 to
+63m of CPU and 19 MiB. With no reservation, it used 1 to 2m, and no
+device object changed in a minute. Plan 15's drill on liken-1 measured
+115m with both telescopes `Ready`. The 41 to 42m in "The problem" came
+from the two-node test cluster, so it does not compare directly.
+
+The write rate did not fall. In one minute, the watches saw 270
+changes, 54 each on `Mount east`, `Mount west`, and the three
+`Camera`s, about 4.5 a second. The mount simulators move their right
+ascension about once a second, and each CCD simulator copies it into
+its own `EQUATORIAL_PE`, so each tick writes the mount and every
+camera. Plan 16 made each of those writes smaller, not less frequent.
+
+The drill found two small things. Neither one affects a reservation:
+
+- An `Idle` device keeps the `status.endpoint` of its last
+  reservation, with no pod.
+- `east-switch`, `lab-dome`, and `lab-weatherstation` each started
+  their container a second time in the second before the operator
+  deleted their pods, when the INDI server they connect to stopped
+  first.
 
 ## Deferred
 
