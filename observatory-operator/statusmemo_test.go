@@ -6,6 +6,8 @@ package main
 
 import (
 	"testing"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"testing/synctest"
 	"time"
 
@@ -56,6 +58,24 @@ func TestAStatusThatAnotherWriterChangesIsWrittenAgain(t *testing.T) {
 		focuser, _ := decode[observatory.Focuser](t, w.api, collection, "east")
 		if focuser.Status.Phase != observatory.DeviceConnected {
 			t.Errorf("phase = %q, want %q", focuser.Status.Phase, observatory.DeviceConnected)
+		}
+	})
+}
+
+// The watch's copy of a device holds no status.properties, because no
+// pass reads the list and it is most of the object. The API server
+// still holds the list that the status writer wrote.
+func TestTheCachedDeviceHoldsNoPropertyList(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := readyWorld(t)
+		cached, _, _ := w.operator().stores.kinds[observatory.CameraKind].View().Store.GetByKey(testNamespace + "/east-main")
+		if _, found, _ := unstructured.NestedSlice(cached.(*unstructured.Unstructured).Object, "status", "properties"); found {
+			t.Error("the cached Camera east-main holds status.properties")
+		}
+		camera, _ := decode[observatory.Camera](t, w.api, kindCollection(observatory.CameraKind), "east-main")
+		if len(camera.Status.Properties) == 0 {
+			t.Error("the API server's Camera east-main holds no status.properties")
 		}
 	})
 }

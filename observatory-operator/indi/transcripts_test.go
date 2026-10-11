@@ -42,9 +42,19 @@ func phases(simulator, device string) []phase {
 
 // steps are the changes captured between connect and disconnect. The
 // focuser moves within its limits and then past them, which the driver
-// refuses with Alert. The dome turns, which takes it through Busy.
+// refuses with Alert. The dome turns, which takes it through Busy. The
+// camera sets a frame of 8 by 8 pixels, selects slot 2 of its own
+// wheel, and takes a frame of 0.1 s, whose BLOB the capture asked for
+// with enableBLOB before it connected. The camera's steps ran with the
+// driver in the server's own container, not in the topology of plan
+// 03, which a snoop does not depend on.
 func steps(device string) map[string][]phase {
 	return map[string][]phase{
+		"ccd": {
+			{"frame", fmt.Sprintf(`<newNumberVector device=%q name="CCD_FRAME"><oneNumber name="X">0</oneNumber><oneNumber name="Y">0</oneNumber><oneNumber name="WIDTH">8</oneNumber><oneNumber name="HEIGHT">8</oneNumber></newNumberVector>`, device)},
+			{"slot", numberMessage(device, "FILTER_SLOT", "FILTER_SLOT_VALUE", "2")},
+			{"expose", numberMessage(device, "CCD_EXPOSURE", "CCD_EXPOSURE_VALUE", "0.1")},
+		},
 		"focus": {
 			{"move", numberMessage(device, "ABS_FOCUS_POSITION", "FOCUS_ABSOLUTE_POSITION", "52000")},
 			{"refuse", numberMessage(device, "ABS_FOCUS_POSITION", "FOCUS_ABSOLUTE_POSITION", "200000")},

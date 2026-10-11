@@ -1,0 +1,11 @@
+<message device="CCD Simulator" timestamp="2026-10-11T18:30:33" message="[INFO] Setting current filter to slot 2"/>
+<setNumberVector device="CCD Simulator" name="FILTER_SLOT" state="Ok" timeout="60" timestamp="2026-10-11T18:30:34">
+    <oneNumber name="FILTER_SLOT_VALUE">
+2
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="CCD Simulator" name="FILTER_SLOT" state="Ok" timeout="60" timestamp="2026-10-11T18:30:34">
+    <oneNumber name="FILTER_SLOT_VALUE">
+2
+    </oneNumber>
+</setNumberVector>

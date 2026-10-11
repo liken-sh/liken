@@ -17,6 +17,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/cache"
@@ -150,8 +151,17 @@ func startWatches(ctx context.Context, client dynamic.Interface, changed *bell) 
 			changed.notify()
 		},
 	}
+	// A device's status.properties is most of the object, and no pass
+	// reads it: the status writer composes it from INDI. The copy drops
+	// it, so each watch event decodes only the rest. The writer's
+	// comparison with a cached status then fails for a connected device
+	// (status.go), and costs one PUT that the API server finds unchanged.
+	kindOptions := options
+	kindOptions.Transform = func(object *unstructured.Unstructured) {
+		unstructured.RemoveNestedField(object.Object, "status", "properties")
+	}
 	for _, kind := range observatory.Kinds {
-		s.kinds[kind] = informer.Start(ctx, client, informer.Source{Resource: kindResource(kind)}, options)
+		s.kinds[kind] = informer.Start(ctx, client, informer.Source{Resource: kindResource(kind)}, kindOptions)
 	}
 	own := labelManagedBy + "=" + managedBy
 	s.pods = informer.Start(ctx, client, informer.Source{Resource: podsResource, LabelSelector: own}, options)

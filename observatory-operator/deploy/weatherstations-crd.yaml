@@ -1023,8 +1023,7 @@ spec:
                     update. A vendor's own properties are here, and no
                     typed reading depends on one. The list holds no BLOB
                     data.
-                  x-kubernetes-list-type: map
-                  x-kubernetes-list-map-keys: [name]
+                  x-kubernetes-list-type: atomic
                   items:
                     type: object
                     required: [name, type, permission, state]
@@ -1073,8 +1072,7 @@ spec:
                         type: array
                         description: >-
                           The property's members, in the driver's order.
-                        x-kubernetes-list-type: map
-                        x-kubernetes-list-map-keys: [name]
+                        x-kubernetes-list-type: atomic
                         items:
                           type: object
                           required: [name]

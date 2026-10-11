@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -461,6 +462,12 @@ func (a *fakeAPI) writeStatus(w http.ResponseWriter, r *http.Request, collection
 	a.writes[collection+"/"+name]++
 	next := clone(held)
 	next["status"] = written["status"]
+	// The API server stores nothing for a write that changes nothing:
+	// the resourceVersion stays, and no watch event follows.
+	if next = normalize(next); reflect.DeepEqual(next["status"], held["status"]) {
+		_ = json.NewEncoder(w).Encode(held)
+		return
+	}
 	_ = json.NewEncoder(w).Encode(a.store(collection, name, next, "MODIFIED"))
 }
 

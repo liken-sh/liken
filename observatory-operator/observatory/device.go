@@ -151,7 +151,12 @@ type DeviceStatus struct {
 	Pod    string `json:"pod,omitempty"`
 	Node   string `json:"node,omitempty"`
 	// Properties is every property that the device defines, as the
-	// driver defines it, with no BLOB data.
+	// driver defines it, with no BLOB data. The CRD makes the list and
+	// each property's members atomic, not maps keyed by name. The
+	// operator writes the whole status in one PUT, so a merge by key
+	// gains nothing, and a map would make the status entry of
+	// managedFields name every property and member, which is larger
+	// than the status.
 	Properties []Property `json:"properties,omitempty"`
 	// Procedures holds the last run of each trigger of the device's
 	// procedures.

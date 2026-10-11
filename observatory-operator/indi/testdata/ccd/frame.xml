@@ -1,0 +1,42 @@
+<setNumberVector device="CCD Simulator" name="CCD_STREAM_FRAME" state="Ok" timeout="60" timestamp="2026-10-11T18:30:31">
+    <oneNumber name="X" min="0" max="7" step="0">
+0
+    </oneNumber>
+    <oneNumber name="Y" min="0" max="7" step="0">
+0
+    </oneNumber>
+    <oneNumber name="WIDTH" min="10" max="8" step="0">
+8
+    </oneNumber>
+    <oneNumber name="HEIGHT" min="10" max="8" step="0">
+8
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="CCD Simulator" name="CCD_FRAME" state="Idle" timeout="60" timestamp="2026-10-11T18:30:31">
+    <oneNumber name="X">
+0
+    </oneNumber>
+    <oneNumber name="Y">
+0
+    </oneNumber>
+    <oneNumber name="WIDTH">
+8
+    </oneNumber>
+    <oneNumber name="HEIGHT">
+8
+    </oneNumber>
+</setNumberVector>
+<setNumberVector device="CCD Simulator" name="CCD_FRAME" state="Ok" timeout="60" timestamp="2026-10-11T18:30:31">
+    <oneNumber name="X">
+0
+    </oneNumber>
+    <oneNumber name="Y">
+0
+    </oneNumber>
+    <oneNumber name="WIDTH">
+8
+    </oneNumber>
+    <oneNumber name="HEIGHT">
+8
+    </oneNumber>
+</setNumberVector>

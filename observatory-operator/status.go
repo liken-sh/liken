@@ -139,6 +139,10 @@ func writeStatus[T any, P memo.Object[T]](recorder *events.Recorder, client *api
 		if seen.knows(key, version) {
 			return !seen.same(key, version, body)
 		}
+		// The cached copy of a device holds no status.properties
+		// (watch.go), so for a connected device this comparison fails,
+		// and the write goes out. The API server finds it unchanged and
+		// stores nothing, and the memo then records the version.
 		if equalJSON(was, next) {
 			seen.note(key, version, body)
 			return false

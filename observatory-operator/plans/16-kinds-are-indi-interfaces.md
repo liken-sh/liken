@@ -305,6 +305,40 @@ Each step closes in its own commit with its tests.
      the `Transform` option of `kubernetes/informer`. The operator never
      reads it from the cache, and today it decodes it on every
      snapshot.
+
+   **Results of step 0**, on 2026-10-11:
+
+   - The CCD simulator of the pinned `indi-simulators` image, with
+     `ACTIVE_FILTER` naming itself, wrote `FILTER = 'Green'` in the
+     header of a frame taken after it selected slot 2. The steps are
+     in `indi/testdata/ccd/` (`frame`, `slot`, `expose`), and
+     `TestCameraFrameNamesTheFilterOfItsOwnWheel` reads the header.
+   - On liken-1, a reserved simulated `Camera east-main` with 71
+     properties measured:
+
+     | Part | Bytes |
+     |---|---|
+     | The whole object | 53,965 |
+     | `metadata.managedFields` | 29,290 |
+     | `status` | 23,594 |
+
+     The operator's status entry in `managedFields` was 28,411 bytes,
+     because `status.properties` and each property's `members` were
+     lists of type `map` keyed by `name`, and the entry names every
+     key. The operator writes each status as a `PUT` of the whole
+     object to `/status`, with no field manager, so a merge by key
+     gains nothing. Both lists are now `atomic` in the 14 device CRDs.
+     Applied to the measured objects, the camera's `managedFields`
+     become about 1.8 KB and the whole object about 26.5 KB.
+   - The operator's watches drop `status.properties` from the cached
+     device objects; the informer already drops `managedFields`. The
+     status writer compares a composed status with the cached one
+     when its memo has no record of the object's version, after a
+     restart or a write by another client. For a connected device
+     that comparison now fails, and the writer sends one `PUT`. The
+     API server finds it unchanged and stores nothing, so the cost is
+     one request, with no write to etcd and no watch event. A `PUT`
+     of an unchanged status on liken-1 kept its `resourceVersion`.
 1. **The bare drivers and the capture.** The sources in `indi/standard/`,
    the make target, and a capture command in Go that also captures the
    simulator transcripts in `indi/testdata/` again, so both are made the
