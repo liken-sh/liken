@@ -317,6 +317,7 @@ var (
 	queryTimeSources  = querySources
 	setSystemClock    = clockSettime
 	slewSystemClock   = slewClock
+	pendingSlew       = readPendingSlew
 	saveHardwareClock = writeRTC
 )
 
@@ -348,6 +349,18 @@ func slewClock(offset time.Duration) error {
 	}
 	_, err := unix.Adjtimex(tx)
 	return err
+}
+
+// readPendingSlew answers the part of the last slew that the kernel
+// has not applied yet. ADJ_OFFSET_SS_READ reads the old-style adjtime
+// offset without changing it. A clock whose read fails reports nothing
+// pending, which overstates what was applied by at most one slew.
+func readPendingSlew() time.Duration {
+	tx := &unix.Timex{Modes: unix.ADJ_OFFSET_SS_READ}
+	if _, err := unix.Adjtimex(tx); err != nil {
+		return 0
+	}
+	return time.Duration(tx.Offset) * time.Microsecond
 }
 
 // syncStaleAfter is how long the loop keeps reporting synchronized
@@ -397,8 +410,8 @@ func writeRTC() {
 // measures, filters, slews, records, publishes, sleeps, and repeats.
 //
 // Each answered poll goes through the clock filter (clockfilter.go),
-// and the selected sample drives three outputs. The clock slews by it
-// once. The reading, the exact offset, goes to the file under
+// and the selected sample, corrected for the slews applied since it was
+// measured, drives three outputs. The clock slews by it. The reading, the exact offset, goes to the file under
 // readingDir on every answered poll, where machine-operator reads it
 // for Prometheus. The standing goes to the facts tree, and from there
 // to status, only when it changes: a new state, source, or stratum,
@@ -455,16 +468,20 @@ func disciplineClock(clk *clock, tree machine.FactsTree, readingDir string, init
 				continue
 			}
 
-			selected, fresh := filter.observe(*sync)
-			if fresh {
-				if err := slewSystemClock(selected.offset); err != nil {
-					fmt.Fprintf(os.Stderr, "liken: time: slewing the clock: %v\n", err)
-				}
+			// The slew replaces whatever part of the last slew is still
+			// pending, so the loop slews by the clock's whole error now
+			// on every poll, and records it as the new request.
+			applied := filter.requested - pendingSlew()
+			selected := filter.observe(*sync, applied)
+			if err := slewSystemClock(selected.offset); err != nil {
+				fmt.Fprintf(os.Stderr, "liken: time: slewing the clock: %v\n", err)
+			} else {
+				filter.slewed(applied, slewAmount(selected.offset))
 			}
 			if published.State != machine.TimeSynchronized {
 				fmt.Printf("liken: time: synchronized to %s (stratum %d), offset %s\n",
 					selected.source, selected.stratum, selected.offset.Round(10*time.Microsecond))
-			} else if fresh && selected.offset.Abs() >= stepThreshold {
+			} else if selected.offset.Abs() >= stepThreshold {
 				fmt.Printf("liken: time: offset %s from %s exceeds the slew's pace; correcting over several polls\n",
 					selected.offset.Round(time.Millisecond), selected.source)
 			}
@@ -488,7 +505,7 @@ func disciplineClock(clk *clock, tree machine.FactsTree, readingDir string, init
 			}
 			if bound, changed := hold.next(published.Offset, machine.OffsetBoundOf(selected.offset)); changed {
 				fmt.Printf("liken: time: offset within %s of %s (was %s); last measured %s\n",
-					bound, selected.source, orUnknown(published.Offset), selected.offset.Round(10*time.Microsecond))
+					consoleBound(bound), selected.source, consoleBound(published.Offset), selected.offset.Round(10*time.Microsecond))
 				next.Offset = bound
 				publish(next)
 			}

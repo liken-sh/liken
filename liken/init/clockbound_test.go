@@ -62,3 +62,16 @@ func TestBoundHold(t *testing.T) {
 		})
 	}
 }
+
+// The kernel escapes every byte outside printable ASCII when a reader
+// reads /dev/kmsg, so a console line spells the bound in ASCII.
+func TestConsoleBoundIsASCII(t *testing.T) {
+	cases := map[string]string{"±5ms": "+/-5ms", ">1s": ">1s", "": "unknown"}
+	for bound, want := range cases {
+		t.Run(want, func(t *testing.T) {
+			if got := consoleBound(bound); got != want {
+				t.Errorf("got %q", got)
+			}
+		})
+	}
+}

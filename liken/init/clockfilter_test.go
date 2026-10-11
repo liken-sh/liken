@@ -16,11 +16,13 @@ func sample(n int, source string, offset, delay time.Duration) timeSync {
 	}
 }
 
-func observeAll(f *clockFilter, samples ...timeSync) (selected timeSync, fresh bool) {
+// observeAll feeds the filter samples measured while no correction was
+// applied, and answers the last selection.
+func observeAll(f *clockFilter, samples ...timeSync) (selected timeSync) {
 	for _, s := range samples {
-		selected, fresh = f.observe(s)
+		selected = f.observe(s, 0)
 	}
-	return selected, fresh
+	return selected
 }
 
 // Over wifi, the samples with a long round trip carry the asymmetric
@@ -28,7 +30,7 @@ func observeAll(f *clockFilter, samples ...timeSync) (selected timeSync, fresh b
 // truth.
 func TestClockFilterSelectsTheShortestRoundTrip(t *testing.T) {
 	f := &clockFilter{}
-	selected, _ := observeAll(f,
+	selected := observeAll(f,
 		sample(0, "10.0.0.1", -30*time.Millisecond, 40*time.Millisecond),
 		sample(1, "10.0.0.1", -2*time.Millisecond, 4*time.Millisecond),
 		sample(2, "10.0.0.1", 37*time.Millisecond, 45*time.Millisecond),
@@ -43,7 +45,7 @@ func TestClockFilterSelectsTheShortestRoundTrip(t *testing.T) {
 // its round trip was.
 func TestClockFilterDropsSamplesOlderThanEightPolls(t *testing.T) {
 	f := &clockFilter{}
-	selected, _ := observeAll(f,
+	selected := observeAll(f,
 		sample(0, "10.0.0.1", time.Millisecond, time.Millisecond),
 		sample(9, "10.0.0.1", 4*time.Millisecond, 10*time.Millisecond),
 	)
@@ -67,7 +69,7 @@ func TestClockFilterKeepsEightSamples(t *testing.T) {
 // nothing about the other's.
 func TestClockFilterStartsEmptyWhenTheSourceChanges(t *testing.T) {
 	f := &clockFilter{}
-	selected, _ := observeAll(f,
+	selected := observeAll(f,
 		sample(0, "10.0.0.1", time.Millisecond, time.Millisecond),
 		sample(1, "10.0.0.2", 4*time.Millisecond, 10*time.Millisecond),
 	)
@@ -76,14 +78,25 @@ func TestClockFilterStartsEmptyWhenTheSourceChanges(t *testing.T) {
 	}
 }
 
-// A selected sample is fresh once. Slewing by it a second time would
-// correct the same error twice.
-func TestClockFilterReportsEachSelectedSampleFreshOnce(t *testing.T) {
+// A sample measured the clock before the corrections applied after it.
+// Once the clock has been slewed by a sample's whole offset, that
+// sample says the clock is right, however short its round trip.
+func TestClockFilterCorrectsEachSampleForTheSlewsAppliedSinceIt(t *testing.T) {
 	f := &clockFilter{}
-	_, first := f.observe(sample(0, "10.0.0.1", 3*time.Millisecond, time.Millisecond))
-	_, second := f.observe(sample(1, "10.0.0.1", 9*time.Millisecond, 20*time.Millisecond))
-	_, third := f.observe(sample(2, "10.0.0.1", 2*time.Millisecond, 500*time.Microsecond))
-	if !first || second || !third {
-		t.Errorf("fresh: %v %v %v", first, second, third)
+	f.observe(sample(0, "10.0.0.1", 37*time.Millisecond, time.Millisecond), 0)
+	selected := f.observe(sample(1, "10.0.0.1", 9*time.Millisecond, 20*time.Millisecond), 37*time.Millisecond)
+	if selected.delay != time.Millisecond || selected.offset != 0 {
+		t.Errorf("got %+v", selected)
+	}
+}
+
+// Part of a slew still pending is not applied yet, so a sample keeps
+// that part of its offset.
+func TestClockFilterKeepsTheOffsetASlewHasNotAppliedYet(t *testing.T) {
+	f := &clockFilter{}
+	f.observe(sample(0, "10.0.0.1", 100*time.Millisecond, time.Millisecond), 0)
+	selected := f.observe(sample(1, "10.0.0.1", 70*time.Millisecond, 20*time.Millisecond), 30*time.Millisecond)
+	if selected.offset != 70*time.Millisecond {
+		t.Errorf("got %v", selected.offset)
 	}
 }

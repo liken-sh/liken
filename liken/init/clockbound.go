@@ -12,7 +12,11 @@ package main
 // bound publishes only after three polls in a row inside it, the same
 // three polls after which a silent source counts as gone.
 
-import "github.com/liken-sh/liken/liken/machine"
+import (
+	"strings"
+
+	"github.com/liken-sh/liken/liken/machine"
+)
 
 // boundStreak is how many polls in a row must measure a better bound
 // before status publishes it.
@@ -56,4 +60,15 @@ func (h *boundHold) next(published string, fresh machine.OffsetBound) (string, b
 // another way.
 func (h *boundHold) reset() {
 	h.better = 0
+}
+
+// consoleBound spells a bound for a console line. init's console lines
+// go through /dev/kmsg, and the kernel escapes every byte outside
+// printable ASCII when a reader reads it, so "±5ms" would reach the
+// log relay as "\xc2\xb15ms". An empty bound reads "unknown".
+func consoleBound(bound string) string {
+	if bound == "" {
+		return "unknown"
+	}
+	return strings.Replace(bound, "±", "+/-", 1)
 }

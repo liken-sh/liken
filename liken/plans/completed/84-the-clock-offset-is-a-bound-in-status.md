@@ -1,7 +1,9 @@
 # 84. The clock offset is a bound in status
 
-Milestone 84. Proposed and built 2026-10-11. The testbed drill has
-not run yet. It follows milestone 81, which
+Milestone 84. Proposed and built 2026-10-11, released in
+2026.10.11-002, and corrected after the testbed drill
+([What the testbed showed](#what-the-testbed-showed)). It follows
+milestone 81, which
 stopped `init` from republishing the time facts on every poll, and it
 closes the finding that milestone 81 left open: on wifi, single SNTP
 samples move the offset past 25 ms several times an hour
@@ -62,10 +64,16 @@ the two directions of the trip to differ, and that difference is what
 the offset calculation cannot cancel. The filter drops a sample older
 than eight polls, and it starts empty when the source changes.
 
-`init` slews the clock only when the filter selects a sample that it
-has not slewed by before. A sample measured the clock before the last
-correction, so slewing by it a second time would correct the same
-error twice. RFC 5905 gives the same rule.
+A sample measured the clock as it was when the sample was taken, and
+each slew since then has removed part of that error. So the filter
+records, with each sample, the total correction that the kernel had
+applied at that moment, and it subtracts the correction applied since
+then from the sample's offset. The kernel reports the part of a slew
+that it has not applied yet (`ADJ_OFFSET_SS_READ`), and the applied
+total is the requested total less that part. chrony corrects its
+stored samples for each clock adjustment in the same way. A new slew
+replaces the pending part of the last one, so `init` slews by the
+corrected offset on every poll.
 
 The filter feeds all three outputs: the slew, the bound in status, and
 the reading for Prometheus.
@@ -181,8 +189,8 @@ costs more than it gives.
 
 - The filter selects the sample with the shortest delay, drops samples
   older than eight polls, and starts empty when the source changes.
-- The loop slews once for each newly selected sample, and not again
-  for the same one.
+- The filter subtracts from each sample the correction applied since
+  it was measured, and keeps the part of a slew still pending.
 - A worse bound publishes at the poll that measures it. A better bound
   publishes after three polls in a row inside it, and not after two.
 - The loop writes the reading on every answered poll.
@@ -191,6 +199,31 @@ costs more than it gives.
   three polls of silence, and still publishes the last-sync time.
 - `ClockSynchronized` takes each row of its table, and a False
   `ClockSynchronized` leaves `Ready` `True`.
+
+## What the testbed showed
+
+Release 2026.10.11-002 reached `liken-1` at 15:55 UTC and `stick-1` at
+15:58 UTC on 2026-10-11.
+
+`liken-1` stepped its clock by 133 ms at boot, published no bound, and
+published `±5ms` at its first poll 65 seconds later.
+`liken_time_offset_seconds` read 3.20 ms and 3.49 ms on two scrapes 70
+seconds apart, and `ClockSynchronized` was `True`.
+
+`stick-1` measured 102 ms at boot, under the step threshold, so it
+slewed and published `±128ms`. Its reading then stayed at 37.6 ms from
+16:02 to 16:10, and the bound stayed at `±128ms` until 16:13, when the
+reading was −0.65 ms and the bound went to `±1ms`. The 37.6 ms sample
+had the shortest round trip, so the filter selected it for eight polls
+after the clock had been slewed by it. The filter as first built
+slewed once by each selected sample and reported the sample's offset
+as measured. The correction for applied slews above replaced that
+rule.
+
+The console line for a new bound reached the log relay as
+`\xc2\xb15ms`, because the kernel escapes every byte outside
+printable ASCII when a reader reads `/dev/kmsg`. The console line now
+spells the bound `+/-5ms`, and status keeps `±5ms`.
 
 ## The drill
 

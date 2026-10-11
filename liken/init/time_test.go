@@ -297,11 +297,13 @@ type fakeClockActions struct {
 func installFakeClock(t *testing.T, polls ...pollAnswer) *fakeClockActions {
 	t.Helper()
 	f := &fakeClockActions{polls: polls}
-	savedQuery, savedSet, savedSlew, savedRTC := queryTimeSources, setSystemClock, slewSystemClock, saveHardwareClock
+	savedQuery, savedSet, savedSlew, savedPending, savedRTC := queryTimeSources, setSystemClock, slewSystemClock, pendingSlew, saveHardwareClock
 	t.Cleanup(func() {
-		queryTimeSources, setSystemClock, slewSystemClock, saveHardwareClock = savedQuery, savedSet, savedSlew, savedRTC
+		queryTimeSources, setSystemClock, slewSystemClock, pendingSlew, saveHardwareClock = savedQuery, savedSet, savedSlew, savedPending, savedRTC
 	})
 	queryTimeSources, setSystemClock, slewSystemClock, saveHardwareClock = f.query, f.step, f.slew, f.writeRTC
+	// The fake kernel applies each slew at once, so nothing is pending.
+	pendingSlew = func() time.Duration { return 0 }
 	return f
 }
 

@@ -24,41 +24,59 @@ import "time"
 // as NTP's.
 const filterSamples = 8
 
-// clockFilter holds the recent samples from the current source, oldest
-// first, and the time of the last sample that the clock was slewed by.
-type clockFilter struct {
-	samples []timeSync
-	slewed  time.Time
+// filterSample is one sample and the total correction the kernel had
+// applied to the clock when the sample was measured.
+type filterSample struct {
+	timeSync
+	applied time.Duration
 }
 
-// observe adds one poll's sample and answers the selected sample, and
-// whether it is fresh: whether the clock has not been slewed by it
-// yet. A sample measured the clock before the corrections that came
-// after it, so slewing by the same sample twice would correct the same
-// error twice. RFC 5905 passes a sample to the clock discipline only
-// when it is newer than the last one passed, for the same reason.
+// clockFilter holds the recent samples from the current source, oldest
+// first, and the total correction this boot has asked the kernel for.
+type clockFilter struct {
+	samples   []filterSample
+	requested time.Duration
+}
+
+// observe adds one poll's sample and answers the selected sample, with
+// its offset corrected to the clock's error now. applied is the total
+// correction the kernel has applied to the clock so far, which is the
+// total requested less the part of the last slew still pending.
+//
+// A sample measured the clock as it was then. Each slew applied since
+// then has moved the clock by part of that error, so the sample's
+// offset now is its measured offset less the correction applied since
+// it was measured. Without that, a sample with a short round trip
+// would keep reporting an error that the slew had already removed, for
+// as long as it stayed in the filter. chrony corrects its stored
+// samples for each clock adjustment in the same way.
 //
 // The filter starts empty when the source changes, because two sources
 // have different paths. It drops a sample older than eight polls, so a
 // sample from before a long outage cannot win on its old round trip.
-func (f *clockFilter) observe(s timeSync) (selected timeSync, fresh bool) {
+func (f *clockFilter) observe(s timeSync, applied time.Duration) timeSync {
 	if len(f.samples) > 0 && f.samples[0].source != s.source {
 		f.samples = nil
 	}
-	f.samples = append(f.samples, s)
+	f.samples = append(f.samples, filterSample{timeSync: s, applied: applied})
 	oldest := s.at.Add(-filterSamples * timePollInterval)
 	for len(f.samples) > filterSamples || f.samples[0].at.Before(oldest) {
 		f.samples = f.samples[1:]
 	}
-	selected = f.samples[0]
+	best := f.samples[0]
 	for _, candidate := range f.samples[1:] {
-		if candidate.delay < selected.delay {
-			selected = candidate
+		if candidate.delay < best.delay {
+			best = candidate
 		}
 	}
-	fresh = selected.at.After(f.slewed)
-	if fresh {
-		f.slewed = selected.at
-	}
-	return selected, fresh
+	selected := best.timeSync
+	selected.offset -= applied - best.applied
+	return selected
+}
+
+// slewed records a slew by offset that replaced whatever part of the
+// last slew was still pending. The kernel discards that pending part,
+// so the total requested becomes what was applied plus the new slew.
+func (f *clockFilter) slewed(applied, offset time.Duration) {
+	f.requested = applied + offset
 }

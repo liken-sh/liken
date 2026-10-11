@@ -151,8 +151,8 @@ func TestDisciplineClockPublishesAWorseBoundAtOnceAndABetterOneAfterThreePolls(t
 }
 
 // Over wifi, the samples with a long round trip swing by tens of
-// milliseconds. The filter keeps the short one, so the clock slews
-// once, and the bound holds.
+// milliseconds. The filter keeps the short one, so the clock slews by
+// its offset once, and the bound holds.
 func TestDisciplineClockFiltersOutSlowRoundTrips(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := installFakeClock(t,
@@ -168,8 +168,34 @@ func TestDisciplineClockFiltersOutSlowRoundTrips(t *testing.T) {
 		if got := publishedTime(t, tree).Offset; got != "±5ms" {
 			t.Errorf("noise on slow round trips moved the bound to %q", got)
 		}
-		if _, _, slews, _ := f.recorded(); !slices.Equal(slews, []time.Duration{-2 * time.Millisecond}) {
-			t.Errorf("the clock slews once, by the short round trip: %v", slews)
+		if _, _, slews, _ := f.recorded(); !slices.Equal(slews, []time.Duration{-2 * time.Millisecond, 0, 0}) {
+			t.Errorf("the clock slews by the short round trip, and then by nothing: %v", slews)
+		}
+	})
+}
+
+// A machine that boots 37ms off slews by the shortest round trip, and
+// once the slew has applied, that sample reports a clock that is right.
+// The bound falls at the third poll after the correction, not after the
+// sample ages out of the filter eight polls later.
+func TestDisciplineClockReportsTheErrorThatRemainsAfterASlew(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		installFakeClock(t,
+			timeAnswerOver(37*time.Millisecond, time.Millisecond),
+			timeAnswerOver(500*time.Microsecond, 20*time.Millisecond),
+			timeAnswerOver(500*time.Microsecond, 20*time.Millisecond),
+			timeAnswerOver(500*time.Microsecond, 20*time.Millisecond))
+		tree, readingDir, stop := runDiscipline(t, bootSynchronized("±128ms"))
+		defer stop()
+
+		time.Sleep(4*timePollInterval + time.Second)
+		synctest.Wait()
+
+		if got := publishedTime(t, tree).Offset; got != "±1ms" {
+			t.Errorf("the bound after the slew is %q", got)
+		}
+		if got, _ := machine.ReadClockReading(readingDir); got.Offset != 0 {
+			t.Errorf("the reading after the slew is %v", got.Offset)
 		}
 	})
 }
