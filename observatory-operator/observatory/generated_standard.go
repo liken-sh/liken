@@ -26,6 +26,10 @@ type Standard struct {
 	// with no settings. Each field's indi tag names the property that
 	// the operator writes the field to.
 	Settings func() any
+	// Status answers a new value of the kind's typed status fields,
+	// such as a *CameraStandard, which the status writer fills. Each
+	// field's indi tag names the property that the field holds.
+	Status func() any
 }
 
 // Standards holds the standard set of each device kind that has one.
@@ -35,71 +39,83 @@ var Standards = map[Kind]Standard{
 		Detect:     []string{"CCD_EXPOSURE"},
 		Properties: []string{"ACTIVE_DEVICES", "CCD_EXPOSURE", "CCD_ABORT_EXPOSURE", "CCD_FRAME", "CCD_FRAME_RESET", "CCD_BINNING", "FITS_HEADER", "GUIDER_EXPOSURE", "GUIDER_ABORT_EXPOSURE", "GUIDER_FRAME", "CCD_TEMPERATURE", "CCD_TEMP_RAMP", "CCD_CAPTURE_FORMAT", "CCD_TRANSFER_FORMAT", "CCD_INFO", "GUIDER_INFO", "GUIDER_BINNING", "CCD_COMPRESSION", "CCD1", "GUIDER_COMPRESSION", "CCD2", "TELESCOPE_TIMED_GUIDE_NS", "TELESCOPE_TIMED_GUIDE_WE", "CCD_FRAME_TYPE", "GUIDER_FRAME_TYPE", "CCD_CFA", "SCOPE_INFO", "WCS_CONTROL", "UPLOAD_MODE", "UPLOAD_SETTINGS", "CCD_FAST_TOGGLE", "CCD_FAST_COUNT", "CCD_VIDEO_STREAM", "STREAM_FULL_DEPTH", "STREAM_DELAY", "STREAMING_EXPOSURE", "FPS", "RECORD_STREAM", "RECORD_FILE", "RECORD_OPTIONS", "CCD_STREAM_FRAME", "CCD_STREAM_ENCODER", "CCD_STREAM_RECORDER", "LIMITS", "DSP_ACTIVATE_CONVOLUTION", "DSP_ACTIVATE_DFT", "DSP_ACTIVATE_IDFT", "DSP_ACTIVATE_SPECTRUM", "DSP_ACTIVATE_HISTOGRAM", "DSP_ACTIVATE_WAVELETS", "CCD_GAIN", "CCD_OFFSET", "CCD_COOLER", "CCD_COOLER_POWER"},
 		Settings:   func() any { return new(CameraSettings) },
+		Status:     func() any { return new(CameraStandard) },
 	},
 	DomeKind: {
 		Interfaces: []string{"dome"},
 		Detect:     []string{"DOME_MOTION", "DOME_SHUTTER"},
 		Properties: []string{"ACTIVE_DEVICES", "MOUNT_POLICY", "DOME_SHUTTER", "DOME_SHUTTER_PARK_POLICY", "DOME_MOTION", "DOME_SPEED", "REL_DOME_POSITION", "ABS_DOME_POSITION", "DOME_ABORT_MOTION", "Presets", "Goto", "DOME_AUTOSYNC", "DM_OTA_SIDE", "DOME_PARAMS", "DOME_MEASUREMENTS", "DOME_SYNC", "DOME_PARK", "DOME_PARK_POSITION", "DOME_PARK_OPTION", "DOME_BACKLASH_TOGGLE", "DOME_BACKLASH_STEPS", "USEJOYSTICK", "SNOOP_JOYSTICK"},
 		Settings:   func() any { return new(DomeSettings) },
+		Status:     func() any { return new(DomeStandard) },
 	},
 	DustCapKind: {
 		Interfaces: []string{"dustcap"},
 		Detect:     []string{"CAP_PARK"},
 		Properties: []string{"CAP_PARK", "CAP_ABORT"},
+		Status:     func() any { return new(DustCapStandard) },
 	},
 	FilterWheelKind: {
 		Interfaces: []string{"filter"},
 		Detect:     []string{"FILTER_SLOT"},
 		Properties: []string{"FILTER_SLOT", "FILTER_NAME"},
 		Settings:   func() any { return new(FilterWheelSettings) },
+		Status:     func() any { return new(FilterWheelStandard) },
 	},
 	FlatPanelKind: {
 		Interfaces: []string{"lightbox"},
 		Detect:     []string{"FLAT_LIGHT_CONTROL"},
 		Properties: []string{"ACTIVE_DEVICES", "FLAT_LIGHT_CONTROL", "FLAT_LIGHT_INTENSITY"},
 		Settings:   func() any { return new(FlatPanelSettings) },
+		Status:     func() any { return new(FlatPanelStandard) },
 	},
 	FocuserKind: {
 		Interfaces: []string{"focuser"},
 		Detect:     []string{"FOCUS_MOTION"},
 		Properties: []string{"FOCUS_MOTION", "FOCUS_SPEED", "REL_FOCUS_POSITION", "ABS_FOCUS_POSITION", "FOCUS_MAX", "FOCUS_ABORT_MOTION", "FOCUS_SYNC", "FOCUS_REVERSE_MOTION", "FOCUS_BACKLASH_TOGGLE", "FOCUS_BACKLASH_STEPS", "FOCUS_TIMER", "FOCUS_TEMPERATURE"},
 		Settings:   func() any { return new(FocuserSettings) },
+		Status:     func() any { return new(FocuserStandard) },
 	},
 	GPSKind: {
 		Interfaces: []string{"gps"},
 		Detect:     []string{"GPS_REFRESH"},
 		Properties: []string{"GEOGRAPHIC_COORD", "TIME_UTC", "GPS_REFRESH", "GPS_REFRESH_PERIOD", "SYSTEM_TIME_UPDATE"},
 		Settings:   func() any { return new(GPSSettings) },
+		Status:     func() any { return new(GPSStandard) },
 	},
 	MountKind: {
 		Interfaces: []string{"telescope"},
 		Detect:     []string{"EQUATORIAL_EOD_COORD"},
 		Properties: []string{"ACTIVE_DEVICES", "DOME_POLICY", "ON_COORD_SET", "EQUATORIAL_EOD_COORD", "TELESCOPE_ABORT_MOTION", "TELESCOPE_TRACK_MODE", "TELESCOPE_TRACK_STATE", "TELESCOPE_TRACK_RATE", "TELESCOPE_HOME", "TELESCOPE_MOTION_NS", "TELESCOPE_MOTION_WE", "TELESCOPE_REVERSE_MOTION", "TELESCOPE_SLEW_RATE", "TARGET_EOD_COORD", "TELESCOPE_MOUNT_TYPE", "TIME_UTC", "GEOGRAPHIC_COORD", "TELESCOPE_PARK", "TELESCOPE_PARK_OPTION", "TELESCOPE_PIER_SIDE", "SIMULATE_PIER_SIDE", "SAT_TLE_TEXT", "SAT_PASS_WINDOW", "SAT_TRACKING_STAT", "PEC", "USEJOYSTICK", "SNOOP_JOYSTICK", "TELESCOPE_PARK_POSITION"},
 		Settings:   func() any { return new(MountSettings) },
+		Status:     func() any { return new(MountStandard) },
 	},
 	PolarAlignerKind: {
 		Interfaces: []string{"pac"},
 		Detect:     []string{"PAC_MANUAL_ADJUSTMENT"},
 		Properties: []string{"PAC_MANUAL_ADJUSTMENT", "PAC_ABORT_MOTION", "PAC_POSITION", "PAC_SPEED", "PAC_AZ_REVERSE", "PAC_ALT_REVERSE", "PAC_HOME", "PAC_SYNC", "PAC_BACKLASH_ENABLED", "PAC_BACKLASH_STEPS"},
 		Settings:   func() any { return new(PolarAlignerSettings) },
+		Status:     func() any { return new(PolarAlignerStandard) },
 	},
 	ReceiverKind: {
 		Interfaces: []string{"receiver"},
 		Detect:     []string{"RECEIVER_SETTINGS"},
 		Properties: []string{"ACTIVE_DEVICES", "RECEIVER_SETTINGS", "SENSOR_TEMPERATURE", "SENSOR_INTEGRATION", "FITS_HEADER", "SENSOR", "UPLOAD_MODE", "UPLOAD_SETTINGS", "SENSOR_DATA_STREAM", "STREAM_FULL_DEPTH", "STREAM_DELAY", "STREAMING_EXPOSURE", "FPS", "RECORD_STREAM", "RECORD_FILE", "RECORD_OPTIONS", "SENSOR_STREAM_ENCODER", "SENSOR_STREAM_RECORDER", "LIMITS", "DSP_ACTIVATE_CONVOLUTION", "DSP_ACTIVATE_DFT", "DSP_ACTIVATE_IDFT", "DSP_ACTIVATE_SPECTRUM", "DSP_ACTIVATE_HISTOGRAM", "DSP_ACTIVATE_WAVELETS"},
 		Settings:   func() any { return new(ReceiverSettings) },
+		Status:     func() any { return new(ReceiverStandard) },
 	},
 	RotatorKind: {
 		Interfaces: []string{"rotator"},
 		Detect:     []string{"ABS_ROTATOR_ANGLE"},
 		Properties: []string{"ABS_ROTATOR_ANGLE", "ROTATOR_ABORT_MOTION", "SYNC_ROTATOR_ANGLE", "ROTATOR_HOME", "ROTATOR_REVERSE", "ROTATOR_BACKLASH_TOGGLE", "ROTATOR_BACKLASH_STEPS", "ROTATOR_LIMITS"},
 		Settings:   func() any { return new(RotatorSettings) },
+		Status:     func() any { return new(RotatorStandard) },
 	},
 	SwitchKind: {
 		Interfaces: []string{"output", "input"},
 		Detect:     []string{"DIGITAL_OUTPUT_1", "DIGITAL_INPUT_1"},
 		Properties: []string{"DIGITAL_OUTPUT_*", "DIGITAL_OUTPUT_LABELS", "PULSE_*", "DIGITAL_INPUT_*", "DIGITAL_INPUT_LABELS", "ANALOG_INPUT_*", "ANALOG_INPUT_LABELS"},
 		Settings:   func() any { return new(SwitchSettings) },
+		Status:     func() any { return new(SwitchStandard) },
 	},
 	WeatherStationKind: {
 		Interfaces: []string{"weather"},
@@ -107,5 +123,6 @@ var Standards = map[Kind]Standard{
 		Properties: []string{"WEATHER_UPDATE", "WEATHER_REFRESH", "WEATHER_OVERRIDE", "WEATHER_STATUS", "SAFETY_STATUS", "WEATHER_PARAMETERS"},
 		NamedBy:    []string{"WEATHER_PARAMETERS"},
 		Settings:   func() any { return new(WeatherStationSettings) },
+		Status:     func() any { return new(WeatherStationStandard) },
 	},
 }

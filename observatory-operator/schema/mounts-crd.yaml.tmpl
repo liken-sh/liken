@@ -115,8 +115,8 @@ spec:
                 display:
                   type: object
                   description: >-
-                    The readings as a person reads them, with their units,
-                    for the printer columns. The numbers are in `readings`.
+                    The values of the typed fields as a person reads them,
+                    with their units, for the printer columns.
                   properties:
                     rightAscension:
                       type: string
@@ -127,24 +127,10 @@ spec:
                 readings:
                   type: object
                   description: >-
-                    What the mount reports, from `EQUATORIAL_EOD_COORD`,
-                    `TELESCOPE_PARK`, and `TELESCOPE_TRACK_STATE`. A
-                    field is absent until the driver sends it.
+                    What the operator reads from several of the mount's
+                    properties, which no typed field holds alone. A field
+                    is absent until the driver sends what it comes from.
                   properties:
-                    rightAscension:
-                      type: number
-                      minimum: 0
-                      maximum: 24
-                      description: >-
-                        Where the mount points, in hours from 0 to 24,
-                        in the equinox of the date (JNow).
-                    declination:
-                      type: number
-                      minimum: -90
-                      maximum: 90
-                      description: >-
-                        Where the mount points, in degrees from -90 to
-                        90, in the equinox of the date (JNow).
                     state:
                       type: string
                       enum: [Parked, Parking, Unparking, Stopped, Slewing, Tracking]

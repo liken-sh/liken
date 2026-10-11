@@ -1,8 +1,9 @@
 package main
 
-// The named states in a device's readings: one field that names the
-// state a person reads, from the switches and lights the driver
-// reports.
+// The named states that a person reads: a mount's state in its
+// readings, a camera's exposure in its display, and the reasons of the
+// state conditions that the printer columns of a dome and a flat panel
+// show. Each comes from the switches and lights the driver reports.
 
 import (
 	"testing"
@@ -12,15 +13,30 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// reading answers one string field of a device's status.readings, or
+// field answers one string field of a device's status, by its path, or
 // "" when the field is absent.
-func (w *world) reading(kind observatory.Kind, name, field string) string {
-	w.t.Helper()
-	object, _ := decode[map[string]any](w.t, w.api, kindCollection(kind), name)
-	status, _ := object["status"].(map[string]any)
-	readings, _ := status["readings"].(map[string]any)
-	value, _ := readings[field].(string)
-	return value
+func field(path ...string) func(w *world, kind observatory.Kind, name string) string {
+	return func(w *world, kind observatory.Kind, name string) string {
+		w.t.Helper()
+		object, _ := decode[map[string]any](w.t, w.api, kindCollection(kind), name)
+		value := any(object["status"])
+		for _, key := range path {
+			fields, _ := value.(map[string]any)
+			value = fields[key]
+		}
+		text, _ := value.(string)
+		return text
+	}
+}
+
+// reason answers the reason of one condition of a device, or "" while
+// the device has no such condition.
+func reason(condition string) func(w *world, kind observatory.Kind, name string) string {
+	return func(w *world, kind observatory.Kind, name string) string {
+		w.t.Helper()
+		object, _ := decode[deviceObject](w.t, w.api, kindCollection(kind), name)
+		return conditionOf(object.Status.Conditions, condition).Reason
+	}
 }
 
 // stateStep is one thing a driver or a client does, and the named
@@ -31,14 +47,14 @@ type stateStep struct {
 	want string
 }
 
-// walk runs each step in order, and checks one reading after each.
-func (w *world) walk(kind observatory.Kind, name, field string, steps []stateStep) {
+// walk runs each step in order, and checks one named state after each.
+func (w *world) walk(kind observatory.Kind, name string, read func(*world, observatory.Kind, string) string, steps []stateStep) {
 	w.t.Helper()
 	for _, s := range steps {
 		s.do(w)
 		w.settle()
-		if got := w.reading(kind, name, field); got != s.want {
-			w.t.Errorf("%s: %s %s readings.%s = %q, want %q", s.name, kind.Name, name, field, got, s.want)
+		if got := read(w, kind, name); got != s.want {
+			w.t.Errorf("%s: %s %s = %q, want %q", s.name, kind.Name, name, got, s.want)
 		}
 	}
 }
@@ -49,7 +65,7 @@ func TestAMountNamesItsState(t *testing.T) {
 		w := readyWorld(t)
 		const server, mount = "east-telescope", "Telescope Simulator"
 		w.indi.move(mount, "TELESCOPE_PARK")
-		w.walk(observatory.MountKind, "east", "state", []stateStep{
+		w.walk(observatory.MountKind, "east", field("readings", "state"), []stateStep{
 			{"unparked with tracking off", func(w *world) {}, string(observatory.MountStopped)},
 			{"tracking on", func(w *world) {
 				w.indi.ask(server, mount, "TELESCOPE_TRACK_STATE", "TRACK_ON=On", "TRACK_OFF=Off")
@@ -110,7 +126,7 @@ func TestAMountWhoseParkFailedIsNotParked(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
 		const server, mount = "east-telescope", "Telescope Simulator"
-		w.walk(observatory.MountKind, "east", "state", []stateStep{
+		w.walk(observatory.MountKind, "east", field("readings", "state"), []stateStep{
 			{"a park that fails", func(w *world) {
 				w.indi.move(mount, "TELESCOPE_PARK")
 				w.indi.ask(server, mount, "TELESCOPE_PARK", "PARK=On", "UNPARK=Off")
@@ -128,14 +144,14 @@ func TestADomeNamesItsPark(t *testing.T) {
 		// The dome does not park while the mount is unparked.
 		w.indi.ask("east-telescope", "Telescope Simulator", "TELESCOPE_PARK", "PARK=On", "UNPARK=Off")
 		w.relayedLast(server, "TELESCOPE_PARK", mountsParkedToLab)
-		w.walk(observatory.DomeKind, "lab", "park", []stateStep{
-			{"unparked", func(w *world) {}, string(observatory.DomeUnparked)},
+		w.walk(observatory.DomeKind, "lab", reason(observatory.ConditionParked), []stateStep{
+			{"unparked", func(w *world) {}, "Unparked"},
 			{"turning to its park position", func(w *world) {
 				w.indi.setState(server, dome, "DOME_PARK", "Busy")
-			}, string(observatory.DomeMoving)},
+			}, reasonMoving},
 			{"parked", func(w *world) {
 				w.indi.ask(server, dome, "DOME_PARK", "PARK=On", "UNPARK=Off")
-			}, string(observatory.DomeParked)},
+			}, "Parked"},
 			{"the driver disconnects", func(w *world) {
 				w.indi.ask(server, dome, "CONNECTION", "CONNECT=Off", "DISCONNECT=On")
 			}, ""},
@@ -151,9 +167,11 @@ func TestACameraNamesItsExposure(t *testing.T) {
 		exposure := func(state string) func(w *world) {
 			return func(w *world) { w.indi.setState(server, camera, "CCD_EXPOSURE", state) }
 		}
-		w.walk(observatory.CameraKind, "east-main", "exposure", []stateStep{
+		w.walk(observatory.CameraKind, "east-main", field("display", "exposure"), []stateStep{
 			{"before the first exposure", func(w *world) {}, string(observatory.ExposureIdle)},
-			{"an exposure runs", exposure("Busy"), string(observatory.ExposureExposing)},
+			// While an exposure runs, the display shows the time left,
+			// which the simulator's CCD_EXPOSURE holds as 1 s.
+			{"an exposure runs", exposure("Busy"), "1 s"},
 			{"the exposure ends", exposure("Ok"), string(observatory.ExposureDone)},
 			{"an exposure fails", exposure("Alert"), string(observatory.ExposureFailed)},
 		})
@@ -165,11 +183,11 @@ func TestAFlatPanelNamesItsLight(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
 		const server, panel = "east-telescope", "Light Panel Simulator"
-		w.walk(observatory.FlatPanelKind, "east", "light", []stateStep{
-			{"dark", func(w *world) {}, string(observatory.StateDark)},
+		w.walk(observatory.FlatPanelKind, "east", reason(observatory.ConditionLit), []stateStep{
+			{"dark", func(w *world) {}, "LightOff"},
 			{"lit", func(w *world) {
 				w.indi.ask(server, panel, "FLAT_LIGHT_CONTROL", "FLAT_LIGHT_ON=On", "FLAT_LIGHT_OFF=Off")
-			}, string(observatory.StateLit)},
+			}, "LightOn"},
 		})
 	})
 }

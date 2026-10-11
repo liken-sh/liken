@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liken-sh/liken/observatory-operator/indi"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
@@ -124,68 +125,113 @@ func onOff(v bool) string {
 }
 
 // deviceDisplay answers the display block of a device's kind, from its
-// readings and its spec, or nil for a kind with no value to show.
-// readings is nil before the driver reports. maximum answers the
-// maximum that the driver defines for a number, for a value that INDI
-// gives no unit.
-func deviceDisplay(d *device, readings any, maximum func(property, member string) (float64, bool)) any {
+// typed fields, its limits, and its spec, or nil for a kind with no
+// value to show. standard is nil before the driver reports. A flat
+// panel's brightness shows against the maximum in its limits, because
+// INDI gives FLAT_LIGHT_INTENSITY no unit.
+func deviceDisplay(d *device, standard any, limits map[string]map[string]observatory.Limit) any {
+	degrees := func(v float64) string { return quantity(v, 1, "°") }
 	switch d.kind {
 	case observatory.CameraKind:
-		r, _ := readings.(observatory.CameraReadings)
-		var out observatory.CameraDisplay
-		if t := coolSetpoint(d); t != nil {
-			out.Setpoint = quantity(*t, 1, "°C")
-		}
-		if r.Temperature != nil {
-			out.Temperature = quantity(*r.Temperature, 1, "°C")
-		}
-		if r.Cooler != nil {
-			out.Cooler = onOff(*r.Cooler)
-		}
-		if r.CoolerPower != nil {
-			out.CoolerPower = quantity(*r.CoolerPower, 0, "%")
-		}
-		out.Exposure = string(r.Exposure)
-		if r.Exposure == observatory.ExposureExposing && r.ExposureRemaining != nil {
-			out.Exposure = quantity(*r.ExposureRemaining, 1, "s")
-		}
-		return out
+		s, _ := standard.(*observatory.CameraStandard)
+		return cameraDisplay(d, s)
 	case observatory.MountKind:
-		r, _ := readings.(observatory.MountReadings)
 		var out observatory.MountDisplay
-		if r.RightAscension != nil {
-			out.RightAscension = rightAscension(*r.RightAscension)
-		}
-		if r.Declination != nil {
-			out.Declination = declination(*r.Declination)
+		if s, _ := standard.(*observatory.MountStandard); s != nil && s.Equatorial != nil {
+			out.RightAscension = optionalText(s.Equatorial.RightAscension, rightAscension)
+			out.Declination = optionalText(s.Equatorial.Declination, declination)
 		}
 		return out
 	case observatory.DomeKind:
-		r, _ := readings.(observatory.DomeReadings)
-		return observatory.DomeDisplay{Azimuth: optionalText(r.Azimuth, func(v float64) string { return quantity(v, 1, "°") })}
+		var out observatory.DomeDisplay
+		if s, _ := standard.(*observatory.DomeStandard); s != nil && s.Azimuth != nil {
+			out.Azimuth = optionalText(s.Azimuth.Value, degrees)
+		}
+		return out
 	case observatory.FocuserKind:
-		r, _ := readings.(observatory.FocuserReadings)
 		var out observatory.FocuserDisplay
-		if r.Position != nil {
-			out.Position = quantity(float64(*r.Position), 0, "steps")
+		if s, _ := standard.(*observatory.FocuserStandard); s != nil && s.Position != nil {
+			out.Position = optionalText(s.Position.Value, func(v float64) string { return quantity(math.Round(v), 0, "steps") })
 		}
 		return out
 	case observatory.RotatorKind:
-		r, _ := readings.(observatory.RotatorReadings)
-		return observatory.RotatorDisplay{Angle: optionalText(r.Angle, func(v float64) string { return quantity(v, 1, "°") })}
+		var out observatory.RotatorDisplay
+		if s, _ := standard.(*observatory.RotatorStandard); s != nil && s.Angle != nil {
+			out.Angle = optionalText(s.Angle.Value, degrees)
+		}
+		return out
 	case observatory.FlatPanelKind:
-		r, _ := readings.(observatory.FlatPanelReadings)
-		return observatory.FlatPanelDisplay{Brightness: optionalText(r.Brightness, func(v float64) string {
-			if top, ok := maximum("FLAT_LIGHT_INTENSITY", "FLAT_LIGHT_INTENSITY_VALUE"); ok {
-				return quantity(v, 0, "") + " of " + quantity(top, 0, "")
-			}
-			return quantity(v, 0, "")
-		})}
+		var out observatory.FlatPanelDisplay
+		if s, _ := standard.(*observatory.FlatPanelStandard); s != nil && s.Brightness != nil {
+			out.Brightness = optionalText(s.Brightness.Value, func(v float64) string {
+				if top, ok := limits["FLAT_LIGHT_INTENSITY"]["FLAT_LIGHT_INTENSITY_VALUE"]; ok {
+					return quantity(v, 0, "") + " of " + quantity(top.Max, 0, "")
+				}
+				return quantity(v, 0, "")
+			})
+		}
+		return out
 	case observatory.ReceiverKind:
-		r, _ := readings.(observatory.ReceiverReadings)
-		return observatory.ReceiverDisplay{Frequency: optionalText(r.Frequency, frequency)}
+		var out observatory.ReceiverDisplay
+		if s, _ := standard.(*observatory.ReceiverStandard); s != nil && s.ReceiverSettings != nil {
+			out.Frequency = optionalText(s.ReceiverSettings.Frequency, frequency)
+		}
+		return out
+	case observatory.SwitchKind:
+		var on []string
+		if s, _ := standard.(*observatory.SwitchStandard); s != nil {
+			for _, output := range s.Outputs {
+				if output.Value == "ON" {
+					on = append(on, strconv.Itoa(int(output.Number)))
+				}
+			}
+		}
+		return observatory.SwitchDisplay{On: strings.Join(on, ", ")}
 	}
 	return nil
+}
+
+// cameraDisplay shows a camera's temperature, cooler, and exposure,
+// and the setpoint of its activation's cool action. While an exposure
+// runs, the exposure shows the time left, and otherwise the state of
+// CCD_EXPOSURE in one word.
+func cameraDisplay(d *device, s *observatory.CameraStandard) observatory.CameraDisplay {
+	var out observatory.CameraDisplay
+	if t := coolSetpoint(d); t != nil {
+		out.Setpoint = quantity(*t, 1, "°C")
+	}
+	if s == nil {
+		return out
+	}
+	if s.Temperature != nil {
+		out.Temperature = optionalText(s.Temperature.Value, func(v float64) string { return quantity(v, 1, "°C") })
+	}
+	if s.Cooler != nil && s.Cooler.Value != "" {
+		out.Cooler = onOff(s.Cooler.Value == "COOLER_ON")
+	}
+	if s.CoolerPower != nil {
+		out.CoolerPower = optionalText(s.CoolerPower.Value, func(v float64) string { return quantity(v, 0, "%") })
+	}
+	if s.Exposure != nil {
+		out.Exposure = string(exposureState(s.Exposure.State))
+		if s.Exposure.State == indi.Busy && s.Exposure.Value != nil {
+			out.Exposure = quantity(*s.Exposure.Value, 1, "s")
+		}
+	}
+	return out
+}
+
+// exposureState names the state of CCD_EXPOSURE.
+func exposureState(state indi.State) observatory.ExposureState {
+	switch state {
+	case indi.Busy:
+		return observatory.ExposureExposing
+	case indi.Ok:
+		return observatory.ExposureDone
+	case indi.Alert:
+		return observatory.ExposureFailed
+	}
+	return observatory.ExposureIdle
 }
 
 func optionalText(v *float64, format func(float64) string) string {

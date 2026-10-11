@@ -149,6 +149,10 @@ type Standard struct {
 	// with no settings. Each field's indi tag names the property that
 	// the operator writes the field to.
 	Settings func() any
+	// Status answers a new value of the kind's typed status fields,
+	// such as a *CameraStandard, which the status writer fills. Each
+	// field's indi tag names the property that the field holds.
+	Status func() any
 }
 
 // Standards holds the standard set of each device kind that has one.
@@ -174,6 +178,7 @@ var Standards = map[Kind]Standard{
 		if slices.ContainsFunc(k.Fields, func(p property) bool { return p.Role == roleSetting }) {
 			fmt.Fprintf(&b, "\t\tSettings: func() any { return new(%sSettings) },\n", k.Kind)
 		}
+		fmt.Fprintf(&b, "\t\tStatus: func() any { return new(%sStandard) },\n", k.Kind)
 		b.WriteString("\t},\n")
 	}
 	b.WriteString("}\n")

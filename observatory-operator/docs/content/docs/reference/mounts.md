@@ -260,7 +260,8 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--image"></span>`image` | string | no | The image that the device's pod runs, after the operator resolved it. |
 | <span id="status--pod"></span>`pod` | string | no | The name of the device's pod, while it exists. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the device's pod. |
-| <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Every property that the device defines, as the driver defines it, with the values of its last update. A vendor's own properties are here, and no typed reading depends on one. The list holds no BLOB data. |
+| <span id="status--limits"></span>`limits` | map[string]map[string]object | no | The range that the driver gives each number of this resource's typed fields that a client can write, by INDI property and then by member, such as `limits.CCD_TEMPERATURE.CCD_TEMPERATURE_VALUE`. Each range has `min` and `max`, the least and the greatest value that the driver accepts, and `step` when the driver states one. The schema describes each typed field, and the driver chooses only these ranges, such as a camera's least and greatest temperature or its range of gain. |
+| <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Each property of the INDI device that no typed field holds, as the driver defines it, with the values of its last update: a vendor's own properties, the properties that every INDI device has, such as `DEBUG`, and the standard properties of an interface that no resource on the device is, such as the `FILTER_SLOT` of a camera with no `FilterWheel`. Only the resource that runs the driver has the list, so each property is in one object, and no typed reading depends on one. The list holds no BLOB data. |
 | <span id="status--activedevices"></span>`activeDevices` | [object](#statusactivedevices) | no | The INDI devices whose state the mount reads. The status holds what the driver reports in `ACTIVE_DEVICES`. The operator decides it from the resources around the device, so it is not in spec. |
 | <span id="status--domepolicy"></span>`domePolicy` | [object](#statusdomepolicy) | no | Whether the dome's park locks the mount's park: `DOME_LOCKS` or `DOME_IGNORED`. The operator sets `DOME_LOCKS` when the observatory has a dome. The status holds what the driver reports in `DOME_POLICY`. The operator decides it from the resources around the device, so it is not in spec. |
 | <span id="status--oncoordset"></span>`onCoordSet` | [object](#statusoncoordset) | no | What the mount does with the next coordinates that a client writes: slew, track, sync, or flip. The status holds what the driver reports in `ON_COORD_SET`. Clients such as KStars and Ekos change it. |
@@ -289,8 +290,8 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--joystick"></span>`joystick` | [object](#statusjoystick) | no | Whether the driver moves the mount from a joystick. The status holds what the driver reports in `USEJOYSTICK`. `spec.joystick` sets it. |
 | <span id="status--joystickdevice"></span>`joystickDevice` | [object](#statusjoystickdevice) | no | The INDI device of the joystick. The status holds what the driver reports in `SNOOP_JOYSTICK`. The operator decides it from the resources around the device, so it is not in spec. |
 | <span id="status--parkposition"></span>`parkPosition` | [object](#statusparkposition) | no | Where the mount parks, in the unit that each element's label names. Its elements depend on the mount's park type, such as right ascension and declination, or azimuth and altitude. The status holds what the driver reports in `TELESCOPE_PARK_POSITION`. `spec.parkPosition` sets it. |
-| <span id="status--display"></span>`display` | [object](#statusdisplay) | no | The readings as a person reads them, with their units, for the printer columns. The numbers are in `readings`. |
-| <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the mount reports, from `EQUATORIAL_EOD_COORD`, `TELESCOPE_PARK`, and `TELESCOPE_TRACK_STATE`. A field is absent until the driver sends it. |
+| <span id="status--display"></span>`display` | [object](#statusdisplay) | no | The values of the typed fields as a person reads them, with their units, for the printer columns. |
+| <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the operator reads from several of the mount's properties, which no typed field holds alone. A field is absent until the driver sends what it comes from. |
 
 ### status.conditions[]
 
@@ -661,7 +662,7 @@ One element that the driver defines.
 
 ### status.display
 
-The readings as a person reads them, with their units, for the printer columns. The numbers are in `readings`.
+The values of the typed fields as a person reads them, with their units, for the printer columns.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -670,10 +671,8 @@ The readings as a person reads them, with their units, for the printer columns. 
 
 ### status.readings
 
-What the mount reports, from `EQUATORIAL_EOD_COORD`, `TELESCOPE_PARK`, and `TELESCOPE_TRACK_STATE`. A field is absent until the driver sends it.
+What the operator reads from several of the mount's properties, which no typed field holds alone. A field is absent until the driver sends what it comes from.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="statusreadings--rightascension"></span>`rightAscension` | number | no | Where the mount points, in hours from 0 to 24, in the equinox of the date (JNow). |
-| <span id="statusreadings--declination"></span>`declination` | number | no | Where the mount points, in degrees from -90 to 90, in the equinox of the date (JNow). |
 | <span id="statusreadings--state"></span>`state` | string | no | What the mount does: `Parking` or `Unparking` while `TELESCOPE_PARK` is `Busy`, `Parked` while its `PARK` member is on and its state is not `Alert`, `Slewing` while `EQUATORIAL_EOD_COORD` is `Busy`, `Tracking` while the `TRACK_ON` member of `TELESCOPE_TRACK_STATE` is on, and `Stopped` otherwise. The first that applies wins. Absent until the driver defines all three properties. One of: `Parked`, `Parking`, `Unparking`, `Stopped`, `Slewing`, `Tracking`. |

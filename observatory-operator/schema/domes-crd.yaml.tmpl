@@ -42,10 +42,10 @@ spec:
           jsonPath: .status.display.azimuth
         - name: Shutter
           type: string
-          jsonPath: .status.readings.shutter
+          jsonPath: '.status.conditions[?(@.type=="Open")].reason'
         - name: Park
           type: string
-          jsonPath: .status.readings.park
+          jsonPath: '.status.conditions[?(@.type=="Parked")].reason'
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -118,39 +118,12 @@ spec:
                 display:
                   type: object
                   description: >-
-                    The readings as a person reads them, with their units,
-                    for the printer columns. The numbers are in `readings`.
+                    The values of the typed fields as a person reads them,
+                    with their units, for the printer columns.
                   properties:
                     azimuth:
                       type: string
                       description: "The azimuth in degrees, such as `123.4°`."
-                readings:
-                  type: object
-                  description: >-
-                    What the dome reports, from `ABS_DOME_POSITION`,
-                    `DOME_SHUTTER`, and `DOME_PARK`. A field is absent
-                    until the driver sends it.
-                  properties:
-                    azimuth:
-                      type: number
-                      minimum: 0
-                      maximum: 360
-                      description: >-
-                        The dome's azimuth, in degrees from 0 to 360
-                        east of north.
-                    shutter:
-                      type: string
-                      enum: [Open, Closed, Moving]
-                      description: >-
-                        `Open`, `Closed`, or `Moving` while
-                        `DOME_SHUTTER` is `Busy`.
-                    park:
-                      type: string
-                      enum: [Parked, Unparked, Moving]
-                      description: >-
-                        `Parked` or `Unparked` from the member of
-                        `DOME_PARK` that is on, or `Moving` while
-                        `DOME_PARK` is `Busy`.
 {{- define "action" }}
 type: object
 description: >-

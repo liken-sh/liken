@@ -104,22 +104,12 @@ spec:
                 display:
                   type: object
                   description: >-
-                    The readings as a person reads them, with their units,
-                    for the printer columns. The numbers are in `readings`.
+                    The values of the typed fields as a person reads them,
+                    with their units, for the printer columns.
                   properties:
                     position:
                       type: string
                       description: "The position in steps, such as `52000 steps`."
-                readings:
-                  type: object
-                  description: >-
-                    What the focuser reports, from `ABS_FOCUS_POSITION`.
-                    A field is absent until the driver sends it.
-                  properties:
-                    position:
-                      type: integer
-                      format: int64
-                      description: "The focuser's position, in its own steps."
 {{- define "action" }}
 type: object
 description: >-

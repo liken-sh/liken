@@ -38,7 +38,7 @@ spec:
           jsonPath: .status.phase
         - name: Safety
           type: string
-          jsonPath: .status.readings.safety
+          jsonPath: '.status.conditions[?(@.type=="Safe")].reason'
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -104,59 +104,6 @@ spec:
               properties:
 {{ include "device status" . | indent 16 }}
 {{ standard | indent 16 }}
-                readings:
-                  type: object
-                  description: >-
-                    What the weather station reports, from `SAFETY_STATUS`,
-                    `WEATHER_PARAMETERS`, and `WEATHER_STATUS`. A field is
-                    absent until the driver sends it. INDI reports each safety
-                    status as a light: `Ok` is `Safe`, `Busy` is `Warning`,
-                    `Alert` is `Danger`, and `Idle` is `Unknown`.
-                  properties:
-                    safety:
-                      type: string
-                      enum: [Safe, Warning, Danger, Unknown]
-                      description: "The station's safety status for the whole site."
-                    parameters:
-                      type: array
-                      description: >-
-                        Each measurement, with its safety status against the
-                        driver's limits.
-                      x-kubernetes-list-type: map
-                      x-kubernetes-list-map-keys: [name]
-                      items:
-                        type: object
-                        required: [name]
-                        description: "One measurement."
-                        properties:
-                          name:
-                            type: string
-                            minLength: 1
-                            description: >-
-                              The measurement's name, such as
-                              `WEATHER_TEMPERATURE`.
-                          label:
-                            type: string
-                            description: >-
-                              The label that the driver gives the
-                              measurement, with its unit, such as
-                              `Temperature (C)`.
-                          value:
-                            type: number
-                            description: >-
-                              The value, in the unit that the label
-                              names.
-                          text:
-                            type: string
-                            description: >-
-                              The value with the unit that the label
-                              names, such as `12.5 °C` or `20 km/h`. A
-                              label that names no unit gives the number
-                              alone.
-                          safety:
-                            type: string
-                            enum: [Safe, Warning, Danger, Unknown]
-                            description: "The safety status of this measurement."
 {{- define "action" }}
 type: object
 description: >-

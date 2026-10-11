@@ -140,10 +140,11 @@ func writeStatus[T any, P memo.Object[T]](recorder *events.Recorder, client *api
 		if seen.knows(key, version) {
 			return !seen.same(key, version, body)
 		}
-		// The cached copy of a device holds no status.properties
-		// (watch.go), so for a connected device this comparison fails,
-		// and the write goes out. The API server finds it unchanged and
-		// stores nothing, and the memo then records the version.
+		// The cached copy of a device holds no typed fields, no
+		// status.limits, and no status.properties (watch.go), so for a
+		// connected device this comparison fails, and the write goes
+		// out. The API server finds it unchanged and stores nothing,
+		// and the memo then records the version.
 		if equalJSON(was, next) {
 			seen.note(key, version, body)
 			return false
@@ -182,7 +183,6 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 	var connection indi.Property
 	defined := false
 	var device *reader
-	maximum := func(string, string) (float64, bool) { return 0, false }
 	ref, placed := t.server(d)
 	// A device whose driver another device runs has no device of its
 	// own on the server. The device of that name is the other one's. A
@@ -208,19 +208,22 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 	serving := false
 	if server, open := o.servers.get(at); readable && !refused && hasPod && open && server.client.Connected() {
 		if indiDevice := t.indiName(server.client, d); indiDevice != "" {
-			r := reader{c: server.client, name: indiDevice}
+			all := server.client.Properties(indiDevice)
+			held, rest := t.split(d, all)
+			r := newReader(held)
 			next.IndiDevice = indiDevice
 			if d.runsDriver() {
-				next.Properties = properties(r)
+				next.Properties = properties(rest)
 			}
+			next.Standard = standardStatus(d.kind, r)
+			next.Limits = limits(r)
 			next.Readings = readings(d.kind, r)
-			connection, defined = r.property("CONNECTION")
-			maximum = r.maximum
+			connection, defined = newReader(all).property("CONNECTION")
 			device = &r
 			serving = serves(server.client, indiDevice, d.kind)
 		}
 	}
-	next.Display = deviceDisplay(d, next.Readings, maximum)
+	next.Display = deviceDisplay(d, next.Standard, next.Limits)
 	standing := o.standingOf(t, d)
 	// A pod that a device's server no longer runs is one that a Ready
 	// runner deletes (moves.go), or one that deactivation deletes. It

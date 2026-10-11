@@ -1,26 +1,44 @@
 package main
 
-// The typed readings of each device kind, and the list of every
-// property, from what the device's driver reports on its server. A
-// reading is absent until the driver sends the property it comes from.
+// The readings of the kinds that have them, and the list of the
+// properties that no typed field holds, from what the device's driver
+// reports on its server. A reading is absent until the driver sends the
+// properties it comes from.
 
 import (
 	"math"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/liken-sh/liken/observatory-operator/indi"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// reader reads one device's properties from its client's store.
+// reader reads the properties that one resource holds of its INDI
+// device (devicesplit.go): the ones its typed fields hold, in the same
+// window. A resource's readings and state conditions read these alone,
+// so each of them follows the typed fields of the same status.
 type reader struct {
-	c    *indi.Client
-	name string
+	held  []indi.Property
+	index map[string]int
 }
 
-func (r reader) property(name string) (indi.Property, bool) { return r.c.Property(r.name, name) }
+// newReader reads a list of properties, in the driver's order.
+func newReader(held []indi.Property) reader {
+	index := make(map[string]int, len(held))
+	for i, p := range held {
+		index[p.Name] = i
+	}
+	return reader{held: held, index: index}
+}
+
+func (r reader) property(name string) (indi.Property, bool) {
+	i, ok := r.index[name]
+	if !ok {
+		return indi.Property{}, false
+	}
+	return r.held[i], true
+}
 
 func (r reader) number(property, member string) *float64 {
 	p, ok := r.property(property)
@@ -34,88 +52,16 @@ func (r reader) number(property, member string) *float64 {
 	return &v
 }
 
-// maximum answers the largest value that the driver defines for a
-// number.
-func (r reader) maximum(property, member string) (float64, bool) {
-	p, ok := r.property(property)
-	if !ok {
-		return 0, false
-	}
-	m, ok := p.Member(member)
-	return m.Max, ok
-}
-
-func (r reader) on(property, member string) *bool {
-	p, ok := r.property(property)
-	if !ok {
-		return nil
-	}
-	m, ok := p.Member(member)
-	if !ok {
-		return nil
-	}
-	return &m.Switch
-}
-
-func (r reader) state(property string) indi.State {
-	p, _ := r.property(property)
-	return p.State
-}
-
-// readings answers the readings block of a device's kind.
+// readings answers the readings block of a device's kind, or nil for a
+// kind with none. A reading holds what the operator derives from
+// several values, which no typed field holds alone: what a mount does,
+// and the name of the filter in a wheel's slot.
 func readings(kind observatory.Kind, r reader) any {
 	switch kind {
 	case observatory.MountKind:
-		return observatory.MountReadings{
-			RightAscension: r.number("EQUATORIAL_EOD_COORD", "RA"),
-			Declination:    r.number("EQUATORIAL_EOD_COORD", "DEC"),
-			State:          mountState(r.property),
-		}
-	case observatory.GPSKind:
-		return gpsReadings(r)
-	case observatory.PolarAlignerKind:
-		return observatory.PolarAlignerReadings{Adjustment: r.state("PAC_MANUAL_ADJUSTMENT")}
-	case observatory.CameraKind:
-		out := observatory.CameraReadings{
-			Temperature: r.number("CCD_TEMPERATURE", "CCD_TEMPERATURE_VALUE"),
-			Cooler:      r.on("CCD_COOLER", "COOLER_ON"),
-			CoolerPower: r.number("CCD_COOLER_POWER", "CCD_COOLER_VALUE"),
-			Exposure:    exposure(r),
-		}
-		if out.Exposure == observatory.ExposureExposing {
-			out.ExposureRemaining = r.number("CCD_EXPOSURE", "CCD_EXPOSURE_VALUE")
-		}
-		return out
+		return observatory.MountReadings{State: mountState(r.property)}
 	case observatory.FilterWheelKind:
 		return filterReadings(r)
-	case observatory.FocuserKind:
-		var out observatory.FocuserReadings
-		if v := r.number("ABS_FOCUS_POSITION", "FOCUS_ABSOLUTE_POSITION"); v != nil {
-			position := int64(math.Round(*v))
-			out.Position = &position
-		}
-		return out
-	case observatory.RotatorKind:
-		return observatory.RotatorReadings{Angle: r.number("ABS_ROTATOR_ANGLE", "ANGLE")}
-	case observatory.DustCapKind:
-		return observatory.DustCapReadings{Cover: cover(r, "CAP_PARK", "UNPARK", "PARK")}
-	case observatory.FlatPanelKind:
-		return observatory.FlatPanelReadings{
-			Light:      light(r),
-			Brightness: r.number("FLAT_LIGHT_INTENSITY", "FLAT_LIGHT_INTENSITY_VALUE"),
-		}
-	case observatory.DomeKind:
-		return observatory.DomeReadings{
-			Azimuth: r.number("ABS_DOME_POSITION", "DOME_ABSOLUTE_POSITION"),
-			Shutter: cover(r, "DOME_SHUTTER", "SHUTTER_OPEN", "SHUTTER_CLOSE"),
-			Park:    domePark(r),
-		}
-	case observatory.WeatherStationKind:
-		return weatherReadings(r)
-	case observatory.SwitchKind:
-		return switchReadings(r)
-	case observatory.ReceiverKind:
-		return observatory.ReceiverReadings{Frequency: r.number("RECEIVER_SETTINGS", "RECEIVER_FREQUENCY")}
 	}
 	return nil
 }
@@ -161,110 +107,16 @@ func mountState(property func(string) (indi.Property, bool)) observatory.MountSt
 	return observatory.MountStopped
 }
 
-// domePark reads DOME_PARK as a cover reads its switch: Moving while
-// Busy, then the member that is On.
-func domePark(r reader) observatory.DomePark {
-	p, ok := r.property("DOME_PARK")
-	switch {
-	case !ok:
-		return ""
-	case p.State == indi.Busy:
-		return observatory.DomeMoving
-	case isOn(p, "PARK"):
-		return observatory.DomeParked
-	case isOn(p, "UNPARK"):
-		return observatory.DomeUnparked
-	}
-	return ""
-}
-
-// exposure names the light of CCD_EXPOSURE.
-func exposure(r reader) observatory.ExposureState {
-	p, ok := r.property("CCD_EXPOSURE")
-	if !ok {
-		return ""
-	}
-	switch p.State {
-	case indi.Busy:
-		return observatory.ExposureExposing
-	case indi.Ok:
-		return observatory.ExposureDone
-	case indi.Alert:
-		return observatory.ExposureFailed
-	}
-	return observatory.ExposureIdle
-}
-
-// light names a flat panel's light from the switch of
-// FLAT_LIGHT_CONTROL, as the Lit condition reads it.
-func light(r reader) observatory.LightState {
-	p, ok := r.property("FLAT_LIGHT_CONTROL")
-	switch {
-	case !ok:
-		return ""
-	case isOn(p, "FLAT_LIGHT_ON"):
-		return observatory.StateLit
-	case isOn(p, "FLAT_LIGHT_OFF"):
-		return observatory.StateDark
-	}
-	return ""
-}
-
-// cover reads a cover's position from a switch property: Moving while
-// Busy, Open when the open member is On, Closed when the closed member
-// is On.
-func cover(r reader, property, open, closed string) string {
-	p, ok := r.property(property)
-	if !ok {
-		return ""
-	}
-	if p.State == indi.Busy {
-		return observatory.CoverMoving
-	}
-	if m, _ := p.Member(open); m.Switch {
-		return observatory.CoverOpen
-	}
-	if m, _ := p.Member(closed); m.Switch {
-		return observatory.CoverClosed
-	}
-	return ""
-}
-
-func gpsReadings(r reader) observatory.GPSReadings {
-	var out observatory.GPSReadings
-	if p, ok := r.property("GEOGRAPHIC_COORD"); ok {
-		fix := p.State == indi.Ok
-		out.Fix = &fix
-		out.Latitude = r.number("GEOGRAPHIC_COORD", "LAT")
-		if v := r.number("GEOGRAPHIC_COORD", "LONG"); v != nil {
-			longitude := *v
-			if longitude > 180 {
-				longitude -= 360
-			}
-			out.Longitude = &longitude
-		}
-		out.Elevation = r.number("GEOGRAPHIC_COORD", "ELEV")
-	}
-	if p, ok := r.property("TIME_UTC"); ok {
-		if m, ok := p.Member("UTC"); ok {
-			if at, err := time.Parse("2006-01-02T15:04:05", strings.TrimSpace(m.Text)); err == nil {
-				out.Time = &at
-			}
-		}
-	}
-	return out
-}
-
+// filterReadings names the filter in the light path: the member of
+// FILTER_NAME for the slot that FILTER_SLOT gives, counted from 1.
 func filterReadings(r reader) observatory.FilterWheelReadings {
 	var out observatory.FilterWheelReadings
 	v := r.number("FILTER_SLOT", "FILTER_SLOT_VALUE")
 	if v == nil {
 		return out
 	}
-	slot := int32(math.Round(*v))
-	out.Slot = &slot
 	if p, ok := r.property("FILTER_NAME"); ok {
-		if m, ok := p.Member("FILTER_SLOT_NAME_" + strconv.Itoa(int(slot))); ok {
+		if m, ok := p.Member("FILTER_SLOT_NAME_" + strconv.Itoa(int(math.Round(*v)))); ok {
 			out.Filter = m.Text
 		}
 	}
@@ -296,60 +148,20 @@ func stationSafety(p indi.Property) observatory.Safety {
 	return safety(p.State)
 }
 
-func weatherReadings(r reader) observatory.WeatherStationReadings {
-	var out observatory.WeatherStationReadings
-	if p, ok := r.property("SAFETY_STATUS"); ok {
-		out.Safety = stationSafety(p)
+// typedSafety reads a station's verdict from its typed safety field,
+// as stationSafety reads SAFETY_STATUS.
+func typedSafety(s observatory.WeatherStationSafetyStatus) observatory.Safety {
+	if s.Value != "" && s.Value != indi.Idle {
+		return safety(s.Value)
 	}
-	status, _ := r.property("WEATHER_STATUS")
-	if p, ok := r.property("WEATHER_PARAMETERS"); ok {
-		for _, m := range p.Members {
-			value := m.Number
-			parameter := observatory.WeatherParameter{Name: m.Name, Label: m.Label, Value: &value, Text: weatherText(m.Label, value)}
-			if light, ok := status.Member(m.Name); ok {
-				parameter.Safety = safety(light.Light)
-			}
-			out.Parameters = append(out.Parameters, parameter)
-		}
-	}
-	return out
+	return safety(s.State)
 }
 
-func switchReadings(r reader) observatory.SwitchReadings {
-	var out observatory.SwitchReadings
-	out.Outputs = channels(r, "DIGITAL_OUTPUT_", "DIGITAL_OUTPUT_LABELS")
-	out.Inputs = channels(r, "DIGITAL_INPUT_", "DIGITAL_INPUT_LABELS")
-	for _, c := range out.Outputs {
-		if c.On != nil && *c.On {
-			out.On = append(out.On, c.Number)
-		}
-	}
-	return out
-}
-
-// channels reads DIGITAL_OUTPUT_1, DIGITAL_OUTPUT_2, and on, until the
-// first number the driver does not define.
-func channels(r reader, prefix, labels string) []observatory.SwitchChannel {
-	names, _ := r.property(labels)
-	var out []observatory.SwitchChannel
-	for n := 1; ; n++ {
-		property := prefix + strconv.Itoa(n)
-		if _, ok := r.property(property); !ok {
-			return out
-		}
-		channel := observatory.SwitchChannel{Number: int32(n), On: r.on(property, "ON")}
-		if m, ok := names.Member(property); ok {
-			channel.Label = m.Text
-		}
-		out = append(out, channel)
-	}
-}
-
-// properties lists every property of a device as its status shows it,
-// with each number in its member's format and no BLOB data.
-func properties(r reader) []observatory.Property {
+// properties lists properties as a status shows them, with each number
+// in its member's format and no BLOB data.
+func properties(list []indi.Property) []observatory.Property {
 	var out []observatory.Property
-	for _, p := range r.c.Properties(r.name) {
+	for _, p := range list {
 		property := observatory.Property{
 			Name: p.Name, Label: p.Label, Group: p.Group, Type: p.Type,
 			Permission: p.Perm, State: p.State, Rule: p.Rule,

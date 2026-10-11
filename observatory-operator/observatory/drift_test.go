@@ -71,6 +71,10 @@ func compare(goType reflect.Type, schema *apiextensionsv1.JSONSchemaProps, path 
 		}
 	case goType.Kind() == reflect.Slice:
 		problems = append(problems, compare(goType.Elem(), schema.Items.Schema, path+"[]")...)
+	case goType.Kind() == reflect.Map && (schema.AdditionalProperties == nil || schema.AdditionalProperties.Schema == nil):
+		problems = append(problems, path+": Go has a map, the CRD has no additionalProperties")
+	case goType.Kind() == reflect.Map:
+		problems = append(problems, compare(goType.Elem(), schema.AdditionalProperties.Schema, path+".*")...)
 	case goType.Kind() == reflect.Struct && goType != timeType:
 		fields := jsonFields(goType)
 		for _, name := range sortedKeys(fields) {
@@ -111,7 +115,7 @@ func schemaType(goType reflect.Type) (string, string) {
 		return "number", ""
 	case reflect.Slice:
 		return "array", ""
-	case reflect.Struct:
+	case reflect.Map, reflect.Struct:
 		return "object", ""
 	}
 	return goType.Kind().String(), ""
@@ -151,10 +155,11 @@ func TestCompareFindsEachKindOfDifference(t *testing.T) {
 		Count int32 `json:"count"`
 	}
 	type sample struct {
-		Name  string          `json:"name"`
-		Items []inner         `json:"items"`
-		Raw   json.RawMessage `json:"raw"`
-		When  *time.Time      `json:"when"`
+		Name  string           `json:"name"`
+		Items []inner          `json:"items"`
+		Raw   json.RawMessage  `json:"raw"`
+		When  *time.Time       `json:"when"`
+		Sizes map[string]inner `json:"sizes"`
 	}
 	preserve := true
 	matching := func() *apiextensionsv1.JSONSchemaProps {
@@ -166,6 +171,10 @@ func TestCompareFindsEachKindOfDifference(t *testing.T) {
 				}}}},
 			"raw":  {Type: "object", XPreserveUnknownFields: &preserve},
 			"when": {Type: "string", Format: "date-time"},
+			"sizes": {Type: "object", AdditionalProperties: &apiextensionsv1.JSONSchemaPropsOrBool{Schema: &apiextensionsv1.JSONSchemaProps{
+				Type: "object", Properties: map[string]apiextensionsv1.JSONSchemaProps{
+					"count": {Type: "integer", Format: "int32"},
+				}}}},
 		}}
 	}
 	cases := []struct {
@@ -189,6 +198,12 @@ func TestCompareFindsEachKindOfDifference(t *testing.T) {
 		{"raw JSON that the API server prunes", func(s *apiextensionsv1.JSONSchemaProps) {
 			s.Properties["raw"] = apiextensionsv1.JSONSchemaProps{Type: "object"}
 		}, "x.raw: raw JSON needs x-kubernetes-preserve-unknown-fields"},
+		{"a map with no schema for its values", func(s *apiextensionsv1.JSONSchemaProps) {
+			s.Properties["sizes"] = apiextensionsv1.JSONSchemaProps{Type: "object"}
+		}, "x.sizes: Go has a map, the CRD has no additionalProperties"},
+		{"another type in a map's values", func(s *apiextensionsv1.JSONSchemaProps) {
+			s.Properties["sizes"].AdditionalProperties.Schema.Properties["count"] = apiextensionsv1.JSONSchemaProps{Type: "string"}
+		}, "x.sizes.*.count: Go has integer, the CRD has string"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

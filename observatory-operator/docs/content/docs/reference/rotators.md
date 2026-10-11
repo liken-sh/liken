@@ -246,7 +246,8 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--image"></span>`image` | string | no | The image that the device's pod runs, after the operator resolved it. |
 | <span id="status--pod"></span>`pod` | string | no | The name of the device's pod, while it exists. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the device's pod. |
-| <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Every property that the device defines, as the driver defines it, with the values of its last update. A vendor's own properties are here, and no typed reading depends on one. The list holds no BLOB data. |
+| <span id="status--limits"></span>`limits` | map[string]map[string]object | no | The range that the driver gives each number of this resource's typed fields that a client can write, by INDI property and then by member, such as `limits.CCD_TEMPERATURE.CCD_TEMPERATURE_VALUE`. Each range has `min` and `max`, the least and the greatest value that the driver accepts, and `step` when the driver states one. The schema describes each typed field, and the driver chooses only these ranges, such as a camera's least and greatest temperature or its range of gain. |
+| <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Each property of the INDI device that no typed field holds, as the driver defines it, with the values of its last update: a vendor's own properties, the properties that every INDI device has, such as `DEBUG`, and the standard properties of an interface that no resource on the device is, such as the `FILTER_SLOT` of a camera with no `FilterWheel`. Only the resource that runs the driver has the list, so each property is in one object, and no typed reading depends on one. The list holds no BLOB data. |
 | <span id="status--angle"></span>`angle` | [object](#statusangle) | no | The rotator's angle, in degrees from 0 to 360. The status holds what the driver reports in `ABS_ROTATOR_ANGLE`. Clients such as KStars and Ekos change it. |
 | <span id="status--abortmotion"></span>`abortMotion` | [object](#statusabortmotion) | no | Stops the rotator's motion. The status holds what the driver reports in `ROTATOR_ABORT_MOTION`. Clients such as KStars and Ekos change it. |
 | <span id="status--sync"></span>`sync` | [object](#statussync) | no | An angle, in degrees, that the driver takes as the current angle, with no motion. The status holds what the driver reports in `SYNC_ROTATOR_ANGLE`. Clients such as KStars and Ekos change it. |
@@ -255,8 +256,7 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--backlash"></span>`backlash` | [object](#statusbacklash) | no | Whether the driver corrects the backlash of the rotator's motor. The status holds what the driver reports in `ROTATOR_BACKLASH_TOGGLE`. `spec.backlash` sets it. |
 | <span id="status--backlashsteps"></span>`backlashSteps` | [object](#statusbacklashsteps) | no | The backlash of the rotator's motor, in steps. The status holds what the driver reports in `ROTATOR_BACKLASH_STEPS`. `spec.backlashSteps` sets it. |
 | <span id="status--saferange"></span>`safeRange` | [object](#statussaferange) | no | How far, in degrees, the rotator may turn, so a cable does not wind up. The status holds what the driver reports in `ROTATOR_LIMITS`. `spec.safeRange` sets it. |
-| <span id="status--display"></span>`display` | [object](#statusdisplay) | no | The readings as a person reads them, with their units, for the printer columns. The numbers are in `readings`. |
-| <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the rotator reports, from `ABS_ROTATOR_ANGLE`. A field is absent until the driver sends it. |
+| <span id="status--display"></span>`display` | [object](#statusdisplay) | no | The values of the typed fields as a person reads them, with their units, for the printer columns. |
 
 ### status.conditions[]
 
@@ -409,16 +409,8 @@ How far, in degrees, the rotator may turn, so a cable does not wind up. The stat
 
 ### status.display
 
-The readings as a person reads them, with their units, for the printer columns. The numbers are in `readings`.
+The values of the typed fields as a person reads them, with their units, for the printer columns.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="statusdisplay--angle"></span>`angle` | string | no | The angle in degrees, such as `90°`. |
-
-### status.readings
-
-What the rotator reports, from `ABS_ROTATOR_ANGLE`. A field is absent until the driver sends it.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <span id="statusreadings--angle"></span>`angle` | number | no | The rotator's angle, in degrees from 0 to 360. |

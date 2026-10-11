@@ -245,10 +245,10 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--image"></span>`image` | string | no | The image that the device's pod runs, after the operator resolved it. |
 | <span id="status--pod"></span>`pod` | string | no | The name of the device's pod, while it exists. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the device's pod. |
-| <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Every property that the device defines, as the driver defines it, with the values of its last update. A vendor's own properties are here, and no typed reading depends on one. The list holds no BLOB data. |
+| <span id="status--limits"></span>`limits` | map[string]map[string]object | no | The range that the driver gives each number of this resource's typed fields that a client can write, by INDI property and then by member, such as `limits.CCD_TEMPERATURE.CCD_TEMPERATURE_VALUE`. Each range has `min` and `max`, the least and the greatest value that the driver accepts, and `step` when the driver states one. The schema describes each typed field, and the driver chooses only these ranges, such as a camera's least and greatest temperature or its range of gain. |
+| <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Each property of the INDI device that no typed field holds, as the driver defines it, with the values of its last update: a vendor's own properties, the properties that every INDI device has, such as `DEBUG`, and the standard properties of an interface that no resource on the device is, such as the `FILTER_SLOT` of a camera with no `FilterWheel`. Only the resource that runs the driver has the list, so each property is in one object, and no typed reading depends on one. The list holds no BLOB data. |
 | <span id="status--park"></span>`park` | [object](#statuspark) | no | Closes the cap with `PARK` or opens it with `UNPARK`. The `state` action changes it. The status holds what the driver reports in `CAP_PARK`. Clients such as KStars and Ekos change it. |
 | <span id="status--abort"></span>`abort` | [object](#statusabort) | no | Stops the cap's motion. The status holds what the driver reports in `CAP_ABORT`. Clients such as KStars and Ekos change it. |
-| <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the dust cap reports, from `CAP_PARK`. A field is absent until the driver sends it. |
 
 ### status.conditions[]
 
@@ -344,11 +344,3 @@ Stops the cap's motion. The status holds what the driver reports in `CAP_ABORT`.
 | --- | --- | --- | --- |
 | <span id="statusabort--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
 | <span id="statusabort--value"></span>`value` | string | no | The name of the member that is on, such as `ABORT`. Absent when no member is on. |
-
-### status.readings
-
-What the dust cap reports, from `CAP_PARK`. A field is absent until the driver sends it.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <span id="statusreadings--cover"></span>`cover` | string | no | `Closed` when the cap is parked, `Open` when it is unparked, and `Moving` while `CAP_PARK` is `Busy`. One of: `Open`, `Closed`, `Moving`. |

@@ -129,22 +129,12 @@ spec:
                 display:
                   type: object
                   description: >-
-                    The readings as a person reads them, with their units,
-                    for the printer columns. The numbers are in `readings`.
+                    The values of the typed fields as a person reads them,
+                    with their units, for the printer columns.
                   properties:
                     frequency:
                       type: string
                       description: "The center frequency in megahertz, such as `1420.406 MHz`."
-                readings:
-                  type: object
-                  description: >-
-                    What the receiver reports, from `RECEIVER_SETTINGS`.
-                    A field is absent until the driver sends it.
-                  properties:
-                    frequency:
-                      type: number
-                      minimum: 0
-                      description: "The center frequency, in hertz."
 {{- define "action" }}
 type: object
 description: >-

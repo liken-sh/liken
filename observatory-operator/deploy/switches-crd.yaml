@@ -46,7 +46,7 @@ spec:
           jsonPath: .status.phase
         - name: "On"
           type: string
-          jsonPath: .status.readings.on
+          jsonPath: .status.display.on
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -1141,14 +1141,52 @@ spec:
                 node:
                   type: string
                   description: "The node that runs the device's pod."
+                limits:
+                  type: object
+                  description: >-
+                    The range that the driver gives each number of this
+                    resource's typed fields that a client can write, by
+                    INDI property and then by member, such as
+                    `limits.CCD_TEMPERATURE.CCD_TEMPERATURE_VALUE`. Each
+                    range has `min` and `max`, the least and the
+                    greatest value that the driver accepts, and `step`
+                    when the driver states one. The schema describes
+                    each typed field, and the driver chooses only these
+                    ranges, such as a camera's least and greatest
+                    temperature or its range of gain.
+                  x-kubernetes-map-type: atomic
+                  additionalProperties:
+                    type: object
+                    description: "The members of one property, by name."
+                    additionalProperties:
+                      type: object
+                      required: [min, max]
+                      description: "The range of one member."
+                      properties:
+                        min:
+                          type: number
+                          description: "The least value that the driver accepts."
+                        max:
+                          type: number
+                          description: "The greatest value that the driver accepts."
+                        step:
+                          type: number
+                          description: >-
+                            The step between values. Absent when the
+                            driver states no step.
                 properties:
                   type: array
                   description: >-
-                    Every property that the device defines, as the
-                    driver defines it, with the values of its last
-                    update. A vendor's own properties are here, and no
-                    typed reading depends on one. The list holds no BLOB
-                    data.
+                    Each property of the INDI device that no typed field
+                    holds, as the driver defines it, with the values of
+                    its last update: a vendor's own properties, the
+                    properties that every INDI device has, such as
+                    `DEBUG`, and the standard properties of an interface
+                    that no resource on the device is, such as the
+                    `FILTER_SLOT` of a camera with no `FilterWheel`.
+                    Only the resource that runs the driver has the list,
+                    so each property is in one object, and no typed
+                    reading depends on one. The list holds no BLOB data.
                   x-kubernetes-list-type: atomic
                   items:
                     type: object
@@ -1494,67 +1532,17 @@ spec:
                             type: string
                             description: >-
                               The element's text.
-                readings:
+                display:
                   type: object
                   description: >-
-                    What the switch reports, from the `DIGITAL_OUTPUT_n`
-                    and `DIGITAL_INPUT_n` properties and their labels. A
-                    field is absent until the driver sends it.
+                    The values of the typed fields as a person reads
+                    them, for the printer columns.
                   properties:
-                    outputs:
-                      type: array
-                      description: "Each output, from output 1."
-                      x-kubernetes-list-type: map
-                      x-kubernetes-list-map-keys: [number]
-                      items:
-                        type: object
-                        required: [number]
-                        description: "One output."
-                        properties:
-                          number:
-                            type: integer
-                            format: int32
-                            minimum: 1
-                            description: "The output's number, from 1."
-                          label:
-                            type: string
-                            description: >-
-                              The label from `DIGITAL_OUTPUT_LABELS`.
-                          "on":
-                            type: boolean
-                            description: "Whether the output is on."
                     "on":
-                      type: array
+                      type: string
                       description: >-
                         The numbers of the outputs that are on, such as
-                        `[1, 3]`. A printer column shows only the first
+                        `1, 2, 3`. A printer column shows only the first
                         value of a JSONPath that matches several, so the
-                        `On` column of `kubectl get` reads this list.
-                      x-kubernetes-list-type: set
-                      items:
-                        type: integer
-                        format: int32
-                        minimum: 1
-                        description: "The number of an output that is on."
-                    inputs:
-                      type: array
-                      description: "Each input, from input 1."
-                      x-kubernetes-list-type: map
-                      x-kubernetes-list-map-keys: [number]
-                      items:
-                        type: object
-                        required: [number]
-                        description: "One input."
-                        properties:
-                          number:
-                            type: integer
-                            format: int32
-                            minimum: 1
-                            description: "The input's number, from 1."
-                          label:
-                            type: string
-                            description: >-
-                              The label from `DIGITAL_INPUT_LABELS`.
-                          "on":
-                            type: boolean
-                            description: "Whether the input is on."
+                        `On` column of `kubectl get` reads this text,
+                        and a program reads `outputs`.

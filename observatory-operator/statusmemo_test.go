@@ -62,20 +62,27 @@ func TestAStatusThatAnotherWriterChangesIsWrittenAgain(t *testing.T) {
 	})
 }
 
-// The watch's copy of a device holds no status.properties, because no
-// pass reads the list and it is most of the object. The API server
-// still holds the list that the status writer wrote.
-func TestTheCachedDeviceHoldsNoPropertyList(t *testing.T) {
+// The watch's copy of a device holds none of the fields that the
+// status writer composes from INDI, because no pass reads them and they
+// are most of the object. The API server still holds what the status
+// writer wrote.
+func TestTheCachedDeviceHoldsNoComposedFields(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
 		cached, _, _ := w.operator().stores.kinds[observatory.CameraKind].View().Store.GetByKey(testNamespace + "/east-main")
-		if _, found, _ := unstructured.NestedSlice(cached.(*unstructured.Unstructured).Object, "status", "properties"); found {
-			t.Error("the cached Camera east-main holds status.properties")
+		status, _, _ := unstructured.NestedMap(cached.(*unstructured.Unstructured).Object, "status")
+		stored, _ := w.api.object(kindCollection(observatory.CameraKind), "east-main")
+		for _, field := range []string{"properties", "limits", "temperature", "gain"} {
+			if _, found := status[field]; found {
+				t.Errorf("the cached Camera east-main holds status.%s", field)
+			}
+			if _, found := stored["status"].(map[string]any)[field]; !found {
+				t.Errorf("the API server's Camera east-main holds no status.%s", field)
+			}
 		}
-		camera, _ := decode[observatory.Camera](t, w.api, kindCollection(observatory.CameraKind), "east-main")
-		if len(camera.Status.Properties) == 0 {
-			t.Error("the API server's Camera east-main holds no status.properties")
+		if status["phase"] != string(observatory.DeviceConnected) {
+			t.Errorf("the cached Camera east-main's phase = %v, want %s", status["phase"], observatory.DeviceConnected)
 		}
 	})
 }

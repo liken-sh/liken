@@ -243,10 +243,11 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--image"></span>`image` | string | no | The image that the device's pod runs, after the operator resolved it. |
 | <span id="status--pod"></span>`pod` | string | no | The name of the device's pod, while it exists. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the device's pod. |
-| <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Every property that the device defines, as the driver defines it, with the values of its last update. A vendor's own properties are here, and no typed reading depends on one. The list holds no BLOB data. |
+| <span id="status--limits"></span>`limits` | map[string]map[string]object | no | The range that the driver gives each number of this resource's typed fields that a client can write, by INDI property and then by member, such as `limits.CCD_TEMPERATURE.CCD_TEMPERATURE_VALUE`. Each range has `min` and `max`, the least and the greatest value that the driver accepts, and `step` when the driver states one. The schema describes each typed field, and the driver chooses only these ranges, such as a camera's least and greatest temperature or its range of gain. |
+| <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Each property of the INDI device that no typed field holds, as the driver defines it, with the values of its last update: a vendor's own properties, the properties that every INDI device has, such as `DEBUG`, and the standard properties of an interface that no resource on the device is, such as the `FILTER_SLOT` of a camera with no `FilterWheel`. Only the resource that runs the driver has the list, so each property is in one object, and no typed reading depends on one. The list holds no BLOB data. |
 | <span id="status--slot"></span>`slot` | [object](#statusslot) | no | The slot in front of the camera, counted from 1. The status holds what the driver reports in `FILTER_SLOT`. Clients such as KStars and Ekos change it. |
 | <span id="status--filters"></span>`filters` | [object](#statusfilters) | no | The name of the filter in each slot, from slot 1, such as `Luminance` or `H_Alpha`. The status holds what the driver reports in `FILTER_NAME`. `spec.filters` sets it. |
-| <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the filter wheel reports, from `FILTER_SLOT` and `FILTER_NAME`. A field is absent until the driver sends it. |
+| <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the operator reads from `FILTER_SLOT` and `FILTER_NAME` together, which neither typed field holds alone. A field is absent until the driver sends both. |
 
 ### status.conditions[]
 
@@ -355,9 +356,8 @@ One element that the driver defines.
 
 ### status.readings
 
-What the filter wheel reports, from `FILTER_SLOT` and `FILTER_NAME`. A field is absent until the driver sends it.
+What the operator reads from `FILTER_SLOT` and `FILTER_NAME` together, which neither typed field holds alone. A field is absent until the driver sends both.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="statusreadings--slot"></span>`slot` | integer | no | The slot in the light path, from 1. |
-| <span id="statusreadings--filter"></span>`filter` | string | no | The name of the filter in that slot. |
+| <span id="statusreadings--filter"></span>`filter` | string | no | The name of the filter in the slot that `slot` gives. |

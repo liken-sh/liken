@@ -1,8 +1,9 @@
 package main
 
 // The conditions of a device's state, which the triggers of procedures
-// read (plan 13). Each one comes from a property that the driver
-// already reports for the device's readings. The status writer adds
+// read (plan 13), and which several printer columns show by reason.
+// Each one comes from a standard property that the resource holds as a
+// typed field (devicesplit.go). The status writer adds
 // them only while the device is connected: a disconnected driver
 // deletes the properties, and a condition kept from before would
 // describe a state that nobody can confirm.

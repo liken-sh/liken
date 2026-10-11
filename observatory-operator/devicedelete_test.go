@@ -7,6 +7,7 @@ package main
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -199,8 +200,8 @@ func TestADeletedDeviceReadsConnectedWhileItsDeactivationRuns(t *testing.T) {
 		if phase := status["phase"]; phase != string(observatory.DeviceConnected) {
 			t.Errorf("phase = %v, want Connected", phase)
 		}
-		if cover := w.reading(observatory.DustCapKind, "east", "cover"); cover != observatory.CoverOpen {
-			t.Errorf("readings.cover = %q, want Open", cover)
+		if open := w.stateOf(observatory.DustCapKind, "east", observatory.ConditionOpen); !strings.HasPrefix(open, "True Open:") {
+			t.Errorf("Open = %q, want True Open", open)
 		}
 	})
 }

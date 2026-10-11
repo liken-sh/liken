@@ -256,7 +256,8 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--image"></span>`image` | string | no | The image that the device's pod runs, after the operator resolved it. |
 | <span id="status--pod"></span>`pod` | string | no | The name of the device's pod, while it exists. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the device's pod. |
-| <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Every property that the device defines, as the driver defines it, with the values of its last update. A vendor's own properties are here, and no typed reading depends on one. The list holds no BLOB data. |
+| <span id="status--limits"></span>`limits` | map[string]map[string]object | no | The range that the driver gives each number of this resource's typed fields that a client can write, by INDI property and then by member, such as `limits.CCD_TEMPERATURE.CCD_TEMPERATURE_VALUE`. Each range has `min` and `max`, the least and the greatest value that the driver accepts, and `step` when the driver states one. The schema describes each typed field, and the driver chooses only these ranges, such as a camera's least and greatest temperature or its range of gain. |
+| <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Each property of the INDI device that no typed field holds, as the driver defines it, with the values of its last update: a vendor's own properties, the properties that every INDI device has, such as `DEBUG`, and the standard properties of an interface that no resource on the device is, such as the `FILTER_SLOT` of a camera with no `FilterWheel`. Only the resource that runs the driver has the list, so each property is in one object, and no typed reading depends on one. The list holds no BLOB data. |
 | <span id="status--adjustment"></span>`adjustment` | [object](#statusadjustment) | no | Moves the mount's polar axis by an angle on each axis, in degrees. The status holds what the driver reports in `PAC_MANUAL_ADJUSTMENT`. Clients such as KStars and Ekos change it. |
 | <span id="status--abortmotion"></span>`abortMotion` | [object](#statusabortmotion) | no | Stops every motion of the polar aligner. The status holds what the driver reports in `PAC_ABORT_MOTION`. Clients such as KStars and Ekos change it. |
 | <span id="status--position"></span>`position` | [object](#statusposition) | no | How far the polar aligner has moved the axis from its home, in degrees. The status holds what the driver reports in `PAC_POSITION`. |
@@ -267,7 +268,6 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--sync"></span>`sync` | [object](#statussync) | no | A position, in degrees, that the driver takes as the current position, with no motion. The status holds what the driver reports in `PAC_SYNC`. Clients such as KStars and Ekos change it. |
 | <span id="status--backlash"></span>`backlash` | [object](#statusbacklash) | no | Whether the driver corrects the backlash of the motors. The status holds what the driver reports in `PAC_BACKLASH_ENABLED`. `spec.backlash` sets it. |
 | <span id="status--backlashsteps"></span>`backlashSteps` | [object](#statusbacklashsteps) | no | The backlash of each motor, in steps. The status holds what the driver reports in `PAC_BACKLASH_STEPS`. `spec.backlashSteps` sets it. |
-| <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the polar aligner reports, from `PAC_MANUAL_ADJUSTMENT`. A field is absent until the driver sends it. |
 
 ### status.conditions[]
 
@@ -439,11 +439,3 @@ The backlash of each motor, in steps. The status holds what the driver reports i
 | <span id="statusbacklashsteps--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
 | <span id="statusbacklashsteps--azimuth"></span>`azimuth` | number | no | The backlash of the azimuth motor, in steps. The member is `BACKLASH_AZ`. |
 | <span id="statusbacklashsteps--altitude"></span>`altitude` | number | no | The backlash of the altitude motor, in steps. The member is `BACKLASH_ALT`. |
-
-### status.readings
-
-What the polar aligner reports, from `PAC_MANUAL_ADJUSTMENT`. A field is absent until the driver sends it.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <span id="statusreadings--adjustment"></span>`adjustment` | string | no | The state of `PAC_MANUAL_ADJUSTMENT`: `Busy` while the motors move, `Ok` when a move ended, and `Alert` when it failed. One of: `Idle`, `Ok`, `Busy`, `Alert`. |

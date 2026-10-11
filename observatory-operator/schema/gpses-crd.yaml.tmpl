@@ -38,11 +38,11 @@ spec:
           type: string
           jsonPath: .status.phase
         - name: Fix
-          type: boolean
-          jsonPath: .status.readings.fix
+          type: string
+          jsonPath: .status.location.state
         - name: Time
           type: string
-          jsonPath: .status.readings.time
+          jsonPath: .status.time.utc
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -105,41 +105,6 @@ spec:
               properties:
 {{ include "device status" . | indent 16 }}
 {{ standard | indent 16 }}
-                readings:
-                  type: object
-                  description: >-
-                    What the GPS reports, from `GEOGRAPHIC_COORD` and
-                    `TIME_UTC`. A field is absent until the driver sends
-                    it.
-                  properties:
-                    fix:
-                      type: boolean
-                      description: >-
-                        Whether the GPS has a fix. It is `true` when
-                        `GEOGRAPHIC_COORD` is in the `Ok` state.
-                    time:
-                      type: string
-                      format: date-time
-                      description: "The time that the GPS reports, in UTC."
-                    latitude:
-                      type: number
-                      minimum: -90
-                      maximum: 90
-                      description: >-
-                        The latitude that the GPS reports, in degrees
-                        north.
-                    longitude:
-                      type: number
-                      minimum: -180
-                      maximum: 180
-                      description: >-
-                        The longitude that the GPS reports, in degrees
-                        east, from -180 to 180.
-                    elevation:
-                      type: number
-                      description: >-
-                        The elevation that the GPS reports, in meters
-                        above mean sea level.
 {{- define "action" }}
 type: object
 description: >-

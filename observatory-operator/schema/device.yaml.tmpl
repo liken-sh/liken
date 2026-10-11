@@ -245,14 +245,52 @@ pod:
 node:
   type: string
   description: "The node that runs the device's pod."
+limits:
+  type: object
+  description: >-
+    The range that the driver gives each number of this
+    resource's typed fields that a client can write, by
+    INDI property and then by member, such as
+    `limits.CCD_TEMPERATURE.CCD_TEMPERATURE_VALUE`. Each
+    range has `min` and `max`, the least and the greatest
+    value that the driver accepts, and `step` when the
+    driver states one. The schema describes each typed
+    field, and the driver chooses only these ranges, such
+    as a camera's least and greatest temperature or its
+    range of gain.
+  x-kubernetes-map-type: atomic
+  additionalProperties:
+    type: object
+    description: "The members of one property, by name."
+    additionalProperties:
+      type: object
+      required: [min, max]
+      description: "The range of one member."
+      properties:
+        min:
+          type: number
+          description: "The least value that the driver accepts."
+        max:
+          type: number
+          description: "The greatest value that the driver accepts."
+        step:
+          type: number
+          description: >-
+            The step between values. Absent when the driver
+            states no step.
 properties:
   type: array
   description: >-
-    Every property that the device defines, as the
-    driver defines it, with the values of its last
-    update. A vendor's own properties are here, and no
-    typed reading depends on one. The list holds no BLOB
-    data.
+    Each property of the INDI device that no typed field
+    holds, as the driver defines it, with the values of
+    its last update: a vendor's own properties, the
+    properties that every INDI device has, such as
+    `DEBUG`, and the standard properties of an interface
+    that no resource on the device is, such as the
+    `FILTER_SLOT` of a camera with no `FilterWheel`. Only
+    the resource that runs the driver has the list, so
+    each property is in one object, and no typed reading
+    depends on one. The list holds no BLOB data.
   x-kubernetes-list-type: atomic
   items:
     type: object

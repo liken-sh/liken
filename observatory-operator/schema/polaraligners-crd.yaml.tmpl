@@ -38,7 +38,7 @@ spec:
           jsonPath: .status.phase
         - name: Adjustment
           type: string
-          jsonPath: .status.readings.adjustment
+          jsonPath: .status.adjustment.state
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -102,20 +102,6 @@ spec:
               properties:
 {{ include "device status" . | indent 16 }}
 {{ standard | indent 16 }}
-                readings:
-                  type: object
-                  description: >-
-                    What the polar aligner reports, from
-                    `PAC_MANUAL_ADJUSTMENT`. A field is absent until the
-                    driver sends it.
-                  properties:
-                    adjustment:
-                      type: string
-                      enum: [Idle, Ok, Busy, Alert]
-                      description: >-
-                        The state of `PAC_MANUAL_ADJUSTMENT`: `Busy`
-                        while the motors move, `Ok` when a move ended,
-                        and `Alert` when it failed.
 {{- define "action" }}
 type: object
 description: >-

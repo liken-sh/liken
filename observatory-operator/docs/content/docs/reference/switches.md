@@ -246,7 +246,8 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--image"></span>`image` | string | no | The image that the device's pod runs, after the operator resolved it. |
 | <span id="status--pod"></span>`pod` | string | no | The name of the device's pod, while it exists. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the device's pod. |
-| <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Every property that the device defines, as the driver defines it, with the values of its last update. A vendor's own properties are here, and no typed reading depends on one. The list holds no BLOB data. |
+| <span id="status--limits"></span>`limits` | map[string]map[string]object | no | The range that the driver gives each number of this resource's typed fields that a client can write, by INDI property and then by member, such as `limits.CCD_TEMPERATURE.CCD_TEMPERATURE_VALUE`. Each range has `min` and `max`, the least and the greatest value that the driver accepts, and `step` when the driver states one. The schema describes each typed field, and the driver chooses only these ranges, such as a camera's least and greatest temperature or its range of gain. |
+| <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Each property of the INDI device that no typed field holds, as the driver defines it, with the values of its last update: a vendor's own properties, the properties that every INDI device has, such as `DEBUG`, and the standard properties of an interface that no resource on the device is, such as the `FILTER_SLOT` of a camera with no `FilterWheel`. Only the resource that runs the driver has the list, so each property is in one object, and no typed reading depends on one. The list holds no BLOB data. |
 | <span id="status--outputs"></span>`outputs` | [\[\]object](#statusoutputs) | no | Each digital output, on or off. A device whose `spec.power` names an output switches it. The status holds one item for each `DIGITAL_OUTPUT_n` that the driver defines. Clients such as KStars and Ekos change it. |
 | <span id="status--outputlabels"></span>`outputLabels` | [object](#statusoutputlabels) | no | The name of each digital output, from output 1, such as `Dew heater`. The status holds what the driver reports in `DIGITAL_OUTPUT_LABELS`. `spec.outputLabels` sets it. |
 | <span id="status--pulses"></span>`pulses` | [\[\]object](#statuspulses) | no | A pulse of each digital output, in milliseconds. The driver numbers these from 0, for the outputs that it numbers from 1. The status holds one item for each `PULSE_n` that the driver defines. Clients such as KStars and Ekos change it. |
@@ -254,7 +255,7 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--inputlabels"></span>`inputLabels` | [object](#statusinputlabels) | no | The name of each digital input, from input 1. The status holds what the driver reports in `DIGITAL_INPUT_LABELS`. `spec.inputLabels` sets it. |
 | <span id="status--analoginputs"></span>`analogInputs` | [\[\]object](#statusanaloginputs) | no | The value of each analog input, in the driver's own units. The status holds one item for each `ANALOG_INPUT_n` that the driver defines. |
 | <span id="status--analoginputlabels"></span>`analogInputLabels` | [object](#statusanaloginputlabels) | no | The name of each analog input, from input 1. The status holds what the driver reports in `ANALOG_INPUT_LABELS`. `spec.analogInputLabels` sets it. |
-| <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the switch reports, from the `DIGITAL_OUTPUT_n` and `DIGITAL_INPUT_n` properties and their labels. A field is absent until the driver sends it. |
+| <span id="status--display"></span>`display` | [object](#statusdisplay) | no | The values of the typed fields as a person reads them, for the printer columns. |
 
 ### status.conditions[]
 
@@ -430,32 +431,10 @@ One element that the driver defines.
 | <span id="statusanaloginputlabelselements--label"></span>`label` | string | no | The label that the driver gives the element. |
 | <span id="statusanaloginputlabelselements--value"></span>`value` | string | no | The element's text. |
 
-### status.readings
+### status.display
 
-What the switch reports, from the `DIGITAL_OUTPUT_n` and `DIGITAL_INPUT_n` properties and their labels. A field is absent until the driver sends it.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <span id="statusreadings--outputs"></span>`outputs` | [\[\]object](#statusreadingsoutputs) | no | Each output, from output 1. |
-| <span id="statusreadings--on"></span>`on` | []integer | no | The numbers of the outputs that are on, such as `[1, 3]`. A printer column shows only the first value of a JSONPath that matches several, so the `On` column of `kubectl get` reads this list. |
-| <span id="statusreadings--inputs"></span>`inputs` | [\[\]object](#statusreadingsinputs) | no | Each input, from input 1. |
-
-#### status.readings.outputs[]
-
-One output.
+The values of the typed fields as a person reads them, for the printer columns.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="statusreadingsoutputs--number"></span>`number` | integer | yes | The output's number, from 1. |
-| <span id="statusreadingsoutputs--label"></span>`label` | string | no | The label from `DIGITAL_OUTPUT_LABELS`. |
-| <span id="statusreadingsoutputs--on"></span>`on` | boolean | no | Whether the output is on. |
-
-#### status.readings.inputs[]
-
-One input.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <span id="statusreadingsinputs--number"></span>`number` | integer | yes | The input's number, from 1. |
-| <span id="statusreadingsinputs--label"></span>`label` | string | no | The label from `DIGITAL_INPUT_LABELS`. |
-| <span id="statusreadingsinputs--on"></span>`on` | boolean | no | Whether the input is on. |
+| <span id="statusdisplay--on"></span>`on` | string | no | The numbers of the outputs that are on, such as `1, 2, 3`. A printer column shows only the first value of a JSONPath that matches several, so the `On` column of `kubectl get` reads this text, and a program reads `outputs`. |

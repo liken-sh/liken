@@ -42,7 +42,7 @@ spec:
           jsonPath: .status.phase
         - name: "On"
           type: string
-          jsonPath: .status.readings.on
+          jsonPath: .status.display.on
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -125,70 +125,20 @@ spec:
               properties:
 {{ include "device status" . | indent 16 }}
 {{ standard | indent 16 }}
-                readings:
+                display:
                   type: object
                   description: >-
-                    What the switch reports, from the `DIGITAL_OUTPUT_n`
-                    and `DIGITAL_INPUT_n` properties and their labels. A
-                    field is absent until the driver sends it.
+                    The values of the typed fields as a person reads them,
+                    for the printer columns.
                   properties:
-                    outputs:
-                      type: array
-                      description: "Each output, from output 1."
-                      x-kubernetes-list-type: map
-                      x-kubernetes-list-map-keys: [number]
-                      items:
-                        type: object
-                        required: [number]
-                        description: "One output."
-                        properties:
-                          number:
-                            type: integer
-                            format: int32
-                            minimum: 1
-                            description: "The output's number, from 1."
-                          label:
-                            type: string
-                            description: >-
-                              The label from `DIGITAL_OUTPUT_LABELS`.
-                          "on":
-                            type: boolean
-                            description: "Whether the output is on."
                     "on":
-                      type: array
+                      type: string
                       description: >-
                         The numbers of the outputs that are on, such as
-                        `[1, 3]`. A printer column shows only the first
+                        `1, 2, 3`. A printer column shows only the first
                         value of a JSONPath that matches several, so the
-                        `On` column of `kubectl get` reads this list.
-                      x-kubernetes-list-type: set
-                      items:
-                        type: integer
-                        format: int32
-                        minimum: 1
-                        description: "The number of an output that is on."
-                    inputs:
-                      type: array
-                      description: "Each input, from input 1."
-                      x-kubernetes-list-type: map
-                      x-kubernetes-list-map-keys: [number]
-                      items:
-                        type: object
-                        required: [number]
-                        description: "One input."
-                        properties:
-                          number:
-                            type: integer
-                            format: int32
-                            minimum: 1
-                            description: "The input's number, from 1."
-                          label:
-                            type: string
-                            description: >-
-                              The label from `DIGITAL_INPUT_LABELS`.
-                          "on":
-                            type: boolean
-                            description: "Whether the input is on."
+                        `On` column of `kubectl get` reads this text, and a
+                        program reads `outputs`.
 {{- define "action" }}
 type: object
 description: >-

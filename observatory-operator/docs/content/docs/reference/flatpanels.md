@@ -246,12 +246,12 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--image"></span>`image` | string | no | The image that the device's pod runs, after the operator resolved it. |
 | <span id="status--pod"></span>`pod` | string | no | The name of the device's pod, while it exists. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the device's pod. |
-| <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Every property that the device defines, as the driver defines it, with the values of its last update. A vendor's own properties are here, and no typed reading depends on one. The list holds no BLOB data. |
+| <span id="status--limits"></span>`limits` | map[string]map[string]object | no | The range that the driver gives each number of this resource's typed fields that a client can write, by INDI property and then by member, such as `limits.CCD_TEMPERATURE.CCD_TEMPERATURE_VALUE`. Each range has `min` and `max`, the least and the greatest value that the driver accepts, and `step` when the driver states one. The schema describes each typed field, and the driver chooses only these ranges, such as a camera's least and greatest temperature or its range of gain. |
+| <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Each property of the INDI device that no typed field holds, as the driver defines it, with the values of its last update: a vendor's own properties, the properties that every INDI device has, such as `DEBUG`, and the standard properties of an interface that no resource on the device is, such as the `FILTER_SLOT` of a camera with no `FilterWheel`. Only the resource that runs the driver has the list, so each property is in one object, and no typed reading depends on one. The list holds no BLOB data. |
 | <span id="status--activedevices"></span>`activeDevices` | [object](#statusactivedevices) | no | The INDI devices whose state the panel reads. The status holds what the driver reports in `ACTIVE_DEVICES`. The operator decides it from the resources around the device, so it is not in spec. |
 | <span id="status--light"></span>`light` | [object](#statuslight) | no | Turns the panel's light on or off. The `state` action changes it. The status holds what the driver reports in `FLAT_LIGHT_CONTROL`. Clients such as KStars and Ekos change it. |
 | <span id="status--brightness"></span>`brightness` | [object](#statusbrightness) | no | The brightness of the panel's light, in the driver's own units. The status holds what the driver reports in `FLAT_LIGHT_INTENSITY`. `spec.brightness` sets it. |
-| <span id="status--display"></span>`display` | [object](#statusdisplay) | no | The readings as a person reads them, with their units, for the printer columns. The numbers are in `readings`. |
-| <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the flat panel reports, from `FLAT_LIGHT_CONTROL` and `FLAT_LIGHT_INTENSITY`. A field is absent until the driver sends it. |
+| <span id="status--display"></span>`display` | [object](#statusdisplay) | no | The values of the typed fields as a person reads them, with their units, for the printer columns. |
 
 ### status.conditions[]
 
@@ -359,17 +359,8 @@ The brightness of the panel's light, in the driver's own units. The status holds
 
 ### status.display
 
-The readings as a person reads them, with their units, for the printer columns. The numbers are in `readings`.
+The values of the typed fields as a person reads them, with their units, for the printer columns.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="statusdisplay--brightness"></span>`brightness` | string | no | The brightness against the maximum of `FLAT_LIGHT_INTENSITY`, such as `128 of 255`. INDI gives the brightness no unit. |
-
-### status.readings
-
-What the flat panel reports, from `FLAT_LIGHT_CONTROL` and `FLAT_LIGHT_INTENSITY`. A field is absent until the driver sends it.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <span id="statusreadings--light"></span>`light` | string | no | `Lit` while the `FLAT_LIGHT_ON` member of `FLAT_LIGHT_CONTROL` is on, and `Dark` while `FLAT_LIGHT_OFF` is on. One of: `Lit`, `Dark`. |
-| <span id="statusreadings--brightness"></span>`brightness` | number | no | The light's brightness, in the driver's own units, from 0 to the maximum that `FLAT_LIGHT_INTENSITY` defines. |

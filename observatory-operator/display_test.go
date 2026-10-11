@@ -6,6 +6,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/liken-sh/liken/observatory-operator/indi"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
@@ -78,31 +79,43 @@ func ptr[T any](v T) *T { return &v }
 func TestTheDisplayOfACamera(t *testing.T) {
 	camera := &device{kind: observatory.CameraKind}
 	camera.object.Spec.Activation = []action{{Cool: &observatory.Temperature{Celsius: -10}}}
+	cooler := func(on string) *observatory.CameraCoolerStatus { return &observatory.CameraCoolerStatus{Value: on} }
 	cases := []struct {
 		name     string
-		readings any
+		standard any
 		want     observatory.CameraDisplay
 	}{
 		{"a camera with no pod shows its setpoint", nil, observatory.CameraDisplay{Setpoint: "-10 °C"}},
 		{
 			"a cooling camera",
-			observatory.CameraReadings{Temperature: ptr(-9.84), Cooler: ptr(true), CoolerPower: ptr(42.0), Exposure: observatory.ExposureIdle},
+			&observatory.CameraStandard{Temperature: &observatory.CameraTemperatureStatus{Value: ptr(-9.84)}, Cooler: cooler("COOLER_ON"),
+				CoolerPower: &observatory.CameraCoolerPowerStatus{Value: ptr(42.0)}, Exposure: &observatory.CameraExposureStatus{State: indi.Idle}},
 			observatory.CameraDisplay{Temperature: "-9.8 °C", Setpoint: "-10 °C", Cooler: "On", CoolerPower: "42 %", Exposure: "Idle"},
 		},
 		{
 			"a camera that exposes",
-			observatory.CameraReadings{Cooler: ptr(false), Exposure: observatory.ExposureExposing, ExposureRemaining: ptr(12.0)},
+			&observatory.CameraStandard{Cooler: cooler("COOLER_OFF"), Exposure: &observatory.CameraExposureStatus{State: indi.Busy, Value: ptr(12.0)}},
 			observatory.CameraDisplay{Setpoint: "-10 °C", Cooler: "Off", Exposure: "12 s"},
 		},
 		{
+			"a camera that exposes and reports no time left",
+			&observatory.CameraStandard{Exposure: &observatory.CameraExposureStatus{State: indi.Busy}},
+			observatory.CameraDisplay{Setpoint: "-10 °C", Exposure: "Exposing"},
+		},
+		{
 			"a camera whose exposure ended",
-			observatory.CameraReadings{Cooler: ptr(false), Exposure: observatory.ExposureDone},
+			&observatory.CameraStandard{Cooler: cooler("COOLER_OFF"), Exposure: &observatory.CameraExposureStatus{State: indi.Ok}},
 			observatory.CameraDisplay{Setpoint: "-10 °C", Cooler: "Off", Exposure: "Done"},
+		},
+		{
+			"a camera whose exposure failed",
+			&observatory.CameraStandard{Exposure: &observatory.CameraExposureStatus{State: indi.Alert}},
+			observatory.CameraDisplay{Setpoint: "-10 °C", Exposure: "Failed"},
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := deviceDisplay(camera, c.readings, nil); got != c.want {
+			if got := deviceDisplay(camera, c.standard, nil); got != c.want {
 				t.Errorf("got %+v, want %+v", got, c.want)
 			}
 		})
@@ -110,26 +123,30 @@ func TestTheDisplayOfACamera(t *testing.T) {
 }
 
 func TestTheDisplayOfEachKind(t *testing.T) {
-	maximum := func(property, member string) (float64, bool) { return 255, property == "FLAT_LIGHT_INTENSITY" }
+	limits := map[string]map[string]observatory.Limit{"FLAT_LIGHT_INTENSITY": {"FLAT_LIGHT_INTENSITY_VALUE": {Max: 255}}}
 	cases := []struct {
 		name     string
 		kind     observatory.Kind
-		readings any
+		standard any
+		limits   map[string]map[string]observatory.Limit
 		want     any
 	}{
-		{"a mount", observatory.MountKind, observatory.MountReadings{RightAscension: ptr(19.28915271950613), Declination: ptr(12.582222)},
+		{"a mount", observatory.MountKind, &observatory.MountStandard{Equatorial: &observatory.MountEquatorialStatus{RightAscension: ptr(19.28915271950613), Declination: ptr(12.582222)}}, nil,
 			observatory.MountDisplay{RightAscension: "19h17m21s", Declination: "+12°34′56″"}},
-		{"a dome", observatory.DomeKind, observatory.DomeReadings{Azimuth: ptr(123.44)}, observatory.DomeDisplay{Azimuth: "123.4°"}},
-		{"a focuser", observatory.FocuserKind, observatory.FocuserReadings{Position: ptr(int64(52000))}, observatory.FocuserDisplay{Position: "52000 steps"}},
-		{"a rotator", observatory.RotatorKind, observatory.RotatorReadings{Angle: ptr(90.0)}, observatory.RotatorDisplay{Angle: "90°"}},
-		{"a flat panel", observatory.FlatPanelKind, observatory.FlatPanelReadings{Brightness: ptr(128.0)}, observatory.FlatPanelDisplay{Brightness: "128 of 255"}},
-		{"a receiver", observatory.ReceiverKind, observatory.ReceiverReadings{Frequency: ptr(1420405752.0)}, observatory.ReceiverDisplay{Frequency: "1420.406 MHz"}},
-		{"a mount with no readings", observatory.MountKind, nil, observatory.MountDisplay{}},
-		{"a kind with nothing to show", observatory.GPSKind, observatory.GPSReadings{}, nil},
+		{"a dome", observatory.DomeKind, &observatory.DomeStandard{Azimuth: &observatory.DomeAzimuthStatus{Value: ptr(123.44)}}, nil, observatory.DomeDisplay{Azimuth: "123.4°"}},
+		{"a focuser", observatory.FocuserKind, &observatory.FocuserStandard{Position: &observatory.FocuserPositionStatus{Value: ptr(52000.0)}}, nil, observatory.FocuserDisplay{Position: "52000 steps"}},
+		{"a rotator", observatory.RotatorKind, &observatory.RotatorStandard{Angle: &observatory.RotatorAngleStatus{Value: ptr(90.0)}}, nil, observatory.RotatorDisplay{Angle: "90°"}},
+		{"a flat panel", observatory.FlatPanelKind, &observatory.FlatPanelStandard{Brightness: &observatory.FlatPanelBrightnessStatus{Value: ptr(128.0)}}, limits, observatory.FlatPanelDisplay{Brightness: "128 of 255"}},
+		{"a flat panel with no range", observatory.FlatPanelKind, &observatory.FlatPanelStandard{Brightness: &observatory.FlatPanelBrightnessStatus{Value: ptr(128.0)}}, nil, observatory.FlatPanelDisplay{Brightness: "128"}},
+		{"a receiver", observatory.ReceiverKind, &observatory.ReceiverStandard{ReceiverSettings: &observatory.ReceiverReceiverSettingsStatus{Frequency: ptr(1420405752.0)}}, nil, observatory.ReceiverDisplay{Frequency: "1420.406 MHz"}},
+		{"a switch", observatory.SwitchKind, &observatory.SwitchStandard{Outputs: []observatory.SwitchOutputsStatus{{Number: 1, Value: "ON"}, {Number: 2, Value: "OFF"}, {Number: 3, Value: "ON"}}}, nil,
+			observatory.SwitchDisplay{On: "1, 3"}},
+		{"a mount with no typed fields", observatory.MountKind, nil, nil, observatory.MountDisplay{}},
+		{"a kind with nothing to show", observatory.GPSKind, &observatory.GPSStandard{}, nil, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := deviceDisplay(&device{kind: c.kind}, c.readings, maximum); got != c.want {
+			if got := deviceDisplay(&device{kind: c.kind}, c.standard, c.limits); got != c.want {
 				t.Errorf("got %+v, want %+v", got, c.want)
 			}
 		})
@@ -162,11 +179,9 @@ func TestTheStatusShowsEachValueWithItsUnit(t *testing.T) {
 		if east.Status.Display.Guider != "Ready, Stopped" {
 			t.Errorf("east guider column = %q", east.Status.Display.Guider)
 		}
-		weather, _ := decode[observatory.WeatherStation](t, w.api, kindCollection(observatory.WeatherStationKind), "lab")
-		for _, p := range weather.Status.Readings.Parameters {
-			if p.Name == "WEATHER_TEMPERATURE" && !strings.HasSuffix(p.Text, " °C") {
-				t.Errorf("%s text = %q", p.Name, p.Text)
-			}
+		power, _ := decode[observatory.Switch](t, w.api, kindCollection(observatory.SwitchKind), "east")
+		if power.Status.Display.On != "1, 2, 3" {
+			t.Errorf("switch display = %+v, want outputs 1, 2, 3 on", power.Status.Display)
 		}
 		// The west camera has no pod. It shows no temperature, and
 		// its spec states no setpoint.

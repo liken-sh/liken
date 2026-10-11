@@ -256,7 +256,8 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--image"></span>`image` | string | no | The image that the device's pod runs, after the operator resolved it. |
 | <span id="status--pod"></span>`pod` | string | no | The name of the device's pod, while it exists. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the device's pod. |
-| <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Every property that the device defines, as the driver defines it, with the values of its last update. A vendor's own properties are here, and no typed reading depends on one. The list holds no BLOB data. |
+| <span id="status--limits"></span>`limits` | map[string]map[string]object | no | The range that the driver gives each number of this resource's typed fields that a client can write, by INDI property and then by member, such as `limits.CCD_TEMPERATURE.CCD_TEMPERATURE_VALUE`. Each range has `min` and `max`, the least and the greatest value that the driver accepts, and `step` when the driver states one. The schema describes each typed field, and the driver chooses only these ranges, such as a camera's least and greatest temperature or its range of gain. |
+| <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Each property of the INDI device that no typed field holds, as the driver defines it, with the values of its last update: a vendor's own properties, the properties that every INDI device has, such as `DEBUG`, and the standard properties of an interface that no resource on the device is, such as the `FILTER_SLOT` of a camera with no `FilterWheel`. Only the resource that runs the driver has the list, so each property is in one object, and no typed reading depends on one. The list holds no BLOB data. |
 | <span id="status--updateperiod"></span>`updatePeriod` | [object](#statusupdateperiod) | no | How often the driver reads the weather, in seconds. The status holds what the driver reports in `WEATHER_UPDATE`. `spec.updatePeriod` sets it. |
 | <span id="status--refresh"></span>`refresh` | [object](#statusrefresh) | no | Reads the weather again. The status holds what the driver reports in `WEATHER_REFRESH`. Clients such as KStars and Ekos change it. |
 | <span id="status--override"></span>`override` | [object](#statusoverride) | no | Reports the weather as safe, whatever the parameters are. The status holds what the driver reports in `WEATHER_OVERRIDE`. Clients such as KStars and Ekos change it. |
@@ -264,7 +265,6 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--safety"></span>`safety` | [object](#statussafety) | no | The verdict on the whole weather: `Ok` is safe, `Busy` is a warning, `Alert` is danger, and `Idle` is unknown. The status holds what the driver reports in `SAFETY_STATUS`. |
 | <span id="status--parameters"></span>`parameters` | [object](#statusparameters) | no | Each weather parameter that the driver reads, such as `WEATHER_TEMPERATURE`, in the unit that its label names. The status holds what the driver reports in `WEATHER_PARAMETERS`. |
 | <span id="status--parameterlimits"></span>`parameterLimits` | [\[\]object](#statusparameterlimits) | no | The limits of each parameter of `parameters`, which the driver defines as a property named for the parameter, such as `WEATHER_TEMPERATURE`. The status holds one item for each parameter that `WEATHER_PARAMETERS` names. `spec.parameterLimits` sets it. |
-| <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the weather station reports, from `SAFETY_STATUS`, `WEATHER_PARAMETERS`, and `WEATHER_STATUS`. A field is absent until the driver sends it. INDI reports each safety status as a light: `Ok` is `Safe`, `Busy` is `Warning`, `Alert` is `Danger`, and `Idle` is `Unknown`. |
 
 ### status.conditions[]
 
@@ -429,24 +429,3 @@ One property of the family.
 | <span id="statusparameterlimits--maximum"></span>`maximum` | number | no | The greatest value that is safe, in the unit that the parameter's label names. The member is `MAX_OK`. |
 | <span id="statusparameterlimits--warningpercent"></span>`warningPercent` | number | no | How close to a limit a value is a warning, in percent of the safe range. The member is `PERC_WARN`. |
 | <span id="statusparameterlimits--alertinbounds"></span>`alertInBounds` | number | no | 1 when a value inside the limits is the alert, and 0 when a value outside them is. The member is `ALERT_TYPE`. |
-
-### status.readings
-
-What the weather station reports, from `SAFETY_STATUS`, `WEATHER_PARAMETERS`, and `WEATHER_STATUS`. A field is absent until the driver sends it. INDI reports each safety status as a light: `Ok` is `Safe`, `Busy` is `Warning`, `Alert` is `Danger`, and `Idle` is `Unknown`.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <span id="statusreadings--safety"></span>`safety` | string | no | The station's safety status for the whole site. One of: `Safe`, `Warning`, `Danger`, `Unknown`. |
-| <span id="statusreadings--parameters"></span>`parameters` | [\[\]object](#statusreadingsparameters) | no | Each measurement, with its safety status against the driver's limits. |
-
-#### status.readings.parameters[]
-
-One measurement.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <span id="statusreadingsparameters--name"></span>`name` | string | yes | The measurement's name, such as `WEATHER_TEMPERATURE`. |
-| <span id="statusreadingsparameters--label"></span>`label` | string | no | The label that the driver gives the measurement, with its unit, such as `Temperature (C)`. |
-| <span id="statusreadingsparameters--value"></span>`value` | number | no | The value, in the unit that the label names. |
-| <span id="statusreadingsparameters--text"></span>`text` | string | no | The value with the unit that the label names, such as `12.5 °C` or `20 km/h`. A label that names no unit gives the number alone. |
-| <span id="statusreadingsparameters--safety"></span>`safety` | string | no | The safety status of this measurement. One of: `Safe`, `Warning`, `Danger`, `Unknown`. |

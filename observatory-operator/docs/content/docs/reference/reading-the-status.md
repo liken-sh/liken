@@ -21,8 +21,12 @@ parent to find, so its `ParentFound` is `True` with the reason
 
 ## Devices
 
-A device's status has the same fields in every kind, and one
-`readings` block of its own:
+A device's status has the same fields in every kind, and a typed field
+for each standard property of the kind's INDI interface. Each value is
+in one place. One INDI device can serve several resources, such as a
+camera and the `FilterWheel` that the camera's driver serves, and each
+of its properties is in the status of one resource, so an update to
+the wheel's slot writes the `FilterWheel` alone.
 
 - `phase`: `Inventory` on the shelf, with a `Ready` message such as
   `Not installed in an optical train`. `Idle` when the device is
@@ -35,35 +39,66 @@ A device's status has the same fields in every kind, and one
   `Telescope`, an `Observatory`, and a `Guider` are `Idle` with no
   active reservation, then `Activating`, `Ready`, and `Deactivating`,
   or `Error`.
-- `indiDevice`, `driver`, `image`, `pod`, and `node`: what runs, and
-  where. `indiDevice` is the name that KStars shows.
-- `readings`: the typed values of the kind, such as
-  `status.readings.temperature` of a `Camera`. A reading is absent
-  until the driver sends it. Each number is in the unit that its
-  description in `kubectl explain` states.
-- `display`: the same values as text with their units, such as
-  `-9.8 °C`, for the printer columns. A program reads `readings`, and
-  `kubectl get` shows `display`. INDI gives a flat panel's brightness
-  no unit, so it shows against the driver's maximum, such as
-  `128 of 255`.
-- `properties`: every INDI property that the device defines, with its
-  label, group, type, permission, state, switch rule, and the value and
-  limits of each member. A vendor's own properties are here. The list
-  holds no BLOB data.
+- `indiDevice` and `endpoint`: the INDI device and the server that
+  serve the resource. A client reaches the resource there, a served
+  one too, with no need to follow `spec.device`. `driver`, `image`,
+  `pod`, and `node`: what runs, and where, for the resource that runs
+  the driver. `indiDevice` is the name that KStars shows.
+- The typed fields: one for each standard property of the kind's
+  interface that the driver defines, such as `status.temperature` and
+  `status.gain` of a `Camera`, or `status.slot` and `status.filters`
+  of a `FilterWheel`. Each holds the property's state and its values.
+  `kubectl explain` describes each field, its property, and its unit.
+  Where the driver chooses the elements, such as a mount's slew rates
+  or a wheel's filter names, the field lists them.
+- `limits`: the range that the driver gives each number of the typed
+  fields that a client can write, by INDI property and member, such as
+  `status.limits.CCD_TEMPERATURE.CCD_TEMPERATURE_VALUE` with its `min`
+  and `max`.
+- `readings`: on a `Mount` and a `FilterWheel` only, a value that the
+  operator derives from several properties and that no typed field
+  holds: what the mount does, in `status.readings.state`, and the name
+  of the filter in the wheel's slot, in `status.readings.filter`.
+- `display`: values of the typed fields as text with their units, such
+  as `-9.8 °C`, for the printer columns. A program reads the typed
+  fields, and `kubectl get` shows `display`. INDI gives a flat panel's
+  brightness no unit, so it shows against the maximum in `limits`,
+  such as `128 of 255`. A `Switch` shows the numbers of its outputs
+  that are on, such as `1, 2, 3`, because a printer column shows only
+  the first value of a JSONPath that matches several.
+- `properties`: on the resource that runs the driver, each INDI
+  property that no typed field holds, with its label, group, type,
+  permission, state, switch rule, and the value and limits of each
+  member. A vendor's own properties are here, and so are the
+  properties that every INDI device has, such as `DEBUG`. A standard
+  property of an interface that no resource on the device is stays
+  here too, such as the `FILTER_SLOT` of a camera with a wheel and no
+  `FilterWheel`. The list holds no BLOB data.
+
+```sh
+kubectl get camera east-main -n observatory -o jsonpath='{.status.gain.value}'
+kubectl get camera east-main -n observatory \
+  -o jsonpath='{.status.limits.CCD_TEMPERATURE.CCD_TEMPERATURE_VALUE}'
+kubectl get camera east-main -n observatory \
+  -o jsonpath='{.status.properties[*].name}'
+```
 
 ## Device states
 
-A reading that holds a state names it in one word, because a device
-is in one state at a time:
+A device is in one state at a time, and the printer columns name it in
+one word. A mount's state comes from three properties, so it is a
+reading. Each other state is the reason of a state condition (below),
+or the camera's display:
 
-| Kind | Reading | Values | From |
+| Kind | Column | Values | From |
 |---|---|---|---|
-| `Mount` | `state` | `Parked`, `Parking`, `Unparking`, `Stopped`, `Slewing`, `Tracking` | `TELESCOPE_PARK`, `TELESCOPE_TRACK_STATE`, and the state of `EQUATORIAL_EOD_COORD` |
-| `Dome` | `park` | `Parked`, `Unparked`, `Moving` | `DOME_PARK` |
-| `Dome` | `shutter` | `Open`, `Closed`, `Moving` | `DOME_SHUTTER` |
-| `DustCap` | `cover` | `Open`, `Closed`, `Moving` | `CAP_PARK` |
-| `Camera` | `exposure` | `Idle`, `Exposing`, `Done`, `Failed` | the state of `CCD_EXPOSURE` |
-| `FlatPanel` | `light` | `Lit`, `Dark` | `FLAT_LIGHT_CONTROL` |
+| `Mount` | `State`, `status.readings.state` | `Parked`, `Parking`, `Unparking`, `Stopped`, `Slewing`, `Tracking` | `TELESCOPE_PARK`, `TELESCOPE_TRACK_STATE`, and the state of `EQUATORIAL_EOD_COORD` |
+| `Dome` | `Park`, the reason of `Parked` | `Parked`, `Unparked`, `Moving` | `DOME_PARK` |
+| `Dome` | `Shutter`, the reason of `Open` | `Open`, `Closed`, `Moving` | `DOME_SHUTTER` |
+| `DustCap` | `Cover`, the reason of `Open` | `Open`, `Closed`, `Moving` | `CAP_PARK` |
+| `Camera` | `Exposure`, `status.display.exposure` | the time left, such as `12 s`, while an exposure runs, then `Done` or `Failed`, and `Idle` before the first | `CCD_EXPOSURE` |
+| `FlatPanel` | `Light`, the reason of `Lit` | `LightOn`, `LightOff` | `FLAT_LIGHT_CONTROL` |
+| `WeatherStation` | `Safety`, the reason of `Safe` | `Safe`, `Warning`, `Danger` | `SAFETY_STATUS` |
 
 A mount reads the first state that applies, in this order. A `Busy`
 park is `Parking` or `Unparking`, toward the switch that is on. `PARK`

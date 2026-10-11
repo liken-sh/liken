@@ -124,8 +124,8 @@ spec:
                 display:
                   type: object
                   description: >-
-                    The readings as a person reads them, with their units,
-                    for the printer columns. The numbers are in `readings`.
+                    The values of the typed fields as a person reads them,
+                    with their units, for the printer columns.
                   properties:
                     temperature:
                       type: string
@@ -141,41 +141,7 @@ spec:
                       description: "The cooler's power, such as `42 %`."
                     exposure:
                       type: string
-                      description: "The time left, such as `12 s`, while an exposure runs, and `readings.exposure` otherwise."
-                readings:
-                  type: object
-                  description: >-
-                    What the camera reports, from `CCD_TEMPERATURE`,
-                    `CCD_COOLER`, `CCD_COOLER_POWER`, and
-                    `CCD_EXPOSURE`. A field is absent until the driver
-                    sends it.
-                  properties:
-                    temperature:
-                      type: number
-                      description: >-
-                        The sensor's temperature, in degrees Celsius.
-                    cooler:
-                      type: boolean
-                      description: >-
-                        Whether the cooler is on: `true` while the
-                        `COOLER_ON` member of `CCD_COOLER` is on.
-                    coolerPower:
-                      type: number
-                      minimum: 0
-                      maximum: 100
-                      description: "The cooler's power, in percent."
-                    exposure:
-                      type: string
-                      enum: [Idle, Exposing, Done, Failed]
-                      description: >-
-                        The state of `CCD_EXPOSURE`: `Idle` before the
-                        first exposure, `Exposing` while an exposure
-                        runs (`Busy`), `Done` when it ended (`Ok`), and
-                        `Failed` when it failed (`Alert`).
-                    exposureRemaining:
-                      type: number
-                      minimum: 0
-                      description: "The time left in the exposure, in seconds."
+                      description: "The time left, such as `12 s`, while an exposure runs. Otherwise the state of `CCD_EXPOSURE` in one word: `Idle` before the first exposure, `Done` when it ended (`Ok`), and `Failed` when it failed (`Alert`)."
 {{- define "action" }}
 type: object
 description: >-

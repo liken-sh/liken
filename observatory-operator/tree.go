@@ -17,8 +17,8 @@ import (
 
 // deviceObject is one device resource of any of the 13 device kinds.
 // The spec holds the fields that every device kind has, so one type
-// reads them all, and the status holds the readings of the kind as
-// JSON. The CRD of each kind refuses the fields it does not have, so a
+// reads them all, and the status holds the typed fields, the readings,
+// and the display of the kind as values of any type. The CRD of each kind refuses the fields it does not have, so a
 // field that does not belong to a kind is always empty here.
 type deviceObject struct {
 	APIVersion string                 `json:"apiVersion,omitempty"`
@@ -55,8 +55,33 @@ func (s *deviceSpec) UnmarshalJSON(body []byte) error {
 
 type deviceStatus struct {
 	observatory.DeviceStatus
+	// Standard holds the typed fields of the kind's standard
+	// properties, such as a *observatory.CameraStandard, which the
+	// JSON writes at the level of the status, as each kind's status
+	// embeds it. The cached copy of a device holds none (watch.go).
+	Standard any `json:"-"`
 	Readings any `json:"readings,omitempty"`
 	Display  any `json:"display,omitempty"`
+}
+
+// MarshalJSON writes the typed fields beside the rest of the status, as
+// encoding/json writes an embedded struct.
+func (s deviceStatus) MarshalJSON() ([]byte, error) {
+	type plain deviceStatus
+	shared, err := json.Marshal(plain(s))
+	if err != nil || s.Standard == nil {
+		return shared, err
+	}
+	typed, err := json.Marshal(s.Standard)
+	switch {
+	case err != nil:
+		return nil, err
+	case len(typed) <= len("{}"):
+		return shared, nil
+	case len(shared) <= len("{}"):
+		return typed, nil
+	}
+	return append(append(shared[:len(shared)-1], ','), typed[1:]...), nil
 }
 
 // device is one device resource and its kind.

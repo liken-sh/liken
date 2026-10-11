@@ -6,6 +6,7 @@ package main
 
 import (
 	"io"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -35,19 +36,24 @@ func TestADeviceReportsWhatItsDriverReports(t *testing.T) {
 			s.Driver != "indi_simulator_ccd" || !strings.HasPrefix(s.Image, "ghcr.io/liken-sh/indi-simulators:") {
 			t.Errorf("camera status = %+v", s)
 		}
-		if s.Readings.Temperature == nil || *s.Readings.Temperature != -10 {
-			t.Errorf("temperature = %v, want the setpoint the driver reports", s.Readings.Temperature)
+		if s.Temperature == nil || s.Temperature.Value == nil || *s.Temperature.Value != -10 {
+			t.Errorf("temperature = %+v, want the setpoint the driver reports", s.Temperature)
 		}
-		names := map[string]observatory.Property{}
-		for _, p := range s.Properties {
-			names[p.Name] = p
+		if s.Gain == nil || s.Gain.Value == nil || *s.Gain.Value != 100 {
+			t.Errorf("gain = %+v, want the 100 that the spec sets", s.Gain)
 		}
-		gain := names["CCD_GAIN"]
-		if gain.Type != "Number" || gain.Permission != "rw" || len(gain.Members) != 1 || gain.Members[0].Value != "100" || gain.Members[0].Max == nil {
-			t.Errorf("CCD_GAIN = %+v", gain)
+		if s.ImageData == nil || s.ImageData.State == "" {
+			t.Errorf("imageData = %+v, want the state of the BLOB property CCD1", s.ImageData)
 		}
-		if _, ok := names["CCD1"]; !ok {
-			t.Error("the BLOB property CCD1 is missing from the list")
+		// The driver chooses the ranges, and the schema the rest.
+		want := map[string]observatory.Limit{"CCD_TEMPERATURE": {Min: -15, Max: 25}, "CCD_GAIN": {Min: 0, Max: 300, Step: 10}}
+		for property, limit := range want {
+			if got := s.Limits[property]; len(got) != 1 || slices.Collect(maps.Values(got))[0] != limit {
+				t.Errorf("limits.%s = %v, want %+v", property, got, limit)
+			}
+		}
+		if _, ok := s.Limits["CCD_INFO"]; ok {
+			t.Error("limits hold the read-only CCD_INFO, which no client writes")
 		}
 		if c := conditionOf(s.Conditions, observatory.ConditionReady); c.Status != observatory.ConditionTrue {
 			t.Errorf("Ready = %+v", c)
@@ -57,25 +63,30 @@ func TestADeviceReportsWhatItsDriverReports(t *testing.T) {
 		}
 
 		wheel, _ := decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east")
-		if wheel.Status.Readings.Slot == nil || wheel.Status.Readings.Filter != "Luminance" {
-			t.Errorf("filter wheel readings = %+v", wheel.Status.Readings)
+		if wheel.Status.Slot == nil || wheel.Status.Readings.Filter != "Luminance" {
+			t.Errorf("filter wheel slot = %+v, readings = %+v", wheel.Status.Slot, wheel.Status.Readings)
 		}
 		power, _ := decode[observatory.Switch](t, w.api, kindCollection(observatory.SwitchKind), "east")
-		if !slices.Equal(power.Status.Readings.On, []int32{1, 2, 3}) {
-			t.Errorf("outputs on = %v", power.Status.Readings.On)
+		var on []int32
+		for _, output := range power.Status.Outputs {
+			if output.Value == "ON" {
+				on = append(on, output.Number)
+			}
+		}
+		if !slices.Equal(on, []int32{1, 2, 3}) {
+			t.Errorf("outputs on = %v", on)
 		}
 		mount, _ := decode[observatory.Mount](t, w.api, kindCollection(observatory.MountKind), "east")
-		if mount.Status.Readings.State != observatory.MountStopped || mount.Status.Readings.RightAscension == nil {
-			t.Errorf("mount readings = %+v", mount.Status.Readings)
+		if mount.Status.Readings.State != observatory.MountStopped || mount.Status.Equatorial == nil || mount.Status.Equatorial.RightAscension == nil {
+			t.Errorf("mount readings = %+v, coordinates = %+v", mount.Status.Readings, mount.Status.Equatorial)
 		}
 
 		// A cover that moves reports Moving.
 		w.indi.setState("east-telescope", "Dust Cover Simulator", "CAP_PARK", "Busy")
 		time.Sleep(2 * statusWindow)
 		synctest.Wait()
-		cap, _ := decode[observatory.DustCap](t, w.api, kindCollection(observatory.DustCapKind), "east")
-		if cap.Status.Readings.Cover != observatory.CoverMoving {
-			t.Errorf("cover = %q, want Moving", cap.Status.Readings.Cover)
+		if open := w.stateOf(observatory.DustCapKind, "east", observatory.ConditionOpen); !strings.HasPrefix(open, "Unknown Moving:") {
+			t.Errorf("Open = %q, want Unknown Moving", open)
 		}
 
 		// The west telescope has no reservation, so its devices are
@@ -230,8 +241,8 @@ func TestStatusWritesAreCoalesced(t *testing.T) {
 			t.Errorf("%d status writes for 50 updates in 5 seconds, want at most one a second", writes)
 		}
 		focuser, _ := decode[observatory.Focuser](t, w.api, kindCollection(observatory.FocuserKind), "east")
-		if focuser.Status.Readings.Position == nil || *focuser.Status.Readings.Position != 19000 {
-			t.Errorf("position = %v, want the last update", focuser.Status.Readings.Position)
+		if focuser.Status.Position == nil || focuser.Status.Position.Value == nil || *focuser.Status.Position.Value != 19000 {
+			t.Errorf("position = %+v, want the last update", focuser.Status.Position)
 		}
 	})
 }

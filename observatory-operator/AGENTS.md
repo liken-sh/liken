@@ -161,7 +161,9 @@ runner for each `Reservation` (`reservation.go`, `activation.go`,
 `configure.go`, `deactivation.go`, `steady.go`, `moves.go`,
 `finish.go`, and the guider's `guidersteps.go` and `guidersteady.go`),
 the status writer (`status.go`, `statustree.go`, `standing.go`,
-`readings.go`, `guiderstatus.go`), the lock relay (`locks.go` and
+`readings.go`, `guiderstatus.go`, and `devicesplit.go` and
+`typedstatus.go`, which give each property of an INDI device to one
+resource's status), the lock relay (`locks.go` and
 `domepolicy.go`), and the trigger controller (`triggers.go`), which runs each resource's
 `spec.triggers` (plan 13), and runs a failed one again on the retry
 annotation (`retry.go`). The runner's `Activation` and

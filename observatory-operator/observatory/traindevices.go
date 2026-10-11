@@ -24,8 +24,7 @@ type CameraSpec struct {
 type CameraStatus struct {
 	DeviceStatus
 	CameraStandard
-	Readings CameraReadings `json:"readings,omitzero"`
-	Display  CameraDisplay  `json:"display,omitzero"`
+	Display CameraDisplay `json:"display,omitzero"`
 }
 
 // CameraDisplay holds the readings and the setpoint as a person reads
@@ -41,13 +40,13 @@ type CameraDisplay struct {
 	// CoolerPower is the cooler's power, such as 42 %.
 	CoolerPower string `json:"coolerPower,omitempty"`
 	// Exposure is the time left, such as 12 s, while an exposure runs,
-	// and the reading's named exposure state otherwise.
+	// and the ExposureState of CCD_EXPOSURE otherwise.
 	Exposure string `json:"exposure,omitempty"`
 }
 
-// ExposureState names the light of a camera's CCD_EXPOSURE: Idle
-// before the first exposure, Exposing while it is Busy, Done when it
-// is Ok, and Failed when it is Alert.
+// ExposureState names the state of a camera's CCD_EXPOSURE in the
+// display: Idle before the first exposure, Exposing while it is Busy,
+// Done when it is Ok, and Failed when it is Alert.
 type ExposureState string
 
 const (
@@ -56,21 +55,6 @@ const (
 	ExposureDone     ExposureState = "Done"
 	ExposureFailed   ExposureState = "Failed"
 )
-
-// CameraReadings come from CCD_TEMPERATURE, CCD_COOLER_POWER, and
-// CCD_EXPOSURE.
-type CameraReadings struct {
-	// Temperature is the sensor's temperature in degrees Celsius.
-	Temperature *float64 `json:"temperature,omitempty"`
-	// Cooler is true while CCD_COOLER's COOLER_ON is On.
-	Cooler *bool `json:"cooler,omitempty"`
-	// CoolerPower is the cooler's power in percent.
-	CoolerPower *float64 `json:"coolerPower,omitempty"`
-	// Exposure names the light of CCD_EXPOSURE.
-	Exposure ExposureState `json:"exposure,omitempty"`
-	// ExposureRemaining is the time left in the exposure, in seconds.
-	ExposureRemaining *float64 `json:"exposureRemaining,omitempty"`
-}
 
 // FilterWheelSpec describes a device with INDI's FILTER_INTERFACE.
 type FilterWheelSpec struct {
@@ -85,10 +69,10 @@ type FilterWheelStatus struct {
 	Readings FilterWheelReadings `json:"readings,omitzero"`
 }
 
-// FilterWheelReadings come from FILTER_SLOT and FILTER_NAME.
+// FilterWheelReadings hold the name of the filter in the light path,
+// which no typed field holds alone: FILTER_SLOT gives the slot, and
+// FILTER_NAME the name in each slot.
 type FilterWheelReadings struct {
-	// Slot counts from 1.
-	Slot   *int32 `json:"slot,omitempty"`
 	Filter string `json:"filter,omitempty"`
 }
 
@@ -102,20 +86,13 @@ type FocuserSpec struct {
 type FocuserStatus struct {
 	DeviceStatus
 	FocuserStandard
-	Readings FocuserReadings `json:"readings,omitzero"`
-	Display  FocuserDisplay  `json:"display,omitzero"`
+	Display FocuserDisplay `json:"display,omitzero"`
 }
 
 // FocuserDisplay holds the position with its unit, such as 52000
 // steps, for the printer columns.
 type FocuserDisplay struct {
 	Position string `json:"position,omitempty"`
-}
-
-// FocuserReadings come from ABS_FOCUS_POSITION.
-type FocuserReadings struct {
-	// Position is in the focuser's steps.
-	Position *int64 `json:"position,omitempty"`
 }
 
 // RotatorSpec describes a device with INDI's ROTATOR_INTERFACE.
@@ -128,20 +105,13 @@ type RotatorSpec struct {
 type RotatorStatus struct {
 	DeviceStatus
 	RotatorStandard
-	Readings RotatorReadings `json:"readings,omitzero"`
-	Display  RotatorDisplay  `json:"display,omitzero"`
+	Display RotatorDisplay `json:"display,omitzero"`
 }
 
 // RotatorDisplay holds the angle with its unit, such as 90°, for the
 // printer columns.
 type RotatorDisplay struct {
 	Angle string `json:"angle,omitempty"`
-}
-
-// RotatorReadings come from ABS_ROTATOR_ANGLE.
-type RotatorReadings struct {
-	// Angle is in degrees, from 0 to 360.
-	Angle *float64 `json:"angle,omitempty"`
 }
 
 // DustCapSpec describes a device with INDI's DUSTCAP_INTERFACE.
@@ -153,20 +123,6 @@ type DustCapSpec struct {
 type DustCapStatus struct {
 	DeviceStatus
 	DustCapStandard
-	Readings DustCapReadings `json:"readings,omitzero"`
-}
-
-// The positions of a dust cap or a dome's shutter.
-const (
-	CoverOpen   = "Open"
-	CoverClosed = "Closed"
-	CoverMoving = "Moving"
-)
-
-// DustCapReadings come from CAP_PARK: PARK is Closed, UNPARK is Open,
-// and a Busy state is Moving.
-type DustCapReadings struct {
-	Cover string `json:"cover,omitempty"`
 }
 
 // FlatPanelSpec describes a device with INDI's LIGHTBOX_INTERFACE.
@@ -179,8 +135,7 @@ type FlatPanelSpec struct {
 type FlatPanelStatus struct {
 	DeviceStatus
 	FlatPanelStandard
-	Readings FlatPanelReadings `json:"readings,omitzero"`
-	Display  FlatPanelDisplay  `json:"display,omitzero"`
+	Display FlatPanelDisplay `json:"display,omitzero"`
 }
 
 // FlatPanelDisplay holds the brightness for the printer columns. INDI
@@ -188,14 +143,4 @@ type FlatPanelStatus struct {
 // the driver's maximum, such as 128 of 255.
 type FlatPanelDisplay struct {
 	Brightness string `json:"brightness,omitempty"`
-}
-
-// FlatPanelReadings come from FLAT_LIGHT_CONTROL and
-// FLAT_LIGHT_INTENSITY.
-type FlatPanelReadings struct {
-	// Light is Lit or Dark, the words of the panel's state action.
-	Light LightState `json:"light,omitempty"`
-	// Brightness is in the driver's own units, from 0 to the maximum
-	// that FLAT_LIGHT_INTENSITY defines.
-	Brightness *float64 `json:"brightness,omitempty"`
 }

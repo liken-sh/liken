@@ -372,7 +372,7 @@ func TestRefusedStatusWritesAndEventsAreWrittenLater(t *testing.T) {
 		time.Sleep(3 * statusWindow)
 		synctest.Wait()
 		camera, _ := decode[observatory.Camera](t, w.api, kindCollection(observatory.CameraKind), "east-main")
-		if s := camera.Status.Readings.Temperature; s == nil || *s != -12 {
+		if s := camera.Status.Temperature; s == nil || s.Value == nil || *s.Value != -12 {
 			t.Errorf("temperature = %s after a refused write, want -12", mustJSON(s))
 		}
 		// The recorder sends a refused Event again after 10 s.

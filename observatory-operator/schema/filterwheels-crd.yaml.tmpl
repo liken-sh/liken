@@ -37,8 +37,8 @@ spec:
           type: string
           jsonPath: .status.phase
         - name: Slot
-          type: integer
-          jsonPath: .status.readings.slot
+          type: number
+          jsonPath: .status.slot.value
         - name: Filter
           type: string
           jsonPath: .status.readings.filter
@@ -107,18 +107,13 @@ spec:
                 readings:
                   type: object
                   description: >-
-                    What the filter wheel reports, from `FILTER_SLOT`
-                    and `FILTER_NAME`. A field is absent until the
-                    driver sends it.
+                    What the operator reads from `FILTER_SLOT` and
+                    `FILTER_NAME` together, which neither typed field holds
+                    alone. A field is absent until the driver sends both.
                   properties:
-                    slot:
-                      type: integer
-                      format: int32
-                      minimum: 1
-                      description: "The slot in the light path, from 1."
                     filter:
                       type: string
-                      description: "The name of the filter in that slot."
+                      description: "The name of the filter in the slot that `slot` gives."
 {{- define "action" }}
 type: object
 description: >-

@@ -12,6 +12,7 @@ package main
 
 import (
 	"context"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -151,16 +152,21 @@ func startWatches(ctx context.Context, client dynamic.Interface, changed *bell) 
 			changed.notify()
 		},
 	}
-	// A device's status.properties is most of the object, and no pass
-	// reads it: the status writer composes it from INDI. The copy drops
-	// it, so each watch event decodes only the rest. The writer's
+	// A device's typed fields, status.limits, and status.properties are
+	// most of the object, and no pass reads them: the status writer
+	// composes them from INDI. The copy drops them, so the cache holds
+	// and each watch event decodes only the rest. The writer's
 	// comparison with a cached status then fails for a connected device
 	// (status.go), and costs one PUT that the API server finds unchanged.
-	kindOptions := options
-	kindOptions.Transform = func(object *unstructured.Unstructured) {
-		unstructured.RemoveNestedField(object.Object, "status", "properties")
-	}
 	for _, kind := range observatory.Kinds {
+		kindOptions := options
+		if dropped := composedFields(kind); len(dropped) > 0 {
+			kindOptions.Transform = func(object *unstructured.Unstructured) {
+				for _, field := range dropped {
+					unstructured.RemoveNestedField(object.Object, "status", field)
+				}
+			}
+		}
 		s.kinds[kind] = informer.Start(ctx, client, informer.Source{Resource: kindResource(kind)}, kindOptions)
 	}
 	own := labelManagedBy + "=" + managedBy
@@ -266,4 +272,21 @@ func byName[S, T any](items []observatory.Object[S, T]) map[string]*observatory.
 		out[items[i].Metadata.Name] = &items[i]
 	}
 	return out
+}
+
+// composedFields answers the status fields of a device kind that the
+// status writer composes from INDI and no pass reads: the typed fields
+// of its standard properties, status.limits, and status.properties.
+// Every other kind has none.
+func composedFields(kind observatory.Kind) []string {
+	standard, ok := observatory.Standards[kind]
+	if !ok {
+		return nil
+	}
+	fields := []string{"limits", "properties"}
+	for f := range reflect.TypeOf(standard.Status()).Elem().Fields() {
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		fields = append(fields, name)
+	}
+	return fields
 }

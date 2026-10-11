@@ -6,8 +6,9 @@ package main
 // joins the dust cover's transcripts and the light panel's under one
 // device. An SBIG camera claims INDI's filter interface with no wheel
 // attached, so its fake is the guide camera with the FILTER bit set in
-// DRIVER_INTERFACE. A test names a variant as a driver, with an image,
-// because the indi images hold no such driver.
+// DRIVER_INTERFACE. A mount with a GPS joins the telescope simulator's
+// transcripts and the GPS simulator's. A test names a variant as a
+// driver, with an image, because the indi images hold no such driver.
 
 import (
 	"path/filepath"
@@ -32,6 +33,10 @@ var fakeVariants = map[string]fakeVariant{
 	"indi_fake_flipflat": {simulators: []string{"lightpanel", "dustcover"}, device: "Flip-Flat Simulator", bits: "34304"},
 	// CCD, GUIDER, and FILTER.
 	"indi_fake_sbig": {simulators: []string{"guide"}, device: "SBIG Simulator", bits: "22"},
+	// TELESCOPE and GPS: a mount with a GPS receiver of its own. The
+	// device keeps the telescope simulator's name, so PHD2 and the
+	// mount's locks find it as they find that simulator.
+	"indi_fake_gpsmount": {simulators: []string{"telescope", "gps"}, device: "Telescope Simulator", bits: "65"},
 }
 
 // variantImage is an image for a variant's driver, which a resource names

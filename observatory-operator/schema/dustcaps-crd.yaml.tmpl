@@ -38,7 +38,7 @@ spec:
           jsonPath: .status.phase
         - name: Cover
           type: string
-          jsonPath: .status.readings.cover
+          jsonPath: '.status.conditions[?(@.type=="Open")].reason'
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -102,19 +102,6 @@ spec:
               properties:
 {{ include "device status" . | indent 16 }}
 {{ standard | indent 16 }}
-                readings:
-                  type: object
-                  description: >-
-                    What the dust cap reports, from `CAP_PARK`. A field
-                    is absent until the driver sends it.
-                  properties:
-                    cover:
-                      type: string
-                      enum: [Open, Closed, Moving]
-                      description: >-
-                        `Closed` when the cap is parked, `Open` when it
-                        is unparked, and `Moving` while `CAP_PARK` is
-                        `Busy`.
 {{- define "action" }}
 type: object
 description: >-

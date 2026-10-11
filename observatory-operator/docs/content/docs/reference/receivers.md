@@ -257,7 +257,8 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--image"></span>`image` | string | no | The image that the device's pod runs, after the operator resolved it. |
 | <span id="status--pod"></span>`pod` | string | no | The name of the device's pod, while it exists. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the device's pod. |
-| <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Every property that the device defines, as the driver defines it, with the values of its last update. A vendor's own properties are here, and no typed reading depends on one. The list holds no BLOB data. |
+| <span id="status--limits"></span>`limits` | map[string]map[string]object | no | The range that the driver gives each number of this resource's typed fields that a client can write, by INDI property and then by member, such as `limits.CCD_TEMPERATURE.CCD_TEMPERATURE_VALUE`. Each range has `min` and `max`, the least and the greatest value that the driver accepts, and `step` when the driver states one. The schema describes each typed field, and the driver chooses only these ranges, such as a camera's least and greatest temperature or its range of gain. |
+| <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Each property of the INDI device that no typed field holds, as the driver defines it, with the values of its last update: a vendor's own properties, the properties that every INDI device has, such as `DEBUG`, and the standard properties of an interface that no resource on the device is, such as the `FILTER_SLOT` of a camera with no `FilterWheel`. Only the resource that runs the driver has the list, so each property is in one object, and no typed reading depends on one. The list holds no BLOB data. |
 | <span id="status--activedevices"></span>`activeDevices` | [object](#statusactivedevices) | no | The INDI devices whose state the receiver writes into the FITS header of each integration. The status holds what the driver reports in `ACTIVE_DEVICES`. The operator decides it from the resources around the device, so it is not in spec. |
 | <span id="status--receiversettings"></span>`receiverSettings` | [object](#statusreceiversettings) | no | The tuning of the receiver. The status holds what the driver reports in `RECEIVER_SETTINGS`. `spec.receiverSettings` sets it. |
 | <span id="status--temperature"></span>`temperature` | [object](#statustemperature) | no | The temperature of the receiver, in degrees Celsius. A client that writes it sets the cooler's setpoint. The status holds what the driver reports in `SENSOR_TEMPERATURE`. Clients such as KStars and Ekos change it. |
@@ -283,8 +284,7 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--dspspectrum"></span>`dspSpectrum` | [object](#statusdspspectrum) | no | Turns the spectrum of each integration on or off. The status holds what the driver reports in `DSP_ACTIVATE_SPECTRUM`. Clients such as KStars and Ekos change it. |
 | <span id="status--dsphistogram"></span>`dspHistogram` | [object](#statusdsphistogram) | no | Turns the histogram of each integration on or off. The status holds what the driver reports in `DSP_ACTIVATE_HISTOGRAM`. Clients such as KStars and Ekos change it. |
 | <span id="status--dspwavelets"></span>`dspWavelets` | [object](#statusdspwavelets) | no | Turns the wavelet transform of each integration on or off. The status holds what the driver reports in `DSP_ACTIVATE_WAVELETS`. Clients such as KStars and Ekos change it. |
-| <span id="status--display"></span>`display` | [object](#statusdisplay) | no | The readings as a person reads them, with their units, for the printer columns. The numbers are in `readings`. |
-| <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the receiver reports, from `RECEIVER_SETTINGS`. A field is absent until the driver sends it. |
+| <span id="status--display"></span>`display` | [object](#statusdisplay) | no | The values of the typed fields as a person reads them, with their units, for the printer columns. |
 
 ### status.conditions[]
 
@@ -602,16 +602,8 @@ Turns the wavelet transform of each integration on or off. The status holds what
 
 ### status.display
 
-The readings as a person reads them, with their units, for the printer columns. The numbers are in `readings`.
+The values of the typed fields as a person reads them, with their units, for the printer columns.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="statusdisplay--frequency"></span>`frequency` | string | no | The center frequency in megahertz, such as `1420.406 MHz`. |
-
-### status.readings
-
-What the receiver reports, from `RECEIVER_SETTINGS`. A field is absent until the driver sends it.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <span id="statusreadings--frequency"></span>`frequency` | number | no | The center frequency, in hertz. |

@@ -34,7 +34,6 @@ var (
 	guiderStates = strs(GuiderStopped, GuiderSelected, GuiderCalibrating, GuiderGuiding,
 		GuiderLostLock, GuiderPaused, GuiderLooping)
 	stepStates = strs(StepPending, StepRunning, StepDone, StepFailed, StepSkipped)
-	covers     = []string{CoverOpen, CoverClosed, CoverMoving}
 	refKinds   = func() []string {
 		var names []string
 		for _, kind := range Kinds {
@@ -71,15 +70,8 @@ func TestEachEnumHoldsTheGoConstants(t *testing.T) {
 		{OpticalTrainKind, "status.devices[].kind", deviceKind},
 		{OpticalTrainKind, "status.devices[].phase", devicePhases},
 		{TelescopeKind, "status.trains[].devices[].phase", devicePhases},
-		{WeatherStationKind, "status.readings.safety", safeties},
-		{WeatherStationKind, "status.readings.parameters[].safety", safeties},
-		{DustCapKind, "status.readings.cover", covers},
-		{DomeKind, "status.readings.shutter", covers},
-		{DomeKind, "status.readings.park", strs(DomeParked, DomeUnparked, DomeMoving)},
 		{MountKind, "status.readings.state", strs(MountParked, MountParking, MountUnparking,
 			MountStopped, MountSlewing, MountTracking)},
-		{CameraKind, "status.readings.exposure", strs(ExposureIdle, ExposureExposing, ExposureDone, ExposureFailed)},
-		{FlatPanelKind, "status.readings.light", strs(StateLit, StateDark)},
 		{GuiderKind, "spec.pulses", strs(PulsesMount, PulsesCamera)},
 		{GuiderKind, "status.state", guiderStates},
 		{TelescopeKind, "status.guider.phase", phases},

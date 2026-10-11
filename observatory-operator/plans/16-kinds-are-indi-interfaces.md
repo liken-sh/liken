@@ -370,6 +370,38 @@ Each step closes in its own commit with its tests.
 4. **The status.** Typed fields from the generated types, `status.limits`,
    and `status.properties` for the rest. The readings and the display
    columns read the typed fields.
+
+   **Results of step 4**, on 2026-10-11:
+
+   - The build splits each INDI device's properties among the resources
+     it serves (`devicesplit.go`). A name in two standard sets, such as
+     `GEOGRAPHIC_COORD` on a mount that serves a GPS, goes to the served
+     resources first, in the order of the tree, and then to the
+     resource that runs the driver. A served resource exists only to
+     show its interface, and the resource that runs the driver keeps
+     everything else.
+   - Each value is in one place, so the readings that restated a typed
+     field are gone. Two readings stay, because each derives one value
+     from several properties and no typed field holds it: a `Mount`'s
+     `readings.state` and a `FilterWheel`'s `readings.filter`. The
+     display and the printer columns read the typed fields, and the
+     columns of a dome's park and shutter, a dust cap's cover, a flat
+     panel's light, and a weather station's safety read the reasons of
+     the state conditions. A `Switch` shows its outputs that are on in
+     `display.on`. The readings and the state conditions read the
+     properties that the resource holds, the same ones that its typed
+     fields hold in the same window.
+   - `status.limits` maps each INDI property, then each member, to
+     `min`, `max`, and `step`, for every number of the typed fields that
+     a client can write. A range whose `min` equals its `max` is left
+     out, because libindi's clients read it as no range. The map is
+     atomic.
+   - The informer cache drops the typed fields and `status.limits` as
+     well as `status.properties`.
+   - On the fakes, a reserved `Camera east-main` writes 12.5 KB in
+     place of 23.6 KB: 3.1 KB of typed fields, 1.4 KB of limits, 6.7 KB
+     of the simulator's own properties and `DefaultDevice`'s, and 1.3 KB
+     of the rest. The `FilterWheel` it serves writes 1.2 KB.
 5. **The manual and the example.** The resource pages, the guide to
    describing equipment, and the example: `FilterWheel east` served by
    `Camera east-main`, because the CCD simulator serves `FILTER`.

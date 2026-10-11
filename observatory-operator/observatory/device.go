@@ -152,8 +152,9 @@ const (
 
 // DeviceStatus holds the status fields that every device kind shares.
 // Each kind's status embeds it beside the kind's generated Standard,
-// which holds its standard properties, and a readings block of its
-// own.
+// which holds its standard properties. A mount and a filter wheel add
+// a readings block, which holds what the operator derives from several
+// properties, and most kinds a display block for the printer columns.
 type DeviceStatus struct {
 	ObservedGeneration int64       `json:"observedGeneration,omitempty"`
 	Phase              DevicePhase `json:"phase,omitempty"`
@@ -172,8 +173,19 @@ type DeviceStatus struct {
 	Image  string `json:"image,omitempty"`
 	Pod    string `json:"pod,omitempty"`
 	Node   string `json:"node,omitempty"`
-	// Properties is every property that the device defines, as the
-	// driver defines it, with no BLOB data. The CRD makes the list and
+	// Limits holds the range that the driver gives each number of the
+	// resource's typed fields that a client can write, by property and
+	// by member, such as the least and the greatest CCD_TEMPERATURE of
+	// a camera. The schema states the rest of a typed field's
+	// definition, so the status repeats only what the driver chooses.
+	// The CRD makes the map atomic, for the reason Properties gives.
+	Limits map[string]map[string]Limit `json:"limits,omitempty"`
+	// Properties holds each property of the INDI device that no typed
+	// field holds, as the driver defines it, with no BLOB data: a
+	// vendor's own properties, the properties of INDI's DefaultDevice,
+	// and the standard properties of an interface that no resource on
+	// the device is. Only the resource that runs the driver has them,
+	// so each property is in one object. The CRD makes the list and
 	// each property's members atomic, not maps keyed by name. The
 	// operator writes the whole status in one PUT, so a merge by key
 	// gains nothing, and a map would make the status entry of
@@ -183,6 +195,15 @@ type DeviceStatus struct {
 	// Procedures holds the last run of each trigger of the device's
 	// procedures.
 	Procedures []ProcedureRun `json:"procedures,omitempty"`
+}
+
+// Limit is the range that a driver gives one number. A driver refuses
+// a value outside Min and Max. Step is absent when the driver states
+// none.
+type Limit struct {
+	Min  float64 `json:"min"`
+	Max  float64 `json:"max"`
+	Step float64 `json:"step,omitempty"`
 }
 
 // Property is one INDI property, as the driver defines it and with

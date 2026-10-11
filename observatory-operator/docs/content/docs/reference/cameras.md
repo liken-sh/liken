@@ -319,7 +319,8 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--image"></span>`image` | string | no | The image that the device's pod runs, after the operator resolved it. |
 | <span id="status--pod"></span>`pod` | string | no | The name of the device's pod, while it exists. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the device's pod. |
-| <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Every property that the device defines, as the driver defines it, with the values of its last update. A vendor's own properties are here, and no typed reading depends on one. The list holds no BLOB data. |
+| <span id="status--limits"></span>`limits` | map[string]map[string]object | no | The range that the driver gives each number of this resource's typed fields that a client can write, by INDI property and then by member, such as `limits.CCD_TEMPERATURE.CCD_TEMPERATURE_VALUE`. Each range has `min` and `max`, the least and the greatest value that the driver accepts, and `step` when the driver states one. The schema describes each typed field, and the driver chooses only these ranges, such as a camera's least and greatest temperature or its range of gain. |
+| <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Each property of the INDI device that no typed field holds, as the driver defines it, with the values of its last update: a vendor's own properties, the properties that every INDI device has, such as `DEBUG`, and the standard properties of an interface that no resource on the device is, such as the `FILTER_SLOT` of a camera with no `FilterWheel`. Only the resource that runs the driver has the list, so each property is in one object, and no typed reading depends on one. The list holds no BLOB data. |
 | <span id="status--activedevices"></span>`activeDevices` | [object](#statusactivedevices) | no | The INDI devices whose state the camera writes into the FITS header of each frame. The status holds what the driver reports in `ACTIVE_DEVICES`. The operator decides it from the resources around the device, so it is not in spec. |
 | <span id="status--exposure"></span>`exposure` | [object](#statusexposure) | no | The length of an exposure of the sensor, in seconds. While the exposure runs, the driver counts it down. The status holds what the driver reports in `CCD_EXPOSURE`. Clients such as KStars and Ekos change it. |
 | <span id="status--abortexposure"></span>`abortExposure` | [object](#statusabortexposure) | no | Stops the exposure of the sensor that runs. The status holds what the driver reports in `CCD_ABORT_EXPOSURE`. Clients such as KStars and Ekos change it. |
@@ -374,8 +375,7 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--offset"></span>`offset` | [object](#statusoffset) | no | The level that the sensor adds to each pixel, in the driver's own units. The status holds what the driver reports in `CCD_OFFSET`. `spec.offset` sets it. |
 | <span id="status--cooler"></span>`cooler` | [object](#statuscooler) | no | Turns the sensor's cooler on or off. The `cool` and `warm` actions change it. The status holds what the driver reports in `CCD_COOLER`. Clients such as KStars and Ekos change it. |
 | <span id="status--coolerpower"></span>`coolerPower` | [object](#statuscoolerpower) | no | The power that the cooler draws, in percent of its greatest power. The status holds what the driver reports in `CCD_COOLER_POWER`. |
-| <span id="status--display"></span>`display` | [object](#statusdisplay) | no | The readings as a person reads them, with their units, for the printer columns. The numbers are in `readings`. |
-| <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the camera reports, from `CCD_TEMPERATURE`, `CCD_COOLER`, `CCD_COOLER_POWER`, and `CCD_EXPOSURE`. A field is absent until the driver sends it. |
+| <span id="status--display"></span>`display` | [object](#statusdisplay) | no | The values of the typed fields as a person reads them, with their units, for the printer columns. |
 
 ### status.conditions[]
 
@@ -989,7 +989,7 @@ The power that the cooler draws, in percent of its greatest power. The status ho
 
 ### status.display
 
-The readings as a person reads them, with their units, for the printer columns. The numbers are in `readings`.
+The values of the typed fields as a person reads them, with their units, for the printer columns.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -997,16 +997,4 @@ The readings as a person reads them, with their units, for the printer columns. 
 | <span id="statusdisplay--setpoint"></span>`setpoint` | string | no | The setpoint of the `cool` action in `spec.activation`, such as `-10 °C`. |
 | <span id="statusdisplay--cooler"></span>`cooler` | string | no | `On` or `Off`, from `CCD_COOLER`. |
 | <span id="statusdisplay--coolerpower"></span>`coolerPower` | string | no | The cooler's power, such as `42 %`. |
-| <span id="statusdisplay--exposure"></span>`exposure` | string | no | The time left, such as `12 s`, while an exposure runs, and `readings.exposure` otherwise. |
-
-### status.readings
-
-What the camera reports, from `CCD_TEMPERATURE`, `CCD_COOLER`, `CCD_COOLER_POWER`, and `CCD_EXPOSURE`. A field is absent until the driver sends it.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <span id="statusreadings--temperature"></span>`temperature` | number | no | The sensor's temperature, in degrees Celsius. |
-| <span id="statusreadings--cooler"></span>`cooler` | boolean | no | Whether the cooler is on: `true` while the `COOLER_ON` member of `CCD_COOLER` is on. |
-| <span id="statusreadings--coolerpower"></span>`coolerPower` | number | no | The cooler's power, in percent. |
-| <span id="statusreadings--exposure"></span>`exposure` | string | no | The state of `CCD_EXPOSURE`: `Idle` before the first exposure, `Exposing` while an exposure runs (`Busy`), `Done` when it ended (`Ok`), and `Failed` when it failed (`Alert`). One of: `Idle`, `Exposing`, `Done`, `Failed`. |
-| <span id="statusreadings--exposureremaining"></span>`exposureRemaining` | number | no | The time left in the exposure, in seconds. |
+| <span id="statusdisplay--exposure"></span>`exposure` | string | no | The time left, such as `12 s`, while an exposure runs. Otherwise the state of `CCD_EXPOSURE` in one word: `Idle` before the first exposure, `Done` when it ended (`Ok`), and `Failed` when it failed (`Alert`). |

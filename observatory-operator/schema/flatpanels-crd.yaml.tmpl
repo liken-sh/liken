@@ -38,7 +38,7 @@ spec:
           jsonPath: .status.phase
         - name: Light
           type: string
-          jsonPath: .status.readings.light
+          jsonPath: '.status.conditions[?(@.type=="Lit")].reason'
         - name: Brightness
           type: string
           jsonPath: .status.display.brightness
@@ -108,33 +108,12 @@ spec:
                 display:
                   type: object
                   description: >-
-                    The readings as a person reads them, with their units,
-                    for the printer columns. The numbers are in `readings`.
+                    The values of the typed fields as a person reads them,
+                    with their units, for the printer columns.
                   properties:
                     brightness:
                       type: string
                       description: "The brightness against the maximum of `FLAT_LIGHT_INTENSITY`, such as `128 of 255`. INDI gives the brightness no unit."
-                readings:
-                  type: object
-                  description: >-
-                    What the flat panel reports, from
-                    `FLAT_LIGHT_CONTROL` and `FLAT_LIGHT_INTENSITY`. A
-                    field is absent until the driver sends it.
-                  properties:
-                    light:
-                      type: string
-                      enum: [Lit, Dark]
-                      description: >-
-                        `Lit` while the `FLAT_LIGHT_ON` member of
-                        `FLAT_LIGHT_CONTROL` is on, and `Dark` while
-                        `FLAT_LIGHT_OFF` is on.
-                    brightness:
-                      type: number
-                      minimum: 0
-                      description: >-
-                        The light's brightness, in the driver's own
-                        units, from 0 to the maximum that
-                        `FLAT_LIGHT_INTENSITY` defines.
 {{- define "action" }}
 type: object
 description: >-

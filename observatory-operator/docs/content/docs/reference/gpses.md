@@ -244,13 +244,13 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--image"></span>`image` | string | no | The image that the device's pod runs, after the operator resolved it. |
 | <span id="status--pod"></span>`pod` | string | no | The name of the device's pod, while it exists. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the device's pod. |
-| <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Every property that the device defines, as the driver defines it, with the values of its last update. A vendor's own properties are here, and no typed reading depends on one. The list holds no BLOB data. |
+| <span id="status--limits"></span>`limits` | map[string]map[string]object | no | The range that the driver gives each number of this resource's typed fields that a client can write, by INDI property and then by member, such as `limits.CCD_TEMPERATURE.CCD_TEMPERATURE_VALUE`. Each range has `min` and `max`, the least and the greatest value that the driver accepts, and `step` when the driver states one. The schema describes each typed field, and the driver chooses only these ranges, such as a camera's least and greatest temperature or its range of gain. |
+| <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Each property of the INDI device that no typed field holds, as the driver defines it, with the values of its last update: a vendor's own properties, the properties that every INDI device has, such as `DEBUG`, and the standard properties of an interface that no resource on the device is, such as the `FILTER_SLOT` of a camera with no `FilterWheel`. Only the resource that runs the driver has the list, so each property is in one object, and no typed reading depends on one. The list holds no BLOB data. |
 | <span id="status--location"></span>`location` | [object](#statuslocation) | no | The location of the GPS receiver. The state is `Ok` while the receiver has a fix. The status holds what the driver reports in `GEOGRAPHIC_COORD`. |
 | <span id="status--time"></span>`time` | [object](#statustime) | no | The time that the GPS receiver reports. The status holds what the driver reports in `TIME_UTC`. |
 | <span id="status--refresh"></span>`refresh` | [object](#statusrefresh) | no | Reads the location and the time from the receiver again. The status holds what the driver reports in `GPS_REFRESH`. Clients such as KStars and Ekos change it. |
 | <span id="status--refreshperiod"></span>`refreshPeriod` | [object](#statusrefreshperiod) | no | How often the driver reads the receiver, in seconds. Zero reads it only on a refresh. The status holds what the driver reports in `GPS_REFRESH_PERIOD`. `spec.refreshPeriod` sets it. |
 | <span id="status--systemtimeupdate"></span>`systemTimeUpdate` | [object](#statussystemtimeupdate) | no | When the driver sets the system clock from the receiver's time. The status holds what the driver reports in `SYSTEM_TIME_UPDATE`. `spec.systemTimeUpdate` sets it. |
-| <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the GPS reports, from `GEOGRAPHIC_COORD` and `TIME_UTC`. A field is absent until the driver sends it. |
 
 ### status.conditions[]
 
@@ -376,15 +376,3 @@ When the driver sets the system clock from the receiver's time. The status holds
 | --- | --- | --- | --- |
 | <span id="statussystemtimeupdate--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
 | <span id="statussystemtimeupdate--value"></span>`value` | string | no | The name of the member that is on, such as `UPDATE_NEVER`. Absent when no member is on. |
-
-### status.readings
-
-What the GPS reports, from `GEOGRAPHIC_COORD` and `TIME_UTC`. A field is absent until the driver sends it.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| <span id="statusreadings--fix"></span>`fix` | boolean | no | Whether the GPS has a fix. It is `true` when `GEOGRAPHIC_COORD` is in the `Ok` state. |
-| <span id="statusreadings--time"></span>`time` | string | no | The time that the GPS reports, in UTC. |
-| <span id="statusreadings--latitude"></span>`latitude` | number | no | The latitude that the GPS reports, in degrees north. |
-| <span id="statusreadings--longitude"></span>`longitude` | number | no | The longitude that the GPS reports, in degrees east, from -180 to 180. |
-| <span id="statusreadings--elevation"></span>`elevation` | number | no | The elevation that the GPS reports, in meters above mean sea level. |

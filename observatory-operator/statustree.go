@@ -247,13 +247,13 @@ func reservationList(names []string) string {
 }
 
 // worstWeather answers the worst verdict of the weather stations that
-// report one, and Unknown when none does.
+// report SAFETY_STATUS, and Unknown when none does.
 func worstWeather(devices []*device, composed map[string]deviceStatus) observatory.Safety {
 	rank := []observatory.Safety{observatory.SafetySafe, observatory.SafetyWarning, observatory.SafetyDanger}
 	worst := -1
 	for _, d := range devices {
-		if readings, ok := composed[d.key()].Readings.(observatory.WeatherStationReadings); ok {
-			worst = max(worst, slices.Index(rank, readings.Safety))
+		if s, ok := composed[d.key()].Standard.(*observatory.WeatherStationStandard); ok && s.Safety != nil {
+			worst = max(worst, slices.Index(rank, typedSafety(*s.Safety)))
 		}
 	}
 	if worst < 0 {
