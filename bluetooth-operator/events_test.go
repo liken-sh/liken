@@ -88,6 +88,7 @@ func TestAPairingPostsTheWindowAndThePairing(t *testing.T) {
 		)
 		assertPosted(t, postedAbout(recorded, peripheralKind, "a0-ab-51-33-b7-12"),
 			posted{"Normal", reasonPaired, "paired with A0:AB:51:33:B7:12 through PairingRequest liken-system/new-gamepad"},
+			posted{"Normal", reasonNotConnected, connectedMessages[reasonNotConnected]},
 		)
 	})
 }
@@ -150,7 +151,41 @@ func TestABondThatLeftBluetoothdPostsBondLost(t *testing.T) {
 		inventory.reconcile()
 
 		assertPosted(t, postedAbout(recorded, peripheralKind, "a0-ab-51-33-b7-12"),
+			posted{"Normal", reasonLinkUp, connectedMessages[reasonLinkUp]},
+			posted{"Normal", reasonNotBonded, connectedMessages[reasonNotBonded]},
 			posted{"Warning", reasonBondLost, "bluetoothd holds no bond with A0:AB:51:33:B7:12; delete the Peripheral to unpair it, or pair the device again"},
+		)
+	})
+}
+
+// Each transition of the Connected condition posts an Event with its
+// reason: a remote that sleeps and wakes, and a link whose keys did not
+// match, which is the one that needs a person. A pass that finds the
+// same state again posts nothing.
+func TestEachTransitionOfTheLinkPostsItsReason(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		radio := testRadio(t, connectedRemote(t))
+		inventory, recorded := eventInventory(t, newAPIFixture(), radio)
+		inventory.reconcile()
+		// The recorder counts a repeat within 10 minutes on the Event it
+		// posted, so each change of the link comes later than that.
+		link := func(connected bool, ended string) {
+			time.Sleep(11 * time.Minute)
+			radio.update(remoteAddress(t), func(d *deviceState) { d.Connected = connected })
+			inventory.ends.record(remoteAddress(t), ended)
+			inventory.reconcile()
+			inventory.reconcile()
+		}
+
+		link(false, blueZReasonTimeout)
+		link(true, "")
+		link(false, blueZReasonAuthentication)
+
+		assertPosted(t, postedAbout(recorded, peripheralKind, "fe-5c-63-a3-ff-2e"),
+			posted{"Normal", reasonLinkUp, connectedMessages[reasonLinkUp]},
+			posted{"Normal", reasonAsleep, connectedMessages[reasonAsleep]},
+			posted{"Normal", reasonLinkUp, connectedMessages[reasonLinkUp]},
+			posted{"Warning", reasonAuthenticationFailed, connectedMessages[reasonAuthenticationFailed]},
 		)
 	})
 }

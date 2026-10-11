@@ -197,6 +197,13 @@ starts when somebody turns it on. If the controller disconnects while
 the pod runs, the eviction after `tolerationSeconds` ends the pod's
 session.
 
+In a `Deployment`, claim through a `ResourceClaimTemplate` instead of
+a standing `ResourceClaim`. A standing claim keeps its allocation
+across an eviction, so the `ReplicaSet`'s replacement pods would
+schedule onto a device that is gone and be evicted at once. A
+template gives each replacement pod a fresh claim. A fresh claim
+needs a new allocation, which the taints block.
+
 <a id="when-a-connected-controller-sends-no-input"></a>
 
 ### When a connected controller sends no input
@@ -232,12 +239,54 @@ when it starts a reconnect or a power cycle and when it finishes:
 
     kubectl -n liken-system logs ds/bluetooth-operator -c operator
 
-In a `Deployment`, claim through a `ResourceClaimTemplate` instead of
-a standing `ResourceClaim`. A standing claim keeps its allocation
-across an eviction, so the `ReplicaSet`'s replacement pods would
-schedule onto a device that is gone and be evicted at once. A
-template gives each replacement pod a fresh claim. A fresh claim
-needs a new allocation, which the taints block.
+<a id="why-a-controller-is-not-connected"></a>
+
+### Why a controller is not connected
+
+`kubectl get peripherals` shows each bond's link, the reason of its
+`Connected` condition, and how long ago the link came up or ended:
+
+    $ kubectl get peripherals
+    NAME                ALIAS         DEVICE      ADDRESS             BATTERY   PAIRED   CONNECTED   REASON   SINCE   NODE     AGE
+    c2-11-22-33-44-55   sofa-remote   T6-Remote   C2:11:22:33:44:55   75        true     False       Asleep   42m     node-2   24d
+
+The reason comes from `bluetoothd`'s report of why the link ended:
+
+| Reason | What it means |
+|---|---|
+| `LinkUp` | The link is up. |
+| `Asleep` | The link timed out on a device that sleeps between sessions. A Low Energy remote ends its link after an idle hour, and its next press connects it again. |
+| `LinkLost` | The link timed out on a device that does not sleep. It went out of range, or its battery ran out. |
+| `ClosedByDevice` | The device ended the link: it was switched off, or it disconnected. |
+| `ClosedByRadio` | This radio ended the link, at an unpair or when the operator reconnected a controller that sent no input. |
+| `AuthenticationFailed` | The keys did not match. Delete the `Peripheral` and pair the device again. |
+| `NotConnected` | The operator received no reason. The link ended while the operator was not running, or `bluetoothd` restarted. |
+| `NotBonded` | `bluetoothd` holds no object for the device. |
+
+The reason changes only when the link changes, so a restart of the
+operator keeps `Asleep` on a remote that sleeps. Each change posts an
+`Event` on the `Peripheral`, as the [install guide](/docs/guides/install/#read-the-events)
+lists.
+
+<a id="when-a-remote-wakes-from-sleep"></a>
+
+### When a remote wakes from sleep
+
+A remote that sleeps sends no key for the press that wakes it. So when
+a remote whose reason is `Asleep` connects again, at least 10 seconds
+after its link ended, the operator writes one `KEY_UNKNOWN` press into
+the remote's virtual node, and the operator's log has a line for it.
+A sleeping screen wakes on that press, so one press of any button
+wakes the remote and the room.
+
+The press does not stand for the button you pressed. When the remote
+fell asleep during a film, the first press, such as a pause, does
+nothing, and the second press pauses.
+
+A remote that went out of range sleeps too. When it comes back into
+range, it can connect with no press, and the operator writes the
+press then. So a remote that comes back into range wakes the room
+although nobody pressed a button.
 
 ## Unpair
 

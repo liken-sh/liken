@@ -298,9 +298,10 @@ the next step.
 ## Read the Events
 
 The operator posts a Kubernetes `Event` when a window opens or
-closes, a device pairs, a bond, a relay, or the radio fails, the
-operator powers the adapter off and on to recover a controller, a
-change of privacy restarts the pod, or the trace turns on or off.
+closes, a device pairs, a link comes up or ends, a bond, a relay, or
+the radio fails, the operator powers the adapter off and on to
+recover a controller, a change of privacy restarts the pod, or the
+trace turns on or off.
 Read them with `kubectl describe` on the object. A `Peripheral`, an `Adapter`, and a `Node` are
 cluster-scoped, so their `Event`s are in `default`, and
 `kubectl events --for` finds them only with `-n default` or `-A`:
@@ -315,6 +316,14 @@ cluster-scoped, so their `Event`s are in `default`, and
 | `PairingRefused` | Warning | `PairingRequest` | `bluetoothd` refused to pair the approved device. The window tries again, and the `Event` repeats only when the refusal changes. |
 | `Paired` | Normal | `PairingRequest`, `Peripheral` | The device holds a bond, and the operator created its `Peripheral`. |
 | `BondLost` | Warning | `Peripheral` | `bluetoothd` holds no bond with the device any more. The `Peripheral` stays until you delete it. |
+| `LinkUp` | Normal | `Peripheral` | The device connected. |
+| `Asleep` | Normal | `Peripheral` | The link timed out on a device that sleeps between sessions, such as a remote after an idle hour. |
+| `LinkLost` | Normal | `Peripheral` | The link timed out on a device that does not sleep: it went out of range, or its battery ran out. |
+| `ClosedByDevice` | Normal | `Peripheral` | The device ended the link: it was switched off, or it disconnected. |
+| `ClosedByRadio` | Normal | `Peripheral` | This radio ended the link, at an unpair or at the input recovery. |
+| `AuthenticationFailed` | Warning | `Peripheral` | The link ended because the keys did not match. Delete the `Peripheral` and pair the device again. |
+| `NotConnected` | Normal | `Peripheral` | The link ended, and the operator received no reason from `bluetoothd`. |
+| `NotBonded` | Normal | `Peripheral` | `bluetoothd` holds no object for the device. `BondLost` follows when it held a bond before. |
 | `InputRelayFailed` | Warning | `Peripheral` | The operator could not make the virtual input device that a claim on the controller receives. |
 | `AdapterPowerCycled` | Normal | `Peripheral` | `bluetoothd` did not disconnect a controller that has a link and no input, so the operator powered the adapter off and on. Every link on the adapter dropped. |
 | `AdapterPowerOnFailed` | Warning | `Peripheral` | The operator powered the adapter off to recover the controller, and `bluetoothd` did not power it on again. Delete the operator's pod on that node to power the adapter on. |
@@ -323,12 +332,13 @@ cluster-scoped, so their `Event`s are in `default`, and
 | `PrivacyChanged` | Normal | `Adapter` | `spec.privacy` differs from the value `bluetoothd` started with, and the operator deletes its own pod so that `bluetoothd` starts with the new value. |
 | `BtmonChanged` | Normal | `Adapter` | `spec.btmon` differs from the value the `btmon` container reads, and the operator wrote the new value, so the container starts or stops its trace. |
 
-A controller that connects or disconnects posts no `Event`. A Low
-Energy remote drops its link between presses, so the `Connected`
-condition and the `bluetooth_disconnects_total` metric hold those
-changes. A reconnect of a controller that holds a link with no input
-posts no `Event` either, and the `operator` container's log records
-it. A power cycle of the adapter for the same controller posts
+The reasons from `LinkUp` to `NotBonded` are the reasons of the
+`Peripheral`'s `Connected` condition, and each change of the condition
+posts one `Event`. A Low Energy remote ends its link after an idle
+hour, so a remote posts about two `Event`s for each session. The
+`bluetooth_disconnects_total` metric counts the same changes by
+reason. A reconnect of a controller that holds a link with no input
+posts no `Event`, and the `operator` container's log records it. A power cycle of the adapter for the same controller posts
 `AdapterPowerCycled`, as [Pair a controller](https://liken.sh/bluetooth/docs/guides/pair-a-controller/#when-a-connected-controller-sends-no-input)
 describes. The API server deletes an `Event` an hour after its last
 write. The status and the pod's log keep each fact longer.

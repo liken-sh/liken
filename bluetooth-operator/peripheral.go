@@ -20,9 +20,6 @@ import (
 	"fmt"
 	"os"
 	"reflect"
-	"slices"
-	"strings"
-	"time"
 
 	"github.com/liken-sh/bluetooth-operator/bonds"
 	"github.com/liken-sh/liken/kubernetes/apiclient"
@@ -191,15 +188,20 @@ func (i *inventory) reconcileDeviceSpec(peripheral *Peripheral, device deviceSta
 // kernel is the level the kernel's power supply class reports for this
 // device, and nil when it reports none. claimed reports whether a
 // prepared claim holds this controller right now.
+//
+// The reason the device's last link ended is read once, before the
+// first composition, so every composition in this call gives the same
+// condition. It is forgotten only after the status is settled: a write
+// that fails keeps it for the next pass.
 func (i *inventory) writePeripheralStatus(peripheral *Peripheral, adapter *Adapter, address bonds.Address, device deviceState, present bool, kernel *hidBattery, claimed bool) {
-	status := i.peripheralStatus(peripheral.Status, adapter, address, device, present, kernel)
+	ended := i.ends.reason(address)
+	status := i.peripheralStatus(peripheral.Status, adapter, address, device, present, kernel, ended)
 
 	// The metrics report this pass's reading whether or not it changes
 	// what the object holds, because a scrape must see the current
 	// state and not only the passes that happened to write it.
 	name := peripheral.Metadata.Name
-	connected := status.Conditions[0].Status == conditionTrue
-	i.metrics.setPeripheralConnected(name, connected)
+	i.metrics.setPeripheralConnected(name, status.Conditions[0].Status == conditionTrue)
 	i.metrics.setPeripheralClaimed(name, claimed)
 	i.metrics.setPeripheralBonded(name, status.Bond.Bonded)
 	if status.Battery != nil {
@@ -209,12 +211,15 @@ func (i *inventory) writePeripheralStatus(peripheral *Peripheral, adapter *Adapt
 	}
 
 	// replaced is the status the last write went against. A copy from
-	// the store can be older than the API server's, so the disconnect
-	// and the lost bond are reported from the copy that a landed write
-	// replaced, and a stale copy never reports the same change twice.
-	var replaced PeripheralStatus
+	// the store can be older than the API server's, so the disconnect,
+	// the condition's transition, and the lost bond are reported from
+	// the copy that a landed write replaced, and a stale copy never
+	// reports the same change twice. settled is the status the object
+	// holds after this call, whether or not it wrote.
+	var replaced, settled PeripheralStatus
 	apply := func(held *Peripheral) bool {
-		next := i.peripheralStatus(held.Status, adapter, address, device, present, kernel)
+		next := i.peripheralStatus(held.Status, adapter, address, device, present, kernel, ended)
+		settled = next
 		// The status holds a pointer and a slice, so the comparison is
 		// deep.
 		if reflect.DeepEqual(held.Status, next) {
@@ -226,20 +231,34 @@ func (i *inventory) writePeripheralStatus(peripheral *Peripheral, adapter *Adapt
 		return true
 	}
 	wrote, err := informer.SettleStatus(i.client, i.cache.peripheralVersions, peripheralPath(name), peripheral, apply)
-	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
+	if err != nil {
 		// A Peripheral that is gone needs no status. Its delete event
 		// wakes the pass that adopts the bond again.
-		fmt.Fprintf(os.Stderr, "writing the status of %s: %v\n", name, err)
+		if !errors.Is(err, apiclient.ErrNotFound) {
+			fmt.Fprintf(os.Stderr, "writing the status of %s: %v\n", name, err)
+		}
+		return
 	}
+	i.ends.forget(address, ended)
+	// The relay follows the condition the object holds now: Asleep arms
+	// the press that wakes the room, and every other reason disarms it
+	// (wake.go). It follows a status that settled, so the first pass
+	// after a restart arms a remote whose Peripheral still holds Asleep.
+	connection := settled.Conditions[0]
+	i.relays.follow(macFromDeviceName(address.Key()), connection)
 	if !wrote {
 		return
 	}
-	// first is true for a Peripheral this write reports on before it
-	// ever held a Connected condition, which is a creation or an
-	// adoption and never a transition this operator watched happen.
-	first := len(replaced.Conditions) == 0
-	if !first && connectionWas(replaced.Conditions, conditionTrue) && !connected {
-		i.metrics.countDisconnect(name)
+	// A Peripheral that held no Connected condition before this write is
+	// a creation or an adoption. Its first condition posts an Event, and
+	// counts no disconnect, because a disconnect measures an edge this
+	// operator watched happen.
+	previous, had := conditions.Find(replaced.Conditions, conditionConnected)
+	if had && previous.Status == conditionTrue && connection.Status == conditionFalse {
+		i.metrics.countDisconnect(name, connection.Reason)
+	}
+	if !had || previous.Status != connection.Status || previous.Reason != connection.Reason {
+		i.recorder.Transition(peripheralReference(peripheral), connection, connectedWarning(connection.Reason))
 	}
 	if replaced.Bond.Held && !status.Bond.Held {
 		fmt.Fprintf(os.Stderr, "peripheral: %s reports no bond in bluetoothd; the object stays until somebody deletes it\n", name)
@@ -249,8 +268,9 @@ func (i *inventory) writePeripheralStatus(peripheral *Peripheral, adapter *Adapt
 }
 
 // peripheralStatus composes one Peripheral's status from this pass's
-// reading and the status the object publishes now.
-func (i *inventory) peripheralStatus(published PeripheralStatus, adapter *Adapter, address bonds.Address, device deviceState, present bool, kernel *hidBattery) PeripheralStatus {
+// reading, the reason the device's last link ended, and the status the
+// object publishes now.
+func (i *inventory) peripheralStatus(published PeripheralStatus, adapter *Adapter, address bonds.Address, device deviceState, present bool, kernel *hidBattery, ended string) PeripheralStatus {
 	status := PeripheralStatus{
 		Address: address.Directory(),
 		Name:    attributeString(deviceReportedName(device)),
@@ -268,7 +288,7 @@ func (i *inventory) peripheralStatus(published PeripheralStatus, adapter *Adapte
 			Request:   published.Bond.Request,
 		},
 		Conditions: []Condition{
-			connectedCondition(published.Conditions, device, present, i.now()),
+			connectedCondition(published.Conditions, device, present, ended, i.now()),
 		},
 	}
 	if status.Bond.PairedAt == "" {
@@ -293,90 +313,6 @@ func (i *inventory) peripheralStatus(published PeripheralStatus, adapter *Adapte
 		}
 	}
 	return status
-}
-
-// The Connected condition, and the reasons it carries.
-//
-// Connected is the link state, in the standard condition shape. The
-// reason carries the meaning. LinkUp is a device on the air. Asleep is
-// a bonded Low Energy device that drops its link between presses and
-// pages the radio again on the next one, and it needs no attention.
-// NotConnected is a device that is switched off or out of range.
-// NotBonded is a device bluetoothd holds no object for, which means the
-// bond was removed by another route.
-const (
-	conditionConnected = "Connected"
-
-	conditionTrue  = conditions.True
-	conditionFalse = conditions.False
-
-	reasonLinkUp       = "LinkUp"
-	reasonAsleep       = "Asleep"
-	reasonNotConnected = "NotConnected"
-	reasonNotBonded    = "NotBonded"
-)
-
-// connectedCondition reports the link state of one bonded device.
-//
-// lastTransitionTime carries over from the condition the object already
-// holds whenever the status is unchanged, so it marks when the link
-// last changed and not when the operator last wrote the object.
-func connectedCondition(held []Condition, device deviceState, present bool, now time.Time) Condition {
-	condition := Condition{Type: conditionConnected, Status: conditionFalse}
-	switch {
-	case !present:
-		condition.Reason = reasonNotBonded
-	case device.Connected:
-		condition.Status, condition.Reason = conditionTrue, reasonLinkUp
-	case device.Paired && sleepsBetweenSessions(device):
-		condition.Reason = reasonAsleep
-	default:
-		condition.Reason = reasonNotConnected
-	}
-	// The API server keeps a date-time to the second, so the time is
-	// cut to the second, and a status composed again compares equal to
-	// the one the object holds.
-	condition.LastTransitionTime = now.UTC().Truncate(time.Second)
-	list := slices.Clone(held)
-	conditions.Set(&list, condition)
-	condition, _ = conditions.Find(list, conditionConnected)
-	return condition
-}
-
-// connectionWas reports whether the Connected condition a Peripheral
-// held before this pass carried the given status. A Peripheral with
-// no Connected condition yet, which is one this pass is adopting or
-// creating, answers false.
-func connectionWas(held []Condition, status conditions.Status) bool {
-	for _, previous := range held {
-		if previous.Type == conditionConnected {
-			return previous.Status == status
-		}
-	}
-	return false
-}
-
-// hidOverGATT is the assigned number of the HID over GATT service.
-const hidOverGATT = 0x1812
-
-// sleepsBetweenSessions reports whether a device that is not connected
-// is expected to be off the air.
-//
-// A Low Energy device drops its link after a short idle and pages the
-// radio again on the next press, so disconnected is its resting state.
-// Two facts name one: a random address, which only Low Energy uses,
-// and the HID over GATT service, which a device on a public address
-// can still carry.
-func sleepsBetweenSessions(device deviceState) bool {
-	if strings.EqualFold(device.AddressType, "random") {
-		return true
-	}
-	for _, uuid := range device.UUIDs {
-		if short, ok := shortUUID(uuid); ok && short == hidOverGATT {
-			return true
-		}
-	}
-	return false
 }
 
 // deviceDisplayName is the name a person recognizes the controller by.

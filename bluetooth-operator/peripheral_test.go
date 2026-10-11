@@ -5,12 +5,7 @@ package main
 // state, and the spec that reconciles back into the device.
 
 import (
-	"encoding/json"
-	"reflect"
 	"testing"
-	"time"
-
-	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
 // testPeripheralPath is the path of the test device's Peripheral.
@@ -268,133 +263,6 @@ func TestPeripheralStatusOmitsTheBatteryWhenTheDeviceReportsNone(t *testing.T) {
 	peripheral := read[Peripheral](t, fixture, testPeripheralPath())
 	if peripheral.Status.Battery != nil {
 		t.Errorf("status.battery = %+v, want none", peripheral.Status.Battery)
-	}
-}
-
-// The reason separates a controller asleep between presses from one
-// that is off the air, which is what a consumer reads to decide whether
-// to wait or to report a problem.
-func TestConnectedConditionReason(t *testing.T) {
-	hidOverGATT := fullUUID("1812")
-	classicHID := fullUUID("1124")
-	cases := []struct {
-		name    string
-		present bool
-		device  func(*deviceState)
-		status  conditions.Status
-		reason  string
-	}{
-		{
-			name:    "a connected controller",
-			present: true,
-			device:  func(*deviceState) {},
-			status:  conditionTrue,
-			reason:  reasonLinkUp,
-		},
-		{
-			name:    "a Low Energy remote between presses",
-			present: true,
-			device: func(d *deviceState) {
-				d.Connected, d.AddressType = false, "random"
-			},
-			status: conditionFalse,
-			reason: reasonAsleep,
-		},
-		{
-			name:    "a HID-over-GATT device on a public address",
-			present: true,
-			device: func(d *deviceState) {
-				d.Connected, d.AddressType = false, "public"
-				d.UUIDs = []string{hidOverGATT}
-			},
-			status: conditionFalse,
-			reason: reasonAsleep,
-		},
-		{
-			name:    "a classic controller that is switched off",
-			present: true,
-			device: func(d *deviceState) {
-				d.Connected, d.AddressType = false, "public"
-				d.UUIDs = []string{classicHID}
-			},
-			status: conditionFalse,
-			reason: reasonNotConnected,
-		},
-		{
-			name:    "a bond bluetoothd holds no object for",
-			present: false,
-			device:  func(*deviceState) {},
-			status:  conditionFalse,
-			reason:  reasonNotBonded,
-		},
-	}
-	for _, test := range cases {
-		t.Run(test.name, func(t *testing.T) {
-			device := pairedDevice(t, testDevice)
-			test.device(&device)
-
-			condition := connectedCondition(nil, device, test.present, testNow)
-
-			if condition.Type != conditionConnected {
-				t.Errorf("type = %q", condition.Type)
-			}
-			if condition.Status != test.status || condition.Reason != test.reason {
-				t.Errorf("condition = %+v, want %s/%s", condition, test.status, test.reason)
-			}
-		})
-	}
-}
-
-// lastTransitionTime marks when the link state last changed, so a
-// reader can measure how long a controller has been asleep. A reason
-// that changes under the same status does not move it.
-func TestConnectedConditionKeepsTheTimeOfTheLastChange(t *testing.T) {
-	device := pairedDevice(t, testDevice)
-	device.Connected, device.AddressType = false, "random"
-	asleep := connectedCondition(nil, device, true, testNow)
-
-	later := testNow.Add(time.Hour)
-	device.AddressType = "public"
-	same := connectedCondition([]Condition{asleep}, device, true, later)
-	if !same.LastTransitionTime.Equal(asleep.LastTransitionTime) {
-		t.Errorf("lastTransitionTime = %s, want the time of the last change %s",
-			same.LastTransitionTime, asleep.LastTransitionTime)
-	}
-	if same.Reason != reasonNotConnected {
-		t.Errorf("reason = %q, want the reason to follow the device", same.Reason)
-	}
-
-	device.Connected = true
-	changed := connectedCondition([]Condition{asleep}, device, true, later)
-	if !changed.LastTransitionTime.Equal(later) {
-		t.Errorf("lastTransitionTime = %s, want the moment the link came up", changed.LastTransitionTime)
-	}
-}
-
-// The Connected condition keeps the wire format the CRD declares: a
-// string status, a date-time to the second, and a message the schema
-// accepts empty. The time is cut to the second, so a status composed
-// again equals the one the API server returns.
-func TestConnectedConditionKeepsItsWireFormat(t *testing.T) {
-	device := pairedDevice(t, testDevice)
-	device.Connected, device.AddressType = false, "random"
-
-	condition := connectedCondition(nil, device, true, testNow.Add(400*time.Millisecond))
-
-	written, err := json.Marshal(condition)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := `{"type":"Connected","status":"False","reason":"Asleep","message":"","lastTransitionTime":"2026-08-17T17:30:00Z"}`
-	if string(written) != want {
-		t.Errorf("condition = %s, want %s", written, want)
-	}
-	var read Condition
-	if err := json.Unmarshal(written, &read); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(read, condition) {
-		t.Errorf("read back %+v, want %+v", read, condition)
 	}
 }
 

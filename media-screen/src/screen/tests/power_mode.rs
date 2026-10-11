@@ -175,3 +175,32 @@ fn the_screen_mode_ignores_wake_and_sleep() {
         );
     }
 }
+
+// `bluetooth-operator` writes `KEY_UNKNOWN` for a remote that wakes from
+// sleep, and the remote's own button press never arrives. The key has no
+// binding, so on a sleeping screen it behaves as any other key does: it wakes
+// the screen, states the on desire, and reaches neither the client nor the
+// power topic. The room mode's on desire is what wakes the TV and the receiver.
+#[test]
+fn an_unknown_key_wakes_a_sleeping_screen_in_either_mode() {
+    let now = Instant::now();
+    for power in ["room", "screen"] {
+        let mut screen = idling_in(power, now);
+        screen.asleep = true;
+        screen.desire = Some(crate::panel::OFF);
+
+        let effects = screen.deliver(SOFA_EVENTS, &key("KEY_UNKNOWN", 1), false, now);
+
+        assert_eq!(moments(effects.clone()), [Moment::Wake], "{power}");
+        assert_eq!(
+            publishes(effects),
+            [Publish {
+                topic: PANEL.into(),
+                payload: br#"{"desire":"on"}"#.to_vec(),
+                retained: true,
+            }],
+            "{power}"
+        );
+        assert!(!screen.asleep, "{power}");
+    }
+}

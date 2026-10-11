@@ -36,6 +36,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/liken-sh/liken/kubernetes/events"
 )
@@ -55,6 +56,11 @@ type relays struct {
 	// nothing.
 	recorder *events.Recorder
 
+	// now is the clock that decides whether a remote slept long enough
+	// for the press that wakes the room (wake.go). It is a field so that
+	// a test sets the time.
+	now func() time.Time
+
 	mu   sync.Mutex
 	held map[string]*controllerRelay
 
@@ -65,16 +71,24 @@ type relays struct {
 }
 
 func newRelays(kernel inputKernel) *relays {
-	return &relays{kernel: kernel, held: map[string]*controllerRelay{}, refused: map[string]bool{}}
+	return &relays{kernel: kernel, now: time.Now, held: map[string]*controllerRelay{}, refused: map[string]bool{}}
 }
 
 // controllerRelay is one controller's virtual devices, keyed by the
 // name the real node reports for itself, and what each prepared claim
 // on the controller asks those devices to deliver, keyed by the
 // claim's UID.
+//
+// armed is the time the controller's link ended in a sleep, and zero
+// while no press is due. pressed is the time of the sleep that gave the
+// last press, so the same sleep never arms the controller again
+// (wake.go).
 type controllerRelay struct {
 	nodes  map[string]*nodeRelay
 	demand map[string]delivery
+
+	armed   time.Time
+	pressed time.Time
 }
 
 // nodeRelay is one virtual device and the real node its events come
@@ -160,7 +174,7 @@ func (r *relays) ensure(mac string, nodes []string) {
 				publishedMAC(mac), caps.Name, path)
 			continue
 		}
-		r.read(mac, relay, path, held.demanded())
+		r.read(mac, held, relay, path)
 	}
 }
 
@@ -337,8 +351,11 @@ func (r *relays) create(mac string, relay *nodeRelay) bool {
 // claims demand, tunes its axes the same way, and starts moving its
 // events. A reconnect is a new kernel device, so it carries neither
 // the mask nor the axis values, and both are applied before the pump
-// reads anything. The caller holds the lock.
-func (r *relays) read(mac string, relay *nodeRelay, path string, want delivery) {
+// reads anything. The press that wakes the room goes into the virtual
+// device before the pump starts, so it arrives before any real event.
+// The caller holds the lock.
+func (r *relays) read(mac string, held *controllerRelay, relay *nodeRelay, path string) {
+	want := held.demanded()
 	source, err := r.kernel.open(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "relay: opening %s of controller %s: %v\n", path, publishedMAC(mac), err)
@@ -351,6 +368,7 @@ func (r *relays) read(mac string, relay *nodeRelay, path string, want delivery) 
 	// person compare the time of the open with the time of the
 	// controller's input add.
 	fmt.Printf("relay: reading %s of controller %s into %s\n", path, publishedMAC(mac), relay.device.node())
+	r.pressToWake(mac, held, relay, want.classes)
 	go r.pump(mac, relay, source)
 }
 

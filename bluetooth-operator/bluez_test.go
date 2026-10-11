@@ -270,7 +270,7 @@ func TestRelayBlueZSignalsWakesOnASignal(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		signals := make(chan *dbus.Signal, 4)
 		released := make(chan struct{})
-		changed := relayBlueZSignals(t.Context(), signals, func() { close(released) })
+		changed := relayBlueZSignals(t.Context(), signals, newLinkEnds(), func() { close(released) })
 
 		signals <- &dbus.Signal{Name: "org.freedesktop.DBus.Properties.PropertiesChanged"}
 		synctest.Wait()
@@ -292,12 +292,32 @@ func TestRelayBlueZSignalsWakesOnASignal(t *testing.T) {
 	})
 }
 
+// A Disconnected signal records why the link ended before it wakes the
+// loop, so the pass that the wake starts reads the reason.
+func TestRelayBlueZSignalsRecordsWhyALinkEnded(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		signals := make(chan *dbus.Signal, 4)
+		ends := newLinkEnds()
+		changed := relayBlueZSignals(t.Context(), signals, ends, func() {})
+
+		signals <- disconnected("/org/bluez/hci0/dev_C2_11_22_33_44_55", blueZReasonTimeout)
+		synctest.Wait()
+
+		if _, got := ready(changed); !got {
+			t.Error("the signal produced no wake")
+		}
+		if reason := ends.reason(testAddress(t, sampleRemote)); reason != blueZReasonTimeout {
+			t.Errorf("the record holds %q, want %q", reason, blueZReasonTimeout)
+		}
+	})
+}
+
 func TestRelayBlueZSignalsStopsWithItsContext(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		signals := make(chan *dbus.Signal, 1)
 		released := make(chan struct{})
-		changed := relayBlueZSignals(ctx, signals, func() { close(released) })
+		changed := relayBlueZSignals(ctx, signals, newLinkEnds(), func() { close(released) })
 
 		cancel()
 		synctest.Wait()

@@ -188,7 +188,7 @@ func TestAnOlderCopyNeverCountsADisconnectTwice(t *testing.T) {
 	inventory.reconcile()
 
 	count, found := metricValue(t, inventory.metrics.registry,
-		"bluetooth_disconnects_total", map[string]string{"peripheral": "a0-ab-51-33-b7-12"})
+		"bluetooth_disconnects_total", map[string]string{"peripheral": "a0-ab-51-33-b7-12", "reason": reasonNotConnected})
 	if !found || count != 1 {
 		t.Errorf("bluetooth_disconnects_total = %v (found: %v), want 1", count, found)
 	}

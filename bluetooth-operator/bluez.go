@@ -15,11 +15,13 @@ package main
 // when somebody turns the controller on. Connection state publishes
 // as an attribute and drives the taint (slices.go).
 //
-// The signals here say only that something changed. Every consumer
+// Most signals here say only that something changed. Every consumer
 // re-reads the whole managed-object tree, the same way liken's
 // hardware watcher re-walks sysfs after a uevent. A cache built from
 // signal payloads can fall out of step with the daemon; a full
-// re-read stays correct.
+// re-read stays correct. One signal carries a fact that the tree does
+// not hold: Disconnected names the reason a link ended, and the reader
+// records that reason until a pass writes it (linkend.go).
 
 import (
 	"context"
@@ -206,6 +208,11 @@ func adapterAddressFrom(objects map[dbus.ObjectPath]map[string]map[string]dbus.V
 // the paired devices, so a signal with no pairing in it costs a read
 // and no more.
 //
+// A fourth signal, Disconnected on a device object, also wakes the
+// loop, and its reason goes into ends before the wake, so the pass that
+// the wake starts reads it. BlueZ emits it before the change of
+// Connected to false.
+//
 // The bond store reads the same three signals through the same
 // channel, and it needs each of them. Bonded is the property that says
 // the keys are stored, where Paired is deferred until service
@@ -219,7 +226,7 @@ func adapterAddressFrom(objects map[dbus.ObjectPath]map[string]map[string]dbus.V
 // The channel is buffered and a full channel drops the signal, for
 // the same reason the uevent channel does: the reader re-reads the
 // whole tree, so one wake answers a burst.
-func watchBlueZ(ctx context.Context, conn *dbus.Conn) (<-chan struct{}, error) {
+func watchBlueZ(ctx context.Context, conn *dbus.Conn, ends *linkEnds) (<-chan struct{}, error) {
 	matches := [][]dbus.MatchOption{
 		{
 			dbus.WithMatchSender(bluezService),
@@ -231,6 +238,11 @@ func watchBlueZ(ctx context.Context, conn *dbus.Conn) (<-chan struct{}, error) {
 			dbus.WithMatchMember("PropertiesChanged"),
 			dbus.WithMatchArg(0, deviceInterface),
 		},
+		{
+			dbus.WithMatchSender(bluezService),
+			dbus.WithMatchInterface(deviceInterface),
+			dbus.WithMatchMember("Disconnected"),
+		},
 	}
 	for _, match := range matches {
 		if err := conn.AddMatchSignal(match...); err != nil {
@@ -240,7 +252,7 @@ func watchBlueZ(ctx context.Context, conn *dbus.Conn) (<-chan struct{}, error) {
 
 	signals := make(chan *dbus.Signal, 64)
 	conn.Signal(signals)
-	return relayBlueZSignals(ctx, signals, func() { conn.RemoveSignal(signals) }), nil
+	return relayBlueZSignals(ctx, signals, ends, func() { conn.RemoveSignal(signals) }), nil
 }
 
 // relayBlueZSignals is watchBlueZ's loop, over a signal channel that
@@ -251,7 +263,7 @@ func watchBlueZ(ctx context.Context, conn *dbus.Conn) (<-chan struct{}, error) {
 // it on the way out, whichever way it leaves, because a connection
 // that keeps delivering to a channel nobody reads holds the channel
 // and the goroutine godbus spawns for it forever.
-func relayBlueZSignals(ctx context.Context, signals <-chan *dbus.Signal, release func()) <-chan struct{} {
+func relayBlueZSignals(ctx context.Context, signals <-chan *dbus.Signal, ends *linkEnds, release func()) <-chan struct{} {
 	changed := make(chan struct{}, 1)
 	go func() {
 		defer close(changed)
@@ -260,9 +272,12 @@ func relayBlueZSignals(ctx context.Context, signals <-chan *dbus.Signal, release
 			select {
 			case <-ctx.Done():
 				return
-			case _, ok := <-signals:
+			case signal, ok := <-signals:
 				if !ok {
 					return
+				}
+				if device, reason, read := disconnectedFrom(signal); read {
+					ends.record(device, reason)
 				}
 				select {
 				case changed <- struct{}{}:

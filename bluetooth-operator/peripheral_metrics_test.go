@@ -5,7 +5,10 @@ package main
 // object itself; this file covers what writePeripheralStatus reports
 // to metrics.go beside it.
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // The gauge follows the Connected condition it is read beside.
 func TestPeripheralConnectedGaugeFollowsTheLink(t *testing.T) {
@@ -39,7 +42,7 @@ func TestFirstObservationNeverCountsAsADisconnect(t *testing.T) {
 	inventory.reconcile()
 
 	if count, found := metricValue(t, inventory.metrics.registry,
-		"bluetooth_disconnects_total", map[string]string{"peripheral": "a0-ab-51-33-b7-12"}); found && count != 0 {
+		"bluetooth_disconnects_total", map[string]string{"peripheral": "a0-ab-51-33-b7-12", "reason": reasonNotConnected}); found && count != 0 {
 		t.Errorf("bluetooth_disconnects_total = %v, want none for the first observation", count)
 	}
 }
@@ -58,9 +61,40 @@ func TestDisconnectsCountOnlyTheObservedTransition(t *testing.T) {
 	inventory.reconcile()
 
 	count, found := metricValue(t, inventory.metrics.registry,
-		"bluetooth_disconnects_total", map[string]string{"peripheral": "a0-ab-51-33-b7-12"})
+		"bluetooth_disconnects_total", map[string]string{"peripheral": "a0-ab-51-33-b7-12", "reason": reasonNotConnected})
 	if !found || count != 1 {
 		t.Errorf("bluetooth_disconnects_total = %v (found: %v), want 1 for one observed drop held over two passes", count, found)
+	}
+}
+
+// The counter carries the reason the Connected condition took, so a
+// remote that sleeps counts apart from a link that the radio closed.
+func TestDisconnectsCountUnderTheConditionsReason(t *testing.T) {
+	cases := []struct {
+		ended  string
+		reason string
+	}{
+		{blueZReasonTimeout, reasonAsleep},
+		{blueZReasonLocal, reasonClosedByRadio},
+		{"", reasonNotConnected},
+	}
+	for _, c := range cases {
+		t.Run(c.reason, func(t *testing.T) {
+			fixture := newAPIFixture()
+			radio := testRadio(t, connectedRemote(t))
+			inventory := testInventory(t, fixture, radio)
+			inventory.reconcile()
+
+			radio.update(remoteAddress(t), func(d *deviceState) { d.Connected = false })
+			inventory.ends.record(remoteAddress(t), c.ended)
+			inventory.reconcile()
+
+			count, found := metricValue(t, inventory.metrics.registry,
+				"bluetooth_disconnects_total", map[string]string{"peripheral": "fe-5c-63-a3-ff-2e", "reason": c.reason})
+			if !found || count != 1 {
+				t.Errorf("bluetooth_disconnects_total{reason=%q} = %v (found: %v), want 1", c.reason, count, found)
+			}
+		})
 	}
 }
 
@@ -161,5 +195,21 @@ func TestPeripheralBondedGaugeFollowsTheStoredKeys(t *testing.T) {
 	if bonded, found := metricValue(t, inventory.metrics.registry,
 		"bluetooth_peripheral_bonded", map[string]string{"peripheral": "a0-ab-51-33-b7-12"}); !found || bonded != 0 {
 		t.Errorf("bluetooth_peripheral_bonded = %v (found: %v), want 0 once the keys are gone", bonded, found)
+	}
+}
+
+// An unpair takes the Peripheral off every series, the disconnects of
+// every reason and the wake presses among them.
+func TestForgettingAPeripheralClearsEverySeries(t *testing.T) {
+	readings := newMetrics()
+	readings.countDisconnect("c2-11-22-33-44-55", reasonAsleep)
+	readings.countDisconnect("c2-11-22-33-44-55", reasonClosedByRadio)
+	readings.countWakePress("c2-11-22-33-44-55")
+
+	readings.forgetPeripheral("c2-11-22-33-44-55")
+
+	page := scrape(t, readings)
+	if strings.Contains(page, "c2-11-22-33-44-55") {
+		t.Errorf("the registry still carries the Peripheral after it was forgotten:\n%s", page)
 	}
 }

@@ -12,7 +12,7 @@ package main
 //
 // This file holds the registry and the two layers every process
 // shares. The domain layer is recorded where each fact is already
-// read: peripheral.go, relay.go, and inventory.go each call one
+// read: peripheral.go, relay.go, wake.go, and inventory.go each call one
 // narrow method here, so a scrape reads the same snapshot the
 // reconcile loop already took and never touches BlueZ, the kernel, or
 // the API server itself.
@@ -88,6 +88,7 @@ type metrics struct {
 	peripheralBattery   *prometheus.GaugeVec
 	peripheralBonded    *prometheus.GaugeVec
 	disconnects         *prometheus.CounterVec
+	wakePresses         *prometheus.CounterVec
 	pairAttempts        *prometheus.CounterVec
 	adapterPresent      prometheus.Gauge
 	inputEvents         *prometheus.CounterVec
@@ -131,7 +132,11 @@ func newMetrics() *metrics {
 	}, peripheralLabel)
 	m.disconnects = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "bluetooth_disconnects_total",
-		Help: "Observed transitions of a Peripheral from connected to disconnected.",
+		Help: "Observed transitions of a Peripheral from connected to disconnected, by the reason of the Connected condition.",
+	}, []string{"peripheral", "reason"})
+	m.wakePresses = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "bluetooth_wake_presses_total",
+		Help: "KEY_UNKNOWN presses the relay wrote into a Peripheral's virtual device when it connected after a sleep.",
 	}, peripheralLabel)
 	m.pairAttempts = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "bluetooth_pair_attempts_total",
@@ -160,7 +165,7 @@ func newMetrics() *metrics {
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		buildInfo, m.reconcileDuration, m.reconcileErrors,
 		m.peripheralConnected, m.peripheralClaimed, m.peripheralBattery, m.peripheralBonded,
-		m.disconnects, m.pairAttempts,
+		m.disconnects, m.wakePresses, m.pairAttempts,
 		m.adapterPresent, m.inputEvents, m.observationValid, m.observationSuccess)
 	return m
 }
@@ -230,15 +235,26 @@ func (m *metrics) setPeripheralConnected(peripheral string, connected bool) {
 }
 
 // countDisconnect counts one disconnect: a status write that moved a
-// Peripheral's Connected condition from True to False. The caller does
-// not count a Peripheral that held no condition before, which is a
-// creation and never a transition: a disconnect measures an edge this
-// operator watched happen, not the gap between not knowing and knowing.
-func (m *metrics) countDisconnect(peripheral string) {
+// Peripheral's Connected condition from True to False, under the
+// condition's new reason. The caller does not count a Peripheral that
+// held no condition before, which is a creation and never a transition:
+// a disconnect measures an edge this operator watched happen, not the
+// gap between not knowing and knowing.
+func (m *metrics) countDisconnect(peripheral, reason string) {
 	if m == nil {
 		return
 	}
-	m.disconnects.WithLabelValues(peripheral).Inc()
+	m.disconnects.WithLabelValues(peripheral, reason).Inc()
+}
+
+// countWakePress counts one press the relay wrote into a Peripheral's
+// virtual device, because the controller connected after a sleep
+// (wake.go).
+func (m *metrics) countWakePress(peripheral string) {
+	if m == nil {
+		return
+	}
+	m.wakePresses.WithLabelValues(peripheral).Inc()
 }
 
 // setPeripheralBonded records whether BlueZ holds a link key for this
@@ -307,7 +323,10 @@ func (m *metrics) forgetPeripheral(peripheral string) {
 	m.peripheralClaimed.DeleteLabelValues(peripheral)
 	m.peripheralBattery.DeleteLabelValues(peripheral)
 	m.peripheralBonded.DeleteLabelValues(peripheral)
-	m.disconnects.DeleteLabelValues(peripheral)
+	// A disconnect carries a reason too, so its series for every reason
+	// go together.
+	m.disconnects.DeletePartialMatch(prometheus.Labels{"peripheral": peripheral})
+	m.wakePresses.DeleteLabelValues(peripheral)
 	m.inputEvents.DeleteLabelValues(peripheral)
 }
 

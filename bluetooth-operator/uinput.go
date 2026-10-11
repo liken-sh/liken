@@ -167,7 +167,9 @@ func (d *uinputDevice) build(caps evdevCapabilities, phys string) error {
 		}
 	}
 	for _, mirrored := range mirroredTypes {
-		codes := caps.Codes[mirrored.name]
+		// A node with a keyboard code also declares KEY_UNKNOWN, for the
+		// press that wakes the room (wake.go).
+		codes := declaredCodes(caps, mirrored.name)
 		if len(codes) == 0 {
 			continue
 		}

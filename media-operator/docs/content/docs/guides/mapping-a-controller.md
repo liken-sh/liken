@@ -86,6 +86,13 @@ needed. Only a press earns this last line. A release or a repeat logs
 the raw line above it instead, naming the code and saying a Keymap
 binds the press alone.
 
+A Bluetooth LE remote that wakes from sleep does not send the press
+that woke it. `bluetooth-operator` writes a press of `KEY_UNKNOWN`
+(code 240) in its place, so discovery logs that press after each
+wake. It is not a button to map. A `Keymap` row on `KEY_UNKNOWN` acts
+on every wake, and on any real button that the kernel also reports as
+`KEY_UNKNOWN`, so do not bind it.
+
 If the controller has modes, press every button in every mode. A
 combined remote can emit different codes for one button per mode. An
 air-mouse shell emits `BTN_LEFT` for its OK button in mouse mode, and

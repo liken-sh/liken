@@ -485,6 +485,28 @@ it is paired, and its claims stop parking from then on.
 Events go one way. A gamepad's rumble is a write into the real node,
 and the relay does not carry it back.
 
+A Bluetooth LE remote that sleeps sends no key for the press that
+wakes it. So when a remote connects after a sleep, the operator
+writes one press and one release of `KEY_UNKNOWN` (code 240) into its
+virtual node, before the remote's own events. A consumer that binds
+nothing to `KEY_UNKNOWN` reads it as a press with no meaning, and a
+sleeping screen wakes on it. The press arrives only under all of
+these conditions:
+
+* The `Peripheral`'s `Connected` condition held `Asleep`: the link
+  timed out on a device that sleeps between sessions.
+* The link was down for at least 10 seconds. A remote that lost its
+  link while it was awake connects again within seconds, and gets no
+  press.
+* The node reports a keyboard key, a code below `BTN_MISC`. A
+  gamepad's node gets no press.
+* A claim on the controller receives `EV_KEY` from that node.
+
+Each sleep gives one press, on the first node that meets these
+conditions. Each virtual node with a keyboard key declares
+`KEY_UNKNOWN`, although the controller's own node may not. The stored
+capabilities, the input classes, and the slice do not include it.
+
 ## Lifecycle
 
 * **A disconnected controller is tainted, never deleted.** The device

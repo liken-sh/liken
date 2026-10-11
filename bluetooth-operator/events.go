@@ -5,19 +5,22 @@ package main
 // a Node.
 //
 // An Event records what just happened: a window opened or closed, a
-// device paired, a bond or a radio went away, the input recovery
-// powered the adapter off and on, a change of privacy restarted the
-// pod, or the trace turned on or off. A condition and a
-// status field hold what is true now, and the API server deletes an
-// Event an hour after its last write, so each fact here is also in a
+// device paired, a link came up or ended, a bond or a radio went away,
+// the input recovery powered the adapter off and on, a change of
+// privacy restarted the pod, or the trace turned on or off. A condition
+// and a status field hold what is true now, and the API server deletes
+// an Event an hour after its last write, so each fact here is also in a
 // status field or a log line.
 //
-// The Connected condition posts no Event. A Low Energy remote drops its
-// link between presses and pages the radio again on the next one, so
-// its condition changes many times an hour. The condition, the log,
-// and the bluetooth_disconnects_total counter hold those
-// changes. Only the change that needs a person, a bond that left
-// bluetoothd, posts BondLost.
+// Each transition of a Peripheral's Connected condition posts an Event
+// with the condition's reason and message (connected.go). A Low Energy
+// remote ends its link after about 60 idle minutes, so a remote posts
+// about two Events for each session. The Event is the record a person
+// reads in `kubectl describe` when a controller stopped working.
+// AuthenticationFailed is a Warning, because a person must pair the
+// device again, and every other reason is Normal. The press that the
+// relay writes when a remote wakes posts no Event (wake.go), because the
+// change of the condition to LinkUp posts one.
 //
 // Peripherals, Adapters, and Nodes are cluster-scoped, so their Events
 // are in `default`. A PairingRequest's Events are in its own namespace.
@@ -25,7 +28,11 @@ package main
 import "github.com/liken-sh/liken/kubernetes/events"
 
 // The reasons this operator posts. They are part of its published
-// interface, and the install guide lists them.
+// interface, and the install guide lists them. The reasons of the
+// Connected condition are posted too, and connected.go declares them:
+// LinkUp, Asleep, LinkLost, ClosedByDevice, ClosedByRadio,
+// AuthenticationFailed, NotConnected, and NotBonded, each on a
+// Peripheral.
 const (
 	// reasonPairingWindowOpened is Normal, on a PairingRequest: the
 	// radio is discoverable and pairable until the window closes.
