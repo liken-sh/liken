@@ -92,6 +92,6 @@ The other spec fields are the few that activation needs:
 `aperture` and `focalLength` in millimeters, the camera's `gain` and
 `offset`, the filter wheel's `filters`, the guider's `opticalTrain` and `pulses`, and the
 reservation's `telescope`, `holder`, `start`, and `end`. [Plan
-05](https://github.com/liken-sh/liken/blob/main/observatory-operator/plans/05-the-property-schema.md) will generate typed fields for the
+16](https://github.com/liken-sh/liken/blob/main/observatory-operator/plans/16-kinds-are-indi-interfaces.md) will generate typed fields for the
 other standard properties. `kubectl explain` prints every field with
 its unit.

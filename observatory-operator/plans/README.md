@@ -1,7 +1,8 @@
 # Plans
 
 [`00-design.md`](00-design.md) is the design. A plan moves to
-`completed/` when it is built.
+`completed/` when it is built, and to `rejected/` when another plan
+replaces it before it is built.
 
 This directory numbers its own plans. A new plan takes the next number
 after the highest one in this directory and its subdirectories. A number

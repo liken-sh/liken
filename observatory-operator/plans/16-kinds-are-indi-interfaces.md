@@ -1,0 +1,390 @@
+# 16, Kinds are INDI interfaces
+
+Proposed on 2026-10-11. Not built. This plan replaces
+[plan 05](rejected/05-the-property-schema.md) and the open problem "A
+reading rewrites the whole property list", whose measurements it
+carries. It breaks the `observatory.liken.sh` API with no conversion,
+because no observatory runs on it outside the test clusters.
+
+Each device kind becomes one INDI driver interface, and one INDI device
+can serve several resources. Each kind's typed fields come from the
+standard properties that libindi defines for its interface, captured
+from a bare driver at development time. A device's status keeps every
+other property in full, so a person still sees each vendor property
+with `kubectl`.
+
+## The problem
+
+Three problems have one cause: the kinds follow the hardware, and INDI
+follows interfaces.
+
+- **One driver cannot serve two kinds.** A QHY camera drives its filter
+  wheel through the camera's cable, so the wheel's properties are on
+  the camera's INDI device. A Flip-Flat is a dust cap and a flat panel
+  in one driver. `shareddrivers.go` refuses two resources on one
+  driver, so a person cannot describe either one. Plan 06 listed this
+  as unsolved.
+- **The resources have no typed fields for most standard properties.**
+  Plan 06 wrote by hand the few that activation needs. Plan 05 was to
+  generate the rest from the simulators, but each simulator adds its
+  own properties, such as `SIM_FOCUSING` and `PLANET_MODE`, so its
+  output needed a person to sort the standard properties from the
+  others.
+- **Each status write carries every definition again.** A device's
+  `status.properties` holds every property the driver defines, with
+  its label, group, permission, rule, ranges, and value. On liken-1 on
+  2026-10-11, a reserved simulated `Camera` was 25.1 KB, and 22.3 KB
+  of it was 71 properties. Their values were about 2.9 KB. When one
+  value changes, the operator writes the whole status, and every
+  watcher decodes the whole object again. On the two-node test cluster
+  on 2026-10-06, two Ready telescopes made five objects write about
+  4.2 times a second, and the operator used 41 to 42m of CPU, against
+  0 to 1m with no reservation.
+
+The 45 places where the operator branches on kind show the same
+mismatch. 26 of them are about an interface's meaning, such as park,
+cool, abort, and the locks. They are written against a kind, so a
+device that serves two interfaces fits none of them.
+
+## What INDI defines
+
+These facts come from the source of indi 2.2.5 and indi-3rdparty 2.2.0,
+the versions `indi/package.toml` pins. The research notes cite each
+file and line.
+
+- **A property is standard by its name.** No `def*Vector` marks a
+  property as standard. `libs/indidevice/indistandardproperty.h`
+  declares only the six connection properties. The others are the
+  names that libindi's base classes and interface mixins define, and
+  the names that drivers share by convention and the documentation
+  lists, such as `CCD_GAIN`, `CCD_OFFSET`, and `CCD_COOLER`, which no
+  file in libindi's `libs/` defines.
+- **An interface is a base class, a mixin, or both.** `TELESCOPE`,
+  `CCD`, `DOME`, and the sensor family have only a base class. `FOCUSER`,
+  `FILTER`, `ROTATOR`, `GPS`, and `WEATHER` have a base class and a
+  mixin, and the base class adds properties that the mixin does not,
+  such as the focuser's `Presets` and `Goto`. A camera's filter wheel,
+  or a power box's focuser, is the mixin alone.
+- **One driver publishes all of its interfaces under one device
+  name.** No camera driver puts its wheel or its guide head on a
+  separate device.
+- **The interface bits are late and not always true.** QHY and Atik
+  add `FILTER` only at connect, when the camera reports a wheel
+  (`indi-qhy/qhy_ccd.cpp:930`). MI, QSI, Apogee, and SBIG claim
+  `FILTER` with no wheel. No driver clears a bit on disconnect. Some
+  drivers define an interface's properties and never set its bit.
+- **A device can snoop itself.** `INDI::CCD` writes the `FILTER` FITS
+  keyword only from the slot it snoops from the device that
+  `ACTIVE_FILTER` names (`libs/indibase/indiccd.cpp:802`, `:2115`).
+  The CCD simulator names itself by default (`:467`), and `indiserver`
+  routes a snooped property to every driver that asked for it, the
+  sender included (`indiserver/DvrInfo.cpp:230`). So a camera with a
+  built-in wheel gets a filter name in its headers only when
+  `ACTIVE_FILTER` names the camera.
+- **Ten property names have more than one definer.** `ACTIVE_DEVICES`,
+  `GEOGRAPHIC_COORD`, `TIME_UTC`, `Presets`, `Goto`, `FITS_HEADER`,
+  `UPLOAD_MODE`, `UPLOAD_SETTINGS`, `EQUATORIAL_EOD_COORD`, and
+  `ORIENTATION`. No driver in either tree combines two definers of
+  one name, so the union of a device's standard sets by name is safe
+  at these versions.
+
+## The design
+
+### Each kind is one interface
+
+| Kind | Interface | How the operator detects it |
+|---|---|---|
+| `Mount` | `TELESCOPE` | `EQUATORIAL_EOD_COORD` |
+| `Camera` | `CCD` | `CCD_EXPOSURE` |
+| `FilterWheel` | `FILTER` | `FILTER_SLOT` |
+| `Focuser` | `FOCUSER` | `FOCUS_MOTION` |
+| `Rotator` | `ROTATOR` | `ABS_ROTATOR_ANGLE` |
+| `DustCap` | `DUSTCAP` | `CAP_PARK` |
+| `FlatPanel` | `LIGHTBOX` | `FLAT_LIGHT_CONTROL` |
+| `PolarAligner` | `PAC` | `PAC_MANUAL_ADJUSTMENT` |
+| `GPS` | `GPS` | `GPS_REFRESH` |
+| `Dome` | `DOME` | `DOME_MOTION` or `DOME_SHUTTER` |
+| `WeatherStation` | `WEATHER` | `WEATHER_STATUS` |
+| `Switch` | `OUTPUT` and `INPUT` | `DIGITAL_OUTPUT_1` or `DIGITAL_INPUT_1` |
+| `Receiver` | `SPECTROGRAPH` | `RECEIVER_SETTINGS` |
+
+Each property in the detection column is in the spike's captures or
+in libindi's source. Step 1 confirms each one against the capture of
+its interface.
+
+The operator decides that a device serves an interface from the
+properties the device defines after connect, and reads the bit in
+`DRIVER_INFO.DRIVER_INTERFACE` only as a hint. This rule has no
+exceptions: the same check finds a QHY camera's wheel, refuses an SBIG
+camera that claims a wheel it does not have, and tells `Receiver` from
+`INDI::Spectrograph`, which set the same bit.
+
+`Switch` is the one kind with two interfaces, because a relay board
+has outputs and inputs on one device. Its typed fields are the union
+of the two mixins' captures.
+
+`SkyQualityMeter` goes. Its simulator sets no interface bit, and
+`SKY_QUALITY` is not a property libindi defines. A sky quality meter
+can return as a kind when someone's hardware needs one.
+
+`GUIDER` has no kind. It is the ST-4 pulse mixin on a camera or a
+mount, and the `Guider` (PHD2) already names where its pulses go with
+`spec.pulses`.
+
+### One device serves several resources
+
+A device resource either runs a driver or names the resource whose
+device serves it:
+
+```yaml
+apiVersion: observatory.liken.sh/v1alpha1
+kind: Camera
+metadata:
+  name: east-main
+spec:
+  opticalTrain: east-imaging
+  driver: {name: indi_qhy_ccd}
+---
+apiVersion: observatory.liken.sh/v1alpha1
+kind: FilterWheel
+metadata:
+  name: east
+spec:
+  opticalTrain: east-imaging
+  device: {kind: Camera, name: east-main}
+  filters: [L, R, G, B, Ha, OIII, SII]
+```
+
+A CEL rule requires exactly one of `driver` and `device`. The resource
+that runs the driver is the device's owner. It gets the pod, the
+claim, `spec.power`, and the finalizer, and its pod's lifecycle covers
+every resource it serves:
+
+- The owner gets the finalizer when the operator creates its pod, as
+  today. A served resource gets the finalizer when its owner does, so
+  a delete of either waits for the deactivation.
+- A served resource's activation runs after its owner connects, and
+  its deactivation runs before its owner's. A Flip-Flat's `DustCap`
+  closes before the device stops.
+- A served resource that leaves its server, because it is deleted or
+  because its owner's pod stops, runs its deactivation first, as a
+  device that leaves does today.
+- A served resource names a resource on the same server. A pointer
+  across servers is refused with a condition, because one INDI device
+  runs on one server.
+- When the owner connects and does not define the interface, the
+  served resource reports `Error` and names the missing property. A
+  QHY camera with no wheel attached fails here, at activation, and the
+  rest of the telescope still starts.
+
+`shareddrivers.go` keeps its rule for two resources that each run the
+same driver. A served resource runs no driver, so that rule does not
+see it. Two served resources of one kind on one device are refused.
+
+Every device's status reports the INDI device name and the server
+endpoint it resolved to, the served ones included. A client such as
+`astrophotography-operator` reads one resource and reaches the device
+without following the pointer.
+
+### What the operator writes to INDI
+
+The rules of today stay, with the served device in place of the
+resource's own:
+
+- A camera's `ACTIVE_DEVICES` names the INDI device of each device in
+  its train. When the train's `FilterWheel` is served by the camera,
+  `ACTIVE_FILTER` names the camera. That is INDI's own arrangement, so
+  the operator has no case for it.
+- Typed spec fields are written in the `Configure` step, once for each
+  reservation, as today. The operator does not drive them back while
+  the reservation runs, so a sequencer can change a camera's gain for
+  one frame.
+- Settings that the tree decides, such as `ACTIVE_DEVICES`,
+  `GEOGRAPHIC_COORD`, `SCOPE_INFO`, and `DOME_POLICY`, never become
+  spec fields, so a person and the operator never write the same
+  property.
+
+### The standard set of each interface
+
+A bare driver is a small C++ driver for one interface. It hosts the
+interface's mixin on a plain `INDI::DefaultDevice`, or inherits the base
+class for an interface that has no mixin, turns on every capability,
+defines nothing of its own, and reports connected with no hardware.
+What it defines is libindi's standard set for that interface. A spike
+on 2026-10-11 built six of them against libindi 2.2.5, captured them
+under `indiserver` in 38 s, and found:
+
+| Interface | Before connect | Added at connect |
+|---|---|---|
+| `CCD` | 7 | 49 |
+| `TELESCOPE` | 8 | 26 |
+| `FILTER` | 6 | 2 |
+| `FOCUSER` | 6 | 14 |
+| `DOME` | 8 | 21 |
+| `DUSTCAP` and `LIGHTBOX` | 7 | 4 |
+
+The spike used the focuser's base class, and step 1 moves it to the
+mixin. Three interfaces cannot turn on every capability at once:
+`FOCUSER` loses `FOCUS_TIMER`, a `TELESCOPE`'s park position members
+follow its park type, and a `DOME` is a roll-off roof or a rotating
+dome. Each of those needs one capture for each variant, and the
+generator merges them. Some properties appear only after a value
+changes, such as `TELESCOPE_PIER_SIDE`, so a capture keeps every
+definition it sees, not only the last state.
+
+The standard set of an interface is the merge of three sources:
+
+1. The bare driver's capture: the structure, the types, the
+   permissions, the rules, and the ranges.
+2. The standard properties page of `indilib/docs`: the descriptions
+   and the units, which no driver states.
+3. A short table, written by hand, of the properties that drivers
+   share by convention and libindi does not define, such as
+   `CCD_GAIN`, `CCD_OFFSET`, `CCD_COOLER`, `CCD_COOLER_POWER`, and
+   `FOCUS_TEMPERATURE`. The simulator transcripts check each entry.
+
+The generator reports each place where two sources disagree and picks
+neither. The capture leaves out the properties of the transport and
+of `DefaultDevice`, such as `CONNECTION_MODE`, `DEVICE_PORT`, `DEBUG`,
+and `POLLING_PERIOD`, because they belong to every device and to no
+interface.
+
+A curated file names each typed field and states its unit. The
+generator fails on a standard property that has no entry in it, so no
+standard property is left untyped by accident. Where the driver chooses
+the elements, such as slew rates, track modes, capture formats, park
+positions, and filter names, the typed field is a list of the elements
+the driver defines.
+
+The bare drivers run on a workstation, never in CI and never in a
+cluster. Their sources are in `indi/standard/`, beside the images
+whose libindi they describe, and a make target builds them on the
+pinned snapshots, runs each one under `indiserver`, and captures it.
+The captures are committed under `observatory-operator/indi/standard/`,
+and a test fails when a capture names another INDI version than
+`indi/package.toml`.
+
+### The status
+
+Each property appears in exactly one object, so one update costs one
+write:
+
+- A standard property is a typed field on the resource of its
+  interface. A `FilterWheel` served by a camera shows `FILTER_SLOT` and
+  `FILTER_NAME`, and the camera does not.
+- Every other property is in `status.properties` of the owner, in full,
+  with its definition and its value, as today. That includes vendor
+  properties and the properties of `DefaultDevice`, such as `DEBUG`.
+- The schema states the definition of a typed field, so its status
+  holds the value alone. The ranges that the driver chooses, such as a
+  camera's temperature limits, are in `status.limits`.
+
+A simulated `Camera` then writes about 11.8 KB in place of 25.1 KB.
+The write rate does not change in the simulator: its camera copies the
+mount's right ascension into `EQUATORIAL_PE`, a vendor property, every
+second. Nobody has checked whether a real camera driver defines a
+property that changes that often.
+
+The schema of each kind grows, because each typed field brings its
+description. The procedure schema is 70% of the `Camera` CRD today and
+stays as it is; a later plan can return to it.
+
+## Steps
+
+Each step closes in its own commit with its tests.
+
+0. **Check the two unknowns, and take one saving now.**
+   - Run the CCD simulator with `ACTIVE_FILTER` naming itself, take a
+     frame, and check that its FITS header carries `FILTER`. Keep it as
+     a test on the transcripts.
+   - Read a reserved `Camera` with `--show-managed-fields` on liken-1. A
+     model puts the `managedFields` at about 28 KB, more than the
+     status. If they are that large, the way the operator writes status
+     is a cost of its own, and this plan takes it up.
+   - Drop `status.properties` from the operator's informer cache with
+     the `Transform` option of `kubernetes/informer`. The operator never
+     reads it from the cache, and today it decodes it on every
+     snapshot.
+1. **The bare drivers and the capture.** The sources in `indi/standard/`,
+   the make target, and a capture command in Go that also captures the
+   simulator transcripts in `indi/testdata/` again, so both are made the
+   same way after an INDI bump. The captures for every interface in the
+   table, with the variants above.
+2. **The generator.** The curated file, the hand-written table, the
+   merge with the documentation, and the report. It writes the Go
+   types and the typed fields of each CRD, and the shared device and
+   procedure schema in each CRD, which `shared_test.go` and
+   `procedureschema_test.go` hold equal by hand today.
+3. **The kinds as interfaces.** Detection from properties, `spec.device`
+   and its CEL rule, the owner's lifecycle over its served resources,
+   the resolved device and endpoint in every status, and the branches
+   on kind moved to the interface. `SkyQualityMeter` goes from the
+   types, the CRDs, the example, and the manual.
+4. **The status.** Typed fields from the generated types, `status.limits`,
+   and `status.properties` for the rest. The readings and the display
+   columns read the typed fields.
+5. **The manual and the example.** The resource pages, the guide to
+   describing equipment, and the example: `FilterWheel east` served by
+   `Camera east-main`, because the CCD simulator serves `FILTER`.
+
+## Tests
+
+The tests run on the fakes, as today, against the transcripts and the
+captures:
+
+- A `FilterWheel` served by `Camera east-main` reaches `Ready` on the
+  CCD simulator's transcript, and the camera's `ACTIVE_FILTER` names
+  the camera.
+- A frame from that camera carries the `FILTER` keyword (step 0).
+- A served resource whose owner does not define the interface reports
+  `Error` with the missing property, and the telescope still starts.
+- A device that sets the `FILTER` bit and defines no `FILTER_SLOT`
+  serves no `FilterWheel`.
+- A `DustCap` and a `FlatPanel` served by one device both activate and
+  deactivate, the cap closes before the device stops, and a delete of
+  either one waits for its deactivation.
+- A served resource that names a resource on another server is
+  refused.
+- Each property appears in one object: a `FILTER_SLOT` update writes the
+  `FilterWheel`'s status and not the camera's.
+- The generated types match the CRDs, and the captures match
+  `indi/package.toml`.
+
+## The drill
+
+On liken-1, with the simulators: reserve `east` with `FilterWheel east`
+served by `Camera east-main`, and confirm that both reach `Ready`,
+that the camera's pod is the only pod for the two, and that a captured
+frame's header names its filter. Read both objects' sizes and their
+`managedFields`, and the operator's CPU with two telescopes Ready,
+against the figures above.
+
+## Deferred
+
+- **`PowerBox`.** `POWER` shares no property shapes with `OUTPUT`, 14
+  drivers use it, and INDI has no simulator for it. `Switch` keeps
+  `spec.power` until someone's hardware needs a power box.
+- **`INPUT` on its own**, `AO`, `IMU`, `DETECTOR`, and `CORRELATOR`
+  have no kind.
+- **The procedure schema.**
+- **A driver with several INDI devices.** The operator still takes the
+  first device whose `DRIVER_EXEC` matches.
+
+## Open questions
+
+- Whether `ci/` can declare a bake target that it never publishes. If
+  not, the bare drivers build from a Dockerfile that only the make
+  target uses.
+
+## References
+
+- indilib/indi at `v2.2.5`: `libs/indibase/`, `libs/indidevice/basedevice.h`
+  (`DRIVER_INTERFACE`), `indiserver/DvrInfo.cpp`
+- indilib/indi-3rdparty at `v2.2.0`: the survey of drivers with more
+  than one interface found 45 of 315 drivers with more than one bit
+  other than `AUX`, and 53 when the bits added at connect are counted.
+- Standard properties: <https://docs.indilib.org/drivers/standard-properties/>
+- [docs#7](https://github.com/indilib/docs/issues/7): the standard
+  properties page is maintained by hand.
+- Root [plan 74](../../plans/74-astrophotography.md): what
+  `astrophotography-operator` reads from these resources.

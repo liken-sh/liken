@@ -1,6 +1,10 @@
 # 05, The property schema
 
-Proposed on 2026-10-05. Not built.
+Proposed on 2026-10-05. Not built. Replaced on 2026-10-11 by
+[plan 16](../16-kinds-are-indi-interfaces.md), which takes the standard
+set of each interface from a bare driver in place of the simulators,
+because each simulator adds properties of its own. This document stays
+as the record of the first design.
 
 Plan 06 wrote by hand the few typed fields that activation needs, such
 as a camera's `temperature` setpoint and a filter wheel's `filters`, in
