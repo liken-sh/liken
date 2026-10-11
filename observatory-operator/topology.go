@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -223,65 +224,88 @@ func (o *operator) handlesOf(t *tree, ref serverRef, devices []*device) []handle
 // claims that select returns true for, and waits until the pods are gone. A delete that
 // the API server refuses is sent again (send).
 func (o *operator) stopPods(ctx context.Context, report func(string), selected func(labels map[string]string) bool) ([]string, error) {
-	var stopped []string
-	for name, p := range o.snapshot().pods {
-		if selected(p.Metadata.Labels) {
-			stopped = append(stopped, name)
-		}
-	}
-	sort.Strings(stopped)
+	stopped := o.snapshot().podNames(selected)
 	err := o.waitFor(ctx, report, func(t *tree) (bool, string, error) {
-		var left []string
-		for name, p := range t.pods {
-			if !selected(p.Metadata.Labels) {
-				continue
-			}
-			left = append(left, name)
-			if p.Metadata.DeletionTimestamp != nil {
-				continue
-			}
-			if err := o.send(ctx, report, fmt.Sprintf("deleting pod %s", name), func() error { return o.deleteObject(podPath(o.namespace, name)) }); err != nil {
-				return false, "", err
-			}
-			if err := o.send(ctx, report, fmt.Sprintf("deleting ResourceClaim %s", name), func() error { return o.deleteObject(claimPath(o.namespace, name)) }); err != nil {
-				return false, "", err
-			}
+		if err := o.deleteSelected(ctx, report, t, selected); err != nil {
+			return false, "", err
 		}
-		for name, svc := range t.services {
-			if selected(svc.Metadata.Labels) {
-				if err := o.send(ctx, report, fmt.Sprintf("deleting Service %s", name), func() error { return o.deleteObject(servicePath(o.namespace, name)) }); err != nil {
-					return false, "", err
-				}
-			}
-		}
-		for name, files := range t.configMaps {
-			if selected(files.Metadata.Labels) {
-				if err := o.send(ctx, report, fmt.Sprintf("deleting ConfigMap %s", name), func() error { return o.deleteObject(configMapPath(o.namespace, name)) }); err != nil {
-					return false, "", err
-				}
-			}
-		}
-		sort.Strings(left)
+		left := t.podNames(selected)
 		return len(left) == 0, "stopping pods " + strings.Join(left, ", "), nil
 	})
 	return stopped, err
 }
 
-// stopServer deletes a server's pod, and then the pods and objects of
-// its devices. indiserver ends its drivers when it exits. A device pod
-// that went first would end its driver's connection, and indiserver
-// would start the driver again.
+// podNames answers the sorted names of the pods that select returns
+// true for.
+func (t *tree) podNames(selected func(labels map[string]string) bool) []string {
+	var names []string
+	for name, p := range t.pods {
+		if selected(p.Metadata.Labels) {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// deleteSelected sends the deletes of the pods, the Services, the
+// ConfigMaps, and the claims that select returns true for, and does
+// not wait for them. A pod that is terminating already gets no second
+// delete.
+func (o *operator) deleteSelected(ctx context.Context, report func(string), t *tree, selected func(labels map[string]string) bool) error {
+	for _, name := range t.podNames(selected) {
+		if t.pods[name].Metadata.DeletionTimestamp != nil {
+			continue
+		}
+		if err := o.send(ctx, report, fmt.Sprintf("deleting pod %s", name), func() error { return o.deleteObject(podPath(o.namespace, name)) }); err != nil {
+			return err
+		}
+		if err := o.send(ctx, report, fmt.Sprintf("deleting ResourceClaim %s", name), func() error { return o.deleteObject(claimPath(o.namespace, name)) }); err != nil {
+			return err
+		}
+	}
+	for name, svc := range t.services {
+		if selected(svc.Metadata.Labels) {
+			if err := o.send(ctx, report, fmt.Sprintf("deleting Service %s", name), func() error { return o.deleteObject(servicePath(o.namespace, name)) }); err != nil {
+				return err
+			}
+		}
+	}
+	for name, files := range t.configMaps {
+		if selected(files.Metadata.Labels) {
+			if err := o.send(ctx, report, fmt.Sprintf("deleting ConfigMap %s", name), func() error { return o.deleteObject(configMapPath(o.namespace, name)) }); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// stopServer deletes the pods and objects of a server's devices, then
+// the server's pod, and waits until every pod is gone. The order keeps
+// each device's container from starting again. A device pod runs socat
+// with the restart policy Always, and socat exits when the shim's
+// connection ends. When the server stops first, socat exits in a pod
+// that is not terminating yet, so the kubelet starts the container
+// again before its delete arrives. The kubelet starts no container in a
+// pod that is terminating. When a device pod stops first, indiserver
+// sees its shim exit and starts the shim again, and the new shim finds
+// no ready endpoint behind the device's Service. That shim ends with
+// indiserver when the server's delete arrives, and no driver starts.
+// Every caller disconnects the server's devices before the stop.
 func (o *operator) stopServer(ctx context.Context, report func(string), ref serverRef) ([]string, error) {
-	first, err := o.stopPods(ctx, report, func(l map[string]string) bool {
-		return l[labelServer] == ref.String() && l[labelRole] == roleServer
-	})
-	if err != nil {
+	devices := func(l map[string]string) bool {
+		return l[labelServer] == ref.String() && l[labelRole] != roleServer
+	}
+	t := o.snapshot()
+	first := t.podNames(devices)
+	if err := o.deleteSelected(ctx, report, t, devices); err != nil {
 		return first, err
 	}
 	rest, err := o.stopPods(ctx, report, onServer(ref, func(string) bool { return true }))
 	stopped := append(first, rest...)
 	sort.Strings(stopped)
-	return stopped, err
+	return slices.Compact(stopped), err
 }
 
 // onServer selects the objects of one server whose kind passes keep.

@@ -102,7 +102,10 @@ func TestALeavingDevicesPodGoesAfterItsDriverStops(t *testing.T) {
 }
 
 // A release stops each driver on its running server before it deletes
-// the driver's pod, as a device that leaves does.
+// the driver's pod, as a device that leaves does. A server that stops
+// with its devices loses their pods first, so indiserver starts each of
+// their shims once more, against a device pod that is gone, while its
+// own pod stops.
 func TestAReleaseStopsEachDriverBeforeItsPod(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -113,8 +116,11 @@ func TestAReleaseStopsEachDriverBeforeItsPod(t *testing.T) {
 			_, ok := w.reservation("east-tonight")
 			return !ok
 		})
-		if got := w.indi.restarted(); len(got) != 0 {
-			t.Errorf("restarted drivers = %q, want none", got)
+		got := w.indi.restarted()
+		slices.Sort(got)
+		want := []string{"east-telescope east-switch", "lab-observatory lab-dome", "lab-observatory lab-weatherstation"}
+		if !slices.Equal(got, want) {
+			t.Errorf("restarted drivers = %q, want only the drivers of a stopping server, %q", got, want)
 		}
 	})
 }

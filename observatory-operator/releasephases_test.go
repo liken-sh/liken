@@ -32,26 +32,25 @@ func (w *world) releasePod(name string) {
 }
 
 // The camera's driver stops on the server that keeps running for the
-// Switch, 10 seconds after the operator asks, and the dome's server
-// stops at StopSite, its pod terminating for 10 seconds while the dome's
-// pod stays.
+// Switch, 10 seconds after the operator asks, and the dome's pod
+// stops at StopSite, terminating for 10 seconds.
 func TestAReleasedDeviceIsNeverStarting(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
 		w.indi.slowShim(10 * time.Second)
-		w.holdPod("lab-observatory")
+		w.holdPod("lab-dome")
 		w.api.mu.Lock()
 		since := w.api.version
 		w.api.mu.Unlock()
 		at := time.Now().Add(time.Minute).UTC().Format(time.RFC3339)
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop", "end": at})
-		w.until(15*time.Minute, "the observatory's server does not stop", func() bool {
-			object, _ := w.api.object(podsCollection, "lab-observatory")
+		w.until(15*time.Minute, "the dome's pod does not stop", func() bool {
+			object, _ := w.api.object(podsCollection, "lab-dome")
 			return object["metadata"].(map[string]any)["deletionTimestamp"] != nil
 		})
 		time.Sleep(10 * time.Second)
-		w.releasePod("lab-observatory")
+		w.releasePod("lab-dome")
 		w.phase("east-tonight", observatory.ReservationReleased, 15*time.Minute)
 		w.settle()
 		for _, d := range []struct {
