@@ -404,6 +404,28 @@ func TestADeviceThatComesBackAndRefusesItsSettingsShowsTheFault(t *testing.T) {
 	})
 }
 
+// A device whose setup failed when it came back clears the fault when
+// it comes back again and its setup succeeds.
+func TestADeviceThatComesBackAgainClearsItsFault(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := readyWorld(t)
+		w.indi.refuse("CCD Simulator", "CCD_GAIN")
+		w.api.deleteNamed(podsCollection, "east-main-camera")
+		w.until(time.Minute, "the camera shows no fault", func() bool {
+			camera, _ := decode[observatory.Camera](t, w.api, kindCollection(observatory.CameraKind), "east-main")
+			return camera.Status.Phase == observatory.DeviceError
+		})
+		w.indi.accept("CCD Simulator", "CCD_GAIN")
+		w.api.deleteNamed(podsCollection, "east-main-camera")
+		w.until(time.Minute, "the camera keeps its fault", func() bool {
+			camera, _ := decode[observatory.Camera](t, w.api, kindCollection(observatory.CameraKind), "east-main")
+			ready := conditionOf(camera.Status.Conditions, observatory.ConditionReady)
+			return camera.Status.Phase == observatory.DeviceConnected && ready.Status == observatory.ConditionTrue
+		})
+	})
+}
+
 // A reservation whose end passed before it took its telescope ends at
 // once, and does not hold up the reservations that wait.
 func TestAReservationThatEndedBeforeItsStartGoesAtOnce(t *testing.T) {

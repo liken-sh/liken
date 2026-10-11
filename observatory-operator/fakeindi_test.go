@@ -316,6 +316,11 @@ type indiWorld struct {
 	// driver leaves out when it connects, until reveal defines them
 	// (fakepresets_test.go).
 	withheld map[string]bool
+	// silent holds the devices whose driver does not answer a
+	// getProperties that names the device, and asked counts each such
+	// getProperties by device (fakesync_test.go).
+	silent map[string]bool
+	asked  map[string]int
 	// shimDelay is the time from a change of a server pod's annotation
 	// to the shim's start or stop of a driver (fakeshim_test.go).
 	shimDelay time.Duration
@@ -330,7 +335,7 @@ type indiWorld struct {
 }
 
 func startIndiWorld(t *testing.T, api *fakeAPI) *indiWorld {
-	w := &indiWorld{t: t, api: api, servers: map[string]*fakeServer{}, held: map[string]bool{}, refused: map[string]bool{}, moving: map[string]bool{}, lateDials: map[string]int{}, presets: map[string]string{}, texts: map[string]string{}, withheld: map[string]bool{}}
+	w := &indiWorld{t: t, api: api, servers: map[string]*fakeServer{}, held: map[string]bool{}, refused: map[string]bool{}, moving: map[string]bool{}, lateDials: map[string]int{}, presets: map[string]string{}, texts: map[string]string{}, withheld: map[string]bool{}, silent: map[string]bool{}, asked: map[string]int{}}
 	go w.follow(t.Context())
 	return w
 }
@@ -525,9 +530,15 @@ func (w *indiWorld) answer(name string, s *fakeServer, c *fakeConn, v xmlVector)
 	defer w.mu.Unlock()
 	tag := v.XMLName.Local
 	if tag == "getProperties" {
+		if v.Device != "" {
+			w.asked[v.Device]++
+		}
 		// indiserver hands a getProperties that names a device to that
 		// device's driver alone.
 		for _, link := range sortedKeys(s.drivers) {
+			if w.silent[v.Device] {
+				break
+			}
 			if v.Device != "" && s.drivers[link].device != v.Device {
 				continue
 			}

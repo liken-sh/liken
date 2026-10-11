@@ -4,6 +4,11 @@ package main
 // transcript's. Every simulator starts unparked and open, so a test
 // that must see a park or a cover move presets the other side.
 
+import (
+	"fmt"
+	"slices"
+)
+
 // preset makes each driver of a device turn one member of a switch
 // property On, and the others Off, when it defines the property.
 func (w *indiWorld) preset(device, property, member string) {
@@ -61,6 +66,23 @@ func (w *indiWorld) reveal(device, property string) {
 					s.broadcast(added.def())
 				}
 			}
+		}
+	}
+}
+
+// conceal makes each connected driver of a device delete a property and
+// leave it out until reveal defines it again.
+func (w *indiWorld) conceal(device, property string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.withheld[device+"."+property] = true
+	for _, s := range w.servers {
+		for _, d := range s.drivers {
+			if d.device != device || d.find(property) == nil {
+				continue
+			}
+			d.props = slices.DeleteFunc(d.props, func(p *fakeProperty) bool { return p.Name == property })
+			s.broadcast(fmt.Sprintf("<delProperty device=\"%s\" name=\"%s\"/>\n", escape(device), escape(property)))
 		}
 	}
 }

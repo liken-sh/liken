@@ -96,10 +96,11 @@ type operator struct {
 	// faults holds the last failure of each device by its key, such as
 	// Camera/east-main, for the device's status.
 	faults map[string]string
-	// lacking holds, by the key of each resource whose INDI device does
-	// not serve the resource's interface, why (interfaces.go). It is a
-	// cache of the last verdict on what the device defines.
-	lacking map[string]string
+	// verdicts holds, by the key of each resource, the last verdict on
+	// whether its INDI device serves the resource's interface
+	// (interfaces.go). It is a cache of what the device defined, and of
+	// what the operator wrote to it.
+	verdicts map[string]verdict
 	// sites serializes the work on each observatory's server, which
 	// the runners of several telescopes share.
 	sites map[string]lock
@@ -124,7 +125,7 @@ func newOperator(namespace string, client *apiclient.Client, dialer indi.Dialer)
 		versions:  memo.New(),
 		runners:   map[string]*runner{},
 		faults:    map[string]string{},
-		lacking:   map[string]string{},
+		verdicts:  map[string]verdict{},
 		sites:     map[string]lock{},
 	}
 	// A run or an activity that changes rings structure, which also

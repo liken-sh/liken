@@ -18,7 +18,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/liken-sh/liken/observatory-operator/indi"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
@@ -87,6 +89,36 @@ func missingInterface(h handle) error {
 		h.name, strings.Join(observatory.Standards[h.d.kind].Detect, " or "), h.d.kind.Name)
 }
 
+// verdict is the operator's last decision on whether a resource's INDI
+// device serves the resource's interface. It caches what the device
+// defined when the operator last looked, and what the operator wrote
+// to it since, for the current connection of the driver.
+type verdict struct {
+	// lacking says why the device does not serve the interface, or is
+	// "" while it does.
+	lacking string
+	// silent is true when the driver did not answer a request for its
+	// properties (indi.Client.Sync), and connection is the revision of
+	// the device's CONNECTION then. The operator asks again only after
+	// CONNECTION changes, because each request makes the driver define
+	// every property again, and indiserver sends that burst to every
+	// client.
+	silent     bool
+	connection uint64
+	// unwritten is true while the resource's settings have not gone to
+	// the device, because the device did not serve the interface when
+	// the operator would have written them (configureDevice). The
+	// settings go out once for each connection of the driver, so a
+	// device that stops defining the interface for a while and defines
+	// it again keeps what a client such as a sequencer changed.
+	unwritten bool
+}
+
+// syncLimit bounds the wait for a driver to answer a request for its
+// properties. A driver answers within a second, so one that has not
+// answered in this time does not answer. It is a deadline.
+const syncLimit = 30 * time.Second
+
 // detect decides whether a connected device serves the interface of a
 // resource on it, and records the verdict. The properties of an
 // interface arrive in the burst that follows CONNECTION, and the dust
@@ -94,34 +126,70 @@ func missingInterface(h handle) error {
 // that defines none of them yet may still be on its way. detect then
 // waits for the driver to answer a getProperties (indi.Client.Sync),
 // which it does after everything it wrote before, and decides from
-// what the device defines then. ctx bounds that wait, and a wait that
-// ends with no answer decides nothing. A resource whose device does
+// what the device defines then. A driver that does not answer within
+// syncLimit gets a verdict that says so. A resource whose device does
 // not serve its interface stays connected, because the other resources
 // that its driver serves still need it, and the steps leave it out.
 func (o *operator) detect(ctx context.Context, h handle) bool {
 	if !h.serving() {
-		if err := h.client().Sync(ctx, h.name); err != nil {
+		wait, cancel := context.WithTimeout(ctx, syncLimit)
+		err := h.client().Sync(wait, h.name)
+		cancel()
+		if err != nil {
+			// A caller that stops records nothing about the driver.
+			if ctx.Err() == nil {
+				o.judge(h.d, false, verdict{silent: true, connection: h.client().Revision(h.name, "CONNECTION"),
+					lacking: fmt.Sprintf("INDI device %s did not answer a request for its properties: %v", h.name, err)})
+			}
 			return false
 		}
 	}
 	serving := h.serving()
+	v := verdict{}
+	if !serving {
+		v.lacking = missingInterface(h).Error()
+	}
+	o.judge(h.d, serving, v)
+	return serving
+}
+
+// judge records a verdict on a resource. The first verdict on a
+// resource since the operator started marks its settings unwritten
+// when the device does not serve the interface, because the operator
+// cannot tell whether they went out before. Every later verdict keeps
+// the mark of the one before.
+func (o *operator) judge(d *device, serving bool, v verdict) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if serving {
-		delete(o.lacking, h.d.key())
-	} else {
-		o.lacking[h.d.key()] = missingInterface(h).Error()
-	}
-	return serving
+	before, judged := o.verdicts[d.key()]
+	v.unwritten = before.unwritten || (!judged && !serving)
+	o.verdicts[d.key()] = v
+}
+
+// written records whether a resource's settings went to its device.
+func (o *operator) written(d *device, sent bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	v := o.verdicts[d.key()]
+	v.unwritten = !sent
+	o.verdicts[d.key()] = v
+}
+
+// verdictOf answers the last verdict on a resource, and false when it
+// has none.
+func (o *operator) verdictOf(d *device) (verdict, bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	v, ok := o.verdicts[d.key()]
+	return v, ok
 }
 
 // lackingOf answers why a resource's device does not serve its
 // interface, by the last verdict, or "" when it serves it or has no
 // verdict.
 func (o *operator) lackingOf(d *device) string {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return o.lacking[d.key()]
+	v, _ := o.verdictOf(d)
+	return v.lacking
 }
 
 // serving reports whether a handle's device serves its resource's
@@ -129,37 +197,70 @@ func (o *operator) lackingOf(d *device) string {
 func (h handle) serving() bool { return serves(h.client(), h.name, h.d.kind) }
 
 // judgeInterfaces keeps the verdict of each connected device on a
-// server current, on each change that the runner wakes for. A device
-// with no verdict, such as one the operator finds after a restart, is
-// judged once (detect). A resource whose device defines its
-// interface's properties after a verdict that it lacked them heals:
-// it gets its settings, once, and its activation runs as a resource's
-// that joins a Ready session (joins.go), because the Activation step
-// left it out.
+// server current, on each change that the runner wakes for:
+//
+//   - A device with no verdict, such as one the operator finds after a
+//     restart, is judged once (detect), and so is a device that stops
+//     defining its interface's properties.
+//   - A device whose driver did not answer is asked again when its
+//     CONNECTION changes, and not before.
+//   - A resource whose device defines its interface's properties after
+//     a verdict that it lacked them heals. It gets the settings that
+//     did not go out, and its activation runs as a resource's that
+//     joins a Ready session (joins.go), because the Activation step
+//     left it out.
+//
+// The work holds the server's lock, and the site's for the
+// observatory's server, which the runners of several telescopes share
+// (holding). Another runner may have judged a device while this one
+// waited, so each device is checked again under the locks.
 func (r *runner) judgeInterfaces(ctx context.Context, t *tree, ref serverRef) {
 	_, site, err := r.siteOf(t)
 	if err != nil {
 		return
 	}
-	// A driver that never answers holds the runner no longer than the
-	// work of a device that came back may take. It is a deadline.
-	ctx, cancel := context.WithTimeout(ctx, reapplyLimit)
-	defer cancel()
 	all := r.o.handlesOf(t, ref, t.devicesOn(ref))
-	for _, h := range all {
-		if !h.connected() {
-			continue
-		}
-		lacked := r.o.lackingOf(h.d) != ""
-		switch {
-		case lacked && h.serving():
-			r.o.detect(ctx, h)
-			var notes []string
-			_, err := configureDevice(ctx, t, site, h, all, &notes)
-			r.o.fault(h.d, err)
-			r.o.logf("%s now serves its interface on %s", h, ref)
-		case !lacked && !h.serving():
-			r.o.detect(ctx, h)
-		}
+	if !slices.ContainsFunc(all, r.o.needsJudging) {
+		return
 	}
+	err = holding(ctx, r.o.locksOf(ref, all[0].server), func(ctx context.Context) error {
+		for _, h := range all {
+			if !r.o.needsJudging(h) {
+				continue
+			}
+			before, _ := r.o.verdictOf(h.d)
+			if !r.o.detect(ctx, h) {
+				continue
+			}
+			if before.unwritten {
+				var notes []string
+				_, err := r.o.configureDevice(ctx, t, site, h, all, &notes)
+				r.o.fault(h.d, err)
+			}
+			if before.lacking != "" {
+				r.o.logf("%s now serves its interface on %s", h, ref)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		r.o.logf("judging the interfaces on %s: %v", ref, err)
+	}
+}
+
+// needsJudging reports whether a connected device's verdict is stale
+// (judgeInterfaces).
+func (o *operator) needsJudging(h handle) bool {
+	if !h.connected() {
+		return false
+	}
+	v, judged := o.verdictOf(h.d)
+	serving := h.serving()
+	switch {
+	case serving:
+		return v.lacking != "" || v.unwritten
+	case v.silent:
+		return h.client().Revision(h.name, "CONNECTION") != v.connection
+	}
+	return !judged || v.lacking == ""
 }

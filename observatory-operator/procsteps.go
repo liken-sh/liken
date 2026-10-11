@@ -61,11 +61,17 @@ func (p *stepPlan) event() event {
 }
 
 // tier answers the resources of a list of devices with one transition
-// time.
+// time. A deleted device whose driver still runs is a resource in the
+// place it left, as a leaver is (leaves.go), so its deactivation
+// resolves its references there.
 func tier(t *tree, devices []*device, since time.Time) []stepRun {
 	var out []stepRun
 	for _, d := range devices {
-		out = append(out, stepRun{t.ofDevice(d), since})
+		r := t.ofDevice(d)
+		if ref, ok := t.lastServer(d); ok {
+			r = leaver(t, d, ref)
+		}
+		out = append(out, stepRun{r, since})
 	}
 	return out
 }

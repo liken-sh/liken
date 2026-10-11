@@ -116,6 +116,14 @@ The step's summary names it too, and the rest of the telescope starts.
   `DRIVER_INTERFACE` and define none of its properties. The operator
   reads the properties, not the claim. Check the driver's properties in
   KStars, and choose the driver that defines them.
+* **A driver that does not answer.** The operator asks the driver for
+  its properties, and waits 30 seconds for the answer. When none comes,
+  the `Ready` message is
+  `INDI device <device> did not answer a request for its properties`,
+  with the error. The operator asks again when the device's
+  `CONNECTION` changes, such as when you connect the device again from
+  KStars, and not before. The INDI server's log shows the driver's own
+  messages.
 
 A resource that names another in `spec.device` reports `Error` before
 it connects when the operator cannot serve it from that resource: the

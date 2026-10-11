@@ -47,7 +47,7 @@ func TestADevicesMessageLeadsWithItsState(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := deviceMessage(c.status, c.kind, ref, "east-main-camera", c.fault, c.standing); got != c.want {
+			if got := deviceMessage(c.status, c.kind, ref.String(), "east-main-camera", c.fault, c.standing); got != c.want {
 				t.Errorf("got %q, want %q", got, c.want)
 			}
 		})

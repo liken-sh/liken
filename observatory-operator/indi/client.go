@@ -352,6 +352,20 @@ func (c *Client) Property(device, name string) (Property, bool) {
 	return c.store.Property(device, name)
 }
 
+// Revision answers the number of a property's last change, its
+// definition or its update, or 0 when the device does not define it.
+// A change takes a higher number than every change before it, on this
+// connection and on each one before, so a caller that recorded a
+// revision can tell whether the property changed since.
+func (c *Client) Revision(device, name string) uint64 {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	if e := c.store.entry(device, name); e != nil {
+		return e.updated
+	}
+	return 0
+}
+
 // write sends one message on the current connection.
 func (c *Client) write(message []byte) error {
 	c.mutex.Lock()

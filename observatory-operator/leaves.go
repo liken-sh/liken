@@ -27,6 +27,12 @@ package main
 // activation runs its deactivation whenever its parent is Active,
 // because a person can change it during the session, such as a flat
 // panel lit by hand.
+//
+// A device deleted together with its reservation, as `kubectl delete
+// -f` of a whole observatory deletes them, runs its deactivation in
+// the reservation's Deactivation step instead. The Ready runner that
+// would find it leaving has stopped, and the step reaches it through
+// the server it left (tree.lastServer).
 
 import (
 	"context"

@@ -470,6 +470,12 @@ func (o *operator) deviceHandle(ctx context.Context, c procCall, report func(str
 	} else if refusal := t.verdict(d).refusal; refusal != "" {
 		return handle{}, skip(fmt.Sprintf("%s is not served: %s", c.res, refusal))
 	}
+	if !placed && c.ending {
+		// A device deleted together with its reservation runs its
+		// deactivation in the reservation's Deactivation step, through
+		// the driver that still runs on the server it left.
+		ref, placed = t.lastServer(d)
+	}
 	if !placed {
 		return handle{}, skip(fmt.Sprintf("%s is on the shelf", c.res))
 	}
@@ -494,7 +500,7 @@ func (o *operator) deviceHandle(ctx context.Context, c procCall, report func(str
 	// each device again, and the interface's properties can follow the
 	// device's CONNECTION, so the check waits for them (detect).
 	if !o.detect(ctx, h) {
-		return handle{}, skip(missingInterface(h).Error())
+		return handle{}, skip(firstNonEmpty(o.lackingOf(h.d), missingInterface(h).Error()))
 	}
 	return h, nil
 }

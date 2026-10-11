@@ -248,13 +248,13 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 	if standing == onShelf {
 		parent = shelved()
 	}
-	message := deviceMessage(next, d.kind, ref, name, fault, standing)
+	message := deviceMessage(next, d.kind, at, name, fault, standing)
 	if detecting {
 		message = fmt.Sprintf("Waiting for %s to define %s", next.IndiDevice, strings.Join(observatory.Standards[d.kind].Detect, " or "))
 	}
 	ready := condition(observatory.ConditionReady, observatory.ConditionFalse, string(next.Phase), message)
 	if next.Phase == observatory.DeviceConnected {
-		ready = condition(observatory.ConditionReady, observatory.ConditionTrue, string(next.Phase), deviceMessage(next, d.kind, ref, name, "", standing))
+		ready = condition(observatory.ConditionReady, observatory.ConditionTrue, string(next.Phase), deviceMessage(next, d.kind, at, name, "", standing))
 	}
 	next.Conditions = []observatory.Condition{parent, ready}
 	next.Procedures = o.runs.list(recordKey(d.kind, d.object.Metadata))
@@ -299,9 +299,10 @@ func devicePhase(stopping, hasPod, defined bool, standing standing, connection i
 	return observatory.DeviceStarting
 }
 
-// deviceMessage says what a device does, or waits for. pod names the
-// device's pod.
-func deviceMessage(s deviceStatus, kind observatory.Kind, ref serverRef, pod, fault string, standing standing) string {
+// deviceMessage says what a device does, or waits for. server names
+// the server that the device runs on, or the one it left while its
+// driver still runs there, and pod names the device's pod.
+func deviceMessage(s deviceStatus, kind observatory.Kind, server, pod, fault string, standing standing) string {
 	switch {
 	case fault != "":
 		return "Failed: " + fault
@@ -316,7 +317,7 @@ func deviceMessage(s deviceStatus, kind observatory.Kind, ref serverRef, pod, fa
 	case s.Phase == observatory.DeviceDisconnecting && s.IndiDevice == "":
 		return "Stopping pod " + pod
 	case s.IndiDevice == "":
-		return "Waiting for its driver on " + ref.String()
+		return "Waiting for its driver on " + server
 	}
-	return fmt.Sprintf("%s on %s", s.Phase, ref)
+	return fmt.Sprintf("%s on %s", s.Phase, server)
 }

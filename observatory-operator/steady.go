@@ -290,7 +290,7 @@ func (r *runner) reapply(ctx context.Context, t *tree, ref serverRef, appeared *
 		if !appeared.take(ref.String(), group[0].name) || group[0].connected() {
 			continue
 		}
-		r.again(ctx, group, func(ctx context.Context) error {
+		r.again(ctx, ref, group, func(ctx context.Context) error {
 			if err := connectGroup(ctx, r.o, group); err != nil {
 				return err
 			}
@@ -302,13 +302,13 @@ func (r *runner) reapply(ctx context.Context, t *tree, ref serverRef, appeared *
 		if !appeared.take(ref.String(), group[0].name) || group[0].connected() {
 			continue
 		}
-		r.again(ctx, group, func(ctx context.Context) error {
+		r.again(ctx, ref, group, func(ctx context.Context) error {
 			if err := connectGroup(ctx, r.o, group); err != nil {
 				return err
 			}
 			var notes []string
 			for _, h := range group {
-				if _, err := configureDevice(ctx, t, site, h, all, &notes); err != nil {
+				if _, err := r.o.configureDevice(ctx, t, site, h, all, &notes); err != nil {
 					return err
 				}
 				if setpoint := coolSetpoint(h.d); interfaces[h.d.kind].cooler && setpoint != nil && h.serving() {
@@ -336,12 +336,7 @@ func (r *runner) reapplySite(ctx context.Context, t *tree, site *observatory.Obs
 		if !appeared.take(ref.String(), group[0].name) || group[0].connected() {
 			continue
 		}
-		r.again(ctx, group, func(ctx context.Context) error {
-			lock := r.o.siteLock(site.Metadata.Name)
-			if err := lock.acquire(ctx); err != nil {
-				return err
-			}
-			defer lock.release()
+		r.again(ctx, ref, group, func(ctx context.Context) error {
 			if err := connectGroup(ctx, r.o, group); err != nil {
 				return err
 			}
@@ -352,7 +347,7 @@ func (r *runner) reapplySite(ctx context.Context, t *tree, site *observatory.Obs
 			var notes []string
 			byKey := map[string]handle{}
 			for _, h := range group {
-				if _, err := configureDevice(ctx, t, site, h, nil, &notes); err != nil {
+				if _, err := r.o.configureDevice(ctx, t, site, h, nil, &notes); err != nil {
 					return err
 				}
 				byKey[h.d.key()] = h
@@ -395,21 +390,48 @@ func connectGroup(ctx context.Context, o *operator, group []handle) error {
 	return nil
 }
 
-// again runs the work for one INDI device that came back, and records
-// a failure in the status of the resource that runs its driver. A
-// failure does not end the reservation: the holder may still use the
-// other devices.
-func (r *runner) again(ctx context.Context, group []handle, work func(context.Context) error) {
+// again runs the work for one INDI device that came back on a server,
+// under the server's locks (holding), and records a failure in the
+// status of the resource that runs its driver. A failure does not end
+// the reservation: the holder may still use the other devices. A
+// success clears the fault of each resource on the device, because a
+// fault of an earlier try no longer holds.
+func (r *runner) again(ctx context.Context, ref serverRef, group []handle, work func(context.Context) error) {
 	h := group[0]
-	ctx, cancel := context.WithTimeout(ctx, reapplyLimit)
-	defer cancel()
-	err := h.server.lock.acquire(ctx)
-	if err == nil {
-		defer h.server.lock.release()
-		err = work(ctx)
-	}
-	if err != nil {
+	if err := holding(ctx, r.o.locksOf(ref, h.server), work); err != nil {
 		r.o.fault(h.d, err)
 		r.o.logf("setting up %s again failed: %v", h, err)
+		return
 	}
+	for _, member := range group {
+		r.o.fault(member.d, nil)
+	}
+}
+
+// locksOf answers the locks that a runner holds to change the devices
+// on a server: the site's lock and then the server's for the
+// observatory's server, which the runners of several telescopes share,
+// and the server's alone for a telescope's.
+func (o *operator) locksOf(ref serverRef, server *indiServer) []lock {
+	if ref.kind == observatory.ObservatoryKind {
+		return []lock{o.siteLock(ref.name), server.lock}
+	}
+	return []lock{server.lock}
+}
+
+// holding runs work while it holds locks, taken in order, with a
+// deadline of reapplyLimit on the waits and on the work. Every holder
+// of a site's lock and its server's lock takes the site's first, so two
+// runners never wait on each other. The deadline keeps a driver that
+// never answers from holding the runner and the locks.
+func holding(ctx context.Context, locks []lock, work func(context.Context) error) error {
+	ctx, cancel := context.WithTimeout(ctx, reapplyLimit)
+	defer cancel()
+	for _, l := range locks {
+		if err := l.acquire(ctx); err != nil {
+			return err
+		}
+		defer l.release()
+	}
+	return work(ctx)
 }

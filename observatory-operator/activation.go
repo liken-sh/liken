@@ -271,7 +271,7 @@ func (r *runner) connectAll(ctx context.Context, w *stepWork, handles []handle) 
 	for _, h := range handles {
 		switch {
 		case !r.o.detect(ctx, h):
-			lacking = append(lacking, h.String()+" is not served: "+lowerFirst(missingInterface(h).Error()))
+			lacking = append(lacking, h.String()+" is not served: "+lowerFirst(firstNonEmpty(r.o.lackingOf(h.d), missingInterface(h).Error())))
 		case !h.d.runsDriver():
 			served[h.name] = append(served[h.name], h.String())
 		}

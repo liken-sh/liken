@@ -174,6 +174,38 @@ func (t *tree) server(d *device) (serverRef, bool) {
 	return serverRef{observatory.ObservatoryKind, p.Name}, true
 }
 
+// lastServer answers the server that a deleted device ran on, while the
+// pod of its driver still runs there and the device has the pod
+// (podOf): a served device has it while it holds the finalizer. The
+// finalizer keeps the deleted device's object until its deactivation
+// ran through that driver, and the answer lets the run reach it.
+func (t *tree) lastServer(d *device) (serverRef, bool) {
+	if !deleting(d.object.Metadata) {
+		return serverRef{}, false
+	}
+	_, p, running := t.podOf(d)
+	if !running {
+		return serverRef{}, false
+	}
+	return t.serverNamed(p.Metadata.Labels[labelServer])
+}
+
+// serverNamed answers the server of a Telescope or an Observatory in
+// the tree by the name of its pod.
+func (t *tree) serverNamed(name string) (serverRef, bool) {
+	for scope := range t.telescopes {
+		if ref := (serverRef{observatory.TelescopeKind, scope}); ref.String() == name {
+			return ref, true
+		}
+	}
+	for site := range t.observatories {
+		if ref := (serverRef{observatory.ObservatoryKind, site}); ref.String() == name {
+			return ref, true
+		}
+	}
+	return serverRef{}, false
+}
+
 // devicesOn answers the devices that one server runs, in the order of
 // t.devices: the devices that run a driver, and the devices that one
 // of them serves. A device whose driver another device on the server

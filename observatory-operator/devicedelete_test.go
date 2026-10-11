@@ -200,6 +200,9 @@ func TestADeletedDeviceReadsConnectedWhileItsDeactivationRuns(t *testing.T) {
 		if phase := status["phase"]; phase != string(observatory.DeviceConnected) {
 			t.Errorf("phase = %v, want Connected", phase)
 		}
+		if ready := w.stateOf(observatory.DustCapKind, "east", observatory.ConditionReady); ready != "True Connected: Connected on east-telescope" {
+			t.Errorf("Ready = %q, want the server it left", ready)
+		}
 		if open := w.stateOf(observatory.DustCapKind, "east", observatory.ConditionOpen); !strings.HasPrefix(open, "True Open:") {
 			t.Errorf("Open = %q, want True Open", open)
 		}
@@ -220,4 +223,49 @@ func TestADomeDeletedOverAnUnparkedMountNamesItsLock(t *testing.T) {
 			t.Errorf("dome Events = %q, want %q", got, failed)
 		}
 	})
+}
+
+// A dust cap deleted together with the reservation, as `kubectl delete
+// -f` of a whole observatory does, closes in the reservation's
+// Deactivation step before it goes, whether it runs its driver or a
+// Flip-Flat serves it. An exposure that the Abort step waits for holds
+// the step until the cap's delete arrives, so the Deactivation step
+// finds the cap deleted.
+func TestADeviceDeletedWithItsReservationRunsItsDeactivation(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		setup func(w *world)
+		close string
+	}{
+		{"a dust cap that runs its driver", func(*world) {}, parkCap},
+		{"a dust cap that a Flip-Flat serves", func(w *world) { w.flipFlat() }, closeFlipFlat},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				w := startWorld(t)
+				c.setup(w)
+				readyOf(w)
+				w.indi.setState("east-telescope", "CCD Simulator", "CCD_EXPOSURE", "Busy")
+				w.indi.hold("CCD Simulator", "CCD_ABORT_EXPOSURE")
+				w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
+				w.until(time.Minute, "the Abort step does not abort the exposure", func() bool {
+					return w.indi.count("east-telescope", "CCD Simulator.CCD_ABORT_EXPOSURE") > 0
+				})
+				w.api.deleteNamed(kindCollection(observatory.DustCapKind), "east")
+				time.Sleep(time.Minute)
+				synctest.Wait()
+				w.indi.setState("east-telescope", "CCD Simulator", "CCD_EXPOSURE", "Ok")
+				w.gone(observatory.DustCapKind, "east", 10*time.Minute)
+				if !slices.Contains(w.indi.changes(), c.close) {
+					t.Errorf("changes = %q\nwant %q before the dust cap went", w.indi.changes(), c.close)
+				}
+				if n := startedRuns(w.api, observatory.DustCapKind, "east", observatory.TriggerDeactivation); n != 1 {
+					t.Errorf("the deactivation started %d times, want once", n)
+				}
+			})
+		})
+	}
 }

@@ -73,7 +73,10 @@ func (t *tree) runnerOf(d *device) (*device, bool) {
 }
 
 // podOf answers the name of the pod that runs a device's driver, and
-// the pod while it exists.
+// the pod while it exists. A served device has the pod only while it
+// shares its owner's device (shares): a served device on the shelf
+// that let go of its owner has no pod, though its spec.device still
+// names the owner.
 func (t *tree) podOf(d *device) (string, *pod, bool) {
 	runner, ok := t.runnerOf(d)
 	if !ok {
@@ -84,7 +87,18 @@ func (t *tree) podOf(d *device) (string, *pod, bool) {
 		return "", nil, false
 	}
 	p, ok := t.pods[name]
+	if !d.runsDriver() && !t.shares(d) {
+		return name, nil, false
+	}
 	return name, p, ok
+}
+
+// shares reports whether a served device shares the INDI device of the
+// resource that its spec.device names: the tree serves it on its
+// server, or it left that server and still holds the finalizer, while
+// its deactivation runs there (leaveServed).
+func (t *tree) shares(d *device) bool {
+	return t.verdict(d).owner != nil || holdsFinalizer(d.object.Metadata)
 }
 
 // serving is the tree's verdict on one served device that is placed on
@@ -330,7 +344,9 @@ func joiningServed(t *tree, devices []*device) []*device {
 // already, so no driver appears for the runner to set up again
 // (reapply), and the device's settings would not reach it otherwise. A
 // device whose owner is not connected yet gets its settings when the
-// owner connects.
+// owner connects. The work holds the server's lock, with the deadline
+// of holding. keepPods holds the site's lock already for the
+// observatory's server, so the work takes the server's lock alone.
 func (r *runner) configureJoined(ctx context.Context, t *tree, ref serverRef, joining []*device) {
 	if len(joining) == 0 {
 		return
@@ -339,16 +355,26 @@ func (r *runner) configureJoined(ctx context.Context, t *tree, ref serverRef, jo
 	if err != nil {
 		return
 	}
+	handles := r.o.handlesOf(t, ref, joining)
+	if len(handles) == 0 {
+		return
+	}
 	all := r.o.handlesOf(t, ref, t.devicesOn(ref))
-	for _, h := range r.o.handlesOf(t, ref, joining) {
-		if !h.connected() || !r.o.detect(ctx, h) {
-			continue
+	err = holding(ctx, []lock{handles[0].server.lock}, func(ctx context.Context) error {
+		for _, h := range handles {
+			if !h.connected() || !r.o.detect(ctx, h) {
+				continue
+			}
+			var notes []string
+			_, err := r.o.configureDevice(ctx, t, site, h, all, &notes)
+			r.o.fault(h.d, err)
+			if err != nil {
+				r.o.logf("configuring %s, which joined %s: %v", h, ref, err)
+			}
 		}
-		var notes []string
-		_, err := configureDevice(ctx, t, site, h, all, &notes)
-		r.o.fault(h.d, err)
-		if err != nil {
-			r.o.logf("configuring %s, which joined %s: %v", h, ref, err)
-		}
+		return nil
+	})
+	if err != nil {
+		r.o.logf("configuring the devices that joined %s: %v", ref, err)
 	}
 }

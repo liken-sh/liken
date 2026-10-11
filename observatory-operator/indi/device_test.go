@@ -203,6 +203,53 @@ func TestSyncWaitsForEverythingTheDriverWroteBefore(t *testing.T) {
 	})
 }
 
+// An update of CONNECTION is not the driver's answer to getProperties:
+// KStars can connect the device again while Sync waits, and the
+// driver's Busy and Ok come before the interface's properties. Sync
+// waits for the driver to define CONNECTION again, which it does in
+// its answer.
+func TestSyncWaitsForTheDefinitionOfConnection(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c, server := connectedBaseline(t, "dustcover")
+		server.mute()
+		synced := make(chan error, 1)
+		go func() { synced <- c.Sync(context.Background(), server.device) }()
+		server.awaitElement("getProperties", 2)
+		server.send(`<setSwitchVector device="` + server.device + `" name="CONNECTION" state="Busy"/>
+	<setSwitchVector device="` + server.device + `" name="CONNECTION" state="Ok"><oneSwitch name="CONNECT">On</oneSwitch><oneSwitch name="DISCONNECT">Off</oneSwitch></setSwitchVector>`)
+		synctest.Wait()
+		select {
+		case err := <-synced:
+			t.Fatalf("Sync returned %v on an update of CONNECTION", err)
+		default:
+		}
+		server.send(`<defSwitchVector device="` + server.device + `" name="CONNECTION" state="Ok" perm="rw" rule="OneOfMany"><defSwitch name="CONNECT">On</defSwitch><defSwitch name="DISCONNECT">Off</defSwitch></defSwitchVector>`)
+		if err := <-synced; err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+// A property's revision rises with each definition and each update, so
+// a caller can tell whether the property changed since it looked.
+func TestARevisionRisesWithEachChange(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c, server := connectedBaseline(t, "dustcover")
+		if r := c.Revision(server.device, "NOTHING"); r != 0 {
+			t.Errorf("the revision of a property that is not defined = %d, want 0", r)
+		}
+		first := c.Revision(server.device, "CONNECTION")
+		server.send(`<setSwitchVector device="` + server.device + `" name="CONNECTION" state="Busy"/>`)
+		synctest.Wait()
+		updated := c.Revision(server.device, "CONNECTION")
+		server.send(`<defSwitchVector device="` + server.device + `" name="CONNECTION" state="Ok" perm="rw" rule="OneOfMany"><defSwitch name="CONNECT">Off</defSwitch><defSwitch name="DISCONNECT">On</defSwitch></defSwitchVector>`)
+		synctest.Wait()
+		if defined := c.Revision(server.device, "CONNECTION"); first == 0 || updated <= first || defined <= updated {
+			t.Errorf("revisions = %d, %d, %d, want each one higher", first, updated, defined)
+		}
+	})
+}
+
 func TestSyncFails(t *testing.T) {
 	cases := []struct {
 		name  string

@@ -334,6 +334,33 @@ func TestAServedResourceThatJoinsAReadySessionGetsItsSettings(t *testing.T) {
 	})
 }
 
+// A served resource that joins a driver that never answers its settings
+// holds the runner no longer than reapplyLimit: it reports the failure,
+// and the runner goes on to create a pod that is gone.
+func TestAServedResourceThatJoinsADriverThatNeverAnswersDoesNotHoldTheRunner(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := readyWorld(t)
+		w.api.deleteNamed(kindCollection(observatory.FilterWheelKind), "east")
+		w.gone(observatory.FilterWheelKind, "east", 5*time.Minute)
+		w.indi.hold("CCD Simulator", "FILTER_NAME")
+		before := w.indi.count("east-telescope", "CCD Simulator.FILTER_NAME")
+		w.put(observatory.FilterWheelKind, "east-new", map[string]any{"opticalTrain": "east-imaging",
+			"device": map[string]any{"kind": "Camera", "name": "east-main"}, "filters": []any{"Clear", "Red"}})
+		w.until(time.Minute, "the new filter wheel's names are not sent", func() bool {
+			return w.indi.count("east-telescope", "CCD Simulator.FILTER_NAME") > before
+		})
+		w.api.deleteNamed(podsCollection, "east-focuser")
+		w.until(2*reapplyLimit, "the runner does not create the focuser's pod again", func() bool {
+			return slices.Contains(w.api.names(podsCollection), "east-focuser")
+		})
+		w.until(time.Minute, "the new filter wheel shows no fault", func() bool {
+			wheel, _ := decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east-new")
+			return wheel.Status.Phase == observatory.DeviceError
+		})
+	})
+}
+
 // A resource whose device defines its interface only after the step
 // that connected it decided that it lacks the interface heals: it
 // reports Connected, gets its settings, and runs its activation, as a

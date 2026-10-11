@@ -96,21 +96,26 @@ func familyNumber(name, prefix string) (int32, bool) {
 
 // sharers answers the resources that one INDI device serves, in the
 // order that they take a property that two standard sets hold: each
-// device that names it in spec.device and that the tree does not refuse,
-// in the order of the tree, then the device that runs its driver. A
-// served device that left its server still reads the device until the
-// driver stops (status.go), so it shares the device too.
+// device that the tree serves on it, in the order of the tree, then each
+// device that left its server and still holds the finalizer (shares),
+// then the device that runs its driver. A device that left reads the
+// owner's device while its deactivation runs (status.go), and one that
+// the tree serves takes the properties from it, so a FilterWheel that
+// joins a camera reads the wheel at once.
 func (t *tree) sharers(owner *device) []*device {
-	var out []*device
+	var served, leaving []*device
 	for _, d := range t.devices {
-		if d.runsDriver() || t.verdict(d).refusal != "" {
+		if d.runsDriver() || t.verdict(d).refusal != "" || !t.shares(d) {
 			continue
 		}
-		if named, ok := t.named(d); ok && named == owner {
-			out = append(out, d)
+		switch named, _ := t.named(d); {
+		case t.verdict(d).owner == owner:
+			served = append(served, d)
+		case named == owner:
+			leaving = append(leaving, d)
 		}
 	}
-	return append(out, owner)
+	return append(append(served, leaving...), owner)
 }
 
 // holders answers the resource whose typed field holds each property of

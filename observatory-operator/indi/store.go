@@ -36,13 +36,15 @@ type device struct {
 }
 
 // An entry records the sequence of the property's first definition,
-// of its last change, and of its last change to Busy. Settle reads
-// them, because several changes can arrive between two of its checks.
+// of its last definition, of its last change, and of its last change
+// to Busy. Settle and Sync read them, because several changes can
+// arrive between two of their checks.
 type entry struct {
-	property Property
-	defined  uint64
-	updated  uint64
-	busy     uint64
+	property  Property
+	defined   uint64
+	redefined uint64
+	updated   uint64
+	busy      uint64
 }
 
 // Connected reports whether the client has a connection to the server.
@@ -117,6 +119,7 @@ func (s *Store) define(p Property) {
 		d.properties[p.Name] = e
 		d.order = append(d.order, p.Name)
 	}
+	e.redefined = s.sequence
 	e.set(p, s.sequence)
 }
 

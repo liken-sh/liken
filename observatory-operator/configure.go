@@ -38,7 +38,7 @@ func (r *runner) configure(ctx context.Context, w *stepWork) (outcome, error) {
 	var notes, wrote []string
 	for _, h := range all {
 		w.report("configuring " + h.String())
-		changed, err := configureDevice(ctx, t, site, h, handles, &notes)
+		changed, err := r.o.configureDevice(ctx, t, site, h, handles, &notes)
 		// A device that does not serve its interface keeps the fault
 		// that detect recorded.
 		if err != nil || h.serving() {
@@ -63,9 +63,15 @@ func (r *runner) configure(ctx context.Context, w *stepWork) (outcome, error) {
 // configureDevice writes one resource's settings to the INDI device
 // that serves it, and answers whether it sent any. A resource whose
 // device does not serve its interface reports Error already (detect),
-// and gets nothing.
-func configureDevice(ctx context.Context, t *tree, site *observatory.Observatory, h handle, all []handle, notes *[]string) (bool, error) {
-	if !h.serving() {
+// and gets nothing until it heals (judgeInterfaces). The verdict
+// records which of the two happened, so a heal writes the settings
+// only when they did not go out. A write that fails counts as sent,
+// because its fault is in the resource's status, and a heal that sent
+// it again on each change would repeat the failure.
+func (o *operator) configureDevice(ctx context.Context, t *tree, site *observatory.Observatory, h handle, all []handle, notes *[]string) (bool, error) {
+	serving := h.serving()
+	o.written(h.d, serving)
+	if !serving {
 		return false, nil
 	}
 	var changes []bool

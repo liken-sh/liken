@@ -61,9 +61,14 @@ func (c *Client) setConnection(ctx context.Context, device, member string) error
 // properties again, CONNECTION among them (DefaultDevice::ISGetProperties
 // in libs/indibase/defaultdevice.cpp). A driver answers in the order it
 // reads, so its answer comes after everything it wrote before, and the
-// next report of CONNECTION shows that the client has applied all of
-// it. It fails when the connection ends or the device deletes
-// CONNECTION, and ctx bounds the wait.
+// next definition of CONNECTION shows that the client has applied all
+// of it. An update of CONNECTION does not count: a client such as
+// KStars can connect the device again during the wait, and the
+// driver's Busy and Ok come before the properties that the connection
+// defines. Each Sync makes the driver define every property again, and
+// indiserver sends that burst to every client, so a caller syncs only
+// when it has a reason to. It fails when the connection ends or the
+// device deletes CONNECTION, and ctx bounds the wait.
 func (c *Client) Sync(ctx context.Context, device string) error {
 	c.mutex.Lock()
 	opened, sequence := c.store.connection, c.store.sequence
@@ -87,6 +92,6 @@ func (c *Client) Sync(ctx context.Context, device string) error {
 		if e == nil || e.defined != defined {
 			return false, fmt.Errorf("%w: waiting for %s.%s", ErrDeleted, device, connection)
 		}
-		return e.updated > sequence, nil
+		return e.redefined > sequence, nil
 	})
 }
