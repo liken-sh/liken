@@ -257,9 +257,11 @@ positions, and filter names, the typed field is a list of the elements
 the driver defines.
 
 The bare drivers run on a workstation, never in CI and never in a
-cluster. Their sources are in `indi/standard/`, beside the images
-whose libindi they describe, and a make target builds them on the
-pinned snapshots, runs each one under `indiserver`, and captures it.
+cluster. Their sources are in `observatory-operator/indi/standard/bare/`,
+not in `indi/`, because every file in `indi/` is part of the recipe of
+the 17 INDI images, and a new one would rebuild them all. A make target
+builds the drivers on the pinned snapshots, from a bake file of their
+own, runs each one under `indiserver`, and captures it.
 The captures are committed under `observatory-operator/indi/standard/`,
 and a test fails when a capture names another INDI version than
 `indi/package.toml`.
@@ -339,7 +341,7 @@ Each step closes in its own commit with its tests.
      API server finds it unchanged and stores nothing, so the cost is
      one request, with no write to etcd and no watch event. A `PUT`
      of an unchanged status on liken-1 kept its `resourceVersion`.
-1. **The bare drivers and the capture.** The sources in `indi/standard/`,
+1. **The bare drivers and the capture.** The sources in `indi/standard/bare/`,
    the make target, and a capture command in Go that also captures the
    simulator transcripts in `indi/testdata/` again, so both are made the
    same way after an INDI bump. The captures for every interface in the
@@ -406,9 +408,9 @@ against the figures above.
 
 ## Open questions
 
-- Whether `ci/` can declare a bake target that it never publishes. If
-  not, the bare drivers build from a Dockerfile that only the make
-  target uses.
+None. `ci/` cannot declare a bake target that it never publishes,
+because it writes a target only for an image it publishes. So the bare
+drivers build from a bake file that only the make target uses.
 
 ## References
 

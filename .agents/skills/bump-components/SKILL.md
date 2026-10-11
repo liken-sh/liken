@@ -199,8 +199,11 @@ section "The notices" in `indi/README.md` holds the steps. Build every target in
 `indi/package.toml` and run each smoke check. The build fails when a
 new release adds a third-party driver that no list in `indi/images/`
 names; add it to an image's list or to `indi/images/unpublished`, and
-say which in the report. CI builds the 17 images only when this tag is
-new.
+say which in the report. Then run `make -C observatory-operator
+captures`, which records the captures of the standard INDI properties
+and the simulator transcripts again on the new libindi; the operator's
+tests fail until it runs. CI builds the 17 images only when this tag
+is new.
 
 ## 6. Report
 

@@ -1,0 +1,63 @@
+<capture driver="indi_bare_focuser" device="Bare Focuser" indi="2.2.5+202610040455~ubuntu26.04.1" interface="8">
+<phase name="connect">
+<defSwitchVector device="Bare Focuser" name="FOCUS_MOTION" label="Direction" group="Main Control" state="Ok" perm="rw" rule="OneOfMany" timeout="60">
+    <defSwitch name="FOCUS_INWARD" label="Focus In">
+On
+    </defSwitch>
+    <defSwitch name="FOCUS_OUTWARD" label="Focus Out">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Bare Focuser" name="FOCUS_SPEED" label="Speed" group="Main Control" state="Ok" perm="rw" timeout="60">
+    <defNumber name="FOCUS_SPEED_VALUE" label="Focus Speed" format="%3.0f" min="0" max="255" step="1">
+255
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Bare Focuser" name="REL_FOCUS_POSITION" label="Relative Position" group="Main Control" state="Ok" perm="rw" timeout="60">
+    <defNumber name="FOCUS_RELATIVE_POSITION" label="Steps" format="%.f" min="0" max="100000" step="1000">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Bare Focuser" name="ABS_FOCUS_POSITION" label="Absolute Position" group="Main Control" state="Ok" perm="rw" timeout="60">
+    <defNumber name="FOCUS_ABSOLUTE_POSITION" label="Steps" format="%.f" min="0" max="100000" step="1000">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Bare Focuser" name="FOCUS_MAX" label="Max. Position" group="Main Control" state="Ok" perm="rw" timeout="60">
+    <defNumber name="FOCUS_MAX_VALUE" label="Steps" format="%.f" min="1000" max="1000000" step="10000">
+100000
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Bare Focuser" name="FOCUS_ABORT_MOTION" label="Abort Motion" group="Main Control" state="Idle" perm="rw" rule="AtMostOne" timeout="60">
+    <defSwitch name="ABORT" label="Abort">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Bare Focuser" name="FOCUS_SYNC" label="Sync" group="Main Control" state="Ok" perm="rw" timeout="60">
+    <defNumber name="FOCUS_SYNC_VALUE" label="Steps" format="%.f" min="0" max="100000" step="1000">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Bare Focuser" name="FOCUS_REVERSE_MOTION" label="Reverse Motion" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60">
+    <defSwitch name="INDI_ENABLED" label="Enabled">
+Off
+    </defSwitch>
+    <defSwitch name="INDI_DISABLED" label="Disabled">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Focuser" name="FOCUS_BACKLASH_TOGGLE" label="Backlash" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60">
+    <defSwitch name="INDI_ENABLED" label="Enabled">
+Off
+    </defSwitch>
+    <defSwitch name="INDI_DISABLED" label="Disabled">
+On
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Bare Focuser" name="FOCUS_BACKLASH_STEPS" label="Backlash" group="Main Control" state="Ok" perm="rw" timeout="60">
+    <defNumber name="FOCUS_BACKLASH_VALUE" label="Steps" format="%.f" min="0" max="1000000" step="100">
+0
+    </defNumber>
+</defNumberVector>
+</phase>
+</capture>

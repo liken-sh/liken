@@ -1,0 +1,3 @@
+# The build reads the sources and CMakeLists.txt.
+Dockerfile
+docker-bake.hcl

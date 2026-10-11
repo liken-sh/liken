@@ -1,0 +1,214 @@
+<capture driver="indi_bare_receiver" device="Bare Receiver" indi="2.2.5+202610040455~ubuntu26.04.1" interface="8192">
+<phase name="baseline">
+<defTextVector device="Bare Receiver" name="ACTIVE_DEVICES" label="Snoop devices" group="Options" state="Idle" perm="rw" timeout="60">
+    <defText name="ACTIVE_TELESCOPE" label="Telescope">
+Telescope Simulator
+    </defText>
+    <defText name="ACTIVE_GPS" label="GPS">
+GPS Simulator
+    </defText>
+</defTextVector>
+</phase>
+<phase name="connect">
+<defNumberVector device="Bare Receiver" name="RECEIVER_SETTINGS" label="Receiver Settings" group="Main Control" state="Idle" perm="rw" timeout="60">
+    <defNumber name="RECEIVER_GAIN" label="Gain" format="%16.2f" min="1" max="4" step="1">
+1
+    </defNumber>
+    <defNumber name="RECEIVER_FREQUENCY" label="Frequency" format="%16.2f" min="1" max="4" step="1">
+1
+    </defNumber>
+    <defNumber name="RECEIVER_BANDWIDTH" label="Bandwidth" format="%16.2f" min="1" max="4" step="1">
+1
+    </defNumber>
+    <defNumber name="RECEIVER_BITSPERSAMPLE" label="Bits per sample" format="%16.2f" min="1" max="4" step="1">
+1
+    </defNumber>
+    <defNumber name="RECEIVER_SAMPLERATE" label="Sampling rate" format="%16.2f" min="1" max="4" step="1">
+1
+    </defNumber>
+    <defNumber name="RECEIVER_ANTENNA" label="Antenna" format="%16.2f" min="1" max="4" step="1">
+1
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Bare Receiver" name="SENSOR_TEMPERATURE" label="Temperature" group="Main Control" state="Idle" perm="rw" timeout="60">
+    <defNumber name="SENSOR_TEMPERATURE_VALUE" label="Temperature (C)" format="%5.2f" min="-50" max="50" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Bare Receiver" name="SENSOR_INTEGRATION" label="Integration" group="Main Control" state="Idle" perm="rw" timeout="60">
+    <defNumber name="SENSOR_INTEGRATION_VALUE" label="Time (s)" format="%5.2f" min="0.010000000000000000208" max="3600" step="1">
+1
+    </defNumber>
+</defNumberVector>
+<defTextVector device="Bare Receiver" name="FITS_HEADER" label="FITS Header" group="General Info" state="Idle" perm="rw" timeout="60">
+    <defText name="FITS_OBSERVER" label="Observer">
+Unknown
+    </defText>
+    <defText name="FITS_OBJECT" label="Object">
+Unknown
+    </defText>
+</defTextVector>
+<defBLOBVector device="Bare Receiver" name="SENSOR" label="Integration Data" group="Main Control" state="Idle" perm="ro" timeout="60">
+    <defBLOB name="Continuum" label="Sensor Continuum Blob"/>
+    <defBLOB name="Real" label="Sensor Data Real"/>
+    <defBLOB name="Imaginary" label="Sensor Imaginary Blob"/>
+    <defBLOB name="Magnitude" label="Sensor Magnitude Blob"/>
+    <defBLOB name="Phase" label="Sensor Phase Blob"/>
+</defBLOBVector>
+<defSwitchVector device="Bare Receiver" name="UPLOAD_MODE" label="Upload" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0">
+    <defSwitch name="UPLOAD_CLIENT" label="Client">
+On
+    </defSwitch>
+    <defSwitch name="UPLOAD_LOCAL" label="Local">
+Off
+    </defSwitch>
+    <defSwitch name="UPLOAD_BOTH" label="Both">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Bare Receiver" name="UPLOAD_SETTINGS" label="Upload Settings" group="Options" state="Idle" perm="rw" timeout="60">
+    <defText name="UPLOAD_DIR" label="Dir">
+/root
+    </defText>
+    <defText name="UPLOAD_PREFIX" label="Prefix">
+INTEGRATION_XXX
+    </defText>
+</defTextVector>
+<defSwitchVector device="Bare Receiver" name="SENSOR_DATA_STREAM" label="Video Stream" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0">
+    <defSwitch name="STREAM_ON" label="Stream On">
+Off
+    </defSwitch>
+    <defSwitch name="STREAM_OFF" label="Stream Off">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Receiver" name="STREAM_FULL_DEPTH" label="Stream Depth" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0">
+    <defSwitch name="FULL_DEPTH_8BIT" label="8-bit">
+On
+    </defSwitch>
+    <defSwitch name="FULL_DEPTH_16BIT" label="16-bit">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Bare Receiver" name="STREAM_DELAY" label="Video Stream Delay" group="Streaming" state="Idle" perm="ro" timeout="0">
+    <defNumber name="STREAM_DELAY_TIME" label="Delay (s)" format="%.3f" min="0" max="60" step="0.0010000000000000000208">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Bare Receiver" name="STREAMING_EXPOSURE" label="Expose" group="Streaming" state="Idle" perm="rw" timeout="60">
+    <defNumber name="STREAMING_EXPOSURE_VALUE" label="Duration (s)" format="%.6f" min="9.9999999999999995475e-07" max="60" step="0.10000000000000000555">
+0.10000000000000000555
+    </defNumber>
+    <defNumber name="STREAMING_DIVISOR_VALUE" label="Divisor" format="%.f" min="1" max="15" step="1">
+1
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Bare Receiver" name="FPS" label="FPS" group="Streaming" state="Idle" perm="ro" timeout="60">
+    <defNumber name="EST_FPS" label="Instant." format="%.2f" min="0" max="999" step="0">
+30
+    </defNumber>
+    <defNumber name="AVG_FPS" label="Average (1 sec.)" format="%.2f" min="0" max="999" step="0">
+30
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Bare Receiver" name="RECORD_STREAM" label="Video Record" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0">
+    <defSwitch name="RECORD_ON" label="Record On">
+Off
+    </defSwitch>
+    <defSwitch name="RECORD_DURATION_ON" label="Record (Duration)">
+Off
+    </defSwitch>
+    <defSwitch name="RECORD_FRAME_ON" label="Record (Frames)">
+Off
+    </defSwitch>
+    <defSwitch name="RECORD_OFF" label="Record Off">
+On
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Bare Receiver" name="RECORD_FILE" label="Record File" group="Streaming" state="Idle" perm="rw" timeout="0">
+    <defText name="RECORD_FILE_DIR" label="Dir.">
+/root/Videos/indi__D_
+    </defText>
+    <defText name="RECORD_FILE_NAME" label="Name">
+indi_record__T_
+    </defText>
+</defTextVector>
+<defNumberVector device="Bare Receiver" name="RECORD_OPTIONS" label="Record Options" group="Streaming" state="Idle" perm="rw" timeout="60">
+    <defNumber name="RECORD_DURATION" label="Duration (sec)" format="%.3f" min="0.0010000000000000000208" max="999999" step="0">
+1
+    </defNumber>
+    <defNumber name="RECORD_FRAME_TOTAL" label="Frames" format="%.f" min="1" max="999999999" step="1">
+30
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Bare Receiver" name="SENSOR_STREAM_ENCODER" label="Encoder" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0">
+    <defSwitch name="RAW" label="RAW">
+On
+    </defSwitch>
+    <defSwitch name="MJPEG" label="MJPEG">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Receiver" name="SENSOR_STREAM_RECORDER" label="Recorder" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0">
+    <defSwitch name="SER" label="SER">
+On
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Bare Receiver" name="LIMITS" label="Limits" group="Streaming" state="Idle" perm="rw" timeout="0">
+    <defNumber name="LIMITS_BUFFER_MAX" label="Maximum Buffer Size (MB)" format="%.0f" min="1" max="65536" step="1">
+512
+    </defNumber>
+    <defNumber name="LIMITS_PREVIEW_FPS" label="Maximum Preview FPS" format="%.0f" min="1" max="120" step="1">
+10
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Bare Receiver" name="DSP_ACTIVATE_CONVOLUTION" label="Convolution" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60">
+    <defSwitch name="DSP_ACTIVATE_ON" label="On">
+Off
+    </defSwitch>
+    <defSwitch name="DSP_ACTIVATE_OFF" label="Off">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Receiver" name="DSP_ACTIVATE_DFT" label="DFT" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60">
+    <defSwitch name="DSP_ACTIVATE_ON" label="On">
+Off
+    </defSwitch>
+    <defSwitch name="DSP_ACTIVATE_OFF" label="Off">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Receiver" name="DSP_ACTIVATE_IDFT" label="IDFT" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60">
+    <defSwitch name="DSP_ACTIVATE_ON" label="On">
+Off
+    </defSwitch>
+    <defSwitch name="DSP_ACTIVATE_OFF" label="Off">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Receiver" name="DSP_ACTIVATE_SPECTRUM" label="Spectrum" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60">
+    <defSwitch name="DSP_ACTIVATE_ON" label="On">
+Off
+    </defSwitch>
+    <defSwitch name="DSP_ACTIVATE_OFF" label="Off">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Receiver" name="DSP_ACTIVATE_HISTOGRAM" label="Histogram" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60">
+    <defSwitch name="DSP_ACTIVATE_ON" label="On">
+Off
+    </defSwitch>
+    <defSwitch name="DSP_ACTIVATE_OFF" label="Off">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Receiver" name="DSP_ACTIVATE_WAVELETS" label="Wavelets" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60">
+    <defSwitch name="DSP_ACTIVATE_ON" label="On">
+Off
+    </defSwitch>
+    <defSwitch name="DSP_ACTIVATE_OFF" label="Off">
+On
+    </defSwitch>
+</defSwitchVector>
+</phase>
+</capture>

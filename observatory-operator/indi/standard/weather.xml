@@ -1,0 +1,48 @@
+<capture driver="indi_bare_weather" device="Bare Weather" indi="2.2.5+202610040455~ubuntu26.04.1" interface="128">
+<phase name="connect">
+<defNumberVector device="Bare Weather" name="WEATHER_UPDATE" label="Update" group="Main Control" state="Idle" perm="rw" timeout="60">
+    <defNumber name="PERIOD" label="Period (s)" format="%.f" min="0" max="3600" step="60">
+60
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Bare Weather" name="WEATHER_REFRESH" label="Weather" group="Main Control" state="Idle" perm="rw" rule="AtMostOne" timeout="0">
+    <defSwitch name="REFRESH" label="Refresh">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Weather" name="WEATHER_OVERRIDE" label="Safety" group="Main Control" state="Idle" perm="rw" rule="AnyOfMany" timeout="0">
+    <defSwitch name="OVERRIDE" label="Override Status">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defLightVector device="Bare Weather" name="WEATHER_STATUS" label="Status" group="Main Control" state="Idle">
+    <defLight name="WEATHER_TEMPERATURE" label="Temperature (C)">
+Idle
+    </defLight>
+</defLightVector>
+<defLightVector device="Bare Weather" name="SAFETY_STATUS" label="Safety" group="Main Control" state="Idle">
+    <defLight name="SAFETY" label="Safety">
+Idle
+    </defLight>
+</defLightVector>
+<defNumberVector device="Bare Weather" name="WEATHER_PARAMETERS" label="Parameters" group="Parameters" state="Ok" perm="ro" timeout="60">
+    <defNumber name="WEATHER_TEMPERATURE" label="Temperature (C)" format="%.2f" min="-10" max="30" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Bare Weather" name="WEATHER_TEMPERATURE" label="Temperature (C)" group="Parameters" state="Idle" perm="rw" timeout="60">
+    <defNumber name="MIN_OK" label="OK range min" format="%.2f" min="-1000000" max="1000000" step="0">
+-10
+    </defNumber>
+    <defNumber name="MAX_OK" label="OK range max" format="%.2f" min="-1000000" max="1000000" step="0">
+30
+    </defNumber>
+    <defNumber name="PERC_WARN" label="% for Warning" format="%.f" min="0" max="100" step="5">
+15
+    </defNumber>
+    <defNumber name="ALERT_TYPE" label="Flip alerting to in-bounds" format="%.f" min="0" max="1" step="1">
+0
+    </defNumber>
+</defNumberVector>
+</phase>
+</capture>

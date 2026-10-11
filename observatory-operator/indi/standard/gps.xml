@@ -1,0 +1,40 @@
+<capture driver="indi_bare_gps" device="Bare GPS" indi="2.2.5+202610040455~ubuntu26.04.1" interface="64">
+<phase name="connect">
+<defNumberVector device="Bare GPS" name="GEOGRAPHIC_COORD" label="Location" group="Main Control" state="Ok" perm="ro" timeout="60">
+    <defNumber name="LAT" label="Lat (dd:mm:ss)" format="%010.6m" min="-90" max="90" step="0">
+0
+    </defNumber>
+    <defNumber name="LONG" label="Lon (dd:mm:ss)" format="%010.6m" min="0" max="360" step="0">
+0
+    </defNumber>
+    <defNumber name="ELEV" label="Elevation (m)" format="%g" min="-200" max="10000" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defTextVector device="Bare GPS" name="TIME_UTC" label="UTC" group="Main Control" state="Ok" perm="ro" timeout="60">
+    <defText name="UTC" label="UTC Time"/>
+    <defText name="OFFSET" label="UTC Offset"/>
+</defTextVector>
+<defSwitchVector device="Bare GPS" name="GPS_REFRESH" label="Refresh" group="Main Control" state="Ok" perm="rw" rule="AtMostOne" timeout="0">
+    <defSwitch name="REFRESH" label="GPS">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Bare GPS" name="GPS_REFRESH_PERIOD" label="Refresh" group="Main Control" state="Idle" perm="rw" timeout="0">
+    <defNumber name="PERIOD" label="Period (s)" format="%.f" min="0" max="3600" step="60">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Bare GPS" name="SYSTEM_TIME_UPDATE" label="System Time" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60">
+    <defSwitch name="UPDATE_NEVER" label="Never">
+Off
+    </defSwitch>
+    <defSwitch name="UPDATE_ON_STARTUP" label="On Startup">
+On
+    </defSwitch>
+    <defSwitch name="UPDATE_ON_REFRESH" label="On Refresh">
+Off
+    </defSwitch>
+</defSwitchVector>
+</phase>
+</capture>

@@ -1,0 +1,55 @@
+<capture driver="indi_bare_dome_roof" device="Bare Dome" indi="2.2.5+202610040455~ubuntu26.04.1" interface="32">
+<phase name="baseline">
+<defTextVector device="Bare Dome" name="ACTIVE_DEVICES" label="Snoop devices" group="Options" state="Idle" perm="rw" timeout="60">
+    <defText name="ACTIVE_TELESCOPE" label="Telescope">
+Telescope Simulator
+    </defText>
+    <defText name="ACTIVE_INPUT" label="Input"/>
+    <defText name="ACTIVE_OUTPUT" label="Output"/>
+</defTextVector>
+<defSwitchVector device="Bare Dome" name="MOUNT_POLICY" label="Mount Policy" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="60">
+    <defSwitch name="MOUNT_IGNORED" label="Mount ignored">
+On
+    </defSwitch>
+    <defSwitch name="MOUNT_LOCKS" label="Mount locks">
+Off
+    </defSwitch>
+</defSwitchVector>
+</phase>
+<phase name="connect">
+<defSwitchVector device="Bare Dome" name="DOME_MOTION" label="Motion" group="Main Control" state="Ok" perm="rw" rule="AtMostOne" timeout="60">
+    <defSwitch name="DOME_CW" label="Open">
+Off
+    </defSwitch>
+    <defSwitch name="DOME_CCW" label="Close">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Dome" name="DOME_ABORT_MOTION" label="Abort Motion" group="Main Control" state="Idle" perm="rw" rule="AtMostOne" timeout="60">
+    <defSwitch name="ABORT" label="Abort">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Dome" name="DOME_PARK" label="Parking" group="Main Control" state="Ok" perm="rw" rule="OneOfMany" timeout="60">
+    <defSwitch name="PARK" label="Park(ed)">
+Off
+    </defSwitch>
+    <defSwitch name="UNPARK" label="UnPark(ed)">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Dome" name="USEJOYSTICK" label="Joystick" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0">
+    <defSwitch name="ENABLE" label="Enable">
+Off
+    </defSwitch>
+    <defSwitch name="DISABLE" label="Disable">
+On
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Bare Dome" name="SNOOP_JOYSTICK" label="Snoop Joystick" group="Options" state="Idle" perm="rw" timeout="60">
+    <defText name="SNOOP_JOYSTICK_DEVICE" label="Device">
+Joystick
+    </defText>
+</defTextVector>
+</phase>
+</capture>

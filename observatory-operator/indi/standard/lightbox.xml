@@ -1,0 +1,24 @@
+<capture driver="indi_bare_lightbox" device="Bare Light Box" indi="2.2.5+202610040455~ubuntu26.04.1" interface="33792">
+<phase name="baseline">
+<defTextVector device="Bare Light Box" name="ACTIVE_DEVICES" label="Snoop devices" group="Options" state="Idle" perm="rw" timeout="60">
+    <defText name="ACTIVE_FILTER" label="Filter">
+Filter Simulator
+    </defText>
+</defTextVector>
+</phase>
+<phase name="connect">
+<defSwitchVector device="Bare Light Box" name="FLAT_LIGHT_CONTROL" label="Flat Light" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="0">
+    <defSwitch name="FLAT_LIGHT_ON" label="On">
+Off
+    </defSwitch>
+    <defSwitch name="FLAT_LIGHT_OFF" label="Off">
+On
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Bare Light Box" name="FLAT_LIGHT_INTENSITY" label="Brightness" group="Main Control" state="Idle" perm="rw" timeout="0">
+    <defNumber name="FLAT_LIGHT_INTENSITY_VALUE" label="Value" format="%.f" min="0" max="255" step="10">
+0
+    </defNumber>
+</defNumberVector>
+</phase>
+</capture>

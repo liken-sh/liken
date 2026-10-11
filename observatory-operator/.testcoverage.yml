@@ -15,9 +15,15 @@ profile: coverage.out
 # go test never calls main(), so the statements in main.go never run
 # under the gate. main.go holds only the wiring of the in-cluster
 # clients, and the gate measures every other file.
+#
+# indi/capture/record/ runs INDI drivers in Docker on a workstation,
+# and no test starts a container. Its tests cover what it decides
+# without one, and the capture package beside it holds the rest of the
+# record, which the gate measures.
 exclude:
   paths:
     - ^main\.go$
+    - ^indi/capture/record/
 
 threshold:
   # The total covers the six packages. The tests measure 95.4%:

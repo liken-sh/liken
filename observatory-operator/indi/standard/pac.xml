@@ -1,0 +1,81 @@
+<capture driver="indi_bare_pac" device="Bare PAC" indi="2.2.5+202610040455~ubuntu26.04.1" interface="1081344">
+<phase name="connect">
+<defNumberVector device="Bare PAC" name="PAC_MANUAL_ADJUSTMENT" label="Manual Adjustment" group="Main Control" state="Idle" perm="wo" timeout="0">
+    <defNumber name="MANUAL_AZ_STEP" label="Azimuth Step (deg)" format="%.4f" min="-10" max="10" step="0.10000000000000000555">
+0
+    </defNumber>
+    <defNumber name="MANUAL_ALT_STEP" label="Altitude Step (deg)" format="%.4f" min="-10" max="10" step="0.10000000000000000555">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Bare PAC" name="PAC_ABORT_MOTION" label="Abort Motion" group="Main Control" state="Idle" perm="rw" rule="AtMostOne" timeout="60">
+    <defSwitch name="ABORT" label="Abort">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Bare PAC" name="PAC_POSITION" label="Position" group="Main Control" state="Idle" perm="ro" timeout="0">
+    <defNumber name="POSITION_AZ" label="Azimuth (deg)" format="%.4f" min="-360" max="360" step="0">
+0
+    </defNumber>
+    <defNumber name="POSITION_ALT" label="Altitude (deg)" format="%.4f" min="-90" max="90" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defNumberVector device="Bare PAC" name="PAC_SPEED" label="Speed" group="Main Control" state="Ok" perm="rw" timeout="60">
+    <defNumber name="PAC_SPEED_VALUE" label="Speed" format="%.0f" min="1" max="10" step="1">
+1
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Bare PAC" name="PAC_AZ_REVERSE" label="Azimuth Reverse" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60">
+    <defSwitch name="INDI_ENABLED" label="Enabled">
+Off
+    </defSwitch>
+    <defSwitch name="INDI_DISABLED" label="Disabled">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare PAC" name="PAC_ALT_REVERSE" label="Altitude Reverse" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60">
+    <defSwitch name="INDI_ENABLED" label="Enabled">
+Off
+    </defSwitch>
+    <defSwitch name="INDI_DISABLED" label="Disabled">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare PAC" name="PAC_HOME" label="Home" group="Main Control" state="Idle" perm="rw" rule="AtMostOne" timeout="60">
+    <defSwitch name="HOME_SET" label="Set Home">
+Off
+    </defSwitch>
+    <defSwitch name="HOME_GO" label="Return Home">
+Off
+    </defSwitch>
+    <defSwitch name="HOME_RESET" label="Reset Home">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Bare PAC" name="PAC_SYNC" label="Sync Position" group="Main Control" state="Idle" perm="rw" timeout="60">
+    <defNumber name="SYNC_AZ" label="Azimuth (deg)" format="%.4f" min="-360" max="360" step="0">
+0
+    </defNumber>
+    <defNumber name="SYNC_ALT" label="Altitude (deg)" format="%.4f" min="-90" max="90" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Bare PAC" name="PAC_BACKLASH_ENABLED" label="Backlash" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60">
+    <defSwitch name="INDI_ENABLED" label="Enabled">
+Off
+    </defSwitch>
+    <defSwitch name="INDI_DISABLED" label="Disabled">
+On
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Bare PAC" name="PAC_BACKLASH_STEPS" label="Backlash Steps" group="Main Control" state="Idle" perm="rw" timeout="60">
+    <defNumber name="BACKLASH_AZ" label="Azimuth (steps)" format="%.0f" min="0" max="10000" step="1">
+0
+    </defNumber>
+    <defNumber name="BACKLASH_ALT" label="Altitude (steps)" format="%.0f" min="0" max="10000" step="1">
+0
+    </defNumber>
+</defNumberVector>
+</phase>
+</capture>

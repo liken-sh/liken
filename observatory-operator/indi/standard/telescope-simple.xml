@@ -1,0 +1,240 @@
+<capture driver="indi_bare_telescope_simple" device="Bare Telescope" indi="2.2.5+202610040455~ubuntu26.04.1" interface="1">
+<phase name="baseline">
+<defTextVector device="Bare Telescope" name="ACTIVE_DEVICES" label="Snoop devices" group="Options" state="Idle" perm="rw" timeout="60">
+    <defText name="ACTIVE_GPS" label="GPS">
+GPS Simulator
+    </defText>
+    <defText name="ACTIVE_DOME" label="DOME">
+Dome Simulator
+    </defText>
+</defTextVector>
+<defSwitchVector device="Bare Telescope" name="DOME_POLICY" label="Dome Policy" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="60">
+    <defSwitch name="DOME_IGNORED" label="Dome ignored">
+On
+    </defSwitch>
+    <defSwitch name="DOME_LOCKS" label="Dome locks">
+Off
+    </defSwitch>
+</defSwitchVector>
+</phase>
+<phase name="connect">
+<defSwitchVector device="Bare Telescope" name="ON_COORD_SET" label="On Set" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60">
+    <defSwitch name="TRACK" label="Track">
+On
+    </defSwitch>
+    <defSwitch name="SLEW" label="Slew">
+Off
+    </defSwitch>
+    <defSwitch name="SYNC" label="Sync">
+Off
+    </defSwitch>
+    <defSwitch name="FLIP" label="Flip">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Bare Telescope" name="EQUATORIAL_EOD_COORD" label="Eq. Coordinates" group="Main Control" state="Idle" perm="rw" timeout="60">
+    <defNumber name="RA" label="RA (hh:mm:ss)" format="%010.6m" min="0" max="24" step="0">
+0
+    </defNumber>
+    <defNumber name="DEC" label="DEC (dd:mm:ss)" format="%010.6m" min="-90" max="90" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Bare Telescope" name="TELESCOPE_ABORT_MOTION" label="Abort Motion" group="Main Control" state="Idle" perm="rw" rule="AtMostOne" timeout="60">
+    <defSwitch name="ABORT" label="Abort">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Telescope" name="TELESCOPE_TRACK_MODE" label="Track Mode" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="0">
+    <defSwitch name="TRACK_SIDEREAL" label="Sidereal">
+On
+    </defSwitch>
+    <defSwitch name="TRACK_SOLAR" label="Solar">
+Off
+    </defSwitch>
+    <defSwitch name="TRACK_LUNAR" label="Lunar">
+Off
+    </defSwitch>
+    <defSwitch name="TRACK_CUSTOM" label="Custom">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Telescope" name="TELESCOPE_TRACK_STATE" label="Tracking" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="0">
+    <defSwitch name="TRACK_ON" label="On">
+Off
+    </defSwitch>
+    <defSwitch name="TRACK_OFF" label="Off">
+On
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Bare Telescope" name="TELESCOPE_TRACK_RATE" label="Track Rates" group="Main Control" state="Idle" perm="rw" timeout="60">
+    <defNumber name="TRACK_RATE_RA" label="RA (arcsecs/s)" format="%.6f" min="-16384" max="16384" step="9.9999999999999995475e-07">
+15.04106717867020393
+    </defNumber>
+    <defNumber name="TRACK_RATE_DE" label="DE (arcsecs/s)" format="%.6f" min="-16384" max="16384" step="9.9999999999999995475e-07">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Bare Telescope" name="TELESCOPE_HOME" label="Home" group="Main Control" state="Idle" perm="rw" rule="AtMostOne" timeout="60">
+    <defSwitch name="FIND" label="Find">
+Off
+    </defSwitch>
+    <defSwitch name="SET" label="Set">
+Off
+    </defSwitch>
+    <defSwitch name="GO" label="Go">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Telescope" name="TELESCOPE_MOTION_NS" label="Motion N/S" group="Motion Control" state="Idle" perm="rw" rule="AtMostOne" timeout="60">
+    <defSwitch name="MOTION_NORTH" label="North">
+Off
+    </defSwitch>
+    <defSwitch name="MOTION_SOUTH" label="South">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Telescope" name="TELESCOPE_MOTION_WE" label="Motion W/E" group="Motion Control" state="Idle" perm="rw" rule="AtMostOne" timeout="60">
+    <defSwitch name="MOTION_WEST" label="West">
+Off
+    </defSwitch>
+    <defSwitch name="MOTION_EAST" label="East">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Telescope" name="TELESCOPE_REVERSE_MOTION" label="Reverse" group="Motion Control" state="Idle" perm="rw" rule="AnyOfMany" timeout="60">
+    <defSwitch name="REVERSE_NS" label="North/South">
+Off
+    </defSwitch>
+    <defSwitch name="REVERSE_WE" label="West/East">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Telescope" name="TELESCOPE_SLEW_RATE" label="Slew Rate" group="Motion Control" state="Idle" perm="rw" rule="OneOfMany" timeout="0">
+    <defSwitch name="1x" label="Guide">
+Off
+    </defSwitch>
+    <defSwitch name="2x" label="Centering">
+Off
+    </defSwitch>
+    <defSwitch name="3x" label="Find">
+On
+    </defSwitch>
+    <defSwitch name="4x" label="Max">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defNumberVector device="Bare Telescope" name="TARGET_EOD_COORD" label="Slew Target" group="Motion Control" state="Idle" perm="ro" timeout="60">
+    <defNumber name="RA" label="RA (hh:mm:ss)" format="%010.6m" min="0" max="24" step="0">
+0
+    </defNumber>
+    <defNumber name="DEC" label="DEC (dd:mm:ss)" format="%010.6m" min="-90" max="90" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Bare Telescope" name="TELESCOPE_MOUNT_TYPE" label="Mount Type" group="Motion Control" state="Idle" perm="ro" rule="OneOfMany" timeout="60">
+    <defSwitch name="ALTAZ" label="ALTAZ">
+Off
+    </defSwitch>
+    <defSwitch name="EQ_FORK" label="Fork (Eq)">
+Off
+    </defSwitch>
+    <defSwitch name="EQ_GEM" label="GEM">
+On
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Bare Telescope" name="TIME_UTC" label="UTC" group="Site Management" state="Idle" perm="rw" timeout="60">
+    <defText name="UTC" label="UTC Time"/>
+    <defText name="OFFSET" label="UTC Offset"/>
+</defTextVector>
+<defNumberVector device="Bare Telescope" name="GEOGRAPHIC_COORD" label="Scope Location" group="Site Management" state="Idle" perm="rw" timeout="60">
+    <defNumber name="LAT" label="Lat (dd:mm:ss.s)" format="%012.8m" min="-90" max="90" step="0">
+0
+    </defNumber>
+    <defNumber name="LONG" label="Lon (dd:mm:ss.s)" format="%012.8m" min="0" max="360" step="0">
+0
+    </defNumber>
+    <defNumber name="ELEV" label="Elevation (m)" format="%g" min="-200" max="10000" step="0">
+0
+    </defNumber>
+</defNumberVector>
+<defSwitchVector device="Bare Telescope" name="TELESCOPE_PARK" label="Parking" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60">
+    <defSwitch name="PARK" label="Park(ed)">
+Off
+    </defSwitch>
+    <defSwitch name="UNPARK" label="UnPark(ed)">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Telescope" name="TELESCOPE_PARK_OPTION" label="Park Options" group="Site Management" state="Idle" perm="rw" rule="AtMostOne" timeout="60">
+    <defSwitch name="PARK_CURRENT" label="Current">
+Off
+    </defSwitch>
+    <defSwitch name="PARK_DEFAULT" label="Default">
+Off
+    </defSwitch>
+    <defSwitch name="PARK_WRITE_DATA" label="Write Data">
+Off
+    </defSwitch>
+    <defSwitch name="PARK_PURGE_DATA" label="Purge Data">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Telescope" name="TELESCOPE_PIER_SIDE" label="Pier Side" group="Main Control" state="Idle" perm="ro" rule="AtMostOne" timeout="60">
+    <defSwitch name="PIER_WEST" label="West (pointing east)">
+Off
+    </defSwitch>
+    <defSwitch name="PIER_EAST" label="East (pointing west)">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Telescope" name="SIMULATE_PIER_SIDE" label="Simulate Pier Side" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60">
+    <defSwitch name="SIMULATE_YES" label="Yes">
+Off
+    </defSwitch>
+    <defSwitch name="SIMULATE_NO" label="No">
+On
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Bare Telescope" name="SAT_TLE_TEXT" label="Orbit Params" group="Satellite" state="Idle" perm="rw" timeout="60">
+    <defText name="TLE" label="TLE"/>
+</defTextVector>
+<defTextVector device="Bare Telescope" name="SAT_PASS_WINDOW" label="Pass Window" group="Satellite" state="Idle" perm="rw" timeout="60">
+    <defText name="SAT_PASS_WINDOW_START" label="Start UTC">
+2026-10-11T19:01:48
+    </defText>
+    <defText name="SAT_PASS_WINDOW_END" label="End UTC">
+2026-10-11T19:01:48
+    </defText>
+</defTextVector>
+<defSwitchVector device="Bare Telescope" name="SAT_TRACKING_STAT" label="Sat tracking" group="Satellite" state="Idle" perm="rw" rule="OneOfMany" timeout="60">
+    <defSwitch name="SAT_TRACK" label="Track">
+Off
+    </defSwitch>
+    <defSwitch name="SAT_HALT" label="Halt">
+On
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Telescope" name="PEC" label="PEC Playback" group="Motion Control" state="Idle" perm="rw" rule="OneOfMany" timeout="0">
+    <defSwitch name="PEC OFF" label="PEC OFF">
+On
+    </defSwitch>
+    <defSwitch name="PEC ON" label="PEC ON">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Telescope" name="USEJOYSTICK" label="Joystick" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0">
+    <defSwitch name="ENABLE" label="Enable">
+Off
+    </defSwitch>
+    <defSwitch name="DISABLE" label="Disable">
+On
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Bare Telescope" name="SNOOP_JOYSTICK" label="Snoop Joystick" group="Options" state="Idle" perm="rw" timeout="60">
+    <defText name="SNOOP_JOYSTICK_DEVICE" label="Device">
+Joystick
+    </defText>
+</defTextVector>
+</phase>
+</capture>

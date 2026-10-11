@@ -20,6 +20,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/observatory-operator/indi/capture"
 )
 
 // A request is one element that a client sent, as the server read it.
@@ -51,9 +53,9 @@ func (r request) value(member string) (string, bool) {
 // change as the request. The client may send members that the
 // recorder's message left out, so every member of the phase must be in
 // the request with an equal value.
-func (r request) answers(p phase) bool {
+func (r request) answers(p capture.Phase) bool {
 	var want request
-	if err := xml.Unmarshal([]byte(p.message), &want); err != nil {
+	if err := xml.Unmarshal([]byte(p.Message), &want); err != nil {
 		panic(err)
 	}
 	if want.XMLName.Local != r.XMLName.Local || want.Device != r.Device || want.Name != r.Name {
@@ -81,7 +83,7 @@ type replayServer struct {
 	t         *testing.T
 	simulator string
 	device    string
-	phases    []phase
+	phases    []capture.Phase
 
 	mutex sync.Mutex
 	// closed refuses every dial, as a closed port does.
@@ -103,7 +105,7 @@ func startReplay(t *testing.T, simulator string) *replayServer {
 	device := firstDevice(t, baseline)
 	s := &replayServer{
 		t: t, simulator: simulator, device: device,
-		phases: phases(simulator, device), arrived: make(chan struct{}),
+		phases: capture.SimulatorScript(simulator, device).Phases, arrived: make(chan struct{}),
 	}
 	t.Cleanup(s.close)
 	return s
@@ -216,7 +218,7 @@ func (s *replayServer) serve(conn *replayConn) {
 				break
 			}
 			if r.answers(p) {
-				conn.write(transcript(s.t, s.simulator, p.name))
+				conn.write(transcript(s.t, s.simulator, p.Name))
 				break
 			}
 		}

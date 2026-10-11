@@ -1,0 +1,17 @@
+<capture driver="indi_bare_dustcap" device="Bare Dust Cap" indi="2.2.5+202610040455~ubuntu26.04.1" interface="33280">
+<phase name="connect">
+<defSwitchVector device="Bare Dust Cap" name="CAP_PARK" label="Dust Cover" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="0">
+    <defSwitch name="PARK" label="Park">
+Off
+    </defSwitch>
+    <defSwitch name="UNPARK" label="Unpark">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defSwitchVector device="Bare Dust Cap" name="CAP_ABORT" label="Motion" group="Main Control" state="Idle" perm="rw" rule="AtMostOne" timeout="60">
+    <defSwitch name="ABORT" label="Abort">
+Off
+    </defSwitch>
+</defSwitchVector>
+</phase>
+</capture>

@@ -91,9 +91,25 @@ simulators that plan 06 gives a kind. Each directory has `baseline.xml`,
 more steps. `replay_test.go` serves them to a client that dials
 through `WithDialer`, over a `net.Pipe`, so the tests run in a
 `testing/synctest` bubble. A client that sends a wrong message gets no
-reply. They were captured
-from the simulators of the pinned `indi-simulators` tag, and need
-capturing again after a bump of the INDI images.
+reply. They come from the simulators of the pinned `indi-simulators`
+tag, and `capture.SimulatorScript` in `indi/capture/` holds the
+message that each file answers.
+
+The captures in `indi/standard/` hold the standard properties of each
+INDI interface. Each one is the union of every property that a bare
+driver in `indi/standard/bare/` defined: a small C++ driver for one
+interface that turns on every capability and defines nothing of its
+own. The properties of `INDI::DefaultDevice` and of the connection
+plugins are in `device.xml` alone, and every other capture leaves them
+out. The bare drivers build against the libindi of the pinned
+snapshots, from their own bake file, because `ci/` publishes every
+target it writes. Their sources are here and not in `indi/`, because
+a file in `indi/` changes the recipe of the 17 INDI images.
+
+After a bump of the INDI images, `make captures` records both again
+in Docker: `make standard` builds and captures the bare drivers, and
+`make transcripts` runs the simulators. A test fails when a capture
+names another INDI version than `indi/package.toml`.
 
 ## The PHD2 client
 

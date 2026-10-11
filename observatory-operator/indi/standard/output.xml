@@ -1,0 +1,22 @@
+<capture driver="indi_bare_output" device="Bare Output" indi="2.2.5+202610040455~ubuntu26.04.1" interface="98304">
+<phase name="connect">
+<defSwitchVector device="Bare Output" name="DIGITAL_OUTPUT_1" label="Output #1" group="Outputs" state="Idle" perm="rw" rule="AtMostOne" timeout="60">
+    <defSwitch name="OFF" label="Off">
+Off
+    </defSwitch>
+    <defSwitch name="ON" label="On">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Bare Output" name="DIGITAL_OUTPUT_LABELS" label="Labels" group="Outputs" state="Idle" perm="rw" timeout="60">
+    <defText name="DIGITAL_OUTPUT_1" label="Output #1">
+Output #1
+    </defText>
+</defTextVector>
+<defNumberVector device="Bare Output" name="PULSE_0" label="Output #1" group="Pulse Mode" state="Idle" perm="rw" timeout="60">
+    <defNumber name="DURATION" label="Duration (ms)" format="%.0f" min="0" max="60000" step="100">
+0
+    </defNumber>
+</defNumberVector>
+</phase>
+</capture>

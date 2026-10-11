@@ -1,0 +1,27 @@
+<capture driver="indi_bare_input" device="Bare Input" indi="2.2.5+202610040455~ubuntu26.04.1" interface="163840">
+<phase name="connect">
+<defSwitchVector device="Bare Input" name="DIGITAL_INPUT_1" label="Digital #1" group="Inputs" state="Idle" perm="ro" rule="OneOfMany" timeout="60">
+    <defSwitch name="OFF" label="Off">
+Off
+    </defSwitch>
+    <defSwitch name="ON" label="On">
+Off
+    </defSwitch>
+</defSwitchVector>
+<defTextVector device="Bare Input" name="DIGITAL_INPUT_LABELS" label="Digital Labels" group="Inputs" state="Idle" perm="rw" timeout="60">
+    <defText name="DIGITAL_INPUT_1" label="Digital #1">
+Digital #1
+    </defText>
+</defTextVector>
+<defNumberVector device="Bare Input" name="ANALOG_INPUT_1" label="Analog #1" group="Inputs" state="Idle" perm="ro" timeout="60">
+    <defNumber name="ANALOG_INPUT_1" label="Analog #1" format="%.2f" min="0" max="1000000" step="1">
+1
+    </defNumber>
+</defNumberVector>
+<defTextVector device="Bare Input" name="ANALOG_INPUT_LABELS" label="Analog Labels" group="Inputs" state="Idle" perm="rw" timeout="60">
+    <defText name="ANALOG_INPUT_1" label="Analog #1">
+Analog #1
+    </defText>
+</defTextVector>
+</phase>
+</capture>

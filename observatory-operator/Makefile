@@ -38,6 +38,35 @@ test-go:
 drivers:
 	go test ./drivers -run TestTheMapIsCurrent -update
 
+# The captures in indi/standard/ and the transcripts in indi/testdata/
+# are what a real indiserver sent on the libindi that indi/package.toml
+# pins. After a bump of the INDI images, this records both again: it
+# builds the bare drivers of indi/standard/bare/ and captures each one,
+# and runs each simulator of the indi-simulators image through its
+# script. A test fails when a capture names another INDI version than
+# the pin. It runs Docker, so it runs on a workstation, never in CI.
+#
+# Both images build through bake, from the trust and indi targets of
+# the same commit. The bare drivers are never published, so their
+# target is in a bake file of its own beside them, which ci/ does not
+# write.
+INDI_VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' ../indi/package.toml)
+INDI_TAG := $(INDI_VERSION)-$(shell sed -n 's/^revision = \(.*\)/\1/p' ../indi/package.toml)
+
+.PHONY: captures
+captures: standard transcripts
+
+.PHONY: standard
+standard:
+	cd .. && INDI_SNAPSHOT=$(INDI_VERSION) docker buildx bake \
+		-f docker-bake.hcl -f observatory-operator/indi/standard/bare/docker-bake.hcl indi-bare --load
+	go run ./indi/capture/record -image indi-bare:$(INDI_VERSION) standard indi/standard
+
+.PHONY: transcripts
+transcripts:
+	cd .. && docker buildx bake indi-simulators --load
+	go run ./indi/capture/record -image ghcr.io/liken-sh/indi-simulators:$(INDI_TAG) simulators indi/testdata
+
 .PHONY: test-docs
 test-docs:
 # The reference pages are generated and committed, so a checkout
