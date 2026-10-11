@@ -1,0 +1,16 @@
+# The typed fields of a `FilterWheel`, from the standard properties of
+# INDI's FILTER interface. curated.go gives the format and the roles.
+kind: FilterWheel
+interfaces: [filter]
+detect: [FILTER_SLOT]
+properties:
+  FILTER_SLOT:
+    field: slot
+    role: command
+    unit: count
+    description: "The slot in front of the camera, counted from 1."
+  FILTER_NAME:
+    field: filters
+    role: setting
+    elements: driver
+    description: "The name of the filter in each slot, from slot 1, such as `Luminance` or `H_Alpha`."

@@ -22,10 +22,12 @@ type (
 type MountSpec struct {
 	TelescopeDevice
 	Procedures[ParkAction]
+	MountSettings
 }
 
 type MountStatus struct {
 	DeviceStatus
+	MountStandard
 	Readings MountReadings `json:"readings,omitzero"`
 	Display  MountDisplay  `json:"display,omitzero"`
 }
@@ -73,10 +75,12 @@ type MountReadings struct {
 type GPSSpec struct {
 	TelescopeDevice
 	Procedures[Action]
+	GPSSettings
 }
 
 type GPSStatus struct {
 	DeviceStatus
+	GPSStandard
 	Readings GPSReadings `json:"readings,omitzero"`
 }
 
@@ -99,10 +103,12 @@ type GPSReadings struct {
 type PolarAlignerSpec struct {
 	TelescopeDevice
 	Procedures[Action]
+	PolarAlignerSettings
 }
 
 type PolarAlignerStatus struct {
 	DeviceStatus
+	PolarAlignerStandard
 	Readings PolarAlignerReadings `json:"readings,omitzero"`
 }
 

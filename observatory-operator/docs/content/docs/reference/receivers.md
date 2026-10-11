@@ -21,6 +21,7 @@ One radio receiver, with INDI's `SPECTROGRAPH_INTERFACE`.
 | <span id="spec--driver"></span>`driver` | [object](#specdriver) | yes | The INDI driver that runs the device. With no `image`, the operator runs the image that the `indi` build lists for the driver, so `name` must then be an INDI driver that the image holds, such as `indi_simulator_ccd`. |
 | <span id="spec--power"></span>`power` | [object](#specpower) | no | The `Switch` output that powers the device. Activation switches the output on before the device's pod starts, and deactivation switches it off after the pod stops. Optional. With no power, a person powers the device on and off by hand. |
 | <span id="spec--claim"></span>`claim` | object | no | A `ResourceClaimSpec` of the `resource.k8s.io` API, for real hardware. The operator creates a `ResourceClaim` from it for the device's pod. The API server validates it when the operator creates the claim. Optional. A simulator needs no claim. |
+| <span id="spec--receiversettings"></span>`receiverSettings` | [object](#specreceiversettings) | no | The tuning of the receiver. The operator writes it to `RECEIVER_SETTINGS` once, in the `Configure` step of each reservation. Optional. |
 | <span id="spec--activation"></span>`activation` | [\[\]object](#specactivation) | no | The actions that run, in order, as this resource's `Telescope` or `Observatory` turns `Active`, while every device is still connected. For a `Telescope` or an `Observatory`, that is the resource itself. The `Reservation`'s `Activation` step waits for them. Each action is a target state, so a run that an operator restart interrupted runs again each action that is not `Done`. Optional. |
 | <span id="spec--deactivation"></span>`deactivation` | [\[\]object](#specdeactivation) | no | The actions that run, in order, as this resource's `Telescope` or `Observatory` stops being `Active`, while every device is still connected. For a `Telescope` or an `Observatory`, that is the resource itself. The `Reservation`'s `Deactivation` step waits for them. Each action is a target state, so a run that an operator restart interrupted runs again each action that is not `Done`. Optional. |
 | <span id="spec--triggers"></span>`triggers` | [\[\]object](#spectriggers) | no | Triggers on conditions. Each one runs its actions once for each transition of its condition to the status it names, while the resource is active: from when its activation is done until its deactivation begins. A condition that holds when the activation ends runs then. A run that began runs to its end, unless the resource's deactivation begins, and a resource runs one procedure at a time. Optional. |
@@ -42,6 +43,19 @@ The `Switch` output that powers the device. Activation switches the output on be
 | --- | --- | --- | --- |
 | <span id="specpower--switch"></span>`switch` | string | yes | The name of a `Switch` in this namespace. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
 | <span id="specpower--output"></span>`output` | integer | yes | The number of the output, from 1, as the driver numbers `DIGITAL_OUTPUT_1`. |
+
+### spec.receiverSettings
+
+The tuning of the receiver. The operator writes it to `RECEIVER_SETTINGS` once, in the `Configure` step of each reservation. Optional.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specreceiversettings--gain"></span>`gain` | number | no | The gain, in the driver's own units. The member is `RECEIVER_GAIN`. |
+| <span id="specreceiversettings--frequency"></span>`frequency` | number | no | The center frequency, in hertz. The member is `RECEIVER_FREQUENCY`. |
+| <span id="specreceiversettings--bandwidth"></span>`bandwidth` | number | no | The bandwidth, in hertz. The member is `RECEIVER_BANDWIDTH`. |
+| <span id="specreceiversettings--bitspersample"></span>`bitsPerSample` | number | no | The depth of each sample, in bits. The member is `RECEIVER_BITSPERSAMPLE`. |
+| <span id="specreceiversettings--samplerate"></span>`sampleRate` | number | no | The sample rate, in hertz. The member is `RECEIVER_SAMPLERATE`. |
+| <span id="specreceiversettings--antenna"></span>`antenna` | number | no | The number of the antenna input. The member is `RECEIVER_ANTENNA`. |
 
 ### spec.activation[]
 
@@ -233,6 +247,31 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--pod"></span>`pod` | string | no | The name of the device's pod, while it exists. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the device's pod. |
 | <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Every property that the device defines, as the driver defines it, with the values of its last update. A vendor's own properties are here, and no typed reading depends on one. The list holds no BLOB data. |
+| <span id="status--activedevices"></span>`activeDevices` | [object](#statusactivedevices) | no | The INDI devices whose state the receiver writes into the FITS header of each integration. The status holds what the driver reports in `ACTIVE_DEVICES`. The operator decides it from the resources around the device, so it is not in spec. |
+| <span id="status--receiversettings"></span>`receiverSettings` | [object](#statusreceiversettings) | no | The tuning of the receiver. The status holds what the driver reports in `RECEIVER_SETTINGS`. `spec.receiverSettings` sets it. |
+| <span id="status--temperature"></span>`temperature` | [object](#statustemperature) | no | The temperature of the receiver, in degrees Celsius. A client that writes it sets the cooler's setpoint. The status holds what the driver reports in `SENSOR_TEMPERATURE`. Clients such as KStars and Ekos change it. |
+| <span id="status--integration"></span>`integration` | [object](#statusintegration) | no | The length of an integration, in seconds. While the integration runs, the driver counts it down. The status holds what the driver reports in `SENSOR_INTEGRATION`. Clients such as KStars and Ekos change it. |
+| <span id="status--fitsheader"></span>`fitsHeader` | [object](#statusfitsheader) | no | The observer and the object that the FITS header of each integration names. The status holds what the driver reports in `FITS_HEADER`. Clients such as KStars and Ekos change it. |
+| <span id="status--data"></span>`data` | [object](#statusdata) | no | The data of the last integration. The operator never asks for its data, so the status holds its state alone. The status holds what the driver reports in `SENSOR`. |
+| <span id="status--uploadmode"></span>`uploadMode` | [object](#statusuploadmode) | no | Where the driver sends each integration: to the client, to a local file, or to both. The status holds what the driver reports in `UPLOAD_MODE`. Clients such as KStars and Ekos change it. |
+| <span id="status--uploadsettings"></span>`uploadSettings` | [object](#statusuploadsettings) | no | Where the driver saves an integration that it saves to a local file. The status holds what the driver reports in `UPLOAD_SETTINGS`. Clients such as KStars and Ekos change it. |
+| <span id="status--datastream"></span>`dataStream` | [object](#statusdatastream) | no | Turns the data stream of the receiver on or off. The status holds what the driver reports in `SENSOR_DATA_STREAM`. Clients such as KStars and Ekos change it. |
+| <span id="status--streamdepth"></span>`streamDepth` | [object](#statusstreamdepth) | no | The depth of each sample of the data stream, 8 or 16 bits. The status holds what the driver reports in `STREAM_FULL_DEPTH`. Clients such as KStars and Ekos change it. |
+| <span id="status--streamdelay"></span>`streamDelay` | [object](#statusstreamdelay) | no | The delay between the frames of the data stream, in seconds. The status holds what the driver reports in `STREAM_DELAY`. |
+| <span id="status--streamingexposure"></span>`streamingExposure` | [object](#statusstreamingexposure) | no | The integration of each frame of the data stream. The status holds what the driver reports in `STREAMING_EXPOSURE`. Clients such as KStars and Ekos change it. |
+| <span id="status--fps"></span>`fps` | [object](#statusfps) | no | The frame rate of the data stream, in frames per second. The status holds what the driver reports in `FPS`. |
+| <span id="status--recordstream"></span>`recordStream` | [object](#statusrecordstream) | no | Starts or stops a recording of the data stream, with no end, for the time, or for the frames in `recordOptions`. The status holds what the driver reports in `RECORD_STREAM`. Clients such as KStars and Ekos change it. |
+| <span id="status--recordfile"></span>`recordFile` | [object](#statusrecordfile) | no | The file that a recording of the data stream writes. The status holds what the driver reports in `RECORD_FILE`. Clients such as KStars and Ekos change it. |
+| <span id="status--recordoptions"></span>`recordOptions` | [object](#statusrecordoptions) | no | When a recording of the data stream ends. The status holds what the driver reports in `RECORD_OPTIONS`. Clients such as KStars and Ekos change it. |
+| <span id="status--streamencoder"></span>`streamEncoder` | [object](#statusstreamencoder) | no | The encoder of the data stream, raw or MJPEG. The status holds what the driver reports in `SENSOR_STREAM_ENCODER`. Clients such as KStars and Ekos change it. |
+| <span id="status--streamrecorder"></span>`streamRecorder` | [object](#statusstreamrecorder) | no | The format of a recording of the data stream. The status holds what the driver reports in `SENSOR_STREAM_RECORDER`. Clients such as KStars and Ekos change it. |
+| <span id="status--streamlimits"></span>`streamLimits` | [object](#statusstreamlimits) | no | The limits of the data stream. The status holds what the driver reports in `LIMITS`. Clients such as KStars and Ekos change it. |
+| <span id="status--dspconvolution"></span>`dspConvolution` | [object](#statusdspconvolution) | no | Turns the convolution of each integration on or off. The status holds what the driver reports in `DSP_ACTIVATE_CONVOLUTION`. Clients such as KStars and Ekos change it. |
+| <span id="status--dspdft"></span>`dspDft` | [object](#statusdspdft) | no | Turns the discrete Fourier transform of each integration on or off. The status holds what the driver reports in `DSP_ACTIVATE_DFT`. Clients such as KStars and Ekos change it. |
+| <span id="status--dspidft"></span>`dspIdft` | [object](#statusdspidft) | no | Turns the inverse discrete Fourier transform of each integration on or off. The status holds what the driver reports in `DSP_ACTIVATE_IDFT`. Clients such as KStars and Ekos change it. |
+| <span id="status--dspspectrum"></span>`dspSpectrum` | [object](#statusdspspectrum) | no | Turns the spectrum of each integration on or off. The status holds what the driver reports in `DSP_ACTIVATE_SPECTRUM`. Clients such as KStars and Ekos change it. |
+| <span id="status--dsphistogram"></span>`dspHistogram` | [object](#statusdsphistogram) | no | Turns the histogram of each integration on or off. The status holds what the driver reports in `DSP_ACTIVATE_HISTOGRAM`. Clients such as KStars and Ekos change it. |
+| <span id="status--dspwavelets"></span>`dspWavelets` | [object](#statusdspwavelets) | no | Turns the wavelet transform of each integration on or off. The status holds what the driver reports in `DSP_ACTIVATE_WAVELETS`. Clients such as KStars and Ekos change it. |
 | <span id="status--display"></span>`display` | [object](#statusdisplay) | no | The readings as a person reads them, with their units, for the printer columns. The numbers are in `readings`. |
 | <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the receiver reports, from `RECEIVER_SETTINGS`. A field is absent until the driver sends it. |
 
@@ -302,6 +341,243 @@ One member of the property.
 | <span id="statuspropertiesmembers--min"></span>`min` | number | no | For a number, the least value that the driver accepts. |
 | <span id="statuspropertiesmembers--max"></span>`max` | number | no | For a number, the greatest value that the driver accepts. |
 | <span id="statuspropertiesmembers--step"></span>`step` | number | no | For a number, the step between values. Zero means any step. |
+
+### status.activeDevices
+
+The INDI devices whose state the receiver writes into the FITS header of each integration. The status holds what the driver reports in `ACTIVE_DEVICES`. The operator decides it from the resources around the device, so it is not in spec.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusactivedevices--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusactivedevices--telescope"></span>`telescope` | string | no | The mount, for where the antenna points. The member is `ACTIVE_TELESCOPE`. |
+| <span id="statusactivedevices--gps"></span>`gps` | string | no | The GPS, for the site's location and time. The member is `ACTIVE_GPS`. |
+
+### status.receiverSettings
+
+The tuning of the receiver. The status holds what the driver reports in `RECEIVER_SETTINGS`. `spec.receiverSettings` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusreceiversettings--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusreceiversettings--gain"></span>`gain` | number | no | The gain, in the driver's own units. The member is `RECEIVER_GAIN`. |
+| <span id="statusreceiversettings--frequency"></span>`frequency` | number | no | The center frequency, in hertz. The member is `RECEIVER_FREQUENCY`. |
+| <span id="statusreceiversettings--bandwidth"></span>`bandwidth` | number | no | The bandwidth, in hertz. The member is `RECEIVER_BANDWIDTH`. |
+| <span id="statusreceiversettings--bitspersample"></span>`bitsPerSample` | number | no | The depth of each sample, in bits. The member is `RECEIVER_BITSPERSAMPLE`. |
+| <span id="statusreceiversettings--samplerate"></span>`sampleRate` | number | no | The sample rate, in hertz. The member is `RECEIVER_SAMPLERATE`. |
+| <span id="statusreceiversettings--antenna"></span>`antenna` | number | no | The number of the antenna input. The member is `RECEIVER_ANTENNA`. |
+
+### status.temperature
+
+The temperature of the receiver, in degrees Celsius. A client that writes it sets the cooler's setpoint. The status holds what the driver reports in `SENSOR_TEMPERATURE`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statustemperature--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statustemperature--value"></span>`value` | number | no | The value that the driver reports. The unit is degrees Celsius. |
+
+### status.integration
+
+The length of an integration, in seconds. While the integration runs, the driver counts it down. The status holds what the driver reports in `SENSOR_INTEGRATION`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusintegration--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusintegration--value"></span>`value` | number | no | The value that the driver reports. The unit is seconds. |
+
+### status.fitsHeader
+
+The observer and the object that the FITS header of each integration names. The status holds what the driver reports in `FITS_HEADER`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusfitsheader--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusfitsheader--observer"></span>`observer` | string | no | The name of the observer. The member is `FITS_OBSERVER`. |
+| <span id="statusfitsheader--object"></span>`object` | string | no | The name of the object. The member is `FITS_OBJECT`. |
+
+### status.data
+
+The data of the last integration. The operator never asks for its data, so the status holds its state alone. The status holds what the driver reports in `SENSOR`.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusdata--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+
+### status.uploadMode
+
+Where the driver sends each integration: to the client, to a local file, or to both. The status holds what the driver reports in `UPLOAD_MODE`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusuploadmode--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusuploadmode--value"></span>`value` | string | no | The name of the member that is on, such as `UPLOAD_CLIENT`. Absent when no member is on. |
+
+### status.uploadSettings
+
+Where the driver saves an integration that it saves to a local file. The status holds what the driver reports in `UPLOAD_SETTINGS`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusuploadsettings--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusuploadsettings--directory"></span>`directory` | string | no | The directory, in the driver's container. The member is `UPLOAD_DIR`. |
+| <span id="statusuploadsettings--prefix"></span>`prefix` | string | no | The start of each file's name. The member is `UPLOAD_PREFIX`. |
+
+### status.dataStream
+
+Turns the data stream of the receiver on or off. The status holds what the driver reports in `SENSOR_DATA_STREAM`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusdatastream--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusdatastream--value"></span>`value` | string | no | The name of the member that is on, such as `STREAM_ON`. Absent when no member is on. |
+
+### status.streamDepth
+
+The depth of each sample of the data stream, 8 or 16 bits. The status holds what the driver reports in `STREAM_FULL_DEPTH`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusstreamdepth--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusstreamdepth--value"></span>`value` | string | no | The name of the member that is on, such as `FULL_DEPTH_8BIT`. Absent when no member is on. |
+
+### status.streamDelay
+
+The delay between the frames of the data stream, in seconds. The status holds what the driver reports in `STREAM_DELAY`.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusstreamdelay--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusstreamdelay--value"></span>`value` | number | no | The value that the driver reports. The unit is seconds. |
+
+### status.streamingExposure
+
+The integration of each frame of the data stream. The status holds what the driver reports in `STREAMING_EXPOSURE`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusstreamingexposure--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusstreamingexposure--duration"></span>`duration` | number | no | The length of each integration, in seconds. The member is `STREAMING_EXPOSURE_VALUE`. |
+| <span id="statusstreamingexposure--divisor"></span>`divisor` | number | no | The stream sends one frame in this many. 1 sends every frame. The member is `STREAMING_DIVISOR_VALUE`. |
+
+### status.fps
+
+The frame rate of the data stream, in frames per second. The status holds what the driver reports in `FPS`.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusfps--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusfps--instant"></span>`instant` | number | no | The rate of the last frames, in frames per second. The member is `EST_FPS`. |
+| <span id="statusfps--average"></span>`average` | number | no | The average rate over one second, in frames per second. The member is `AVG_FPS`. |
+
+### status.recordStream
+
+Starts or stops a recording of the data stream, with no end, for the time, or for the frames in `recordOptions`. The status holds what the driver reports in `RECORD_STREAM`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusrecordstream--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusrecordstream--value"></span>`value` | string | no | The name of the member that is on, such as `RECORD_ON`. Absent when no member is on. |
+
+### status.recordFile
+
+The file that a recording of the data stream writes. The status holds what the driver reports in `RECORD_FILE`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusrecordfile--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusrecordfile--directory"></span>`directory` | string | no | The directory, in the driver's container. The member is `RECORD_FILE_DIR`. |
+| <span id="statusrecordfile--name"></span>`name` | string | no | The file's name. The member is `RECORD_FILE_NAME`. |
+
+### status.recordOptions
+
+When a recording of the data stream ends. The status holds what the driver reports in `RECORD_OPTIONS`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusrecordoptions--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusrecordoptions--duration"></span>`duration` | number | no | The length of a recording, in seconds. The member is `RECORD_DURATION`. |
+| <span id="statusrecordoptions--frames"></span>`frames` | number | no | The length of a recording, in frames. The member is `RECORD_FRAME_TOTAL`. |
+
+### status.streamEncoder
+
+The encoder of the data stream, raw or MJPEG. The status holds what the driver reports in `SENSOR_STREAM_ENCODER`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusstreamencoder--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusstreamencoder--value"></span>`value` | string | no | The name of the member that is on, such as `RAW`. Absent when no member is on. |
+
+### status.streamRecorder
+
+The format of a recording of the data stream. The status holds what the driver reports in `SENSOR_STREAM_RECORDER`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusstreamrecorder--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusstreamrecorder--value"></span>`value` | string | no | The name of the member that is on, such as `SER`. Absent when no member is on. |
+
+### status.streamLimits
+
+The limits of the data stream. The status holds what the driver reports in `LIMITS`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusstreamlimits--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusstreamlimits--buffermax"></span>`bufferMax` | number | no | The largest buffer of frames, in megabytes. The member is `LIMITS_BUFFER_MAX`. |
+| <span id="statusstreamlimits--previewfps"></span>`previewFps` | number | no | The greatest rate that the stream sends to a client, in frames per second. The member is `LIMITS_PREVIEW_FPS`. |
+
+### status.dspConvolution
+
+Turns the convolution of each integration on or off. The status holds what the driver reports in `DSP_ACTIVATE_CONVOLUTION`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusdspconvolution--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusdspconvolution--value"></span>`value` | string | no | The name of the member that is on, such as `DSP_ACTIVATE_ON`. Absent when no member is on. |
+
+### status.dspDft
+
+Turns the discrete Fourier transform of each integration on or off. The status holds what the driver reports in `DSP_ACTIVATE_DFT`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusdspdft--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusdspdft--value"></span>`value` | string | no | The name of the member that is on, such as `DSP_ACTIVATE_ON`. Absent when no member is on. |
+
+### status.dspIdft
+
+Turns the inverse discrete Fourier transform of each integration on or off. The status holds what the driver reports in `DSP_ACTIVATE_IDFT`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusdspidft--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusdspidft--value"></span>`value` | string | no | The name of the member that is on, such as `DSP_ACTIVATE_ON`. Absent when no member is on. |
+
+### status.dspSpectrum
+
+Turns the spectrum of each integration on or off. The status holds what the driver reports in `DSP_ACTIVATE_SPECTRUM`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusdspspectrum--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusdspspectrum--value"></span>`value` | string | no | The name of the member that is on, such as `DSP_ACTIVATE_ON`. Absent when no member is on. |
+
+### status.dspHistogram
+
+Turns the histogram of each integration on or off. The status holds what the driver reports in `DSP_ACTIVATE_HISTOGRAM`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusdsphistogram--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusdsphistogram--value"></span>`value` | string | no | The name of the member that is on, such as `DSP_ACTIVATE_ON`. Absent when no member is on. |
+
+### status.dspWavelets
+
+Turns the wavelet transform of each integration on or off. The status holds what the driver reports in `DSP_ACTIVATE_WAVELETS`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusdspwavelets--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusdspwavelets--value"></span>`value` | string | no | The name of the member that is on, such as `DSP_ACTIVATE_ON`. Absent when no member is on. |
 
 ### status.display
 

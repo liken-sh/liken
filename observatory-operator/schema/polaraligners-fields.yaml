@@ -1,0 +1,59 @@
+# The typed fields of a `PolarAligner`, from the standard properties of
+# INDI's PAC interface. curated.go gives the format and the roles.
+kind: PolarAligner
+interfaces: [pac]
+detect: [PAC_MANUAL_ADJUSTMENT]
+properties:
+  PAC_MANUAL_ADJUSTMENT:
+    field: adjustment
+    role: command
+    description: "Moves the mount's polar axis by an angle on each axis, in degrees."
+    members:
+      MANUAL_AZ_STEP: {field: azimuth, unit: deg, description: "The move in azimuth, in degrees."}
+      MANUAL_ALT_STEP: {field: altitude, unit: deg, description: "The move in altitude, in degrees."}
+  PAC_ABORT_MOTION:
+    field: abortMotion
+    role: command
+    description: "Stops every motion of the polar aligner."
+  PAC_POSITION:
+    field: position
+    role: reading
+    description: "How far the polar aligner has moved the axis from its home, in degrees."
+    members:
+      POSITION_AZ: {field: azimuth, unit: deg, description: "The position in azimuth, in degrees."}
+      POSITION_ALT: {field: altitude, unit: deg, description: "The position in altitude, in degrees."}
+  PAC_SPEED:
+    field: speed
+    role: setting
+    unit: driver
+    description: "The speed of the polar aligner's motors, in the driver's own units."
+  PAC_AZ_REVERSE:
+    field: azimuthReverse
+    role: setting
+    description: "Whether the driver reverses the direction of the azimuth motor."
+  PAC_ALT_REVERSE:
+    field: altitudeReverse
+    role: setting
+    description: "Whether the driver reverses the direction of the altitude motor."
+  PAC_HOME:
+    field: home
+    role: command
+    description: "Sets the current position as home, moves the polar aligner home, or clears the home position."
+  PAC_SYNC:
+    field: sync
+    role: command
+    description: "A position, in degrees, that the driver takes as the current position, with no motion."
+    members:
+      SYNC_AZ: {field: azimuth, unit: deg, description: "The position in azimuth, in degrees."}
+      SYNC_ALT: {field: altitude, unit: deg, description: "The position in altitude, in degrees."}
+  PAC_BACKLASH_ENABLED:
+    field: backlash
+    role: setting
+    description: "Whether the driver corrects the backlash of the motors."
+  PAC_BACKLASH_STEPS:
+    field: backlashSteps
+    role: setting
+    description: "The backlash of each motor, in steps."
+    members:
+      BACKLASH_AZ: {field: azimuth, unit: steps, description: "The backlash of the azimuth motor, in steps."}
+      BACKLASH_ALT: {field: altitude, unit: steps, description: "The backlash of the altitude motor, in steps."}

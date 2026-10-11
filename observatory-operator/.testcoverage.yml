@@ -17,20 +17,23 @@ profile: coverage.out
 # clients, and the gate measures every other file.
 #
 # indi/capture/record/ runs INDI drivers in Docker on a workstation,
-# and no test starts a container. Its tests cover what it decides
+# and no test starts a container. schema/crosscheck/ fetches a page from
+# GitHub, and no test reaches the network. Its tests cover what it decides
 # without one, and the capture package beside it holds the rest of the
 # record, which the gate measures.
 exclude:
   paths:
     - ^main\.go$
     - ^indi/capture/record/
+    - ^schema/crosscheck/
 
 threshold:
-  # The total covers the six packages. The tests measure 95.4%:
-  # observatory/ 100%, indi/ 97.8%, phd2/ 96.6%, phd2/phd2test/ 99.0%,
-  # drivers/ 94.3%, and the operator's package 94.4% with main.go in
-  # it. The floor was 97 before the
-  # operator's package joined the total. Most of the rest of that
+  # The total covers every package but indi/capture/record/ and
+  # schema/crosscheck/. The tests measure 95.3%: observatory/ 100%,
+  # indi/ 97.8%, indi/capture/ 94.7%, indi/standard/ 95.3%, schema/
+  # 94.6%, phd2/ 96.6%, phd2/phd2test/ 99.0%, drivers/ 94.3%, and the
+  # operator's package 94.3% with main.go in it. The floor was 97
+  # before the operator's package joined the total. Most of the rest of that
   # package is one return of an error after one INDI change or one API
   # request fails, at each call in each step. The fakes can fail any
   # one call, and the tests fail one call in each step

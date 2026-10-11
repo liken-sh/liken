@@ -1,0 +1,42 @@
+# The typed fields of a `Rotator`, from the standard properties of
+# INDI's ROTATOR interface. curated.go gives the format and the roles.
+kind: Rotator
+interfaces: [rotator]
+detect: [ABS_ROTATOR_ANGLE]
+properties:
+  ABS_ROTATOR_ANGLE:
+    field: angle
+    role: command
+    unit: deg
+    description: "The rotator's angle, in degrees from 0 to 360."
+  ROTATOR_ABORT_MOTION:
+    field: abortMotion
+    role: command
+    description: "Stops the rotator's motion."
+  SYNC_ROTATOR_ANGLE:
+    field: sync
+    role: command
+    unit: deg
+    description: "An angle, in degrees, that the driver takes as the current angle, with no motion."
+  ROTATOR_HOME:
+    field: home
+    role: command
+    description: "Moves the rotator to its home position."
+  ROTATOR_REVERSE:
+    field: reverse
+    role: setting
+    description: "Whether the driver reverses the direction of the rotator's motor."
+  ROTATOR_BACKLASH_TOGGLE:
+    field: backlash
+    role: setting
+    description: "Whether the driver corrects the backlash of the rotator's motor."
+  ROTATOR_BACKLASH_STEPS:
+    field: backlashSteps
+    role: setting
+    unit: steps
+    description: "The backlash of the rotator's motor, in steps."
+  ROTATOR_LIMITS:
+    field: safeRange
+    role: setting
+    unit: deg
+    description: "How far, in degrees, the rotator may turn, so a cable does not wind up."

@@ -1,7 +1,7 @@
 package observatory
 
-// The CRDs are written by hand, so this test holds each one equal to
-// its Go type. A field that one side has and the other does not, or a
+// Most of each CRD and of each Go type is written by hand, so this
+// test holds each CRD equal to its Go type. A field that one side has and the other does not, or a
 // field with another type, fails here. Without it, the API server
 // prunes a status field that the CRD lacks, and the operator's next
 // write of that field does nothing.

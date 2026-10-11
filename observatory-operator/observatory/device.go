@@ -136,7 +136,9 @@ const (
 )
 
 // DeviceStatus holds the status fields that every device kind shares.
-// Each kind's status embeds it beside a readings block of its own.
+// Each kind's status embeds it beside the kind's generated Standard,
+// which holds its standard properties, and a readings block of its
+// own.
 type DeviceStatus struct {
 	ObservedGeneration int64       `json:"observedGeneration,omitempty"`
 	Phase              DevicePhase `json:"phase,omitempty"`

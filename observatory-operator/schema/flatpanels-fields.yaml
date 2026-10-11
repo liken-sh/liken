@@ -1,0 +1,21 @@
+# The typed fields of a `FlatPanel`, from the standard properties of
+# INDI's LIGHTBOX interface. curated.go gives the format and the roles.
+kind: FlatPanel
+interfaces: [lightbox]
+detect: [FLAT_LIGHT_CONTROL]
+properties:
+  ACTIVE_DEVICES:
+    field: activeDevices
+    role: tree
+    description: "The INDI devices whose state the panel reads."
+    members:
+      ACTIVE_FILTER: {field: filter, description: "The filter wheel, for a brightness for each filter."}
+  FLAT_LIGHT_CONTROL:
+    field: light
+    role: command
+    description: "Turns the panel's light on or off. The `state` action changes it."
+  FLAT_LIGHT_INTENSITY:
+    field: brightness
+    role: setting
+    unit: driver
+    description: "The brightness of the panel's light, in the driver's own units."

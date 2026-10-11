@@ -1,0 +1,14 @@
+# The typed fields of a `DustCap`, from the standard properties of
+# INDI's DUSTCAP interface. curated.go gives the format and the roles.
+kind: DustCap
+interfaces: [dustcap]
+detect: [CAP_PARK]
+properties:
+  CAP_PARK:
+    field: park
+    role: command
+    description: "Closes the cap with `PARK` or opens it with `UNPARK`. The `state` action changes it."
+  CAP_ABORT:
+    field: abort
+    role: command
+    description: "Stops the cap's motion."

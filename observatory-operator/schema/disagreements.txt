@@ -1,0 +1,40 @@
+# Written by make crosscheck; DO NOT EDIT.
+#
+# Each line is one place where the sources of the standard properties
+# disagree: the captures of the bare drivers, conventions.yaml, the
+# simulator transcripts, the units of the fields files in schema/, and
+# the standard properties page of indilib/docs. The generator reads
+# none of the page, so no line here changes the schema. A person
+# decides what each line means.
+#
+# indilib/docs commit: a1d5584e3db4bda83699d77fc81e7ba47ad4364d
+CCD_ABORT_EXPOSURE: the standard properties page gives the type "Number", and the capture of ccd gives "Switch"
+CCD_FILE_PATH: the standard properties page lists it for ccd, and no source defines it
+CCD_ROTATION: the standard properties page lists it for ccd, and no source defines it
+CCD_STREAM_RECORDER: the standard properties page names the member OGV, and the capture of ccd does not define it
+EQUATORIAL_COORD: the standard properties page lists it for telescope, and no source defines it
+FILTER_NAME: the capture of filter defines the member FILTER_SLOT_NAME_*, and the standard properties page does not name it
+FILTER_NAME: the standard properties page names the member FILTER_NAME_VALUE, and the capture of filter does not define it
+FLAT_LIGHT_FILTER_INTENSITY: the standard properties page lists it for lightbox, and no source defines it
+FOCUS_TEMPERATURE: conventions.yaml gives the permission "ro", and the focus simulator gives "rw"
+FPS.AVG_FPS: the standard properties page gives the unit s, and cameras-fields.yaml gives fps
+FPS.AVG_FPS: the standard properties page gives the unit s, and receivers-fields.yaml gives fps
+GUIDER_ABORT_EXPOSURE: the standard properties page gives the type "Number", and the capture of ccd gives "Switch"
+HORIZONTAL_COORD: the standard properties page lists it for telescope, and no source defines it
+JOYSTICK_LOCK_AXIS: the standard properties page lists it for telescope, and no source defines it
+MOTION_CONTROL_MODE: the standard properties page lists it for telescope, and no source defines it
+ON_COORD_SET: the capture of telescope defines the member FLIP, and the standard properties page does not name it
+TELESCOPE_INFO: the standard properties page lists it for telescope, and no source defines it
+TELESCOPE_JOYSTICK_REVERSE: the standard properties page lists it for telescope, and no source defines it
+TELESCOPE_PARK_POSITION: the capture of telescope defines the member PARK_HA, and the standard properties page does not name it
+TELESCOPE_PARK_POSITION: the standard properties page gives the unit deg, and mounts-fields.yaml gives label
+TELESCOPE_SLEW_RATE: the capture of telescope defines the member 1x, and the standard properties page does not name it
+TELESCOPE_SLEW_RATE: the capture of telescope defines the member 2x, and the standard properties page does not name it
+TELESCOPE_SLEW_RATE: the capture of telescope defines the member 3x, and the standard properties page does not name it
+TELESCOPE_SLEW_RATE: the capture of telescope defines the member 4x, and the standard properties page does not name it
+TELESCOPE_SLEW_RATE: the standard properties page names the member SLEW_CENTERING, and the capture of telescope does not define it
+TELESCOPE_SLEW_RATE: the standard properties page names the member SLEW_FIND, and the capture of telescope does not define it
+TELESCOPE_SLEW_RATE: the standard properties page names the member SLEW_GUIDE, and the capture of telescope does not define it
+TELESCOPE_SLEW_RATE: the standard properties page names the member SLEW_MAX, and the capture of telescope does not define it
+TELESCOPE_TIMED_GUIDE_NS: the standard properties page lists it for telescope, and no source defines it
+TELESCOPE_TIMED_GUIDE_WE: the standard properties page lists it for telescope, and no source defines it

@@ -10,7 +10,10 @@
 // k8s.io/apimachinery would add a large dependency tree for a few
 // structs. ObjectMeta and Condition copy only the fields that an
 // operator reads or writes, and they keep the wire format of
-// metav1.ObjectMeta and metav1.Condition.
+// metav1.ObjectMeta and metav1.Condition. The typed fields of INDI's
+// standard properties are the exception: schema/ generates them in the
+// generated_*.go files, with the CRDs that hold them, from the standard
+// properties of each INDI interface.
 //
 // The CRDs in deploy/ are the schema that the API server enforces. A
 // test compares each type here with its CRD, field by field, so the

@@ -1,0 +1,152 @@
+# A `SkyQualityMeter` measures the brightness of the sky: an INDI driver
+# with `AUX_INTERFACE` that defines `SKY_QUALITY`.
+#
+# A device resource is inventory: `observatory-operator` starts its pod
+# only while a `Reservation` needs it. The fields that every device
+# shares come from `device.yaml.tmpl`, and the procedure schema from
+# `procedures.yaml.tmpl`, so all 14 device CRDs hold the same copy.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: skyqualitymeters.observatory.liken.sh
+spec:
+  group: observatory.liken.sh
+  names:
+    kind: SkyQualityMeter
+    listKind: SkyQualityMeterList
+    plural: skyqualitymeters
+    singular: skyqualitymeter
+    shortNames: [sqm]
+    categories: [astro]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      selectableFields:
+        - jsonPath: .spec.telescope
+        - jsonPath: .spec.observatory
+      additionalPrinterColumns:
+        - name: Telescope
+          type: string
+          jsonPath: .spec.telescope
+        - name: Observatory
+          type: string
+          jsonPath: .spec.observatory
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Brightness
+          type: string
+          jsonPath: .status.display.brightness
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+        - name: Driver
+          type: string
+          jsonPath: .spec.driver.name
+          priority: 1
+        - name: Device
+          type: string
+          jsonPath: .status.indiDevice
+          priority: 1
+        - name: Node
+          type: string
+          jsonPath: .status.node
+          priority: 1
+        - name: Message
+          type: string
+          jsonPath: '.status.conditions[?(@.type=="Ready")].message'
+          priority: 1
+      schema:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-validations:
+            - rule: size(self.metadata.name) <= 32
+              message: >-
+                a SkyQualityMeter name is at most 32 characters, because
+                observatory-operator names its pod and Service
+                <name>-skyqualitymeter, and a Service name holds at most
+                63 characters
+          description: >-
+            A `SkyQualityMeter` measures the brightness of the sky: an
+            INDI driver with `AUX_INTERFACE` that defines `SKY_QUALITY`.
+            It belongs to the `Observatory`, or to one `Telescope` when
+            it is mounted on it.
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [driver]
+              description: "One sky quality meter."
+              x-kubernetes-validations:
+                - rule: "!(has(self.telescope) && has(self.observatory))"
+                  message: "set at most one parent: spec.telescope or spec.observatory"
+              properties:
+                telescope:
+                  type: string
+                  minLength: 1
+                  maxLength: 253
+                  pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                  description: >-
+                    The name of the `Telescope` that the device belongs
+                    to. Set this or `observatory`, not both.
+                    Optional. With neither `telescope` nor
+                    `observatory`, the device is on the shelf, and the
+                    operator creates nothing for it.
+                observatory:
+                  type: string
+                  minLength: 1
+                  maxLength: 253
+                  pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                  description: >-
+                    The name of the `Observatory` that the device
+                    belongs to, when no single telescope owns it. The
+                    device then runs on the observatory's own INDI
+                    server. Set this or `telescope`, not both.
+                    Optional. With neither `telescope` nor
+                    `observatory`, the device is on the shelf, and the
+                    operator creates nothing for it.
+{{ include "device spec" . | indent 16 }}
+{{ settings | indent 16 }}
+{{ include "procedure spec" . | indent 16 }}
+            status:
+              type: object
+              description: >-
+                What the operator observes. The operator writes it, and
+                a person reads it.
+              properties:
+{{ include "device status" . | indent 16 }}
+{{ standard | indent 16 }}
+                display:
+                  type: object
+                  description: >-
+                    The readings as a person reads them, with their units,
+                    for the printer columns. The numbers are in `readings`.
+                  properties:
+                    brightness:
+                      type: string
+                      description: "The sky's brightness, such as `21.3 mag/arcsec²`."
+                readings:
+                  type: object
+                  description: >-
+                    What the meter reports, from `SKY_QUALITY`. A field
+                    is absent until the driver sends it.
+                  properties:
+                    brightness:
+                      type: number
+                      description: >-
+                        The sky's brightness, in magnitudes per square
+                        arcsecond. A higher number is a darker sky.
+{{- define "action" }}
+type: object
+description: >-
+  One action, which names `job`.
+x-kubernetes-validations:
+  - rule: "has(self.job)"
+    message: "an action of a SkyQualityMeter names job"
+properties:
+{{ include "action fields" . | indent 2 }}
+{{- end }}

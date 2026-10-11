@@ -18,14 +18,12 @@ type (
 type CameraSpec struct {
 	TrainDevice
 	Procedures[CameraAction]
-	// Gain is written to CCD_GAIN, in the driver's own units.
-	Gain *float64 `json:"gain,omitempty"`
-	// Offset is written to CCD_OFFSET, in the driver's own units.
-	Offset *float64 `json:"offset,omitempty"`
+	CameraSettings
 }
 
 type CameraStatus struct {
 	DeviceStatus
+	CameraStandard
 	Readings CameraReadings `json:"readings,omitzero"`
 	Display  CameraDisplay  `json:"display,omitzero"`
 }
@@ -78,13 +76,12 @@ type CameraReadings struct {
 type FilterWheelSpec struct {
 	TrainDevice
 	Procedures[Action]
-	// Filters names the filter in each slot, from slot 1. The
-	// operator writes them to FILTER_NAME.
-	Filters []string `json:"filters,omitempty"`
+	FilterWheelSettings
 }
 
 type FilterWheelStatus struct {
 	DeviceStatus
+	FilterWheelStandard
 	Readings FilterWheelReadings `json:"readings,omitzero"`
 }
 
@@ -99,10 +96,12 @@ type FilterWheelReadings struct {
 type FocuserSpec struct {
 	TrainDevice
 	Procedures[Action]
+	FocuserSettings
 }
 
 type FocuserStatus struct {
 	DeviceStatus
+	FocuserStandard
 	Readings FocuserReadings `json:"readings,omitzero"`
 	Display  FocuserDisplay  `json:"display,omitzero"`
 }
@@ -123,10 +122,12 @@ type FocuserReadings struct {
 type RotatorSpec struct {
 	TrainDevice
 	Procedures[Action]
+	RotatorSettings
 }
 
 type RotatorStatus struct {
 	DeviceStatus
+	RotatorStandard
 	Readings RotatorReadings `json:"readings,omitzero"`
 	Display  RotatorDisplay  `json:"display,omitzero"`
 }
@@ -151,6 +152,7 @@ type DustCapSpec struct {
 
 type DustCapStatus struct {
 	DeviceStatus
+	DustCapStandard
 	Readings DustCapReadings `json:"readings,omitzero"`
 }
 
@@ -171,10 +173,12 @@ type DustCapReadings struct {
 type FlatPanelSpec struct {
 	TrainDevice
 	Procedures[LightAction]
+	FlatPanelSettings
 }
 
 type FlatPanelStatus struct {
 	DeviceStatus
+	FlatPanelStandard
 	Readings FlatPanelReadings `json:"readings,omitzero"`
 	Display  FlatPanelDisplay  `json:"display,omitzero"`
 }

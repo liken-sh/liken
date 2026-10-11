@@ -1,0 +1,121 @@
+# The typed fields of a `Dome`, from the standard properties of INDI's
+# DOME interface, as a rotating dome and as a roll-off roof. curated.go
+# gives the format and the roles.
+kind: Dome
+interfaces: [dome]
+detect: [DOME_MOTION, DOME_SHUTTER]
+properties:
+  ACTIVE_DEVICES:
+    field: activeDevices
+    role: tree
+    description: "The INDI devices whose state the dome reads."
+    members:
+      ACTIVE_TELESCOPE: {field: telescope, description: "The mount, for its park lock and for where it points."}
+      ACTIVE_INPUT: {field: input, description: "The input device that the dome reads."}
+      ACTIVE_OUTPUT: {field: output, description: "The output device that the dome switches."}
+  MOUNT_POLICY:
+    field: mountPolicy
+    role: tree
+    description: "Whether the mount's park locks the dome's park: `MOUNT_LOCKS` or `MOUNT_IGNORED`."
+  DOME_MOTION:
+    field: motion
+    role: command
+    description: "Turns the dome clockwise or counterclockwise, as seen from above, or moves the roof."
+  DOME_ABORT_MOTION:
+    field: abortMotion
+    role: command
+    description: "Stops every motion of the dome and of its shutter."
+  DOME_PARK:
+    field: park
+    role: command
+    description: "Parks or unparks the dome. The `state` action changes it."
+  USEJOYSTICK:
+    field: joystick
+    role: setting
+    description: "Whether the driver moves the dome from a joystick."
+  SNOOP_JOYSTICK:
+    field: joystickDevice
+    role: tree
+    description: "The INDI device of the joystick."
+  DOME_SHUTTER:
+    field: shutter
+    role: command
+    description: "Opens or closes the shutter."
+  DOME_SHUTTER_PARK_POLICY:
+    field: shutterParkPolicy
+    role: setting
+    description: "Whether the driver closes the shutter when the dome parks, opens it when the dome unparks, or both."
+  DOME_SPEED:
+    field: speed
+    role: setting
+    unit: rpm
+    description: "The speed of the dome's rotation, in revolutions per minute."
+  REL_DOME_POSITION:
+    field: relativePosition
+    role: command
+    unit: deg
+    description: "Turns the dome by this many degrees in the direction of `motion`."
+  ABS_DOME_POSITION:
+    field: azimuth
+    role: command
+    unit: deg
+    description: "The azimuth of the shutter, in degrees east of north."
+  Presets:
+    field: presets
+    role: setting
+    description: "Three azimuths, in degrees, that `gotoPreset` turns the dome to."
+    members:
+      Preset 1: {field: preset1, unit: deg, description: "The first azimuth, in degrees."}
+      Preset 2: {field: preset2, unit: deg, description: "The second azimuth, in degrees."}
+      Preset 3: {field: preset3, unit: deg, description: "The third azimuth, in degrees."}
+  Goto:
+    field: gotoPreset
+    role: command
+    description: "Turns the dome to one of its `presets`."
+  DOME_AUTOSYNC:
+    field: autoSync
+    role: setting
+    description: "Whether the dome follows the mount, so the shutter stays in front of the telescope."
+  DM_OTA_SIDE:
+    field: otaSide
+    role: setting
+    description: "Which side of the pier the driver takes the telescope to be on: east, west, from the mount, from the hour angle, or none."
+  DOME_PARAMS:
+    field: autoSyncThreshold
+    role: setting
+    unit: deg
+    description: "How far, in degrees, the shutter can be from where the telescope points before the dome turns to follow it."
+  DOME_MEASUREMENTS:
+    field: measurements
+    role: setting
+    description: "The dome's geometry, in meters, which the driver needs to turn the shutter to where the telescope points."
+    members:
+      DM_DOME_RADIUS: {field: radius, unit: m, description: "The radius of the dome, in meters."}
+      DM_SHUTTER_WIDTH: {field: shutterWidth, unit: m, description: "The width of the shutter's opening, in meters."}
+      DM_NORTH_DISPLACEMENT: {field: northDisplacement, unit: m, description: "How far the mount's axes are north of the dome's center, in meters."}
+      DM_EAST_DISPLACEMENT: {field: eastDisplacement, unit: m, description: "How far the mount's axes are east of the dome's center, in meters."}
+      DM_UP_DISPLACEMENT: {field: upDisplacement, unit: m, description: "How far the mount's axes are above the dome's center, in meters."}
+      DM_OTA_OFFSET: {field: otaOffset, unit: m, description: "How far the optical tube's axis is from the mount's axes, in meters."}
+  DOME_SYNC:
+    field: sync
+    role: command
+    unit: deg
+    description: "An azimuth, in degrees, that the driver takes as the dome's current azimuth, with no motion."
+  DOME_PARK_POSITION:
+    field: parkPosition
+    role: setting
+    unit: deg
+    description: "The azimuth that the dome parks at, in degrees."
+  DOME_PARK_OPTION:
+    field: parkOption
+    role: command
+    description: "Sets the park position to the current azimuth or to the driver's default, or writes the driver's park data."
+  DOME_BACKLASH_TOGGLE:
+    field: backlash
+    role: setting
+    description: "Whether the driver corrects the backlash of the dome's motor."
+  DOME_BACKLASH_STEPS:
+    field: backlashSteps
+    role: setting
+    unit: steps
+    description: "The backlash of the dome's motor, in steps."

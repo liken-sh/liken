@@ -38,6 +38,24 @@ test-go:
 drivers:
 	go test ./drivers -run TestTheMapIsCurrent -update
 
+# The schema comes from schema/ and from the standard properties of
+# each INDI interface in indi/standard/: the CRD in deploy/ of each kind
+# with procedures, and the typed fields in observatory/generated_*.go. A
+# test fails when one of them is stale; this writes them again.
+.PHONY: schema
+schema:
+	go test ./schema -run TestTheSchemaIsCurrent -update
+
+# schema/disagreements.txt lists each place where the sources of the
+# standard properties disagree, with the standard properties page of
+# indilib/docs among them. The generator never reads the page, because
+# its text is not ours to publish. This fetches the page from GitHub at
+# its newest commit, or at COMMIT, and writes the report again, so it
+# runs on a workstation, never in CI.
+.PHONY: crosscheck
+crosscheck:
+	go run ./schema/crosscheck -root . $(if $(COMMIT),-commit $(COMMIT))
+
 # The captures in indi/standard/ and the transcripts in indi/testdata/
 # are what a real indiserver sent on the libindi that indi/package.toml
 # pins. After a bump of the INDI images, this records both again: it

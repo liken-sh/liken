@@ -1,0 +1,131 @@
+# A `Focuser` moves the focus of one light path: an INDI driver with
+# `FOCUSER_INTERFACE`.
+#
+# A device resource is inventory: `observatory-operator` starts its pod
+# only while a `Reservation` needs it. The fields that every device
+# shares come from `device.yaml.tmpl`, and the procedure schema from
+# `procedures.yaml.tmpl`, so all 14 device CRDs hold the same copy. The
+# typed fields of INDI's standard properties come from
+# `focusers-fields.yaml`.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: focusers.observatory.liken.sh
+spec:
+  group: observatory.liken.sh
+  names:
+    kind: Focuser
+    listKind: FocuserList
+    plural: focusers
+    singular: focuser
+    shortNames: [foc]
+    categories: [astro]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      selectableFields:
+        - jsonPath: .spec.opticalTrain
+      additionalPrinterColumns:
+        - name: Train
+          type: string
+          jsonPath: .spec.opticalTrain
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Position
+          type: string
+          jsonPath: .status.display.position
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+        - name: Driver
+          type: string
+          jsonPath: .spec.driver.name
+          priority: 1
+        - name: Device
+          type: string
+          jsonPath: .status.indiDevice
+          priority: 1
+        - name: Node
+          type: string
+          jsonPath: .status.node
+          priority: 1
+        - name: Message
+          type: string
+          jsonPath: '.status.conditions[?(@.type=="Ready")].message'
+          priority: 1
+      schema:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-validations:
+            - rule: size(self.metadata.name) <= 32
+              message: >-
+                a Focuser name is at most 32 characters, because
+                observatory-operator names its pod and Service
+                <name>-focuser, and a Service name holds at most 63
+                characters
+          description: >-
+            A `Focuser` moves the focus of one light path: an INDI
+            driver with `FOCUSER_INTERFACE`.
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [driver]
+              description: "One focuser, with INDI's `FOCUSER_INTERFACE`."
+              properties:
+                opticalTrain:
+                  type: string
+                  minLength: 1
+                  maxLength: 253
+                  pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                  description: >-
+                    The name of the `OpticalTrain` that the device is
+                    on. The train's members set what each camera on it
+                    snoops.
+                    Optional. With no `opticalTrain`, the device is on
+                    the shelf, and the operator creates nothing for it.
+{{ include "device spec" . | indent 16 }}
+{{ settings | indent 16 }}
+{{ include "procedure spec" . | indent 16 }}
+            status:
+              type: object
+              description: >-
+                What the operator observes. The operator writes it, and
+                a person reads it.
+              properties:
+{{ include "device status" . | indent 16 }}
+{{ standard | indent 16 }}
+                display:
+                  type: object
+                  description: >-
+                    The readings as a person reads them, with their units,
+                    for the printer columns. The numbers are in `readings`.
+                  properties:
+                    position:
+                      type: string
+                      description: "The position in steps, such as `52000 steps`."
+                readings:
+                  type: object
+                  description: >-
+                    What the focuser reports, from `ABS_FOCUS_POSITION`.
+                    A field is absent until the driver sends it.
+                  properties:
+                    position:
+                      type: integer
+                      format: int64
+                      description: "The focuser's position, in its own steps."
+{{- define "action" }}
+type: object
+description: >-
+  One action, which names `job`.
+x-kubernetes-validations:
+  - rule: "has(self.job)"
+    message: "an action of a Focuser names job"
+properties:
+{{ include "action fields" . | indent 2 }}
+{{- end }}

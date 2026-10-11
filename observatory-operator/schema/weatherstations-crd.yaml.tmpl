@@ -1,0 +1,168 @@
+# A `WeatherStation` reports the weather at the site and whether it is
+# safe to observe: an INDI driver with `WEATHER_INTERFACE`.
+#
+# A device resource is inventory: `observatory-operator` starts its pod
+# only while a `Reservation` needs it. The fields that every device
+# shares come from `device.yaml.tmpl`, and the procedure schema from
+# `procedures.yaml.tmpl`, so all 14 device CRDs hold the same copy. The
+# typed fields of INDI's standard properties come from
+# `weatherstations-fields.yaml`.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: weatherstations.observatory.liken.sh
+spec:
+  group: observatory.liken.sh
+  names:
+    kind: WeatherStation
+    listKind: WeatherStationList
+    plural: weatherstations
+    singular: weatherstation
+    shortNames: [weather]
+    categories: [astro]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      selectableFields:
+        - jsonPath: .spec.observatory
+      additionalPrinterColumns:
+        - name: Observatory
+          type: string
+          jsonPath: .spec.observatory
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Safety
+          type: string
+          jsonPath: .status.readings.safety
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+        - name: Driver
+          type: string
+          jsonPath: .spec.driver.name
+          priority: 1
+        - name: Device
+          type: string
+          jsonPath: .status.indiDevice
+          priority: 1
+        - name: Node
+          type: string
+          jsonPath: .status.node
+          priority: 1
+        - name: Message
+          type: string
+          jsonPath: '.status.conditions[?(@.type=="Ready")].message'
+          priority: 1
+      schema:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-validations:
+            - rule: size(self.metadata.name) <= 32
+              message: >-
+                a WeatherStation name is at most 32 characters, because
+                observatory-operator names its pod and Service
+                <name>-weatherstation, and a Service name holds at most
+                63 characters
+          description: >-
+            A `WeatherStation` reports the weather at the site and whether it
+            is safe to observe: an INDI driver with `WEATHER_INTERFACE`. It
+            runs on the observatory's own INDI server, and the `Observatory`'s
+            status reports the worst safety status of its stations.
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [driver]
+              description: >-
+                One weather station, with INDI's `WEATHER_INTERFACE`.
+              properties:
+                observatory:
+                  type: string
+                  minLength: 1
+                  maxLength: 253
+                  pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                  description: >-
+                    The name of the `Observatory` that the device
+                    belongs to. The device runs on the observatory's own
+                    INDI server.
+                    Optional. With no `observatory`, the device is on
+                    the shelf, and the operator creates nothing for it.
+{{ include "device spec" . | indent 16 }}
+{{ settings | indent 16 }}
+{{ include "procedure spec" . | indent 16 }}
+            status:
+              type: object
+              description: >-
+                What the operator observes. The operator writes it, and
+                a person reads it.
+              properties:
+{{ include "device status" . | indent 16 }}
+{{ standard | indent 16 }}
+                readings:
+                  type: object
+                  description: >-
+                    What the weather station reports, from `SAFETY_STATUS`,
+                    `WEATHER_PARAMETERS`, and `WEATHER_STATUS`. A field is
+                    absent until the driver sends it. INDI reports each safety
+                    status as a light: `Ok` is `Safe`, `Busy` is `Warning`,
+                    `Alert` is `Danger`, and `Idle` is `Unknown`.
+                  properties:
+                    safety:
+                      type: string
+                      enum: [Safe, Warning, Danger, Unknown]
+                      description: "The station's safety status for the whole site."
+                    parameters:
+                      type: array
+                      description: >-
+                        Each measurement, with its safety status against the
+                        driver's limits.
+                      x-kubernetes-list-type: map
+                      x-kubernetes-list-map-keys: [name]
+                      items:
+                        type: object
+                        required: [name]
+                        description: "One measurement."
+                        properties:
+                          name:
+                            type: string
+                            minLength: 1
+                            description: >-
+                              The measurement's name, such as
+                              `WEATHER_TEMPERATURE`.
+                          label:
+                            type: string
+                            description: >-
+                              The label that the driver gives the
+                              measurement, with its unit, such as
+                              `Temperature (C)`.
+                          value:
+                            type: number
+                            description: >-
+                              The value, in the unit that the label
+                              names.
+                          text:
+                            type: string
+                            description: >-
+                              The value with the unit that the label
+                              names, such as `12.5 °C` or `20 km/h`. A
+                              label that names no unit gives the number
+                              alone.
+                          safety:
+                            type: string
+                            enum: [Safe, Warning, Danger, Unknown]
+                            description: "The safety status of this measurement."
+{{- define "action" }}
+type: object
+description: >-
+  One action, which names `job`.
+x-kubernetes-validations:
+  - rule: "has(self.job)"
+    message: "an action of a WeatherStation names job"
+properties:
+{{ include "action fields" . | indent 2 }}
+{{- end }}

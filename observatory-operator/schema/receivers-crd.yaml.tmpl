@@ -1,0 +1,157 @@
+# A `Receiver` is a radio receiver, such as an RTL-SDR: an INDI driver
+# with `SPECTROGRAPH_INTERFACE`.
+#
+# A device resource is inventory: `observatory-operator` starts its pod
+# only while a `Reservation` needs it. The fields that every device
+# shares come from `device.yaml.tmpl`, and the procedure schema from
+# `procedures.yaml.tmpl`, so all 14 device CRDs hold the same copy. The
+# typed fields of INDI's standard properties come from
+# `receivers-fields.yaml`.
+#
+# `equipment-operator` has a `Receiver` kind of its own in the
+# `equipment.liken.sh` group. `kubectl get receiver` can answer either
+# one, so name this one as `rx` or `receivers.observatory.liken.sh`.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: receivers.observatory.liken.sh
+spec:
+  group: observatory.liken.sh
+  names:
+    kind: Receiver
+    listKind: ReceiverList
+    plural: receivers
+    singular: receiver
+    shortNames: [rx]
+    categories: [astro]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      selectableFields:
+        - jsonPath: .spec.telescope
+        - jsonPath: .spec.observatory
+      additionalPrinterColumns:
+        - name: Telescope
+          type: string
+          jsonPath: .spec.telescope
+        - name: Observatory
+          type: string
+          jsonPath: .spec.observatory
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Frequency
+          type: string
+          jsonPath: .status.display.frequency
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+        - name: Driver
+          type: string
+          jsonPath: .spec.driver.name
+          priority: 1
+        - name: Device
+          type: string
+          jsonPath: .status.indiDevice
+          priority: 1
+        - name: Node
+          type: string
+          jsonPath: .status.node
+          priority: 1
+        - name: Message
+          type: string
+          jsonPath: '.status.conditions[?(@.type=="Ready")].message'
+          priority: 1
+      schema:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-validations:
+            - rule: size(self.metadata.name) <= 32
+              message: >-
+                a Receiver name is at most 32 characters, because
+                observatory-operator names its pod and Service
+                <name>-receiver, and a Service name holds at most 63
+                characters
+          description: >-
+            A `Receiver` is a radio receiver, such as an RTL-SDR: an
+            INDI driver with `SPECTROGRAPH_INTERFACE`.
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [driver]
+              description: >-
+                One radio receiver, with INDI's
+                `SPECTROGRAPH_INTERFACE`.
+              x-kubernetes-validations:
+                - rule: "!(has(self.telescope) && has(self.observatory))"
+                  message: "set at most one parent: spec.telescope or spec.observatory"
+              properties:
+                telescope:
+                  type: string
+                  minLength: 1
+                  maxLength: 253
+                  pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                  description: >-
+                    The name of the `Telescope` that the device belongs
+                    to. Set this or `observatory`, not both.
+                    Optional. With neither `telescope` nor
+                    `observatory`, the device is on the shelf, and the
+                    operator creates nothing for it.
+                observatory:
+                  type: string
+                  minLength: 1
+                  maxLength: 253
+                  pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                  description: >-
+                    The name of the `Observatory` that the device
+                    belongs to, when no single telescope owns it. The
+                    device then runs on the observatory's own INDI
+                    server. Set this or `telescope`, not both.
+                    Optional. With neither `telescope` nor
+                    `observatory`, the device is on the shelf, and the
+                    operator creates nothing for it.
+{{ include "device spec" . | indent 16 }}
+{{ settings | indent 16 }}
+{{ include "procedure spec" . | indent 16 }}
+            status:
+              type: object
+              description: >-
+                What the operator observes. The operator writes it, and
+                a person reads it.
+              properties:
+{{ include "device status" . | indent 16 }}
+{{ standard | indent 16 }}
+                display:
+                  type: object
+                  description: >-
+                    The readings as a person reads them, with their units,
+                    for the printer columns. The numbers are in `readings`.
+                  properties:
+                    frequency:
+                      type: string
+                      description: "The center frequency in megahertz, such as `1420.406 MHz`."
+                readings:
+                  type: object
+                  description: >-
+                    What the receiver reports, from `RECEIVER_SETTINGS`.
+                    A field is absent until the driver sends it.
+                  properties:
+                    frequency:
+                      type: number
+                      minimum: 0
+                      description: "The center frequency, in hertz."
+{{- define "action" }}
+type: object
+description: >-
+  One action, which names `job`.
+x-kubernetes-validations:
+  - rule: "has(self.job)"
+    message: "an action of a Receiver names job"
+properties:
+{{ include "action fields" . | indent 2 }}
+{{- end }}

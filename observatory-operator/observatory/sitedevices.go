@@ -18,10 +18,12 @@ type (
 type DomeSpec struct {
 	ObservatoryDevice
 	Procedures[ParkAction]
+	DomeSettings
 }
 
 type DomeStatus struct {
 	DeviceStatus
+	DomeStandard
 	Readings DomeReadings `json:"readings,omitzero"`
 	Display  DomeDisplay  `json:"display,omitzero"`
 }
@@ -57,10 +59,12 @@ type DomeReadings struct {
 type WeatherStationSpec struct {
 	ObservatoryDevice
 	Procedures[Action]
+	WeatherStationSettings
 }
 
 type WeatherStationStatus struct {
 	DeviceStatus
+	WeatherStationStandard
 	Readings WeatherStationReadings `json:"readings,omitzero"`
 }
 
@@ -130,10 +134,12 @@ type SkyQualityMeterReadings struct {
 type SwitchSpec struct {
 	TelescopeOrObservatoryDevice
 	Procedures[Action]
+	SwitchSettings
 }
 
 type SwitchStatus struct {
 	DeviceStatus
+	SwitchStandard
 	Readings SwitchReadings `json:"readings,omitzero"`
 }
 
@@ -162,10 +168,12 @@ type SwitchChannel struct {
 type ReceiverSpec struct {
 	TelescopeOrObservatoryDevice
 	Procedures[Action]
+	ReceiverSettings
 }
 
 type ReceiverStatus struct {
 	DeviceStatus
+	ReceiverStandard
 	Readings ReceiverReadings `json:"readings,omitzero"`
 	Display  ReceiverDisplay  `json:"display,omitzero"`
 }

@@ -20,6 +20,11 @@ One polar alignment corrector, with INDI's `PAC_INTERFACE`.
 | <span id="spec--driver"></span>`driver` | [object](#specdriver) | yes | The INDI driver that runs the device. With no `image`, the operator runs the image that the `indi` build lists for the driver, so `name` must then be an INDI driver that the image holds, such as `indi_simulator_ccd`. |
 | <span id="spec--power"></span>`power` | [object](#specpower) | no | The `Switch` output that powers the device. Activation switches the output on before the device's pod starts, and deactivation switches it off after the pod stops. Optional. With no power, a person powers the device on and off by hand. |
 | <span id="spec--claim"></span>`claim` | object | no | A `ResourceClaimSpec` of the `resource.k8s.io` API, for real hardware. The operator creates a `ResourceClaim` from it for the device's pod. The API server validates it when the operator creates the claim. Optional. A simulator needs no claim. |
+| <span id="spec--speed"></span>`speed` | number | no | The speed of the polar aligner's motors, in the driver's own units. The operator writes it to `PAC_SPEED` once, in the `Configure` step of each reservation. Optional. |
+| <span id="spec--azimuthreverse"></span>`azimuthReverse` | string | no | Whether the driver reverses the direction of the azimuth motor. The operator writes it to `PAC_AZ_REVERSE` once, in the `Configure` step of each reservation. Optional. One of: `INDI_ENABLED`, `INDI_DISABLED`. |
+| <span id="spec--altitudereverse"></span>`altitudeReverse` | string | no | Whether the driver reverses the direction of the altitude motor. The operator writes it to `PAC_ALT_REVERSE` once, in the `Configure` step of each reservation. Optional. One of: `INDI_ENABLED`, `INDI_DISABLED`. |
+| <span id="spec--backlash"></span>`backlash` | string | no | Whether the driver corrects the backlash of the motors. The operator writes it to `PAC_BACKLASH_ENABLED` once, in the `Configure` step of each reservation. Optional. One of: `INDI_ENABLED`, `INDI_DISABLED`. |
+| <span id="spec--backlashsteps"></span>`backlashSteps` | [object](#specbacklashsteps) | no | The backlash of each motor, in steps. The operator writes it to `PAC_BACKLASH_STEPS` once, in the `Configure` step of each reservation. Optional. |
 | <span id="spec--activation"></span>`activation` | [\[\]object](#specactivation) | no | The actions that run, in order, as this resource's `Telescope` or `Observatory` turns `Active`, while every device is still connected. For a `Telescope` or an `Observatory`, that is the resource itself. The `Reservation`'s `Activation` step waits for them. Each action is a target state, so a run that an operator restart interrupted runs again each action that is not `Done`. Optional. |
 | <span id="spec--deactivation"></span>`deactivation` | [\[\]object](#specdeactivation) | no | The actions that run, in order, as this resource's `Telescope` or `Observatory` stops being `Active`, while every device is still connected. For a `Telescope` or an `Observatory`, that is the resource itself. The `Reservation`'s `Deactivation` step waits for them. Each action is a target state, so a run that an operator restart interrupted runs again each action that is not `Done`. Optional. |
 | <span id="spec--triggers"></span>`triggers` | [\[\]object](#spectriggers) | no | Triggers on conditions. Each one runs its actions once for each transition of its condition to the status it names, while the resource is active: from when its activation is done until its deactivation begins. A condition that holds when the activation ends runs then. A run that began runs to its end, unless the resource's deactivation begins, and a resource runs one procedure at a time. Optional. |
@@ -41,6 +46,15 @@ The `Switch` output that powers the device. Activation switches the output on be
 | --- | --- | --- | --- |
 | <span id="specpower--switch"></span>`switch` | string | yes | The name of a `Switch` in this namespace. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
 | <span id="specpower--output"></span>`output` | integer | yes | The number of the output, from 1, as the driver numbers `DIGITAL_OUTPUT_1`. |
+
+### spec.backlashSteps
+
+The backlash of each motor, in steps. The operator writes it to `PAC_BACKLASH_STEPS` once, in the `Configure` step of each reservation. Optional.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specbacklashsteps--azimuth"></span>`azimuth` | number | no | The backlash of the azimuth motor, in steps. The member is `BACKLASH_AZ`. |
+| <span id="specbacklashsteps--altitude"></span>`altitude` | number | no | The backlash of the altitude motor, in steps. The member is `BACKLASH_ALT`. |
 
 ### spec.activation[]
 
@@ -232,6 +246,16 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--pod"></span>`pod` | string | no | The name of the device's pod, while it exists. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the device's pod. |
 | <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Every property that the device defines, as the driver defines it, with the values of its last update. A vendor's own properties are here, and no typed reading depends on one. The list holds no BLOB data. |
+| <span id="status--adjustment"></span>`adjustment` | [object](#statusadjustment) | no | Moves the mount's polar axis by an angle on each axis, in degrees. The status holds what the driver reports in `PAC_MANUAL_ADJUSTMENT`. Clients such as KStars and Ekos change it. |
+| <span id="status--abortmotion"></span>`abortMotion` | [object](#statusabortmotion) | no | Stops every motion of the polar aligner. The status holds what the driver reports in `PAC_ABORT_MOTION`. Clients such as KStars and Ekos change it. |
+| <span id="status--position"></span>`position` | [object](#statusposition) | no | How far the polar aligner has moved the axis from its home, in degrees. The status holds what the driver reports in `PAC_POSITION`. |
+| <span id="status--speed"></span>`speed` | [object](#statusspeed) | no | The speed of the polar aligner's motors, in the driver's own units. The status holds what the driver reports in `PAC_SPEED`. `spec.speed` sets it. |
+| <span id="status--azimuthreverse"></span>`azimuthReverse` | [object](#statusazimuthreverse) | no | Whether the driver reverses the direction of the azimuth motor. The status holds what the driver reports in `PAC_AZ_REVERSE`. `spec.azimuthReverse` sets it. |
+| <span id="status--altitudereverse"></span>`altitudeReverse` | [object](#statusaltitudereverse) | no | Whether the driver reverses the direction of the altitude motor. The status holds what the driver reports in `PAC_ALT_REVERSE`. `spec.altitudeReverse` sets it. |
+| <span id="status--home"></span>`home` | [object](#statushome) | no | Sets the current position as home, moves the polar aligner home, or clears the home position. The status holds what the driver reports in `PAC_HOME`. Clients such as KStars and Ekos change it. |
+| <span id="status--sync"></span>`sync` | [object](#statussync) | no | A position, in degrees, that the driver takes as the current position, with no motion. The status holds what the driver reports in `PAC_SYNC`. Clients such as KStars and Ekos change it. |
+| <span id="status--backlash"></span>`backlash` | [object](#statusbacklash) | no | Whether the driver corrects the backlash of the motors. The status holds what the driver reports in `PAC_BACKLASH_ENABLED`. `spec.backlash` sets it. |
+| <span id="status--backlashsteps"></span>`backlashSteps` | [object](#statusbacklashsteps) | no | The backlash of each motor, in steps. The status holds what the driver reports in `PAC_BACKLASH_STEPS`. `spec.backlashSteps` sets it. |
 | <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the polar aligner reports, from `PAC_MANUAL_ADJUSTMENT`. A field is absent until the driver sends it. |
 
 ### status.conditions[]
@@ -300,6 +324,100 @@ One member of the property.
 | <span id="statuspropertiesmembers--min"></span>`min` | number | no | For a number, the least value that the driver accepts. |
 | <span id="statuspropertiesmembers--max"></span>`max` | number | no | For a number, the greatest value that the driver accepts. |
 | <span id="statuspropertiesmembers--step"></span>`step` | number | no | For a number, the step between values. Zero means any step. |
+
+### status.adjustment
+
+Moves the mount's polar axis by an angle on each axis, in degrees. The status holds what the driver reports in `PAC_MANUAL_ADJUSTMENT`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusadjustment--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusadjustment--azimuth"></span>`azimuth` | number | no | The move in azimuth, in degrees. The member is `MANUAL_AZ_STEP`. |
+| <span id="statusadjustment--altitude"></span>`altitude` | number | no | The move in altitude, in degrees. The member is `MANUAL_ALT_STEP`. |
+
+### status.abortMotion
+
+Stops every motion of the polar aligner. The status holds what the driver reports in `PAC_ABORT_MOTION`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusabortmotion--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusabortmotion--value"></span>`value` | string | no | The name of the member that is on, such as `ABORT`. Absent when no member is on. |
+
+### status.position
+
+How far the polar aligner has moved the axis from its home, in degrees. The status holds what the driver reports in `PAC_POSITION`.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusposition--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusposition--azimuth"></span>`azimuth` | number | no | The position in azimuth, in degrees. The member is `POSITION_AZ`. |
+| <span id="statusposition--altitude"></span>`altitude` | number | no | The position in altitude, in degrees. The member is `POSITION_ALT`. |
+
+### status.speed
+
+The speed of the polar aligner's motors, in the driver's own units. The status holds what the driver reports in `PAC_SPEED`. `spec.speed` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusspeed--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusspeed--value"></span>`value` | number | no | The value that the driver reports. The unit is the driver's own. |
+
+### status.azimuthReverse
+
+Whether the driver reverses the direction of the azimuth motor. The status holds what the driver reports in `PAC_AZ_REVERSE`. `spec.azimuthReverse` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusazimuthreverse--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusazimuthreverse--value"></span>`value` | string | no | The name of the member that is on, such as `INDI_ENABLED`. Absent when no member is on. |
+
+### status.altitudeReverse
+
+Whether the driver reverses the direction of the altitude motor. The status holds what the driver reports in `PAC_ALT_REVERSE`. `spec.altitudeReverse` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusaltitudereverse--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusaltitudereverse--value"></span>`value` | string | no | The name of the member that is on, such as `INDI_ENABLED`. Absent when no member is on. |
+
+### status.home
+
+Sets the current position as home, moves the polar aligner home, or clears the home position. The status holds what the driver reports in `PAC_HOME`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statushome--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statushome--value"></span>`value` | string | no | The name of the member that is on, such as `HOME_SET`. Absent when no member is on. |
+
+### status.sync
+
+A position, in degrees, that the driver takes as the current position, with no motion. The status holds what the driver reports in `PAC_SYNC`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussync--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statussync--azimuth"></span>`azimuth` | number | no | The position in azimuth, in degrees. The member is `SYNC_AZ`. |
+| <span id="statussync--altitude"></span>`altitude` | number | no | The position in altitude, in degrees. The member is `SYNC_ALT`. |
+
+### status.backlash
+
+Whether the driver corrects the backlash of the motors. The status holds what the driver reports in `PAC_BACKLASH_ENABLED`. `spec.backlash` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusbacklash--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusbacklash--value"></span>`value` | string | no | The name of the member that is on, such as `INDI_ENABLED`. Absent when no member is on. |
+
+### status.backlashSteps
+
+The backlash of each motor, in steps. The status holds what the driver reports in `PAC_BACKLASH_STEPS`. `spec.backlashSteps` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusbacklashsteps--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusbacklashsteps--azimuth"></span>`azimuth` | number | no | The backlash of the azimuth motor, in steps. The member is `BACKLASH_AZ`. |
+| <span id="statusbacklashsteps--altitude"></span>`altitude` | number | no | The backlash of the altitude motor, in steps. The member is `BACKLASH_ALT`. |
 
 ### status.readings
 

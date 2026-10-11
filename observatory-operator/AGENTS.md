@@ -3,7 +3,7 @@
 This directory holds the operator that controls an observatory's
 hardware through INDI, and the manifests that run it: the operator's
 `package main` at the top, the resources' Go types in `observatory/`,
-the INDI client in `indi/`, the client of PHD2's event server in
+the generator of their schema in `schema/`, the INDI client in `indi/`, the client of PHD2's event server in
 `phd2/`, the map of driver images in `drivers/`,
 the CRDs, the RBAC, and the operator's `Deployment` in `deploy/`, the
 example in `examples/`, the manual in `docs/`, the skills that the
@@ -29,32 +29,59 @@ operator's pods to the properties that plan 03 measured, and
 
 ## The resources
 
-The CRDs in `deploy/` are written by hand, one file for each kind, and
-`observatory/` holds the Go type of each kind. The tests in
-`observatory/` read the CRDs through the API server's own validators
-and hold them to the Go types:
+`observatory/` holds the Go type of each kind, and `deploy/` holds one
+CRD for each kind. Four CRDs are written by hand: `OpticalTube`,
+`OpticalTrain`, `Guider`, and `Reservation`. `schema/` generates the
+other 16, the kinds with procedures, so the parts that several kinds
+share have one source:
+
+- `<plural>-crd.yaml.tmpl` is the CRD of one kind, with the fields
+  that only that kind has written out, and the kind's own action
+  fields in its template `action`.
+- `device.yaml.tmpl` holds the fields that every device kind shares,
+  `DeviceSpec` and `DeviceStatus`, and `procedures.yaml.tmpl` holds
+  the procedure schema: `spec.activation`, `spec.deactivation`,
+  `spec.triggers`, and `status.procedures`.
+- `<plural>-fields.yaml` gives the typed fields of a device kind, one
+  entry for each standard property of its INDI interfaces: the field's
+  name, its role, the unit of each number, and its description. The
+  role decides whether a field is in spec and status, or in status
+  alone. `curated.go` describes the format. The generator writes the
+  fields into the CRD, and their Go types into
+  `observatory/generated_*.go`.
+
+The standard properties of each interface come from `indi/standard/`:
+the captures of the bare drivers give the structure, and
+`conventions.yaml` gives the properties that drivers share and libindi
+does not define, such as `CCD_GAIN`. The generator fails on a standard
+property that a fields file does not name, on an entry that names no
+standard property, on an entry or a member with no description, and on
+a description that does not name its unit.
+
+The descriptions are ours, written in the voice of `brand/voice.md`,
+because `kubectl explain` and the manual publish them. The standard
+properties page of `indilib/docs` is a cross-check only: `make
+crosscheck` fetches it and writes `schema/disagreements.txt`, which
+lists each place where the page, the captures, the conventions, the
+simulators, and the units of the fields files disagree, and names the
+commit of the page. It reaches GitHub, so no test runs it; a test
+checks that each line names a property that a source still defines.
+
+`make schema` writes the CRDs and the generated types again, and a
+test fails when one of them is stale. So a new field takes an edit to
+a template or a fields file, a description with the field's unit, and
+`make schema`.
+
+The tests in `observatory/` read the CRDs through the API server's own
+validators and hold them to the Go types:
 
 - `drift_test.go` compares each Go type with its CRD, field by field.
   A field on one side only, or a field with another type, fails.
-- `shared_test.go` holds the fields that every device shares equal in
-  all 14 device CRDs, descriptions and rules included. A change to
-  `DeviceSpec` or `DeviceStatus` is a change to all 14 files.
-- `procedureschema_test.go` holds the procedure schema equal in the
-  16 CRDs with procedures, descriptions and rules included:
-  `spec.activation`, `spec.deactivation`, `spec.triggers`, and
-  `status.procedures`. Only the action fields that some kinds lack,
-  `state` with its enum, `cool`, and `warm`, differ by kind, with the
-  action's description and its rule. A change to any other part is a
-  change to all 16 files.
 - `enum_test.go` holds each CRD enum equal to the Go constants.
 - `validation_test.go` runs resources that a person could write
   through the structural schema and the CEL rules.
 - `example_test.go` holds `examples/simulators.yaml` to the CRDs, to
   the Go types, and to itself: every name it gives exists in it.
-
-So a new field takes three edits: the Go type, the CRD, and a
-description with the field's unit. `kubectl explain` prints the
-description, and a test fails on a field with none.
 
 ## The INDI client
 
@@ -109,7 +136,10 @@ a file in `indi/` changes the recipe of the 17 INDI images.
 After a bump of the INDI images, `make captures` records both again
 in Docker: `make standard` builds and captures the bare drivers, and
 `make transcripts` runs the simulators. A test fails when a capture
-names another INDI version than `indi/package.toml`.
+names another INDI version than `indi/package.toml`. Then run `make
+schema`, which fails on each new standard property until a fields file
+in `schema/` gives it a field and a description, and `make
+crosscheck`, whose report shows what changed between the sources.
 
 ## The PHD2 client
 

@@ -202,8 +202,10 @@ names; add it to an image's list or to `indi/images/unpublished`, and
 say which in the report. Then run `make -C observatory-operator
 captures`, which records the captures of the standard INDI properties
 and the simulator transcripts again on the new libindi; the operator's
-tests fail until it runs. CI builds the 17 images only when this tag
-is new.
+tests fail until it runs. Then run `make -C observatory-operator
+schema crosscheck`; `observatory-operator/AGENTS.md` gives the steps.
+Report each new line of `observatory-operator/schema/disagreements.txt`.
+CI builds the 17 images only when this tag is new.
 
 ## 6. Report
 

@@ -235,6 +235,8 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--pod"></span>`pod` | string | no | The name of the device's pod, while it exists. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the device's pod. |
 | <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Every property that the device defines, as the driver defines it, with the values of its last update. A vendor's own properties are here, and no typed reading depends on one. The list holds no BLOB data. |
+| <span id="status--park"></span>`park` | [object](#statuspark) | no | Closes the cap with `PARK` or opens it with `UNPARK`. The `state` action changes it. The status holds what the driver reports in `CAP_PARK`. Clients such as KStars and Ekos change it. |
+| <span id="status--abort"></span>`abort` | [object](#statusabort) | no | Stops the cap's motion. The status holds what the driver reports in `CAP_ABORT`. Clients such as KStars and Ekos change it. |
 | <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the dust cap reports, from `CAP_PARK`. A field is absent until the driver sends it. |
 
 ### status.conditions[]
@@ -303,6 +305,24 @@ One member of the property.
 | <span id="statuspropertiesmembers--min"></span>`min` | number | no | For a number, the least value that the driver accepts. |
 | <span id="statuspropertiesmembers--max"></span>`max` | number | no | For a number, the greatest value that the driver accepts. |
 | <span id="statuspropertiesmembers--step"></span>`step` | number | no | For a number, the step between values. Zero means any step. |
+
+### status.park
+
+Closes the cap with `PARK` or opens it with `UNPARK`. The `state` action changes it. The status holds what the driver reports in `CAP_PARK`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statuspark--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statuspark--value"></span>`value` | string | no | The name of the member that is on, such as `PARK`. Absent when no member is on. |
+
+### status.abort
+
+Stops the cap's motion. The status holds what the driver reports in `CAP_ABORT`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusabort--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusabort--value"></span>`value` | string | no | The name of the member that is on, such as `ABORT`. Absent when no member is on. |
 
 ### status.readings
 

@@ -1,0 +1,141 @@
+# The typed fields of a `Receiver`, from the standard properties of
+# INDI's receiver, a SPECTROGRAPH interface. curated.go gives the format
+# and the roles.
+kind: Receiver
+interfaces: [receiver]
+detect: [RECEIVER_SETTINGS]
+properties:
+  ACTIVE_DEVICES:
+    field: activeDevices
+    role: tree
+    description: "The INDI devices whose state the receiver writes into the FITS header of each integration."
+    members:
+      ACTIVE_TELESCOPE: {field: telescope, description: "The mount, for where the antenna points."}
+      ACTIVE_GPS: {field: gps, description: "The GPS, for the site's location and time."}
+  RECEIVER_SETTINGS:
+    field: receiverSettings
+    role: setting
+    description: "The tuning of the receiver."
+    members:
+      RECEIVER_GAIN: {field: gain, unit: driver, description: "The gain, in the driver's own units."}
+      RECEIVER_FREQUENCY: {field: frequency, unit: Hz, description: "The center frequency, in hertz."}
+      RECEIVER_BANDWIDTH: {field: bandwidth, unit: Hz, description: "The bandwidth, in hertz."}
+      RECEIVER_BITSPERSAMPLE: {field: bitsPerSample, unit: bits, description: "The depth of each sample, in bits."}
+      RECEIVER_SAMPLERATE: {field: sampleRate, unit: Hz, description: "The sample rate, in hertz."}
+      RECEIVER_ANTENNA: {field: antenna, unit: count, description: "The number of the antenna input."}
+  SENSOR_TEMPERATURE:
+    field: temperature
+    role: command
+    unit: degC
+    description: "The temperature of the receiver, in degrees Celsius. A client that writes it sets the cooler's setpoint."
+  SENSOR_INTEGRATION:
+    field: integration
+    role: command
+    unit: s
+    description: "The length of an integration, in seconds. While the integration runs, the driver counts it down."
+  FITS_HEADER:
+    field: fitsHeader
+    role: command
+    description: "The observer and the object that the FITS header of each integration names."
+    members:
+      FITS_OBSERVER: {field: observer, description: "The name of the observer."}
+      FITS_OBJECT: {field: object, description: "The name of the object."}
+  SENSOR:
+    field: data
+    role: reading
+    description: "The data of the last integration. The operator never asks for its data, so the status holds its state alone."
+  UPLOAD_MODE:
+    field: uploadMode
+    role: command
+    description: "Where the driver sends each integration: to the client, to a local file, or to both."
+  UPLOAD_SETTINGS:
+    field: uploadSettings
+    role: command
+    description: "Where the driver saves an integration that it saves to a local file."
+    members:
+      UPLOAD_DIR: {field: directory, description: "The directory, in the driver's container."}
+      UPLOAD_PREFIX: {field: prefix, description: "The start of each file's name."}
+  SENSOR_DATA_STREAM:
+    field: dataStream
+    role: command
+    description: "Turns the data stream of the receiver on or off."
+  STREAM_FULL_DEPTH:
+    field: streamDepth
+    role: command
+    description: "The depth of each sample of the data stream, 8 or 16 bits."
+  STREAM_DELAY:
+    field: streamDelay
+    role: reading
+    unit: s
+    description: "The delay between the frames of the data stream, in seconds."
+  STREAMING_EXPOSURE:
+    field: streamingExposure
+    role: command
+    description: "The integration of each frame of the data stream."
+    members:
+      STREAMING_EXPOSURE_VALUE: {field: duration, unit: s, description: "The length of each integration, in seconds."}
+      STREAMING_DIVISOR_VALUE: {field: divisor, unit: count, description: "The stream sends one frame in this many. 1 sends every frame."}
+  FPS:
+    field: fps
+    role: reading
+    description: "The frame rate of the data stream, in frames per second."
+    members:
+      EST_FPS: {field: instant, unit: fps, description: "The rate of the last frames, in frames per second."}
+      AVG_FPS: {field: average, unit: fps, description: "The average rate over one second, in frames per second."}
+  RECORD_STREAM:
+    field: recordStream
+    role: command
+    description: "Starts or stops a recording of the data stream, with no end, for the time, or for the frames in `recordOptions`."
+  RECORD_FILE:
+    field: recordFile
+    role: command
+    description: "The file that a recording of the data stream writes."
+    members:
+      RECORD_FILE_DIR: {field: directory, description: "The directory, in the driver's container."}
+      RECORD_FILE_NAME: {field: name, description: "The file's name."}
+  RECORD_OPTIONS:
+    field: recordOptions
+    role: command
+    description: "When a recording of the data stream ends."
+    members:
+      RECORD_DURATION: {field: duration, unit: s, description: "The length of a recording, in seconds."}
+      RECORD_FRAME_TOTAL: {field: frames, unit: frames, description: "The length of a recording, in frames."}
+  SENSOR_STREAM_ENCODER:
+    field: streamEncoder
+    role: command
+    description: "The encoder of the data stream, raw or MJPEG."
+  SENSOR_STREAM_RECORDER:
+    field: streamRecorder
+    role: command
+    description: "The format of a recording of the data stream."
+  LIMITS:
+    field: streamLimits
+    role: command
+    description: "The limits of the data stream."
+    members:
+      LIMITS_BUFFER_MAX: {field: bufferMax, unit: MB, description: "The largest buffer of frames, in megabytes."}
+      LIMITS_PREVIEW_FPS: {field: previewFps, unit: fps, description: "The greatest rate that the stream sends to a client, in frames per second."}
+  DSP_ACTIVATE_CONVOLUTION:
+    field: dspConvolution
+    role: command
+    description: "Turns the convolution of each integration on or off."
+  DSP_ACTIVATE_DFT:
+    field: dspDft
+    role: command
+    description: "Turns the discrete Fourier transform of each integration on or off."
+  DSP_ACTIVATE_IDFT:
+    field: dspIdft
+    role: command
+    description: "Turns the inverse discrete Fourier transform of each integration on or off."
+  DSP_ACTIVATE_SPECTRUM:
+    field: dspSpectrum
+    role: command
+    description: "Turns the spectrum of each integration on or off."
+  DSP_ACTIVATE_HISTOGRAM:
+    field: dspHistogram
+    role: command
+    description: "Turns the histogram of each integration on or off."
+  DSP_ACTIVATE_WAVELETS:
+    field: dspWavelets
+    role: command
+    description: "Turns the wavelet transform of each integration on or off."

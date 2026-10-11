@@ -20,6 +20,8 @@ One weather station, with INDI's `WEATHER_INTERFACE`.
 | <span id="spec--driver"></span>`driver` | [object](#specdriver) | yes | The INDI driver that runs the device. With no `image`, the operator runs the image that the `indi` build lists for the driver, so `name` must then be an INDI driver that the image holds, such as `indi_simulator_ccd`. |
 | <span id="spec--power"></span>`power` | [object](#specpower) | no | The `Switch` output that powers the device. Activation switches the output on before the device's pod starts, and deactivation switches it off after the pod stops. Optional. With no power, a person powers the device on and off by hand. |
 | <span id="spec--claim"></span>`claim` | object | no | A `ResourceClaimSpec` of the `resource.k8s.io` API, for real hardware. The operator creates a `ResourceClaim` from it for the device's pod. The API server validates it when the operator creates the claim. Optional. A simulator needs no claim. |
+| <span id="spec--updateperiod"></span>`updatePeriod` | number | no | How often the driver reads the weather, in seconds. The operator writes it to `WEATHER_UPDATE` once, in the `Configure` step of each reservation. Optional. |
+| <span id="spec--parameterlimits"></span>`parameterLimits` | [\[\]object](#specparameterlimits) | no | The limits of each parameter of `parameters`, which the driver defines as a property named for the parameter, such as `WEATHER_TEMPERATURE`. The operator writes each item to the property that the item names once, in the `Configure` step of each reservation. Optional. |
 | <span id="spec--activation"></span>`activation` | [\[\]object](#specactivation) | no | The actions that run, in order, as this resource's `Telescope` or `Observatory` turns `Active`, while every device is still connected. For a `Telescope` or an `Observatory`, that is the resource itself. The `Reservation`'s `Activation` step waits for them. Each action is a target state, so a run that an operator restart interrupted runs again each action that is not `Done`. Optional. |
 | <span id="spec--deactivation"></span>`deactivation` | [\[\]object](#specdeactivation) | no | The actions that run, in order, as this resource's `Telescope` or `Observatory` stops being `Active`, while every device is still connected. For a `Telescope` or an `Observatory`, that is the resource itself. The `Reservation`'s `Deactivation` step waits for them. Each action is a target state, so a run that an operator restart interrupted runs again each action that is not `Done`. Optional. |
 | <span id="spec--triggers"></span>`triggers` | [\[\]object](#spectriggers) | no | Triggers on conditions. Each one runs its actions once for each transition of its condition to the status it names, while the resource is active: from when its activation is done until its deactivation begins. A condition that holds when the activation ends runs then. A run that began runs to its end, unless the resource's deactivation begins, and a resource runs one procedure at a time. Optional. |
@@ -41,6 +43,18 @@ The `Switch` output that powers the device. Activation switches the output on be
 | --- | --- | --- | --- |
 | <span id="specpower--switch"></span>`switch` | string | yes | The name of a `Switch` in this namespace. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
 | <span id="specpower--output"></span>`output` | integer | yes | The number of the output, from 1, as the driver numbers `DIGITAL_OUTPUT_1`. |
+
+### spec.parameterLimits[]
+
+One property of the family, and the values to write to it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specparameterlimits--name"></span>`name` | string | yes | The property's name, which a member of `WEATHER_PARAMETERS` gives, such as `WEATHER_TEMPERATURE`. |
+| <span id="specparameterlimits--minimum"></span>`minimum` | number | no | The least value that is safe, in the unit that the parameter's label names. The member is `MIN_OK`. |
+| <span id="specparameterlimits--maximum"></span>`maximum` | number | no | The greatest value that is safe, in the unit that the parameter's label names. The member is `MAX_OK`. |
+| <span id="specparameterlimits--warningpercent"></span>`warningPercent` | number | no | How close to a limit a value is a warning, in percent of the safe range. The member is `PERC_WARN`. |
+| <span id="specparameterlimits--alertinbounds"></span>`alertInBounds` | number | no | 1 when a value inside the limits is the alert, and 0 when a value outside them is. The member is `ALERT_TYPE`. |
 
 ### spec.activation[]
 
@@ -232,6 +246,13 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--pod"></span>`pod` | string | no | The name of the device's pod, while it exists. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the device's pod. |
 | <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Every property that the device defines, as the driver defines it, with the values of its last update. A vendor's own properties are here, and no typed reading depends on one. The list holds no BLOB data. |
+| <span id="status--updateperiod"></span>`updatePeriod` | [object](#statusupdateperiod) | no | How often the driver reads the weather, in seconds. The status holds what the driver reports in `WEATHER_UPDATE`. `spec.updatePeriod` sets it. |
+| <span id="status--refresh"></span>`refresh` | [object](#statusrefresh) | no | Reads the weather again. The status holds what the driver reports in `WEATHER_REFRESH`. Clients such as KStars and Ekos change it. |
+| <span id="status--override"></span>`override` | [object](#statusoverride) | no | Reports the weather as safe, whatever the parameters are. The status holds what the driver reports in `WEATHER_OVERRIDE`. Clients such as KStars and Ekos change it. |
+| <span id="status--parameterstatus"></span>`parameterStatus` | [object](#statusparameterstatus) | no | The verdict of each critical parameter against its limits. The status holds what the driver reports in `WEATHER_STATUS`. |
+| <span id="status--safety"></span>`safety` | [object](#statussafety) | no | The verdict on the whole weather: `Ok` is safe, `Busy` is a warning, `Alert` is danger, and `Idle` is unknown. The status holds what the driver reports in `SAFETY_STATUS`. |
+| <span id="status--parameters"></span>`parameters` | [object](#statusparameters) | no | Each weather parameter that the driver reads, such as `WEATHER_TEMPERATURE`, in the unit that its label names. The status holds what the driver reports in `WEATHER_PARAMETERS`. |
+| <span id="status--parameterlimits"></span>`parameterLimits` | [\[\]object](#statusparameterlimits) | no | The limits of each parameter of `parameters`, which the driver defines as a property named for the parameter, such as `WEATHER_TEMPERATURE`. The status holds one item for each parameter that `WEATHER_PARAMETERS` names. `spec.parameterLimits` sets it. |
 | <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the weather station reports, from `SAFETY_STATUS`, `WEATHER_PARAMETERS`, and `WEATHER_STATUS`. A field is absent until the driver sends it. INDI reports each safety status as a light: `Ok` is `Safe`, `Busy` is `Warning`, `Alert` is `Danger`, and `Idle` is `Unknown`. |
 
 ### status.conditions[]
@@ -300,6 +321,93 @@ One member of the property.
 | <span id="statuspropertiesmembers--min"></span>`min` | number | no | For a number, the least value that the driver accepts. |
 | <span id="statuspropertiesmembers--max"></span>`max` | number | no | For a number, the greatest value that the driver accepts. |
 | <span id="statuspropertiesmembers--step"></span>`step` | number | no | For a number, the step between values. Zero means any step. |
+
+### status.updatePeriod
+
+How often the driver reads the weather, in seconds. The status holds what the driver reports in `WEATHER_UPDATE`. `spec.updatePeriod` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusupdateperiod--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusupdateperiod--value"></span>`value` | number | no | The value that the driver reports. The unit is seconds. |
+
+### status.refresh
+
+Reads the weather again. The status holds what the driver reports in `WEATHER_REFRESH`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusrefresh--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusrefresh--value"></span>`value` | string | no | The name of the member that is on, such as `REFRESH`. Absent when no member is on. |
+
+### status.override
+
+Reports the weather as safe, whatever the parameters are. The status holds what the driver reports in `WEATHER_OVERRIDE`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusoverride--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusoverride--values"></span>`values` | []string | no | The names of the members that are on, such as `OVERRIDE`. |
+
+### status.parameterStatus
+
+The verdict of each critical parameter against its limits. The status holds what the driver reports in `WEATHER_STATUS`.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusparameterstatus--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusparameterstatus--elements"></span>`elements` | [\[\]object](#statusparameterstatuselements) | no | Each element that the driver defines, in the driver's order. |
+
+#### status.parameterStatus.elements[]
+
+One element that the driver defines.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusparameterstatuselements--name"></span>`name` | string | yes | The element's name, as the driver defines it. |
+| <span id="statusparameterstatuselements--label"></span>`label` | string | no | The label that the driver gives the element. |
+| <span id="statusparameterstatuselements--state"></span>`state` | string | no | The light's state. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+
+### status.safety
+
+The verdict on the whole weather: `Ok` is safe, `Busy` is a warning, `Alert` is danger, and `Idle` is unknown. The status holds what the driver reports in `SAFETY_STATUS`.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussafety--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statussafety--value"></span>`value` | string | no | The value that the driver reports. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+
+### status.parameters
+
+Each weather parameter that the driver reads, such as `WEATHER_TEMPERATURE`, in the unit that its label names. The status holds what the driver reports in `WEATHER_PARAMETERS`.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusparameters--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusparameters--elements"></span>`elements` | [\[\]object](#statusparameterselements) | no | Each element that the driver defines, in the driver's order. |
+
+#### status.parameters.elements[]
+
+One element that the driver defines.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusparameterselements--name"></span>`name` | string | yes | The element's name, as the driver defines it. |
+| <span id="statusparameterselements--label"></span>`label` | string | no | The label that the driver gives the element. |
+| <span id="statusparameterselements--value"></span>`value` | number | no | The element's value. The unit is the one that the element's label names. |
+
+### status.parameterLimits[]
+
+One property of the family.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusparameterlimits--name"></span>`name` | string | yes | The property's name, which a member of `WEATHER_PARAMETERS` gives, such as `WEATHER_TEMPERATURE`. |
+| <span id="statusparameterlimits--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusparameterlimits--minimum"></span>`minimum` | number | no | The least value that is safe, in the unit that the parameter's label names. The member is `MIN_OK`. |
+| <span id="statusparameterlimits--maximum"></span>`maximum` | number | no | The greatest value that is safe, in the unit that the parameter's label names. The member is `MAX_OK`. |
+| <span id="statusparameterlimits--warningpercent"></span>`warningPercent` | number | no | How close to a limit a value is a warning, in percent of the safe range. The member is `PERC_WARN`. |
+| <span id="statusparameterlimits--alertinbounds"></span>`alertInBounds` | number | no | 1 when a value inside the limits is the alert, and 0 when a value outside them is. The member is `ALERT_TYPE`. |
 
 ### status.readings
 

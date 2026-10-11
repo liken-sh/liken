@@ -1,0 +1,201 @@
+# A `Switch` is a relay board or a power box's outputs: an INDI driver
+# with `OUTPUT_INTERFACE` or `INPUT_INTERFACE`.
+#
+# A device resource is inventory: `observatory-operator` starts its pod
+# only while a `Reservation` needs it. The fields that every device
+# shares come from `device.yaml.tmpl`, and the procedure schema from
+# `procedures.yaml.tmpl`, so all 14 device CRDs hold the same copy. The
+# typed fields of INDI's standard properties come from
+# `switches-fields.yaml`.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: switches.observatory.liken.sh
+spec:
+  group: observatory.liken.sh
+  names:
+    kind: Switch
+    listKind: SwitchList
+    plural: switches
+    singular: switch
+    shortNames: [sw]
+    categories: [astro]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      selectableFields:
+        - jsonPath: .spec.telescope
+        - jsonPath: .spec.observatory
+      additionalPrinterColumns:
+        - name: Telescope
+          type: string
+          jsonPath: .spec.telescope
+        - name: Observatory
+          type: string
+          jsonPath: .spec.observatory
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: "On"
+          type: string
+          jsonPath: .status.readings.on
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+        - name: Driver
+          type: string
+          jsonPath: .spec.driver.name
+          priority: 1
+        - name: Device
+          type: string
+          jsonPath: .status.indiDevice
+          priority: 1
+        - name: Node
+          type: string
+          jsonPath: .status.node
+          priority: 1
+        - name: Message
+          type: string
+          jsonPath: '.status.conditions[?(@.type=="Ready")].message'
+          priority: 1
+      schema:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-validations:
+            - rule: size(self.metadata.name) <= 32
+              message: >-
+                a Switch name is at most 32 characters, because
+                observatory-operator names its pod and Service
+                <name>-switch, and a Service name holds at most 63
+                characters
+          description: >-
+            A `Switch` is a relay board or a power box's outputs: an
+            INDI driver with `OUTPUT_INTERFACE` or `INPUT_INTERFACE`. A
+            device's `spec.power` names one of its outputs, and a
+            reservation switches that output on before the device starts
+            and off after it stops.
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [driver]
+              description: >-
+                One switch, with INDI's `OUTPUT_INTERFACE` or
+                `INPUT_INTERFACE`.
+              x-kubernetes-validations:
+                - rule: "!(has(self.telescope) && has(self.observatory))"
+                  message: "set at most one parent: spec.telescope or spec.observatory"
+              properties:
+                telescope:
+                  type: string
+                  minLength: 1
+                  maxLength: 253
+                  pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                  description: >-
+                    The name of the `Telescope` that the device belongs
+                    to. Set this or `observatory`, not both.
+                    Optional. With neither `telescope` nor
+                    `observatory`, the device is on the shelf, and the
+                    operator creates nothing for it.
+                observatory:
+                  type: string
+                  minLength: 1
+                  maxLength: 253
+                  pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                  description: >-
+                    The name of the `Observatory` that the device
+                    belongs to, when no single telescope owns it. The
+                    device then runs on the observatory's own INDI
+                    server. Set this or `telescope`, not both.
+                    Optional. With neither `telescope` nor
+                    `observatory`, the device is on the shelf, and the
+                    operator creates nothing for it.
+{{ include "device spec" . | indent 16 }}
+{{ settings | indent 16 }}
+{{ include "procedure spec" . | indent 16 }}
+            status:
+              type: object
+              description: >-
+                What the operator observes. The operator writes it, and
+                a person reads it.
+              properties:
+{{ include "device status" . | indent 16 }}
+{{ standard | indent 16 }}
+                readings:
+                  type: object
+                  description: >-
+                    What the switch reports, from the `DIGITAL_OUTPUT_n`
+                    and `DIGITAL_INPUT_n` properties and their labels. A
+                    field is absent until the driver sends it.
+                  properties:
+                    outputs:
+                      type: array
+                      description: "Each output, from output 1."
+                      x-kubernetes-list-type: map
+                      x-kubernetes-list-map-keys: [number]
+                      items:
+                        type: object
+                        required: [number]
+                        description: "One output."
+                        properties:
+                          number:
+                            type: integer
+                            format: int32
+                            minimum: 1
+                            description: "The output's number, from 1."
+                          label:
+                            type: string
+                            description: >-
+                              The label from `DIGITAL_OUTPUT_LABELS`.
+                          "on":
+                            type: boolean
+                            description: "Whether the output is on."
+                    "on":
+                      type: array
+                      description: >-
+                        The numbers of the outputs that are on, such as
+                        `[1, 3]`. A printer column shows only the first
+                        value of a JSONPath that matches several, so the
+                        `On` column of `kubectl get` reads this list.
+                      x-kubernetes-list-type: set
+                      items:
+                        type: integer
+                        format: int32
+                        minimum: 1
+                        description: "The number of an output that is on."
+                    inputs:
+                      type: array
+                      description: "Each input, from input 1."
+                      x-kubernetes-list-type: map
+                      x-kubernetes-list-map-keys: [number]
+                      items:
+                        type: object
+                        required: [number]
+                        description: "One input."
+                        properties:
+                          number:
+                            type: integer
+                            format: int32
+                            minimum: 1
+                            description: "The input's number, from 1."
+                          label:
+                            type: string
+                            description: >-
+                              The label from `DIGITAL_INPUT_LABELS`.
+                          "on":
+                            type: boolean
+                            description: "Whether the input is on."
+{{- define "action" }}
+type: object
+description: >-
+  One action, which names `job`.
+x-kubernetes-validations:
+  - rule: "has(self.job)"
+    message: "an action of a Switch names job"
+properties:
+{{ include "action fields" . | indent 2 }}
+{{- end }}

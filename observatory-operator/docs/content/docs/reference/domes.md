@@ -20,6 +20,17 @@ One dome or roll-off roof, with INDI's `DOME_INTERFACE`. While an `Observatory` 
 | <span id="spec--driver"></span>`driver` | [object](#specdriver) | yes | The INDI driver that runs the device. With no `image`, the operator runs the image that the `indi` build lists for the driver, so `name` must then be an INDI driver that the image holds, such as `indi_simulator_ccd`. |
 | <span id="spec--power"></span>`power` | [object](#specpower) | no | The `Switch` output that powers the device. Activation switches the output on before the device's pod starts, and deactivation switches it off after the pod stops. Optional. With no power, a person powers the device on and off by hand. |
 | <span id="spec--claim"></span>`claim` | object | no | A `ResourceClaimSpec` of the `resource.k8s.io` API, for real hardware. The operator creates a `ResourceClaim` from it for the device's pod. The API server validates it when the operator creates the claim. Optional. A simulator needs no claim. |
+| <span id="spec--shutterparkpolicy"></span>`shutterParkPolicy` | []string | no | Whether the driver closes the shutter when the dome parks, opens it when the dome unparks, or both. The operator writes it to `DOME_SHUTTER_PARK_POLICY` once, in the `Configure` step of each reservation. Optional. |
+| <span id="spec--speed"></span>`speed` | number | no | The speed of the dome's rotation, in revolutions per minute. The operator writes it to `DOME_SPEED` once, in the `Configure` step of each reservation. Optional. |
+| <span id="spec--presets"></span>`presets` | [object](#specpresets) | no | Three azimuths, in degrees, that `gotoPreset` turns the dome to. The operator writes it to `Presets` once, in the `Configure` step of each reservation. Optional. |
+| <span id="spec--autosync"></span>`autoSync` | string | no | Whether the dome follows the mount, so the shutter stays in front of the telescope. The operator writes it to `DOME_AUTOSYNC` once, in the `Configure` step of each reservation. Optional. One of: `DOME_AUTOSYNC_ENABLE`, `DOME_AUTOSYNC_DISABLE`. |
+| <span id="spec--otaside"></span>`otaSide` | string | no | Which side of the pier the driver takes the telescope to be on: east, west, from the mount, from the hour angle, or none. The operator writes it to `DM_OTA_SIDE` once, in the `Configure` step of each reservation. Optional. One of: `DM_OTA_SIDE_EAST`, `DM_OTA_SIDE_WEST`, `DM_OTA_SIDE_MOUNT`, `DM_OTA_SIDE_HA`, `DM_OTA_SIDE_IGNORE`. |
+| <span id="spec--autosyncthreshold"></span>`autoSyncThreshold` | number | no | How far, in degrees, the shutter can be from where the telescope points before the dome turns to follow it. The operator writes it to `DOME_PARAMS` once, in the `Configure` step of each reservation. Optional. |
+| <span id="spec--measurements"></span>`measurements` | [object](#specmeasurements) | no | The dome's geometry, in meters, which the driver needs to turn the shutter to where the telescope points. The operator writes it to `DOME_MEASUREMENTS` once, in the `Configure` step of each reservation. Optional. |
+| <span id="spec--parkposition"></span>`parkPosition` | number | no | The azimuth that the dome parks at, in degrees. The operator writes it to `DOME_PARK_POSITION` once, in the `Configure` step of each reservation. Optional. |
+| <span id="spec--backlash"></span>`backlash` | string | no | Whether the driver corrects the backlash of the dome's motor. The operator writes it to `DOME_BACKLASH_TOGGLE` once, in the `Configure` step of each reservation. Optional. One of: `INDI_ENABLED`, `INDI_DISABLED`. |
+| <span id="spec--backlashsteps"></span>`backlashSteps` | number | no | The backlash of the dome's motor, in steps. The operator writes it to `DOME_BACKLASH_STEPS` once, in the `Configure` step of each reservation. Optional. |
+| <span id="spec--joystick"></span>`joystick` | string | no | Whether the driver moves the dome from a joystick. The operator writes it to `USEJOYSTICK` once, in the `Configure` step of each reservation. Optional. One of: `ENABLE`, `DISABLE`. |
 | <span id="spec--activation"></span>`activation` | [\[\]object](#specactivation) | no | The actions that run, in order, as this resource's `Telescope` or `Observatory` turns `Active`, while every device is still connected. For a `Telescope` or an `Observatory`, that is the resource itself. The `Reservation`'s `Activation` step waits for them. Each action is a target state, so a run that an operator restart interrupted runs again each action that is not `Done`. Optional. |
 | <span id="spec--deactivation"></span>`deactivation` | [\[\]object](#specdeactivation) | no | The actions that run, in order, as this resource's `Telescope` or `Observatory` stops being `Active`, while every device is still connected. For a `Telescope` or an `Observatory`, that is the resource itself. The `Reservation`'s `Deactivation` step waits for them. Each action is a target state, so a run that an operator restart interrupted runs again each action that is not `Done`. Optional. |
 | <span id="spec--triggers"></span>`triggers` | [\[\]object](#spectriggers) | no | Triggers on conditions. Each one runs its actions once for each transition of its condition to the status it names, while the resource is active: from when its activation is done until its deactivation begins. A condition that holds when the activation ends runs then. A run that began runs to its end, unless the resource's deactivation begins, and a resource runs one procedure at a time. Optional. |
@@ -41,6 +52,29 @@ The `Switch` output that powers the device. Activation switches the output on be
 | --- | --- | --- | --- |
 | <span id="specpower--switch"></span>`switch` | string | yes | The name of a `Switch` in this namespace. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
 | <span id="specpower--output"></span>`output` | integer | yes | The number of the output, from 1, as the driver numbers `DIGITAL_OUTPUT_1`. |
+
+### spec.presets
+
+Three azimuths, in degrees, that `gotoPreset` turns the dome to. The operator writes it to `Presets` once, in the `Configure` step of each reservation. Optional.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specpresets--preset1"></span>`preset1` | number | no | The first azimuth, in degrees. The member is `Preset 1`. |
+| <span id="specpresets--preset2"></span>`preset2` | number | no | The second azimuth, in degrees. The member is `Preset 2`. |
+| <span id="specpresets--preset3"></span>`preset3` | number | no | The third azimuth, in degrees. The member is `Preset 3`. |
+
+### spec.measurements
+
+The dome's geometry, in meters, which the driver needs to turn the shutter to where the telescope points. The operator writes it to `DOME_MEASUREMENTS` once, in the `Configure` step of each reservation. Optional.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specmeasurements--radius"></span>`radius` | number | no | The radius of the dome, in meters. The member is `DM_DOME_RADIUS`. |
+| <span id="specmeasurements--shutterwidth"></span>`shutterWidth` | number | no | The width of the shutter's opening, in meters. The member is `DM_SHUTTER_WIDTH`. |
+| <span id="specmeasurements--northdisplacement"></span>`northDisplacement` | number | no | How far the mount's axes are north of the dome's center, in meters. The member is `DM_NORTH_DISPLACEMENT`. |
+| <span id="specmeasurements--eastdisplacement"></span>`eastDisplacement` | number | no | How far the mount's axes are east of the dome's center, in meters. The member is `DM_EAST_DISPLACEMENT`. |
+| <span id="specmeasurements--updisplacement"></span>`upDisplacement` | number | no | How far the mount's axes are above the dome's center, in meters. The member is `DM_UP_DISPLACEMENT`. |
+| <span id="specmeasurements--otaoffset"></span>`otaOffset` | number | no | How far the optical tube's axis is from the mount's axes, in meters. The member is `DM_OTA_OFFSET`. |
 
 ### spec.activation[]
 
@@ -235,6 +269,29 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--pod"></span>`pod` | string | no | The name of the device's pod, while it exists. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the device's pod. |
 | <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Every property that the device defines, as the driver defines it, with the values of its last update. A vendor's own properties are here, and no typed reading depends on one. The list holds no BLOB data. |
+| <span id="status--activedevices"></span>`activeDevices` | [object](#statusactivedevices) | no | The INDI devices whose state the dome reads. The status holds what the driver reports in `ACTIVE_DEVICES`. The operator decides it from the resources around the device, so it is not in spec. |
+| <span id="status--mountpolicy"></span>`mountPolicy` | [object](#statusmountpolicy) | no | Whether the mount's park locks the dome's park: `MOUNT_LOCKS` or `MOUNT_IGNORED`. The status holds what the driver reports in `MOUNT_POLICY`. The operator decides it from the resources around the device, so it is not in spec. |
+| <span id="status--shutter"></span>`shutter` | [object](#statusshutter) | no | Opens or closes the shutter. The status holds what the driver reports in `DOME_SHUTTER`. Clients such as KStars and Ekos change it. |
+| <span id="status--shutterparkpolicy"></span>`shutterParkPolicy` | [object](#statusshutterparkpolicy) | no | Whether the driver closes the shutter when the dome parks, opens it when the dome unparks, or both. The status holds what the driver reports in `DOME_SHUTTER_PARK_POLICY`. `spec.shutterParkPolicy` sets it. |
+| <span id="status--motion"></span>`motion` | [object](#statusmotion) | no | Turns the dome clockwise or counterclockwise, as seen from above, or moves the roof. The status holds what the driver reports in `DOME_MOTION`. Clients such as KStars and Ekos change it. |
+| <span id="status--speed"></span>`speed` | [object](#statusspeed) | no | The speed of the dome's rotation, in revolutions per minute. The status holds what the driver reports in `DOME_SPEED`. `spec.speed` sets it. |
+| <span id="status--relativeposition"></span>`relativePosition` | [object](#statusrelativeposition) | no | Turns the dome by this many degrees in the direction of `motion`. The status holds what the driver reports in `REL_DOME_POSITION`. Clients such as KStars and Ekos change it. |
+| <span id="status--azimuth"></span>`azimuth` | [object](#statusazimuth) | no | The azimuth of the shutter, in degrees east of north. The status holds what the driver reports in `ABS_DOME_POSITION`. Clients such as KStars and Ekos change it. |
+| <span id="status--abortmotion"></span>`abortMotion` | [object](#statusabortmotion) | no | Stops every motion of the dome and of its shutter. The status holds what the driver reports in `DOME_ABORT_MOTION`. Clients such as KStars and Ekos change it. |
+| <span id="status--presets"></span>`presets` | [object](#statuspresets) | no | Three azimuths, in degrees, that `gotoPreset` turns the dome to. The status holds what the driver reports in `Presets`. `spec.presets` sets it. |
+| <span id="status--gotopreset"></span>`gotoPreset` | [object](#statusgotopreset) | no | Turns the dome to one of its `presets`. The status holds what the driver reports in `Goto`. Clients such as KStars and Ekos change it. |
+| <span id="status--autosync"></span>`autoSync` | [object](#statusautosync) | no | Whether the dome follows the mount, so the shutter stays in front of the telescope. The status holds what the driver reports in `DOME_AUTOSYNC`. `spec.autoSync` sets it. |
+| <span id="status--otaside"></span>`otaSide` | [object](#statusotaside) | no | Which side of the pier the driver takes the telescope to be on: east, west, from the mount, from the hour angle, or none. The status holds what the driver reports in `DM_OTA_SIDE`. `spec.otaSide` sets it. |
+| <span id="status--autosyncthreshold"></span>`autoSyncThreshold` | [object](#statusautosyncthreshold) | no | How far, in degrees, the shutter can be from where the telescope points before the dome turns to follow it. The status holds what the driver reports in `DOME_PARAMS`. `spec.autoSyncThreshold` sets it. |
+| <span id="status--measurements"></span>`measurements` | [object](#statusmeasurements) | no | The dome's geometry, in meters, which the driver needs to turn the shutter to where the telescope points. The status holds what the driver reports in `DOME_MEASUREMENTS`. `spec.measurements` sets it. |
+| <span id="status--sync"></span>`sync` | [object](#statussync) | no | An azimuth, in degrees, that the driver takes as the dome's current azimuth, with no motion. The status holds what the driver reports in `DOME_SYNC`. Clients such as KStars and Ekos change it. |
+| <span id="status--park"></span>`park` | [object](#statuspark) | no | Parks or unparks the dome. The `state` action changes it. The status holds what the driver reports in `DOME_PARK`. Clients such as KStars and Ekos change it. |
+| <span id="status--parkposition"></span>`parkPosition` | [object](#statusparkposition) | no | The azimuth that the dome parks at, in degrees. The status holds what the driver reports in `DOME_PARK_POSITION`. `spec.parkPosition` sets it. |
+| <span id="status--parkoption"></span>`parkOption` | [object](#statusparkoption) | no | Sets the park position to the current azimuth or to the driver's default, or writes the driver's park data. The status holds what the driver reports in `DOME_PARK_OPTION`. Clients such as KStars and Ekos change it. |
+| <span id="status--backlash"></span>`backlash` | [object](#statusbacklash) | no | Whether the driver corrects the backlash of the dome's motor. The status holds what the driver reports in `DOME_BACKLASH_TOGGLE`. `spec.backlash` sets it. |
+| <span id="status--backlashsteps"></span>`backlashSteps` | [object](#statusbacklashsteps) | no | The backlash of the dome's motor, in steps. The status holds what the driver reports in `DOME_BACKLASH_STEPS`. `spec.backlashSteps` sets it. |
+| <span id="status--joystick"></span>`joystick` | [object](#statusjoystick) | no | Whether the driver moves the dome from a joystick. The status holds what the driver reports in `USEJOYSTICK`. `spec.joystick` sets it. |
+| <span id="status--joystickdevice"></span>`joystickDevice` | [object](#statusjoystickdevice) | no | The INDI device of the joystick. The status holds what the driver reports in `SNOOP_JOYSTICK`. The operator decides it from the resources around the device, so it is not in spec. |
 | <span id="status--display"></span>`display` | [object](#statusdisplay) | no | The readings as a person reads them, with their units, for the printer columns. The numbers are in `readings`. |
 | <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the dome reports, from `ABS_DOME_POSITION`, `DOME_SHUTTER`, and `DOME_PARK`. A field is absent until the driver sends it. |
 
@@ -304,6 +361,222 @@ One member of the property.
 | <span id="statuspropertiesmembers--min"></span>`min` | number | no | For a number, the least value that the driver accepts. |
 | <span id="statuspropertiesmembers--max"></span>`max` | number | no | For a number, the greatest value that the driver accepts. |
 | <span id="statuspropertiesmembers--step"></span>`step` | number | no | For a number, the step between values. Zero means any step. |
+
+### status.activeDevices
+
+The INDI devices whose state the dome reads. The status holds what the driver reports in `ACTIVE_DEVICES`. The operator decides it from the resources around the device, so it is not in spec.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusactivedevices--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusactivedevices--telescope"></span>`telescope` | string | no | The mount, for its park lock and for where it points. The member is `ACTIVE_TELESCOPE`. |
+| <span id="statusactivedevices--input"></span>`input` | string | no | The input device that the dome reads. The member is `ACTIVE_INPUT`. |
+| <span id="statusactivedevices--output"></span>`output` | string | no | The output device that the dome switches. The member is `ACTIVE_OUTPUT`. |
+
+### status.mountPolicy
+
+Whether the mount's park locks the dome's park: `MOUNT_LOCKS` or `MOUNT_IGNORED`. The status holds what the driver reports in `MOUNT_POLICY`. The operator decides it from the resources around the device, so it is not in spec.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusmountpolicy--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusmountpolicy--value"></span>`value` | string | no | The name of the member that is on, such as `MOUNT_IGNORED`. Absent when no member is on. |
+
+### status.shutter
+
+Opens or closes the shutter. The status holds what the driver reports in `DOME_SHUTTER`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusshutter--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusshutter--value"></span>`value` | string | no | The name of the member that is on, such as `SHUTTER_OPEN`. Absent when no member is on. |
+
+### status.shutterParkPolicy
+
+Whether the driver closes the shutter when the dome parks, opens it when the dome unparks, or both. The status holds what the driver reports in `DOME_SHUTTER_PARK_POLICY`. `spec.shutterParkPolicy` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusshutterparkpolicy--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusshutterparkpolicy--values"></span>`values` | []string | no | The names of the members that are on, such as `SHUTTER_CLOSE_ON_PARK`. |
+
+### status.motion
+
+Turns the dome clockwise or counterclockwise, as seen from above, or moves the roof. The status holds what the driver reports in `DOME_MOTION`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusmotion--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusmotion--value"></span>`value` | string | no | The name of the member that is on, such as `DOME_CW`. Absent when no member is on. |
+
+### status.speed
+
+The speed of the dome's rotation, in revolutions per minute. The status holds what the driver reports in `DOME_SPEED`. `spec.speed` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusspeed--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusspeed--value"></span>`value` | number | no | The value that the driver reports. The unit is revolutions per minute. |
+
+### status.relativePosition
+
+Turns the dome by this many degrees in the direction of `motion`. The status holds what the driver reports in `REL_DOME_POSITION`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusrelativeposition--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusrelativeposition--value"></span>`value` | number | no | The value that the driver reports. The unit is degrees. |
+
+### status.azimuth
+
+The azimuth of the shutter, in degrees east of north. The status holds what the driver reports in `ABS_DOME_POSITION`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusazimuth--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusazimuth--value"></span>`value` | number | no | The value that the driver reports. The unit is degrees. |
+
+### status.abortMotion
+
+Stops every motion of the dome and of its shutter. The status holds what the driver reports in `DOME_ABORT_MOTION`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusabortmotion--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusabortmotion--value"></span>`value` | string | no | The name of the member that is on, such as `ABORT`. Absent when no member is on. |
+
+### status.presets
+
+Three azimuths, in degrees, that `gotoPreset` turns the dome to. The status holds what the driver reports in `Presets`. `spec.presets` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statuspresets--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statuspresets--preset1"></span>`preset1` | number | no | The first azimuth, in degrees. The member is `Preset 1`. |
+| <span id="statuspresets--preset2"></span>`preset2` | number | no | The second azimuth, in degrees. The member is `Preset 2`. |
+| <span id="statuspresets--preset3"></span>`preset3` | number | no | The third azimuth, in degrees. The member is `Preset 3`. |
+
+### status.gotoPreset
+
+Turns the dome to one of its `presets`. The status holds what the driver reports in `Goto`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusgotopreset--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusgotopreset--value"></span>`value` | string | no | The name of the member that is on, such as `Preset 1`. Absent when no member is on. |
+
+### status.autoSync
+
+Whether the dome follows the mount, so the shutter stays in front of the telescope. The status holds what the driver reports in `DOME_AUTOSYNC`. `spec.autoSync` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusautosync--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusautosync--value"></span>`value` | string | no | The name of the member that is on, such as `DOME_AUTOSYNC_ENABLE`. Absent when no member is on. |
+
+### status.otaSide
+
+Which side of the pier the driver takes the telescope to be on: east, west, from the mount, from the hour angle, or none. The status holds what the driver reports in `DM_OTA_SIDE`. `spec.otaSide` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusotaside--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusotaside--value"></span>`value` | string | no | The name of the member that is on, such as `DM_OTA_SIDE_EAST`. Absent when no member is on. |
+
+### status.autoSyncThreshold
+
+How far, in degrees, the shutter can be from where the telescope points before the dome turns to follow it. The status holds what the driver reports in `DOME_PARAMS`. `spec.autoSyncThreshold` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusautosyncthreshold--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusautosyncthreshold--value"></span>`value` | number | no | The value that the driver reports. The unit is degrees. |
+
+### status.measurements
+
+The dome's geometry, in meters, which the driver needs to turn the shutter to where the telescope points. The status holds what the driver reports in `DOME_MEASUREMENTS`. `spec.measurements` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusmeasurements--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusmeasurements--radius"></span>`radius` | number | no | The radius of the dome, in meters. The member is `DM_DOME_RADIUS`. |
+| <span id="statusmeasurements--shutterwidth"></span>`shutterWidth` | number | no | The width of the shutter's opening, in meters. The member is `DM_SHUTTER_WIDTH`. |
+| <span id="statusmeasurements--northdisplacement"></span>`northDisplacement` | number | no | How far the mount's axes are north of the dome's center, in meters. The member is `DM_NORTH_DISPLACEMENT`. |
+| <span id="statusmeasurements--eastdisplacement"></span>`eastDisplacement` | number | no | How far the mount's axes are east of the dome's center, in meters. The member is `DM_EAST_DISPLACEMENT`. |
+| <span id="statusmeasurements--updisplacement"></span>`upDisplacement` | number | no | How far the mount's axes are above the dome's center, in meters. The member is `DM_UP_DISPLACEMENT`. |
+| <span id="statusmeasurements--otaoffset"></span>`otaOffset` | number | no | How far the optical tube's axis is from the mount's axes, in meters. The member is `DM_OTA_OFFSET`. |
+
+### status.sync
+
+An azimuth, in degrees, that the driver takes as the dome's current azimuth, with no motion. The status holds what the driver reports in `DOME_SYNC`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussync--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statussync--value"></span>`value` | number | no | The value that the driver reports. The unit is degrees. |
+
+### status.park
+
+Parks or unparks the dome. The `state` action changes it. The status holds what the driver reports in `DOME_PARK`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statuspark--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statuspark--value"></span>`value` | string | no | The name of the member that is on, such as `PARK`. Absent when no member is on. |
+
+### status.parkPosition
+
+The azimuth that the dome parks at, in degrees. The status holds what the driver reports in `DOME_PARK_POSITION`. `spec.parkPosition` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusparkposition--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusparkposition--value"></span>`value` | number | no | The value that the driver reports. The unit is degrees. |
+
+### status.parkOption
+
+Sets the park position to the current azimuth or to the driver's default, or writes the driver's park data. The status holds what the driver reports in `DOME_PARK_OPTION`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusparkoption--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusparkoption--value"></span>`value` | string | no | The name of the member that is on, such as `PARK_CURRENT`. Absent when no member is on. |
+
+### status.backlash
+
+Whether the driver corrects the backlash of the dome's motor. The status holds what the driver reports in `DOME_BACKLASH_TOGGLE`. `spec.backlash` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusbacklash--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusbacklash--value"></span>`value` | string | no | The name of the member that is on, such as `INDI_ENABLED`. Absent when no member is on. |
+
+### status.backlashSteps
+
+The backlash of the dome's motor, in steps. The status holds what the driver reports in `DOME_BACKLASH_STEPS`. `spec.backlashSteps` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusbacklashsteps--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusbacklashsteps--value"></span>`value` | number | no | The value that the driver reports. The unit is the motor's steps. |
+
+### status.joystick
+
+Whether the driver moves the dome from a joystick. The status holds what the driver reports in `USEJOYSTICK`. `spec.joystick` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusjoystick--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusjoystick--value"></span>`value` | string | no | The name of the member that is on, such as `ENABLE`. Absent when no member is on. |
+
+### status.joystickDevice
+
+The INDI device of the joystick. The status holds what the driver reports in `SNOOP_JOYSTICK`. The operator decides it from the resources around the device, so it is not in spec.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusjoystickdevice--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusjoystickdevice--value"></span>`value` | string | no | The value that the driver reports. |
 
 ### status.display
 

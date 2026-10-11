@@ -1,0 +1,46 @@
+# The typed fields of a `WeatherStation`, from the standard properties
+# of INDI's WEATHER interface. curated.go gives the format and the
+# roles.
+kind: WeatherStation
+interfaces: [weather]
+detect: [WEATHER_STATUS]
+properties:
+  WEATHER_UPDATE:
+    field: updatePeriod
+    role: setting
+    unit: s
+    description: "How often the driver reads the weather, in seconds."
+  WEATHER_REFRESH:
+    field: refresh
+    role: command
+    description: "Reads the weather again."
+  WEATHER_OVERRIDE:
+    field: override
+    role: command
+    description: "Reports the weather as safe, whatever the parameters are."
+  WEATHER_STATUS:
+    field: parameterStatus
+    role: reading
+    elements: driver
+    description: "The verdict of each critical parameter against its limits."
+  SAFETY_STATUS:
+    field: safety
+    role: reading
+    description: "The verdict on the whole weather: `Ok` is safe, `Busy` is a warning, `Alert` is danger, and `Idle` is unknown."
+  WEATHER_PARAMETERS:
+    field: parameters
+    role: reading
+    elements: driver
+    unit: label
+    description: "Each weather parameter that the driver reads, such as `WEATHER_TEMPERATURE`, in the unit that its label names."
+  WEATHER_TEMPERATURE:
+    field: parameterLimits
+    role: setting
+    family: named
+    namedBy: WEATHER_PARAMETERS
+    description: "The limits of each parameter of `parameters`, which the driver defines as a property named for the parameter, such as `WEATHER_TEMPERATURE`."
+    members:
+      MIN_OK: {field: minimum, unit: label, description: "The least value that is safe, in the unit that the parameter's label names."}
+      MAX_OK: {field: maximum, unit: label, description: "The greatest value that is safe, in the unit that the parameter's label names."}
+      PERC_WARN: {field: warningPercent, unit: percent, description: "How close to a limit a value is a warning, in percent of the safe range."}
+      ALERT_TYPE: {field: alertInBounds, unit: count, description: "1 when a value inside the limits is the alert, and 0 when a value outside them is."}

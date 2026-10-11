@@ -1,0 +1,68 @@
+# The properties that drivers share by convention. No file in
+# libindi's libs/ defines them, so no bare driver captures them, but
+# KStars, Ekos, and PHD2 read them by name from every driver that has
+# them. Each entry gives the structure that most drivers in
+# indi-3rdparty v2.2.0 define, and names the definitions it was read
+# from. `interface` names the captures of the interface it belongs to.
+#
+# `simulators` lists the directories of indi/testdata whose transcripts
+# define the property. A test fails when that list is wrong, and the
+# report lists each place where a simulator's definition differs from
+# the entry.
+
+- name: CCD_GAIN
+  interface: ccd
+  type: Number
+  perm: rw
+  label: Gain
+  members:
+    - {name: GAIN, label: Gain}
+  simulators: [ccd, guide]
+  # indi-qhy/qhy_ccd.cpp:110 and indi-atik/atik_ccd.cpp:143.
+
+- name: CCD_OFFSET
+  interface: ccd
+  type: Number
+  perm: rw
+  label: Offset
+  members:
+    - {name: OFFSET, label: Offset}
+  simulators: [ccd]
+  # indi-qhy/qhy_ccd.cpp:114, indi-atik/atik_ccd.cpp:147, and
+  # indi-toupbase/indi_toupbase.cpp:158.
+
+- name: CCD_COOLER
+  interface: ccd
+  type: Switch
+  perm: wo
+  rule: OneOfMany
+  label: Cooler
+  members:
+    - {name: COOLER_ON, label: "On"}
+    - {name: COOLER_OFF, label: "Off"}
+  simulators: [ccd]
+  # indi-asi/asi_base.cpp:400, indi-atik/atik_ccd.cpp:128, and
+  # indi-toupbase/indi_toupbase.cpp:102 define it write-only;
+  # indi-qhy/qhy_ccd.cpp:100 defines it read and write.
+
+- name: CCD_COOLER_POWER
+  interface: ccd
+  type: Number
+  perm: ro
+  label: Cooling Power
+  members:
+    - {name: CCD_COOLER_VALUE, label: Cooling Power (%)}
+  simulators: []
+  # indi-asi/asi_base.cpp:403, indi-qhy/qhy_ccd.cpp:105, and
+  # indi-atik/atik_ccd.cpp:133. indi-toupbase/indi_toupbase.cpp:105
+  # names its member COOLER_POWER.
+
+- name: FOCUS_TEMPERATURE
+  interface: focuser
+  type: Number
+  perm: ro
+  label: Temperature
+  members:
+    - {name: TEMPERATURE, label: Celsius}
+  simulators: [focus]
+  # indi-asi/asi_focuser.cpp:113 and indi-qhy/qhy_focuser.cpp:83.

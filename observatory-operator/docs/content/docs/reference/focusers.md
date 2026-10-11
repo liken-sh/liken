@@ -20,6 +20,11 @@ One focuser, with INDI's `FOCUSER_INTERFACE`.
 | <span id="spec--driver"></span>`driver` | [object](#specdriver) | yes | The INDI driver that runs the device. With no `image`, the operator runs the image that the `indi` build lists for the driver, so `name` must then be an INDI driver that the image holds, such as `indi_simulator_ccd`. |
 | <span id="spec--power"></span>`power` | [object](#specpower) | no | The `Switch` output that powers the device. Activation switches the output on before the device's pod starts, and deactivation switches it off after the pod stops. Optional. With no power, a person powers the device on and off by hand. |
 | <span id="spec--claim"></span>`claim` | object | no | A `ResourceClaimSpec` of the `resource.k8s.io` API, for real hardware. The operator creates a `ResourceClaim` from it for the device's pod. The API server validates it when the operator creates the claim. Optional. A simulator needs no claim. |
+| <span id="spec--speed"></span>`speed` | number | no | The speed of a timed move, in the driver's own units, from 0 for no motion. The operator writes it to `FOCUS_SPEED` once, in the `Configure` step of each reservation. Optional. |
+| <span id="spec--maxposition"></span>`maxPosition` | number | no | The greatest position that the focuser moves to, in steps. The operator writes it to `FOCUS_MAX` once, in the `Configure` step of each reservation. Optional. |
+| <span id="spec--reversemotion"></span>`reverseMotion` | string | no | Whether the driver reverses the direction of the focuser's motor. The operator writes it to `FOCUS_REVERSE_MOTION` once, in the `Configure` step of each reservation. Optional. One of: `INDI_ENABLED`, `INDI_DISABLED`. |
+| <span id="spec--backlash"></span>`backlash` | string | no | Whether the driver corrects the backlash of the focuser's motor. The operator writes it to `FOCUS_BACKLASH_TOGGLE` once, in the `Configure` step of each reservation. Optional. One of: `INDI_ENABLED`, `INDI_DISABLED`. |
+| <span id="spec--backlashsteps"></span>`backlashSteps` | number | no | The backlash of the focuser's motor, in steps. The operator writes it to `FOCUS_BACKLASH_STEPS` once, in the `Configure` step of each reservation. Optional. |
 | <span id="spec--activation"></span>`activation` | [\[\]object](#specactivation) | no | The actions that run, in order, as this resource's `Telescope` or `Observatory` turns `Active`, while every device is still connected. For a `Telescope` or an `Observatory`, that is the resource itself. The `Reservation`'s `Activation` step waits for them. Each action is a target state, so a run that an operator restart interrupted runs again each action that is not `Done`. Optional. |
 | <span id="spec--deactivation"></span>`deactivation` | [\[\]object](#specdeactivation) | no | The actions that run, in order, as this resource's `Telescope` or `Observatory` stops being `Active`, while every device is still connected. For a `Telescope` or an `Observatory`, that is the resource itself. The `Reservation`'s `Deactivation` step waits for them. Each action is a target state, so a run that an operator restart interrupted runs again each action that is not `Done`. Optional. |
 | <span id="spec--triggers"></span>`triggers` | [\[\]object](#spectriggers) | no | Triggers on conditions. Each one runs its actions once for each transition of its condition to the status it names, while the resource is active: from when its activation is done until its deactivation begins. A condition that holds when the activation ends runs then. A run that began runs to its end, unless the resource's deactivation begins, and a resource runs one procedure at a time. Optional. |
@@ -232,6 +237,18 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--pod"></span>`pod` | string | no | The name of the device's pod, while it exists. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the device's pod. |
 | <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Every property that the device defines, as the driver defines it, with the values of its last update. A vendor's own properties are here, and no typed reading depends on one. The list holds no BLOB data. |
+| <span id="status--motion"></span>`motion` | [object](#statusmotion) | no | The direction of the next relative or timed move, inward or outward. The status holds what the driver reports in `FOCUS_MOTION`. Clients such as KStars and Ekos change it. |
+| <span id="status--speed"></span>`speed` | [object](#statusspeed) | no | The speed of a timed move, in the driver's own units, from 0 for no motion. The status holds what the driver reports in `FOCUS_SPEED`. `spec.speed` sets it. |
+| <span id="status--relativeposition"></span>`relativePosition` | [object](#statusrelativeposition) | no | Moves the focuser by this many steps in the direction of `motion`. The status holds what the driver reports in `REL_FOCUS_POSITION`. Clients such as KStars and Ekos change it. |
+| <span id="status--position"></span>`position` | [object](#statusposition) | no | The focuser's position, in steps. The status holds what the driver reports in `ABS_FOCUS_POSITION`. Clients such as KStars and Ekos change it. |
+| <span id="status--maxposition"></span>`maxPosition` | [object](#statusmaxposition) | no | The greatest position that the focuser moves to, in steps. The status holds what the driver reports in `FOCUS_MAX`. `spec.maxPosition` sets it. |
+| <span id="status--abortmotion"></span>`abortMotion` | [object](#statusabortmotion) | no | Stops the focuser's motion. The status holds what the driver reports in `FOCUS_ABORT_MOTION`. Clients such as KStars and Ekos change it. |
+| <span id="status--sync"></span>`sync` | [object](#statussync) | no | A position, in steps, that the driver takes as the current position, with no motion. The status holds what the driver reports in `FOCUS_SYNC`. Clients such as KStars and Ekos change it. |
+| <span id="status--reversemotion"></span>`reverseMotion` | [object](#statusreversemotion) | no | Whether the driver reverses the direction of the focuser's motor. The status holds what the driver reports in `FOCUS_REVERSE_MOTION`. `spec.reverseMotion` sets it. |
+| <span id="status--backlash"></span>`backlash` | [object](#statusbacklash) | no | Whether the driver corrects the backlash of the focuser's motor. The status holds what the driver reports in `FOCUS_BACKLASH_TOGGLE`. `spec.backlash` sets it. |
+| <span id="status--backlashsteps"></span>`backlashSteps` | [object](#statusbacklashsteps) | no | The backlash of the focuser's motor, in steps. The status holds what the driver reports in `FOCUS_BACKLASH_STEPS`. `spec.backlashSteps` sets it. |
+| <span id="status--timer"></span>`timer` | [object](#statustimer) | no | Moves the focuser in the direction of `motion` at `speed` for this many milliseconds. The status holds what the driver reports in `FOCUS_TIMER`. Clients such as KStars and Ekos change it. |
+| <span id="status--temperature"></span>`temperature` | [object](#statustemperature) | no | The temperature at the focuser, in degrees Celsius. The status holds what the driver reports in `FOCUS_TEMPERATURE`. |
 | <span id="status--display"></span>`display` | [object](#statusdisplay) | no | The readings as a person reads them, with their units, for the printer columns. The numbers are in `readings`. |
 | <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the focuser reports, from `ABS_FOCUS_POSITION`. A field is absent until the driver sends it. |
 
@@ -301,6 +318,114 @@ One member of the property.
 | <span id="statuspropertiesmembers--min"></span>`min` | number | no | For a number, the least value that the driver accepts. |
 | <span id="statuspropertiesmembers--max"></span>`max` | number | no | For a number, the greatest value that the driver accepts. |
 | <span id="statuspropertiesmembers--step"></span>`step` | number | no | For a number, the step between values. Zero means any step. |
+
+### status.motion
+
+The direction of the next relative or timed move, inward or outward. The status holds what the driver reports in `FOCUS_MOTION`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusmotion--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusmotion--value"></span>`value` | string | no | The name of the member that is on, such as `FOCUS_INWARD`. Absent when no member is on. |
+
+### status.speed
+
+The speed of a timed move, in the driver's own units, from 0 for no motion. The status holds what the driver reports in `FOCUS_SPEED`. `spec.speed` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusspeed--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusspeed--value"></span>`value` | number | no | The value that the driver reports. The unit is the driver's own. |
+
+### status.relativePosition
+
+Moves the focuser by this many steps in the direction of `motion`. The status holds what the driver reports in `REL_FOCUS_POSITION`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusrelativeposition--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusrelativeposition--value"></span>`value` | number | no | The value that the driver reports. The unit is the motor's steps. |
+
+### status.position
+
+The focuser's position, in steps. The status holds what the driver reports in `ABS_FOCUS_POSITION`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusposition--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusposition--value"></span>`value` | number | no | The value that the driver reports. The unit is the motor's steps. |
+
+### status.maxPosition
+
+The greatest position that the focuser moves to, in steps. The status holds what the driver reports in `FOCUS_MAX`. `spec.maxPosition` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusmaxposition--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusmaxposition--value"></span>`value` | number | no | The value that the driver reports. The unit is the motor's steps. |
+
+### status.abortMotion
+
+Stops the focuser's motion. The status holds what the driver reports in `FOCUS_ABORT_MOTION`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusabortmotion--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusabortmotion--value"></span>`value` | string | no | The name of the member that is on, such as `ABORT`. Absent when no member is on. |
+
+### status.sync
+
+A position, in steps, that the driver takes as the current position, with no motion. The status holds what the driver reports in `FOCUS_SYNC`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussync--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statussync--value"></span>`value` | number | no | The value that the driver reports. The unit is the motor's steps. |
+
+### status.reverseMotion
+
+Whether the driver reverses the direction of the focuser's motor. The status holds what the driver reports in `FOCUS_REVERSE_MOTION`. `spec.reverseMotion` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusreversemotion--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusreversemotion--value"></span>`value` | string | no | The name of the member that is on, such as `INDI_ENABLED`. Absent when no member is on. |
+
+### status.backlash
+
+Whether the driver corrects the backlash of the focuser's motor. The status holds what the driver reports in `FOCUS_BACKLASH_TOGGLE`. `spec.backlash` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusbacklash--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusbacklash--value"></span>`value` | string | no | The name of the member that is on, such as `INDI_ENABLED`. Absent when no member is on. |
+
+### status.backlashSteps
+
+The backlash of the focuser's motor, in steps. The status holds what the driver reports in `FOCUS_BACKLASH_STEPS`. `spec.backlashSteps` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusbacklashsteps--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusbacklashsteps--value"></span>`value` | number | no | The value that the driver reports. The unit is the motor's steps. |
+
+### status.timer
+
+Moves the focuser in the direction of `motion` at `speed` for this many milliseconds. The status holds what the driver reports in `FOCUS_TIMER`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statustimer--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statustimer--value"></span>`value` | number | no | The value that the driver reports. The unit is milliseconds. |
+
+### status.temperature
+
+The temperature at the focuser, in degrees Celsius. The status holds what the driver reports in `FOCUS_TEMPERATURE`.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statustemperature--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statustemperature--value"></span>`value` | number | no | The value that the driver reports. The unit is degrees Celsius. |
 
 ### status.display
 

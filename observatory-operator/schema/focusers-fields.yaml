@@ -1,0 +1,63 @@
+# The typed fields of a `Focuser`, from the standard properties of
+# INDI's FOCUSER interface, with an absolute position and with a timer.
+# curated.go gives the format and the roles.
+kind: Focuser
+interfaces: [focuser]
+detect: [FOCUS_MOTION]
+properties:
+  FOCUS_MOTION:
+    field: motion
+    role: command
+    description: "The direction of the next relative or timed move, inward or outward."
+  FOCUS_SPEED:
+    field: speed
+    role: setting
+    unit: driver
+    description: "The speed of a timed move, in the driver's own units, from 0 for no motion."
+  REL_FOCUS_POSITION:
+    field: relativePosition
+    role: command
+    unit: steps
+    description: "Moves the focuser by this many steps in the direction of `motion`."
+  ABS_FOCUS_POSITION:
+    field: position
+    role: command
+    unit: steps
+    description: "The focuser's position, in steps."
+  FOCUS_MAX:
+    field: maxPosition
+    role: setting
+    unit: steps
+    description: "The greatest position that the focuser moves to, in steps."
+  FOCUS_ABORT_MOTION:
+    field: abortMotion
+    role: command
+    description: "Stops the focuser's motion."
+  FOCUS_SYNC:
+    field: sync
+    role: command
+    unit: steps
+    description: "A position, in steps, that the driver takes as the current position, with no motion."
+  FOCUS_REVERSE_MOTION:
+    field: reverseMotion
+    role: setting
+    description: "Whether the driver reverses the direction of the focuser's motor."
+  FOCUS_BACKLASH_TOGGLE:
+    field: backlash
+    role: setting
+    description: "Whether the driver corrects the backlash of the focuser's motor."
+  FOCUS_BACKLASH_STEPS:
+    field: backlashSteps
+    role: setting
+    unit: steps
+    description: "The backlash of the focuser's motor, in steps."
+  FOCUS_TIMER:
+    field: timer
+    role: command
+    unit: ms
+    description: "Moves the focuser in the direction of `motion` at `speed` for this many milliseconds."
+  FOCUS_TEMPERATURE:
+    field: temperature
+    role: reading
+    unit: degC
+    description: "The temperature at the focuser, in degrees Celsius."

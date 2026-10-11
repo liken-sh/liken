@@ -1,0 +1,44 @@
+# The typed fields of a `Switch`, from the standard properties of
+# INDI's OUTPUT and INPUT interfaces. curated.go gives the format and
+# the roles.
+kind: Switch
+interfaces: [output, input]
+detect: [DIGITAL_OUTPUT_1, DIGITAL_INPUT_1]
+properties:
+  DIGITAL_OUTPUT_1:
+    field: outputs
+    role: command
+    family: numbered
+    description: "Each digital output, on or off. A device whose `spec.power` names an output switches it."
+  DIGITAL_OUTPUT_LABELS:
+    field: outputLabels
+    role: setting
+    elements: driver
+    description: "The name of each digital output, from output 1, such as `Dew heater`."
+  PULSE_0:
+    field: pulses
+    role: command
+    family: numbered
+    unit: ms
+    description: "A pulse of each digital output, in milliseconds. The driver numbers these from 0, for the outputs that it numbers from 1."
+  DIGITAL_INPUT_1:
+    field: inputs
+    role: reading
+    family: numbered
+    description: "Each digital input, on or off."
+  DIGITAL_INPUT_LABELS:
+    field: inputLabels
+    role: setting
+    elements: driver
+    description: "The name of each digital input, from input 1."
+  ANALOG_INPUT_1:
+    field: analogInputs
+    role: reading
+    family: numbered
+    unit: driver
+    description: "The value of each analog input, in the driver's own units."
+  ANALOG_INPUT_LABELS:
+    field: analogInputLabels
+    role: setting
+    elements: driver
+    description: "The name of each analog input, from input 1."

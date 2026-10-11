@@ -20,7 +20,7 @@ One filter wheel, with INDI's `FILTER_INTERFACE`.
 | <span id="spec--driver"></span>`driver` | [object](#specdriver) | yes | The INDI driver that runs the device. With no `image`, the operator runs the image that the `indi` build lists for the driver, so `name` must then be an INDI driver that the image holds, such as `indi_simulator_ccd`. |
 | <span id="spec--power"></span>`power` | [object](#specpower) | no | The `Switch` output that powers the device. Activation switches the output on before the device's pod starts, and deactivation switches it off after the pod stops. Optional. With no power, a person powers the device on and off by hand. |
 | <span id="spec--claim"></span>`claim` | object | no | A `ResourceClaimSpec` of the `resource.k8s.io` API, for real hardware. The operator creates a `ResourceClaim` from it for the device's pod. The API server validates it when the operator creates the claim. Optional. A simulator needs no claim. |
-| <span id="spec--filters"></span>`filters` | []string | no | The name of the filter in each slot, from slot 1, such as `Luminance` or `H_Alpha`. The operator writes them to `FILTER_NAME`. Optional. |
+| <span id="spec--filters"></span>`filters` | []string | no | The name of the filter in each slot, from slot 1, such as `Luminance` or `H_Alpha`. The operator writes it to `FILTER_NAME` once, in the `Configure` step of each reservation. Optional. |
 | <span id="spec--activation"></span>`activation` | [\[\]object](#specactivation) | no | The actions that run, in order, as this resource's `Telescope` or `Observatory` turns `Active`, while every device is still connected. For a `Telescope` or an `Observatory`, that is the resource itself. The `Reservation`'s `Activation` step waits for them. Each action is a target state, so a run that an operator restart interrupted runs again each action that is not `Done`. Optional. |
 | <span id="spec--deactivation"></span>`deactivation` | [\[\]object](#specdeactivation) | no | The actions that run, in order, as this resource's `Telescope` or `Observatory` stops being `Active`, while every device is still connected. For a `Telescope` or an `Observatory`, that is the resource itself. The `Reservation`'s `Deactivation` step waits for them. Each action is a target state, so a run that an operator restart interrupted runs again each action that is not `Done`. Optional. |
 | <span id="spec--triggers"></span>`triggers` | [\[\]object](#spectriggers) | no | Triggers on conditions. Each one runs its actions once for each transition of its condition to the status it names, while the resource is active: from when its activation is done until its deactivation begins. A condition that holds when the activation ends runs then. A run that began runs to its end, unless the resource's deactivation begins, and a resource runs one procedure at a time. Optional. |
@@ -233,6 +233,8 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--pod"></span>`pod` | string | no | The name of the device's pod, while it exists. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the device's pod. |
 | <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Every property that the device defines, as the driver defines it, with the values of its last update. A vendor's own properties are here, and no typed reading depends on one. The list holds no BLOB data. |
+| <span id="status--slot"></span>`slot` | [object](#statusslot) | no | The slot in front of the camera, counted from 1. The status holds what the driver reports in `FILTER_SLOT`. Clients such as KStars and Ekos change it. |
+| <span id="status--filters"></span>`filters` | [object](#statusfilters) | no | The name of the filter in each slot, from slot 1, such as `Luminance` or `H_Alpha`. The status holds what the driver reports in `FILTER_NAME`. `spec.filters` sets it. |
 | <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the filter wheel reports, from `FILTER_SLOT` and `FILTER_NAME`. A field is absent until the driver sends it. |
 
 ### status.conditions[]
@@ -301,6 +303,34 @@ One member of the property.
 | <span id="statuspropertiesmembers--min"></span>`min` | number | no | For a number, the least value that the driver accepts. |
 | <span id="statuspropertiesmembers--max"></span>`max` | number | no | For a number, the greatest value that the driver accepts. |
 | <span id="statuspropertiesmembers--step"></span>`step` | number | no | For a number, the step between values. Zero means any step. |
+
+### status.slot
+
+The slot in front of the camera, counted from 1. The status holds what the driver reports in `FILTER_SLOT`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusslot--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusslot--value"></span>`value` | number | no | The value that the driver reports. It is a count, with no unit. |
+
+### status.filters
+
+The name of the filter in each slot, from slot 1, such as `Luminance` or `H_Alpha`. The status holds what the driver reports in `FILTER_NAME`. `spec.filters` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusfilters--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusfilters--elements"></span>`elements` | [\[\]object](#statusfilterselements) | no | Each element that the driver defines, in the driver's order. |
+
+#### status.filters.elements[]
+
+One element that the driver defines.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusfilterselements--name"></span>`name` | string | yes | The element's name, as the driver defines it. |
+| <span id="statusfilterselements--label"></span>`label` | string | no | The label that the driver gives the element. |
+| <span id="statusfilterselements--value"></span>`value` | string | no | The element's text. |
 
 ### status.readings
 

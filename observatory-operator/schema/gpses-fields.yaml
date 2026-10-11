@@ -1,0 +1,34 @@
+# The typed fields of a `GPS`, from the standard properties of INDI's
+# GPS interface. curated.go gives the format and the roles.
+kind: GPS
+interfaces: [gps]
+detect: [GPS_REFRESH]
+properties:
+  GEOGRAPHIC_COORD:
+    field: location
+    role: reading
+    description: "The location of the GPS receiver. The state is `Ok` while the receiver has a fix."
+    members:
+      LAT: {field: latitude, unit: deg, description: "The latitude, in degrees north."}
+      LONG: {field: longitude, unit: deg, description: "The longitude, in degrees east, from 0 to 360."}
+      ELEV: {field: elevation, unit: m, description: "The elevation, in meters above sea level."}
+  TIME_UTC:
+    field: time
+    role: reading
+    description: "The time that the GPS receiver reports."
+    members:
+      UTC: {field: utc, description: "The time in UTC, in ISO 8601."}
+      OFFSET: {field: offset, description: "The offset of the local time from UTC, in hours."}
+  GPS_REFRESH:
+    field: refresh
+    role: command
+    description: "Reads the location and the time from the receiver again."
+  GPS_REFRESH_PERIOD:
+    field: refreshPeriod
+    role: setting
+    unit: s
+    description: "How often the driver reads the receiver, in seconds. Zero reads it only on a refresh."
+  SYSTEM_TIME_UPDATE:
+    field: systemTimeUpdate
+    role: setting
+    description: "When the driver sets the system clock from the receiver's time."

@@ -20,6 +20,8 @@ One GPS receiver, with INDI's `GPS_INTERFACE`.
 | <span id="spec--driver"></span>`driver` | [object](#specdriver) | yes | The INDI driver that runs the device. With no `image`, the operator runs the image that the `indi` build lists for the driver, so `name` must then be an INDI driver that the image holds, such as `indi_simulator_ccd`. |
 | <span id="spec--power"></span>`power` | [object](#specpower) | no | The `Switch` output that powers the device. Activation switches the output on before the device's pod starts, and deactivation switches it off after the pod stops. Optional. With no power, a person powers the device on and off by hand. |
 | <span id="spec--claim"></span>`claim` | object | no | A `ResourceClaimSpec` of the `resource.k8s.io` API, for real hardware. The operator creates a `ResourceClaim` from it for the device's pod. The API server validates it when the operator creates the claim. Optional. A simulator needs no claim. |
+| <span id="spec--refreshperiod"></span>`refreshPeriod` | number | no | How often the driver reads the receiver, in seconds. Zero reads it only on a refresh. The operator writes it to `GPS_REFRESH_PERIOD` once, in the `Configure` step of each reservation. Optional. |
+| <span id="spec--systemtimeupdate"></span>`systemTimeUpdate` | string | no | When the driver sets the system clock from the receiver's time. The operator writes it to `SYSTEM_TIME_UPDATE` once, in the `Configure` step of each reservation. Optional. One of: `UPDATE_NEVER`, `UPDATE_ON_STARTUP`, `UPDATE_ON_REFRESH`. |
 | <span id="spec--activation"></span>`activation` | [\[\]object](#specactivation) | no | The actions that run, in order, as this resource's `Telescope` or `Observatory` turns `Active`, while every device is still connected. For a `Telescope` or an `Observatory`, that is the resource itself. The `Reservation`'s `Activation` step waits for them. Each action is a target state, so a run that an operator restart interrupted runs again each action that is not `Done`. Optional. |
 | <span id="spec--deactivation"></span>`deactivation` | [\[\]object](#specdeactivation) | no | The actions that run, in order, as this resource's `Telescope` or `Observatory` stops being `Active`, while every device is still connected. For a `Telescope` or an `Observatory`, that is the resource itself. The `Reservation`'s `Deactivation` step waits for them. Each action is a target state, so a run that an operator restart interrupted runs again each action that is not `Done`. Optional. |
 | <span id="spec--triggers"></span>`triggers` | [\[\]object](#spectriggers) | no | Triggers on conditions. Each one runs its actions once for each transition of its condition to the status it names, while the resource is active: from when its activation is done until its deactivation begins. A condition that holds when the activation ends runs then. A run that began runs to its end, unless the resource's deactivation begins, and a resource runs one procedure at a time. Optional. |
@@ -232,6 +234,11 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--pod"></span>`pod` | string | no | The name of the device's pod, while it exists. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the device's pod. |
 | <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Every property that the device defines, as the driver defines it, with the values of its last update. A vendor's own properties are here, and no typed reading depends on one. The list holds no BLOB data. |
+| <span id="status--location"></span>`location` | [object](#statuslocation) | no | The location of the GPS receiver. The state is `Ok` while the receiver has a fix. The status holds what the driver reports in `GEOGRAPHIC_COORD`. |
+| <span id="status--time"></span>`time` | [object](#statustime) | no | The time that the GPS receiver reports. The status holds what the driver reports in `TIME_UTC`. |
+| <span id="status--refresh"></span>`refresh` | [object](#statusrefresh) | no | Reads the location and the time from the receiver again. The status holds what the driver reports in `GPS_REFRESH`. Clients such as KStars and Ekos change it. |
+| <span id="status--refreshperiod"></span>`refreshPeriod` | [object](#statusrefreshperiod) | no | How often the driver reads the receiver, in seconds. Zero reads it only on a refresh. The status holds what the driver reports in `GPS_REFRESH_PERIOD`. `spec.refreshPeriod` sets it. |
+| <span id="status--systemtimeupdate"></span>`systemTimeUpdate` | [object](#statussystemtimeupdate) | no | When the driver sets the system clock from the receiver's time. The status holds what the driver reports in `SYSTEM_TIME_UPDATE`. `spec.systemTimeUpdate` sets it. |
 | <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the GPS reports, from `GEOGRAPHIC_COORD` and `TIME_UTC`. A field is absent until the driver sends it. |
 
 ### status.conditions[]
@@ -300,6 +307,54 @@ One member of the property.
 | <span id="statuspropertiesmembers--min"></span>`min` | number | no | For a number, the least value that the driver accepts. |
 | <span id="statuspropertiesmembers--max"></span>`max` | number | no | For a number, the greatest value that the driver accepts. |
 | <span id="statuspropertiesmembers--step"></span>`step` | number | no | For a number, the step between values. Zero means any step. |
+
+### status.location
+
+The location of the GPS receiver. The state is `Ok` while the receiver has a fix. The status holds what the driver reports in `GEOGRAPHIC_COORD`.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statuslocation--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statuslocation--latitude"></span>`latitude` | number | no | The latitude, in degrees north. The member is `LAT`. |
+| <span id="statuslocation--longitude"></span>`longitude` | number | no | The longitude, in degrees east, from 0 to 360. The member is `LONG`. |
+| <span id="statuslocation--elevation"></span>`elevation` | number | no | The elevation, in meters above sea level. The member is `ELEV`. |
+
+### status.time
+
+The time that the GPS receiver reports. The status holds what the driver reports in `TIME_UTC`.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statustime--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statustime--utc"></span>`utc` | string | no | The time in UTC, in ISO 8601. The member is `UTC`. |
+| <span id="statustime--offset"></span>`offset` | string | no | The offset of the local time from UTC, in hours. The member is `OFFSET`. |
+
+### status.refresh
+
+Reads the location and the time from the receiver again. The status holds what the driver reports in `GPS_REFRESH`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusrefresh--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusrefresh--value"></span>`value` | string | no | The name of the member that is on, such as `REFRESH`. Absent when no member is on. |
+
+### status.refreshPeriod
+
+How often the driver reads the receiver, in seconds. Zero reads it only on a refresh. The status holds what the driver reports in `GPS_REFRESH_PERIOD`. `spec.refreshPeriod` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusrefreshperiod--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusrefreshperiod--value"></span>`value` | number | no | The value that the driver reports. The unit is seconds. |
+
+### status.systemTimeUpdate
+
+When the driver sets the system clock from the receiver's time. The status holds what the driver reports in `SYSTEM_TIME_UPDATE`. `spec.systemTimeUpdate` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussystemtimeupdate--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statussystemtimeupdate--value"></span>`value` | string | no | The name of the member that is on, such as `UPDATE_NEVER`. Absent when no member is on. |
 
 ### status.readings
 

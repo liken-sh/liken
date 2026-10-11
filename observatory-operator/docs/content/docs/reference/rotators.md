@@ -20,6 +20,10 @@ One rotator, with INDI's `ROTATOR_INTERFACE`.
 | <span id="spec--driver"></span>`driver` | [object](#specdriver) | yes | The INDI driver that runs the device. With no `image`, the operator runs the image that the `indi` build lists for the driver, so `name` must then be an INDI driver that the image holds, such as `indi_simulator_ccd`. |
 | <span id="spec--power"></span>`power` | [object](#specpower) | no | The `Switch` output that powers the device. Activation switches the output on before the device's pod starts, and deactivation switches it off after the pod stops. Optional. With no power, a person powers the device on and off by hand. |
 | <span id="spec--claim"></span>`claim` | object | no | A `ResourceClaimSpec` of the `resource.k8s.io` API, for real hardware. The operator creates a `ResourceClaim` from it for the device's pod. The API server validates it when the operator creates the claim. Optional. A simulator needs no claim. |
+| <span id="spec--reverse"></span>`reverse` | string | no | Whether the driver reverses the direction of the rotator's motor. The operator writes it to `ROTATOR_REVERSE` once, in the `Configure` step of each reservation. Optional. One of: `INDI_ENABLED`, `INDI_DISABLED`. |
+| <span id="spec--backlash"></span>`backlash` | string | no | Whether the driver corrects the backlash of the rotator's motor. The operator writes it to `ROTATOR_BACKLASH_TOGGLE` once, in the `Configure` step of each reservation. Optional. One of: `INDI_ENABLED`, `INDI_DISABLED`. |
+| <span id="spec--backlashsteps"></span>`backlashSteps` | number | no | The backlash of the rotator's motor, in steps. The operator writes it to `ROTATOR_BACKLASH_STEPS` once, in the `Configure` step of each reservation. Optional. |
+| <span id="spec--saferange"></span>`safeRange` | number | no | How far, in degrees, the rotator may turn, so a cable does not wind up. The operator writes it to `ROTATOR_LIMITS` once, in the `Configure` step of each reservation. Optional. |
 | <span id="spec--activation"></span>`activation` | [\[\]object](#specactivation) | no | The actions that run, in order, as this resource's `Telescope` or `Observatory` turns `Active`, while every device is still connected. For a `Telescope` or an `Observatory`, that is the resource itself. The `Reservation`'s `Activation` step waits for them. Each action is a target state, so a run that an operator restart interrupted runs again each action that is not `Done`. Optional. |
 | <span id="spec--deactivation"></span>`deactivation` | [\[\]object](#specdeactivation) | no | The actions that run, in order, as this resource's `Telescope` or `Observatory` stops being `Active`, while every device is still connected. For a `Telescope` or an `Observatory`, that is the resource itself. The `Reservation`'s `Deactivation` step waits for them. Each action is a target state, so a run that an operator restart interrupted runs again each action that is not `Done`. Optional. |
 | <span id="spec--triggers"></span>`triggers` | [\[\]object](#spectriggers) | no | Triggers on conditions. Each one runs its actions once for each transition of its condition to the status it names, while the resource is active: from when its activation is done until its deactivation begins. A condition that holds when the activation ends runs then. A run that began runs to its end, unless the resource's deactivation begins, and a resource runs one procedure at a time. Optional. |
@@ -232,6 +236,14 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--pod"></span>`pod` | string | no | The name of the device's pod, while it exists. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the device's pod. |
 | <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Every property that the device defines, as the driver defines it, with the values of its last update. A vendor's own properties are here, and no typed reading depends on one. The list holds no BLOB data. |
+| <span id="status--angle"></span>`angle` | [object](#statusangle) | no | The rotator's angle, in degrees from 0 to 360. The status holds what the driver reports in `ABS_ROTATOR_ANGLE`. Clients such as KStars and Ekos change it. |
+| <span id="status--abortmotion"></span>`abortMotion` | [object](#statusabortmotion) | no | Stops the rotator's motion. The status holds what the driver reports in `ROTATOR_ABORT_MOTION`. Clients such as KStars and Ekos change it. |
+| <span id="status--sync"></span>`sync` | [object](#statussync) | no | An angle, in degrees, that the driver takes as the current angle, with no motion. The status holds what the driver reports in `SYNC_ROTATOR_ANGLE`. Clients such as KStars and Ekos change it. |
+| <span id="status--home"></span>`home` | [object](#statushome) | no | Moves the rotator to its home position. The status holds what the driver reports in `ROTATOR_HOME`. Clients such as KStars and Ekos change it. |
+| <span id="status--reverse"></span>`reverse` | [object](#statusreverse) | no | Whether the driver reverses the direction of the rotator's motor. The status holds what the driver reports in `ROTATOR_REVERSE`. `spec.reverse` sets it. |
+| <span id="status--backlash"></span>`backlash` | [object](#statusbacklash) | no | Whether the driver corrects the backlash of the rotator's motor. The status holds what the driver reports in `ROTATOR_BACKLASH_TOGGLE`. `spec.backlash` sets it. |
+| <span id="status--backlashsteps"></span>`backlashSteps` | [object](#statusbacklashsteps) | no | The backlash of the rotator's motor, in steps. The status holds what the driver reports in `ROTATOR_BACKLASH_STEPS`. `spec.backlashSteps` sets it. |
+| <span id="status--saferange"></span>`safeRange` | [object](#statussaferange) | no | How far, in degrees, the rotator may turn, so a cable does not wind up. The status holds what the driver reports in `ROTATOR_LIMITS`. `spec.safeRange` sets it. |
 | <span id="status--display"></span>`display` | [object](#statusdisplay) | no | The readings as a person reads them, with their units, for the printer columns. The numbers are in `readings`. |
 | <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the rotator reports, from `ABS_ROTATOR_ANGLE`. A field is absent until the driver sends it. |
 
@@ -301,6 +313,78 @@ One member of the property.
 | <span id="statuspropertiesmembers--min"></span>`min` | number | no | For a number, the least value that the driver accepts. |
 | <span id="statuspropertiesmembers--max"></span>`max` | number | no | For a number, the greatest value that the driver accepts. |
 | <span id="statuspropertiesmembers--step"></span>`step` | number | no | For a number, the step between values. Zero means any step. |
+
+### status.angle
+
+The rotator's angle, in degrees from 0 to 360. The status holds what the driver reports in `ABS_ROTATOR_ANGLE`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusangle--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusangle--value"></span>`value` | number | no | The value that the driver reports. The unit is degrees. |
+
+### status.abortMotion
+
+Stops the rotator's motion. The status holds what the driver reports in `ROTATOR_ABORT_MOTION`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusabortmotion--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusabortmotion--value"></span>`value` | string | no | The name of the member that is on, such as `ABORT`. Absent when no member is on. |
+
+### status.sync
+
+An angle, in degrees, that the driver takes as the current angle, with no motion. The status holds what the driver reports in `SYNC_ROTATOR_ANGLE`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussync--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statussync--value"></span>`value` | number | no | The value that the driver reports. The unit is degrees. |
+
+### status.home
+
+Moves the rotator to its home position. The status holds what the driver reports in `ROTATOR_HOME`. Clients such as KStars and Ekos change it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statushome--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statushome--value"></span>`value` | string | no | The name of the member that is on, such as `HOME`. Absent when no member is on. |
+
+### status.reverse
+
+Whether the driver reverses the direction of the rotator's motor. The status holds what the driver reports in `ROTATOR_REVERSE`. `spec.reverse` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusreverse--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusreverse--value"></span>`value` | string | no | The name of the member that is on, such as `INDI_ENABLED`. Absent when no member is on. |
+
+### status.backlash
+
+Whether the driver corrects the backlash of the rotator's motor. The status holds what the driver reports in `ROTATOR_BACKLASH_TOGGLE`. `spec.backlash` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusbacklash--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusbacklash--value"></span>`value` | string | no | The name of the member that is on, such as `INDI_ENABLED`. Absent when no member is on. |
+
+### status.backlashSteps
+
+The backlash of the rotator's motor, in steps. The status holds what the driver reports in `ROTATOR_BACKLASH_STEPS`. `spec.backlashSteps` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusbacklashsteps--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusbacklashsteps--value"></span>`value` | number | no | The value that the driver reports. The unit is the motor's steps. |
+
+### status.safeRange
+
+How far, in degrees, the rotator may turn, so a cable does not wind up. The status holds what the driver reports in `ROTATOR_LIMITS`. `spec.safeRange` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussaferange--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statussaferange--value"></span>`value` | number | no | The value that the driver reports. The unit is degrees. |
 
 ### status.display
 

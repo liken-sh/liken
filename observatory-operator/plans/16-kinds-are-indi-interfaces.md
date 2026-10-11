@@ -232,29 +232,40 @@ generator merges them. Some properties appear only after a value
 changes, such as `TELESCOPE_PIER_SIDE`, so a capture keeps every
 definition it sees, not only the last state.
 
-The standard set of an interface is the merge of three sources:
+The standard set of an interface is the merge of two sources:
 
 1. The bare driver's capture: the structure, the types, the
-   permissions, the rules, and the ranges.
-2. The standard properties page of `indilib/docs`: the descriptions
-   and the units, which no driver states.
-3. A short table, written by hand, of the properties that drivers
+   permissions, and the rules.
+2. A short table, written by hand, of the properties that drivers
    share by convention and libindi does not define, such as
    `CCD_GAIN`, `CCD_OFFSET`, `CCD_COOLER`, `CCD_COOLER_POWER`, and
    `FOCUS_TEMPERATURE`. The simulator transcripts check each entry.
 
-The generator reports each place where two sources disagree and picks
-neither. The capture leaves out the properties of the transport and
-of `DefaultDevice`, such as `CONNECTION_MODE`, `DEVICE_PORT`, `DEBUG`,
+The capture leaves out the properties of the transport and of
+`DefaultDevice`, such as `CONNECTION_MODE`, `DEVICE_PORT`, `DEBUG`,
 and `POLLING_PERIOD`, because they belong to every device and to no
 interface.
 
-A curated file names each typed field and states its unit. The
-generator fails on a standard property that has no entry in it, so no
-standard property is left untyped by accident. Where the driver chooses
-the elements, such as slew rates, track modes, capture formats, park
-positions, and filter names, the typed field is a list of the elements
-the driver defines.
+A curated file for each kind, in `observatory-operator/schema/`,
+names each typed field, gives its role, states its unit, and
+describes it. The descriptions are ours, in the project's voice,
+because `kubectl explain` and the manual publish them. The generator
+fails on a standard property that has no entry, so no standard
+property is left untyped by accident, and on an entry with no
+description. Where the driver chooses the elements, such as slew
+rates, track modes, capture formats, park positions, and filter
+names, the typed field is a list of the elements the driver defines.
+
+The standard properties page of `indilib/docs` is a cross-check at
+development time, and the generator never reads it, because its text
+is not ours to publish. A make target fetches the page and writes a
+report of each place where the page, the captures, the table, the
+simulators, and the curated units disagree, with the commit of the
+page. The report is committed, and picks no side.
+
+The generator writes each CRD with procedures whole, from a template
+for each kind and the shared templates of the device fields and the
+procedure schema, so those shared parts have one source.
 
 The bare drivers run on a workstation, never in CI and never in a
 cluster. Their sources are in `observatory-operator/indi/standard/bare/`,
@@ -346,11 +357,11 @@ Each step closes in its own commit with its tests.
    simulator transcripts in `indi/testdata/` again, so both are made the
    same way after an INDI bump. The captures for every interface in the
    table, with the variants above.
-2. **The generator.** The curated file, the hand-written table, the
-   merge with the documentation, and the report. It writes the Go
-   types and the typed fields of each CRD, and the shared device and
-   procedure schema in each CRD, which `shared_test.go` and
-   `procedureschema_test.go` hold equal by hand today.
+2. **The generator.** The curated files, the hand-written table, the
+   templates, and the cross-check with the documentation. It writes
+   the Go types and the 16 CRDs with procedures whole, with the shared
+   device and procedure schema that `shared_test.go` and
+   `procedureschema_test.go` held equal by hand.
 3. **The kinds as interfaces.** Detection from properties, `spec.device`
    and its CEL rule, the owner's lifecycle over its served resources,
    the resolved device and endpoint in every status, and the branches

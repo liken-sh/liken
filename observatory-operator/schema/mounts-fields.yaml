@@ -1,0 +1,145 @@
+# The typed fields of a `Mount`, from the standard properties of INDI's
+# TELESCOPE interface in every variant of its park type. curated.go
+# gives the format and the roles.
+kind: Mount
+interfaces: [telescope]
+detect: [EQUATORIAL_EOD_COORD]
+properties:
+  ACTIVE_DEVICES:
+    field: activeDevices
+    role: tree
+    description: "The INDI devices whose state the mount reads."
+    members:
+      ACTIVE_GPS: {field: gps, description: "The GPS, for the site's location and time."}
+      ACTIVE_DOME: {field: dome, description: "The dome, for its park lock."}
+  DOME_POLICY:
+    field: domePolicy
+    role: tree
+    description: "Whether the dome's park locks the mount's park: `DOME_LOCKS` or `DOME_IGNORED`. The operator sets `DOME_LOCKS` when the observatory has a dome."
+  ON_COORD_SET:
+    field: onCoordSet
+    role: command
+    description: "What the mount does with the next coordinates that a client writes: slew, track, sync, or flip."
+  EQUATORIAL_EOD_COORD:
+    field: equatorial
+    role: command
+    description: "Where the mount points, in the equinox of the date (JNow). A client that writes it moves the mount, as `onCoordSet` says."
+    members:
+      RA: {field: rightAscension, unit: h, description: "The right ascension, in hours from 0 to 24."}
+      DEC: {field: declination, unit: deg, description: "The declination, in degrees from -90 to 90."}
+  TELESCOPE_ABORT_MOTION:
+    field: abortMotion
+    role: command
+    description: "Stops every motion of the mount."
+  TELESCOPE_TRACK_MODE:
+    field: trackMode
+    role: setting
+    elements: driver
+    description: "The rate that the mount tracks at, such as sidereal, solar, or lunar."
+  TELESCOPE_TRACK_STATE:
+    field: tracking
+    role: command
+    description: "Turns tracking on or off."
+  TELESCOPE_TRACK_RATE:
+    field: trackRate
+    role: command
+    description: "The rates of the custom track mode, in arcseconds per second."
+    members:
+      TRACK_RATE_RA: {field: rightAscension, unit: arcsec/s, description: "The rate of the right ascension axis, in arcseconds per second."}
+      TRACK_RATE_DE: {field: declination, unit: arcsec/s, description: "The rate of the declination axis, in arcseconds per second."}
+  TELESCOPE_HOME:
+    field: home
+    role: command
+    description: "Finds the home position, sets the current position as home, or moves the mount home."
+  TELESCOPE_MOTION_NS:
+    field: motionNorthSouth
+    role: command
+    description: "Moves the mount to the north or to the south while a client holds it on."
+  TELESCOPE_MOTION_WE:
+    field: motionWestEast
+    role: command
+    description: "Moves the mount to the west or to the east while a client holds it on."
+  TELESCOPE_REVERSE_MOTION:
+    field: reverseMotion
+    role: setting
+    description: "The axes whose manual motion the driver reverses."
+  TELESCOPE_SLEW_RATE:
+    field: slewRate
+    role: command
+    elements: driver
+    description: "The rate of a manual motion, from the slowest to the fastest that the driver offers."
+  TARGET_EOD_COORD:
+    field: target
+    role: reading
+    description: "Where the last slew goes, in the equinox of the date (JNow)."
+    members:
+      RA: {field: rightAscension, unit: h, description: "The right ascension, in hours from 0 to 24."}
+      DEC: {field: declination, unit: deg, description: "The declination, in degrees from -90 to 90."}
+  TELESCOPE_MOUNT_TYPE:
+    field: mountType
+    role: reading
+    description: "The type of the mount: alt-az, fork, or German equatorial."
+  TIME_UTC:
+    field: time
+    role: tree
+    description: "The time that the mount uses to compute where the sky is."
+    members:
+      UTC: {field: utc, description: "The time in UTC, in ISO 8601."}
+      OFFSET: {field: offset, description: "The offset of the local time from UTC, in hours."}
+  GEOGRAPHIC_COORD:
+    field: location
+    role: tree
+    description: "The site's location. The operator writes it from the `Observatory`'s `spec.location`."
+    members:
+      LAT: {field: latitude, unit: deg, description: "The latitude, in degrees north."}
+      LONG: {field: longitude, unit: deg, description: "The longitude, in degrees east, from 0 to 360."}
+      ELEV: {field: elevation, unit: m, description: "The elevation, in meters above sea level."}
+  TELESCOPE_PARK:
+    field: park
+    role: command
+    description: "Parks or unparks the mount. The `state` action changes it."
+  TELESCOPE_PARK_POSITION:
+    field: parkPosition
+    role: setting
+    elements: driver
+    unit: label
+    description: "Where the mount parks, in the unit that each element's label names. Its elements depend on the mount's park type, such as right ascension and declination, or azimuth and altitude."
+  TELESCOPE_PARK_OPTION:
+    field: parkOption
+    role: command
+    description: "Sets the park position to the current position or to the driver's default, or writes or deletes the driver's park data."
+  TELESCOPE_PIER_SIDE:
+    field: pierSide
+    role: reading
+    description: "The side of the pier that the mount is on."
+  SIMULATE_PIER_SIDE:
+    field: simulatePierSide
+    role: setting
+    description: "Whether the driver computes the pier side, for a mount that does not report it."
+  SAT_TLE_TEXT:
+    field: satelliteTle
+    role: command
+    description: "The two-line element set of a satellite to track."
+  SAT_PASS_WINDOW:
+    field: satellitePassWindow
+    role: command
+    description: "The times when the satellite of `satelliteTle` is in view."
+    members:
+      SAT_PASS_WINDOW_START: {field: start, description: "The start of the pass, in UTC."}
+      SAT_PASS_WINDOW_END: {field: end, description: "The end of the pass, in UTC."}
+  SAT_TRACKING_STAT:
+    field: satelliteTracking
+    role: command
+    description: "Starts or halts the tracking of the satellite of `satelliteTle`."
+  PEC:
+    field: pec
+    role: setting
+    description: "Whether the mount plays back its periodic error correction."
+  USEJOYSTICK:
+    field: joystick
+    role: setting
+    description: "Whether the driver moves the mount from a joystick."
+  SNOOP_JOYSTICK:
+    field: joystickDevice
+    role: tree
+    description: "The INDI device of the joystick."

@@ -21,6 +21,9 @@ One switch, with INDI's `OUTPUT_INTERFACE` or `INPUT_INTERFACE`.
 | <span id="spec--driver"></span>`driver` | [object](#specdriver) | yes | The INDI driver that runs the device. With no `image`, the operator runs the image that the `indi` build lists for the driver, so `name` must then be an INDI driver that the image holds, such as `indi_simulator_ccd`. |
 | <span id="spec--power"></span>`power` | [object](#specpower) | no | The `Switch` output that powers the device. Activation switches the output on before the device's pod starts, and deactivation switches it off after the pod stops. Optional. With no power, a person powers the device on and off by hand. |
 | <span id="spec--claim"></span>`claim` | object | no | A `ResourceClaimSpec` of the `resource.k8s.io` API, for real hardware. The operator creates a `ResourceClaim` from it for the device's pod. The API server validates it when the operator creates the claim. Optional. A simulator needs no claim. |
+| <span id="spec--outputlabels"></span>`outputLabels` | []string | no | The name of each digital output, from output 1, such as `Dew heater`. The operator writes it to `DIGITAL_OUTPUT_LABELS` once, in the `Configure` step of each reservation. Optional. |
+| <span id="spec--inputlabels"></span>`inputLabels` | []string | no | The name of each digital input, from input 1. The operator writes it to `DIGITAL_INPUT_LABELS` once, in the `Configure` step of each reservation. Optional. |
+| <span id="spec--analoginputlabels"></span>`analogInputLabels` | []string | no | The name of each analog input, from input 1. The operator writes it to `ANALOG_INPUT_LABELS` once, in the `Configure` step of each reservation. Optional. |
 | <span id="spec--activation"></span>`activation` | [\[\]object](#specactivation) | no | The actions that run, in order, as this resource's `Telescope` or `Observatory` turns `Active`, while every device is still connected. For a `Telescope` or an `Observatory`, that is the resource itself. The `Reservation`'s `Activation` step waits for them. Each action is a target state, so a run that an operator restart interrupted runs again each action that is not `Done`. Optional. |
 | <span id="spec--deactivation"></span>`deactivation` | [\[\]object](#specdeactivation) | no | The actions that run, in order, as this resource's `Telescope` or `Observatory` stops being `Active`, while every device is still connected. For a `Telescope` or an `Observatory`, that is the resource itself. The `Reservation`'s `Deactivation` step waits for them. Each action is a target state, so a run that an operator restart interrupted runs again each action that is not `Done`. Optional. |
 | <span id="spec--triggers"></span>`triggers` | [\[\]object](#spectriggers) | no | Triggers on conditions. Each one runs its actions once for each transition of its condition to the status it names, while the resource is active: from when its activation is done until its deactivation begins. A condition that holds when the activation ends runs then. A run that began runs to its end, unless the resource's deactivation begins, and a resource runs one procedure at a time. Optional. |
@@ -233,6 +236,13 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--pod"></span>`pod` | string | no | The name of the device's pod, while it exists. |
 | <span id="status--node"></span>`node` | string | no | The node that runs the device's pod. |
 | <span id="status--properties"></span>`properties` | [\[\]object](#statusproperties) | no | Every property that the device defines, as the driver defines it, with the values of its last update. A vendor's own properties are here, and no typed reading depends on one. The list holds no BLOB data. |
+| <span id="status--outputs"></span>`outputs` | [\[\]object](#statusoutputs) | no | Each digital output, on or off. A device whose `spec.power` names an output switches it. The status holds one item for each `DIGITAL_OUTPUT_n` that the driver defines. Clients such as KStars and Ekos change it. |
+| <span id="status--outputlabels"></span>`outputLabels` | [object](#statusoutputlabels) | no | The name of each digital output, from output 1, such as `Dew heater`. The status holds what the driver reports in `DIGITAL_OUTPUT_LABELS`. `spec.outputLabels` sets it. |
+| <span id="status--pulses"></span>`pulses` | [\[\]object](#statuspulses) | no | A pulse of each digital output, in milliseconds. The driver numbers these from 0, for the outputs that it numbers from 1. The status holds one item for each `PULSE_n` that the driver defines. Clients such as KStars and Ekos change it. |
+| <span id="status--inputs"></span>`inputs` | [\[\]object](#statusinputs) | no | Each digital input, on or off. The status holds one item for each `DIGITAL_INPUT_n` that the driver defines. |
+| <span id="status--inputlabels"></span>`inputLabels` | [object](#statusinputlabels) | no | The name of each digital input, from input 1. The status holds what the driver reports in `DIGITAL_INPUT_LABELS`. `spec.inputLabels` sets it. |
+| <span id="status--analoginputs"></span>`analogInputs` | [\[\]object](#statusanaloginputs) | no | The value of each analog input, in the driver's own units. The status holds one item for each `ANALOG_INPUT_n` that the driver defines. |
+| <span id="status--analoginputlabels"></span>`analogInputLabels` | [object](#statusanaloginputlabels) | no | The name of each analog input, from input 1. The status holds what the driver reports in `ANALOG_INPUT_LABELS`. `spec.analogInputLabels` sets it. |
 | <span id="status--readings"></span>`readings` | [object](#statusreadings) | no | What the switch reports, from the `DIGITAL_OUTPUT_n` and `DIGITAL_INPUT_n` properties and their labels. A field is absent until the driver sends it. |
 
 ### status.conditions[]
@@ -301,6 +311,103 @@ One member of the property.
 | <span id="statuspropertiesmembers--min"></span>`min` | number | no | For a number, the least value that the driver accepts. |
 | <span id="statuspropertiesmembers--max"></span>`max` | number | no | For a number, the greatest value that the driver accepts. |
 | <span id="statuspropertiesmembers--step"></span>`step` | number | no | For a number, the step between values. Zero means any step. |
+
+### status.outputs[]
+
+One property of the family.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusoutputs--number"></span>`number` | integer | yes | The number at the end of the property's name, such as 1 for `DIGITAL_OUTPUT_1`. |
+| <span id="statusoutputs--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusoutputs--value"></span>`value` | string | no | The name of the member that is on, such as `OFF`. Absent when no member is on. |
+
+### status.outputLabels
+
+The name of each digital output, from output 1, such as `Dew heater`. The status holds what the driver reports in `DIGITAL_OUTPUT_LABELS`. `spec.outputLabels` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusoutputlabels--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusoutputlabels--elements"></span>`elements` | [\[\]object](#statusoutputlabelselements) | no | Each element that the driver defines, in the driver's order. |
+
+#### status.outputLabels.elements[]
+
+One element that the driver defines.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusoutputlabelselements--name"></span>`name` | string | yes | The element's name, as the driver defines it. |
+| <span id="statusoutputlabelselements--label"></span>`label` | string | no | The label that the driver gives the element. |
+| <span id="statusoutputlabelselements--value"></span>`value` | string | no | The element's text. |
+
+### status.pulses[]
+
+One property of the family.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statuspulses--number"></span>`number` | integer | yes | The number at the end of the property's name, such as 0 for `PULSE_0`. |
+| <span id="statuspulses--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statuspulses--value"></span>`value` | number | no | The value that the driver reports. The unit is milliseconds. |
+
+### status.inputs[]
+
+One property of the family.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusinputs--number"></span>`number` | integer | yes | The number at the end of the property's name, such as 1 for `DIGITAL_INPUT_1`. |
+| <span id="statusinputs--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusinputs--value"></span>`value` | string | no | The name of the member that is on, such as `OFF`. Absent when no member is on. |
+
+### status.inputLabels
+
+The name of each digital input, from input 1. The status holds what the driver reports in `DIGITAL_INPUT_LABELS`. `spec.inputLabels` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusinputlabels--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusinputlabels--elements"></span>`elements` | [\[\]object](#statusinputlabelselements) | no | Each element that the driver defines, in the driver's order. |
+
+#### status.inputLabels.elements[]
+
+One element that the driver defines.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusinputlabelselements--name"></span>`name` | string | yes | The element's name, as the driver defines it. |
+| <span id="statusinputlabelselements--label"></span>`label` | string | no | The label that the driver gives the element. |
+| <span id="statusinputlabelselements--value"></span>`value` | string | no | The element's text. |
+
+### status.analogInputs[]
+
+One property of the family.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusanaloginputs--number"></span>`number` | integer | yes | The number at the end of the property's name, such as 1 for `ANALOG_INPUT_1`. |
+| <span id="statusanaloginputs--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusanaloginputs--value"></span>`value` | number | no | The value that the driver reports. The unit is the driver's own. |
+
+### status.analogInputLabels
+
+The name of each analog input, from input 1. The status holds what the driver reports in `ANALOG_INPUT_LABELS`. `spec.analogInputLabels` sets it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusanaloginputlabels--state"></span>`state` | string | no | The property's state: `Busy` while the driver carries out a change, `Ok` when the last change ended well, `Alert` when it failed, and `Idle` before the first change. One of: `Idle`, `Ok`, `Busy`, `Alert`. |
+| <span id="statusanaloginputlabels--elements"></span>`elements` | [\[\]object](#statusanaloginputlabelselements) | no | Each element that the driver defines, in the driver's order. |
+
+#### status.analogInputLabels.elements[]
+
+One element that the driver defines.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusanaloginputlabelselements--name"></span>`name` | string | yes | The element's name, as the driver defines it. |
+| <span id="statusanaloginputlabelselements--label"></span>`label` | string | no | The label that the driver gives the element. |
+| <span id="statusanaloginputlabelselements--value"></span>`value` | string | no | The element's text. |
 
 ### status.readings
 
