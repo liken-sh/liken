@@ -2,7 +2,8 @@
 
 Proposed on 2026-10-08. Built on 2026-10-08 with design (a), all four
 steps, and tested against the fake API server, which now serves lists
-and watches of every namespace. The drill on liken-1 has not run yet.
+and watches of every namespace. Drilled on liken-1 on 2026-10-11, with
+INDI simulators; "The drill" below records the results.
 
 `observatory-operator` runs in its own `observatory` namespace and
 watches that namespace alone. Every other `liken` operator runs in
@@ -153,3 +154,32 @@ runs in `liken-system` and reads the inventory, then create a
 `Reservation` and confirm the device pods and the INDI server start in
 `observatory` and the telescope reaches `Ready`. Then apply the
 simulators again in a second namespace and run both at once.
+
+### Results
+
+The drill ran on 2026-10-11 against `2026.10.10-002`. The bump to
+that pin had already moved the operator. The `observatory` namespace
+carried the prune annotation and survived, Flux pruned the old `Role`
+and `RoleBinding`, and the operator ran in `liken-system` with a
+`ClusterRole` and read the inventory.
+
+| Step | Result |
+|---|---|
+| Reserve `east` in `observatory` | `Ready` in 54 s. Every device pod, the INDI servers, the guider, and their `Service`s ran in `observatory`. |
+| Apply the same inventory in `observatory-drill`, and reserve `east` there | `Ready` in 40 s at `east-telescope.observatory-drill.svc:7624`, while `east` in `observatory` stayed `Ready`. The `Event`s landed in `observatory-drill`, and each log line of the site named `observatory-drill`. |
+| Delete the `Reservation` and the namespace `observatory-drill` | The site released the telescope and stopped its pods, and the namespace was gone in 31 s. `east` in `observatory` stayed `Ready`, and the operator logged nothing for `observatory-drill` after the delete finished. |
+| End the `Reservation` in `observatory` | The telescope went `Idle`, and every pod stopped. |
+
+The operator did not restart. With both telescopes `Ready`, it used
+115m of CPU.
+
+The drill found two small defects. Neither one affects a reservation:
+
+- While a namespace is deleted, the operator posts a `ParentMissing`
+  warning for each device whose parent the delete removed first. The
+  API server refuses each write, with `403` because the namespace is
+  terminating or with `not found`, and the operator logs each refusal.
+  The drill logged five.
+- The line that `kubernetes/events` logs for a refused write names
+  the object's kind and name but not its namespace, so the line does
+  not show which observatory it came from.
