@@ -63,6 +63,8 @@ type operator struct {
 	logs io.Writer
 	// recorder posts the Events (events.go). Nil posts none.
 	recorder *events.Recorder
+	// series sets the namespace's Prometheus series (series.go).
+	series *namespaceSeries
 
 	servers *servers
 	// guiderConns holds the connection to each guider's PHD2.
@@ -199,6 +201,7 @@ func (o *operator) run(ctx context.Context, s *stores) {
 		o.servers.stopAll()
 		o.guiderConns.stopAll()
 		o.running.Wait()
+		o.series.forget()
 	}()
 	seeded := false
 	for {
@@ -217,7 +220,9 @@ func (o *operator) run(ctx context.Context, s *stores) {
 				o.seeded.Store(true)
 				o.changed.notify()
 			}
-			o.supervise(ctx, t)
+			began := time.Now()
+			err := o.supervise(ctx, t)
+			o.series.m.observePass(observatory.ReservationKind.Name, time.Since(began), err != nil)
 		}
 		select {
 		case <-ctx.Done():
@@ -228,8 +233,9 @@ func (o *operator) run(ctx context.Context, s *stores) {
 }
 
 // supervise starts the runners and the INDI connections that the tree
-// needs, and stops the pods that no reservation holds.
-func (o *operator) supervise(ctx context.Context, t *tree) {
+// needs, and stops the pods that no reservation holds. It logs each
+// failure, and answers the failures for the pass's metrics.
+func (o *operator) supervise(ctx context.Context, t *tree) error {
 	for _, r := range t.reservations {
 		if finished(r) {
 			continue
@@ -242,15 +248,13 @@ func (o *operator) supervise(ctx context.Context, t *tree) {
 	o.servers.sync(ctx, t)
 	o.guiderConns.sync(ctx, t)
 	held := o.heldServers(t)
-	if err := o.sweep(t, held); err != nil {
-		o.logf("%v", err)
+	problems := []error{o.sweep(t, held), o.releaseDevices(t, held), o.keepParents(t)}
+	for _, err := range problems {
+		if err != nil {
+			o.logf("%v", err)
+		}
 	}
-	if err := o.releaseDevices(t, held); err != nil {
-		o.logf("%v", err)
-	}
-	if err := o.keepParents(t); err != nil {
-		o.logf("%v", err)
-	}
+	return joinErrors(problems)
 }
 
 // finished reports whether a reservation has no work left: it is

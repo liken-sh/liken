@@ -32,10 +32,13 @@ COPY indi/*.go ./indi/
 COPY phd2/*.go ./phd2/
 COPY observatory/*.go ./observatory/
 COPY drivers/*.go ./drivers/
+# The version reaches the binary through -ldflags, so liken_build_info
+# names the release that runs and not dev.
+ARG VERSION=dev
 # CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
 # static binary with no paths from the build machine in it. It runs
 # from scratch, where there is no loader to need.
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /observatory-operator .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /observatory-operator .
 # The license files of the Go standard library and of each module that
 # the binary links. notices/go.sh says why the image needs them.
 COPY --from=notices go.sh /

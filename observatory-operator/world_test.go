@@ -125,7 +125,9 @@ func (w *world) start() {
 	done := w.done
 	go func() {
 		defer close(done)
-		n.run(ctx, func(ctx context.Context, changed *bell) *stores { return startWatches(ctx, watcher, changed) })
+		n.run(ctx, func(ctx context.Context, changed *bell) *stores {
+			return startWatches(ctx, watcher, changed, n.metrics)
+		})
 	}()
 }
 

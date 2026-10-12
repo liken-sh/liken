@@ -31,6 +31,8 @@ type namespaces struct {
 	dialer   indi.Dialer
 	logs     io.Writer
 	recorder *events.Recorder
+	// metrics is the registry that the listener serves (metrics.go).
+	metrics *metrics
 	// changed rings on each change to the stores.
 	changed *bell
 	stores  *stores
@@ -51,6 +53,7 @@ func newNamespaces(client *apiclient.Client, dialer indi.Dialer) *namespaces {
 		client:  client,
 		dialer:  dialer,
 		logs:    os.Stderr,
+		metrics: newMetrics(version),
 		changed: newBell(nil),
 		running: map[string]*namespaceRun{},
 	}
@@ -112,7 +115,7 @@ func (n *namespaces) supervise(ctx context.Context, group *sync.WaitGroup) {
 // once.
 func (n *namespaces) start(ctx context.Context, group *sync.WaitGroup, namespace string) {
 	o := newOperator(namespace, n.client, n.dialer)
-	o.logs, o.recorder = n.logs, n.recorder
+	o.logs, o.recorder, o.series = n.logs, n.recorder, n.metrics.namespace(namespace)
 	ctx, stop := context.WithCancel(ctx)
 	r := &namespaceRun{o: o, stop: stop, done: make(chan struct{})}
 	n.running[namespace] = r

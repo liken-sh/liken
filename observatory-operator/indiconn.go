@@ -32,7 +32,10 @@ const (
 )
 
 type indiServer struct {
-	name   string
+	name string
+	// source names the server in the observation series: the resource
+	// whose server it is, such as Telescope/east.
+	source string
 	client *indi.Client
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -76,14 +79,12 @@ func (s *servers) sync(ctx context.Context, t *tree) {
 	defer s.mu.Unlock()
 	for name := range want {
 		if _, open := s.byName[name]; !open {
-			s.byName[name] = s.open(ctx, name)
+			s.byName[name] = s.open(ctx, name, sourceOf(t.pods[name]))
 		}
 	}
 	for name, server := range s.byName {
 		if !want[name] {
-			server.cancel()
-			<-server.done
-			delete(s.byName, name)
+			s.close(server)
 		}
 	}
 }
@@ -91,30 +92,42 @@ func (s *servers) sync(ctx context.Context, t *tree) {
 func (s *servers) stopAll() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for name, server := range s.byName {
-		server.cancel()
-		<-server.done
-		delete(s.byName, name)
+	for _, server := range s.byName {
+		s.close(server)
 	}
 }
 
-func (s *servers) open(parent context.Context, name string) *indiServer {
+// close ends a server's connection, and deletes its observation series:
+// the server's pod is gone, so nothing is left to observe. The caller
+// holds s.mu.
+func (s *servers) close(server *indiServer) {
+	server.cancel()
+	<-server.done
+	delete(s.byName, server.name)
+	s.o.series.forgetSource(server.source)
+}
+
+func (s *servers) open(parent context.Context, name, source string) *indiServer {
 	ctx, cancel := context.WithCancel(parent)
 	address := serviceHost(name, s.o.namespace) + ":" + strconv.Itoa(serverPort)
 	var options []indi.Option
 	if s.o.dialer != nil {
 		options = append(options, indi.WithDialer(s.o.dialer))
 	}
-	server := &indiServer{name: name, client: indi.NewClient(address, options...), lock: newLock(), cancel: cancel, done: make(chan struct{})}
+	server := &indiServer{name: name, source: source, client: indi.NewClient(address, options...), lock: newLock(), cancel: cancel, done: make(chan struct{})}
 	server.epoch.Store(epochs.Add(1))
 	events := server.client.Subscribe(ctx)
+	s.o.series.observation(source, false)
 	var group sync.WaitGroup
 	// Every INDI event wakes the operator, as a watch event does: a
 	// runner may wait for a property, and the status writer shows it.
 	// An update or a message changes no device that a server defines,
-	// so it rings changed alone (operator.go).
+	// so it rings changed alone (operator.go). Every event but the end
+	// of the connection is a message from an open connection, so it
+	// moves the observation's timestamp.
 	group.Go(func() {
 		for e := range events {
+			s.o.series.observation(source, e.Kind != indi.Disconnected)
 			if e.Kind == indi.Updated || e.Kind == indi.Message {
 				s.o.changed.notify()
 			} else {

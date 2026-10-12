@@ -100,4 +100,4 @@ must hold.
 | [19](19-the-frames-outbox.md) | Built: a `Reservation` names a claim in `spec.outbox`, the session records it, the imaging cameras' pods mount it at `/outbox`, and `Configure` points each driver's uploads there |
 | [20](20-declared-fits-keywords.md) | Proposed: declared FITS keywords overlaid from the `Observatory` down to the `Reservation`, written by the driver |
 | [21](21-a-person-in-the-procedure.md) | Proposed: a step that waits for a person to set the telescope up, a step that asks them to cover it, and the flag that allows unattended reservations |
-| [22](22-prometheus-metrics.md) | Proposed: the operator's metrics under root plan 65 |
+| [22](22-prometheus-metrics.md) | Built: the operator serves its metrics under root plan 65 on port 9200, and `deploy/monitoring` adds a `PodMonitor` and a dashboard; not drilled yet |

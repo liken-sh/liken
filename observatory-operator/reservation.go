@@ -342,6 +342,7 @@ const (
 
 func (r *runner) failure(ctx context.Context, s *observatory.Step, reason string) {
 	r.o.logf("Reservation %s: %s", r.name, stepLine(s))
+	r.o.series.stepFailed(r.res.Spec.Telescope, s.Name)
 	r.status.Phase = observatory.ReservationFailed
 	r.save(ctx)
 	r.o.recorder.Warning(reference(observatory.ReservationKind, r.res.Metadata), reason, failedMessage(s))

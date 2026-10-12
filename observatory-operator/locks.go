@@ -48,6 +48,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/liken-sh/liken/observatory-operator/indi"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
@@ -124,7 +125,11 @@ type lockMemo struct {
 // arrives. The server's connection
 // carries the report and then the move, and indiserver hands both to
 // the driver in that order.
-func (o *operator) relayLocks(t *tree) {
+//
+// It reports whether a relay failed, for the metrics of keepLocks's
+// pass. The next pass sends a failed relay again, because sent does not
+// hold it.
+func (o *operator) relayLocks(t *tree) (failed bool) {
 	o.locks.mu.Lock()
 	defer o.locks.mu.Unlock()
 	sent, states := map[string]string{}, map[string]indi.State{}
@@ -138,6 +143,7 @@ func (o *operator) relayLocks(t *tree) {
 			}
 			if err := r.server.client.Relay(r.report); err != nil {
 				o.logf("relaying %s.%s to %s: %v", r.report.Device, r.report.Name, r.server.name, err)
+				failed = true
 				continue
 			}
 			sent[id] = r.key
@@ -156,6 +162,7 @@ func (o *operator) relayLocks(t *tree) {
 		}
 	}
 	o.locks.sent, o.locks.states = sent, states
+	return failed
 }
 
 // refusedMoves maps the reason of each refusal to the action that the
@@ -209,8 +216,10 @@ func (o *operator) keepLocks(ctx context.Context) {
 	for {
 		wake := o.changed.wait()
 		if o.stores.ready() {
-			o.relayLocks(o.snapshot())
+			began := time.Now()
+			failed := o.relayLocks(o.snapshot())
 			o.keepDomePolicies(ctx, policies)
+			o.series.m.observePass(observatory.ObservatoryKind.Name, time.Since(began), failed)
 		}
 		select {
 		case <-ctx.Done():

@@ -3,6 +3,8 @@
 Proposed on 2026-10-12, and designed on 2026-10-12. The design below
 answers what the design conversation left open.
 
+Built on 2026-10-12; not drilled yet.
+
 ## The problem
 
 [Root plan 65](../../plans/completed/65-prometheus-metrics.md) says
@@ -47,7 +49,7 @@ name of its telescope.
 | `observatory_reconcile_duration_seconds{kind}`, `observatory_reconcile_errors_total{kind}`, `observatory_watch_restarts_total{kind}` | histogram, counters | plan 65's second layer; `kind` is the kind of the resource each loop serves |
 | `observatory_device_connected{namespace, kind, name}` | gauge, 1 or 0 | the driver reports `CONNECTION` on |
 | `observatory_device_claimed{namespace, kind, name}` | gauge, 1 or 0 | a session holds the device; claimed and not connected is the alert |
-| `observatory_observation_valid{source}` and `observatory_observation_last_success_timestamp_seconds{source}` | gauge, gauge | the connection to each INDI server and each PHD2; `source` is the server's resource, such as `Telescope/east` |
+| `observatory_observation_valid{namespace, source}` and `observatory_observation_last_success_timestamp_seconds{namespace, source}` | gauge, gauge | the connection to each INDI server and each PHD2; `source` is the server's resource, such as `Telescope/east`. Plan 65 gives these two `source` alone; `namespace` is added because two namespaces can each have a `Telescope/east` |
 | `observatory_telescope_phase{namespace, telescope, phase}` | gauge, 1 or 0 | the phase of the telescope's reservation, or `Idle` |
 | `observatory_activation_duration_seconds{namespace, telescope}` | histogram | from the start of activation to `Ready` |
 | `observatory_step_failures_total{namespace, telescope, step}` | counter | a step that fails, by its name |

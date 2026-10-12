@@ -73,16 +73,22 @@ func (o *operator) writeStatuses(ctx context.Context) {
 	}
 }
 
-// writeAll composes and writes every status but the reservations'.
+// writeAll composes and writes every status but the reservations', and
+// sets the namespace's series from what it composed (series.go). The
+// pass counts in the metrics under each kind that it wrote (metrics.go).
 func (o *operator) writeAll(ctx context.Context, t *tree, seen *statusMemo) {
 	client := o.client.WithContext(ctx)
 	seen.begin()
+	times := newPassTimes()
+	defer o.series.m.observePasses(times)
 	composed := map[string]deviceStatus{}
 	for _, d := range t.devices {
-		next := o.deviceStatus(t, d)
+		began := time.Now()
+		next, reading := o.deviceStatus(t, d)
+		o.series.device(d, reading)
 		composed[d.key()] = next
 		object := d.object
-		writeStatus(o.recorder, client, seen, d.kind, &object, reference(d.kind, object.Metadata),
+		failed := writeStatus(o.recorder, client, seen, d.kind, &object, reference(d.kind, object.Metadata),
 			func(held *deviceObject) any { return held.Status },
 			func(held *deviceObject) (any, []observatory.Condition) {
 				composed := next
@@ -91,41 +97,57 @@ func (o *operator) writeAll(ctx context.Context, t *tree, seen *statusMemo) {
 				held.APIVersion, held.Kind, held.Status = observatory.APIVersion, d.kind.Name, composed
 				return composed, transitions
 			})
+		times.add(d.kind, began, failed)
 	}
 	// A telescope's status names its guider's phase and state, so the
 	// guiders' statuses are composed first.
 	guiders := map[string]observatory.GuiderStatus{}
 	for name, guider := range t.guiders {
+		began := time.Now()
 		guiders[name] = o.guiderStatus(t, guider)
+		o.series.guider(name, o.guiderReading(guider, guiders[name]))
+		times.add(observatory.GuiderKind, began, false)
 	}
 	for _, telescope := range t.telescopes {
+		began := time.Now()
 		next := o.telescopeStatus(t, telescope, composed, guiders)
-		writeTyped(o.recorder, client, seen, observatory.TelescopeKind, telescope, next, func(s *observatory.TelescopeStatus) *[]observatory.Condition { return &s.Conditions })
+		o.series.telescope(telescope.Metadata.Name, next.Phase)
+		failed := writeTyped(o.recorder, client, seen, observatory.TelescopeKind, telescope, next, func(s *observatory.TelescopeStatus) *[]observatory.Condition { return &s.Conditions })
+		times.add(observatory.TelescopeKind, began, failed)
 	}
 	for _, site := range t.observatories {
+		began := time.Now()
 		next := o.observatoryStatus(t, site, composed)
-		writeTyped(o.recorder, client, seen, observatory.ObservatoryKind, site, next, func(s *observatory.ObservatoryStatus) *[]observatory.Condition { return &s.Conditions })
+		failed := writeTyped(o.recorder, client, seen, observatory.ObservatoryKind, site, next, func(s *observatory.ObservatoryStatus) *[]observatory.Condition { return &s.Conditions })
+		times.add(observatory.ObservatoryKind, began, failed)
 	}
 	for _, train := range t.trains {
+		began := time.Now()
 		next := trainStatus(t, train, composed)
-		writeTyped(o.recorder, client, seen, observatory.OpticalTrainKind, train, next, func(s *observatory.OpticalTrainStatus) *[]observatory.Condition { return &s.Conditions })
+		failed := writeTyped(o.recorder, client, seen, observatory.OpticalTrainKind, train, next, func(s *observatory.OpticalTrainStatus) *[]observatory.Condition { return &s.Conditions })
+		times.add(observatory.OpticalTrainKind, began, failed)
 	}
 	for _, tube := range t.tubes {
+		began := time.Now()
 		next := tubeStatus(t, tube)
-		writeTyped(o.recorder, client, seen, observatory.OpticalTubeKind, tube, next, func(s *observatory.OpticalTubeStatus) *[]observatory.Condition { return &s.Conditions })
+		failed := writeTyped(o.recorder, client, seen, observatory.OpticalTubeKind, tube, next, func(s *observatory.OpticalTubeStatus) *[]observatory.Condition { return &s.Conditions })
+		times.add(observatory.OpticalTubeKind, began, failed)
 	}
 	for name, guider := range t.guiders {
-		next := guiders[name]
-		writeTyped(o.recorder, client, seen, observatory.GuiderKind, guider, next, func(s *observatory.GuiderStatus) *[]observatory.Condition { return &s.Conditions })
+		began := time.Now()
+		failed := writeTyped(o.recorder, client, seen, observatory.GuiderKind, guider, guiders[name], func(s *observatory.GuiderStatus) *[]observatory.Condition { return &s.Conditions })
+		times.add(observatory.GuiderKind, began, failed)
 	}
+	o.series.endPass(t.hasSeries)
 }
 
 // writeTyped writes one status of a kind of the observatory package.
 // conditions answers the status's conditions, which keep their
-// transition times when their status holds.
-func writeTyped[S, T any](recorder *events.Recorder, client *apiclient.Client, seen *statusMemo, kind observatory.Kind, object *observatory.Object[S, T], next T, conditions func(*T) *[]observatory.Condition) {
+// transition times when their status holds. It reports whether the
+// write failed, as writeStatus does.
+func writeTyped[S, T any](recorder *events.Recorder, client *apiclient.Client, seen *statusMemo, kind observatory.Kind, object *observatory.Object[S, T], next T, conditions func(*T) *[]observatory.Condition) bool {
 	held := *object
-	writeStatus(recorder, client, seen, kind, &held, reference(kind, held.Metadata),
+	return writeStatus(recorder, client, seen, kind, &held, reference(kind, held.Metadata),
 		func(copy *observatory.Object[S, T]) any { return copy.Status },
 		func(copy *observatory.Object[S, T]) (any, []observatory.Condition) {
 			composed := next
@@ -143,8 +165,9 @@ func writeTyped[S, T any](recorder *events.Recorder, client *apiclient.Client, s
 // on the object and answers it, with each condition that transitioned
 // from the stored status. Each transition posts its Event only after
 // the write lands, so a refused write posts nothing, and the next
-// window finds the same transition again.
-func writeStatus[T any, P memo.Object[T]](recorder *events.Recorder, client *apiclient.Client, seen *statusMemo, kind observatory.Kind, object *T, about events.ObjectReference, stored func(*T) any, apply func(*T) (any, []observatory.Condition)) {
+// window finds the same transition again. It reports whether the write
+// failed, for the pass's metrics.
+func writeStatus[T any, P memo.Object[T]](recorder *events.Recorder, client *apiclient.Client, seen *statusMemo, kind observatory.Kind, object *T, about events.ObjectReference, stored func(*T) any, apply func(*T) (any, []observatory.Condition)) bool {
 	meta := P(object).GetObjectMeta()
 	key, path := kind.Name+"/"+meta.GetName(), objectPath(kind, meta.GetNamespace(), meta.GetName())
 	var body []byte
@@ -178,13 +201,16 @@ func writeStatus[T any, P memo.Object[T]](recorder *events.Recorder, client *api
 	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 		seen.failed = true
 		fmt.Fprintf(os.Stderr, "observatory-operator: writing the status of the %s %s: %v\n", kind.Name, meta.GetName(), err)
+		return true
 	}
+	return false
 }
 
 // deviceStatus composes one device's status from the pod of the driver
 // that serves it and from what that driver reports on its server. A
-// served device reads its owner's pod and INDI device (served.go).
-func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
+// served device reads its owner's pod and INDI device (served.go). The
+// reading holds what the series of the device need (series.go).
+func (o *operator) deviceStatus(t *tree, d *device) (deviceStatus, deviceReading) {
 	var next deviceStatus
 	next.ObservedGeneration = d.object.Metadata.Generation
 	if d.runsDriver() {
@@ -232,7 +258,11 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 		next.Endpoint = &observatory.Endpoint{Service: on, Host: serviceHost(on, o.namespace), Port: serverPort}
 	}
 	serving := false
+	// A device with no pod, or one that the operator refuses, has no
+	// driver of its own, so the operator knows that it is not connected.
+	observed := !hasPod || refused
 	if server, open := o.servers.get(at); readable && !refused && hasPod && open && server.client.Connected() {
+		observed = true
 		if indiDevice := t.indiName(server.client, d); indiDevice != "" {
 			all := server.client.Properties(indiDevice)
 			held, rest := t.split(d, all)
@@ -298,7 +328,15 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 	for i := range next.Conditions {
 		next.Conditions[i].ObservedGeneration = next.ObservedGeneration
 	}
-	return next
+	connect, _ := connection.Member("CONNECT")
+	_, claimed := t.heldOn(d)
+	return next, deviceReading{
+		observed:  observed,
+		connected: defined && connect.Switch,
+		claimed:   claimed,
+		leaving:   standing == releasing || left || deleting(d.object.Metadata),
+		standard:  next.Standard,
+	}
 }
 
 // devicePhase answers a device's phase from what the operator observes.

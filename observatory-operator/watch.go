@@ -139,7 +139,9 @@ var watchCount = int32(len(observatory.Kinds) + 4)
 
 // startWatches opens every watch, across every namespace. Each change
 // notifies changed, and so does the end of each watch's first read.
-func startWatches(ctx context.Context, client dynamic.Interface, changed *bell) *stores {
+// Each watch that the API server closes and the operator opens again
+// counts in m's watch restarts, under the watch's kind.
+func startWatches(ctx context.Context, client dynamic.Interface, changed *bell, m *metrics) *stores {
 	s := &stores{kinds: map[observatory.Kind]*informer.Collection{}, copies: map[*informer.Collection]*copies{}}
 	options := informer.Options{
 		Handler: wakeOnAnyChange(func() {
@@ -158,8 +160,13 @@ func startWatches(ctx context.Context, client dynamic.Interface, changed *bell) 
 	// and each watch event decodes only the rest. The writer's
 	// comparison with a cached status then fails for a connected device
 	// (status.go), and costs one PUT that the API server finds unchanged.
+	counted := func(kind string) informer.Options {
+		counted := options
+		counted.Reopened = m.watchReopened(kind)
+		return counted
+	}
 	for _, kind := range observatory.Kinds {
-		kindOptions := options
+		kindOptions := counted(kind.Name)
 		if dropped := composedFields(kind); len(dropped) > 0 {
 			kindOptions.Transform = func(object *unstructured.Unstructured) {
 				for _, field := range dropped {
@@ -170,10 +177,10 @@ func startWatches(ctx context.Context, client dynamic.Interface, changed *bell) 
 		s.kinds[kind] = informer.Start(ctx, client, informer.Source{Resource: kindResource(kind)}, kindOptions)
 	}
 	own := labelManagedBy + "=" + managedBy
-	s.pods = informer.Start(ctx, client, informer.Source{Resource: podsResource, LabelSelector: own}, options)
-	s.services = informer.Start(ctx, client, informer.Source{Resource: servicesResource, LabelSelector: own}, options)
-	s.configMaps = informer.Start(ctx, client, informer.Source{Resource: configMapsResource, LabelSelector: own}, options)
-	s.jobs = informer.Start(ctx, client, informer.Source{Resource: jobsResource, LabelSelector: own}, options)
+	s.pods = informer.Start(ctx, client, informer.Source{Resource: podsResource, LabelSelector: own}, counted("Pod"))
+	s.services = informer.Start(ctx, client, informer.Source{Resource: servicesResource, LabelSelector: own}, counted("Service"))
+	s.configMaps = informer.Start(ctx, client, informer.Source{Resource: configMapsResource, LabelSelector: own}, counted("ConfigMap"))
+	s.jobs = informer.Start(ctx, client, informer.Source{Resource: jobsResource, LabelSelector: own}, counted("Job"))
 	for _, c := range s.kinds {
 		s.copies[c] = &copies{}
 	}

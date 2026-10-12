@@ -188,6 +188,9 @@ use `structure`, so a mount
 that reports its position several times a second does not wake them.
 `cost_test.go` holds the cost of a reading, and measures the CPU time
 of a minute of readings when `OBSERVATORY_COST` names a profile file.
+`metrics.go` holds the Prometheus registry and its listener (plan
+22), and `series.go` the series of one namespace, which the status
+writer, the runners, and the connections set.
 
 - A reservation's `status.steps` is the runner's record. A step that
   runs again after a restart must read what the cluster and the devices

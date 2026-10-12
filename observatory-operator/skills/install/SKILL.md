@@ -188,6 +188,23 @@ parks the dome, and stops the pods. That takes a few minutes, mostly
 for the camera's warm-up. When the command returns, the equipment is
 safe to power off.
 
+## Collect metrics
+
+The operator serves Prometheus metrics on port `9200`. If you run the
+prometheus-operator, add the monitoring component beside the base in
+your `kustomization.yaml`. It adds a `PodMonitor` in `liken-system`
+and a Grafana dashboard in the `monitoring` namespace:
+
+```yaml
+resources:
+  - https://github.com/liken-sh/liken//observatory-operator/deploy?ref=<full 40-character sha>
+components:
+  - https://github.com/liken-sh/liken//observatory-operator/deploy/monitoring?ref=<full 40-character sha>
+```
+
+[Metrics](https://liken.sh/observatory/docs/reference/metrics/) lists every series and suggests
+the alerts for a night of observing.
+
 ## Rollouts and failover
 
 Only one copy of the operator acts at a time: the copy that holds the

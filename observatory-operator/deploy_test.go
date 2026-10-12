@@ -103,8 +103,12 @@ func TestTheDeploymentRollsOverToACopyThatWaits(t *testing.T) {
 		t.Fatalf("containers = %+v, want one", containers)
 	}
 	env := map[string]string{}
+	// The downward API's variables. The metrics address is a plain
+	// value, which monitoring_test.go holds.
 	for _, v := range containers[0].Env {
-		env[v.Name] = v.ValueFrom.FieldRef.FieldPath
+		if v.ValueFrom.FieldRef.FieldPath != "" {
+			env[v.Name] = v.ValueFrom.FieldRef.FieldPath
+		}
 	}
 	want := map[string]string{podNameVariable: "metadata.name", podNamespaceVariable: "metadata.namespace"}
 	if !maps.Equal(env, want) {

@@ -103,7 +103,13 @@ func (o *operator) evaluateTriggers(ctx context.Context, t *tree, k *control) ti
 	}
 	var due time.Time
 	live := map[string]bool{}
+	// A refused trigger is an error in a spec, which the resource's
+	// status reports, so the pass itself never fails.
+	times := newPassTimes()
+	defer o.series.m.observePasses(times)
+	defer times.stop()
 	for _, r := range t.withProcedures() {
+		times.start(r.kind)
 		live[r.record()] = true
 		retry := k.retryAsked(r)
 		o.lateActivation(ctx, t, r, k, retry)

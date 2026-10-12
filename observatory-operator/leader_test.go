@@ -76,7 +76,9 @@ func startCandidate(t *testing.T, leases *electiontest.Server) *candidate {
 		err := actWhileLeading(ctx, leases.Config(t), options, func(mayWrite func() error) error {
 			c.n = leadingNamespaces(client, mayWrite, dialer, logs, testPod)
 			close(c.acting)
-			c.n.run(ctx, func(ctx context.Context, changed *bell) *stores { return startWatches(ctx, watcher, changed) })
+			c.n.run(ctx, func(ctx context.Context, changed *bell) *stores {
+				return startWatches(ctx, watcher, changed, c.n.metrics)
+			})
 			return c.n.finish()
 		})
 		if err != nil {

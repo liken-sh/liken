@@ -29,6 +29,12 @@ const (
 	podNamespaceVariable = "POD_NAMESPACE"
 )
 
+// metricsAddressVariable names where /metrics listens, as host:port.
+// Root plan 65 gives every process on the cluster network port 9200,
+// and deploy/operator.yaml sets it. An empty value turns the listener
+// off.
+const metricsAddressVariable = "OBSERVATORY_METRICS_ADDRESS"
+
 func main() {
 	if err := operate(); err != nil {
 		fmt.Fprintf(os.Stderr, "observatory-operator: %v\n", err)
@@ -69,7 +75,15 @@ func operate() error {
 	}
 	return actWhileLeading(ctx, config, options, func(mayWrite func() error) error {
 		n := leadingNamespaces(client, mayWrite, nil, nil, "")
-		n.run(ctx, func(ctx context.Context, changed *bell) *stores { return startWatches(ctx, watcher, changed) })
+		// Only the copy that holds the Lease serves metrics, because only
+		// that copy has series to serve. A listener that fails to open
+		// is logged and does not stop the operator's work.
+		if _, err := n.metrics.serve(ctx, os.Getenv(metricsAddressVariable)); err != nil {
+			fmt.Fprintf(os.Stderr, "observatory-operator: the metrics listener: %v\n", err)
+		}
+		n.run(ctx, func(ctx context.Context, changed *bell) *stores {
+			return startWatches(ctx, watcher, changed, n.metrics)
+		})
 		return n.finish()
 	})
 }

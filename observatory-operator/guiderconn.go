@@ -17,7 +17,10 @@ import (
 )
 
 type guiderConn struct {
-	name   string
+	name string
+	// source names the PHD2 in the observation series: its Guider, such
+	// as Guider/east.
+	source string
 	client *phd2.Client
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -57,14 +60,12 @@ func (g *guiderConns) sync(ctx context.Context, t *tree) {
 	defer g.mu.Unlock()
 	for name := range want {
 		if _, open := g.byName[name]; !open {
-			g.byName[name] = g.open(ctx, name)
+			g.byName[name] = g.open(ctx, name, sourceOf(t.pods[name]))
 		}
 	}
 	for name, c := range g.byName {
 		if !want[name] {
-			c.cancel()
-			<-c.done
-			delete(g.byName, name)
+			g.close(c)
 		}
 	}
 }
@@ -72,17 +73,28 @@ func (g *guiderConns) sync(ctx context.Context, t *tree) {
 func (g *guiderConns) stopAll() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	for name, c := range g.byName {
-		c.cancel()
-		<-c.done
-		delete(g.byName, name)
+	for _, c := range g.byName {
+		g.close(c)
 	}
 }
 
-func (g *guiderConns) open(parent context.Context, name string) *guiderConn {
+// close ends a connection, and deletes its observation series, as
+// servers.close does. The caller holds g.mu.
+func (g *guiderConns) close(c *guiderConn) {
+	c.cancel()
+	<-c.done
+	delete(g.byName, c.name)
+	g.o.series.forgetSource(c.source)
+}
+
+func (g *guiderConns) open(parent context.Context, name, source string) *guiderConn {
 	ctx, cancel := context.WithCancel(parent)
-	c := &guiderConn{name: name, cancel: cancel, done: make(chan struct{})}
+	c := &guiderConn{name: name, source: source, cancel: cancel, done: make(chan struct{})}
+	g.o.series.observation(source, false)
 	options := []phd2.Option{phd2.WithNotify(func(s phd2.State) {
+		// Each change is a message on an open connection, except the
+		// end of the connection.
+		g.o.series.observation(source, s.Open)
 		// A guide step changes the status and nothing a runner waits
 		// for, so it rings changed alone. The connection and the
 		// equipment are what StartGuider and a Ready runner wait for,

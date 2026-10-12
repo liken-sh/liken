@@ -61,6 +61,16 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            # The pod runs on the cluster network, so it takes port 9200,
+            # the port of root plan 65. The copy that holds the Lease
+            # serves /metrics there. The deploy/monitoring component is
+            # what a cluster owner adds to scrape it, and the base runs
+            # the same either way. An empty value turns the listener off.
+            - name: OBSERVATORY_METRICS_ADDRESS
+              value: :9200
+          ports:
+            - name: metrics
+              containerPort: 9200
           securityContext:
             runAsNonRoot: true
             runAsUser: 65534
