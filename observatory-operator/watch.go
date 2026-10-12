@@ -228,9 +228,17 @@ func wakeOnAnyChange(changed func()) cache.ResourceEventHandler {
 	}
 }
 
-// snapshot reads every store into one tree. An object that does not
-// convert is reported and left out (listOf).
+// snapshot reads every store into one tree, with the sessions' records
+// applied. An object that does not convert is reported and left out
+// (listOf).
 func (s *stores) snapshot(namespace string) *tree {
+	t := s.read(namespace)
+	t.applyRecords()
+	return t
+}
+
+// read reads every store into one tree, before any record applies.
+func (s *stores) read(namespace string) *tree {
 	t := &tree{
 		namespace:     namespace,
 		observatories: byName(listOf[observatory.Observatory](s, s.kinds[observatory.ObservatoryKind], namespace)),
@@ -261,7 +269,6 @@ func (s *stores) snapshot(namespace string) *tree {
 	for _, j := range listOf[job](s, s.jobs, namespace) {
 		t.jobs[j.Metadata.Name] = &j
 	}
-	t.applyRecords()
 	return t
 }
 

@@ -9,7 +9,6 @@ package main
 import (
 	"encoding/json"
 	"slices"
-	"strings"
 	"sync"
 
 	"github.com/liken-sh/liken/kubernetes/memo"
@@ -153,10 +152,12 @@ type tree struct {
 	// served holds the owner of each served device (served.go).
 	served servedVerdicts
 	// records holds the record of each held server that a holder's
-	// status records, and recordedTubes the spec of each tube that one
-	// of them names (records.go).
+	// status records, recordedTubes the spec of each tube that one of
+	// them names, and writtenTrains each train whose spec a record
+	// replaced, as a person wrote it (records.go).
 	records       map[serverRef]observatory.Session
-	recordedTubes map[string]observatory.OpticalTubeSpec
+	recordedTubes map[string]observatory.SessionTube
+	writtenTrains map[string]*observatory.OpticalTrain
 }
 
 // parent answers the resource above a device, from the parent field
@@ -181,19 +182,21 @@ func parentOf(s *deviceSpec) (observatory.Parent, bool) {
 }
 
 // declared answers the INDI server that a device's parents place it
-// on: its telescope's, or its observatory's. A device on a train runs
-// on the server of the train's telescope. The answer is false for a
-// device on the shelf, while a train that the device names is missing,
-// and for a device that a person deleted. The finalizer keeps a deleted
-// device's object until its server let it go, and a server that runs
-// it treats it as a device that left (finalizers.go).
+// on, as a person wrote them: its telescope's, or its observatory's. A
+// device on a train runs on the server of the telescope that the
+// train's spec names now, though a session froze the train. The
+// answer is false for a device on the shelf, while a train that the
+// device names is missing, and for a device that a person deleted.
+// The finalizer keeps a deleted device's object until its server let
+// it go, and a server that runs it treats it as a device that left
+// (finalizers.go).
 func (t *tree) declared(d *device) (serverRef, bool) {
 	p, installed := d.declaredParent()
 	switch {
 	case !installed, deleting(d.object.Metadata):
 		return serverRef{}, false
 	case p.Kind == observatory.OpticalTrainKind:
-		train, ok := t.trains[p.Name]
+		train, ok := t.trainAsWritten(p.Name)
 		if !ok {
 			return serverRef{}, false
 		}
@@ -202,153 +205,6 @@ func (t *tree) declared(d *device) (serverRef, bool) {
 		return serverRef{observatory.TelescopeKind, p.Name}, true
 	}
 	return serverRef{observatory.ObservatoryKind, p.Name}, true
-}
-
-// server answers the INDI server that runs a device. While a session
-// holds a server and its pod runs, the server runs a fixed set of
-// devices: the devices that it started, which its pod lists in its
-// drivers annotation when it is created and whose pods carry its label
-// (heldOn). An eviction can delete the server's pod, or every pod of
-// the server. Then the record in the status of the reservations that
-// hold the server names the set, and the runner creates the pods again
-// with it (records.go). A server whose holders recorded nothing yet
-// takes the devices that the specs place there, as a new session
-// does. During the session, the pods and the record place such a
-// device, and its spec does not, so a spec edit that would move it to
-// another telescope, train, or the shelf, or a train deleted under it, takes
-// effect when the session ends, and the release stops the device as
-// its own. A device that its parents place on such a server and that
-// the server did not start waits for the next session. So a device
-// runs on one server at a time: a move between two running servers
-// would need one server to release the device while the other starts
-// it, and the steps of both sessions to agree on where it is. A deleted
-// device leaves its server at once, because its finalizer holds it
-// only until its deactivation ran.
-func (t *tree) server(d *device) (serverRef, bool) {
-	if deleting(d.object.Metadata) {
-		return serverRef{}, false
-	}
-	if on, ok := t.heldOn(d); ok {
-		return on, true
-	}
-	ref, ok := t.declared(d)
-	if ok && t.started(ref) {
-		return serverRef{}, false
-	}
-	return ref, ok
-}
-
-// sessions is what the reservations hold in one tree. The status
-// writer places every device on each pass, so a tree computes it once,
-// and a lookup builds no pod name.
-type sessions struct {
-	// holders names, for each held server, the reservations that hold
-	// it, sorted: one for a telescope's server, and one for each held
-	// telescope of an observatory for the observatory's server.
-	holders map[serverRef][]string
-	// started holds each held server whose set of devices is fixed: a
-	// holder's status records the set, or its pod or the pod of one of
-	// its devices exists.
-	started map[serverRef]bool
-	// runs gives the started server whose set holds each device that
-	// runs a driver: the server in the label of the device's pod, the
-	// server whose pod lists the device's driver, or, while that pod is
-	// gone, the server that lostFrom answers.
-	runs map[*device]serverRef
-	// podded holds each device that runs a driver and whose pod exists.
-	podded map[*device]bool
-}
-
-// sessions answers what the reservations hold, from their steps
-// (holds) and the pods.
-func (t *tree) sessions() sessions {
-	t.heldOnce.Do(func() {
-		t.held = sessions{holders: map[serverRef][]string{}, started: map[serverRef]bool{},
-			runs: map[*device]serverRef{}, podded: map[*device]bool{}}
-		for _, name := range sortedNames(t.reservations) {
-			res := t.reservations[name]
-			if !holds(res) {
-				continue
-			}
-			scope := serverRef{observatory.TelescopeKind, res.Spec.Telescope}
-			t.held.holders[scope] = append(t.held.holders[scope], name)
-			if telescope, ok := t.telescopes[scope.name]; ok {
-				site := serverRef{observatory.ObservatoryKind, telescope.Spec.Observatory}
-				t.held.holders[site] = append(t.held.holders[site], name)
-			}
-		}
-		byServer, byPod := map[string]serverRef{}, map[string]serverRef{}
-		for ref := range t.held.holders {
-			byServer[ref.String()] = ref
-			if p, ok := t.pods[ref.String()]; ok {
-				t.held.started[ref] = true
-				for _, address := range strings.Fields(p.Metadata.Annotations[annotationDrivers]) {
-					name, _, _ := strings.Cut(address, ":")
-					byPod[name] = ref
-				}
-			}
-		}
-		for name, p := range t.pods {
-			if ref, held := byServer[p.Metadata.Labels[labelServer]]; held && p.Metadata.Labels[labelRole] == roleDevice {
-				byPod[name] = ref
-				t.held.started[ref] = true
-			}
-		}
-		for ref := range t.held.holders {
-			if _, recorded := t.records[ref]; recorded {
-				t.held.started[ref] = true
-			}
-		}
-		for _, d := range driverDevices(t.devices) {
-			name, err := objectName(d.kind, d.name())
-			if err != nil {
-				continue
-			}
-			_, t.held.podded[d] = t.pods[name]
-			if ref, ok := byPod[name]; ok {
-				t.held.runs[d] = ref
-			} else if ref, ok := t.lostFrom(d); ok {
-				t.held.runs[d] = ref
-			}
-		}
-	})
-	return t.held
-}
-
-// lostFrom answers the started server whose set holds a device whose
-// pod is gone, while that server's pod is gone too: the server whose
-// record names the device.
-func (t *tree) lostFrom(d *device) (serverRef, bool) {
-	if d.record == nil {
-		return serverRef{}, false
-	}
-	_, running := t.pods[d.recordedOn.String()]
-	return d.recordedOn, t.held.started[d.recordedOn] && !running
-}
-
-// started reports whether a session holds a server and the server's
-// set of devices is fixed (heldOn).
-func (t *tree) started(ref serverRef) bool {
-	return t.sessions().started[ref]
-}
-
-// heldOn answers the held server whose set of devices holds a device. A
-// served device belongs to the set of its owner's server once it holds
-// the finalizer, which it gets just before its owner's pod is created
-// (startDevices). Before that, a served device that its parents place
-// with its owner joins the set with the owner's pod.
-func (t *tree) heldOn(d *device) (serverRef, bool) {
-	runner, ok := t.runnerOf(d)
-	if !ok {
-		return serverRef{}, false
-	}
-	held := t.sessions()
-	on, ok := held.runs[runner]
-	if !ok || d.runsDriver() || holdsFinalizer(d.object.Metadata) {
-		return on, ok
-	}
-	declared, placed := t.declared(d)
-	return on, !held.podded[runner] && placed && declared == on
 }
 
 // runningOn answers the server that the pod of a device's driver runs
@@ -493,7 +349,7 @@ func (t *tree) missingParent(d *device) string {
 	case !installed:
 		return ""
 	case p.Kind == observatory.OpticalTrainKind:
-		train, ok := t.trains[p.Name]
+		train, ok := t.trainAsWritten(p.Name)
 		if !ok {
 			return "OpticalTrain " + p.Name
 		}

@@ -118,11 +118,15 @@ type ReservationStatus struct {
 
 // Session is what a reservation's session started with. The StartSite
 // step writes Observatory and Site, and the PowerOn step writes the
-// rest, each once, before it creates a pod. The record lives in the
-// reservation and not on the pods, so an eviction that deletes every
-// pod of a server leaves it.
+// rest, each once, before it creates a pod. A retry of a failed
+// activation step writes the parts that are written again, from the
+// specs as they are then. The record lives in the reservation and not
+// on the pods, so an eviction that deletes every pod of a server
+// leaves it.
 type Session struct {
 	// Observatory is the observatory of the reservation's telescope.
+	// The StartSite step writes it with Site, so a record with an
+	// observatory and no Site records an observatory with no devices.
 	Observatory string `json:"observatory,omitempty"`
 	// Site holds each device of the observatory's server, by its key,
 	// such as Dome/lab. Reservations of several telescopes in one
@@ -135,9 +139,28 @@ type Session struct {
 	// Trains, Tubes, and Guiders hold the spec of each OpticalTrain and
 	// Guider of the telescope, and of each OpticalTube of those trains,
 	// by name.
-	Trains  map[string]OpticalTrainSpec `json:"trains,omitempty"`
-	Tubes   map[string]OpticalTubeSpec  `json:"tubes,omitempty"`
-	Guiders map[string]GuiderSpec       `json:"guiders,omitempty"`
+	Trains  map[string]SessionTrain  `json:"trains,omitempty"`
+	Tubes   map[string]SessionTube   `json:"tubes,omitempty"`
+	Guiders map[string]SessionGuider `json:"guiders,omitempty"`
+}
+
+// SessionTrain, SessionTube, and SessionGuider are the spec of one
+// OpticalTrain, OpticalTube, or Guider as its session started it. UID
+// tells the object from one that a person created again with the same
+// name during the session, which the session did not start.
+type SessionTrain struct {
+	UID string `json:"uid,omitempty"`
+	OpticalTrainSpec
+}
+
+type SessionTube struct {
+	UID string `json:"uid,omitempty"`
+	OpticalTubeSpec
+}
+
+type SessionGuider struct {
+	UID string `json:"uid,omitempty"`
+	GuiderSpec
 }
 
 // SessionDevice is the spec of one device as its session started it.

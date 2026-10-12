@@ -77,7 +77,10 @@ goes. An edit of an `OpticalTrain`, an `OpticalTube`, or a
 reservation's `status.session` shows what the session started with,
 and the operator acts on that until the reservation ends. End the
 reservation, or let it reach its `end`, and reserve the telescope
-again.
+again. When the reservation is `Failed` in an activation step, fix
+the spec and
+[run the failed step again](#run-a-failed-step-again) instead: the
+retry records the session from the specs as they are.
 
 ## StartDevices fails: a device never appears
 
@@ -192,9 +195,15 @@ the cause, and then run the failed step again:
 kubectl annotate reservation east-tonight -n observatory observatory.liken.sh/retry=1
 ```
 
-The operator removes the annotation when it starts the step. To give
-up on a failed activation instead, delete the reservation, and
-deactivation runs from its first step.
+The operator removes the annotation when it starts the step. For a
+failed activation step, it first records the session again in
+`status.session` from the specs as they are, because the record holds
+the spec that failed. So a driver, a power output, or a claim that you
+fixed takes effect, and the step replaces each pod that the old spec
+built. A retry of a failed deactivation step keeps the record, because
+the release stops what the session started. To give up on a failed
+activation instead, delete the reservation, and deactivation runs from
+its first step.
 
 A trigger's run that failed does not run again for the same change of
 its condition. The same annotation on the resource runs it again, if

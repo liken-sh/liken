@@ -264,8 +264,11 @@ spec:
                   description: >-
                     What the reservation's session started with. `StartSite`
                     writes `observatory` and `site`, and `PowerOn` writes the
-                    rest, each once and before it creates a pod, and nothing
-                    changes them after that. While the reservation holds its
+                    rest, each once and before it creates a pod. The
+                    `observatory.liken.sh/retry` annotation on a failed
+                    activation step writes the parts again from the specs as
+                    they are then, before the step runs again, and nothing
+                    else changes them. While the reservation holds its
                     telescope, the operator reads this record in place of the
                     specs of the resources it names, so an edit of a device's
                     parents, driver, power, or claim, of the `Telescope`'s
@@ -287,7 +290,10 @@ spec:
                         of several telescopes in one observatory share its
                         server, and while any of them holds its telescope, the
                         operator reads the union of their records. Absent when
-                        the observatory has no devices.
+                        the observatory has no devices. Then `observatory`
+                        alone records that the session started the
+                        observatory with none, and a device created there
+                        during the session waits for the next one.
                       additionalProperties:
                         type: object
                         description: >-
@@ -432,6 +438,13 @@ spec:
                         required: [telescope, opticalTube]
                         description: "One train's spec."
                         properties:
+                          uid:
+                            type: string
+                            description: >-
+                              The train's `metadata.uid`. A train that a
+                              person deletes and creates again with the same
+                              name during the session has another UID, and the
+                              record does not apply to it.
                           telescope:
                             type: string
                             description: "The train's `spec.telescope`."
@@ -449,6 +462,13 @@ spec:
                         required: [telescope, aperture, focalLength]
                         description: "One tube's spec."
                         properties:
+                          uid:
+                            type: string
+                            description: >-
+                              The tube's `metadata.uid`. A tube that a
+                              person deletes and creates again with the same
+                              name during the session has another UID, and the
+                              record does not apply to it.
                           telescope:
                             type: string
                             description: "The tube's `spec.telescope`."
@@ -466,6 +486,13 @@ spec:
                         required: [telescope, opticalTrain, pulses]
                         description: "One `Guider`'s spec."
                         properties:
+                          uid:
+                            type: string
+                            description: >-
+                              The `Guider`'s `metadata.uid`. A `Guider` that a
+                              person deletes and creates again with the same
+                              name during the session has another UID, and the
+                              record does not apply to it.
                           telescope:
                             type: string
                             description: "The `Guider`'s `spec.telescope`."

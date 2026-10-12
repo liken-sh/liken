@@ -15,8 +15,9 @@ import (
 // keeps the finalizer, because the devices may not be safe to power
 // off, and the Ready and SafeToPowerOff conditions name the step. In
 // both cases the annotation observatory.liken.sh/retry runs the failed
-// step again: the operator removes the annotation and sets the step
-// Pending.
+// step again: the operator removes the annotation, records a failed
+// activation's session again from the specs (recordAgain), and sets the
+// step Pending.
 func (r *runner) failed(ctx context.Context) {
 	for ctx.Err() == nil {
 		wake := r.o.structure.wait()
@@ -36,6 +37,9 @@ func (r *runner) failed(ctx context.Context) {
 				}
 			}
 			r.status.Phase = phaseOf(r.status.Step)
+			if err := r.recordAgain(ctx); err != nil {
+				return
+			}
 			r.save(ctx)
 			r.o.record(r.res, "Retry", "Retrying "+string(r.status.Step))
 			r.awaitStore(ctx, func(res *observatory.Reservation) bool {

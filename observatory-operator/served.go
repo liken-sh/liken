@@ -286,10 +286,10 @@ func deviceTiers(t *tree, groups [][]*device) [][]*device {
 }
 
 // holdServed gives each device that an owner serves the finalizer,
-// with its owner's, and waits until the stores show it. A served device
-// that lacks the finalizer once its owner's pod exists waits for the
-// next session (tree.heldOn), so a pod that the stores showed first
-// would leave the served device out of its owner's session. The owner
+// with its owner's, and waits until the stores show it. The finalizer
+// keeps a deleted served device until its deactivation ran through its
+// owner's driver (leaveServed), so the served device holds it before
+// its owner's pod starts that driver. The owner
 // can come from another reading of the tree, so t finds it by kind and
 // name. A write that the API server refuses is sent again (send), and
 // the step's deadline bounds the tries.

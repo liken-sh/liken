@@ -61,6 +61,16 @@ safe to power off. In both cases, this runs the failed step again:
 kubectl annotate reservation east-tonight -n observatory observatory.liken.sh/retry=1
 ```
 
+A retry is how you say that you fixed the cause. A failed activation
+step often fails on a spec that the session recorded, such as a
+driver that no image holds, so before the step runs again, the
+operator records the session again in `status.session` from the specs
+as they are then. Then the step runs on the fixed spec, and it
+replaces each pod that the old record built. The observatory's part
+of the record still holds the devices that another reservation's
+running session recorded there. A retry of a failed deactivation step
+records nothing, because the release stops what the session started.
+
 A trigger's run that failed, such as a dome park that the driver
 refused, is not run again for the same transition. The same annotation
 on the resource runs it again, once the cause is fixed:
@@ -145,7 +155,8 @@ session ends:
   whether a `Guider` guides with it, and the telescope's observatory,
   trains, tubes, and `Guider`s. `StartSite` records the observatory
   and the devices of its server, and `PowerOn` records the rest. Each
-  step writes its part once, and nothing changes it after that. Until
+  step writes its part once, and only the retry of a failed activation
+  step writes it again, from the specs as they are then. Until
   the session ends, the operator reads the record and not the spec. So the release switches off the output that the
   session switched on, a camera whose driver comes back gets the
   `SCOPE_INFO` of the tube that the session started with, and PHD2
@@ -157,13 +168,16 @@ session ends:
   The operator writes the settings and the location from the spec
   when a device's driver comes back.
 - A device that a person adds to the telescope, a train, or the
-  observatory of a running server, by creating it or by naming its
-  parent, does not start. It is `Idle`, and its `Ready` message reads
+  observatory of a session, by creating it or by naming its parent,
+  does not start. That includes an observatory that had no devices
+  when the session started. It is `Idle`, and its `Ready` message reads
   `Starts at the next reservation, after Reservation east-tonight
   ends`. The next session starts it. A resource that another
   resource's driver serves, such as the `FilterWheel` of a camera,
   waits the same way, and so does a `Guider` that a person creates
-  for the telescope.
+  for the telescope. The record names each object by its UID, so a
+  device, a train, a tube, or a `Guider` that a person deletes and
+  creates again with the same name is a new object, and it waits too.
 - A device that a person deletes while the reservation is `Ready`
   leaves at once, as
   [Deleting a running resource](#deleting-a-running-resource)

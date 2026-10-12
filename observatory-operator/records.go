@@ -10,7 +10,10 @@ package main
 // (observatory.Session), so it outlives every pod of the server. The
 // StartSite step records the observatory and the devices of its server,
 // and the PowerOn step records the rest, each once and before it
-// creates a pod, and then neither changes. Reservations of several
+// creates a pod. A retry of a failed activation step is a person saying
+// that they fixed a spec, so it records both parts again from the specs
+// as they are then, before the step runs again (recordAgain). Nothing
+// else changes the record. Reservations of several
 // telescopes in one observatory share the observatory's server, and
 // each reservation is the only writer of its own status, so each one
 // records the observatory's devices as its StartSite step found them.
@@ -19,13 +22,16 @@ package main
 // records of every reservation that holds the server. So the record
 // stays while any of them holds it, in whatever order they end.
 //
-// While a session holds a server, the tree reads each device that the
-// record names with the recorded facts in its spec, each held
+// While a session holds a server, the record alone decides which
+// devices the server runs (tree.server), and the tree reads each device
+// that the record names with the recorded facts in its spec, each held
 // Telescope with the recorded observatory, each recorded train and
 // Guider with its recorded spec, and each recorded tube's optics from
-// the record (applyRecords, tubeSpec). A Guider that the record does
-// not name is not the telescope's Guider during the session
-// (guidersOf). So every step, the runner of a Ready reservation, the
+// the record (applyRecords, tubeSpec). The record names each object by
+// its UID too, so an object that a person deletes and creates again
+// with the same name is not the one that the session started. Such an
+// object, and a Guider that the record does not name, waits for the
+// next session (guidersOf). So every step, the runner of a Ready reservation, the
 // locks, the guider, the power, the release, and the status lists act
 // on what the session started, and a spec edit during the session takes
 // effect when the session ends, as a move does (tree.server). The spec
@@ -65,38 +71,46 @@ func (t *tree) recordOf(ref serverRef, devices []*device) map[string]observatory
 // opticsOf answers the specs of a telescope's trains, of their tubes,
 // and of its Guiders: the recorded ones while a session holds the
 // telescope, and the ones whose spec names the telescope otherwise.
-func (t *tree) opticsOf(telescope string) (map[string]observatory.OpticalTrainSpec, map[string]observatory.OpticalTubeSpec, map[string]observatory.GuiderSpec) {
+func (t *tree) opticsOf(telescope string) (map[string]observatory.SessionTrain, map[string]observatory.SessionTube, map[string]observatory.SessionGuider) {
 	if r, ok := t.records[serverRef{observatory.TelescopeKind, telescope}]; ok {
 		return r.Trains, r.Tubes, r.Guiders
 	}
-	trains, tubes, guiders := map[string]observatory.OpticalTrainSpec{}, map[string]observatory.OpticalTubeSpec{}, map[string]observatory.GuiderSpec{}
+	trains, tubes, guiders := map[string]observatory.SessionTrain{}, map[string]observatory.SessionTube{}, map[string]observatory.SessionGuider{}
 	for name, train := range t.trains {
 		if train.Spec.Telescope == telescope {
-			trains[name] = train.Spec
+			trains[name] = observatory.SessionTrain{UID: train.Metadata.UID, OpticalTrainSpec: train.Spec}
 			if tube, ok := t.tubes[train.Spec.OpticalTube]; ok {
-				tubes[tube.Metadata.Name] = tube.Spec
+				tubes[tube.Metadata.Name] = observatory.SessionTube{UID: tube.Metadata.UID, OpticalTubeSpec: tube.Spec}
 			}
 		}
 	}
 	for _, guider := range t.guidersOf(telescope) {
-		guiders[guider.Metadata.Name] = guider.Spec
+		guiders[guider.Metadata.Name] = observatory.SessionGuider{UID: guider.Metadata.UID, GuiderSpec: guider.Spec}
 	}
 	return trains, tubes, guiders
 }
 
 // guidersOf answers the Guiders of a telescope, sorted by name: the
 // Guiders that a session recorded while one holds the telescope, and
-// every Guider whose spec names it otherwise.
+// every Guider whose spec names it otherwise. A Guider that a person
+// created again during the session is not the recorded one.
 func (t *tree) guidersOf(telescope string) []*observatory.Guider {
 	recorded, frozen := t.records[serverRef{observatory.TelescopeKind, telescope}]
 	var out []*observatory.Guider
 	for _, name := range slices.Sorted(maps.Keys(t.guiders)) {
 		guider := t.guiders[name]
-		if _, ok := recorded.Guiders[name]; (frozen && ok) || (!frozen && guider.Spec.Telescope == telescope) {
+		r, ok := recorded.Guiders[name]
+		if (frozen && ok && sameUID(r.UID, guider.Metadata)) || (!frozen && guider.Spec.Telescope == telescope) {
 			out = append(out, guider)
 		}
 	}
 	return out
+}
+
+// sameUID reports whether a record applies to an object: the record
+// names the object's UID, or no UID.
+func sameUID(recorded string, m observatory.ObjectMeta) bool {
+	return recorded == "" || recorded == m.UID
 }
 
 // applyRecords reads the record of each reservation that holds its
@@ -104,10 +118,17 @@ func (t *tree) guidersOf(telescope string) []*observatory.Guider {
 // each recorded train and Guider its recorded spec, and each device
 // that a record names its recorded spec. The record of a reservation
 // that no longer holds its telescope freezes nothing.
+//
+// A record whose observatory is set records the observatory's server,
+// with no devices when its observatory had none, so the server is
+// started and a device created there waits for the next session. The
+// server's record is the union of its holders' records, and where two
+// of them record one device, the record of a reservation whose
+// StartSite step failed gives way: that step never started its set,
+// and a retry records it again.
 func (t *tree) applyRecords() {
-	t.records, t.recordedTubes = map[serverRef]observatory.Session{}, map[string]observatory.OpticalTubeSpec{}
-	for _, name := range sortedNames(t.reservations) {
-		res := t.reservations[name]
+	t.records, t.recordedTubes, t.writtenTrains = map[serverRef]observatory.Session{}, map[string]observatory.SessionTube{}, map[string]*observatory.OpticalTrain{}
+	for _, res := range recordOrder(t.reservations) {
 		s := res.Status.Session
 		if !holds(res) || s == nil {
 			continue
@@ -122,7 +143,7 @@ func (t *tree) applyRecords() {
 			frozen.Spec.Observatory = s.Observatory
 			t.telescopes[scope.name] = &frozen
 		}
-		if len(s.Site) > 0 {
+		if s.Observatory != "" {
 			site := serverRef{observatory.ObservatoryKind, s.Observatory}
 			union := t.records[site]
 			if union.Devices == nil {
@@ -145,7 +166,7 @@ func (t *tree) applyRecords() {
 	}
 	for i, d := range t.devices {
 		r, ok := records[d.key()]
-		if !ok || (r.UID != "" && r.UID != d.object.Metadata.UID) {
+		if !ok || !sameUID(r.UID, d.object.Metadata) {
 			continue
 		}
 		frozen := *d
@@ -157,25 +178,51 @@ func (t *tree) applyRecords() {
 	}
 }
 
+// recordOrder answers the reservations sorted by name, with each one
+// whose StartSite step failed after the others (applyRecords).
+func recordOrder(reservations map[string]*observatory.Reservation) []*observatory.Reservation {
+	var first, last []*observatory.Reservation
+	for _, name := range sortedNames(reservations) {
+		if res := reservations[name]; failedSite(res) {
+			last = append(last, res)
+		} else {
+			first = append(first, res)
+		}
+	}
+	return append(first, last...)
+}
+
+// failedSite reports whether a reservation's StartSite step failed.
+func failedSite(r *observatory.Reservation) bool {
+	for _, s := range r.Status.Steps {
+		if s.Name == observatory.StepStartSite {
+			return s.State == observatory.StepFailed
+		}
+	}
+	return false
+}
+
 // freezeOptics gives each train and Guider that a record names its
 // recorded spec, and keeps the recorded spec of each tube for tubeSpec.
-// The tube's object keeps its spec, so its status shows the lengths
-// that a person wrote.
+// A train, a tube, or a Guider that a person created again during the
+// session keeps its own spec. The tube's object keeps its spec, so its
+// status shows the lengths that a person wrote, and writtenTrains
+// keeps each train's object as a person wrote it (trainAsWritten).
 func (t *tree) freezeOptics(r observatory.Session) {
 	for name, spec := range r.Trains {
-		if train, ok := t.trains[name]; ok {
+		if train, ok := t.trains[name]; ok && sameUID(spec.UID, train.Metadata) {
 			frozen := *train
-			frozen.Spec = spec
-			t.trains[name] = &frozen
+			frozen.Spec = spec.OpticalTrainSpec
+			t.trains[name], t.writtenTrains[name] = &frozen, train
 		}
 	}
 	for name, spec := range r.Tubes {
 		t.recordedTubes[name] = spec
 	}
 	for name, spec := range r.Guiders {
-		if guider, ok := t.guiders[name]; ok {
+		if guider, ok := t.guiders[name]; ok && sameUID(spec.UID, guider.Metadata) {
 			frozen := *guider
-			frozen.Spec = spec
+			frozen.Spec = spec.GuiderSpec
 			t.guiders[name] = &frozen
 		}
 	}
@@ -188,18 +235,30 @@ func (t *tree) tubeSpec(name string) (observatory.OpticalTubeSpec, bool) {
 	if !ok {
 		return observatory.OpticalTubeSpec{}, false
 	}
-	if spec, ok := t.recordedTubes[name]; ok {
-		return spec, true
+	if spec, ok := t.recordedTubes[name]; ok && sameUID(spec.UID, tube.Metadata) {
+		return spec.OpticalTubeSpec, true
 	}
 	return tube.Spec, true
+}
+
+// trainAsWritten answers an OpticalTrain as a person wrote it, whether
+// or not a session froze its spec.
+func (t *tree) trainAsWritten(name string) (*observatory.OpticalTrain, bool) {
+	if train, ok := t.writtenTrains[name]; ok {
+		return train, true
+	}
+	train, ok := t.trains[name]
+	return train, ok
 }
 
 // recordSession writes a part of the session's record into the
 // reservation's status, and waits until the store holds it, so each
 // tree that the step reads after it holds the record. fill sets the
-// part on the record. A step that runs again after a restart or a
-// retry finds its part recorded and writes nothing, because the record
-// holds what the session started with. The write that the report sends
+// part on the record. A step that runs again after a restart finds its
+// part recorded and writes nothing, because the record holds what the
+// session started with. A retry records the part again before the step
+// runs again (recordAgain), so that step finds it recorded too. The
+// write that the report sends
 // carries the record, and send writes it again when that write failed.
 func (r *runner) recordSession(ctx context.Context, w *stepWork, recorded func(*observatory.Session) bool, fill func(*observatory.Session)) error {
 	if r.status.Session == nil {

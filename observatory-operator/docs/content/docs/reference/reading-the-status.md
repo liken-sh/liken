@@ -183,7 +183,8 @@ that failed, and it is empty while the reservation is `Ready` or
 telescope's `observatory`, the devices of the observatory's server in
 `site`, and the `devices`, `trains`, `tubes`, and `guiders` of the
 telescope's server. Each device is under its kind and name, such as
-`Focuser/east`. `StartSite` and `PowerOn` write it once, and the
+`Focuser/east`. `StartSite` and `PowerOn` write it once, a retry of a
+failed activation step writes it again from the specs, and the
 operator reads it in place of the specs until the reservation is
 `Released`. Compare it with a spec to see which edit waits for the
 next session:

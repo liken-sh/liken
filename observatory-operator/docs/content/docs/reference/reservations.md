@@ -32,7 +32,7 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--step"></span>`step` | string | no | The step that runs now, or the step that failed. It is empty while the phase is `Ready` or `Released`. One of: `Wait`, `StartSite`, `PowerOn`, `StartDevices`, `Connect`, `Configure`, `Activation`, `StartGuider`, `Abort`, `Deactivation`, `StopGuider`, `Disconnect`, `StopDevices`, `PowerOff`, `StopSite`. |
 | <span id="status--steps"></span>`steps` | [\[\]object](#statussteps) | no | Every step, in the order it runs. The activation steps are `Wait`, `StartSite`, `PowerOn`, `StartDevices`, `Connect`, `Configure`, `Activation`, and `StartGuider`, and the list holds them from the start. The deactivation steps are `Abort`, `Deactivation`, `StopGuider`, `Disconnect`, `StopDevices`, `PowerOff`, and `StopSite`, and the list holds them from when deactivation begins. A step starts only when the step before it is `Done` or `Skipped`. |
 | <span id="status--endpoint"></span>`endpoint` | [object](#statusendpoint) | no | The telescope's INDI server, while the phase is `Ready`. KStars connects to its `host` and `port`. |
-| <span id="status--session"></span>`session` | [object](#statussession) | no | What the reservation's session started with. `StartSite` writes `observatory` and `site`, and `PowerOn` writes the rest, each once and before it creates a pod, and nothing changes them after that. While the reservation holds its telescope, the operator reads this record in place of the specs of the resources it names, so an edit of a device's parents, driver, power, or claim, of the `Telescope`'s `spec.observatory`, of an `OpticalTrain`, of an `OpticalTube`, or of a `Guider` takes effect at the next session. The record is in the reservation, so an eviction of every pod of a server leaves it, and the operator creates the pods again from it. |
+| <span id="status--session"></span>`session` | [object](#statussession) | no | What the reservation's session started with. `StartSite` writes `observatory` and `site`, and `PowerOn` writes the rest, each once and before it creates a pod. The `observatory.liken.sh/retry` annotation on a failed activation step writes the parts again from the specs as they are then, before the step runs again, and nothing else changes them. While the reservation holds its telescope, the operator reads this record in place of the specs of the resources it names, so an edit of a device's parents, driver, power, or claim, of the `Telescope`'s `spec.observatory`, of an `OpticalTrain`, of an `OpticalTube`, or of a `Guider` takes effect at the next session. The record is in the reservation, so an eviction of every pod of a server leaves it, and the operator creates the pods again from it. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | `Ready` is `True` while the phase is `Ready`, so `kubectl wait --for=condition=Ready` waits for the telescope. When a step fails, it is `False` and its message names the step and the device. `SafeToPowerOff` is `True` when the deactivation steps are done. |
 
 ### status.steps[]
@@ -74,12 +74,12 @@ The telescope's INDI server, while the phase is `Ready`. KStars connects to its 
 
 ### status.session
 
-What the reservation's session started with. `StartSite` writes `observatory` and `site`, and `PowerOn` writes the rest, each once and before it creates a pod, and nothing changes them after that. While the reservation holds its telescope, the operator reads this record in place of the specs of the resources it names, so an edit of a device's parents, driver, power, or claim, of the `Telescope`'s `spec.observatory`, of an `OpticalTrain`, of an `OpticalTube`, or of a `Guider` takes effect at the next session. The record is in the reservation, so an eviction of every pod of a server leaves it, and the operator creates the pods again from it.
+What the reservation's session started with. `StartSite` writes `observatory` and `site`, and `PowerOn` writes the rest, each once and before it creates a pod. The `observatory.liken.sh/retry` annotation on a failed activation step writes the parts again from the specs as they are then, before the step runs again, and nothing else changes them. While the reservation holds its telescope, the operator reads this record in place of the specs of the resources it names, so an edit of a device's parents, driver, power, or claim, of the `Telescope`'s `spec.observatory`, of an `OpticalTrain`, of an `OpticalTube`, or of a `Guider` takes effect at the next session. The record is in the reservation, so an eviction of every pod of a server leaves it, and the operator creates the pods again from it.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="statussession--observatory"></span>`observatory` | string | no | The observatory of the reservation's telescope. |
-| <span id="statussession--site"></span>`site` | [map\[string\]object](#statussessionsite) | no | The devices of the observatory's server, by kind and name, such as `Dome/lab`, as the server ran them when this reservation's `StartSite` began. The reservations of several telescopes in one observatory share its server, and while any of them holds its telescope, the operator reads the union of their records. Absent when the observatory has no devices. |
+| <span id="statussession--site"></span>`site` | [map\[string\]object](#statussessionsite) | no | The devices of the observatory's server, by kind and name, such as `Dome/lab`, as the server ran them when this reservation's `StartSite` began. The reservations of several telescopes in one observatory share its server, and while any of them holds its telescope, the operator reads the union of their records. Absent when the observatory has no devices. Then `observatory` alone records that the session started the observatory with none, and a device created there during the session waits for the next one. |
 | <span id="statussession--devices"></span>`devices` | [map\[string\]object](#statussessiondevices) | no | The devices of the telescope's server, by kind and name, such as `Camera/east-main`, as `PowerOn` started them. |
 | <span id="statussession--trains"></span>`trains` | [map\[string\]object](#statussessiontrains) | no | The spec of each `OpticalTrain` of the telescope, by name. |
 | <span id="statussession--tubes"></span>`tubes` | [map\[string\]object](#statussessiontubes) | no | The spec of each `OpticalTube` of those trains, by name. A camera whose driver comes back gets the `SCOPE_INFO` of these lengths. |
@@ -177,6 +177,7 @@ One train's spec.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| <span id="statussessiontrains--uid"></span>`uid` | string | no | The train's `metadata.uid`. A train that a person deletes and creates again with the same name during the session has another UID, and the record does not apply to it. |
 | <span id="statussessiontrains--telescope"></span>`telescope` | string | yes | The train's `spec.telescope`. |
 | <span id="statussessiontrains--opticaltube"></span>`opticalTube` | string | yes | The train's `spec.opticalTube`. |
 
@@ -186,6 +187,7 @@ One tube's spec.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| <span id="statussessiontubes--uid"></span>`uid` | string | no | The tube's `metadata.uid`. A tube that a person deletes and creates again with the same name during the session has another UID, and the record does not apply to it. |
 | <span id="statussessiontubes--telescope"></span>`telescope` | string | yes | The tube's `spec.telescope`. |
 | <span id="statussessiontubes--aperture"></span>`aperture` | number | yes | The tube's `spec.aperture`, in millimeters. |
 | <span id="statussessiontubes--focallength"></span>`focalLength` | number | yes | The tube's `spec.focalLength`, in millimeters. |
@@ -196,6 +198,7 @@ One `Guider`'s spec.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
+| <span id="statussessionguiders--uid"></span>`uid` | string | no | The `Guider`'s `metadata.uid`. A `Guider` that a person deletes and creates again with the same name during the session has another UID, and the record does not apply to it. |
 | <span id="statussessionguiders--telescope"></span>`telescope` | string | yes | The `Guider`'s `spec.telescope`. |
 | <span id="statussessionguiders--opticaltrain"></span>`opticalTrain` | string | yes | The `Guider`'s `spec.opticalTrain`. |
 | <span id="statussessionguiders--pulses"></span>`pulses` | string | yes | The `Guider`'s `spec.pulses`. One of: `Mount`, `Camera`. |
