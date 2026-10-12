@@ -295,7 +295,7 @@ func vector(verb string, p Property, attributes string) []byte {
 		}
 		one := "one" + string(p.Type)
 		fmt.Fprintf(&b, "  <%s name=%s>", one, attribute(m.Name))
-		xml.EscapeText(&b, []byte(value))
+		b.WriteString(escape.Replace(value))
 		fmt.Fprintf(&b, "</%s>\n", one)
 	}
 	fmt.Fprintf(&b, "</%s>\n", tag)
@@ -324,11 +324,15 @@ func pingReply(uid string) []byte {
 	return []byte("<pingReply uid=" + attribute(uid) + "/>\n")
 }
 
+// escape writes the five characters that XML reserves as the named
+// entities that libindi's parser decodes (libs/indicore/lilxml.cpp).
+// encoding/xml writes ' and " as numeric references, such as &#39;,
+// which the parser leaves as they are: a driver given "it&#39;s" keeps
+// those seven characters, so its answer never matches the value sent.
+// A tab or a newline goes as it is, for the same reason.
+var escape = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "'", "&apos;", `"`, "&quot;")
+
 // attribute quotes and escapes an attribute value.
 func attribute(value string) string {
-	var b bytes.Buffer
-	b.WriteByte('"')
-	xml.EscapeText(&b, []byte(value))
-	b.WriteByte('"')
-	return b.String()
+	return `"` + escape.Replace(value) + `"`
 }

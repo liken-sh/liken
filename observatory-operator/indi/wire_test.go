@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -339,6 +340,31 @@ func TestEventKindNames(t *testing.T) {
 	for k, want := range cases {
 		if got := k.String(); got != want {
 			t.Errorf("EventKind(%d) = %q, want %q", int(k), got, want)
+		}
+	}
+}
+
+// libindi's XML parser (libs/indicore/lilxml.cpp) decodes the five named
+// entities and no numeric reference, so a client that sends &#39; for
+// an apostrophe gives the driver the six characters "&#39;", and the
+// driver's answer never matches the value sent.
+func TestTextIsEscapedWithTheEntitiesThatLibindiDecodes(t *testing.T) {
+	cases := []struct {
+		text, want string
+	}{
+		{"the Telescope's own name", "the Telescope&apos;s own name"},
+		{`say "hi"`, "say &quot;hi&quot;"},
+		{"a&b<c>d", "a&amp;b&lt;c&gt;d"},
+		{"one\ttwo\nthree", "one\ttwo\nthree"},
+	}
+	for _, c := range cases {
+		p := Property{Device: `Dev's "x"`, Name: "FITS_HEADER", Type: TextType, Members: []Member{{Name: "KEYWORD_COMMENT", Text: c.text}}}
+		got := string(newVector(p))
+		if !strings.Contains(got, ">"+c.want+"</oneText>") {
+			t.Errorf("text %q encoded as %q, want the element text %q", c.text, got, c.want)
+		}
+		if !strings.Contains(got, `device="Dev&apos;s &quot;x&quot;"`) {
+			t.Errorf("the device attribute in %q is not escaped with named entities", got)
 		}
 	}
 }
