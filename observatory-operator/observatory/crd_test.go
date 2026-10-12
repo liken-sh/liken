@@ -267,3 +267,53 @@ func resolve(schema *apiextensionsv1.JSONSchemaProps, steps []string) *apiextens
 	}
 	return schema
 }
+
+// `kubectl apply` sends a JSON merge patch to a custom resource, and a
+// merge patch replaces a whole list when it differs from the live one.
+// A default inside a list's items makes the live list differ from the
+// file's list that omits the field, so every apply of an unchanged
+// file reports the resource as configured. So the operator applies
+// those defaults itself, and the schema states none inside a list.
+func TestNoCRDStatesADefaultInsideAList(t *testing.T) {
+	for _, kind := range Kinds {
+		t.Run(kind.Name, func(t *testing.T) {
+			for _, path := range listDefaults(schemaOf(t, kind), "", false) {
+				t.Errorf("%s has a default inside a list", path)
+			}
+		})
+	}
+}
+
+func TestListDefaultsFindsADefaultInsideAList(t *testing.T) {
+	half := apiextensionsv1.JSON{Raw: []byte("0.5")}
+	schema := &apiextensionsv1.JSONSchemaProps{Properties: map[string]apiextensionsv1.JSONSchemaProps{
+		"top": {Type: "number", Default: &half},
+		"actions": {Type: "array", Items: &apiextensionsv1.JSONSchemaPropsOrArray{Schema: &apiextensionsv1.JSONSchemaProps{
+			Type: "object", Properties: map[string]apiextensionsv1.JSONSchemaProps{
+				"within": {Type: "number", Default: &half},
+			},
+		}}},
+	}}
+	if got := listDefaults(schema, "", false); !slices.Equal(got, []string{".actions[].within"}) {
+		t.Errorf("listDefaults = %v, want [.actions[].within]", got)
+	}
+}
+
+// listDefaults answers the path of each default under an array's
+// items. A default outside every list is allowed.
+func listDefaults(schema *apiextensionsv1.JSONSchemaProps, path string, inList bool) []string {
+	var found []string
+	if inList && schema.Default != nil {
+		found = append(found, path)
+	}
+	for name, property := range schema.Properties {
+		found = append(found, listDefaults(&property, path+"."+name, inList)...)
+	}
+	if schema.Items != nil && schema.Items.Schema != nil {
+		found = append(found, listDefaults(schema.Items.Schema, path+"[]", true)...)
+	}
+	if schema.AdditionalProperties != nil && schema.AdditionalProperties.Schema != nil {
+		found = append(found, listDefaults(schema.AdditionalProperties.Schema, path+"{}", inList)...)
+	}
+	return found
+}

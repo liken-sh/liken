@@ -344,7 +344,6 @@ spec:
                             minimum: 0
                             exclusiveMinimum: true
                             maximum: 10
-                            default: 0.5
                             description: >-
                               How close to the setpoint the sensor must
                               come, in degrees Celsius. The default is
@@ -373,7 +372,6 @@ spec:
                             minimum: 0
                             exclusiveMinimum: true
                             maximum: 10
-                            default: 0.5
                             description: >-
                               How close to the setpoint the sensor must
                               come, in degrees Celsius. The default is
@@ -515,7 +513,6 @@ spec:
                             status:
                               type: string
                               enum: ["True", "False", Unknown]
-                              default: "True"
                               description: >-
                                 The status that the condition must have:
                                 `True`, `False`, or `Unknown`. The
@@ -594,7 +591,6 @@ spec:
                             minimum: 0
                             exclusiveMinimum: true
                             maximum: 10
-                            default: 0.5
                             description: >-
                               How close to the setpoint the sensor must
                               come, in degrees Celsius. The default is
@@ -623,7 +619,6 @@ spec:
                             minimum: 0
                             exclusiveMinimum: true
                             maximum: 10
-                            default: 0.5
                             description: >-
                               How close to the setpoint the sensor must
                               come, in degrees Celsius. The default is
@@ -765,7 +760,6 @@ spec:
                             status:
                               type: string
                               enum: ["True", "False", Unknown]
-                              default: "True"
                               description: >-
                                 The status that the condition must have:
                                 `True`, `False`, or `Unknown`. The
@@ -856,7 +850,6 @@ spec:
                           status:
                             type: string
                             enum: ["True", "False", Unknown]
-                            default: "True"
                             description: >-
                               The status that the condition must have:
                               `True`, `False`, or `Unknown`. The default
@@ -907,7 +900,6 @@ spec:
                                   minimum: 0
                                   exclusiveMinimum: true
                                   maximum: 10
-                                  default: 0.5
                                   description: >-
                                     How close to the setpoint the sensor
                                     must come, in degrees Celsius. The
@@ -937,7 +929,6 @@ spec:
                                   minimum: 0
                                   exclusiveMinimum: true
                                   maximum: 10
-                                  default: 0.5
                                   description: >-
                                     How close to the setpoint the sensor
                                     must come, in degrees Celsius. The
@@ -1088,7 +1079,6 @@ spec:
                                   status:
                                     type: string
                                     enum: ["True", "False", Unknown]
-                                    default: "True"
                                     description: >-
                                       The status that the condition must
                                       have: `True`, `False`, or

@@ -421,7 +421,6 @@ spec:
                             status:
                               type: string
                               enum: ["True", "False", Unknown]
-                              default: "True"
                               description: >-
                                 The status that the condition must have:
                                 `True`, `False`, or `Unknown`. The
@@ -616,7 +615,6 @@ spec:
                             status:
                               type: string
                               enum: ["True", "False", Unknown]
-                              default: "True"
                               description: >-
                                 The status that the condition must have:
                                 `True`, `False`, or `Unknown`. The
@@ -707,7 +705,6 @@ spec:
                           status:
                             type: string
                             enum: ["True", "False", Unknown]
-                            default: "True"
                             description: >-
                               The status that the condition must have:
                               `True`, `False`, or `Unknown`. The default
@@ -883,7 +880,6 @@ spec:
                                   status:
                                     type: string
                                     enum: ["True", "False", Unknown]
-                                    default: "True"
                                     description: >-
                                       The status that the condition must
                                       have: `True`, `False`, or

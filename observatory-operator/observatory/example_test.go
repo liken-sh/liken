@@ -14,6 +14,9 @@ import (
 	"strings"
 	"testing"
 
+	structuralschema "k8s.io/apiextensions-apiserver/pkg/apiserver/schema"
+	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/defaulting"
+	"k8s.io/apimachinery/pkg/util/jsonmergepatch"
 	"sigs.k8s.io/yaml"
 )
 
@@ -126,4 +129,49 @@ func TestEveryNameInTheExampleExists(t *testing.T) {
 			}
 		}
 	}
+}
+
+// `kubectl apply` of an unchanged file must change nothing. For a
+// custom resource, kubectl computes a three-way JSON merge patch from
+// the last file it applied, the file, and the live object, and the
+// live object carries the defaults that the API server applied from
+// the CRD. A patch other than {} makes kubectl send it and report the
+// resource as configured on every apply.
+func TestApplyingTheExampleAgainChangesNothing(t *testing.T) {
+	for _, object := range documents(t, example) {
+		kind := kindNamed(object["kind"].(string))
+		t.Run(kind.Name+"/"+objectName(object), func(t *testing.T) {
+			file, err := json.Marshal(object)
+			if err != nil {
+				t.Fatal(err)
+			}
+			patch, err := jsonmergepatch.CreateThreeWayJSONMergePatch(file, file, live(t, kind, file))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(patch) != "{}" {
+				t.Errorf("a second apply patches %s", patch)
+			}
+		})
+	}
+}
+
+// live answers the object that the API server stores for a file: the
+// file with the CRD's defaults applied.
+func live(t *testing.T, kind Kind, file []byte) []byte {
+	t.Helper()
+	structural, err := structuralschema.NewStructural(internalSchema(t, kind))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var object map[string]any
+	if err := json.Unmarshal(file, &object); err != nil {
+		t.Fatal(err)
+	}
+	defaulting.Default(object, structural)
+	stored, err := json.Marshal(object)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stored
 }
