@@ -172,7 +172,8 @@ func (o *operator) telescopeStatus(t *tree, telescope *observatory.Telescope, co
 		conditions = append(conditions, t.horizonFound(horizon))
 	}
 	next.Procedures = o.runs.list(recordKey(observatory.TelescopeKind, telescope.Metadata))
-	conditions = withAttention(conditions, next.Procedures, telescope.Status.Conditions)
+	conditions = withAttention(conditions, next.Procedures, telescope.Status.Conditions,
+		o.activeSince(resource{kind: observatory.TelescopeKind, meta: telescope.Metadata}))
 	next.Conditions = withGeneration(conditions, next.ObservedGeneration)
 	return next
 }
@@ -238,7 +239,8 @@ func (o *operator) observatoryStatus(t *tree, site *observatory.Observatory, com
 		conditions = append(conditions, *locks)
 	}
 	next.Procedures = o.runs.list(recordKey(observatory.ObservatoryKind, site.Metadata))
-	conditions = withAttention(conditions, next.Procedures, site.Status.Conditions)
+	conditions = withAttention(conditions, next.Procedures, site.Status.Conditions,
+		o.activeSince(resource{kind: observatory.ObservatoryKind, meta: site.Metadata}))
 	next.Conditions = withGeneration(conditions, next.ObservedGeneration)
 	return next
 }

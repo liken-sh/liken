@@ -14,6 +14,15 @@ package main
 // person's answer: take-down after covering the telescope, or set-up
 // after carrying it out again. An expiry at dawn is the operator's
 // write, not the person's, so it clears nothing.
+//
+// The activation begins when the resource's Telescope or Observatory
+// turns Active, and a resource's own activation run records that start
+// only when the resource has activation actions. A portable telescope
+// often has none, only the notify of its deactivation, so the status
+// writer passes the start of the activity too. That start is gone once
+// the activity ends, so a request made before the condition last turned
+// False stays closed. Without that rule, the deactivation that follows
+// would open the old request again before its own notify asks.
 
 import (
 	"strings"
@@ -27,17 +36,24 @@ import (
 const notifyPrefix = "notify: "
 
 // attention answers the AttentionNeeded condition of a resource from
-// the records of its runs and its stored conditions, and false for a
-// resource with no notify action that is done.
-func attention(runs []observatory.ProcedureRun, stored []observatory.Condition) (observatory.Condition, bool) {
-	var activated, answered time.Time
+// the records of its runs, its stored conditions, and the start of its
+// activity, which is zero while it is not Active. It answers false for
+// a resource with no notify action that is done.
+func attention(runs []observatory.ProcedureRun, stored []observatory.Condition, activeSince time.Time) (observatory.Condition, bool) {
+	activated := activeSince
+	var answered, cleared time.Time
 	for _, run := range runs {
-		if run.Trigger == observatory.TriggerActivation && run.StartTime != nil {
+		if run.Trigger == observatory.TriggerActivation && run.StartTime != nil && run.StartTime.After(activated) {
 			activated = *run.StartTime
 		}
 	}
 	if c, ok := conditions.Find(stored, observatory.ConditionSetUp); ok && c.Reason != observatory.ReasonExpired {
 		answered = c.LastTransitionTime
+	}
+	held, wasCleared := conditions.Find(stored, observatory.ConditionAttentionNeeded)
+	wasCleared = wasCleared && held.Status == observatory.ConditionFalse
+	if wasCleared {
+		cleared = held.LastTransitionTime
 	}
 	asked := false
 	var open []string
@@ -50,7 +66,7 @@ func attention(runs []observatory.ProcedureRun, stored []observatory.Condition) 
 			asked = true
 			// A request that an activation run made itself is open
 			// while that run is the last activation.
-			if !a.StopTime.Before(activated) && a.StopTime.After(answered) {
+			if !a.StopTime.Before(activated) && a.StopTime.After(answered) && a.StopTime.After(cleared) {
 				open = append(open, sentence(strings.TrimSuffix(text, ".")))
 			}
 		}
@@ -61,6 +77,8 @@ func attention(runs []observatory.ProcedureRun, stored []observatory.Condition) 
 	case len(open) > 0:
 		return condition(observatory.ConditionAttentionNeeded, observatory.ConditionTrue, observatory.ReasonNotified,
 			strings.Join(open, ". ")), true
+	case wasCleared && !answered.After(cleared) && !activated.After(cleared):
+		return held, true
 	case answered.After(activated):
 		return condition(observatory.ConditionAttentionNeeded, observatory.ConditionFalse, observatory.ReasonAcknowledged,
 			"A person wrote SetUp after the request"), true
@@ -71,8 +89,8 @@ func attention(runs []observatory.ProcedureRun, stored []observatory.Condition) 
 
 // withAttention adds a resource's AttentionNeeded to its composed
 // conditions, when it has one.
-func withAttention(composed []observatory.Condition, runs []observatory.ProcedureRun, stored []observatory.Condition) []observatory.Condition {
-	if c, ok := attention(runs, stored); ok {
+func withAttention(composed []observatory.Condition, runs []observatory.ProcedureRun, stored []observatory.Condition, activeSince time.Time) []observatory.Condition {
+	if c, ok := attention(runs, stored, activeSince); ok {
 		return append(composed, c)
 	}
 	return composed

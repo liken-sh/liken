@@ -383,7 +383,7 @@ func (o *operator) deviceStatus(t *tree, d *device) (deviceStatus, deviceReading
 	if next.Phase == observatory.DeviceConnected && device != nil {
 		next.Conditions = append(next.Conditions, stateConditions(d, *device)...)
 	}
-	next.Conditions = withAttention(next.Conditions, next.Procedures, d.object.Status.Conditions)
+	next.Conditions = withAttention(next.Conditions, next.Procedures, d.object.Status.Conditions, o.activeSince(t.ofDevice(d)))
 	for i := range next.Conditions {
 		next.Conditions[i].ObservedGeneration = next.ObservedGeneration
 	}

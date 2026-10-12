@@ -48,6 +48,19 @@ func governor(r resource) (string, bool) {
 	return "", false
 }
 
+// activeSince answers when the activity of a resource's Telescope or
+// Observatory began, or the zero time while it is not Active.
+func (o *operator) activeSince(r resource) time.Time {
+	key, ok := governor(r)
+	if !ok {
+		return time.Time{}
+	}
+	if state := o.activity.get(key); state.active {
+		return state.since
+	}
+	return time.Time{}
+}
+
 // lateActivation starts the activation of a device whose Active parent
 // did not run it, and stops it when the parent's activity ends. retry
 // runs a Failed activation of the current transition again.
