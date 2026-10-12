@@ -175,20 +175,22 @@ mount, such as a `ReadWriteOnce` volume bound on another node, leaves
 the camera's pod `Pending`, and the summary of `StartDevices` gives
 the scheduler's message.
 
-`Configure` then sets the driver's `UPLOAD_DIR` to `/outbox` and its
+`Configure` then sets the driver's `UPLOAD_DIR` to the directory of
+the camera's name in the outbox, such as `/outbox/east-main`, and its
 `UPLOAD_MODE` to `UPLOAD_BOTH`, so each frame lands in the outbox and
-KStars still receives it. It leaves `UPLOAD_PREFIX` as the driver has
-it. The holder can change the mode and the directory afterward: Ekos
+KStars still receives it. The driver creates the directory when it
+saves the first frame. A driver numbers its files from the ones it
+finds in its directory, and a `Camera`'s name is unique in its
+namespace, so two cameras that write to one claim, on one telescope or
+on two, never choose the same file name. `Configure` leaves
+`UPLOAD_PREFIX` as the driver has it. The holder can change the mode and the directory afterward: Ekos
 writes its own upload settings when it captures, and
 `astrophotography-operator` chooses a directory for each target. With
 no outbox, the operator does not touch the upload settings.
 
 The session records the outbox, so an edit of `spec.outbox` takes
 effect at the next session. A new pod in the middle of an exposure
-would lose the exposure. Two telescopes whose reservations name the
-same claim both write to its root, and two drivers that write at the
-same moment can choose the same file name, so give each telescope its
-own claim.
+would lose the exposure.
 
 ## Editing devices during a session
 

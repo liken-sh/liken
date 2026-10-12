@@ -117,7 +117,7 @@ func TestConfigurePointsTheImagingCameraAtTheOutbox(t *testing.T) {
 		want         []string
 	}{
 		{"an outbox", "frames", []string{
-			"east-telescope CCD Simulator.UPLOAD_SETTINGS UPLOAD_DIR=/outbox UPLOAD_PREFIX=IMAGE_XXX",
+			"east-telescope CCD Simulator.UPLOAD_SETTINGS UPLOAD_DIR=/outbox/east-main UPLOAD_PREFIX=IMAGE_XXX",
 			"east-telescope CCD Simulator.UPLOAD_MODE UPLOAD_CLIENT=Off UPLOAD_LOCAL=Off UPLOAD_BOTH=On",
 		}},
 		{"no outbox", "", nil},
@@ -133,6 +133,35 @@ func TestConfigurePointsTheImagingCameraAtTheOutbox(t *testing.T) {
 			})
 		})
 	}
+}
+
+// With no Guider, both cameras of the telescope image, and each driver
+// writes into the directory of its own Camera's name, so two drivers
+// never choose a file name in one directory.
+func TestEachImagingCameraWritesIntoItsOwnDirectory(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := startWorld(t)
+		w.api.deleteNamed(kindCollection(observatory.GuiderKind), "east")
+		w.putClaim("frames")
+		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop", "outbox": map[string]any{"claimName": "frames"}})
+		w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
+
+		var got []string
+		for _, change := range w.uploads() {
+			if strings.Contains(change, ".UPLOAD_SETTINGS ") {
+				got = append(got, change)
+			}
+		}
+		slices.Sort(got)
+		want := []string{
+			"east-telescope CCD Simulator.UPLOAD_SETTINGS UPLOAD_DIR=/outbox/east-main UPLOAD_PREFIX=IMAGE_XXX",
+			"east-telescope Guide Simulator.UPLOAD_SETTINGS UPLOAD_DIR=/outbox/east-guide UPLOAD_PREFIX=IMAGE_XXX",
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("upload settings = %q, want %q", got, want)
+		}
+	})
 }
 
 // A reservation whose outbox names a claim that does not exist fails

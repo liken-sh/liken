@@ -2,8 +2,10 @@
 
 Proposed on 2026-10-12, and designed and built on 2026-10-12. Drilled
 on the QEMU dev cluster on 2026-10-12, with INDI simulators; [the
-drill](#the-drill) records the results. The design below answers what
-the design conversation left open.
+drill](#the-drill) records the results, and [After the
+drill](#after-the-drill) records the change that closed the problem
+the drill left open. The design below answers what the design
+conversation left open.
 
 ## The problem
 
@@ -149,11 +151,22 @@ log of the operator pod on `node-4` held no error, except the two INDI
 connections that ended when `PowerOff` and `StopSite` stopped their
 servers.
 
-## Still open
+## After the drill
 
-Two telescopes whose reservations name the same claim both write to
-its root, and each driver numbers its files from the ones it finds.
-Two drivers that write at the same moment can choose the same name.
-`astrophotography-operator` sets its own directory and a unique name
-for each frame, so only a person who shares one claim between two
-desktop sessions meets this.
+The drill left one problem open. Two telescopes whose reservations
+named the same claim both wrote to its root, and each driver numbers
+its files from the ones it finds. So two drivers that wrote at the
+same moment could choose the same name. Two imaging cameras of one
+telescope, such as `east-main` and `east-guide` with no `Guider`,
+shared the root the same way. `astrophotography-operator` sets its own
+directory and a unique name for each frame, so only the frames of a
+desktop session met this.
+
+`Configure` now sets `UPLOAD_DIR` to `/outbox/<the Camera's name>`,
+such as `/outbox/east-main`, in place of `/outbox`. A `Camera`'s name
+is unique in its namespace, and a claim is in one namespace, so no two
+drivers write to one directory. The operator does not create the
+directory. On 2026-10-12, a check against the CCD simulator of the
+pinned `indi-simulators` image showed that the driver creates a
+missing directory itself: it logged `[INFO] Creating directory
+/out/observatory/east-main...` and then saved the frame there.

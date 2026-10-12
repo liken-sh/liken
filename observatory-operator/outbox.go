@@ -86,8 +86,15 @@ func (r *runner) checkOutbox(ctx context.Context, w *stepWork, outbox *observato
 }
 
 // uploadToOutbox points a camera's driver at the outbox: UPLOAD_DIR is
-// /outbox, and UPLOAD_MODE is UPLOAD_BOTH, so every frame lands in the
-// outbox and a desktop client still receives it. It leaves
+// /outbox/<the Camera's name>, and UPLOAD_MODE is UPLOAD_BOTH, so every
+// frame lands in the outbox and a desktop client still receives it.
+// Each driver numbers its files from the ones it finds in its
+// directory, so two drivers that shared one directory could choose the
+// same name at the same moment. That happens when two cameras of one
+// telescope image, or when the reservations of two telescopes name one
+// claim. A Camera's name is unique in its namespace, and a claim is in
+// one namespace, so no two drivers share a directory. The driver
+// creates a missing directory itself when it saves a frame. It leaves
 // UPLOAD_PREFIX to the holder. The holder can change the mode and the
 // directory afterward: astrophotography-operator chooses UPLOAD_LOCAL
 // and a directory for each target, and Ekos writes its own upload
@@ -101,7 +108,7 @@ func uploadToOutbox(ctx context.Context, t *tree, h handle, notes *[]string, not
 		*notes = append(*notes, fmt.Sprintf("no UPLOAD_SETTINGS on %s to write frames to the outbox", h))
 		return nil
 	}
-	if err := note(h.setTexts(ctx, "UPLOAD_SETTINGS", map[string]string{"UPLOAD_DIR": outboxDir})); err != nil {
+	if err := note(h.setTexts(ctx, "UPLOAD_SETTINGS", map[string]string{"UPLOAD_DIR": outboxDir + "/" + h.d.name()})); err != nil {
 		return err
 	}
 	return note(h.setSwitches(ctx, "UPLOAD_MODE", map[string]bool{"UPLOAD_BOTH": true}))

@@ -94,6 +94,9 @@ the kind, the resource, the trigger, and a hash, such as
 The pod of each camera that mounts the reservation's outbox has a
 volume named `outbox`, from the `PersistentVolumeClaim` that the
 session recorded, mounted at `/outbox` in its `driver` container. The
+driver writes its frames into the directory of the camera's name in
+the volume, such as `/outbox/east-main`, and creates it when it saves
+the first frame. The
 pod's `securityContext` sets `fsGroup: 1000` and
 `fsGroupChangePolicy: OnRootMismatch`, so the driver can write to a
 volume that root owns. The claim is yours: the operator never creates

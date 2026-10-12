@@ -127,9 +127,12 @@ spec:
                     telescope mounts the claim at `/outbox`, except a
                     camera that a `Guider` guides with, and the
                     `Configure` step sets the driver's `UPLOAD_DIR` to
-                    `/outbox` and its `UPLOAD_MODE` to `UPLOAD_BOTH`, so
-                    each frame lands in the outbox and a desktop client
-                    still receives it. With no outbox, the operator leaves
+                    the directory of the camera's name in the outbox,
+                    such as `/outbox/east-main`, and its `UPLOAD_MODE` to
+                    `UPLOAD_BOTH`, so each frame lands in the outbox and
+                    a desktop client still receives it. A camera's name
+                    is unique in its namespace, so no two drivers write
+                    to one directory. With no outbox, the operator leaves
                     the upload settings alone, and a driver that a client
                     sets to keep frames writes them to the pod's `/tmp`,
                     which the pod loses when it stops. An edit takes
