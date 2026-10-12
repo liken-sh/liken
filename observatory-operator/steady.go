@@ -47,6 +47,7 @@ func (r *runner) steady(ctx context.Context) {
 		if !r.refresh() || ending(r.o.snapshot(), r.res, time.Now()) {
 			return
 		}
+		r.observe(ctx)
 		t := r.o.snapshot()
 		ref, telescope, devices, err := r.telescope(t)
 		if err != nil {

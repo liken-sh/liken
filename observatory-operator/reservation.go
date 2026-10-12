@@ -236,7 +236,8 @@ type stepWork struct {
 	r    *runner
 	name observatory.StepName
 	// report records what the step does or waits for in the step's
-	// message, and writes the status when the message changed.
+	// message, and writes the status when the message or the spec
+	// changed (edited).
 	report func(string)
 	// last is the last message that report received.
 	last string
@@ -284,7 +285,7 @@ func (r *runner) runStep(ctx context.Context, name observatory.StepName, fn step
 	work.report = func(message string) {
 		message = sentence(message)
 		work.last = message
-		if r.step(name).Summary != message {
+		if r.step(name).Summary != message || r.edited() {
 			r.step(name).Summary = message
 			r.save(ctx)
 		}
@@ -411,6 +412,26 @@ func (r *runner) save(ctx context.Context) error {
 		r.o.logf("writing the status of the Reservation %s: %v", r.name, err)
 	}
 	return err
+}
+
+// edited reports whether the spec changed since the runner last wrote
+// the status. The runner writes the status when a step changes, and a
+// reservation that is Ready, Failed, or waits in the Wait step changes
+// no step. Without a write on the edit alone, status.observedGeneration
+// stays behind metadata.generation, and a client such as `kubectl wait`
+// cannot tell that the operator read the edit. A mid-session edit takes
+// effect at the next session (records.go), so this write records that
+// the operator read the edit, not that it applied it.
+func (r *runner) edited() bool {
+	return r.status.ObservedGeneration != r.res.Metadata.Generation
+}
+
+// observe writes the status when the spec changed since the last write
+// (edited).
+func (r *runner) observe(ctx context.Context) {
+	if r.edited() {
+		r.save(ctx)
+	}
 }
 
 // compose sets the conditions, the endpoint, and the observed

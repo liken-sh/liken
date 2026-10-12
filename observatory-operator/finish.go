@@ -53,6 +53,7 @@ func (r *runner) failed(ctx context.Context) {
 		if r.stage() != stageFailed {
 			return
 		}
+		r.observe(ctx)
 		r.keepWaiting(ctx, wake)
 	}
 }
