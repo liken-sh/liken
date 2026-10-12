@@ -25,6 +25,9 @@ import (
 //   - {{ include "fits keywords" . }} is spec.fitsKeywords, in
 //     fitskeywords.yaml.tmpl, whose rule refuses the keywords that
 //     {{ refusedKeywords }} lists from observatory.RefusedFITSKeywords.
+//     {{ astrophotographyKeywords }} lists the ones among them that
+//     astrophotography-operator writes, so the rule's message names
+//     that operator.
 //   - {{ settings }} and {{ standard }} are the typed fields that the
 //     kind's fields file gives, in spec and in status.
 //
@@ -50,7 +53,10 @@ func renderCRD(dir, plural, settings, standard string) (string, error) {
 		"indent":          indent,
 		"settings":        func() string { return settings },
 		"standard":        func() string { return standard },
-		"refusedKeywords": refusedKeywords,
+		"refusedKeywords": func() string { return celList(observatory.RefusedFITSKeywords()) },
+		"astrophotographyKeywords": func() string {
+			return celList(observatory.AstrophotographyFITSKeywords)
+		},
 	})
 	for _, name := range []string{deviceTemplate, procedureSchema, fitsTemplate, plural + templateSuffix} {
 		raw, err := os.ReadFile(filepath.Join(dir, name))
@@ -79,12 +85,12 @@ func indent(n int, fragment string) string {
 	return strings.Join(lines, "\n")
 }
 
-// refusedKeywords writes the names that spec.fitsKeywords refuses as
-// the items of a CEL list, such as 'SIMPLE', 'BITPIX'.
-func refusedKeywords() string {
-	refused := observatory.RefusedFITSKeywords()
-	for i, name := range refused {
-		refused[i] = "'" + name + "'"
+// celList writes names as the items of a CEL list, such as
+// 'SIMPLE', 'BITPIX'.
+func celList(names []string) string {
+	quoted := make([]string, len(names))
+	for i, name := range names {
+		quoted[i] = "'" + name + "'"
 	}
-	return strings.Join(refused, ", ")
+	return strings.Join(quoted, ", ")
 }

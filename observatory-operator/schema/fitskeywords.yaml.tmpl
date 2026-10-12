@@ -28,7 +28,9 @@ fitsKeywords:
     each frame when it creates the file. An edit takes effect at the
     next session. The API server refuses a keyword that the driver
     writes from what it measures, such as `EXPTIME` or `DATE-OBS`,
-    because a declared value would replace the measured one.
+    because a declared value would replace the measured one. It
+    refuses `FRAMEID` too, because `astrophotography-operator` writes
+    a new identity into each frame that it takes.
   x-kubernetes-list-type: map
   x-kubernetes-list-map-keys: [name]
   items:
@@ -51,6 +53,8 @@ fitsKeywords:
             messageExpression: >-
               self + (self in ['COMMENT', 'HISTORY', 'END']
               ? ' is a keyword that FITS reserves for a card with no value'
+              : self in [{{ astrophotographyKeywords }}]
+              ? ' is a keyword that astrophotography-operator writes, with a new value for each frame'
               : ' is a keyword that the camera\'s driver writes from what it measures, and a declared value would replace the measured one')
       value:
         type: string

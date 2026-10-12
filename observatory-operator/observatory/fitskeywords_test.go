@@ -120,3 +120,28 @@ func TestEachLevelHasTheSameFITSKeywordsSchema(t *testing.T) {
 		})
 	}
 }
+
+// astrophotography-operator writes FRAMEID, a new identity for each
+// frame that it takes. A declared FRAMEID would put one identity on
+// every frame of a session, the frames of a desktop client included,
+// so every level refuses it, with a message that names the writer.
+func TestEveryLevelRefusesFRAMEID(t *testing.T) {
+	frameID := []any{fits("FRAMEID", "0199d3a0-0000-7000-8000-000000000001", "")}
+	cases := []struct {
+		kind Kind
+		spec map[string]any
+	}{
+		{ObservatoryKind, map[string]any{"location": map[string]any{"latitude": 51.5, "longitude": 0.0, "elevation": 40.0}, "fitsKeywords": frameID}},
+		{TelescopeKind, map[string]any{"observatory": "lab", "fitsKeywords": frameID}},
+		{CameraKind, camera(map[string]any{"fitsKeywords": frameID})},
+		{ReservationKind, map[string]any{"telescope": "east", "holder": "desktop", "fitsKeywords": frameID}},
+	}
+	for _, c := range cases {
+		t.Run(c.kind.Name, func(t *testing.T) {
+			errs := validate(t, c.kind, resource(c.kind, c.spec), nil)
+			if got := errs.ToAggregate(); !refuses(got, "FRAMEID is a keyword that astrophotography-operator writes") {
+				t.Errorf("errors = %v", got)
+			}
+		})
+	}
+}

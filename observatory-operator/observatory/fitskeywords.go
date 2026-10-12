@@ -64,14 +64,22 @@ var DriverFITSKeywords = []string{
 // and not the person's equipment.
 var renamedFITSKeywords = []string{"INSTRUME", "TELESCOP"}
 
+// AstrophotographyFITSKeywords are the keywords that
+// astrophotography-operator writes with a new value for each frame it
+// takes. FRAMEID is the frame's identity, which its catalog and its
+// archive key on. A declared FRAMEID would give every frame of a
+// session one identity, the frames of a desktop client included.
+var AstrophotographyFITSKeywords = []string{"FRAMEID"}
+
 // RefusedFITSKeywords answers the names that the CRDs refuse in
-// spec.fitsKeywords: each keyword that the driver measures, and
-// COMMENT, HISTORY, and END, which FITS reserves for cards that hold
-// no value.
+// spec.fitsKeywords: each keyword that the driver measures, each
+// keyword that astrophotography-operator writes, and COMMENT,
+// HISTORY, and END, which FITS reserves for cards that hold no value.
 func RefusedFITSKeywords() []string {
 	refused := slices.DeleteFunc(slices.Clone(DriverFITSKeywords), func(name string) bool {
 		return slices.Contains(renamedFITSKeywords, name)
 	})
+	refused = append(refused, AstrophotographyFITSKeywords...)
 	return append(refused, "COMMENT", "HISTORY", "END")
 }
 

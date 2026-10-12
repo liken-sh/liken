@@ -324,7 +324,9 @@ spec:
                     session. The API server refuses a keyword that the
                     driver writes from what it measures, such as
                     `EXPTIME` or `DATE-OBS`, because a declared value
-                    would replace the measured one.
+                    would replace the measured one. It refuses `FRAMEID`
+                    too, because `astrophotography-operator` writes a
+                    new identity into each frame that it takes.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [name]
                   items:
@@ -345,11 +347,14 @@ spec:
                         x-kubernetes-validations:
                           - rule: "self.matches('^[A-Z0-9_-]{1,8}$')"
                             message: "a FITS keyword name is 1 to 8 of the capital letters A to Z, the digits, '-', and '_'"
-                          - rule: "!(self in ['SIMPLE', 'BITPIX', 'NAXIS', 'NAXIS1', 'NAXIS2', 'EXTEND', 'BZERO', 'BSCALE', 'ROWORDER', 'EXPTIME', 'CCD-TEMP', 'PIXSIZE1', 'PIXSIZE2', 'XBINNING', 'YBINNING', 'XPIXSZ', 'YPIXSZ', 'FRAME', 'IMAGETYP', 'FILTER', 'FOCALLEN', 'APTDIA', 'ROTATANG', 'FOCUSPOS', 'FOCUSTEM', 'SCALE', 'SITELAT', 'SITELONG', 'AIRMASS', 'OBJCTAZ', 'OBJCTALT', 'OBJCTRA', 'OBJCTDEC', 'RA', 'DEC', 'PIERSIDE', 'EQUINOX', 'DATE-OBS', 'GAIN', 'OFFSET', 'DARKTIME', 'MPSAS', 'BAYERPAT', 'XBAYROFF', 'YBAYROFF', 'DATAMIN', 'DATAMAX', 'CTYPE1', 'CTYPE2', 'CRVAL1', 'CRVAL2', 'CRPIX1', 'CRPIX2', 'CDELT1', 'CDELT2', 'CROTA1', 'CROTA2', 'SECPIX1', 'SECPIX2', 'RADECSYS', 'COMMENT', 'HISTORY', 'END'])"
+                          - rule: "!(self in ['SIMPLE', 'BITPIX', 'NAXIS', 'NAXIS1', 'NAXIS2', 'EXTEND', 'BZERO', 'BSCALE', 'ROWORDER', 'EXPTIME', 'CCD-TEMP', 'PIXSIZE1', 'PIXSIZE2', 'XBINNING', 'YBINNING', 'XPIXSZ', 'YPIXSZ', 'FRAME', 'IMAGETYP', 'FILTER', 'FOCALLEN', 'APTDIA', 'ROTATANG', 'FOCUSPOS', 'FOCUSTEM', 'SCALE', 'SITELAT', 'SITELONG', 'AIRMASS', 'OBJCTAZ', 'OBJCTALT', 'OBJCTRA', 'OBJCTDEC', 'RA', 'DEC', 'PIERSIDE', 'EQUINOX', 'DATE-OBS', 'GAIN', 'OFFSET', 'DARKTIME', 'MPSAS', 'BAYERPAT', 'XBAYROFF', 'YBAYROFF', 'DATAMIN', 'DATAMAX', 'CTYPE1', 'CTYPE2', 'CRVAL1', 'CRVAL2', 'CRPIX1', 'CRPIX2', 'CDELT1', 'CDELT2', 'CROTA1', 'CROTA2', 'SECPIX1', 'SECPIX2', 'RADECSYS', 'FRAMEID', 'COMMENT', 'HISTORY', 'END'])"
                             messageExpression: >-
                               self + (self in ['COMMENT', 'HISTORY',
                               'END'] ? ' is a keyword that FITS reserves
-                              for a card with no value' : ' is a keyword
+                              for a card with no value' : self in
+                              ['FRAMEID'] ? ' is a keyword that
+                              astrophotography-operator writes, with a
+                              new value for each frame' : ' is a keyword
                               that the camera\'s driver writes from what
                               it measures, and a declared value would
                               replace the measured one')
