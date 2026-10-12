@@ -228,34 +228,38 @@ func (r *runner) stopGuider(ctx context.Context, w *stepWork) (outcome, error) {
 	return done("stopped %s", strings.Join(stopped, ", "))
 }
 
-// stopCapture stops PHD2's exposures and guiding, for Abort. A PHD2
-// whose connection is not open, or that takes no exposures, receives
-// nothing.
+// stopCapture stops PHD2's exposures and guiding, for Abort. It finds
+// PHD2 by the guider pod that runs on the telescope's server, not by the
+// Guider: a Guider has no finalizer, so one that a person deleted with
+// the reservation is gone while its PHD2 still guides. A PHD2 whose
+// connection is not open, or that takes no exposures, receives nothing.
 func (r *runner) stopCapture(ctx context.Context, w *stepWork) (string, error) {
-	t := r.o.snapshot()
-	guider := t.guiderOf(r.res.Spec.Telescope)
-	if guider == nil {
-		return "", nil
-	}
-	conn, ok := r.o.guiderConns.get(guiderName(guider))
-	if !ok {
-		return "", nil
-	}
-	state := conn.client.State()
-	if !state.Open || !capturing(state) {
-		return "", nil
-	}
-	w.report("stopping PHD2, which is " + state.AppState)
-	if err := conn.client.StopCapture(ctx); err != nil {
-		if errors.Is(err, phd2.ErrNotConnected) || errors.Is(err, phd2.ErrDisconnected) {
-			return "", nil
+	ref := serverRef{observatory.TelescopeKind, r.res.Spec.Telescope}
+	var stopped []string
+	for _, name := range r.o.snapshot().podNames(func(l map[string]string) bool {
+		return l[labelServer] == ref.String() && l[labelRole] == roleGuider
+	}) {
+		conn, ok := r.o.guiderConns.get(name)
+		if !ok {
+			continue
 		}
-		return "", fmt.Errorf("stopping PHD2: %w", err)
+		state := conn.client.State()
+		if !state.Open || !capturing(state) {
+			continue
+		}
+		w.report("stopping PHD2, which is " + state.AppState)
+		if err := conn.client.StopCapture(ctx); err != nil {
+			if errors.Is(err, phd2.ErrNotConnected) || errors.Is(err, phd2.ErrDisconnected) {
+				continue
+			}
+			return "", fmt.Errorf("stopping PHD2: %w", err)
+		}
+		if err := conn.client.WaitFor(ctx, func(s phd2.State) bool { return !s.Open || !capturing(s) }); err != nil {
+			return "", fmt.Errorf("PHD2 still reports %s: %w", conn.client.State().AppState, err)
+		}
+		stopped = append(stopped, "stopped PHD2, which was "+state.AppState)
 	}
-	if err := conn.client.WaitFor(ctx, func(s phd2.State) bool { return !s.Open || !capturing(s) }); err != nil {
-		return "", fmt.Errorf("PHD2 still reports %s: %w", conn.client.State().AppState, err)
-	}
-	return "stopped PHD2, which was " + state.AppState, nil
+	return strings.Join(stopped, "; "), nil
 }
 
 // capturing reports whether PHD2 takes exposures: it loops,

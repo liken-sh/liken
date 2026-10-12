@@ -127,3 +127,86 @@ func TestADeviceThatLeavesAndRejoinsRunsEachProcedureAgain(t *testing.T) {
 		}
 	})
 }
+
+// A device that leaves while the reservation is Ready loses the power
+// of the output that its spec.power names, as it would at the end of
+// the reservation: its Switch stays on the server, and a camera left
+// powered on the shelf would stay powered for good. A train deleted
+// before its reservation, which the operator can read first in a
+// `kubectl delete -f`, takes every device of the train off the server.
+func TestADeviceThatLeavesLosesItsPower(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		leave func(w *world)
+		pods  []string
+		off   []string
+	}{
+		{"a camera put on the shelf",
+			func(w *world) { w.moveDevice(observatory.CameraKind, "east-main", "", "") },
+			[]string{"east-main-camera"}, outputsOff[:1]},
+		{"a camera moved to another telescope",
+			func(w *world) { w.moveDevice(observatory.CameraKind, "east-main", "opticalTrain", "west-imaging") },
+			[]string{"east-main-camera"}, outputsOff[:1]},
+		{"a train deleted before its reservation",
+			func(w *world) { w.api.deleteNamed(kindCollection(observatory.OpticalTrainKind), "east-imaging") },
+			[]string{"east-main-camera", "east-focuser", "east-rotator", "east-dustcap", "east-flatpanel"}, outputsOff},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				w := readyWorld(t)
+				c.leave(w)
+				w.until(5*time.Minute, "a pod that left stays", func() bool {
+					names := w.api.names(podsCollection)
+					return !slices.ContainsFunc(c.pods, func(p string) bool { return slices.Contains(names, p) })
+				})
+				w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
+				w.gone(observatory.ReservationKind, "east-tonight", 10*time.Minute)
+				for _, change := range c.off {
+					if !slices.Contains(w.indi.changes(), change) {
+						t.Errorf("changes = %q\nwant %q", w.indi.changes(), change)
+					}
+				}
+			})
+		})
+	}
+}
+
+// The Event on a device that left says that its output went off, and
+// an output that a device on the server still names stays on: the
+// focuser and the rotator share output 2.
+func TestALeavingDeviceSwitchesOffOnlyAnOutputNoDeviceStillNames(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		kind   observatory.Kind
+		device string
+		event  string
+		output string
+		sent   bool
+	}{
+		{"a camera alone on output 1", observatory.CameraKind, "east-main",
+			"Normal PodDeleted: Deleted pod east-main-camera, because the Camera left Telescope east while Reservation east-tonight is Ready. Switched off output 1 of Switch east.",
+			outputsOff[0], true},
+		{"a focuser that shares output 2", observatory.FocuserKind, "east",
+			"Normal PodDeleted: Deleted pod east-focuser, because the Focuser left Telescope east while Reservation east-tonight is Ready.",
+			outputsOff[1], false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				w := readyWorld(t)
+				w.moveDevice(c.kind, c.device, "", "")
+				w.until(5*time.Minute, "no PodDeleted Event", func() bool {
+					return slices.Contains(typedEvents(w.api, c.kind, c.device), c.event)
+				})
+				if sent := slices.Contains(w.indi.changes(), c.output); sent != c.sent {
+					t.Errorf("sent %q = %t, want %t", c.output, sent, c.sent)
+				}
+			})
+		})
+	}
+}

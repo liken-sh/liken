@@ -43,6 +43,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -219,23 +220,31 @@ func (o *operator) keepLocks(ctx context.Context) {
 	}
 }
 
-// domesOf answers the domes of an observatory, the Dome resources whose
-// spec.observatory names it. The park locks hold while there is one. A
-// deleted dome counts while its pod runs on the observatory's server,
-// because its deactivation parks it there (leaves.go) and the dome
-// still turns over the mounts until its driver stops.
+// domesOf answers the domes of an observatory: the Dome resources that
+// its server runs or releases (lockDevices). The park locks hold while
+// there is one.
 func domesOf(t *tree, site *observatory.Observatory) []*device {
-	siteRef := serverRef{observatory.ObservatoryKind, site.Metadata.Name}
-	domes := t.devicesOf(siteRef, observatory.DomeKind)
+	return lockDevices(t, serverRef{observatory.ObservatoryKind, site.Metadata.Name}, observatory.DomeKind)
+}
+
+// lockDevices answers the devices of one kind on one server that hold
+// or follow a park lock, sorted by key: the devices that the tree
+// places there (tree.devicesOf), and the devices whose driver's pod
+// still runs there (tree.runningOn), as tree.releasedOn answers them.
+// The pod and not the parents decides, because a dome or a mount that a
+// person deleted, with its reservation or alone, still turns until its
+// deactivation parks it and its driver stops.
+func lockDevices(t *tree, s serverRef, kind observatory.Kind) []*device {
+	out := t.devicesOf(s, kind)
 	for _, d := range t.devices {
-		if d.kind != observatory.DomeKind || !deleting(d.object.Metadata) {
+		if d.kind != kind || slices.Contains(out, d) {
 			continue
 		}
-		if _, p, ok := t.podOf(d); ok && p.Metadata.Labels[labelServer] == siteRef.String() {
-			domes = append(domes, d)
+		if on, running := t.runningOn(d); running && on == s {
+			out = append(out, d)
 		}
 	}
-	return sortedDevices(domes)
+	return sortedDevices(out)
 }
 
 // planLocks answers the relays, the watches, and the condition of one
@@ -259,7 +268,7 @@ func (o *operator) planLocks(t *tree, site *observatory.Observatory) sitePlan {
 			continue
 		}
 		ref := serverRef{observatory.TelescopeKind, name}
-		devices := sortedDevices(t.devicesOf(ref, observatory.MountKind))
+		devices := lockDevices(t, ref, observatory.MountKind)
 		mountDevices = append(mountDevices, devices...)
 		mountHandles = append(mountHandles, o.handlesOf(t, ref, devices)...)
 		for _, d := range devices {

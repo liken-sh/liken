@@ -102,6 +102,11 @@ that leaves, to the shelf or to another telescope, first runs its
 timeouts of its actions. Then its driver stops on the server, also
 after a `deactivation` that failed with a `ProcedureFailed` Warning,
 and the device loses its pod, its `Service`, and its `ResourceClaim`.
+Then the operator switches off the output that the device's
+`spec.power` names, unless a device on a running server names the same
+output, and the `PodDeleted` Event says so. Once its pod is gone, the
+reservation's `PowerOff` no longer finds the device, so this is the
+only time its output goes off.
 A device that a person deletes leaves the same way, as [Deleting a running
 resource](#deleting-a-running-resource) describes. The
 operator posts a `DriverStarted` or a `DriverStopped` Event on the
@@ -182,8 +187,11 @@ deletes the pod before the server's pod. A deleted `Switch` switches
 its outputs off the same way, and a deleted `Dome` disconnects in
 `StopSite` before the observatory's server stops.
 A device whose train a person deletes while the reservation is `Ready`
-leaves its server and runs its `deactivation` first, as a device put
-on the shelf does.
+leaves its server and runs its `deactivation` first, and loses the
+power of its output, as a device put on the shelf does. A `Guider`
+carries no finalizer either, so it is gone at once, and `Abort` finds
+its PHD2 by the guider's pod on the telescope's server, and stops it
+there.
 
 A `Telescope` that a person deletes during a session ends the
 reservation that holds it, as `spec.end` does. The deactivation steps

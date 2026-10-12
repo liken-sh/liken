@@ -280,3 +280,28 @@ func TestTheLastReleaseParksTheDome(t *testing.T) {
 		}
 	})
 }
+
+// A mount deleted together with its reservation holds the dome's lock
+// while its driver runs. So while an exposure holds the Abort step, a
+// person's KStars cannot park the dome over the mount, which is still
+// unparked.
+func TestAMountDeletedWithItsReservationHoldsTheDomeLock(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := startWorld(t)
+		readyOf(w)
+		w.indi.setState("east-telescope", "CCD Simulator", "CCD_EXPOSURE", "Busy")
+		w.indi.hold("CCD Simulator", "CCD_ABORT_EXPOSURE")
+		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
+		w.until(time.Minute, "the Abort step does not abort the exposure", func() bool {
+			return w.indi.count("east-telescope", "CCD Simulator.CCD_ABORT_EXPOSURE") > 0
+		})
+		w.api.deleteNamed(kindCollection(observatory.MountKind), "east")
+		synctest.Wait()
+		w.relayedLast("lab-observatory", "TELESCOPE_PARK", mountsUnparkedToLab)
+		w.indi.ask("lab-observatory", "Dome Simulator", "DOME_PARK", "PARK=On", "UNPARK=Off")
+		if got := w.indi.parked("lab-observatory", "Dome Simulator", "DOME_PARK"); got != "Alert UNPARK" {
+			t.Errorf("DOME_PARK is %q, want Alert with UNPARK On", got)
+		}
+	})
+}

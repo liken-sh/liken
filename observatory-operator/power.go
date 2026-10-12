@@ -75,3 +75,24 @@ func (o *operator) setOutputs(ctx context.Context, t *tree, devices []*device, p
 	}
 	return notes, nil
 }
+
+// unpowered answers the devices whose output no device on a running
+// server names. A device that the tree places on a server whose pod
+// runs still draws from its output, so a device that leaves, on the
+// same Switch output, leaves that output on.
+func (t *tree) unpowered(devices []*device) []*device {
+	used := map[observatory.Power]bool{}
+	for _, d := range t.devices {
+		ref, placed := t.server(d)
+		if _, running := t.pods[ref.String()]; placed && running && d.object.Spec.Power != nil {
+			used[*d.object.Spec.Power] = true
+		}
+	}
+	var out []*device
+	for _, d := range devices {
+		if p := d.object.Spec.Power; p != nil && !used[*p] {
+			out = append(out, d)
+		}
+	}
+	return out
+}

@@ -49,7 +49,9 @@ mount under the name in its `ACTIVE_DEVICES.ACTIVE_TELESCOPE`:
 unparked while any mount is unparked, moving, or silent. A mount that
 does not report its park state counts as unparked until the
 `Deactivation` step of its reservation has ended. A dome that does not
-report counts as parked.
+report counts as parked. A `Mount` or a `Dome` that a person deleted,
+alone or with its reservation, counts while its driver's pod runs,
+because the device can still move until its `deactivation` parks it.
 
 The `Observatory`'s `LocksRelayed` condition reports the relay. It is
 `True` while the operator relays each state, and its message names

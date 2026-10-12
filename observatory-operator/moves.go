@@ -14,6 +14,11 @@ package main
 //     server it left, so the runner deletes them here. Without the
 //     delete, the pod would run and the claim would hold the hardware
 //     until deactivation's StopDevices.
+//   - The runner switches off the output that the device's spec.power
+//     names, as PowerOff would. Once the pod is gone, nothing places
+//     the device on the server, so the reservation's PowerOff no longer
+//     finds it. An output that a device on a running server still names
+//     stays on, because that device still draws from it.
 //
 // The runner refuses no change.
 
@@ -22,6 +27,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -71,6 +77,7 @@ func (r *runner) removeStrays(ctx context.Context, t *tree, ref serverRef) error
 	if err != nil {
 		return err
 	}
+	now := r.o.snapshot()
 	for _, key := range slices.Sorted(maps.Keys(left)) {
 		d, ok := t.deviceByKey(key)
 		if !ok {
@@ -80,8 +87,15 @@ func (r *runner) removeStrays(ctx context.Context, t *tree, ref serverRef) error
 		if deleting(d.object.Metadata) {
 			why = "was deleted"
 		}
-		r.o.recorder.Normal(reference(d.kind, d.object.Metadata), reasonPodDeleted,
-			fmt.Sprintf("Deleted pod %s, because the %s %s while Reservation %s is Ready.", left[key], d.kind.Name, why, r.name))
+		message := fmt.Sprintf("Deleted pod %s, because the %s %s while Reservation %s is Ready.", left[key], d.kind.Name, why, r.name)
+		notes, err := r.o.setOutputs(ctx, now, now.unpowered([]*device{d}), false)
+		if err != nil {
+			r.o.logf("Reservation %s: switching off the output of %s: %v", r.name, key, err)
+		}
+		if len(notes) > 0 {
+			message += " " + sentence(strings.Join(notes, "; ")) + "."
+		}
+		r.o.recorder.Normal(reference(d.kind, d.object.Metadata), reasonPodDeleted, message)
 		r.o.logf("Reservation %s: deleted pod %s of %s, which left %s", r.name, left[key], key, ref)
 	}
 	return nil
