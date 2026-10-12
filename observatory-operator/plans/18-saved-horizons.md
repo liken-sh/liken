@@ -1,8 +1,7 @@
 # 18, Saved horizons
 
-Proposed on 2026-10-12. Not built. This plan records the problem and
-the decisions of the design conversation; the resource and its fields
-are not designed yet.
+Proposed on 2026-10-12, and designed on 2026-10-12. The design below
+answers what the design conversation left open.
 
 ## The problem
 
@@ -37,8 +36,38 @@ roof sees a different sky.
   mount limit says where the hardware must not move, which is a safety
   matter. A dome's slit moves with the dome, so it is no fixed horizon.
 
+## The design
+
+- **A saved horizon is a `Horizon`**, a resource in the namespace of
+  the observatory, named for the place, such as `yard` or `roof`. A
+  resource of its own lets a person list the saved horizons with
+  `kubectl get horizons`, and lets several telescopes name one.
+- **`spec.profile` holds the file as the person brought it**: one
+  point to a line, the azimuth and then the altitude, in degrees,
+  separated by spaces, a tab, or a comma. A line that starts with `#`
+  is a comment, and a blank line is skipped. This is the format of
+  N.I.N.A.'s custom horizon and of Cartes du Ciel's, so a person
+  pastes a file in and copies it out with no conversion.
+- **The schema refuses a profile that no program could read**: a line
+  that is not a comment and not two numbers, an azimuth outside 0 to
+  360, an altitude outside -90 to 90, or fewer than two points, which
+  N.I.N.A. also requires. A mistake fails when it is applied.
+- **The altitude between two points is a straight line in azimuth**,
+  and the profile wraps from its last point to its first through 360
+  degrees. N.I.N.A. interpolates the same way. The rule lives in Go
+  beside the type, in `observatory/`, so `astrophotography-operator`
+  reads a horizon with the same code that its tests use.
+- **`spec.horizon` on the `Telescope` names its current `Horizon`.**
+  Moving a portable telescope from the yard to the roof is one edit
+  of that name. With no name, the telescope has no horizon, and only
+  the sky's own geometry limits it.
+- **The `Telescope`'s `HorizonFound` condition** reports whether the
+  named `Horizon` exists. A telescope that names a missing horizon
+  still runs, because a horizon matters only to the scheduler, but the
+  condition and its `Event` tell the person before a night is spent
+  on targets behind the trees.
+
 ## Still open
 
-The resource or field that holds a saved horizon, how a `Telescope`
-names its current one, and the exact syntax the other programs accept,
-such as comments and the order of the columns.
+Stellarium's landscapes and SkyTools have horizon files of their own,
+with more columns. A person converts one of those by hand.
