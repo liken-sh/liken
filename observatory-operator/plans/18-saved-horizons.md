@@ -3,7 +3,8 @@
 Proposed on 2026-10-12, and designed on 2026-10-12. The design below
 answers what the design conversation left open.
 
-Built on 2026-10-12; not drilled yet.
+Built on 2026-10-12. Drilled on the QEMU dev cluster on 2026-10-12;
+[the drill](#the-drill) records the results.
 
 ## The problem
 
@@ -88,6 +89,36 @@ roof sees a different sky.
   the status writer composes `HorizonFound` again when a `Horizon` is
   created or deleted. `False` posts a Warning, because a scheduler
   would plan the night with no horizon.
+
+## The drill
+
+The drill ran on 2026-10-12 on the QEMU dev cluster, on the lab of
+[plan 19's drill](19-the-frames-outbox.md#the-drill): `node-1`, a
+leader with 2 GB of memory, and `node-4`, a follower with 3 GB. A
+`NoSchedule` taint on `node-1` kept the observatory's pods on
+`node-4`. The operator was built from d8d0759a and reached the lab
+through the lab registry as `ghcr.io/liken-sh/observatory-operator:dev`.
+The observatory was a copy of `examples/simulators.yaml` without its
+`Reservation`, so `Horizon yard` and `Horizon roof` existed, and
+`Telescope east` named `yard`. The times below come from polling the
+`Telescope` every 0.5 s.
+
+| Check | Result |
+|---|---|
+| Create a `Horizon` with the line `north 20` | Refused: "each line of spec.profile is a comment that starts with #, a blank line, or an azimuth and an altitude in degrees, separated by spaces, a tab, or a comma". |
+| Create a `Horizon` with the azimuth 400, and one with -1 | Both refused: "each azimuth in spec.profile is from 0 to 360 degrees". |
+| Create a `Horizon` with the altitude 95, and one with 90.1 | Both refused: "each altitude in spec.profile is from -90 to 90 degrees". |
+| Create a `Horizon` with one point | Refused: "spec.profile holds at least two points". |
+| Create three `Horizon`s that a program can read | Created: a profile with a comment, a blank line, a comma, and a tab; a profile of 360 lines, one point for each degree, in 4,856 bytes of YAML; and the points `0 -90`, `359.5 90`, and `360 -2.5`. |
+| Delete `Horizon yard` | `HorizonFound` was `False` 1.7 s later, with the reason `HorizonMissing` and the message "Missing Horizon yard". A Warning `Event` `HorizonMissing` had the same message. |
+| Apply the example again, which creates `yard` | `HorizonFound` was `True`, "Found Horizon yard", 4.8 s after the apply of the whole example started. A Normal `Event` `Found` had the same message. |
+| Set `spec.horizon` to `roof` | 1.7 s later the message was "Found Horizon roof". The status stayed `True`, so `lastTransitionTime` kept its value and no `Event` was posted. |
+| Remove `spec.horizon` | The condition was gone from the status 1.1 s later, and no `Event` was posted. |
+| Set `spec.horizon` to `nowhere`, and reserve `east` | `HorizonFound` was `False`, "Missing Horizon nowhere". The reservation was `Ready` 35 s after its creation, and the `Telescope`'s `Ready` was `True` beside `HorizonFound` `False`. |
+| Ask the API server what the operator's service account can do with `horizons` | `get`, `list`, and `watch`: yes. `create`, `update`, `patch`, and `delete`: no. The CRD has no status subresource. |
+
+The checks of the profile went to the API server with `kubectl create`,
+so each refusal is the message of the CRD's own rule.
 
 ## Still open
 

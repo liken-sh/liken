@@ -2,7 +2,9 @@
 
 Proposed on 2026-10-12, and designed on 2026-10-12. The design below
 answers what the design conversation left open, from the evidence of
-the CCD simulator. Built on 2026-10-12; not drilled yet.
+the CCD simulator. Built on 2026-10-12. Drilled on the QEMU dev
+cluster on 2026-10-12; [the drill](#the-drill) records the results,
+and a defect of the INDI client that the example's keywords found.
 
 ## The problem
 
@@ -129,7 +131,75 @@ the driver saved:
   person chose for that frame type, because it writes the fact the
   driver measures in another spelling and not a different fact.
 
+## The drill
+
+The drill ran on 2026-10-12 on the QEMU dev cluster, on the lab of
+[plan 19's drill](19-the-frames-outbox.md#the-drill), with the
+observatory's pods on `node-4`. The operator was built from d8d0759a
+and reached the lab through the lab registry as
+`ghcr.io/liken-sh/observatory-operator:dev`. The observatory was a copy
+of `examples/simulators.yaml` without its `Reservation`, so the
+`Observatory` declared `OBSERVER` and `Telescope east` declared
+`TELESCOP`. The drill added `INSTRUME` and `OBJECT` (`Camera default`)
+to `Camera east-main`. Each reservation of `east` declared `OBJECT`
+and named the outbox `frames`, a `local-path` claim on `node-4`, so
+the frames landed where a `busybox` pod could read them. The exposures
+were 1 s, through a port forward to `east-telescope`.
+
+The guider could not run on this lab. Its pod runs beside the
+telescope's server on `node-4`, whose image filesystem had 450 MiB
+free, and the images of PHD2 and weston take about 785 MB when
+unpacked. So the drill reserved `east` once with `Guider east` and
+ended the reservation during `Activation`, before `StartGuider`. It
+then deleted `Guider east`, so `Camera east-guide` was an imaging
+camera in the other sessions.
+
+| Check | Result |
+|---|---|
+| Write `EXPTIME` and `CRVAL1` on a `Telescope` and a `Reservation`, `DATE-OBS` on a `Camera`, and `CCD-TEMP` on the `Observatory` | Each refused, for example: "EXPTIME is a keyword that the camera's driver writes from what it measures, and a declared value would replace the measured one". The `Reservation`'s hand-written copy of the field gave the same messages as the generated CRDs. |
+| Write the value `f/5`, and `a/b` on a `Reservation` | Refused: "the camera's driver writes each '/' in a value as '\', so the header would not hold the value declared". |
+| Write `COMMENT`, `observer`, and `OBJECT` twice on a `Telescope` | Refused: "COMMENT is a keyword that FITS reserves for a card with no value", "a FITS keyword name is 1 to 8 of the capital letters A to Z, the digits, '-', and '_'", and "Duplicate value: {"name":"OBJECT"}". |
+| Write `TELESCOP`, `INSTRUME`, and `OBJECT` | Accepted. |
+| Reserve `east` with `Guider east` and `OBJECT` `M31` | `status.session.fitsKeywords` held `Camera/east-main` alone, the guide camera's none: `OBSERVER`, `TELESCOP`, `INSTRUME`, and `OBJECT` `M31`, the reservation's value over the camera's. `Configure` failed after its deadline of 2 min, as the next paragraphs describe. |
+| Change the comment of `TELESCOP`, and annotate `observatory.liken.sh/retry=1` | The retry recorded the session again with the new comment, and `Configure` took 1 s. |
+| Reserve `east` with no `Guider` | `Ready` 35 s after creation. `Configure` took 1 s. The record held both cameras, and `Camera/east-guide` had no `INSTRUME`, the camera's keyword. |
+| Expose `CCD Simulator`, and read `IMAGE_003.fits` from the claim | `INSTRUME = 'East main camera' / the Camera level` in the place of the driver's `CCD Simulator`, `OBJECT = 'M31'`, `OBSERVER = 'Simulated Observer'`, and `TELESCOP = 'East refractor'`. The header held one card for each name, so the driver's own `TELESCOP` was gone. |
+| Expose `Guide Simulator` | `INSTRUME = 'Guide Simulator' / Camera Name`, the driver's, and the same `OBJECT`, `OBSERVER`, and `TELESCOP`. |
+| Change `OBSERVER` on the `Observatory` to `Edited Observer` and `OBJECT` on the `Reservation` to `M33` while the reservation is `Ready`, and expose | 15 s later, the record was the same, and the camera pod had the same UID and a `restartCount` of 0. `IMAGE_005.fits` held `Simulated Observer` and `M31`. |
+| Delete the pod `east-main-camera`, and expose | The `Camera` was `Connected` again 5 s after the delete, in a new pod. `IMAGE_006.fits`, from the new driver process, held the four recorded keywords. |
+| End the reservation, reserve `east` again, and expose | `Ready` 36 s after creation. The record held `Edited Observer` and `M33`, and so did `IMAGE_007.fits`. |
+
+The first reservation failed because of the comment in the example,
+"the Telescope's own name". The operator's INDI client writes a text
+with `xml.EscapeText` (`indi/wire.go`), which writes `'` as `&#39;` and
+`"` as `&#34;`. libindi's XML parser decodes the named entities
+`&apos;`, `&quot;`, and `&amp;`, but it does not decode a numeric
+character reference. So the driver stored the comment as the literal
+text `the Telescope&#39;s own name`, and answered with that text.
+`Settle` waits until the driver answers with the values sent, so it
+waited until the step's deadline, and the `Camera`'s Warning `Event`
+said "writing the FITS keyword TELESCOP: Camera east-main: context
+deadline exceeded".
+
+Two probes isolated the cause. A raw client wrote `it's`, `it&apos;s`,
+and `it&#39;s` as a comment. The driver answered the first two with
+`it's`, and the third with the literal text `it&#39;s`, which it sent
+as `it&amp;#39;s`. The operator's own client,
+against the same server, settled `INDI_CLEAR` in 43 ms and `OBSERVER`
+in 2 ms, and did not settle `TELESCOP` with the example's comment in
+8 s. The defect is in the INDI client, and it affects every text that
+the client writes with a `'` or a `"`, not only a FITS keyword. The
+drill did not fix it. It changed the comment on the lab's `Telescope`
+to "the name of the Telescope" and ran the other checks with that
+comment.
+
 ## Still open
+
+The INDI client writes `'` and `"` as numeric character references,
+which libindi does not decode, so `Configure` times out on a declared
+keyword whose value or comment holds either character, such as the
+comment of `TELESCOP` in `examples/simulators.yaml`. [The
+drill](#the-drill) gives the evidence.
 
 `astrophotography-operator` writes keywords of its own levels, such as
 `OBJECT` for each target, into the same running driver. `INDI_CLEAR`
