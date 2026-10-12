@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -77,6 +78,29 @@ func (o *operator) setOutputs(ctx context.Context, t *tree, devices []*device, p
 		}
 	}
 	return notes, nil
+}
+
+// poweredBy answers the devices whose outputs the release of a
+// server switches off: the devices that it releases (releasedOn), and
+// one for each device in the server's record whose object is gone or
+// was created again, with the recorded spec. The finalizer holds a
+// deleted device only until its pod is gone, so after StopDevices only
+// the record names the output that the session switched on for it.
+func (t *tree) poweredBy(ref serverRef, released []*device) []*device {
+	out := slices.Clone(released)
+	for _, key := range sortedKeys(t.records[ref].Devices) {
+		r := t.records[ref].Devices[key]
+		if d, ok := t.deviceByKey(key); ok && sameUID(r.UID, d.object.Metadata) {
+			continue
+		}
+		kindName, name, _ := strings.Cut(key, "/")
+		kind, _ := observatory.KindNamed(kindName)
+		gone := &device{kind: kind, record: &r, recordedOn: ref}
+		gone.object.Metadata.Name = name
+		gone.object.Spec.DeviceSpec = r.DeviceSpec
+		out = append(out, gone)
+	}
+	return out
 }
 
 // unpowered answers the devices whose output no device that draws

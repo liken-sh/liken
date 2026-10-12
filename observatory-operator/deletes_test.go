@@ -7,8 +7,10 @@ package main
 // and its finalizer.
 
 import (
+	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -210,6 +212,64 @@ func TestADeletedDeviceSwitchesOffOnlyAnOutputNoDeviceStillNames(t *testing.T) {
 				})
 				if sent := slices.Contains(w.indi.changes(), c.output); sent != c.sent {
 					t.Errorf("sent %q = %t, want %t", c.output, sent, c.sent)
+				}
+			})
+		})
+	}
+}
+
+// A device deleted together with its reservation loses its pod in the
+// StopDevices step, with the other devices of its server, and before
+// the PowerOff step switches any output off. A pod that outlived its
+// driver's link would see its socat exit and the kubelet start it
+// again. The PowerOff step still switches off the output of a deleted
+// camera that is alone on output 1, from the session's record.
+func TestADeviceDeletedWithItsReservationStopsWithTheOtherPods(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		deletes []named
+		pods    []string
+	}{
+		{"a dust cap with its train",
+			[]named{{observatory.OpticalTrainKind, "east-imaging"}, {observatory.DustCapKind, "east"}},
+			[]string{"east-dustcap", "east-main-camera", "east-mount"}},
+		{"a dust cap and a camera with their train",
+			[]named{{observatory.OpticalTrainKind, "east-imaging"}, {observatory.DustCapKind, "east"}, {observatory.CameraKind, "east-main"}},
+			[]string{"east-dustcap", "east-main-camera", "east-mount"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				w := startWorld(t)
+				readyOf(w)
+				var mu sync.Mutex
+				late := map[string]bool{}
+				w.api.hear(func(r *http.Request) {
+					pod, ok := strings.CutPrefix(r.URL.Path, podsCollection+"/")
+					if r.Method != http.MethodDelete || !ok {
+						return
+					}
+					off := slices.ContainsFunc(w.indi.changes(), func(change string) bool { return slices.Contains(outputsOff, change) })
+					mu.Lock()
+					defer mu.Unlock()
+					late[pod] = off
+				})
+				w.deleteDuringAbort(c.deletes...)
+				w.gone(observatory.ReservationKind, "east-tonight", 10*time.Minute)
+
+				mu.Lock()
+				defer mu.Unlock()
+				for _, pod := range c.pods {
+					if off, deleted := late[pod]; !deleted || off {
+						t.Errorf("pod %s deleted = %t, after an output went off = %t; want deleted before PowerOff", pod, deleted, off)
+					}
+				}
+				for _, change := range outputsOff {
+					if !slices.Contains(w.indi.changes(), change) {
+						t.Errorf("changes = %q\nwant %q", w.indi.changes(), change)
+					}
 				}
 			})
 		})

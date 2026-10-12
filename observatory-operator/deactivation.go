@@ -221,12 +221,11 @@ func (r *runner) disconnect(ctx context.Context, w *stepWork) (outcome, error) {
 
 // stopTelescopeDevices stops the drivers of the telescope's devices,
 // apart from the ones that power the others, on the server that keeps
-// running, and then deletes their pods (setDrivers). The server's
-// record still names each device after its pod is gone, so PowerOff
-// switches its output off (records.go). A device that a person deleted
-// keeps its pod, with its driver stopped, until PowerOff: the
-// finalizer keeps its object, and so its spec.power, only while its
-// pod runs.
+// running, and then deletes their pods (setDrivers). A device that a
+// person deleted goes with the others: a pod that outlived its driver's
+// link would see its socat exit, and the kubelet would start it again.
+// The server's record still names each device after its pod and its
+// object are gone, so PowerOff switches its output off (poweredBy).
 func (r *runner) stopTelescopeDevices(ctx context.Context, w *stepWork) (outcome, error) {
 	ref := serverRef{observatory.TelescopeKind, r.res.Spec.Telescope}
 	t := r.o.snapshot()
@@ -237,11 +236,6 @@ func (r *runner) stopTelescopeDevices(ctx context.Context, w *stepWork) (outcome
 	kept := map[string]bool{}
 	for _, d := range driverDevices(switches) {
 		kept[d.key()] = true
-	}
-	for _, d := range t.devicesRunningOn(ref) {
-		if runner, ok := t.runnerOf(d); ok && deleting(d.object.Metadata) {
-			kept[runner.key()] = true
-		}
 	}
 	stopped, err := r.o.stopPods(ctx, w.report, func(l map[string]string) bool {
 		return l[labelServer] == ref.String() && l[labelRole] == roleDevice && !kept[l[labelKind]+"/"+l[labelResource]]
@@ -262,12 +256,14 @@ func (r *runner) stopTelescopeDevices(ctx context.Context, w *stepWork) (outcome
 // reaches a Switch through it. A device that only its pod places on
 // the server (tree.releasedOn) has its output switched off too, so a
 // camera whose train a person deleted with the reservation loses its
-// power as it would in any release.
+// power as it would in any release. So does a device that a person
+// deleted with the reservation, whose object can be gone once
+// StopDevices deleted its pod (tree.poweredBy).
 func (r *runner) powerOff(ctx context.Context, w *stepWork) (outcome, error) {
 	t := r.o.snapshot()
 	ref := serverRef{observatory.TelescopeKind, r.res.Spec.Telescope}
 	devices := t.releasedOn(ref)
-	notes, err := r.o.setOutputs(ctx, t, t.unpowered(devices, ref), false)
+	notes, err := r.o.setOutputs(ctx, t, t.unpowered(t.poweredBy(ref, devices), ref), false)
 	if err != nil {
 		return outcome{}, err
 	}

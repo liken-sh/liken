@@ -39,8 +39,8 @@ goes on.
 | `Deactivation` | Runs the deactivation procedures, from the bottom of the tree up: those of the devices of the telescope's trains, then the `Telescope`'s own devices' and its own. When the last telescope in the observatory ends, it then runs the observatory's devices' and the `Observatory`'s own. Every device is still connected. | none: each action's timeout |
 | `StopGuider` | Deletes the guider's pod, `Service`, and `ConfigMap`, while its camera and mount are still connected. | 2 min |
 | `Disconnect` | Disconnects the devices in the reverse order of `Connect`. | 2 min |
-| `StopDevices` | Stops the drivers of the devices that are not `Switch` devices, and deletes their pods. A device that a person deleted keeps its pod until `PowerOff`, because the finalizer keeps the device only while its pod runs. | 2 min |
-| `PowerOff` | Switches the outputs off, except an output that a device on another server still draws from, then stops the `Switch` pods and the telescope's server. | 5 min |
+| `StopDevices` | Stops the drivers of the devices that are not `Switch` devices, and deletes their pods, the pods of the devices that a person deleted included. | 2 min |
+| `PowerOff` | Switches the outputs off, except an output that a device on another server still draws from, then stops the `Switch` pods and the telescope's server. It reads each output from the reservation's `status.session`, so a device that a person deleted has its output switched off after its object is gone. | 5 min |
 | `StopSite` | Disconnects the observatory's devices, switches their outputs off, except an output that a device on another server still draws from, and stops its server, unless a reservation of another telescope in the observatory is active. | 5 min |
 
 Deactivation begins at `spec.end`, when a person deletes the
