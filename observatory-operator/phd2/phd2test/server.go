@@ -38,12 +38,31 @@ type Server struct {
 	Scale *float64
 	// Refuse is the message of an error answer to set_connected.
 	Refuse string
+	// Refusals holds the message of an error answer to each method it
+	// names, such as find_star with "could not find star".
+	Refusals map[string]string
 	// Hold names a method that the Server reads and never answers.
 	Hold string
+	// Exposure is the guide exposure in milliseconds that set_exposure
+	// set last.
+	Exposure int
+	// Star is the position in pixels that find_star selects.
+	Star [2]float64
+	// HoldSettle keeps each settle of a guide or a dither open after
+	// its SettleBegin and one Settling event, until Settle ends it.
+	HoldSettle bool
+	// SettleFailure is the reason that each SettleDone reports, or
+	// empty for a settle that settles.
+	SettleFailure string
 
-	methods []string
-	conns   []net.Conn
-	dials   int
+	// settling names the operation whose settle HoldSettle holds open,
+	// guide or dither. PHD2 refuses another guide or dither until it
+	// ends.
+	settling string
+	params   map[string]json.RawMessage
+	methods  []string
+	conns    []net.Conn
+	dials    int
 	// exited records a Cut. A PHD2 that exited has no listener, so
 	// each later dial is refused.
 	exited bool
@@ -52,8 +71,11 @@ type Server struct {
 }
 
 // New answers a PHD2 that runs, is idle, and has no equipment
-// connected, as PHD2 is after it starts.
-func New() *Server { return &Server{AppState: "Stopped"} }
+// connected, as PHD2 is after it starts. Its star is where the
+// recorded session's star was.
+func New() *Server {
+	return &Server{AppState: "Stopped", Star: [2]float64{1045.09, 44.96}, params: map[string]json.RawMessage{}}
+}
 
 // DialContext answers one end of a new pipe, and serves the other. A
 // Server that was cut refuses the dial with ECONNREFUSED, as a host with
@@ -150,67 +172,216 @@ func (s *Server) serve(conn net.Conn) {
 			continue
 		}
 		answer := map[string]any{"jsonrpc": "2.0", "id": request.ID}
-		s.mu.Lock()
-		before := s.AppState
-		s.mu.Unlock()
-		if request.Method == "set_connected" {
-			// Connecting the gear writes the profile, and PHD2 reports
-			// that before it answers.
-			send(conn, Event("ConfigurationChange", nil))
+		a := s.answer(request.Method, request.Params)
+		for _, e := range a.before {
+			send(conn, e)
 		}
-		result, failure := s.answer(request.Method, request.Params)
-		if failure != "" {
-			answer["error"] = map[string]any{"code": 1, "message": failure}
+		if a.failure != "" {
+			answer["error"] = map[string]any{"code": 1, "message": a.failure}
 		} else {
-			answer["result"] = result
+			answer["result"] = a.result
 		}
 		if request.ID != nil {
 			send(conn, answer)
 		}
-		if request.Method == "stop_capture" {
-			// PHD2 reports the end of guiding and of the loop as events
-			// after it answers, and sends no AppState.
-			if before != "Stopped" && before != "Selected" && before != "Looping" {
-				send(conn, Event("GuidingStopped", nil))
-			}
-			send(conn, Event("LoopingExposuresStopped", nil))
+		for _, e := range a.after {
+			send(conn, e)
 		}
 	}
 }
 
-// answer runs one method the way event_server.cpp does.
-func (s *Server) answer(method string, params json.RawMessage) (any, string) {
+// reply is the Server's answer to one method: the events it sends
+// before the answer, the result or the failure, and the events after.
+type reply struct {
+	before  []map[string]any
+	result  any
+	failure string
+	after   []map[string]any
+}
+
+func result(v any, after ...map[string]any) reply    { return reply{result: v, after: after} }
+func failure(message string) reply                   { return reply{failure: message} }
+func (r reply) first(before ...map[string]any) reply { r.before = before; return r }
+
+// answer runs one method the way event_server.cpp does, with the
+// error messages of event_server.cpp and phdcontrol.cpp.
+func (s *Server) answer(method string, params json.RawMessage) reply {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.params[method] = params
+	if message, refused := s.Refusals[method]; refused {
+		return failure(message)
+	}
 	switch method {
 	case "get_app_state":
-		return s.AppState, ""
+		return result(s.AppState)
 	case "get_calibrated":
-		return s.Calibrated, ""
+		return result(s.Calibrated)
 	case "get_connected":
-		return s.Equipment, ""
+		return result(s.Equipment)
 	case "get_pixel_scale":
 		// PHD2 knows the camera's pixel size only once the camera is
 		// connected.
 		if s.Scale == nil || !s.Equipment {
-			return nil, ""
+			return result(nil)
 		}
-		return *s.Scale, ""
+		return result(*s.Scale)
 	case "set_connected":
+		// Connecting the gear writes the profile, and PHD2 reports
+		// that before it answers.
+		changed := Event("ConfigurationChange", nil)
 		var on []bool
 		if err := json.Unmarshal(params, &on); err != nil || len(on) != 1 {
-			return nil, "expected connected boolean param"
+			return failure("expected connected boolean param").first(changed)
 		}
 		if s.Refuse != "" {
-			return nil, s.Refuse
+			return failure(s.Refuse).first(changed)
 		}
 		s.Equipment = on[0]
-		return 0, ""
+		return result(0).first(changed)
 	case "stop_capture":
+		// PHD2 reports the end of guiding and of the loop as events
+		// after it answers, and sends no AppState.
+		var after []map[string]any
+		if s.AppState != "Stopped" && s.AppState != "Selected" && s.AppState != "Looping" {
+			after = append(after, Event("GuidingStopped", nil))
+		}
 		s.AppState = "Stopped"
-		return 0, ""
+		return result(0, append(after, Event("LoopingExposuresStopped", nil))...)
+	case "set_exposure":
+		var exposure []int
+		if err := json.Unmarshal(params, &exposure); err != nil || len(exposure) != 1 {
+			return failure("expected exposure param")
+		}
+		s.Exposure = exposure[0]
+		return result(0)
+	case "loop":
+		// PHD2 cannot loop with no camera.
+		if !s.Equipment {
+			return failure("could not start looping")
+		}
+		if s.AppState != "Selected" {
+			s.AppState = "Looping"
+		}
+		return result(0, Event("LoopingExposures", map[string]any{"Frame": 1}))
+	case "find_star":
+		if s.AppState != "Looping" && s.AppState != "Selected" {
+			return failure("could not find star")
+		}
+		s.AppState = "Selected"
+		at := map[string]any{"X": s.Star[0], "Y": s.Star[1]}
+		return result([]float64{s.Star[0], s.Star[1]}).first(Event("LockPositionSet", at), Event("StarSelected", at))
+	case "guide":
+		var p struct {
+			Settle      *settle `json:"settle"`
+			Recalibrate bool    `json:"recalibrate"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.Settle == nil {
+			return failure("expected settle object param")
+		}
+		if !p.Settle.valid() {
+			return failure("invalid settle params")
+		}
+		if !s.Equipment {
+			return failure("all equipment must be connected first")
+		}
+		if s.settling != "" {
+			return failure("Cannot initiate guide while " + s.settling + " is in progress")
+		}
+		var after []map[string]any
+		if p.Recalibrate || !s.Calibrated {
+			mount := map[string]any{"Mount": "INDI Mount [Telescope Simulator]"}
+			after = append(after, Event("StartCalibration", mount), Event("CalibrationComplete", mount))
+			s.Calibrated = true
+		}
+		s.AppState = "Guiding"
+		after = append(after, Event("StartGuiding", nil))
+		return result(0, append(after, s.settleLocked("guide", *p.Settle)...)...)
+	case "dither":
+		var p struct {
+			Amount *float64 `json:"amount"`
+			RAOnly bool     `json:"raOnly"`
+			Settle *settle  `json:"settle"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil || p.Amount == nil {
+			return failure("expected dither amount param")
+		}
+		if p.Settle == nil {
+			return failure("expected settle object param")
+		}
+		if !p.Settle.valid() {
+			return failure("invalid settle params")
+		}
+		if s.settling != "" {
+			return failure("Cannot initiate dither while " + s.settling + " is in progress")
+		}
+		// PHD2's frame refuses a dither while it does not guide.
+		if s.AppState != "Guiding" {
+			return failure("Dither error")
+		}
+		dy := *p.Amount / 2
+		if p.RAOnly {
+			dy = 0
+		}
+		dithered := Event("GuidingDithered", map[string]any{"dx": *p.Amount / 2, "dy": dy})
+		return result(0, append([]map[string]any{dithered}, s.settleLocked("dither", *p.Settle)...)...)
 	}
-	return nil, "method not found"
+	return failure("method not found")
+}
+
+// settle is the settle object of a guide or a dither.
+type settle struct {
+	Pixels  *float64 `json:"pixels"`
+	Time    *float64 `json:"time"`
+	Timeout *float64 `json:"timeout"`
+}
+
+// valid is parse_settle's check: pixels, time, and timeout are all
+// present.
+func (p settle) valid() bool { return p.Pixels != nil && p.Time != nil && p.Timeout != nil }
+
+// settleLocked begins a settle, and answers its events: SettleBegin,
+// one Settling, and SettleDone, which reports SettleFailure when it is
+// set. With HoldSettle, the settle stays open without its SettleDone
+// until Settle ends it. The caller holds mu.
+func (s *Server) settleLocked(operation string, p settle) []map[string]any {
+	events := []map[string]any{
+		Event("SettleBegin", nil),
+		Event("Settling", map[string]any{"Distance": 0.67, "Time": 0.0, "SettleTime": *p.Time, "StarLocked": true}),
+	}
+	if s.HoldSettle {
+		s.settling = operation
+		return events
+	}
+	return append(events, settleDone(s.SettleFailure))
+}
+
+// settleDone builds a SettleDone event. PHD2 adds Error only to a
+// settle that failed.
+func settleDone(failure string) map[string]any {
+	done := map[string]any{"Status": 0, "TotalFrames": 7, "DroppedFrames": 0}
+	if failure != "" {
+		done["Status"], done["Error"] = 1, failure
+	}
+	return Event("SettleDone", done)
+}
+
+// Settle ends the settle that HoldSettle holds open, and sends its
+// SettleDone to every open connection: settled when failure is empty,
+// and failed with failure as the reason otherwise.
+func (s *Server) Settle(failure string) {
+	s.mu.Lock()
+	s.settling = ""
+	s.mu.Unlock()
+	s.Broadcast(settleDone(failure))
+}
+
+// Params answers the params of the last request of a method, as the
+// client sent them, or nil when no request of the method arrived.
+func (s *Server) Params(method string) json.RawMessage {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.params[method]
 }
 
 // Set changes the Server's state under its lock.

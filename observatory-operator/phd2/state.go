@@ -33,6 +33,34 @@ type State struct {
 	// Alert is the last alert PHD2 showed, or the last failed
 	// calibration.
 	Alert *Alert
+	// Settling is the settle of the last Guide or Dither that this
+	// client sent, or that PHD2 reported since the connection opened.
+	Settling *Settling
+}
+
+// Settling is PHD2's progress toward one settle, from the SettleBegin,
+// Settling, and SettleDone events.
+type Settling struct {
+	// Began is true after SettleBegin. A Guide that calibrates first
+	// begins its settle when the calibration ends.
+	Began bool
+	// Distance is the star's distance from the lock position at the
+	// last Settling event, in pixels.
+	Distance float64
+	// Time is how long the star has stayed within the settle's
+	// distance, and SettleTime is how long the settle asks for.
+	Time, SettleTime time.Duration
+	// StarLocked is false while PHD2 has no star at the lock position.
+	StarLocked bool
+	// Done is true after SettleDone. Status is 0 when the star
+	// settled, and Error holds PHD2's reason when it did not.
+	Done   bool
+	Status int
+	Error  string
+	// TotalFrames and DroppedFrames count the guide frames of the
+	// settle, and the frames that PHD2 dropped because it lost the
+	// star.
+	TotalFrames, DroppedFrames int
 }
 
 // Step is one guide step, from a GuideStep event.
@@ -82,6 +110,10 @@ func (s State) clone() State {
 		alert := *s.Alert
 		out.Alert = &alert
 	}
+	if s.Settling != nil {
+		settling := *s.Settling
+		out.Settling = &settling
+	}
 	return out
 }
 
@@ -129,7 +161,21 @@ type message struct {
 	Msg            string  `json:"Msg"`
 	Type           string  `json:"Type"`
 	Reason         string  `json:"Reason"`
+
+	Distance   float64 `json:"Distance"`
+	Time       float64 `json:"Time"`
+	SettleTime float64 `json:"SettleTime"`
+	StarLocked bool    `json:"StarLocked"`
+	// Status is a number in SettleDone and text in LoopingExposures,
+	// so it is read for SettleDone alone.
+	Status        json.RawMessage `json:"Status"`
+	SettleError   string          `json:"Error"`
+	TotalFrames   int             `json:"TotalFrames"`
+	DroppedFrames int             `json:"DroppedFrames"`
 }
+
+// seconds converts a time in PHD2's seconds.
+func seconds(s float64) time.Duration { return time.Duration(math.Round(s * float64(time.Second))) }
 
 // errMethod wraps an error answer.
 var errMethod = errors.New("phd2")
@@ -171,7 +217,7 @@ func (c *Client) answer(id int, m message) {
 		c.applyRead(r.method, m.Result)
 	}
 	if r.done != nil {
-		r.done <- err
+		r.done <- reply{result: m.Result, err: err}
 	}
 }
 
@@ -257,9 +303,34 @@ func (c *Client) event(m message) {
 		// the connection itself.
 		s.Alert = &Alert{Message: m.Msg, Type: m.Type, Time: at}
 		c.rereadLocked(methodCalibrated, methodConnected, methodPixelScale)
+	case "SettleBegin", "Settling", "SettleDone":
+		c.settle(m)
 	case "ConfigurationChange":
 		// A change to the profile, such as a new binning or focal
 		// length, can change the pixel scale and drop the calibration.
 		c.rereadLocked(methodCalibrated, methodConnected, methodPixelScale)
+	}
+}
+
+// settle applies one event of a settle. The settle that Guide or
+// Dither recorded takes the events that follow its request. A settle
+// that another client started, such as a dither from KStars, starts a
+// new record at its first event, and so does a SettleBegin while a
+// settle that began is still open, because PHD2 begins a new settle
+// only after it ends the last one. The caller holds mu.
+func (c *Client) settle(m message) {
+	s := c.state.Settling
+	if s == nil || s.Done || (m.Event == "SettleBegin" && s.Began) {
+		s = &Settling{}
+		c.state.Settling = s
+	}
+	s.Began = true
+	switch m.Event {
+	case "Settling":
+		s.Distance, s.Time, s.SettleTime, s.StarLocked = m.Distance, seconds(m.Time), seconds(m.SettleTime), m.StarLocked
+	case "SettleDone":
+		s.Done = true
+		_ = json.Unmarshal(m.Status, &s.Status)
+		s.Error, s.TotalFrames, s.DroppedFrames = m.SettleError, m.TotalFrames, m.DroppedFrames
 	}
 }

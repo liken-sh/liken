@@ -3,6 +3,7 @@ package phd2test
 import (
 	"bufio"
 	"encoding/json"
+	"slices"
 	"testing"
 	"testing/synctest"
 )
@@ -46,7 +47,7 @@ func exchange(t *testing.T, s *Server, line string) []map[string]any {
 
 func TestAnUnknownMethodIsNotFound(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		got := exchange(t, New(), `{"method":"loop","id":7}`)
+		got := exchange(t, New(), `{"method":"get_star_image","id":7}`)
 		if got[0]["Event"] != "Version" || got[1]["Event"] != "AppState" || got[1]["State"] != "Stopped" {
 			t.Errorf("catch-up = %v", got[:2])
 		}
@@ -195,4 +196,178 @@ func TestACutServerRefusesADial(t *testing.T) {
 		conn.Close()
 		t.Fatal("the dial reached a PHD2 that exited")
 	}
+}
+
+// Each guiding method refuses what event_server.cpp and phdcontrol.cpp
+// refuse, with their messages.
+func TestTheGuidingMethodsRefuseAsPHD2Does(t *testing.T) {
+	const ok = `{"pixels":1.5,"time":5,"timeout":60}`
+	cases := []struct {
+		name, line string
+		set        func(*Server)
+		want       string
+	}{
+		{"an exposure that is not a whole number", `{"method":"set_exposure","params":[1.5],"id":1}`, nil, "expected exposure param"},
+		{"a loop with no camera", `{"method":"loop","id":1}`, nil, "could not start looping"},
+		{"a star while not looping", `{"method":"find_star","id":1}`, nil, "could not find star"},
+		{"no star in the frame", `{"method":"find_star","id":1}`,
+			func(s *Server) {
+				s.AppState, s.Refusals = "Looping", map[string]string{"find_star": "could not find star"}
+			}, "could not find star"},
+		{"a guide with no settle", `{"method":"guide","params":{"recalibrate":false},"id":1}`, nil, "expected settle object param"},
+		{"a settle with no timeout", `{"method":"guide","params":{"settle":{"pixels":1.5,"time":5}},"id":1}`, nil, "invalid settle params"},
+		{"a guide with no equipment", `{"method":"guide","params":{"settle":` + ok + `},"id":1}`, nil, "all equipment must be connected first"},
+		{"a guide during a settle", `{"method":"guide","params":{"settle":` + ok + `},"id":1}`,
+			func(s *Server) { s.Equipment, s.settling = true, "dither" }, "Cannot initiate guide while dither is in progress"},
+		{"a dither with no amount", `{"method":"dither","params":{"settle":` + ok + `},"id":1}`, nil, "expected dither amount param"},
+		{"a dither with no settle", `{"method":"dither","params":{"amount":5},"id":1}`, nil, "expected settle object param"},
+		{"a dither with a bad settle", `{"method":"dither","params":{"amount":5,"settle":{}},"id":1}`, nil, "invalid settle params"},
+		{"a dither during a settle", `{"method":"dither","params":{"amount":5,"settle":` + ok + `},"id":1}`,
+			func(s *Server) { s.AppState, s.settling = "Guiding", "guide" }, "Cannot initiate dither while guide is in progress"},
+		{"a dither while not guiding", `{"method":"dither","params":{"amount":5,"settle":` + ok + `},"id":1}`, nil, "Dither error"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				s := New()
+				if c.set != nil {
+					s.Set(c.set)
+				}
+				got := exchange(t, s, c.line)
+				failure, _ := got[2]["error"].(map[string]any)
+				if failure["message"] != c.want {
+					t.Errorf("answer = %v, want %q", got[2], c.want)
+				}
+			})
+		})
+	}
+}
+
+// readAll sends one line to a new connection and answers every message
+// that follows the catch-up events until the Server goes quiet.
+func readAll(t *testing.T, s *Server, line string) []map[string]any {
+	conn, _ := s.DialContext(t.Context(), "tcp", "phd2:4400")
+	lines := bufio.NewScanner(conn)
+	lines.Scan()
+	lines.Scan()
+	_, _ = conn.Write([]byte(line + "\r\n"))
+	var out []map[string]any
+	read := make(chan struct{})
+	go func() {
+		defer close(read)
+		for lines.Scan() {
+			var m map[string]any
+			_ = json.Unmarshal(lines.Bytes(), &m)
+			out = append(out, m)
+		}
+	}()
+	synctest.Wait()
+	conn.Close()
+	<-read
+	return out
+}
+
+// names answers the event of each message, or "answer" for an answer.
+func names(messages []map[string]any) []string {
+	var out []string
+	for _, m := range messages {
+		name, _ := m["Event"].(string)
+		if name == "" {
+			name = "answer"
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
+// The events around each answer follow the recorded session in
+// phd2/testdata/: find_star's selection comes before its answer, and a
+// guide's calibration and settle come after it.
+func TestEachMethodSendsPHD2sEvents(t *testing.T) {
+	const settle = `{"pixels":1.5,"time":5,"timeout":60}`
+	cases := []struct {
+		name, line string
+		set        func(*Server)
+		want       []string
+	}{
+		{"loop", `{"method":"loop","id":1}`, func(s *Server) { s.Equipment = true },
+			[]string{"answer", "LoopingExposures"}},
+		{"find a star", `{"method":"find_star","id":1}`, func(s *Server) { s.AppState = "Looping" },
+			[]string{"LockPositionSet", "StarSelected", "answer"}},
+		{"guide with no calibration", `{"method":"guide","params":{"settle":` + settle + `},"id":1}`, func(s *Server) { s.Equipment = true },
+			[]string{"answer", "StartCalibration", "CalibrationComplete", "StartGuiding", "SettleBegin", "Settling", "SettleDone"}},
+		{"guide with a calibration", `{"method":"guide","params":{"settle":` + settle + `},"id":1}`, func(s *Server) { s.Equipment, s.Calibrated = true, true },
+			[]string{"answer", "StartGuiding", "SettleBegin", "Settling", "SettleDone"}},
+		{"recalibrate", `{"method":"guide","params":{"settle":` + settle + `,"recalibrate":true},"id":1}`, func(s *Server) { s.Equipment, s.Calibrated = true, true },
+			[]string{"answer", "StartCalibration", "CalibrationComplete", "StartGuiding", "SettleBegin", "Settling", "SettleDone"}},
+		{"dither", `{"method":"dither","params":{"amount":5,"raOnly":true,"settle":` + settle + `},"id":1}`, func(s *Server) { s.AppState = "Guiding" },
+			[]string{"answer", "GuidingDithered", "SettleBegin", "Settling", "SettleDone"}},
+		{"hold the settle", `{"method":"dither","params":{"amount":5,"settle":` + settle + `},"id":1}`, func(s *Server) { s.AppState, s.HoldSettle = "Guiding", true },
+			[]string{"answer", "GuidingDithered", "SettleBegin", "Settling"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				s := New()
+				s.Set(c.set)
+				if got := names(readAll(t, s, c.line)); !slices.Equal(got, c.want) {
+					t.Errorf("messages = %v, want %v", got, c.want)
+				}
+			})
+		})
+	}
+}
+
+func TestFindStarAnswersTheStar(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := New()
+		s.Set(func(s *Server) { s.AppState, s.Star = "Looping", [2]float64{10, 20} })
+		got := exchange(t, s, `{"method":"find_star","id":1}`)
+		if position, _ := got[2]["result"].([]any); !slices.Equal(position, []any{10.0, 20.0}) || s.AppState != "Selected" {
+			t.Errorf("answer = %v, state = %q", got[2], s.AppState)
+		}
+	})
+}
+
+func TestSetExposureRecordsTheExposure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := New()
+		exchange(t, s, `{"method":"set_exposure","params":[2000],"id":1}`)
+		if s.Exposure != 2000 || string(s.Params("set_exposure")) != "[2000]" {
+			t.Errorf("exposure = %d, params = %s", s.Exposure, s.Params("set_exposure"))
+		}
+	})
+}
+
+// A settle that fails reports Status 1 and PHD2's reason, and a held
+// settle ends with Settle.
+func TestASettleEndsSettledOrFailed(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := New()
+		s.Set(func(s *Server) { s.AppState, s.SettleFailure = "Guiding", "timed-out waiting for guider to settle" })
+		got := readAll(t, s, `{"method":"dither","params":{"amount":5,"settle":{"pixels":1.5,"time":5,"timeout":60}},"id":1}`)
+		if done := got[len(got)-1]; done["Status"] != 1.0 || done["Error"] != "timed-out waiting for guider to settle" {
+			t.Errorf("SettleDone = %v", done)
+		}
+
+		s = New()
+		s.Set(func(s *Server) { s.AppState, s.HoldSettle = "Guiding", true })
+		conn, _ := s.DialContext(t.Context(), "tcp", "phd2:4400")
+		defer conn.Close()
+		lines := bufio.NewScanner(conn)
+		lines.Scan()
+		lines.Scan()
+		_, _ = conn.Write([]byte(`{"method":"dither","params":{"amount":5,"settle":{"pixels":1.5,"time":5,"timeout":60}},"id":1}` + "\r\n"))
+		// The answer, GuidingDithered, SettleBegin, and Settling.
+		for range 4 {
+			lines.Scan()
+		}
+		go s.Settle("")
+		lines.Scan()
+		var done map[string]any
+		_ = json.Unmarshal(lines.Bytes(), &done)
+		if _, failed := done["Error"]; done["Event"] != "SettleDone" || done["Status"] != 0.0 || failed {
+			t.Errorf("SettleDone = %v", done)
+		}
+	})
 }

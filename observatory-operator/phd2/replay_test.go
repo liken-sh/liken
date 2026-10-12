@@ -23,10 +23,12 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
+	"time"
 )
 
 type recorded struct {
@@ -67,6 +69,23 @@ func methodOf(line string) string {
 	}
 	_ = json.Unmarshal([]byte(line), &r)
 	return r.Method
+}
+
+func paramsOf(line string) json.RawMessage {
+	var r struct {
+		Params json.RawMessage `json:"params"`
+	}
+	_ = json.Unmarshal([]byte(line), &r)
+	return r.Params
+}
+
+// sameJSON compares two JSON values by what they hold, not by the
+// order of their keys.
+func sameJSON(a, b json.RawMessage) bool {
+	var x, y any
+	_ = json.Unmarshal(a, &x)
+	_ = json.Unmarshal(b, &y)
+	return reflect.DeepEqual(x, y)
 }
 
 func isAnswer(line string) bool { return strings.HasPrefix(line, `{"jsonrpc"`) }
@@ -112,14 +131,15 @@ func (r *replay) serve() {
 	lines := bufio.NewScanner(r.conn)
 	for lines.Scan() {
 		var request struct {
-			Method string `json:"method"`
-			ID     int    `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+			ID     int             `json:"id"`
 		}
 		if err := json.Unmarshal(lines.Bytes(), &request); err != nil {
 			r.t.Errorf("a request that is not JSON: %q", lines.Text())
 			return
 		}
-		for _, line := range r.answers(request.Method) {
+		for _, line := range r.answers(request.Method, request.Params) {
 			if isAnswer(line) {
 				var answer map[string]json.RawMessage
 				_ = json.Unmarshal([]byte(line), &answer)
@@ -133,8 +153,10 @@ func (r *replay) serve() {
 }
 
 // answers answers the lines that follow the recorded request of a
-// method in the current phase, or the last answer to the method.
-func (r *replay) answers(method string) []string {
+// method in the current phase, or the last answer to the method. The
+// client's params must equal the recorded ones, so the client asks
+// what the recording client asked.
+func (r *replay) answers(method string, params json.RawMessage) []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for i, l := range r.current {
@@ -142,6 +164,9 @@ func (r *replay) answers(method string) []string {
 			continue
 		}
 		r.used[i] = true
+		if want := paramsOf(l.line); !sameJSON(params, want) {
+			r.t.Errorf("%s params = %s, the recording sent %s", method, params, want)
+		}
 		var out []string
 		for _, next := range r.current[i+1:] {
 			if next.sent {
@@ -206,22 +231,43 @@ func TestTheClientFollowsARealPHD2(t *testing.T) {
 			t.Errorf("after set_connected = %+v", s)
 		}
 
-		r.stream("04-loop.txt")
+		r.play("04-loop.txt")
+		if err := c.Loop(t.Context()); err != nil {
+			t.Fatal(err)
+		}
 		if s := settled(c); s.AppState != "Looping" {
 			t.Errorf("looping = %q", s.AppState)
 		}
-		r.stream("05-find-star.txt")
+		r.play("05-find-star.txt")
+		x, y, err := c.FindStar(t.Context())
+		if err != nil || x != 1045.09 || y != 44.96 {
+			t.Errorf("find_star = %v, %v, %v", x, y, err)
+		}
 		if s := settled(c); s.AppState != "Selected" {
 			t.Errorf("with a star = %q, and PHD2 answered Selected", s.AppState)
 		}
-		r.stream("06-calibrate.txt")
-		if s := settled(c); s.AppState != "Guiding" || s.Calibrated == nil || !*s.Calibrated {
+		r.play("06-calibrate.txt")
+		if err := c.Guide(t.Context(), Settle{Pixels: 1.5, Time: 5 * time.Second, Timeout: time.Minute}, true); err != nil {
+			t.Fatal(err)
+		}
+		s = settled(c)
+		if s.AppState != "Guiding" || s.Calibrated == nil || !*s.Calibrated {
 			t.Errorf("after calibration = %+v", s)
 		}
+		if s.Settling == nil || !s.Settling.Began || s.Settling.Done {
+			t.Errorf("settle after SettleBegin = %+v", s.Settling)
+		}
 		r.stream("07-guide.txt")
+		if err := c.WaitSettled(t.Context()); err != nil {
+			t.Errorf("settle = %v", err)
+		}
 		s = settled(c)
 		if s.AppState != "Guiding" || s.Step == nil || s.RMS.Steps != 33 || s.Step.HFD == 0 || s.Step.SNR == 0 {
 			t.Errorf("guiding = %+v, step %+v", s, s.Step)
+		}
+		want := Settling{Began: true, Distance: 0.67, Time: 3800 * time.Millisecond, SettleTime: 5 * time.Second, StarLocked: true, Done: true, TotalFrames: 7}
+		if *s.Settling != want {
+			t.Errorf("settle = %+v, want %+v", *s.Settling, want)
 		}
 		t.Logf("RMS of the recorded guiding: %+v pixels, %.2f arcsec total", s.RMS, s.RMS.Total*(*s.PixelScale))
 

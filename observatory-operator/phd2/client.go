@@ -107,7 +107,13 @@ type Client struct {
 // a read's answer to the state itself, so a read needs no waiter.
 type request struct {
 	method string
-	done   chan error
+	done   chan reply
+}
+
+// reply is PHD2's answer to one request: its result, or its error.
+type reply struct {
+	result json.RawMessage
+	err    error
 }
 
 // NewClient returns a client of the PHD2 at address, such as
@@ -179,7 +185,7 @@ func (c *Client) Run(ctx context.Context) error {
 	c.state, c.rms = State{}, window{}
 	for _, r := range c.pending {
 		if r.done != nil {
-			r.done <- ErrDisconnected
+			r.done <- reply{err: ErrDisconnected}
 		}
 	}
 	c.pending = nil
@@ -258,8 +264,9 @@ func (c *Client) changeLocked() {
 }
 
 // send writes one request. A request with done waits for its answer
-// there; one without is a read whose answer the reader applies.
-func (c *Client) send(method string, params []any, done chan error) error {
+// there; one without is a read whose answer the reader applies. PHD2
+// takes params as a list in order, or as an object by name.
+func (c *Client) send(method string, params any, done chan reply) error {
 	c.mu.Lock()
 	conn := c.conn
 	if conn == nil {
@@ -288,16 +295,22 @@ func (c *Client) send(method string, params []any, done chan error) error {
 }
 
 // call sends one request and waits for its answer, or for ctx.
-func (c *Client) call(ctx context.Context, method string, params []any) error {
-	done := make(chan error, 1)
+func (c *Client) call(ctx context.Context, method string, params any) error {
+	_, err := c.callResult(ctx, method, params)
+	return err
+}
+
+// callResult sends one request and answers its result, or its error.
+func (c *Client) callResult(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	done := make(chan reply, 1)
 	if err := c.send(method, params, done); err != nil {
-		return err
+		return nil, err
 	}
 	select {
-	case err := <-done:
-		return err
+	case r := <-done:
+		return r.result, r.err
 	case <-ctx.Done():
-		return context.Cause(ctx)
+		return nil, context.Cause(ctx)
 	}
 }
 
