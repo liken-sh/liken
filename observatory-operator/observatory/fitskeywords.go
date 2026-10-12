@@ -26,12 +26,16 @@ type FITSKeyword struct {
 	Comment string `json:"comment,omitempty"`
 }
 
-// DriverFITSKeywords are the keywords that INDI's CCD writes into every
-// frame by itself. All but OFFSET, DARKTIME, and MPSAS are in
+// DriverFITSKeywords are the keywords that INDI's CCD writes into a
+// frame by itself. The first groups are in
 // indi/testdata/ccd/frame-header.txt, the header of a frame that the
 // CCD simulator saved with the mount, focuser, rotator, filter wheel,
-// and SQM simulators connected. libindi's CCD writes those three when
-// the camera or an SQM reports them, and the simulators did not.
+// and SQM simulators connected. libindi's CCD writes the rest under
+// conditions that the simulators did not meet
+// (libs/indibase/indiccd.cpp): OFFSET, DARKTIME, and MPSAS when the
+// camera or an SQM reports them, the Bayer keywords for a color sensor,
+// DATAMIN and DATAMAX for some frames, and the WCS keywords when it
+// writes a world coordinate system.
 var DriverFITSKeywords = []string{
 	// The structure of the file.
 	"SIMPLE", "BITPIX", "NAXIS", "NAXIS1", "NAXIS2", "EXTEND", "BZERO",
@@ -43,8 +47,15 @@ var DriverFITSKeywords = []string{
 	"XPIXSZ", "YPIXSZ", "FRAME", "IMAGETYP", "FILTER", "FOCALLEN",
 	"APTDIA", "ROTATANG", "FOCUSPOS", "FOCUSTEM", "SCALE", "SITELAT",
 	"SITELONG", "AIRMASS", "OBJCTAZ", "OBJCTALT", "OBJCTRA", "OBJCTDEC",
-	"RA", "DEC", "PIERSIDE", "EQUINOX", "DATE-OBS", "GAIN", "OFFSET",
-	"DARKTIME", "MPSAS",
+	"RA", "DEC", "PIERSIDE", "EQUINOX", "DATE-OBS", "GAIN",
+	// The measures that the simulators did not report.
+	"OFFSET", "DARKTIME", "MPSAS",
+	// The color sensor and the range of the pixels.
+	"BAYERPAT", "XBAYROFF", "YBAYROFF", "DATAMIN", "DATAMAX",
+	// The world coordinate system.
+	"CTYPE1", "CTYPE2", "CRVAL1", "CRVAL2", "CRPIX1", "CRPIX2",
+	"CDELT1", "CDELT2", "CROTA1", "CROTA2", "SECPIX1", "SECPIX2",
+	"RADECSYS",
 }
 
 // renamedFITSKeywords are the keywords of DriverFITSKeywords that a

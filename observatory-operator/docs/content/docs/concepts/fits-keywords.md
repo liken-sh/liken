@@ -38,6 +38,11 @@ refused:
   `FOCUSTEM`, `SCALE`, `SITELAT`, `SITELONG`, `AIRMASS`, `OBJCTAZ`,
   `OBJCTALT`, `OBJCTRA`, `OBJCTDEC`, `RA`, `DEC`, `PIERSIDE`,
   `EQUINOX`, `DATE-OBS`, `GAIN`, `OFFSET`, `DARKTIME`, and `MPSAS`
+- the keywords of a color sensor and of the range of the pixels:
+  `BAYERPAT`, `XBAYROFF`, `YBAYROFF`, `DATAMIN`, and `DATAMAX`
+- the world coordinate system: `CTYPE1`, `CTYPE2`, `CRVAL1`,
+  `CRVAL2`, `CRPIX1`, `CRPIX2`, `CDELT1`, `CDELT2`, `CROTA1`,
+  `CROTA2`, `SECPIX1`, `SECPIX2`, and `RADECSYS`
 - `COMMENT`, `HISTORY`, and `END`, which FITS reserves for cards that
   hold no value
 
@@ -55,7 +60,9 @@ text that one 80-column card holds, and a comment at most 47. Both
 hold only printable ASCII characters, because FITS allows no others in
 a header. The driver writes a value that reads as a number, such as
 `2026` or `-4.5`, as a number, and any other value as quoted text.
-libindi's CCD replaces each `/` in a text value with `\`.
+A value cannot hold `/`: libindi's CCD writes each `/` in a value as
+`\`, so `f/5` would reach the header as `f\5`, and the API server
+refuses it. A comment can hold `/`.
 
 ## The levels
 
@@ -110,15 +117,17 @@ kubectl get reservation east-tonight -n observatory -o jsonpath='{.status.sessio
 ## How long keywords last
 
 The driver keeps each keyword that it receives and writes it on every
-later frame, until its process exits. So the operator writes each
+later frame, until its process exits or a client clears every keyword
+with a write of the name `INDI_CLEAR`. So the operator writes each
 keyword once for the session:
 
 - The `PowerOn` step records the merged list of each imaging camera in
   the reservation's `status.session`. A camera that a `Guider` guides
   with sends its frames to PHD2 and writes no file, so it gets no
   keywords.
-- The `Configure` step writes the record to each camera's
-  `FITS_HEADER`, one write for each keyword. Every frame of the
+- The `Configure` step clears each imaging camera's keywords, and
+  then writes the record to its `FITS_HEADER`, one write for each
+  keyword. Every frame of the
   session carries them, and so does each frame that KStars and Ekos
   take. A camera whose driver lacks `FITS_HEADER` gets a note in the
   step's summary.
@@ -130,5 +139,7 @@ An edit of `spec.fitsKeywords` at any level takes effect at the next
 session, so every frame of one night carries the same declared
 keywords. A retry of a failed activation step records the keywords
 again from the specs, and when they changed, it runs `Configure` again,
-which writes the new list. A keyword that the retry leaves out stays
-in the camera's driver until the driver exits.
+which clears the camera's keywords and writes the new list, so a
+keyword that the retry leaves out is gone from the next frame. A
+program that writes keywords of its own, such as `OBJECT`, writes them
+again after a retry.

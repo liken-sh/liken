@@ -8,11 +8,12 @@ package main
 // takes included, so no component edits a frame afterward.
 //
 // The driver puts each keyword it receives on every later frame until
-// its process exits, and the operator only adds and replaces keywords.
-// So the PowerOn step records the merged list of each imaging camera in
-// status.session, and Configure writes the record, never the specs. An
-// edit takes effect at the next session, and every frame of one session
-// carries the same declared keywords. A driver that comes back after
+// its process exits, or until a client clears them all. So the PowerOn
+// step records the merged list of each imaging camera in
+// status.session, and Configure clears the camera's keywords and writes
+// the record, never the specs. An edit takes effect at the next
+// session, and every frame of one session carries the same declared
+// keywords. A driver that comes back after
 // its pod restarts is a new process with no keywords, and the runner
 // configures it again (steady.go), which writes the record again.
 
@@ -56,23 +57,34 @@ func (t *tree) fitsKeywordsOf(ref serverRef, site string, devices []*device, res
 	return out
 }
 
-// writeFITSKeywords writes each keyword that the session recorded for a
-// camera to its FITS_HEADER, one write for each keyword. FITS_HEADER is
-// write-only, so the driver reports no keywords to compare with, and a
-// step that runs again writes each one again, which replaces it with the
-// same value. Each write names all three members: the driver keeps the
+// clearFITSKeywords is the name that libindi's CCD reads, in a write
+// to FITS_HEADER, as a request to remove every keyword that a client
+// wrote before (libs/indibase/indiccd.cpp). An empty value does not
+// remove a keyword: the driver ignores such a write.
+const clearFITSKeywords = "INDI_CLEAR"
+
+// writeFITSKeywords clears the keywords of an imaging camera and writes
+// each keyword that the session recorded for it, one write for each
+// keyword. The clear comes first even when the record holds none, so a
+// retry that removes a keyword from the record removes it from the
+// driver too. FITS_HEADER is write-only, so the driver reports no
+// keywords to compare with, and a step that runs again writes them all
+// again. Each write names all three members: the driver keeps the
 // members that a write leaves out, so a keyword with no comment would
 // take the comment of the keyword before it.
 func writeFITSKeywords(ctx context.Context, t *tree, h handle, notes *[]string, note func(bool, error) error) error {
+	if t.guides(h.d.recordedOn, h.d) {
+		return nil
+	}
 	keywords := t.records[h.d.recordedOn].FITSKeywords[h.d.key()]
-	if len(keywords) == 0 {
-		return nil
-	}
 	if _, ok := h.property(ctx, "FITS_HEADER"); !ok {
-		*notes = append(*notes, fmt.Sprintf("no FITS_HEADER on %s to write %d FITS keywords", h, len(keywords)))
+		if len(keywords) > 0 {
+			*notes = append(*notes, fmt.Sprintf("no FITS_HEADER on %s to write %d FITS keywords", h, len(keywords)))
+		}
 		return nil
 	}
-	for _, k := range keywords {
+	clear := observatory.FITSKeyword{Name: clearFITSKeywords}
+	for _, k := range append([]observatory.FITSKeyword{clear}, keywords...) {
 		err := h.settle(ctx, func() (indi.Sent, error) {
 			return h.client().SetTexts(h.name, "FITS_HEADER", map[string]string{
 				"KEYWORD_NAME": k.Name, "KEYWORD_VALUE": k.Value, "KEYWORD_COMMENT": k.Comment,

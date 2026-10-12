@@ -53,19 +53,24 @@ func fitsKeyword(name, value, comment string) map[string]any {
 	return k
 }
 
+// cleared is the write that removes every keyword that a client wrote
+// to the east telescope's imaging camera before.
+var cleared = written("INDI_CLEAR", "", "")
+
 // exampleKeywords are the writes of the keywords that the example
 // declares: OBSERVER on the Observatory lab, and TELESCOP on the
-// Telescope east.
+// Telescope east, after the write that clears the camera's keywords.
 var exampleKeywords = []string{
+	cleared,
 	written("OBSERVER", "Simulated Observer", ""),
 	written("TELESCOP", "East refractor", "the Telescope's own name"),
 }
 
-// Configure writes the merged keywords of the four levels to the
-// imaging camera, one write for each keyword, in the order of first
-// appearance with the most specific value. The guide camera gets none,
-// even when its own spec declares keywords, and with no keywords at any
-// level, no camera gets a write.
+// Configure clears the imaging camera's keywords and writes the merged
+// keywords of the four levels to it, one write for each keyword, in the
+// order of first appearance with the most specific value. The guide
+// camera gets no write, even when its own spec declares keywords. With
+// no keywords at any level, the imaging camera gets the clear alone.
 func TestConfigureWritesTheMergedKeywordsToTheImagingCamera(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -78,13 +83,14 @@ func TestConfigureWritesTheMergedKeywordsToTheImagingCamera(t *testing.T) {
 		{"no keywords at any level", func(w *world) {
 			w.declare(observatory.ObservatoryKind, "lab")
 			w.declare(observatory.TelescopeKind, "east")
-		}, nil, nil},
+		}, nil, []string{cleared}},
 		{"every level, with the most specific value of each name", func(w *world) {
 			w.declare(observatory.ObservatoryKind, "lab", fitsKeyword("OBSERVER", "Site", ""), fitsKeyword("SITENAME", "Lab", "where"))
 			w.declare(observatory.TelescopeKind, "east", fitsKeyword("TELESCOP", "Esprit 100", ""), fitsKeyword("OBSERVER", "Scope", ""))
 			w.declare(observatory.CameraKind, "east-main", fitsKeyword("INSTRUME", "ASI2600MM", "camera"), fitsKeyword("SITENAME", "Pier 2", ""))
 			w.declare(observatory.CameraKind, "east-guide", fitsKeyword("INSTRUME", "ASI120MM", ""))
 		}, []any{fitsKeyword("OBSERVER", "Ada", "tonight"), fitsKeyword("OBJECT", "M42", "")}, []string{
+			cleared,
 			written("OBSERVER", "Ada", "tonight"),
 			written("SITENAME", "Pier 2", ""),
 			written("TELESCOP", "Esprit 100", ""),
@@ -147,7 +153,7 @@ func TestAKeywordEditWaitsForTheNextSession(t *testing.T) {
 		from = len(w.indi.changes())
 		w.reserve("east-tomorrow", map[string]any{"telescope": "east", "holder": "desktop"})
 		w.phase("east-tomorrow", observatory.ReservationReady, 10*time.Minute)
-		if got, want := headerWrites(w, from), []string{written("OBSERVER", "Grace", "")}; !slices.Equal(got, want) {
+		if got, want := headerWrites(w, from), []string{cleared, written("OBSERVER", "Grace", "")}; !slices.Equal(got, want) {
 			t.Errorf("the next session's writes = %q, want %q", got, want)
 		}
 	})
@@ -155,24 +161,39 @@ func TestAKeywordEditWaitsForTheNextSession(t *testing.T) {
 
 // A retry is a person saying that the specs are fixed, so a retry that
 // changes the keywords records them again and runs Configure again,
-// which writes the new list.
+// which clears the camera's keywords and writes the new list. A
+// keyword that the retry removes leaves the driver with the clear.
 func TestARetryThatChangesTheKeywordsRunsConfigureAgain(t *testing.T) {
 	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		w := startWorld(t)
-		var from int
-		failGuiderThenRetry(w, func(w *world) {
-			from = len(w.indi.changes())
+	cases := []struct {
+		name   string
+		change func(w *world)
+		want   []string
+	}{
+		{"a keyword added", func(w *world) {
 			w.declare(observatory.ReservationKind, "east-tonight", fitsKeyword("OBJECT", "M31", ""))
-		})
-		r := w.phase("east-tonight", observatory.ReservationReady, 15*time.Minute)
+		}, append(slices.Clone(exampleKeywords), written("OBJECT", "M31", ""))},
+		{"every keyword removed", func(w *world) {
+			w.declare(observatory.ObservatoryKind, "lab")
+			w.declare(observatory.TelescopeKind, "east")
+		}, []string{cleared}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				w := startWorld(t)
+				var from int
+				failGuiderThenRetry(w, func(w *world) {
+					from = len(w.indi.changes())
+					c.change(w)
+				})
+				w.phase("east-tonight", observatory.ReservationReady, 15*time.Minute)
 
-		want := append(slices.Clone(exampleKeywords), written("OBJECT", "M31", ""))
-		if got := headerWrites(w, from); !slices.Equal(got, want) {
-			t.Errorf("writes after the retry = %q, want %q", got, want)
-		}
-		if got := r.Status.Session.FITSKeywords["Camera/east-main"]; len(got) != 3 {
-			t.Errorf("the record = %+v, want 3 keywords", got)
-		}
-	})
+				if got := headerWrites(w, from); !slices.Equal(got, c.want) {
+					t.Errorf("writes after the retry = %q, want %q", got, c.want)
+				}
+			})
+		})
+	}
 }

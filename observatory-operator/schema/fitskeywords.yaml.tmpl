@@ -60,10 +60,13 @@ fitsKeywords:
           The value, at most 68 characters, the longest text that one
           80-column card holds. The driver writes a value that reads as
           a number, such as `2026` or `-4.5`, as a number, and any
-          other value as quoted text.
+          other value as quoted text. A value cannot hold `/`, because
+          the driver writes each `/` in a value as `\`.
         x-kubernetes-validations:
           - rule: "self.matches('^[ -~]*$')"
             message: "FITS allows only the printable ASCII characters in a header"
+          - rule: "!self.contains('/')"
+            message: "the camera's driver writes each '/' in a value as '\\', so the header would not hold the value declared"
       comment:
         type: string
         maxLength: 47

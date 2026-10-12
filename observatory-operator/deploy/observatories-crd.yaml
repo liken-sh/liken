@@ -146,7 +146,7 @@ spec:
                         x-kubernetes-validations:
                           - rule: "self.matches('^[A-Z0-9_-]{1,8}$')"
                             message: "a FITS keyword name is 1 to 8 of the capital letters A to Z, the digits, '-', and '_'"
-                          - rule: "!(self in ['SIMPLE', 'BITPIX', 'NAXIS', 'NAXIS1', 'NAXIS2', 'EXTEND', 'BZERO', 'BSCALE', 'ROWORDER', 'EXPTIME', 'CCD-TEMP', 'PIXSIZE1', 'PIXSIZE2', 'XBINNING', 'YBINNING', 'XPIXSZ', 'YPIXSZ', 'FRAME', 'IMAGETYP', 'FILTER', 'FOCALLEN', 'APTDIA', 'ROTATANG', 'FOCUSPOS', 'FOCUSTEM', 'SCALE', 'SITELAT', 'SITELONG', 'AIRMASS', 'OBJCTAZ', 'OBJCTALT', 'OBJCTRA', 'OBJCTDEC', 'RA', 'DEC', 'PIERSIDE', 'EQUINOX', 'DATE-OBS', 'GAIN', 'OFFSET', 'DARKTIME', 'MPSAS', 'COMMENT', 'HISTORY', 'END'])"
+                          - rule: "!(self in ['SIMPLE', 'BITPIX', 'NAXIS', 'NAXIS1', 'NAXIS2', 'EXTEND', 'BZERO', 'BSCALE', 'ROWORDER', 'EXPTIME', 'CCD-TEMP', 'PIXSIZE1', 'PIXSIZE2', 'XBINNING', 'YBINNING', 'XPIXSZ', 'YPIXSZ', 'FRAME', 'IMAGETYP', 'FILTER', 'FOCALLEN', 'APTDIA', 'ROTATANG', 'FOCUSPOS', 'FOCUSTEM', 'SCALE', 'SITELAT', 'SITELONG', 'AIRMASS', 'OBJCTAZ', 'OBJCTALT', 'OBJCTRA', 'OBJCTDEC', 'RA', 'DEC', 'PIERSIDE', 'EQUINOX', 'DATE-OBS', 'GAIN', 'OFFSET', 'DARKTIME', 'MPSAS', 'BAYERPAT', 'XBAYROFF', 'YBAYROFF', 'DATAMIN', 'DATAMAX', 'CTYPE1', 'CTYPE2', 'CRVAL1', 'CRVAL2', 'CRPIX1', 'CRPIX2', 'CDELT1', 'CDELT2', 'CROTA1', 'CROTA2', 'SECPIX1', 'SECPIX2', 'RADECSYS', 'COMMENT', 'HISTORY', 'END'])"
                             messageExpression: >-
                               self + (self in ['COMMENT', 'HISTORY',
                               'END'] ? ' is a keyword that FITS reserves
@@ -163,10 +163,14 @@ spec:
                           text that one 80-column card holds. The driver
                           writes a value that reads as a number, such as
                           `2026` or `-4.5`, as a number, and any other
-                          value as quoted text.
+                          value as quoted text. A value cannot hold `/`,
+                          because the driver writes each `/` in a value
+                          as `\`.
                         x-kubernetes-validations:
                           - rule: "self.matches('^[ -~]*$')"
                             message: "FITS allows only the printable ASCII characters in a header"
+                          - rule: "!self.contains('/')"
+                            message: "the camera's driver writes each '/' in a value as '\\', so the header would not hold the value declared"
                       comment:
                         type: string
                         maxLength: 47

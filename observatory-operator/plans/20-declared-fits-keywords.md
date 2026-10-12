@@ -54,8 +54,17 @@ the driver saved:
   clear it.
 - **A second write of the same name replaces the value**, and a new
   name adds a keyword.
-- **A keyword cannot be removed.** A write with an empty value changes
-  nothing.
+- **One write removes every keyword.** A write whose name is
+  `INDI_CLEAR` removes every keyword that a client wrote, and a write
+  with an empty value changes nothing. The first probe tried only the
+  empty value, and the design first said that no keyword can be
+  removed. The build found `INDI_CLEAR` in libindi's
+  `libs/indibase/indiccd.cpp`, and a second probe on the same image
+  confirmed it: the frame after the clear held only the driver's own
+  keywords.
+- **The driver changes a value that holds `/`.** It writes each `/` in
+  a value as `\`, so `f/5` reached the header as `f\5`. A comment kept
+  its `/`.
 - **A written keyword replaces the driver's own.** A write of `EXPTIME`
   as 999 put `EXPTIME = 999` on the next frame, in place of the
   exposure's real length. The driver does not protect what it
@@ -74,7 +83,9 @@ the driver saved:
   `OBJCTDEC`, `RA`, `DEC`, `PIERSIDE`, `EQUINOX`, `DATE-OBS`, and
   `GAIN`. The header is in `indi/testdata/ccd/frame-header.txt`.
   libindi's CCD also writes `OFFSET`, `DARKTIME`, and `MPSAS` when the
-  camera or an SQM reports them; the simulators did not.
+  camera or an SQM reports them, the Bayer keywords, `DATAMIN`, and
+  `DATAMAX` for some cameras and frames, and the WCS keywords when it
+  writes a world coordinate system; the simulators did not.
 
 ## The design
 
@@ -85,8 +96,9 @@ the driver saved:
   time, and the header keeps the order the person wrote.
 - **The schema refuses a keyword the driver owns.** The CRD's rules
   refuse a name that is not a FITS keyword (one to eight of `A`-`Z`,
-  `0`-`9`, `-`, and `_`), and a name on the driver's list above,
-  except `INSTRUME` and `TELESCOP`. The API server refuses such a
+  `0`-`9`, `-`, and `_`), a name on the driver's list above, except
+  `INSTRUME` and `TELESCOP`, and a value that holds `/`, which the
+  driver would change. The API server refuses such a
   resource when it is applied, so a mistake never waits for a night to
   show. `INSTRUME` and `TELESCOP` are declarable, because the driver
   fills them with the names of INDI devices, such as `CCD Simulator`,
@@ -97,18 +109,18 @@ the driver saved:
   in the order `Observatory`, `Telescope`, `Camera`, `Reservation`, and
   a name at a later level replaces the value of the same name at an
   earlier one.
-- **`Configure` writes the merged list once**, one write of
-  `FITS_HEADER` for each keyword, to each imaging camera of the
-  session. A guide camera writes no files, so it gets none. Because a
-  keyword stays until the driver exits, and a session starts each
-  camera's driver once, one write covers every frame of the session,
-  including the frames of a desktop client in mode 1.
+- **`Configure` clears the keywords and writes the merged list once**,
+  one write of `INDI_CLEAR` and then one write of `FITS_HEADER` for
+  each keyword, to each imaging camera of the session. A guide camera
+  writes no files, so it gets none. Because a keyword stays until the
+  driver exits, one write covers every frame of the session, including
+  the frames of a desktop client in mode 1. The clear comes first even
+  when the list is empty, so a retry that removes a keyword removes it
+  from the driver.
 - **An edit takes effect at the next session.** The session records the
   merged list when `PowerOn` records the devices, as [plan
   17](completed/17-a-session-freezes-its-devices.md) does for every
-  other spec. A keyword cannot be removed from a running driver, so a
-  live edit could add and replace but never remove, and the frames of
-  one night would disagree with each other.
+  other spec, so the frames of one night agree with each other.
 - **A choice of convention belongs to whoever sets the frame type.**
   The driver writes `IMAGETYP` in the SBFITSEXT form, `Light Frame`,
   from the frame type of the exposure. `IMAGETYP` is on the driver's
@@ -120,12 +132,14 @@ the driver saved:
 ## Still open
 
 `astrophotography-operator` writes keywords of its own levels, such as
-`OBJECT` for each target, into the same running driver. A keyword
-cannot be removed, so a keyword that one target declares stays on the
-frames of the next target unless that target writes the same name. Its
-[plan 01](../../astrophotography-operator/plans/01-run-a-targets-sequence.md)
-has to account for this. A way to remove a keyword through
-`FITS_HEADER` is a reasonable request to libindi.
+`OBJECT` for each target, into the same running driver. `INDI_CLEAR`
+removes every keyword, the ones `observatory-operator` wrote included,
+so after each clear, `astrophotography-operator` writes the session's
+list from `status.session.fitsKeywords` again with its own. Its [plan
+01](../../astrophotography-operator/plans/01-run-a-targets-sequence.md)
+has to account for this.
+
+The change of `/` to `\` in a value is worth a report to libindi.
 
 Keywords written into archived frames are the hardest decision to
 change later, because the frames never change. The keyword list
