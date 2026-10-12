@@ -49,6 +49,19 @@ and the message names the missing parent. It stays in place and does
 nothing until the parent exists. This is almost always a typo in the
 parent field, or a parent in another namespace.
 
+## A telescope reports HorizonFound False
+
+A `Telescope` whose `spec.horizon` names a `Horizon` that does not
+exist reports `HorizonFound` `False`, and the message names the
+missing horizon. The telescope still runs, and a reservation of it
+still activates, but a scheduler that reads the telescope's horizon
+finds none. Create the `Horizon` in the telescope's namespace, or
+correct the name in `spec.horizon`:
+
+```sh
+kubectl get horizons -n observatory
+```
+
 ## StartSite or PowerOn fails: two devices name one driver
 
 One INDI server runs each driver once. When two devices on one server

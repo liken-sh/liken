@@ -100,6 +100,7 @@ var references = map[string]string{
 	"telescope":    "Telescope",
 	"opticalTube":  "OpticalTube",
 	"opticalTrain": "OpticalTrain",
+	"horizon":      "Horizon",
 }
 
 func TestEveryNameInTheExampleExists(t *testing.T) {

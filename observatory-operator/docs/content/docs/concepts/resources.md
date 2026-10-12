@@ -6,12 +6,14 @@ weight: 10
 
 # The resources
 
-You describe an observatory with 19 kinds of resource in the API
+You describe an observatory with 20 kinds of resource in the API
 group `observatory.liken.sh/v1alpha1`. Most of them describe the
 site, the telescopes, and each piece of equipment. A `Reservation`
 gives someone the use of a telescope, and an `OpticalTrain` and a
 `Guider` describe how light reaches a camera and how the telescope
-guides. Each kind has its own reference page with every field.
+guides. A `Horizon` saves the part of the sky that trees and buildings
+block from one place, and a `Telescope` names the one for where it
+stands now. Each kind has its own reference page with every field.
 
 Every kind is namespaced, and every kind is in the category `astro`,
 so `kubectl get astro` lists the whole observatory. Each resource names
@@ -96,10 +98,13 @@ shows how to write one.
 | `Receiver` | `rx` | `telescope` or `observatory` | frequency in MHz |
 | `Guider` | none | `telescope` | phase, PHD2's state, RMS in arcsec |
 | `Reservation` | `rsv` | `telescope` | phase, step, message |
+| `Horizon` | none | none | its age |
 
-`GPS`, `Dome`, and `Guider` have no short name, because the singular
-is already short. `equipment-operator` also has a `Receiver` kind, so
-name this one as `rx` or `receivers.observatory.liken.sh`. Each CRD
+`GPS`, `Dome`, `Guider`, and `Horizon` have no short name, because the
+singular is already short. A `Horizon` has no parent: a `Telescope`
+names it in `spec.horizon`, and several telescopes can name one.
+`equipment-operator` also has a `Receiver` kind, so name this one as
+`rx` or `receivers.observatory.liken.sh`. Each CRD
 declares its parent fields as `selectableFields`, so
 `kubectl get cam --field-selector spec.opticalTrain=east-imaging` lists
 one train's cameras.
@@ -134,8 +139,8 @@ for one frame. The settings that the tree decides, such as `ACTIVE_DEVICES`
 and `GEOGRAPHIC_COORD`, are never spec fields. The other kinds' spec
 fields are `Observatory.spec.location`, the tube's `aperture` and
 `focalLength` in millimeters, the guider's `opticalTrain` and
-`pulses`, and the reservation's `telescope`, `holder`, `start`, and
-`end`.
+`pulses`, the reservation's `telescope`, `holder`, `start`, and
+`end`, the telescope's `horizon`, and the horizon's `profile`.
 
 A device kind's status has a typed field for each standard property of
 its INDI interface, and the resource that runs the driver lists every

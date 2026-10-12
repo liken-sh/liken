@@ -192,7 +192,9 @@ func TestTheClusterRoleGrantsWhatTheOperatorSends(t *testing.T) {
 		for _, verb := range []string{"get", "list", "watch"} {
 			needs = append(needs, need{observatory.Group, kind.Plural, verb})
 		}
-		needs = append(needs, need{observatory.Group, kind.Plural + "/status", "update"})
+		if kind.HasStatus() {
+			needs = append(needs, need{observatory.Group, kind.Plural + "/status", "update"})
+		}
 	}
 	// A merge patch removes the retry annotation of any resource with
 	// procedures, and adds and removes the finalizer of a device, a

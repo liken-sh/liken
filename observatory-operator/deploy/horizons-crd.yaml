@@ -1,0 +1,100 @@
+# A `Horizon` is the part of the sky that trees, buildings, and roofs
+# block from one place, such as `yard` or `roof`. A `Telescope` names
+# the one for where it stands now. A horizon is for a scheduler, such
+# as the planned `astrophotography-operator`, which skips the targets
+# behind the trees. observatory-operator starts nothing for it and
+# writes no status to it.
+#
+# The rules on `spec.profile` refuse a profile that no program could
+# read. Each rule matches the whole profile with one regular
+# expression. A rule on each line of `split` is easier to read, but the
+# API server's cost estimator priced it at more than 100 times its
+# budget with a `maxLength` of 8192, and refused the CRD: the estimate
+# grows with the square of the length. One expression costs the length
+# alone. In each expression, a line is a comment or a blank
+# line, `[ \t\r]*(#.*)?`, or a point: a number, a comma or spaces and
+# tabs, and a number, where a number is
+# `[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)`. The second and third rules put
+# the azimuth's range, 0 to 360, or the altitude's range, -90 to 90,
+# into the expression of its number. Each of the last three rules
+# passes a profile that the first rule refuses, so a mistake gets one
+# message. `ParseProfile` in `observatory/horizon.go` reads the same
+# lines, and a test holds the two to the same cases.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: horizons.observatory.liken.sh
+spec:
+  group: observatory.liken.sh
+  names:
+    kind: Horizon
+    listKind: HorizonList
+    plural: horizons
+    singular: horizon
+    categories: [astro]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      additionalPrinterColumns:
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-validations:
+            - rule: size(self.metadata.name) <= 32
+              message: >-
+                a Horizon name is at most 32 characters, the limit of
+                every resource of observatory.liken.sh
+          description: >-
+            A `Horizon` is the part of the sky that trees, buildings,
+            and roofs block from one place, such as `yard` or `roof`. A
+            `Telescope` names its current horizon in `spec.horizon`, so
+            a portable telescope that moves to another place takes
+            another saved `Horizon` with one edit. A horizon is for a
+            scheduler, which skips the targets behind it. It is not a
+            limit on where the mount moves.
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [profile]
+              description: "The horizon's altitude in each direction."
+              properties:
+                profile:
+                  type: string
+                  maxLength: 16384
+                  description: >-
+                    The horizon as a text file, in the format of
+                    N.I.N.A.'s custom horizon and of Cartes du Ciel's:
+                    one point to a line, the azimuth from 0 to 360 and
+                    then the altitude from -90 to 90, in degrees,
+                    separated by spaces, a tab, or a comma. A line that
+                    starts with `#` is a comment, and a blank line is
+                    skipped. A profile needs at least two points.
+                    Between two points, the altitude changes in a
+                    straight line with the azimuth, and the last point
+                    joins the first through 360 degrees.
+                  x-kubernetes-validations:
+                    - rule: >-
+                        self.matches(r'^(([ \t\r]*(#.*)?|[ \t]*[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([ \t]*,[ \t]*|[ \t]+)[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)[ \t\r]*)\n)*([ \t\r]*(#.*)?|[ \t]*[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([ \t]*,[ \t]*|[ \t]+)[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)[ \t\r]*)$')
+                      message: >-
+                        each line of spec.profile is a comment that
+                        starts with #, a blank line, or an azimuth and
+                        an altitude in degrees, separated by spaces, a
+                        tab, or a comma
+                    - rule: >-
+                        !self.matches(r'^(([ \t\r]*(#.*)?|[ \t]*[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([ \t]*,[ \t]*|[ \t]+)[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)[ \t\r]*)\n)*([ \t\r]*(#.*)?|[ \t]*[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([ \t]*,[ \t]*|[ \t]+)[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)[ \t\r]*)$') ||
+                        self.matches(r'^(([ \t\r]*(#.*)?|[ \t]*(\+?0*([0-9]{1,2}|[12][0-9]{2}|3[0-5][0-9])(\.[0-9]*)?|\+?0*360(\.0*)?|\+?\.[0-9]+|-0+(\.0*)?|-\.0+)([ \t]*,[ \t]*|[ \t]+)[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)[ \t\r]*)\n)*([ \t\r]*(#.*)?|[ \t]*(\+?0*([0-9]{1,2}|[12][0-9]{2}|3[0-5][0-9])(\.[0-9]*)?|\+?0*360(\.0*)?|\+?\.[0-9]+|-0+(\.0*)?|-\.0+)([ \t]*,[ \t]*|[ \t]+)[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)[ \t\r]*)$')
+                      message: "each azimuth in spec.profile is from 0 to 360 degrees"
+                    - rule: >-
+                        !self.matches(r'^(([ \t\r]*(#.*)?|[ \t]*[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([ \t]*,[ \t]*|[ \t]+)[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)[ \t\r]*)\n)*([ \t\r]*(#.*)?|[ \t]*[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([ \t]*,[ \t]*|[ \t]+)[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)[ \t\r]*)$') ||
+                        self.matches(r'^(([ \t\r]*(#.*)?|[ \t]*[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([ \t]*,[ \t]*|[ \t]+)[-+]?(0*([0-9]|[1-8][0-9])(\.[0-9]*)?|0*90(\.0*)?|\.[0-9]+)[ \t\r]*)\n)*([ \t\r]*(#.*)?|[ \t]*[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([ \t]*,[ \t]*|[ \t]+)[-+]?(0*([0-9]|[1-8][0-9])(\.[0-9]*)?|0*90(\.0*)?|\.[0-9]+)[ \t\r]*)$')
+                      message: "each altitude in spec.profile is from -90 to 90 degrees"
+                    - rule: >-
+                        !self.matches(r'^(([ \t\r]*(#.*)?|[ \t]*[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([ \t]*,[ \t]*|[ \t]+)[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)[ \t\r]*)\n)*([ \t\r]*(#.*)?|[ \t]*[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([ \t]*,[ \t]*|[ \t]+)[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)[ \t\r]*)$') ||
+                        self.findAll(r'(?m)^[ \t]*[-+.0-9]').size() >= 2
+                      message: "spec.profile holds at least two points"

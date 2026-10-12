@@ -27,6 +27,7 @@ var kindTypes = map[string]any{
 	"Dome": Dome{}, "WeatherStation": WeatherStation{},
 	"Switch":   Switch{},
 	"Receiver": Receiver{}, "Guider": Guider{}, "Reservation": Reservation{},
+	"Horizon": Horizon{},
 }
 
 func TestEachGoTypeMatchesItsCRD(t *testing.T) {
@@ -34,7 +35,14 @@ func TestEachGoTypeMatchesItsCRD(t *testing.T) {
 		t.Run(kind.Name, func(t *testing.T) {
 			object := reflect.TypeOf(kindTypes[kind.Name])
 			schema := schemaOf(t, kind)
-			for _, half := range []string{"Spec", "Status"} {
+			halves := []string{"Spec", "Status"}
+			if !kind.HasStatus() {
+				halves = halves[:1]
+				if _, held := schema.Properties["status"]; held {
+					t.Error("status: in the CRD of a kind with no status")
+				}
+			}
+			for _, half := range halves {
 				field, _ := object.FieldByName(half)
 				property := schema.Properties[strings.ToLower(half)]
 				for _, problem := range compare(field.Type, &property, strings.ToLower(half)) {

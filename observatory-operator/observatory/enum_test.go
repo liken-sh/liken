@@ -34,10 +34,12 @@ var (
 	guiderStates = strs(GuiderStopped, GuiderSelected, GuiderCalibrating, GuiderGuiding,
 		GuiderLostLock, GuiderPaused, GuiderLooping)
 	stepStates = strs(StepPending, StepRunning, StepDone, StepFailed, StepSkipped)
-	refKinds   = func() []string {
+	// A procedure waits on a resource's conditions, so it names no kind
+	// with no status.
+	refKinds = func() []string {
 		var names []string
 		for _, kind := range Kinds {
-			if kind != ReservationKind {
+			if kind != ReservationKind && kind.HasStatus() {
 				names = append(names, kind.Name)
 			}
 		}

@@ -15,8 +15,9 @@ kind: ClusterRole
 metadata:
   name: observatory-operator
 rules:
-  # A watch of each kind reads the inventory and the reservations, and
-  # get reads one reservation again after a write that met a conflict.
+  # A watch of each kind reads the inventory, the reservations, and the
+  # saved horizons, and get reads one reservation again after a write
+  # that met a conflict.
   - apiGroups: [observatory.liken.sh]
     resources:
       - observatories
@@ -38,9 +39,11 @@ rules:
       - receivers
       - guiders
       - reservations
+      - horizons
     verbs: [get, list, watch]
   # The operator writes every status with a PUT to the status
-  # subresource, which is the update verb, and never writes a spec.
+  # subresource, which is the update verb, and never writes a spec. A
+  # Horizon has no status.
   - apiGroups: [observatory.liken.sh]
     resources:
       - observatories/status

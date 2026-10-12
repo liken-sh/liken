@@ -17,7 +17,7 @@ and guides through PHD2's event server.
 The Go module `github.com/liken-sh/liken/observatory-operator` holds
 the operator and four packages:
 
-- [`observatory/`](observatory/) holds the 19 kinds of
+- [`observatory/`](observatory/) holds the 20 kinds of
   `observatory.liken.sh/v1alpha1` as Go types. The operator reads and
   writes them, and `astrophotography-operator` will import them to read
   a telescope's state and to create a `Reservation`.
@@ -68,7 +68,7 @@ install it, describe equipment, connect USB hardware, reserve a
 telescope, write procedures, and guide with PHD2. The concepts explain
 how a reservation runs, how procedures run, and how the locks and the
 guider work. The reference lists what each status field means and
-every field of the 19 resources. Its source is in [`docs/`](docs/), and
+every field of the 20 resources. Its source is in [`docs/`](docs/), and
 `make -C docs skills` emits each guide as an Agent Skill in
 [`skills/`](skills/).
 

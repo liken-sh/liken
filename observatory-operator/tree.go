@@ -134,6 +134,7 @@ type tree struct {
 	trains        map[string]*observatory.OpticalTrain
 	guiders       map[string]*observatory.Guider
 	reservations  map[string]*observatory.Reservation
+	horizons      map[string]*observatory.Horizon
 	// devices are sorted by kind, in the order of
 	// observatory.DeviceKinds, and then by name.
 	devices    []*device

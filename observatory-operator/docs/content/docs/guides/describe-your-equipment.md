@@ -1,7 +1,7 @@
 ---
 title: Describe your equipment
 weight: 20
-description: "Describe a real observatory as observatory.liken.sh resources: the site, each telescope, its optical tubes and trains, and one resource per device with the INDI driver and image that run it. Use when setting up someone's mount, cameras, focuser, filter wheel, dome, or other astronomy equipment, when choosing an INDI driver, or when a resource reports ParentFound False."
+description: "Describe a real observatory as observatory.liken.sh resources: the site, each telescope, its optical tubes and trains, and one resource per device with the INDI driver and image that run it. Use when setting up someone's mount, cameras, focuser, filter wheel, dome, or other astronomy equipment, when choosing an INDI driver, when saving the horizon that a telescope sees from where it stands, or when a resource reports ParentFound False."
 ---
 
 # Describe your equipment
@@ -291,6 +291,68 @@ reservation starts at the next one, and a device that you take off
 stays until the reservation ends. [Editing devices during a
 session](/docs/concepts/how-a-reservation-runs/#editing-devices-during-a-session)
 gives the rule.
+
+## Save the horizon of each place
+
+Trees, buildings, and roofs block part of the sky that a telescope's
+latitude allows. A `Horizon` saves the blocked part for one place, so
+a scheduler skips the targets behind it. The blocked part depends on
+where the telescope stands: two piers at one site see different
+treelines, and a portable telescope on the roof sees more than in the
+yard. So save one `Horizon` for each place, and name the one for where
+the telescope stands now in the telescope's `spec.horizon`.
+
+The profile is a horizon file in the format of N.I.N.A.'s custom
+horizon and of Cartes du Ciel's, so you can paste in a horizon that
+you traced with a phone app or made for another program. Each line is
+one point: the azimuth from 0 to 360 and then the altitude from -90 to
+90, in degrees, separated by spaces, a tab, or a comma. A line that
+starts with `#` is a comment, and a blank line is skipped.
+
+```yaml
+apiVersion: observatory.liken.sh/v1alpha1
+kind: Horizon
+metadata:
+  name: yard
+spec:
+  profile: |
+    # The house to the north, and a row of trees to the west.
+    0 30
+    40 30
+    50 8
+    180 5
+    230 12
+    260 25
+    300 25
+    330 30
+---
+apiVersion: observatory.liken.sh/v1alpha1
+kind: Telescope
+metadata:
+  name: east
+spec:
+  observatory: backyard
+  horizon: yard
+```
+
+Between two points, the altitude changes in a straight line with the
+azimuth, and the last point joins the first through 360 degrees. The
+API server refuses a profile with fewer than two points, a line that
+is not a comment, a blank line, or two numbers, an azimuth outside 0
+to 360, or an altitude outside -90 to 90.
+
+To move the telescope from the yard to the roof, save a `Horizon`
+named `roof` once, and change the name:
+
+```sh
+kubectl patch telescope east -n observatory --type merge -p '{"spec":{"horizon":"roof"}}'
+```
+
+The telescope's `HorizonFound` condition is `True` when the `Horizon`
+that it names exists. When it is `False`, the message names the
+missing horizon. The telescope still runs, because only a scheduler
+reads a horizon. A telescope with no `spec.horizon` has no horizon
+and no `HorizonFound` condition.
 
 ## Check the result
 

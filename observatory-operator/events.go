@@ -52,15 +52,17 @@ func (o *operator) record(r *observatory.Reservation, reason, message string) {
 // for events.Recorder.Transition. A missing parent needs one. Ready is
 // False while a resource starts or is not reserved, which is expected,
 // so only its failing reasons need one. Weather that is not Safe needs
-// one too. The other state conditions of a device, such as Parked or
-// Lit, are False in normal use, so none of them is a Warning.
+// one too, and so does a missing Horizon, because a scheduler would
+// plan the telescope's night with no horizon. The other state
+// conditions of a device, such as Parked or Lit, are False in normal
+// use, so none of them is a Warning.
 func badStatus(c observatory.Condition) observatory.ConditionStatus {
 	switch {
 	case c.Type == observatory.ConditionParentFound:
 		return conditions.False
 	case c.Type == observatory.ConditionReady && failing(c.Reason):
 		return conditions.False
-	case c.Type == observatory.ConditionSafe:
+	case c.Type == observatory.ConditionSafe, c.Type == observatory.ConditionHorizonFound:
 		return conditions.False
 	}
 	return ""

@@ -28,6 +28,8 @@
 #                 Camera
 #
 #   the shelf                       Focuser spare
+#   the saved horizons              Horizon yard, which east names,
+#                                   Horizon roof
 #
 # Each resource names its parent in its spec. A device takes the name
 # of its telescope or its observatory, and a second device of one kind
@@ -143,15 +145,56 @@ spec:
   observatory: lab
   driver: {name: indi_simulator_weather}
 ---
+# Two saved horizons: the part of the sky that buildings and trees
+# block from two places where the east telescope can stand. Each
+# profile is a horizon file of N.I.N.A. or Cartes du Ciel: one point to
+# a line, the azimuth and then the altitude in degrees. Between two
+# points, the altitude changes in a straight line, and the last point
+# joins the first through 360 degrees. The telescope names the horizon
+# of where it stands now in `spec.horizon`, so a move from the yard to
+# the roof is one edit.
+apiVersion: observatory.liken.sh/v1alpha1
+kind: Horizon
+metadata:
+  name: yard
+spec:
+  profile: |
+    # The yard: the house to the north, and a row of trees to the west.
+    0 30
+    40 30
+    50 8
+    180 5
+    230 12
+    260 25
+    300 25
+    330 30
+---
+apiVersion: observatory.liken.sh/v1alpha1
+kind: Horizon
+metadata:
+  name: roof
+spec:
+  profile: |
+    # The roof: above the trees, with only the chimney to the north.
+    0 4
+    10 18
+    20 4
+    360 4
+---
 # The first telescope has a device of every kind. Its mount, its trains,
 # and its other devices run on one INDI server, because a camera snoops
-# the mount and the focuser of its train only on the same server.
+# the mount and the focuser of its train only on the same server. It
+# stands in the yard. A telescope that names a `Horizon` reports the
+# condition `HorizonFound`, which is `False` while the `Horizon` does
+# not exist. The telescope runs either way, because only a scheduler
+# reads a horizon.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Telescope
 metadata:
   name: east
 spec:
   observatory: lab
+  horizon: yard
 ---
 # The mount unparks on activation, after the dome unparked, and parks on
 # deactivation, before the dome parks. The operator leaves tracking off,

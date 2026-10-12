@@ -12,8 +12,9 @@ and the reservations.
 ## Conditions
 
 Each kind
-has `status.conditions` in the shape of `metav1.Condition`, and
-`status.observedGeneration`. `ParentFound` is `False` when a resource
+except `Horizon` has `status.conditions` in the shape of
+`metav1.Condition`, and `status.observedGeneration`. A `Horizon` has
+no status, because the operator reads nothing in it. `ParentFound` is `False` when a resource
 that the spec names does not exist; the resource stays in place, and
 the message names the missing parent. A device on the shelf has no
 parent to find, so its `ParentFound` is `True` with the reason
@@ -21,6 +22,14 @@ parent to find, so its `ParentFound` is `True` with the reason
 places it has `ParentFound` `True` with the reason `MovePending`, and
 the message says where it goes when the session ends, such as `Moves
 to OpticalTrain west-imaging when Reservation east-tonight ends`.
+
+A `Telescope` that names a `Horizon` in `spec.horizon` has the
+condition `HorizonFound`. It is `True` with the message `Found Horizon
+yard` when that `Horizon` exists, and `False` with the reason
+`HorizonMissing` and the message `Missing Horizon yard` when it does
+not. A missing horizon stops nothing: the telescope's phase and its
+`Ready` condition do not change. A telescope with no `spec.horizon` has
+no `HorizonFound` condition.
 
 ## Devices
 

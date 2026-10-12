@@ -88,6 +88,18 @@ spec:
                   description: >-
                     The name of the `Observatory` that the telescope is
                     in.
+                horizon:
+                  type: string
+                  minLength: 1
+                  maxLength: 253
+                  pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                  description: >-
+                    The name of the `Horizon`, in the telescope's
+                    namespace, that the telescope sees from where it
+                    stands now. Optional. With no horizon, only the
+                    sky's own geometry limits the telescope. A missing
+                    `Horizon` never stops a reservation: the
+                    `HorizonFound` condition reports it.
 {{ include "procedure spec" . | indent 16 }}
             status:
               type: object
@@ -118,7 +130,11 @@ spec:
                   description: >-
                     `Ready` is `True` while the telescope's server runs and
                     every device of the telescope is connected. `ParentFound`
-                    is `False` when the `Observatory` does not exist. `Active`
+                    is `False` when the `Observatory` does not exist.
+                    `HorizonFound` is `True` when the `Horizon` that
+                    `spec.horizon` names exists, and `False` when it does
+                    not. A telescope with no `spec.horizon` has no
+                    `HorizonFound` condition. `Active`
                     is `True` from the start of its reservation's `Activation`
                     step until the start of its `Deactivation` step. Its
                     `lastTransitionTime` is the transition that starts the

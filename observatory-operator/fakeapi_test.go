@@ -1,7 +1,7 @@
 package main
 
 // A fake API server that holds every collection the operator reads and
-// writes: the 19 kinds of the group, the pods, the Services, and the
+// writes: the 20 kinds of the group, the pods, the Services, and the
 // claims. The Events go to the shared fake of kubernetes/events. It
 // serves a list and a watch of each
 // collection, a create, a read, a status write, a merge patch of the

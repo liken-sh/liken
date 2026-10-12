@@ -1,5 +1,5 @@
 # The docs domain builds the manual at liken.sh/observatory/. The
-# reference page of each of the 19 resources is generated, never
+# reference page of each of the 20 resources is generated, never
 # edited: crdref, the generator the brand component publishes, renders
 # each one from its CRD in deploy/, so a schema edit is a manual edit.
 # GENERATED lists those pages, and each rule names the generator's
@@ -18,11 +18,12 @@ CRDREF_SOURCES := go.mod $(BRAND)/go.mod \
 REFERENCE := content/docs/reference
 
 # The weights put the resource pages after the hand-written reference
-# pages, in the order of the tree: the site, the telescope and its
-# reservation, the optics, then each device kind.
+# pages, in the order of the tree: the site, the telescope with its
+# reservation and its horizon, the optics, then each device kind.
 GENERATED := $(REFERENCE)/observatories.md \
 	$(REFERENCE)/telescopes.md \
 	$(REFERENCE)/reservations.md \
+	$(REFERENCE)/horizons.md \
 	$(REFERENCE)/opticaltubes.md \
 	$(REFERENCE)/opticaltrains.md \
 	$(REFERENCE)/mounts.md \
@@ -68,6 +69,9 @@ $(REFERENCE)/telescopes.md: ../deploy/telescopes-crd.yaml $(CRDREF_SOURCES)
 
 $(REFERENCE)/reservations.md: ../deploy/reservations-crd.yaml $(CRDREF_SOURCES)
 	$(CRDREF) -title Reservation -weight 110 $< $@
+
+$(REFERENCE)/horizons.md: ../deploy/horizons-crd.yaml $(CRDREF_SOURCES)
+	$(CRDREF) -title Horizon -weight 112 $< $@
 
 $(REFERENCE)/opticaltubes.md: ../deploy/opticaltubes-crd.yaml $(CRDREF_SOURCES)
 	$(CRDREF) -title OpticalTube -weight 115 $< $@

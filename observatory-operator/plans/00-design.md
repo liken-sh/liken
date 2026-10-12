@@ -96,7 +96,7 @@ must hold.
 | [15](completed/15-the-operator-watches-every-namespace.md) | Built: the operator runs in `liken-system`, watches every namespace, and runs each observatory in the namespace of its resources; drilled on liken-1 |
 | [16](completed/16-kinds-are-indi-interfaces.md) | Built: each device kind is one INDI interface, one INDI device serves several resources, and typed fields come from the standard set that a bare driver captures; drilled on liken-1 on 2026-10-11 |
 | [17](completed/17-a-session-freezes-its-devices.md) | Built: a reservation records what its session acts on in `status.session`, and a held server's devices change only when the session ends; drilled on liken-1 on 2026-10-12 |
-| [18](18-saved-horizons.md) | Proposed: named horizons, such as `yard` and `roof`, in the format the hobby shares, and the one each `Telescope` uses now |
+| [18](18-saved-horizons.md) | Built: a `Horizon` holds a horizon file of N.I.N.A. or Cartes du Ciel in `spec.profile`, a `Telescope` names its current one in `spec.horizon`, and its `HorizonFound` condition reports whether it exists; not drilled yet |
 | [19](19-the-frames-outbox.md) | Built: a `Reservation` names a claim in `spec.outbox`, the session records it, the imaging cameras' pods mount it at `/outbox`, and `Configure` points each driver's uploads there |
 | [20](20-declared-fits-keywords.md) | Proposed: declared FITS keywords overlaid from the `Observatory` down to the `Reservation`, written by the driver |
 | [21](21-a-person-in-the-procedure.md) | Proposed: a step that waits for a person to set the telescope up, a step that asks them to cover it, and the flag that allows unattended reservations |

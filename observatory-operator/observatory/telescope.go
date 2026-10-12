@@ -9,6 +9,10 @@ type Telescope = Object[TelescopeSpec, TelescopeStatus]
 
 type TelescopeSpec struct {
 	Observatory string `json:"observatory"`
+	// Horizon names the Horizon, in the telescope's namespace, that the
+	// telescope sees from where it stands now. It is empty for a
+	// telescope with no horizon.
+	Horizon string `json:"horizon,omitempty"`
 	Procedures[Action]
 }
 

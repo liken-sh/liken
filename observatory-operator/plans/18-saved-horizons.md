@@ -3,6 +3,8 @@
 Proposed on 2026-10-12, and designed on 2026-10-12. The design below
 answers what the design conversation left open.
 
+Built on 2026-10-12; not drilled yet.
+
 ## The problem
 
 A telescope sees less sky than its site's latitude allows, because
@@ -66,6 +68,26 @@ roof sees a different sky.
   still runs, because a horizon matters only to the scheduler, but the
   condition and its `Event` tell the person before a night is spent
   on targets behind the trees.
+
+## The build
+
+- **The schema's rules match the whole profile with one regular
+  expression each.** A rule on each line of `split` estimated more than
+  100 times the API server's cost budget at a `maxLength` of 8192,
+  because the estimate grows with the square of the length, and the
+  API server refused the CRD. A rule on the whole string costs the
+  length alone, so `maxLength` is 16384, a point for every half degree
+  with comments. The ranges of the azimuth and the altitude are in the
+  expressions of their numbers. `ParseProfile` reads the lines in Go,
+  and a test runs one table of profiles through both and requires the
+  same verdict.
+- **A `Horizon` has no status**, because the operator reads nothing in
+  it. Its CRD has no status subresource, and the operator's
+  `ClusterRole` grants only `get`, `list`, and `watch` on it.
+- **The operator watches the `Horizon`s like every other kind**, so
+  the status writer composes `HorizonFound` again when a `Horizon` is
+  created or deleted. `False` posts a Warning, because a scheduler
+  would plan the night with no horizon.
 
 ## Still open
 

@@ -33,9 +33,11 @@ resources:
   - weatherstations-crd.yaml
   - switches-crd.yaml
   - receivers-crd.yaml
-  # The guider, and the reservation that activates a telescope.
+  # The guider, the reservation that activates a telescope, and the
+  # saved horizons that a telescope names.
   - guiders-crd.yaml
   - reservations-crd.yaml
+  - horizons-crd.yaml
   # The operator.
   - rbac.yaml
   - operator.yaml

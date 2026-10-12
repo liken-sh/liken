@@ -163,11 +163,15 @@ func (o *operator) telescopeStatus(t *tree, telescope *observatory.Telescope, co
 		next.Guider = guiderRef(guider.Metadata.Name, guiders[guider.Metadata.Name])
 		next.Display.Guider = guiderColumn(next.Guider)
 	}
-	next.Conditions = withGeneration([]observatory.Condition{
+	conditions := []observatory.Condition{
 		parentCondition(t.missingObservatory(telescope.Spec.Observatory)),
 		readyCondition(phase, message),
 		o.activity.condition(telescopeKey(name)),
-	}, next.ObservedGeneration)
+	}
+	if horizon := telescope.Spec.Horizon; horizon != "" {
+		conditions = append(conditions, t.horizonFound(horizon))
+	}
+	next.Conditions = withGeneration(conditions, next.ObservedGeneration)
 	next.Procedures = o.runs.list(recordKey(observatory.TelescopeKind, telescope.Metadata))
 	return next
 }

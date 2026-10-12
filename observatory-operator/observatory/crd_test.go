@@ -107,7 +107,7 @@ func TestEachCRDNamesItsKind(t *testing.T) {
 
 // Each CRD serves one version, stores it, and splits the status into
 // its own subresource, so the operator's status writes never touch a
-// spec a person wrote.
+// spec a person wrote. A kind with no status has no subresource.
 func TestEachCRDServesOneVersionWithAStatusSubresource(t *testing.T) {
 	for _, kind := range Kinds {
 		t.Run(kind.Name, func(t *testing.T) {
@@ -120,8 +120,8 @@ func TestEachCRDServesOneVersionWithAStatusSubresource(t *testing.T) {
 				t.Errorf("version %s served=%v storage=%v, want %s served and stored",
 					v.Name, v.Served, v.Storage, Version)
 			}
-			if v.Subresources == nil || v.Subresources.Status == nil {
-				t.Error("no status subresource")
+			if hasSubresource := v.Subresources != nil && v.Subresources.Status != nil; hasSubresource != kind.HasStatus() {
+				t.Errorf("status subresource = %v, want %v", hasSubresource, kind.HasStatus())
 			}
 		})
 	}
@@ -137,7 +137,7 @@ var shortNames = map[string][]string{
 	"DustCap": {"cap"}, "FlatPanel": {"flat"}, "PolarAligner": {"pac"},
 	"GPS": nil, "Dome": nil, "WeatherStation": {"weather"},
 	"Switch": {"sw"}, "Receiver": {"rx"},
-	"Guider": nil, "Reservation": {"rsv"},
+	"Guider": nil, "Reservation": {"rsv"}, "Horizon": nil,
 }
 
 var takenNames = []string{

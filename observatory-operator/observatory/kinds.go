@@ -8,9 +8,10 @@ type Kind struct {
 }
 
 // The kinds, from the top of the tree down: the site and its
-// telescopes, the optics, the 13 device kinds, the guider, and the
-// reservation. Each device kind is one INDI interface, and each has a
-// simulator in the indi-simulators image.
+// telescopes, the optics, the 13 device kinds, the guider, the
+// reservation, and the saved horizons that telescopes name. Each
+// device kind is one INDI interface, and each has a simulator in the
+// indi-simulators image.
 var (
 	ObservatoryKind  = Kind{"Observatory", "observatories"}
 	TelescopeKind    = Kind{"Telescope", "telescopes"}
@@ -33,6 +34,7 @@ var (
 
 	GuiderKind      = Kind{"Guider", "guiders"}
 	ReservationKind = Kind{"Reservation", "reservations"}
+	HorizonKind     = Kind{"Horizon", "horizons"}
 )
 
 // DeviceKinds lists the 13 device kinds, in the order of plan 06's
@@ -44,14 +46,19 @@ var DeviceKinds = []Kind{
 	WeatherStationKind, SwitchKind, ReceiverKind,
 }
 
-// Kinds lists all 19 kinds.
+// Kinds lists all 20 kinds.
 var Kinds = []Kind{
 	ObservatoryKind, TelescopeKind, OpticalTubeKind, OpticalTrainKind,
 	MountKind, CameraKind, FilterWheelKind, FocuserKind, RotatorKind,
 	DustCapKind, FlatPanelKind, PolarAlignerKind, GPSKind, DomeKind,
 	WeatherStationKind, SwitchKind, ReceiverKind,
-	GuiderKind, ReservationKind,
+	GuiderKind, ReservationKind, HorizonKind,
 }
+
+// HasStatus reports whether a kind has a status. A Horizon has none:
+// it is a fact that a person writes and a scheduler reads, and the
+// Telescope that names it reports whether it exists.
+func (k Kind) HasStatus() bool { return k != HorizonKind }
 
 // Path answers the URL of the kind's collection in one namespace, such
 // as /apis/observatory.liken.sh/v1alpha1/namespaces/observatory/mounts.
