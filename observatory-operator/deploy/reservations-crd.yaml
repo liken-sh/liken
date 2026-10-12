@@ -21,8 +21,12 @@ spec:
       storage: true
       subresources:
         status: {}
+      # A holder that is a program, such as astrophotography-operator,
+      # lists and watches only the reservations it holds, with the
+      # field selector spec.holder=<its name>.
       selectableFields:
         - jsonPath: .spec.telescope
+        - jsonPath: .spec.holder
       additionalPrinterColumns:
         - name: Telescope
           type: string

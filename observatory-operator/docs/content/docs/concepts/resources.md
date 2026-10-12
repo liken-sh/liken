@@ -107,7 +107,10 @@ names it in `spec.horizon`, and several telescopes can name one.
 `rx` or `receivers.observatory.liken.sh`. Each CRD
 declares its parent fields as `selectableFields`, so
 `kubectl get cam --field-selector spec.opticalTrain=east-imaging` lists
-one train's cameras.
+one train's cameras. A `Reservation` selects on `spec.holder` too, so
+`kubectl get rsv --field-selector spec.holder=astrophotography-operator`
+lists the reservations that `astrophotography-operator` holds, and that
+operator watches only those.
 
 Every device kind shares these spec fields:
 

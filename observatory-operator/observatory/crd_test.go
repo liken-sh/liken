@@ -172,6 +172,43 @@ func TestTheShortNamesAreUniqueAndFree(t *testing.T) {
 	}
 }
 
+// The fields that a list or a watch can select on, by kind. Each kind
+// with a parent selects on the parent's field, so `kubectl get cam
+// --field-selector spec.opticalTrain=east-imaging` lists one train's
+// cameras. A Reservation selects on its holder too, so
+// astrophotography-operator lists and watches only the reservations
+// that it holds. The API server checks that each path names a field of
+// a type it can select on (TestTheAPIServerWouldAcceptEachCRD).
+var selectableFields = map[string][]string{
+	"Observatory": nil, "Telescope": {".spec.observatory"},
+	"OpticalTube": {".spec.telescope"}, "OpticalTrain": {".spec.telescope"},
+	"Mount": {".spec.telescope"}, "Camera": {".spec.opticalTrain"},
+	"FilterWheel": {".spec.opticalTrain"}, "Focuser": {".spec.opticalTrain"},
+	"Rotator": {".spec.opticalTrain"}, "DustCap": {".spec.opticalTrain"},
+	"FlatPanel": {".spec.opticalTrain"}, "PolarAligner": {".spec.telescope"},
+	"GPS": {".spec.telescope"}, "Dome": {".spec.observatory"},
+	"WeatherStation": {".spec.observatory"},
+	"Switch":         {".spec.telescope", ".spec.observatory"},
+	"Receiver":       {".spec.telescope", ".spec.observatory"},
+	"Guider":         {".spec.telescope"},
+	"Reservation":    {".spec.telescope", ".spec.holder"},
+	"Horizon":        nil,
+}
+
+func TestEachCRDSelectsOnItsFields(t *testing.T) {
+	for _, kind := range Kinds {
+		t.Run(kind.Name, func(t *testing.T) {
+			var got []string
+			for _, field := range loadCRD(t, kind).Spec.Versions[0].SelectableFields {
+				got = append(got, field.JSONPath)
+			}
+			if !slices.Equal(got, selectableFields[kind.Name]) {
+				t.Errorf("selectableFields = %v, want %v", got, selectableFields[kind.Name])
+			}
+		})
+	}
+}
+
 // The API server checks the whole definition before it serves it,
 // and that check compiles each CEL rule and estimates its cost. A rule
 // that the estimator refuses makes the cluster refuse the whole CRD.
