@@ -81,7 +81,7 @@ spec:
             spec:
               type: object
               required: [telescope, holder]
-              description: "The telescope, the holder, and the times."
+              description: "The telescope, the holder, the times, and the outbox."
               x-kubernetes-validations:
                 - rule: "!has(self.start) || !has(self.end) || self.end > self.start"
                   message: "spec.end must be after spec.start"
@@ -118,6 +118,36 @@ spec:
                     When deactivation begins, as an RFC 3339 time.
                     Optional. With no end, the reservation lasts until
                     it is deleted.
+                outbox:
+                  type: object
+                  required: [claimName]
+                  description: >-
+                    The volume that the telescope's imaging cameras write
+                    their frames to. Optional. Each `Camera` of the
+                    telescope mounts the claim at `/outbox`, except a
+                    camera that a `Guider` guides with, and the
+                    `Configure` step sets the driver's `UPLOAD_DIR` to
+                    `/outbox` and its `UPLOAD_MODE` to `UPLOAD_BOTH`, so
+                    each frame lands in the outbox and a desktop client
+                    still receives it. With no outbox, the operator leaves
+                    the upload settings alone, and a driver that a client
+                    sets to keep frames writes them to the pod's `/tmp`,
+                    which the pod loses when it stops. An edit takes
+                    effect at the next session.
+                  properties:
+                    claimName:
+                      type: string
+                      minLength: 1
+                      maxLength: 253
+                      pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                      description: >-
+                        The name of a `PersistentVolumeClaim` in the
+                        reservation's namespace. The `PowerOn` step fails
+                        when it does not exist. A claim that exists and
+                        cannot be mounted on the camera's node, such as a
+                        `ReadWriteOnce` volume bound on another node,
+                        leaves the camera's pod `Pending`, and
+                        `StartDevices` gives the scheduler's message.
             status:
               type: object
               description: >-
@@ -273,8 +303,8 @@ spec:
                     specs of the resources it names, so an edit of a device's
                     parents, driver, power, or claim, of the `Telescope`'s
                     `spec.observatory`, of an `OpticalTrain`, of an
-                    `OpticalTube`, or of a `Guider` takes effect at the next
-                    session. The record is in the reservation, so an eviction
+                    `OpticalTube`, of a `Guider`, or of the reservation's
+                    `spec.outbox` takes effect at the next session. The record is in the reservation, so an eviction
                     of every pod of a server leaves it, and the operator
                     creates the pods again from it.
                   properties:
@@ -503,6 +533,16 @@ spec:
                             type: string
                             enum: [Mount, Camera]
                             description: "The `Guider`'s `spec.pulses`."
+                    outbox:
+                      type: object
+                      required: [claimName]
+                      description: >-
+                        The reservation's `spec.outbox`, which the camera
+                        pods of the session mount.
+                      properties:
+                        claimName:
+                          type: string
+                          description: "The name of the `PersistentVolumeClaim`."
                 conditions:
                   type: array
                   description: >-

@@ -22,6 +22,21 @@ type ReservationSpec struct {
 	// End is when deactivation begins. With no end, the Reservation
 	// lasts until it is deleted.
 	End *time.Time `json:"end,omitempty"`
+	// Outbox names the volume that the telescope's imaging cameras
+	// write their frames to. With no outbox, the operator leaves the
+	// upload settings alone, and a driver that a client sets to keep
+	// frames writes them to the pod's /tmp, which the pod loses when it
+	// stops.
+	Outbox *Outbox `json:"outbox,omitempty"`
+}
+
+// Outbox names a PersistentVolumeClaim in the reservation's namespace,
+// in the shape of a pod's persistentVolumeClaim volume, so a later
+// field such as a subPath has a place. The claim is the person's, not
+// a template, so the frames stay from night to night in a place they
+// chose.
+type Outbox struct {
+	ClaimName string `json:"claimName"`
 }
 
 // ReservationPhase is a reservation's state in one word.
@@ -142,6 +157,11 @@ type Session struct {
 	Trains  map[string]SessionTrain  `json:"trains,omitempty"`
 	Tubes   map[string]SessionTube   `json:"tubes,omitempty"`
 	Guiders map[string]SessionGuider `json:"guiders,omitempty"`
+	// Outbox is the reservation's spec.outbox. A claim cannot change
+	// under a running driver without a new pod, and a new pod in the
+	// middle of an exposure loses the exposure, so an edit waits for
+	// the next session.
+	Outbox *Outbox `json:"outbox,omitempty"`
 }
 
 // SessionTrain, SessionTube, and SessionGuider are the spec of one

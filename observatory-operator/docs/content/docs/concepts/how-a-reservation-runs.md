@@ -29,10 +29,10 @@ goes on.
 |---|---|---|
 | `Wait` | Waits for `spec.start`, for the telescope to exist with no delete pending on it or its observatory, and for no other reservation to hold the telescope. | none |
 | `StartSite` | Starts the observatory's server and its devices, connects them, and writes the dome's `DOME_SHUTTER_PARK_POLICY` and its `MOUNT_POLICY`. Another reservation in the observatory may have started them already. Fails when two devices of the observatory name one driver. | 10 min |
-| `PowerOn` | Starts the telescope's server with a link to every device, starts and connects its `Switch` devices, and switches on each output that a device's `spec.power` names. Fails when two devices of the telescope name one driver. | 10 min |
-| `StartDevices` | Starts the pod of every other device, and waits until each pod is Ready and its driver defines its device on the server. A device on real hardware waits here for its claim. | 10 min |
+| `PowerOn` | Starts the telescope's server with a link to every device, starts and connects its `Switch` devices, and switches on each output that a device's `spec.power` names. Fails when two devices of the telescope name one driver, and fails before it starts the server when the `PersistentVolumeClaim` that `spec.outbox` names does not exist. | 10 min |
+| `StartDevices` | Starts the pod of every other device, and waits until each pod is Ready and its driver defines its device on the server. A device on real hardware waits here for its claim. While no node fits a pod, the summary gives the scheduler's message. | 10 min |
 | `Connect` | Connects the mount, the GPS, the polar aligner, the focusers, the filter wheels, the rotators, the dust caps, the flat panels, the receivers, and the cameras, in that order. A device that another resource serves connects with that resource. Then it checks that each device defines the properties of its resource's interface, and a resource whose device does not reports `Error` while the others go on. | 2 min |
-| `Configure` | Writes each setting that a device's spec states, such as a camera's gain and offset and the filter names, once for the reservation. It also writes the settings that the tree decides: the observatory's location and the `DOME_POLICY` to the mount, the location to the GPS, each camera's `ACTIVE_DEVICES` from its train, and the tube's focal length and aperture. It then relays the dome's park state to the mount, before a procedure unparks it. | 2 min |
+| `Configure` | Writes each setting that a device's spec states, such as a camera's gain and offset and the filter names, once for the reservation. It also writes the settings that the tree decides: the observatory's location and the `DOME_POLICY` to the mount, the location to the GPS, each camera's `ACTIVE_DEVICES` from its train, the tube's focal length and aperture, and the upload settings of each camera that mounts the [outbox](#the-outbox). It then relays the dome's park state to the mount, before a procedure unparks it. | 2 min |
 | `Activation` | Runs the activation procedures, from the top of the tree down: the `Observatory`'s and its devices', unless another reservation in the observatory ran them, then the `Telescope`'s and its devices', then those of the devices of its trains. [Procedures](/docs/concepts/procedures/) states what they do. | none: each action's timeout |
 | `StartGuider` | Starts the guider's pod, waits for PHD2's event server, sends `set_connected`, and waits until PHD2 reports its camera and mount connected. A telescope with no `Guider` skips it. | 10 min |
 | `Abort` | Stops PHD2's exposures and guiding with `stop_capture`, then ends each exposure and stops the mount if it moves. | 2 min |
@@ -80,8 +80,8 @@ retry took it out of the session. An output that the old record
 switched on and the new one does not goes off, unless another device
 draws from it. Then the steps run again from the first step that reads
 a part of the record that changed: `StartSite` for the observatory's
-devices, `PowerOn` for the telescope's devices, `Configure` for the
-trains and tubes, and `StartGuider` for the `Guider`. So a power output
+devices, `PowerOn` for the telescope's devices and the outbox,
+`Configure` for the trains and tubes, and `StartGuider` for the `Guider`. So a power output
 that you changed is switched on, and the `Retry` Event names the first
 step that runs again. A retry of a failed deactivation step records
 nothing, because the release stops what the session started.
@@ -139,6 +139,57 @@ reason and message. A `ParentFound` that is `False`, a `Ready` whose
 reason is `Error`, and a `Safe` that is `False` are `Warning`s. `kubectl describe` lists them
 for an hour.
 
+## The outbox
+
+A camera's driver writes a frame to a file only when a client asks it
+to keep frames, and it writes the file to the pod's `/tmp`, which the
+pod loses when it stops. To keep the frames, name a
+`PersistentVolumeClaim` of the reservation's namespace in
+`spec.outbox`:
+
+```yaml
+spec:
+  telescope: east
+  holder: desktop
+  outbox:
+    claimName: east-frames
+```
+
+The claim is yours, so the frames stay from night to night in the
+place you chose. A volume on the machine at the pier keeps the frames
+off the network while the night runs. A network share works too, but a
+frame written straight to a share can make the next exposure wait,
+and the wait repeats all night.
+
+`PowerOn` reads the claim before it creates a pod, and fails with a
+summary that names the claim and the namespace when the claim does
+not exist. Each `Camera` of the telescope mounts the claim at
+`/outbox`, except a camera that a `Guider` guides with, because that
+camera sends its frames to PHD2 and writes no file. The driver runs as
+user and group 1000, and a new volume is often owned by root, so the
+camera's pod sets `fsGroup: 1000` with `fsGroupChangePolicy:
+OnRootMismatch`. The kubelet then gives the driver's group write
+access, and walks a large volume only when the owner of its root does
+not match. A claim that exists and that the camera's node cannot
+mount, such as a `ReadWriteOnce` volume bound on another node, leaves
+the camera's pod `Pending`, and the summary of `StartDevices` gives
+the scheduler's message.
+
+`Configure` then sets the driver's `UPLOAD_DIR` to `/outbox` and its
+`UPLOAD_MODE` to `UPLOAD_BOTH`, so each frame lands in the outbox and
+KStars still receives it. It leaves `UPLOAD_PREFIX` as the driver has
+it. The holder can change the mode and the directory afterward: Ekos
+writes its own upload settings when it captures, and
+`astrophotography-operator` chooses a directory for each target. With
+no outbox, the operator does not touch the upload settings.
+
+The session records the outbox, so an edit of `spec.outbox` takes
+effect at the next session. A new pod in the middle of an exposure
+would lose the exposure. Two telescopes whose reservations name the
+same claim both write to its root, and two drivers that write at the
+same moment can choose the same file name, so give each telescope its
+own claim.
+
 ## Editing devices during a session
 
 From the step that starts a telescope's INDI server, `PowerOn`, until
@@ -164,11 +215,12 @@ session ends:
   `spec.power`, its driver, or its claim, waits for the end of the
   session too. So does an edit of the `Telescope`'s
   `spec.observatory`, of its `OpticalTrain`s, of the `OpticalTube`s of
-  those trains, and of its `Guider`. Before the session starts a
+  those trains, of its `Guider`, and of the reservation's
+  `spec.outbox`. Before the session starts a
   server, the operator records in the reservation's `status.session`
   what it acts on: each device's parents, driver, power, and claim,
-  whether a `Guider` guides with it, and the telescope's observatory,
-  trains, tubes, and `Guider`s. `StartSite` records the observatory
+  whether a `Guider` guides with it, the telescope's observatory,
+  trains, tubes, and `Guider`s, and the reservation's outbox. `StartSite` records the observatory
   and the devices of its server, and `PowerOn` records the rest. Each
   step writes its part once, and only the retry of a failed activation
   step writes it again, from the specs as they are then. Until

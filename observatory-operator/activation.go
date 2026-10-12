@@ -324,7 +324,11 @@ func (r *runner) powerOn(ctx context.Context, w *stepWork) (outcome, error) {
 		s.Observatory = firstNonEmpty(s.Observatory, telescope.Spec.Observatory)
 		s.Devices = t.recordOf(ref, devices)
 		s.Trains, s.Tubes, s.Guiders = t.opticsOf(ref.name)
+		s.Outbox = r.res.Spec.Outbox
 	}); err != nil {
+		return outcome{}, err
+	}
+	if err := r.checkOutbox(ctx, w, r.status.Session.Outbox); err != nil {
 		return outcome{}, err
 	}
 	if _, err := r.o.startServer(ctx, w.report, ref, telescope.Metadata.UID, devices); err != nil {

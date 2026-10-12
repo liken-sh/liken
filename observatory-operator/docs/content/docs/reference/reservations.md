@@ -12,7 +12,7 @@ A `Reservation` gives one holder the use of one `Telescope`. Activation runs whe
 
 ## spec
 
-The telescope, the holder, and the times.
+The telescope, the holder, the times, and the outbox.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -20,6 +20,15 @@ The telescope, the holder, and the times.
 | <span id="spec--holder"></span>`holder` | string | yes | Who uses the telescope: a person's desktop client, or `astrophotography-operator`. |
 | <span id="spec--start"></span>`start` | string | no | When activation begins, as an RFC 3339 time. Optional. With no start, activation begins when the reservation is created. |
 | <span id="spec--end"></span>`end` | string | no | When deactivation begins, as an RFC 3339 time. Optional. With no end, the reservation lasts until it is deleted. |
+| <span id="spec--outbox"></span>`outbox` | [object](#specoutbox) | no | The volume that the telescope's imaging cameras write their frames to. Optional. Each `Camera` of the telescope mounts the claim at `/outbox`, except a camera that a `Guider` guides with, and the `Configure` step sets the driver's `UPLOAD_DIR` to `/outbox` and its `UPLOAD_MODE` to `UPLOAD_BOTH`, so each frame lands in the outbox and a desktop client still receives it. With no outbox, the operator leaves the upload settings alone, and a driver that a client sets to keep frames writes them to the pod's `/tmp`, which the pod loses when it stops. An edit takes effect at the next session. |
+
+### spec.outbox
+
+The volume that the telescope's imaging cameras write their frames to. Optional. Each `Camera` of the telescope mounts the claim at `/outbox`, except a camera that a `Guider` guides with, and the `Configure` step sets the driver's `UPLOAD_DIR` to `/outbox` and its `UPLOAD_MODE` to `UPLOAD_BOTH`, so each frame lands in the outbox and a desktop client still receives it. With no outbox, the operator leaves the upload settings alone, and a driver that a client sets to keep frames writes them to the pod's `/tmp`, which the pod loses when it stops. An edit takes effect at the next session.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specoutbox--claimname"></span>`claimName` | string | yes | The name of a `PersistentVolumeClaim` in the reservation's namespace. The `PowerOn` step fails when it does not exist. A claim that exists and cannot be mounted on the camera's node, such as a `ReadWriteOnce` volume bound on another node, leaves the camera's pod `Pending`, and `StartDevices` gives the scheduler's message. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
 
 ## status
 
@@ -32,7 +41,7 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--step"></span>`step` | string | no | The step that runs now, or the step that failed. It is empty while the phase is `Ready` or `Released`. One of: `Wait`, `StartSite`, `PowerOn`, `StartDevices`, `Connect`, `Configure`, `Activation`, `StartGuider`, `Abort`, `Deactivation`, `StopGuider`, `Disconnect`, `StopDevices`, `PowerOff`, `StopSite`. |
 | <span id="status--steps"></span>`steps` | [\[\]object](#statussteps) | no | Every step, in the order it runs. The activation steps are `Wait`, `StartSite`, `PowerOn`, `StartDevices`, `Connect`, `Configure`, `Activation`, and `StartGuider`, and the list holds them from the start. The deactivation steps are `Abort`, `Deactivation`, `StopGuider`, `Disconnect`, `StopDevices`, `PowerOff`, and `StopSite`, and the list holds them from when deactivation begins. A step starts only when the step before it is `Done` or `Skipped`. |
 | <span id="status--endpoint"></span>`endpoint` | [object](#statusendpoint) | no | The telescope's INDI server, while the phase is `Ready`. KStars connects to its `host` and `port`. |
-| <span id="status--session"></span>`session` | [object](#statussession) | no | What the reservation's session started with. `StartSite` writes `observatory` and `site`, and `PowerOn` writes the rest, each once and before it creates a pod. The `observatory.liken.sh/retry` annotation on a failed activation step writes the parts again from the specs as they are then, before the step runs again, and nothing else changes them. While the reservation holds its telescope, the operator reads this record in place of the specs of the resources it names, so an edit of a device's parents, driver, power, or claim, of the `Telescope`'s `spec.observatory`, of an `OpticalTrain`, of an `OpticalTube`, or of a `Guider` takes effect at the next session. The record is in the reservation, so an eviction of every pod of a server leaves it, and the operator creates the pods again from it. |
+| <span id="status--session"></span>`session` | [object](#statussession) | no | What the reservation's session started with. `StartSite` writes `observatory` and `site`, and `PowerOn` writes the rest, each once and before it creates a pod. The `observatory.liken.sh/retry` annotation on a failed activation step writes the parts again from the specs as they are then, before the step runs again, and nothing else changes them. While the reservation holds its telescope, the operator reads this record in place of the specs of the resources it names, so an edit of a device's parents, driver, power, or claim, of the `Telescope`'s `spec.observatory`, of an `OpticalTrain`, of an `OpticalTube`, of a `Guider`, or of the reservation's `spec.outbox` takes effect at the next session. The record is in the reservation, so an eviction of every pod of a server leaves it, and the operator creates the pods again from it. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | `Ready` is `True` while the phase is `Ready`, so `kubectl wait --for=condition=Ready` waits for the telescope. When a step fails, it is `False` and its message names the step and the device. `SafeToPowerOff` is `True` when the deactivation steps are done. |
 
 ### status.steps[]
@@ -74,7 +83,7 @@ The telescope's INDI server, while the phase is `Ready`. KStars connects to its 
 
 ### status.session
 
-What the reservation's session started with. `StartSite` writes `observatory` and `site`, and `PowerOn` writes the rest, each once and before it creates a pod. The `observatory.liken.sh/retry` annotation on a failed activation step writes the parts again from the specs as they are then, before the step runs again, and nothing else changes them. While the reservation holds its telescope, the operator reads this record in place of the specs of the resources it names, so an edit of a device's parents, driver, power, or claim, of the `Telescope`'s `spec.observatory`, of an `OpticalTrain`, of an `OpticalTube`, or of a `Guider` takes effect at the next session. The record is in the reservation, so an eviction of every pod of a server leaves it, and the operator creates the pods again from it.
+What the reservation's session started with. `StartSite` writes `observatory` and `site`, and `PowerOn` writes the rest, each once and before it creates a pod. The `observatory.liken.sh/retry` annotation on a failed activation step writes the parts again from the specs as they are then, before the step runs again, and nothing else changes them. While the reservation holds its telescope, the operator reads this record in place of the specs of the resources it names, so an edit of a device's parents, driver, power, or claim, of the `Telescope`'s `spec.observatory`, of an `OpticalTrain`, of an `OpticalTube`, of a `Guider`, or of the reservation's `spec.outbox` takes effect at the next session. The record is in the reservation, so an eviction of every pod of a server leaves it, and the operator creates the pods again from it.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -84,6 +93,7 @@ What the reservation's session started with. `StartSite` writes `observatory` an
 | <span id="statussession--trains"></span>`trains` | [map\[string\]object](#statussessiontrains) | no | The spec of each `OpticalTrain` of the telescope, by name. |
 | <span id="statussession--tubes"></span>`tubes` | [map\[string\]object](#statussessiontubes) | no | The spec of each `OpticalTube` of those trains, by name. A camera whose driver comes back gets the `SCOPE_INFO` of these lengths. |
 | <span id="statussession--guiders"></span>`guiders` | [map\[string\]object](#statussessionguiders) | no | The spec of each `Guider` of the telescope, by name. |
+| <span id="statussession--outbox"></span>`outbox` | [object](#statussessionoutbox) | no | The reservation's `spec.outbox`, which the camera pods of the session mount. |
 
 #### status.session.site.*
 
@@ -202,6 +212,14 @@ One `Guider`'s spec.
 | <span id="statussessionguiders--telescope"></span>`telescope` | string | yes | The `Guider`'s `spec.telescope`. |
 | <span id="statussessionguiders--opticaltrain"></span>`opticalTrain` | string | yes | The `Guider`'s `spec.opticalTrain`. |
 | <span id="statussessionguiders--pulses"></span>`pulses` | string | yes | The `Guider`'s `spec.pulses`. One of: `Mount`, `Camera`. |
+
+#### status.session.outbox
+
+The reservation's `spec.outbox`, which the camera pods of the session mount.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussessionoutbox--claimname"></span>`claimName` | string | yes | The name of the `PersistentVolumeClaim`. |
 
 ### status.conditions[]
 

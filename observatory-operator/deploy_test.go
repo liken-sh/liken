@@ -211,6 +211,7 @@ func TestTheClusterRoleGrantsWhatTheOperatorSends(t *testing.T) {
 		need{"batch", "jobs", "watch"},
 		need{"batch", "jobs", "create"},
 		need{"batch", "jobs", "delete"},
+		need{"", "persistentvolumeclaims", "get"},
 	)
 	for _, resource := range []string{"pods", "services"} {
 		for _, verb := range []string{"get", "list", "watch", "create", "delete"} {

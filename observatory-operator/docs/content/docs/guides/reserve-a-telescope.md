@@ -32,6 +32,11 @@ spec:
 * `start` and `end` are RFC 3339 times. With no `start`, activation
   begins as soon as you create the reservation. With no `end`, the
   reservation lasts until you delete it.
+* `outbox` is optional. Its `claimName` names a
+  `PersistentVolumeClaim` in the reservation's namespace, and the
+  telescope's imaging cameras write each frame to it, as
+  [The outbox](/docs/concepts/how-a-reservation-runs/#the-outbox)
+  describes. The claim must exist before `PowerOn`, or the step fails.
 
 A telescope serves one reservation at a time. A second reservation of
 the same telescope waits in its `Wait` step, and its summary names the
@@ -61,7 +66,7 @@ operator:
    on the server
 4. connects each device
 5. writes the settings that each device's spec states, the site's
-   location, and the optics to the drivers
+   location, the optics, and the outbox to the drivers
 6. runs the activation procedures that you declared, such as
    unparking the dome and cooling the camera
 7. starts PHD2, if the telescope has a `Guider`

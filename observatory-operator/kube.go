@@ -42,16 +42,26 @@ type pod struct {
 }
 
 type podSpec struct {
-	NodeName                      string      `json:"nodeName,omitempty"`
-	RestartPolicy                 string      `json:"restartPolicy,omitempty"`
-	TerminationGracePeriodSeconds *int64      `json:"terminationGracePeriodSeconds,omitempty"`
-	EnableServiceLinks            *bool       `json:"enableServiceLinks,omitempty"`
-	AutomountServiceAccountToken  *bool       `json:"automountServiceAccountToken,omitempty"`
-	InitContainers                []container `json:"initContainers,omitempty"`
-	Containers                    []container `json:"containers"`
-	Volumes                       []volume    `json:"volumes,omitempty"`
-	ResourceClaims                []podClaim  `json:"resourceClaims,omitempty"`
-	Affinity                      *affinity   `json:"affinity,omitempty"`
+	NodeName                      string              `json:"nodeName,omitempty"`
+	RestartPolicy                 string              `json:"restartPolicy,omitempty"`
+	TerminationGracePeriodSeconds *int64              `json:"terminationGracePeriodSeconds,omitempty"`
+	EnableServiceLinks            *bool               `json:"enableServiceLinks,omitempty"`
+	AutomountServiceAccountToken  *bool               `json:"automountServiceAccountToken,omitempty"`
+	InitContainers                []container         `json:"initContainers,omitempty"`
+	Containers                    []container         `json:"containers"`
+	Volumes                       []volume            `json:"volumes,omitempty"`
+	ResourceClaims                []podClaim          `json:"resourceClaims,omitempty"`
+	Affinity                      *affinity           `json:"affinity,omitempty"`
+	SecurityContext               *podSecurityContext `json:"securityContext,omitempty"`
+}
+
+// podSecurityContext holds the settings that apply to every container
+// of a pod. FSGroup makes the kubelet give a volume to that group, so
+// a container that runs as another user than the volume's owner can
+// write to it.
+type podSecurityContext struct {
+	FSGroup             *int64 `json:"fsGroup,omitempty"`
+	FSGroupChangePolicy string `json:"fsGroupChangePolicy,omitempty"`
 }
 
 type container struct {
@@ -110,10 +120,16 @@ type volumeMount struct {
 }
 
 type volume struct {
-	Name        string             `json:"name"`
-	EmptyDir    *emptyDir          `json:"emptyDir,omitempty"`
-	ConfigMap   *configMapSource   `json:"configMap,omitempty"`
-	DownwardAPI *downwardAPISource `json:"downwardAPI,omitempty"`
+	Name                  string             `json:"name"`
+	EmptyDir              *emptyDir          `json:"emptyDir,omitempty"`
+	ConfigMap             *configMapSource   `json:"configMap,omitempty"`
+	DownwardAPI           *downwardAPISource `json:"downwardAPI,omitempty"`
+	PersistentVolumeClaim *claimVolume       `json:"persistentVolumeClaim,omitempty"`
+}
+
+// claimVolume mounts a PersistentVolumeClaim of the pod's namespace.
+type claimVolume struct {
+	ClaimName string `json:"claimName"`
 }
 
 // downwardAPISource writes fields of the pod's own object as files.
@@ -188,9 +204,12 @@ type terminated struct {
 	Message  string `json:"message,omitempty"`
 }
 
+// podCondition is one condition of a pod. The scheduler sets
+// PodScheduled to False with a message when no node fits the pod.
 type podCondition struct {
-	Type   string `json:"type"`
-	Status string `json:"status"`
+	Type    string `json:"type"`
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
 }
 
 // ready reports whether the kubelet reports the pod Ready: every
@@ -205,6 +224,19 @@ func (p *pod) ready() bool {
 		}
 	}
 	return false
+}
+
+// unschedulable answers ": " and the scheduler's message while no node
+// fits the pod, such as when its claim is bound on another node, and
+// "" otherwise. Without it, a step that waits for the pod reads only
+// Pending, and the reason is in the pod's status alone.
+func unschedulable(p *pod) string {
+	for _, c := range p.Status.Conditions {
+		if c.Type == "PodScheduled" && c.Status == "False" && c.Message != "" {
+			return ": " + c.Message
+		}
+	}
+	return ""
 }
 
 type service struct {

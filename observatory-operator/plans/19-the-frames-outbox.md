@@ -1,8 +1,7 @@
 # 19, The frames outbox
 
-Proposed on 2026-10-12. Not built. This plan records the problem and
-the decisions of the design conversation; the field is not designed
-yet.
+Proposed on 2026-10-12, and designed and built on 2026-10-12. The
+design below answers what the design conversation left open.
 
 ## The problem
 
@@ -50,7 +49,54 @@ network while the night runs.
   land in a volume of their own, and something would have to gather
   them.
 
+## The design
+
+- **The field is `spec.outbox.claimName`** on the `Reservation`: the
+  name of a `PersistentVolumeClaim` in the reservation's namespace, in
+  the shape of a pod's `persistentVolumeClaim` volume. An object, and
+  not a bare string, leaves room for a later field such as a
+  `subPath`. A reservation with no outbox runs as it did before: the
+  driver writes local frames to its `tmp` `emptyDir`, and the
+  operator does not touch the upload settings.
+- **The session records the outbox.** `PowerOn` copies the field into
+  `status.session` with the devices, so an edit during a session
+  takes effect at the next session, the same rule [plan
+  17](completed/17-a-session-freezes-its-devices.md) gives a device. A
+  claim cannot change under a running driver without a new pod, and a
+  new pod in the middle of an exposure loses the exposure.
+- **`PowerOn` checks the claim before it creates a pod.** A claim that
+  does not exist fails the step, and the step's summary names the
+  claim and the namespace. A claim that exists but cannot be mounted,
+  such as a `ReadWriteOnce` volume bound on another node than the
+  camera's, leaves the pod `Pending`, and the step that waits for the
+  pod reports the scheduler's message.
+- **Only the imaging cameras mount it.** A camera that a `Guider`
+  guides with sends its frames to PHD2 and never writes a file, so its
+  pod does not mount the claim. Every other `Camera` of the telescope
+  mounts the claim at `/outbox`.
+- **The pod's `fsGroup` is the driver's group.** The driver runs as
+  user and group 1000 on a read-only root, and a new volume is often
+  owned by root. The camera pod sets `fsGroup: 1000` with
+  `fsGroupChangePolicy: OnRootMismatch`, so the kubelet gives the
+  driver write access and walks a large volume only when its root
+  does not match.
+- **`Configure` points the driver at the outbox.** It writes
+  `UPLOAD_SETTINGS` with `UPLOAD_DIR` set to `/outbox`, and leaves
+  `UPLOAD_PREFIX` to the holder. It sets `UPLOAD_MODE` to
+  `UPLOAD_BOTH`, so every frame lands in the outbox and a desktop
+  client still receives it. The holder can change the mode and the
+  directory afterward: `astrophotography-operator` chooses
+  `UPLOAD_LOCAL` and a directory for each target, and Ekos applies its
+  own upload settings when it captures.
+- **A camera cannot be shared by two telescopes,** because each device
+  has one parent and runs on one server at a time. So the question of
+  which outbox a shared camera writes to does not come up.
+
 ## Still open
 
-The field, how the claim reaches each camera pod, and how a camera that
-several telescopes share at different times finds the right outbox.
+Two telescopes whose reservations name the same claim both write to
+its root, and each driver numbers its files from the ones it finds.
+Two drivers that write at the same moment can choose the same name.
+`astrophotography-operator` sets its own directory and a unique name
+for each frame, so only a person who shares one claim between two
+desktop sessions meets this.

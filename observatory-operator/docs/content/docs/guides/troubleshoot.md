@@ -1,7 +1,7 @@
 ---
 title: Troubleshoot
 weight: 70
-description: "Find why a reservation failed or waits, from the step and the device its status names: a missing parent, two devices on one driver, a pod that stays Pending, a device that does not connect, a device that does not serve its kind, a device that waits for the next session, a park that a lock refused, or a delete that does not finish. Then run the failed step again with the retry annotation. Use when a Reservation is Failed or stuck, when a device reports Error, or when a resource will not delete."
+description: "Find why a reservation failed or waits, from the step and the device its status names: a missing parent, two devices on one driver, an outbox that does not exist, a pod that stays Pending, a device that does not connect, a device that does not serve its kind, a device that waits for the next session, a park that a lock refused, or a delete that does not finish. Then run the failed step again with the retry annotation. Use when a Reservation is Failed or stuck, when a device reports Error, or when a resource will not delete."
 ---
 
 # Troubleshoot
@@ -61,6 +61,16 @@ not start until the next session, so it never stops a device that
 runs. When it names the driver of a device on that server, the next
 session's `StartSite` or `PowerOn` fails as above.
 
+## PowerOn fails: the outbox does not exist
+
+The summary of `PowerOn` reads `Failed: missing PersistentVolumeClaim
+east-frames in namespace observatory, which spec.outbox.claimName
+names`. The step
+fails before it starts the telescope's server. Create the claim in the
+reservation's namespace, or correct `spec.outbox.claimName`, and then
+[run the failed step again](#run-a-failed-step-again). The retry
+records the outbox again from the spec.
+
 ## A device does not start or move during a reservation
 
 A running server keeps the devices that it started until the
@@ -71,8 +81,9 @@ and its `Ready` message names the reservation it waits for, such as
 `Starts at the next reservation, after Reservation east-tonight ends`.
 A device that a person moved keeps running where it was, and its
 `ParentFound` condition has the reason `MovePending` and says where it
-goes. An edit of an `OpticalTrain`, an `OpticalTube`, or a
-`Guider` waits for the next reservation the same way. The
+goes. An edit of an `OpticalTrain`, an `OpticalTube`, a `Guider`, or
+the reservation's `spec.outbox` waits for the next reservation the
+same way. The
 reservation's `status.session` shows what the session started with,
 and the operator acts on that until the reservation ends. End the
 reservation, or let it reach its `end`, and reserve the telescope
@@ -98,7 +109,11 @@ kubectl describe pod east-mount -n observatory
   [Connect USB equipment](/docs/guides/connect-usb-equipment/) describes.
   A camera on a vendor SDK, such as a ZWO ASI, publishes whole under
   its port path, such as `usb-1-2`, so select it by its vendor and
-  product.
+  product. A camera's pod also stays `Pending` when its node cannot
+  mount the outbox, such as a `ReadWriteOnce` volume bound on another
+  node. The step's summary gives the scheduler's message, such as
+  `volume node affinity conflict`. Bind the claim on the camera's
+  node, or name another claim, and run the failed step again.
 * **The image does not pull.** A vendor's driver image is large. The
   ToupTek image is over 300 MB, so the first pull on a slow link can
   take most of the deadline. Run the step again once the image is on

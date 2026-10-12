@@ -54,7 +54,7 @@ func TestADevicePodServesItsDriverThroughSocat(t *testing.T) {
 	for _, d := range eastDevices() {
 		t.Run(d.name(), func(t *testing.T) {
 			t.Parallel()
-			p, svc, claim, err := devicePod("observatory", east, d, false)
+			p, svc, claim, err := devicePod("observatory", east, d, false, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -147,7 +147,7 @@ func TestEveryObjectHasItsOwnerAndTheOperatorsLabels(t *testing.T) {
 	t.Parallel()
 	east := serverRef{observatory.TelescopeKind, "east"}
 	camera := simulator(observatory.CameraKind, "east-main", "indi_simulator_ccd")
-	devicePodBuilt, deviceService, _, err := devicePod("observatory", east, camera, false)
+	devicePodBuilt, deviceService, _, err := devicePod("observatory", east, camera, false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestADeviceWithAClaimGetsAResourceClaim(t *testing.T) {
 	t.Parallel()
 	camera := simulator(observatory.CameraKind, "east-main", "indi_asi_ccd")
 	camera.object.Spec.Claim = json.RawMessage(`{"devices":{"requests":[{"name":"camera","exactly":{"deviceClassName":"usb.liken.sh"}}]}}`)
-	p, _, claim, err := devicePod("observatory", serverRef{observatory.TelescopeKind, "east"}, camera, false)
+	p, _, claim, err := devicePod("observatory", serverRef{observatory.TelescopeKind, "east"}, camera, false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestEachObjectIsNamedForItsResourceThenItsKind(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.want, func(t *testing.T) {
 			t.Parallel()
-			p, svc, _, err := devicePod("observatory", east, simulator(c.kind, c.name, "indi_simulator_ccd"), false)
+			p, svc, _, err := devicePod("observatory", east, simulator(c.kind, c.name, "indi_simulator_ccd"), false, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -243,11 +243,11 @@ func TestANameThatIsNoServiceNameIsRefused(t *testing.T) {
 		message string
 	}{
 		{"a dot", func() error {
-			_, _, _, err := devicePod("observatory", east, simulator(observatory.CameraKind, "east.main", "indi_simulator_ccd"), false)
+			_, _, _, err := devicePod("observatory", east, simulator(observatory.CameraKind, "east.main", "indi_simulator_ccd"), false, "")
 			return err
 		}, `the pod and Service name "east.main-camera" is not a DNS label: use only lowercase letters, digits, and "-", and start with a letter`},
 		{"a camera of 57 characters", func() error {
-			_, _, _, err := devicePod("observatory", east, simulator(observatory.CameraKind, strings.Repeat("a", 57), "indi_simulator_ccd"), false)
+			_, _, _, err := devicePod("observatory", east, simulator(observatory.CameraKind, strings.Repeat("a", 57), "indi_simulator_ccd"), false, "")
 			return err
 		}, `the pod and Service name "` + strings.Repeat("a", 57) + `-camera" has 64 characters, and Kubernetes allows 63: shorten the name of the Camera to 56 characters or fewer`},
 		{"a telescope of 54 characters", func() error {
@@ -268,7 +268,7 @@ func TestANameThatIsNoServiceNameIsRefused(t *testing.T) {
 // The longest names that fit are accepted.
 func TestTheLongestNamesThatFitAreAccepted(t *testing.T) {
 	t.Parallel()
-	if _, _, _, err := devicePod("observatory", east, simulator(observatory.CameraKind, strings.Repeat("a", 56), "indi_simulator_ccd"), false); err != nil {
+	if _, _, _, err := devicePod("observatory", east, simulator(observatory.CameraKind, strings.Repeat("a", 56), "indi_simulator_ccd"), false, ""); err != nil {
 		t.Error(err)
 	}
 	if _, _, err := serverPod("observatory", serverRef{observatory.TelescopeKind, strings.Repeat("a", 53)}, "uid", nil); err != nil {
@@ -295,9 +295,9 @@ func TestTheDigestOfAServerLeavesOutItsDevices(t *testing.T) {
 func TestTheDigestOfADevicePodFollowsItsDriver(t *testing.T) {
 	t.Parallel()
 	east := serverRef{observatory.TelescopeKind, "east"}
-	one, _, _, _ := devicePod("observatory", east, simulator(observatory.MountKind, "east", "indi_simulator_telescope"), false)
-	same, _, _, _ := devicePod("observatory", east, simulator(observatory.MountKind, "east", "indi_simulator_telescope"), false)
-	other, _, _, _ := devicePod("observatory", east, simulator(observatory.MountKind, "east", "indi_lx200generic"), false)
+	one, _, _, _ := devicePod("observatory", east, simulator(observatory.MountKind, "east", "indi_simulator_telescope"), false, "")
+	same, _, _, _ := devicePod("observatory", east, simulator(observatory.MountKind, "east", "indi_simulator_telescope"), false, "")
+	other, _, _, _ := devicePod("observatory", east, simulator(observatory.MountKind, "east", "indi_lx200generic"), false, "")
 	if !current(one, same) || current(one, other) {
 		t.Errorf("digests: %v %v %v", one.Metadata.Annotations, same.Metadata.Annotations, other.Metadata.Annotations)
 	}

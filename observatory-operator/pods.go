@@ -46,6 +46,13 @@ const (
 // count lasts about 4,000 years. Plan 03 measured it.
 const maxRestarts = "2147483647"
 
+// outboxVolume is the pod-local name of a camera's outbox, and
+// outboxDir is where the driver sees it.
+const (
+	outboxVolume = "outbox"
+	outboxDir    = "/outbox"
+)
+
 // claimName is the pod-local name of a device's ResourceClaim.
 const claimName = "device"
 
@@ -72,8 +79,10 @@ func int64Pointer(i int64) *int64 { return &i }
 
 // devicePod answers the pod, the Service, and, for a device with
 // spec.claim, the ResourceClaim of one device on one server. guides is
-// true for a camera that a Guider guides with (placement.go).
-func devicePod(namespace string, server serverRef, d *device, guides bool) (*pod, *service, *resourceClaim, error) {
+// true for a camera that a Guider guides with (placement.go), and
+// outbox names the claim that the pod mounts at /outbox, or "" for
+// none (outbox.go).
+func devicePod(namespace string, server serverRef, d *device, guides bool, outbox string) (*pod, *service, *resourceClaim, error) {
 	name, err := objectName(d.kind, d.name())
 	if err != nil {
 		return nil, nil, nil, err
@@ -112,6 +121,9 @@ func devicePod(namespace string, server serverRef, d *device, guides bool) (*pod
 			Volumes:                      []volume{{Name: "tmp", EmptyDir: &emptyDir{}}},
 			Affinity:                     placement(server, d, guides),
 		},
+	}
+	if outbox != "" {
+		mountOutbox(p, outbox)
 	}
 	var claim *resourceClaim
 	if len(d.object.Spec.Claim) > 0 {

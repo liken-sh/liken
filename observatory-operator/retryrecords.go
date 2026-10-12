@@ -61,6 +61,7 @@ func (r *runner) recordAgain(ctx context.Context) (notes []string, err error) {
 		ref := serverRef{observatory.TelescopeKind, r.res.Spec.Telescope}
 		next.Devices = t.recordOf(ref, t.devicesOn(ref))
 		next.Trains, next.Tubes, next.Guiders = t.opticsOf(ref.name)
+		next.Outbox = r.res.Spec.Outbox
 	}
 	r.status.Session = next
 	r.rerunFrom(old, next)
@@ -122,8 +123,9 @@ func (r *runner) undoOld(ctx context.Context, before *tree, old, next *observato
 // first one that reads a part of the record that the retry changed:
 // StartSite for the observatory's devices, PowerOn for the telescope's
 // devices, because it gives the server their drivers and switches on
-// their outputs, Configure for the trains and tubes, and StartGuider
-// for the Guiders. The steps after it read what it starts, so they run
+// their outputs, PowerOn for the outbox too, because it checks the
+// claim and the camera pods after it mount it, Configure for the
+// trains and tubes, and StartGuider for the Guiders. The steps after it read what it starts, so they run
 // again too, and the retry names the first one. A step that runs again finds each device that did not
 // change as it left it, and an activation run that is done stays done
 // (activation).
@@ -132,7 +134,7 @@ func (r *runner) rerunFrom(old, next *observatory.Session) {
 	switch {
 	case !equalJSON(old.Site, next.Site):
 		first = observatory.StepStartSite
-	case !equalJSON(old.Devices, next.Devices):
+	case !equalJSON(old.Devices, next.Devices) || !equalJSON(old.Outbox, next.Outbox):
 		first = observatory.StepPowerOn
 	case !equalJSON(old.Trains, next.Trains) || !equalJSON(old.Tubes, next.Tubes):
 		first = observatory.StepConfigure

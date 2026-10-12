@@ -40,7 +40,7 @@ func TestOnlyAGuideCameraWithNoClaimFollowsTheServer(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.what, func(t *testing.T) {
 			t.Parallel()
-			p, _, _, err := devicePod("observatory", east, c.d, c.guides)
+			p, _, _, err := devicePod("observatory", east, c.d, c.guides, "")
 			if err != nil {
 				t.Fatal(err)
 			}

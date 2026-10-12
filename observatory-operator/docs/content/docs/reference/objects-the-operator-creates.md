@@ -89,6 +89,17 @@ pod. The guider's pod, `Service`, and `ConfigMap` take the name
 the kind, the resource, the trigger, and a hash, such as
 `observatory-lab-activation-a799431dd4` ([Procedures](/docs/concepts/procedures/)).
 
+## The outbox volume
+
+The pod of each camera that mounts the reservation's outbox has a
+volume named `outbox`, from the `PersistentVolumeClaim` that the
+session recorded, mounted at `/outbox` in its `driver` container. The
+pod's `securityContext` sets `fsGroup: 1000` and
+`fsGroupChangePolicy: OnRootMismatch`, so the driver can write to a
+volume that root owns. The claim is yours: the operator never creates
+or deletes it. [The outbox](/docs/concepts/how-a-reservation-runs/#the-outbox)
+says which cameras mount it.
+
 ## Finalizers
 
 The operator adds the finalizer `observatory.liken.sh/deactivate` to

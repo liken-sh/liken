@@ -5,7 +5,7 @@ package main
 // acts on: for each device, its parents, its driver, its served owner,
 // its power, its claim, and whether a Guider guides with it, and for a
 // telescope, its observatory, its OpticalTrains, the OpticalTubes of
-// those trains, and its Guiders.
+// those trains, its Guiders, and the reservation's outbox (outbox.go).
 // The record is in the status of the reservation whose session it is
 // (observatory.Session), so it outlives every pod of the server. The
 // StartSite step records the observatory and the devices of its server,
@@ -138,7 +138,7 @@ func (t *tree) applyRecords() {
 		}
 		scope := serverRef{observatory.TelescopeKind, res.Spec.Telescope}
 		if len(s.Devices) > 0 {
-			t.records[scope] = observatory.Session{Devices: s.Devices, Trains: s.Trains, Tubes: s.Tubes, Guiders: s.Guiders}
+			t.records[scope] = observatory.Session{Devices: s.Devices, Trains: s.Trains, Tubes: s.Tubes, Guiders: s.Guiders, Outbox: s.Outbox}
 			t.freezeOptics(*s)
 		}
 		if telescope, ok := t.telescopes[scope.name]; ok && s.Observatory != "" && s.Observatory != telescope.Spec.Observatory {

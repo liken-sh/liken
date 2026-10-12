@@ -101,6 +101,12 @@ rules:
   - apiGroups: [""]
     resources: [configmaps]
     verbs: [get, list, watch, create, update, delete]
+  # The PowerOn step reads the claim that a reservation's spec.outbox
+  # names, once, to fail with its name when it does not exist. The
+  # operator does not watch the claims, so it needs get alone.
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [get]
   # The claim of a device on real hardware, made from its spec.claim.
   - apiGroups: [resource.k8s.io]
     resources: [resourceclaims]

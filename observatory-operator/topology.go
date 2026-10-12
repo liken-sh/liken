@@ -95,7 +95,7 @@ func (o *operator) startDevices(ctx context.Context, report func(string), ref se
 	t := o.snapshot()
 	var started []*device
 	for _, d := range driverDevices(devices) {
-		built, svc, claim, err := devicePod(o.namespace, ref, d, t.guides(ref, d))
+		built, svc, claim, err := devicePod(o.namespace, ref, d, t.guides(ref, d), t.outbox(ref, d))
 		if err != nil {
 			o.fault(d, err)
 			return started, fmt.Errorf("%s %s: %w", d.kind.Name, d.name(), err)
@@ -132,7 +132,7 @@ func (o *operator) waitReady(ctx context.Context, report func(string), devices [
 			if !ok || !p.ready() {
 				phase := "not created"
 				if ok {
-					phase = firstNonEmpty(p.Status.Phase, "Pending")
+					phase = firstNonEmpty(p.Status.Phase, "Pending") + unschedulable(p)
 				}
 				return false, fmt.Sprintf("waiting for pod %s of %s %s (%s)", name, d.kind.Name, d.name(), phase), nil
 			}

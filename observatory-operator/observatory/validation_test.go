@@ -256,6 +256,11 @@ func TestTheAPIServerAcceptsAndRefuses(t *testing.T) {
 		{"a reservation with a time that is not RFC 3339", ReservationKind,
 			map[string]any{"telescope": "east", "holder": "desktop", "end": "tomorrow"},
 			"spec.end: Invalid value"},
+		{"a reservation with an outbox", ReservationKind,
+			map[string]any{"telescope": "east", "holder": "desktop", "outbox": map[string]any{"claimName": "frames"}}, ""},
+		{"a reservation with an outbox that names no claim", ReservationKind,
+			map[string]any{"telescope": "east", "holder": "desktop", "outbox": map[string]any{}},
+			"spec.outbox.claimName: Required value"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
