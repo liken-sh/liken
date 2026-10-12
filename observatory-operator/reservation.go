@@ -39,6 +39,9 @@ type runner struct {
 	// logged is the last phase that the log names, so each phase
 	// change writes one line.
 	logged observatory.ReservationPhase
+	// session is the SessionCurrent condition that the runner last
+	// judged (sessioncurrent.go), or nil for none.
+	session *observatory.Condition
 	// guiderLink names the guider's pod and the INDI server's pod, by
 	// their UIDs, whose PHD2 the runner last saw with its equipment
 	// connected (guidersteady.go).
@@ -78,6 +81,7 @@ func (r *runner) run(ctx context.Context) {
 		}
 		if first {
 			r.status, r.logged, first = r.res.Status, r.res.Status.Phase, false
+			r.session = storedSession(r.res.Status)
 			if finished(r.res) {
 				// A Released reservation that a person edits has no step
 				// to run, so this write alone keeps its
@@ -397,19 +401,29 @@ func (r *runner) save(ctx context.Context) error {
 		r.o.logf("Reservation %s: %s", r.name, phaseLine(&r.status))
 	}
 	held := *r.res
-	_, err := informer.SettleStatus[observatory.Reservation](r.o.client.WithContext(ctx), r.o.versions,
+	var transitions []observatory.Condition
+	wrote, err := informer.SettleStatus[observatory.Reservation](r.o.client.WithContext(ctx), r.o.versions,
 		objectPath(observatory.ReservationKind, held.Metadata.Namespace, held.Metadata.Name), &held,
 		func(copy *observatory.Reservation) bool {
 			next := r.status
-			// The runner's own Events cover these transitions
-			// (events.go).
-			next.Conditions, _ = mergeConditions(copy.Status.Conditions, r.status.Conditions)
+			next.Conditions, transitions = mergeConditions(copy.Status.Conditions, r.status.Conditions)
 			if equalJSON(copy.Status, next) {
 				return false
 			}
 			copy.APIVersion, copy.Kind, copy.Status = observatory.APIVersion, observatory.ReservationKind.Name, next
 			return true
 		})
+	if wrote {
+		// The runner's own Events cover the transitions of Ready and
+		// SafeToPowerOff (events.go). SessionCurrent changes on an
+		// edit, when no step changes, so its transitions post their
+		// own Events, after the write lands.
+		for _, c := range transitions {
+			if c.Type == observatory.ConditionSessionCurrent {
+				r.o.recorder.Transition(reference(observatory.ReservationKind, r.res.Metadata), c, "")
+			}
+		}
+	}
 	if err == nil {
 		r.res = &held
 	} else if ctx.Err() == nil {
@@ -431,9 +445,13 @@ func (r *runner) edited() bool {
 }
 
 // observe writes the status when the spec changed since the last write
-// (edited).
+// (edited), or when an edit of a spec changed the SessionCurrent
+// condition (judgeSession). An edit of an Observatory, a Telescope, or
+// a Camera moves no generation of the reservation, so the condition is
+// judged on each wake of the bell structure, which every watch event
+// rings and an INDI reading does not.
 func (r *runner) observe(ctx context.Context) {
-	if r.edited() {
+	if judged := r.judgeSession(r.o.snapshot()); judged || r.edited() {
 		r.save(ctx)
 	}
 }
@@ -478,6 +496,9 @@ func (r *runner) compose() {
 		}
 	}
 	s.Conditions = []observatory.Condition{ready, safe}
+	if r.session != nil && s.Phase != observatory.ReservationReleased {
+		s.Conditions = append(s.Conditions, *r.session)
+	}
 	for i := range s.Conditions {
 		s.Conditions[i].ObservedGeneration = s.ObservedGeneration
 	}

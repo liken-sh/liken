@@ -65,6 +65,7 @@ func (r *runner) recordAgain(ctx context.Context) (notes []string, err error) {
 		next.FITSKeywords = t.fitsKeywordsOf(ref, next.Observatory, t.devicesOn(ref), r.res.Spec.FITSKeywords)
 	}
 	r.status.Session = next
+	r.judgeSession(r.o.snapshot())
 	r.rerunFrom(old, next)
 	if err := r.o.send(ctx, nil, "recording the session again in the status of the Reservation "+r.name, func() error { return r.save(ctx) }); err != nil {
 		return nil, err

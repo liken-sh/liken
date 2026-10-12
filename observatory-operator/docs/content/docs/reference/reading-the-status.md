@@ -238,5 +238,30 @@ observatory-operator: Reservation east-tonight: Ready at east-telescope.observat
 
 `SafeToPowerOff` is `True` when the deactivation steps are done. Until
 then it is `False`, and its message says why, such as
-`In use by desktop` while the reservation is `Ready`. [The
+`In use by desktop` while the reservation is `Ready`.
+
+`SessionCurrent` tells you whether an edit of the outbox or of a FITS
+keyword waits for the next session. The reservation has it from the
+moment `PowerOn` records the session until the reservation is
+`Released`. It is `True` with the reason `NoEditPending` while
+`status.session` holds the outbox and the merged keywords that the
+specs give now. It is `False` with the reason `EditPending` when an
+edit of `spec.outbox`, or of `spec.fitsKeywords` on the `Observatory`,
+the `Telescope`, a `Camera`, or the `Reservation`, changes what the
+next session records. The message names each change and its next
+value, separated by `;`:
+
+```text
+spec.outbox.claimName changes from frames to nightly at the next session; FITS keyword OBJECT of Camera east-main changes from "M31" to "M33" at the next session
+```
+
+A keyword whose value is the same and whose comment changed reads
+`the comment of FITS keyword TELESCOP of Camera east-main changes from
+...`, and a value that the next session adds or drops reads `none` on
+that side. Each change of the condition's status or reason posts one
+Event with the same reason and message, so a second edit while one
+waits posts none. A retry of a failed activation step records the
+session again from the specs, so it turns the condition `True`. A
+moved or added device does not show here: its own `ParentFound` or
+`Ready` condition says that it waits. [The
 guider](/docs/concepts/the-guider/) states what a `Guider`'s status holds.

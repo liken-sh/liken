@@ -655,7 +655,12 @@ spec:
                     telescope. When a step fails, it is `False` and its
                     message names the step and the device.
                     `SafeToPowerOff` is `True` when the deactivation
-                    steps are done.
+                    steps are done. `SessionCurrent` is `False` with the
+                    reason `EditPending` while an edit of `spec.outbox`
+                    or of a `spec.fitsKeywords` waits for the next
+                    session, and its message names each change. The
+                    reservation has it from the `PowerOn` step until it
+                    is `Released`.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:

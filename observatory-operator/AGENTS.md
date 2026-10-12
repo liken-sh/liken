@@ -177,7 +177,7 @@ The operator's files are flat in `package main`, one domain to a file.
 (with the finalizers of `finalizers.go`), one
 runner for each `Reservation` (`reservation.go`, `activation.go`,
 `configure.go`, `deactivation.go`, `steady.go`, `deletes.go`,
-`leaves.go`, `finish.go`, and the guider's `guidersteps.go` and
+`leaves.go`, `finish.go`, `sessioncurrent.go`, and the guider's `guidersteps.go` and
 `guidersteady.go`),
 the status writer (`status.go`, `statustree.go`, `standing.go`,
 `readings.go`, `guiderstatus.go`, and `devicesplit.go` and

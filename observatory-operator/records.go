@@ -272,6 +272,7 @@ func (r *runner) recordSession(ctx context.Context, w *stepWork, recorded func(*
 		return nil
 	}
 	fill(r.status.Session)
+	r.judgeSession(r.o.snapshot())
 	// The step's summary changes in the same write, so the write shows
 	// in `kubectl get` as each status write does.
 	w.report("recording the devices that the session starts in status.session")
