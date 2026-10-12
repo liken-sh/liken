@@ -55,8 +55,27 @@ as it takes.
 The `Target` resource, how the identity is formed, and the frame
 record. Two ways to form the identity were discussed: a UUID in a
 keyword of our own, or the camera and the exposure's start time, which
-are standard keywords. The second depends on how precise INDI's
-`DATE-OBS` is and whether two cameras of one model report different
-`INSTRUME` values; neither was checked. The identity is written into
-every archived frame, so it is the hardest decision here to change
-later.
+are standard keywords. The identity is written into every archived
+frame, so it is the hardest decision here to change later.
+
+On 2026-10-12, the CCD simulator of the pinned `indi-simulators` image
+answered three questions that bear on the choice
+([`observatory-operator` plan
+20](../../observatory-operator/plans/20-declared-fits-keywords.md)
+has the probe):
+
+- `DATE-OBS` has millisecond precision, such as
+  `2026-10-12T20:08:26.864`.
+- `INSTRUME` is the name of the INDI device, such as `CCD Simulator`.
+  Two cameras of one model run under one driver name, so they report
+  the same `INSTRUME` unless a person declares their own, and the
+  camera and the start time alone do not tell two such cameras apart.
+- A keyword written through `FITS_HEADER` before an exposure is on
+  that exposure's frame, and a second write of the same name replaces
+  the value. So a keyword that changes with every frame, such as a
+  UUID, costs one write before each exposure.
+
+`INDI_CLEAR` removes every keyword that a client wrote, those of
+`observatory-operator` included. After a clear, this operator writes
+the session's list from `status.session.fitsKeywords` again with its
+own, so a keyword of one target never reaches the frames of the next.
