@@ -43,6 +43,8 @@ variable "BRANCH_CACHE" {
 
 group "default" {
   targets = [
+    "vulkan",
+    "astrometry",
     "trust",
     "audio-operator",
     "audio-operator-cli",
@@ -50,7 +52,6 @@ group "default" {
     "bluetooth-bondfetch",
     "bluetoothd",
     "bluetooth-operator-cli",
-    "vulkan",
     "vaapi",
     "ffmpeg",
     "weston",
@@ -96,6 +97,39 @@ group "default" {
     "people-operator",
     "per-node-csi-driver",
   ]
+}
+
+target "vulkan" {
+  context    = "vulkan"
+  dockerfile = "Dockerfile"
+  platforms  = ["linux/amd64"]
+  args = {
+    VERSION = "20260928"
+  }
+  tags       = ["ghcr.io/liken-sh/vulkan:20260928-3"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache", "type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache-20260928-3"]
+  cache-to = concat(
+    CACHE_WRITE == "vulkan" ? ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "vulkan" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache-20260928-3,mode=max,ignore-error=true"] : [],
+  )
+}
+
+target "astrometry" {
+  context    = "astrometry"
+  dockerfile = "Dockerfile"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "builder" = "vulkan"
+  }
+  args = {
+    VERSION = "20260928"
+  }
+  tags       = ["ghcr.io/liken-sh/astrometry:20260928-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache", "type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache-20260928-1"]
+  cache-to = concat(
+    CACHE_WRITE == "astrometry" ? ["type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "astrometry" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache-20260928-1,mode=max,ignore-error=true"] : [],
+  )
 }
 
 target "trust" {
@@ -209,21 +243,6 @@ target "bluetooth-operator-cli" {
   tags       = ["ghcr.io/liken-sh/bluetooth-operator-cli:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/bluetooth-operator-cli:buildcache"]
   cache-to   = CACHE_WRITE == "bluetooth-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/bluetooth-operator-cli:buildcache,mode=max,ignore-error=true"] : []
-}
-
-target "vulkan" {
-  context    = "vulkan"
-  dockerfile = "Dockerfile"
-  platforms  = ["linux/amd64"]
-  args = {
-    VERSION = "20260928"
-  }
-  tags       = ["ghcr.io/liken-sh/vulkan:20260928-3"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache", "type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache-20260928-3"]
-  cache-to = concat(
-    CACHE_WRITE == "vulkan" ? ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "vulkan" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache-20260928-3,mode=max,ignore-error=true"] : [],
-  )
 }
 
 target "vaapi" {

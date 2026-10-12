@@ -105,6 +105,9 @@ both, and a node holds it once.
    line of the `Dockerfile`. The nested compositor in
    `media-operator/local/weston-nested/Dockerfile` names the digest
    too.
+   `astrometry` installs from the same snapshot, because this
+   directory's `snapshot.sha256` holds the checksums of one date, so
+   set its `version`, `revision`, and digest the same way.
 5. Run `make workflows` at the top of the repository. The bake file
    carries each base's version and tag.
 6. Run `make images` at the top of the repository. It builds every

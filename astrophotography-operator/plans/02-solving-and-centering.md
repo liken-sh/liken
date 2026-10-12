@@ -352,10 +352,50 @@ first sync removes it. The drill of [plan
 08](08-the-component-and-the-first-session.md) checks that the error
 falls within 30 arcseconds in at most two rounds.
 
+## The image
+
+Built on 2026-10-12 as `ghcr.io/liken-sh/astrometry:20260928-1`,
+from the top-level component `astrometry/`, and pushed to the lab
+registry. The build downloaded 117 Debian packages, 41.7 MiB, and the
+image is 52,178,737 bytes (49.8 MiB), with 46 packages in its notices
+and no Python. It is smaller than the 88 MB the laptop's closure
+measured, because Debian's packages with no recommends install the
+reference BLAS and LAPACK in place of OpenBLAS, and its `solve-field`
+does not link `cairo`.
+
+The smoke check, `astrometry/smoke/astrometry.sh`, solves a synthetic
+field of 256 by 256 pixels against an index file of the same synthetic
+stars, 104 KB, that the component commits, with the options of [the
+worker](#extraction-beside-the-frames). It solved at 150.000002°,
+30.000009°, and 2.2353 arcseconds per pixel, against the field's
+150°, 30°, and 2.235. So 0.97 of Debian 13 reads `--just-augment
+--no-remove-lines --uniformize 0` as 0.98 does, and runs no other
+program.
+
+The image also solved a frame of the CCD simulator with the lab's 13
+index files of 4207 and 4208, each step in its own container on the
+laptop. The frame, made with a focal length of 400 mm, is 1280 by 1024
+at 2.68 arcseconds per pixel.
+
+| Step | Wall time, with the container's start |
+|---|---|
+| `source-extractor`, 317 stars | 0.26 s |
+| `solve-field --just-augment`, an `.axy` of 20,160 bytes | 0.25 s |
+| `astrometry-engine`, solved with `index-2mass-07-00.fits` | 0.28 s |
+
+The solution was 29.6070°, 59.8193°, at 2.6815 arcseconds per pixel,
+with 39 stars matched. The frame's header gave `OBJCTRA` and `OBJCTDEC`
+of 35.63°, 53.82°, which is 6.8° from the stars that the simulator
+drew. With that point as the hint and a radius of 5°, the engine
+searched for 58 s and wrote no solution. The laptop's 0.98 gave the
+same result for the same `.axy`. With a radius of 10° the image solved
+the frame as above.
+
 ## Still open
 
 - The download of index files, and the choice of series from each
   train's field, after the first session.
 - A `Solver` that serves targets of other namespaces.
-- Whether 0.97 of Debian 13 reads the options above the
-  same way as 0.98; the smoke check answers it.
+- Why the header of the frame `C_001.fits` names a point 6.8° from the
+  stars that the simulator drew, when the probe above found the two
+  the same. The drill checks it on a frame of a reservation.

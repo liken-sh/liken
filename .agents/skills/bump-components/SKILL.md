@@ -132,6 +132,11 @@ and `revision` to 1 in all five `package.toml` files, set the digest
 in every `FROM debian:trixie-slim` line, run `make workflows`, run
 `make images`, and run each image's smoke check. Compare the package
 versions with the old snapshot and report the ones that moved.
+`astrometry`, the plate solver, is not a base, but it installs from
+the same snapshot through `vulkan/snapshot.sh`, and
+`vulkan/snapshot.sha256` holds the checksums of one date. So it moves
+with the five: its `version`, `revision`, digest, and
+`[package.upstream]` change in the same commit.
 
 Each base's `package.toml` also lists, under `[package.upstream]`, the
 upstream releases that matter in it, such as `mesa` and `ffmpeg`. A
@@ -152,10 +157,10 @@ the same commit. Walk the graph up from each changed base and raise the
 revision of every pinned component that depends on it, directly or
 through another base:
 
-* `vulkan` raises `vaapi`, `ffmpeg`, `mpv`, and `weston`.
+* `vulkan` raises `vaapi`, `ffmpeg`, `mpv`, `weston`, and `astrometry`.
 * `vaapi` raises `ffmpeg` and `mpv`.
 * `ffmpeg` raises `mpv`.
-* `mpv` and `weston` raise nothing.
+* `mpv`, `weston`, and `astrometry` raise nothing.
 
 A new snapshot sets every revision to 1, so it needs no cascade. When
 CI fails with "the recipe of N pinned components changed with no new
