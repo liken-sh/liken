@@ -62,7 +62,9 @@ focus and grading measures respond. PHD2 guides the guide camera
 simulator, and the weather simulator can turn unsafe. On the dev
 cluster's QEMU fleet, a whole night needs no network, once the images
 are loaded and the `Solver`'s claim holds index files from the laptop.
-How the dev cluster loads images with no network was not checked.
+The lab registry of the dev cluster serves the images that the laptop
+built, and [plan 08](08-the-component-and-the-first-session.md) holds
+the drill of the first session.
 
 The simulators do not model the time of day or clouds. The CCD
 simulator draws stars at noon and below the horizon, so the scheduler's
@@ -85,17 +87,24 @@ care.
 ## The plans
 
 Each plan below records a problem and the decisions that the design
-conversation of 2026-10-12 settled, and leaves the implementation to
-be designed. They are in the order they build on each other.
+conversation of 2026-10-12 settled. Plans 01, 02, and 03 are designed,
+and together they make one imaging session; plans 04 to 07 leave the
+implementation to be designed. [Plan
+08](08-the-component-and-the-first-session.md) builds first: it gives
+the component's scaffold, its import of `observatory-operator`'s
+`indi`, `phd2`, and `observatory` packages, the order in which agents
+build the pieces of plans 01 to 03, and the drill of the first session.
+The plans are otherwise in the order they build on each other.
 `observatory-operator` plans 19 and 20 come before plan 01, its plan
 18 before plan 04, and its plan 21 before plan 05.
 
 | Plan | Subject |
 |---|---|
-| [01](01-run-a-targets-sequence.md) | `Target`, and running its sequences inside a reservation |
-| [02](02-solving-and-centering.md) | The `astrometry` image, the `Solver`, and centering |
-| [03](03-promotion-to-the-archive.md) | Moving frames from the outbox to the target's archive |
+| [01](01-run-a-targets-sequence.md) | Designed: `Target`, running its sequences inside a reservation, and the frame catalog |
+| [02](02-solving-and-centering.md) | Designed: the `astrometry` image, the `Solver`, the worker, and centering |
+| [03](03-promotion-to-the-archive.md) | Designed: moving frames from the outbox to the target's archive, and verifying them |
 | [04](04-the-scheduler.md) | Choosing the next target from the sky, the horizon, and the work left |
 | [05](05-reservations-on-demand.md) | Creating and ending reservations as the sky allows |
 | [06](06-grading-policies.md) | Rejecting frames by a person's policy |
 | [07](07-calibration-frames.md) | Capturing and keeping darks and flats |
+| [08](08-the-component-and-the-first-session.md) | The component's scaffold, the order of the build, and the drill of the first session |
