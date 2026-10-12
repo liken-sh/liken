@@ -545,6 +545,118 @@ each posted a `Starting` `Event`, though no pod started. Five said
 "Starting on east-telescope", and `FilterWheel east` said "Waiting
 for activation to create pod east-main-camera".
 
+### Third drill
+
+The third drill ran on 2026-10-12 against
+`2026.10.11-004-dev-030-399d6b73`. Since the second drill, 8d7482fa
+finished the release of a deleted train's devices, 1e2402f8 moved the
+defaults of the procedure list fields from the CRDs to Go, and
+e3ed4492 through 399d6b73 froze each session's devices in the
+`status.session` of its `Reservation`. The drill checked those changes
+in six parts, A to F. The example was copied again at the same commit,
+without the explicit defaults that the earlier copy stated.
+
+A. The operator after the bump:
+
+| Check | Result |
+|---|---|
+| Rollout | The new pod ran with no restart, and all 19 CRDs were established. |
+| Idle devices | Every device `Idle`, and `Focuser spare` `Inventory`. No object had `status.endpoint`. |
+| `kubectl apply -k` | The first apply of the new copy reported `Camera east-main` and `Dome lab` `configured`, because it removed the stated defaults. A second and a third apply reported all 28 objects `unchanged`. |
+
+B. The checks of the earlier drills:
+
+| Check | Result |
+|---|---|
+| Reserve `east` | `Ready` in 41 s. `FilterWheel east` and `Camera east-main` were `Connected` with `Ready` `True`, `indiDevice` `CCD Simulator`, and the endpoint `east-telescope.observatory.svc:7624`. `east-main-camera` was the one pod for the two. |
+| The camera's `ACTIVE_FILTER` | `CCD Simulator`. The camera's 17 `status.properties` held no `FILTER_SLOT` or `FILTER_NAME`. |
+| A frame through the wheel | Slot 3 gave `FILTER = 'Green'`, and slot 7 gave `FILTER = 'SII'`. The `FilterWheel` followed to slot 7. |
+| Reserve `west` as well | `Ready` in 7 s. |
+| `Event`s | 174 while both reservations ran, each with a count of 1. The one `Warning` was a failed readiness probe of `east-guider` while PHD2 started. |
+| End both `Reservation`s | `west` released in 18 s and `east` in 1 min 9 s. The deactivation warmed the camera, closed the dust cap, and parked both mounts and the dome. A pod watch saw every `restartCount` stay at 0, and no object kept `status.endpoint`. |
+
+C. A session's devices stay as the session started them:
+
+| Check | Result |
+|---|---|
+| Move `Focuser east` to `west-imaging` while `east` is `Ready` | The pod kept its UID with no restart, the focuser stayed `Connected` on `east-telescope`, and outputs 1 to 3 of `Switch east` stayed on. `ParentFound` changed to the reason `MovePending`, "Moves to OpticalTrain west-imaging when Reservation east-c ends", with one `MovePending` `Event`. |
+| End that session | The release disconnected `Focuser east` with the devices of `east`, stopped `east-focuser`, and switched off outputs 1, 2, and 3. |
+| The next sessions of `east` and `west` | `Focuser east` started on `west-telescope`, and the record of the `west` reservation named it. |
+| Create `FilterWheel east-wheel` on `east-imaging`, driver `indi_simulator_wheel`, while `east` is `Ready` | No pod started. `Ready` was `False`, "Starts at the next reservation, after Reservation east-c ends". At the next session of `east`, it was `Connected` as `Filter Simulator`. |
+| Delete `FilterWheel east-wheel` during that session | Its pod was deleted within 1 s, with a `PodDeleted` `Event`, and the reservation stayed `Ready`. |
+
+D. One `kubectl delete` of `Reservation east-bulk`, `OpticalTrain
+east-imaging`, and `DustCap east` while `east` was `Ready`:
+
+| Check | Result |
+|---|---|
+| Deactivation | The cap closed, `Camera east-main` warmed to 5 °C with its cooler off, `FlatPanel east` ran its deactivation, and the mount and the dome parked. |
+| `PowerOff` | Switched off outputs 1, 2, and 3 of `Switch east` (8d7482fa). |
+| `Starting` `Event`s | None (8d7482fa). |
+| Release | 1 min 8 s, and every pod stopped. |
+| Restarts | `east-dustcap` restarted once. See below. |
+
+E. A retry with a fixed spec:
+
+| Check | Result |
+|---|---|
+| Reserve `east` with `Focuser east` on `indi_fishcamp_ccd` | `Failed` in 9 s at `StartDevices`: "no image of the indi build holds this driver". The record held `indi_fishcamp_ccd`. |
+| Fix the spec, annotate `observatory.liken.sh/retry=1` | `Ready` 33 s after the annotation. The record held `indi_simulator_focus`, the operator removed the annotation, and the steps ran again from `PowerOn`. `Focuser east` was `Connected` as `Focuser Simulator`. |
+
+F. An operator restart with `WeatherStation lab` `Safe` `False`:
+
+| Check | Result |
+|---|---|
+| Make the weather unsafe | `WEATHER_CONTROL` `Weather` set to 1 gave `Safe` `False`, reason `Danger`. The triggers parked `Mount east` and `Dome lab`. |
+| Delete the operator pod, twice | The new pod held the `Lease` within 2 s each time. After the second delete, the writes to `Mount east` stopped for 3 s and then resumed. |
+| Triggers | No trigger ran again. Each trigger's record kept the start time of the first run, and `Safe` kept its transition time. In the 95 s after the second delete, nothing wrote `WeatherStation lab`, `Dome lab`, or the `Reservation`. |
+| `Ready` and `Event`s | The reservation's `Ready` kept its transition time. No `Event` was posted between the first delete and the release. |
+
+Each object, compact JSON, read with `--show-managed-fields` while
+`east` was `Ready`. The device sizes are within 15 bytes of the second
+drill:
+
+| Object | Whole | `managedFields` | `status` | `status.properties` | `status.session` |
+|---|---|---|---|---|---|
+| `Camera east-main` | 19,453 | 5,092 | 13,305 | 17 | |
+| `FilterWheel east` | 3,486 | 1,390 | 1,186 | 0 | |
+| `Mount east` | 17,979 | 3,268 | 13,589 | 29 | |
+| `Reservation east-drill` | 10,659 | 4,156 | 5,831 | | 2,668 |
+
+With both telescopes `Ready` for 5 minutes, the operator used 59 to
+65m of CPU and 17 to 19 MiB, with one sample of 38m 30 s after `west`
+became `Ready`. In one minute, the watches saw 270 changes, 54 each
+on `Mount east`, `Mount west`, and the three `Camera`s, the same as
+the earlier drills.
+
+The bulk delete showed one fault. `StopDevices` did not stop
+`east-dustcap`, the pod of the deleted `DustCap east`, though the
+`DustCap` posted "Stopping pod east-dustcap" at the same second.
+`StopDevices` listed the other nine pods. The server dropped its link
+to the dust cap, so `socat` exited, and the kubelet started the
+container again at 06:08:20. `PowerOff` deleted the pod 2 s later. At
+the four releases where the `DustCap` was not deleted, `StopDevices`
+stopped `east-dustcap`.
+
+`east-guider` ended in the phase `Failed` at each of the five
+releases, though `StopGuider` reported it stopped each time. That is
+the kubelet's record of PHD2 and weston killed by `SIGKILL` after the
+pod's grace period of 1 s, and it does no harm.
+
+#### Rerun on 2026.10.11-004-dev-031-c0a84806
+
+c0a84806 fixed the fault: `StopDevices` stops a deleted device's pod
+with the others, and `PowerOff` reads a deleted device's output from
+the session's record. After the bump, the operator rolled out with no
+restart, all 19 CRDs were established, every device was `Idle` with no
+`status.endpoint`, and `kubectl apply -k` reported all 28 objects
+`unchanged`. A pod watch ran through both checks.
+
+| Check | Result |
+|---|---|
+| Bulk delete, as in D | The cap closed, `Camera east-main` warmed to 5 °C with its cooler off, `FlatPanel east` ran its deactivation, and the mount and the dome parked. `StopDevices` stopped all ten device pods, `east-dustcap` among them, and `PowerOff` switched off outputs 1, 2, and 3. No `Starting` `Event`. The release took 1 min 10 s, and every `restartCount` stayed 0. |
+| A normal reservation of `east` | `Ready` in 41 s, released in 1 min 10 s. Outputs 1, 2, and 3 went off, every `restartCount` stayed 0, and no object kept `status.endpoint`. |
+
 ## Deferred
 
 - **`PowerBox`.** `POWER` shares no property shapes with `OUTPUT`, 14
