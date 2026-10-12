@@ -179,6 +179,20 @@ Each step's state is `Pending`, `Running`, `Done`, `Failed`, or
 that failed, and it is empty while the reservation is `Ready` or
 `Released`. [How a reservation runs](/docs/concepts/how-a-reservation-runs/) states what each step does.
 
+`status.session` records what the session started with: the
+telescope's `observatory`, the devices of the observatory's server in
+`site`, and the `devices`, `trains`, `tubes`, and `guiders` of the
+telescope's server. Each device is under its kind and name, such as
+`Focuser/east`. `StartSite` and `PowerOn` write it once, and the
+operator reads it in place of the specs until the reservation is
+`Released`. Compare it with a spec to see which edit waits for the
+next session:
+
+```sh
+kubectl get rsv east-tonight -n observatory \
+  -o jsonpath='{.status.session.devices.Focuser/east.power}'
+```
+
 ```sh
 kubectl get rsv -n observatory -w
 kubectl wait --for=condition=Ready reservation/east-tonight -n observatory --timeout=10m

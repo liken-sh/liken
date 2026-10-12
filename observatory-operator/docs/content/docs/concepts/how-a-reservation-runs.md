@@ -139,13 +139,14 @@ session ends:
   `spec.power`, its driver, or its claim, waits for the end of the
   session too. So does an edit of the `Telescope`'s
   `spec.observatory`, of its `OpticalTrain`s, of the `OpticalTube`s of
-  those trains, and of its `Guider`. When the session starts a server
-  or a device's pod, the operator records in the annotation
-  `observatory.liken.sh/session` on that pod what it acts on: each
-  device's parents, driver, power, and claim, whether a `Guider`
-  guides with it, and the telescope's observatory, trains, tubes, and
-  `Guider`s. Until the session ends, the operator reads the record and
-  not the spec. So the release switches off the output that the
+  those trains, and of its `Guider`. Before the session starts a
+  server, the operator records in the reservation's `status.session`
+  what it acts on: each device's parents, driver, power, and claim,
+  whether a `Guider` guides with it, and the telescope's observatory,
+  trains, tubes, and `Guider`s. `StartSite` records the observatory
+  and the devices of its server, and `PowerOn` records the rest. Each
+  step writes its part once, and nothing changes it after that. Until
+  the session ends, the operator reads the record and not the spec. So the release switches off the output that the
   session switched on, a camera whose driver comes back gets the
   `SCOPE_INFO` of the tube that the session started with, and PHD2
   keeps its pod and its calibration. A tube's status still shows the
@@ -171,19 +172,23 @@ session ends:
   turns to `Error`, and a camera whose train or tube is gone gets no
   `SCOPE_INFO` when its driver comes back.
 
-An eviction does not change the set either. Each pod of the server
-carries the whole record, so while one of them is left, the operator
-creates the others again from it, and a device added during the
-session still waits. When every pod of the server is gone, the record
-is gone with them. If the reservation's `StartDevices` step is `Done`,
-or `StartSite` for the observatory's server, the new pod takes the
-devices that hold the finalizer and that their parents place there. A
-device added during the session holds no finalizer, so it still waits,
-and a device that another running server's record names stays there.
-These devices run with their specs as they are then, because the
-record of their drivers, power, and claims went with the pods. Before
-that step is `Done`, the new pod takes the devices that their specs
-place there, as a new session does.
+An eviction does not change the set either. The record is in the
+reservation and not on the pods, so when an eviction deletes one pod
+of the server or every pod, the operator creates the pods again from
+the record. They run the drivers, the power, and the claims that the
+session started with, and a device added during the session still
+waits.
+
+The reservations of several telescopes in one observatory share its
+server, and each reservation writes only its own status. So each one
+records the observatory's devices when its `StartSite` begins. A
+reservation that starts while another holds the server records the
+devices that the other recorded, and the operator reads the union of
+the records of every reservation that holds its telescope. The record
+of the observatory's server stays while any of them holds it, in
+whatever order they end. The operator reads a reservation's record
+only while the reservation holds its telescope, so the record of a
+`Released` reservation changes nothing.
 
 So each device runs on one server at a time. A device that moved
 between two running servers would need one server to release it while

@@ -382,8 +382,9 @@ func phaseOf(name observatory.StepName) observatory.ReservationPhase {
 // save writes the record to the reservation's status, with the phase's
 // conditions and endpoint, and writes nothing when the status holds it
 // already. A failed write is retried with the next save, and the record
-// in memory stays as it is.
-func (r *runner) save(ctx context.Context) {
+// in memory stays as it is. The error is for a caller that must know
+// that the write landed (recordSession).
+func (r *runner) save(ctx context.Context) error {
 	r.compose()
 	if r.status.Phase != r.logged {
 		r.logged = r.status.Phase
@@ -408,6 +409,7 @@ func (r *runner) save(ctx context.Context) {
 	} else if ctx.Err() == nil {
 		r.o.logf("writing the status of the Reservation %s: %v", r.name, err)
 	}
+	return err
 }
 
 // compose sets the conditions, the endpoint, and the observed

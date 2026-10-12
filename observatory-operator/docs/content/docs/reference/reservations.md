@@ -32,6 +32,7 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--step"></span>`step` | string | no | The step that runs now, or the step that failed. It is empty while the phase is `Ready` or `Released`. One of: `Wait`, `StartSite`, `PowerOn`, `StartDevices`, `Connect`, `Configure`, `Activation`, `StartGuider`, `Abort`, `Deactivation`, `StopGuider`, `Disconnect`, `StopDevices`, `PowerOff`, `StopSite`. |
 | <span id="status--steps"></span>`steps` | [\[\]object](#statussteps) | no | Every step, in the order it runs. The activation steps are `Wait`, `StartSite`, `PowerOn`, `StartDevices`, `Connect`, `Configure`, `Activation`, and `StartGuider`, and the list holds them from the start. The deactivation steps are `Abort`, `Deactivation`, `StopGuider`, `Disconnect`, `StopDevices`, `PowerOff`, and `StopSite`, and the list holds them from when deactivation begins. A step starts only when the step before it is `Done` or `Skipped`. |
 | <span id="status--endpoint"></span>`endpoint` | [object](#statusendpoint) | no | The telescope's INDI server, while the phase is `Ready`. KStars connects to its `host` and `port`. |
+| <span id="status--session"></span>`session` | [object](#statussession) | no | What the reservation's session started with. `StartSite` writes `observatory` and `site`, and `PowerOn` writes the rest, each once and before it creates a pod, and nothing changes them after that. While the reservation holds its telescope, the operator reads this record in place of the specs of the resources it names, so an edit of a device's parents, driver, power, or claim, of the `Telescope`'s `spec.observatory`, of an `OpticalTrain`, of an `OpticalTube`, or of a `Guider` takes effect at the next session. The record is in the reservation, so an eviction of every pod of a server leaves it, and the operator creates the pods again from it. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | `Ready` is `True` while the phase is `Ready`, so `kubectl wait --for=condition=Ready` waits for the telescope. When a step fails, it is `False` and its message names the step and the device. `SafeToPowerOff` is `True` when the deactivation steps are done. |
 
 ### status.steps[]
@@ -70,6 +71,134 @@ The telescope's INDI server, while the phase is `Ready`. KStars connects to its 
 | <span id="statusendpoint--service"></span>`service` | string | yes | The name of the server's `Service`. |
 | <span id="statusendpoint--host"></span>`host` | string | yes | The `Service`'s DNS name in the cluster. |
 | <span id="statusendpoint--port"></span>`port` | integer | yes | The INDI port of the `Service`, 7624. |
+
+### status.session
+
+What the reservation's session started with. `StartSite` writes `observatory` and `site`, and `PowerOn` writes the rest, each once and before it creates a pod, and nothing changes them after that. While the reservation holds its telescope, the operator reads this record in place of the specs of the resources it names, so an edit of a device's parents, driver, power, or claim, of the `Telescope`'s `spec.observatory`, of an `OpticalTrain`, of an `OpticalTube`, or of a `Guider` takes effect at the next session. The record is in the reservation, so an eviction of every pod of a server leaves it, and the operator creates the pods again from it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussession--observatory"></span>`observatory` | string | no | The observatory of the reservation's telescope. |
+| <span id="statussession--site"></span>`site` | [map\[string\]object](#statussessionsite) | no | The devices of the observatory's server, by kind and name, such as `Dome/lab`, as the server ran them when this reservation's `StartSite` began. The reservations of several telescopes in one observatory share its server, and while any of them holds its telescope, the operator reads the union of their records. Absent when the observatory has no devices. |
+| <span id="statussession--devices"></span>`devices` | [map\[string\]object](#statussessiondevices) | no | The devices of the telescope's server, by kind and name, such as `Camera/east-main`, as `PowerOn` started them. |
+| <span id="statussession--trains"></span>`trains` | [map\[string\]object](#statussessiontrains) | no | The spec of each `OpticalTrain` of the telescope, by name. |
+| <span id="statussession--tubes"></span>`tubes` | [map\[string\]object](#statussessiontubes) | no | The spec of each `OpticalTube` of those trains, by name. A camera whose driver comes back gets the `SCOPE_INFO` of these lengths. |
+| <span id="statussession--guiders"></span>`guiders` | [map\[string\]object](#statussessionguiders) | no | The spec of each `Guider` of the telescope, by name. |
+
+#### status.session.site.*
+
+One device as the session started it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussessionsite--uid"></span>`uid` | string | no | The device's `metadata.uid`. A device that a person deletes and creates again with the same name during the session has another UID, and the record does not apply to it. |
+| <span id="statussessionsite--telescope"></span>`telescope` | string | no | The device's `spec.telescope`. |
+| <span id="statussessionsite--opticaltrain"></span>`opticalTrain` | string | no | The device's `spec.opticalTrain`. |
+| <span id="statussessionsite--observatory"></span>`observatory` | string | no | The device's `spec.observatory`. |
+| <span id="statussessionsite--driver"></span>`driver` | [object](#statussessionsitedriver) | no | The device's `spec.driver`. |
+| <span id="statussessionsite--device"></span>`device` | [object](#statussessionsitedevice) | no | The device's `spec.device`: the resource whose driver serves it. |
+| <span id="statussessionsite--power"></span>`power` | [object](#statussessionsitepower) | no | The device's `spec.power`: the output that activation switched on, and that `PowerOff` switches off. |
+| <span id="statussessionsite--claim"></span>`claim` | object | no | The device's `spec.claim`, the `ResourceClaimSpec` of its pod's claim. |
+| <span id="statussessionsite--guides"></span>`guides` | boolean | no | `true` for a camera that a `Guider` of the telescope guides with, whose pod runs on the node of the telescope's server. |
+
+#### status.session.site.*.driver
+
+The device's `spec.driver`.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussessionsitedriver--name"></span>`name` | string | yes | The driver's executable. |
+| <span id="statussessionsitedriver--image"></span>`image` | string | no | The container image that holds the driver. |
+
+#### status.session.site.*.device
+
+The device's `spec.device`: the resource whose driver serves it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussessionsitedevice--kind"></span>`kind` | string | yes | The kind of the resource that runs the driver. |
+| <span id="statussessionsitedevice--name"></span>`name` | string | yes | The name of the resource that runs the driver. |
+
+#### status.session.site.*.power
+
+The device's `spec.power`: the output that activation switched on, and that `PowerOff` switches off.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussessionsitepower--switch"></span>`switch` | string | yes | The name of the `Switch`. |
+| <span id="statussessionsitepower--output"></span>`output` | integer | yes | The output's number. |
+
+#### status.session.devices.*
+
+One device as the session started it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussessiondevices--uid"></span>`uid` | string | no | The device's `metadata.uid`. A device that a person deletes and creates again with the same name during the session has another UID, and the record does not apply to it. |
+| <span id="statussessiondevices--telescope"></span>`telescope` | string | no | The device's `spec.telescope`. |
+| <span id="statussessiondevices--opticaltrain"></span>`opticalTrain` | string | no | The device's `spec.opticalTrain`. |
+| <span id="statussessiondevices--observatory"></span>`observatory` | string | no | The device's `spec.observatory`. |
+| <span id="statussessiondevices--driver"></span>`driver` | [object](#statussessiondevicesdriver) | no | The device's `spec.driver`. |
+| <span id="statussessiondevices--device"></span>`device` | [object](#statussessiondevicesdevice) | no | The device's `spec.device`: the resource whose driver serves it. |
+| <span id="statussessiondevices--power"></span>`power` | [object](#statussessiondevicespower) | no | The device's `spec.power`: the output that activation switched on, and that `PowerOff` switches off. |
+| <span id="statussessiondevices--claim"></span>`claim` | object | no | The device's `spec.claim`, the `ResourceClaimSpec` of its pod's claim. |
+| <span id="statussessiondevices--guides"></span>`guides` | boolean | no | `true` for a camera that a `Guider` of the telescope guides with, whose pod runs on the node of the telescope's server. |
+
+#### status.session.devices.*.driver
+
+The device's `spec.driver`.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussessiondevicesdriver--name"></span>`name` | string | yes | The driver's executable. |
+| <span id="statussessiondevicesdriver--image"></span>`image` | string | no | The container image that holds the driver. |
+
+#### status.session.devices.*.device
+
+The device's `spec.device`: the resource whose driver serves it.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussessiondevicesdevice--kind"></span>`kind` | string | yes | The kind of the resource that runs the driver. |
+| <span id="statussessiondevicesdevice--name"></span>`name` | string | yes | The name of the resource that runs the driver. |
+
+#### status.session.devices.*.power
+
+The device's `spec.power`: the output that activation switched on, and that `PowerOff` switches off.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussessiondevicespower--switch"></span>`switch` | string | yes | The name of the `Switch`. |
+| <span id="statussessiondevicespower--output"></span>`output` | integer | yes | The output's number. |
+
+#### status.session.trains.*
+
+One train's spec.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussessiontrains--telescope"></span>`telescope` | string | yes | The train's `spec.telescope`. |
+| <span id="statussessiontrains--opticaltube"></span>`opticalTube` | string | yes | The train's `spec.opticalTube`. |
+
+#### status.session.tubes.*
+
+One tube's spec.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussessiontubes--telescope"></span>`telescope` | string | yes | The tube's `spec.telescope`. |
+| <span id="statussessiontubes--aperture"></span>`aperture` | number | yes | The tube's `spec.aperture`, in millimeters. |
+| <span id="statussessiontubes--focallength"></span>`focalLength` | number | yes | The tube's `spec.focalLength`, in millimeters. |
+
+#### status.session.guiders.*
+
+One `Guider`'s spec.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statussessionguiders--telescope"></span>`telescope` | string | yes | The `Guider`'s `spec.telescope`. |
+| <span id="statussessionguiders--opticaltrain"></span>`opticalTrain` | string | yes | The `Guider`'s `spec.opticalTrain`. |
+| <span id="statussessionguiders--pulses"></span>`pulses` | string | yes | The `Guider`'s `spec.pulses`. One of: `Mount`, `Camera`. |
 
 ### status.conditions[]
 

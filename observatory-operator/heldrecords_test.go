@@ -62,11 +62,10 @@ func TestAReleaseSwitchesOffTheOutputThatItsSessionSwitchedOn(t *testing.T) {
 }
 
 // A server pod that an eviction deleted during a session comes back
-// with the devices that its session started: the record on any pod of
-// the server that is left names them, and when every pod is gone, the
-// devices that hold the finalizer are the set, because the
-// reservation's StartDevices step is Done. A device placed on the
-// server during the session still waits for the next one. The
+// with the devices that its session started, also when every pod of
+// the server is gone: the reservation's status records them. A device
+// placed on the server during the session still waits for the next
+// one. The
 // operator is down while the pods go, so it reads every eviction at
 // once, as it would after a node fails.
 func TestAServerCreatedAgainKeepsItsSessionsDevices(t *testing.T) {
@@ -238,9 +237,9 @@ func TestAReleaseStartsNoDriverThatItsSessionDidNot(t *testing.T) {
 // A server whose pods an eviction deletes one at a time while the
 // operator runs keeps its session's devices, in either order, also
 // when the API server refuses to create the pods again until every
-// pod of the server is gone. The reservation's steps record that the
-// session started the server, so the new pod takes the devices that
-// hold the finalizer and not the focuser placed during the session.
+// pod of the server is gone. The reservation's status records the
+// devices that the session started, so the new pod takes them and not
+// the focuser placed during the session.
 func TestAServerWhosePodsGoOneAtATimeKeepsItsSessionsDevices(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

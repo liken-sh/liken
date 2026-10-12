@@ -259,6 +259,223 @@ spec:
                       type: integer
                       format: int32
                       description: "The INDI port of the `Service`, 7624."
+                session:
+                  type: object
+                  description: >-
+                    What the reservation's session started with. `StartSite`
+                    writes `observatory` and `site`, and `PowerOn` writes the
+                    rest, each once and before it creates a pod, and nothing
+                    changes them after that. While the reservation holds its
+                    telescope, the operator reads this record in place of the
+                    specs of the resources it names, so an edit of a device's
+                    parents, driver, power, or claim, of the `Telescope`'s
+                    `spec.observatory`, of an `OpticalTrain`, of an
+                    `OpticalTube`, or of a `Guider` takes effect at the next
+                    session. The record is in the reservation, so an eviction
+                    of every pod of a server leaves it, and the operator
+                    creates the pods again from it.
+                  properties:
+                    observatory:
+                      type: string
+                      description: "The observatory of the reservation's telescope."
+                    site:
+                      type: object
+                      description: >-
+                        The devices of the observatory's server, by kind and
+                        name, such as `Dome/lab`, as the server ran them when
+                        this reservation's `StartSite` began. The reservations
+                        of several telescopes in one observatory share its
+                        server, and while any of them holds its telescope, the
+                        operator reads the union of their records. Absent when
+                        the observatory has no devices.
+                      additionalProperties:
+                        type: object
+                        description: >-
+                          One device as the session started it.
+                        properties:
+                          uid:
+                            type: string
+                            description: >-
+                              The device's `metadata.uid`. A device that a
+                              person deletes and creates again with the same
+                              name during the session has another UID, and the
+                              record does not apply to it.
+                          telescope:
+                            type: string
+                            description: "The device's `spec.telescope`."
+                          opticalTrain:
+                            type: string
+                            description: "The device's `spec.opticalTrain`."
+                          observatory:
+                            type: string
+                            description: "The device's `spec.observatory`."
+                          driver:
+                            type: object
+                            required: [name]
+                            description: "The device's `spec.driver`."
+                            properties:
+                              name:
+                                type: string
+                                description: "The driver's executable."
+                              image:
+                                type: string
+                                description: "The container image that holds the driver."
+                          device:
+                            type: object
+                            required: [kind, name]
+                            description: "The device's `spec.device`: the resource whose driver serves it."
+                            properties:
+                              kind:
+                                type: string
+                                description: "The kind of the resource that runs the driver."
+                              name:
+                                type: string
+                                description: "The name of the resource that runs the driver."
+                          power:
+                            type: object
+                            required: [switch, output]
+                            description: "The device's `spec.power`: the output that activation switched on, and that `PowerOff` switches off."
+                            properties:
+                              switch:
+                                type: string
+                                description: "The name of the `Switch`."
+                              output:
+                                type: integer
+                                format: int32
+                                description: "The output's number."
+                          claim:
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                            description: "The device's `spec.claim`, the `ResourceClaimSpec` of its pod's claim."
+                          guides:
+                            type: boolean
+                            description: >-
+                              `true` for a camera that a `Guider` of the
+                              telescope guides with, whose pod runs on the
+                              node of the telescope's server.
+                    devices:
+                      type: object
+                      description: >-
+                        The devices of the telescope's server, by kind and
+                        name, such as `Camera/east-main`, as `PowerOn` started
+                        them.
+                      additionalProperties:
+                        type: object
+                        description: >-
+                          One device as the session started it.
+                        properties:
+                          uid:
+                            type: string
+                            description: >-
+                              The device's `metadata.uid`. A device that a
+                              person deletes and creates again with the same
+                              name during the session has another UID, and the
+                              record does not apply to it.
+                          telescope:
+                            type: string
+                            description: "The device's `spec.telescope`."
+                          opticalTrain:
+                            type: string
+                            description: "The device's `spec.opticalTrain`."
+                          observatory:
+                            type: string
+                            description: "The device's `spec.observatory`."
+                          driver:
+                            type: object
+                            required: [name]
+                            description: "The device's `spec.driver`."
+                            properties:
+                              name:
+                                type: string
+                                description: "The driver's executable."
+                              image:
+                                type: string
+                                description: "The container image that holds the driver."
+                          device:
+                            type: object
+                            required: [kind, name]
+                            description: "The device's `spec.device`: the resource whose driver serves it."
+                            properties:
+                              kind:
+                                type: string
+                                description: "The kind of the resource that runs the driver."
+                              name:
+                                type: string
+                                description: "The name of the resource that runs the driver."
+                          power:
+                            type: object
+                            required: [switch, output]
+                            description: "The device's `spec.power`: the output that activation switched on, and that `PowerOff` switches off."
+                            properties:
+                              switch:
+                                type: string
+                                description: "The name of the `Switch`."
+                              output:
+                                type: integer
+                                format: int32
+                                description: "The output's number."
+                          claim:
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                            description: "The device's `spec.claim`, the `ResourceClaimSpec` of its pod's claim."
+                          guides:
+                            type: boolean
+                            description: >-
+                              `true` for a camera that a `Guider` of the
+                              telescope guides with, whose pod runs on the
+                              node of the telescope's server.
+                    trains:
+                      type: object
+                      description: "The spec of each `OpticalTrain` of the telescope, by name."
+                      additionalProperties:
+                        type: object
+                        required: [telescope, opticalTube]
+                        description: "One train's spec."
+                        properties:
+                          telescope:
+                            type: string
+                            description: "The train's `spec.telescope`."
+                          opticalTube:
+                            type: string
+                            description: "The train's `spec.opticalTube`."
+                    tubes:
+                      type: object
+                      description: >-
+                        The spec of each `OpticalTube` of those trains, by
+                        name. A camera whose driver comes back gets the
+                        `SCOPE_INFO` of these lengths.
+                      additionalProperties:
+                        type: object
+                        required: [telescope, aperture, focalLength]
+                        description: "One tube's spec."
+                        properties:
+                          telescope:
+                            type: string
+                            description: "The tube's `spec.telescope`."
+                          aperture:
+                            type: number
+                            description: "The tube's `spec.aperture`, in millimeters."
+                          focalLength:
+                            type: number
+                            description: "The tube's `spec.focalLength`, in millimeters."
+                    guiders:
+                      type: object
+                      description: "The spec of each `Guider` of the telescope, by name."
+                      additionalProperties:
+                        type: object
+                        required: [telescope, opticalTrain, pulses]
+                        description: "One `Guider`'s spec."
+                        properties:
+                          telescope:
+                            type: string
+                            description: "The `Guider`'s `spec.telescope`."
+                          opticalTrain:
+                            type: string
+                            description: "The `Guider`'s `spec.opticalTrain`."
+                          pulses:
+                            type: string
+                            enum: [Mount, Camera]
+                            description: "The `Guider`'s `spec.pulses`."
                 conditions:
                   type: array
                   description: >-

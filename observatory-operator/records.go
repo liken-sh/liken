@@ -1,16 +1,23 @@
 package main
 
-// A session freezes what it started. When a reservation's steps start
-// a server, or a device's pod, the operator records in the API the
-// facts that the session acts on: for each device, its parents, its
-// driver, its served owner, its power, its claim, and whether a
-// Guider guides with it, and for a telescope, its observatory, its
-// OpticalTrains, the OpticalTubes of those trains, and its Guiders.
-// The record is an annotation on the server's pod and on the pod of
-// each device that the server runs, and each of these pods carries the
-// whole record. So the record survives an eviction while one pod of
-// the server is left, and the runner creates the other pods again from
-// it.
+// A session freezes what it started. Before a reservation's steps start
+// a server, the operator records in the API the facts that the session
+// acts on: for each device, its parents, its driver, its served owner,
+// its power, its claim, and whether a Guider guides with it, and for a
+// telescope, its observatory, its OpticalTrains, the OpticalTubes of
+// those trains, and its Guiders.
+// The record is in the status of the reservation whose session it is
+// (observatory.Session), so it outlives every pod of the server. The
+// StartSite step records the observatory and the devices of its server,
+// and the PowerOn step records the rest, each once and before it
+// creates a pod, and then neither changes. Reservations of several
+// telescopes in one observatory share the observatory's server, and
+// each reservation is the only writer of its own status, so each one
+// records the observatory's devices as its StartSite step found them.
+// A reservation that starts while another holds the server records the
+// set that the other one recorded, and the tree reads the union of the
+// records of every reservation that holds the server. So the record
+// stays while any of them holds it, in whatever order they end.
 //
 // While a session holds a server, the tree reads each device that the
 // record names with the recorded facts in its spec, each held
@@ -35,61 +42,24 @@ package main
 
 import (
 	"cmp"
-	"encoding/json"
+	"context"
 	"maps"
 	"slices"
 
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// annotationSession holds a sessionRecord as JSON on a server's pod and
-// on each device's pod.
-const annotationSession = Group + "/session"
-
-// sessionRecord is what a session recorded about one server.
-type sessionRecord struct {
-	// Observatory is the observatory of the telescope whose server the
-	// pod belongs to, or "" on the pods of an observatory's server.
-	Observatory string `json:"observatory,omitempty"`
-	// Devices holds each device's record by the device's key, such as
-	// Camera/east-main.
-	Devices map[string]deviceRecord `json:"devices"`
-	// Trains, Tubes, and Guiders hold the spec of each OpticalTrain and
-	// Guider of the telescope, and of each OpticalTube of those trains,
-	// by name.
-	Trains  map[string]observatory.OpticalTrainSpec `json:"trains,omitempty"`
-	Tubes   map[string]observatory.OpticalTubeSpec  `json:"tubes,omitempty"`
-	Guiders map[string]observatory.GuiderSpec       `json:"guiders,omitempty"`
-}
-
-// deviceRecord is the spec of one device as its session started it.
-// UID tells the device from one that a person created again with the
-// same name during the session, which the session did not start.
-type deviceRecord struct {
-	UID          string `json:"uid,omitempty"`
-	Telescope    string `json:"telescope,omitempty"`
-	OpticalTrain string `json:"opticalTrain,omitempty"`
-	Observatory  string `json:"observatory,omitempty"`
-	observatory.DeviceSpec
-	Guides bool `json:"guides,omitempty"`
-}
-
-// recordOf answers the record that each pod of a server carries: the
-// facts that the tree reads now, which for a server that a session
-// holds are the recorded ones. devices is the server's set of devices.
-func (t *tree) recordOf(ref serverRef, devices []*device) string {
-	out := sessionRecord{Devices: map[string]deviceRecord{}}
+// recordOf answers the record of a server's devices: the facts that
+// the tree reads now, which for a server that a session holds are the
+// recorded ones.
+func (t *tree) recordOf(ref serverRef, devices []*device) map[string]observatory.SessionDevice {
+	out := map[string]observatory.SessionDevice{}
 	for _, d := range devices {
 		s := d.object.Spec
-		out.Devices[d.key()] = deviceRecord{UID: d.object.Metadata.UID, Telescope: s.Telescope, OpticalTrain: s.OpticalTrain,
+		out[d.key()] = observatory.SessionDevice{UID: d.object.Metadata.UID, Telescope: s.Telescope, OpticalTrain: s.OpticalTrain,
 			Observatory: s.Observatory, DeviceSpec: s.DeviceSpec, Guides: t.guides(ref, d)}
 	}
-	if telescope, ok := t.telescopes[ref.name]; ok && ref.kind == observatory.TelescopeKind {
-		out.Observatory = telescope.Spec.Observatory
-		out.Trains, out.Tubes, out.Guiders = t.opticsOf(ref.name)
-	}
-	body, _ := json.Marshal(out)
-	return string(body)
+	return out
 }
 
 // opticsOf answers the specs of a telescope's trains, of their tubes,
@@ -129,38 +99,44 @@ func (t *tree) guidersOf(telescope string) []*observatory.Guider {
 	return out
 }
 
-// applyRecords reads the record of each held server, and gives each
-// held Telescope its recorded observatory, each recorded train and
-// Guider its recorded spec, and each device that a record names its
-// recorded spec. A record counts on the pods of a held server, so the
-// pods of a server that no session holds any longer freeze nothing.
+// applyRecords reads the record of each reservation that holds its
+// telescope, and gives each held Telescope its recorded observatory,
+// each recorded train and Guider its recorded spec, and each device
+// that a record names its recorded spec. The record of a reservation
+// that no longer holds its telescope freezes nothing.
 func (t *tree) applyRecords() {
-	t.records, t.recordedTubes = map[serverRef]sessionRecord{}, map[string]observatory.OpticalTubeSpec{}
-	for _, res := range t.reservations {
-		telescope, ok := t.telescopes[res.Spec.Telescope]
-		if !holds(res) || !ok {
+	t.records, t.recordedTubes = map[serverRef]observatory.Session{}, map[string]observatory.OpticalTubeSpec{}
+	for _, name := range sortedNames(t.reservations) {
+		res := t.reservations[name]
+		s := res.Status.Session
+		if !holds(res) || s == nil {
 			continue
 		}
-		scope := serverRef{observatory.TelescopeKind, telescope.Metadata.Name}
-		site := telescope.Spec.Observatory
-		if r, ok := t.recordOn(scope); ok {
-			t.records[scope] = r
-			t.freezeOptics(r)
-			if r.Observatory != "" {
-				site = r.Observatory
-			}
+		scope := serverRef{observatory.TelescopeKind, res.Spec.Telescope}
+		if len(s.Devices) > 0 {
+			t.records[scope] = observatory.Session{Devices: s.Devices, Trains: s.Trains, Tubes: s.Tubes, Guiders: s.Guiders}
+			t.freezeOptics(*s)
 		}
-		if site != telescope.Spec.Observatory {
+		if telescope, ok := t.telescopes[scope.name]; ok && s.Observatory != "" && s.Observatory != telescope.Spec.Observatory {
 			frozen := *telescope
-			frozen.Spec.Observatory = site
+			frozen.Spec.Observatory = s.Observatory
 			t.telescopes[scope.name] = &frozen
 		}
-		ref := serverRef{observatory.ObservatoryKind, site}
-		if r, ok := t.recordOn(ref); ok {
-			t.records[ref] = r
+		if len(s.Site) > 0 {
+			site := serverRef{observatory.ObservatoryKind, s.Observatory}
+			union := t.records[site]
+			if union.Devices == nil {
+				union.Devices = map[string]observatory.SessionDevice{}
+			}
+			for key, d := range s.Site {
+				if _, ok := union.Devices[key]; !ok {
+					union.Devices[key] = d
+				}
+			}
+			t.records[site] = union
 		}
 	}
-	records := map[string]deviceRecord{}
+	records := map[string]observatory.SessionDevice{}
 	on := map[string]serverRef{}
 	for _, ref := range slices.SortedFunc(maps.Keys(t.records), func(a, b serverRef) int { return cmp.Compare(a.String(), b.String()) }) {
 		for key, d := range t.records[ref].Devices {
@@ -185,7 +161,7 @@ func (t *tree) applyRecords() {
 // recorded spec, and keeps the recorded spec of each tube for tubeSpec.
 // The tube's object keeps its spec, so its status shows the lengths
 // that a person wrote.
-func (t *tree) freezeOptics(r sessionRecord) {
+func (t *tree) freezeOptics(r observatory.Session) {
 	for name, spec := range r.Trains {
 		if train, ok := t.trains[name]; ok {
 			frozen := *train
@@ -218,25 +194,29 @@ func (t *tree) tubeSpec(name string) (observatory.OpticalTubeSpec, bool) {
 	return tube.Spec, true
 }
 
-// recordOn answers the record of a server: on its pod, or, once an
-// eviction deleted that pod, on the pod of one of its devices, the
-// first by name.
-func (t *tree) recordOn(ref serverRef) (sessionRecord, bool) {
-	read := func(p *pod) (sessionRecord, bool) {
-		var r sessionRecord
-		err := json.Unmarshal([]byte(p.Metadata.Annotations[annotationSession]), &r)
-		return r, err == nil
+// recordSession writes a part of the session's record into the
+// reservation's status, and waits until the store holds it, so each
+// tree that the step reads after it holds the record. fill sets the
+// part on the record. A step that runs again after a restart or a
+// retry finds its part recorded and writes nothing, because the record
+// holds what the session started with. The write that the report sends
+// carries the record, and send writes it again when that write failed.
+func (r *runner) recordSession(ctx context.Context, w *stepWork, recorded func(*observatory.Session) bool, fill func(*observatory.Session)) error {
+	if r.status.Session == nil {
+		r.status.Session = &observatory.Session{}
 	}
-	if p, ok := t.pods[ref.String()]; ok {
-		return read(p)
+	if recorded(r.status.Session) {
+		return nil
 	}
-	for _, name := range slices.Sorted(maps.Keys(t.pods)) {
-		p := t.pods[name]
-		if l := p.Metadata.Labels; l[labelServer] == ref.String() && l[labelRole] == roleDevice {
-			if r, ok := read(p); ok {
-				return r, true
-			}
-		}
+	fill(r.status.Session)
+	// The step's summary changes in the same write, so the write shows
+	// in `kubectl get` as each status write does.
+	w.report("recording the devices that the session starts in status.session")
+	if err := r.o.send(ctx, w.report, "recording the session in the status of the Reservation "+r.name, func() error { return r.save(ctx) }); err != nil {
+		return err
 	}
-	return sessionRecord{}, false
+	return r.o.waitFor(ctx, nil, func(t *tree) (bool, string, error) {
+		res, ok := t.reservations[r.name]
+		return !ok || (res.Status.Session != nil && recorded(res.Status.Session)), "", nil
+	})
 }

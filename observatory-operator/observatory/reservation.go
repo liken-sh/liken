@@ -108,8 +108,50 @@ type ReservationStatus struct {
 	Steps []Step `json:"steps,omitempty"`
 	// Endpoint is the telescope's INDI server, while the phase is
 	// Ready.
-	Endpoint   *Endpoint   `json:"endpoint,omitempty"`
+	Endpoint *Endpoint `json:"endpoint,omitempty"`
+	// Session records what the reservation's session started with, so
+	// a spec edit or an eviction during the session changes nothing
+	// that runs.
+	Session    *Session    `json:"session,omitempty"`
 	Conditions []Condition `json:"conditions,omitempty"`
+}
+
+// Session is what a reservation's session started with. The StartSite
+// step writes Observatory and Site, and the PowerOn step writes the
+// rest, each once, before it creates a pod. The record lives in the
+// reservation and not on the pods, so an eviction that deletes every
+// pod of a server leaves it.
+type Session struct {
+	// Observatory is the observatory of the reservation's telescope.
+	Observatory string `json:"observatory,omitempty"`
+	// Site holds each device of the observatory's server, by its key,
+	// such as Dome/lab. Reservations of several telescopes in one
+	// observatory share its server, and each one records the devices
+	// that the server ran when its StartSite step began.
+	Site map[string]SessionDevice `json:"site,omitempty"`
+	// Devices holds each device of the telescope's server, by its key,
+	// such as Camera/east-main.
+	Devices map[string]SessionDevice `json:"devices,omitempty"`
+	// Trains, Tubes, and Guiders hold the spec of each OpticalTrain and
+	// Guider of the telescope, and of each OpticalTube of those trains,
+	// by name.
+	Trains  map[string]OpticalTrainSpec `json:"trains,omitempty"`
+	Tubes   map[string]OpticalTubeSpec  `json:"tubes,omitempty"`
+	Guiders map[string]GuiderSpec       `json:"guiders,omitempty"`
+}
+
+// SessionDevice is the spec of one device as its session started it.
+// UID tells the device from one that a person created again with the
+// same name during the session, which the session did not start.
+type SessionDevice struct {
+	UID          string `json:"uid,omitempty"`
+	Telescope    string `json:"telescope,omitempty"`
+	OpticalTrain string `json:"opticalTrain,omitempty"`
+	Observatory  string `json:"observatory,omitempty"`
+	DeviceSpec
+	// Guides is true for a camera that a Guider of the telescope
+	// guides with.
+	Guides bool `json:"guides,omitempty"`
 }
 
 // Step is one step's record. An operator that restarts resumes from

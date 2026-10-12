@@ -162,24 +162,34 @@ func (r *runner) siteOf(t *tree) (*observatory.Telescope, *observatory.Observato
 // the same observatory may have started them, and then the step finds
 // each device connected and changes nothing.
 func (r *runner) startSite(ctx context.Context, w *stepWork) (outcome, error) {
-	t := r.o.snapshot()
-	_, site, err := r.siteOf(t)
+	_, site, err := r.siteOf(r.o.snapshot())
 	if err != nil {
 		return outcome{}, err
 	}
-	ref := serverRef{observatory.ObservatoryKind, site.Metadata.Name}
-	if err := t.driverConflicts(ref); err != nil {
-		return outcome{}, err
-	}
-	devices := t.devicesOn(ref)
-	if len(devices) == 0 {
-		return skipped("no devices on Observatory %s", site.Metadata.Name)
-	}
+	// The lock comes first, so a reservation that starts while another
+	// one starts the server records the set that the other recorded.
 	lock := r.o.siteLock(site.Metadata.Name)
 	if err := lock.acquire(ctx); err != nil {
 		return outcome{}, err
 	}
 	defer lock.release()
+	t := r.o.snapshot()
+	ref := serverRef{observatory.ObservatoryKind, site.Metadata.Name}
+	if err := t.driverConflicts(ref); err != nil {
+		return outcome{}, err
+	}
+	devices := t.devicesOn(ref)
+	if err := r.recordSession(ctx, w, func(s *observatory.Session) bool { return s.Observatory != "" }, func(s *observatory.Session) {
+		s.Observatory = site.Metadata.Name
+		if len(devices) > 0 {
+			s.Site = t.recordOf(ref, devices)
+		}
+	}); err != nil {
+		return outcome{}, err
+	}
+	if len(devices) == 0 {
+		return skipped("no devices on Observatory %s", site.Metadata.Name)
+	}
 	if _, err := r.o.startServer(ctx, w.report, ref, site.Metadata.UID, devices); err != nil {
 		return outcome{}, err
 	}
@@ -308,6 +318,13 @@ func (r *runner) powerOn(ctx context.Context, w *stepWork) (outcome, error) {
 		return outcome{}, fmt.Errorf("no devices on Telescope %s", telescope.Metadata.Name)
 	}
 	if err := t.driverConflicts(ref); err != nil {
+		return outcome{}, err
+	}
+	if err := r.recordSession(ctx, w, func(s *observatory.Session) bool { return len(s.Devices) > 0 }, func(s *observatory.Session) {
+		s.Observatory = firstNonEmpty(s.Observatory, telescope.Spec.Observatory)
+		s.Devices = t.recordOf(ref, devices)
+		s.Trains, s.Tubes, s.Guiders = t.opticsOf(ref.name)
+	}); err != nil {
 		return outcome{}, err
 	}
 	if _, err := r.o.startServer(ctx, w.report, ref, telescope.Metadata.UID, devices); err != nil {

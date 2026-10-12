@@ -72,8 +72,11 @@ and its `Ready` message names the reservation it waits for, such as
 A device that a person moved keeps running where it was, and its
 `ParentFound` condition has the reason `MovePending` and says where it
 goes. An edit of an `OpticalTrain`, an `OpticalTube`, or a
-`Guider` waits for the next reservation the same way. End the reservation, or let it reach its `end`, and reserve the
-telescope again.
+`Guider` waits for the next reservation the same way. The
+reservation's `status.session` shows what the session started with,
+and the operator acts on that until the reservation ends. End the
+reservation, or let it reach its `end`, and reserve the telescope
+again.
 
 ## StartDevices fails: a device never appears
 
