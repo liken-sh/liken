@@ -630,6 +630,43 @@ install-stick: $(DISK_DEPS)
 storage:
 	$(MAKE) -C storage run
 
+# The lab's container registry: a stock `registry` container (the
+# CNCF distribution project) on the laptop. It lets the guests pull
+# an image that you built on the laptop a minute ago, with no round
+# trip through ghcr.io. cluster.yaml declares it as the mirror for
+# ghcr.io, so a pod spec names the same image reference on the lab
+# that it names on a real fleet. registry/push.sh builds an image and
+# copies it in.
+#
+# The registry listens on the laptop's loopback alone, so no other
+# machine on the network can reach it. A guest reaches it all the
+# same, because QEMU's user-mode network sends a guest's connection
+# to 10.0.2.2 to the laptop's 127.0.0.1. That is the address in
+# cluster.yaml, and the same path that `make serve` uses for the
+# release channel.
+#
+# The images persist in registry/storage/, which is gitignored. The
+# container runs as your own user, so you can delete that directory
+# without root. `make clean` does not delete it: a factory reset of
+# the guests keeps the images you pushed. registry-stop removes the
+# container and keeps the images too, so a change to REGISTRY_IMAGE
+# takes effect on the next `make registry`.
+REGISTRY_IMAGE := registry:3.0.0
+REGISTRY_NAME := liken-lab-registry
+
+registry:
+	mkdir -p registry/storage
+	docker container inspect $(REGISTRY_NAME) >/dev/null 2>&1 \
+		&& docker start $(REGISTRY_NAME) \
+		|| docker run -d --name $(REGISTRY_NAME) \
+			--user $$(id -u):$$(id -g) \
+			-p 127.0.0.1:5000:5000 \
+			-v $(CURDIR)/registry/storage:/var/lib/registry \
+			$(REGISTRY_IMAGE)
+
+registry-stop:
+	docker rm -f $(REGISTRY_NAME)
+
 # Grow a node's pods disk under the machine. This stands in for a
 # bigger drive or an expanded cloud volume. Run this command only
 # while the machine is off: resizing a live qcow2 file corrupts it.
@@ -714,7 +751,7 @@ smoke-emmc:
 		HOLD_DEADLINE=420 SMOKE_DEADLINE=420 \
 		./smoke.sh uefi emmc
 
-.PHONY: run run-once install install-stick storage grow-pods reset-nvram smoke-uefi smoke-bios smoke-hardware smoke-emmc clean
+.PHONY: run run-once install install-stick storage registry registry-stop grow-pods reset-nvram smoke-uefi smoke-bios smoke-hardware smoke-emmc clean
 
 clean:
 	rm -rf guests

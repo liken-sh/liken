@@ -99,6 +99,24 @@ spec:
       goMemoryLimit: "25%"
       goGC: 50
 
+  # The lab registry, a mirror for ghcr.io. It holds the operator
+  # images that you build on the laptop, so you can run a change on
+  # the lab before CI publishes it, with no upload over a slow
+  # uplink. `make registry` starts it and
+  # dev-cluster/registry/push.sh fills it. 10.0.2.2 is QEMU's address
+  # for the laptop on the user-mode network, the same address the
+  # release source below uses. The registry serves plain HTTP,
+  # because the traffic never leaves the laptop. containerd tries
+  # this endpoint first for every ghcr.io image. When the lab
+  # registry does not hold the image, or is not running, containerd
+  # pulls from ghcr.io itself, so a guest pulls a published image
+  # whether or not the registry runs. With the registry stopped, one
+  # pull on the lab waited 35 to 40 seconds for the endpoint before
+  # it fell back.
+  registries:
+    mirrors:
+      ghcr.io: [http://10.0.2.2:5000]
+
   releases:
     # Where release artifacts come from: the lab's release server
     # (`liken serve`, started with `make serve`), reached at QEMU's

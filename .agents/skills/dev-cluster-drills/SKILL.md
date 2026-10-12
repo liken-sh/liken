@@ -149,6 +149,36 @@ started with, even after make rebuilt the file. To deliver new code to
 such a guest, kill its QEMU process and start it again. A `BOOT=disk`
 guest does not have this problem, because it loads from its own slots.
 
+## Run an image you built on the laptop
+
+The lab registry lets the guests pull an operator image that you built
+on the laptop, with no push to ghcr.io. It is a `registry:3.0.0`
+container named `liken-lab-registry` on the laptop's `127.0.0.1:5000`.
+`dev-cluster/cluster.yaml` declares it as the `spec.registries` mirror
+for `ghcr.io` at `http://10.0.2.2:5000`, so a manifest keeps its
+`ghcr.io/liken-sh/...` image reference:
+
+```bash
+make registry
+dev-cluster/registry/push.sh observatory-operator
+dev-cluster/registry/push.sh ghcr.io/liken-sh/indi-simulators:20261005-5
+```
+
+`push.sh` takes a target of the root `docker-bake.hcl` or an image
+reference that the local docker daemon holds. It builds a target as
+`ghcr.io/liken-sh/<name>:dev` unless you set `VERSION`. ghcr.io has
+no `:dev` tag, so a pod that names one pulls only from the lab
+registry. Every other `ghcr.io` image falls back to ghcr.io when the
+lab registry lacks it or is stopped. `docker logs liken-lab-registry`
+shows each pull with the user agent `containerd`. The images stay in
+`dev-cluster/registry/storage/`, and neither `make registry-stop` nor
+`make -C dev-cluster clean` deletes them.
+
+When the build cannot resolve names, set
+`BAKE_FLAGS="--set *.network=host --allow network.host"`. This
+happens on a VPN whose DNS server answers the laptop but not its
+containers.
+
 ## The upgrade drill
 
 This is the full forward roll. It needs a running fleet.
@@ -431,5 +461,6 @@ applies sysctls live and reboots nothing.
 ## Clean up
 
 Report what is still running when the drill ends: which guests, which
-`make serve`, and which background tasks. A `liken serve` holds
-`:8017`, and a leftover guest holds `node-N`'s disks.
+`make serve`, whether `liken-lab-registry` runs, and which background
+tasks. A `liken serve` holds `:8017`, the lab registry holds `:5000`,
+and a leftover guest holds `node-N`'s disks.

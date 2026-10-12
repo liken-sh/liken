@@ -7,6 +7,10 @@
 #              adopted) by the identity domain; never in history
 #   image/     the assembled boot archives, which bake the identity
 #              and manifests above into the OS the guests boot
+#   registry/storage/
+#              the lab registry's images; `make registry` creates it
+#              and registry/push.sh fills it
 guests/
 identity/
 image/
+registry/storage/

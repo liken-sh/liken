@@ -423,6 +423,16 @@ run: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/initrd.cpio
 storage:
 	$(MAKE) -C dev-cluster storage
 
+# The lab's container registry (dev-cluster/Makefile explains it)
+# runs on the laptop and needs no OS artifacts either. These targets
+# start and remove it from the root. dev-cluster/registry/push.sh
+# fills it.
+registry:
+	$(MAKE) -C dev-cluster registry
+
+registry-stop:
+	$(MAKE) -C dev-cluster registry-stop
+
 # One-shot boots are for debugging and automation. The liken.oneshot
 # flag tells init not to restart k3s. When k3s first exits, the
 # machine powers off, QEMU exits, and the console log becomes a
@@ -821,4 +831,4 @@ clean:
 	rm -rf $(HW_IMAGE_DIR)
 	rm -rf $(EMMC_IMAGE_DIR)
 
-.PHONY: versions all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware smoke-emmc install install-stick install-gitops storage release serve docs test test-go coverage-profile coverage-report test-docs clean
+.PHONY: versions all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware smoke-emmc install install-stick install-gitops storage registry registry-stop release serve docs test test-go coverage-profile coverage-report test-docs clean
