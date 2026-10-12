@@ -116,6 +116,12 @@ func TestAGuiderCreatedAgainDuringASessionWaits(t *testing.T) {
 		w := readyGuider(t)
 		spec, _ := w.api.object(kindCollection(observatory.GuiderKind), "east")
 		w.api.deleteNamed(kindCollection(observatory.GuiderKind), "east")
+		// The garbage collector deletes the pod after its owner is
+		// gone. Pods and Guiders come through separate watches, so an
+		// operator that saw the pod go first would still hold the
+		// Guider and create its pod again, and the fake API server
+		// has no garbage collector to delete that pod.
+		synctest.Wait()
 		w.api.deleteNamed(podsCollection, "east-guider")
 		w.settle()
 		w.put(observatory.GuiderKind, "east", spec["spec"].(map[string]any))

@@ -68,8 +68,23 @@ operator records the session again in `status.session` from the specs
 as they are then. Then the step runs on the fixed spec, and it
 replaces each pod that the old record built. The observatory's part
 of the record still holds the devices that another reservation's
-running session recorded there. A retry of a failed deactivation step
-records nothing, because the release stops what the session started.
+running session recorded there, and the telescope's part leaves out a
+device that another session started on the observatory's server.
+
+The retry also undoes what the old record started and the new record
+does not, before any step runs again. A device that the new record
+leaves out, such as one you moved to another telescope, leaves the
+session: its `deactivation` runs if the telescope is `Active`, its
+driver stops, its pod goes, and its `PodDeleted` Event says that the
+retry took it out of the session. An output that the old record
+switched on and the new one does not goes off, unless another device
+draws from it. Then the steps run again from the first step that reads
+a part of the record that changed: `StartSite` for the observatory's
+devices, `PowerOn` for the telescope's devices, `Configure` for the
+trains and tubes, and `StartGuider` for the `Guider`. So a power output
+that you changed is switched on, and the `Retry` Event names the first
+step that runs again. A retry of a failed deactivation step records
+nothing, because the release stops what the session started.
 
 A trigger's run that failed, such as a dome park that the driver
 refused, is not run again for the same transition. The same annotation
@@ -238,9 +253,9 @@ unless another device that a running server runs names the same
 output. The `PodDeleted` Event on the device says whether the output
 went off. Then the operator removes the finalizer, and the device is
 gone. A device deleted while the reservation activates or is `Failed`
-goes when the reservation is `Ready`, or in its release. A device
-deleted before the `Activation` step ran its `activation` goes with no
-procedure.
+goes at a retry, when the reservation is `Ready`, or in its release. A
+device deleted before the `Activation` step ran its `activation` goes
+with no procedure.
 
 When a person deletes a reservation together with devices or the
 resources that place them, as `kubectl delete -f` of a whole inventory

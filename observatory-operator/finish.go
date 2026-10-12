@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"strings"
 
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
@@ -37,11 +38,12 @@ func (r *runner) failed(ctx context.Context) {
 				}
 			}
 			r.status.Phase = phaseOf(r.status.Step)
-			if err := r.recordAgain(ctx); err != nil {
+			notes, err := r.recordAgain(ctx)
+			if err != nil {
 				return
 			}
 			r.save(ctx)
-			r.o.record(r.res, "Retry", "Retrying "+string(r.status.Step))
+			r.o.record(r.res, "Retry", strings.Join(append([]string{"Retrying " + string(r.status.Step)}, notes...), "; "))
 			r.awaitStore(ctx, func(res *observatory.Reservation) bool {
 				_, still := res.Metadata.Annotations[annotationRetry]
 				return !still

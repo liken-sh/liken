@@ -19,8 +19,11 @@ package main
 //     finds it. An output that another device still draws from stays
 //     on (tree.draws).
 //
-// A device deleted while the reservation activates or is Failed keeps
-// its pod until the reservation is Ready, or until the release.
+// A retry of a failed activation step records the session again
+// (retryrecords.go), and a device that the new record leaves out leaves
+// the session the same way, at the retry. A device deleted while the
+// reservation activates or is Failed keeps its pod until the retry, the
+// reservation is Ready, or the release.
 
 import (
 	"context"
@@ -59,11 +62,14 @@ func strays(t *tree, ref serverRef) map[string]string {
 }
 
 // removeStrays deletes the pod, the Service, and the claim of each
-// deleted device of a server, and posts an Event on each such device
-// that still exists. A deleted device still exists while the finalizer
-// holds it, and the supervisor removes the finalizer once its pod is
-// gone (finalizers.go).
-func (r *runner) removeStrays(ctx context.Context, t *tree, ref serverRef) error {
+// device of a server that the server no longer runs, and posts an Event
+// on each such device that still exists. A deleted device still exists
+// while the finalizer holds it, and the supervisor removes the
+// finalizer once its pod is gone (finalizers.go). from is the tree that
+// placed the device on the server, whose spec of it names the output
+// that the session switched on: t itself after a delete, and the tree
+// of the old record after a retry.
+func (r *runner) removeStrays(ctx context.Context, t, from *tree, ref serverRef) error {
 	left := strays(t, ref)
 	if len(left) == 0 {
 		return nil
@@ -79,11 +85,15 @@ func (r *runner) removeStrays(ctx context.Context, t *tree, ref serverRef) error
 	}
 	now := r.o.snapshot()
 	for _, key := range slices.Sorted(maps.Keys(left)) {
-		d, ok := t.deviceByKey(key)
+		d, ok := from.deviceByKey(key)
 		if !ok {
 			continue
 		}
-		message := fmt.Sprintf("Deleted pod %s, because the %s was deleted while Reservation %s is Ready.", left[key], d.kind.Name, r.name)
+		because := fmt.Sprintf("the %s was deleted while Reservation %s is %s", d.kind.Name, r.name, r.status.Phase)
+		if !deleting(d.object.Metadata) {
+			because = fmt.Sprintf("the retry of Reservation %s recorded a spec that takes the %s out of its session", r.name, d.kind.Name)
+		}
+		message := fmt.Sprintf("Deleted pod %s, because %s.", left[key], because)
 		notes, err := r.o.setOutputs(ctx, now, now.unpowered([]*device{d}, serverRef{}), false)
 		if err != nil {
 			r.o.logf("Reservation %s: switching off the output of %s: %v", r.name, key, err)
@@ -92,7 +102,7 @@ func (r *runner) removeStrays(ctx context.Context, t *tree, ref serverRef) error
 			message += " " + sentence(strings.Join(notes, "; ")) + "."
 		}
 		r.o.recorder.Normal(reference(d.kind, d.object.Metadata), reasonPodDeleted, message)
-		r.o.logf("Reservation %s: deleted pod %s of %s, which was deleted", r.name, left[key], key)
+		r.o.logf("Reservation %s: deleted pod %s of %s, because %s", r.name, left[key], key, because)
 	}
 	return nil
 }

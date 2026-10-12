@@ -115,14 +115,14 @@ func (r *runner) keepPods(ctx context.Context, t *tree, ref serverRef, telescope
 	}
 	defer lock.release()
 	if _, running := t.pods[siteRef.String()]; len(siteDevices) == 0 && !running {
-		return r.removeStrays(ctx, t, siteRef)
+		return r.removeStrays(ctx, t, t, siteRef)
 	}
 	return r.keepServer(ctx, t, siteRef, site.Metadata, siteDevices)
 }
 
 // keepServer creates one server's pod when it is gone, creates the pod
 // of each of its devices that is gone, sets the server's drivers to the
-// devices, and deletes the pods of the devices that a person deleted.
+// devices, and releases the devices that left it (releaseLeft).
 // The order stops a deleted device's driver before its pod goes
 // (serverdrivers.go). A server whose pod is new starts every driver
 // disconnected, so its Switch cannot answer yet, and reapply switches
@@ -144,17 +144,25 @@ func (r *runner) keepServer(ctx context.Context, t *tree, ref serverRef, owner o
 	if err != nil {
 		return err
 	}
-	// A deleted served device deactivates through its owner's driver,
-	// so it goes before setDrivers stops any driver.
+	return r.releaseLeft(ctx, t, t, ref, about)
+}
+
+// releaseLeft releases each device that a server's pod runs and that
+// the server no longer runs: it runs the device's deactivation, stops
+// its driver, and deletes its pod (removeStrays). A served device
+// deactivates through its owner's driver, so it goes before setDrivers
+// stops any driver. from is the tree that placed the devices on the
+// server (removeStrays).
+func (r *runner) releaseLeft(ctx context.Context, t, from *tree, ref serverRef, about events.ObjectReference) error {
 	if err := r.leaveServed(ctx, t, ref); err != nil {
 		return err
 	}
-	left, err := r.o.setDrivers(ctx, nil, ref, devices)
+	left, err := r.o.setDrivers(ctx, nil, ref, t.devicesOn(ref))
 	r.recordDrivers(t, ref, about, left)
 	if err != nil {
 		return err
 	}
-	return r.removeStrays(ctx, t, ref)
+	return r.removeStrays(ctx, t, from, ref)
 }
 
 // recordServerPod writes an Event and a log line when the runner

@@ -199,8 +199,12 @@ failed activation step, it first records the session again in
 `status.session` from the specs as they are, because the record holds
 the spec that failed. So a driver, a power output, or a claim that you
 fixed takes effect, and the step replaces each pod that the old spec
-built. A retry of a failed deactivation step keeps the record, because
-the release stops what the session started. To give up on a failed
+built. A device that you moved out of the session leaves it at the
+retry, through its `deactivation`, and an output that no recorded
+device names any more goes off. The steps then run again from the
+first step that reads what you changed, such as `PowerOn` for a
+device's power output. A retry of a failed deactivation step keeps
+the record, because the release stops what the session started. To give up on a failed
 activation instead, delete the reservation, and deactivation runs from
 its first step.
 

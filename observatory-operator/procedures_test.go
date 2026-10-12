@@ -200,8 +200,13 @@ func (w *world) retry(name string) {
 }
 
 // annotateRetry sets the retry annotation on any resource, as a person
-// does with kubectl annotate.
+// does with kubectl annotate. A person annotates after the fix landed,
+// and each kind comes through its own watch, so the annotation waits
+// until the operator has read every earlier write. Without the wait,
+// the operator can read the annotation before the fixed spec, and the
+// retry records the spec that failed.
 func (w *world) annotateRetry(kind observatory.Kind, name string) {
+	synctest.Wait()
 	object, _ := w.api.object(kindCollection(kind), name)
 	object["metadata"].(map[string]any)["annotations"] = map[string]any{annotationRetry: "1"}
 	w.api.mu.Lock()

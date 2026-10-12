@@ -225,8 +225,8 @@ func podDriver(p *pod) string {
 
 // recordDrivers posts an Event on a Telescope or an Observatory for
 // each driver that its running server stopped while the reservation is
-// Ready. t names the device of each pod that left, from the pod's
-// labels, because the device itself can be gone already.
+// Ready, or at its retry. t names the device of each pod that left,
+// from the pod's labels, because the device itself can be gone already.
 func (r *runner) recordDrivers(t *tree, ref serverRef, about events.ObjectReference, left []string) {
 	for _, name := range left {
 		device := "pod " + name
@@ -234,7 +234,7 @@ func (r *runner) recordDrivers(t *tree, ref serverRef, about events.ObjectRefere
 			device = p.Metadata.Labels[labelKind] + " " + p.Metadata.Labels[labelResource]
 		}
 		r.o.recorder.Normal(about, reasonDriverStopped,
-			fmt.Sprintf("Stopped the driver of %s on server %s while Reservation %s is Ready. The server did not restart.", device, ref, r.name))
+			fmt.Sprintf("Stopped the driver of %s on server %s while Reservation %s is %s. The server did not restart.", device, ref, r.name, r.status.Phase))
 		r.o.logf("Reservation %s: stopped the driver of %s on %s", r.name, device, ref)
 	}
 }

@@ -125,7 +125,10 @@ func sameUID(recorded string, m observatory.ObjectMeta) bool {
 // server's record is the union of its holders' records, and where two
 // of them record one device, the record of a reservation whose
 // StartSite step failed gives way: that step never started its set,
-// and a retry records it again.
+// and a retry records it again. No two servers' records name one
+// device: a step records only the devices that the tree places on its
+// server, and the tree places a recorded device only where its record
+// names it (tree.server, forgotten).
 func (t *tree) applyRecords() {
 	t.records, t.recordedTubes, t.writtenTrains = map[serverRef]observatory.Session{}, map[string]observatory.SessionTube{}, map[string]*observatory.OpticalTrain{}
 	for _, res := range recordOrder(t.reservations) {
