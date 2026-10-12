@@ -33,20 +33,18 @@ func (o *operator) writeStatuses(ctx context.Context) {
 	first := newFirstRead()
 	for {
 		wake := o.changed.wait()
-		var held time.Time
+		var held, expiry time.Time
 		if o.stores.ready() && o.seeded.Load() {
 			t := o.snapshot()
 			if held = first.hold(ctx, o, t); held.IsZero() {
-				o.writeAll(ctx, t, seen)
+				expiry = o.writeAll(ctx, t, seen)
 			}
 		}
-		// The timer is a clock: the end of the hold (firstread.go).
-		var end <-chan time.Time
-		var hold *time.Timer
-		if !held.IsZero() {
-			hold = time.NewTimer(time.Until(held))
-			end = hold.C
-		}
+		// The timers are clocks: the end of the hold (firstread.go),
+		// and the expiry of the next SetUp, which no watch event marks
+		// (setup.go).
+		end, stopEnd := clock(held)
+		expires, stopExpires := clock(expiry)
 		// After a failed write, the writer waits for the next window,
 		// not for the next change: no event follows a failure, and the
 		// status stays stale until the writer composes it again.
@@ -55,11 +53,11 @@ func (o *operator) writeStatuses(ctx context.Context) {
 			case <-ctx.Done():
 			case <-wake:
 			case <-end:
+			case <-expires:
 			}
 		}
-		if hold != nil {
-			hold.Stop()
-		}
+		stopEnd()
+		stopExpires()
 		if ctx.Err() != nil {
 			return
 		}
@@ -73,14 +71,27 @@ func (o *operator) writeStatuses(ctx context.Context) {
 	}
 }
 
+// clock answers a channel that receives at a time, and the function
+// that stops its timer, or a nil channel when the time is zero.
+func clock(at time.Time) (<-chan time.Time, func()) {
+	if at.IsZero() {
+		return nil, func() {}
+	}
+	timer := time.NewTimer(time.Until(at))
+	return timer.C, func() { timer.Stop() }
+}
+
 // writeAll composes and writes every status but the reservations', and
 // sets the namespace's series from what it composed (series.go). The
 // pass counts in the metrics under each kind that it wrote (metrics.go).
-func (o *operator) writeAll(ctx context.Context, t *tree, seen *statusMemo) {
+// It answers the next expiry of a person's SetUp, or zero when no SetUp
+// holds.
+func (o *operator) writeAll(ctx context.Context, t *tree, seen *statusMemo) time.Time {
 	client := o.client.WithContext(ctx)
 	seen.begin()
 	times := newPassTimes()
 	defer o.series.m.observePasses(times)
+	var expiry time.Time
 	composed := map[string]deviceStatus{}
 	for _, d := range t.devices {
 		began := time.Now()
@@ -88,12 +99,18 @@ func (o *operator) writeAll(ctx context.Context, t *tree, seen *statusMemo) {
 		o.series.device(d, reading)
 		composed[d.key()] = next
 		object := d.object
+		place := placeOf(t, d.kind, d.name())
+		expiry = nextExpiry(expiry, object.Status.Conditions, object.Status.SetUpUntil, place)
 		failed := writeStatus(o.recorder, client, seen, d.kind, &object, reference(d.kind, object.Metadata),
 			func(held *deviceObject) any { return held.Status },
 			func(held *deviceObject) (any, []observatory.Condition) {
 				composed := next
 				var transitions []observatory.Condition
 				composed.Conditions, transitions = mergeConditions(held.Status.Conditions, next.Conditions)
+				composed.SetUpUntil = held.Status.SetUpUntil
+				if expired := expireSetUp(&composed.Conditions, composed.SetUpUntil, place); expired != nil {
+					transitions = append(transitions, *expired)
+				}
 				held.APIVersion, held.Kind, held.Status = observatory.APIVersion, d.kind.Name, composed
 				return composed, transitions
 			})
@@ -112,47 +129,88 @@ func (o *operator) writeAll(ctx context.Context, t *tree, seen *statusMemo) {
 		began := time.Now()
 		next := o.telescopeStatus(t, telescope, composed, guiders)
 		o.series.telescope(telescope.Metadata.Name, next.Phase)
-		failed := writeTyped(o.recorder, client, seen, observatory.TelescopeKind, telescope, next, func(s *observatory.TelescopeStatus) *[]observatory.Condition { return &s.Conditions })
+		failed := writeTyped(o.recorder, client, seen, observatory.TelescopeKind, telescope, next, statusParts[observatory.TelescopeStatus]{
+			conditions: func(s *observatory.TelescopeStatus) *[]observatory.Condition { return &s.Conditions },
+			until:      func(s *observatory.TelescopeStatus) **time.Time { return &s.SetUpUntil },
+			place:      placeOf(t, observatory.TelescopeKind, telescope.Metadata.Name),
+		}, &expiry)
 		times.add(observatory.TelescopeKind, began, failed)
 	}
 	for _, site := range t.observatories {
 		began := time.Now()
 		next := o.observatoryStatus(t, site, composed)
-		failed := writeTyped(o.recorder, client, seen, observatory.ObservatoryKind, site, next, func(s *observatory.ObservatoryStatus) *[]observatory.Condition { return &s.Conditions })
+		failed := writeTyped(o.recorder, client, seen, observatory.ObservatoryKind, site, next, statusParts[observatory.ObservatoryStatus]{
+			conditions: func(s *observatory.ObservatoryStatus) *[]observatory.Condition { return &s.Conditions },
+			until:      func(s *observatory.ObservatoryStatus) **time.Time { return &s.SetUpUntil },
+			place:      &site.Spec.Location,
+		}, &expiry)
 		times.add(observatory.ObservatoryKind, began, failed)
 	}
 	for _, train := range t.trains {
 		began := time.Now()
 		next := trainStatus(t, train, composed)
-		failed := writeTyped(o.recorder, client, seen, observatory.OpticalTrainKind, train, next, func(s *observatory.OpticalTrainStatus) *[]observatory.Condition { return &s.Conditions })
+		failed := writeTyped(o.recorder, client, seen, observatory.OpticalTrainKind, train, next, statusParts[observatory.OpticalTrainStatus]{
+			conditions: func(s *observatory.OpticalTrainStatus) *[]observatory.Condition { return &s.Conditions },
+			place:      placeOf(t, observatory.OpticalTrainKind, train.Metadata.Name),
+		}, &expiry)
 		times.add(observatory.OpticalTrainKind, began, failed)
 	}
 	for _, tube := range t.tubes {
 		began := time.Now()
 		next := tubeStatus(t, tube)
-		failed := writeTyped(o.recorder, client, seen, observatory.OpticalTubeKind, tube, next, func(s *observatory.OpticalTubeStatus) *[]observatory.Condition { return &s.Conditions })
+		failed := writeTyped(o.recorder, client, seen, observatory.OpticalTubeKind, tube, next, statusParts[observatory.OpticalTubeStatus]{
+			conditions: func(s *observatory.OpticalTubeStatus) *[]observatory.Condition { return &s.Conditions },
+			place:      placeOf(t, observatory.OpticalTubeKind, tube.Metadata.Name),
+		}, &expiry)
 		times.add(observatory.OpticalTubeKind, began, failed)
 	}
 	for name, guider := range t.guiders {
 		began := time.Now()
-		failed := writeTyped(o.recorder, client, seen, observatory.GuiderKind, guider, guiders[name], func(s *observatory.GuiderStatus) *[]observatory.Condition { return &s.Conditions })
+		failed := writeTyped(o.recorder, client, seen, observatory.GuiderKind, guider, guiders[name], statusParts[observatory.GuiderStatus]{
+			conditions: func(s *observatory.GuiderStatus) *[]observatory.Condition { return &s.Conditions },
+			place:      placeOf(t, observatory.GuiderKind, guider.Metadata.Name),
+		}, &expiry)
 		times.add(observatory.GuiderKind, began, failed)
 	}
 	o.series.endPass(t.hasSeries)
+	return expiry
 }
 
-// writeTyped writes one status of a kind of the observatory package.
-// conditions answers the status's conditions, which keep their
-// transition times when their status holds. It reports whether the
-// write failed, as writeStatus does.
-func writeTyped[S, T any](recorder *events.Recorder, client *apiclient.Client, seen *statusMemo, kind observatory.Kind, object *observatory.Object[S, T], next T, conditions func(*T) *[]observatory.Condition) bool {
+// statusParts names the parts of one kind's status that the writer
+// merges with the stored status: its conditions, which keep their
+// transition times while their status holds, and a person's
+// setUpUntil, nil for a kind that has none. place is the location of
+// the resource's Observatory, for the dawn that expires a SetUp.
+type statusParts[T any] struct {
+	conditions func(*T) *[]observatory.Condition
+	until      func(*T) **time.Time
+	place      *observatory.Location
+}
+
+// writeTyped writes one status of a kind of the observatory package,
+// and moves expiry to the expiry of its stored SetUp when that comes
+// sooner. It reports whether the write failed, as writeStatus does.
+func writeTyped[S, T any](recorder *events.Recorder, client *apiclient.Client, seen *statusMemo, kind observatory.Kind, object *observatory.Object[S, T], next T, parts statusParts[T], expiry *time.Time) bool {
 	held := *object
+	var until *time.Time
+	if parts.until != nil {
+		until = *parts.until(&held.Status)
+	}
+	*expiry = nextExpiry(*expiry, *parts.conditions(&held.Status), until, parts.place)
 	return writeStatus(recorder, client, seen, kind, &held, reference(kind, held.Metadata),
 		func(copy *observatory.Object[S, T]) any { return copy.Status },
 		func(copy *observatory.Object[S, T]) (any, []observatory.Condition) {
 			composed := next
 			var transitions []observatory.Condition
-			*conditions(&composed), transitions = mergeConditions(*conditions(&copy.Status), *conditions(&next))
+			*parts.conditions(&composed), transitions = mergeConditions(*parts.conditions(&copy.Status), *parts.conditions(&next))
+			var until *time.Time
+			if parts.until != nil {
+				until = *parts.until(&copy.Status)
+				*parts.until(&composed) = until
+			}
+			if expired := expireSetUp(parts.conditions(&composed), until, parts.place); expired != nil {
+				transitions = append(transitions, *expired)
+			}
 			copy.APIVersion, copy.Kind, copy.Status = observatory.APIVersion, kind.Name, composed
 			return composed, transitions
 		})
@@ -325,6 +383,7 @@ func (o *operator) deviceStatus(t *tree, d *device) (deviceStatus, deviceReading
 	if next.Phase == observatory.DeviceConnected && device != nil {
 		next.Conditions = append(next.Conditions, stateConditions(d, *device)...)
 	}
+	next.Conditions = withAttention(next.Conditions, next.Procedures, d.object.Status.Conditions)
 	for i := range next.Conditions {
 		next.Conditions[i].ObservedGeneration = next.ObservedGeneration
 	}

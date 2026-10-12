@@ -65,17 +65,20 @@ operator:
 
 1. starts the observatory's INDI server and its devices, if another
    reservation has not already started them
-2. starts the telescope's INDI server, and switches on the power
+2. waits for the conditions that the telescope's `spec.requires`
+   names, such as a person's confirmation that a portable telescope
+   is [set up](/docs/guides/set-up-a-portable-telescope/)
+3. starts the telescope's INDI server, and switches on the power
    outputs that its devices name
-3. starts a pod for each device, and waits for each driver to appear
+4. starts a pod for each device, and waits for each driver to appear
    on the server
-4. connects each device
-5. writes the settings that each device's spec states, the site's
+5. connects each device
+6. writes the settings that each device's spec states, the site's
    location, the optics, the outbox, and the FITS keywords to the
    drivers
-6. runs the activation procedures that you declared, such as
+7. runs the activation procedures that you declared, such as
    unparking the dome and cooling the camera
-7. starts PHD2, if the telescope has a `Guider`
+8. starts PHD2, if the telescope has a `Guider`
 
 [How a reservation runs](/docs/concepts/how-a-reservation-runs/)
 gives each step's exact behavior and deadline. To follow one step:

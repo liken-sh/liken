@@ -9,6 +9,11 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: observatory-operator
+  labels:
+    # The base binary selects on this label to find the operator's
+    # Deployment, read its image version, and pull the matching -cli
+    # image.
+    cli.liken.sh/plugin: observatory
 spec:
   # One replica is enough, because the kubelet restarts a crashed
   # operator. Two copies that acted at once would each run the same

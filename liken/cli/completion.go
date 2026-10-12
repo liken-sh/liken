@@ -44,7 +44,7 @@ var topLevelVerbs = []string{
 // CLI ships with a release and completes before any cluster is reached,
 // so the shell offers a domain the same whether its CLI is installed or
 // not.
-var pluginDomains = []string{"audio", "bluetooth", "display", "library", "media"}
+var pluginDomains = []string{"audio", "bluetooth", "display", "library", "media", "observatory"}
 
 // The plugins group's own subcommands.
 var pluginsSubcommands = []string{"list", "remove", "sync"}

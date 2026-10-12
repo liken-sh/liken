@@ -9,6 +9,10 @@ package main
 //   - Each condition transition of a device, a Telescope, an
 //     Observatory, a Guider, an OpticalTrain, and an OpticalTube posts
 //     one Event, after the status writer's write lands (status.go).
+//     That includes a SetUp that expires (setup.go) and an
+//     AttentionNeeded that a notify action sets (attention.go). A
+//     person's own write of SetUp is no transition of the operator's,
+//     and posts nothing.
 //   - A Reservation's runner posts one Event for each step's end and
 //     each phase change, with the step's own summary, so the
 //     transitions of the Reservation's Ready and SafeToPowerOff post
@@ -55,7 +59,9 @@ func (o *operator) record(r *observatory.Reservation, reason, message string) {
 // False while a resource starts or is not reserved, which is expected,
 // so only its failing reasons need one. Weather that is not Safe needs
 // one too, and so does a missing Horizon, because a scheduler would
-// plan the telescope's night with no horizon. The other state
+// plan the telescope's night with no horizon. AttentionNeeded True is
+// a notify action's request to a person, so it is a Warning, and a
+// SetUp that expires is expected, so it is not. The other state
 // conditions of a device, such as Parked or Lit, are False in normal
 // use, so none of them is a Warning.
 func badStatus(c observatory.Condition) observatory.ConditionStatus {
@@ -66,6 +72,8 @@ func badStatus(c observatory.Condition) observatory.ConditionStatus {
 		return conditions.False
 	case c.Type == observatory.ConditionSafe, c.Type == observatory.ConditionHorizonFound:
 		return conditions.False
+	case c.Type == observatory.ConditionAttentionNeeded:
+		return conditions.True
 	}
 	return ""
 }

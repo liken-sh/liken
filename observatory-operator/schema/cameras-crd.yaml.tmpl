@@ -147,10 +147,10 @@ spec:
 type: object
 description: >-
   One action, which names exactly one of `cool`,
-  `warm`, and `job`.
+  `warm`, `job`, and `notify`.
 x-kubernetes-validations:
-  - rule: "[has(self.cool), has(self.warm), has(self.job)].filter(x, x).size() == 1"
-    message: "an action names exactly one of cool, warm, and job"
+  - rule: "[has(self.cool), has(self.warm), has(self.job), has(self.notify)].filter(x, x).size() == 1"
+    message: "an action names exactly one of cool, warm, job, and notify"
 properties:
   cool:
     type: object

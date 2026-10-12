@@ -165,6 +165,12 @@ conditions:
     `Unknown` with the reason `Moving`. `Safe` is
     `False` with the reason `Warning` or `Danger`. A
     device that is not connected has none of them.
+    `SetUp` is the condition that a person writes, such
+    as with `kubectl liken observatory set-up`, and the
+    operator keeps it until it expires and turns
+    `False` with the reason `Expired`.
+    `AttentionNeeded` is `True` while a `notify` action
+    asks a person to do something.
   x-kubernetes-list-type: map
   x-kubernetes-list-map-keys: [type]
   items:

@@ -92,6 +92,7 @@ group "default" {
     "media-operator-capabilities",
     "media-operator-cli",
     "observatory-operator",
+    "observatory-operator-cli",
     "people-operator",
     "per-node-csi-driver",
   ]
@@ -964,6 +965,23 @@ target "observatory-operator" {
   tags       = ["ghcr.io/liken-sh/observatory-operator:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/observatory-operator:buildcache"]
   cache-to   = CACHE_WRITE == "observatory-operator" ? ["type=registry,ref=ghcr.io/liken-sh/observatory-operator:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "observatory-operator-cli" {
+  context    = "observatory-operator"
+  dockerfile = "Dockerfile.cli"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+    "notices" = "notices"
+    "trust" = "target:trust"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/observatory-operator-cli:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/observatory-operator-cli:buildcache"]
+  cache-to   = CACHE_WRITE == "observatory-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/observatory-operator-cli:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "people-operator" {

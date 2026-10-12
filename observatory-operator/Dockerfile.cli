@@ -1,0 +1,58 @@
+# The -cli image. It carries one static binary,
+# kubectl-liken-observatory, over a distroless base, and it is built
+# for linux/amd64 only.
+
+# The build stage runs on the builder's own architecture and
+# cross-compiles, so no target-architecture code runs here and the
+# build needs no emulation.
+FROM --platform=$BUILDPLATFORM golang:1.27.1-bookworm AS build
+# proxy.golang.org sometimes drops a module download partway through
+# the stream. With the default comma, `go` tries the origin only when
+# the proxy answers 404 or 410, so a dropped stream fails the build.
+# With a pipe, `go` fetches the module from its origin after any proxy
+# error, with the git that this image includes. `GOSUMDB` keeps its
+# default, so the checksum database still verifies a module that `go`
+# fetched from its origin.
+ENV GOPROXY="https://proxy.golang.org|direct"
+WORKDIR /src
+# The module files come first so a source edit reuses the
+# cached download layer.
+COPY go.mod go.sum ./
+# go.mod replaces the shared kubernetes module with ../kubernetes, so
+# the module graph reads its go.mod from the second build context named
+# kubernetes. The CLI imports none of its packages, so the module file
+# is all it needs.
+COPY --from=kubernetes go.mod /kubernetes/
+RUN go mod download
+# Only the CLI package and the module files reach the build.
+# The CLI shares no code with the operator package.
+COPY cli/ ./cli/
+# The version reaches the binary through -ldflags, the same way
+# the operator image is stamped.
+ARG VERSION=dev
+# Buildx passes the target platform through these two, and the
+# Go toolchain cross-compiles from them.
+ARG TARGETOS
+ARG TARGETARCH
+# CGO_ENABLED=0 with -trimpath is liken's build discipline: a
+# static binary with no paths from the build machine in it.
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags "-X main.version=${VERSION}" \
+    -o /kubectl-liken-observatory ./cli
+# The license files of the Go standard library and of each module that
+# the binary links. notices/go.sh says why the image needs them.
+COPY --from=notices go.sh /
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} sh /go.sh /notices ./cli
+
+# Distroless static carries a CA bundle and nonroot user and no
+# shell, which is all a static Go binary that calls the Kubernetes API
+# needs.
+FROM gcr.io/distroless/static:nonroot
+# distroless carries its own Debian CA bundle. The one that the trust
+# component pins for every image of liken replaces it, with its notice.
+COPY --from=trust / /
+COPY --from=build /kubectl-liken-observatory /usr/local/bin/kubectl-liken-observatory
+COPY --from=build /notices /
+# The binary is the entrypoint, so docker run passes the verbs
+# straight to it and a Job in the cluster runs it the same way.
+ENTRYPOINT ["/usr/local/bin/kubectl-liken-observatory"]

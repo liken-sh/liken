@@ -253,7 +253,7 @@ spec:
                     failed, and the `Ready` condition names it.
                 step:
                   type: string
-                  enum: [Wait, StartSite, PowerOn, StartDevices, Connect, Configure, Activation, StartGuider, Abort, Deactivation, StopGuider, Disconnect, StopDevices, PowerOff, StopSite]
+                  enum: [Wait, StartSite, Requires, PowerOn, StartDevices, Connect, Configure, Activation, StartGuider, Abort, Deactivation, StopGuider, Disconnect, StopDevices, PowerOff, StopSite]
                   description: >-
                     The step that runs now, or the step that failed.
                     It is empty while the phase is `Ready` or
@@ -262,10 +262,15 @@ spec:
                   type: array
                   description: >-
                     Every step, in the order it runs. The activation
-                    steps are `Wait`, `StartSite`, `PowerOn`,
-                    `StartDevices`, `Connect`, `Configure`,
+                    steps are `Wait`, `StartSite`, `Requires`,
+                    `PowerOn`, `StartDevices`, `Connect`, `Configure`,
                     `Activation`, and `StartGuider`, and the list holds
-                    them from the start. The deactivation steps are
+                    them from the start. `Wait` and `Requires` wait for
+                    the `spec.requires` of the resources that the
+                    session starts, and a reservation that still waits
+                    in either one at the next astronomical dawn ends
+                    there: the step is `Skipped`, and its summary names
+                    the conditions it waited for. The deactivation steps are
                     `Abort`, `Deactivation`, `StopGuider`, `Disconnect`,
                     `StopDevices`, `PowerOff`, and `StopSite`, and the
                     list holds them from when
@@ -280,7 +285,7 @@ spec:
                     properties:
                       name:
                         type: string
-                        enum: [Wait, StartSite, PowerOn, StartDevices, Connect, Configure, Activation, StartGuider, Abort, Deactivation, StopGuider, Disconnect, StopDevices, PowerOff, StopSite]
+                        enum: [Wait, StartSite, Requires, PowerOn, StartDevices, Connect, Configure, Activation, StartGuider, Abort, Deactivation, StopGuider, Disconnect, StopDevices, PowerOff, StopSite]
                         description: "The step's name."
                       state:
                         type: string

@@ -38,7 +38,7 @@ func TestAReservationActivatesTheTelescopeAndReleasesIt(t *testing.T) {
 		w := startWorld(t)
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		r := w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
-		want := []string{"Wait=Done", "StartSite=Done", "PowerOn=Done", "StartDevices=Done", "Connect=Done", "Configure=Done", "Activation=Done", "StartGuider=Done"}
+		want := []string{"Wait=Done", "StartSite=Done", "Requires=Skipped", "PowerOn=Done", "StartDevices=Done", "Connect=Done", "Configure=Done", "Activation=Done", "StartGuider=Done"}
 		if got := stepStates(r); !slices.Equal(got, want) {
 			t.Errorf("steps = %v, want %v", got, want)
 		}
@@ -135,7 +135,7 @@ func TestAReservationDeactivatesAtItsEnd(t *testing.T) {
 		time.Sleep(time.Hour)
 		r := w.phase("east-tonight", observatory.ReservationReleased, 10*time.Minute)
 		want := []string{
-			"Wait=Done", "StartSite=Done", "PowerOn=Done", "StartDevices=Done", "Connect=Done", "Configure=Done", "Activation=Done", "StartGuider=Done",
+			"Wait=Done", "StartSite=Done", "Requires=Skipped", "PowerOn=Done", "StartDevices=Done", "Connect=Done", "Configure=Done", "Activation=Done", "StartGuider=Done",
 			"Abort=Skipped", "Deactivation=Done", "StopGuider=Done", "Disconnect=Done", "StopDevices=Done", "PowerOff=Done", "StopSite=Done",
 		}
 		if got := stepStates(r); !slices.Equal(got, want) {

@@ -847,7 +847,7 @@ jobs:
       packages: write
 
   observatory-operator:
-    needs: [plan, indi, weston]
+    needs: [plan, indi, trust, weston]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['observatory-operator'].check }}
     uses: ./.github/workflows/component-observatory-operator.yaml
     with:

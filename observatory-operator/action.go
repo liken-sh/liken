@@ -35,7 +35,7 @@ func procedures(in observatory.Procedures[observatory.Action]) observatory.Proce
 		}
 		return out
 	}
-	out := observatory.Procedures[action]{Activation: actions(in.Activation), Deactivation: actions(in.Deactivation)}
+	out := observatory.Procedures[action]{Requires: in.Requires, Activation: actions(in.Activation), Deactivation: actions(in.Deactivation)}
 	for _, trigger := range in.Triggers {
 		out.Triggers = append(out.Triggers, observatory.Trigger[action]{When: trigger.When, Run: actions(trigger.Run)})
 	}
@@ -54,6 +54,8 @@ func (a action) String() string {
 		return "state: " + a.State
 	case a.Job != nil:
 		return "job: " + a.Job.Image
+	case a.Notify != "":
+		return notifyPrefix + a.Notify
 	}
 	return "no action"
 }

@@ -1,6 +1,6 @@
 ---
 name: troubleshoot
-description: "Find why a reservation failed or waits, from the step and the device its status names: a missing parent, two devices on one driver, an outbox that does not exist, a pod that stays Pending, a device that does not connect, a device that does not serve its kind, a device that waits for the next session, a park that a lock refused, or a delete that does not finish. Then run the failed step again with the retry annotation. Use when a Reservation is Failed or stuck, when a device reports Error, or when a resource will not delete."
+description: "Find why a reservation failed or waits, from the step and the device its status names: a requirement that does not hold, a missing parent, two devices on one driver, an outbox that does not exist, a pod that stays Pending, a device that does not connect, a device that does not serve its kind, a device that waits for the next session, a park that a lock refused, or a delete that does not finish. Then run the failed step again with the retry annotation. Use when a Reservation is Failed or stuck, when a device reports Error, or when a resource will not delete."
 ---
 
 This skill is the guide at https://liken.sh/observatory/docs/guides/troubleshoot/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
@@ -31,17 +31,54 @@ The sections below follow the steps in the order they run.
 
 ## The reservation stays in Wait
 
-`Wait` waits for the start time, for the telescope to exist, and for
-no other reservation to hold it. The summary says which:
+`Wait` waits for the start time, for the telescope to exist, for the
+`spec.requires` of the `Observatory` and its devices, and for no other
+reservation to hold it. The summary says which:
 
 * `Missing Telescope east`: no `Telescope` of that name exists in
   `observatory`. Check the name and the namespace.
+* `Waiting for Observatory lab SetUp=True`: a requirement of the
+  observatory or of a device on its server does not hold, as [The
+  reservation stays in Requires](#the-reservation-stays-in-requires)
+  describes.
 * A reservation name: another reservation holds the telescope. It
   takes the telescope when that one is `Released`. A `Released`
   reservation no longer holds anything, but a `Failed` one does until
   you delete it or its `end` time passes.
 * `Telescope east is being deleted`: a delete of the telescope or its
   observatory is in progress.
+
+## The reservation stays in Requires
+
+`Requires` waits for each condition that the `spec.requires` of the
+`Telescope` and of its devices names, and its summary lists the ones
+that do not hold yet, such as
+`Waiting for Telescope east SetUp=True, WeatherStation lab Safe=True`:
+
+* `SetUp=True`: nobody confirmed that the resource is set up tonight,
+  or the confirmation expired at dawn. Read who wrote it last and
+  when, then confirm it once the equipment is ready:
+
+  ```sh
+  kubectl get telescope east -n observatory \
+    -o jsonpath='{.status.conditions[?(@.type=="SetUp")]}'
+  kubectl liken observatory set-up telescope east -n observatory
+  ```
+
+* `Safe=True`: the weather station reports bad weather, and the
+  reservation starts when it reports `Safe`.
+* `spec.requires[0] of Telescope east: no WeatherStation roof`: the
+  requirement names a resource that does not exist. Correct the name.
+
+A requirement that names the `Safe` of a weather station on the
+observatory's server belongs on the `Telescope`, not the
+`Observatory`: the observatory's requirements hold `Wait`, before the
+station starts, so the station never reports `Safe`.
+
+A reservation that still waits at dawn ends. The step is `Skipped`
+with `Dawn came at ...` and the conditions it waited for, and the
+reservation is `Released` with the telescope's equipment never
+powered on. Create a new reservation for the next night.
 
 ## A resource reports ParentFound False
 

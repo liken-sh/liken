@@ -257,6 +257,63 @@ spec:
                       description: >-
                         The backlash of the altitude motor, in steps.
                         The member is `BACKLASH_ALT`.
+                requires:
+                  type: array
+                  maxItems: 8
+                  description: >-
+                    The conditions that must hold before a
+                    `Reservation`'s session starts this resource, as a
+                    pod's `readinessGates` hold a pod. A person's
+                    `SetUp`, or a `WeatherStation`'s `Safe`, keeps the
+                    equipment off until it holds. The requirements of
+                    the `Observatory` and of the devices on its server
+                    hold the `Wait` step, so they cannot name a
+                    condition that only a device on that server reports.
+                    The requirements of the `Telescope` and of its
+                    devices hold the `Requires` step, after `StartSite`
+                    and before `PowerOn`. The step's message names each
+                    condition it waits for, and a reservation that still
+                    waits at the next astronomical dawn ends with the
+                    telescope's equipment off. A requirement gates only
+                    the start: a condition that turns `False` later
+                    changes nothing, and a trigger acts on it. Optional.
+                  items:
+                    type: object
+                    required: [type]
+                    description: >-
+                      One condition, and the status it must have.
+                    properties:
+                      kind:
+                        type: string
+                        enum: [Observatory, Telescope, OpticalTube, OpticalTrain, Mount, Camera, FilterWheel, Focuser, Rotator, DustCap, FlatPanel, PolarAligner, GPS, Dome, WeatherStation, Switch, Receiver, Guider]
+                        description: >-
+                          The kind of the resource whose condition it
+                          reads. With no `kind`, the condition is the
+                          resource's own. A `kind` of `Observatory` or
+                          `Telescope` with no `name` means the
+                          resource's own observatory or telescope.
+                      name:
+                        type: string
+                        minLength: 1
+                        maxLength: 253
+                        pattern: "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+                        description: >-
+                          The name of the resource, in this namespace. A
+                          device kind needs a name.
+                      type:
+                        type: string
+                        minLength: 1
+                        maxLength: 316
+                        description: >-
+                          The condition's type, such as `Safe`,
+                          `Parked`, or `SetUp`.
+                      status:
+                        type: string
+                        enum: ["True", "False", Unknown]
+                        description: >-
+                          The status that the condition must have:
+                          `True`, `False`, or `Unknown`. The default is
+                          `True`.
                 activation:
                   type: array
                   maxItems: 16
@@ -272,10 +329,11 @@ spec:
                   items:
                     type: object
                     description: >-
-                      One action, which names `job`.
+                      One action, which names exactly one of `job` and
+                      `notify`.
                     x-kubernetes-validations:
-                      - rule: "has(self.job)"
-                        message: "an action of a PolarAligner names job"
+                      - rule: "[has(self.job), has(self.notify)].filter(x, x).size() == 1"
+                        message: "an action of a PolarAligner names exactly one of job and notify"
                     properties:
                       job:
                         type: object
@@ -409,8 +467,8 @@ spec:
                               minLength: 1
                               maxLength: 316
                               description: >-
-                                The condition's type, such as `Safe` or
-                                `Parked`.
+                                The condition's type, such as `Safe`,
+                                `Parked`, or `SetUp`.
                             status:
                               type: string
                               enum: ["True", "False", Unknown]
@@ -418,6 +476,22 @@ spec:
                                 The status that the condition must have:
                                 `True`, `False`, or `Unknown`. The
                                 default is `True`.
+                      notify:
+                        type: string
+                        minLength: 1
+                        maxLength: 1024
+                        description: >-
+                          A request to a person, such as `Cover the
+                          telescope and carry it in`, for what no driver
+                          can do. The resource's `AttentionNeeded`
+                          condition turns `True` with the text as its
+                          message, and its transition posts a Warning
+                          `Event`. The action is `Done` at once and
+                          never waits for the person. `AttentionNeeded`
+                          turns `False` at the start of the resource's
+                          next activation, or when a person writes the
+                          resource's `SetUp` condition after the
+                          request.
                       after:
                         type: array
                         maxItems: 8
@@ -466,10 +540,11 @@ spec:
                   items:
                     type: object
                     description: >-
-                      One action, which names `job`.
+                      One action, which names exactly one of `job` and
+                      `notify`.
                     x-kubernetes-validations:
-                      - rule: "has(self.job)"
-                        message: "an action of a PolarAligner names job"
+                      - rule: "[has(self.job), has(self.notify)].filter(x, x).size() == 1"
+                        message: "an action of a PolarAligner names exactly one of job and notify"
                     properties:
                       job:
                         type: object
@@ -603,8 +678,8 @@ spec:
                               minLength: 1
                               maxLength: 316
                               description: >-
-                                The condition's type, such as `Safe` or
-                                `Parked`.
+                                The condition's type, such as `Safe`,
+                                `Parked`, or `SetUp`.
                             status:
                               type: string
                               enum: ["True", "False", Unknown]
@@ -612,6 +687,22 @@ spec:
                                 The status that the condition must have:
                                 `True`, `False`, or `Unknown`. The
                                 default is `True`.
+                      notify:
+                        type: string
+                        minLength: 1
+                        maxLength: 1024
+                        description: >-
+                          A request to a person, such as `Cover the
+                          telescope and carry it in`, for what no driver
+                          can do. The resource's `AttentionNeeded`
+                          condition turns `True` with the text as its
+                          message, and its transition posts a Warning
+                          `Event`. The action is `Done` at once and
+                          never waits for the person. `AttentionNeeded`
+                          turns `False` at the start of the resource's
+                          next activation, or when a person writes the
+                          resource's `SetUp` condition after the
+                          request.
                       after:
                         type: array
                         maxItems: 8
@@ -722,10 +813,11 @@ spec:
                         items:
                           type: object
                           description: >-
-                            One action, which names `job`.
+                            One action, which names exactly one of `job`
+                            and `notify`.
                           x-kubernetes-validations:
-                            - rule: "has(self.job)"
-                              message: "an action of a PolarAligner names job"
+                            - rule: "[has(self.job), has(self.notify)].filter(x, x).size() == 1"
+                              message: "an action of a PolarAligner names exactly one of job and notify"
                           properties:
                             job:
                               type: object
@@ -869,7 +961,7 @@ spec:
                                     maxLength: 316
                                     description: >-
                                       The condition's type, such as
-                                      `Safe` or `Parked`.
+                                      `Safe`, `Parked`, or `SetUp`.
                                   status:
                                     type: string
                                     enum: ["True", "False", Unknown]
@@ -877,6 +969,23 @@ spec:
                                       The status that the condition must
                                       have: `True`, `False`, or
                                       `Unknown`. The default is `True`.
+                            notify:
+                              type: string
+                              minLength: 1
+                              maxLength: 1024
+                              description: >-
+                                A request to a person, such as `Cover
+                                the telescope and carry it in`, for what
+                                no driver can do. The resource's
+                                `AttentionNeeded` condition turns `True`
+                                with the text as its message, and its
+                                transition posts a Warning `Event`. The
+                                action is `Done` at once and never waits
+                                for the person. `AttentionNeeded` turns
+                                `False` at the start of the resource's
+                                next activation, or when a person writes
+                                the resource's `SetUp` condition after
+                                the request.
                             after:
                               type: array
                               maxItems: 8
@@ -963,7 +1072,12 @@ spec:
                     cover that moves is `Unknown` with the reason
                     `Moving`. `Safe` is `False` with the reason
                     `Warning` or `Danger`. A device that is not
-                    connected has none of them.
+                    connected has none of them. `SetUp` is the condition
+                    that a person writes, such as with `kubectl liken
+                    observatory set-up`, and the operator keeps it until
+                    it expires and turns `False` with the reason
+                    `Expired`. `AttentionNeeded` is `True` while a
+                    `notify` action asks a person to do something.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:
@@ -1007,6 +1121,16 @@ spec:
                         description: >-
                           When `status` last changed. A write with the
                           same status keeps this time.
+                setUpUntil:
+                  type: string
+                  format: date-time
+                  description: >-
+                    When the person's `SetUp` condition expires, in
+                    place of the first astronomical dawn after its
+                    `lastTransitionTime` at the resource's
+                    `Observatory`. A person writes it with `SetUp`, as
+                    `kubectl liken observatory set-up --until` does, and
+                    the operator keeps it. Optional.
                 procedures:
                   type: array
                   description: >-

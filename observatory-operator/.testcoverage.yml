@@ -29,10 +29,12 @@ exclude:
 
 threshold:
   # The total covers every package but indi/capture/record/ and
-  # schema/crosscheck/. The tests measure 95.0%: observatory/ 100%,
-  # indi/ 97.7%, indi/capture/ 94.7%, indi/standard/ 95.3%, schema/
-  # 94.6%, phd2/ 96.6%, phd2/phd2test/ 99.0%, drivers/ 94.3%, and the
-  # operator's package 94.0% with main.go in it. The floor was 97
+  # schema/crosscheck/. The tests measure 95.1%: observatory/ 96.9%,
+  # indi/ 97.8%, indi/capture/ 94.7%, indi/standard/ 95.3%, schema/
+  # 94.6%, phd2/ 96.1%, phd2/phd2test/ 99.0%, drivers/ 94.3%, cli/
+  # 89.7%, and the operator's package 95.1% with main.go left out. The
+  # plugin's main() and the error returns of building its clients from
+  # a kubeconfig are most of what cli/ leaves out. The floor was 97
   # before the operator's package joined the total. Most of the rest of that
   # package is one return of an error after one INDI change or one API
   # request fails, at each call in each step. The fakes can fail any

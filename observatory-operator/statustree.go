@@ -171,8 +171,9 @@ func (o *operator) telescopeStatus(t *tree, telescope *observatory.Telescope, co
 	if horizon := telescope.Spec.Horizon; horizon != "" {
 		conditions = append(conditions, t.horizonFound(horizon))
 	}
-	next.Conditions = withGeneration(conditions, next.ObservedGeneration)
 	next.Procedures = o.runs.list(recordKey(observatory.TelescopeKind, telescope.Metadata))
+	conditions = withAttention(conditions, next.Procedures, telescope.Status.Conditions)
+	next.Conditions = withGeneration(conditions, next.ObservedGeneration)
 	return next
 }
 
@@ -236,8 +237,9 @@ func (o *operator) observatoryStatus(t *tree, site *observatory.Observatory, com
 	if locks := o.planLocks(t, site).condition; locks != nil {
 		conditions = append(conditions, *locks)
 	}
-	next.Conditions = withGeneration(conditions, next.ObservedGeneration)
 	next.Procedures = o.runs.list(recordKey(observatory.ObservatoryKind, site.Metadata))
+	conditions = withAttention(conditions, next.Procedures, site.Status.Conditions)
+	next.Conditions = withGeneration(conditions, next.ObservedGeneration)
 	return next
 }
 

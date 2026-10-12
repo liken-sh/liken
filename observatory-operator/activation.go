@@ -15,7 +15,9 @@ import (
 // stepTimeouts bounds each step from its start time, which the status
 // records, so a step that an operator restart interrupted keeps its
 // deadline. A step that passes its deadline fails the reservation. Wait
-// has no limit: it waits for spec.start and for the telescope.
+// and Requires have no limit: Wait waits for spec.start, for the
+// telescope, and for the Observatory's requirements, and Requires for
+// the Telescope's, and dawn ends either wait (requires.go).
 var stepTimeouts = map[observatory.StepName]time.Duration{
 	// The first start of a pod on a node pulls its image, and the
 	// simulators' image is 380 MB.
@@ -49,6 +51,7 @@ func (r *runner) activate(ctx context.Context) {
 	steps := map[observatory.StepName]stepFunc{
 		observatory.StepWait:         r.wait,
 		observatory.StepStartSite:    r.startSite,
+		observatory.StepRequires:     r.requires,
 		observatory.StepPowerOn:      r.powerOn,
 		observatory.StepStartDevices: r.startTelescopeDevices,
 		observatory.StepConnect:      r.connect,
@@ -57,6 +60,12 @@ func (r *runner) activate(ctx context.Context) {
 		observatory.StepStartGuider:  r.startGuider,
 	}
 	for _, name := range observatory.ActivationSteps {
+		// A record that an earlier version of the operator wrote can
+		// lack a step that this version added, such as Requires, and
+		// runs the steps it lists.
+		if r.step(name) == nil {
+			continue
+		}
 		switch r.step(name).State {
 		case observatory.StepDone, observatory.StepSkipped:
 			continue
@@ -68,7 +77,9 @@ func (r *runner) activate(ctx context.Context) {
 	r.status.Phase, r.status.Step = observatory.ReservationReady, ""
 	r.save(ctx)
 	endpoint := r.endpoint()
-	took := time.Since(r.began(observatory.ActivationSteps[1:]))
+	// The time a person or the weather kept the Requires step waiting
+	// is no part of how long the equipment took to start.
+	took := time.Since(r.began(observatory.ActivationSteps[1:])) - r.took(observatory.StepRequires)
 	r.o.series.activated(r.res.Spec.Telescope, took)
 	r.o.record(r.res, string(observatory.ReservationReady),
 		fmt.Sprintf("Ready in %s at %s:%d", duration(took), endpoint.Host, endpoint.Port))
@@ -123,11 +134,23 @@ func (r *runner) wait(ctx context.Context, w *stepWork) (outcome, error) {
 		wake := r.o.structure.wait()
 		t := r.o.snapshot()
 		telescope, ok := t.telescopes[res.Spec.Telescope]
+		// The gate comes before the telescope is taken, so a reservation
+		// that waits for a person holds nothing, and its telescope and
+		// devices stay Idle.
+		var g gate
+		if site, found := t.observatories[observatoryOf(telescope)]; ok && found {
+			var err error
+			if g, err = gateOn(t, t.gateOf(ofObservatory(site), serverRef{observatory.ObservatoryKind, site.Metadata.Name}), telescope, r.waitBegan()); err != nil {
+				return outcome{}, err
+			}
+		}
 		switch {
 		case !ok:
 			w.report("missing Telescope " + res.Spec.Telescope)
 		case deletedParent(t, telescope) != "":
 			w.report(deletedParent(t, telescope) + " is being deleted")
+		case g.waiting != "":
+			w.report(g.waiting)
 		default:
 			took, other := r.o.claims.take(t, res, now)
 			if !took {
@@ -139,11 +162,29 @@ func (r *runner) wait(ctx context.Context, w *stepWork) (outcome, error) {
 			}
 			return done("took Telescope %s", res.Spec.Telescope)
 		}
-		select {
-		case <-ctx.Done():
-		case <-wake:
-		}
+		awaitChangeOr(ctx, wake, g.dawn)
 	}
+}
+
+// observatoryOf answers the name of a telescope's Observatory, or ""
+// for a telescope that is missing.
+func observatoryOf(telescope *observatory.Telescope) string {
+	if telescope == nil {
+		return ""
+	}
+	return telescope.Spec.Observatory
+}
+
+// waitBegan answers when the Wait step's gate began to wait: the later
+// of the step's start and spec.start, so a reservation made days ahead
+// gives up at the dawn after its own night, not at the first dawn after
+// its creation.
+func (r *runner) waitBegan() time.Time {
+	began := *r.step(observatory.StepWait).StartTime
+	if start := r.res.Spec.Start; start != nil && start.After(began) {
+		return *start
+	}
+	return began
 }
 
 // siteOf answers the observatory of the reservation's telescope.

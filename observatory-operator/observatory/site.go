@@ -5,6 +5,8 @@ package observatory
 // that no telescope owns, while at least one Reservation in it is
 // active.
 
+import "time"
+
 type Observatory = Object[ObservatorySpec, ObservatoryStatus]
 
 type ObservatorySpec struct {
@@ -52,6 +54,10 @@ type ObservatoryStatus struct {
 	// Procedures holds the last run of each trigger of the
 	// observatory's own procedures.
 	Procedures []ProcedureRun `json:"procedures,omitempty"`
+	// SetUpUntil is when a person's SetUp expires, in place of the
+	// next astronomical dawn. A person writes it with SetUp, and the
+	// operator keeps it.
+	SetUpUntil *time.Time `json:"setUpUntil,omitempty"`
 }
 
 // ObservatoryDisplay holds the spec's location as a person reads it,

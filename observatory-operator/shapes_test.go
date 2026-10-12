@@ -27,7 +27,7 @@ func TestASmallTelescopeSkipsWhatItLacks(t *testing.T) {
 				w.put(observatory.MountKind, "solo-mount", map[string]any{"telescope": "solo", "driver": map[string]any{"name": "indi_simulator_telescope"}})
 			},
 			steps: []string{
-				"Wait=Done", "StartSite=Skipped", "PowerOn=Done", "StartDevices=Done", "Connect=Done", "Configure=Done", "Activation=Skipped", "StartGuider=Skipped",
+				"Wait=Done", "StartSite=Skipped", "Requires=Skipped", "PowerOn=Done", "StartDevices=Done", "Connect=Done", "Configure=Done", "Activation=Skipped", "StartGuider=Skipped",
 				"Abort=Skipped", "Deactivation=Skipped", "StopGuider=Skipped", "Disconnect=Done", "StopDevices=Done", "PowerOff=Done", "StopSite=Skipped",
 			},
 		},
@@ -37,7 +37,7 @@ func TestASmallTelescopeSkipsWhatItLacks(t *testing.T) {
 				w.put(observatory.SwitchKind, "solo-power", map[string]any{"telescope": "solo", "driver": map[string]any{"name": "indi_simulator_io"}})
 			},
 			steps: []string{
-				"Wait=Done", "StartSite=Skipped", "PowerOn=Done", "StartDevices=Skipped", "Connect=Skipped", "Configure=Skipped", "Activation=Skipped", "StartGuider=Skipped",
+				"Wait=Done", "StartSite=Skipped", "Requires=Skipped", "PowerOn=Done", "StartDevices=Skipped", "Connect=Skipped", "Configure=Skipped", "Activation=Skipped", "StartGuider=Skipped",
 				"Abort=Skipped", "Deactivation=Skipped", "StopGuider=Skipped", "Disconnect=Skipped", "StopDevices=Skipped", "PowerOff=Done", "StopSite=Skipped",
 			},
 		},

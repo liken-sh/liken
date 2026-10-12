@@ -294,9 +294,9 @@ local CLI, so a cold start (`kubectl liken audio` with no plugin, which
 
 `plugins remove <domain>` deletes one installed CLI.
 
-Five domains ship a CLI today: `audio`, `bluetooth`, `display`,
-`library`, and `media`. Each one's own site documents its verbs. The
-first cut:
+Six domains ship a CLI today: `audio`, `bluetooth`, `display`,
+`library`, `media`, and `observatory`. Each one's own site documents
+its verbs. The first cut:
 
 * `audio capture <sink>` streams a sink's sound to stdout (wav, and
   `--format flac|opus`). `--source` captures a Source instead.
@@ -308,6 +308,9 @@ first cut:
   approve. `bluetooth unpair <device>` removes one.
 * `library reenrich <library>` requests an enrichment pass. `--only
   <fact>` limits it to one fact.
+* `observatory set-up <kind> <name>` confirms that you set a telescope
+  or a device up for the night, until dawn or `--until`.
+  `observatory take-down <kind> <name>` withdraws the confirmation.
 
 Each capture verb is a thin client over its operator's stream API. It
 authenticates with the credential you already hold: the API verifies

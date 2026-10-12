@@ -17,6 +17,14 @@ import "time"
 // Procedures are the triggers of one resource and the actions that
 // each one runs.
 type Procedures[A any] struct {
+	// Requires lists the conditions that must hold before a
+	// reservation's session starts the resource. The Observatory's and
+	// its own devices' requirements hold the Wait step, before
+	// StartSite; the Telescope's and its devices' hold the Requires
+	// step, before PowerOn. A requirement gates only the start: a
+	// condition that turns False later changes nothing, and a trigger
+	// acts on it.
+	Requires []ConditionRef `json:"requires,omitempty"`
 	// Activation runs as the resource's Telescope or Observatory turns
 	// Active, while every device is connected.
 	Activation []A `json:"activation,omitempty"`
@@ -70,6 +78,11 @@ type ActionBase struct {
 	// Job runs a container as a Kubernetes Job, for what no other
 	// action does.
 	Job *Job `json:"job,omitempty"`
+	// Notify asks a person to do something that no driver can, such as
+	// covering a telescope: the resource's AttentionNeeded condition
+	// turns True with the text as its message. The action never waits
+	// for the person.
+	Notify string `json:"notify,omitempty"`
 	// Timeout bounds the action, its waits for Requires and After
 	// included, as a Go duration such as 20m. With no timeout, the
 	// action takes the default of what it does.

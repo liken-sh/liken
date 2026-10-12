@@ -117,11 +117,11 @@ spec:
 {{- define "action" }}
 type: object
 description: >-
-  One action, which names exactly one of `state` and
-  `job`.
+  One action, which names exactly one of `state`,
+  `job`, and `notify`.
 x-kubernetes-validations:
-  - rule: "[has(self.state), has(self.job)].filter(x, x).size() == 1"
-    message: "an action of a FlatPanel names exactly one of state and job"
+  - rule: "[has(self.state), has(self.job), has(self.notify)].filter(x, x).size() == 1"
+    message: "an action of a FlatPanel names exactly one of state, job, and notify"
 properties:
   state:
     type: string

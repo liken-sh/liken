@@ -62,7 +62,10 @@ The base creates:
 * a `Role` and a `RoleBinding` that let the operator hold its `Lease`,
   `observatory-operator` in `liken-system`
 * the operator, a `Deployment` with one replica in `liken-system`, the
-  namespace of every `liken` operator
+  namespace of every `liken` operator. Its label
+  `cli.liken.sh/plugin: observatory` lets `liken plugins sync` find it
+  and install the `kubectl liken observatory` plugin of the same
+  version, from the image `ghcr.io/liken-sh/observatory-operator-cli`.
 
 The operator watches every namespace. You choose the namespace your
 observatory lives in, and the operator runs the observatory's pods,

@@ -31,6 +31,18 @@ not. A missing horizon stops nothing: the telescope's phase and its
 `Ready` condition do not change. A telescope with no `spec.horizon` has
 no `HorizonFound` condition.
 
+`SetUp` is the one condition that a person writes, through the status
+subresource, such as with `kubectl liken observatory set-up`. It is
+`True` with the reason `SetUp` and a message such as `Set up by ada`,
+or `False` with the reason `TakenDown`. The operator keeps it as the
+person wrote it, with `status.setUpUntil`, until it expires at dawn or
+at `status.setUpUntil`, and then sets it `False` with the reason
+`Expired`. `AttentionNeeded` is `True` with the reason `Notified`
+while a `notify` action's request is open, and `False` with the reason
+`Activated` or `Acknowledged` once the next activation or a person's
+`SetUp` answers it. [Set up a portable
+telescope](/docs/guides/set-up-a-portable-telescope/) uses both.
+
 ## Devices
 
 A device's status has the same fields in every kind, and a typed field

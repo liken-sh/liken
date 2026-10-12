@@ -2,6 +2,7 @@ package observatory
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/liken-sh/liken/observatory-operator/indi"
 )
@@ -196,6 +197,10 @@ type DeviceStatus struct {
 	// Procedures holds the last run of each trigger of the device's
 	// procedures.
 	Procedures []ProcedureRun `json:"procedures,omitempty"`
+	// SetUpUntil is when a person's SetUp expires, in place of the
+	// next astronomical dawn. A person writes it with SetUp, and the
+	// operator keeps it.
+	SetUpUntil *time.Time `json:"setUpUntil,omitempty"`
 }
 
 // Limit is the range that a driver gives one number. A driver refuses

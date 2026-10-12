@@ -72,6 +72,7 @@ type StepName string
 const (
 	StepWait         StepName = "Wait"
 	StepStartSite    StepName = "StartSite"
+	StepRequires     StepName = "Requires"
 	StepPowerOn      StepName = "PowerOn"
 	StepStartDevices StepName = "StartDevices"
 	StepConnect      StepName = "Connect"
@@ -89,10 +90,11 @@ const (
 )
 
 // ActivationSteps run in this order. Plan 07 states what each one
-// does, and plan 13 states the Activation step, which runs the
-// procedures of the resources' activation.
+// does, plan 13 states the Activation step, which runs the procedures
+// of the resources' activation, and plan 21 states the Requires step,
+// which waits for the spec.requires of the Telescope and its devices.
 var ActivationSteps = []StepName{
-	StepWait, StepStartSite, StepPowerOn, StepStartDevices,
+	StepWait, StepStartSite, StepRequires, StepPowerOn, StepStartDevices,
 	StepConnect, StepConfigure, StepActivation, StepStartGuider,
 }
 

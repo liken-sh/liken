@@ -6,8 +6,11 @@ hardware through INDI, and the manifests that run it: the operator's
 the generator of their schema in `schema/`, the INDI client in `indi/`, the client of PHD2's event server in
 `phd2/`, the map of driver images in `drivers/`,
 the CRDs, the RBAC, and the operator's `Deployment` in `deploy/`, the
-example in `examples/`, the manual in `docs/`, the skills that the
-manual's guides emit in `skills/`, and the plans.
+example in `examples/`, the `kubectl liken observatory` plugin in
+`cli/` with its image's `Dockerfile.cli`, the manual in `docs/`, the
+skills that the manual's guides emit in `skills/`, and the plans. The
+plugin shares no code with the operator, as the other operators'
+plugins do, and a test holds its list of kinds to the operator's.
 
 `plans/00-design.md` is the design, and the `plans/` directory holds the
 plans that build it. Code exists only where a plan calls for it. [Root
@@ -177,12 +180,15 @@ The operator's files are flat in `package main`, one domain to a file.
 (with the finalizers of `finalizers.go`), one
 runner for each `Reservation` (`reservation.go`, `activation.go`,
 `configure.go`, `deactivation.go`, `steady.go`, `deletes.go`,
-`leaves.go`, `finish.go`, `sessioncurrent.go`, and the guider's `guidersteps.go` and
-`guidersteady.go`),
+`leaves.go`, `finish.go`, `editspending.go`, the guider's
+`guidersteps.go` and `guidersteady.go`, and the gates of
+`spec.requires` in `requires.go`, which end at the dawn of `dawn.go`),
 the status writer (`status.go`, `statustree.go`, `standing.go`,
 `readings.go`, `guiderstatus.go`, and `devicesplit.go` and
 `typedstatus.go`, which give each property of an INDI device to one
-resource's status), the lock relay (`locks.go` and
+resource's status, and `setup.go` and `attention.go`, which keep a
+person's `SetUp` until it expires and set `AttentionNeeded` from a
+`notify` action), the lock relay (`locks.go` and
 `domepolicy.go`), and the trigger controller (`triggers.go`), which runs each resource's
 `spec.triggers` (plan 13), runs an activation that a device missed
 (`lateactivation.go`), and runs a failed one again on the retry
@@ -218,8 +224,9 @@ writer, the runners, and the connections set.
   is still needed (`indidevice.go`).
 - A timer is a clock and its comment says so: `spec.start`,
   `spec.end`, a step's deadline, the status window, the pause after a
-  refused write, and the pause before the INDI connection is opened
-  again.
+  refused write, the pause before the INDI connection is opened
+  again, the dawn that ends a gate's wait, and the expiry of a
+  person's `SetUp`.
 - `drivers/generated.go` comes from `indi/images/` and
   `indi/package.toml`. `make drivers` writes it again, and a test fails
   when it is stale.

@@ -38,6 +38,8 @@ func (r *runner) deactivate(ctx context.Context) {
 		message := "Deactivating Telescope " + r.res.Spec.Telescope
 		if parent := heldParentDeleted(r.o.snapshot(), r.res); parent != "" {
 			message += ": " + parent + " was deleted"
+		} else if why := gaveUpSummary(r.status.Steps); why != "" {
+			message += ": " + lowerFirst(why)
 		}
 		r.o.record(r.res, string(observatory.ReservationDeactivating), message)
 	}
@@ -86,7 +88,11 @@ func (r *runner) endUnstarted(ctx context.Context) {
 	}
 	r.status.Phase, r.status.Step = observatory.ReservationReleased, ""
 	r.save(ctx)
-	r.o.record(r.res, string(observatory.ReservationReleased), "Released before it took Telescope "+r.res.Spec.Telescope)
+	message := "Released before it took Telescope " + r.res.Spec.Telescope
+	if why := gaveUpSummary(r.status.Steps); why != "" {
+		message += ": " + lowerFirst(why)
+	}
+	r.o.record(r.res, string(observatory.ReservationReleased), message)
 }
 
 // settleWait bounds how long a deactivation step waits for the

@@ -32,6 +32,11 @@ the operator and four packages:
 - [`drivers/`](drivers/) maps each INDI driver to the image of the
   `indi` build that holds it, and names the images of the guider's pod.
 
+The module also builds the `kubectl liken observatory` plugin from
+[`cli/`](cli/), into the image `observatory-operator-cli` that
+`liken plugins sync` installs. A person confirms with it that they set
+a telescope up for the night.
+
 [`deploy/`](deploy/) holds the CRDs, the RBAC, and the operator, and [`examples/simulators.yaml`](examples/simulators.yaml)
 is an observatory of simulators with a device of every kind.
 [`plans/00-design.md`](plans/00-design.md) is the design, and [root

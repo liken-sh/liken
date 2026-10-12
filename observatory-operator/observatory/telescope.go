@@ -5,6 +5,8 @@ package observatory
 // mount and its trains on one server, and a server for each telescope
 // limits a failure to one telescope.
 
+import "time"
+
 type Telescope = Object[TelescopeSpec, TelescopeStatus]
 
 type TelescopeSpec struct {
@@ -41,6 +43,10 @@ type TelescopeStatus struct {
 	// Procedures holds the last run of each trigger of the telescope's
 	// own procedures.
 	Procedures []ProcedureRun `json:"procedures,omitempty"`
+	// SetUpUntil is when a person's SetUp expires, in place of the
+	// next astronomical dawn. A person writes it with SetUp, and the
+	// operator keeps it.
+	SetUpUntil *time.Time `json:"setUpUntil,omitempty"`
 }
 
 // TelescopeDisplay holds what the printer columns show.

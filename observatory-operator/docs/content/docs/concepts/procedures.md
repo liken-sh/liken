@@ -25,6 +25,12 @@ device kind, the `Telescope`, and the `Observatory` have them:
 - `triggers` lists triggers. Each one names a condition in `when`,
   and runs its actions in `run`, as [Triggers](#triggers) states.
 
+The same kinds have a fourth field, `requires`, which runs nothing: it
+lists conditions that must hold before a session starts the resource,
+such as a person's `SetUp`, and [Requirements and
+dawn](/docs/concepts/how-a-reservation-runs/#requirements-and-dawn)
+states how it holds the reservation.
+
 `activation`, `deactivation`, and each trigger's `run` are lists of
 actions that run in order. An action is a target
 state, so it is safe to run twice: the operator reads what the device
@@ -39,6 +45,20 @@ accepts only the actions it supports, and the CRD refuses the others:
 | `Camera` | `cool: {celsius, within}`: write the setpoint and wait until the sensor is within `within`, 0.5 °C by default | 20 min |
 | `Camera` | `warm: {celsius, within}`: warm the sensor, then switch the cooler off | 10 min |
 | every kind, `Telescope`, `Observatory` | `job: {image, command, args, env}`: run a container once as a Kubernetes `Job` | 10 min |
+| every kind, `Telescope`, `Observatory` | `notify: <text>`: ask a person to do something, and go on at once | none |
+
+A `notify` is for what no driver can do, such as covering a portable
+telescope. It is `Done` as soon as its run records it, with the
+summary `Asked: <text>`, and it never waits for the person. The
+status writer reads the record and sets the resource's
+`AttentionNeeded` condition: `True` with the reason `Notified` and
+each open request as its message, and its transition posts a
+`Warning` Event. It turns `False` with the reason `Activated` when the
+resource's next activation begins, and with the reason `Acknowledged`
+when a person writes the resource's `SetUp` condition after the
+request, as `kubectl liken observatory take-down` does. The operator's
+own expiry of `SetUp` at dawn is no answer, so it clears nothing. A
+resource that never ran a `notify` has no `AttentionNeeded`.
 
 A `warm` that does not reach its setpoint by its timeout still
 switches the cooler off, and notes where the sensor is, because a

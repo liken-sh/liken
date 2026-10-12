@@ -18,6 +18,7 @@ The site.
 | --- | --- | --- | --- |
 | <span id="spec--location"></span>`location` | [object](#speclocation) | yes | Where the site is. The operator writes it to each mount and GPS as `GEOGRAPHIC_COORD`, which takes the longitude from 0 to 360 degrees east, and converts a negative longitude to that range. |
 | <span id="spec--fitskeywords"></span>`fitsKeywords` | [\[\]object](#specfitskeywords) | no | The FITS keywords that the telescope's imaging cameras write into the header of every frame, such as `OBSERVER` or `TELESCOP`. Optional. The `Observatory`, the `Telescope`, the `Camera`, and the `Reservation` can each declare keywords, and the operator merges them in that order: a keyword at a later level replaces the value and the comment of the same name at an earlier one. The `PowerOn` step records the merged list of each `Camera` that no `Guider` guides with, and the `Configure` step writes it to the camera's `FITS_HEADER`, so the driver writes the keywords into each frame when it creates the file. An edit takes effect at the next session. The API server refuses a keyword that the driver writes from what it measures, such as `EXPTIME` or `DATE-OBS`, because a declared value would replace the measured one. |
+| <span id="spec--requires"></span>`requires` | [\[\]object](#specrequires) | no | The conditions that must hold before a `Reservation`'s session starts this resource, as a pod's `readinessGates` hold a pod. A person's `SetUp`, or a `WeatherStation`'s `Safe`, keeps the equipment off until it holds. The requirements of the `Observatory` and of the devices on its server hold the `Wait` step, so they cannot name a condition that only a device on that server reports. The requirements of the `Telescope` and of its devices hold the `Requires` step, after `StartSite` and before `PowerOn`. The step's message names each condition it waits for, and a reservation that still waits at the next astronomical dawn ends with the telescope's equipment off. A requirement gates only the start: a condition that turns `False` later changes nothing, and a trigger acts on it. Optional. |
 | <span id="spec--activation"></span>`activation` | [\[\]object](#specactivation) | no | The actions that run, in order, as this resource's `Telescope` or `Observatory` turns `Active`, while every device is still connected. For a `Telescope` or an `Observatory`, that is the resource itself. The `Reservation`'s `Activation` step waits for them. Each action is a target state, so a run that an operator restart interrupted runs again each action that is not `Done`. Optional. |
 | <span id="spec--deactivation"></span>`deactivation` | [\[\]object](#specdeactivation) | no | The actions that run, in order, as this resource's `Telescope` or `Observatory` stops being `Active`, while every device is still connected. For a `Telescope` or an `Observatory`, that is the resource itself. The `Reservation`'s `Deactivation` step waits for them. Each action is a target state, so a run that an operator restart interrupted runs again each action that is not `Done`. Optional. |
 | <span id="spec--triggers"></span>`triggers` | [\[\]object](#spectriggers) | no | Triggers on conditions. Each one runs its actions once for each transition of its condition to the status it names, while the resource is active: from when its activation is done until its deactivation begins. A condition that holds when the activation ends runs then. A run that began runs to its end, unless the resource's deactivation begins, and a resource runs one procedure at a time. Optional. |
@@ -42,15 +43,27 @@ One keyword: its name, its value, and a comment.
 | <span id="specfitskeywords--value"></span>`value` | string | yes | The value, at most 68 characters, the longest text that one 80-column card holds. The driver writes a value that reads as a number, such as `2026` or `-4.5`, as a number, and any other value as quoted text. A value cannot hold `/`, because the driver writes each `/` in a value as `\`. |
 | <span id="specfitskeywords--comment"></span>`comment` | string | no | The comment that follows the value on the card. Optional. At most 47 characters, which fit beside a number. |
 
+### spec.requires[]
+
+One condition, and the status it must have.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specrequires--kind"></span>`kind` | string | no | The kind of the resource whose condition it reads. With no `kind`, the condition is the resource's own. A `kind` of `Observatory` or `Telescope` with no `name` means the resource's own observatory or telescope. One of: `Observatory`, `Telescope`, `OpticalTube`, `OpticalTrain`, `Mount`, `Camera`, `FilterWheel`, `Focuser`, `Rotator`, `DustCap`, `FlatPanel`, `PolarAligner`, `GPS`, `Dome`, `WeatherStation`, `Switch`, `Receiver`, `Guider`. |
+| <span id="specrequires--name"></span>`name` | string | no | The name of the resource, in this namespace. A device kind needs a name. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
+| <span id="specrequires--type"></span>`type` | string | yes | The condition's type, such as `Safe`, `Parked`, or `SetUp`. |
+| <span id="specrequires--status"></span>`status` | string | no | The status that the condition must have: `True`, `False`, or `Unknown`. The default is `True`. One of: `True`, `False`, `Unknown`. |
+
 ### spec.activation[]
 
-One action, which names `job`.
+One action, which names exactly one of `job` and `notify`.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specactivation--job"></span>`job` | [object](#specactivationjob) | no | A container that the operator runs once as a Kubernetes `Job` in the resource's namespace, for what no other action does, such as switching a dew heater's relay or posting to a webhook. The resource owns the `Job`. The action is `Done` when the `Job` succeeds, and `Failed` with the `Job`'s reason and message when it fails. The `Job` has no retry, and its `activeDeadlineSeconds` is the action's timeout. Kubernetes deletes it an hour after it ends. The environment adds `LIKEN_OBSERVATORY`, `LIKEN_TELESCOPE` for a resource of a telescope, `LIKEN_RESOURCE` such as `Dome/lab`, `LIKEN_TRIGGER` such as `activation` or `triggers[0]`, and `INDI_HOST` and `INDI_PORT` of the resource's INDI server. The container runs as user 1000 with no capabilities, on a read-only root filesystem with a writable `/tmp`. The default timeout is 10 minutes. |
 | <span id="specactivation--timeout"></span>`timeout` | string | no | How long the action may take, its waits for `requires` and `after` included, as a duration such as `20m`. An action that passes it fails. Optional. Each action has a default. |
 | <span id="specactivation--requires"></span>`requires` | [\[\]object](#specactivationrequires) | no | The conditions that must hold before the action runs. The operator waits for each one until the action's timeout. They bind only the actions that the operator runs: a move that a person makes in KStars is stopped only by the drivers' park locks. |
+| <span id="specactivation--notify"></span>`notify` | string | no | A request to a person, such as `Cover the telescope and carry it in`, for what no driver can do. The resource's `AttentionNeeded` condition turns `True` with the text as its message, and its transition posts a Warning `Event`. The action is `Done` at once and never waits for the person. `AttentionNeeded` turns `False` at the start of the resource's next activation, or when a person writes the resource's `SetUp` condition after the request. |
 | <span id="specactivation--after"></span>`after` | [\[\]object](#specactivationafter) | no | The resources whose runs for the same event must end before the action runs: the same lifecycle step, or the same transition of the same condition. A resource with no such run is not waited for. A resource in a later tier of the tree is waited for until the action's timeout, and the action then fails. |
 
 #### spec.activation[].job
@@ -81,7 +94,7 @@ One condition, and the status it must have.
 | --- | --- | --- | --- |
 | <span id="specactivationrequires--kind"></span>`kind` | string | no | The kind of the resource whose condition it reads. With no `kind`, the condition is the resource's own. A `kind` of `Observatory` or `Telescope` with no `name` means the resource's own observatory or telescope. One of: `Observatory`, `Telescope`, `OpticalTube`, `OpticalTrain`, `Mount`, `Camera`, `FilterWheel`, `Focuser`, `Rotator`, `DustCap`, `FlatPanel`, `PolarAligner`, `GPS`, `Dome`, `WeatherStation`, `Switch`, `Receiver`, `Guider`. |
 | <span id="specactivationrequires--name"></span>`name` | string | no | The name of the resource, in this namespace. A device kind needs a name. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
-| <span id="specactivationrequires--type"></span>`type` | string | yes | The condition's type, such as `Safe` or `Parked`. |
+| <span id="specactivationrequires--type"></span>`type` | string | yes | The condition's type, such as `Safe`, `Parked`, or `SetUp`. |
 | <span id="specactivationrequires--status"></span>`status` | string | no | The status that the condition must have: `True`, `False`, or `Unknown`. The default is `True`. One of: `True`, `False`, `Unknown`. |
 
 #### spec.activation[].after[]
@@ -95,13 +108,14 @@ One resource, by its kind and name.
 
 ### spec.deactivation[]
 
-One action, which names `job`.
+One action, which names exactly one of `job` and `notify`.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specdeactivation--job"></span>`job` | [object](#specdeactivationjob) | no | A container that the operator runs once as a Kubernetes `Job` in the resource's namespace, for what no other action does, such as switching a dew heater's relay or posting to a webhook. The resource owns the `Job`. The action is `Done` when the `Job` succeeds, and `Failed` with the `Job`'s reason and message when it fails. The `Job` has no retry, and its `activeDeadlineSeconds` is the action's timeout. Kubernetes deletes it an hour after it ends. The environment adds `LIKEN_OBSERVATORY`, `LIKEN_TELESCOPE` for a resource of a telescope, `LIKEN_RESOURCE` such as `Dome/lab`, `LIKEN_TRIGGER` such as `activation` or `triggers[0]`, and `INDI_HOST` and `INDI_PORT` of the resource's INDI server. The container runs as user 1000 with no capabilities, on a read-only root filesystem with a writable `/tmp`. The default timeout is 10 minutes. |
 | <span id="specdeactivation--timeout"></span>`timeout` | string | no | How long the action may take, its waits for `requires` and `after` included, as a duration such as `20m`. An action that passes it fails. Optional. Each action has a default. |
 | <span id="specdeactivation--requires"></span>`requires` | [\[\]object](#specdeactivationrequires) | no | The conditions that must hold before the action runs. The operator waits for each one until the action's timeout. They bind only the actions that the operator runs: a move that a person makes in KStars is stopped only by the drivers' park locks. |
+| <span id="specdeactivation--notify"></span>`notify` | string | no | A request to a person, such as `Cover the telescope and carry it in`, for what no driver can do. The resource's `AttentionNeeded` condition turns `True` with the text as its message, and its transition posts a Warning `Event`. The action is `Done` at once and never waits for the person. `AttentionNeeded` turns `False` at the start of the resource's next activation, or when a person writes the resource's `SetUp` condition after the request. |
 | <span id="specdeactivation--after"></span>`after` | [\[\]object](#specdeactivationafter) | no | The resources whose runs for the same event must end before the action runs: the same lifecycle step, or the same transition of the same condition. A resource with no such run is not waited for. A resource in a later tier of the tree is waited for until the action's timeout, and the action then fails. |
 
 #### spec.deactivation[].job
@@ -132,7 +146,7 @@ One condition, and the status it must have.
 | --- | --- | --- | --- |
 | <span id="specdeactivationrequires--kind"></span>`kind` | string | no | The kind of the resource whose condition it reads. With no `kind`, the condition is the resource's own. A `kind` of `Observatory` or `Telescope` with no `name` means the resource's own observatory or telescope. One of: `Observatory`, `Telescope`, `OpticalTube`, `OpticalTrain`, `Mount`, `Camera`, `FilterWheel`, `Focuser`, `Rotator`, `DustCap`, `FlatPanel`, `PolarAligner`, `GPS`, `Dome`, `WeatherStation`, `Switch`, `Receiver`, `Guider`. |
 | <span id="specdeactivationrequires--name"></span>`name` | string | no | The name of the resource, in this namespace. A device kind needs a name. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
-| <span id="specdeactivationrequires--type"></span>`type` | string | yes | The condition's type, such as `Safe` or `Parked`. |
+| <span id="specdeactivationrequires--type"></span>`type` | string | yes | The condition's type, such as `Safe`, `Parked`, or `SetUp`. |
 | <span id="specdeactivationrequires--status"></span>`status` | string | no | The status that the condition must have: `True`, `False`, or `Unknown`. The default is `True`. One of: `True`, `False`, `Unknown`. |
 
 #### spec.deactivation[].after[]
@@ -167,13 +181,14 @@ The condition, and the status that fires the trigger.
 
 #### spec.triggers[].run[]
 
-One action, which names `job`.
+One action, which names exactly one of `job` and `notify`.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="spectriggersrun--job"></span>`job` | [object](#spectriggersrunjob) | no | A container that the operator runs once as a Kubernetes `Job` in the resource's namespace, for what no other action does, such as switching a dew heater's relay or posting to a webhook. The resource owns the `Job`. The action is `Done` when the `Job` succeeds, and `Failed` with the `Job`'s reason and message when it fails. The `Job` has no retry, and its `activeDeadlineSeconds` is the action's timeout. Kubernetes deletes it an hour after it ends. The environment adds `LIKEN_OBSERVATORY`, `LIKEN_TELESCOPE` for a resource of a telescope, `LIKEN_RESOURCE` such as `Dome/lab`, `LIKEN_TRIGGER` such as `activation` or `triggers[0]`, and `INDI_HOST` and `INDI_PORT` of the resource's INDI server. The container runs as user 1000 with no capabilities, on a read-only root filesystem with a writable `/tmp`. The default timeout is 10 minutes. |
 | <span id="spectriggersrun--timeout"></span>`timeout` | string | no | How long the action may take, its waits for `requires` and `after` included, as a duration such as `20m`. An action that passes it fails. Optional. Each action has a default. |
 | <span id="spectriggersrun--requires"></span>`requires` | [\[\]object](#spectriggersrunrequires) | no | The conditions that must hold before the action runs. The operator waits for each one until the action's timeout. They bind only the actions that the operator runs: a move that a person makes in KStars is stopped only by the drivers' park locks. |
+| <span id="spectriggersrun--notify"></span>`notify` | string | no | A request to a person, such as `Cover the telescope and carry it in`, for what no driver can do. The resource's `AttentionNeeded` condition turns `True` with the text as its message, and its transition posts a Warning `Event`. The action is `Done` at once and never waits for the person. `AttentionNeeded` turns `False` at the start of the resource's next activation, or when a person writes the resource's `SetUp` condition after the request. |
 | <span id="spectriggersrun--after"></span>`after` | [\[\]object](#spectriggersrunafter) | no | The resources whose runs for the same event must end before the action runs: the same lifecycle step, or the same transition of the same condition. A resource with no such run is not waited for. A resource in a later tier of the tree is waited for until the action's timeout, and the action then fails. |
 
 #### spec.triggers[].run[].job
@@ -204,7 +219,7 @@ One condition, and the status it must have.
 | --- | --- | --- | --- |
 | <span id="spectriggersrunrequires--kind"></span>`kind` | string | no | The kind of the resource whose condition it reads. With no `kind`, the condition is the resource's own. A `kind` of `Observatory` or `Telescope` with no `name` means the resource's own observatory or telescope. One of: `Observatory`, `Telescope`, `OpticalTube`, `OpticalTrain`, `Mount`, `Camera`, `FilterWheel`, `Focuser`, `Rotator`, `DustCap`, `FlatPanel`, `PolarAligner`, `GPS`, `Dome`, `WeatherStation`, `Switch`, `Receiver`, `Guider`. |
 | <span id="spectriggersrunrequires--name"></span>`name` | string | no | The name of the resource, in this namespace. A device kind needs a name. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
-| <span id="spectriggersrunrequires--type"></span>`type` | string | yes | The condition's type, such as `Safe` or `Parked`. |
+| <span id="spectriggersrunrequires--type"></span>`type` | string | yes | The condition's type, such as `Safe`, `Parked`, or `SetUp`. |
 | <span id="spectriggersrunrequires--status"></span>`status` | string | no | The status that the condition must have: `True`, `False`, or `Unknown`. The default is `True`. One of: `True`, `False`, `Unknown`. |
 
 #### spec.triggers[].run[].after[]
@@ -224,8 +239,9 @@ What the operator observes. The operator writes it, and a person reads it.
 | --- | --- | --- | --- |
 | <span id="status--observedgeneration"></span>`observedGeneration` | integer | no | The `metadata.generation` of the spec that the operator last acted on. |
 | <span id="status--phase"></span>`phase` | string | no | The state in one word. `Idle`: no reservation needs it, and nothing runs. `Activating`: a reservation's activation steps run. `Ready`: everything it needs runs and is connected. `Deactivating`: a reservation's deactivation steps run. `Error`: a step failed, and the `Ready` condition gives the reason. The observatory's server runs from the first active reservation here to the end of the last one. One of: `Idle`, `Activating`, `Ready`, `Deactivating`, `Error`. |
+| <span id="status--setupuntil"></span>`setUpUntil` | string | no | When the person's `SetUp` condition expires, in place of the first astronomical dawn after its `lastTransitionTime` at the resource's `Observatory`. A person writes it with `SetUp`, as `kubectl liken observatory set-up --until` does, and the operator keeps it. Optional. |
 | <span id="status--procedures"></span>`procedures` | [\[\]object](#statusprocedures) | no | The last run of each trigger of the resource's procedures: `activation`, `deactivation`, and `triggers[0]` and so on for each item of `spec.triggers`. An operator that restarts resumes a run from this record. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | `Ready` is `True` while the observatory's server and devices run and are connected. `LocksRelayed` is present while the observatory has a `Dome`. It is `True` while the operator relays the park states that the locks need, `False` with the reason `Waiting` while a dome or a mount does not report what the relay needs, and `False` with the reason `Idle` while no dome or mount runs. `Active` is `True` from the `Activation` step of the first reservation in the observatory until the `Deactivation` step of the last one. Its `lastTransitionTime` is the transition that starts the activation and deactivation procedures. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | `Ready` is `True` while the observatory's server and devices run and are connected. `LocksRelayed` is present while the observatory has a `Dome`. It is `True` while the operator relays the park states that the locks need, `False` with the reason `Waiting` while a dome or a mount does not report what the relay needs, and `False` with the reason `Idle` while no dome or mount runs. `Active` is `True` from the `Activation` step of the first reservation in the observatory until the `Deactivation` step of the last one. Its `lastTransitionTime` is the transition that starts the activation and deactivation procedures. `SetUp` is the condition that a person writes, such as with `kubectl liken observatory set-up`, and the operator keeps it until it expires and turns `False` with the reason `Expired`. `AttentionNeeded` is `True` while a `notify` action asks a person to do something. |
 | <span id="status--server"></span>`server` | [object](#statusserver) | no | The observatory's own INDI server, while it runs. |
 | <span id="status--telescopes"></span>`telescopes` | []string | no | Each `Telescope` whose `spec.observatory` names this observatory. While a session holds a `Telescope`, the observatory that the session recorded counts, until the session ends. |
 | <span id="status--devices"></span>`devices` | [\[\]object](#statusdevices) | no | Each device whose parent is this observatory. |

@@ -357,6 +357,12 @@ func (o *operator) perform(ctx, wait context.Context, c procCall, a action, at p
 		// A job needs no device, so any resource runs one.
 		return o.runJob(wait, c, *a.Job, at, report)
 	}
+	if a.Notify != "" {
+		// A request to a person needs no device either, and it is done
+		// once it is recorded: the status writer reads the record and
+		// sets AttentionNeeded (attention.go).
+		return "asked: " + a.Notify, nil
+	}
 	if c.res.device == nil {
 		return "", fmt.Errorf("a %s has no %s", c.res.kind.Name, a)
 	}

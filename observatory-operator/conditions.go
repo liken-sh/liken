@@ -23,7 +23,8 @@ func condition(kind string, status observatory.ConditionStatus, reason, message 
 // mergeConditions answers the next conditions, with the transition time
 // of each stored condition whose status did not change, and each next
 // condition that transitioned from the stored one (conditions.Set). A
-// stored condition of a type that next leaves out is dropped.
+// stored condition of a type that next leaves out is dropped, except a
+// person's SetUp, which stays as the person wrote it (keepSetUp).
 func mergeConditions(stored, next []observatory.Condition) (merged, transitions []observatory.Condition) {
 	merged = make([]observatory.Condition, len(next))
 	for i, c := range next {
@@ -36,7 +37,7 @@ func mergeConditions(stored, next []observatory.Condition) (merged, transitions 
 		}
 		merged[i] = held[0]
 	}
-	return merged, transitions
+	return keepSetUp(stored, merged), transitions
 }
 
 // equalJSON reports whether two values are the same JSON document

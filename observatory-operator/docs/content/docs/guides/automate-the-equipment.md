@@ -36,6 +36,7 @@ operator restarts.
 | `Camera` | `cool: {celsius, within}`: set the cooler, and wait until the sensor is within `within` degrees, 0.5 by default | 20 min |
 | `Camera` | `warm: {celsius, within}`: warm the sensor to within `within` degrees of that temperature, then switch the cooler off | 10 min |
 | any kind, `Telescope`, `Observatory` | `job`: run a container once, as a Kubernetes `Job` | 10 min |
+| any kind, `Telescope`, `Observatory` | `notify`: ask a person to do what no driver can, such as covering the telescope. It never waits for the person. | none |
 
 Each kind accepts only its own actions, and the API server refuses the
 others. Every action also takes `timeout`, such as `timeout: 30m`, and
@@ -149,6 +150,13 @@ for, such as `Waiting for WeatherStation backyard Safe=True`.
 
 `requires` binds only the operator's own actions. A move that someone
 makes in KStars is stopped only by the drivers' park locks.
+
+An action's `requires` waits inside the `Activation` step, after
+every device is powered on and connected. To keep the equipment off
+until a condition holds, list it in the resource's own
+`spec.requires` instead, as [Set up a portable
+telescope](/docs/guides/set-up-a-portable-telescope/) does with a
+person's `SetUp` and the weather station's `Safe`.
 
 A dome unparked means open, and parked means closed. While the
 observatory has a `Dome`, the operator sets each dome to close its
@@ -272,6 +280,27 @@ So a script can drive any INDI property through `INDI_HOST` and
 `INDI_PORT`. When the container fails, the action fails, and its
 summary gives the exit code and the last lines of the container's
 output. Kubernetes deletes the `Job` an hour after it ends.
+
+## Ask a person
+
+A `notify` action asks a person to do what no driver can, such as
+covering a portable telescope at the end of the night:
+
+```yaml
+spec:
+  deactivation:
+    - notify: Cover the telescope and carry it in
+```
+
+The action is `Done` at once, and the next action runs, so parking
+the mount and warming the camera never wait on a person. The
+resource's `AttentionNeeded` condition turns `True` with the request
+as its message, and its transition posts a `Warning` Event with the
+reason `Notified`. `AttentionNeeded` turns `False` when the resource's next activation
+begins, and when someone writes the resource's `SetUp` after the
+request, as `kubectl liken observatory take-down` does. [Set up a
+portable telescope](/docs/guides/set-up-a-portable-telescope/) uses
+both.
 
 ## Test the procedures with the simulators
 

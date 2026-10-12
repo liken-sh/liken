@@ -27,8 +27,9 @@ goes on.
 
 | Step | What it does | Deadline |
 |---|---|---|
-| `Wait` | Waits for `spec.start`, for the telescope to exist with no delete pending on it or its observatory, and for no other reservation to hold the telescope. | none |
+| `Wait` | Waits for `spec.start`, for the telescope to exist with no delete pending on it or its observatory, for each condition that the `spec.requires` of the `Observatory` and of the devices on its server names, and for no other reservation to hold the telescope. | none: [dawn](#requirements-and-dawn) |
 | `StartSite` | Starts the observatory's server and its devices, connects them, and writes the dome's `DOME_SHUTTER_PARK_POLICY` and its `MOUNT_POLICY`. Another reservation in the observatory may have started them already. Fails when two devices of the observatory name one driver. | 10 min |
+| `Requires` | Waits for each condition that the `spec.requires` of the `Telescope` and of the devices on its server names, such as a person's `SetUp` or a `WeatherStation`'s `Safe`. The summary names each condition it waits for. Nothing of the telescope runs yet. `Skipped` when nothing is required. | none: [dawn](#requirements-and-dawn) |
 | `PowerOn` | Starts the telescope's server with a link to every device, starts and connects its `Switch` devices, and switches on each output that a device's `spec.power` names. Fails when two devices of the telescope name one driver, and fails before it starts the server when the `PersistentVolumeClaim` that `spec.outbox` names does not exist. | 10 min |
 | `StartDevices` | Starts the pod of every other device, and waits until each pod is Ready and its driver defines its device on the server. A device on real hardware waits here for its claim. While no node fits a pod, the summary gives the scheduler's message. | 10 min |
 | `Connect` | Connects the mount, the GPS, the polar aligner, the focusers, the filter wheels, the rotators, the dust caps, the flat panels, the receivers, and the cameras, in that order. A device that another resource serves connects with that resource. Then it checks that each device defines the properties of its resource's interface, and a resource whose device does not reports `Error` while the others go on. | 2 min |
@@ -136,8 +137,55 @@ the operator connects each device again.
 Each resource except a `Reservation` posts an Event each time a condition first
 appears or changes its status or its reason, with the condition's
 reason and message. A `ParentFound` that is `False`, a `Ready` whose
-reason is `Error`, and a `Safe` that is `False` are `Warning`s. `kubectl describe` lists them
-for an hour.
+reason is `Error`, a `Safe` that is `False`, and an `AttentionNeeded`
+that is `True` are `Warning`s. `kubectl describe` lists them for an
+hour. A person's own write of `SetUp` posts nothing, and its expiry
+posts a `Normal` Event with the reason `Expired`.
+
+## Requirements and dawn
+
+Each resource with procedures can list conditions in `spec.requires`
+that must hold before a session starts it, as a pod's
+`readinessGates` hold a pod. A portable telescope lists the `SetUp`
+that a person writes once it is carried out and polar aligned, and a
+site can list a `WeatherStation`'s `Safe`, so nothing powers on in the
+rain. [Set up a portable telescope](/docs/guides/set-up-a-portable-telescope/)
+gives the steps.
+
+Two steps hold the requirements, because each INDI server starts in
+its own step. The `Observatory`'s requirements, and those of the
+devices on its server, hold the `Wait` step, before the reservation
+takes its telescope, so the telescope and its devices stay `Idle`.
+The `Telescope`'s requirements, and those of its devices, hold the
+`Requires` step, after `StartSite`, so a telescope can require the
+`Safe` of a weather station that the observatory's server runs: the
+station reports `Safe` only once `StartSite` has connected it. The
+same requirement on the `Observatory` waits until dawn, because the
+station never starts. Each step's summary names every condition it
+waits for, such as `Waiting for Telescope east SetUp=True,
+WeatherStation lab Safe=True`, and a reference that names no resource
+appears there too, such as `spec.requires[0] of Telescope east: no
+WeatherStation roof`.
+
+A requirement gates only the start of a session. A condition that
+turns `False` once the equipment runs changes nothing here, and a
+[trigger](/docs/concepts/procedures/#triggers) acts on it, such as
+parking the dome in bad weather.
+
+A reservation that still waits in either step at the first
+astronomical dawn after the wait began ends. Astronomical dawn is
+when the sun rises through 18 degrees below the horizon at the
+`Observatory`'s `spec.location`, the end of a dark night. The `Wait`
+step's wait begins at `spec.start`, or when the step starts if that
+is later, and the `Requires` step's when it starts. The step is
+`Skipped` with a summary such as `Dawn came at
+2026-10-13T08:44:52Z while waiting for Telescope east SetUp=True, so
+the session did not start`, the reservation deactivates, and it is
+`Released` with the telescope's equipment never powered on. The
+`Deactivating` or `Released` Event gives the same reason. Where the
+sun never reaches 18 degrees below the horizon, in the white nights
+of a high-latitude summer, the night ends at the sun's lowest point,
+and in a polar night, where it never rises that far, at its highest.
 
 ## The outbox
 

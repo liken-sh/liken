@@ -8,11 +8,11 @@ license = "MIT"
 # The operator's map of driver images is generated from indi/images/
 # at the tag that indi/package.toml pins, and the guider's compositor
 # is the weston image at the tag that weston/package.toml pins, so a
-# bump of either runs these tests again. The image builds against the
-# shared kubernetes module, and ships the license notices that notices/
-# collects.
+# bump of either runs these tests again. The images build against the
+# shared kubernetes module, and ship the license notices that notices/
+# collects. The CLI's image carries the CA bundle that trust pins.
 [depends]
-components = ["indi", "kubernetes", "notices", "weston"]
+components = ["indi", "kubernetes", "notices", "trust", "weston"]
 
 [docs]
 prefix = "observatory"
@@ -53,4 +53,12 @@ deploy = "deploy"
 [[outputs.images]]
 name = "observatory-operator"
 file = "Dockerfile"
+contexts = { kubernetes = "kubernetes", notices = "notices" }
+
+# The CLI image carries the same version as the operator, so the base
+# binary pulls a CLI that never drifts from the operator it faces. It is
+# built for linux/amd64 only.
+[[outputs.images]]
+name = "observatory-operator-cli"
+file = "Dockerfile.cli"
 contexts = { kubernetes = "kubernetes", notices = "notices" }

@@ -142,10 +142,11 @@ spec:
 {{- define "action" }}
 type: object
 description: >-
-  One action, which names `job`.
+  One action, which names exactly one of `job` and
+  `notify`.
 x-kubernetes-validations:
-  - rule: "has(self.job)"
-    message: "an action of a Switch names job"
+  - rule: "[has(self.job), has(self.notify)].filter(x, x).size() == 1"
+    message: "an action of a Switch names exactly one of job and notify"
 properties:
 {{ include "action fields" . | indent 2 }}
 {{- end }}

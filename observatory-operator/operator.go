@@ -387,3 +387,20 @@ func (o *operator) sleepUntil(ctx context.Context, when time.Time) {
 	case <-timer.C:
 	}
 }
+
+// awaitChangeOr waits for a ring of the bell that wake came from, for
+// ctx to end, or for a time, when the time is not zero. The timer is a
+// clock: the dawn that ends a gate's wait (requires.go).
+func awaitChangeOr(ctx context.Context, wake <-chan struct{}, when time.Time) {
+	var at <-chan time.Time
+	if !when.IsZero() {
+		timer := time.NewTimer(time.Until(when))
+		defer timer.Stop()
+		at = timer.C
+	}
+	select {
+	case <-ctx.Done():
+	case <-wake:
+	case <-at:
+	}
+}

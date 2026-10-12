@@ -194,7 +194,7 @@ func (r *runner) stage() stage {
 	switch {
 	case deactivating && allFinished(r.status.Steps):
 		return stageReleased
-	case deactivating, ending(t, r.res, time.Now()):
+	case deactivating, ending(t, r.res, time.Now()), gaveUp(r.status.Steps):
 		return stageDeactivate
 	case allFinished(r.status.Steps):
 		return stageReady
@@ -303,7 +303,17 @@ func (r *runner) runStep(ctx context.Context, name observatory.StepName, fn step
 	s = r.step(name)
 	finish := stamp()
 	s.StopTime = &finish
+	gave, gaveUpNow := isGaveUp(err)
 	switch {
+	case gaveUpNow:
+		// A gate's step ends the reservation at dawn (requires.go): it
+		// is Skipped with what it waited for, and stage then
+		// deactivates.
+		s.State, s.Summary = observatory.StepSkipped, gave.summary
+		r.save(ctx)
+		r.o.logf("Reservation %s: %s", r.name, stepLine(s))
+		r.o.record(r.res, string(name), sentence(strings.TrimPrefix(stepLine(s), string(name)+" ")))
+		return errEnding
 	case err != nil && errors.Is(context.Cause(ctx), errEnding):
 		s.State, s.Summary = observatory.StepSkipped, sentence(errEnding.Error())
 		r.save(ctx)
@@ -376,6 +386,14 @@ func (r *runner) began(names []observatory.StepName) time.Time {
 		}
 	}
 	return first
+}
+
+// took answers how long a finished step ran, or zero.
+func (r *runner) took(name observatory.StepName) time.Duration {
+	if s := r.step(name); s != nil && s.StartTime != nil && s.StopTime != nil {
+		return s.StopTime.Sub(*s.StartTime)
+	}
+	return 0
 }
 
 // phaseOf answers the phase while a step runs.
