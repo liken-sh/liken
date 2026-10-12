@@ -158,14 +158,16 @@ The operator's files are flat in `package main`, one domain to a file.
 `operator.go` starts the five kinds of goroutine: the supervisor
 (with the finalizers of `finalizers.go`), one
 runner for each `Reservation` (`reservation.go`, `activation.go`,
-`configure.go`, `deactivation.go`, `steady.go`, `moves.go`,
-`finish.go`, and the guider's `guidersteps.go` and `guidersteady.go`),
+`configure.go`, `deactivation.go`, `steady.go`, `deletes.go`,
+`leaves.go`, `finish.go`, and the guider's `guidersteps.go` and
+`guidersteady.go`),
 the status writer (`status.go`, `statustree.go`, `standing.go`,
 `readings.go`, `guiderstatus.go`, and `devicesplit.go` and
 `typedstatus.go`, which give each property of an INDI device to one
 resource's status), the lock relay (`locks.go` and
 `domepolicy.go`), and the trigger controller (`triggers.go`), which runs each resource's
-`spec.triggers` (plan 13), and runs a failed one again on the retry
+`spec.triggers` (plan 13), runs an activation that a device missed
+(`lateactivation.go`), and runs a failed one again on the retry
 annotation (`retry.go`). The runner's `Activation` and
 `Deactivation` steps run the lifecycle procedures (`procsteps.go`):
 `procedure.go` runs one trigger's actions, `action.go`, `cooler.go`,

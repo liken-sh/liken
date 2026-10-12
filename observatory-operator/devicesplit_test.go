@@ -248,29 +248,22 @@ func TestAPropertyOfTwoInterfacesGoesToTheServedResource(t *testing.T) {
 	})
 }
 
-// shelveWheel puts the example's FilterWheel east on the shelf during a
-// session, and waits until its deactivation ran and it let go of the
-// camera that served it.
+// shelveWheel puts the example's FilterWheel east on the shelf, before
+// a session.
 func shelveWheel(w *world) {
-	w.t.Helper()
 	w.put(observatory.FilterWheelKind, "east", map[string]any{
 		"device": map[string]any{"kind": "Camera", "name": "east-main"}, "filters": []any{"L"}})
-	w.until(5*time.Minute, "the shelved filter wheel keeps its finalizer", func() bool {
-		wheel, _ := decode[observatory.FilterWheel](w.t, w.api, kindCollection(observatory.FilterWheelKind), "east")
-		return !holdsFinalizer(wheel.Metadata)
-	})
 }
 
-// A served device on the shelf that let go of its owner reads nothing
-// of the owner's INDI device: it is Inventory, and its wheel's
-// properties go back to the camera's list.
+// A served device on the shelf reads nothing of the owner's INDI
+// device: it is Inventory, and its wheel's properties stay in the
+// camera's list.
 func TestAServedDeviceOnTheShelfReadsNothingOfItsOwner(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		w := readyWorld(t)
+		w := startWorld(t)
 		shelveWheel(w)
-		time.Sleep(2 * statusWindow)
-		synctest.Wait()
+		readyOf(w)
 		wheel, _ := decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east")
 		if s := wheel.Status; s.Phase != observatory.DeviceInventory || s.IndiDevice != "" || s.Endpoint != nil || s.Slot != nil {
 			t.Errorf("the shelved filter wheel = %s on %q at %+v, slot %+v", s.Phase, s.IndiDevice, s.Endpoint, s.Slot)
@@ -282,19 +275,20 @@ func TestAServedDeviceOnTheShelfReadsNothingOfItsOwner(t *testing.T) {
 	})
 }
 
-// A served device that joins its owner takes the owner's properties
-// from one of its kind on the shelf, whatever the order of their names.
+// A served device placed on its owner takes the owner's properties from
+// one of its kind on the shelf, whatever the order of their names.
 func TestAPlacedServedDeviceTakesThePropertiesFromOneOnTheShelf(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		w := readyWorld(t)
+		w := startWorld(t)
 		shelveWheel(w)
 		w.put(observatory.FilterWheelKind, "east-new", map[string]any{"opticalTrain": "east-imaging",
 			"device": map[string]any{"kind": "Camera", "name": "east-main"}, "filters": []any{"L"}})
-		w.until(time.Minute, "the new filter wheel does not read the camera's wheel", func() bool {
-			wheel, _ := decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east-new")
-			return wheel.Status.Slot != nil
-		})
+		readyOf(w)
+		placed, _ := decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east-new")
+		if placed.Status.Slot == nil {
+			t.Error("the new filter wheel does not read the camera's wheel")
+		}
 		shelved, _ := decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east")
 		if shelved.Status.Slot != nil || shelved.Status.IndiDevice != "" {
 			t.Errorf("the shelved filter wheel reads slot %+v on %q", shelved.Status.Slot, shelved.Status.IndiDevice)

@@ -11,7 +11,7 @@ package main
 // device that serves it (served.go). A device with a deletionTimestamp
 // is placed on no server (tree.go), so a running server treats it as a
 // device that left: it runs the device's deactivation, stops its
-// driver, and deletes its pod and its claim (leaves.go, moves.go). The
+// driver, and deletes its pod and its claim (leaves.go, deletes.go). The
 // supervisor then removes the finalizer. A device whose pod does not
 // run carries no finalizer, so the delete of an inventory device is
 // instant.
@@ -133,7 +133,10 @@ func (o *operator) holdDevice(ctx context.Context, report func(string), d *devic
 // gone and that no held server runs: a deleted device after the
 // cleanup of its pod, and every device of a reservation that was
 // Released. A device on a held server keeps it while its pod is gone,
-// because the runner creates the pod again. A served device's pod is
+// because the runner creates the pod again, and so does a device whose
+// parents place it on a held server, because that server's PowerOff
+// switches its output off after StopDevices deleted its pod. A served
+// device's pod is
 // the pod of the driver that its spec.device names, so it keeps the
 // finalizer while that driver runs: a Ready runner removes it once the
 // served device's deactivation has run (leaveServed).
@@ -146,7 +149,11 @@ func (o *operator) releaseDevices(t *tree, held map[string]bool) error {
 		if _, p, running := t.podOf(d); running && p != nil {
 			continue
 		}
-		if ref, placed := t.server(d); placed && held[ref.String()] {
+		ref, placed := t.server(d)
+		if !placed {
+			ref, placed = t.declared(d)
+		}
+		if placed && held[ref.String()] {
 			continue
 		}
 		problems = append(problems, o.setFinalizerOf(d.kind, d.name(), false))

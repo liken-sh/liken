@@ -124,8 +124,7 @@ func telescopeTiers(t *tree, telescope *observatory.Telescope, devices []*device
 // withoutLacking answers tiers without the devices whose INDI device
 // does not serve their interface (detect). Such a device has no run of
 // the transition, so if its driver defines the interface later, its
-// activation runs then, as a device's that joins a Ready session
-// (judgeInterfaces).
+// activation runs then (lateactivation.go).
 func (o *operator) withoutLacking(tiers [][]stepRun) [][]stepRun {
 	out := make([][]stepRun, 0, len(tiers))
 	for _, members := range tiers {

@@ -17,9 +17,10 @@ package main
 //   - Its activation runs after its owner connects, and its
 //     deactivation runs before its owner's (deviceTiers), so a
 //     Flip-Flat's cap closes before the device stops.
-//   - When it leaves its server, because a person deleted or moved it
-//     or because its owner left, it runs its deactivation through its
-//     owner's driver before that driver stops (leaveServed).
+//   - When a person deletes it or its owner during a session, it runs
+//     its deactivation through its owner's driver before that driver
+//     stops (leaveServed). A spec edit that would move it takes effect
+//     when the session ends, as for any device (tree.server).
 //
 // The tree refuses a served resource that cannot share its owner's
 // device, and the refusal is its status's fault: an owner that does not
@@ -126,9 +127,12 @@ func (t *tree) verdict(d *device) serving {
 
 // judgeServed answers the verdict of each served device on a server.
 // Of two served devices of one kind on one owner, one is served: the
-// one that holds the finalizer, so a device that joins never displaces
-// one that its owner serves already, then the older resource, then the
-// one whose name sorts first.
+// one that holds the finalizer, so a device that waits for the next
+// session never displaces one that its owner serves already, then the
+// older resource, then the one whose name sorts first. A served device
+// that waits for the next session of its server (tree.waits) is judged
+// there too, so its status names a refusal now, and it has no owner
+// until that session starts it.
 func (t *tree) judgeServed() map[*device]serving {
 	verdicts := map[*device]serving{}
 	type slot struct {
@@ -136,9 +140,17 @@ func (t *tree) judgeServed() map[*device]serving {
 		kind  observatory.Kind
 	}
 	winners := map[slot]*device{}
+	waiting := map[*device]bool{}
 	for _, d := range t.devices {
+		if d.runsDriver() {
+			continue
+		}
 		ref, placed := t.server(d)
-		if d.runsDriver() || !placed {
+		if !placed && t.waits(d) {
+			ref, placed = t.declared(d)
+			waiting[d] = true
+		}
+		if !placed {
 			continue
 		}
 		v := t.judge(d, ref)
@@ -155,9 +167,12 @@ func (t *tree) judgeServed() map[*device]serving {
 		if v.refusal != "" {
 			continue
 		}
-		if winner := winners[slot{v.owner, d.kind}]; winner != d {
+		switch winner := winners[slot{v.owner, d.kind}]; {
+		case winner != d:
 			verdicts[d] = serving{refusal: fmt.Sprintf("%s %s serves %s %s already: one INDI device serves one resource of each kind",
 				v.owner.kind.Name, v.owner.name(), winner.kind.Name, winner.name())}
+		case waiting[d]:
+			verdicts[d] = serving{}
 		}
 	}
 	return verdicts
@@ -271,15 +286,31 @@ func deviceTiers(t *tree, groups [][]*device) [][]*device {
 }
 
 // holdServed gives each device that an owner serves the finalizer,
-// with its owner's. A write that the API server refuses is sent again
-// (send), and the step's deadline bounds the tries.
+// with its owner's, and waits until the stores show it. A served device
+// that lacks the finalizer once its owner's pod exists waits for the
+// next session (tree.heldOn), so a pod that the stores showed first
+// would leave the served device out of its owner's session. The owner
+// can come from another reading of the tree, so t finds it by kind and
+// name. A write that the API server refuses is sent again (send), and
+// the step's deadline bounds the tries.
 func (o *operator) holdServed(ctx context.Context, report func(string), t *tree, owner *device) error {
-	for _, d := range t.servedBy(owner) {
+	var served []*device
+	if own, ok := t.device(owner.kind, owner.name()); ok {
+		served = t.servedBy(own)
+	}
+	for _, d := range served {
 		if err := o.holdDevice(ctx, report, d); err != nil {
 			return err
 		}
 	}
-	return nil
+	return o.waitFor(ctx, report, func(now *tree) (bool, string, error) {
+		for _, d := range served {
+			if held, ok := now.device(d.kind, d.name()); ok && !deleting(held.object.Metadata) && !holdsFinalizer(held.object.Metadata) {
+				return false, "waiting for the finalizer of " + d.kind.Name + " " + d.name(), nil
+			}
+		}
+		return true, "", nil
+	})
 }
 
 // served reports whether a device holds the finalizer for a server: it
@@ -295,7 +326,7 @@ func served(t *tree, d *device, ref serverRef) bool {
 
 // leaveServed runs the deactivation of each served device that left a
 // running server and still holds the finalizer: a person deleted it or
-// moved it, or its owner left, so the tree no longer serves it there.
+// its owner, so the tree no longer serves it there.
 // The run acts through the owner's driver, which still runs, so it
 // comes before setDrivers stops that driver. The finalizer goes once
 // the run ends, as a device's goes once its pod is gone.
@@ -324,57 +355,4 @@ func (r *runner) leaveServed(ctx context.Context, t *tree, ref serverRef) error 
 		r.o.logf("Reservation %s: %s left %s", r.name, d.key(), ref)
 	}
 	return joinErrors(problems)
-}
-
-// joiningServed answers the served devices among a server's devices
-// that do not hold the finalizer yet: the ones that join the server
-// now, and gain it with their owner's (holdServed).
-func joiningServed(t *tree, devices []*device) []*device {
-	var out []*device
-	for _, d := range devices {
-		if !d.runsDriver() && !holdsFinalizer(d.object.Metadata) {
-			out = append(out, d)
-		}
-	}
-	return out
-}
-
-// configureJoined writes the settings of each served device that joined
-// a running server whose owner is connected. Its owner's driver runs
-// already, so no driver appears for the runner to set up again
-// (reapply), and the device's settings would not reach it otherwise. A
-// device whose owner is not connected yet gets its settings when the
-// owner connects. The work holds the server's lock, with the deadline
-// of holding. keepPods holds the site's lock already for the
-// observatory's server, so the work takes the server's lock alone.
-func (r *runner) configureJoined(ctx context.Context, t *tree, ref serverRef, joining []*device) {
-	if len(joining) == 0 {
-		return
-	}
-	_, site, err := r.siteOf(t)
-	if err != nil {
-		return
-	}
-	handles := r.o.handlesOf(t, ref, joining)
-	if len(handles) == 0 {
-		return
-	}
-	all := r.o.handlesOf(t, ref, t.devicesOn(ref))
-	err = holding(ctx, []lock{handles[0].server.lock}, func(ctx context.Context) error {
-		for _, h := range handles {
-			if !h.connected() || !r.o.detect(ctx, h) {
-				continue
-			}
-			var notes []string
-			_, err := r.o.configureDevice(ctx, t, site, h, all, &notes)
-			r.o.fault(h.d, err)
-			if err != nil {
-				r.o.logf("configuring %s, which joined %s: %v", h, ref, err)
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		r.o.logf("configuring the devices that joined %s: %v", ref, err)
-	}
 }

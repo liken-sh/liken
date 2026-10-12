@@ -1,9 +1,10 @@
 package main
 
-// A device that leaves a telescope or an observatory: while a
-// reservation of it is Ready, its driver stops on the running server,
-// and its pod, its Service, and its claim go. The other devices on the
-// server stay connected.
+// A device that a person deletes while a reservation of its telescope
+// or observatory is Ready: its driver stops on the running server, and
+// its pod, its Service, and its claim go. The other devices on the
+// server stay connected. devicedelete_test.go holds its deactivation
+// and its finalizer.
 
 import (
 	"slices"
@@ -15,7 +16,7 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-func TestADeviceTakenOffAReadyTelescopeStopsOnTheRunningServer(t *testing.T) {
+func TestADeviceDeletedWhileReadyStopsOnTheRunningServer(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
@@ -25,10 +26,11 @@ func TestADeviceTakenOffAReadyTelescopeStopsOnTheRunningServer(t *testing.T) {
 		before, _ := w.api.object(podsCollection, "east-telescope")
 		w.indi.setState("east-telescope", "CCD Simulator", "CCD_EXPOSURE", "Busy")
 
-		w.put(observatory.FocuserKind, "east", map[string]any{"driver": map[string]any{"name": "indi_simulator_focus"}})
+		w.api.deleteNamed(kindCollection(observatory.FocuserKind), "east")
 		w.until(time.Minute, "the focuser's pod stays", func() bool {
 			return !slices.Contains(w.api.names(podsCollection), "east-focuser") && len(w.indi.connected("east-telescope")) == 10
 		})
+		w.gone(observatory.FocuserKind, "east", time.Minute)
 		time.Sleep(2 * statusWindow)
 		synctest.Wait()
 
@@ -45,12 +47,7 @@ func TestADeviceTakenOffAReadyTelescopeStopsOnTheRunningServer(t *testing.T) {
 		if r, _ := w.reservation("east-tonight"); r.Status.Phase != observatory.ReservationReady {
 			t.Errorf("the reservation is %s", r.Status.Phase)
 		}
-		focuser, _ := decode[observatory.Focuser](t, w.api, kindCollection(observatory.FocuserKind), "east")
-		if focuser.Status.Phase != observatory.DeviceInventory {
-			t.Errorf("focuser = %+v", focuser.Status)
-		}
-
-		wantFocuser := "Normal PodDeleted: Deleted pod east-focuser, because the Focuser left Telescope east while Reservation east-tonight is Ready."
+		wantFocuser := "Normal PodDeleted: Deleted pod east-focuser, because the Focuser was deleted while Reservation east-tonight is Ready."
 		if got := typedEvents(w.api, observatory.FocuserKind, "east"); !slices.Contains(got, wantFocuser) {
 			t.Errorf("focuser Events = %q, want %q", got, wantFocuser)
 		}
@@ -62,11 +59,11 @@ func TestADeviceTakenOffAReadyTelescopeStopsOnTheRunningServer(t *testing.T) {
 	})
 }
 
-// A leaving device's pod goes only after the server reports its driver
+// A deleted device's pod goes only after the server reports its driver
 // stopped. A pod that went first would end the driver's connection,
 // and indiserver would start the driver again. A shim that never stops
 // the driver holds the pod for driverStopLimit, and no longer.
-func TestALeavingDevicesPodGoesAfterItsDriverStops(t *testing.T) {
+func TestADeletedDevicesPodGoesAfterItsDriverStops(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name     string
@@ -85,7 +82,7 @@ func TestALeavingDevicesPodGoesAfterItsDriverStops(t *testing.T) {
 				w.indi.slowShim(c.shim)
 				start := time.Now()
 
-				w.put(observatory.FocuserKind, "east", map[string]any{"driver": map[string]any{"name": "indi_simulator_focus"}})
+				w.api.deleteNamed(kindCollection(observatory.FocuserKind), "east")
 				w.until(5*time.Minute, "the focuser's pod stays", func() bool {
 					return !slices.Contains(w.api.names(podsCollection), "east-focuser")
 				})
@@ -102,7 +99,7 @@ func TestALeavingDevicesPodGoesAfterItsDriverStops(t *testing.T) {
 }
 
 // A release stops each driver on its running server before it deletes
-// the driver's pod, as a device that leaves does. A server that stops
+// the driver's pod, as a deleted device does. A server that stops
 // with its devices loses their pods first, so indiserver starts each of
 // their shims once more, against a device pod that is gone, while its
 // own pod stops.
@@ -125,23 +122,22 @@ func TestAReleaseStopsEachDriverBeforeItsPod(t *testing.T) {
 	})
 }
 
-// A device that leaves the observatory stops on the observatory's
-// server, and the dome on that server stays connected.
-func TestADeviceTakenOffTheObservatoryStopsOnItsRunningServer(t *testing.T) {
+// A device of the observatory that a person deletes stops on the
+// observatory's server, and the dome on that server stays connected.
+func TestADeviceDeletedFromTheObservatoryStopsOnItsRunningServer(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		w := readyWorld(t)
+		w := startWorld(t)
+		w.put(observatory.ReceiverKind, "lab", map[string]any{"observatory": "lab", "driver": map[string]any{"name": "indi_simulator_receiver"}})
+		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
+		w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
 		site := serverRef{observatory.ObservatoryKind, "lab"}.String()
 		connected := len(w.indi.connected(site))
-		w.put(observatory.ReceiverKind, "lab", map[string]any{"observatory": "lab", "driver": map[string]any{"name": "indi_simulator_receiver"}})
-		w.until(time.Minute, "the receiver does not join the observatory's server", func() bool {
-			return len(w.indi.connected(site)) == connected+1
-		})
 		before, _ := w.api.object(podsCollection, site)
 
-		w.put(observatory.ReceiverKind, "lab", map[string]any{"driver": map[string]any{"name": "indi_simulator_receiver"}})
+		w.api.deleteNamed(kindCollection(observatory.ReceiverKind), "lab")
 		w.until(time.Minute, "the receiver stays on the observatory's server", func() bool {
-			return !slices.Contains(w.api.names(podsCollection), "lab-receiver") && len(w.indi.connected(site)) == connected
+			return !slices.Contains(w.api.names(podsCollection), "lab-receiver") && len(w.indi.connected(site)) == connected-1
 		})
 
 		after, _ := w.api.object(podsCollection, site)
@@ -182,4 +178,41 @@ func TestADeviceMovedOffAnIdleTelescopeIsAnEdit(t *testing.T) {
 			t.Errorf("Events = %q, want no Warning", events)
 		}
 	})
+}
+
+// The Event on a deleted device says that its output went off, and an
+// output that a device on the server still names stays on: the
+// focuser and the rotator share output 2.
+func TestADeletedDeviceSwitchesOffOnlyAnOutputNoDeviceStillNames(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		kind   observatory.Kind
+		device string
+		event  string
+		output string
+		sent   bool
+	}{
+		{"a camera alone on output 1", observatory.CameraKind, "east-main",
+			"Normal PodDeleted: Deleted pod east-main-camera, because the Camera was deleted while Reservation east-tonight is Ready. Switched off output 1 of Switch east.",
+			outputsOff[0], true},
+		{"a focuser that shares output 2", observatory.FocuserKind, "east",
+			"Normal PodDeleted: Deleted pod east-focuser, because the Focuser was deleted while Reservation east-tonight is Ready.",
+			outputsOff[1], false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				w := readyWorld(t)
+				w.api.deleteNamed(kindCollection(c.kind), c.device)
+				w.until(5*time.Minute, "no PodDeleted Event", func() bool {
+					return slices.Contains(typedEvents(w.api, c.kind, c.device), c.event)
+				})
+				if sent := slices.Contains(w.indi.changes(), c.output); sent != c.sent {
+					t.Errorf("sent %q = %t, want %t", c.output, sent, c.sent)
+				}
+			})
+		})
+	}
 }

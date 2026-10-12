@@ -248,8 +248,10 @@ func stampedWith(p *pod, file string) *pod {
 }
 
 // current reports whether a running pod has the spec of the pod the
-// operator builds now, for the same server. A device pod that another
-// server held, whose server stopped, is not current (tree.heldElsewhere).
+// operator builds now, for the same server. A device pod's spec names
+// no server, so a pod that another server's session left behind, such
+// as one whose reservation a person removed the finalizer from, is not
+// current, and the sweep would delete it from under the new server.
 func current(running, built *pod) bool {
 	return running.Metadata.Annotations[annotationSpec] == built.Metadata.Annotations[annotationSpec] &&
 		running.Metadata.Labels[labelServer] == built.Metadata.Labels[labelServer]

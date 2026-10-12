@@ -17,7 +17,10 @@ has `status.conditions` in the shape of `metav1.Condition`, and
 that the spec names does not exist; the resource stays in place, and
 the message names the missing parent. A device on the shelf has no
 parent to find, so its `ParentFound` is `True` with the reason
-`NoParent`.
+`NoParent`. A device that a session holds where its spec no longer
+places it has `ParentFound` `True` with the reason `MovePending`, and
+the message says where it goes when the session ends, such as `Moves
+to OpticalTrain west-imaging when Reservation east-tonight ends`.
 
 ## Devices
 
@@ -31,8 +34,12 @@ the wheel's slot writes the `FilterWheel` alone.
 - `phase`: `Inventory` on the shelf, with a `Ready` message such as
   `Not installed in an optical train`. `Idle` when the device is
   installed and no reservation of its telescope or its observatory is
-  active, with the message `Not reserved`. From the start of a
-  reservation's activation, `Starting` until the pod exists, then
+  active, with the message `Not reserved`. A device whose server runs
+  for a session and does not run the device is `Idle` too, with a
+  message such as `Starts at the next reservation, after Reservation
+  east-tonight ends`: a device added during the session, and a device
+  that the release stopped, until the server stops. From the start of
+  a reservation's activation, `Starting` until the pod exists, then
   `Connecting`, `Connected`, and `Disconnecting`, or `Error`. During
   a release, a device is `Disconnecting` from its disconnect until its
   pod is gone, while the operator stops its driver or its server. A
@@ -50,9 +57,9 @@ the wheel's slot writes the `FilterWheel` alone.
   device on its server. The driver stops on its server before its pod
   is deleted, so a stopping pod has no driver to reach. `endpoint`
   names the server in the pod's `observatory.liken.sh/server` label,
-  so a device that moves to another telescope names the server it
-  left until that server deletes its pod. When a reservation ends, the
-  device moves to the shelf, or the pod of the resource that serves it
+  so a device that a person moved during a session names the server
+  that runs it until the session ends. When a reservation ends, a
+  person deletes the device, or the pod of the resource that serves it
   stops, the operator removes these fields. An `Idle` device and an
   `Inventory` device have none of them.
 - The typed fields: one for each standard property of the kind's

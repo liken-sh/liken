@@ -221,16 +221,17 @@ func (r *runner) disconnect(ctx context.Context, w *stepWork) (outcome, error) {
 
 // stopTelescopeDevices stops the drivers of the telescope's devices,
 // apart from the ones that power the others, on the server that keeps
-// running, and then deletes their pods (setDrivers). A device that only
-// its pod places on the server, because a person deleted it or its
-// train, keeps its pod with its driver stopped until PowerOff has
-// switched its output off: the pod is the only record of the server
-// that the device ran on (tree.runningOn).
+// running, and then deletes their pods (setDrivers). A device whose
+// parents no longer place it on the server, because a person deleted
+// it or its train, or moved it during the session, keeps its pod with
+// its driver stopped until PowerOff has switched its output off: the
+// pod is the only record of the server that the device ran on
+// (tree.runningOn).
 func (r *runner) stopTelescopeDevices(ctx context.Context, w *stepWork) (outcome, error) {
 	ref := serverRef{observatory.TelescopeKind, r.res.Spec.Telescope}
 	t := r.o.snapshot()
 	switches, _ := t.partition(t.releasedOn(ref))
-	if _, _, err := r.o.setDrivers(ctx, w.report, ref, switches); err != nil {
+	if _, err := r.o.setDrivers(ctx, w.report, ref, switches); err != nil {
 		return outcome{}, err
 	}
 	kept := map[string]bool{}
@@ -238,7 +239,7 @@ func (r *runner) stopTelescopeDevices(ctx context.Context, w *stepWork) (outcome
 		kept[d.key()] = true
 	}
 	for _, d := range t.devicesRunningOn(ref) {
-		if on, placed := t.server(d); !placed || on != ref {
+		if on, placed := t.declared(d); !placed || on != ref {
 			if runner, ok := t.runnerOf(d); ok {
 				kept[runner.key()] = true
 			}

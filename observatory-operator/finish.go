@@ -16,9 +16,7 @@ import (
 // off, and the Ready and SafeToPowerOff conditions name the step. In
 // both cases the annotation observatory.liken.sh/retry runs the failed
 // step again: the operator removes the annotation and sets the step
-// Pending. While it waits, the runner releases each device that left
-// the servers (releaseLeft), because the server that a moved device
-// joins waits for that release.
+// Pending.
 func (r *runner) failed(ctx context.Context) {
 	for ctx.Err() == nil {
 		wake := r.o.structure.wait()
@@ -49,7 +47,6 @@ func (r *runner) failed(ctx context.Context) {
 		if r.stage() != stageFailed {
 			return
 		}
-		r.releaseLeft(ctx)
 		r.keepWaiting(ctx, wake)
 	}
 }

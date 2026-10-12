@@ -194,25 +194,21 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 	if v := t.verdict(d); v.refusal != "" {
 		fault, refused = v.refusal, true
 	}
-	// A device that left its server, by a move or a delete, keeps its
-	// pod there while its deactivation runs (leaves.go). Its status
-	// reads that server until the driver stops, so a person who watches
-	// the delete reads the cap close. A device that moved to another
-	// running server waits for the server it left to release it
-	// (tree.heldElsewhere).
+	// A device that a person deleted keeps its pod on its server while
+	// its deactivation runs (leaves.go). Its status reads that server
+	// until the driver stops, so a person who watches the delete reads
+	// the cap close.
 	at, readable := ref.String(), placed
 	left := hasPod && (!placed || p.Metadata.Labels[labelServer] != ref.String())
 	if left {
 		at, readable = p.Metadata.Labels[labelServer], p.Metadata.DeletionTimestamp == nil
 	}
-	moving := left && placed && t.heldElsewhere(d, ref.String())
 	// The endpoint names the server in the label of the pod of the
 	// device's driver, while that pod runs and is not stopping. A
 	// device's driver stops on its server before the operator deletes
 	// its pod (serverdrivers.go), so a client that dials the endpoint of
 	// a device whose pod is stopping, or that has no pod, finds no
-	// driver there. A device that moved names the server it left until
-	// that server deletes its pod.
+	// driver there.
 	if hasPod && p.Metadata.DeletionTimestamp == nil {
 		on := p.Metadata.Labels[labelServer]
 		next.Endpoint = &observatory.Endpoint{Service: on, Host: serviceHost(on, o.namespace), Port: serverPort}
@@ -238,7 +234,7 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 	next.Display = deviceDisplay(d, next.Standard, next.Limits)
 	standing := o.standingOf(t, d)
 	// A pod that a device's server no longer runs is one that a Ready
-	// runner deletes (moves.go), or one that deactivation deletes. It
+	// runner deletes (deletes.go), or one that deactivation deletes. It
 	// reads as stopping once its driver is gone from that server. Its
 	// device is releasing there whatever its parents say, so a device
 	// that the Disconnect step disconnects on the server it left reads
@@ -263,21 +259,17 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 	} else if detecting {
 		next.Phase = observatory.DeviceConnecting
 	}
-	parent := parentCondition(t.missingParent(d))
-	if standing == onShelf {
-		parent = shelved()
-	}
+	parent := t.parentFound(d)
 	message := deviceMessage(next, d.kind, at, name, fault, standing)
-	if detecting {
+	switch {
+	case detecting:
 		message = fmt.Sprintf("Waiting for %s to define %s", next.IndiDevice, strings.Join(observatory.Standards[d.kind].Detect, " or "))
+	case next.Phase == observatory.DeviceIdle && t.waits(d):
+		declared, _ := t.declared(d)
+		message = "Starts at the next reservation, after " + endOf(t.sessions().holders[declared])
 	}
 	ready := condition(observatory.ConditionReady, observatory.ConditionFalse, string(next.Phase), message)
-	switch {
-	case moving:
-		// The device is not ready where its spec places it until the
-		// server it left releases it, whatever it reads there.
-		ready.Message = fmt.Sprintf("Waiting for %s to release it to %s", at, ref)
-	case next.Phase == observatory.DeviceConnected:
+	if next.Phase == observatory.DeviceConnected {
 		ready = condition(observatory.ConditionReady, observatory.ConditionTrue, string(next.Phase), deviceMessage(next, d.kind, at, name, "", standing))
 	}
 	next.Conditions = []observatory.Condition{parent, ready}

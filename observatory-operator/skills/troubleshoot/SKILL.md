@@ -1,6 +1,6 @@
 ---
 name: troubleshoot
-description: "Find why a reservation failed or waits, from the step and the device its status names: a missing parent, two devices on one driver, a pod that stays Pending, a device that does not connect, a device that does not serve its kind, a park that a lock refused, or a delete that does not finish. Then run the failed step again with the retry annotation. Use when a Reservation is Failed or stuck, when a device reports Error, or when a resource will not delete."
+description: "Find why a reservation failed or waits, from the step and the device its status names: a missing parent, two devices on one driver, a pod that stays Pending, a device that does not connect, a device that does not serve its kind, a device that waits for the next session, a park that a lock refused, or a delete that does not finish. Then run the failed step again with the retry annotation. Use when a Reservation is Failed or stuck, when a device reports Error, or when a resource will not delete."
 ---
 
 This skill is the guide at https://liken.sh/observatory/docs/guides/troubleshoot/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
@@ -57,10 +57,23 @@ name the same driver, the step fails, and its message names both
 devices and the driver. Give one of the devices another driver, move
 it to the shelf, or move it to another telescope.
 
-A device that joins a running reservation with a driver that another
-device already runs does not start. It reports `Error` with the name
-of the device that holds the driver, and the running device stays
-connected.
+A device that a person adds to a running server during a session does
+not start until the next session, so it never stops a device that
+runs. When it names the driver of a device on that server, the next
+session's `StartSite` or `PowerOn` fails as above.
+
+## A device does not start or move during a reservation
+
+A running server keeps the devices that it started until the
+reservation ends, as
+[Editing devices during a session](https://liken.sh/observatory/docs/concepts/how-a-reservation-runs/#editing-devices-during-a-session)
+describes. A device that a person added during the session is `Idle`,
+and its `Ready` message names the reservation it waits for, such as
+`Starts at the next reservation, after Reservation east-tonight ends`.
+A device that a person moved keeps running where it was, and its
+`ParentFound` condition has the reason `MovePending` and says where it
+goes. End the reservation, or let it reach its `end`, and reserve the
+telescope again.
 
 ## StartDevices fails: a device never appears
 

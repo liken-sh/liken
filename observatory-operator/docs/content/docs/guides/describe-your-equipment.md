@@ -284,9 +284,12 @@ its own server.
 A device with no parent field is on the shelf. Its spec can name its
 driver and its hardware, but the operator starts nothing for it and
 claims no hardware for it. Its phase is `Inventory`. To install it,
-set its parent field. You can do that while a reservation runs: the
-operator starts the device's driver on the running server and connects
-it, and the other devices stay connected.
+set its parent field. A server that runs for a reservation keeps the
+devices it started, so a device that you install during the
+reservation starts at the next one, and a device that you take off
+stays until the reservation ends. [Editing devices during a
+session](/docs/concepts/how-a-reservation-runs/#editing-devices-during-a-session)
+gives the rule.
 
 ## Check the result
 

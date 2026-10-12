@@ -989,14 +989,16 @@ spec:
                     device is on the shelf, with no parent, and the
                     operator creates nothing for it. `Idle`: the device
                     is installed, but no reservation of its telescope or
-                    its observatory is active, so it has no pod.
-                    `Starting`: a reservation's activation began, or the
-                    device's pod starts. `Connecting`: the operator
-                    asked the driver to connect. `Connected`: the driver
-                    reports the device connected. `Disconnecting`: the
-                    operator asked the driver to disconnect, or stops
-                    the pod. `Error`: a step failed, and the `Ready`
-                    condition gives the reason.
+                    its observatory is active, so it has no pod, or the
+                    device waits for the next session of a server that a
+                    session holds and did not start it on. `Starting`: a
+                    reservation's activation began, or the device's pod
+                    starts. `Connecting`: the operator asked the driver
+                    to connect. `Connected`: the driver reports the
+                    device connected. `Disconnecting`: the operator
+                    asked the driver to disconnect, or stops the pod.
+                    `Error`: a step failed, and the `Ready` condition
+                    gives the reason.
                 conditions:
                   type: array
                   description: >-
@@ -1005,8 +1007,12 @@ spec:
                     spec names, up to the `Observatory`, does not exist,
                     and its message names the missing resource. A device
                     on the shelf names no parent, and its `ParentFound`
-                    is `True` with the reason `NoParent`. While a device
-                    is connected, it also reports the state that the
+                    is `True` with the reason `NoParent`. A device that
+                    a session holds where its spec no longer places it
+                    has `ParentFound` `True` with the reason
+                    `MovePending`, and the message says where the device
+                    goes when the session ends. While a device is
+                    connected, it also reports the state that the
                     triggers of procedures read, by kind: a `Dome`
                     `Parked` and `Open` (the shutter), a `Mount`
                     `Parked`, a `DustCap` `Open`, a `FlatPanel` `Lit`
@@ -1168,11 +1174,8 @@ spec:
                     serves is that resource's pod, and it names the
                     server in that pod's `observatory.liken.sh/server`
                     label. The driver stops on that server before the
-                    pod is deleted. A device that moves to another
-                    telescope names the server it left until that server
-                    deletes its pod. When a reservation ends, or the
-                    device moves to the shelf, the operator removes the
-                    field.
+                    pod is deleted. When a reservation ends, or a person
+                    deletes the device, the operator removes the field.
                   properties:
                     service:
                       type: string

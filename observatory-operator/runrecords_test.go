@@ -47,13 +47,15 @@ func TestARecreatedDomeStartsWithNoRunsOfTheOldOne(t *testing.T) {
 
 		recreated := time.Now()
 		w.recreate(observatory.DomeKind, "lab")
-		w.until(5*time.Minute, "the new dome does not connect", func() bool {
-			dome, _ := decode[observatory.Dome](t, w.api, kindCollection(observatory.DomeKind), "lab")
-			return dome.Status.Phase == observatory.DeviceConnected
-		})
-		time.Sleep(2 * statusWindow)
-		synctest.Wait()
+		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
+		w.gone(observatory.ReservationKind, "east-tonight", 10*time.Minute)
+		w.reserve("east-later", map[string]any{"telescope": "east", "holder": "desktop"})
+		w.phase("east-later", observatory.ReservationReady, 10*time.Minute)
+		w.settle()
 		dome, _ := decode[observatory.Dome](t, w.api, kindCollection(observatory.DomeKind), "lab")
+		if dome.Status.Phase != observatory.DeviceConnected || len(dome.Status.Procedures) == 0 {
+			t.Errorf("the new dome = %s with runs %s, want Connected with its own activation", dome.Status.Phase, mustJSON(dome.Status.Procedures))
+		}
 		for _, run := range dome.Status.Procedures {
 			if run.StartTime == nil || run.StartTime.Before(recreated) {
 				t.Errorf("the new dome holds a run of the old one: %s", mustJSON(run))

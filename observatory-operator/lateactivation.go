@@ -1,11 +1,12 @@
 package main
 
-// A device that joins a running server during a Ready reservation
-// (serverdrivers.go) missed the transition of Active that ran every
-// other activation. A dust cap added to a train during a session would
-// stay closed, and a dome created again would stay parked. So the
-// trigger controller runs the activation of each such device as an
-// answer to the same transition: the run's since is the time its
+// A device in a session can miss the transition of Active that ran
+// every other activation. The Activation step leaves out a resource
+// whose device did not define its interface's properties, and when the
+// properties arrive later, the resource heals (interfaces.go). A spec
+// edit can also give a running device an activation it did not have.
+// So the trigger controller runs the activation of each such device as
+// an answer to the same transition: the run's since is the time its
 // Telescope or Observatory turned Active.
 //
 // The controller acts only while a reservation that governs the device
@@ -21,13 +22,6 @@ package main
 // current transition is a run that this controller started. A failure
 // in the reservation's Activation step fails the reservation, which
 // is then not Ready, and that run retries through the reservation.
-//
-// A device that leaves while its parent is Active runs its
-// deactivation before its driver stops (leaves.go), and drops the
-// record of its activation, so a device that joins again activates
-// again. Each run's record answers the transition, and the times of
-// two runs in the same second cannot order them, so the record of the
-// other trigger goes instead.
 
 import (
 	"context"
@@ -54,10 +48,10 @@ func governor(r resource) (string, bool) {
 	return "", false
 }
 
-// joinActivation starts the activation of a device that joined an
-// Active parent, and stops it when the parent's activity ends. retry
+// lateActivation starts the activation of a device whose Active parent
+// did not run it, and stops it when the parent's activity ends. retry
 // runs a Failed activation of the current transition again.
-func (o *operator) joinActivation(ctx context.Context, t *tree, r resource, k *control, retry bool) {
+func (o *operator) lateActivation(ctx context.Context, t *tree, r resource, k *control, retry bool) {
 	if r.device == nil || len(r.procedures.Activation) == 0 {
 		return
 	}
@@ -84,37 +78,11 @@ func (o *operator) joinActivation(ctx context.Context, t *tree, r resource, k *c
 	// device reads now. A new run, or one run again, needs a connected
 	// device.
 	resumed := answered && !rerun
-	if !o.governedByReady(t, r) || (!resumed && !t.connectedNow(r.device)) {
+	if !o.governedByReady(t, r) || (!resumed && r.device.object.Status.Phase != observatory.DeviceConnected) {
 		return
-	}
-	if !answered {
-		// A device that left ran its deactivation of this transition,
-		// and dropped its activation's record (leaves.go). It joins
-		// again, so its next leave must run its deactivation again.
-		o.runs.drop(r.record(), observatory.TriggerDeactivation)
 	}
 	k.flights[id] = o.fly(ctx, procCall{res: r, trigger: observatory.TriggerActivation,
 		actions: r.procedures.Activation, since: state.since, rerun: rerun}, &k.group)
-}
-
-// connectedNow reports whether a device is connected on the server
-// that its parents place it on: its stored status reads Connected on
-// that server for its current spec, and the pod of its driver runs
-// there. A device that leaves and joins again changes its spec twice,
-// and its status reads Connected from before the leave until the status
-// writer reads the device's new pod, whose driver starts disconnected.
-// The status writer records the generation it read, so a status of an
-// older generation is stale. A device that moves to another running
-// server stays on the server it left while its deactivation runs there
-// (tree.heldElsewhere), and its status reads Connected on that server
-// for the new spec, so the server in the status and in the pod must be
-// the one the device joins.
-func (t *tree) connectedNow(d *device) bool {
-	s := d.object.Status
-	ref, placed := t.server(d)
-	on, running := t.runningOn(d)
-	return placed && running && on == ref && s.Endpoint != nil && s.Endpoint.Service == ref.String() &&
-		s.Phase == observatory.DeviceConnected && s.ObservedGeneration == d.object.Metadata.Generation
 }
 
 // governedByReady reports whether a reservation that governs a device

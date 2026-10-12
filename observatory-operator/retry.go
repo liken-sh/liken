@@ -9,8 +9,9 @@ package main
 // transition time, and skips its Done actions. It then removes the
 // annotation. A run whose transition is over stays Failed, because
 // its condition no longer asks for it. The annotation also runs again
-// the Failed activation of a device that joined an Active parent
-// (joins.go). Any other lifecycle run, activation or deactivation,
+// the Failed activation that a device ran after its Active parent's
+// Activation step, such as after it healed (lateactivation.go). Any
+// other lifecycle run, activation or deactivation,
 // runs again through the retry annotation of the Reservation whose
 // step it failed.
 

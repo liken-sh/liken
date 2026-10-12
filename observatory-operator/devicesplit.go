@@ -100,8 +100,8 @@ func familyNumber(name, prefix string) (int32, bool) {
 // device that left its server and still holds the finalizer (shares),
 // then the device that runs its driver. A device that left reads the
 // owner's device while its deactivation runs (status.go), and one that
-// the tree serves takes the properties from it, so a FilterWheel that
-// joins a camera reads the wheel at once.
+// the tree serves takes the properties from it, so the FilterWheel that
+// a camera serves reads the wheel at once.
 func (t *tree) sharers(owner *device) []*device {
 	var served, leaving []*device
 	for _, d := range t.devices {

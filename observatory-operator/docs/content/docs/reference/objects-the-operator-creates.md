@@ -59,7 +59,7 @@ Every pod and `Service` the operator creates has these labels:
 | `app.kubernetes.io/part-of` | `observatory` |
 | `app.kubernetes.io/name` | the object's name, such as `east-telescope`. Each `Service` selects its pod by this label. |
 | `observatory.liken.sh/role` | `server`, `device`, or `guider` |
-| `observatory.liken.sh/server` | the INDI server the pod belongs to, such as `east-telescope`. A device's pod belongs to that server until the pod is gone, so a device that moves to another server runs there in a new pod. |
+| `observatory.liken.sh/server` | the INDI server the pod belongs to, such as `east-telescope`. A device's pod belongs to that server until the pod is gone, and while a session holds the server, the label and not the device's spec places the device. |
 | `observatory.liken.sh/kind` | the kind of the resource that caused the object, such as `Telescope` or `Camera` |
 | `observatory.liken.sh/resource` | that resource's name, such as `east` |
 

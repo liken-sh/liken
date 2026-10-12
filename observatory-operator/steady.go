@@ -5,10 +5,11 @@ package main
 //
 //   - It creates again each pod that is gone, such as one a node's
 //     eviction deleted, and records an Event for each device pod and
-//     guider pod that it creates (recordPod). When the telescope's
-//     devices change, it starts and stops their drivers on the running
-//     server (serverdrivers.go), and deletes the pod of each device
-//     that left (moves.go).
+//     guider pod that it creates (recordPod). When a person deletes a
+//     device, it stops the device's driver on the running server
+//     (serverdrivers.go), and deletes the device's pod (deletes.go).
+//     The servers start no other device until the session ends
+//     (tree.server).
 //   - It keeps the telescope's guider (guidersteady.go).
 //   - It connects and configures again each device whose driver comes
 //     back on its server disconnected. A driver comes back that way
@@ -121,12 +122,11 @@ func (r *runner) keepPods(ctx context.Context, t *tree, ref serverRef, telescope
 
 // keepServer creates one server's pod when it is gone, creates the pod
 // of each of its devices that is gone, sets the server's drivers to the
-// devices, and deletes the pods of the devices that left. The order
-// gives a joining device its power before its pod (powerJoining) and
-// its pod before its driver, and stops a leaving device's driver before
-// its pod goes (serverdrivers.go). A server whose pod is new starts
-// every driver disconnected, so its Switch cannot answer yet, and
-// reapply switches the outputs on when the Switch comes back.
+// devices, and deletes the pods of the devices that a person deleted.
+// The order stops a deleted device's driver before its pod goes
+// (serverdrivers.go). A server whose pod is new starts every driver
+// disconnected, so its Switch cannot answer yet, and reapply switches
+// the outputs on when the Switch comes back.
 func (r *runner) keepServer(ctx context.Context, t *tree, ref serverRef, owner observatory.ObjectMeta, devices []*device) error {
 	about := reference(ref.kind, owner)
 	created, err := r.o.ensureServer(ctx, nil, ref, owner.UID, devices)
@@ -136,37 +136,25 @@ func (r *runner) keepServer(ctx context.Context, t *tree, ref serverRef, owner o
 	if err != nil {
 		return err
 	}
-	joining := joiningServed(t, devices)
-	var powered map[string]string
-	if !created {
-		powered = r.powerJoining(ctx, t, ref, devices)
-	}
 	started, err := r.o.startDevices(ctx, nil, ref, devices)
-	r.recordDevicePods(started, powered)
+	for _, d := range started {
+		name, _ := objectName(d.kind, d.name())
+		r.recordPod(reference(d.kind, d.object.Metadata), name, "")
+	}
 	if err != nil {
 		return err
 	}
-	r.configureJoined(ctx, t, ref, joining)
-	// A served device that left deactivates through its owner's
-	// driver, so it goes before setDrivers stops any driver.
+	// A deleted served device deactivates through its owner's driver,
+	// so it goes before setDrivers stops any driver.
 	if err := r.leaveServed(ctx, t, ref); err != nil {
 		return err
 	}
-	joined, left, err := r.o.setDrivers(ctx, nil, ref, devices)
-	r.recordDrivers(t, ref, about, joined, left)
+	left, err := r.o.setDrivers(ctx, nil, ref, devices)
+	r.recordDrivers(t, ref, about, left)
 	if err != nil {
 		return err
 	}
 	return r.removeStrays(ctx, t, ref)
-}
-
-// recordDevicePods writes an Event and a log line for each device whose
-// pod the runner created, with what powerJoining switched for it.
-func (r *runner) recordDevicePods(devices []*device, powered map[string]string) {
-	for _, d := range devices {
-		name, _ := objectName(d.kind, d.name())
-		r.recordPod(reference(d.kind, d.object.Metadata), name, powered[d.key()])
-	}
 }
 
 // recordServerPod writes an Event and a log line when the runner

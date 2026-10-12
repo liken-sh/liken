@@ -9,29 +9,24 @@ package main
 // it gets no pod and no driver, and reports `Error` with the name of
 // the device that runs the driver.
 //
-// The device that runs is, in order:
-//
-//  1. the device that the server runs now, from its pod's annotation,
-//     so a device that joins never stops one that a holder uses;
-//  2. the device with the older resource, by creation time, so the
-//     choice does not change while neither runs;
-//  3. the device whose kind and name sort first, between devices
-//     created in the same second.
-//
-// The tree makes the choice (devicesOn), so the runner's pods and
-// drivers, activation, and the status writer all use the same one.
+// The device that runs is the device with the older resource, by
+// creation time, so the choice does not change while neither runs, and
+// then the device whose kind and name sort first, between devices
+// created in the same second. The tree makes the choice (devicesOn), so
+// the runner's pods and drivers, activation, and the status writer all
+// use the same one.
 //
 // Activation refuses such a pair instead: the step that starts a
 // server fails, and names both devices and the driver. Otherwise the
 // reservation would become Ready without one of its devices, such as
 // the imaging camera, and only that device's status would say so. A
-// device that joins a running server while its reservation is Ready
-// meets the choice above, and the device that runs stays.
+// device placed on a running server during a session waits for the
+// next session (tree.server), so it never displaces a device that a
+// holder uses.
 
 import (
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -58,7 +53,7 @@ func (t *tree) sharedDrivers() map[*device]*device {
 	for _, d := range devices {
 		if ref, placed := t.server(d); placed {
 			at := slot{ref, d.object.Spec.Driver.Name}
-			if other, ok := runs[at]; !ok || t.runsBefore(ref, d, other) {
+			if other, ok := runs[at]; !ok || runsBefore(d, other) {
 				runs[at] = d
 			}
 		}
@@ -76,29 +71,12 @@ func (t *tree) sharedDrivers() map[*device]*device {
 
 // runsBefore reports whether a server runs device a rather than device
 // b, when both name one driver.
-func (t *tree) runsBefore(ref serverRef, a, b *device) bool {
-	if ra, rb := t.listed(ref, a), t.listed(ref, b); ra != rb {
-		return ra
-	}
+func runsBefore(a, b *device) bool {
 	ca, cb := createdAt(a), createdAt(b)
 	if !ca.Equal(cb) {
 		return ca.Before(cb)
 	}
 	return a.key() < b.key()
-}
-
-// listed reports whether a server's pod names a device in its
-// annotation, which is the list of devices whose drivers it runs.
-func (t *tree) listed(ref serverRef, d *device) bool {
-	server, ok := t.pods[ref.String()]
-	if !ok {
-		return false
-	}
-	object, err := objectName(d.kind, d.name())
-	if err != nil {
-		return false
-	}
-	return slices.Contains(strings.Fields(server.Metadata.Annotations[annotationDrivers]), object+":"+strconv.Itoa(devicePort))
 }
 
 // createdAt answers a device's creation time, or the zero time when the

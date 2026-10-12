@@ -311,9 +311,10 @@ func TestTheDevicesThatServeASwitchPowerTheOthers(t *testing.T) {
 	}
 }
 
-// A served resource that joins a Ready session gets the finalizer and
-// its settings through its owner's device, which runs already.
-func TestAServedResourceThatJoinsAReadySessionGetsItsSettings(t *testing.T) {
+// A served resource created during a session waits for the next one,
+// though its owner's device runs: the session started its owner without
+// it. The next session gives it the finalizer and its settings.
+func TestAServedResourceCreatedDuringASessionWaitsForTheNext(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyWorld(t)
@@ -322,49 +323,36 @@ func TestAServedResourceThatJoinsAReadySessionGetsItsSettings(t *testing.T) {
 		w.put(observatory.FilterWheelKind, "east-new", map[string]any{"opticalTrain": "east-imaging",
 			"device": map[string]any{"kind": "Camera", "name": "east-main"}, "filters": []any{"Clear", "Red"}})
 		want := "east-telescope CCD Simulator.FILTER_NAME FILTER_SLOT_NAME_1=Clear FILTER_SLOT_NAME_2=Red"
-		w.until(time.Minute, "the new filter wheel's names do not reach the camera", func() bool {
-			return slices.ContainsFunc(w.indi.changes(), func(c string) bool { return strings.HasPrefix(c, want) })
-		})
-		time.Sleep(2 * statusWindow)
+		named := func(c string) bool { return strings.HasPrefix(c, want) }
+		time.Sleep(time.Minute)
 		synctest.Wait()
+
 		wheel, _ := decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east-new")
+		if wheel.Status.Phase != observatory.DeviceIdle || wheel.Status.IndiDevice != "" || holdsFinalizer(wheel.Metadata) {
+			t.Errorf("during the session, filter wheel = %s on %q, finalizers %v", wheel.Status.Phase, wheel.Status.IndiDevice, wheel.Metadata.Finalizers)
+		}
+		if slices.ContainsFunc(w.indi.changes(), named) {
+			t.Errorf("changes = %q, want no names before the next session", w.indi.changes())
+		}
+
+		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
+		w.gone(observatory.ReservationKind, "east-tonight", 10*time.Minute)
+		w.reserve("east-later", map[string]any{"telescope": "east", "holder": "desktop"})
+		w.phase("east-later", observatory.ReservationReady, 10*time.Minute)
+		w.settle()
+		if !slices.ContainsFunc(w.indi.changes(), named) {
+			t.Errorf("changes = %q, want %q", w.indi.changes(), want)
+		}
+		wheel, _ = decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east-new")
 		if wheel.Status.Phase != observatory.DeviceConnected || !holdsFinalizer(wheel.Metadata) {
 			t.Errorf("filter wheel = %s, finalizers %v", wheel.Status.Phase, wheel.Metadata.Finalizers)
 		}
 	})
 }
 
-// A served resource that joins a driver that never answers its settings
-// holds the runner no longer than reapplyLimit: it reports the failure,
-// and the runner goes on to create a pod that is gone.
-func TestAServedResourceThatJoinsADriverThatNeverAnswersDoesNotHoldTheRunner(t *testing.T) {
-	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		w := readyWorld(t)
-		w.api.deleteNamed(kindCollection(observatory.FilterWheelKind), "east")
-		w.gone(observatory.FilterWheelKind, "east", 5*time.Minute)
-		w.indi.hold("CCD Simulator", "FILTER_NAME")
-		before := w.indi.count("east-telescope", "CCD Simulator.FILTER_NAME")
-		w.put(observatory.FilterWheelKind, "east-new", map[string]any{"opticalTrain": "east-imaging",
-			"device": map[string]any{"kind": "Camera", "name": "east-main"}, "filters": []any{"Clear", "Red"}})
-		w.until(time.Minute, "the new filter wheel's names are not sent", func() bool {
-			return w.indi.count("east-telescope", "CCD Simulator.FILTER_NAME") > before
-		})
-		w.api.deleteNamed(podsCollection, "east-focuser")
-		w.until(2*reapplyLimit, "the runner does not create the focuser's pod again", func() bool {
-			return slices.Contains(w.api.names(podsCollection), "east-focuser")
-		})
-		w.until(time.Minute, "the new filter wheel shows no fault", func() bool {
-			wheel, _ := decode[observatory.FilterWheel](t, w.api, kindCollection(observatory.FilterWheelKind), "east-new")
-			return wheel.Status.Phase == observatory.DeviceError
-		})
-	})
-}
-
 // A resource whose device defines its interface only after the step
 // that connected it decided that it lacks the interface heals: it
-// reports Connected, gets its settings, and runs its activation, as a
-// resource that joins a Ready session does.
+// reports Connected, gets its settings, and runs its activation.
 func TestAResourceWhoseInterfaceArrivesLateHeals(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -411,8 +399,8 @@ func TestAResourceWhoseInterfaceArrivesLateHeals(t *testing.T) {
 }
 
 // Of two served resources of one kind on one owner, the one that holds
-// the finalizer keeps the device, so one that joins never displaces it,
-// and then the older one.
+// the finalizer keeps the device, so one that waits for the next
+// session never displaces it, and then the older one.
 func TestTheServedResourceThatKeepsTheDevice(t *testing.T) {
 	t.Parallel()
 	early, late := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)

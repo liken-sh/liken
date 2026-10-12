@@ -39,7 +39,7 @@ goes on.
 | `Deactivation` | Runs the deactivation procedures, from the bottom of the tree up: those of the devices of the telescope's trains, then the `Telescope`'s own devices' and its own. When the last telescope in the observatory ends, it then runs the observatory's devices' and the `Observatory`'s own. Every device is still connected. | none: each action's timeout |
 | `StopGuider` | Deletes the guider's pod, `Service`, and `ConfigMap`, while its camera and mount are still connected. | 2 min |
 | `Disconnect` | Disconnects the devices in the reverse order of `Connect`. | 2 min |
-| `StopDevices` | Stops the drivers of the devices that are not `Switch` devices, and deletes their pods. A device whose pod is the only record of its server, because a person deleted the device or its train, keeps its pod until `PowerOff`. | 2 min |
+| `StopDevices` | Stops the drivers of the devices that are not `Switch` devices, and deletes their pods. A device whose pod is the only record of its server, because a person deleted the device or its train, or moved the device during the session, keeps its pod until `PowerOff`. | 2 min |
 | `PowerOff` | Switches the outputs off, except an output that a device on another server still draws from, then stops the `Switch` pods and the telescope's server. | 5 min |
 | `StopSite` | Disconnects the observatory's devices, switches their outputs off, except an output that a device on another server still draws from, and stops its server, unless a reservation of another telescope in the observatory is active. | 5 min |
 
@@ -73,10 +73,10 @@ The operator runs again each `Failed` run of the resource's
 `spec.triggers` whose condition still holds with the same transition
 time, skips the actions that are `Done`, and removes the annotation.
 A run whose condition changed since stays `Failed`. The annotation on
-a device also runs again its `Failed` `activation` after the device
-joined an `Active` parent. Any other run of `activation` or
-`deactivation` runs again through the retry annotation of its
-reservation.
+a device also runs again its `Failed` `activation` that ran after the
+`Activation` step, such as after the device defined its interface's
+properties late. Any other run of `activation` or `deactivation` runs
+again through the retry annotation of its reservation.
 
 One telescope serves one reservation at a time. A second reservation
 of the telescope waits in `Wait`, and its summary names the reservation
@@ -91,63 +91,11 @@ disconnects in KStars stays disconnected. The operator also creates
 the guider's pod again, and connects the camera and the mount of each
 new PHD2 once.
 
-A device that joins or leaves a telescope or the observatory during a
-reservation is an ordinary edit, and the operator refuses no change.
-While the reservation is `Ready`, the server keeps running, and the
-other devices on it stay connected. A device that joins first gets the
-power of the output that its `spec.power` names, as `PowerOn` gives it,
-and the `PodCreated` Event on the device says when the output went on.
-Then it gets its pod, and its driver starts on the running server, and
-the operator connects it, writes its settings, and runs its
-`activation`. A device
-that leaves, to the shelf or to another telescope, first runs its
-`deactivation` through the driver on the server it leaves, within the
-timeouts of its actions. Then its driver stops on the server, also
-after a `deactivation` that failed with a `ProcedureFailed` Warning,
-and the device loses its pod, its `Service`, and its `ResourceClaim`.
-Then the operator switches off the output that the device's
-`spec.power` names, unless another device still draws from the same
-output, and the `PodDeleted` Event says so. A device draws from its
-output while its driver's pod runs on a server that is not stopping,
-and while it waits for its pod on a running server whose reservation
-activates or is `Ready`. A device that a release's `StopDevices`
-stopped draws nothing, so two releases at the same time switch off an
-output that only their devices share. Once its pod is gone, the
-reservation's `PowerOff` no longer finds the device, so this is the
-only time its output goes off.
-A device's pod belongs to the server in its `observatory.liken.sh/server`
-label until the pod is gone. So a device that moves to another
-telescope whose reservation is also active first leaves its old
-server, as above, or leaves in that server's release when its
-reservation ends at the same time. The old server releases it while
-its reservation is `Ready` or `Failed`, and between two activation
-steps. Until then, the device's `Ready` condition is `False` with the
-message `Waiting for east-telescope to release it to west-telescope`,
-and the condition's Event records the move. Only then does the other
-server create a new pod for the device and start its driver, as for
-any device that joins, and run its `activation` once the device is
-connected there. A
-device pod whose server no longer runs belongs to no server, and the
-server that the device now names replaces it.
-A device that a person deletes leaves the same way, as [Deleting a running
-resource](#deleting-a-running-resource) describes. The
-operator posts a `DriverStarted` or a `DriverStopped` Event on the
-`Telescope` or the `Observatory`, and the device that left gets a
-`PodDeleted` Event. The Events name the reservation's phase when the
-device left. A device that leaves during activation keeps its pod
-until the step that runs ends, because the step can act on the
-server's drivers. A device on a telescope with no active reservation
-changes nothing that runs.
-
 INDI names a device after its model, so two devices on one server
 with the same driver define one device, and the second driver breaks
 the first. Activation refuses such a pair: `StartSite` or `PowerOn`
 fails, and its message names both devices and the driver, so a
-reservation never becomes `Ready` without its imaging camera. A device
-that joins a running server during a `Ready` reservation, with a
-driver that a running device holds, never starts. It reports `Error`
-with the name of the device that runs the driver, and the running
-device stays connected.
+reservation never becomes `Ready` without its imaging camera.
 
 While such a pod is gone, its device is `Starting`, and the `Ready`
 message of the device or its `Guider` reads `Creating pod <name>`.
@@ -166,6 +114,44 @@ reason and message. A `ParentFound` that is `False`, a `Ready` whose
 reason is `Error`, and a `Safe` that is `False` are `Warning`s. `kubectl describe` lists them
 for an hour.
 
+## Editing devices during a session
+
+From the step that starts a telescope's INDI server, `PowerOn`, until
+the reservation is `Released`, the server runs the devices that the
+tree placed on it when it started, and no others. The observatory's
+server does the same from `StartSite`, while a reservation of any of
+its telescopes holds it. The operator refuses no edit, and an edit
+that would change which devices a server runs takes effect when the
+session ends:
+
+- A device that a person moves to another telescope, another train,
+  or the shelf stays where it runs. Its driver, its pod, and its power
+  do not change, and it stays connected. Its `ParentFound` condition
+  is `True` with the reason `MovePending` and a message such as
+  `Moves to OpticalTrain west-imaging when Reservation east-tonight
+  ends`, and the condition's Event records the edit. The release
+  stops the device as one of its own: its `deactivation` runs, it
+  disconnects, `PowerOff` switches its output off, and its pod goes.
+  The next session of the telescope that the device names starts it
+  there. A train that a person deletes leaves its devices on the
+  server the same way.
+- A device that a person adds to the telescope, a train, or the
+  observatory of a running server, by creating it or by naming its
+  parent, does not start. It is `Idle`, and its `Ready` message reads
+  `Starts at the next reservation, after Reservation east-tonight
+  ends`. The next session starts it. A resource that another resource's driver serves,
+  such as the `FilterWheel` of a camera, waits the same way.
+- A device that a person deletes while the reservation is `Ready`
+  leaves at once, as
+  [Deleting a running resource](#deleting-a-running-resource)
+  describes.
+
+So each device runs on one server at a time. A device that moved
+between two running servers would need one server to release it while
+the other started it, and the steps of both reservations to agree on
+where it was at each moment. A device on a telescope with no active
+reservation changes nothing that runs.
+
 ## Deleting a running resource
 
 The operator adds the finalizer `observatory.liken.sh/deactivate` to
@@ -179,18 +165,24 @@ operator stopped it:
 | `Telescope` | from when a reservation takes it in `Wait` until that reservation is `Released` |
 | `Observatory` | while a reservation holds any of its telescopes |
 
-A device that a person deletes during a session leaves its server.
+A device that a person deletes while a reservation is `Ready` leaves
+its server, and the server and the other devices on it keep running.
 When its `Telescope` or `Observatory` is `Active`, and the device ran
 its `activation`, the operator first runs its `deactivation` through
 its driver, so a dust cap closes and a dome parks. A `deactivation`
 that fails or times out posts a `ProcedureFailed` Warning, and the
 delete goes on. A device that is not connected skips its actions.
-Then the operator stops the device's driver, deletes its pod, its
-`Service`, and its `ResourceClaim`, and posts a `PodDeleted` Event on
-the device. Then it removes the finalizer, and the device is gone. A
-device deleted during activation goes when the step that runs ends.
-A device deleted before the `Activation` step ran its `activation`
-goes with no procedure.
+Then the operator stops the device's driver on the running server and
+posts a `DriverStopped` Event on the `Telescope` or the `Observatory`.
+It deletes the device's pod, its `Service`, and its `ResourceClaim`,
+and switches off the output that the device's `spec.power` names,
+unless another device that a running server runs names the same
+output. The `PodDeleted` Event on the device says whether the output
+went off. Then the operator removes the finalizer, and the device is
+gone. A device deleted while the reservation activates or is `Failed`
+goes when the reservation is `Ready`, or in its release. A device
+deleted before the `Activation` step ran its `activation` goes with no
+procedure.
 
 When a person deletes a reservation together with devices or the
 resources that place them, as `kubectl delete -f` of a whole inventory
@@ -208,12 +200,9 @@ so `StopDevices` stops its driver and leaves the pod. `PowerOff` then
 switches off the output that the device's `spec.power` names, and
 deletes the pod before the server's pod. A deleted `Switch` switches
 its outputs off the same way, and so does a `Switch` that a person
-moves to another telescope during the release, because its pod still
+moves to another telescope during the session, because its pod still
 runs on the server it left. A deleted `Dome` disconnects in
-`StopSite` before the observatory's server stops.
-A device whose train a person deletes while the reservation is `Ready`
-leaves its server and runs its `deactivation` first, and loses the
-power of its output, as a device put on the shelf does. A `Guider`
+`StopSite` before the observatory's server stops. A `Guider`
 carries no finalizer either, so it is gone at once, and `Abort` finds
 its PHD2 by the guider's pod on the telescope's server, and stops it
 there.

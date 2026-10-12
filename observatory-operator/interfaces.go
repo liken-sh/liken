@@ -206,9 +206,8 @@ func (h handle) serving() bool { return serves(h.client(), h.name, h.d.kind) }
 //     CONNECTION changes, and not before.
 //   - A resource whose device defines its interface's properties after
 //     a verdict that it lacked them heals. It gets the settings that
-//     did not go out, and its activation runs as a resource's that
-//     joins a Ready session (joins.go), because the Activation step
-//     left it out.
+//     did not go out, and its activation runs then
+//     (lateactivation.go), because the Activation step left it out.
 //
 // The work holds the server's lock, and the site's for the
 // observatory's server, which the runners of several telescopes share

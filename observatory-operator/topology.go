@@ -15,8 +15,8 @@ import (
 )
 
 // ensure creates a pod and its Service and claim, or replaces a
-// running pod whose spec differs from the one built now, or that a
-// server which stopped held (current). A pod that
+// running pod whose spec or server differs from the one built now
+// (current). A pod that
 // stops must be gone before the new one of the same name can be
 // created. A write that the API server refuses is sent again (send),
 // and the step's deadline bounds the tries. created reports whether
@@ -72,7 +72,7 @@ func (o *operator) startServer(ctx context.Context, report func(string), ref ser
 	if err != nil {
 		return created, err
 	}
-	_, _, err = o.setDrivers(ctx, report, ref, devices)
+	_, err = o.setDrivers(ctx, report, ref, devices)
 	return created, err
 }
 

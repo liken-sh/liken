@@ -34,13 +34,13 @@ func (o *operator) setOutputs(ctx context.Context, t *tree, devices []*device, p
 			}
 			continue
 		}
-		// A Switch runs on the server that holds its pod until the pod
-		// is gone (tree.heldElsewhere), and is reached there, whatever
-		// its parents say now: a Switch that a person deleted or moved
-		// switches its outputs off on the server it left, during that
-		// server's release. A Switch with no pod is reached on the
-		// server that the tree places it on, which is known unless it is
-		// on the shelf, because a Switch never belongs to a train.
+		// A Switch is reached on the server that its pod runs on,
+		// whatever its parents say now: a Switch that a person deleted,
+		// or moved during the session, switches its outputs off there
+		// during that server's release. A Switch with no pod is reached
+		// on the server that the tree places it on, which is known
+		// unless it is on the shelf, because a Switch never belongs to a
+		// train.
 		ref, installed := t.runningOn(sw)
 		if !installed {
 			ref, installed = t.server(sw)
@@ -82,7 +82,7 @@ func (o *operator) setOutputs(ctx context.Context, t *tree, devices []*device, p
 // unpowered answers the devices whose output no device that draws
 // from it names (draws), apart from the devices of the server that
 // stops: the server whose release switches the outputs off, or none
-// (serverRef{}). A device that leaves, or a server that releases, so
+// (serverRef{}). A deleted device, or a server that releases, so
 // leaves on an output that another device still draws from, such as an
 // output of an observatory's Switch that powers devices on two
 // telescopes.
@@ -103,74 +103,20 @@ func (t *tree) unpowered(devices []*device, stopping serverRef) []*device {
 }
 
 // draws reports whether a device draws from its output on a server
-// other than the one that stops. A device draws while the pod of its
-// driver runs, and is not stopping, on a running server. A device with
-// no pod draws when the tree places it on a running server that a
-// reservation activates or holds Ready, because PowerOn and
-// powerJoining switch its output on before its pod starts. Once a
-// release's StopDevices has deleted the pods, its devices draw nothing,
-// so two releases that overlap do not each leave the other's output
-// on.
+// other than the one that stops: the tree places it on a running
+// server (tree.server), and its pod is not stopping. A device with no
+// pod draws there too, because PowerOn switches its output on before
+// StartDevices creates its pod. Once a release's StopDevices has
+// deleted the pods, the session's set no longer holds its devices, so
+// two releases that overlap do not each leave the other's output on.
 func (t *tree) draws(d *device, stopping serverRef) bool {
-	if _, p, ok := t.podOf(d); ok {
-		on, known := t.serverNamed(p.Metadata.Labels[labelServer])
-		return known && on != stopping && p.Metadata.DeletionTimestamp == nil && t.serverRuns(on)
-	}
 	ref, placed := t.server(d)
-	return placed && ref != stopping && t.serverRuns(ref) && t.inSession(ref)
+	_, p, running := t.podOf(d)
+	return placed && ref != stopping && t.serverRuns(ref) && !(running && p.Metadata.DeletionTimestamp != nil)
 }
 
 // serverRuns reports whether a server's pod exists and is not stopping.
 func (t *tree) serverRuns(ref serverRef) bool {
 	p, ok := t.pods[ref.String()]
 	return ok && p.Metadata.DeletionTimestamp == nil
-}
-
-// inSession reports whether a reservation that runs a server activates
-// or is Ready: the reservation of the telescope, or of any telescope in
-// the observatory.
-func (t *tree) inSession(ref serverRef) bool {
-	for _, res := range t.reservations {
-		telescope, ok := t.telescopes[res.Spec.Telescope]
-		runs := ok && (ref == serverRef{observatory.TelescopeKind, telescope.Metadata.Name} ||
-			ref == serverRef{observatory.ObservatoryKind, telescope.Spec.Observatory})
-		if phase := res.Status.Phase; runs && (phase == observatory.ReservationActivating || phase == observatory.ReservationReady) {
-			return true
-		}
-	}
-	return false
-}
-
-// powerJoining switches on the output that each device without a pod
-// on a running server names, before the runner creates the pod, as
-// PowerOn does before StartDevices. A device that joins the server
-// while the reservation is Ready can name an output that is off: the
-// output of a camera that left switched off with it. A driver of real
-// hardware connects only to a device with power, and a pod with a claim
-// stays Pending until its device appears. powerJoining answers what it
-// switched for each device, by the device's key, for the Event on the
-// device's new pod.
-//
-// A device whose pod is gone for another reason, such as an eviction,
-// names an output that is on already, and powerJoining sends nothing
-// for it. A failure does not stop the pod: the Switch can be the device
-// that is coming back, and reapply switches every output on again when
-// the Switch's driver comes back.
-func (r *runner) powerJoining(ctx context.Context, t *tree, ref serverRef, devices []*device) map[string]string {
-	out := map[string]string{}
-	for _, d := range driverDevices(devices) {
-		name, err := objectName(d.kind, d.name())
-		if _, running := t.pods[name]; err != nil || running || d.object.Spec.Power == nil {
-			continue
-		}
-		notes, err := r.o.setOutputs(ctx, t, []*device{d}, true)
-		if err != nil {
-			r.o.logf("Reservation %s: switching on the output of %s, which joins %s: %v", r.name, d.key(), ref, err)
-			continue
-		}
-		if len(notes) > 0 {
-			out[d.key()] = sentence(strings.Join(notes, "; ")) + "."
-		}
-	}
-	return out
 }

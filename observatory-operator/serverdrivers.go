@@ -1,8 +1,9 @@
 package main
 
-// A device can join or leave a server while a reservation is Ready. A
-// restart of the server would disconnect every other device on it and
-// end an exposure in progress, so the server's pod does not change.
+// A device leaves a running server when a person deletes it, and every
+// device leaves when the release stops it. A restart of the server
+// would disconnect every other device on it and end an exposure in
+// progress, so the server's pod does not change, and its drivers do.
 // The operator writes the server's devices in the annotation
 // annotationDrivers, one address on each line. The pod mounts the
 // annotation as a file through a downward API volume, and indi-shim,
@@ -18,11 +19,11 @@ package main
 // only at the kubelet's next sync of the pod, up to about a minute
 // later.
 //
-// A Ready reservation's runner orders the work for a device that joins
-// and one that leaves (steady.go). A joining device gets its pod first
-// and then its driver, so the shim dials a pod that exists. A leaving
-// device loses its driver first and then its pod, so indiserver does
-// not restart a shim whose pod is gone.
+// A server's pod lists each device's driver when the pod is created,
+// so a pod that is gone and created again keeps its driver, and the
+// shim dials the new pod. A leaving device loses its driver first and
+// then its pod, so indiserver does not restart a shim whose pod is gone
+// (steady.go, deactivation.go).
 
 import (
 	"context"
@@ -31,7 +32,6 @@ import (
 	"maps"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -40,16 +40,10 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/indi"
 )
 
-const (
-	// reasonDriverStarted is the reason of the Event on a Telescope or
-	// an Observatory whose running server started the driver of a
-	// device that joined it.
-	reasonDriverStarted = "DriverStarted"
-	// reasonDriverStopped is the reason of the Event on a Telescope or
-	// an Observatory whose running server stopped the driver of a
-	// device that left it.
-	reasonDriverStopped = "DriverStopped"
-)
+// reasonDriverStopped is the reason of the Event on a Telescope or an
+// Observatory whose running server stopped the driver of a device that
+// a person deleted.
+const reasonDriverStopped = "DriverStopped"
 
 // driverStopLimit bounds the wait for a running server to report the
 // driver of a leaving device stopped. It is a clock. The shim stops the
@@ -94,39 +88,31 @@ func (m *driversMemo) wrote(p *pod, list string) {
 }
 
 // setDrivers writes the devices of a running server in its pod's
-// annotation, and answers the devices that joined the server and the
-// pods of the devices that left it. A server whose pod is gone has
-// nothing to change: the next pod starts with the devices of the pod
-// that ensure creates.
+// annotation, and answers the pods of the devices that left it. A
+// server whose pod is gone has nothing to change: the next pod starts
+// with the devices of the pod that ensure creates.
 //
-// A device that left while its parent is Active runs its deactivation
-// before its driver stops (leaves.go). setDrivers returns only after
+// A deleted device that left while its parent is Active runs its
+// deactivation before its driver stops (leaves.go). setDrivers returns only after
 // the server reports the driver of each device that left stopped, or
 // after driverStopLimit, so the caller can delete those pods
 // (stopping).
-func (o *operator) setDrivers(ctx context.Context, report func(string), ref serverRef, devices []*device) (joined []*device, left []string, err error) {
+func (o *operator) setDrivers(ctx context.Context, report func(string), ref serverRef, devices []*device) (left []string, err error) {
 	want, err := driverList(devices)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	t := o.snapshot()
 	running, ok := t.pods[ref.String()]
 	if !ok || running.Metadata.DeletionTimestamp != nil {
-		return nil, nil, nil
+		return nil, nil
 	}
 	have := o.serverDrivers.current(running)
 	if have == want {
-		return nil, nil, nil
-	}
-	before := strings.Fields(have)
-	for _, d := range driverDevices(devices) {
-		object, _ := objectName(d.kind, d.name())
-		if !slices.Contains(before, object+":"+strconv.Itoa(devicePort)) {
-			joined = append(joined, d)
-		}
+		return nil, nil
 	}
 	after := strings.Fields(want)
-	for _, address := range before {
+	for _, address := range strings.Fields(have) {
 		if !slices.Contains(after, address) {
 			name, _, _ := strings.Cut(address, ":")
 			left = append(left, name)
@@ -137,18 +123,15 @@ func (o *operator) setDrivers(ctx context.Context, report func(string), ref serv
 	defer cancel()
 	body, err := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": map[string]string{annotationDrivers: want}}})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if err := o.send(ctx, report, "setting the drivers of pod "+ref.String(), func() error {
 		return o.client.Request(http.MethodPatch, podPath(o.namespace, ref.String()), mergePatch, body, nil)
 	}); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	o.serverDrivers.wrote(running, want)
-	if err := stopped(); err != nil {
-		return joined, left, err
-	}
-	return joined, left, nil
+	return left, stopped()
 }
 
 // stopping opens a subscription to a server before the patch that
@@ -241,22 +224,17 @@ func podDriver(p *pod) string {
 }
 
 // recordDrivers posts an Event on a Telescope or an Observatory for
-// each driver that its running server started or stopped. t names the
-// device of each pod that left, from the pod's labels, because the
-// device itself can be deleted already.
-func (r *runner) recordDrivers(t *tree, ref serverRef, about events.ObjectReference, joined []*device, left []string) {
-	for _, d := range joined {
-		r.o.recorder.Normal(about, reasonDriverStarted,
-			fmt.Sprintf("Started the driver of %s %s on server %s while Reservation %s is %s. The server did not restart.", d.kind.Name, d.name(), ref, r.name, r.status.Phase))
-		r.o.logf("Reservation %s: started the driver of %s on %s", r.name, d.key(), ref)
-	}
+// each driver that its running server stopped while the reservation is
+// Ready. t names the device of each pod that left, from the pod's
+// labels, because the device itself can be gone already.
+func (r *runner) recordDrivers(t *tree, ref serverRef, about events.ObjectReference, left []string) {
 	for _, name := range left {
 		device := "pod " + name
 		if p, ok := t.pods[name]; ok {
 			device = p.Metadata.Labels[labelKind] + " " + p.Metadata.Labels[labelResource]
 		}
 		r.o.recorder.Normal(about, reasonDriverStopped,
-			fmt.Sprintf("Stopped the driver of %s on server %s while Reservation %s is %s. The server did not restart.", device, ref, r.name, r.status.Phase))
+			fmt.Sprintf("Stopped the driver of %s on server %s while Reservation %s is Ready. The server did not restart.", device, ref, r.name))
 		r.o.logf("Reservation %s: stopped the driver of %s on %s", r.name, device, ref)
 	}
 }

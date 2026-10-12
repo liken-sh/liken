@@ -2,13 +2,12 @@ package main
 
 // Two devices on one server that name the same driver. INDI names a
 // device after its model, so both drivers would define one device, and
-// the second driver would break the first. One device runs, and the
-// other never starts and reports Error. At activation, such a pair
-// fails the step that starts the server.
+// the second driver would break the first. At activation, such a pair
+// fails the step that starts the server, and a device placed beside a
+// running one during a session waits for the next session.
 
 import (
 	"slices"
-	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -43,20 +42,16 @@ func TestOneOfTwoDevicesWithTheSameDriverRuns(t *testing.T) {
 	cases := []struct {
 		name    string
 		devices []*device
-		running string
 		winner  string
 		loser   string
 	}{
-		{name: "the running device, though the other is older", devices: []*device{focuserOn("aaa", early), focuserOn("east", late)}, running: "east-focuser:7625\n", winner: "east", loser: "aaa"},
-		{name: "the older device, while neither runs", devices: []*device{focuserOn("aaa", late), focuserOn("east", early)}, winner: "east", loser: "aaa"},
+		{name: "the older device", devices: []*device{focuserOn("aaa", late), focuserOn("east", early)}, winner: "east", loser: "aaa"},
 		{name: "the first name, between devices of one age", devices: []*device{focuserOn("spare", early), focuserOn("east", early)}, winner: "east", loser: "spare"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			tr := &tree{devices: c.devices, pods: map[string]*pod{
-				"east-telescope": {Metadata: meta{Name: "east-telescope", Annotations: map[string]string{annotationDrivers: c.running}}},
-			}}
+			tr := &tree{devices: c.devices, pods: map[string]*pod{}}
 			on := tr.devicesOn(serverRef{observatory.TelescopeKind, "east"})
 			if len(on) != 1 || on[0].name() != c.winner {
 				t.Errorf("devicesOn = %q, want %s alone", names(on), c.winner)
@@ -73,28 +68,21 @@ func TestOneOfTwoDevicesWithTheSameDriverRuns(t *testing.T) {
 	}
 }
 
-// A device that joins a Ready telescope with a driver that a running
-// device holds never starts, and the running device stays. At
-// activation, the same pair fails the step instead (failures_test.go).
+// A device placed beside a running device with the same driver during
+// a session never starts, and the running device stays connected, also
+// after the second device goes back to the shelf. At activation, the
+// same pair fails the step instead (failures_test.go).
 func TestASecondDeviceWithTheSameDriverNeverStarts(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		w := startWorld(t)
-		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
-		w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
+		w := readyWorld(t)
 		w.put(observatory.FocuserKind, "spare", map[string]any{"opticalTrain": "east-guiding", "driver": map[string]any{"name": "indi_simulator_focus"}})
-		w.until(time.Minute, "the second focuser is not in Error", func() bool {
+		w.until(time.Minute, "the second focuser is not Idle", func() bool {
 			f, _ := decode[observatory.Focuser](t, w.api, kindCollection(observatory.FocuserKind), "spare")
-			return f.Status.Phase == observatory.DeviceError
+			return f.Status.Phase == observatory.DeviceIdle
 		})
-		time.Sleep(2 * statusWindow)
-		synctest.Wait()
+		w.settle()
 
-		second, _ := decode[observatory.Focuser](t, w.api, kindCollection(observatory.FocuserKind), "spare")
-		want := "Failed: Focuser east runs driver indi_simulator_focus on server east-telescope already"
-		if ready := second.Status.Conditions[1]; !strings.HasPrefix(ready.Message, want) {
-			t.Errorf("Ready = %+v, want a message that begins %q", ready, want)
-		}
 		first, _ := decode[observatory.Focuser](t, w.api, kindCollection(observatory.FocuserKind), "east")
 		if first.Status.Phase != observatory.DeviceConnected {
 			t.Errorf("Focuser east = %+v", first.Status)
@@ -103,17 +91,13 @@ func TestASecondDeviceWithTheSameDriverNeverStarts(t *testing.T) {
 		if slices.Contains(w.api.names(podsCollection), "spare-focuser") || slices.Contains(links(server), "spare-focuser") {
 			t.Errorf("pods %v, drivers %v", w.api.names(podsCollection), links(server))
 		}
-		if r, _ := w.reservation("east-tonight"); r.Status.Phase != observatory.ReservationReady {
-			t.Errorf("the reservation is %s", r.Status.Phase)
-		}
 
 		w.put(observatory.FocuserKind, "spare", map[string]any{"driver": map[string]any{"name": "indi_simulator_focus"}})
 		w.until(time.Minute, "the second focuser is not on the shelf", func() bool {
 			f, _ := decode[observatory.Focuser](t, w.api, kindCollection(observatory.FocuserKind), "spare")
 			return f.Status.Phase == observatory.DeviceInventory
 		})
-		time.Sleep(2 * statusWindow)
-		synctest.Wait()
+		w.settle()
 		if first, _ := decode[observatory.Focuser](t, w.api, kindCollection(observatory.FocuserKind), "east"); first.Status.Phase != observatory.DeviceConnected {
 			t.Errorf("after the second focuser left, Focuser east = %+v", first.Status)
 		}

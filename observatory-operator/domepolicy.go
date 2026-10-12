@@ -6,13 +6,14 @@ package main
 // dome that no longer exists, until its driver restarts or the next
 // Configure. So the lock relay's pass also writes the policy: when an
 // observatory's last dome goes, each running mount of it gets
-// DOME_IGNORED at once, and when a dome comes, DOME_LOCKS. The write
+// DOME_IGNORED at once. A dome declared during a session waits for the
+// next one (tree.server), whose Configure writes DOME_LOCKS. The write
 // saves the driver's configuration, as Configure's does (lockPolicy).
 //
 // The pass acts only on a telescope whose reservation is Ready.
 // Activation's Configure step writes the policy, and the operator
 // writes a mount's settings again when its driver restarts during a
-// session (steady.go), so the pass covers a dome that comes or goes.
+// session (steady.go), so the pass covers a dome that a person deletes.
 // One write to a mount runs at a time: each save rewrites the driver's
 // configuration file, and the server's epoch moves with each property
 // that a driver defines while the write is on its way.

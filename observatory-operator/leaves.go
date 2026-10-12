@@ -1,39 +1,36 @@
 package main
 
-// A device can leave a running server while its Telescope or
-// Observatory is Active: a person puts it on the shelf, or names
-// another parent. Its driver then stops (serverdrivers.go), and a dust
-// cap left open would stay open. So before the driver stops, the
-// operator runs the device's deactivation through that driver. The
-// run ends the device's part in the activity that its activation began,
-// so its since is the time its old parent turned Active, the same as
-// the since of its activation. An operator restart during the run
-// finds the device still in the server's annotation, and resumes the
-// run from its record.
+// A device that a person deletes leaves its running server while its
+// Telescope or Observatory is Active. Its driver then stops
+// (serverdrivers.go), and a dust cap left open would stay open. So
+// before the driver stops, the operator runs the device's deactivation
+// through that driver. The finalizer keeps the deleted device's object,
+// and so its spec, until its pod is gone (finalizers.go). The run ends
+// the device's part in the activity that its activation began, so its
+// since is the time its parent turned Active, the same as the since of
+// its activation. An operator restart during the run finds the device
+// still in the server's annotation, and resumes the run from its
+// record.
 //
 // The run acts on the device where it was: a reference in an action
-// resolves against the old parent, and the action reaches the device
-// through the old server. A device that is not connected skips each
+// resolves against its parent, and the action reaches the device
+// through the server. A device that is not connected skips each
 // action, as in the Deactivation step. A failure posts
 // ProcedureFailed, and the driver stops anyway after the run ends,
 // because the device is out of the operator's care.
 //
-// A device that a person deleted leaves the same way. The finalizer
-// keeps its object, and so its spec, until its pod is gone
-// (finalizers.go). A device with an activation runs its deactivation
-// only when its activation ran for the same transition: a dust cap
-// deleted during activation, before the Activation step reached it, was
-// never opened, and goes with no procedure. A device with no
-// activation runs its deactivation whenever its parent is Active,
-// because a person can change it during the session, such as a flat
-// panel lit by hand.
+// A device with an activation runs its deactivation only when its
+// activation ran for the same transition: a dust cap deleted during
+// activation, before the Activation step reached it, was never opened,
+// and goes with no procedure. A device with no activation runs its
+// deactivation whenever its parent is Active, because a person can
+// change it during the session, such as a flat panel lit by hand.
 //
 // A device deleted together with its reservation, as `kubectl delete
 // -f` of a whole observatory deletes them, runs its deactivation in
 // the reservation's Deactivation step instead. The Ready runner that
 // would find it leaving has stopped, and the step reaches it through
-// the server it left (tree.runningOn). So does a device whose train is
-// deleted together with its reservation.
+// the server its pod runs on (tree.runningOn).
 
 import (
 	"context"
@@ -44,10 +41,9 @@ import (
 )
 
 // leavers answers the devices of the pods that left a server whose
-// objects still exist: the same object, by UID, with another parent,
-// none, or a deletionTimestamp. A pod whose device the step stops,
-// with its parent unchanged, and the pod of a device that is gone, are
-// not leavers.
+// objects still exist: the same object, by UID, that the server no
+// longer runs, because a person deleted it. A pod whose device the
+// step stops, and the pod of a device that is gone, are not leavers.
 func leavers(t *tree, ref serverRef, pods []string) []resource {
 	var out []resource
 	for _, name := range pods {
@@ -106,9 +102,6 @@ func (o *operator) deactivateLeft(ctx context.Context, ref serverRef, left []res
 			continue
 		}
 		group.Go(func() {
-			// The device's activation answered this transition, and a
-			// rejoin must answer it again (joins.go).
-			o.runs.drop(r.record(), observatory.TriggerActivation)
 			err := o.runProcedure(ctx, procCall{res: r, trigger: observatory.TriggerDeactivation,
 				actions: r.procedures.Deactivation, since: state.since, ending: true, on: ref})
 			if err != nil {
