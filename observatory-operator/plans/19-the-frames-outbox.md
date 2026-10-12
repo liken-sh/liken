@@ -1,7 +1,9 @@
 # 19, The frames outbox
 
-Proposed on 2026-10-12, and designed and built on 2026-10-12. The
-design below answers what the design conversation left open.
+Proposed on 2026-10-12, and designed and built on 2026-10-12. Drilled
+on the QEMU dev cluster on 2026-10-12, with INDI simulators; [the
+drill](#the-drill) records the results. The design below answers what
+the design conversation left open.
 
 ## The problem
 
@@ -91,6 +93,61 @@ network while the night runs.
 - **A camera cannot be shared by two telescopes,** because each device
   has one parent and runs on one server at a time. So the question of
   which outbox a shared camera writes to does not come up.
+
+## The drill
+
+The drill ran on 2026-10-12 on the QEMU dev cluster, with two guests:
+`node-1`, a leader with 2 GB of memory, and `node-4`, a follower with
+3 GB. The operator was built from 1f01d28d and reached the lab
+through the lab registry as `ghcr.io/liken-sh/observatory-operator:dev`.
+The observatory was a copy of `examples/simulators.yaml`, and
+`Reservation east-tonight` named the outbox `frames`, a `local-path`
+claim of 1Gi with the access mode `ReadWriteOnce`.
+
+The drill deleted `Guider east` after the first check. The guider's
+pod pulls the `weston` image from ghcr.io, about 270 MB, and the
+laptop's link was too slow for that download. With no `Guider`, the
+telescope has no guide camera, so `Camera east-guide` is an imaging
+camera and mounts the outbox too, as the design says.
+
+| Check | Result |
+|---|---|
+| Reserve `east` with `Guider east`, and read the pods during `Activation`, before `StartGuider` pulls weston | `east-main-camera` mounted `frames` at `/outbox`, with `fsGroup: 1000` and `fsGroupChangePolicy: OnRootMismatch`. `east-guide-camera` had only its `tmp` volume and no pod security context. The drill then ended the reservation, and no guider pod started. |
+| Reserve `east` with no `Guider` | `Ready` 81 s after creation. `status.session.outbox` was `{claimName: frames}`. Both camera pods mounted `frames` at `/outbox` with `fsGroup` 1000, and no other device pod mounted it. |
+| Read the main camera's upload settings through a port forward to `east-telescope` | `UPLOAD_DIR` was `/outbox`, `UPLOAD_PREFIX` was the driver's default `IMAGE_XXX`, and `UPLOAD_MODE` was `UPLOAD_BOTH`. |
+| Take two exposures of 1 s | The client received each frame as a BLOB 1.6 s after the request: 2,629,440 bytes of FITS, 1280 by 1024 pixels of 16 bits. The driver reported `Image saved to /outbox/IMAGE_001.fits`, and then `IMAGE_002.fits`. |
+| Read the claim from a `busybox` pod that mounts `frames` read-only | Two files of 2,629,440 bytes, owned by user and group 1000, with the mode `0644`. The root of the volume was owned by root and group 1000, with the mode `2777`, so the kubelet had set the group from `fsGroup`. Each header held `INSTRUME = 'CCD Simulator'`, `EXPTIME = 1`, `CCD-TEMP = -10`, and `FILTER = 'Luminance'`. |
+| Change `spec.outbox.claimName` to `frames-elsewhere` while the reservation is `Ready` | 30 s later, both camera pods had the same UIDs and a `restartCount` of 0, and `status.session.outbox` still named `frames`. |
+| End the reservation | Released 76 s after the delete, and 63 s of that was the camera's warm-up. A new read-only pod found both files with the same sizes. |
+| Reserve `east` with the outbox `nope`, a claim that does not exist | `Failed` 10 s after creation. The summary of `PowerOn` was "missing PersistentVolumeClaim nope in namespace observatory, which spec.outbox.claimName names", and no `east-telescope` pod started. |
+| Create the claim `nope`, and annotate `observatory.liken.sh/retry=1` | A `Retry` `Event`, "Retrying PowerOn", and `Ready` 52 s after the annotation. The operator removed the annotation, `status.session.outbox` named `nope`, and `east-main-camera` mounted `nope`. |
+
+In the reservation with no `Guider`, the steps took 27 s for
+`StartSite`, 4 s for `PowerOn`, 15 s for `StartDevices`, 2 s for
+`Connect`, 1 s for `Configure`, and 31 s for `Activation`, most of
+which was the camera's cooling to -10 °C.
+
+After the edit of `spec.outbox.claimName`, the reservation's
+`metadata.generation` was 2 and its `status.observedGeneration` stayed
+1. The runner writes a reservation's status when a step changes, and
+a `Ready` reservation runs no step, so `observedGeneration` stays
+behind after any edit of the spec, not only an edit of the outbox.
+
+The first reservation with no `Guider` failed on `node-1`, for a cause
+outside this plan. The kubelet evicted every pod of the observatory
+for low ephemeral storage, with 96 MB free against a threshold of
+100 MB, and `Activation` failed when the camera's connection ended.
+On these guests, `/var/lib/rancher` is a 1.9 GiB partition of the
+state disk, and it holds the k3s data, etcd, and the images. The
+kubelet's image collection then deleted the `indi-simulators` image
+from `node-1`. The drill put a `NoSchedule` taint on `node-1`, made
+the claim `frames` again so that it bound on `node-4`, and ran the
+other checks on `node-4`. There, the same partition kept 488 MiB free
+while the telescope was `Ready`. Apart from those evictions and the
+expected failure of `PowerOn`, the drill saw no `Warning` `Event`. The
+log of the operator pod on `node-4` held no error, except the two INDI
+connections that ended when `PowerOff` and `StopSite` stopped their
+servers.
 
 ## Still open
 
