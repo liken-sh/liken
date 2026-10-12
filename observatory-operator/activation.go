@@ -42,6 +42,8 @@ var stepTimeouts = map[observatory.StepName]time.Duration{
 
 // activate runs the activation steps that are not finished, in order,
 // until the telescope is Ready, a step fails, or the reservation ends.
+// After each step, it releases the devices that left the servers
+// during the step (releaseLeft).
 func (r *runner) activate(ctx context.Context) {
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
@@ -64,6 +66,7 @@ func (r *runner) activate(ctx context.Context) {
 		if err := r.runStep(ctx, name, steps[name]); err != nil {
 			return
 		}
+		r.releaseLeft(ctx)
 	}
 	r.status.Phase, r.status.Step = observatory.ReservationReady, ""
 	r.save(ctx)

@@ -84,7 +84,7 @@ func (o *operator) joinActivation(ctx context.Context, t *tree, r resource, k *c
 	// device reads now. A new run, or one run again, needs a connected
 	// device.
 	resumed := answered && !rerun
-	if !o.governedByReady(t, r) || (!resumed && !connectedNow(r.device)) {
+	if !o.governedByReady(t, r) || (!resumed && !t.connectedNow(r.device)) {
 		return
 	}
 	if !answered {
@@ -97,15 +97,24 @@ func (o *operator) joinActivation(ctx context.Context, t *tree, r resource, k *c
 		actions: r.procedures.Activation, since: state.since, rerun: rerun}, &k.group)
 }
 
-// connectedNow reports whether a device's stored status reads it
-// Connected for its current spec. A device that leaves and joins again
-// changes its spec twice, and its status reads Connected from before
-// the leave until the status writer reads the device's new pod, whose
-// driver starts disconnected. The status writer records the generation
-// it read, so a status of an older generation is stale.
-func connectedNow(d *device) bool {
+// connectedNow reports whether a device is connected on the server
+// that its parents place it on: its stored status reads Connected on
+// that server for its current spec, and the pod of its driver runs
+// there. A device that leaves and joins again changes its spec twice,
+// and its status reads Connected from before the leave until the status
+// writer reads the device's new pod, whose driver starts disconnected.
+// The status writer records the generation it read, so a status of an
+// older generation is stale. A device that moves to another running
+// server stays on the server it left while its deactivation runs there
+// (tree.heldElsewhere), and its status reads Connected on that server
+// for the new spec, so the server in the status and in the pod must be
+// the one the device joins.
+func (t *tree) connectedNow(d *device) bool {
 	s := d.object.Status
-	return s.Phase == observatory.DeviceConnected && s.ObservedGeneration == d.object.Metadata.Generation
+	ref, placed := t.server(d)
+	on, running := t.runningOn(d)
+	return placed && running && on == ref && s.Endpoint != nil && s.Endpoint.Service == ref.String() &&
+		s.Phase == observatory.DeviceConnected && s.ObservedGeneration == d.object.Metadata.Generation
 }
 
 // governedByReady reports whether a reservation that governs a device

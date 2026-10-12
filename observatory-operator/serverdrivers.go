@@ -247,7 +247,7 @@ func podDriver(p *pod) string {
 func (r *runner) recordDrivers(t *tree, ref serverRef, about events.ObjectReference, joined []*device, left []string) {
 	for _, d := range joined {
 		r.o.recorder.Normal(about, reasonDriverStarted,
-			fmt.Sprintf("Started the driver of %s %s on server %s while Reservation %s is Ready. The server did not restart.", d.kind.Name, d.name(), ref, r.name))
+			fmt.Sprintf("Started the driver of %s %s on server %s while Reservation %s is %s. The server did not restart.", d.kind.Name, d.name(), ref, r.name, r.status.Phase))
 		r.o.logf("Reservation %s: started the driver of %s on %s", r.name, d.key(), ref)
 	}
 	for _, name := range left {
@@ -256,7 +256,7 @@ func (r *runner) recordDrivers(t *tree, ref serverRef, about events.ObjectRefere
 			device = p.Metadata.Labels[labelKind] + " " + p.Metadata.Labels[labelResource]
 		}
 		r.o.recorder.Normal(about, reasonDriverStopped,
-			fmt.Sprintf("Stopped the driver of %s on server %s while Reservation %s is Ready. The server did not restart.", device, ref, r.name))
+			fmt.Sprintf("Stopped the driver of %s on server %s while Reservation %s is %s. The server did not restart.", device, ref, r.name, r.status.Phase))
 		r.o.logf("Reservation %s: stopped the driver of %s on %s", r.name, device, ref)
 	}
 }

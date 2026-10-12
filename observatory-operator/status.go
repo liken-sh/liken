@@ -197,16 +197,25 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 	// A device that left its server, by a move or a delete, keeps its
 	// pod there while its deactivation runs (leaves.go). Its status
 	// reads that server until the driver stops, so a person who watches
-	// the delete reads the cap close. A device names a server only while
-	// the pod of its driver runs, because a client that dials the
-	// endpoint of a device with no pod finds no driver there.
+	// the delete reads the cap close. A device that moved to another
+	// running server waits for the server it left to release it
+	// (tree.heldElsewhere).
 	at, readable := ref.String(), placed
 	left := hasPod && (!placed || p.Metadata.Labels[labelServer] != ref.String())
 	if left {
 		at, readable = p.Metadata.Labels[labelServer], p.Metadata.DeletionTimestamp == nil
 	}
-	if hasPod && (placed || readable) {
-		next.Endpoint = &observatory.Endpoint{Service: at, Host: serviceHost(at, o.namespace), Port: serverPort}
+	moving := left && placed && t.heldElsewhere(d, ref.String())
+	// The endpoint names the server in the label of the pod of the
+	// device's driver, while that pod runs and is not stopping. A
+	// device's driver stops on its server before the operator deletes
+	// its pod (serverdrivers.go), so a client that dials the endpoint of
+	// a device whose pod is stopping, or that has no pod, finds no
+	// driver there. A device that moved names the server it left until
+	// that server deletes its pod.
+	if hasPod && p.Metadata.DeletionTimestamp == nil {
+		on := p.Metadata.Labels[labelServer]
+		next.Endpoint = &observatory.Endpoint{Service: on, Host: serviceHost(on, o.namespace), Port: serverPort}
 	}
 	serving := false
 	if server, open := o.servers.get(at); readable && !refused && hasPod && open && server.client.Connected() {
@@ -263,7 +272,12 @@ func (o *operator) deviceStatus(t *tree, d *device) deviceStatus {
 		message = fmt.Sprintf("Waiting for %s to define %s", next.IndiDevice, strings.Join(observatory.Standards[d.kind].Detect, " or "))
 	}
 	ready := condition(observatory.ConditionReady, observatory.ConditionFalse, string(next.Phase), message)
-	if next.Phase == observatory.DeviceConnected {
+	switch {
+	case moving:
+		// The device is not ready where its spec places it until the
+		// server it left releases it, whatever it reads there.
+		ready.Message = fmt.Sprintf("Waiting for %s to release it to %s", at, ref)
+	case next.Phase == observatory.DeviceConnected:
 		ready = condition(observatory.ConditionReady, observatory.ConditionTrue, string(next.Phase), deviceMessage(next, d.kind, at, name, "", standing))
 	}
 	next.Conditions = []observatory.Condition{parent, ready}

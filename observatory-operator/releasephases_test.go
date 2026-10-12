@@ -90,6 +90,39 @@ func TestAReleasedDeviceNamesNoServer(t *testing.T) {
 	})
 }
 
+// A device names the server whose pod holds it while that pod runs,
+// and no server once the pod stops, because its driver stopped on that
+// server before the delete. A device that moved to another telescope
+// names the server it left until then, the same as one put on the
+// shelf. The hold keeps the focuser's pod terminating.
+func TestADeviceWhosePodStopsNamesNoServer(t *testing.T) {
+	t.Parallel()
+	cases := []struct{ name, field, parent string }{
+		{"to the shelf", "", ""},
+		{"to west", "opticalTrain", "west-imaging"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				w := twoReadyWorld(t)
+				w.holdPod("east-focuser")
+				w.moveDevice(observatory.FocuserKind, "east", c.field, c.parent)
+				w.until(5*time.Minute, "the focuser's pod does not stop", func() bool {
+					object, _ := w.api.object(podsCollection, "east-focuser")
+					return object["metadata"].(map[string]any)["deletionTimestamp"] != nil
+				})
+				w.settle()
+
+				focuser, _ := decode[observatory.Focuser](t, w.api, kindCollection(observatory.FocuserKind), "east")
+				if s := focuser.Status; s.Endpoint != nil {
+					t.Errorf("the focuser = %s at %+v, want no endpoint", s.Phase, s.Endpoint)
+				}
+			})
+		})
+	}
+}
+
 // A person deletes the reservation and its OpticalTrain in one
 // command. The devices of the train stay, and their pods are the only
 // record of the server they ran on. The Disconnect step disconnects

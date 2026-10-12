@@ -186,3 +186,38 @@ func parked(w *world, device string) {
 	w.indi.report(device, "TELESCOPE_PARK", "PARK", "On")
 	w.indi.report(device, "TELESCOPE_PARK", "UNPARK", "Off")
 }
+
+// A dust cap that moves to another Ready telescope closes on the server
+// it left, and opens on the server it joined once its driver runs
+// there. Its activation waits for the cap's driver on the new server,
+// not for a status that the old server's driver writes while the cap's
+// deactivation closes it there. The hold on the park keeps the cap on
+// east while it closes, and the cap's driver on west starts parked.
+func TestADustCapMovedToAnotherReadyTelescopeOpensThere(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := twoReadyWorld(t)
+		w.indi.hold("Dust Cover Simulator", "CAP_PARK")
+		w.indi.preset("Dust Cover Simulator", "CAP_PARK", "PARK")
+		moved := time.Now()
+		from := len(w.indi.changes())
+
+		w.put(observatory.DustCapKind, "east", map[string]any{"opticalTrain": "west-imaging", "driver": map[string]any{"name": "indi_simulator_dustcover"}, "power": map[string]any{"switch": "east", "output": 3}, "activation": []any{map[string]any{"state": "Open"}}, "deactivation": []any{map[string]any{"state": "Closed"}}})
+		time.Sleep(30 * time.Second)
+		w.indi.release("Dust Cover Simulator", "CAP_PARK")
+		w.indi.report("Dust Cover Simulator", "CAP_PARK", "PARK", "On")
+		w.indi.report("Dust Cover Simulator", "CAP_PARK", "UNPARK", "Off")
+		var run observatory.ProcedureRun
+		w.until(10*time.Minute, "the cap's activation does not end after the move", func() bool {
+			run = lastRun(t, w, observatory.DustCapKind, "east", observatory.TriggerActivation)
+			return run.StartTime != nil && !run.StartTime.Before(moved) && (run.State == observatory.StepDone || run.State == observatory.StepFailed)
+		})
+
+		if run.State != observatory.StepDone {
+			t.Errorf("the activation = %s", mustJSON(run))
+		}
+		if sent := w.indi.changes()[from:]; !slices.Contains(sent, "west-telescope Dust Cover Simulator.CAP_PARK PARK=Off UNPARK=On") {
+			t.Errorf("changes = %q, want the cap unparked on west", sent)
+		}
+	})
+}

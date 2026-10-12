@@ -1086,9 +1086,14 @@ spec:
                     The INDI server that runs the device. A client such
                     as KStars reaches the device at this address by the
                     name in `indiDevice`. The field is present only
-                    while the pod of the device's driver runs, which for
-                    a device that another resource serves is that
-                    resource's pod. When a reservation ends, or the
+                    while the pod of the device's driver runs and is not
+                    stopping, which for a device that another resource
+                    serves is that resource's pod, and it names the
+                    server in that pod's `observatory.liken.sh/server`
+                    label. The driver stops on that server before the
+                    pod is deleted. A device that moves to another
+                    telescope names the server it left until that server
+                    deletes its pod. When a reservation ends, or the
                     device moves to the shelf, the operator removes the
                     field.
                   properties:

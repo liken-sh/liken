@@ -6,6 +6,7 @@ package main
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -55,6 +56,61 @@ func TestAReleaseLeavesOnAnOutputThatAnotherServerStillUses(t *testing.T) {
 		sent := w.indi.changes()[before:]
 		if !slices.Contains(sent, labOutput("2", "OFF")) || slices.Contains(sent, labOutput("1", "OFF")) {
 			t.Errorf("changes = %q, want output 2 off and output 1 left on", sent)
+		}
+	})
+}
+
+// Two releases that overlap switch off an output that only their own
+// devices name. Each release finds the other server's pod while it
+// switches its outputs off, so the output goes off only when a release
+// counts no device whose server stops. The hold on the mounts' park
+// keeps both releases in their Deactivation step until both have
+// begun, and the holds on the servers' pods keep each one terminating
+// until both have stopped.
+func TestOverlappingReleasesSwitchOffASharedOutput(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := startWorld(t)
+		w.put(observatory.SwitchKind, "lab", map[string]any{"observatory": "lab", "driver": map[string]any{"name": "indi_simulator_io"}})
+		w.powerFrom(observatory.FocuserKind, "east", "lab", 1)
+		w.powerFrom(observatory.CameraKind, "west-main", "lab", 1)
+		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
+		w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
+		w.reserve("west-tonight", map[string]any{"telescope": "west", "holder": "desktop"})
+		w.phase("west-tonight", observatory.ReservationReady, 10*time.Minute)
+		before := len(w.indi.changes())
+		servers := []string{"east-telescope", "west-telescope"}
+		for _, name := range servers {
+			w.holdPod(name)
+		}
+
+		w.indi.hold("Telescope Simulator", "TELESCOPE_PARK")
+		for _, name := range []string{"east-tonight", "west-tonight"} {
+			w.api.deleteNamed(kindCollection(observatory.ReservationKind), name)
+			w.until(time.Minute, name+" does not park its mount", func() bool {
+				r, _ := w.reservation(name)
+				return strings.Contains(stepText(stepOf(r, observatory.StepDeactivation)), "Parked Running")
+			})
+		}
+		w.indi.release("Telescope Simulator", "TELESCOPE_PARK")
+		parked(w, "Telescope Simulator")
+		w.until(10*time.Minute, "the servers' pods do not stop", func() bool {
+			for _, name := range servers {
+				object, _ := w.api.object(podsCollection, name)
+				if object["metadata"].(map[string]any)["deletionTimestamp"] == nil {
+					return false
+				}
+			}
+			return true
+		})
+		for _, name := range servers {
+			w.releasePod(name)
+		}
+		w.gone(observatory.ReservationKind, "east-tonight", 10*time.Minute)
+		w.gone(observatory.ReservationKind, "west-tonight", 10*time.Minute)
+
+		if sent := w.indi.changes()[before:]; !slices.Contains(sent, labOutput("1", "OFF")) {
+			t.Errorf("changes = %q, want output 1 off", sent)
 		}
 	})
 }

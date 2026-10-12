@@ -257,8 +257,8 @@ func (r *runner) stopTelescopeDevices(ctx context.Context, w *stepWork) (outcome
 }
 
 // powerOff switches off the outputs that the telescope's devices name,
-// apart from an output that a device on another running server still
-// names (tree.unpowered), then stops the Switch pods and the
+// apart from an output that a device on another server still draws
+// from (tree.unpowered), then stops the Switch pods and the
 // telescope's server. The server stops last, because the operator
 // reaches a Switch through it. A device that only its pod places on
 // the server (tree.releasedOn) has its output switched off too, so a
@@ -294,10 +294,11 @@ func (r *runner) powerOff(ctx context.Context, w *stepWork) (outcome, error) {
 }
 
 // stopSite disconnects the observatory's devices, switches off their
-// outputs that no device on another running server names, and stops
-// the observatory's server, unless a reservation of another telescope
-// in the observatory holds its telescope. The dome's park is a procedure, which the Deactivation
-// step ran while the mounts were still connected.
+// outputs that no device on another server draws from, and stops the
+// observatory's server, unless a reservation of another telescope in
+// the observatory holds its telescope. The dome's park is a procedure,
+// which the Deactivation step ran while the mounts were still
+// connected.
 func (r *runner) stopSite(ctx context.Context, w *stepWork) (outcome, error) {
 	t := r.o.snapshot()
 	telescope, ok := t.telescopes[r.res.Spec.Telescope]
