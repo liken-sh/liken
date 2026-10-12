@@ -237,7 +237,7 @@ func (o *operator) run(ctx context.Context, s *stores) {
 // failure, and answers the failures for the pass's metrics.
 func (o *operator) supervise(ctx context.Context, t *tree) error {
 	for _, r := range t.reservations {
-		if finished(r) {
+		if finished(r) && r.Status.ObservedGeneration == r.Metadata.Generation {
 			continue
 		}
 		o.startRunner(ctx, r)
@@ -257,9 +257,11 @@ func (o *operator) supervise(ctx context.Context, t *tree) error {
 	return joinErrors(problems)
 }
 
-// finished reports whether a reservation has no work left: it is
+// finished reports whether a reservation has no steps left: it is
 // Released and holds no finalizer, or it is gone from the API server
-// apart from its finalizer-free deletion.
+// apart from its finalizer-free deletion. A finished reservation that a
+// person edits still gets a runner, which records the edit's
+// generation and stops (runner.run).
 func finished(r *observatory.Reservation) bool {
 	return r.Status.Phase == observatory.ReservationReleased && !hasFinalizer(r)
 }

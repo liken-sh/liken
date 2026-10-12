@@ -1,9 +1,8 @@
 package main
 
 // A reservation's status.observedGeneration follows each edit of its
-// spec, in every phase where the runner waits and runs no step, so a
-// client such as `kubectl wait` can tell that the operator read the
-// edit.
+// spec, in every phase where the runner runs no step, so a client such
+// as `kubectl wait` can tell that the operator read the edit.
 
 import (
 	"testing"
@@ -23,6 +22,7 @@ func TestAReservationObservesAnEditWhileItWaits(t *testing.T) {
 		{"Ready", map[string]any{}, observatory.ReservationReady},
 		{"Scheduled for a later start", map[string]any{"start": "2100-01-01T00:00:00Z"}, observatory.ReservationScheduled},
 		{"Failed", map[string]any{"outbox": map[string]any{"claimName": "nightly"}}, observatory.ReservationFailed},
+		{"Released at its end", map[string]any{"end": "2000-01-01T00:00:00Z"}, observatory.ReservationReleased},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

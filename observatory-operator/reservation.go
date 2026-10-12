@@ -79,6 +79,10 @@ func (r *runner) run(ctx context.Context) {
 		if first {
 			r.status, r.logged, first = r.res.Status, r.res.Status.Phase, false
 			if finished(r.res) {
+				// A Released reservation that a person edits has no step
+				// to run, so this write alone keeps its
+				// status.observedGeneration current (edited).
+				r.observe(ctx)
 				return
 			}
 		}
@@ -416,8 +420,8 @@ func (r *runner) save(ctx context.Context) error {
 
 // edited reports whether the spec changed since the runner last wrote
 // the status. The runner writes the status when a step changes, and a
-// reservation that is Ready, Failed, or waits in the Wait step changes
-// no step. Without a write on the edit alone, status.observedGeneration
+// reservation that is Ready, Failed, Released, or waits in the Wait
+// step changes no step. Without a write on the edit alone, status.observedGeneration
 // stays behind metadata.generation, and a client such as `kubectl wait`
 // cannot tell that the operator read the edit. A mid-session edit takes
 // effect at the next session (records.go), so this write records that
