@@ -267,6 +267,36 @@ func TestTheAPIServerAcceptsAndRefuses(t *testing.T) {
 		{"a reservation with an outbox that names no claim", ReservationKind,
 			map[string]any{"telescope": "east", "holder": "desktop", "outbox": map[string]any{}},
 			"spec.outbox.claimName: Required value"},
+		{"an observatory with FITS keywords", ObservatoryKind,
+			map[string]any{"location": map[string]any{"latitude": 51.5, "longitude": 0.0, "elevation": 40.0},
+				"fitsKeywords": []any{fits("OBSERVER", "Ada Lovelace", "who took the frame"), fits("SITENAME", "Back yard", "")}}, ""},
+		{"a telescope that names itself in TELESCOP", TelescopeKind,
+			map[string]any{"observatory": "lab", "fitsKeywords": []any{fits("TELESCOP", "Esprit 100", "")}}, ""},
+		{"a camera that names itself in INSTRUME", CameraKind,
+			camera(map[string]any{"fitsKeywords": []any{fits("INSTRUME", "ASI2600MM Pro", "")}}), ""},
+		{"a reservation with a target", ReservationKind,
+			map[string]any{"telescope": "east", "holder": "desktop", "fitsKeywords": []any{fits("OBJECT", "M42", ""), fits("PROG-ID", "2026_B", "")}}, ""},
+		{"a keyword that the driver measures", CameraKind,
+			camera(map[string]any{"fitsKeywords": []any{fits("EXPTIME", "300", "")}}),
+			"EXPTIME is a keyword that the camera's driver writes"},
+		{"a keyword that FITS reserves", ReservationKind,
+			map[string]any{"telescope": "east", "holder": "desktop", "fitsKeywords": []any{fits("HISTORY", "stacked", "")}},
+			"HISTORY is a keyword that FITS reserves"},
+		{"a keyword name in lowercase", TelescopeKind,
+			map[string]any{"observatory": "lab", "fitsKeywords": []any{fits("observer", "Ada", "")}},
+			"a FITS keyword name is 1 to 8 of"},
+		{"a keyword name of nine characters", TelescopeKind,
+			map[string]any{"observatory": "lab", "fitsKeywords": []any{fits("OBSERVERS", "Ada", "")}},
+			"spec.fitsKeywords[0].name: Too long"},
+		{"a keyword with no value", CameraKind,
+			camera(map[string]any{"fitsKeywords": []any{fits("OBSERVER", "", "")}}),
+			"spec.fitsKeywords[0].value: Invalid value"},
+		{"a keyword value that is not ASCII", CameraKind,
+			camera(map[string]any{"fitsKeywords": []any{fits("OBSERVER", "Ada Lovelace °", "")}}),
+			"FITS allows only the printable ASCII characters"},
+		{"a keyword value longer than a card holds", CameraKind,
+			camera(map[string]any{"fitsKeywords": []any{fits("NOTES", strings.Repeat("x", 69), "")}}),
+			"spec.fitsKeywords[0].value: Too long"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -276,6 +306,16 @@ func TestTheAPIServerAcceptsAndRefuses(t *testing.T) {
 			}
 		})
 	}
+}
+
+// fits builds one item of spec.fitsKeywords, with no comment when
+// comment is "".
+func fits(name, value, comment string) map[string]any {
+	item := map[string]any{"name": name, "value": value}
+	if comment != "" {
+		item["comment"] = comment
+	}
+	return item
 }
 
 // refuses answers whether the errors match a case's verdict: no error

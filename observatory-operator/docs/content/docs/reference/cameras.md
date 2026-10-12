@@ -29,6 +29,7 @@ One camera, with INDI's `CCD_INTERFACE`. The operator writes each setting that t
 | <span id="spec--wcs"></span>`wcs` | string | no | Whether the driver writes the world coordinate system keywords into the FITS header of each frame. The operator writes it to `WCS_CONTROL` once, in the `Configure` step of each reservation. Optional. One of: `WCS_ENABLE`, `WCS_DISABLE`. |
 | <span id="spec--gain"></span>`gain` | number | no | The sensor's gain, in the driver's own units. The operator writes it to `CCD_GAIN` once, in the `Configure` step of each reservation. Optional. |
 | <span id="spec--offset"></span>`offset` | number | no | The level that the sensor adds to each pixel, in the driver's own units. The operator writes it to `CCD_OFFSET` once, in the `Configure` step of each reservation. Optional. |
+| <span id="spec--fitskeywords"></span>`fitsKeywords` | [\[\]object](#specfitskeywords) | no | The FITS keywords that the telescope's imaging cameras write into the header of every frame, such as `OBSERVER` or `TELESCOP`. Optional. The `Observatory`, the `Telescope`, the `Camera`, and the `Reservation` can each declare keywords, and the operator merges them in that order: a keyword at a later level replaces the value and the comment of the same name at an earlier one. The `PowerOn` step records the merged list of each `Camera` that no `Guider` guides with, and the `Configure` step writes it to the camera's `FITS_HEADER`, so the driver writes the keywords into each frame when it creates the file. An edit takes effect at the next session. The API server refuses a keyword that the driver writes from what it measures, such as `EXPTIME` or `DATE-OBS`, because a declared value would replace the measured one. |
 | <span id="spec--activation"></span>`activation` | [\[\]object](#specactivation) | no | The actions that run, in order, as this resource's `Telescope` or `Observatory` turns `Active`, while every device is still connected. For a `Telescope` or an `Observatory`, that is the resource itself. The `Reservation`'s `Activation` step waits for them. Each action is a target state, so a run that an operator restart interrupted runs again each action that is not `Done`. Optional. |
 | <span id="spec--deactivation"></span>`deactivation` | [\[\]object](#specdeactivation) | no | The actions that run, in order, as this resource's `Telescope` or `Observatory` stops being `Active`, while every device is still connected. For a `Telescope` or an `Observatory`, that is the resource itself. The `Reservation`'s `Deactivation` step waits for them. Each action is a target state, so a run that an operator restart interrupted runs again each action that is not `Done`. Optional. |
 | <span id="spec--triggers"></span>`triggers` | [\[\]object](#spectriggers) | no | Triggers on conditions. Each one runs its actions once for each transition of its condition to the status it names, while the resource is active: from when its activation is done until its deactivation begins. A condition that holds when the activation ends runs then. A run that began runs to its end, unless the resource's deactivation begins, and a resource runs one procedure at a time. Optional. |
@@ -68,6 +69,16 @@ How fast the driver changes the cooler's setpoint toward a new one. The operator
 | --- | --- | --- | --- |
 | <span id="spectemperatureramp--slope"></span>`slope` | number | no | The greatest change of the setpoint, in degrees Celsius per minute. Zero turns the ramp off. The member is `RAMP_SLOPE`. |
 | <span id="spectemperatureramp--threshold"></span>`threshold` | number | no | How close to the setpoint the sensor must come before the change is done, in degrees Celsius. The member is `RAMP_THRESHOLD`. |
+
+### spec.fitsKeywords[]
+
+One keyword: its name, its value, and a comment.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specfitskeywords--name"></span>`name` | string | yes | The keyword, such as `OBSERVER`: 1 to 8 of the capital letters `A` to `Z`, the digits, `-`, and `_`. `INSTRUME` and `TELESCOP` are allowed, because the driver fills them with the names of INDI devices, such as `CCD Simulator`. |
+| <span id="specfitskeywords--value"></span>`value` | string | yes | The value, at most 68 characters, the longest text that one 80-column card holds. The driver writes a value that reads as a number, such as `2026` or `-4.5`, as a number, and any other value as quoted text. |
+| <span id="specfitskeywords--comment"></span>`comment` | string | no | The comment that follows the value on the card. Optional. At most 47 characters, which fit beside a number. |
 
 ### spec.activation[]
 

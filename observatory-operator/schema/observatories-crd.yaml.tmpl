@@ -101,6 +101,7 @@ spec:
                       maximum: 9000
                       description: >-
                         The elevation, in meters above mean sea level.
+{{ include "fits keywords" . | indent 16 }}
 {{ include "procedure spec" . | indent 16 }}
             status:
               type: object

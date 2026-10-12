@@ -17,6 +17,10 @@ type (
 // states.
 type CameraSpec struct {
 	TrainDevice
+	// FITSKeywords are the keywords of every frame that the camera
+	// takes, the third level of MergeFITSKeywords. Unlike the settings,
+	// the session records them, so an edit waits for the next session.
+	FITSKeywords []FITSKeyword `json:"fitsKeywords,omitempty"`
 	Procedures[CameraAction]
 	CameraSettings
 }

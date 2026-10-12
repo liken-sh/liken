@@ -123,6 +123,25 @@ A guide scope is a second `OpticalTube` with its own `OpticalTrain`.
 An off-axis guider shares the imaging tube, so its train names the
 same tube.
 
+The camera's driver writes `TELESCOP` and `INSTRUME` into each frame
+with the names of INDI devices, such as `Telescope Simulator`. To
+write the names of your own equipment, declare them in
+`spec.fitsKeywords` of the `Telescope` and of each `Camera`:
+
+```yaml
+kind: Telescope
+metadata:
+  name: east
+spec:
+  observatory: backyard
+  fitsKeywords:
+  - {name: TELESCOP, value: East refractor}
+```
+
+The `Observatory` takes `fitsKeywords` too, such as `OBSERVER`, and
+[FITS keywords](https://liken.sh/observatory/docs/concepts/fits-keywords/) gives the order in
+which the levels merge and the keywords that the driver measures.
+
 ## Describe each device
 
 A device resource names its parent and its INDI driver:

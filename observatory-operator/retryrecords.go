@@ -62,6 +62,7 @@ func (r *runner) recordAgain(ctx context.Context) (notes []string, err error) {
 		next.Devices = t.recordOf(ref, t.devicesOn(ref))
 		next.Trains, next.Tubes, next.Guiders = t.opticsOf(ref.name)
 		next.Outbox = r.res.Spec.Outbox
+		next.FITSKeywords = t.fitsKeywordsOf(ref, next.Observatory, t.devicesOn(ref), r.res.Spec.FITSKeywords)
 	}
 	r.status.Session = next
 	r.rerunFrom(old, next)
@@ -125,7 +126,8 @@ func (r *runner) undoOld(ctx context.Context, before *tree, old, next *observato
 // devices, because it gives the server their drivers and switches on
 // their outputs, PowerOn for the outbox too, because it checks the
 // claim and the camera pods after it mount it, Configure for the
-// trains and tubes, and StartGuider for the Guiders. The steps after it read what it starts, so they run
+// trains, the tubes, and the FITS keywords, and StartGuider for the
+// Guiders. The steps after it read what it starts, so they run
 // again too, and the retry names the first one. A step that runs again finds each device that did not
 // change as it left it, and an activation run that is done stays done
 // (activation).
@@ -136,7 +138,7 @@ func (r *runner) rerunFrom(old, next *observatory.Session) {
 		first = observatory.StepStartSite
 	case !equalJSON(old.Devices, next.Devices) || !equalJSON(old.Outbox, next.Outbox):
 		first = observatory.StepPowerOn
-	case !equalJSON(old.Trains, next.Trains) || !equalJSON(old.Tubes, next.Tubes):
+	case !equalJSON(old.Trains, next.Trains) || !equalJSON(old.Tubes, next.Tubes) || !equalJSON(old.FITSKeywords, next.FITSKeywords):
 		first = observatory.StepConfigure
 	case !equalJSON(old.Guiders, next.Guiders):
 		first = observatory.StepStartGuider

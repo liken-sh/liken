@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+
+	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
 // The CRD of each kind with procedures is a template in this
@@ -20,6 +22,9 @@ import (
 //     procedures.yaml.tmpl. Its actions include the kind's own
 //     template "action", which states the action's fields that only
 //     the kind has, and includes "action fields" for the rest.
+//   - {{ include "fits keywords" . }} is spec.fitsKeywords, in
+//     fitskeywords.yaml.tmpl, whose rule refuses the keywords that
+//     {{ refusedKeywords }} lists from observatory.RefusedFITSKeywords.
 //   - {{ settings }} and {{ standard }} are the typed fields that the
 //     kind's fields file gives, in spec and in status.
 //
@@ -29,6 +34,7 @@ const (
 	templateSuffix  = "-crd.yaml.tmpl"
 	deviceTemplate  = "device.yaml.tmpl"
 	procedureSchema = "procedures.yaml.tmpl"
+	fitsTemplate    = "fitskeywords.yaml.tmpl"
 )
 
 // renderCRD renders the template of one kind. The typed fields arrive
@@ -41,11 +47,12 @@ func renderCRD(dir, plural, settings, standard string) (string, error) {
 			err := t.ExecuteTemplate(&out, name, data)
 			return out.String(), err
 		},
-		"indent":   indent,
-		"settings": func() string { return settings },
-		"standard": func() string { return standard },
+		"indent":          indent,
+		"settings":        func() string { return settings },
+		"standard":        func() string { return standard },
+		"refusedKeywords": refusedKeywords,
 	})
-	for _, name := range []string{deviceTemplate, procedureSchema, plural + templateSuffix} {
+	for _, name := range []string{deviceTemplate, procedureSchema, fitsTemplate, plural + templateSuffix} {
 		raw, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			return "", err
@@ -70,4 +77,14 @@ func indent(n int, fragment string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// refusedKeywords writes the names that spec.fitsKeywords refuses as
+// the items of a CEL list, such as 'SIMPLE', 'BITPIX'.
+func refusedKeywords() string {
+	refused := observatory.RefusedFITSKeywords()
+	for i, name := range refused {
+		refused[i] = "'" + name + "'"
+	}
+	return strings.Join(refused, ", ")
 }

@@ -38,6 +38,11 @@ spec:
   telescope's imaging cameras write each frame to it, as
   [The outbox](https://liken.sh/observatory/docs/concepts/how-a-reservation-runs/#the-outbox)
   describes. The claim must exist before `PowerOn`, or the step fails.
+* `fitsKeywords` is optional. It lists FITS keywords for the header of
+  every frame of the reservation, such as `OBJECT`, and its values
+  replace those of the same names on the `Observatory`, the
+  `Telescope`, and the `Camera`, as
+  [FITS keywords](https://liken.sh/observatory/docs/concepts/fits-keywords/) describes.
 
 A telescope serves one reservation at a time. A second reservation of
 the same telescope waits in its `Wait` step, and its summary names the
@@ -67,7 +72,8 @@ operator:
    on the server
 4. connects each device
 5. writes the settings that each device's spec states, the site's
-   location, the optics, and the outbox to the drivers
+   location, the optics, the outbox, and the FITS keywords to the
+   drivers
 6. runs the activation procedures that you declared, such as
    unparking the dome and cooling the camera
 7. starts PHD2, if the telescope has a `Guider`

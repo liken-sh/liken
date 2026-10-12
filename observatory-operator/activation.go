@@ -327,6 +327,7 @@ func (r *runner) powerOn(ctx context.Context, w *stepWork) (outcome, error) {
 		s.Devices = t.recordOf(ref, devices)
 		s.Trains, s.Tubes, s.Guiders = t.opticsOf(ref.name)
 		s.Outbox = r.res.Spec.Outbox
+		s.FITSKeywords = t.fitsKeywordsOf(ref, s.Observatory, devices, r.res.Spec.FITSKeywords)
 	}); err != nil {
 		return outcome{}, err
 	}

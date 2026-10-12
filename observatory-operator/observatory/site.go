@@ -9,6 +9,9 @@ type Observatory = Object[ObservatorySpec, ObservatoryStatus]
 
 type ObservatorySpec struct {
 	Location Location `json:"location"`
+	// FITSKeywords are the keywords of every frame taken at the site,
+	// the first level of MergeFITSKeywords.
+	FITSKeywords []FITSKeyword `json:"fitsKeywords,omitempty"`
 	Procedures[Action]
 }
 

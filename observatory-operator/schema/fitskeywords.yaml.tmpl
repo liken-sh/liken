@@ -1,0 +1,76 @@
+{{- /*
+spec.fitsKeywords, which the Observatory, the Telescope, and the Camera
+include from here. The Reservation's CRD is written by hand and holds a
+copy, and TestEachLevelHasTheSameFITSKeywordsSchema in observatory/
+holds the copy equal to this one, so the description names every level.
+
+A FITS card is 80 columns: the name in columns 1 to 8, "= " in 9 and 10,
+and the value and an optional " / " comment in the 70 columns after. A
+quoted text value fills at most 68 of them. A number is right-aligned
+in columns 11 to 30, so a comment of at most 47 characters fits beside
+it. The names that the rule refuses come from
+observatory.RefusedFITSKeywords, the one source of the driver's list.
+*/ -}}
+{{- define "fits keywords" }}
+fitsKeywords:
+  type: array
+  maxItems: 64
+  description: >-
+    The FITS keywords that the telescope's imaging cameras write into
+    the header of every frame, such as `OBSERVER` or `TELESCOP`.
+    Optional. The `Observatory`, the `Telescope`, the `Camera`, and the
+    `Reservation` can each declare keywords, and the operator merges
+    them in that order: a keyword at a later level replaces the value
+    and the comment of the same name at an earlier one. The
+    `PowerOn` step records the merged list of each `Camera` that no
+    `Guider` guides with, and the `Configure` step writes it to the
+    camera's `FITS_HEADER`, so the driver writes the keywords into
+    each frame when it creates the file. An edit takes effect at the
+    next session. The API server refuses a keyword that the driver
+    writes from what it measures, such as `EXPTIME` or `DATE-OBS`,
+    because a declared value would replace the measured one.
+  x-kubernetes-list-type: map
+  x-kubernetes-list-map-keys: [name]
+  items:
+    type: object
+    required: [name, value]
+    description: "One keyword: its name, its value, and a comment."
+    properties:
+      name:
+        type: string
+        maxLength: 8
+        description: >-
+          The keyword, such as `OBSERVER`: 1 to 8 of the capital
+          letters `A` to `Z`, the digits, `-`, and `_`. `INSTRUME` and
+          `TELESCOP` are allowed, because the driver fills them with the
+          names of INDI devices, such as `CCD Simulator`.
+        x-kubernetes-validations:
+          - rule: "self.matches('^[A-Z0-9_-]{1,8}$')"
+            message: "a FITS keyword name is 1 to 8 of the capital letters A to Z, the digits, '-', and '_'"
+          - rule: "!(self in [{{ refusedKeywords }}])"
+            messageExpression: >-
+              self + (self in ['COMMENT', 'HISTORY', 'END']
+              ? ' is a keyword that FITS reserves for a card with no value'
+              : ' is a keyword that the camera\'s driver writes from what it measures, and a declared value would replace the measured one')
+      value:
+        type: string
+        minLength: 1
+        maxLength: 68
+        description: >-
+          The value, at most 68 characters, the longest text that one
+          80-column card holds. The driver writes a value that reads as
+          a number, such as `2026` or `-4.5`, as a number, and any
+          other value as quoted text.
+        x-kubernetes-validations:
+          - rule: "self.matches('^[ -~]*$')"
+            message: "FITS allows only the printable ASCII characters in a header"
+      comment:
+        type: string
+        maxLength: 47
+        description: >-
+          The comment that follows the value on the card. Optional. At
+          most 47 characters, which fit beside a number.
+        x-kubernetes-validations:
+          - rule: "self.matches('^[ -~]*$')"
+            message: "FITS allows only the printable ASCII characters in a header"
+{{- end }}

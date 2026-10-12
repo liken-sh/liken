@@ -36,6 +36,9 @@ type deviceSpec struct {
 	Observatory  string `json:"observatory,omitempty"`
 	observatory.DeviceSpec
 	observatory.Procedures[action]
+	// FITSKeywords is a Camera's spec.fitsKeywords. The CRD of every
+	// other kind has no such field, so it is empty for them.
+	FITSKeywords []observatory.FITSKeyword `json:"fitsKeywords,omitempty"`
 	// raw is the spec as the API server holds it. Each kind's settings
 	// differ, so the Configure step decodes them from it into the
 	// kind's own type (settings.go).

@@ -41,6 +41,12 @@ share have one source:
   `DeviceSpec` and `DeviceStatus`, and `procedures.yaml.tmpl` holds
   the procedure schema: `spec.activation`, `spec.deactivation`,
   `spec.triggers`, and `status.procedures`.
+- `fitskeywords.yaml.tmpl` holds `spec.fitsKeywords`, which the
+  `Observatory`, the `Telescope`, and the `Camera` include. Its rule
+  refuses the keywords that the camera's driver writes, and the
+  generator writes their names from `observatory/fitskeywords.go`, the
+  one list of them. The `Reservation`'s CRD holds a copy of the field,
+  and a test holds the copy equal to the generated one.
 - `<plural>-fields.yaml` gives the typed fields of a device kind, one
   entry for each standard property of its INDI interfaces: the field's
   name, its role, the unit of each number, and its description. The
@@ -121,6 +127,19 @@ reply. They come from the simulators of the pinned `indi-simulators`
 tag, and `capture.SimulatorScript` in `indi/capture/` holds the
 message that each file answers.
 
+`indi/testdata/ccd/frame-header.txt` holds the 80-column header cards,
+with trailing spaces removed, of a frame that the CCD simulator saved.
+`observatory/fitskeywords_test.go` holds the driver's list of keywords
+to it, so a capture after a bump that holds a new keyword fails until
+the list names it. `make transcripts` does not write the file, because
+its capture runs six simulators on one server and reads the saved
+file. To capture it again, run `indiserver` from the `indi-simulators`
+image with the telescope, focuser, rotator, filter, SQM, and CCD
+simulators, connect each device, slew the mount, write `SCOPE_INFO`,
+set `UPLOAD_MODE` to `UPLOAD_LOCAL`, write the one `FITS_HEADER`
+keyword `OBJECT`, take an exposure of 1 s, and copy the header of the
+file that the driver saved.
+
 The captures in `indi/standard/` hold the standard properties of each
 INDI interface. Each one is the union of every property that a bare
 driver in `indi/standard/bare/` defined: a small C++ driver for one
@@ -175,8 +194,9 @@ procedure's references, `runs.go` holds the record of each run, and
 `activity.go` the `Active` condition. `served.go` holds the rules of
 a device that another resource's driver serves, `interfaces.go` what
 the operator does with each INDI interface and how it detects one,
-and `settings.go` the Configure step's write of each setting in a
-spec. Each of them waits on a bell and reads the watches' stores again. `changed`
+`settings.go` the Configure step's write of each setting in a
+spec, and `fitskeywords.go` its write of the declared FITS keywords
+that the session recorded. Each of them waits on a bell and reads the watches' stores again. `changed`
 rings on every watch event, every INDI event, and every change that a
 PHD2 reports, and `structure` on the same events except an INDI
 property's update or message, and except a PHD2 change other than its

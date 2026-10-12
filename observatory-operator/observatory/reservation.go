@@ -28,6 +28,9 @@ type ReservationSpec struct {
 	// frames writes them to the pod's /tmp, which the pod loses when it
 	// stops.
 	Outbox *Outbox `json:"outbox,omitempty"`
+	// FITSKeywords are the keywords of every frame of the session, the
+	// last and most specific level of MergeFITSKeywords.
+	FITSKeywords []FITSKeyword `json:"fitsKeywords,omitempty"`
 }
 
 // Outbox names a PersistentVolumeClaim in the reservation's namespace,
@@ -162,6 +165,14 @@ type Session struct {
 	// middle of an exposure loses the exposure, so an edit waits for
 	// the next session.
 	Outbox *Outbox `json:"outbox,omitempty"`
+	// FITSKeywords holds the merged keywords of each imaging camera, by
+	// the camera's key, such as Camera/east-main, for each camera
+	// whose merged list is not empty. The Configure step writes them,
+	// and the driver puts each keyword it receives on every later frame
+	// until it exits. Recording them keeps the declared keywords of
+	// every frame of one session the same, whatever a person edits
+	// during it.
+	FITSKeywords map[string][]FITSKeyword `json:"fitsKeywords,omitempty"`
 }
 
 // SessionTrain, SessionTube, and SessionGuider are the spec of one

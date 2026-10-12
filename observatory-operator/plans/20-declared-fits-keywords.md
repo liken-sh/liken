@@ -2,7 +2,7 @@
 
 Proposed on 2026-10-12, and designed on 2026-10-12. The design below
 answers what the design conversation left open, from the evidence of
-the CCD simulator.
+the CCD simulator. Built on 2026-10-12; not drilled yet.
 
 ## The problem
 

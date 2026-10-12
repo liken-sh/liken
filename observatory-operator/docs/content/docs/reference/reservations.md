@@ -12,7 +12,7 @@ A `Reservation` gives one holder the use of one `Telescope`. Activation runs whe
 
 ## spec
 
-The telescope, the holder, the times, and the outbox.
+The telescope, the holder, the times, the outbox, and the FITS keywords.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -21,6 +21,7 @@ The telescope, the holder, the times, and the outbox.
 | <span id="spec--start"></span>`start` | string | no | When activation begins, as an RFC 3339 time. Optional. With no start, activation begins when the reservation is created. |
 | <span id="spec--end"></span>`end` | string | no | When deactivation begins, as an RFC 3339 time. Optional. With no end, the reservation lasts until it is deleted. |
 | <span id="spec--outbox"></span>`outbox` | [object](#specoutbox) | no | The volume that the telescope's imaging cameras write their frames to. Optional. Each `Camera` of the telescope mounts the claim at `/outbox`, except a camera that a `Guider` guides with, and the `Configure` step sets the driver's `UPLOAD_DIR` to `/outbox` and its `UPLOAD_MODE` to `UPLOAD_BOTH`, so each frame lands in the outbox and a desktop client still receives it. With no outbox, the operator leaves the upload settings alone, and a driver that a client sets to keep frames writes them to the pod's `/tmp`, which the pod loses when it stops. An edit takes effect at the next session. |
+| <span id="spec--fitskeywords"></span>`fitsKeywords` | [\[\]object](#specfitskeywords) | no | The FITS keywords that the telescope's imaging cameras write into the header of every frame, such as `OBSERVER` or `TELESCOP`. Optional. The `Observatory`, the `Telescope`, the `Camera`, and the `Reservation` can each declare keywords, and the operator merges them in that order: a keyword at a later level replaces the value and the comment of the same name at an earlier one. The `PowerOn` step records the merged list of each `Camera` that no `Guider` guides with, and the `Configure` step writes it to the camera's `FITS_HEADER`, so the driver writes the keywords into each frame when it creates the file. An edit takes effect at the next session. The API server refuses a keyword that the driver writes from what it measures, such as `EXPTIME` or `DATE-OBS`, because a declared value would replace the measured one. |
 
 ### spec.outbox
 
@@ -29,6 +30,16 @@ The volume that the telescope's imaging cameras write their frames to. Optional.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specoutbox--claimname"></span>`claimName` | string | yes | The name of a `PersistentVolumeClaim` in the reservation's namespace. The `PowerOn` step fails when it does not exist. A claim that exists and cannot be mounted on the camera's node, such as a `ReadWriteOnce` volume bound on another node, leaves the camera's pod `Pending`, and `StartDevices` gives the scheduler's message. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
+
+### spec.fitsKeywords[]
+
+One keyword: its name, its value, and a comment.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specfitskeywords--name"></span>`name` | string | yes | The keyword, such as `OBSERVER`: 1 to 8 of the capital letters `A` to `Z`, the digits, `-`, and `_`. `INSTRUME` and `TELESCOP` are allowed, because the driver fills them with the names of INDI devices, such as `CCD Simulator`. |
+| <span id="specfitskeywords--value"></span>`value` | string | yes | The value, at most 68 characters, the longest text that one 80-column card holds. The driver writes a value that reads as a number, such as `2026` or `-4.5`, as a number, and any other value as quoted text. |
+| <span id="specfitskeywords--comment"></span>`comment` | string | no | The comment that follows the value on the card. Optional. At most 47 characters, which fit beside a number. |
 
 ## status
 
@@ -41,7 +52,7 @@ What the operator observes. The operator writes it, and a person reads it.
 | <span id="status--step"></span>`step` | string | no | The step that runs now, or the step that failed. It is empty while the phase is `Ready` or `Released`. One of: `Wait`, `StartSite`, `PowerOn`, `StartDevices`, `Connect`, `Configure`, `Activation`, `StartGuider`, `Abort`, `Deactivation`, `StopGuider`, `Disconnect`, `StopDevices`, `PowerOff`, `StopSite`. |
 | <span id="status--steps"></span>`steps` | [\[\]object](#statussteps) | no | Every step, in the order it runs. The activation steps are `Wait`, `StartSite`, `PowerOn`, `StartDevices`, `Connect`, `Configure`, `Activation`, and `StartGuider`, and the list holds them from the start. The deactivation steps are `Abort`, `Deactivation`, `StopGuider`, `Disconnect`, `StopDevices`, `PowerOff`, and `StopSite`, and the list holds them from when deactivation begins. A step starts only when the step before it is `Done` or `Skipped`. |
 | <span id="status--endpoint"></span>`endpoint` | [object](#statusendpoint) | no | The telescope's INDI server, while the phase is `Ready`. KStars connects to its `host` and `port`. |
-| <span id="status--session"></span>`session` | [object](#statussession) | no | What the reservation's session started with. `StartSite` writes `observatory` and `site`, and `PowerOn` writes the rest, each once and before it creates a pod. The `observatory.liken.sh/retry` annotation on a failed activation step writes the parts again from the specs as they are then, before the step runs again, and nothing else changes them. While the reservation holds its telescope, the operator reads this record in place of the specs of the resources it names, so an edit of a device's parents, driver, power, or claim, of the `Telescope`'s `spec.observatory`, of an `OpticalTrain`, of an `OpticalTube`, of a `Guider`, or of the reservation's `spec.outbox` takes effect at the next session. The record is in the reservation, so an eviction of every pod of a server leaves it, and the operator creates the pods again from it. |
+| <span id="status--session"></span>`session` | [object](#statussession) | no | What the reservation's session started with. `StartSite` writes `observatory` and `site`, and `PowerOn` writes the rest, each once and before it creates a pod. The `observatory.liken.sh/retry` annotation on a failed activation step writes the parts again from the specs as they are then, before the step runs again, and nothing else changes them. While the reservation holds its telescope, the operator reads this record in place of the specs of the resources it names, so an edit of a device's parents, driver, power, or claim, of the `Telescope`'s `spec.observatory`, of an `OpticalTrain`, of an `OpticalTube`, of a `Guider`, of the reservation's `spec.outbox`, or of any `spec.fitsKeywords` takes effect at the next session. The record is in the reservation, so an eviction of every pod of a server leaves it, and the operator creates the pods again from it. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | `Ready` is `True` while the phase is `Ready`, so `kubectl wait --for=condition=Ready` waits for the telescope. When a step fails, it is `False` and its message names the step and the device. `SafeToPowerOff` is `True` when the deactivation steps are done. |
 
 ### status.steps[]
@@ -83,7 +94,7 @@ The telescope's INDI server, while the phase is `Ready`. KStars connects to its 
 
 ### status.session
 
-What the reservation's session started with. `StartSite` writes `observatory` and `site`, and `PowerOn` writes the rest, each once and before it creates a pod. The `observatory.liken.sh/retry` annotation on a failed activation step writes the parts again from the specs as they are then, before the step runs again, and nothing else changes them. While the reservation holds its telescope, the operator reads this record in place of the specs of the resources it names, so an edit of a device's parents, driver, power, or claim, of the `Telescope`'s `spec.observatory`, of an `OpticalTrain`, of an `OpticalTube`, of a `Guider`, or of the reservation's `spec.outbox` takes effect at the next session. The record is in the reservation, so an eviction of every pod of a server leaves it, and the operator creates the pods again from it.
+What the reservation's session started with. `StartSite` writes `observatory` and `site`, and `PowerOn` writes the rest, each once and before it creates a pod. The `observatory.liken.sh/retry` annotation on a failed activation step writes the parts again from the specs as they are then, before the step runs again, and nothing else changes them. While the reservation holds its telescope, the operator reads this record in place of the specs of the resources it names, so an edit of a device's parents, driver, power, or claim, of the `Telescope`'s `spec.observatory`, of an `OpticalTrain`, of an `OpticalTube`, of a `Guider`, of the reservation's `spec.outbox`, or of any `spec.fitsKeywords` takes effect at the next session. The record is in the reservation, so an eviction of every pod of a server leaves it, and the operator creates the pods again from it.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -94,6 +105,7 @@ What the reservation's session started with. `StartSite` writes `observatory` an
 | <span id="statussession--tubes"></span>`tubes` | [map\[string\]object](#statussessiontubes) | no | The spec of each `OpticalTube` of those trains, by name. A camera whose driver comes back gets the `SCOPE_INFO` of these lengths. |
 | <span id="statussession--guiders"></span>`guiders` | [map\[string\]object](#statussessionguiders) | no | The spec of each `Guider` of the telescope, by name. |
 | <span id="statussession--outbox"></span>`outbox` | [object](#statussessionoutbox) | no | The reservation's `spec.outbox`, which the camera pods of the session mount. |
+| <span id="statussession--fitskeywords"></span>`fitsKeywords` | map[string][]object | no | The merged `spec.fitsKeywords` of each `Camera` of the session that no `Guider` guides with, by the camera's key, such as `Camera/east-main`, from the `Observatory`, the `Telescope`, the `Camera`, and the reservation. A camera whose merged list is empty has no entry. The `Configure` step writes each list to its camera's `FITS_HEADER`. |
 
 #### status.session.site.*
 

@@ -100,6 +100,7 @@ spec:
                     sky's own geometry limits the telescope. A missing
                     `Horizon` never stops a reservation: the
                     `HorizonFound` condition reports it.
+{{ include "fits keywords" . | indent 16 }}
 {{ include "procedure spec" . | indent 16 }}
             status:
               type: object

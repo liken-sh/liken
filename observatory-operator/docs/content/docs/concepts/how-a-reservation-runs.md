@@ -32,7 +32,7 @@ goes on.
 | `PowerOn` | Starts the telescope's server with a link to every device, starts and connects its `Switch` devices, and switches on each output that a device's `spec.power` names. Fails when two devices of the telescope name one driver, and fails before it starts the server when the `PersistentVolumeClaim` that `spec.outbox` names does not exist. | 10 min |
 | `StartDevices` | Starts the pod of every other device, and waits until each pod is Ready and its driver defines its device on the server. A device on real hardware waits here for its claim. While no node fits a pod, the summary gives the scheduler's message. | 10 min |
 | `Connect` | Connects the mount, the GPS, the polar aligner, the focusers, the filter wheels, the rotators, the dust caps, the flat panels, the receivers, and the cameras, in that order. A device that another resource serves connects with that resource. Then it checks that each device defines the properties of its resource's interface, and a resource whose device does not reports `Error` while the others go on. | 2 min |
-| `Configure` | Writes each setting that a device's spec states, such as a camera's gain and offset and the filter names, once for the reservation. It also writes the settings that the tree decides: the observatory's location and the `DOME_POLICY` to the mount, the location to the GPS, each camera's `ACTIVE_DEVICES` from its train, the tube's focal length and aperture, and the upload settings of each camera that mounts the [outbox](#the-outbox). It then relays the dome's park state to the mount, before a procedure unparks it. | 2 min |
+| `Configure` | Writes each setting that a device's spec states, such as a camera's gain and offset and the filter names, once for the reservation. It also writes the settings that the tree decides: the observatory's location and the `DOME_POLICY` to the mount, the location to the GPS, each camera's `ACTIVE_DEVICES` from its train, the tube's focal length and aperture, the upload settings of each camera that mounts the [outbox](#the-outbox), and the [FITS keywords](/docs/concepts/fits-keywords/) of each imaging camera. It then relays the dome's park state to the mount, before a procedure unparks it. | 2 min |
 | `Activation` | Runs the activation procedures, from the top of the tree down: the `Observatory`'s and its devices', unless another reservation in the observatory ran them, then the `Telescope`'s and its devices', then those of the devices of its trains. [Procedures](/docs/concepts/procedures/) states what they do. | none: each action's timeout |
 | `StartGuider` | Starts the guider's pod, waits for PHD2's event server, sends `set_connected`, and waits until PHD2 reports its camera and mount connected. A telescope with no `Guider` skips it. | 10 min |
 | `Abort` | Stops PHD2's exposures and guiding with `stop_capture`, then ends each exposure and stops the mount if it moves. | 2 min |
@@ -81,7 +81,7 @@ switched on and the new one does not goes off, unless another device
 draws from it. Then the steps run again from the first step that reads
 a part of the record that changed: `StartSite` for the observatory's
 devices, `PowerOn` for the telescope's devices and the outbox,
-`Configure` for the trains and tubes, and `StartGuider` for the `Guider`. So a power output
+`Configure` for the trains, the tubes, and the FITS keywords, and `StartGuider` for the `Guider`. So a power output
 that you changed is switched on, and the `Retry` Event names the first
 step that runs again. A retry of a failed deactivation step records
 nothing, because the release stops what the session started.
@@ -215,12 +215,13 @@ session ends:
   `spec.power`, its driver, or its claim, waits for the end of the
   session too. So does an edit of the `Telescope`'s
   `spec.observatory`, of its `OpticalTrain`s, of the `OpticalTube`s of
-  those trains, of its `Guider`, and of the reservation's
-  `spec.outbox`. Before the session starts a
+  those trains, of its `Guider`, of the reservation's
+  `spec.outbox`, and of `spec.fitsKeywords` at every level. Before the session starts a
   server, the operator records in the reservation's `status.session`
   what it acts on: each device's parents, driver, power, and claim,
   whether a `Guider` guides with it, the telescope's observatory,
-  trains, tubes, and `Guider`s, and the reservation's outbox. `StartSite` records the observatory
+  trains, tubes, and `Guider`s, the reservation's outbox, and the
+  merged FITS keywords of each imaging camera. `StartSite` records the observatory
   and the devices of its server, and `PowerOn` records the rest. Each
   step writes its part once, and only the retry of a failed activation
   step writes it again, from the specs as they are then. Until

@@ -15,8 +15,9 @@ import (
 // the settings that the tree decides, which no spec states. Those are
 // the observatory's location to the mount and the GPS, the mount's
 // ACTIVE_GPS and DOME_POLICY, and each camera's ACTIVE_DEVICES from its
-// train, SCOPE_INFO from the train's tube, and its upload settings
-// from the session's outbox (outbox.go). It then relays the domes'
+// train, SCOPE_INFO from the train's tube, its upload settings from
+// the session's outbox (outbox.go), and its FITS keywords from the
+// session's record (fitskeywords.go). It then relays the domes'
 // park state to the mount (locks.go), so the mount holds it before a
 // procedure unparks it. The operator does not drive a setting back
 // while the reservation runs, so a client such as a sequencer can
@@ -119,8 +120,8 @@ func configureTree(ctx context.Context, t *tree, site *observatory.Observatory, 
 }
 
 // configureCamera writes ACTIVE_DEVICES from the camera's train,
-// SCOPE_INFO from the train's tube, and the upload settings of an
-// imaging camera from the session's outbox. Each member of ACTIVE_DEVICES names
+// SCOPE_INFO from the train's tube, and the upload settings and FITS
+// keywords of an imaging camera from the session's record. Each member of ACTIVE_DEVICES names
 // the INDI device that serves the train's resource of that kind, so a
 // camera that serves its train's FilterWheel names itself in
 // ACTIVE_FILTER, which is how INDI's camera reads the filter of its own
@@ -144,7 +145,10 @@ func configureCamera(ctx context.Context, t *tree, h handle, all []handle, notes
 			}
 		}
 	}
-	return uploadToOutbox(ctx, t, h, notes, note)
+	if err := uploadToOutbox(ctx, t, h, notes, note); err != nil {
+		return err
+	}
+	return writeFITSKeywords(ctx, t, h, notes, note)
 }
 
 // nameOf answers the INDI name of the first device of a kind among the

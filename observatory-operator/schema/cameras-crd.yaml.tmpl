@@ -112,6 +112,7 @@ spec:
                     the shelf, and the operator creates nothing for it.
 {{ include "device spec" . | indent 16 }}
 {{ settings | indent 16 }}
+{{ include "fits keywords" . | indent 16 }}
 {{ include "procedure spec" . | indent 16 }}
             status:
               type: object

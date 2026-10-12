@@ -13,6 +13,9 @@ type TelescopeSpec struct {
 	// telescope sees from where it stands now. It is empty for a
 	// telescope with no horizon.
 	Horizon string `json:"horizon,omitempty"`
+	// FITSKeywords are the keywords of every frame that the telescope's
+	// cameras take, the second level of MergeFITSKeywords.
+	FITSKeywords []FITSKeyword `json:"fitsKeywords,omitempty"`
 	Procedures[Action]
 }
 
