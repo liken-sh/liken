@@ -40,8 +40,8 @@ goes on.
 | `StopGuider` | Deletes the guider's pod, `Service`, and `ConfigMap`, while its camera and mount are still connected. | 2 min |
 | `Disconnect` | Disconnects the devices in the reverse order of `Connect`. | 2 min |
 | `StopDevices` | Stops the drivers of the devices that are not `Switch` devices, and deletes their pods. A device whose pod is the only record of its server, because a person deleted the device or its train, keeps its pod until `PowerOff`. | 2 min |
-| `PowerOff` | Switches the outputs off, then stops the `Switch` pods and the telescope's server. | 5 min |
-| `StopSite` | Disconnects the observatory's devices, switches their outputs off, and stops its server, unless a reservation of another telescope in the observatory is active. | 5 min |
+| `PowerOff` | Switches the outputs off, except an output that a device on another running server still names, then stops the `Switch` pods and the telescope's server. | 5 min |
+| `StopSite` | Disconnects the observatory's devices, switches their outputs off, except an output that a device on another running server still names, and stops its server, unless a reservation of another telescope in the observatory is active. | 5 min |
 
 Deactivation begins at `spec.end`, when a person deletes the
 reservation, or when a person deletes its `Telescope` or that
@@ -110,6 +110,15 @@ Then the operator switches off the output that the device's
 output, and the `PodDeleted` Event says so. Once its pod is gone, the
 reservation's `PowerOff` no longer finds the device, so this is the
 only time its output goes off.
+A device's pod belongs to the server in its `observatory.liken.sh/server`
+label until the pod is gone. So a device that moves to another
+telescope whose reservation is also active first leaves its old
+server, as above, or leaves in that server's release when its
+reservation ends at the same time. Only then does the other server
+create a new pod for the device and start its driver, as for any
+device that joins. A
+device pod whose server no longer runs belongs to no server, and the
+server that the device now names replaces it.
 A device that a person deletes leaves the same way, as [Deleting a running
 resource](#deleting-a-running-resource) describes. The
 operator posts a `DriverStarted` or a `DriverStopped` Event on the
@@ -187,7 +196,9 @@ The pod of such a device is the only record of the server it ran on,
 so `StopDevices` stops its driver and leaves the pod. `PowerOff` then
 switches off the output that the device's `spec.power` names, and
 deletes the pod before the server's pod. A deleted `Switch` switches
-its outputs off the same way, and a deleted `Dome` disconnects in
+its outputs off the same way, and so does a `Switch` that a person
+moves to another telescope during the release, because its pod still
+runs on the server it left. A deleted `Dome` disconnects in
 `StopSite` before the observatory's server stops.
 A device whose train a person deletes while the reservation is `Ready`
 leaves its server and runs its `deactivation` first, and loses the

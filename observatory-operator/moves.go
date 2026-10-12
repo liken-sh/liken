@@ -20,6 +20,10 @@ package main
 //     finds it. An output that a device on a running server still names
 //     stays on, because that device still draws from it.
 //
+// A device that moves to another running server joins it only after
+// its pod here is gone (tree.heldElsewhere), so the two servers never
+// run one device's driver at once.
+//
 // The runner refuses no change.
 
 import (
@@ -88,7 +92,7 @@ func (r *runner) removeStrays(ctx context.Context, t *tree, ref serverRef) error
 			why = "was deleted"
 		}
 		message := fmt.Sprintf("Deleted pod %s, because the %s %s while Reservation %s is Ready.", left[key], d.kind.Name, why, r.name)
-		notes, err := r.o.setOutputs(ctx, now, now.unpowered([]*device{d}), false)
+		notes, err := r.o.setOutputs(ctx, now, now.unpowered([]*device{d}, serverRef{}), false)
 		if err != nil {
 			r.o.logf("Reservation %s: switching off the output of %s: %v", r.name, key, err)
 		}

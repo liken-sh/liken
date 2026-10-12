@@ -15,7 +15,8 @@ import (
 )
 
 // ensure creates a pod and its Service and claim, or replaces a
-// running pod whose spec differs from the one built now. A pod that
+// running pod whose spec differs from the one built now, or that a
+// server which stopped held (current). A pod that
 // stops must be gone before the new one of the same name can be
 // created. A write that the API server refuses is sent again (send),
 // and the step's deadline bounds the tries. created reports whether
@@ -53,10 +54,10 @@ func (o *operator) ensure(ctx context.Context, report func(string), built *pod, 
 		case running.Metadata.DeletionTimestamp != nil:
 			return false, "waiting for the earlier pod " + name + " to stop", nil
 		case !current(running, built):
-			if err := o.send(ctx, report, fmt.Sprintf("replacing pod %s: its spec changed", name), func() error { return o.deleteObject(podPath(o.namespace, name)) }); err != nil {
+			if err := o.send(ctx, report, fmt.Sprintf("replacing pod %s: its spec or its server changed", name), func() error { return o.deleteObject(podPath(o.namespace, name)) }); err != nil {
 				return false, "", err
 			}
-			return false, "replacing the pod " + name + ", whose spec changed", nil
+			return false, "replacing the pod " + name + ", whose spec or server changed", nil
 		}
 		return true, "", nil
 	})
@@ -266,20 +267,37 @@ type selectedObject struct{ what, path string }
 
 // selectedObjects answers the objects that select returns true for, in
 // a fixed order: each pod by name with its claim, then the Services,
-// then the ConfigMaps. A pod that is terminating already, and its
-// claim, are left out, because they need no second delete.
+// each device's with its claim, then the ConfigMaps. A device's pod,
+// Service, and claim share one name and one set of labels. The
+// operator watches no claims, so a claim is found by its pod or by its
+// Service: a pod that is terminating already needs no second delete,
+// but a pod that an eviction deleted before a release still leaves its
+// Service, and so its claim, to delete.
 func (t *tree) selectedObjects(namespace string, selected func(labels map[string]string) bool) []selectedObject {
 	var out []selectedObject
+	claimed := map[string]bool{}
+	claim := func(name string) {
+		if !claimed[name] {
+			claimed[name] = true
+			out = append(out, selectedObject{"ResourceClaim " + name, claimPath(namespace, name)})
+		}
+	}
 	for _, name := range t.podNames(selected) {
 		if t.pods[name].Metadata.DeletionTimestamp != nil {
 			continue
 		}
-		out = append(out, selectedObject{"pod " + name, podPath(namespace, name)}, selectedObject{"ResourceClaim " + name, claimPath(namespace, name)})
+		out = append(out, selectedObject{"pod " + name, podPath(namespace, name)})
+		claim(name)
 	}
 	for _, name := range sortedKeys(t.services) {
-		if selected(t.services[name].Metadata.Labels) {
-			out = append(out, selectedObject{"Service " + name, servicePath(namespace, name)})
+		l := t.services[name].Metadata.Labels
+		if !selected(l) {
+			continue
 		}
+		if l[labelRole] == roleDevice {
+			claim(name)
+		}
+		out = append(out, selectedObject{"Service " + name, servicePath(namespace, name)})
 	}
 	for _, name := range sortedKeys(t.configMaps) {
 		if selected(t.configMaps[name].Metadata.Labels) {

@@ -130,6 +130,10 @@ type tree struct {
 	// taken is computed once from the devices (shareddrivers.go).
 	takenOnce sync.Once
 	taken     map[*device]*device
+	// homes holds the server of each device pod, computed once from the
+	// pods (homeOf).
+	homesOnce sync.Once
+	homes     map[podKey]string
 	// served holds the owner of each served device (served.go).
 	served servedVerdicts
 }
@@ -175,16 +179,15 @@ func (t *tree) server(d *device) (serverRef, bool) {
 }
 
 // runningOn answers the server that the pod of a device's driver runs
-// on, while the device holds the finalizer and has the pod (podOf): a
-// served device has its owner's pod while it holds the finalizer. The
-// pod places a device that leaves the tree of its parents, because a
-// person deleted the device or the parent that places it, and the
-// finalizer keeps the device's object until its deactivation ran
-// through that driver.
+// on (podOf): the server in the pod's label, which holds the pod until
+// it is gone (heldElsewhere). A served device has its owner's pod while
+// it shares the owner's INDI device. The pod places a device that
+// leaves the tree of its parents, because a person moved or deleted the
+// device or the parent that places it, and the finalizer keeps a
+// deleted device's object until its deactivation ran through that
+// driver. A device whose finalizer a person removed by hand is placed
+// the same way, because its pod still runs its driver.
 func (t *tree) runningOn(d *device) (serverRef, bool) {
-	if !holdsFinalizer(d.object.Metadata) {
-		return serverRef{}, false
-	}
 	_, p, running := t.podOf(d)
 	if !running {
 		return serverRef{}, false
@@ -244,11 +247,13 @@ func (t *tree) serverNamed(name string) (serverRef, bool) {
 // t.devices: the devices that run a driver, and the devices that one
 // of them serves. A device whose driver another device on the server
 // runs is left out (shareddrivers.go), and so is a served device that
-// the tree refuses (served.go).
+// the tree refuses (served.go), and a device whose pod another server
+// still holds (heldElsewhere).
 func (t *tree) devicesOn(s serverRef) []*device {
 	var out []*device
+	server := s.String()
 	for _, d := range t.placedOn(s) {
-		if _, owned := t.ownerOf(d); !owned {
+		if _, owned := t.ownerOf(d); !owned || t.heldElsewhere(d, server) {
 			continue
 		}
 		if _, taken := t.driverTakenBy(d); !taken {
@@ -256,6 +261,50 @@ func (t *tree) devicesOn(s serverRef) []*device {
 		}
 	}
 	return out
+}
+
+// heldElsewhere reports whether the pod of a device's driver (podOf)
+// belongs to a server other than the named one, and that server's pod
+// runs. A device pod belongs to the server in its label until the pod
+// is gone, because socat in the pod serves one connection, and the
+// server that holds it runs the device's deactivation, switches its
+// output off, and stops its driver before the pod goes (moves.go,
+// deactivation.go). So a device that a person moves from one running
+// server to another stays on the server it left until its pod is gone,
+// and then joins the other server in a pod of its own. A pod whose
+// server no longer runs belongs to no server, and the server that the
+// tree places the device on replaces it (ensure).
+func (t *tree) heldElsewhere(d *device, server string) bool {
+	runner, ok := t.runnerOf(d)
+	if !ok || (!d.runsDriver() && !t.shares(d)) {
+		return false
+	}
+	on, ok := t.homeOf(runner)
+	if !ok || on == server {
+		return false
+	}
+	_, running := t.pods[on]
+	return running
+}
+
+// podKey names the resource of a device pod by the pod's labels.
+type podKey struct{ kind, resource string }
+
+// homeOf answers the server in the label of the pod of a device that
+// runs a driver, while the pod exists. The status writer reads the
+// tree once for each reading, so the tree indexes the pods once by
+// their labels, and a lookup builds no name.
+func (t *tree) homeOf(runner *device) (string, bool) {
+	t.homesOnce.Do(func() {
+		t.homes = map[podKey]string{}
+		for _, p := range t.pods {
+			if l := p.Metadata.Labels; l[labelRole] == roleDevice {
+				t.homes[podKey{l[labelKind], l[labelResource]}] = l[labelServer]
+			}
+		}
+	})
+	on, ok := t.homes[podKey{runner.kind.Name, runner.name()}]
+	return on, ok
 }
 
 // placedOn answers the devices whose parents place them on one server,

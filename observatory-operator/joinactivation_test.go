@@ -5,6 +5,8 @@ package main
 // the reservation's Activation step answered.
 
 import (
+	"slices"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -112,6 +114,42 @@ func TestTheRetryAnnotationRerunsAJoiningDevicesFailedActivation(t *testing.T) {
 		}
 		if n := startedRuns(w.api, observatory.DustCapKind, "east", observatory.TriggerActivation); n != 2 {
 			t.Errorf("the activation started %d times, want 2", n)
+		}
+	})
+}
+
+// A camera taken off the train and put back during a session cools
+// again. Its stored status still reads Connected from before it left
+// until the status writer reads its new pod, so the activation waits
+// for a status of the camera as it is now.
+func TestACameraThatRejoinsCoolsAgain(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := readyWorld(t)
+		w.moveDevice(observatory.CameraKind, "east-main", "", "")
+		w.until(5*time.Minute, "the camera's output stays on", func() bool {
+			return slices.Contains(w.indi.changes(), outputsOff[0])
+		})
+		rejoined := time.Now()
+
+		w.moveDevice(observatory.CameraKind, "east-main", "opticalTrain", "east-imaging")
+		var run observatory.ProcedureRun
+		w.until(5*time.Minute, "the camera's activation does not end", func() bool {
+			for _, r := range deviceRuns(t, w, observatory.CameraKind, "east-main") {
+				if r.Trigger == observatory.TriggerActivation && !r.StartTime.Before(rejoined) && (r.State == observatory.StepDone || r.State == observatory.StepFailed) {
+					run = r
+					return true
+				}
+			}
+			return false
+		})
+
+		if run.State != observatory.StepDone {
+			t.Errorf("the activation = %s, want Done", mustJSON(run))
+		}
+		warnings := slices.DeleteFunc(typedEvents(w.api, observatory.CameraKind, "east-main"), func(e string) bool { return !strings.HasPrefix(e, "Warning") })
+		if len(warnings) != 0 {
+			t.Errorf("Warnings = %q", warnings)
 		}
 	})
 }

@@ -248,7 +248,9 @@ func stampedWith(p *pod, file string) *pod {
 }
 
 // current reports whether a running pod has the spec of the pod the
-// operator builds now.
+// operator builds now, for the same server. A device pod that another
+// server held, whose server stopped, is not current (tree.heldElsewhere).
 func current(running, built *pod) bool {
-	return running.Metadata.Annotations[annotationSpec] == built.Metadata.Annotations[annotationSpec]
+	return running.Metadata.Annotations[annotationSpec] == built.Metadata.Annotations[annotationSpec] &&
+		running.Metadata.Labels[labelServer] == built.Metadata.Labels[labelServer]
 }

@@ -34,13 +34,16 @@ func (o *operator) setOutputs(ctx context.Context, t *tree, devices []*device, p
 			}
 			continue
 		}
-		// A Switch belongs to a telescope or an observatory, never to a
-		// train, so its server is known unless it is on the shelf. A
-		// Switch that a person deleted is on the server its pod runs on
-		// until the release stops it, and switches its outputs off there.
-		ref, installed := t.server(sw)
-		if !installed && !power {
-			ref, installed = t.runningOn(sw)
+		// A Switch runs on the server that holds its pod until the pod
+		// is gone (tree.heldElsewhere), and is reached there, whatever
+		// its parents say now: a Switch that a person deleted or moved
+		// switches its outputs off on the server it left, during that
+		// server's release. A Switch with no pod is reached on the
+		// server that the tree places it on, which is known unless it is
+		// on the shelf, because a Switch never belongs to a train.
+		ref, installed := t.runningOn(sw)
+		if !installed {
+			ref, installed = t.server(sw)
 		}
 		if !installed {
 			if power {
@@ -77,14 +80,17 @@ func (o *operator) setOutputs(ctx context.Context, t *tree, devices []*device, p
 }
 
 // unpowered answers the devices whose output no device on a running
-// server names. A device that the tree places on a server whose pod
-// runs still draws from its output, so a device that leaves, on the
-// same Switch output, leaves that output on.
-func (t *tree) unpowered(devices []*device) []*device {
+// server names, apart from the server that stops: the server whose
+// release switches the outputs off, or none (serverRef{}). A device
+// that the tree places on a server whose pod runs still draws from its
+// output, so a device that leaves, or a server that releases, leaves
+// on an output that such a device shares, such as an output of an
+// observatory's Switch that powers devices on two telescopes.
+func (t *tree) unpowered(devices []*device, stopping serverRef) []*device {
 	used := map[observatory.Power]bool{}
 	for _, d := range t.devices {
 		ref, placed := t.server(d)
-		if _, running := t.pods[ref.String()]; placed && running && d.object.Spec.Power != nil {
+		if _, running := t.pods[ref.String()]; placed && running && ref != stopping && d.object.Spec.Power != nil {
 			used[*d.object.Spec.Power] = true
 		}
 	}
