@@ -33,7 +33,10 @@ into `$HOME` before each start. The profile names the INDI server, the
 guide camera and the mount as the server names them, the guide tube's
 focal length, and where the pulses go: `spec.pulses: Mount` sends them
 to the mount's driver, and `Camera` to the guide camera's ST-4 port. A
-change to the profile replaces the pod.
+change to the profile replaces the pod. During a session, the
+operator reads the `Guider`, its train, and the guide tube from the
+session's record, so an edit of them reaches the profile at the next
+session, and PHD2 keeps its calibration until then.
 
 `StopGuider` deletes the pod before `Disconnect`, so PHD2 never sees
 its devices drop. On a compositor with no seat, a modal dialog ends

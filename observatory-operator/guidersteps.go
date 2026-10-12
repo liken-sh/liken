@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
@@ -26,12 +25,11 @@ import (
 )
 
 // guiderOf answers the Guider of a telescope, the first by name when a
-// person declared two, or nil.
+// person declared two, or nil. While a session holds the telescope, it
+// is one that the session recorded (records.go).
 func (t *tree) guiderOf(telescope string) *observatory.Guider {
-	for _, name := range slices.Sorted(maps.Keys(t.guiders)) {
-		if t.guiders[name].Spec.Telescope == telescope {
-			return t.guiders[name]
-		}
+	if guiders := t.guidersOf(telescope); len(guiders) > 0 {
+		return guiders[0]
 	}
 	return nil
 }
@@ -58,8 +56,8 @@ func (t *tree) guiderDevices(ref serverRef, guider *observatory.Guider) (camera,
 	} else if guider.Spec.Pulses == observatory.PulsesMount {
 		return nil, nil, 0, fmt.Errorf("no Mount on Telescope %s to send the pulses to", ref.name)
 	}
-	if tube, ok := t.tubes[train.Spec.OpticalTube]; ok {
-		focalLength = tube.Spec.FocalLength
+	if tube, ok := t.tubeSpec(train.Spec.OpticalTube); ok {
+		focalLength = tube.FocalLength
 	}
 	return camera, mount, focalLength, nil
 }

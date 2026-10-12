@@ -62,24 +62,22 @@ func TestAReleaseSwitchesOffTheOutputThatItsSessionSwitchedOn(t *testing.T) {
 }
 
 // A server pod that an eviction deleted during a session comes back
-// with the devices whose pods carry its label, and with the devices
-// that hold the finalizer, such as a camera whose pod the eviction
-// deleted too. A device placed on the server during the session still
-// waits for the next one. When every pod of the server is gone,
-// nothing records the session's set, and the new pod takes the devices
-// that the specs place there, as a new session would. The operator is
-// down while the pods go, so it reads every eviction at once, as it
-// would after a node fails.
+// with the devices that its session started: the record on any pod of
+// the server that is left names them, and when every pod is gone, the
+// devices that hold the finalizer are the set, because the
+// reservation's StartDevices step is Done. A device placed on the
+// server during the session still waits for the next one. The
+// operator is down while the pods go, so it reads every eviction at
+// once, as it would after a node fails.
 func TestAServerCreatedAgainKeepsItsSessionsDevices(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name    string
 		evicted []string
-		starts  bool
 	}{
-		{"the server's pod", []string{"west-telescope"}, false},
-		{"the server's pod and the camera's", []string{"west-telescope", "west-main-camera"}, false},
-		{"every pod of the server", []string{"west-telescope", "west-mount", "west-main-camera"}, true},
+		{"the server's pod", []string{"west-telescope"}},
+		{"the server's pod and the camera's", []string{"west-telescope", "west-main-camera"}},
+		{"every pod of the server", []string{"west-telescope", "west-mount", "west-main-camera"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -104,9 +102,8 @@ func TestAServerCreatedAgainKeepsItsSessionsDevices(t *testing.T) {
 				synctest.Wait()
 
 				after, _ := w.api.object(podsCollection, "west-telescope")
-				started := slices.Contains(w.api.names(podsCollection), "extra-focuser") || slices.Contains(links(after), "extra-focuser")
-				if started != c.starts {
-					t.Errorf("the extra focuser started = %t, want %t: west runs %v", started, c.starts, links(after))
+				if slices.Contains(w.api.names(podsCollection), "extra-focuser") || slices.Contains(links(after), "extra-focuser") {
+					t.Errorf("west runs %v, want no extra focuser", links(after))
 				}
 			})
 		})
@@ -233,6 +230,87 @@ func TestAReleaseStartsNoDriverThatItsSessionDidNot(t *testing.T) {
 		})
 		if p, _ := w.api.object(podsCollection, "east-telescope"); slices.Contains(links(p), "extra-switch") {
 			t.Errorf("east-telescope runs %v during the release, want no Switch extra", links(p))
+		}
+		w.indi.release("Simulator IO", "DIGITAL_OUTPUT_1")
+	})
+}
+
+// A server whose pods an eviction deletes one at a time while the
+// operator runs keeps its session's devices, in either order, also
+// when the API server refuses to create the pods again until every
+// pod of the server is gone. The reservation's steps record that the
+// session started the server, so the new pod takes the devices that
+// hold the finalizer and not the focuser placed during the session.
+func TestAServerWhosePodsGoOneAtATimeKeepsItsSessionsDevices(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		evicted []string
+	}{
+		{"the server's pod first", []string{"west-telescope", "west-mount", "west-main-camera"}},
+		{"the devices' pods first", []string{"west-mount", "west-main-camera", "west-telescope"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				w := westReadyWorld(t)
+				w.put(observatory.FocuserKind, "extra", map[string]any{"opticalTrain": "west-imaging", "driver": map[string]any{"name": "indi_simulator_focus"}})
+				w.settle()
+
+				w.api.refuse(1000)
+				for _, name := range c.evicted {
+					w.api.deleteNamed(podsCollection, name)
+					time.Sleep(time.Second)
+					synctest.Wait()
+				}
+				w.api.refuse(0)
+				w.until(5*time.Minute, "west's server is not back with its devices", func() bool {
+					connected := w.indi.connected("west-telescope")
+					return slices.Contains(connected, "CCD Simulator") && slices.Contains(connected, "Telescope Simulator")
+				})
+				time.Sleep(time.Minute)
+				synctest.Wait()
+
+				after, _ := w.api.object(podsCollection, "west-telescope")
+				if slices.Contains(w.api.names(podsCollection), "extra-focuser") || slices.Contains(links(after), "extra-focuser") {
+					t.Errorf("west runs %v with pods %v, want no extra focuser", links(after), w.api.names(podsCollection))
+				}
+			})
+		})
+	}
+}
+
+// A focuser moved from east to west's train during both sessions does
+// not start on west while east's release runs: west's server pod,
+// which an eviction deletes after StopDevices deleted the focuser's
+// pod and while PowerOff waits, comes back without it, although the
+// focuser still holds the finalizer from east's session.
+func TestADeviceMovedToAHeldServerWaitsAfterAnEvictionOfThatServer(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := heldWorld(t, true)
+		w.moveDevice(observatory.FocuserKind, "east", "opticalTrain", "west-imaging")
+		w.settle()
+		w.indi.hold("Simulator IO", "DIGITAL_OUTPUT_1")
+		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
+		w.until(5*time.Minute, "PowerOff does not run", func() bool {
+			r, _ := w.reservation("east-tonight")
+			return stepOf(r, observatory.StepPowerOff).State == observatory.StepRunning
+		})
+		before, _ := w.api.object(podsCollection, "west-telescope")
+
+		w.api.deleteNamed(podsCollection, "west-telescope")
+		w.until(5*time.Minute, "west's server is not back", func() bool {
+			p, ok := w.api.object(podsCollection, "west-telescope")
+			return ok && podUID(p) != podUID(before) && slices.Contains(w.indi.connected("west-telescope"), "CCD Simulator")
+		})
+		time.Sleep(10 * time.Second)
+		synctest.Wait()
+
+		after, _ := w.api.object(podsCollection, "west-telescope")
+		if slices.Contains(w.api.names(podsCollection), "east-focuser") || slices.Contains(links(after), "east-focuser") {
+			t.Errorf("west runs %v with pods %v, want no east focuser", links(after), w.api.names(podsCollection))
 		}
 		w.indi.release("Simulator IO", "DIGITAL_OUTPUT_1")
 	})

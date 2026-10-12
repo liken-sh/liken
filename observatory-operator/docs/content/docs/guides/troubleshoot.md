@@ -71,7 +71,8 @@ and its `Ready` message names the reservation it waits for, such as
 `Starts at the next reservation, after Reservation east-tonight ends`.
 A device that a person moved keeps running where it was, and its
 `ParentFound` condition has the reason `MovePending` and says where it
-goes. End the reservation, or let it reach its `end`, and reserve the
+goes. An edit of an `OpticalTrain`, an `OpticalTube`, or a
+`Guider` waits for the next reservation the same way. End the reservation, or let it reach its `end`, and reserve the
 telescope again.
 
 ## StartDevices fails: a device never appears

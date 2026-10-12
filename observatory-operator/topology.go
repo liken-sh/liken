@@ -91,11 +91,11 @@ func (o *operator) ensureServer(ctx context.Context, report func(string), ref se
 // startDevices gives each device that runs a driver the finalizer,
 // with each device that it serves, creates its pod, its Service, and
 // its claim, and answers the devices whose pod it created. A served
-// device has no pod of its own. The tree of now decides which camera a
-// Guider names, so a Guider created during a reservation places its
-// camera at the next start of the camera's pod.
+// device has no pod of its own. Each pod carries the record of the
+// server's whole set (records.go).
 func (o *operator) startDevices(ctx context.Context, report func(string), ref serverRef, devices []*device) ([]*device, error) {
 	t := o.snapshot()
+	record := t.recordOf(ref, t.devicesOn(ref))
 	var started []*device
 	for _, d := range driverDevices(devices) {
 		built, svc, claim, err := devicePod(o.namespace, ref, d, t.guides(ref, d))
@@ -103,11 +103,7 @@ func (o *operator) startDevices(ctx context.Context, report func(string), ref se
 			o.fault(d, err)
 			return started, fmt.Errorf("%s %s: %w", d.kind.Name, d.name(), err)
 		}
-		recorded := []*device{d}
-		if own, ok := t.device(d.kind, d.name()); ok {
-			recorded = append(recorded, t.servedBy(own)...)
-		}
-		built.Metadata.Annotations[annotationSession] = t.recordOf(ref, recorded)
+		built.Metadata.Annotations[annotationSession] = record
 		if err := o.holdDevice(ctx, report, d); err != nil {
 			return started, err
 		}

@@ -115,7 +115,8 @@ spec:
 Use the effective focal length: with a reducer or a flattener in the
 path, give the focal length with it. The operator writes the tube's
 values to the camera's driver, so the frames record them, and to PHD2
-for the guide tube.
+for the guide tube. An edit of a tube or a train during a reservation
+reaches the drivers and PHD2 at the next reservation of the telescope.
 
 A guide scope is a second `OpticalTube` with its own `OpticalTrain`.
 An off-axis guider shares the imaging tube, so its train names the

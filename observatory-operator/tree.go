@@ -152,6 +152,11 @@ type tree struct {
 	held     sessions
 	// served holds the owner of each served device (served.go).
 	served servedVerdicts
+	// records holds the record of each held server whose pods carry
+	// one, and recordedTubes the spec of each tube that one of them
+	// names (records.go).
+	records       map[serverRef]sessionRecord
+	recordedTubes map[string]observatory.OpticalTubeSpec
 }
 
 // parent answers the resource above a device, from the parent field
@@ -203,15 +208,16 @@ func (t *tree) declared(d *device) (serverRef, bool) {
 // holds a server and its pod runs, the server runs a fixed set of
 // devices: the devices that it started, which its pod lists in its
 // drivers annotation when it is created and whose pods carry its label
-// (heldOn). An eviction can delete the server's pod. Then the device
-// pods that carry its label, and the devices that its parents place
-// there and that hold the finalizer, keep the set, and the runner
-// creates the server's pod again with them. When every pod of the
-// server is gone, nothing records the set, and the server takes the
-// devices that the specs place there, as a new session would, because
-// the tree cannot tell that case from a session whose activation has
-// not started the server yet. During the session, the pod places such a device, and its
-// spec does not, so a spec edit that would move it to another
+// (heldOn). An eviction can delete the server's pod. Then the record
+// on the pods of its devices that are left names the set, and the
+// runner creates the server's pod again with it (records.go). When
+// every pod of the server is gone, the record is gone too, and the
+// reservation's steps tell whether the session started the set
+// (startedBy). If it did, the devices that hold the finalizer and that
+// their parents place there are the set (lostFrom). If it did not, the
+// server takes the devices that the specs place there, as a new
+// session does. During the session, the pod places such a device, and
+// its spec does not, so a spec edit that would move it to another
 // telescope, train, or the shelf, or a train deleted under it, takes
 // effect when the session ends, and the release stops the device as
 // its own. A device that its parents place on such a server and that
@@ -244,13 +250,13 @@ type sessions struct {
 	// telescope of an observatory for the observatory's server.
 	holders map[serverRef][]string
 	// started holds each held server whose set of devices is fixed: its
-	// pod exists, or the pod of one of its devices does.
+	// pod exists, the pod of one of its devices does, or a holder's
+	// steps started the set (startedBy).
 	started map[serverRef]bool
 	// runs gives the started server whose set holds each device that
 	// runs a driver: the server in the label of the device's pod, the
 	// server whose pod lists the device's driver, or, while that pod is
-	// gone, the server that the device's parents name if the device
-	// holds the finalizer.
+	// gone, the server that lostFrom answers.
 	runs map[*device]serverRef
 	// podded holds each device that runs a driver and whose pod exists.
 	podded map[*device]bool
@@ -291,6 +297,11 @@ func (t *tree) sessions() sessions {
 				t.held.started[ref] = true
 			}
 		}
+		for ref := range t.held.holders {
+			if t.startedBy(ref) {
+				t.held.started[ref] = true
+			}
+		}
 		for _, d := range driverDevices(t.devices) {
 			name, err := objectName(d.kind, d.name())
 			if err != nil {
@@ -299,14 +310,51 @@ func (t *tree) sessions() sessions {
 			_, t.held.podded[d] = t.pods[name]
 			if ref, ok := byPod[name]; ok {
 				t.held.runs[d] = ref
-			} else if ref, ok := t.declared(d); ok && t.held.started[ref] && holdsFinalizer(d.object.Metadata) {
-				if _, running := t.pods[ref.String()]; !running {
-					t.held.runs[d] = ref
-				}
+			} else if ref, ok := t.lostFrom(d); ok {
+				t.held.runs[d] = ref
 			}
 		}
 	})
 	return t.held
+}
+
+// lostFrom answers the started server whose set holds a device whose
+// pod is gone, while that server's pod is gone too: the server whose
+// record names the device, or, when every pod of the server is gone
+// and with it the record, the server that the device's parents name if
+// the device holds the finalizer and no other server's record names
+// it. A device that a session started holds the finalizer until its
+// release, so a device placed there during the session does not.
+func (t *tree) lostFrom(d *device) (serverRef, bool) {
+	if d.record != nil {
+		_, running := t.pods[d.recordedOn.String()]
+		return d.recordedOn, t.held.started[d.recordedOn] && !running
+	}
+	ref, ok := t.declared(d)
+	if _, recorded := t.records[ref]; !ok || recorded || !t.held.started[ref] || !holdsFinalizer(d.object.Metadata) {
+		return serverRef{}, false
+	}
+	_, running := t.pods[ref.String()]
+	return ref, !running
+}
+
+// startedBy reports whether the steps of a reservation that holds a
+// server started its set of devices: StartDevices for a telescope's
+// server, and StartSite for an observatory's. The steps keep the answer
+// while an eviction deletes every pod of the server.
+func (t *tree) startedBy(ref serverRef) bool {
+	step := observatory.StepStartDevices
+	if ref.kind == observatory.ObservatoryKind {
+		step = observatory.StepStartSite
+	}
+	for _, name := range t.held.holders[ref] {
+		for _, s := range t.reservations[name].Status.Steps {
+			if s.Name == step && s.State == observatory.StepDone {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // started reports whether a session holds a server and the server's

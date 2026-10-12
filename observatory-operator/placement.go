@@ -53,8 +53,8 @@ func (t *tree) guides(server serverRef, d *device) bool {
 	if d.kind != observatory.CameraKind || server.kind != observatory.TelescopeKind || d.object.Spec.OpticalTrain == "" {
 		return false
 	}
-	for _, guider := range t.guiders {
-		if guider.Spec.Telescope == server.name && guider.Spec.OpticalTrain == d.object.Spec.OpticalTrain {
+	for _, guider := range t.guidersOf(server.name) {
+		if guider.Spec.OpticalTrain == d.object.Spec.OpticalTrain {
 			return true
 		}
 	}

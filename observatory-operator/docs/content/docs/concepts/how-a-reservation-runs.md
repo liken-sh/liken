@@ -136,36 +136,54 @@ session ends:
   there. A train that a person deletes leaves its devices on the
   server the same way.
 - Any other edit of a device that the session started, such as of its
-  `spec.power`, its driver, or its claim, and an edit of the
-  `Telescope`'s `spec.observatory`, waits for the end of the session
-  too. When the session starts a server or a device's pod, the
-  operator records in the annotation `observatory.liken.sh/session` on
-  that pod what it acts on: each device's parents, driver, power, and
-  claim, whether a `Guider` guides with it, and the telescope's
-  observatory. Until the session ends, the operator reads the record
-  and not the spec, so the release switches off the output that the
-  session switched on. A device's settings, such as a camera's gain,
-  are not in the record, and the operator writes them from the spec
-  when the device's driver comes back.
+  `spec.power`, its driver, or its claim, waits for the end of the
+  session too. So does an edit of the `Telescope`'s
+  `spec.observatory`, of its `OpticalTrain`s, of the `OpticalTube`s of
+  those trains, and of its `Guider`. When the session starts a server
+  or a device's pod, the operator records in the annotation
+  `observatory.liken.sh/session` on that pod what it acts on: each
+  device's parents, driver, power, and claim, whether a `Guider`
+  guides with it, and the telescope's observatory, trains, tubes, and
+  `Guider`s. Until the session ends, the operator reads the record and
+  not the spec. So the release switches off the output that the
+  session switched on, a camera whose driver comes back gets the
+  `SCOPE_INFO` of the tube that the session started with, and PHD2
+  keeps its pod and its calibration. A tube's status still shows the
+  lengths in its spec.
+- A device's settings, such as a camera's gain, the `Observatory`'s
+  location, and the procedures of every resource are not in the
+  record, because a person changes them during a session on purpose.
+  The operator writes the settings and the location from the spec
+  when a device's driver comes back.
 - A device that a person adds to the telescope, a train, or the
   observatory of a running server, by creating it or by naming its
   parent, does not start. It is `Idle`, and its `Ready` message reads
   `Starts at the next reservation, after Reservation east-tonight
   ends`. The next session starts it. A resource that another
   resource's driver serves, such as the `FilterWheel` of a camera,
-  waits the same way.
+  waits the same way, and so does a `Guider` that a person creates
+  for the telescope.
 - A device that a person deletes while the reservation is `Ready`
   leaves at once, as
   [Deleting a running resource](#deleting-a-running-resource)
-  describes.
+  describes. An `OpticalTrain`, an `OpticalTube`, or a `Guider` that a
+  person deletes is gone at once too: a `Guider` whose train is gone
+  turns to `Error`, and a camera whose train or tube is gone gets no
+  `SCOPE_INFO` when its driver comes back.
 
-An eviction does not change the set either. When the server's pod is
-gone, the operator creates it again with the devices whose pods carry
-the server's label, which hold their records, and the devices that
-hold the finalizer, so a device added during the session still
-waits. When every pod of the
-server is gone, nothing records the set, and the new pod takes the
-devices that their specs place there, as a new session would.
+An eviction does not change the set either. Each pod of the server
+carries the whole record, so while one of them is left, the operator
+creates the others again from it, and a device added during the
+session still waits. When every pod of the server is gone, the record
+is gone with them. If the reservation's `StartDevices` step is `Done`,
+or `StartSite` for the observatory's server, the new pod takes the
+devices that hold the finalizer and that their parents place there. A
+device added during the session holds no finalizer, so it still waits,
+and a device that another running server's record names stays there.
+These devices run with their specs as they are then, because the
+record of their drivers, power, and claims went with the pods. Before
+that step is `Done`, the new pod takes the devices that their specs
+place there, as a new session does.
 
 So each device runs on one server at a time. A device that moved
 between two running servers would need one server to release it while

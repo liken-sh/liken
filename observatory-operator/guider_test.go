@@ -397,16 +397,16 @@ func TestAGuiderWithoutItsEquipmentFailsStartGuider(t *testing.T) {
 	}
 }
 
-// While the reservation is Ready, a Guider that loses its train turns
-// to Error, and the reservation stays Ready.
+// While the reservation is Ready, a Guider whose train a person
+// deletes turns to Error, and the reservation stays Ready.
 func TestAGuiderThatLosesItsTrainIsInError(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyGuider(t)
-		w.put(observatory.GuiderKind, "east", map[string]any{"telescope": "east", "opticalTrain": "nowhere", "pulses": "Mount"})
+		w.api.deleteNamed(kindCollection(observatory.OpticalTrainKind), "east-guiding")
 		w.until(time.Minute, "the Guider is not in Error", func() bool {
 			c := conditionOf(guider(w).Status.Conditions, observatory.ConditionReady)
-			return c.Reason == string(observatory.PhaseError) && c.Message == "Failed: missing OpticalTrain nowhere on Telescope east"
+			return c.Reason == string(observatory.PhaseError) && c.Message == "Failed: missing OpticalTrain east-guiding on Telescope east"
 		})
 		if r, _ := w.reservation("east-tonight"); r.Status.Phase != observatory.ReservationReady {
 			t.Errorf("reservation = %s", r.Status.Phase)
@@ -414,16 +414,18 @@ func TestAGuiderThatLosesItsTrainIsInError(t *testing.T) {
 	})
 }
 
-// A profile change while the reservation is Ready, such as a new guide
-// tube, writes the ConfigMap and replaces the guider's pod.
-func TestANewGuideTubeReplacesTheGuiderPod(t *testing.T) {
+// A new guide tube that a person declares while the reservation is
+// Ready reaches PHD2's profile at the next reservation.
+func TestANewGuideTubeReachesTheNextSessionsProfile(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := readyGuider(t)
 		w.put(observatory.OpticalTubeKind, "east-guidescope", map[string]any{"telescope": "east", "aperture": 60, "focalLength": 240})
-		w.until(time.Minute, "the guider's pod did not start again", func() bool {
-			return w.guiders.starts("east-guider") == 2 && guider(w).Status.Phase == observatory.PhaseReady
-		})
+		w.settle()
+		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
+		w.gone(observatory.ReservationKind, "east-tonight", 15*time.Minute)
+		w.reserve("east-later", map[string]any{"telescope": "east", "holder": "desktop"})
+		w.phase("east-later", observatory.ReservationReady, 10*time.Minute)
 		files, _ := w.api.object(configMapsCollection, "east-guider")
 		if profile := files["data"].(map[string]any)[profileKey].(string); !strings.Contains(profile, "focalLength=240\n") {
 			t.Errorf("profile:\n%s", profile)

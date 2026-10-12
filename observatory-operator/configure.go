@@ -135,8 +135,8 @@ func configureCamera(ctx context.Context, t *tree, h handle, all []handle, notes
 		return err
 	}
 	if trainObject, ok := t.trains[train]; ok {
-		if tube, ok := t.tubes[trainObject.Spec.OpticalTube]; ok {
-			info := map[string]float64{"FOCAL_LENGTH": tube.Spec.FocalLength, "APERTURE": tube.Spec.Aperture}
+		if tube, ok := t.tubeSpec(trainObject.Spec.OpticalTube); ok {
+			info := map[string]float64{"FOCAL_LENGTH": tube.FocalLength, "APERTURE": tube.Aperture}
 			if err := note(optional(ctx, h, "SCOPE_INFO", info, notes)); err != nil {
 				return err
 			}

@@ -64,9 +64,10 @@ Every pod and `Service` the operator creates has these labels:
 | `observatory.liken.sh/resource` | that resource's name, such as `east` |
 
 A server's pod and each device's pod also carry the annotation
-`observatory.liken.sh/session`: what the session recorded when it
-created the pod, which the operator reads instead of the spec until
-the session ends. [Editing devices during a
+`observatory.liken.sh/session`: what the session recorded about the
+whole server, which the operator reads instead of the spec until the
+session ends. Each pod carries the whole record, so it survives an
+eviction while one pod of the server is left. [Editing devices during a
 session](/docs/concepts/how-a-reservation-runs/#editing-devices-during-a-session)
 describes it.
 
