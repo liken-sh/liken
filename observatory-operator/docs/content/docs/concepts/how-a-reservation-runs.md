@@ -94,9 +94,12 @@ new PHD2 once.
 A device that joins or leaves a telescope or the observatory during a
 reservation is an ordinary edit, and the operator refuses no change.
 While the reservation is `Ready`, the server keeps running, and the
-other devices on it stay connected. A device that joins gets its pod,
-and then its driver starts on the running server, and the operator
-connects it, writes its settings, and runs its `activation`. A device
+other devices on it stay connected. A device that joins first gets the
+power of the output that its `spec.power` names, as `PowerOn` gives it,
+and the `PodCreated` Event on the device says when the output went on.
+Then it gets its pod, and its driver starts on the running server, and
+the operator connects it, writes its settings, and runs its
+`activation`. A device
 that leaves, to the shelf or to another telescope, first runs its
 `deactivation` through the driver on the server it leaves, within the
 timeouts of its actions. Then its driver stops on the server, also

@@ -122,8 +122,11 @@ func (r *runner) keepPods(ctx context.Context, t *tree, ref serverRef, telescope
 // keepServer creates one server's pod when it is gone, creates the pod
 // of each of its devices that is gone, sets the server's drivers to the
 // devices, and deletes the pods of the devices that left. The order
-// gives a joining device its pod before its driver, and stops a leaving
-// device's driver before its pod goes (serverdrivers.go).
+// gives a joining device its power before its pod (powerJoining) and
+// its pod before its driver, and stops a leaving device's driver before
+// its pod goes (serverdrivers.go). A server whose pod is new starts
+// every driver disconnected, so its Switch cannot answer yet, and
+// reapply switches the outputs on when the Switch comes back.
 func (r *runner) keepServer(ctx context.Context, t *tree, ref serverRef, owner observatory.ObjectMeta, devices []*device) error {
 	about := reference(ref.kind, owner)
 	created, err := r.o.ensureServer(ctx, nil, ref, owner.UID, devices)
@@ -134,8 +137,12 @@ func (r *runner) keepServer(ctx context.Context, t *tree, ref serverRef, owner o
 		return err
 	}
 	joining := joiningServed(t, devices)
+	var powered map[string]string
+	if !created {
+		powered = r.powerJoining(ctx, t, ref, devices)
+	}
 	started, err := r.o.startDevices(ctx, nil, ref, devices)
-	r.recordDevicePods(started)
+	r.recordDevicePods(started, powered)
 	if err != nil {
 		return err
 	}
@@ -154,11 +161,11 @@ func (r *runner) keepServer(ctx context.Context, t *tree, ref serverRef, owner o
 }
 
 // recordDevicePods writes an Event and a log line for each device whose
-// pod the runner created.
-func (r *runner) recordDevicePods(devices []*device) {
+// pod the runner created, with what powerJoining switched for it.
+func (r *runner) recordDevicePods(devices []*device, powered map[string]string) {
 	for _, d := range devices {
 		name, _ := objectName(d.kind, d.name())
-		r.recordPod(reference(d.kind, d.object.Metadata), name, "")
+		r.recordPod(reference(d.kind, d.object.Metadata), name, powered[d.key()])
 	}
 }
 

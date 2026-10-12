@@ -96,3 +96,37 @@ func (t *tree) unpowered(devices []*device) []*device {
 	}
 	return out
 }
+
+// powerJoining switches on the output that each device without a pod
+// on a running server names, before the runner creates the pod, as
+// PowerOn does before StartDevices. A device that joins the server
+// while the reservation is Ready can name an output that is off: the
+// output of a camera that left switched off with it. A driver of real
+// hardware connects only to a device with power, and a pod with a claim
+// stays Pending until its device appears. powerJoining answers what it
+// switched for each device, by the device's key, for the Event on the
+// device's new pod.
+//
+// A device whose pod is gone for another reason, such as an eviction,
+// names an output that is on already, and powerJoining sends nothing
+// for it. A failure does not stop the pod: the Switch can be the device
+// that is coming back, and reapply switches every output on again when
+// the Switch's driver comes back.
+func (r *runner) powerJoining(ctx context.Context, t *tree, ref serverRef, devices []*device) map[string]string {
+	out := map[string]string{}
+	for _, d := range driverDevices(devices) {
+		name, err := objectName(d.kind, d.name())
+		if _, running := t.pods[name]; err != nil || running || d.object.Spec.Power == nil {
+			continue
+		}
+		notes, err := r.o.setOutputs(ctx, t, []*device{d}, true)
+		if err != nil {
+			r.o.logf("Reservation %s: switching on the output of %s, which joins %s: %v", r.name, d.key(), ref, err)
+			continue
+		}
+		if len(notes) > 0 {
+			out[d.key()] = sentence(strings.Join(notes, "; ")) + "."
+		}
+	}
+	return out
+}
