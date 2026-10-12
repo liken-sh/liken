@@ -48,8 +48,9 @@ the end of mode 1.
 
 - Ekos: <https://kstars-docs.kde.org/en/user_manual/ekos.html>
 - Upload modes: `UploadSP` in `libs/indibase/indiccd.cpp`
-- [Root plan 74](../../plans/74-astrophotography.md), "Frames" and
-  "Security"
+- [Root plan 74](../../../plans/74-astrophotography.md), "Security"
+- [The astrophotography-operator design](../../../astrophotography-operator/plans/00-design.md),
+  "Frames"
 
 ## What was built
 

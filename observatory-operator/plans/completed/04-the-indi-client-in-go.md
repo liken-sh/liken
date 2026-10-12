@@ -125,5 +125,6 @@ replay the 48 files, 283 KB in all, from a real listener.
 - The client side of `libindi`: `libs/indiclient/` in `indilib/indi`
 - What `indiserver` sends each client, and how it reads `enableBLOB`:
   `indiserver/ClInfo.cpp` in `indilib/indi`
-- [Root plan 74](../../../plans/74-astrophotography.md), "The INDI
-  client in Go"
+- [The astrophotography-operator design](../../../astrophotography-operator/plans/00-design.md),
+  "Centering and plate solving": the epoch conversion that the client
+  leaves to its caller

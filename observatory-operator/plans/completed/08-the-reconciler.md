@@ -12,7 +12,7 @@ closed.
 ## The problem
 
 A driver that restarts comes back disconnected, with its settings lost.
-In root plan 74's tests, every restart left `CONNECTION.CONNECT=Off`
+In the Docker tests of plan 03, every restart left `CONNECTION.CONNECT=Off`
 and lost the focal length, the upload mode and directory, and the
 mount's position. INDI writes settings to `~/.indi/*_config.xml` in
 the driver's own filesystem. A container restart deletes them.
@@ -47,7 +47,9 @@ pod restarts.
 - The configuration a driver saves: the `CONFIG_PROCESS` property that
   every driver defines, and `DefaultDevice::saveConfigItems` in
   `libs/indibase/defaultdevice.cpp`
-- [Root plan 74](../../plans/74-astrophotography.md), "The reconciler"
+- [Plan 03](03-the-topology-by-hand.md#the-docker-tests): every
+  restart in the Docker tests left its device disconnected with its
+  settings gone
 
 ## What was built
 

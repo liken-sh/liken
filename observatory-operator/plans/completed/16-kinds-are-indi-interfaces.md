@@ -684,5 +684,5 @@ drivers build from a bake file that only the make target uses.
 - Standard properties: <https://docs.indilib.org/drivers/standard-properties/>
 - [docs#7](https://github.com/indilib/docs/issues/7): the standard
   properties page is maintained by hand.
-- Root [plan 74](../../../plans/74-astrophotography.md): what
-  `astrophotography-operator` reads from these resources.
+- [The astrophotography-operator design](../../../astrophotography-operator/plans/00-design.md):
+  what `astrophotography-operator` reads from these resources.

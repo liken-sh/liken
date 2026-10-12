@@ -145,4 +145,5 @@ that `ldd` does not see.
 - Ubuntu snapshots: <https://snapshot.ubuntu.com/>
 - The closure method: `vulkan/closure.sh`, and
   [Loads that ldd cannot see](../../../display-operator/plans/open-problems/loads-that-ldd-cannot-see.md)
-- [Root plan 74](../../../plans/74-astrophotography.md), "Images"
+- [Root plan 74](../../../plans/74-astrophotography.md): the two
+  components and the contract between them

@@ -2,7 +2,7 @@
 
 Open problem. The headless weston of the `weston` image advertises no
 `wl_seat`, and a GTK 3 program that opens a modal dialog with no seat
-crashes. PHD2, the guider in [root plan 74](../../../plans/74-astrophotography.md),
+crashes. PHD2, the guider of [observatory-operator plan 09](../../../observatory-operator/plans/completed/09-the-guider.md),
 crashed this way twice on 2026-10-04. The display-operator compositor
 on a machine with no input devices probably has the same gap. That
 was not checked.

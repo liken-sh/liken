@@ -61,7 +61,7 @@ gives the design.
 `libindiclient` as the server it connects to. PHD2 is a wxWidgets
 program on GTK 3 with no headless mode, so it needs a Wayland
 compositor. `observatory-operator` runs the `weston` image beside it,
-headless, in the same pod. Root plan 74, "Guiding", gives the design.
+headless, in the same pod. `observatory-operator` plan 09 gives the design.
 The image is 513 MB, about 440 MB more than `indi`, because PHD2 links
 OpenCV, and OpenCV links GDAL, FFmpeg, and GStreamer.
 

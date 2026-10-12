@@ -11,9 +11,8 @@ manual's guides emit in `skills/`, and the plans.
 
 `plans/00-design.md` is the design, and the `plans/` directory holds the
 plans that build it. Code exists only where a plan calls for it. [Root
-plan 74](../plans/74-astrophotography.md) records the architecture that
-this component and `astrophotography-operator` share, and the
-simulator tests that support it.
+plan 74](../plans/74-astrophotography.md) records the contract between
+this component and `astrophotography-operator`.
 
 The manual at https://liken.sh/observatory/ is the description of
 the operator for the people who run it, and `docs/AGENTS.md` covers

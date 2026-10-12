@@ -565,4 +565,5 @@ API server's own validators.
 - ASCOM's device types: <https://ascom-standards.org/alpyca/alpacaclasses.html>
 - equipment-operator's `Receiver` and `Television` resources, and
   media-operator's `Play`
-- [Root plan 74](../../../plans/74-astrophotography.md), "Resources"
+- [The astrophotography-operator design](../../../astrophotography-operator/plans/00-design.md),
+  "The resources": the `Target` that names a `Telescope`

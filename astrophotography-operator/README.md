@@ -8,4 +8,4 @@ in a `Catalog`.
 
 Nothing is built yet. [`plans/00-design.md`](plans/00-design.md) is the
 design, and [root plan 74](../plans/74-astrophotography.md) holds the
-architecture and the tests behind it.
+two components and the contract between them.

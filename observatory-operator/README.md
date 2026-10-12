@@ -35,8 +35,8 @@ the operator and four packages:
 [`deploy/`](deploy/) holds the CRDs, the RBAC, and the operator, and [`examples/simulators.yaml`](examples/simulators.yaml)
 is an observatory of simulators with a device of every kind.
 [`plans/00-design.md`](plans/00-design.md) is the design, and [root
-plan 74](../plans/74-astrophotography.md) holds the architecture and
-the tests behind it. `make test` runs every check CI runs.
+plan 74](../plans/74-astrophotography.md) holds the two components
+and the contract between them. `make test` runs every check CI runs.
 
 ## Running the operator
 

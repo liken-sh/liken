@@ -129,4 +129,5 @@ image lists, so a new driver is a decision, not a silent addition.
 - The driver catalog: `/usr/share/indi/drivers.xml`, 291 devices
 - The CCD simulator: `drivers/ccd/ccd_simulator.cpp` and
   `drivers/ccd/sky_renderer.cpp` in `indilib/indi`
-- [Root plan 74](../../../plans/74-astrophotography.md), "Images"
+- [Root plan 74](../../../plans/74-astrophotography.md): the two
+  components and the contract between them

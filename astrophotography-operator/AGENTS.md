@@ -7,4 +7,4 @@ observatory. It holds only plans so far.
 plans that build it. Code exists only where a plan calls for it. This
 component depends on `observatory-operator`, and `observatory-operator`
 does not depend on it. [Root plan 74](../plans/74-astrophotography.md)
-records the architecture that the two components share.
+records the contract between the two components.

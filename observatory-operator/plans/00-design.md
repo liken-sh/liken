@@ -3,8 +3,10 @@
 `observatory-operator` runs an observatory's hardware through INDI.
 `astrophotography-operator` runs imaging sessions on it, and a person
 can drive it from KStars on a desktop instead. [Root plan
-74](../../plans/74-astrophotography.md) holds the architecture and the
-tests that chose it.
+74](../../plans/74-astrophotography.md) holds the two components and
+the contract between them, and [plan
+03](completed/03-the-topology-by-hand.md#the-docker-tests) holds the
+tests that chose this topology.
 
 ## The topology
 

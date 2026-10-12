@@ -5,11 +5,82 @@ Built on 2026-10-05, and run on a two-node test cluster with the
 
 ## The problem
 
-Root plan 74 tested its architecture with containers on one Docker
-bridge. Pods on a cluster add the pod network, `Service` names, and the
+The Docker tests below tested the architecture with containers on one
+Docker bridge. Pods on a cluster add the pod network, `Service` names, and the
 kubelet's restarts, and none of those were tested. The guide camera's
 frames cross the network twice on their way to PHD2, and the latency
 across nodes is the last unknown of the architecture.
+
+## The Docker tests
+
+On 2026-10-04, before this plan, the architecture was tested on one
+workstation with Ubuntu 26.04, INDI 2.2.4 and 2.2.5 from the PPA, and
+Docker. Containers on one Docker bridge network stood in for pods, and
+`docker run --restart always` stood in for the kubelet's restarts. The
+tests chose one `indiserver` with a pod for each device over the two
+designs below.
+
+### Rejected: a server in each device's pod
+
+`indiserver` can chain another server: a driver argument of the form
+`Device@host:port` forwards that device from a remote server. The
+server also delivers the properties that one driver reads from
+another, which INDI calls snooping: the CCD driver snoops the mount's
+coordinates to write `OBJCTRA` and `OBJCTDEC` into each FITS header,
+and a dome snoops the mount to follow it. A chain of per-device
+servers was the first design, and three properties of
+`indiserver` rule it out.
+
+- **Snooping does not cross a hub.** A hub that chains the mount's
+  server and the camera's server does not deliver the mount's
+  properties to the camera driver. The camera's own server has to chain
+  the mount's server too.
+- **A lost remote ends the server.** When a remote server closes,
+  `indiserver` reconnects at once, with no delay. If that connection is
+  refused, `RemoteDvrInfo::openINDIServer` calls `Bye()`, which calls
+  `exit(1)`. In the test, removing the mount's container ended both the
+  hub and the camera's server, which chained the mount.
+- **A cycle never starts.** `indiserver` connects to its remotes before
+  it opens its own port. Two servers that chain each other each wait
+  for the other to listen. In the test, each restarted 9 times in 45
+  seconds and neither started. Real rigs have such pairs: a dome
+  follows the mount, and the mount reads the dome's park state.
+
+An operator that starts and restarts the servers in dependency order
+does not fix this. A cycle has no order, and when a server restarts,
+the servers that chain it exit at once, before any operator can act.
+
+### Rejected: every device in one pod
+
+One pod with one `indiserver` and every device claim is how a Raspberry
+Pi rig runs today. A pod's claims are allocated when the pod is
+scheduled, so the pod does not start until every claimed device exists.
+An unplugged focuser would keep the camera from running. Separate
+device pods keep each device's claim independent.
+
+### What Docker measured
+
+| Test | Result |
+|---|---|
+| The CCD simulator with the mount simulator | Draws catalog stars at the mount's position with `gsc`. A blank frame until `SCOPE_INFO.FOCAL_LENGTH` is set, because its default is 0 and the mount simulator does not supply one. |
+| `solve-field` on a simulated frame | Solved in 1.2 seconds with the Ubuntu index packages, about 20 arcminutes from the mount's JNow position, which is the precession since J2000. |
+| `UPLOAD_LOCAL` | The driver wrote the FITS file and sent its path in `CCD_FILE_PATH`. |
+| A hub chaining the mount's and the camera's servers | No stars and no `OBJCTRA` until the camera's own server also chained the mount. |
+| The mount's server removed | The hub and the camera's server both exited with `good bye` in the same second. |
+| Two servers that chain each other | 9 restarts each in 45 seconds. Neither started. |
+| A `Never` client and an `Also` client on a chained hub | The client that sent `enableBLOB` last set BLOBs for both. A client that never sent `enableBLOB` changed nothing for the other. |
+| Shim over a Unix socket without `pipes` | Snooping worked. The camera driver crashed on its first BLOB. |
+| Shim over TCP with `pipes`, `UPLOAD_BOTH` | An `Also` client received 3.8 MB per frame. A client that never sent `enableBLOB` received 183 KB of control messages. The frame was also on the camera's volume. |
+| The mount's pod restarted during a 15-second exposure | The exposure finished and wrote its frame. The server and the camera were not restarted. The mount came back disconnected. |
+| The camera's pod restarted during an exposure | The mount's right ascension did not change. That exposure was lost. |
+| The server's pod restarted | Both driver pods restarted with it. Both devices were on the server again after 1 second, disconnected. |
+| The server started 8 seconds before the drivers | It converged after the shims restarted a few times. The cause is probably that `socat` retries a refused connection but not a name that does not resolve yet. This was not confirmed. |
+| Exposure end to BLOB at the client, 1280 by 960, 16-bit, 3.3 MB on the wire, 15 exposures | One server with the drivers as children: 8 ms median, 8 ms p90, 21 ms max. The shim design: 13 ms median, 14 ms p90, 15 ms max. |
+
+Every restart left its device disconnected (`CONNECTION.CONNECT=Off`)
+with its settings gone: the focal length, the upload mode and
+directory, and the mount's position. That finding is the reason for
+the reconciler of [plan 08](08-the-reconciler.md).
 
 ## The topology
 
@@ -152,8 +223,8 @@ was not tested on the cluster.
 ## Upstream issues
 
 - [indi#1927](https://github.com/indilib/indi/issues/1927): a server
-  exits when a server it chains stops. That is the reason plan 74
-  rejected chaining.
+  exits when a server it chains stops. "Rejected: a server in each
+  device's pod" above gives this as one reason against chaining.
 - [indi#1499](https://github.com/indilib/indi/issues/1499): drivers
   that serve several devices congested their pipe to the server. One
   device in each pod avoids that.
@@ -166,5 +237,5 @@ was not tested on the cluster.
 - A driver chooses descriptor passing for BLOBs in `is_unix_io()` in
   `libs/indibase/indidriverio.c`. A pipe makes it send base64, which is
   why the listener needs `pipes`.
-- [Root plan 74](../../../plans/74-astrophotography.md), "The rig" and
-  "Evidence"
+- [Root plan 74](../../../plans/74-astrophotography.md): the two
+  components and the contract between them

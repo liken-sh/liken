@@ -200,6 +200,21 @@ reads. `phd2/phd2test` is the fake event server that both the
 package's tests and the operator's tests use. It answers over
 `net.Pipe`, so the tests run in a `synctest` bubble.
 
+### The Docker tests
+
+On 2026-10-04, PHD2 2.6.14 ran as a client of the simulators' server
+on one workstation, in Docker, with the test setup of [plan
+03](03-the-topology-by-hand.md#the-docker-tests). These runs test the
+path of frames and pulses, not guiding quality: the simulators'
+periodic error and drift were left at their defaults, and the run did
+not record those defaults.
+
+| Test | Result |
+|---|---|
+| PHD2 under `cage` 0.2.1, headless | At 240 mm, every frame was rejected with `Star lost - low HFD`, because the stars were smaller than a pixel at 4.5 arcseconds per pixel. At 1000 mm: calibration in 38 seconds and 19 steps, then 190 guide steps over 3 minutes with the star found in every frame. One step took 1.06 seconds median and 1.16 seconds at most with 1-second exposures. |
+| PHD2 on `ghcr.io/liken-sh/weston:20260928-1`, headless, in a separate container | Two crashes in modal dialogs, with no `wl_seat`: a stale `~/phd2.1` lock, then the first-light wizard. With `ConfigVersion=2001` and no lock: calibration in 19 steps, then 124 guide steps over 2 minutes, 1.07 seconds median and 1.08 seconds at most per step, with the star found in every frame. |
+| PHD2 under `cage` with the first-light wizard open | PHD2 calibrated and guided with the modal dialog on the screen. |
+
 ### The modal dialogs PHD2 can open
 
 On 2026-10-06, PHD2's source at commit `a6c0272` was read for every
@@ -242,7 +257,7 @@ that no event-API method reaches.
 
 ### The example's guide camera
 
-Root plan 74's experiment guided with the CCD simulator, whose pixels
+The Docker tests above guided with the CCD simulator, whose pixels
 are 5.2 µm and whose seeing is 3.5 arc-seconds: at a 240 mm focal
 length that is 4.5 arc-seconds per pixel, and every star was smaller
 than a pixel. The example's guide camera runs `indi_simulator_guide`,
@@ -277,7 +292,7 @@ tracking on, and through the event API, port-forwarded to the
 `Service` `east-guider`, loop, select a star, calibrate, and guide for
 a few minutes, while the `Guider`'s status shows the state and the RMS
 change. Deactivation then stops PHD2 and deletes its pod before
-`Disconnect`, and ends `Released`. Root plan 74's experiment calibrated
+`Disconnect`, and ends `Released`. The Docker tests calibrated
 in 19 steps and then guided at about one step a second with 1-second
 exposures.
 
@@ -490,4 +505,5 @@ connection after the probe closes it, and logs each failed write as a
 - The event server: `src/event_server.cpp` in `OpenPHDGuiding/phd2`
 - The command line: `src/phd.cpp`, and the profile: `src/phdconfig.cpp`
 - The INDI backends: `src/cam_indi.cpp` and `src/scope_indi.cpp`
-- [Root plan 74](../../../plans/74-astrophotography.md), "Guiding"
+- [Root plan 74](../../../plans/74-astrophotography.md): the two
+  components and the contract between them
