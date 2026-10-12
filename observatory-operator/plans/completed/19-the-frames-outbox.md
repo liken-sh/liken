@@ -63,7 +63,7 @@ network while the night runs.
 - **The session records the outbox.** `PowerOn` copies the field into
   `status.session` with the devices, so an edit during a session
   takes effect at the next session, the same rule [plan
-  17](completed/17-a-session-freezes-its-devices.md) gives a device. A
+  17](17-a-session-freezes-its-devices.md) gives a device. A
   claim cannot change under a running driver without a new pod, and a
   new pod in the middle of an exposure loses the exposure.
 - **`PowerOn` checks the claim before it creates a pod.** A claim that

@@ -37,10 +37,10 @@ as it takes.
   Before each exposure the operator sets the camera's directory and
   file prefix inside the reservation's outbox
   ([`observatory-operator` plan
-  19](../../observatory-operator/plans/19-the-frames-outbox.md)), and
+  19](../../observatory-operator/plans/completed/19-the-frames-outbox.md)), and
   the keywords it owns, such as the target, through the declared
   keywords of [`observatory-operator` plan
-  20](../../observatory-operator/plans/20-declared-fits-keywords.md).
+  20](../../observatory-operator/plans/completed/20-declared-fits-keywords.md).
   The operator never asks the server for a frame's bytes.
 - **Each frame has a global identity, written in its header.** The
   file name is the person's format and can change; the identity cannot.
@@ -61,7 +61,7 @@ frame, so it is the hardest decision here to change later.
 On 2026-10-12, the CCD simulator of the pinned `indi-simulators` image
 answered three questions that bear on the choice
 ([`observatory-operator` plan
-20](../../observatory-operator/plans/20-declared-fits-keywords.md)
+20](../../observatory-operator/plans/completed/20-declared-fits-keywords.md)
 has the probe):
 
 - `DATE-OBS` has millisecond precision, such as

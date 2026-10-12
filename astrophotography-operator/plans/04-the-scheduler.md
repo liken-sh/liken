@@ -27,7 +27,7 @@ solve fails.
   and the time: each target's altitude and azimuth, twilight, and the
   moon.
 - **The telescope's horizon comes from `observatory-operator`** ([plan
-  18](../../observatory-operator/plans/18-saved-horizons.md)), because
+  18](../../observatory-operator/plans/completed/18-saved-horizons.md)), because
   the horizon is a fact about where the telescope stands.
 - **The score favors** a target that sets soon, one that is nearly
   done, and the one already in the camera, so the telescope does not

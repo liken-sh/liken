@@ -38,7 +38,7 @@ of a night, someone has to cover it again.
   Parking the mount and warming the camera never wait on a person.
 - **The signal to a person is a condition.** Conditions on the
   operator's resources say what waits on a person, and an alert on
-  the metric of [plan 22](22-prometheus-metrics.md) reaches their
+  the metric of [plan 22](completed/22-prometheus-metrics.md) reaches their
   phone through their own Alertmanager.
 - **A `Telescope` states whether `astrophotography-operator` may
   reserve it unattended at all.** It is off unless the person turns it

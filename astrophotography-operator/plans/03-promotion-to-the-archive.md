@@ -19,7 +19,7 @@ without risk of loss on the way.
   target's frames belong together across every night it is imaged, so
   the archive belongs to the target, not to a night. The outbox belongs
   to the `Reservation` ([`observatory-operator` plan
-  19](../../observatory-operator/plans/19-the-frames-outbox.md)). When
+  19](../../observatory-operator/plans/completed/19-the-frames-outbox.md)). When
   the two are the same claim, no promotion runs.
 - **The person owns the file names.** A target states the format, and
   the operator may add a suffix only to make a name unique. Because the

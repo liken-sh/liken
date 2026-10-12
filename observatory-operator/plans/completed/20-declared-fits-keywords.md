@@ -122,7 +122,7 @@ the driver saved:
   from the driver.
 - **An edit takes effect at the next session.** The session records the
   merged list when `PowerOn` records the devices, as [plan
-  17](completed/17-a-session-freezes-its-devices.md) does for every
+  17](17-a-session-freezes-its-devices.md) does for every
   other spec, so the frames of one night agree with each other.
 - **A choice of convention belongs to whoever sets the frame type.**
   The driver writes `IMAGETYP` in the SBFITSEXT form, `Light Frame`,
@@ -218,7 +218,7 @@ released 67 s after its delete.
 removes every keyword, the ones `observatory-operator` wrote included,
 so after each clear, `astrophotography-operator` writes the session's
 list from `status.session.fitsKeywords` again with its own. Its [plan
-01](../../astrophotography-operator/plans/01-run-a-targets-sequence.md)
+01](../../../astrophotography-operator/plans/01-run-a-targets-sequence.md)
 has to account for this.
 
 The change of `/` to `\` in a value is worth a report to libindi.
