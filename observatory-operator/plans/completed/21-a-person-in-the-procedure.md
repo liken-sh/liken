@@ -1,11 +1,12 @@
 # 21, A person in the procedure
 
-Built on 2026-10-12; not drilled yet. The drill runs a portable
-telescope on the QEMU dev cluster: a confirmation with the plugin, a
-weather station turned unsafe during `Requires`, an expiry at a near
-`--until`, and a `notify` answered with `take-down`. "The build"
-records the decisions the build made where the design left them open,
-and where it departs from the design.
+Built on 2026-10-12, and drilled on the QEMU dev cluster on
+2026-10-12: a confirmation with the plugin, a weather station turned
+unsafe during `Requires`, an expiry at a near `--until`, and a
+`notify` answered with `take-down`. "The build" records the decisions
+the build made where the design left them open, and where it departs
+from the design. "The drill" records the results and the fix to
+`AttentionNeeded` that the drill found.
 
 Proposed on 2026-10-12, and designed on 2026-10-12. The design below
 replaces three of the first decisions. The wait is not a procedure
@@ -48,7 +49,7 @@ of a night, someone has to cover it again.
   Parking the mount and warming the camera never wait on a person.
 - **The signal to a person is a condition.** Conditions on the
   operator's resources say what waits on a person, and an alert on
-  the metric of [plan 22](completed/22-prometheus-metrics.md) reaches their
+  the metric of [plan 22](22-prometheus-metrics.md) reaches their
   phone through their own Alertmanager.
 - **A `Telescope` states whether `astrophotography-operator` may
   reserve it unattended at all.** It is off unless the person turns it
@@ -222,6 +223,79 @@ servers. These are the decisions it made.
 - **The example is unchanged.** Most tests reserve the example's
   `east` telescope, and a `SetUp` requirement there would hold every
   one of them.
+
+## The drill
+
+The drill ran on 2026-10-12 on the QEMU dev cluster, on one node,
+`node-1`, with 4 GB of memory. The operator was built from 01411eab and
+reached the lab through the lab registry as
+`ghcr.io/liken-sh/observatory-operator:dev`. The node held an older
+`:dev`, and the `Deployment`'s `IfNotPresent` kept it, so the drill
+pinned the `Deployment` to the pushed digest. The observatory was the
+example in the namespace `observatory`, with `Guider east`, and the
+`Observatory` `lab` at 30.169° S, 70.806° W. Each reservation of `east`
+named the outbox `frames`, a `local-path` claim. The plugin was built
+with `go build` from `cli/`, and `kubectl` ran it from `PATH` as
+`kubectl-liken-observatory`.
+
+| Check | Result |
+|---|---|
+| Add `{kind: Telescope, name: east, type: SetUp}` to `spec.requires` of `Telescope east`, and reserve `east` | The reservation reached `Requires` 5 s after creation, with the message `Waiting for Telescope east SetUp=True`. `lab-observatory`, `lab-dome`, and `lab-weatherstation` ran, and no pod of `east` existed. |
+| `kubectl liken observatory set-up telescope east -n observatory` | The plugin printed `Telescope east is set up until the next astronomical dawn at its Observatory`. `SetUp` was `True` with the reason `SetUp` and the message `Set up by admin`, the user that `kubectl auth whoami` reported. |
+| Read `managedFields` of the status | `kubectl-liken-observatory`, operation `Apply`, owned the condition `SetUp` and nothing else. The operator's `Update` owned `Active`, `HorizonFound`, `ParentFound`, and `Ready`, and each kept its value. So the apply merged by type. |
+| The reservation after the set-up | `Requires` was `Done` in the second of the apply, with `Found Telescope east SetUp=True`. The reservation was `Ready` 35 s later, after `StartGuider` connected PHD2 in 5 s. |
+| Delete the operator pod, and edit the `Telescope`'s spec to raise its generation | The new pod held the `Lease` within 1 s. It wrote the status of generation 3, and `SetUp` kept its status, its message, and its time. |
+| `set-up --until 3m` | `status.setUpUntil` was `2026-10-12T23:39:49Z`. 1 s after that time, `SetUp` was `False`, reason `Expired`, message `Expired at 2026-10-12T23:39:49Z: set up by admin`, with one `Expired` `Event`. The operator's `Update` then owned `SetUp` too. |
+| Reserve `east` after the expiry | The reservation waited in `Requires` with `Waiting for Telescope east SetUp=True`, and no pod of `east` existed. |
+| `set-up` again, with no `--until` | The forced apply took `SetUp` back: the plugin's entry owned it, and the operator's did not. `status.setUpUntil` was gone. |
+| `take-down telescope east` after a `notify` | `SetUp` was `False`, reason `TakenDown`, message `Taken down by admin`. `AttentionNeeded` turned `False` with `Acknowledged` 1 s later, with one `Event`. |
+| Require `{kind: WeatherStation, name: lab, type: Safe}` on the `Telescope` while a reservation waits, and set the simulator's gust to 40 | `Safe` turned `False`, reason `Danger`. The message was `Waiting for Telescope east SetUp=True, WeatherStation lab Safe=True`, and after a `set-up`, `Waiting for WeatherStation lab Safe=True`, with no pod of `east`. |
+| Set the gust to 0 | `Safe` turned `True`, and `Requires` was `Done` in the same second. The reservation was `Ready` 34 s later. Its `Ready` `Event` said `Ready in 41 s` for a reservation 82 s old, so the 42 s that `Requires` waited were left out. |
+| Add `notify: Cover the telescope and carry it in` to the `Telescope`'s `deactivation`, and end the reservation with `spec.end` | `Deactivation` took 62 s. The camera warmed for 30 s and the mount parked for 15 s, and then the notify ran in 0 s, beside the dome's park. `AttentionNeeded` turned `True`, reason `Notified`, with the request as its message, and one `Warning` `Event` `Notified`. The reservation was `Released` 67 s after its end. |
+| Reserve `east` again, with `SetUp` still `True` from before the request | `AttentionNeeded` stayed `True` after the reservation was `Ready`. The fix follows this table. With the fix, it turned `False`, reason `Activated`, with one `Event`. |
+| End that reservation | `AttentionNeeded` stayed `False` for the 46 s between the start of `Deactivation` and the notify, and then turned `True` with a new `Warning` `Event`. |
+| Grant the guide's `Role` to a `ServiceAccount`, and run the plugin with a kubeconfig of its token | `set-up mount east` printed `reading the operator version: deployments.apps is forbidden: ...` on stderr and wrote `SetUp` with `Set up by system:serviceaccount:observatory:drill-person`. A `kubectl patch` of the `Mount`'s spec, and `set-up camera east-main`, were `Forbidden`. |
+
+The default expiry is at astronomical dawn, and nothing that the
+operator writes gives its time: `status.setUpUntil` is set only by
+`--until`, and the plugin prints "the next astronomical dawn" with no
+time. So the drill ran `dawnAfter` from `dawn.go` on its own, for the
+lab's coordinates after 2026-10-12T23:17Z, and compared the answer to a
+script of the NOAA solar calculator's formulas, which follow Meeus and
+share no code with `dawn.go`. `dawn.go` answered
+`2026-10-13T08:44:52Z`, and the script `08:44:53Z`, which is 05:44 at
+the site in UTC-3.
+
+`attention` found the start of an activation only in the resource's
+own activation run, and a `Telescope` whose only procedure is the
+`notify` of its deactivation has no such run. The guide's example has
+that shape, so its `AttentionNeeded` stayed `True` until a person
+answered, and never cleared at the next activation as the guide says.
+The fix passes `attention` the start of the activity of the resource's
+`Telescope` or `Observatory`. That start is gone once the activity
+ends, so a request older than the condition's last turn to `False`
+stays closed. Without that rule, the deactivation would open the old
+request again before its own notify ran. A test of the world and three
+cases of `attention`'s table failed before the fix. The operator built
+with the fix cleared the condition in the lab, as the table gives.
+
+Two follow-ups of the same day ran on the same reservations.
+
+- **`EditsPending`.** On a `Ready` reservation, a change of
+  `spec.outbox.claimName` from `frames` to `frames-2` turned the
+  condition `True` in the same second, reason `EditPending`, message
+  `spec.outbox.claimName changes from frames to frames-2 at the next
+  session`. Changing it back turned it `False`, reason `NoEditPending`,
+  10 s later. Each transition posted one `Event`, and the session's
+  `PowerOn` had posted the first `NoEditPending`.
+- **`observedGeneration` on a `Released` reservation.** An edit of
+  `spec.outbox` on the `Released` reservation raised its generation
+  from 4 to 5, and within 4 s `status.observedGeneration` and each
+  condition's were 5. The reservation had no `EditsPending`, because
+  it had no session.
+
+The plugin takes `--kubeconfig`, `--context`, and `--namespace`, and
+no other flag of `kubectl`'s, so `--as` failed with `unknown flag`.
 
 ## Still open
 

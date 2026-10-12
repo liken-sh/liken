@@ -29,7 +29,7 @@ that waits on a person also needs a way to reach that person.
 - **Alerts reach a person through their own Prometheus and
   Alertmanager.** The operator exports the series, and the manual
   suggests the alerts, such as a telescope that waits for someone to
-  set it up or to cover it ([plan 21](../21-a-person-in-the-procedure.md)).
+  set it up or to cover it ([plan 21](21-a-person-in-the-procedure.md)).
   The operator sends no notification itself.
 
 ## The design
@@ -69,7 +69,7 @@ name of its telescope.
 - **The manual suggests the alerts** as a `PrometheusRule`: a device
   claimed and not connected, a step that failed, a camera that does not
   reach its temperature, and guiding that lost its star. [Plan
-  21](../21-a-person-in-the-procedure.md) adds the series and the alert
+  21](21-a-person-in-the-procedure.md) adds the series and the alert
   for a telescope that waits on a person.
 
 ## The drill

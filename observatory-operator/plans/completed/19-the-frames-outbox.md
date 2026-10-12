@@ -170,3 +170,13 @@ directory. On 2026-10-12, a check against the CCD simulator of the
 pinned `indi-simulators` image showed that the driver creates a
 missing directory itself: it logged `[INFO] Creating directory
 /out/observatory/east-main...` and then saved the frame there.
+
+A drill on the QEMU dev cluster on 2026-10-12, with the operator built
+from 01411eab, checked the directories on a running session. After
+`Configure`, the driver of `Camera east-main` held `UPLOAD_DIR`
+`/outbox/east-main` and `UPLOAD_MODE` `UPLOAD_BOTH`. A 1 s exposure of
+`CCD Simulator` wrote `east-main/IMAGE_001.fits`, 2629440 bytes, into
+the claim `frames`, and a `busybox` pod read it there. The driver had
+created the directory `east-main`. `Camera east-guide`, which PHD2
+used through `Guider east`, kept the driver's own `UPLOAD_CLIENT` and
+`/tmp`.

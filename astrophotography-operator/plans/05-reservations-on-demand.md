@@ -24,7 +24,7 @@ down all night when clouds come and go.
 - **There is no permanent reservation.** Each reservation is one
   continuous block, at most one night long.
 - **Consent is a flag on the `Telescope`**, from [`observatory-operator`
-  plan 21](../../observatory-operator/plans/21-a-person-in-the-procedure.md),
+  plan 21](../../observatory-operator/plans/completed/21-a-person-in-the-procedure.md),
   off unless the person turns it on. Declaring a target never powers
   equipment by itself.
 - **A portable telescope waits for its person.** Plan 21's setup step
