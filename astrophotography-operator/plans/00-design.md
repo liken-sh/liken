@@ -53,12 +53,42 @@ the person's archive. This is mode 2 of [root plan
   The resources, their conditions, and their `Event`s are the
   interface.
 
+## How it is tested
+
+The INDI simulators give a happy-path night with no hardware: the CCD
+simulator draws catalog stars where the mount points, so solves are
+real, and it sizes its stars from the focuser simulator's position, so
+focus and grading measures respond. PHD2 guides the guide camera
+simulator, and the weather simulator can turn unsafe. On the dev
+cluster's QEMU fleet, a whole night needs no network, once the images
+are loaded and the `Solver`'s claim holds index files from the laptop.
+How the dev cluster loads images with no network was not checked.
+
+The simulators do not model the time of day or clouds. The CCD
+simulator draws stars at noon and below the horizon, so the scheduler's
+geometry is proved by tests with a fake clock, and a drill in daylight
+puts the simulated site where it is night. Clouds that dim the stars,
+a replugged camera, and a slow link to a network share wait for the
+physical testbed.
+
+## What is hard to change later
+
+Every plan below adds to what exists: a field, a procedure step, a
+resource, or a pod. A plan that proves wrong can be dropped without
+undoing the ones before it, and booking a telescope by hand keeps
+working whatever happens to [plan 05](05-reservations-on-demand.md).
+The exception is what the operator writes into frames: the FITS
+keywords, the frame's identity, and the suffix it may add to a file
+name. Archived frames never change, so those three deserve the most
+care.
+
 ## The plans
 
-Each plan below is a stub: the problem and what the design
-conversation of 2026-10-12 settled. They are in the order they build
-on each other. `observatory-operator` plans 19 and 20 come before plan
-01, its plan 18 before plan 04, and its plan 21 before plan 05.
+Each plan below records a problem and the decisions that the design
+conversation of 2026-10-12 settled, and leaves the implementation to
+be designed. They are in the order they build on each other.
+`observatory-operator` plans 19 and 20 come before plan 01, its plan
+18 before plan 04, and its plan 21 before plan 05.
 
 | Plan | Subject |
 |---|---|

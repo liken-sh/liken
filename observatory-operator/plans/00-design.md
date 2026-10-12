@@ -96,8 +96,8 @@ must hold.
 | [15](completed/15-the-operator-watches-every-namespace.md) | Built: the operator runs in `liken-system`, watches every namespace, and runs each observatory in the namespace of its resources; drilled on liken-1 |
 | [16](completed/16-kinds-are-indi-interfaces.md) | Built: each device kind is one INDI interface, one INDI device serves several resources, and typed fields come from the standard set that a bare driver captures; drilled on liken-1 on 2026-10-11 |
 | [17](completed/17-a-session-freezes-its-devices.md) | Built: a reservation records what its session acts on in `status.session`, and a held server's devices change only when the session ends; drilled on liken-1 on 2026-10-12 |
-| [18](18-saved-horizons.md) | Stub: named horizons, such as `yard` and `roof`, in the format the hobby shares, and the one each `Telescope` uses now |
-| [19](19-the-frames-outbox.md) | Stub: a `Reservation` names a claim, and the camera pods write each frame into it |
-| [20](20-declared-fits-keywords.md) | Stub: declared FITS keywords overlaid from the `Observatory` down to the `Reservation`, written by the driver |
-| [21](21-a-person-in-the-procedure.md) | Stub: a step that waits for a person to set the telescope up, a step that asks them to cover it, and the flag that allows unattended reservations |
-| [22](22-prometheus-metrics.md) | Stub: the operator's metrics under root plan 65 |
+| [18](18-saved-horizons.md) | Proposed: named horizons, such as `yard` and `roof`, in the format the hobby shares, and the one each `Telescope` uses now |
+| [19](19-the-frames-outbox.md) | Proposed: a `Reservation` names a claim, and the camera pods write each frame into it |
+| [20](20-declared-fits-keywords.md) | Proposed: declared FITS keywords overlaid from the `Observatory` down to the `Reservation`, written by the driver |
+| [21](21-a-person-in-the-procedure.md) | Proposed: a step that waits for a person to set the telescope up, a step that asks them to cover it, and the flag that allows unattended reservations |
+| [22](22-prometheus-metrics.md) | Proposed: the operator's metrics under root plan 65 |
