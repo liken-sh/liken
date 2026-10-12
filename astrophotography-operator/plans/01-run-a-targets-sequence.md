@@ -46,20 +46,26 @@ as it takes.
   file name is the person's format and can change; the identity cannot.
   Frames are immutable once written, so a copy of a frame anywhere is
   the same frame.
+- **A frame's identity is a UUIDv7 in the keyword `FRAMEID`**,
+  decided on 2026-10-12. The operator writes it through `FITS_HEADER`
+  before each exposure, so the driver writes it into the frame when it
+  creates the file. A UUIDv7 starts with the time it was made, so
+  identities sort in the order the frames were taken. The camera and
+  `DATE-OBS` were set aside, because `INSTRUME` names the INDI driver
+  and two cameras of one model share it. A check of N.I.N.A.'s FITS
+  and XISF headers and of SGP found no keyword for a frame's identity
+  to reuse. The nearest convention, `DATAMD5` from `fitsmd5`, is a hash
+  of the data, so it names the pixels and not the exposure.
 - **Frames are records, not objects.** A night makes hundreds of
   frames, so each one is a record in a `Catalog`, keyed by its identity
   and its reservation, and the target's status carries only the counts.
 
 ## Still open
 
-The `Target` resource, how the identity is formed, and the frame
-record. Two ways to form the identity were discussed: a UUID in a
-keyword of our own, or the camera and the exposure's start time, which
-are standard keywords. The identity is written into every archived
-frame, so it is the hardest decision here to change later.
+The `Target` resource and the frame record.
 
 On 2026-10-12, the CCD simulator of the pinned `indi-simulators` image
-answered three questions that bear on the choice
+answered three questions that bore on the identity
 ([`observatory-operator` plan
 20](../../observatory-operator/plans/completed/20-declared-fits-keywords.md)
 has the probe):
