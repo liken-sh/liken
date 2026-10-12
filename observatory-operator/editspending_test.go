@@ -1,6 +1,6 @@
 package main
 
-// A Reservation's SessionCurrent condition says whether a spec edit
+// A Reservation's EditsPending condition says whether a spec edit
 // waits for the next session: the session record holds the outbox and
 // the merged FITS keywords, and an edit of either takes effect only
 // when a new session records them.
@@ -14,19 +14,19 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// sessionCurrent answers the SessionCurrent condition of east-tonight
+// sessionCurrent answers the EditsPending condition of east-tonight
 // as "<status> <reason>: <message>", or "" when it has none.
 func (w *world) sessionCurrent() string {
 	w.t.Helper()
 	r, _ := w.reservation("east-tonight")
-	c := conditionOf(r.Status.Conditions, observatory.ConditionSessionCurrent)
+	c := conditionOf(r.Status.Conditions, observatory.ConditionEditsPending)
 	if c.Type == "" {
 		return ""
 	}
 	return string(c.Status) + " " + c.Reason + ": " + c.Message
 }
 
-const noEditPending = "True NoEditPending: No edit waits for the next session"
+const noEditPending = "False NoEditPending: No edit waits for the next session"
 
 func TestAReservationShowsTheEditsThatWaitForTheNextSession(t *testing.T) {
 	t.Parallel()
@@ -43,28 +43,28 @@ func TestAReservationShowsTheEditsThatWaitForTheNextSession(t *testing.T) {
 			w.amend(observatory.ReservationKind, "east-tonight", func(spec map[string]any) {
 				spec["outbox"] = map[string]any{"claimName": "nightly"}
 			})
-		}, "False EditPending: spec.outbox.claimName changes from frames to nightly at the next session"},
+		}, "True EditPending: spec.outbox.claimName changes from frames to nightly at the next session"},
 		{"no outbox", func(w *world) {
 			w.amend(observatory.ReservationKind, "east-tonight", func(spec map[string]any) { delete(spec, "outbox") })
-		}, "False EditPending: spec.outbox.claimName changes from frames to none at the next session"},
+		}, "True EditPending: spec.outbox.claimName changes from frames to none at the next session"},
 		{"a keyword of the reservation", func(w *world) {
 			w.declare(observatory.ReservationKind, "east-tonight", fitsKeyword("OBJECT", "M33", ""))
-		}, `False EditPending: FITS keyword OBJECT of Camera east-main changes from none to "M33" at the next session`},
+		}, `True EditPending: FITS keyword OBJECT of Camera east-main changes from none to "M33" at the next session`},
 		{"a keyword of the Observatory", func(w *world) {
 			w.declare(observatory.ObservatoryKind, "lab", fitsKeyword("OBSERVER", "Edited Observer", ""))
-		}, `False EditPending: FITS keyword OBSERVER of Camera east-main changes from "Simulated Observer" to "Edited Observer" at the next session`},
+		}, `True EditPending: FITS keyword OBSERVER of Camera east-main changes from "Simulated Observer" to "Edited Observer" at the next session`},
 		{"a keyword of the Observatory that the Telescope's replaces", func(w *world) {
 			w.declare(observatory.ObservatoryKind, "lab", fitsKeyword("OBSERVER", "Simulated Observer", ""), fitsKeyword("TELESCOP", "Lab scope", ""))
 		}, noEditPending},
 		{"the comment of a keyword of the Telescope", func(w *world) {
 			w.declare(observatory.TelescopeKind, "east", fitsKeyword("TELESCOP", "East refractor", "the refractor"))
-		}, `False EditPending: the comment of FITS keyword TELESCOP of Camera east-main changes from "the Telescope's own name" to "the refractor" at the next session`},
+		}, `True EditPending: the comment of FITS keyword TELESCOP of Camera east-main changes from "the Telescope's own name" to "the refractor" at the next session`},
 		{"a keyword of the Camera and the outbox", func(w *world) {
 			w.declare(observatory.CameraKind, "east-main", fitsKeyword("INSTRUME", "East main camera", ""))
 			w.amend(observatory.ReservationKind, "east-tonight", func(spec map[string]any) {
 				spec["outbox"] = map[string]any{"claimName": "nightly"}
 			})
-		}, `False EditPending: spec.outbox.claimName changes from frames to nightly at the next session; ` +
+		}, `True EditPending: spec.outbox.claimName changes from frames to nightly at the next session; ` +
 			`FITS keyword INSTRUME of Camera east-main changes from none to "East main camera" at the next session`},
 	}
 	for _, c := range cases {
@@ -76,18 +76,18 @@ func TestAReservationShowsTheEditsThatWaitForTheNextSession(t *testing.T) {
 				w.settle()
 
 				if got := w.sessionCurrent(); got != c.want {
-					t.Errorf("SessionCurrent = %q, want %q", got, c.want)
+					t.Errorf("EditsPending = %q, want %q", got, c.want)
 				}
 			})
 		})
 	}
 }
 
-// The condition posts one Event for each transition: True when PowerOn
-// records the session, False at the first edit that waits, nothing for
-// a second edit that changes only the message, and True when the spec
+// The condition posts one Event for each transition: False when PowerOn
+// records the session, True at the first edit that waits, nothing for
+// a second edit that changes only the message, and False when the spec
 // matches the record again. An operator that restarts posts none.
-func TestEachTransitionOfSessionCurrentPostsOneEvent(t *testing.T) {
+func TestEachTransitionOfEditsPendingPostsOneEvent(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := outboxWorld(t, "frames")
@@ -122,7 +122,7 @@ func TestEachTransitionOfSessionCurrentPostsOneEvent(t *testing.T) {
 
 // A reservation has the condition only while it has a session: not
 // while it waits for spec.start, and not once it is Released.
-func TestOnlyAReservationWithASessionHasSessionCurrent(t *testing.T) {
+func TestOnlyAReservationWithASessionHasEditsPending(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name  string
@@ -143,7 +143,7 @@ func TestOnlyAReservationWithASessionHasSessionCurrent(t *testing.T) {
 				w.settle()
 
 				if got := w.sessionCurrent(); got != "" {
-					t.Errorf("SessionCurrent = %q, want none", got)
+					t.Errorf("EditsPending = %q, want none", got)
 				}
 			})
 		})
@@ -151,7 +151,7 @@ func TestOnlyAReservationWithASessionHasSessionCurrent(t *testing.T) {
 }
 
 // A session that ends removes the condition.
-func TestAReleasedReservationHasNoSessionCurrent(t *testing.T) {
+func TestAReleasedReservationHasNoEditsPending(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
@@ -160,14 +160,14 @@ func TestAReleasedReservationHasNoSessionCurrent(t *testing.T) {
 		w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
 		w.settle()
 		if got := w.sessionCurrent(); got != noEditPending {
-			t.Fatalf("SessionCurrent while Ready = %q, want %q", got, noEditPending)
+			t.Fatalf("EditsPending while Ready = %q, want %q", got, noEditPending)
 		}
 		time.Sleep(time.Hour)
 		w.phase("east-tonight", observatory.ReservationReleased, 10*time.Minute)
 		w.settle()
 
 		if got := w.sessionCurrent(); got != "" {
-			t.Errorf("SessionCurrent = %q, want none", got)
+			t.Errorf("EditsPending = %q, want none", got)
 		}
 	})
 }

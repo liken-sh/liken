@@ -4,12 +4,12 @@ package main
 // edit of a recorded fact during a session changes nothing that runs
 // until the next session. A device that an edit moves says so in its
 // ParentFound condition (standing.go). The Reservation's
-// SessionCurrent condition says the same of the facts that the session
+// EditsPending condition says the same of the facts that the session
 // records for the reservation itself: spec.outbox, and the merged FITS
 // keywords of each imaging camera, which the Observatory, the
-// Telescope, the Camera, and the Reservation declare. It is True when
-// the record holds what PowerOn would record from the specs now, and
-// False, with the reason EditPending, when an edit waits. Its message
+// Telescope, the Camera, and the Reservation declare. It is True, with
+// the reason EditPending, when an edit waits, and False when the record
+// holds what PowerOn would record from the specs now. Its message
 // names each fact that changes, with the value it has now and the value
 // it takes at the next session.
 //
@@ -29,13 +29,13 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// The reasons of the SessionCurrent condition.
+// The reasons of the EditsPending condition.
 const (
 	reasonNoEditPending = "NoEditPending"
 	reasonEditPending   = "EditPending"
 )
 
-// judgeSession sets the runner's SessionCurrent condition from the
+// judgeSession sets the runner's EditsPending condition from the
 // session record and the specs in t, and reports whether it changed.
 func (r *runner) judgeSession(t *tree) bool {
 	next := r.sessionCondition(t)
@@ -57,7 +57,7 @@ func sameState(a, b *observatory.Condition) bool {
 	return a.Status == b.Status && a.Reason == b.Reason && a.Message == b.Message
 }
 
-// sessionCondition answers the SessionCurrent condition, or nil when
+// sessionCondition answers the EditsPending condition, or nil when
 // the reservation has no session. The telescope's part of the record
 // holds the outbox and the keywords, so a record with no devices of
 // the telescope has nothing to compare yet.
@@ -70,13 +70,13 @@ func (r *runner) sessionCondition(t *tree) *observatory.Condition {
 	ref := serverRef{observatory.TelescopeKind, r.res.Spec.Telescope}
 	pending = append(pending, keywordsPending(t, ref, s, r.res.Spec.FITSKeywords)...)
 	if len(pending) == 0 {
-		c := condition(observatory.ConditionSessionCurrent, observatory.ConditionTrue, reasonNoEditPending, "No edit waits for the next session")
+		c := condition(observatory.ConditionEditsPending, observatory.ConditionFalse, reasonNoEditPending, "No edit waits for the next session")
 		return &c
 	}
 	for i := range pending {
 		pending[i] += " at the next session"
 	}
-	c := condition(observatory.ConditionSessionCurrent, observatory.ConditionFalse, reasonEditPending, strings.Join(pending, "; "))
+	c := condition(observatory.ConditionEditsPending, observatory.ConditionTrue, reasonEditPending, strings.Join(pending, "; "))
 	return &c
 }
 
@@ -168,11 +168,11 @@ func keywordChanges(camera string, recorded, next []observatory.FITSKeyword) []s
 	return out
 }
 
-// storedSession answers the SessionCurrent condition that a status
+// storedSession answers the EditsPending condition that a status
 // holds, or nil, so a new runner starts from what the last one wrote
 // and an operator restart posts no Event.
 func storedSession(status observatory.ReservationStatus) *observatory.Condition {
-	if c, ok := conditions.Find(status.Conditions, observatory.ConditionSessionCurrent); ok {
+	if c, ok := conditions.Find(status.Conditions, observatory.ConditionEditsPending); ok {
 		return &c
 	}
 	return nil

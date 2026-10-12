@@ -14,8 +14,8 @@ package main
 //     transitions of the Reservation's Ready and SafeToPowerOff post
 //     nothing more. Each of them changes when a step starts or ends,
 //     or when the phase changes, and the runner's Event says more.
-//     SessionCurrent changes on a spec edit, when no step changes, so
-//     each of its transitions posts one Event (sessioncurrent.go).
+//     EditsPending changes on a spec edit, when no step changes, so
+//     each of its transitions posts one Event (editspending.go).
 //   - A pod that a Ready reservation's runner creates again is one
 //     Event on the device, the Guider, or the Telescope or
 //     Observatory whose INDI server the pod runs, because the status

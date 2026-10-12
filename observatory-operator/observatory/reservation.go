@@ -239,9 +239,9 @@ const (
 	// ConditionSafeToPowerOff is True when the deactivation steps are
 	// done: the deactivation procedures ran, and the pods stopped.
 	ConditionSafeToPowerOff = "SafeToPowerOff"
-	// ConditionSessionCurrent is True while the session's record holds
-	// what the specs would record now, and False while an edit of the
-	// outbox or of a FITS keyword waits for the next session. A
+	// ConditionEditsPending is True while an edit of the outbox or of a
+	// FITS keyword waits for the next session, and False while the
+	// session's record holds what the specs would record now. A
 	// reservation has it only while it has a session.
-	ConditionSessionCurrent = "SessionCurrent"
+	ConditionEditsPending = "EditsPending"
 )

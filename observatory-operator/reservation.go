@@ -39,8 +39,8 @@ type runner struct {
 	// logged is the last phase that the log names, so each phase
 	// change writes one line.
 	logged observatory.ReservationPhase
-	// session is the SessionCurrent condition that the runner last
-	// judged (sessioncurrent.go), or nil for none.
+	// session is the EditsPending condition that the runner last
+	// judged (editspending.go), or nil for none.
 	session *observatory.Condition
 	// guiderLink names the guider's pod and the INDI server's pod, by
 	// their UIDs, whose PHD2 the runner last saw with its equipment
@@ -415,11 +415,11 @@ func (r *runner) save(ctx context.Context) error {
 		})
 	if wrote {
 		// The runner's own Events cover the transitions of Ready and
-		// SafeToPowerOff (events.go). SessionCurrent changes on an
+		// SafeToPowerOff (events.go). EditsPending changes on an
 		// edit, when no step changes, so its transitions post their
 		// own Events, after the write lands.
 		for _, c := range transitions {
-			if c.Type == observatory.ConditionSessionCurrent {
+			if c.Type == observatory.ConditionEditsPending {
 				r.o.recorder.Transition(reference(observatory.ReservationKind, r.res.Metadata), c, "")
 			}
 		}
@@ -445,7 +445,7 @@ func (r *runner) edited() bool {
 }
 
 // observe writes the status when the spec changed since the last write
-// (edited), or when an edit of a spec changed the SessionCurrent
+// (edited), or when an edit of a spec changed the EditsPending
 // condition (judgeSession). An edit of an Observatory, a Telescope, or
 // a Camera moves no generation of the reservation, so the condition is
 // judged on each wake of the bell structure, which every watch event

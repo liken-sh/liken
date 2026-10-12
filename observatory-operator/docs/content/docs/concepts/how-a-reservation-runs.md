@@ -232,16 +232,16 @@ session ends:
   `SCOPE_INFO` of the tube that the session started with, and PHD2
   keeps its pod and its calibration. A tube's status still shows the
   lengths in its spec.
-- The reservation's `SessionCurrent` condition shows when an edit of
-  the outbox or of a FITS keyword waits. It is `True` with the reason
+- The reservation's `EditsPending` condition shows when an edit of
+  the outbox or of a FITS keyword waits. It is `False` with the reason
   `NoEditPending` while the record holds what the specs give now. An
   edit of `spec.outbox`, or of a `spec.fitsKeywords` that changes the
-  merged list of an imaging camera, turns it `False` with the reason
+  merged list of an imaging camera, turns it `True` with the reason
   `EditPending`, and its message names each change, such as
   `spec.outbox.claimName changes from frames to nightly at the next
   session`. Each change of its status posts one Event. A keyword that a
   more specific level replaces changes no merged list, so its edit
-  leaves the condition `True`.
+  leaves the condition `False`.
 - A device's settings, such as a camera's gain, the `Observatory`'s
   location, and the procedures of every resource are not in the
   record, because a person changes them during a session on purpose.

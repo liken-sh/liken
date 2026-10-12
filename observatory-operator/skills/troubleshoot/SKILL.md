@@ -98,7 +98,7 @@ A device that a person moved keeps running where it was, and its
 goes. An edit of an `OpticalTrain`, an `OpticalTube`, a `Guider`, or
 the reservation's `spec.outbox` waits for the next reservation the
 same way. An edit of the outbox or of a FITS keyword turns the
-reservation's `SessionCurrent` condition `False` with the reason
+reservation's `EditsPending` condition `True` with the reason
 `EditPending`, and its message names each change. The
 reservation's `status.session` shows what the session started with,
 and the operator acts on that until the reservation ends. End the

@@ -240,12 +240,12 @@ observatory-operator: Reservation east-tonight: Ready at east-telescope.observat
 then it is `False`, and its message says why, such as
 `In use by desktop` while the reservation is `Ready`.
 
-`SessionCurrent` tells you whether an edit of the outbox or of a FITS
+`EditsPending` tells you whether an edit of the outbox or of a FITS
 keyword waits for the next session. The reservation has it from the
 moment `PowerOn` records the session until the reservation is
-`Released`. It is `True` with the reason `NoEditPending` while
+`Released`. It is `False` with the reason `NoEditPending` while
 `status.session` holds the outbox and the merged keywords that the
-specs give now. It is `False` with the reason `EditPending` when an
+specs give now. It is `True` with the reason `EditPending` when an
 edit of `spec.outbox`, or of `spec.fitsKeywords` on the `Observatory`,
 the `Telescope`, a `Camera`, or the `Reservation`, changes what the
 next session records. The message names each change and its next
