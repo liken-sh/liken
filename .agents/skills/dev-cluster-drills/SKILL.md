@@ -31,7 +31,7 @@ Every machine's `rebootPolicy` is `Auto`, so no drill in this lab
 needs `liken approve-reboot`.
 
 Each guest keeps its hardware under `dev-cluster/guests/<node>/`:
-`state.qcow2` (2G), `pods.qcow2` (4G), `boot.qcow2` (4G), and, under
+`state.qcow2` (6G), `pods.qcow2` (4G), `boot.qcow2` (4G), and, under
 UEFI, its own `OVMF_VARS.fd` firmware variable store. The directory is
 gitignored and holds no source.
 
@@ -442,6 +442,8 @@ applies sysctls live and reboots nothing.
 * **Resize a disk only while the machine is off.**
   `make -C dev-cluster grow-pods NODE=node-2` resizes a live qcow2 file
   and corrupts it if the guest is running. The same holds for
+  `grow-state`, which brings a guest that claimed the older 2G state
+  disk up to the current size, and for
   `reset-nvram`, because QEMU writes the variable store back when the
   guest exits.
 * **`SMOKE_DEADLINE`** (default 120 seconds) bounds only the disk

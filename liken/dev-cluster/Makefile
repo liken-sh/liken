@@ -104,9 +104,26 @@ CLUSTER_MAC := 52:54:00:4c:4c:0$(NODE_NUM)
 # under the gitignored guests/ directory, one directory for each
 # node. `make clean` deletes this directory and acts as a factory
 # reset: the next boot finds blank disks and claims them again.
+#
+# The state disk is 6G because clusterState, the disk's remainder
+# role, holds k3s's data, etcd, and containerd's images. A leader
+# with only the system pods uses about 1.1 GB of it. With the INDI
+# simulators, PHD2, and weston running for an observatory drill, it
+# uses about 2.9 GB, because containerd keeps the compressed layers
+# beside the unpacked ones. The kubelet deletes unused images when
+# the filesystem is 85% full, and evicts pods when it cannot free
+# space. On a 2G disk the drill runs out of space, and on a 4G disk
+# it fills 78%, close to that line. On 6G it fills about half, which
+# leaves room for etcd to grow and for the next image that a drill
+# pushes. qcow2 allocates sparsely, so the host pays only for what the
+# guest writes. To give a guest that has already claimed its disks the new
+# size, stop it, run `make grow-state NODE=<node>`, and boot it
+# again.
+STATE_SIZE := 6G
+
 guests/$(NODE)/state.qcow2:
 	mkdir -p guests/$(NODE)
-	qemu-img create -f qcow2 $@ 2G
+	qemu-img create -f qcow2 $@ $(STATE_SIZE)
 
 guests/$(NODE)/pods.qcow2:
 	mkdir -p guests/$(NODE)
@@ -676,6 +693,14 @@ registry-stop:
 grow-pods:
 	qemu-img resize guests/$(NODE)/pods.qcow2 +4G
 
+# Grow a node's state disk to the size that a new guest gets. Run it
+# only while the machine is off, for the same reason as grow-pods. A
+# guest that claimed a smaller state disk keeps its size until this
+# runs, and the next boot grows clusterState, the disk's remainder
+# role, into the new space.
+grow-state:
+	qemu-img resize guests/$(NODE)/state.qcow2 $(STATE_SIZE)
+
 # Reset a node's firmware variables to the vendor defaults. This is
 # what a firmware update does when it resets NVRAM, and what a dead
 # coin-cell battery does to a real board. The guest then holds no boot
@@ -751,7 +776,7 @@ smoke-emmc:
 		HOLD_DEADLINE=420 SMOKE_DEADLINE=420 \
 		./smoke.sh uefi emmc
 
-.PHONY: run run-once install install-stick storage registry registry-stop grow-pods reset-nvram smoke-uefi smoke-bios smoke-hardware smoke-emmc clean
+.PHONY: run run-once install install-stick storage registry registry-stop grow-pods grow-state reset-nvram smoke-uefi smoke-bios smoke-hardware smoke-emmc clean
 
 clean:
 	rm -rf guests
