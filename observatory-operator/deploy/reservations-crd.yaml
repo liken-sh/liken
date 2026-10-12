@@ -103,7 +103,7 @@ spec:
                   maxLength: 253
                   description: >-
                     Who uses the telescope: a person's desktop client,
-                    or a `Session` of `astrophotography-operator`.
+                    or `astrophotography-operator`.
                 start:
                   type: string
                   format: date-time

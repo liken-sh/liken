@@ -14,7 +14,7 @@ type Reservation = Object[ReservationSpec, ReservationStatus]
 type ReservationSpec struct {
 	Telescope string `json:"telescope"`
 	// Holder names who uses the telescope: a person's desktop client,
-	// or a Session of astrophotography-operator.
+	// or astrophotography-operator.
 	Holder string `json:"holder"`
 	// Start is when activation begins. With no start, it begins when
 	// the Reservation is created.

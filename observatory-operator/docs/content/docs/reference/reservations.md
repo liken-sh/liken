@@ -17,7 +17,7 @@ The telescope, the holder, and the times.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="spec--telescope"></span>`telescope` | string | yes | The name of the `Telescope` to reserve. It cannot change after the reservation is created. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
-| <span id="spec--holder"></span>`holder` | string | yes | Who uses the telescope: a person's desktop client, or a `Session` of `astrophotography-operator`. |
+| <span id="spec--holder"></span>`holder` | string | yes | Who uses the telescope: a person's desktop client, or `astrophotography-operator`. |
 | <span id="spec--start"></span>`start` | string | no | When activation begins, as an RFC 3339 time. Optional. With no start, activation begins when the reservation is created. |
 | <span id="spec--end"></span>`end` | string | no | When deactivation begins, as an RFC 3339 time. Optional. With no end, the reservation lasts until it is deleted. |
 
