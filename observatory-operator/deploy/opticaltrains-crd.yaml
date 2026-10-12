@@ -138,7 +138,9 @@ spec:
                   type: array
                   description: >-
                     Each device whose `spec.opticalTrain` names this
-                    train.
+                    train. While a session holds a device, the train
+                    that the session recorded counts, until the session
+                    ends.
                   x-kubernetes-list-type: atomic
                   items:
                     type: object

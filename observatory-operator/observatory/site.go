@@ -36,7 +36,7 @@ type ObservatoryStatus struct {
 	// Server is the observatory's own INDI server, while it runs.
 	Server *Server `json:"server,omitempty"`
 	// Telescopes names each Telescope whose spec.observatory names this
-	// Observatory.
+	// Observatory, as the session that holds a Telescope recorded it.
 	Telescopes []string `json:"telescopes,omitempty"`
 	// Devices lists the devices whose parent is this Observatory.
 	Devices []DeviceRef `json:"devices,omitempty"`

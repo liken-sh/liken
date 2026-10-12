@@ -45,6 +45,6 @@ type OpticalTrainStatus struct {
 	ObservedGeneration int64       `json:"observedGeneration,omitempty"`
 	Conditions         []Condition `json:"conditions,omitempty"`
 	// Devices lists the devices whose spec.opticalTrain names this
-	// train.
+	// train, as the session that holds a device recorded it.
 	Devices []DeviceRef `json:"devices,omitempty"`
 }

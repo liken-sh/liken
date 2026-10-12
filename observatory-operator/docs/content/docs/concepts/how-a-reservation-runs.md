@@ -39,7 +39,7 @@ goes on.
 | `Deactivation` | Runs the deactivation procedures, from the bottom of the tree up: those of the devices of the telescope's trains, then the `Telescope`'s own devices' and its own. When the last telescope in the observatory ends, it then runs the observatory's devices' and the `Observatory`'s own. Every device is still connected. | none: each action's timeout |
 | `StopGuider` | Deletes the guider's pod, `Service`, and `ConfigMap`, while its camera and mount are still connected. | 2 min |
 | `Disconnect` | Disconnects the devices in the reverse order of `Connect`. | 2 min |
-| `StopDevices` | Stops the drivers of the devices that are not `Switch` devices, and deletes their pods. A device whose pod is the only record of its server, because a person deleted the device or its train, or moved the device during the session, keeps its pod until `PowerOff`. | 2 min |
+| `StopDevices` | Stops the drivers of the devices that are not `Switch` devices, and deletes their pods. A device that a person deleted keeps its pod until `PowerOff`, because the finalizer keeps the device only while its pod runs. | 2 min |
 | `PowerOff` | Switches the outputs off, except an output that a device on another server still draws from, then stops the `Switch` pods and the telescope's server. | 5 min |
 | `StopSite` | Disconnects the observatory's devices, switches their outputs off, except an output that a device on another server still draws from, and stops its server, unless a reservation of another telescope in the observatory is active. | 5 min |
 
@@ -135,16 +135,37 @@ session ends:
   The next session of the telescope that the device names starts it
   there. A train that a person deletes leaves its devices on the
   server the same way.
+- Any other edit of a device that the session started, such as of its
+  `spec.power`, its driver, or its claim, and an edit of the
+  `Telescope`'s `spec.observatory`, waits for the end of the session
+  too. When the session starts a server or a device's pod, the
+  operator records in the annotation `observatory.liken.sh/session` on
+  that pod what it acts on: each device's parents, driver, power, and
+  claim, whether a `Guider` guides with it, and the telescope's
+  observatory. Until the session ends, the operator reads the record
+  and not the spec, so the release switches off the output that the
+  session switched on. A device's settings, such as a camera's gain,
+  are not in the record, and the operator writes them from the spec
+  when the device's driver comes back.
 - A device that a person adds to the telescope, a train, or the
   observatory of a running server, by creating it or by naming its
   parent, does not start. It is `Idle`, and its `Ready` message reads
   `Starts at the next reservation, after Reservation east-tonight
-  ends`. The next session starts it. A resource that another resource's driver serves,
-  such as the `FilterWheel` of a camera, waits the same way.
+  ends`. The next session starts it. A resource that another
+  resource's driver serves, such as the `FilterWheel` of a camera,
+  waits the same way.
 - A device that a person deletes while the reservation is `Ready`
   leaves at once, as
   [Deleting a running resource](#deleting-a-running-resource)
   describes.
+
+An eviction does not change the set either. When the server's pod is
+gone, the operator creates it again with the devices whose pods carry
+the server's label, which hold their records, and the devices that
+hold the finalizer, so a device added during the session still
+waits. When every pod of the
+server is gone, nothing records the set, and the new pod takes the
+devices that their specs place there, as a new session would.
 
 So each device runs on one server at a time. A device that moved
 between two running servers would need one server to release it while
@@ -195,10 +216,11 @@ device runs in the tier of its telescope or observatory. An
 cap still closes, its flat panel still goes dark, and its camera still
 aborts its exposure, warms, and disconnects in order, whether a person
 deleted those devices too or not. A deleted `Dome` parks the same way.
-The pod of such a device is the only record of the server it ran on,
-so `StopDevices` stops its driver and leaves the pod. `PowerOff` then
-switches off the output that the device's `spec.power` names, and
-deletes the pod before the server's pod. A deleted `Switch` switches
+The server's record names each such device, and the finalizer keeps a
+deleted one while its pod runs, so `StopDevices` stops the driver of a
+deleted device and leaves its pod. `PowerOff` then switches off the
+output that the record names, and deletes the pod before the server's
+pod. A deleted `Switch` switches
 its outputs off the same way, and so does a `Switch` that a person
 moves to another telescope during the session, because its pod still
 runs on the server it left. A deleted `Dome` disconnects in

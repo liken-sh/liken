@@ -84,6 +84,7 @@ func (o *operator) ensureServer(ctx context.Context, report func(string), ref se
 	if err != nil {
 		return false, err
 	}
+	built.Metadata.Annotations[annotationSession] = o.snapshot().recordOf(ref, devices)
 	return o.ensure(ctx, report, built, svc, nil)
 }
 
@@ -102,6 +103,11 @@ func (o *operator) startDevices(ctx context.Context, report func(string), ref se
 			o.fault(d, err)
 			return started, fmt.Errorf("%s %s: %w", d.kind.Name, d.name(), err)
 		}
+		recorded := []*device{d}
+		if own, ok := t.device(d.kind, d.name()); ok {
+			recorded = append(recorded, t.servedBy(own)...)
+		}
+		built.Metadata.Annotations[annotationSession] = t.recordOf(ref, recorded)
 		if err := o.holdDevice(ctx, report, d); err != nil {
 			return started, err
 		}

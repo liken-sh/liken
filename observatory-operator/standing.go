@@ -39,7 +39,7 @@ const (
 // device whose train is missing has no server, and is idle.
 func (o *operator) standingOf(t *tree, d *device) standing {
 	ref, placed := t.server(d)
-	_, installed := d.parent()
+	_, installed := d.declaredParent()
 	switch {
 	case placed:
 		return o.serverStanding(t, ref)
@@ -66,7 +66,7 @@ func (t *tree) parentFound(d *device) observatory.Condition {
 	if missing := t.missingParent(d); missing != "" {
 		return parentCondition(missing)
 	}
-	p, installed := d.parent()
+	p, installed := d.declaredParent()
 	on, placed := t.server(d)
 	declared, ok := t.declared(d)
 	to := "the shelf"

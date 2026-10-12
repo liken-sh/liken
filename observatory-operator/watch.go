@@ -261,6 +261,7 @@ func (s *stores) snapshot(namespace string) *tree {
 	for _, j := range listOf[job](s, s.jobs, namespace) {
 		t.jobs[j.Metadata.Name] = &j
 	}
+	t.applyRecords()
 	return t
 }
 

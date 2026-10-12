@@ -43,8 +43,13 @@ type labelSelector struct {
 }
 
 // guides reports whether a device is a camera that a Guider of the
-// device's telescope guides with.
+// device's telescope guides with. The record of a held device answers,
+// so an edit of the Guider during the session does not move the
+// camera's pod (records.go).
 func (t *tree) guides(server serverRef, d *device) bool {
+	if d.record != nil {
+		return d.record.Guides
+	}
 	if d.kind != observatory.CameraKind || server.kind != observatory.TelescopeKind || d.object.Spec.OpticalTrain == "" {
 		return false
 	}

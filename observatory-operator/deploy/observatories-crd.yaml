@@ -955,7 +955,9 @@ spec:
                   type: array
                   description: >-
                     Each `Telescope` whose `spec.observatory` names this
-                    observatory.
+                    observatory. While a session holds a `Telescope`,
+                    the observatory that the session recorded counts,
+                    until the session ends.
                   x-kubernetes-list-type: set
                   items:
                     type: string

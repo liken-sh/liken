@@ -133,8 +133,8 @@ func (o *operator) holdDevice(ctx context.Context, report func(string), d *devic
 // gone and that no held server runs: a deleted device after the
 // cleanup of its pod, and every device of a reservation that was
 // Released. A device on a held server keeps it while its pod is gone,
-// because the runner creates the pod again, and so does a device whose
-// parents place it on a held server, because that server's PowerOff
+// because the runner creates the pod again, and so does a device that
+// a held server's record names, because that server's PowerOff
 // switches its output off after StopDevices deleted its pod. A served
 // device's pod is
 // the pod of the driver that its spec.device names, so it keeps the
@@ -150,8 +150,8 @@ func (o *operator) releaseDevices(t *tree, held map[string]bool) error {
 			continue
 		}
 		ref, placed := t.server(d)
-		if !placed {
-			ref, placed = t.declared(d)
+		if !placed && !deleting(d.object.Metadata) {
+			ref, placed = d.recordedOn, d.record != nil
 		}
 		if placed && held[ref.String()] {
 			continue

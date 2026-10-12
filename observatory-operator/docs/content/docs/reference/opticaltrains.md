@@ -27,7 +27,7 @@ What the operator observes. The operator writes it, and a person reads it.
 | --- | --- | --- | --- |
 | <span id="status--observedgeneration"></span>`observedGeneration` | integer | no | The `metadata.generation` of the spec that the operator last acted on. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | `ParentFound` is `False` when the `Telescope`, its `Observatory`, or the `OpticalTube` does not exist. |
-| <span id="status--devices"></span>`devices` | [\[\]object](#statusdevices) | no | Each device whose `spec.opticalTrain` names this train. |
+| <span id="status--devices"></span>`devices` | [\[\]object](#statusdevices) | no | Each device whose `spec.opticalTrain` names this train. While a session holds a device, the train that the session recorded counts, until the session ends. |
 
 ### status.conditions[]
 

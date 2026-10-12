@@ -63,6 +63,13 @@ Every pod and `Service` the operator creates has these labels:
 | `observatory.liken.sh/kind` | the kind of the resource that caused the object, such as `Telescope` or `Camera` |
 | `observatory.liken.sh/resource` | that resource's name, such as `east` |
 
+A server's pod and each device's pod also carry the annotation
+`observatory.liken.sh/session`: what the session recorded when it
+created the pod, which the operator reads instead of the spec until
+the session ends. [Editing devices during a
+session](/docs/concepts/how-a-reservation-runs/#editing-devices-during-a-session)
+describes it.
+
 A `job` action's `Job` has the label `observatory.liken.sh/role: job`.
 To select one telescope's INDI server, use
 `observatory.liken.sh/kind: Telescope` and
