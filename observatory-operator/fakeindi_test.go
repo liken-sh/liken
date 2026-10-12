@@ -321,6 +321,11 @@ type indiWorld struct {
 	// getProperties by device (fakesync_test.go).
 	silent map[string]bool
 	asked  map[string]int
+	// late holds the servers that leave a client's first getProperties
+	// unanswered until answerLate, and waiting holds those clients
+	// (fakesync_test.go).
+	late    map[string]bool
+	waiting map[string][]*fakeConn
 	// shimDelay is the time from a change of a server pod's annotation
 	// to the shim's start or stop of a driver (fakeshim_test.go).
 	shimDelay time.Duration
@@ -335,7 +340,7 @@ type indiWorld struct {
 }
 
 func startIndiWorld(t *testing.T, api *fakeAPI) *indiWorld {
-	w := &indiWorld{t: t, api: api, servers: map[string]*fakeServer{}, held: map[string]bool{}, refused: map[string]bool{}, moving: map[string]bool{}, lateDials: map[string]int{}, presets: map[string]string{}, texts: map[string]string{}, withheld: map[string]bool{}, silent: map[string]bool{}, asked: map[string]int{}}
+	w := &indiWorld{t: t, api: api, servers: map[string]*fakeServer{}, held: map[string]bool{}, refused: map[string]bool{}, moving: map[string]bool{}, lateDials: map[string]int{}, presets: map[string]string{}, texts: map[string]string{}, withheld: map[string]bool{}, silent: map[string]bool{}, asked: map[string]int{}, late: map[string]bool{}, waiting: map[string][]*fakeConn{}}
 	go w.follow(t.Context())
 	return w
 }
@@ -533,20 +538,11 @@ func (w *indiWorld) answer(name string, s *fakeServer, c *fakeConn, v xmlVector)
 		if v.Device != "" {
 			w.asked[v.Device]++
 		}
-		// indiserver hands a getProperties that names a device to that
-		// device's driver alone.
-		for _, link := range sortedKeys(s.drivers) {
-			if w.silent[v.Device] {
-				break
-			}
-			if v.Device != "" && s.drivers[link].device != v.Device {
-				continue
-			}
-			s.drivers[link].reloadDomePolicy()
-			for _, prop := range s.drivers[link].props {
-				c.send(prop.def())
-			}
+		if v.Device == "" && w.late[name] {
+			w.waiting[name] = append(w.waiting[name], c)
+			return
 		}
+		w.define(s, c, v.Device)
 		return
 	}
 	if strings.HasPrefix(tag, "set") {

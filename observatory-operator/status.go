@@ -30,10 +30,22 @@ const statusWindow = time.Second
 
 func (o *operator) writeStatuses(ctx context.Context) {
 	seen := &statusMemo{}
+	first := newFirstRead()
 	for {
 		wake := o.changed.wait()
+		var held time.Time
 		if o.stores.ready() && o.seeded.Load() {
-			o.writeAll(ctx, o.snapshot(), seen)
+			t := o.snapshot()
+			if held = first.hold(ctx, o, t); held.IsZero() {
+				o.writeAll(ctx, t, seen)
+			}
+		}
+		// The timer is a clock: the end of the hold (firstread.go).
+		var end <-chan time.Time
+		var hold *time.Timer
+		if !held.IsZero() {
+			hold = time.NewTimer(time.Until(held))
+			end = hold.C
 		}
 		// After a failed write, the writer waits for the next window,
 		// not for the next change: no event follows a failure, and the
@@ -41,9 +53,15 @@ func (o *operator) writeStatuses(ctx context.Context) {
 		if !seen.failed {
 			select {
 			case <-ctx.Done():
-				return
 			case <-wake:
+			case <-end:
 			}
+		}
+		if hold != nil {
+			hold.Stop()
+		}
+		if ctx.Err() != nil {
+			return
 		}
 		timer := time.NewTimer(statusWindow)
 		select {

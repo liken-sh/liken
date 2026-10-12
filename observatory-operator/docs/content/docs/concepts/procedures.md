@@ -181,6 +181,10 @@ reports `Safe` as `Unknown` for a moment, does not stop a park
 halfway. Only the resource's deactivation, or the operator's stop,
 ends a run. The deactivation ends it as `Skipped` with the reason, and
 a new copy of the operator resumes a run that the stop interrupted.
+A new copy writes no status until it has read each device whose phase
+is `Connected` from its INDI server, for at most 30 seconds. So a
+restart keeps the `lastTransitionTime` of each condition, and a
+trigger does not run again for a transition it already answered.
 
 A resource runs one procedure at a time, its activation and
 deactivation included, so its device never receives two targets at
