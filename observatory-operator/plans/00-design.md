@@ -15,7 +15,10 @@ devices through `indi-shim`, one symbolic link for each device. The
 `Observatory` has one more server for the devices that no telescope
 owns. A device joins or leaves a running server through `indiserver`'s
 fifo, with no restart of the server ([plan
-11](completed/11-devices-join-a-running-server.md)). The operator holds one INDI client for each server, and connects
+11](completed/11-devices-join-a-running-server.md)). While a
+reservation holds a server, the server runs the devices it started and
+no others, so a device moves between telescopes only at a session
+boundary ([plan 17](completed/17-a-session-freezes-its-devices.md)). The operator holds one INDI client for each server, and connects
 each device and applies its settings when the device appears. PHD2 guides each
 telescope from its own pod, as a client of the telescope's server. The
 operator starts PHD2, connects it to the guide camera and the mount,
@@ -91,3 +94,4 @@ must hold.
 | [14](completed/14-named-states-and-clean-deletes.md) | Built: readings name one state instead of a pair of booleans, and a finalizer runs a deleted resource's deactivation; drilled on the test cluster |
 | [15](completed/15-the-operator-watches-every-namespace.md) | Built: the operator runs in `liken-system`, watches every namespace, and runs each observatory in the namespace of its resources; drilled on liken-1 |
 | [16](completed/16-kinds-are-indi-interfaces.md) | Built: each device kind is one INDI interface, one INDI device serves several resources, and typed fields come from the standard set that a bare driver captures; drilled on liken-1 on 2026-10-11 |
+| [17](completed/17-a-session-freezes-its-devices.md) | Built: a reservation records what its session acts on in `status.session`, and a held server's devices change only when the session ends; drilled on liken-1 on 2026-10-12 |

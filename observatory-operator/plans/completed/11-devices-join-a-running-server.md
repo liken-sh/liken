@@ -295,3 +295,8 @@ the camera exposing:
   `kubernetes/kubernetes` at `v1.34.0`
 - [Plan 03](03-the-topology-by-hand.md), the shim, and [plan
   07](07-the-operator-runs-the-topology.md), "Not built yet"
+
+Note, 2026-10-12: [plan 17](17-a-session-freezes-its-devices.md) replaced
+the live moves that this plan built. A device still joins or leaves a
+server through the fifo, but a held server's devices change only at a
+session boundary.
