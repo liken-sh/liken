@@ -4,7 +4,8 @@ Proposed on 2026-10-12, and designed on 2026-10-12. The design below
 answers what the design conversation left open, from the evidence of
 the CCD simulator. Built on 2026-10-12. Drilled on the QEMU dev
 cluster on 2026-10-12; [the drill](#the-drill) records the results,
-and a defect of the INDI client that the example's keywords found.
+and a defect of the INDI client that the example's keywords found,
+which 5e6ce6e0 fixed.
 
 ## The problem
 
@@ -193,13 +194,24 @@ drill did not fix it. It changed the comment on the lab's `Telescope`
 to "the name of the Telescope" and ran the other checks with that
 comment.
 
-## Still open
+Commit 5e6ce6e0 fixed the client: it writes `'` as `&apos;` and `"` as
+`&quot;`. A second drill on the same lab, on the same day, built the
+operator from 5e6ce6e0 and restored the example's comment on
+`Telescope east`. The reservation of `east` declared `OBJECT` with the
+value `the "Orion" nebula` and named the outbox `frames`. It was
+`Ready` 37 s after creation, and `Configure` took 1 s. A 1 s exposure
+of `CCD Simulator` wrote `IMAGE_008.fits` with these cards:
 
-The INDI client writes `'` and `"` as numeric character references,
-which libindi does not decode, so `Configure` times out on a declared
-keyword whose value or comment holds either character, such as the
-comment of `TELESCOP` in `examples/simulators.yaml`. [The
-drill](#the-drill) gives the evidence.
+```
+OBJECT  = 'the "Orion" nebula' / the Reservation level
+TELESCOP= 'East refractor'     / the Telescope's own name
+```
+
+FITS doubles a `'` only inside a value, so the comment kept its single
+`'`, and the value kept each `"` as declared. The reservation was
+released 67 s after its delete.
+
+## Still open
 
 `astrophotography-operator` writes keywords of its own levels, such as
 `OBJECT` for each target, into the same running driver. `INDI_CLEAR`
