@@ -166,7 +166,11 @@ func completeness(t *astrophotography.Target) conditions.Condition {
 		wanted += s.Count
 	}
 	t.Status.Progress = fmt.Sprintf("%d/%d", archived, wanted)
-	message := fmt.Sprintf("%d of %d frames are in the archive", archived, wanted)
+	verb := "are"
+	if archived == 1 {
+		verb = "is"
+	}
+	message := fmt.Sprintf("%s of %d %s in the archive", frames(archived), wanted, verb)
 	if archived < wanted || wanted == 0 {
 		return conditions.Condition{Type: astrophotography.ConditionComplete, Status: conditions.False,
 			Reason: astrophotography.ReasonWorkLeft, Message: message}

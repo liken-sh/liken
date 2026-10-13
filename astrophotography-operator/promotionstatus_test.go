@@ -228,3 +228,27 @@ func TestTheArchiveMessageCountsFrames(t *testing.T) {
 		})
 	}
 }
+
+// Complete's message counts the archived frames in the singular for
+// one.
+func TestTheCompleteMessageCountsFrames(t *testing.T) {
+	cases := []struct {
+		name            string
+		archived, count int32
+		want            string
+	}{
+		{"none of one", 0, 1, "0 frames of 1 are in the archive"},
+		{"one of one", 1, 1, "1 frame of 1 is in the archive"},
+		{"two of three", 2, 3, "2 frames of 3 are in the archive"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			target := m42()
+			target.Status.Sequences = []astrophotography.SequenceProgress{{Sequence: target.Spec.Sequences[0], Archived: c.archived}}
+			target.Status.Sequences[0].Count = c.count
+			if got := completeness(&target).Message; got != c.want {
+				t.Errorf("message %q, want %q", got, c.want)
+			}
+		})
+	}
+}
