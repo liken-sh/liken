@@ -39,6 +39,11 @@ listener off.
 | astrophotography-operator | `astrophotography_reconcile_errors_total{kind}` | counter | passes of a loop that failed, by the kind of resource it serves |
 | astrophotography-operator | `astrophotography_watch_restarts_total{kind}` | counter | watches that the API server closed and the operator opened again, by kind |
 | astrophotography-operator | `liken_build_info{component, version}` | gauge | the release that the operator runs; always 1 |
+| astrophotography-operator | `astrophotography_frames_archived_total` | counter | frames that promotion `Job`s moved from an outbox to an archive |
+| astrophotography-operator | `astrophotography_promotion_bytes_total` | counter | bytes that promotion `Job`s copied from an outbox to an archive; a move within one claim copies none |
+| astrophotography-operator | `astrophotography_promotion_failures_total{reason}` | counter | frames that a promotion `Job` failed to move, by `CopyFailed`, `VerifyFailed`, or `NameConflict` |
 
-No loop of the operator runs a pass yet, so the two reconcile series
-stay at zero.
+The promotion loop counts its passes under the kind `Target`. The
+other kinds stay at zero until their loops are built. The three
+promotion series count each `Job`'s report once, when the operator
+applies it to the `Target`'s status ([The archive](/docs/concepts/archive/)).

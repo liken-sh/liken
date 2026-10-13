@@ -85,6 +85,7 @@ func (p process) operate(stop context.Context) error {
 	// are written before the release.
 	recorder := events.New(context.Background(), client, managedBy, events.Options{Instance: p.pod, Log: p.logs})
 	o := newOperator(client, recorder, newMetrics(version), p.logs)
+	o.pod, o.namespace = p.pod, p.namespace
 	// Only the copy that holds the Lease serves metrics, because only
 	// that copy has series to serve. A listener that fails to open is
 	// logged and does not stop the operator's work.

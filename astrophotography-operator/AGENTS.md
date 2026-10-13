@@ -20,11 +20,14 @@ packages:
   from Meeus's *Astronomical Algorithms*.
 - `outbox/`, the layout of a reservation's outbox, which the runner,
   the worker, and the promotion `Job` share.
-- `catalog/`, the line of a target's frame catalog.
+- `catalog/`, a target's frame catalog: the line, the reader that
+  counts the totals, and the writer that appends.
 - `promote/`, `worker/`, and `solver/`, the three modes of the binary
   that do not run the operator. Each holds the contract that the
   operator speaks with it: the promotion report, and the HTTP requests
-  and answers of the worker and the solver.
+  and answers of the worker and the solver. `promote/` also holds the
+  promotion `Job`'s run and `promote.Name`, which renders a frame's
+  name from `archive.format`.
 
 The operator imports `observatory-operator`'s `indi`, `phd2`, and
 `observatory` packages through the `replace` in `go.mod`, and the
@@ -62,12 +65,19 @@ runs the operator, and releases the `Lease` after the last write.
 every change: the `Target`s and `Solver`s, the `Reservation`s whose
 `spec.holder` is `astrophotography-operator`, the kinds of
 `observatory-operator` that the runner reads, and the pods,
-`Service`s, `Deployment`s, and `Job`s the operator creates.
-`metrics.go` holds the registry and the listener of root plan 65, and
-`events.go` the reasons of the `Event`s on a `Reservation`. Each loop
-of plans 01, 02, and 03 starts in `operator.run` and waits on the bell.
+`Service`s, `Deployment`s, and `Job`s the operator creates, and every
+`PersistentVolumeClaim`. `promotion.go` is the loop of plan 03, which
+starts the promotion `Job`s and applies their reports
+(`promotionstatus.go`), and `outboxfinalizer.go` keeps the finalizer
+on the outbox claims. `metrics.go` holds the registry and the listener
+of root plan 65, and `events.go` the reasons of the `Event`s on a
+`Reservation`. Each loop of plans 01, 02, and 03 starts in
+`operator.run` and waits on the bell.
 
 The tests run the operator in a `testing/synctest` bubble against
 `fakeapi_test.go`, an API server on `kubernetes/apiservertest` that
 holds every watched collection, and the Lease server of
-`kubernetes/election/electiontest`.
+`kubernetes/election/electiontest`. `fakeobjects_test.go` answers the
+reads and writes of one object, with a 409 for a stale
+`resourceVersion`, and `promote/` runs against files in
+`t.TempDir()`.

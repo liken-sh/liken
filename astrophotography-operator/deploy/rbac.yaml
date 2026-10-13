@@ -48,8 +48,9 @@ rules:
   - apiGroups: [""]
     resources: [services]
     verbs: [get, list, watch, create, update, delete]
-  # The promotion Jobs, and the pods whose status holds a promotion's
-  # report and the reason a worker waits.
+  # The promotion Jobs, the pods whose status holds a promotion's
+  # report and the reason a worker waits, and the operator's own pod,
+  # whose image the promotion Jobs run.
   - apiGroups: [batch]
     resources: [jobs]
     verbs: [get, list, watch, create, delete]

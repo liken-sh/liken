@@ -2,7 +2,9 @@
 
 Proposed and designed on 2026-10-12. Pieces B and D of stage 1 were
 built on 2026-10-12, and [what they built](#what-b-and-d-built) lists
-them with each deviation. The rest is not built. This plan builds
+them with each deviation. Piece F of stage 2 was built on 2026-10-12,
+and [what F built](#what-f-built) lists it the same way. The rest is
+not built. This plan builds
 first: it gives the component that plans 01, 02, and 03 build into,
 the changes they need from `observatory-operator`, the order of the
 build, and the drill that proves them together.
@@ -305,6 +307,129 @@ The deviations, each with its reason:
   `spec.holder`, and the reflector retries until C's CRD is applied.
   The `Target` refuses `OBJECT` and `FRAMEID` whether or not C adds
   `FRAMEID` to `observatory-operator`'s list.
+
+## What F built
+
+Piece F, promotion and the catalog of plan 03, was built on
+2026-10-12, at the same time as E and G and against B's contracts.
+
+- **The seam with the runner is the `Target`'s status.** Plan 08
+  named no Go call for the runner to say that a frame waits, and
+  plan 01's "count the frame as pending, and wake the promotion" is
+  met by the status alone. After each exposure, the runner adds one to
+  the sequence's `status.sequences[].pending` and to the
+  `status.outboxes[]` entry of the reservation's outbox claim, in one
+  status write, and creates the entry with `pending: 1` when the claim
+  has none. The runner keeps the entry's other fields, never removes
+  an entry, and never writes `archived`, `progress`, or
+  `status.promotion`. The write wakes the promotion loop through the
+  watch of the `Target`s, and the loop starts a `Job` from what the
+  status says. So the runner and the loop share no memory, and a
+  restart loses nothing.
+- **The contract changes.** `catalog.Line` names its fields by the
+  rule that plan 03 records in [the names in the
+  catalog](03-promotion-to-the-archive.md#the-names-in-the-catalog):
+  `sizeBytes`, `startTime` (from `DATE-OBS`, as RFC 3339 in UTC),
+  `exposureSeconds`, and `binning`, in place of `size`, `dateObs`,
+  `exptime`, and `xbinning`. `promote.Report` gains `left`, the frames
+  the `Job` left in the outbox, because `waiting` and `failures` can be
+  cut to fit the termination message. `promote.Total` is
+  `catalog.Total`, which the catalog's reader counts. The `Target`'s
+  status gains `outboxes[].left` and `promotion.applied`, in the Go
+  types and the CRD.
+- **`catalog/`** holds the reader, which skips a line that does not
+  decode and a record it does not know, and counts each `FRAMEID`
+  once, and `Append`, which starts a new line after a line that a
+  crash cut short and syncs the file and its directory.
+- **`promote/`** holds the `promote` mode of the binary
+  (`astrophotography-operator promote --target ... --path ...
+  --cameras ...`), the reader of a FITS header, and `promote.Name`,
+  which renders `archive.format` for the runner. The mode exits 0 when
+  it reached every frame, failures included, and 1 when it stopped,
+  such as on a catalog that cannot be read, so the `Job`'s next pod
+  runs it again.
+- **The operator** runs the loop of `promotion.go`. For each target it
+  applies the report of the target's next `Job` when that `Job` has
+  ended, reports `Unschedulable` while that `Job`'s pod cannot start,
+  or starts the next `Job` for the first outbox claim that needs one.
+  `outboxfinalizer.go` keeps the finalizer, and `promotionstatus.go`
+  composes the status from a report. The `Job`s of a target are
+  numbered, `<Target>-promote-<n>`, and the report of `Job` n is
+  applied in the same write that sets `status.promotion.applied` to n,
+  so a report is applied once and two passes never create two `Job`s.
+  The `Job`'s owner is its `Target`.
+- **The counts.** A sequence's `archived` is the report's total, and
+  its `pending` drops by as many frames as `archived` rose. The `Job`
+  records the outbox's `pending` when it is created, in the annotation
+  `astrophotography.liken.sh/pending`, and the report sets the outbox's
+  `pending` to the frames the `Job` left plus the frames the runner
+  counted since. A frame that the runner counts while the `Job` moves
+  it counts once too often, and the next `Job`, which finds nothing,
+  corrects it. A frame is never counted too few times.
+- **A frame that fails** starts no `Job` again on its own. A `Job`
+  starts when the outbox's `pending` is more than its `left`, and once
+  for each outbox in each start of the operator, so a restart retries
+  a failure that a person fixed. Without that rule, a frame with a
+  `NameConflict` would start a `Job` on every pass.
+- **Tests.** The promote mode runs against an outbox and an archive in
+  `t.TempDir()`: a crash after each step of the copy and of the rename,
+  then a second run, with one file and one line in the end; the same
+  claim's rename; a name that another file holds; a copy that reads
+  back with another hash; a frame cut short; a catalog, an archive, or
+  an outbox that refuses a write; and the tokens and the suffix of a
+  name. The loop runs in a `synctest` bubble against
+  `kubernetes/apiservertest`, with `fakeobjects_test.go` answering a
+  read, a create, an update, a merge patch, and a delete of one object,
+  and a stale `resourceVersion` with 409. The coverage is 98.0%, at the
+  floor.
+
+The deviations, each with its reason:
+
+- **No node affinity.** The `Job` names no node, as plan 03 states:
+  the scheduler places the pod by its claims, and a `local-path`
+  outbox's volume carries the node.
+- **A rename that falls back to a link.** An NFS or SMB share refuses
+  `RENAME_NOREPLACE` with `EINVAL`, and many archives are on such a
+  share, so the rename falls back to a hard link and an unlink, which
+  fails with `EEXIST` the same way. A share that refuses hard links
+  too fails each frame with `CopyFailed`; no drill has run on one.
+- **The header's reader is in `promote/`,** not in `fits/`, because G
+  builds at the same time and F's reader needs only the cards that
+  promotion reads. It moves to `fits/` when a second user needs it.
+- **`NoFrameID` waits.** A file with no `FRAMEID` in a target's
+  directory is reported as waiting with the reason `NoFrameID`, and
+  `left` does not count it, so it holds no finalizer.
+- **The empty values of a name.** `{filter}` and `{train}` with no
+  value render as `none`, and `{binning}` with no value as `default`,
+  like `{gain}` and `{offset}`. A part of the path that starts with
+  `.` starts with `_` instead, so a value of `..` cannot leave
+  `archive.path` and no frame is hidden beside the `.part` files.
+- **`AfterReservation`** waits while a reservation held by this
+  operator that writes to the claim, by its session's outbox, is
+  `Activating`, `Ready`, or `Deactivating`, and not only for the one
+  reservation that wrote the frames, which the status does not name.
+- **The watch of every `PersistentVolumeClaim`.** The claims carry no
+  label of the operator, so the watch takes every claim of the
+  cluster, for the archive's `ClaimMissing` and the outbox's
+  finalizer.
+- **A `Job` that succeeded waits for its pod.** The watches of `Job`s
+  and pods deliver their changes apart, so the loop applies the report
+  of a `Job` that succeeded only when the pod that holds it is in the
+  store.
+- **The dashboard** of the monitoring component does not show the
+  three series of promotion yet.
+
+Open after F:
+
+- **The finalizer may hold frames that no `Job` can move.** The
+  scheduler refuses a pod that mounts a claim being deleted, as far as
+  the build read, so after a delete of an outbox claim the finalizer
+  keeps the frames, and no promotion `Job` can start to move them. The
+  manual tells a person to move the frames before deleting the claim.
+  A drill confirms the refusal, and plan 03 decides whether the
+  finalizer stays.
+- **A deleted `Target`** takes its status, so the finalizer comes off
+  its outbox claims while its frames are still in them.
 
 ## The drill of the first session
 

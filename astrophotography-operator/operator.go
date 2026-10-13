@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"io"
+	"sync"
 
 	"k8s.io/client-go/dynamic"
 
@@ -29,6 +30,11 @@ type operator struct {
 
 	changed *bell
 	stores  *stores
+
+	// pod and namespace name the operator's own pod, whose image the
+	// promotion Jobs run (ownimage.go).
+	pod       string
+	namespace string
 }
 
 func newOperator(client *apiclient.Client, recorder *events.Recorder, m *metrics, logs io.Writer) *operator {
@@ -39,6 +45,9 @@ func newOperator(client *apiclient.Client, recorder *events.Recorder, m *metrics
 // watch has stopped.
 func (o *operator) run(ctx context.Context, watcher dynamic.Interface) {
 	o.stores = startWatches(ctx, watcher, o.changed, o.metrics)
+	var loops sync.WaitGroup
+	loops.Go(func() { o.promote(ctx) })
 	<-ctx.Done()
+	loops.Wait()
 	o.stores.done()
 }

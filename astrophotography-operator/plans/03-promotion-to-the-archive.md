@@ -1,6 +1,9 @@
 # 03, Promotion to the archive
 
-Proposed on 2026-10-12, and designed on 2026-10-12. Not built. [The
+Proposed on 2026-10-12, and designed on 2026-10-12. Built on
+2026-10-12 as piece F of [plan 08](08-the-component-and-the-first-session.md),
+whose section [what F built](08-the-component-and-the-first-session.md#what-f-built)
+lists the deviations; the drill of plan 08 has not run. [The
 design](#the-design) answers what the design conversation left open,
 and changes two decisions on evidence: frames carry no FITS
 checksums to check, and the same claim still runs a `Job`, which
@@ -206,6 +209,27 @@ A name never replaces a file, so no frame in the archive is ever
 overwritten. Readers of the archive, such as a stacking tool that
 watches it, never see a partial frame, because a frame appears there
 only by a rename.
+
+### The names in the catalog
+
+Decided on 2026-10-12, when the first version of the line mixed
+camelCase names, such as `frameID` and `dateObs`, with the FITS
+keywords in lower case, such as `exptime` and `xbinning`. No archived
+line is ever rewritten, so the names of the first line that reaches an
+archive are kept for good, and one rule decides each of them:
+
+- A name is camelCase English for what the value means, never the FITS
+  keyword it came from. A reader of the catalog should not need the
+  FITS standard to read it.
+- A quantity whose unit a reader could guess wrong carries the unit at
+  the end of its name: `exposureSeconds` and `sizeBytes`.
+- `ID` is in capitals, as Kubernetes writes it: `frameID`.
+
+So the header's `DATE-OBS` is `startTime`, as RFC 3339 in UTC with the
+driver's milliseconds, `EXPTIME` is `exposureSeconds`, and `XBINNING`
+is `binning`, because the runner bins both axes alike. `filter`,
+`gain`, and `offset` keep their names, `record` stays, and a line of a
+later record keeps the same rule.
 
 ### The same claim
 

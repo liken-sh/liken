@@ -22,6 +22,7 @@ import (
 	"k8s.io/client-go/dynamic"
 
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
+	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 )
 
 const (
@@ -67,6 +68,8 @@ type fakeAPI struct {
 	// absent holds the collections whose kind the cluster does not
 	// serve, which answer 404 the way an uninstalled CRD does.
 	absent map[string]bool
+	// recorded holds the Events that the operator writes.
+	recorded eventstest.Events
 }
 
 func startFakeAPI(t *testing.T) *fakeAPI {
@@ -81,7 +84,7 @@ func startFakeAPI(t *testing.T) *fakeAPI {
 		api.collections[c.path] = c
 		api.objects[c.path] = map[string]map[string]any{}
 	}
-	api.server = apiservertest.Start(t, api)
+	api.server = apiservertest.Start(t, api.recorded.Around(api))
 	// The reflector waits out its backoff after a refused list without
 	// reading its context, so the bubble waits past it (apiservertest).
 	t.Cleanup(func() { time.Sleep(time.Minute) })
@@ -181,6 +184,9 @@ func (a *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	absent := a.absent[r.URL.Path]
 	a.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
+	if a.serveObject(w, r) {
+		return
+	}
 	switch {
 	case !known || absent || r.Method != http.MethodGet:
 		w.WriteHeader(http.StatusNotFound)

@@ -5,7 +5,14 @@
 // and is the only writer. The file outlives the cluster and the
 // operator, beside the frames it describes, so its lines are a format
 // that a person reads with jq years later: a field once written keeps
-// its name and its meaning.
+// its name and its meaning, and no line is ever rewritten.
+//
+// So every name follows one rule. A name is camelCase English for what
+// the value means, never the FITS keyword it came from, because a
+// reader of the catalog should not need the FITS standard to read it. A
+// quantity whose unit a reader could guess wrong carries the unit at
+// the end of its name: exposureSeconds, sizeBytes. Kubernetes writes
+// "ID" in capitals, so frameID does too.
 package catalog
 
 import "path"
@@ -28,7 +35,10 @@ const RecordFrame = "frame"
 
 // Line is one line of the catalog.
 type Line struct {
-	Record  string `json:"record"`
+	// Record is RecordFrame. A reader skips a line of a record it does
+	// not know.
+	Record string `json:"record"`
+	// FrameID is FRAMEID from the header, the frame's identity.
 	FrameID string `json:"frameID"`
 	// The resources that took the frame.
 	Target      string `json:"target"`
@@ -39,13 +49,15 @@ type Line struct {
 	// Path is the frame's file relative to archive.path, so the catalog
 	// stays true when a person moves the whole archive.
 	Path string `json:"path"`
-	// Size and SHA256 are of the whole file, which the promotion Job
-	// hashed as it copied and again when it read the copy back.
-	Size   int64  `json:"size"`
-	SHA256 string `json:"sha256"`
-	// DateObs is DATE-OBS from the header as the driver wrote it, such
-	// as 2026-10-12T20:08:26.864, in UTC with no zone.
-	DateObs string `json:"dateObs"`
+	// SizeBytes and SHA256 are of the whole file, which the promotion
+	// Job hashed as it copied and again when it read the copy back.
+	SizeBytes int64  `json:"sizeBytes"`
+	SHA256    string `json:"sha256"`
+	// StartTime is DATE-OBS from the header, the start of the exposure
+	// that the driver measured, as RFC 3339 in UTC with the driver's
+	// milliseconds, such as 2026-10-12T20:08:26.864Z. It is absent when
+	// the header holds no DATE-OBS that reads as a time.
+	StartTime string `json:"startTime,omitempty"`
 	Settings
 }
 
@@ -56,10 +68,10 @@ type Line struct {
 type Settings struct {
 	// Filter is FILTER, empty when the header has none.
 	Filter string `json:"filter,omitempty"`
-	// Exposure is EXPTIME, in seconds.
-	Exposure float64 `json:"exptime"`
-	// Binning is XBINNING.
-	Binning int32 `json:"xbinning"`
+	// ExposureSeconds is EXPTIME.
+	ExposureSeconds float64 `json:"exposureSeconds"`
+	// Binning is XBINNING. The runner bins both axes alike.
+	Binning int32 `json:"binning"`
 	// Gain and Offset are GAIN and OFFSET, absent when the header has
 	// none.
 	Gain   *float64 `json:"gain,omitempty"`

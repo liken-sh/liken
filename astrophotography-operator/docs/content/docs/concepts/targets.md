@@ -83,36 +83,25 @@ frames than it asked for when a promotion lags, and never with fewer.
 ## The archive and the file names
 
 The camera will write each frame once, into the reservation's outbox
-on the machine at the pier, under its final name. The operator will
-then move it to `spec.archive`: a claim of yours, and a directory in
-it. `archive.claimName` cannot change after you create the target,
+on the machine at the pier, under its final name. The operator then
+moves it to `spec.archive`: a claim of yours, and a directory in it.
+`archive.claimName` cannot change after you create the target,
 because the counts come from the catalog in that claim. To use
 another claim, create another target.
 
-`archive.format` gives each frame's file name, relative to
-`archive.path`, with tokens such as `{object}`, `{filter}`,
-`{night}`, and `{datetime}`. The default is
-`{object}/{night}/{filter}/{object}_{filter}_{exposure}_{datetime}`.
-The driver replaces a frame of the same name with no warning, so
-unless the format holds `{frameid}`, the operator will add `_` and the
-last 12 digits of the frame's identity to every name. That suffix is
-the only text the operator adds.
-
-`archive.promotion` decides when frames move. `Continuous` moves them
-while the night runs, so the outbox stays small. `AfterReservation`
-moves them when the reservation ends, so the link stays quiet while
-the telescope works.
+`archive.format` gives each frame's file name, with tokens such as
+`{object}`, `{filter}`, `{night}`, and `{datetime}`, and
+`archive.promotion` decides when frames move.
+[The archive](/docs/concepts/archive/) explains both, and how a frame
+moves with no loss.
 
 ## The frame catalog
 
-The catalog will be one file for each target, at
+The catalog is one file for each target, at
 `<archive.path>/catalog/<Target>.jsonl` in the archive, with one line
-of JSON for each frame: its identity, the resources that took it, its
-path, its size and SHA-256, and its header's `DATE-OBS`, `FILTER`,
-`EXPTIME`, `XBINNING`, `GAIN`, and `OFFSET`. It stays beside the
-frames, so a backup of the archive takes it along, and `jq` answers
-questions such as which frames one night took. A frame never changes
-after it reaches the archive.
+of JSON for each frame. It stays beside the frames, so a backup of the
+archive takes it along. [The archive](/docs/concepts/archive/#the-catalog)
+lists the fields of a line.
 
 ## FITS keywords
 

@@ -5,9 +5,9 @@
 // that name it as their holder.
 //
 // One binary holds every program of the component, and its first
-// argument names the program. With no argument it runs the operator.
-// Plans 02 and 03 add the modes that run in the operator's own pods:
-// promote, worker, and solver.
+// argument names the program. With no argument it runs the operator,
+// and promote runs the container of a promotion Job (plan 03). Plan 02
+// adds worker and solver, the modes of the operator's other pods.
 package main
 
 import (
@@ -19,6 +19,7 @@ import (
 
 	"k8s.io/client-go/rest"
 
+	"github.com/liken-sh/liken/astrophotography-operator/promote"
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/election"
 	"github.com/liken-sh/liken/kubernetes/informer"
@@ -39,6 +40,9 @@ const (
 const metricsAddressVariable = "ASTROPHOTOGRAPHY_METRICS_ADDRESS"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "promote" {
+		os.Exit(promote.Main(os.Args[2:], os.Stderr))
+	}
 	if len(os.Args) > 1 {
 		fmt.Fprintf(os.Stderr, "%s: no mode %q; run with no argument for the operator\n", managedBy, os.Args[1])
 		os.Exit(2)

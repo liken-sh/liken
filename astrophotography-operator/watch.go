@@ -5,7 +5,8 @@ package main
 // Reservations that name this operator as their holder, and one follows
 // each kind of observatory.liken.sh that the runner reads (plan 01).
 // Four more follow the pods, Services, Deployments, and Jobs that the
-// operator creates, selected by its label. All of them run on
+// operator creates, selected by its label, and one follows every
+// PersistentVolumeClaim, for the outboxes and archives. All of them run on
 // client-go's reflector through the shared informer package. A handler
 // only rings the bell, and each loop that waits on it reads the stores
 // again.
@@ -105,8 +106,17 @@ func watches() []watched {
 		out = append(out, watched{kind: kind.name, source: informer.Source{
 			Resource: kind.resource, LabelSelector: labelManagedBy + "=" + managedBy}})
 	}
+	out = append(out, watched{kind: claimKind, source: informer.Source{Resource: claimsResource}})
 	return out
 }
+
+// The claims are a person's, and carry no label of the operator, so
+// their watch takes every claim. The promotion loop reads an archive
+// claim to know that it exists, and puts the finalizer on each outbox
+// claim that holds frames (plan 03).
+const claimKind = "PersistentVolumeClaim"
+
+var claimsResource = schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumeclaims"}
 
 func observatoryResource(kind observatory.Kind) schema.GroupVersionResource {
 	return schema.GroupVersionResource{Group: observatory.Group, Version: observatory.Version, Resource: kind.Plural}

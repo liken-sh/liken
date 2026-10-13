@@ -18,7 +18,8 @@ status keeps the count.
 The operator is under development, and it does not image yet. This
 version installs the `Target` and `Solver` resources, so the API
 server checks every field you write, and it runs the operator, which
-elects its leader and watches the resources and does nothing else.
+elects its leader, watches the resources, and moves the frames that a
+target counts in an outbox to the target's archive.
 The design is in the
 [plans](https://github.com/liken-sh/liken/tree/main/astrophotography-operator/plans),
 and each piece joins this manual as it is built.
@@ -27,8 +28,9 @@ Start here:
 
 * [Install the operator](/docs/guides/install/) beside
   `observatory-operator`.
-* [Targets](/docs/concepts/targets/) explains what a target states
-  and how its frames will be named and counted.
+* [Targets](/docs/concepts/targets/) explains what a target states.
+* [The archive](/docs/concepts/archive/) explains how frames move from
+  the outbox to your archive, and how they are named and counted.
 * [Solvers](/docs/concepts/solvers/) explains how a frame will be
   plate-solved, and why the index files stay in one place.
 

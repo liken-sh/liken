@@ -20,11 +20,15 @@ exclude:
     - ^main\.go$
 
 threshold:
-  # The total covers every package. The tests measure 98.3%:
-  # astrophotography/, catalog/, outbox/, and sky/ 100%, and the
-  # operator's package 96.5% with main.go left out. promote/, solver/,
-  # and worker/ hold only the types of their contracts, with no
-  # statement. The operator's package leaves out the return of an error
-  # from the election and from the Event recorder's shutdown, and the
-  # answer of stores.synced before a watch has read its collection.
+  # The total covers every package. The tests measure 98.0%:
+  # astrophotography/, outbox/, and sky/ 100%, catalog/ 98.7%, promote/
+  # 96.5%, and the operator's package 97.6% of the lines the gate counts,
+  # with main.go left out. solver/ and worker/ hold only the types of
+  # their contracts, with no statement. The operator's package leaves out
+  # the return of an error from the election and from the Event
+  # recorder's shutdown, a list of the Targets and a Job create that the
+  # API server refuses, and a status write that fails twice. promote/
+  # and catalog/ leave out the errors of a file system that fails a sync,
+  # a stat, or a read after an open, and the fallback of a share that
+  # refuses RENAME_NOREPLACE, which tmpfs never does.
   total: 98

@@ -136,6 +136,8 @@ type TargetStatus struct {
 	// Outboxes lists the claims that hold frames of this target that
 	// are not yet in the archive.
 	Outboxes []OutboxFrames `json:"outboxes,omitempty"`
+	// Promotion records the target's promotion Jobs (plan 03).
+	Promotion *PromotionStatus `json:"promotion,omitempty"`
 	// Exposure is the frame in flight, written before the exposure
 	// starts and cleared after it ends, so a runner that restarts counts
 	// the frame once.
@@ -156,9 +158,25 @@ type SequenceProgress struct {
 }
 
 // OutboxFrames is one outbox claim and the frames of the target in it.
+// The runner adds one to Pending after each exposure, and creates the
+// entry when the claim has none. The promotion loop owns Left, sets
+// Pending from each report, and removes the entry when Pending is 0.
 type OutboxFrames struct {
 	ClaimName string `json:"claimName"`
 	Pending   int32  `json:"pending"`
+	// Left is the frames that the last promotion Job of the claim left
+	// in it. A promotion starts when Pending is more than Left, so a
+	// frame that failed starts no Job until a new frame arrives.
+	Left int32 `json:"left,omitempty"`
+}
+
+// PromotionStatus records the target's promotion Jobs. They run one at
+// a time, and their names end in a number that counts up.
+type PromotionStatus struct {
+	// Applied is the number of the last promotion Job whose report the
+	// operator applied. The next Job takes the next number, and a Job at
+	// or below it is never applied twice.
+	Applied int32 `json:"applied"`
 }
 
 // Exposure is the frame in flight.

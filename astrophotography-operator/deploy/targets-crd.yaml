@@ -515,6 +515,32 @@ spec:
                         type: integer
                         format: int32
                         description: "The target's frames in the claim."
+                      left:
+                        type: integer
+                        format: int32
+                        description: >-
+                          The frames that the last promotion `Job` of
+                          this claim left in it: frames that wait as
+                          incomplete, and frames that failed. A new
+                          promotion starts when `pending` is more than
+                          `left`, so a frame that fails does not start a
+                          `Job` again until a new frame arrives.
+                promotion:
+                  type: object
+                  required: [applied]
+                  description: >-
+                    The target's promotion `Job`s. The `Job`s of a target
+                    run one at a time, and their names end in a number
+                    that counts up.
+                  properties:
+                    applied:
+                      type: integer
+                      format: int32
+                      description: >-
+                        The number of the last promotion `Job` whose
+                        report the operator applied to this status. The
+                        next `Job` takes the next number, and a `Job` at
+                        or below it is never applied again.
                 exposure:
                   type: object
                   required: [frameID, sequence, reservation, file, startTime]
