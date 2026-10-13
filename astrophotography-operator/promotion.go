@@ -245,7 +245,7 @@ func (p *promotions) startJob(t *astrophotography.Target, w world, number int32)
 			return err
 		}
 		p.started[key] = true
-		fmt.Fprintf(p.logs, "%s: started the promotion Job %s/%s for %d frames in %s\n", managedBy, namespace, job.Metadata.Name, entry.Pending, entry.ClaimName)
+		fmt.Fprintf(p.logs, "%s: started the promotion Job %s/%s for %s in %s\n", managedBy, namespace, job.Metadata.Name, frames(entry.Pending), entry.ClaimName)
 		return nil
 	}
 	return nil

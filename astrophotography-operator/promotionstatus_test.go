@@ -203,3 +203,28 @@ func TestASucceededJobWaitsForItsPod(t *testing.T) {
 		t.Error("the result is ready with no pod")
 	}
 }
+
+// ArchiveAvailable's message counts frames in the singular for one.
+func TestTheArchiveMessageCountsFrames(t *testing.T) {
+	failed := []promote.Frame{{File: "m42/a.fits", Reason: astrophotography.ReasonCopyFailed, Message: "disk full"}}
+	cases := []struct {
+		name   string
+		report promote.Report
+		want   string
+	}{
+		{"one moved", promote.Report{Promoted: 1}, "the promotion Job m42-promote-1 moved 1 frame to the archive"},
+		{"two moved", promote.Report{Promoted: 2}, "the promotion Job m42-promote-1 moved 2 frames to the archive"},
+		{"one left", promote.Report{Left: 1, Failures: failed},
+			"the promotion Job m42-promote-1 left 1 frame in the outbox; the first failure is m42/a.fits: disk full"},
+		{"two left", promote.Report{Left: 2, Failures: failed},
+			"the promotion Job m42-promote-1 left 2 frames in the outbox; the first failure is m42/a.fits: disk full"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			result := promotionResult{job: "m42-promote-1", report: &c.report}
+			if got := result.availability().Message; got != c.want {
+				t.Errorf("message %q, want %q", got, c.want)
+			}
+		})
+	}
+}

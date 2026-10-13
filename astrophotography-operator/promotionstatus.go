@@ -124,12 +124,20 @@ func (r promotionResult) apply(t *astrophotography.Target) ([]conditions.Conditi
 // reason of the first failure, or True.
 func (r promotionResult) availability() conditions.Condition {
 	if failures := r.report.Failures; len(failures) > 0 {
-		message := fmt.Sprintf("the promotion Job %s left %d frames in the outbox; the first failure is %s: %s",
-			r.job, r.report.Left, failures[0].File, failures[0].Message)
+		message := fmt.Sprintf("the promotion Job %s left %s in the outbox; the first failure is %s: %s",
+			r.job, frames(r.report.Left), failures[0].File, failures[0].Message)
 		return archiveAvailable(conditions.False, failures[0].Reason, message)
 	}
-	message := fmt.Sprintf("the promotion Job %s moved %d frames to the archive", r.job, r.report.Promoted)
+	message := fmt.Sprintf("the promotion Job %s moved %s to the archive", r.job, frames(r.report.Promoted))
 	return archiveAvailable(conditions.True, astrophotography.ReasonPromoted, message)
+}
+
+// frames counts frames for a message: "1 frame", "2 frames".
+func frames(n int32) string {
+	if n == 1 {
+		return "1 frame"
+	}
+	return fmt.Sprintf("%d frames", n)
 }
 
 func archiveAvailable(status conditions.Status, reason, message string) conditions.Condition {

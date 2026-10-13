@@ -98,7 +98,7 @@ func TestAFailedFrameStartsNoJobUntilANewFrame(t *testing.T) {
 			Failures: []promote.Frame{{File: "east-main/east-tonight/m42/M42_0001.fits", Reason: promote.ReasonNameConflict,
 				Message: "astro/M42_0001.fits in the archive is another file"}}},
 			astrophotography.ReasonNameConflict,
-			"the promotion Job m42-promote-1 left 1 frames in the outbox; the first failure is " +
+			"the promotion Job m42-promote-1 left 1 frame in the outbox; the first failure is " +
 				"east-main/east-tonight/m42/M42_0001.fits: astro/M42_0001.fits in the archive is another file"},
 		{"a Job that failed with no report", nil, astrophotography.ReasonCopyFailed,
 			"the promotion Job m42-promote-1 failed: Job has reached the specified backoff limit"},
