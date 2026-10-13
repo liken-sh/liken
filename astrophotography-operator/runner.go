@@ -37,14 +37,10 @@ type runner struct {
 	// res is the reservation as it was when it turned Ready. Its session
 	// is a record that does not change while the reservation is Ready,
 	// and the supervisor stops the runner when the phase changes.
-	res       *observatory.Reservation
-	client    *indi.Client
-	centering centering
-	guiding   guiding
-	// skipped holds the generation of each target, by UID, that failed
-	// on this reservation, so the runner does not take it again until a
-	// person edits it. A restart forgets it, and costs one more try.
-	skipped     map[string]int64
+	res         *observatory.Reservation
+	client      *indi.Client
+	centering   centering
+	guiding     guiding
 	idle        bool
 	warnedNoBox bool
 }
@@ -53,7 +49,6 @@ func newRunner(o *operator, res *observatory.Reservation) *runner {
 	return &runner{
 		o: o, namespace: res.Metadata.Namespace, name: res.Metadata.Name, res: res,
 		centering: o.centering, guiding: o.guiding,
-		skipped: map[string]int64{},
 	}
 }
 

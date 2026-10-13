@@ -56,7 +56,8 @@ The target's `RESERVATION` column is empty while a reservation is
 * The target did not fail earlier on this reservation. A target that
   failed with `NoFilter`, `NoTrain`, `SlewFailed`, or `CenteringFailed`,
   or because PHD2 did not stop, is not taken again by the same
-  reservation until you edit its `spec`.
+  reservation until you edit its `spec`. The target's `status.failed`
+  names that reservation.
 
 When no target is eligible, the reservation gets the `Event`
 `AstrophotographyIdle`. When another target has a higher `priority`,
@@ -94,15 +95,28 @@ next target of the namespace takes the telescope.
 
 A target that failed with `NoFilter`, `NoTrain`, `SlewFailed`,
 `CenteringFailed`, or a PHD2 that did not stop is not taken again by
-the same reservation until its `spec` changes. The fix is often an
-edit of the target, which makes it eligible at once. When the cause
-was elsewhere, such as a mount you fixed by hand, a new reservation
-takes the target again, and so does the same reservation after a
-restart of the operator:
+the same reservation until its `spec` changes. The target's
+`status.failed` records the reservation and the `metadata.generation`
+of the spec that failed, so a restart of the operator does not change
+this:
 
 ```sh
-kubectl -n liken-system rollout restart deployment astrophotography-operator
+kubectl get target m42 -n observatory -o jsonpath='{.status.failed}'
 ```
+
+The fix is often an edit of the target, which makes it eligible at
+once. When the cause was elsewhere, such as a mount you fixed by hand,
+a new reservation takes the target again. To run it on the same
+reservation, suspend the target and resume it. Each patch changes the
+spec, so the failure no longer holds:
+
+```sh
+kubectl patch target m42 -n observatory --type merge -p '{"spec":{"suspend":true}}'
+kubectl patch target m42 -n observatory --type merge -p '{"spec":{"suspend":false}}'
+```
+
+The operator clears `status.failed` when the reservation it names ends,
+or when that reservation claims the target again after an edit.
 
 ## The reservation's Events
 

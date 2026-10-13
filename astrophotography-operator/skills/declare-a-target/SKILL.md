@@ -227,6 +227,7 @@ the target again before each frame:
 
 A target that failed on a reservation, such as with `NoFilter` or
 `SlewFailed`, is not taken again by that reservation until you edit it.
+Its `status.failed` names that reservation.
 [Troubleshoot](https://liken.sh/astrophotography/docs/guides/troubleshoot/) gives the fix for each
 reason.
 

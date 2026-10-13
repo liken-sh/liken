@@ -254,7 +254,9 @@ when it moves to the archive.
 
 A target released for `NoFilter`, `SlewFailed`, `CenteringFailed`, or
 a PHD2 that did not stop is not taken again by the same reservation
-until you edit it. A new reservation takes it again.
+until you edit it. The runner records that reservation in the target's
+`status.failed`, so a restart of the operator does not change this. A
+new reservation takes it again.
 
 ## Restarts and the end of a reservation
 

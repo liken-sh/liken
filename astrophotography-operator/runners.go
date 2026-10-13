@@ -8,7 +8,8 @@ package main
 // whose status.reservation names a reservation that is not Ready: it
 // clears status.reservation and status.exposure, and does not count the
 // frame in flight. If the driver wrote that frame anyway, the promotion
-// finds it in the outbox, and the catalog counts it.
+// finds it in the outbox, and the catalog counts it. It also clears
+// each status.failed that names a reservation that is not Ready.
 //
 // A runner that the operator's own stop ends keeps its claim and its
 // status.exposure, so the next leader finishes the frame in flight.
@@ -93,7 +94,9 @@ func (o *operator) superviseOnce(ctx context.Context, runners map[string]*runnin
 }
 
 // releaseEnded ends the claim of each target whose status.reservation
-// names a reservation that is not Ready.
+// names a reservation that is not Ready, and clears each status.failed
+// that names one. A failure holds only for the reservation it names, so
+// a later reservation of the same name claims the target again.
 func (o *operator) releaseEnded() error {
 	targets, err := o.listTargets("")
 	if err != nil {
@@ -102,21 +105,23 @@ func (o *operator) releaseEnded() error {
 	readyByNamespace := map[string]map[string]bool{}
 	for i := range targets {
 		t := &targets[i]
-		held := t.Status.Reservation
-		if held == "" {
-			continue
-		}
 		ready, ok := readyByNamespace[t.Metadata.Namespace]
 		if !ok {
 			ready = o.readyIn(t.Metadata.Namespace)
 			readyByNamespace[t.Metadata.Namespace] = ready
 		}
-		if ready[held] {
+		held, failed := t.Status.Reservation, t.Status.Failed
+		claimEnded := held != "" && !ready[held]
+		failureEnded := failed != nil && !ready[failed.Reservation]
+		if !claimEnded && !failureEnded {
 			continue
 		}
 		if _, err := o.writeTarget(t, func(fresh *astrophotography.Target, change *statusChange) bool {
-			if fresh.Status.Reservation != held {
-				return false
+			if failureEnded && fresh.Status.Failed != nil && *fresh.Status.Failed == *failed {
+				fresh.Status.Failed = nil
+			}
+			if !claimEnded || fresh.Status.Reservation != held {
+				return true
 			}
 			fresh.Status.Reservation, fresh.Status.Exposure = "", nil
 			change.setImaging(fresh, false, astrophotography.ReasonWaiting,

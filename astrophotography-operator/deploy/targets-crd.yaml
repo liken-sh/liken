@@ -452,6 +452,29 @@ spec:
                     while none does. A runner claims the target by
                     writing it, so two telescopes never image one target
                     at once.
+                failed:
+                  type: object
+                  required: [reservation, observedGeneration]
+                  description: >-
+                    The `Reservation` that released the target after a
+                    failure, such as `NoFilter` or `SlewFailed`. That
+                    reservation does not claim the target again until
+                    the spec changes, also after a restart of the
+                    operator. Every other reservation claims it as
+                    usual. The operator clears it when that reservation
+                    ends.
+                  properties:
+                    reservation:
+                      type: string
+                      description: "The `Reservation` the target failed on."
+                    observedGeneration:
+                      type: integer
+                      format: int64
+                      description: >-
+                        The `metadata.generation` of the spec that
+                        failed. An edit of the spec changes the
+                        generation, and the reservation can claim the
+                        target again.
                 sequences:
                   type: array
                   description: >-

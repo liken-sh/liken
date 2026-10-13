@@ -63,10 +63,19 @@ func created(t astrophotography.Target) time.Time {
 	return *t.Metadata.CreationTimestamp
 }
 
+// failedOn reports whether a target's status.failed names a
+// reservation, at the target's current generation.
+func failedOn(t *astrophotography.Target, reservation string) bool {
+	f := t.Status.Failed
+	return f != nil && f.Reservation == reservation && f.ObservedGeneration == t.Metadata.Generation
+}
+
 // claimNext claims the first eligible target in the order of
 // byPriority, and answers it, or nil when none is eligible. A target
-// that fails on this reservation is not taken again until a person
+// that failed on this reservation is not taken again until a person
 // edits it, so one target with a wrong filter does not hold the night.
+// The failure is in the target's status.failed, so a runner that starts
+// again after a restart of the operator makes the same choice.
 func (r *runner) claimNext() (*astrophotography.Target, error) {
 	session := r.res.Status.Session
 	targets, err := r.o.listTargets(r.namespace)
@@ -78,7 +87,7 @@ func (r *runner) claimNext() (*astrophotography.Target, error) {
 	slices.SortFunc(targets, byPriority)
 	for i := range targets {
 		t := &targets[i]
-		if generation, failed := r.skipped[t.Metadata.UID]; failed && generation == t.Metadata.Generation {
+		if failedOn(t, r.name) {
 			continue
 		}
 		if !eligible(t, session, ready, r.name) {
@@ -89,11 +98,16 @@ func (r *runner) claimNext() (*astrophotography.Target, error) {
 		}
 		claimed := false
 		_, err := r.o.writeTarget(t, func(fresh *astrophotography.Target, change *statusChange) bool {
-			claimed = eligible(fresh, session, ready, r.name)
+			claimed = eligible(fresh, session, ready, r.name) && !failedOn(fresh, r.name)
 			if !claimed {
 				return false
 			}
 			fresh.Status.Reservation = r.name
+			// A failure of this reservation on an older spec no longer
+			// holds, because a person edited the target since.
+			if f := fresh.Status.Failed; f != nil && f.Reservation == r.name {
+				fresh.Status.Failed = nil
+			}
 			change.setImaging(fresh, true, astrophotography.ReasonSlewing,
 				fmt.Sprintf("Reservation %s slews to %s.", r.name, fresh.Spec.Object))
 			return true

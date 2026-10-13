@@ -45,8 +45,9 @@ type work struct {
 }
 
 // imagingFailure ends the work on a target with a reason of the
-// Imaging condition, such as NoFilter. The runner leaves the target for
-// the rest of the reservation, unless a person edits it.
+// Imaging condition, such as NoFilter. The runner records the failure
+// in status.failed, and leaves the target for the rest of the
+// reservation, unless a person edits it.
 type imagingFailure struct {
 	reason string
 	err    error
@@ -72,8 +73,8 @@ func (r *runner) image(ctx context.Context, t *astrophotography.Target) error {
 		return nil
 	case errors.As(err, &failure):
 		r.logf("target %s: %v", targetName(t), err)
-		r.skipped[t.Metadata.UID] = t.Metadata.Generation
-		return r.release(t, failure.reason, fmt.Sprintf("Reservation %s: %v", r.name, failure.err))
+		failed := &astrophotography.Failure{Reservation: r.name, ObservedGeneration: t.Metadata.Generation}
+		return r.releaseAs(t, failed, failure.reason, fmt.Sprintf("Reservation %s: %v", r.name, failure.err))
 	case errors.Is(err, apiclient.ErrNotFound):
 		return nil
 	}
@@ -224,11 +225,22 @@ func (w *work) setImaging(imaging bool, reason, message string) error {
 // status.reservation and status.exposure, and sets Imaging False with
 // the reason. A target that another runner claimed since is left alone.
 func (r *runner) release(t *astrophotography.Target, reason, message string) error {
+	return r.releaseAs(t, nil, reason, message)
+}
+
+// releaseAs releases a target, and records a failure in status.failed
+// when failed is not nil. The record is in the API, not in the runner,
+// so a runner that starts again after a restart of the operator reads
+// it and does not claim the target again (claimNext).
+func (r *runner) releaseAs(t *astrophotography.Target, failed *astrophotography.Failure, reason, message string) error {
 	_, err := r.o.writeTarget(t, func(fresh *astrophotography.Target, change *statusChange) bool {
 		if fresh.Status.Reservation != r.name {
 			return false
 		}
 		fresh.Status.Reservation, fresh.Status.Exposure = "", nil
+		if failed != nil {
+			fresh.Status.Failed = failed
+		}
 		change.setImaging(fresh, false, reason, message)
 		return true
 	})

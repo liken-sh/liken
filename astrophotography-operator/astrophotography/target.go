@@ -131,8 +131,12 @@ type TargetStatus struct {
 	// runner claims the target by writing it, with the resourceVersion
 	// it read, so two runners that choose one target get one success
 	// and one conflict.
-	Reservation string             `json:"reservation,omitempty"`
-	Sequences   []SequenceProgress `json:"sequences,omitempty"`
+	Reservation string `json:"reservation,omitempty"`
+	// Failed records the reservation that released the target after a
+	// failure, such as NoFilter, so that a restart of the operator does
+	// not make that reservation claim the target again.
+	Failed    *Failure           `json:"failed,omitempty"`
+	Sequences []SequenceProgress `json:"sequences,omitempty"`
 	// Outboxes lists the claims that hold frames of this target that
 	// are not yet in the archive.
 	Outboxes []OutboxFrames `json:"outboxes,omitempty"`
@@ -177,6 +181,17 @@ type PromotionStatus struct {
 	// operator applied. The next Job takes the next number, and a Job at
 	// or below it is never applied twice.
 	Applied int32 `json:"applied"`
+}
+
+// Failure is a reservation that released the target after a failure.
+// That reservation does not claim the target again while
+// metadata.generation equals ObservedGeneration, so one target with a
+// wrong filter does not hold the night, and an edit of the spec makes
+// the target eligible again. Every other reservation claims it as
+// usual.
+type Failure struct {
+	Reservation        string `json:"reservation"`
+	ObservedGeneration int64  `json:"observedGeneration"`
 }
 
 // Exposure is the frame in flight.

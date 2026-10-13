@@ -173,6 +173,96 @@ func TestATargetThatCannotBeImagedIsReleased(t *testing.T) {
 	}
 }
 
+// slewsOf counts the claims of a target: each one posts Slewing, and a
+// repeat within 10 minutes adds to the count of the same Event.
+func (w *night) slewsOf(name string) int32 {
+	var count int32
+	for _, e := range w.runnerEvents("Target", name) {
+		if e.Reason == astrophotography.ReasonSlewing {
+			count += e.Count
+		}
+	}
+	return count
+}
+
+// A target that failed on a reservation stays released after a restart
+// of the operator, because the target's status records the failure.
+// An edit of the spec makes it eligible again on the same reservation.
+func TestAFailedTargetStaysReleased(t *testing.T) {
+	cases := []struct {
+		name  string
+		after func(*testing.T, *night)
+		slews int32
+		want  string
+		// failed is the reservation that status.failed names after.
+		failed string
+	}{
+		{"after a restart", func(t *testing.T, w *night) {
+			w.stop()
+			w.start(t)
+		}, 1, "False " + astrophotography.ReasonNoFilter, tonight},
+		{"until an edit of the spec", func(t *testing.T, w *night) {
+			fixed := w.targetNow(t, "m42")
+			fixed.Spec.Sequences[0].Filter = "Luminance"
+			fixed.Metadata.Generation = 2
+			w.put(targetsPath, fixed)
+		}, 2, "False " + astrophotography.ReasonSequencesDone, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				w := newWorld(t)
+				broken := target("m42", lights(1))
+				broken.Spec.Sequences[0].Filter = "H_Beta"
+				w.put(targetsPath, broken)
+				w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+				w.playCamera(t, saves)
+				w.start(t)
+				waitUntil(t, func() bool { return w.imaging(t, "m42") == "False "+astrophotography.ReasonNoFilter })
+
+				c.after(t, w)
+				time.Sleep(time.Hour)
+				synctest.Wait()
+
+				if got := w.imaging(t, "m42"); got != c.want {
+					t.Errorf("Imaging %q, want %q", got, c.want)
+				}
+				if got := w.slewsOf("m42"); got != c.slews {
+					t.Errorf("%d claims, want %d", got, c.slews)
+				}
+				if got := failedReservation(w.targetNow(t, "m42")); got != c.failed {
+					t.Errorf("status.failed names %q, want %q", got, c.failed)
+				}
+			})
+		})
+	}
+}
+
+func failedReservation(t *astrophotography.Target) string {
+	if t.Status.Failed == nil {
+		return ""
+	}
+	return t.Status.Failed.Reservation
+}
+
+// The end of the reservation clears its failures, so a new reservation
+// of the same name claims the target again.
+func TestTheEndOfAReservationClearsItsFailures(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := newWorld(t)
+		broken := target("m42", lights(1))
+		broken.Spec.Sequences[0].Filter = "H_Beta"
+		w.put(targetsPath, broken)
+		w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+		w.playCamera(t, saves)
+		w.start(t)
+		waitUntil(t, func() bool { return failedReservation(w.targetNow(t, "m42")) == tonight })
+
+		w.put(reservationsPath, readyOrNot(observatory.ReservationDeactivating))
+		waitUntil(t, func() bool { return failedReservation(w.targetNow(t, "m42")) == "" })
+	})
+}
+
 // A session with no imaging camera for the target fails it with
 // NoTrain, before the runner reads a device.
 func TestASessionWithNoCameraForTheTarget(t *testing.T) {
