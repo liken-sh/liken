@@ -85,16 +85,16 @@ the `Event` `AstrophotographyIdle`, and the runner waits for a change.
    next target.
 
 Before each frame the runner reads the target again, so an edit takes
-effect at the next frame: new coordinates stop PHD2 and slew the mount
-again, and a target you suspend is released with the reason
-`Suspended`. The slew for coordinates you edit during the night is not
-centered.
+effect at the next frame. New coordinates stop PHD2, slew the mount
+again, and center the target again when it states `centering`. A
+target you suspend is released with the reason `Suspended`.
 
 ## Centering
 
 A slew lands near the target, not on it. When a target states
-`spec.centering`, the runner centers it after the slew of each claim,
-in rounds:
+`spec.centering`, the runner centers it after the slew of each claim
+and after the slew for coordinates you edit during the night, in
+rounds:
 
 1. It takes a centering frame with the binning, gain, and offset of
    the first sequence, the filter `centering.filter`, or the first

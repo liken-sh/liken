@@ -115,6 +115,22 @@ func (w *work) run(ctx context.Context) error {
 	if err := w.r.syncDevices(ctx, w.mountDevice, w.cameraDevice, w.wheelDevice); err != nil {
 		return err
 	}
+	if err := w.aim(ctx); err != nil {
+		return err
+	}
+	for ctx.Err() == nil {
+		done, err := w.next(ctx)
+		if done || err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// aim stops the guiding, slews to the target, and centers it. It runs
+// after each claim, and again when a person edits the coordinates
+// during the night, because a slew lands near the target, not on it.
+func (w *work) aim(ctx context.Context) error {
 	if err := w.r.guiding.stop(ctx, w); err != nil {
 		return fail(astrophotography.ReasonGuidingFailed, "stopping the guiding: %w", err)
 	}
@@ -126,12 +142,6 @@ func (w *work) run(ctx context.Context) error {
 		return centeringFailure(err)
 	}
 	w.centered = centered
-	for ctx.Err() == nil {
-		done, err := w.next(ctx)
-		if done || err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -151,10 +161,7 @@ func (w *work) next(ctx context.Context) (bool, error) {
 		return true, w.r.releaseIneligible(t)
 	}
 	if t.Spec.Coordinates != w.aimed {
-		if err := w.r.guiding.stop(ctx, w); err != nil {
-			return true, fail(astrophotography.ReasonGuidingFailed, "stopping the guiding: %w", err)
-		}
-		if err := w.slew(ctx); err != nil {
+		if err := w.aim(ctx); err != nil {
 			return true, err
 		}
 	}

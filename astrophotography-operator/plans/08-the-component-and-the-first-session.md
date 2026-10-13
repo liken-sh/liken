@@ -803,7 +803,9 @@ Open after I:
   slews again when a person edits a target's coordinates during the
   night, and calls no centering. Centering runs after the slew of each
   claim, which includes the claim after a restart or a lost
-  connection.
+  connection. Closed when H and I were merged: `work.aim` stops the
+  guiding, slews, and centers, after each claim and after an edit of
+  the coordinates.
 - **A centering frame that a crash leaves stays in `_centering`.** The
   runner deletes each frame after its solve. A frame whose solve a
   restart interrupts is never deleted, and the worker's list leaves it
