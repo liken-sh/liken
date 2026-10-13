@@ -37,7 +37,9 @@ subresource, such as with `kubectl liken observatory set-up`. It is
 or `False` with the reason `TakenDown`. The operator keeps it as the
 person wrote it, with `status.setUpUntil`, until it expires at dawn or
 at `status.setUpUntil`, and then sets it `False` with the reason
-`Expired`. `AttentionNeeded` is `True` with the reason `Notified`
+`Expired`. While it is `True`, the operator writes the time it
+expires into `status.setUpExpiryTime`, which the `SET UP UNTIL`
+column of `kubectl get` shows. `AttentionNeeded` is `True` with the reason `Notified`
 while a `notify` action's request is open, and `False` with the reason
 `Activated` or `Acknowledged` once the next activation or a person's
 `SetUp` answers it. [Set up a portable

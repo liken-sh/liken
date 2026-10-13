@@ -69,3 +69,17 @@ func (w *world) conditionOn(kind observatory.Kind, name, conditionType string) o
 	}](w.t, w.api, kindCollection(kind), name)
 	return conditionOf(object.Status.Conditions, conditionType)
 }
+
+// setUpExpiryTime answers a resource's status.setUpExpiryTime as the
+// API server holds it, or the zero time when it has none.
+func (w *world) setUpExpiryTime(kind observatory.Kind, name string) time.Time {
+	object, _ := decode[struct {
+		Status struct {
+			SetUpExpiryTime *time.Time `json:"setUpExpiryTime"`
+		} `json:"status"`
+	}](w.t, w.api, kindCollection(kind), name)
+	if object.Status.SetUpExpiryTime == nil {
+		return time.Time{}
+	}
+	return *object.Status.SetUpExpiryTime
+}

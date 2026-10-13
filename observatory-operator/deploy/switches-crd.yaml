@@ -47,6 +47,9 @@ spec:
         - name: "On"
           type: string
           jsonPath: .status.display.on
+        - name: Set Up Until
+          type: string
+          jsonPath: .status.setUpExpiryTime
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -1138,6 +1141,19 @@ spec:
                     `Observatory`. A person writes it with `SetUp`, as
                     `kubectl liken observatory set-up --until` does, and
                     the operator keeps it. Optional.
+                setUpExpiryTime:
+                  type: string
+                  format: date-time
+                  description: >-
+                    When the `SetUp` condition expires: `setUpUntil`
+                    when the person wrote one, else the first
+                    astronomical dawn after the condition's
+                    `lastTransitionTime` at the resource's
+                    `Observatory`. The operator writes it while `SetUp`
+                    is `True`, and removes it when `SetUp` turns
+                    `False`, as it does at the expiry. It is absent
+                    while a resource with no `Observatory` is set up,
+                    because such a `SetUp` has no dawn to expire at.
                 procedures:
                   type: array
                   description: >-

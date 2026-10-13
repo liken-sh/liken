@@ -75,6 +75,24 @@ func expireSetUp(list *[]observatory.Condition, until *time.Time, place *observa
 	return &held
 }
 
+// expiryTime answers the expiry of the SetUp in a composed list of
+// conditions, for status.setUpExpiryTime, or nil when no SetUp holds
+// or it never expires. The person's setUpUntil is absent when they let
+// the SetUp last until dawn, so without this field `kubectl get` could
+// not show when that SetUp ends.
+func expiryTime(list []observatory.Condition, until *time.Time, place *observatory.Location) *time.Time {
+	c, ok := conditions.Find(list, observatory.ConditionSetUp)
+	if !ok {
+		return nil
+	}
+	expiry := setUpExpiry(c, until, place)
+	if expiry.IsZero() {
+		return nil
+	}
+	expiry = expiry.UTC()
+	return &expiry
+}
+
 // nextExpiry answers the earlier of a time and the expiry of a stored
 // SetUp, when that expiry is still to come. The status writer waits
 // for the earliest one, because no watch event marks the moment.

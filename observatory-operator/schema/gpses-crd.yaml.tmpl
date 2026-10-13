@@ -43,6 +43,9 @@ spec:
         - name: Time
           type: string
           jsonPath: .status.time.utc
+        - name: Set Up Until
+          type: string
+          jsonPath: .status.setUpExpiryTime
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp

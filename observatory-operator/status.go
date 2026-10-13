@@ -111,6 +111,7 @@ func (o *operator) writeAll(ctx context.Context, t *tree, seen *statusMemo) time
 				if expired := expireSetUp(&composed.Conditions, composed.SetUpUntil, place); expired != nil {
 					transitions = append(transitions, *expired)
 				}
+				composed.SetUpExpiryTime = expiryTime(composed.Conditions, composed.SetUpUntil, place)
 				held.APIVersion, held.Kind, held.Status = observatory.APIVersion, d.kind.Name, composed
 				return composed, transitions
 			})
@@ -132,6 +133,7 @@ func (o *operator) writeAll(ctx context.Context, t *tree, seen *statusMemo) time
 		failed := writeTyped(o.recorder, client, seen, observatory.TelescopeKind, telescope, next, statusParts[observatory.TelescopeStatus]{
 			conditions: func(s *observatory.TelescopeStatus) *[]observatory.Condition { return &s.Conditions },
 			until:      func(s *observatory.TelescopeStatus) **time.Time { return &s.SetUpUntil },
+			expires:    func(s *observatory.TelescopeStatus) **time.Time { return &s.SetUpExpiryTime },
 			place:      placeOf(t, observatory.TelescopeKind, telescope.Metadata.Name),
 		}, &expiry)
 		times.add(observatory.TelescopeKind, began, failed)
@@ -142,6 +144,7 @@ func (o *operator) writeAll(ctx context.Context, t *tree, seen *statusMemo) time
 		failed := writeTyped(o.recorder, client, seen, observatory.ObservatoryKind, site, next, statusParts[observatory.ObservatoryStatus]{
 			conditions: func(s *observatory.ObservatoryStatus) *[]observatory.Condition { return &s.Conditions },
 			until:      func(s *observatory.ObservatoryStatus) **time.Time { return &s.SetUpUntil },
+			expires:    func(s *observatory.ObservatoryStatus) **time.Time { return &s.SetUpExpiryTime },
 			place:      &site.Spec.Location,
 		}, &expiry)
 		times.add(observatory.ObservatoryKind, began, failed)
@@ -178,12 +181,14 @@ func (o *operator) writeAll(ctx context.Context, t *tree, seen *statusMemo) time
 
 // statusParts names the parts of one kind's status that the writer
 // merges with the stored status: its conditions, which keep their
-// transition times while their status holds, and a person's
-// setUpUntil, nil for a kind that has none. place is the location of
-// the resource's Observatory, for the dawn that expires a SetUp.
+// transition times while their status holds, a person's setUpUntil,
+// and the operator's setUpExpiryTime, the last two nil for a kind that
+// has neither. place is the location of the resource's Observatory,
+// for the dawn that expires a SetUp.
 type statusParts[T any] struct {
 	conditions func(*T) *[]observatory.Condition
 	until      func(*T) **time.Time
+	expires    func(*T) **time.Time
 	place      *observatory.Location
 }
 
@@ -210,6 +215,9 @@ func writeTyped[S, T any](recorder *events.Recorder, client *apiclient.Client, s
 			}
 			if expired := expireSetUp(parts.conditions(&composed), until, parts.place); expired != nil {
 				transitions = append(transitions, *expired)
+			}
+			if parts.expires != nil {
+				*parts.expires(&composed) = expiryTime(*parts.conditions(&composed), until, parts.place)
 			}
 			copy.APIVersion, copy.Kind, copy.Status = observatory.APIVersion, kind.Name, composed
 			return composed, transitions

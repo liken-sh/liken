@@ -58,6 +58,10 @@ type ObservatoryStatus struct {
 	// next astronomical dawn. A person writes it with SetUp, and the
 	// operator keeps it.
 	SetUpUntil *time.Time `json:"setUpUntil,omitempty"`
+	// SetUpExpiryTime is when the SetUp condition expires: SetUpUntil,
+	// or the next astronomical dawn. The operator writes it while SetUp
+	// is True, so a printer column shows it.
+	SetUpExpiryTime *time.Time `json:"setUpExpiryTime,omitempty"`
 }
 
 // ObservatoryDisplay holds the spec's location as a person reads it,

@@ -39,6 +39,9 @@ spec:
         - name: Cover
           type: string
           jsonPath: '.status.conditions[?(@.type=="Open")].reason'
+        - name: Set Up Until
+          type: string
+          jsonPath: .status.setUpExpiryTime
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp

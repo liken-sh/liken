@@ -46,6 +46,9 @@ spec:
         - name: Park
           type: string
           jsonPath: '.status.conditions[?(@.type=="Parked")].reason'
+        - name: Set Up Until
+          type: string
+          jsonPath: .status.setUpExpiryTime
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
