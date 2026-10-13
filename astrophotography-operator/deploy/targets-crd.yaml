@@ -1,0 +1,644 @@
+# A `Target` states an object to image and the frames wanted of it.
+# Every `Reservation` in its namespace whose holder is
+# `astrophotography-operator` can image it, across as many nights as the
+# work takes. Plans 01, 02, and 03 give the fields.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: targets.astrophotography.liken.sh
+spec:
+  group: astrophotography.liken.sh
+  names:
+    kind: Target
+    listKind: TargetList
+    plural: targets
+    singular: target
+    categories: [astro]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Object
+          type: string
+          jsonPath: .spec.object
+        - name: Progress
+          type: string
+          jsonPath: .status.progress
+        - name: Reservation
+          type: string
+          jsonPath: .status.reservation
+        - name: Complete
+          type: string
+          jsonPath: '.status.conditions[?(@.type=="Complete")].status'
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+        - name: Imaging
+          type: string
+          jsonPath: '.status.conditions[?(@.type=="Imaging")].reason'
+          priority: 1
+        - name: Priority
+          type: integer
+          jsonPath: .spec.priority
+          priority: 1
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            A `Target` states an object to image and the frames wanted of
+            it, as sequences of a filter, an exposure, and a count.
+            `astrophotography-operator` images it in each `Reservation` of
+            the same namespace whose `spec.holder` is
+            `astrophotography-operator`, and moves each frame to the claim
+            that `spec.archive` names. The target lasts until a person
+            deletes it, and `status.sequences` keeps the progress across
+            nights.
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [object, coordinates, sequences, archive]
+              description: "The object, its coordinates, the frames wanted, and where the frames go."
+              properties:
+                object:
+                  type: string
+                  minLength: 1
+                  maxLength: 68
+                  description: >-
+                    The name of the object, such as `M42`. The operator
+                    writes it as `OBJECT` in each frame's header, and the
+                    token `{object}` of `spec.archive.format` gives it in
+                    each file name. It follows the rules of a declared
+                    keyword's value: printable ASCII and no `/`.
+                  x-kubernetes-validations:
+                    - rule: "self.matches('^[ -~]*$')"
+                      message: "FITS allows only the printable ASCII characters in a header"
+                    - rule: "!self.contains('/')"
+                      message: "the camera's driver writes each '/' in a value as '\\', so the header would not hold the object's name"
+                coordinates:
+                  type: object
+                  required: [ra, dec]
+                  description: >-
+                    Where the object is, in J2000 (ICRS), as every
+                    catalog gives it. SIMBAD and KStars print this form.
+                    The operator converts the coordinates to the equinox
+                    of the date before it slews, because an INDI mount
+                    takes `EQUATORIAL_EOD_COORD` at that equinox.
+                  properties:
+                    ra:
+                      type: string
+                      maxLength: 32
+                      description: >-
+                        The right ascension in hours, as `HH:MM:SS.s`,
+                        such as `05:35:17.3`.
+                      x-kubernetes-validations:
+                        - rule: "self.matches('^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]([.][0-9]+)?$')"
+                          message: "ra is hours, minutes, and seconds from 00:00:00 to 23:59:59.9, such as 05:35:17.3"
+                    dec:
+                      type: string
+                      maxLength: 32
+                      description: >-
+                        The declination in degrees, as `±DD:MM:SS.s`, such
+                        as `-05:23:28`. A declination north of the equator
+                        can leave out the `+`.
+                      x-kubernetes-validations:
+                        - rule: "self.matches('^[+-]?([0-8][0-9]:[0-5][0-9]:[0-5][0-9]([.][0-9]+)?|90:00:00([.]0+)?)$')"
+                          message: "dec is degrees, minutes, and seconds from -90:00:00 to +90:00:00, such as -05:23:28"
+                priority:
+                  type: integer
+                  format: int32
+                  description: >-
+                    Which eligible target a reservation images first: the
+                    highest priority, then the oldest target, then the
+                    first name. Optional. The default is `0`.
+                suspend:
+                  type: boolean
+                  description: >-
+                    `true` keeps the target from being imaged and keeps
+                    its progress, the way `spec.suspend` of a `Job` does.
+                    Optional. The default is `false`.
+                opticalTrain:
+                  type: string
+                  maxLength: 253
+                  description: >-
+                    The `OpticalTrain` to image through. Optional. A
+                    target that names a train is imaged only on that
+                    train's telescope. A target with no train is imaged
+                    on any telescope whose session has exactly one
+                    imaging camera.
+                sequences:
+                  type: array
+                  minItems: 1
+                  maxItems: 64
+                  description: >-
+                    The frames wanted. The operator exposes the first
+                    sequence that has work left until it has none, and
+                    then the next, because a change of filter costs a
+                    refocus. A frame counts toward a sequence by its
+                    header: the same filter, exposure, binning, gain, and
+                    offset. So an edit of this list keeps the frames that
+                    still match a sequence.
+                  items:
+                    type: object
+                    required: [exposure, count]
+                    description: "One kind of frame and how many of it."
+                    properties:
+                      filter:
+                        type: string
+                        minLength: 1
+                        maxLength: 64
+                        description: >-
+                          A name in the filter wheel's `FILTER_NAME`,
+                          such as `Luminance`, which the driver also
+                          writes as `FILTER`. Optional. With no filter,
+                          the operator leaves the light path as it is.
+                        x-kubernetes-validations:
+                          - rule: "self.matches('^[ -~]*$')"
+                            message: "FITS allows only the printable ASCII characters in a header"
+                      exposure:
+                        type: string
+                        maxLength: 32
+                        description: >-
+                          The length of each frame, as a duration such as
+                          `300s` or `500ms`.
+                        x-kubernetes-validations:
+                          - rule: "self.matches('^([0-9]+([.][0-9]+)?(ms|s|m|h))+$') && duration(self) > duration('0s')"
+                            message: "exposure must be a positive duration, such as 300s or 500ms"
+                      count:
+                        type: integer
+                        format: int32
+                        minimum: 1
+                        description: "The number of frames wanted."
+                      binning:
+                        type: integer
+                        format: int32
+                        minimum: 1
+                        maximum: 16
+                        description: >-
+                          The binning on both axes, written to
+                          `CCD_BINNING`. Optional. With none, the camera
+                          keeps its own.
+                      gain:
+                        type: integer
+                        format: int32
+                        minimum: 0
+                        description: >-
+                          The gain, written to `CCD_GAIN` in the camera's
+                          own units. Optional. With none, the camera keeps
+                          its own.
+                      offset:
+                        type: integer
+                        format: int32
+                        minimum: 0
+                        description: >-
+                          The offset, written to `CCD_OFFSET` in the
+                          camera's own units. Optional. With none, the
+                          camera keeps its own.
+                dither:
+                  type: object
+                  required: [every, pixels]
+                  description: >-
+                    How PHD2 moves its lock position between frames, so
+                    that fixed noise of the sensor does not stack.
+                    Optional. With no `dither`, the operator does not
+                    dither.
+                  properties:
+                    every:
+                      type: integer
+                      format: int32
+                      minimum: 1
+                      description: "The number of frames between two dithers."
+                    pixels:
+                      type: number
+                      minimum: 0
+                      exclusiveMinimum: true
+                      maximum: 100
+                      description: >-
+                        The largest move of the lock position, in pixels of
+                        the guide camera.
+                    raOnly:
+                      type: boolean
+                      description: >-
+                        `true` moves the lock position in right ascension
+                        alone, for a mount that guides in right ascension
+                        alone. Optional. The default is `false`.
+                centering:
+                  type: object
+                  required: [solver]
+                  description: >-
+                    How the operator centers the target after a slew: it
+                    takes a frame, solves it with the `Solver`, syncs the
+                    mount to the solved position, and slews again until
+                    the error is within `tolerance`. Optional. With no
+                    `centering`, the operator slews and does not solve.
+                  properties:
+                    solver:
+                      type: string
+                      minLength: 1
+                      maxLength: 253
+                      description: "The `Solver` in the target's namespace."
+                    tolerance:
+                      type: number
+                      minimum: 0
+                      exclusiveMinimum: true
+                      default: 30
+                      description: >-
+                        The largest error that counts as centered, in
+                        arcseconds: the angle between the solved center
+                        and `spec.coordinates`. The default is `30`.
+                    exposure:
+                      type: string
+                      maxLength: 32
+                      default: 5s
+                      description: >-
+                        The length of a centering frame, as a duration.
+                        When a frame does not solve, the operator tries
+                        once more with twice the exposure. The default is
+                        `5s`.
+                      x-kubernetes-validations:
+                        - rule: "self.matches('^([0-9]+([.][0-9]+)?(ms|s|m|h))+$') && duration(self) > duration('0s')"
+                          message: "exposure must be a positive duration, such as 5s"
+                    filter:
+                      type: string
+                      minLength: 1
+                      maxLength: 64
+                      description: >-
+                        The filter of a centering frame. Optional. The
+                        default is the first sequence's filter.
+                      x-kubernetes-validations:
+                        - rule: "self.matches('^[ -~]*$')"
+                          message: "FITS allows only the printable ASCII characters in a header"
+                    attempts:
+                      type: integer
+                      format: int32
+                      minimum: 1
+                      maximum: 20
+                      default: 5
+                      description: >-
+                        The number of rounds of solving and slewing before
+                        the operator gives up with the reason
+                        `CenteringFailed`. The default is `5`.
+                archive:
+                  type: object
+                  required: [claimName]
+                  description: >-
+                    Where the frames go: a claim, a directory in it, and
+                    the file name of each frame. The camera writes each
+                    frame into the reservation's outbox under its final
+                    name, and the operator then moves it here, with the
+                    catalog of every frame at
+                    `<path>/catalog/<Target>.jsonl`.
+                  properties:
+                    claimName:
+                      type: string
+                      minLength: 1
+                      maxLength: 253
+                      description: >-
+                        A `PersistentVolumeClaim` in the target's
+                        namespace. It cannot change after the target is
+                        created, because the counts come from the
+                        catalog in this claim. To use another claim,
+                        create another `Target`. A claim that is the
+                        outbox itself works: the operator then moves each
+                        frame with a rename.
+                      x-kubernetes-validations:
+                        - rule: "self == oldSelf"
+                          message: "spec.archive.claimName cannot change; create another Target"
+                    path:
+                      type: string
+                      maxLength: 1024
+                      default: ""
+                      description: >-
+                        A directory in the claim, such as `astro`. The
+                        frames and the catalog are under it. The default
+                        is the claim's root.
+                      x-kubernetes-validations:
+                        - rule: "!self.startsWith('/') && !self.matches('(^|/)[.][.](/|$)')"
+                          message: "path is a directory inside the claim, so it cannot start with '/' or hold '..'"
+                    format:
+                      type: string
+                      minLength: 1
+                      maxLength: 512
+                      default: "{object}/{night}/{filter}/{object}_{filter}_{exposure}_{datetime}"
+                      description: >-
+                        The file name of each frame, relative to `path`
+                        and with no extension, because the driver adds
+                        `.fits`. The tokens are `{target}`, `{object}`,
+                        `{filter}`, `{exposure}`, `{binning}`, `{gain}`,
+                        `{offset}`, `{camera}`, `{telescope}`, `{train}`,
+                        `{reservation}`, `{night}`, `{datetime}`, `{n}`,
+                        and `{frameid}`. Unless the format holds
+                        `{frameid}`, the operator adds `_` and the last 12
+                        digits of the frame's `FRAMEID` to make each name
+                        unique. The rest of the text is the letters, the
+                        digits, `.`, `_`, `+`, `-`, and `/`. The default is
+                        `{object}/{night}/{filter}/{object}_{filter}_{exposure}_{datetime}`.
+                      x-kubernetes-validations:
+                        - rule: "self.matches('^([A-Za-z0-9._+/-]|[{](target|object|filter|exposure|binning|gain|offset|camera|telescope|train|reservation|night|datetime|n|frameid)[}])+$')"
+                          message: "format holds only known tokens, letters, digits, '.', '_', '+', '-', and '/'"
+                        - rule: "!self.startsWith('/') && !self.startsWith('catalog/')"
+                          message: "format is relative to path, and catalog/ holds the catalog"
+                        - rule: "!self.contains('..')"
+                          message: "format cannot hold '..', which would leave path"
+                        - rule: "!self.contains('XXX') && !self.contains('ISO8601')"
+                          message: "the camera's driver replaces XXX and ISO8601 in a file name, so format cannot hold them"
+                    promotion:
+                      type: string
+                      enum: [Continuous, AfterReservation]
+                      default: Continuous
+                      description: >-
+                        When frames move to the archive. `Continuous`
+                        moves them while the night runs, so the outbox
+                        stays small. `AfterReservation` moves them when
+                        the reservation that wrote them ends, so the link
+                        stays quiet while the telescope works. The default
+                        is `Continuous`.
+                fitsKeywords:
+                  type: array
+                  maxItems: 64
+                  description: >-
+                    The FITS keywords of this target's frames, such as
+                    `PROGRAM`. Optional. The operator writes them after
+                    the keywords that the session records for the imaging
+                    camera, so a keyword here replaces the value and the
+                    comment of the same name from the `Observatory`, the
+                    `Telescope`, the `Camera`, or the `Reservation`. The
+                    API server refuses a keyword that the camera's driver
+                    writes from what it measures, such as `EXPTIME`, and
+                    `OBJECT` and `FRAMEID`, which this operator writes.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [name]
+                  items:
+                    type: object
+                    required: [name, value]
+                    description: "One keyword: its name, its value, and a comment."
+                    properties:
+                      name:
+                        type: string
+                        maxLength: 8
+                        description: >-
+                          The keyword, such as `OBSERVER`: 1 to 8 of the
+                          capital letters `A` to `Z`, the digits, `-`,
+                          and `_`. `INSTRUME` and `TELESCOP` are
+                          allowed, because the driver fills them with
+                          the names of INDI devices, such as `CCD
+                          Simulator`.
+                        x-kubernetes-validations:
+                          - rule: "self.matches('^[A-Z0-9_-]{1,8}$')"
+                            message: "a FITS keyword name is 1 to 8 of the capital letters A to Z, the digits, '-', and '_'"
+                          - rule: "!(self in ['SIMPLE', 'BITPIX', 'NAXIS', 'NAXIS1', 'NAXIS2', 'EXTEND', 'BZERO', 'BSCALE', 'ROWORDER', 'EXPTIME', 'CCD-TEMP', 'PIXSIZE1', 'PIXSIZE2', 'XBINNING', 'YBINNING', 'XPIXSZ', 'YPIXSZ', 'FRAME', 'IMAGETYP', 'FILTER', 'FOCALLEN', 'APTDIA', 'ROTATANG', 'FOCUSPOS', 'FOCUSTEM', 'SCALE', 'SITELAT', 'SITELONG', 'AIRMASS', 'OBJCTAZ', 'OBJCTALT', 'OBJCTRA', 'OBJCTDEC', 'RA', 'DEC', 'PIERSIDE', 'EQUINOX', 'DATE-OBS', 'GAIN', 'OFFSET', 'DARKTIME', 'MPSAS', 'BAYERPAT', 'XBAYROFF', 'YBAYROFF', 'DATAMIN', 'DATAMAX', 'CTYPE1', 'CTYPE2', 'CRVAL1', 'CRVAL2', 'CRPIX1', 'CRPIX2', 'CDELT1', 'CDELT2', 'CROTA1', 'CROTA2', 'SECPIX1', 'SECPIX2', 'RADECSYS', 'FRAMEID', 'COMMENT', 'HISTORY', 'END', 'OBJECT'])"
+                            messageExpression: >-
+                              self + (self in ['COMMENT', 'HISTORY',
+                              'END'] ? ' is a keyword that FITS reserves
+                              for a card with no value' : self in
+                              ['OBJECT', 'FRAMEID'] ? ' is a keyword
+                              that astrophotography-operator writes into
+                              every frame' : ' is a keyword that the
+                              camera\'s driver writes from what it
+                              measures, and a declared value would
+                              replace the measured one')
+                      value:
+                        type: string
+                        minLength: 1
+                        maxLength: 68
+                        description: >-
+                          The value, at most 68 characters, the longest
+                          text that one 80-column card holds. The driver
+                          writes a value that reads as a number, such as
+                          `2026` or `-4.5`, as a number, and any other
+                          value as quoted text. A value cannot hold `/`,
+                          because the driver writes each `/` in a value
+                          as `\`.
+                        x-kubernetes-validations:
+                          - rule: "self.matches('^[ -~]*$')"
+                            message: "FITS allows only the printable ASCII characters in a header"
+                          - rule: "!self.contains('/')"
+                            message: "the camera's driver writes each '/' in a value as '\\', so the header would not hold the value declared"
+                      comment:
+                        type: string
+                        maxLength: 47
+                        description: >-
+                          The comment that follows the value on the
+                          card. Optional. At most 47 characters, which
+                          fit beside a number.
+                        x-kubernetes-validations:
+                          - rule: "self.matches('^[ -~]*$')"
+                            message: "FITS allows only the printable ASCII characters in a header"
+            status:
+              type: object
+              description: "What `astrophotography-operator` reports. A person never writes it."
+              properties:
+                observedGeneration:
+                  type: integer
+                  format: int64
+                  description: "The `metadata.generation` of the spec that the status reflects."
+                progress:
+                  type: string
+                  description: >-
+                    The frames in the archive of the frames wanted, over
+                    every sequence, such as `37/180`.
+                reservation:
+                  type: string
+                  description: >-
+                    The `Reservation` that images the target now. Empty
+                    while none does. A runner claims the target by
+                    writing it, so two telescopes never image one target
+                    at once.
+                sequences:
+                  type: array
+                  description: >-
+                    Each sequence of the spec, in the same order, with its
+                    counts. The work left of a sequence is `count -
+                    archived - pending`, so a target can end with more
+                    frames than it asked for when a promotion lags, and
+                    never with fewer.
+                  items:
+                    type: object
+                    required: [exposure, count, archived, pending]
+                    description: "One sequence and its counts."
+                    properties:
+                      filter:
+                        type: string
+                        description: "The sequence's filter."
+                      exposure:
+                        type: string
+                        description: "The sequence's exposure."
+                      count:
+                        type: integer
+                        format: int32
+                        description: "The number of frames wanted."
+                      binning:
+                        type: integer
+                        format: int32
+                        description: "The sequence's binning."
+                      gain:
+                        type: integer
+                        format: int32
+                        description: "The sequence's gain."
+                      offset:
+                        type: integer
+                        format: int32
+                        description: "The sequence's offset."
+                      archived:
+                        type: integer
+                        format: int32
+                        description: >-
+                          The frames of this sequence in the archive's
+                          catalog, from the last promotion's report.
+                      pending:
+                        type: integer
+                        format: int32
+                        description: >-
+                          The frames of this sequence in an outbox and
+                          not yet in the archive.
+                outboxes:
+                  type: array
+                  description: >-
+                    The outbox claims that hold frames of this target
+                    that are not yet in the archive, so a frame that
+                    waits is never forgotten after its reservation ends.
+                    The operator keeps a finalizer on each claim listed
+                    here.
+                  items:
+                    type: object
+                    required: [claimName, pending]
+                    description: "One outbox claim and the target's frames in it."
+                    properties:
+                      claimName:
+                        type: string
+                        description: "The `PersistentVolumeClaim`."
+                      pending:
+                        type: integer
+                        format: int32
+                        description: "The target's frames in the claim."
+                exposure:
+                  type: object
+                  required: [frameID, sequence, reservation, file, startTime]
+                  description: >-
+                    The frame in flight. The operator writes it before
+                    the exposure starts and clears it after the exposure
+                    ends, so an operator that restarts during an exposure
+                    counts the frame once.
+                  properties:
+                    frameID:
+                      type: string
+                      description: "The frame's `FRAMEID`, a UUIDv7."
+                    sequence:
+                      type: integer
+                      format: int32
+                      description: "The index of the frame's sequence in `spec.sequences`, from 0."
+                    reservation:
+                      type: string
+                      description: "The `Reservation` that takes the frame."
+                    file:
+                      type: string
+                      description: >-
+                        The frame's file, relative to the outbox's root,
+                        such as `east-main/east-tonight/m42/M42/2026-10-12/Luminance/M42_Luminance_300s_20261012T231506Z_4f2a9c01d3e7.fits`.
+                    startTime:
+                      type: string
+                      format: date-time
+                      description: "When the operator started the exposure."
+                centering:
+                  type: object
+                  required: [reservation, time, rounds]
+                  description: "The last result of centering."
+                  properties:
+                    reservation:
+                      type: string
+                      description: "The `Reservation` that centered."
+                    time:
+                      type: string
+                      format: date-time
+                      description: "When the last round ended."
+                    rounds:
+                      type: integer
+                      format: int32
+                      description: "The rounds of solving and slewing it took."
+                    solution:
+                      type: object
+                      required: [center, rotation, scale]
+                      description: "Where the last solved frame points. Absent when no frame solved."
+                      properties:
+                        center:
+                          type: object
+                          required: [ra, dec]
+                          description: "The center of the frame, in J2000."
+                          properties:
+                            ra:
+                              type: string
+                              description: "The right ascension in hours, as `HH:MM:SS.s`."
+                            dec:
+                              type: string
+                              description: "The declination in degrees, as `±DD:MM:SS.s`."
+                        rotation:
+                          type: number
+                          description: "The angle of the frame on the sky, in degrees."
+                        scale:
+                          type: number
+                          description: "The plate scale, in arcseconds per pixel."
+                    error:
+                      type: number
+                      description: >-
+                        The angle between the solved center and
+                        `spec.coordinates`, in arcseconds. Absent when no
+                        frame solved.
+                conditions:
+                  type: array
+                  description: >-
+                    `Complete` is `True` when every sequence has at least
+                    its count of frames archived. `Imaging` is `True`
+                    while a reservation images the target, with the
+                    reason `Slewing`, `Centering`, `Guiding`, or
+                    `Exposing`, and a message that names the reservation
+                    and the sequence. `ArchiveAvailable` is `True` when
+                    the last promotion succeeded, and `False` with a
+                    reason such as `ClaimMissing` or `NameConflict` when
+                    it did not.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  items:
+                    type: object
+                    required: [type, status, reason, message, lastTransitionTime]
+                    description: >-
+                      One condition, in the shape of `metav1.Condition`.
+                    properties:
+                      type:
+                        type: string
+                        minLength: 1
+                        maxLength: 316
+                        description: "The condition's name, such as `Complete`."
+                      status:
+                        type: string
+                        enum: ["True", "False", Unknown]
+                        description: >-
+                          Whether the condition holds: `True`, `False`,
+                          or `Unknown`.
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        minimum: 0
+                        description: >-
+                          The `metadata.generation` of the spec that the
+                          condition reflects.
+                      reason:
+                        type: string
+                        minLength: 1
+                        maxLength: 1024
+                        description: "One word in CamelCase for the cause."
+                      message:
+                        type: string
+                        maxLength: 32768
+                        description: >-
+                          The cause, for a person to read. It can be
+                          empty.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When `status` last changed. A write with the
+                          same status keeps this time.

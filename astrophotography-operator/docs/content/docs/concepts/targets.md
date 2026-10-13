@@ -1,0 +1,135 @@
+---
+title: Targets
+weight: 10
+---
+
+# Targets
+
+A `Target` states what you want to image: an object, where it is on
+the sky, and the frames you want of it. It lasts as long as the work
+does, across as many nights as it takes, so you declare it once and
+reserve the telescope as often as the sky allows. The operator does
+not image yet. This page gives what the fields mean and what the
+operator will do with them, so the target you write today stays
+valid when imaging arrives. [`Target`](/docs/reference/targets/)
+lists every field.
+
+```yaml
+apiVersion: astrophotography.liken.sh/v1alpha1
+kind: Target
+metadata:
+  name: m42
+  namespace: observatory
+spec:
+  object: M42
+  coordinates: {ra: "05:35:17.3", dec: "-05:23:28"}
+  opticalTrain: east-imaging
+  sequences:
+    - {filter: Luminance, exposure: 300s, count: 60}
+    - {filter: Red, exposure: 300s, count: 20, binning: 2}
+  dither: {every: 2, pixels: 5}
+  centering: {solver: lab, tolerance: 30}
+  archive:
+    claimName: archive
+    path: astro
+  fitsKeywords:
+    - {name: PROGRAM, value: Orion widefield}
+```
+
+## Which reservations image a target
+
+There is no session resource. A `Reservation` of
+`observatory-operator` whose `spec.holder` is
+`astrophotography-operator` will image the targets of its own
+namespace: the target with the highest `priority` first, then the
+oldest. A target is eligible when `suspend` is not `true`, its
+`Complete` condition is not `True`, no other reservation images it,
+and its `opticalTrain` is one of the session's trains. A target with
+no `opticalTrain` can be imaged on any telescope whose session has
+exactly one imaging camera. A target finds its reservations, so you
+never edit a target for a new night.
+
+The target, its archive, and the reservation's outbox are in one
+namespace, because the operator's pods mount the claims, and a pod
+mounts only the claims of its own namespace.
+
+## Coordinates
+
+`coordinates` are J2000, the form that SIMBAD and KStars print: the
+right ascension in hours as `HH:MM:SS.s`, and the declination in
+degrees as `±DD:MM:SS.s`. The API server refuses any other form, so a
+right ascension in decimal hours never reads as degrees. An INDI mount
+takes coordinates at the equinox of the date, which differ from J2000
+by about 20 arcminutes for M42 in 2026. The operator will convert
+them before each slew.
+
+## Sequences, and how frames count
+
+Each sequence is a filter, an exposure, a count, and optionally the
+binning, the gain, and the offset. A field you leave out leaves the
+camera's own value, so a camera with no gain property works. The
+operator will expose the first sequence that has work left until it
+has none, and then the next, because a change of filter costs a
+refocus on a real rig.
+
+A frame will count toward a sequence by its FITS header: the same
+filter, exposure, binning, gain, and offset. So you can reorder or
+extend the sequences, and the frames that still match keep counting.
+`status.sequences` will show `archived`, the frames in the archive's
+catalog, and `pending`, the frames that wait in an outbox. The work
+left is `count - archived - pending`, so a target can end with more
+frames than it asked for when a promotion lags, and never with fewer.
+
+## The archive and the file names
+
+The camera will write each frame once, into the reservation's outbox
+on the machine at the pier, under its final name. The operator will
+then move it to `spec.archive`: a claim of yours, and a directory in
+it. `archive.claimName` cannot change after you create the target,
+because the counts come from the catalog in that claim. To use
+another claim, create another target.
+
+`archive.format` gives each frame's file name, relative to
+`archive.path`, with tokens such as `{object}`, `{filter}`,
+`{night}`, and `{datetime}`. The default is
+`{object}/{night}/{filter}/{object}_{filter}_{exposure}_{datetime}`.
+The driver replaces a frame of the same name with no warning, so
+unless the format holds `{frameid}`, the operator will add `_` and the
+last 12 digits of the frame's identity to every name. That suffix is
+the only text the operator adds.
+
+`archive.promotion` decides when frames move. `Continuous` moves them
+while the night runs, so the outbox stays small. `AfterReservation`
+moves them when the reservation ends, so the link stays quiet while
+the telescope works.
+
+## The frame catalog
+
+The catalog will be one file for each target, at
+`<archive.path>/catalog/<Target>.jsonl` in the archive, with one line
+of JSON for each frame: its identity, the resources that took it, its
+path, its size and SHA-256, and its header's `DATE-OBS`, `FILTER`,
+`EXPTIME`, `XBINNING`, `GAIN`, and `OFFSET`. It stays beside the
+frames, so a backup of the archive takes it along, and `jq` answers
+questions such as which frames one night took. A frame never changes
+after it reaches the archive.
+
+## FITS keywords
+
+Every frame will carry the keywords of `observatory-operator`'s
+levels, then the target's `fitsKeywords`, then two that this operator
+writes: `OBJECT`, from `spec.object`, and `FRAMEID`, the frame's
+identity, a UUIDv7. The API server refuses `OBJECT` and `FRAMEID` in
+`fitsKeywords`, and every keyword that the camera's driver measures,
+such as `EXPTIME`.
+`observatory-operator`'s page on
+[FITS keywords](https://liken.sh/observatory/docs/concepts/fits-keywords/)
+explains the levels.
+
+## The conditions
+
+| Condition | `True` | `False` reasons |
+|---|---|---|
+| `Complete` | every sequence has at least its count archived | `WorkLeft` |
+| `Imaging` | a reservation images the target; the reason is `Slewing`, `Centering`, `Guiding`, or `Exposing` | `Waiting`, `Suspended`, `SequencesDone`, `NoTrain`, `NoFilter`, `SlewFailed`, `CenteringFailed`, `GuidingFailed`, `OutboxFull` |
+| `ArchiveAvailable` | the last promotion succeeded | `ClaimMissing`, `Unschedulable`, `CopyFailed`, `VerifyFailed`, `NameConflict` |

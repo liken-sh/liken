@@ -1,0 +1,57 @@
+# The operator that images the targets a person declares, on the
+# telescopes that observatory-operator controls: the resources' CRDs
+# and Go types, the conversion of the sky's coordinates, and the
+# operator.
+[package]
+name = "astrophotography-operator"
+license = "MIT"
+
+# The operator imports observatory-operator's INDI client, PHD2 client,
+# and resource types, so a change to them runs these tests again, and
+# the tests hold the Target's FITS keywords to that operator's CRDs.
+# The image builds against the shared kubernetes module, and ships the
+# license notices that notices/ collects.
+[depends]
+components = ["kubernetes", "notices", "observatory-operator"]
+
+[docs]
+prefix = "astrophotography"
+
+# gofmt, vet, a tidy check of go.mod, and one run of the tests that
+# checks for races and writes the coverage profile, then the coverage
+# gate on that profile. .testcoverage.yml holds the floor.
+[[jobs]]
+name = "go"
+toolchain = "go"
+run = "make test-go"
+timeout = 15
+coverage = ["coverage.out"]
+
+# The link check, the generated skills, and the site build.
+[[jobs]]
+name = "docs"
+toolchain = "hugo"
+module = "docs"
+run = "make test-docs"
+
+# The hooks in .pre-commit-config.yaml: the formatters, the linters,
+# and the hygiene checks. The go job runs the tests and the coverage
+# gate.
+[[jobs]]
+name = "prek"
+toolchain = "prek"
+# The go job runs the same checks as these hooks.
+skip = ["gofmt", "go-vet", "go-mod-tidy"]
+
+[outputs]
+deploy = "deploy"
+
+# The image builds from this module's go.mod, which replaces the shared
+# kubernetes module with ../kubernetes and observatory-operator with
+# ../observatory-operator, so it takes those directories as build
+# contexts. The notices context holds the script that copies the
+# license files of the modules the binary links.
+[[outputs.images]]
+name = "astrophotography-operator"
+file = "Dockerfile"
+contexts = { kubernetes = "kubernetes", notices = "notices", observatory = "observatory-operator" }

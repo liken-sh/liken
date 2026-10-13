@@ -1,0 +1,93 @@
+# The first imaging session, on observatory-operator's example
+# observatory of INDI simulators (plan 08). It holds the three claims of
+# the session, a Solver, a Target of M42 with short frames, and the
+# Reservation that gives the telescope east to astrophotography-operator.
+#
+# Apply both operators' deploy bases, then observatory-operator's
+# examples/simulators.yaml with no Reservation, then this file, in the
+# same namespace:
+#
+#   kubectl apply -n observatory -f examples/first-session.yaml
+#   kubectl get astro -n observatory
+#
+# The claim astrometry-indexes must hold index files before the Solver
+# is Ready. The 13 files of the 2MASS series 4207 and 4208, 236 MiB,
+# solve the simulator's field of 47.7 by 38.1 arcminutes.
+---
+# The outbox, where the camera writes each frame. A local-path claim is
+# bound to the node of its first pod, so the camera, the worker, and the
+# promotion Job all run on that node.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: frames
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
+---
+# The archive, where the frames and the catalog stay.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: archive
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: astrometry-indexes
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 512Mi
+---
+apiVersion: astrophotography.liken.sh/v1alpha1
+kind: Solver
+metadata:
+  name: lab
+spec:
+  indexFiles:
+    claimName: astrometry-indexes
+---
+# Nine frames of 10 s, so the whole session runs in minutes. The
+# simulator's filter wheel names its slots Luminance, Red, Green, and
+# Blue.
+apiVersion: astrophotography.liken.sh/v1alpha1
+kind: Target
+metadata:
+  name: m42
+spec:
+  object: M42
+  coordinates: {ra: "05:35:17.3", dec: "-05:23:28"}
+  opticalTrain: east-imaging
+  sequences:
+    - {filter: Luminance, exposure: 10s, count: 3}
+    - {filter: Red, exposure: 10s, count: 2}
+    - {filter: Green, exposure: 10s, count: 2}
+    - {filter: Blue, exposure: 10s, count: 2}
+  dither: {every: 2, pixels: 5}
+  centering: {solver: lab, tolerance: 30}
+  archive:
+    claimName: archive
+    path: astro
+    promotion: Continuous
+---
+apiVersion: observatory.liken.sh/v1alpha1
+kind: Reservation
+metadata:
+  name: east-tonight
+spec:
+  telescope: east
+  holder: astrophotography-operator
+  outbox:
+    claimName: frames

@@ -1,0 +1,188 @@
+# A `Solver` holds astrometry.net's index files on a claim, and
+# `astrophotography-operator` runs one pod that solves the frames of the
+# targets in its namespace that name it. Plan 02 gives the fields.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: solvers.astrophotography.liken.sh
+spec:
+  group: astrophotography.liken.sh
+  names:
+    kind: Solver
+    listKind: SolverList
+    plural: solvers
+    singular: solver
+    categories: [astro]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Ready
+          type: string
+          jsonPath: '.status.conditions[?(@.type=="Ready")].status'
+        - name: Reason
+          type: string
+          jsonPath: '.status.conditions[?(@.type=="Ready")].reason'
+        - name: Indexes
+          type: string
+          jsonPath: .status.indexes[*].id
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+        - name: Host
+          type: string
+          jsonPath: .status.endpoint.host
+          priority: 1
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            A `Solver` plate-solves the frames of the targets in its
+            namespace that name it in `spec.centering.solver`.
+            `astrophotography-operator` runs one pod of astrometry.net
+            that reads the index files on the claim that
+            `spec.indexFiles` names, and a `Service` in front of it. Only
+            star lists of a few kilobytes reach the solver, because a
+            worker beside each reservation's outbox finds the stars in
+            each frame.
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [indexFiles]
+              description: "Where the index files are."
+              properties:
+                indexFiles:
+                  type: object
+                  required: [claimName]
+                  description: >-
+                    A claim, and a directory in it, that holds
+                    astrometry.net's index files. The solver reads every
+                    `index-*.fits` in the directory when its pod starts.
+                    To add index files, copy them into the directory and
+                    restart the solver's `Deployment`.
+                  properties:
+                    claimName:
+                      type: string
+                      minLength: 1
+                      maxLength: 253
+                      description: >-
+                        A `PersistentVolumeClaim` in the solver's
+                        namespace. The solver's pod mounts it read-only.
+                    path:
+                      type: string
+                      maxLength: 1024
+                      default: ""
+                      description: >-
+                        The directory in the claim that holds the index
+                        files. The default is the claim's root.
+                      x-kubernetes-validations:
+                        - rule: "!self.startsWith('/') && !self.matches('(^|/)[.][.](/|$)')"
+                          message: "path is a directory inside the claim, so it cannot start with '/' or hold '..'"
+            status:
+              type: object
+              description: "What `astrophotography-operator` reports. A person never writes it."
+              properties:
+                observedGeneration:
+                  type: integer
+                  format: int64
+                  description: "The `metadata.generation` of the spec that the status reflects."
+                endpoint:
+                  type: object
+                  required: [service, host, port]
+                  description: "The solver's `Service`, while its pod is ready."
+                  properties:
+                    service:
+                      type: string
+                      description: "The name of the `Service`."
+                    host:
+                      type: string
+                      description: "The `Service`'s DNS name in the cluster."
+                    port:
+                      type: integer
+                      format: int32
+                      description: "The `Service`'s port."
+                indexes:
+                  type: array
+                  description: >-
+                    Each series of index files in the claim, which the
+                    solver reads from the headers of each file when its
+                    pod starts.
+                  items:
+                    type: object
+                    required: [id, files, scaleArcmin]
+                    description: "One series of index files."
+                    properties:
+                      id:
+                        type: integer
+                        format: int32
+                        description: "The series, such as `4207`, from each file's `INDEXID` header."
+                      files:
+                        type: integer
+                        format: int32
+                        description: "The files of the series in the claim."
+                      scaleArcmin:
+                        type: object
+                        required: [low, high]
+                        description: "The range of sizes of the series' quads of stars, in arcminutes."
+                        properties:
+                          low:
+                            type: number
+                            description: "The smallest size, in arcminutes."
+                          high:
+                            type: number
+                            description: "The largest size, in arcminutes."
+                conditions:
+                  type: array
+                  description: >-
+                    `Ready` is `True` with the reason `Loaded` when the
+                    solver's pod is ready and holds at least one index
+                    file. Otherwise it is `False` with the reason
+                    `ClaimMissing`, `NoIndexFiles`, or `PodNotReady`.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  items:
+                    type: object
+                    required: [type, status, reason, message, lastTransitionTime]
+                    description: >-
+                      One condition, in the shape of `metav1.Condition`.
+                    properties:
+                      type:
+                        type: string
+                        minLength: 1
+                        maxLength: 316
+                        description: "The condition's name, such as `Ready`."
+                      status:
+                        type: string
+                        enum: ["True", "False", Unknown]
+                        description: >-
+                          Whether the condition holds: `True`, `False`,
+                          or `Unknown`.
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        minimum: 0
+                        description: >-
+                          The `metadata.generation` of the spec that the
+                          condition reflects.
+                      reason:
+                        type: string
+                        minLength: 1
+                        maxLength: 1024
+                        description: "One word in CamelCase for the cause."
+                      message:
+                        type: string
+                        maxLength: 32768
+                        description: >-
+                          The cause, for a person to read. It can be
+                          empty.
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: >-
+                          When `status` last changed. A write with the
+                          same status keeps this time.

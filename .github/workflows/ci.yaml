@@ -244,23 +244,24 @@ jobs:
             --skip kubernetes/
             --skip notices/
             --skip trust/
+            --skip indi/
+            --skip weston/
+            --skip observatory-operator/
+            --skip astrophotography-operator/
             --skip audio-operator/
             --skip bluetooth-operator/
             --skip brand/
             --skip ci/
             --skip vaapi/
             --skip ffmpeg/
-            --skip weston/
             --skip display-operator/
             --skip equipment-operator/
             --skip git-csi-driver/
-            --skip indi/
             --skip media-screen/
             --skip library-operator/
             --skip liken/
             --skip mpv/
             --skip media-operator/
-            --skip observatory-operator/
             --skip people-operator/
             --skip per-node-csi-driver/
 
@@ -445,6 +446,126 @@ jobs:
       contents: read
       packages: write
 
+  indi:
+    needs: [plan, trust]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['indi'].check }}
+    uses: ./.github/workflows/component-indi.yaml
+    with:
+      stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['indi'].dryrun }}
+      version: ${{ fromJSON(needs.plan.outputs.components)['indi'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['indi'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['indi'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['indi'].images) }}
+    permissions:
+      contents: read
+      packages: write
+
+  indi-publish:
+    needs: [plan, indi, trust]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['indi'].publish != 'none' }}
+    uses: ./.github/workflows/component-indi.yaml
+    with:
+      stage: publish
+      dryrun: false
+      version: ${{ fromJSON(needs.plan.outputs.components)['indi'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['indi'].publish }}
+      jobs: '[]'
+      images: '[]'
+    permissions:
+      contents: read
+      packages: write
+
+  weston:
+    needs: [plan, vulkan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['weston'].check }}
+    uses: ./.github/workflows/component-weston.yaml
+    with:
+      stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['weston'].dryrun }}
+      version: ${{ fromJSON(needs.plan.outputs.components)['weston'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['weston'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['weston'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['weston'].images) }}
+    permissions:
+      contents: read
+      packages: write
+
+  weston-publish:
+    needs: [plan, weston, vulkan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['weston'].publish != 'none' }}
+    uses: ./.github/workflows/component-weston.yaml
+    with:
+      stage: publish
+      dryrun: false
+      version: ${{ fromJSON(needs.plan.outputs.components)['weston'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['weston'].publish }}
+      jobs: '[]'
+      images: '[]'
+    permissions:
+      contents: read
+      packages: write
+
+  observatory-operator:
+    needs: [plan, indi, trust, weston]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['observatory-operator'].check }}
+    uses: ./.github/workflows/component-observatory-operator.yaml
+    with:
+      stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['observatory-operator'].dryrun }}
+      version: ${{ fromJSON(needs.plan.outputs.components)['observatory-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['observatory-operator'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['observatory-operator'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['observatory-operator'].images) }}
+    permissions:
+      contents: read
+      packages: write
+
+  observatory-operator-publish:
+    needs: [plan, observatory-operator, indi, kubernetes, notices, trust, vulkan, weston]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['observatory-operator'].publish != 'none' }}
+    uses: ./.github/workflows/component-observatory-operator.yaml
+    with:
+      stage: publish
+      dryrun: false
+      version: ${{ fromJSON(needs.plan.outputs.components)['observatory-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['observatory-operator'].publish }}
+      jobs: '[]'
+      images: '[]'
+    permissions:
+      contents: read
+      packages: write
+
+  astrophotography-operator:
+    needs: [plan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['astrophotography-operator'].check }}
+    uses: ./.github/workflows/component-astrophotography-operator.yaml
+    with:
+      stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['astrophotography-operator'].dryrun }}
+      version: ${{ fromJSON(needs.plan.outputs.components)['astrophotography-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['astrophotography-operator'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['astrophotography-operator'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['astrophotography-operator'].images) }}
+    permissions:
+      contents: read
+      packages: write
+
+  astrophotography-operator-publish:
+    needs: [plan, astrophotography-operator, indi, kubernetes, notices, observatory-operator, trust, vulkan, weston]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['astrophotography-operator'].publish != 'none' }}
+    uses: ./.github/workflows/component-astrophotography-operator.yaml
+    with:
+      stage: publish
+      dryrun: false
+      version: ${{ fromJSON(needs.plan.outputs.components)['astrophotography-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['astrophotography-operator'].publish }}
+      jobs: '[]'
+      images: '[]'
+    permissions:
+      contents: read
+      packages: write
+
   audio-operator:
     needs: [plan, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['audio-operator'].check }}
@@ -593,36 +714,6 @@ jobs:
       contents: read
       packages: write
 
-  weston:
-    needs: [plan, vulkan]
-    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['weston'].check }}
-    uses: ./.github/workflows/component-weston.yaml
-    with:
-      stage: check
-      dryrun: ${{ fromJSON(needs.plan.outputs.components)['weston'].dryrun }}
-      version: ${{ fromJSON(needs.plan.outputs.components)['weston'].version }}
-      publish: ${{ fromJSON(needs.plan.outputs.components)['weston'].publish }}
-      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['weston'].jobs) }}
-      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['weston'].images) }}
-    permissions:
-      contents: read
-      packages: write
-
-  weston-publish:
-    needs: [plan, weston, vulkan]
-    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['weston'].publish != 'none' }}
-    uses: ./.github/workflows/component-weston.yaml
-    with:
-      stage: publish
-      dryrun: false
-      version: ${{ fromJSON(needs.plan.outputs.components)['weston'].version }}
-      publish: ${{ fromJSON(needs.plan.outputs.components)['weston'].publish }}
-      jobs: '[]'
-      images: '[]'
-    permissions:
-      contents: read
-      packages: write
-
   display-operator:
     needs: [plan, ffmpeg, trust, weston]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['display-operator'].check }}
@@ -707,36 +798,6 @@ jobs:
       dryrun: false
       version: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].publish }}
-      jobs: '[]'
-      images: '[]'
-    permissions:
-      contents: read
-      packages: write
-
-  indi:
-    needs: [plan, trust]
-    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['indi'].check }}
-    uses: ./.github/workflows/component-indi.yaml
-    with:
-      stage: check
-      dryrun: ${{ fromJSON(needs.plan.outputs.components)['indi'].dryrun }}
-      version: ${{ fromJSON(needs.plan.outputs.components)['indi'].version }}
-      publish: ${{ fromJSON(needs.plan.outputs.components)['indi'].publish }}
-      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['indi'].jobs) }}
-      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['indi'].images) }}
-    permissions:
-      contents: read
-      packages: write
-
-  indi-publish:
-    needs: [plan, indi, trust]
-    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['indi'].publish != 'none' }}
-    uses: ./.github/workflows/component-indi.yaml
-    with:
-      stage: publish
-      dryrun: false
-      version: ${{ fromJSON(needs.plan.outputs.components)['indi'].version }}
-      publish: ${{ fromJSON(needs.plan.outputs.components)['indi'].publish }}
       jobs: '[]'
       images: '[]'
     permissions:
@@ -877,36 +938,6 @@ jobs:
       contents: read
       packages: write
 
-  observatory-operator:
-    needs: [plan, indi, trust, weston]
-    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['observatory-operator'].check }}
-    uses: ./.github/workflows/component-observatory-operator.yaml
-    with:
-      stage: check
-      dryrun: ${{ fromJSON(needs.plan.outputs.components)['observatory-operator'].dryrun }}
-      version: ${{ fromJSON(needs.plan.outputs.components)['observatory-operator'].version }}
-      publish: ${{ fromJSON(needs.plan.outputs.components)['observatory-operator'].publish }}
-      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['observatory-operator'].jobs) }}
-      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['observatory-operator'].images) }}
-    permissions:
-      contents: read
-      packages: write
-
-  observatory-operator-publish:
-    needs: [plan, observatory-operator, indi, kubernetes, notices, trust, vulkan, weston]
-    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['observatory-operator'].publish != 'none' }}
-    uses: ./.github/workflows/component-observatory-operator.yaml
-    with:
-      stage: publish
-      dryrun: false
-      version: ${{ fromJSON(needs.plan.outputs.components)['observatory-operator'].version }}
-      publish: ${{ fromJSON(needs.plan.outputs.components)['observatory-operator'].publish }}
-      jobs: '[]'
-      images: '[]'
-    permissions:
-      contents: read
-      packages: write
-
   people-operator:
     needs: [plan, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['people-operator'].check }}
@@ -986,7 +1017,7 @@ jobs:
   # check jobs. So it waits for the plan and each component's checks,
   # and not for the publish jobs, and it deploys while they run.
   site:
-    needs: [plan, vulkan, astrometry, kubernetes, notices, trust, audio-operator, bluetooth-operator, brand, ci, vaapi, ffmpeg, weston, display-operator, equipment-operator, git-csi-driver, indi, media-screen, library-operator, liken, mpv, media-operator, observatory-operator, people-operator, per-node-csi-driver]
+    needs: [plan, vulkan, astrometry, kubernetes, notices, trust, indi, weston, observatory-operator, astrophotography-operator, audio-operator, bluetooth-operator, brand, ci, vaapi, ffmpeg, display-operator, equipment-operator, git-csi-driver, media-screen, library-operator, liken, mpv, media-operator, people-operator, per-node-csi-driver]
     if: ${{ !failure() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH == 'true' && needs.plan.outputs.site == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 20
@@ -1062,6 +1093,18 @@ jobs:
           path: kubernetes
 
       - uses: actions/download-artifact@v8
+        if: ${{ fromJSON(needs.plan.outputs.components)['observatory-operator'].check && contains(fromJSON(needs.plan.outputs.components)['observatory-operator'].jobs, 'go') }}
+        with:
+          name: coverage-observatory-operator-go
+          path: observatory-operator
+
+      - uses: actions/download-artifact@v8
+        if: ${{ fromJSON(needs.plan.outputs.components)['astrophotography-operator'].check && contains(fromJSON(needs.plan.outputs.components)['astrophotography-operator'].jobs, 'go') }}
+        with:
+          name: coverage-astrophotography-operator-go
+          path: astrophotography-operator
+
+      - uses: actions/download-artifact@v8
         if: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].check && contains(fromJSON(needs.plan.outputs.components)['audio-operator'].jobs, 'go') }}
         with:
           name: coverage-audio-operator-go
@@ -1128,12 +1171,6 @@ jobs:
           path: media-operator
 
       - uses: actions/download-artifact@v8
-        if: ${{ fromJSON(needs.plan.outputs.components)['observatory-operator'].check && contains(fromJSON(needs.plan.outputs.components)['observatory-operator'].jobs, 'go') }}
-        with:
-          name: coverage-observatory-operator-go
-          path: observatory-operator
-
-      - uses: actions/download-artifact@v8
         if: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].check && contains(fromJSON(needs.plan.outputs.components)['people-operator'].jobs, 'go') }}
         with:
           name: coverage-people-operator-go
@@ -1198,6 +1235,12 @@ jobs:
             | grep -qi "content-type: text/markdown"
           echo "checking llms.txt"
           fetch https://liken.sh/llms.txt | grep -q "^# liken"
+          echo "checking the observatory-operator manual"
+          fetch https://liken.sh/observatory/ > page.html
+          grep -q "<title>" page.html
+          echo "checking the astrophotography-operator manual"
+          fetch https://liken.sh/astrophotography/ > page.html
+          grep -q "<title>" page.html
           echo "checking the audio-operator manual"
           fetch https://liken.sh/audio/ > page.html
           grep -q "<title>" page.html
@@ -1219,9 +1262,6 @@ jobs:
           echo "checking the media-operator manual"
           fetch https://liken.sh/media/ > page.html
           grep -q "<title>" page.html
-          echo "checking the observatory-operator manual"
-          fetch https://liken.sh/observatory/ > page.html
-          grep -q "<title>" page.html
           echo "checking the people-operator manual"
           fetch https://liken.sh/people/ > page.html
           grep -q "<title>" page.html
@@ -1233,7 +1273,7 @@ jobs:
   # component and its version at this tag, whether this tag published
   # it or an earlier one did.
   record:
-    needs: [plan, vulkan, vulkan-publish, astrometry, astrometry-publish, kubernetes, notices, trust, trust-publish, audio-operator, audio-operator-publish, bluetooth-operator, bluetooth-operator-publish, brand, ci, vaapi, vaapi-publish, ffmpeg, ffmpeg-publish, weston, weston-publish, display-operator, display-operator-publish, equipment-operator, equipment-operator-publish, git-csi-driver, git-csi-driver-publish, indi, indi-publish, media-screen, library-operator, library-operator-publish, liken, liken-publish, mpv, mpv-publish, media-operator, media-operator-publish, observatory-operator, observatory-operator-publish, people-operator, people-operator-publish, per-node-csi-driver, per-node-csi-driver-publish]
+    needs: [plan, vulkan, vulkan-publish, astrometry, astrometry-publish, kubernetes, notices, trust, trust-publish, indi, indi-publish, weston, weston-publish, observatory-operator, observatory-operator-publish, astrophotography-operator, astrophotography-operator-publish, audio-operator, audio-operator-publish, bluetooth-operator, bluetooth-operator-publish, brand, ci, vaapi, vaapi-publish, ffmpeg, ffmpeg-publish, display-operator, display-operator-publish, equipment-operator, equipment-operator-publish, git-csi-driver, git-csi-driver-publish, media-screen, library-operator, library-operator-publish, liken, liken-publish, mpv, mpv-publish, media-operator, media-operator-publish, people-operator, people-operator-publish, per-node-csi-driver, per-node-csi-driver-publish]
     if: ${{ !cancelled() && github.ref_type == 'tag' && vars.PUBLISH == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10

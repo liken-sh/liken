@@ -1,0 +1,44 @@
+# These checks run before every commit, through pre-commit or prek,
+# its drop-in replacement. They are the fast, local ones: formatters,
+# linters, and hygiene checks. The test suites and the coverage gates
+# run in CI, through the `make` targets that package.toml names.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        # Kubernetes manifests are multi-document streams.
+        args: [--allow-multiple-documents]
+      - id: check-merge-conflict
+      - id: check-added-large-files
+  # shellcheck-py wraps a prebuilt shellcheck binary, so the hook
+  # works on a machine with no shellcheck installed.
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        entry: bash -c 'test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }'
+        language: system
+        files: \.go$
+        pass_filenames: false
+      - id: go-vet
+        name: go vet
+        entry: go vet ./...
+        language: system
+        files: \.go$|^go\.(mod|sum)$
+        pass_filenames: false
+      - id: go-mod-tidy
+        name: go mod tidy
+        # -diff reports what a tidy would change, without changing
+        # it, so a stale go.mod fails the commit instead of changing
+        # under it.
+        entry: bash -c 'go mod tidy -diff'
+        language: system
+        files: \.go$|^go\.(mod|sum)$
+        pass_filenames: false

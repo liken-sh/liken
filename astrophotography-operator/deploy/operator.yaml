@@ -1,0 +1,85 @@
+# The operator: one unprivileged Deployment in liken-system. It reads
+# the Targets and Solvers in every namespace and the Reservations that
+# name it as their holder, and runs each worker, solver, and promotion
+# Job in the namespace of the resource it serves. It keeps no state
+# outside the API server and the archives: a Target's status records
+# the frame in flight, and a copy that takes the Lease continues from
+# it.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: astrophotography-operator
+spec:
+  # One replica is enough, because the kubelet restarts a crashed
+  # operator. Two copies that acted at once would expose on one camera
+  # and append to one catalog together, so only the copy that holds the
+  # Lease astrophotography-operator acts (leader.go). Every other copy
+  # waits for it.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: astrophotography-operator
+  # A rollout starts the new pod beside the old one, and stops the old
+  # one only when the new one runs. The new pod waits for the Lease
+  # while the old one leads, so the image pull happens while the old pod
+  # still leads.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: astrophotography-operator
+    spec:
+      serviceAccountName: astrophotography-operator
+      # A shutdown waits until every writer has returned, and the client
+      # ends each request in 15 s at most. Then the release waits up to
+      # 11 s for client-go's election to end, and up to 5 s more for the
+      # release that follows a late renewal. One write in flight and the
+      # release take up to 31 s, past the default grace of 30 s, so the
+      # grace is 60 s.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: operator
+          image: ghcr.io/liken-sh/astrophotography-operator:latest
+          # The pod's name and namespace name the Lease and the identity
+          # that holds it, so the operator exits when either is unset.
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            # The pod runs on the cluster network, so it takes port 9200,
+            # the port of root plan 65. The copy that holds the Lease
+            # serves /metrics there. The deploy/monitoring component is
+            # what a cluster owner adds to scrape it, and the base runs
+            # the same either way. An empty value turns the listener off.
+            - name: ASTROPHOTOGRAPHY_METRICS_ADDRESS
+              value: :9200
+          ports:
+            - name: metrics
+              containerPort: 9200
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            # The watches hold every Target and Solver, the observatory
+            # resources of the kinds the runner reads, and the operator's
+            # own pods and Jobs.
+            limits:
+              memory: 256Mi

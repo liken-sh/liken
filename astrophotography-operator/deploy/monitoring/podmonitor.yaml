@@ -1,0 +1,19 @@
+# One PodMonitor for the operator's pod. Only the copy that holds the
+# Lease serves /metrics, so during a rollout the scrape of the copy
+# that waits fails until it takes the Lease. The relabeling puts the
+# pod's node in the target's node label, as root plan 65 gives every
+# PodMonitor, so a dashboard across the fleet selects by it.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: astrophotography-operator
+  namespace: liken-system
+spec:
+  selector:
+    matchLabels:
+      app: astrophotography-operator
+  podMetricsEndpoints:
+    - port: metrics
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node

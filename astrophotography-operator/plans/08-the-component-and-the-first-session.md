@@ -1,6 +1,8 @@
 # 08, The component and the first session
 
-Proposed and designed on 2026-10-12. Not built. This plan builds
+Proposed and designed on 2026-10-12. Pieces B and D of stage 1 were
+built on 2026-10-12, and [what they built](#what-b-and-d-built) lists
+them with each deviation. The rest is not built. This plan builds
 first: it gives the component that plans 01, 02, and 03 build into,
 the changes they need from `observatory-operator`, the order of the
 build, and the drill that proves them together.
@@ -222,6 +224,87 @@ A, B, C, and D share no file and build at the same time. E, F, and G
 build at the same time against B's contracts. The build of A downloads
 Debian packages from the snapshot; on a slow link, its agent measures
 the download first.
+
+## What B and D built
+
+Pieces B and D were built on 2026-10-12, against
+`observatory-operator` as it was before piece C.
+
+- **B, the scaffold.** The module, with the `replace` of
+  `observatory-operator`, and the `Makefile`, `.testcoverage.yml`, and
+  `.pre-commit-config.yaml` of `observatory-operator`. `package main`
+  elects its leader with the `Lease` `astrophotography-operator`,
+  opens the watches, and serves layers 1 and 2 of root plan 65 on port
+  9200 under the prefix `astrophotography_`. The watches are the
+  `Target`s and `Solver`s, the `Reservation`s selected by
+  `spec.holder=astrophotography-operator`, the nine kinds of
+  `observatory-operator` in the RBAC table, and the pods, `Service`s,
+  `Deployment`s, and `Job`s that carry the operator's label. No loop
+  reads them yet: `operator.run` is where E, F, and G start theirs.
+- **B, the types and CRDs.** `astrophotography/` and
+  `deploy/targets-crd.yaml` and `deploy/solvers-crd.yaml`, with the
+  drift, enum, validation, defaults, and example tests of
+  `observatory/`, and a test that holds the `Target`'s
+  `spec.fitsKeywords` to `observatory-operator`'s CRD.
+- **B, the contracts.** `outbox.Frame` gives a frame's path, its
+  `UPLOAD_SETTINGS`, and its parse. `catalog.Line` and
+  `catalog.Settings` give the catalog's line. `promote.Report` gives
+  the promotion report, and a test holds 25 totals inside the 4,096
+  bytes of the termination message. `worker.ExtractRequest`,
+  `worker.ExtractAnswer`, `worker.OutboxAnswer`, and
+  `solver.SolveAnswer` give the HTTP messages, with their paths and
+  port 8080. A test fixes the JSON of each.
+- **B, the rest.** `deploy/` with the RBAC of the table above, the
+  `Deployment`, the kustomization, the monitoring component with a
+  dashboard of layers 1 and 2, and `examples/first-session.yaml`. The
+  `Dockerfile`, `package.toml`, the generated workflows, and a manual
+  with a front page, the concepts of `Target` and `Solver`, the
+  install guide and its skill, the metrics, and the generated
+  reference pages. The image built on the laptop at 28.1 MB.
+- **D, `sky/`.** Precession by the rigorous method of chapter 21 and
+  nutation by the abridged series of chapter 22, as rotation matrices,
+  so `FromDate` is the transpose of `ToDate`. The tests hold examples
+  7.a, 17.a, 21.b, 22.a, and the nutation of 23.a. Plan 02 asks for
+  no altitude or azimuth, so chapters 12 and 13 are not in it. The
+  package also reads the `HH:MM:SS.s` and `±DD:MM:SS.s` of a
+  `Target`, and gives the separation of two positions for the
+  centering error.
+
+The deviations, each with its reason:
+
+- **No `Dockerfile.worker` yet.** A Dockerfile names a base of the
+  repository bare, and `astrometry` is piece A, so the worker image,
+  its `Dockerfile.worker`, and the dependency on `astrometry` come
+  with G.
+- **`outbox/` is a package** that the scaffold's list does not name.
+  The runner, the worker, and the promotion `Job` all read the layout
+  of plan 01's outbox, and the layout is one domain.
+- **`catalog/` holds only the line.** Its reader and the totals are
+  F's, and `fits/` is F's and G's.
+- **No series of layer 3.** Each piece of stage 2 adds its own
+  series with the code that sets it, so the manual never lists a
+  series that nothing sets.
+- **The nutation is the abridged series**, accurate to 0.5 arcseconds
+  in longitude and 0.1 in obliquity. Centering syncs with the same
+  conversion on both sides, so an error of it cancels, and the slew
+  before the first sync misses by more from aberration, which plan 02
+  also leaves out.
+- **Fields the plans left to the build.** `status.progress` holds the
+  `37/180` of the printer column, because a column cannot add up a
+  list. `status.centering.solution` groups the solved center, the
+  rotation, and the scale, which are absent when no frame solved.
+  `Complete` is `True` with the reason `Archived`, and
+  `ArchiveAvailable` with `Promoted`. Each catalog line has
+  `"record": "frame"`, so plan 06's grade can be a line of another
+  record that an older reader skips. The solver answers
+  `GET /indexes`, which the operator copies into `status.indexes`.
+  The CRD refuses an `archive.path` or `indexFiles.path` that starts
+  with `/` or holds `..`, and bounds `binning` at 16,
+  `centering.attempts` at 20, and `dither.pixels` at 100.
+- **Before C,** the API server refuses the list of `Reservation`s by
+  `spec.holder`, and the reflector retries until C's CRD is applied.
+  The `Target` refuses `OBJECT` and `FRAMEID` whether or not C adds
+  `FRAMEID` to `observatory-operator`'s list.
 
 ## The drill of the first session
 

@@ -46,21 +46,6 @@ group "default" {
     "vulkan",
     "astrometry",
     "trust",
-    "audio-operator",
-    "audio-operator-cli",
-    "bluetooth-operator",
-    "bluetooth-bondfetch",
-    "bluetoothd",
-    "bluetooth-operator-cli",
-    "vaapi",
-    "ffmpeg",
-    "weston",
-    "display-operator",
-    "display-capture",
-    "display-api",
-    "display-operator-cli",
-    "equipment-operator",
-    "git-csi-driver",
     "indi",
     "indi-simulators",
     "indi-phd2",
@@ -78,6 +63,24 @@ group "default" {
     "indi-astroasis",
     "indi-gphoto",
     "indi-touptek",
+    "weston",
+    "observatory-operator",
+    "observatory-operator-cli",
+    "astrophotography-operator",
+    "audio-operator",
+    "audio-operator-cli",
+    "bluetooth-operator",
+    "bluetooth-bondfetch",
+    "bluetoothd",
+    "bluetooth-operator-cli",
+    "vaapi",
+    "ffmpeg",
+    "display-operator",
+    "display-capture",
+    "display-api",
+    "display-operator-cli",
+    "equipment-operator",
+    "git-csi-driver",
     "library-operator",
     "library-operator-ffmpeg",
     "library-operator-media-browser",
@@ -92,8 +95,6 @@ group "default" {
     "media-operator-api",
     "media-operator-capabilities",
     "media-operator-cli",
-    "observatory-operator",
-    "observatory-operator-cli",
     "people-operator",
     "per-node-csi-driver",
   ]
@@ -145,264 +146,6 @@ target "trust" {
     CACHE_WRITE == "trust" ? ["type=registry,ref=ghcr.io/liken-sh/trust:buildcache,mode=max,ignore-error=true"] : [],
     BRANCH_CACHE == "trust" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/trust:buildcache-20260925-2,mode=max,ignore-error=true"] : [],
   )
-}
-
-target "audio-operator" {
-  context    = "audio-operator"
-  dockerfile = "Dockerfile"
-  platforms  = ["linux/amd64"]
-  contexts = {
-    "kubernetes" = "kubernetes"
-    "notices" = "notices"
-  }
-  args = {
-    VERSION = VERSION
-  }
-  tags       = ["ghcr.io/liken-sh/audio-operator:${VERSION}"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/audio-operator:buildcache"]
-  cache-to   = CACHE_WRITE == "audio-operator" ? ["type=registry,ref=ghcr.io/liken-sh/audio-operator:buildcache,mode=max,ignore-error=true"] : []
-}
-
-target "audio-operator-cli" {
-  context    = "audio-operator"
-  dockerfile = "Dockerfile.cli"
-  platforms  = ["linux/amd64"]
-  contexts = {
-    "kubernetes" = "kubernetes"
-    "notices" = "notices"
-    "trust" = "target:trust"
-  }
-  args = {
-    VERSION = VERSION
-  }
-  tags       = ["ghcr.io/liken-sh/audio-operator-cli:${VERSION}"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/audio-operator-cli:buildcache"]
-  cache-to   = CACHE_WRITE == "audio-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/audio-operator-cli:buildcache,mode=max,ignore-error=true"] : []
-}
-
-target "bluetooth-operator" {
-  context    = "bluetooth-operator"
-  dockerfile = "Dockerfile"
-  platforms  = ["linux/amd64"]
-  contexts = {
-    "kubernetes" = "kubernetes"
-    "notices" = "notices"
-  }
-  args = {
-    VERSION = VERSION
-  }
-  tags       = ["ghcr.io/liken-sh/bluetooth-operator:${VERSION}"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/bluetooth-operator:buildcache"]
-  cache-to   = CACHE_WRITE == "bluetooth-operator" ? ["type=registry,ref=ghcr.io/liken-sh/bluetooth-operator:buildcache,mode=max,ignore-error=true"] : []
-}
-
-target "bluetooth-bondfetch" {
-  context    = "bluetooth-operator"
-  dockerfile = "bondfetch/Dockerfile"
-  platforms  = ["linux/amd64"]
-  contexts = {
-    "kubernetes" = "kubernetes"
-    "notices" = "notices"
-  }
-  args = {
-    VERSION = VERSION
-  }
-  tags       = ["ghcr.io/liken-sh/bluetooth-bondfetch:${VERSION}"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/bluetooth-bondfetch:buildcache"]
-  cache-to   = CACHE_WRITE == "bluetooth-bondfetch" ? ["type=registry,ref=ghcr.io/liken-sh/bluetooth-bondfetch:buildcache,mode=max,ignore-error=true"] : []
-}
-
-target "bluetoothd" {
-  context    = "bluetooth-operator"
-  dockerfile = "bluetoothd/Dockerfile"
-  platforms  = ["linux/amd64"]
-  contexts = {
-    "kubernetes" = "kubernetes"
-    "notices" = "notices"
-  }
-  args = {
-    VERSION = VERSION
-  }
-  tags       = ["ghcr.io/liken-sh/bluetoothd:${VERSION}"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/bluetoothd:buildcache"]
-  cache-to   = CACHE_WRITE == "bluetoothd" ? ["type=registry,ref=ghcr.io/liken-sh/bluetoothd:buildcache,mode=max,ignore-error=true"] : []
-}
-
-target "bluetooth-operator-cli" {
-  context    = "bluetooth-operator"
-  dockerfile = "Dockerfile.cli"
-  platforms  = ["linux/amd64"]
-  contexts = {
-    "kubernetes" = "kubernetes"
-    "notices" = "notices"
-    "trust" = "target:trust"
-  }
-  args = {
-    VERSION = VERSION
-  }
-  tags       = ["ghcr.io/liken-sh/bluetooth-operator-cli:${VERSION}"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/bluetooth-operator-cli:buildcache"]
-  cache-to   = CACHE_WRITE == "bluetooth-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/bluetooth-operator-cli:buildcache,mode=max,ignore-error=true"] : []
-}
-
-target "vaapi" {
-  context    = "vaapi"
-  dockerfile = "Dockerfile"
-  platforms  = ["linux/amd64"]
-  contexts = {
-    "builder" = "vulkan"
-    "vulkan" = "target:vulkan"
-  }
-  args = {
-    VERSION = "20260928"
-  }
-  tags       = ["ghcr.io/liken-sh/vaapi:20260928-3"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache", "type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache-20260928-3"]
-  cache-to = concat(
-    CACHE_WRITE == "vaapi" ? ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "vaapi" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache-20260928-3,mode=max,ignore-error=true"] : [],
-  )
-}
-
-target "ffmpeg" {
-  context    = "ffmpeg"
-  dockerfile = "Dockerfile"
-  platforms  = ["linux/amd64"]
-  contexts = {
-    "builder" = "vulkan"
-    "vaapi" = "target:vaapi"
-  }
-  args = {
-    VERSION = "20260928"
-  }
-  tags       = ["ghcr.io/liken-sh/ffmpeg:20260928-3"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache", "type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache-20260928-3"]
-  cache-to = concat(
-    CACHE_WRITE == "ffmpeg" ? ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "ffmpeg" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache-20260928-3,mode=max,ignore-error=true"] : [],
-  )
-}
-
-target "weston" {
-  context    = "weston"
-  dockerfile = "Dockerfile"
-  platforms  = ["linux/amd64"]
-  contexts = {
-    "builder" = "vulkan"
-    "vulkan" = "target:vulkan"
-  }
-  args = {
-    VERSION = "20260928"
-  }
-  tags       = ["ghcr.io/liken-sh/weston:20260928-4"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache", "type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20260928-4"]
-  cache-to = concat(
-    CACHE_WRITE == "weston" ? ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "weston" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20260928-4,mode=max,ignore-error=true"] : [],
-  )
-}
-
-target "display-operator" {
-  context    = "display-operator"
-  dockerfile = "Dockerfile"
-  target     = "display-operator"
-  platforms  = ["linux/amd64"]
-  contexts = {
-    "kubernetes" = "kubernetes"
-    "notices" = "notices"
-    "weston" = "target:weston"
-  }
-  args = {
-    VERSION = VERSION
-  }
-  tags       = ["ghcr.io/liken-sh/display-operator:${VERSION}"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/display-operator:buildcache"]
-  cache-to   = CACHE_WRITE == "display-operator" ? ["type=registry,ref=ghcr.io/liken-sh/display-operator:buildcache,mode=max,ignore-error=true"] : []
-}
-
-target "display-capture" {
-  context    = "display-operator"
-  dockerfile = "Dockerfile"
-  target     = "display-capture"
-  platforms  = ["linux/amd64"]
-  contexts = {
-    "ffmpeg" = "target:ffmpeg"
-    "kubernetes" = "kubernetes"
-    "notices" = "notices"
-  }
-  args = {
-    VERSION = VERSION
-  }
-  tags       = ["ghcr.io/liken-sh/display-capture:${VERSION}"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/display-capture:buildcache"]
-  cache-to   = CACHE_WRITE == "display-capture" ? ["type=registry,ref=ghcr.io/liken-sh/display-capture:buildcache,mode=max,ignore-error=true"] : []
-}
-
-target "display-api" {
-  context    = "display-operator"
-  dockerfile = "Dockerfile"
-  target     = "display-api"
-  platforms  = ["linux/amd64"]
-  contexts = {
-    "kubernetes" = "kubernetes"
-    "notices" = "notices"
-  }
-  args = {
-    VERSION = VERSION
-  }
-  tags       = ["ghcr.io/liken-sh/display-api:${VERSION}"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/display-api:buildcache"]
-  cache-to   = CACHE_WRITE == "display-api" ? ["type=registry,ref=ghcr.io/liken-sh/display-api:buildcache,mode=max,ignore-error=true"] : []
-}
-
-target "display-operator-cli" {
-  context    = "display-operator"
-  dockerfile = "Dockerfile.cli"
-  platforms  = ["linux/amd64"]
-  contexts = {
-    "kubernetes" = "kubernetes"
-    "notices" = "notices"
-    "trust" = "target:trust"
-  }
-  args = {
-    VERSION = VERSION
-  }
-  tags       = ["ghcr.io/liken-sh/display-operator-cli:${VERSION}"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/display-operator-cli:buildcache"]
-  cache-to   = CACHE_WRITE == "display-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/display-operator-cli:buildcache,mode=max,ignore-error=true"] : []
-}
-
-target "equipment-operator" {
-  context    = "equipment-operator"
-  dockerfile = "Dockerfile"
-  platforms  = ["linux/amd64"]
-  contexts = {
-    "kubernetes" = "kubernetes"
-    "notices" = "notices"
-  }
-  args = {
-    VERSION = VERSION
-  }
-  tags       = ["ghcr.io/liken-sh/equipment-operator:${VERSION}"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/equipment-operator:buildcache"]
-  cache-to   = CACHE_WRITE == "equipment-operator" ? ["type=registry,ref=ghcr.io/liken-sh/equipment-operator:buildcache,mode=max,ignore-error=true"] : []
-}
-
-target "git-csi-driver" {
-  context    = "git-csi-driver"
-  dockerfile = "Dockerfile"
-  platforms  = ["linux/amd64"]
-  contexts = {
-    "kubernetes" = "kubernetes"
-    "notices" = "notices"
-    "trust" = "target:trust"
-  }
-  args = {
-    VERSION = VERSION
-  }
-  tags       = ["ghcr.io/liken-sh/git-csi-driver:${VERSION}"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/git-csi-driver:buildcache"]
-  cache-to   = CACHE_WRITE == "git-csi-driver" ? ["type=registry,ref=ghcr.io/liken-sh/git-csi-driver:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "indi" {
@@ -728,6 +471,314 @@ target "indi-touptek" {
   )
 }
 
+target "weston" {
+  context    = "weston"
+  dockerfile = "Dockerfile"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "builder" = "vulkan"
+    "vulkan" = "target:vulkan"
+  }
+  args = {
+    VERSION = "20260928"
+  }
+  tags       = ["ghcr.io/liken-sh/weston:20260928-4"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache", "type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20260928-4"]
+  cache-to = concat(
+    CACHE_WRITE == "weston" ? ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "weston" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20260928-4,mode=max,ignore-error=true"] : [],
+  )
+}
+
+target "observatory-operator" {
+  context    = "observatory-operator"
+  dockerfile = "Dockerfile"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+    "notices" = "notices"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/observatory-operator:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/observatory-operator:buildcache"]
+  cache-to   = CACHE_WRITE == "observatory-operator" ? ["type=registry,ref=ghcr.io/liken-sh/observatory-operator:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "observatory-operator-cli" {
+  context    = "observatory-operator"
+  dockerfile = "Dockerfile.cli"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+    "notices" = "notices"
+    "trust" = "target:trust"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/observatory-operator-cli:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/observatory-operator-cli:buildcache"]
+  cache-to   = CACHE_WRITE == "observatory-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/observatory-operator-cli:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "astrophotography-operator" {
+  context    = "astrophotography-operator"
+  dockerfile = "Dockerfile"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+    "notices" = "notices"
+    "observatory" = "observatory-operator"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/astrophotography-operator:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/astrophotography-operator:buildcache"]
+  cache-to   = CACHE_WRITE == "astrophotography-operator" ? ["type=registry,ref=ghcr.io/liken-sh/astrophotography-operator:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "audio-operator" {
+  context    = "audio-operator"
+  dockerfile = "Dockerfile"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+    "notices" = "notices"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/audio-operator:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/audio-operator:buildcache"]
+  cache-to   = CACHE_WRITE == "audio-operator" ? ["type=registry,ref=ghcr.io/liken-sh/audio-operator:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "audio-operator-cli" {
+  context    = "audio-operator"
+  dockerfile = "Dockerfile.cli"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+    "notices" = "notices"
+    "trust" = "target:trust"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/audio-operator-cli:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/audio-operator-cli:buildcache"]
+  cache-to   = CACHE_WRITE == "audio-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/audio-operator-cli:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "bluetooth-operator" {
+  context    = "bluetooth-operator"
+  dockerfile = "Dockerfile"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+    "notices" = "notices"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/bluetooth-operator:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/bluetooth-operator:buildcache"]
+  cache-to   = CACHE_WRITE == "bluetooth-operator" ? ["type=registry,ref=ghcr.io/liken-sh/bluetooth-operator:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "bluetooth-bondfetch" {
+  context    = "bluetooth-operator"
+  dockerfile = "bondfetch/Dockerfile"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+    "notices" = "notices"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/bluetooth-bondfetch:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/bluetooth-bondfetch:buildcache"]
+  cache-to   = CACHE_WRITE == "bluetooth-bondfetch" ? ["type=registry,ref=ghcr.io/liken-sh/bluetooth-bondfetch:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "bluetoothd" {
+  context    = "bluetooth-operator"
+  dockerfile = "bluetoothd/Dockerfile"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+    "notices" = "notices"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/bluetoothd:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/bluetoothd:buildcache"]
+  cache-to   = CACHE_WRITE == "bluetoothd" ? ["type=registry,ref=ghcr.io/liken-sh/bluetoothd:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "bluetooth-operator-cli" {
+  context    = "bluetooth-operator"
+  dockerfile = "Dockerfile.cli"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+    "notices" = "notices"
+    "trust" = "target:trust"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/bluetooth-operator-cli:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/bluetooth-operator-cli:buildcache"]
+  cache-to   = CACHE_WRITE == "bluetooth-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/bluetooth-operator-cli:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "vaapi" {
+  context    = "vaapi"
+  dockerfile = "Dockerfile"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "builder" = "vulkan"
+    "vulkan" = "target:vulkan"
+  }
+  args = {
+    VERSION = "20260928"
+  }
+  tags       = ["ghcr.io/liken-sh/vaapi:20260928-3"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache", "type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache-20260928-3"]
+  cache-to = concat(
+    CACHE_WRITE == "vaapi" ? ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "vaapi" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache-20260928-3,mode=max,ignore-error=true"] : [],
+  )
+}
+
+target "ffmpeg" {
+  context    = "ffmpeg"
+  dockerfile = "Dockerfile"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "builder" = "vulkan"
+    "vaapi" = "target:vaapi"
+  }
+  args = {
+    VERSION = "20260928"
+  }
+  tags       = ["ghcr.io/liken-sh/ffmpeg:20260928-3"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache", "type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache-20260928-3"]
+  cache-to = concat(
+    CACHE_WRITE == "ffmpeg" ? ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "ffmpeg" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache-20260928-3,mode=max,ignore-error=true"] : [],
+  )
+}
+
+target "display-operator" {
+  context    = "display-operator"
+  dockerfile = "Dockerfile"
+  target     = "display-operator"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+    "notices" = "notices"
+    "weston" = "target:weston"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/display-operator:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/display-operator:buildcache"]
+  cache-to   = CACHE_WRITE == "display-operator" ? ["type=registry,ref=ghcr.io/liken-sh/display-operator:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "display-capture" {
+  context    = "display-operator"
+  dockerfile = "Dockerfile"
+  target     = "display-capture"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "ffmpeg" = "target:ffmpeg"
+    "kubernetes" = "kubernetes"
+    "notices" = "notices"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/display-capture:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/display-capture:buildcache"]
+  cache-to   = CACHE_WRITE == "display-capture" ? ["type=registry,ref=ghcr.io/liken-sh/display-capture:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "display-api" {
+  context    = "display-operator"
+  dockerfile = "Dockerfile"
+  target     = "display-api"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+    "notices" = "notices"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/display-api:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/display-api:buildcache"]
+  cache-to   = CACHE_WRITE == "display-api" ? ["type=registry,ref=ghcr.io/liken-sh/display-api:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "display-operator-cli" {
+  context    = "display-operator"
+  dockerfile = "Dockerfile.cli"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+    "notices" = "notices"
+    "trust" = "target:trust"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/display-operator-cli:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/display-operator-cli:buildcache"]
+  cache-to   = CACHE_WRITE == "display-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/display-operator-cli:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "equipment-operator" {
+  context    = "equipment-operator"
+  dockerfile = "Dockerfile"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+    "notices" = "notices"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/equipment-operator:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/equipment-operator:buildcache"]
+  cache-to   = CACHE_WRITE == "equipment-operator" ? ["type=registry,ref=ghcr.io/liken-sh/equipment-operator:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "git-csi-driver" {
+  context    = "git-csi-driver"
+  dockerfile = "Dockerfile"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+    "notices" = "notices"
+    "trust" = "target:trust"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/git-csi-driver:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/git-csi-driver:buildcache"]
+  cache-to   = CACHE_WRITE == "git-csi-driver" ? ["type=registry,ref=ghcr.io/liken-sh/git-csi-driver:buildcache,mode=max,ignore-error=true"] : []
+}
+
 target "library-operator" {
   context    = "library-operator"
   dockerfile = "Dockerfile"
@@ -968,39 +1019,6 @@ target "media-operator-cli" {
   tags       = ["ghcr.io/liken-sh/media-operator-cli:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/media-operator-cli:buildcache"]
   cache-to   = CACHE_WRITE == "media-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/media-operator-cli:buildcache,mode=max,ignore-error=true"] : []
-}
-
-target "observatory-operator" {
-  context    = "observatory-operator"
-  dockerfile = "Dockerfile"
-  platforms  = ["linux/amd64"]
-  contexts = {
-    "kubernetes" = "kubernetes"
-    "notices" = "notices"
-  }
-  args = {
-    VERSION = VERSION
-  }
-  tags       = ["ghcr.io/liken-sh/observatory-operator:${VERSION}"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/observatory-operator:buildcache"]
-  cache-to   = CACHE_WRITE == "observatory-operator" ? ["type=registry,ref=ghcr.io/liken-sh/observatory-operator:buildcache,mode=max,ignore-error=true"] : []
-}
-
-target "observatory-operator-cli" {
-  context    = "observatory-operator"
-  dockerfile = "Dockerfile.cli"
-  platforms  = ["linux/amd64"]
-  contexts = {
-    "kubernetes" = "kubernetes"
-    "notices" = "notices"
-    "trust" = "target:trust"
-  }
-  args = {
-    VERSION = VERSION
-  }
-  tags       = ["ghcr.io/liken-sh/observatory-operator-cli:${VERSION}"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/observatory-operator-cli:buildcache"]
-  cache-to   = CACHE_WRITE == "observatory-operator-cli" ? ["type=registry,ref=ghcr.io/liken-sh/observatory-operator-cli:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "people-operator" {

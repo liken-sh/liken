@@ -1,0 +1,16 @@
+# The coverage profile the gate measures. CI writes it on every run and
+# reads it once; it never belongs to the tree.
+/coverage.out
+
+# The coverage report that `make coverage-report` draws for the site.
+/coverage.html
+
+# The binary that `go build` writes here.
+/astrophotography-operator
+
+# Hugo's build output. The workflow and a workstation both write the
+# site here, and the lock file guards a single hugo process against a
+# second one in the same source tree.
+/docs/dist/
+/docs/.hugo_build.lock
+/docs/public/
