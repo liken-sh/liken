@@ -8,10 +8,9 @@ weight: 10
 A `Target` states what you want to image: an object, where it is on
 the sky, and the frames you want of it. It lasts as long as the work
 does, across as many nights as it takes, so you declare it once and
-reserve the telescope as often as the sky allows. The operator does
-not image yet. This page gives what the fields mean and what the
-operator will do with them, so the target you write today stays
-valid when imaging arrives. [`Target`](/docs/reference/targets/)
+reserve the telescope as often as the sky allows. This page gives what
+the fields mean, and [Imaging](/docs/concepts/imaging/) gives what the
+operator does with them on a night. [`Target`](/docs/reference/targets/)
 lists every field.
 
 ```yaml
@@ -40,11 +39,12 @@ spec:
 
 There is no session resource. A `Reservation` of
 `observatory-operator` whose `spec.holder` is
-`astrophotography-operator` will image the targets of its own
+`astrophotography-operator` images the targets of its own
 namespace: the target with the highest `priority` first, then the
 oldest. A target is eligible when `suspend` is not `true`, its
-`Complete` condition is not `True`, no other reservation images it,
-and its `opticalTrain` is one of the session's trains. A target with
+`Complete` condition is not `True`, a sequence has work left, no other
+reservation images it, and its `opticalTrain` is one of the session's
+trains. A target with
 no `opticalTrain` can be imaged on any telescope whose session has
 exactly one imaging camera. A target finds its reservations, so you
 never edit a target for a new night.
@@ -60,29 +60,29 @@ right ascension in hours as `HH:MM:SS.s`, and the declination in
 degrees as `±DD:MM:SS.s`. The API server refuses any other form, so a
 right ascension in decimal hours never reads as degrees. An INDI mount
 takes coordinates at the equinox of the date, which differ from J2000
-by about 20 arcminutes for M42 in 2026. The operator will convert
-them before each slew.
+by about 20 arcminutes for M42 in 2026. The operator converts them
+before each slew.
 
 ## Sequences, and how frames count
 
 Each sequence is a filter, an exposure, a count, and optionally the
 binning, the gain, and the offset. A field you leave out leaves the
 camera's own value, so a camera with no gain property works. The
-operator will expose the first sequence that has work left until it
-has none, and then the next, because a change of filter costs a
-refocus on a real rig.
+operator exposes the first sequence that has work left until it has
+none, and then the next, because a change of filter costs a refocus
+on a real rig.
 
-A frame will count toward a sequence by its FITS header: the same
-filter, exposure, binning, gain, and offset. So you can reorder or
-extend the sequences, and the frames that still match keep counting.
-`status.sequences` will show `archived`, the frames in the archive's
+A frame counts toward a sequence by its settings: the same filter,
+exposure, binning, gain, and offset. So you can reorder or extend the
+sequences, and the frames that still match keep counting.
+`status.sequences` shows `archived`, the frames in the archive's
 catalog, and `pending`, the frames that wait in an outbox. The work
 left is `count - archived - pending`, so a target can end with more
 frames than it asked for when a promotion lags, and never with fewer.
 
 ## The archive and the file names
 
-The camera will write each frame once, into the reservation's outbox
+The camera writes each frame once, into the reservation's outbox
 on the machine at the pier, under its final name. The operator then
 moves it to `spec.archive`: a claim of yours, and a directory in it.
 `archive.claimName` cannot change after you create the target,
@@ -105,7 +105,7 @@ lists the fields of a line.
 
 ## FITS keywords
 
-Every frame will carry the keywords of `observatory-operator`'s
+Every frame carries the keywords of `observatory-operator`'s
 levels, then the target's `fitsKeywords`, then two that this operator
 writes: `OBJECT`, from `spec.object`, and `FRAMEID`, the frame's
 identity, a UUIDv7. The API server refuses `OBJECT` and `FRAMEID` in
@@ -120,5 +120,5 @@ explains the levels.
 | Condition | `True` | `False` reasons |
 |---|---|---|
 | `Complete` | every sequence has at least its count archived | `WorkLeft` |
-| `Imaging` | a reservation images the target; the reason is `Slewing`, `Centering`, `Guiding`, or `Exposing` | `Waiting`, `Suspended`, `SequencesDone`, `NoTrain`, `NoFilter`, `SlewFailed`, `CenteringFailed`, `GuidingFailed`, `OutboxFull` |
+| `Imaging` | a reservation images the target; the reason is `Slewing`, `Centering`, `Guiding`, or `Exposing` | `Waiting`, `Suspended`, `SequencesDone`, `NoTrain`, `NoFilter`, `SlewFailed`, `CenteringFailed`, `GuidingFailed`, `OutboxFull`, `ExposureFailed` |
 | `ArchiveAvailable` | the last promotion succeeded | `ClaimMissing`, `Unschedulable`, `CopyFailed`, `VerifyFailed`, `NameConflict` |

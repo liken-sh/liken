@@ -9,9 +9,9 @@ description: "Install astrophotography-operator beside observatory-operator on a
 This guide installs `astrophotography-operator` on a
 [`liken`](https://liken.sh/docs/) cluster that runs
 `observatory-operator`, checks that the operator runs and holds its
-`Lease`, and declares a first `Target`. The operator does not image
-yet, so at the end the API server checks your targets and the
-operator watches them, and no telescope moves.
+`Lease`, and declares a first `Target`. No telescope moves until you
+reserve one for the operator, which
+[Image a target](/docs/guides/image-a-target/) does.
 
 You need:
 

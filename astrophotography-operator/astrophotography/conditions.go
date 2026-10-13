@@ -39,6 +39,11 @@ const (
 	ReasonCenteringFailed = "CenteringFailed"
 	ReasonGuidingFailed   = "GuidingFailed"
 	ReasonOutboxFull      = "OutboxFull"
+	// ReasonExposureFailed says that the last exposure gave no frame:
+	// the driver answered Alert, did not finish in time, or saved the
+	// frame under another name. The runner keeps the target and tries
+	// the next frame after a wait.
+	ReasonExposureFailed = "ExposureFailed"
 )
 
 // The reasons of ArchiveAvailable.

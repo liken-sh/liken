@@ -68,7 +68,7 @@ const (
 
 // promote runs the promotion loop until ctx ends.
 func (o *operator) promote(ctx context.Context) {
-	p := &promotions{operator: o, versions: memo.New(), started: map[string]bool{}, metrics: newPromotionMetrics(o.metrics)}
+	p := &promotions{operator: o, versions: o.targetVersions, started: map[string]bool{}, metrics: newPromotionMetrics(o.metrics)}
 	retry := firstRetry
 	for {
 		wake := o.changed.wait()

@@ -66,7 +66,13 @@ every change: the `Target`s and `Solver`s, the `Reservation`s whose
 `spec.holder` is `astrophotography-operator`, the kinds of
 `observatory-operator` that the runner reads, and the pods,
 `Service`s, `Deployment`s, and `Job`s the operator creates, and every
-`PersistentVolumeClaim`. `promotion.go` is the loop of plan 03, which
+`PersistentVolumeClaim`. `runners.go` starts the runner of plan 01
+for each `Ready` reservation (`runner.go`): it chooses and claims a
+target (`selection.go`), slews (`slew.go`), exposes each frame
+(`exposure.go`, `framesaved.go`), counts it into the target's status
+(`counting.go`), and finishes a frame in flight after a restart
+(`resume.go`). `steps.go` holds the seams of guiding and centering.
+`promotion.go` is the loop of plan 03, which
 starts the promotion `Job`s and applies their reports
 (`promotionstatus.go`), and `outboxfinalizer.go` keeps the finalizer
 on the outbox claims. `metrics.go` holds the registry and the listener

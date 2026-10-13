@@ -70,6 +70,8 @@ type fakeAPI struct {
 	absent map[string]bool
 	// recorded holds the Events that the operator writes.
 	recorded eventstest.Events
+	// objectHooks script the status writes (fakewrites_test.go).
+	objectHooks
 }
 
 func startFakeAPI(t *testing.T) *fakeAPI {

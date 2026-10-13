@@ -29,6 +29,9 @@ func (a *fakeAPI) serveObject(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	path, namespace, name, status := m[1]+"/"+m[3], m[2], m[4], m[5] != ""
+	if r.Method == http.MethodPut && status && a.refuseStatus(w, r, path, namespace+"/"+name) {
+		return true
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if _, held := a.collections[path]; !held || (name == "") != (r.Method == http.MethodPost) {

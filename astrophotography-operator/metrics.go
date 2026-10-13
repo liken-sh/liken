@@ -52,6 +52,9 @@ type metrics struct {
 	reconcileDuration *prometheus.HistogramVec
 	reconcileErrors   *prometheus.CounterVec
 	watchRestarts     *prometheus.CounterVec
+
+	// runner holds the runner's series of layer 3 (runnermetrics.go).
+	runner *runnerMetrics
 }
 
 // newMetrics builds the registry. release is the release that the
@@ -101,6 +104,7 @@ func newMetrics(release string) *metrics {
 	for _, w := range watches() {
 		m.watchRestarts.WithLabelValues(w.kind)
 	}
+	m.runner = newRunnerMetrics(m.registry)
 	return m
 }
 

@@ -2,8 +2,9 @@
 
 Proposed and designed on 2026-10-12. Pieces B and D of stage 1 were
 built on 2026-10-12, and [what they built](#what-b-and-d-built) lists
-them with each deviation. Piece F of stage 2 was built on 2026-10-12,
-and [what F built](#what-f-built) lists it the same way. The rest is
+them with each deviation. Pieces E and F of stage 2 were built on
+2026-10-12, and [what E built](#what-e-built) and
+[what F built](#what-f-built) list them the same way. The rest is
 not built. This plan builds
 first: it gives the component that plans 01, 02, and 03 build into,
 the changes they need from `observatory-operator`, the order of the
@@ -430,6 +431,85 @@ Open after F:
   finalizer stays.
 - **A deleted `Target`** takes its status, so the finalizer comes off
   its outbox claims while its frames are still in them.
+
+## What E built
+
+Piece E, the runner of plan 01 with no guiding and no centering, was
+built on 2026-10-12, after F, and counts frames into F's seam.
+
+- **The runner.** `runners.go` starts one runner for each
+  `Reservation` of this operator whose phase is `Ready` with a
+  session, and stops it when the phase changes. The runner keeps one
+  INDI connection open, with a backoff of 1 second that doubles to a
+  minute. It finishes the frames in flight of its reservation, claims
+  the eligible target by plan 01's order with a write that states the
+  `resourceVersion` it read, and then syncs the devices, slews, and
+  exposes one frame at a time in plan 01's order of writes:
+  `UPLOAD_MODE`, `UPLOAD_SETTINGS`, `CCD_FRAME_TYPE`, the binning,
+  gain, and offset that the sequence states, `FILTER_SLOT`, and
+  `FITS_HEADER` with `INDI_CLEAR` first and `FRAMEID` last. Each frame
+  is named with `promote.Name` and counted in the one status write of
+  F's seam. When the reservation leaves `Ready`, the supervisor stops
+  the runner and clears `status.reservation` and `status.exposure` of
+  its targets, with `Imaging` `False` and `Waiting`. A runner that the
+  operator's own stop ends keeps both, so the next leader finishes the
+  frame in flight.
+- **The seams for H and I** are in `steps.go`: `guiding.stop` before
+  the slew, `centering.center` after it, `guiding.start` before the
+  first frame, and `guiding.afterFrame` after each counted frame with
+  the count of frames, where a dither goes. Each answers how it guided
+  or centered, for the `Imaging` message. E's implementations do
+  nothing and say `unguided, not centered`. The operator holds one of
+  each, so H and I replace them in `newOperator`.
+- **The series** of layer 3 are `astrophotography_frames_exposed_total`
+  and `astrophotography_exposure_failures_total`, by namespace and
+  target, and `astrophotography_frame_preparation_seconds`.
+- **The tests** run the operator against the fake API server, the
+  telescope, CCD, and filter wheel simulators of `indi/inditest`, a
+  fake camera that plays each exposure, and a fake worker. They cover
+  the order of the writes, the selection order and a lost race for a
+  claim, a restart during an exposure and after it, a cut connection,
+  the end of a reservation during an exposure, a slew, and a check of
+  the file, a frame the driver does not finish, saves elsewhere, or
+  does not save, a full outbox, and the faults of the worker, the
+  mount, and the API server.
+
+The deviations, each with its reason:
+
+- **The saved message comes first.** A probe of the pinned
+  `indi-simulators` image on 2026-10-12 recorded `[INFO] Image saved
+  to <path>` before `CCD_EXPOSURE` turned `Ok`, which plan 01 left
+  open. The runner listens before it exposes and checks the path. A
+  driver that sends no message within 5 seconds of `Ok` is checked
+  against the worker's list of the outbox.
+- **A new reason, `ExposureFailed`.** Plan 01 names no reason for an
+  exposure that gives no frame: an `Alert`, no end within the exposure
+  plus 2 minutes, a file under another name, or a worker that does not
+  answer. The runner keeps the claim, sets `Imaging` `False` with
+  `ExposureFailed`, aborts an exposure that did not end, and tries the
+  next frame after a minute. `Imaging` stays `False` until a frame
+  counts, so a failure that repeats posts one `Warning`.
+- **A failed target is skipped by its reservation** until a person
+  edits it: `NoFilter` and `SlewFailed` release the target, and the
+  runner holds the target's generation in memory so it does not claim
+  it again at once. A restart of the operator, or a new reservation,
+  tries it once more.
+- **The runner syncs each device** with the INDI client's `Sync` once
+  at the start of a target's work. A test met a mount whose
+  `TELESCOPE_PARK` arrived after `EQUATORIAL_EOD_COORD` on a new
+  connection, and the runner read it as unparked.
+- **The mount settles for 5 seconds** after it reports the end of a
+  slew, because no frame is guided yet.
+- **No recount of `pending` from the worker's list at a start.** The
+  status survives a restart, and `status.exposure` counts the frame in
+  flight once, so the list is read only for that frame. F's reports
+  correct `pending` from the outbox.
+- **The worker does not run yet.** It is G's. Until it does, the
+  runner's check of the outbox's space fails and every exposure ends
+  with `ExposureFailed`, and the manual says so.
+- **`promotion.go` shares the operator's memo of `Target`s**
+  (`targetVersions`), so the runner and the promotion loop each read
+  a copy at least as new as the other's last write.
 
 ## The drill of the first session
 
