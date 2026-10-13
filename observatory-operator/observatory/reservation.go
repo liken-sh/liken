@@ -80,13 +80,20 @@ const (
 	StepActivation   StepName = "Activation"
 	StepStartGuider  StepName = "StartGuider"
 
-	StepAbort        StepName = "Abort"
+	StepStopWork     StepName = "StopWork"
 	StepDeactivation StepName = "Deactivation"
 	StepStopGuider   StepName = "StopGuider"
 	StepDisconnect   StepName = "Disconnect"
 	StepStopDevices  StepName = "StopDevices"
 	StepPowerOff     StepName = "PowerOff"
 	StepStopSite     StepName = "StopSite"
+
+	// StepStoredAbort is the name that an earlier operator gave
+	// StepStopWork. A stored reservation can still hold it, so the CRD
+	// accepts it: a Released reservation keeps its steps, and each
+	// update of that reservation validates them again. The runner
+	// reads it as StepStopWork and never writes it.
+	StepStoredAbort StepName = "Abort"
 )
 
 // ActivationSteps run in this order. Plan 07 states what each one
@@ -100,7 +107,7 @@ var ActivationSteps = []StepName{
 
 // DeactivationSteps run in this order, after spec.end or a delete.
 var DeactivationSteps = []StepName{
-	StepAbort, StepDeactivation, StepStopGuider, StepDisconnect, StepStopDevices,
+	StepStopWork, StepDeactivation, StepStopGuider, StepDisconnect, StepStopDevices,
 	StepPowerOff, StepStopSite,
 }
 

@@ -36,7 +36,7 @@ goes on.
 | `Configure` | Writes each setting that a device's spec states, such as a camera's gain and offset and the filter names, once for the reservation. It also writes the settings that the tree decides: the observatory's location and the `DOME_POLICY` to the mount, the location to the GPS, each camera's `ACTIVE_DEVICES` from its train, the tube's focal length and aperture, the upload settings of each camera that mounts the [outbox](#the-outbox), and the [FITS keywords](/docs/concepts/fits-keywords/) of each imaging camera. It then relays the dome's park state to the mount, before a procedure unparks it. | 2 min |
 | `Activation` | Runs the activation procedures, from the top of the tree down: the `Observatory`'s and its devices', unless another reservation in the observatory ran them, then the `Telescope`'s and its devices', then those of the devices of its trains. [Procedures](/docs/concepts/procedures/) states what they do. | none: each action's timeout |
 | `StartGuider` | Starts the guider's pod, waits for PHD2's event server, sends `set_connected`, and waits until PHD2 reports its camera and mount connected. A telescope with no `Guider` skips it. | 10 min |
-| `Abort` | Stops PHD2's exposures and guiding with `stop_capture`, then ends each exposure and stops the mount if it moves. | 2 min |
+| `StopWork` | Stops what the equipment still does, at every end of a reservation: PHD2's exposures and guiding with `stop_capture`, then each exposure, and the mount if it moves. At a normal end it often stops only PHD2, and it is `Skipped` when nothing runs. | 2 min |
 | `Deactivation` | Runs the deactivation procedures, from the bottom of the tree up: those of the devices of the telescope's trains, then the `Telescope`'s own devices' and its own. When the last telescope in the observatory ends, it then runs the observatory's devices' and the `Observatory`'s own. Every device is still connected. | none: each action's timeout |
 | `StopGuider` | Deletes the guider's pod, `Service`, and `ConfigMap`, while its camera and mount are still connected. | 2 min |
 | `Disconnect` | Disconnects the devices in the reverse order of `Connect`. | 2 min |
@@ -54,7 +54,7 @@ A step that passes its deadline, or a device that answers a change with
 Alert, fails the step, and the reservation is `Failed`. The `Ready`
 condition names the step and the device. After a failed activation
 step, the telescope stays as the steps left it, so a person can look;
-deleting the reservation runs deactivation from `Abort`. After a failed
+deleting the reservation runs deactivation from `StopWork`. After a failed
 deactivation step, the finalizer stays, because the devices may not be
 safe to power off. In both cases, this runs the failed step again:
 
@@ -390,14 +390,14 @@ its outputs off the same way, and so does a `Switch` that a person
 moves to another telescope during the session, because its pod still
 runs on the server it left. A deleted `Dome` disconnects in
 `StopSite` before the observatory's server stops. A `Guider`
-carries no finalizer either, so it is gone at once, and `Abort` finds
+carries no finalizer either, so it is gone at once, and `StopWork` finds
 its PHD2 by the guider's pod on the telescope's server, and stops it
 there.
 
 A `Telescope` that a person deletes during a session ends the
 reservation that holds it, as `spec.end` does. The deactivation steps
-run, from `Abort`, on the telescope and its devices, which stay while
-the finalizer holds them. The summary of `Abort` begins with
+run, from `StopWork`, on the telescope and its devices, which stay while
+the finalizer holds them. The summary of `StopWork` begins with
 `Telescope east was deleted`, and the `Deactivating` Event on the
 reservation ends with the same words. When the reservation is
 `Released`, the operator removes the finalizer, and the telescope is

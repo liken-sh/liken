@@ -78,6 +78,9 @@ func TestASetUpExpiresAtDawn(t *testing.T) {
 		if c.Status != observatory.ConditionFalse || c.Reason != observatory.ReasonExpired || c.Message != message {
 			t.Errorf("SetUp after dawn = %+v", c)
 		}
+		if got := w.setUpExpiryTime(observatory.TelescopeKind, "east"); !got.IsZero() {
+			t.Errorf("setUpExpiryTime after dawn = %v, want none", got)
+		}
 		if got, want := w.eventsWith(observatory.TelescopeKind, "east", observatory.ReasonExpired), []string{"Normal Expired: " + message + " x1"}; !slices.Equal(got, want) {
 			t.Errorf("Events = %v, want %v", got, want)
 		}
@@ -105,6 +108,50 @@ func TestASetUpExpiresAtItsUntil(t *testing.T) {
 		}
 	})
 }
+
+// The status writer shows when each SetUp expires in
+// status.setUpExpiryTime: at the person's setUpUntil when they wrote
+// one, else at the next astronomical dawn, and nothing while the
+// resource is not set up. The same holds on an Observatory, a
+// Telescope, and a device.
+func TestTheStatusShowsWhenASetUpExpires(t *testing.T) {
+	cases := []struct {
+		name  string
+		kind  observatory.Kind
+		up    bool
+		until func(time.Time) time.Time
+		want  func(time.Time) time.Time
+	}{
+		{"a telescope until dawn", observatory.TelescopeKind, true, noTime, labDawn},
+		{"a device until dawn", observatory.MountKind, true, noTime, labDawn},
+		{"an observatory until dawn", observatory.ObservatoryKind, true, noTime, labDawn},
+		{"a telescope until its setUpUntil", observatory.TelescopeKind, true, inTwoHours, inTwoHours},
+		{"a device until its setUpUntil", observatory.MountKind, true, inTwoHours, inTwoHours},
+		{"a telescope taken down", observatory.TelescopeKind, false, noTime, noTime},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				w := startWorld(t)
+				w.operator()
+				name := map[string]string{observatory.ObservatoryKind.Name: "lab"}[c.kind.Name]
+				name = firstNonEmpty(name, "east")
+				now := stamp()
+				w.setUp(c.kind, name, c.up, c.until(now))
+				time.Sleep(2 * statusWindow)
+				synctest.Wait()
+				if got, want := w.setUpExpiryTime(c.kind, name), c.want(now); !got.Equal(want) {
+					t.Errorf("setUpExpiryTime = %v, want %v", got, want)
+				}
+			})
+		})
+	}
+}
+
+func noTime(time.Time) time.Time { return time.Time{} }
+
+func inTwoHours(now time.Time) time.Time { return now.Add(2 * time.Hour) }
 
 // A SetUp that expired lets no new session start: the next reservation
 // waits for a person again.

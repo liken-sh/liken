@@ -151,7 +151,7 @@ func TestADriverThatLacksAPropertyIsNotedAndSkipped(t *testing.T) {
 	})
 }
 
-// Abort ends an exposure and a slew, and sends nothing to a device that
+// StopWork ends an exposure and a slew, and sends nothing to a device that
 // is idle.
 func TestAbortStopsWhatMoves(t *testing.T) {
 	t.Parallel()
@@ -326,7 +326,7 @@ func TestADeviceThatRefusesAChangeFailsItsStep(t *testing.T) {
 	}
 }
 
-// A camera whose exposure does not end when Abort asks fails Abort at
+// A camera whose exposure does not end when StopWork asks fails StopWork at
 // its deadline.
 func TestAnExposureThatDoesNotAbortFailsAbort(t *testing.T) {
 	t.Parallel()
@@ -337,8 +337,8 @@ func TestAnExposureThatDoesNotAbortFailsAbort(t *testing.T) {
 		synctest.Wait()
 		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
 		r := w.phase("east-tonight", observatory.ReservationFailed, 10*time.Minute)
-		if step := stepOf(r, observatory.StepAbort); step.State != observatory.StepFailed || step.Summary != "Timed out after 2 min: aborting Camera east-main" {
-			t.Errorf("Abort = %+v", step)
+		if step := stepOf(r, observatory.StepStopWork); step.State != observatory.StepFailed || step.Summary != "Timed out after 2 min: aborting Camera east-main" {
+			t.Errorf("StopWork = %+v", step)
 		}
 	})
 }

@@ -21,8 +21,8 @@ func TestATelescopeDeletedDuringASessionEndsItsReservation(t *testing.T) {
 		w := readyWorld(t)
 		w.api.deleteNamed(kindCollection(observatory.TelescopeKind), "east")
 		r := w.phase("east-tonight", observatory.ReservationReleased, 10*time.Minute)
-		if abort := stepOf(r, observatory.StepAbort); !strings.HasPrefix(abort.Summary, "Telescope east was deleted") {
-			t.Errorf("Abort = %q, want it to name the delete", abort.Summary)
+		if abort := stepOf(r, observatory.StepStopWork); !strings.HasPrefix(abort.Summary, "Telescope east was deleted") {
+			t.Errorf("StopWork = %q, want it to name the delete", abort.Summary)
 		}
 		w.gone(observatory.TelescopeKind, "east", time.Minute)
 		if !slices.Contains(w.indi.changes(), parkCap) {
@@ -62,8 +62,8 @@ func TestAnObservatoryDeletedDuringASessionEndsEveryReservationOfIt(t *testing.T
 		w.api.deleteNamed(kindCollection(observatory.ObservatoryKind), "lab")
 		for _, telescope := range []string{"east", "west"} {
 			r := w.phase(telescope+"-tonight", observatory.ReservationReleased, 10*time.Minute)
-			if abort := stepOf(r, observatory.StepAbort); !strings.HasPrefix(abort.Summary, "Observatory lab was deleted") {
-				t.Errorf("the Abort of %s = %q, want it to name the delete", telescope, abort.Summary)
+			if abort := stepOf(r, observatory.StepStopWork); !strings.HasPrefix(abort.Summary, "Observatory lab was deleted") {
+				t.Errorf("the StopWork of %s = %q, want it to name the delete", telescope, abort.Summary)
 			}
 		}
 		w.gone(observatory.ObservatoryKind, "lab", time.Minute)

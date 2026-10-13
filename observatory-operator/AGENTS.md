@@ -25,6 +25,16 @@ resource pages are generated from the CRDs, and `skills/` is generated
 from the guides, so run `make -C docs generate skills` after an edit to
 either.
 
+The manual installs the plugin with `liken plugins sync`, which takes
+the plugin of a release. To test a change to `cli/`, against the dev
+cluster or any other, build the plugin from the checkout with `make
+install-plugin`. It writes `kubectl-liken-observatory` into
+`$(HOME)/.local/bin`, or into the directory that `BINDIR` names, and
+kubectl finds it there when that directory is on `PATH`. The binary
+reports the version `dev`, or the one that `VERSION` names, so it
+warns that its version differs from the operator's; `--force`
+silences the warning.
+
 `make test` runs every check CI runs. `pods_test.go` holds the
 operator's pods to the properties that plan 03 measured, and
 `placement_test.go` holds the guide camera's pod on its server's node.

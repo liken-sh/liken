@@ -28,7 +28,7 @@ func TestASmallTelescopeSkipsWhatItLacks(t *testing.T) {
 			},
 			steps: []string{
 				"Wait=Done", "StartSite=Skipped", "Requires=Skipped", "PowerOn=Done", "StartDevices=Done", "Connect=Done", "Configure=Done", "Activation=Skipped", "StartGuider=Skipped",
-				"Abort=Skipped", "Deactivation=Skipped", "StopGuider=Skipped", "Disconnect=Done", "StopDevices=Done", "PowerOff=Done", "StopSite=Skipped",
+				"StopWork=Skipped", "Deactivation=Skipped", "StopGuider=Skipped", "Disconnect=Done", "StopDevices=Done", "PowerOff=Done", "StopSite=Skipped",
 			},
 		},
 		{
@@ -38,7 +38,7 @@ func TestASmallTelescopeSkipsWhatItLacks(t *testing.T) {
 			},
 			steps: []string{
 				"Wait=Done", "StartSite=Skipped", "Requires=Skipped", "PowerOn=Done", "StartDevices=Skipped", "Connect=Skipped", "Configure=Skipped", "Activation=Skipped", "StartGuider=Skipped",
-				"Abort=Skipped", "Deactivation=Skipped", "StopGuider=Skipped", "Disconnect=Skipped", "StopDevices=Skipped", "PowerOff=Done", "StopSite=Skipped",
+				"StopWork=Skipped", "Deactivation=Skipped", "StopGuider=Skipped", "Disconnect=Skipped", "StopDevices=Skipped", "PowerOff=Done", "StopSite=Skipped",
 			},
 		},
 	}

@@ -25,7 +25,7 @@ func (r *runner) deactivate(ctx context.Context) {
 		r.endUnstarted(ctx)
 		return
 	}
-	if findStep(r.status.Steps, observatory.StepAbort) == nil {
+	if findStep(r.status.Steps, observatory.StepStopWork) == nil {
 		for i := range r.status.Steps {
 			s := &r.status.Steps[i]
 			if s.State == observatory.StepPending || s.State == observatory.StepRunning {
@@ -44,7 +44,7 @@ func (r *runner) deactivate(ctx context.Context) {
 		r.o.record(r.res, string(observatory.ReservationDeactivating), message)
 	}
 	steps := map[observatory.StepName]stepFunc{
-		observatory.StepAbort:        r.abort,
+		observatory.StepStopWork:     r.stopWork,
 		observatory.StepDeactivation: r.deactivation,
 		observatory.StepStopGuider:   r.stopGuider,
 		observatory.StepDisconnect:   r.disconnect,
@@ -151,13 +151,15 @@ func (o *operator) connectedHandles(ctx context.Context, report func(string), t 
 	return out, notes
 }
 
-// abort stops PHD2, ends the exposures that run, and stops the mount if
-// it moves. A device that is idle receives nothing: the simulators answer an abort
+// stopWork stops PHD2, ends the exposures that run, and stops the mount
+// if it moves. It runs at every end of a reservation, a normal end
+// too, so its name says what it does and not that something failed.
+// A device that is idle receives nothing: the simulators answer an abort
 // of nothing with no update at all. When a person deleted the
 // telescope or its observatory, the step's summary begins with that,
 // because the reservation's own spec and metadata do not show why it
 // ended.
-func (r *runner) abort(ctx context.Context, w *stepWork) (outcome, error) {
+func (r *runner) stopWork(ctx context.Context, w *stepWork) (outcome, error) {
 	var why []string
 	if parent := heldParentDeleted(r.o.snapshot(), r.res); parent != "" {
 		why = append(why, parent+" was deleted")

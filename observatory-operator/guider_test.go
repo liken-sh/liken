@@ -173,7 +173,7 @@ func TestStartGuiderWaitsForTheGuiderPod(t *testing.T) {
 	})
 }
 
-// Abort stops PHD2 before anything else, and StopGuider deletes the
+// StopWork stops PHD2 before anything else, and StopGuider deletes the
 // guider's pod while the camera and the mount are still connected, so
 // PHD2 never sees them drop.
 func TestDeactivationStopsPHD2BeforeItsDevicesDisconnect(t *testing.T) {
@@ -203,7 +203,10 @@ func TestDeactivationStopsPHD2BeforeItsDevicesDisconnect(t *testing.T) {
 	})
 }
 
-func TestAbortNamesThePHD2ItStopped(t *testing.T) {
+// The first deactivation step stops PHD2 at the normal end of a
+// reservation too, so its name and its Event say what it did, not that
+// something failed.
+func TestStopWorkNamesThePHD2ItStopped(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
@@ -215,8 +218,11 @@ func TestAbortNamesThePHD2ItStopped(t *testing.T) {
 		w.until(time.Minute, "the Guider is not Looping", func() bool { return guider(w).Status.State == observatory.GuiderLooping })
 		time.Sleep(time.Hour)
 		r := w.phase("east-tonight", observatory.ReservationReleased, 10*time.Minute)
-		if s := stepOf(r, observatory.StepAbort); s.State != observatory.StepDone || s.Summary != "Stopped PHD2, which was Looping" {
-			t.Errorf("Abort = %+v", s)
+		if s := stepOf(r, observatory.StepStopWork); s.State != observatory.StepDone || s.Summary != "Stopped PHD2, which was Looping" {
+			t.Errorf("StopWork = %+v", s)
+		}
+		if events, want := eventMessages(w.api), "StopWork: Done in 0 s: stopped PHD2, which was Looping"; !slices.Contains(events, want) {
+			t.Errorf("no Event %q in %q", want, events)
 		}
 		if s := stepOf(r, observatory.StepStopGuider); s.State != observatory.StepDone || s.Summary != "Stopped east-guider" {
 			t.Errorf("StopGuider = %+v", s)

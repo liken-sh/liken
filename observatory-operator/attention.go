@@ -42,13 +42,14 @@ const notifyPrefix = "notify: "
 func attention(runs []observatory.ProcedureRun, stored []observatory.Condition, activeSince time.Time) (observatory.Condition, bool) {
 	activated := activeSince
 	var answered, cleared time.Time
+	var answer string
 	for _, run := range runs {
 		if run.Trigger == observatory.TriggerActivation && run.StartTime != nil && run.StartTime.After(activated) {
 			activated = *run.StartTime
 		}
 	}
 	if c, ok := conditions.Find(stored, observatory.ConditionSetUp); ok && c.Reason != observatory.ReasonExpired {
-		answered = c.LastTransitionTime
+		answered, answer = c.LastTransitionTime, personsAnswer(c)
 	}
 	held, wasCleared := conditions.Find(stored, observatory.ConditionAttentionNeeded)
 	wasCleared = wasCleared && held.Status == observatory.ConditionFalse
@@ -80,11 +81,24 @@ func attention(runs []observatory.ProcedureRun, stored []observatory.Condition, 
 	case wasCleared && !answered.After(cleared) && !activated.After(cleared):
 		return held, true
 	case answered.After(activated):
-		return condition(observatory.ConditionAttentionNeeded, observatory.ConditionFalse, observatory.ReasonAcknowledged,
-			"A person wrote SetUp after the request"), true
+		return condition(observatory.ConditionAttentionNeeded, observatory.ConditionFalse, observatory.ReasonAcknowledged, answer), true
 	}
 	return condition(observatory.ConditionAttentionNeeded, observatory.ConditionFalse, observatory.ReasonActivated,
 		"The activation began after the request"), true
+}
+
+// personsAnswer answers the message of the Acknowledged condition: the
+// message of the person's SetUp, such as "Taken down by ada", because
+// it says what the person did and who did it. A SetUp written by hand
+// can have no message, and then the message says only what was done.
+func personsAnswer(c observatory.Condition) string {
+	if c.Message != "" {
+		return sentence(c.Message)
+	}
+	if c.Status == observatory.ConditionTrue {
+		return "Set up"
+	}
+	return "Taken down"
 }
 
 // withAttention adds a resource's AttentionNeeded to its composed

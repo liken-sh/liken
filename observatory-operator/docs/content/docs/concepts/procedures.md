@@ -56,7 +56,8 @@ each open request as its message, and its transition posts a
 `Warning` Event. It turns `False` with the reason `Activated` when the
 resource's next activation begins, and with the reason `Acknowledged`
 when a person writes the resource's `SetUp` condition after the
-request, as `kubectl liken observatory take-down` does. The operator's
+request, as `kubectl liken observatory take-down` does. Its message is
+then the message of that `SetUp`, such as `Taken down by ada`. The operator's
 own expiry of `SetUp` at dawn is no answer, so it clears nothing. A
 resource that never ran a `notify` has no `AttentionNeeded`.
 

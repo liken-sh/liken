@@ -34,6 +34,9 @@ spec:
         - name: Weather
           type: string
           jsonPath: .status.weather
+        - name: Set Up Until
+          type: string
+          jsonPath: .status.setUpExpiryTime
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp

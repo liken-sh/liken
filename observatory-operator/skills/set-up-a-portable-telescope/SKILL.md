@@ -139,6 +139,25 @@ operator sets the condition `False` with the reason `Expired`, such as
 `Expired at 2026-10-13T08:44:52Z: set up by ada`, and posts one
 `Event`. Nobody has to withdraw it in the morning.
 
+The `SET UP UNTIL` column of `kubectl get` shows when the confirmation
+expires:
+
+```sh
+kubectl get telescopes -n observatory
+```
+
+```
+NAME   OBSERVATORY   PHASE   RESERVATION    HOLDER    HOST                             PORT   SET UP UNTIL           AGE
+east   lab           Ready   east-tonight   desktop   east-telescope.observatory.svc   7624   2026-10-13T08:44:52Z   12d
+```
+
+The operator writes that time into `status.setUpExpiryTime`: your
+`--until` when you gave one, and otherwise the dawn. The column is
+`<none>` while the telescope is not set up, and after the
+confirmation expires. `status.setUpUntil` holds only what you wrote,
+so it is empty when the confirmation lasts until dawn. To read the
+condition itself:
+
 ```sh
 kubectl get telescope east -n observatory \
   -o jsonpath='{.status.conditions[?(@.type=="SetUp")]}'
@@ -169,6 +188,7 @@ kubectl liken observatory take-down telescope east -n observatory
 ```
 
 `SetUp` turns `False` with the reason `TakenDown`, and
-`AttentionNeeded` turns `False` with the reason `Acknowledged`. The
+`AttentionNeeded` turns `False` with the reason `Acknowledged` and the
+message of your take-down, such as `Taken down by ada`. The
 next activation of the telescope clears `AttentionNeeded` too, with
 the reason `Activated`.

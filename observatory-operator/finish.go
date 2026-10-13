@@ -11,7 +11,7 @@ import (
 )
 
 // failed waits while a step is Failed. A failed activation step waits
-// for the reservation to end, and deactivation then runs from Abort,
+// for the reservation to end, and deactivation then runs from StopWork,
 // which stops what activation started. A failed deactivation step
 // keeps the finalizer, because the devices may not be safe to power
 // off, and the Ready and SafeToPowerOff conditions name the step. In

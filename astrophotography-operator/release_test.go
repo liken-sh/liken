@@ -14,7 +14,7 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// The reservation ends during an exposure: observatory-operator's Abort
+// The reservation ends during an exposure: observatory-operator's StopWork
 // step stops the devices. The runner stops, and the target's claim and
 // its frame in flight are cleared, with Imaging False and Waiting. The
 // frame does not count, even when the driver wrote it: the promotion
