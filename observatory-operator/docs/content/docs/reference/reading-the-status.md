@@ -5,8 +5,9 @@ weight: 20
 
 # Reading the status
 
-The operator writes every status, and no person writes one. This page
-explains the status of the devices, the telescopes and observatories,
+The operator writes every status. The one exception is the `SetUp`
+condition, which a person writes, as [Conditions](#conditions)
+describes. This page explains the status of the devices, the telescopes and observatories,
 and the reservations.
 
 ## Conditions
@@ -42,7 +43,8 @@ expires into `status.setUpExpiryTime`, which the `SET UP UNTIL`
 column of `kubectl get` shows. `AttentionNeeded` is `True` with the reason `Notified`
 while a `notify` action's request is open, and `False` with the reason
 `Activated` or `Acknowledged` once the next activation or a person's
-`SetUp` answers it. [Set up a portable
+`SetUp` answers it. The `Acknowledged` message repeats the message of
+that `SetUp`, such as `Taken down by ada`. [Set up a portable
 telescope](/docs/guides/set-up-a-portable-telescope/) uses both.
 
 ## Devices
@@ -275,7 +277,7 @@ A keyword whose value is the same and whose comment changed reads
 that side. Each change of the condition's status or reason posts one
 Event with the same reason and message, so a second edit while one
 waits posts none. A retry of a failed activation step records the
-session again from the specs, so it turns the condition `True`. A
+session again from the specs, so it turns the condition `False`. A
 moved or added device does not show here: its own `ParentFound` or
 `Ready` condition says that it waits. [The
 guider](/docs/concepts/the-guider/) states what a `Guider`'s status holds.
