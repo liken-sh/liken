@@ -237,7 +237,7 @@ spec:
   power: {switch: east, output: 1}
 ```
 
-Several devices can name one output, as they do when a USB hub sits on
+Several devices can name one output, as they do when a USB hub draws from
 one 12 V line. A resource that names another in `spec.device` takes no
 `power`, because the resource that runs its driver holds the power of
 the device.

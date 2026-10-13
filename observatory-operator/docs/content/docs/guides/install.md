@@ -68,7 +68,7 @@ The base creates:
   version, from the image `ghcr.io/liken-sh/observatory-operator-cli`.
 
 The operator watches every namespace. You choose the namespace your
-observatory lives in, and the operator runs the observatory's pods,
+observatory goes in, and the operator runs the observatory's pods,
 `Service`s, and `Job`s in that namespace, beside its resources. So
 your `ResourceQuota`, `NetworkPolicy`, Pod Security level, and RBAC
 grants in that namespace cover the observatory. Every resource of one
