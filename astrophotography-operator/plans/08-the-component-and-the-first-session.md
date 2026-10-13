@@ -88,6 +88,37 @@ tests and manual:
 5. **`AGENTS.md`** says that `indi`, `phd2`, and `observatory` have a
    second user, so a change to them runs both components' tests.
 
+Piece C was built on 2026-10-12, one commit for each change, except
+the fifth, which is in the commit of the second:
+
+- `phd2.Client` has `SetExposure(ctx, time.Duration)`, `Loop(ctx)`,
+  `FindStar(ctx) (x, y float64, err error)`, `Guide(ctx, Settle,
+  recalibrate bool)`, `Dither(ctx, amount float64, raOnly bool,
+  Settle)`, and `WaitSettled(ctx)`, which answers `nil`, an error that
+  wraps `ErrSettleFailed` with PHD2's reason, `ErrDisconnected`, or
+  `ErrNotSettling`. `Settle` is `{Pixels, Time, Timeout}`, and PHD2
+  reads the times as whole seconds, so the request rounds them up.
+  `State.Settling` records the settle. The replay of the recorded
+  session drives `loop`, `find_star`, and `guide` and checks their
+  params. No recording holds `set_exposure` or `dither`, so only the
+  fake, which follows `event_server.cpp` and `phdcontrol.cpp`, holds
+  them; the drill's step 9 is their first check against PHD2.
+- `indi/inditest` holds the transcripts, embedded, in
+  `indi/inditest/testdata/`, and the driver model of
+  `observatory-operator`'s fake servers, not the scripted replay of
+  `indi/replay_test.go`. The replay answers only the messages that the
+  recorder sent, and the runner of plan 01 writes values of its own.
+  `inditest.NewServer(t, "telescope", "ccd", "wheel")` serves the
+  simulators named, and `Hold`, `Refuse`, `Move`, `SetState`,
+  `Report`, `Message`, `Property`, `Changes`, `Cut`, and `Close`
+  script it. `Move` and then `SetState` play an exposure, and
+  `Message` the driver's message that names the saved file.
+- `Reservation` declares `.spec.holder` beside `.spec.telescope` in
+  `selectableFields`.
+- `RefusedFITSKeywords` includes `AstrophotographyFITSKeywords`,
+  `FRAMEID`, so a `Target`'s rule that takes the list refuses it
+  too.
+
 ## The scaffold
 
 - **The module** is `github.com/liken-sh/liken/astrophotography-operator`,
