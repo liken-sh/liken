@@ -95,6 +95,68 @@ func TestTheNextActivationClearsARequest(t *testing.T) {
 	})
 }
 
+// A person who takes the telescope down and sets it up again answers
+// the request, and the next activation clears it. When that activity
+// ends, the older answer is no news. The mount's deactivation runs
+// before the telescope's, so while the mount's Job runs, the telescope
+// is not Active and its notify has not asked yet. AttentionNeeded keeps
+// the reason Activated until the notify asks again, and each change
+// posts one Event.
+func TestTheEndOfAnActivityIsNoAnswer(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := startWorld(t)
+		request := "Cover the telescope and carry it in"
+		w.amend(observatory.TelescopeKind, "east", func(spec map[string]any) {
+			spec["deactivation"] = []any{map[string]any{"notify": request}}
+		})
+		attention := func() string {
+			time.Sleep(2 * statusWindow)
+			synctest.Wait()
+			c := w.conditionOn(observatory.TelescopeKind, "east", observatory.ConditionAttentionNeeded)
+			return string(c.Status) + " " + c.Reason
+		}
+		night := func(name string) {
+			w.reserve(name, map[string]any{"telescope": "east", "holder": "desktop",
+				"end": time.Now().Add(time.Hour).UTC().Format(time.RFC3339)})
+			w.phase(name, observatory.ReservationReady, 10*time.Minute)
+		}
+		night("east-tonight")
+		time.Sleep(time.Hour)
+		w.phase("east-tonight", observatory.ReservationReleased, 10*time.Minute)
+		w.setUp(observatory.TelescopeKind, "east", false, time.Time{})
+		time.Sleep(time.Minute)
+		w.setUp(observatory.TelescopeKind, "east", true, time.Time{})
+		time.Sleep(time.Minute)
+		w.amend(observatory.MountKind, "east", func(spec map[string]any) {
+			spec["deactivation"] = []any{map[string]any{"state": "Parked"},
+				map[string]any{"timeout": "1h", "job": map[string]any{"image": "busybox:1.37", "args": []any{"true"}}}}
+		})
+		night("east-again")
+		w.api.holdJobs()
+		time.Sleep(time.Hour)
+		if got := attention(); got != "False Activated" {
+			t.Errorf("AttentionNeeded while the deactivation runs = %s", got)
+		}
+		w.api.completeJob(jobNamed(t, w, "mount-east-deactivation-").Metadata.Name)
+		w.phase("east-again", observatory.ReservationReleased, 10*time.Minute)
+		if got := attention(); got != "True Notified" {
+			t.Errorf("AttentionNeeded after the second night = %s", got)
+		}
+		got := w.eventsWith(observatory.TelescopeKind, "east",
+			observatory.ReasonNotified, observatory.ReasonAcknowledged, observatory.ReasonActivated)
+		want := []string{
+			"Warning Notified: " + request + " x1",
+			"Normal Acknowledged: Taken down by stargazer x1",
+			"Normal Activated: The activation began after the request x1",
+			"Warning Notified: " + request + " x1",
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("Events = %v, want %v", got, want)
+		}
+	})
+}
+
 // at answers a pointer to a time, for the records below.
 func at(hour int) *time.Time {
 	t := time.Date(2026, 10, 12, hour, 0, 0, 0, time.UTC)
@@ -154,6 +216,9 @@ func TestAttentionClearsWhenAPersonAnswersOrTheNextActivationBegins(t *testing.T
 		{"a request before an activity with no activation run", []observatory.ProcedureRun{notified(5)}, nil, at(20),
 			"False Activated The activation began after the request"},
 		{"a request that an activity cleared before it ended", []observatory.ProcedureRun{notified(5)}, []observatory.Condition{clearedAt(20)}, nil,
+			"False Activated The activation began after the request"},
+		{"an answer before the activity that cleared the request", []observatory.ProcedureRun{notified(2)},
+			append(setUpAt(6, observatory.ReasonSetUp), clearedAt(3)), nil,
 			"False Activated The activation began after the request"},
 		{"a request after the condition cleared", []observatory.ProcedureRun{notified(21)}, []observatory.Condition{clearedAt(20)}, nil,
 			"True Notified Cover the telescope"},
