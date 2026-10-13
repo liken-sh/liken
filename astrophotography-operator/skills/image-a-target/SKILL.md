@@ -1,6 +1,6 @@
 ---
 name: image-a-target
-description: "Image a Target on a telescope that observatory-operator runs: declare the target and its claims, reserve the telescope for astrophotography-operator, follow the Imaging condition and the counts, and end the night. Use when a person wants the operator to take frames, when a target does not start, or when Imaging is False with a reason such as OutboxFull, ExposureFailed, NoFilter, or SlewFailed."
+description: "Image a Target on a telescope that observatory-operator runs: declare the target and its claims, reserve the telescope for astrophotography-operator, follow the Imaging condition and the counts, and end the night. Use when a person wants the operator to take frames, when a target does not start, or when Imaging is False with a reason such as OutboxFull, ExposureFailed, NoFilter, SlewFailed, CenteringFailed, or GuidingFailed."
 ---
 
 This skill is the guide at https://liken.sh/astrophotography/docs/guides/image-a-target/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
@@ -21,11 +21,15 @@ until promotion moves it to your archive. You need:
   answers for its free space, and the runner exposes only when the
   worker answers. [Solvers](https://liken.sh/astrophotography/docs/concepts/solvers/) says where the
   worker runs and what it needs.
+* For a centered target, a `Solver` that is `Ready`
+  ([Set up a solver](https://liken.sh/astrophotography/docs/guides/set-up-a-solver/)). Without one,
+  leave out `centering`, and the frames are taken where the slew
+  leaves the mount.
 
-The operator slews, guides with PHD2 when the telescope has a
-`Guider`, dithers when the target asks, and exposes. It does not
-center with a plate solve yet. A telescope with no `Guider` takes
-unguided frames.
+The operator slews, centers with a plate solve when the target asks,
+guides with PHD2 when the telescope has a `Guider`, dithers when the
+target asks, and exposes. A telescope with no `Guider` takes unguided
+frames.
 [Imaging](https://liken.sh/astrophotography/docs/concepts/imaging/) explains each step.
 
 ## Declare the claims and the target
@@ -69,6 +73,7 @@ spec:
   sequences:
     - {filter: Luminance, exposure: 10s, count: 3}
     - {filter: Red, exposure: 10s, count: 2}
+  centering: {solver: lab, tolerance: 30}
   archive:
     claimName: archive
     path: astro
@@ -77,7 +82,8 @@ EOF
 
 Each `filter` is a name in the filter wheel's `FILTER_NAME`. A target
 with no `opticalTrain` is imaged on a telescope with exactly one
-imaging camera.
+imaging camera. `centering` names the `Solver` and the largest error,
+in arcseconds, that counts as centered.
 
 ## Reserve the telescope
 
@@ -130,11 +136,19 @@ kubectl get target m42 -n observatory -o jsonpath='{.status.exposure.file}'
 ```
 
 `kubectl describe target m42 -n observatory` lists the transitions of
-the night as `Event`s: `Slewing`, `Guiding` when the telescope has a
-`Guider`, `Exposing`, and `SequencesDone` when the sequences have no
-work left. The reservation's own `Event`s say
-when the operator unparked the mount, found the outbox full, or had
+the night as `Event`s: `Slewing`, `Centering` when the target states
+`centering`, `Guiding` when the telescope has a `Guider`, `Exposing`,
+and `SequencesDone` when the sequences have no work left. The
+reservation's own `Event`s say when the operator unparked the mount,
+found the outbox full, imaged a target without centering it, or had
 no target to image.
+
+The result of the centering is in `status.centering`: the rounds, the
+solved center, and the error in arcseconds:
+
+```sh
+kubectl get target m42 -n observatory -o jsonpath='{.status.centering}'
+```
 
 To stop imaging a target and keep its progress, suspend it. The
 operator finishes the frame in flight and releases the target:
@@ -166,6 +180,7 @@ namespace takes the target again where it stopped.
 | `GuidingFailed` | PHD2 did not answer, found no star, refused a guide or a dither, or did not settle; the message gives PHD2's reason | Read the message. Clouds hide the star more often than anything else. The runner guides again a minute later and keeps the target. If PHD2 did not stop for a slew, the runner released the target: check PHD2 in its window or with KStars, then edit the target. |
 | `NoFilter` | a sequence names a filter the wheel does not have, or the train has no `FilterWheel` | Fix the filter's name in the target. The edit makes the target eligible again. |
 | `SlewFailed` | the mount refused to unpark, to track, or to slew, or did not stop in 10 minutes, or the coordinates do not read | Check the mount in KStars, then edit the target, or reserve again. |
+| `CenteringFailed` | no centering frame solved, the rounds ran out outside the tolerance, or the worker, the solver, the camera, or the mount failed; the message says which | Read the message and `status.centering`. A frame with no solution can need a longer `centering.exposure`, or the `Solver`'s index files do not fit the field. Edit the target to make it eligible again. |
 | `Waiting` | the reservation that imaged the target ended | Reserve the telescope again. |
 | `Suspended` | you suspended the target | Set `suspend` to `false`. |
 | `SequencesDone` | every frame the sequences want is pending or archived | Nothing. `Complete` turns `True` when promotion archives the last frame. |

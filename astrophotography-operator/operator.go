@@ -62,7 +62,7 @@ type operator struct {
 	phd2Dialer phd2.Dialer
 	// centering and guiding are the steps of plan 01's order that
 	// pieces H and I of plan 08 fill in (steps.go). Every runner takes
-	// them from here.
+	// them from here, and a test replaces them to watch the order.
 	centering centering
 	guiding   guiding
 }
@@ -73,7 +73,7 @@ func newOperator(client *apiclient.Client, recorder *events.Recorder, m *metrics
 		targetVersions: memo.New(),
 		indiDialer:     &net.Dialer{Timeout: indi.DialTimeout},
 		workerClient:   &http.Client{},
-		centering:      noCentering{},
+		centering:      plateCentering{},
 		guiding:        newPHD2Guiding(),
 		phd2Dialer:     &net.Dialer{Timeout: phd2.DialTimeout},
 	}

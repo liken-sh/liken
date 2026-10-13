@@ -83,7 +83,8 @@ type solveResult struct {
 }
 
 // errSolverNotReady is the error of a solve whose Solver does not
-// exist or is not Ready. The runner reports it as a centering failure.
+// exist or is not Ready. The runner images the target without
+// centering it (centering.go).
 var errSolverNotReady = errors.New("the Solver is not Ready")
 
 // plateSolve solves one frame. It answers an error when the Solver is

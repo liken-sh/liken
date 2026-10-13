@@ -14,11 +14,9 @@ watch the night in KStars at the same time. Each frame lands once,
 under its final name, in the reservation's outbox, and the operator
 counts it there until promotion moves it to your archive.
 
-This version slews, guides with PHD2, dithers, and exposes. It does
-not center the target with a plate solve yet, so the mount goes to the
-coordinates with no solve, and the `Imaging` condition says `not
-centered`. A `Target` that states `centering` is imaged the same way,
-and the field takes effect when centering is built.
+This version slews, centers each target that states `centering`
+with a plate solve, guides with PHD2 when the telescope has a `Guider`,
+dithers, and exposes.
 
 ## The runner of a reservation
 
@@ -74,20 +72,73 @@ the `Event` `AstrophotographyIdle`, and the runner waits for a change.
    which an INDI mount takes in `EQUATORIAL_EOD_COORD`, slew, and wait
    for the mount to report the end of the slew, and then 5 seconds
    more for the tube to settle.
-5. Guide, if the session has a `Guider`: `loop`, `find_star`, and
+5. If the target states `centering`, center it, with `Imaging` `True`
+   and the reason `Centering` ([Centering](#centering)).
+6. Guide, if the session has a `Guider`: `loop`, `find_star`, and
    `guide`, with `Imaging` `True` and the reason `Guiding`, and wait for
    PHD2's `SettleDone` ([Guiding and dithering](#guiding-and-dithering)).
-6. Take one frame of the first sequence with work left, and then the
+7. Take one frame of the first sequence with work left, and then the
    next, with `Imaging` `True` and the reason `Exposing`. After every
    `dither.every` frames, dither and wait for `SettleDone`.
-7. When no sequence has work left, release the claim. `Imaging` turns
+8. When no sequence has work left, release the claim. `Imaging` turns
    `False` with the reason `SequencesDone`, and the runner chooses the
    next target.
 
 Before each frame the runner reads the target again, so an edit takes
 effect at the next frame: new coordinates stop PHD2 and slew the mount
 again, and a target you suspend is released with the reason
-`Suspended`.
+`Suspended`. The slew for coordinates you edit during the night is not
+centered.
+
+## Centering
+
+A slew lands near the target, not on it. When a target states
+`spec.centering`, the runner centers it after the slew of each claim,
+in rounds:
+
+1. It takes a centering frame with the binning, gain, and offset of
+   the first sequence, the filter `centering.filter`, or the first
+   sequence's filter when the target names none, and the exposure
+   `centering.exposure`, 5 seconds by default. The frame gets the same
+   keywords as a light frame and its own `FRAMEID`, and lands in
+   `/outbox/<Camera>/<Reservation>/_centering/<FRAMEID>.fits`. It does
+   not count toward a sequence, and promotion never moves it.
+2. The reservation's worker finds the frame's stars, and the `Solver`
+   that `centering.solver` names solves them
+   ([Solvers](/docs/concepts/solvers/)). The hint is the target's
+   coordinates and the plate scale ±10%: 206.265 × the pixel size in
+   µm, from the camera's `CCD_INFO`, × the binning / the focal length
+   in mm of the train's `OpticalTube`. When the frame does not solve,
+   the runner takes one more at twice the exposure. The worker deletes
+   each centering frame after its solve.
+3. The error is the angle between the solved center and
+   `spec.coordinates`, both J2000. When it is at most
+   `centering.tolerance`, 30 arcseconds by default, the target is
+   centered, and the runner starts the frames.
+4. Otherwise, the runner syncs the mount to the solved center: it sets
+   `ON_COORD_SET` to `SYNC`, writes the solved center at the equinox of
+   the date to `EQUATORIAL_EOD_COORD`, and sets `ON_COORD_SET` back to
+   `TRACK`. Then it slews to the target again, waits 5 seconds for the
+   tube to settle, and starts the next round.
+
+A sync corrects where the mount reports that it points, so the slews
+to the next targets of the night land closer too. The runner converts
+both the solved center and the target with the same formulas, so an
+error of the conversion cancels.
+
+`status.centering` records the last round: the reservation, the time,
+the rounds, the solved center, the frame's rotation and plate scale,
+and the error in arcseconds. The `Imaging` condition's message names
+the error and the rounds, such as `centered within 12.3 arcseconds in
+2 rounds`.
+
+When the `Solver` is missing or not `Ready`, the runner images the
+target without centering it. The `Imaging` condition's message says
+`not centered because Solver <name> is not Ready`, and the reservation
+gets the `Warning` `AstrophotographyNotCentered`. Frames a few
+arcminutes off the target are still frames of it, and a night with no
+frames is lost. A `Solver` that turns `Ready` later centers the next
+claim of the target.
 
 ## Guiding and dithering
 
@@ -185,16 +236,16 @@ when it moves to the archive.
 | The driver answers a setting or the exposure with `Alert`, does not finish within the exposure plus 2 minutes, saves the frame under another name, or the worker does not answer | `Imaging` `False` with `ExposureFailed` and the reason in the message. The frame does not count. The runner keeps the claim and tries the next frame after a minute. An exposure that did not finish is aborted first. |
 | The sequence names a filter that the wheel does not have, or the train has no `FilterWheel` | `Imaging` `False` with `NoFilter`, and the runner releases the target |
 | The mount refuses to unpark, to track, or to slew, or does not stop within 10 minutes | `Imaging` `False` with `SlewFailed`, and the runner releases the target |
+| A centering frame does not solve at its exposure or at twice it, `centering.attempts` rounds (5 by default) end outside the tolerance, the plate scale is unknown, the worker or the solver answers an error, the camera fails the centering frame, or the mount refuses the sync | `Imaging` `False` with `CenteringFailed` and the reason in the message, and the runner releases the target |
 | The connection to the INDI server drops | The runner connects again after a backoff of 1 second that doubles up to a minute, finishes the frame in flight as after a restart, and slews again |
 | PHD2 does not answer within 30 seconds, cannot loop, finds no star, refuses a guide or a dither, or does not settle | `Imaging` `False` with `GuidingFailed` and PHD2's reason in the message. A frame that ended counts. The runner keeps the claim and guides again before the next frame, after a minute. |
 | PHD2 loses its star during an exposure | The frame counts. Unless PHD2 finds the star again on its own, the runner sends no dither and guides again before the next frame. |
 | The connection to PHD2 drops | The runner connects again with the same backoff as INDI's. The frame in flight counts and gets no dither. The next frame waits up to 30 seconds for PHD2, and guides again unless PHD2 reports that it guides. |
 | PHD2 does not stop within 30 seconds of `stop_capture` | `Imaging` `False` with `GuidingFailed`, and the runner releases the target without a slew |
 
-A target released for `NoFilter`, `SlewFailed`, or a PHD2 that did
-not stop is not taken again by the same reservation until you edit
-it. A new reservation tries it
-again.
+A target released for `NoFilter`, `SlewFailed`, `CenteringFailed`, or
+a PHD2 that did not stop is not taken again by the same reservation
+until you edit it. A new reservation tries it again.
 
 ## Restarts and the end of a reservation
 
@@ -232,3 +283,4 @@ reservation with the prefix `Astrophotography`:
 | `AstrophotographyIdle` | `Normal` | no target of the namespace is eligible |
 | `AstrophotographyUnparked` | `Normal` | the runner unparked the mount |
 | `AstrophotographyOutboxFull` | `Warning` | a target found the outbox full |
+| `AstrophotographyNotCentered` | `Warning` | the runner images a target without centering it, because its `Solver` is missing or not `Ready` |

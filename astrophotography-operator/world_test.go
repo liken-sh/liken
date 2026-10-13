@@ -99,9 +99,10 @@ func connectSimulators(t *testing.T, server *inditest.Server) {
 	}
 }
 
-// reservation is east-tonight, Ready, with the session that
-// observatory-operator records: the three devices, the outbox frames,
-// and the session's keywords for the camera.
+// readyOrNot is east-tonight in a phase, with the session that
+// observatory-operator records: the three devices, the train and its
+// tube of 480 mm, the outbox frames, and the session's keywords for
+// the camera.
 func readyOrNot(phase observatory.ReservationPhase) *observatory.Reservation {
 	return &observatory.Reservation{
 		Metadata: meta(tonight),
@@ -115,6 +116,12 @@ func readyOrNot(phase observatory.ReservationPhase) *observatory.Reservation {
 					"Camera/east-main":       {OpticalTrain: "east-imaging"},
 					"FilterWheel/east-wheel": {OpticalTrain: "east-imaging"},
 					"Mount/east-mount":       {Telescope: "east"},
+				},
+				Trains: map[string]observatory.SessionTrain{
+					"east-imaging": {OpticalTrainSpec: observatory.OpticalTrainSpec{Telescope: "east", OpticalTube: "east-refractor"}},
+				},
+				Tubes: map[string]observatory.SessionTube{
+					"east-refractor": {OpticalTubeSpec: observatory.OpticalTubeSpec{Telescope: "east", Aperture: 80, FocalLength: 480}},
 				},
 				Outbox: &observatory.Outbox{ClaimName: "frames"},
 				FITSKeywords: map[string][]observatory.FITSKeyword{

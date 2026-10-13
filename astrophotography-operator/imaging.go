@@ -1,8 +1,9 @@
 package main
 
 // The work on one claimed target (plan 01's order of operations). The
-// runner stops guiding, slews, centers, and then guides and exposes the first sequence with work left, one frame at a time, until
-// no sequence has any. Before each frame it reads the target again, so
+// runner stops guiding, slews, centers, and then guides and exposes the
+// first sequence with work left, one frame at a time, until no sequence
+// has any. Before each frame it reads the target again, so
 // a target that a person suspends, edits, or deletes changes the work
 // at the next frame, not in the middle of one.
 
@@ -122,7 +123,7 @@ func (w *work) run(ctx context.Context) error {
 	}
 	centered, err := w.r.centering.center(ctx, w)
 	if err != nil {
-		return fail(astrophotography.ReasonCenteringFailed, "%w", err)
+		return centeringFailure(err)
 	}
 	w.centered = centered
 	for ctx.Err() == nil {

@@ -3,10 +3,12 @@ package sky
 // A Target states its coordinates the way SIMBAD and KStars print them:
 // the right ascension in hours as HH:MM:SS.s and the declination in
 // degrees as ±DD:MM:SS.s (plan 01). The CRD checks the form, and these
-// read it.
+// read it. A Target's status.centering records a solved center in the
+// same form, so a person compares it with spec.coordinates by eye.
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -65,4 +67,32 @@ func sexagesimal(text string) (float64, error) {
 		return 0, fmt.Errorf("minutes and seconds are each less than 60")
 	}
 	return values[0] + values[1]/60 + values[2]/3600, nil
+}
+
+// FormatRA writes a right ascension in degrees as hours, HH:MM:SS.s,
+// rounded to a tenth of a second of time, 1.5 arcseconds at most.
+func FormatRA(degrees float64) string {
+	const day = 24 * 36000
+	tenths := int64(math.Round(degrees / 15 * 36000))
+	tenths = (tenths%day + day) % day
+	return sexagesimalText("", tenths)
+}
+
+// FormatDec writes a declination in degrees as ±DD:MM:SS.s, rounded to
+// a tenth of an arcsecond.
+func FormatDec(degrees float64) string {
+	sign := "+"
+	if degrees < 0 {
+		sign = "-"
+	}
+	tenths := int64(math.Round(math.Abs(degrees) * 36000))
+	if tenths == 0 {
+		sign = "+"
+	}
+	return sexagesimalText(sign, tenths)
+}
+
+// sexagesimalText writes a count of tenths of a second as A:MM:SS.s.
+func sexagesimalText(sign string, tenths int64) string {
+	return fmt.Sprintf("%s%02d:%02d:%02d.%d", sign, tenths/36000, tenths/600%60, tenths/10%60, tenths%10)
 }

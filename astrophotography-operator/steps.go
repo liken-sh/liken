@@ -15,9 +15,8 @@ package main
 //  4. guiding.afterFrame after each frame the runner counts, which
 //     dithers every dither.every frames and waits for SettleDone.
 //
-// guiding.go guides with PHD2. The centering here centers nothing, and
-// says so in the Imaging condition's message, so a person reads that
-// the mount went to the coordinates without a solve.
+// guiding.go guides with PHD2, and centering.go centers with a plate
+// solve.
 
 import (
 	"context"
@@ -50,11 +49,4 @@ type guiding interface {
 	// frames this reservation took of the target. An error sets
 	// Imaging False with GuidingFailed, as start's does.
 	afterFrame(ctx context.Context, w *work, frames int) error
-}
-
-// noCentering slews and does not solve.
-type noCentering struct{}
-
-func (noCentering) center(context.Context, *work) (string, error) {
-	return "not centered", nil
 }

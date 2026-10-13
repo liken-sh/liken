@@ -31,7 +31,9 @@ func starList(axy []byte) *body {
 	return &body{contentType: "application/octet-stream", data: axy}
 }
 
-// peer sends one request to a pod and decodes the JSON answer into out.
+// peer sends one request to a pod and decodes the JSON answer into
+// out. A nil out reads no answer, for a request such as the delete of a
+// centering frame, which the worker answers with no body.
 func (o *operator) peer(ctx context.Context, method, url string, b *body, out any) error {
 	var reader io.Reader
 	if b != nil {
@@ -52,6 +54,9 @@ func (o *operator) peer(ctx context.Context, method, url string, b *body, out an
 	if response.StatusCode/100 != 2 {
 		text, _ := io.ReadAll(io.LimitReader(response.Body, 1024))
 		return fmt.Errorf("%s %s: %s: %s", method, url, response.Status, strings.TrimSpace(string(text)))
+	}
+	if out == nil {
+		return nil
 	}
 	return json.NewDecoder(response.Body).Decode(out)
 }

@@ -54,16 +54,26 @@ func (w *work) slew(ctx context.Context) error {
 	if err := w.readyMount(ctx); err != nil {
 		return slewFailure(err)
 	}
+	if err := w.goTo(ctx, position); err != nil {
+		return slewFailure(err)
+	}
+	w.aimed = w.target.Spec.Coordinates
+	return nil
+}
+
+// goTo slews the mount to a J2000 position, converted to the equinox
+// of the date, and waits for the tube to settle. The mount must track
+// after a slew, which readyMount sets.
+func (w *work) goTo(ctx context.Context, position sky.Position) error {
 	jnow := sky.ToDate(position, time.Now())
 	if _, err := w.r.settle(ctx, slewTimeout, func() (indi.Sent, error) {
 		return w.r.client.SetNumbers(w.mountDevice, "EQUATORIAL_EOD_COORD", map[string]float64{"RA": jnow.RAHours(), "DEC": jnow.Dec})
 	}); err != nil {
-		return slewFailure(err)
+		return err
 	}
 	if !sleep(ctx, mountSettleTime, nil) {
 		return ctx.Err()
 	}
-	w.aimed = w.target.Spec.Coordinates
 	return nil
 }
 
