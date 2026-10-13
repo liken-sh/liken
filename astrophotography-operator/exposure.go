@@ -74,8 +74,9 @@ func (w *work) expose(ctx context.Context, index int) error {
 		return err
 	}
 	w.r.o.metrics.runner.framesExposed.WithLabelValues(t.Metadata.Namespace, t.Metadata.Name).Inc()
-	return w.r.count(t, exposure, true, w.res.Status.Session.Outbox.ClaimName,
+	_, err = w.r.count(t, exposure, true, w.res.Status.Session.Outbox.ClaimName,
 		fmt.Sprintf("Reservation %s exposes %s, %s.", w.r.name, settings, w.how))
+	return err
 }
 
 // writeFrame writes the settings of one frame, in plan 01's order: the

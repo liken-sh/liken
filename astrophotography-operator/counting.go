@@ -27,9 +27,9 @@ const failedExposureWait = time.Minute
 // status.exposure names another frame was counted already, by a runner
 // before a restart, and count leaves it alone. imaging is the message of
 // an Imaging that turns True with the reason Exposing, or empty to
-// leave the condition alone.
-func (r *runner) count(t *astrophotography.Target, e *astrophotography.Exposure, counted bool, claim, imaging string) error {
-	_, err := r.o.writeTarget(t, func(fresh *astrophotography.Target, change *statusChange) bool {
+// leave the condition alone. count answers whether its write landed.
+func (r *runner) count(t *astrophotography.Target, e *astrophotography.Exposure, counted bool, claim, imaging string) (bool, error) {
+	wrote, err := r.o.writeTarget(t, func(fresh *astrophotography.Target, change *statusChange) bool {
 		if fresh.Status.Exposure == nil || fresh.Status.Exposure.FrameID != e.FrameID {
 			return false
 		}
@@ -43,9 +43,9 @@ func (r *runner) count(t *astrophotography.Target, e *astrophotography.Exposure,
 		return true
 	})
 	if errors.Is(err, apiclient.ErrNotFound) {
-		return nil
+		return false, nil
 	}
-	return err
+	return wrote, err
 }
 
 // addPending counts one frame of the sequence at index as pending in

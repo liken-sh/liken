@@ -77,6 +77,7 @@ func TestARestartDuringAnExposureCountsTheFrameOnce(t *testing.T) {
 				if exposures != 1 || after != 2 {
 					t.Errorf("%d exposures before the restart and %d in all, want 1 and 2", exposures, after)
 				}
+				requireSample(t, scrape(t, w.o.metrics), `astrophotography_frames_exposed_total{namespace="observatory",target="m42"} 2`)
 			})
 		})
 	}
@@ -104,6 +105,7 @@ func TestARefusedCountIsCountedOnTheNextPass(t *testing.T) {
 		if got := pendingOf(w.targetNow(t, "m42").Status); !slices.Equal(got, []int32{2}) {
 			t.Errorf("pending %v, want [2]", got)
 		}
+		requireSample(t, scrape(t, w.o.metrics), `astrophotography_frames_exposed_total{namespace="observatory",target="m42"} 2`)
 	})
 }
 
@@ -136,6 +138,7 @@ func TestACutConnectionLosesNoFrame(t *testing.T) {
 				if got := len(w.worker.held()); got != 9 {
 					t.Errorf("%d frames in the outbox, want 9", got)
 				}
+				requireSample(t, scrape(t, w.o.metrics), `astrophotography_frames_exposed_total{namespace="observatory",target="m42"} 9`)
 			})
 		})
 	}

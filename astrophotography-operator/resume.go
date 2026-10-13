@@ -45,7 +45,8 @@ func (r *runner) finish(ctx context.Context, t *astrophotography.Target) error {
 	frame, err := outbox.Parse(e.File)
 	if err != nil {
 		r.logf("target %s: status.exposure names %s: %v; the frame does not count", targetName(t), e.File, err)
-		return r.count(t, e, false, "", "")
+		_, err := r.count(t, e, false, "", "")
+		return err
 	}
 	// A camera that its driver does not serve holds no exposure, so the
 	// runner waits only on a camera it can name on the server.
@@ -60,7 +61,15 @@ func (r *runner) finish(ctx context.Context, t *astrophotography.Target) error {
 	}
 	counted := slices.Contains(box.Frames, e.File)
 	r.logf("target %s: the frame %s in flight before the restart is %s", targetName(t), e.FrameID, map[bool]string{true: "in the outbox", false: "not in the outbox"}[counted])
-	return r.count(t, e, counted, r.res.Status.Session.Outbox.ClaimName, "")
+	wrote, err := r.count(t, e, counted, r.res.Status.Session.Outbox.ClaimName, "")
+	// The process that started the exposure did not count the frame in
+	// the series, because it stopped or lost the connection before the
+	// frame was saved, so the write that counts it in status counts it
+	// in the series too.
+	if wrote && counted {
+		r.o.metrics.runner.framesExposed.WithLabelValues(t.Metadata.Namespace, t.Metadata.Name).Inc()
+	}
+	return err
 }
 
 // exposureEnd answers when a frame in flight ends at the latest: its
