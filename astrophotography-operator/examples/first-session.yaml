@@ -82,6 +82,16 @@ spec:
     path: astro
     promotion: Continuous
 ---
+# The Reservation has no end, because a fixed time in this file would be
+# past on most days that someone applies it. With no end, it lasts until
+# you delete it, and the operator does not end it: after the last frame
+# the mount stays unparked and tracking. So delete it when the session's
+# frames are in the archive:
+#
+#   kubectl delete reservation east-tonight -n observatory
+#
+# For a real night, give the reservation an end near dawn, as the
+# image-a-target guide does.
 apiVersion: observatory.liken.sh/v1alpha1
 kind: Reservation
 metadata:

@@ -1,41 +1,37 @@
 ---
 title: Image a target
-weight: 20
-description: "Image a Target on a telescope that observatory-operator runs: declare the target and its claims, reserve the telescope for astrophotography-operator, follow the Imaging condition and the counts, and end the night. Use when a person wants the operator to take frames, when a target does not start, or when Imaging is False with a reason such as OutboxFull, ExposureFailed, NoFilter, SlewFailed, CenteringFailed, or GuidingFailed."
+weight: 40
+description: "Image a Target on a telescope that observatory-operator runs: create the outbox claim, reserve the telescope with holder astrophotography-operator, and follow each step of the night, from the claim of a target through the slew, the centering, the guiding, each exposure, the dither, and the promotion of each frame to the archive, by the Imaging condition, its reasons Slewing, Centering, Guiding, and Exposing, the counts in status.sequences, and the Events. Then end the night. Use when a person wants the operator to take frames, or wants to know what the operator does during a night."
 ---
 
 # Image a target
 
 At the end of this guide, a telescope takes the frames of a `Target`
-while you watch, and each frame waits in the reservation's outbox
-until promotion moves it to your archive. You need:
+while you watch, and each frame moves from the reservation's outbox to
+your archive. You see each step of the night in the target's status.
 
-* `astrophotography-operator` installed beside `observatory-operator`
-  ([Install the operator](/docs/guides/install/)), and a telescope
-  that `observatory-operator` runs, such as its example observatory of
-  INDI simulators.
-* The image `astrophotography-operator-worker` in reach of the
-  cluster. The operator starts a worker for the reservation, a pod
-  named `<reservation>-astrophotography` that mounts the outbox and
-  answers for its free space, and the runner exposes only when the
-  worker answers. [Solvers](/docs/concepts/solvers/) says where the
-  worker runs and what it needs.
-* For a centered target, a `Solver` that is `Ready`
-  ([Set up a solver](/docs/guides/set-up-a-solver/)). Without one,
-  leave out `centering`, and the frames are taken where the slew
-  leaves the mount.
+You need:
 
-The operator slews, centers with a plate solve when the target asks,
-guides with PHD2 when the telescope has a `Guider`, dithers when the
-target asks, and exposes. A telescope with no `Guider` takes unguided
-frames.
-[Imaging](/docs/concepts/imaging/) explains each step.
+* A `Target`, with its archive claim
+  ([Declare a target](/docs/guides/declare-a-target/)). This guide
+  uses `m42` in the namespace `observatory`.
+* A telescope that `observatory-operator` runs, such as the `east`
+  telescope of its example observatory of INDI simulators.
+* The image `ghcr.io/liken-sh/astrophotography-operator-worker` in
+  reach of the cluster. For each reservation, the operator starts a
+  worker beside the outbox, which reports the outbox's free space and
+  finds the stars of a centering frame. Nothing is exposed until the
+  worker answers.
+* For a target with `centering`, a `Solver` that is `Ready`
+  ([Set up a solver](/docs/guides/set-up-a-solver/)). Without one, the
+  operator images the target without centering it.
 
-## Declare the claims and the target
+## Create the outbox claim
 
-The outbox is where the camera writes each frame, and the archive is
-where the frames stay. Both are claims in the namespace of your
-observatory. This guide uses `observatory` and `local-path` claims:
+The camera writes each frame into the reservation's outbox, a claim
+close to the camera, and the operator moves it to the archive from
+there. A `local-path` claim keeps the frames on the machine at the
+pier while the night runs:
 
 ```sh
 kubectl apply -n observatory -f - <<'EOF'
@@ -48,61 +44,28 @@ spec:
   storageClassName: local-path
   resources:
     requests:
-      storage: 1Gi
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: archive
-spec:
-  accessModes: [ReadWriteOnce]
-  storageClassName: local-path
-  resources:
-    requests:
-      storage: 1Gi
----
-apiVersion: astrophotography.liken.sh/v1alpha1
-kind: Target
-metadata:
-  name: m42
-spec:
-  object: M42
-  coordinates: {ra: "05:35:17.3", dec: "-05:23:28"}
-  opticalTrain: east-imaging
-  sequences:
-    - {filter: Luminance, exposure: 10s, count: 3}
-    - {filter: Red, exposure: 10s, count: 2}
-  centering: {solver: lab, tolerance: 30}
-  archive:
-    claimName: archive
-    path: astro
+      storage: 10Gi
 EOF
 ```
 
-Each `filter` is a name in the filter wheel's `FILTER_NAME`. A target
-with no `opticalTrain` is imaged on a telescope with exactly one
-imaging camera. `centering` names the `Solver` and the largest error,
-in arcseconds, that counts as centered.
-
-The operator writes the target's progress as soon as it reads the
-target, before any reservation. `PROGRESS` counts the frames in the
-archive of the frames wanted, and `Complete` is `False` with the reason
-`WorkLeft`:
-
-```sh
-kubectl get target m42 -n observatory
-```
-
-```
-NAME   OBJECT   PROGRESS   RESERVATION   COMPLETE   AGE
-m42    M42      0/5                      False      10s
-```
+Give it room for at least a few frames of your camera. The operator
+does not expose when less than three frames' size is free. Do not use
+`ReadWriteOncePod`, because the camera, the worker, and the promotion
+`Job` all mount the claim.
 
 ## Reserve the telescope
 
-Give the telescope to the operator with a `Reservation` whose holder
-is `astrophotography-operator`, whose outbox is the claim above, and
-whose `end` is near the next dawn at your site:
+A `Reservation` gives the telescope to the operator. Three fields
+matter to this operator:
+
+* `holder` must be `astrophotography-operator`. A reservation with any
+  other holder is a person's, and the operator leaves it alone.
+* `outbox` names the claim above. A reservation with no outbox images
+  nothing.
+* `end` is when the night ends. The operator does not end a
+  reservation itself, so without an `end` the telescope stays unparked
+  and tracking after the last frame, until you delete the reservation.
+  Set it near the next dawn at your site.
 
 ```sh
 kubectl apply -n observatory -f - <<'EOF'
@@ -119,100 +82,138 @@ spec:
 EOF
 ```
 
-The operator does not end a reservation itself. When no target has
-work left, the reservation gets the `Event` `AstrophotographyIdle`,
-and the telescope stays as activation left it, with the mount
-tracking and the camera cooled, until `end` comes or you delete the
-reservation. So give each reservation an `end`.
-
-`observatory-operator` starts the devices. When the reservation is
-`Ready`, the operator claims the eligible target with the highest
-priority:
+`observatory-operator` starts the equipment, runs your activation
+procedures, and turns the reservation `Ready`. The reservation's
+`start`, its phases, and what happens to the hardware are in
+[Reserve a telescope](https://liken.sh/observatory/docs/guides/reserve-a-telescope/).
+For a telescope that a person must set up by hand first, see
+[Set up a portable telescope](https://liken.sh/observatory/docs/guides/set-up-a-portable-telescope/).
 
 ```sh
-kubectl get reservation east-tonight -n observatory
-kubectl get target m42 -n observatory
+kubectl get reservation east-tonight -n observatory -w
 ```
 
-The target's `RESERVATION` column names `east-tonight` while the
-telescope images it.
+## What happens during the night
+
+When the reservation is `Ready`, the operator works through these
+steps. The target's `Imaging` condition gives the step in its reason,
+and each change of reason posts an `Event` on the target.
+[Imaging](/docs/concepts/imaging/) gives every detail.
+
+1. **The worker starts.** The operator creates the `Deployment`
+   `east-tonight-astrophotography` beside the outbox.
+2. **The operator claims a target.** It takes the eligible target with
+   the highest priority and writes the reservation's name into the
+   target's `status.reservation`. `Imaging` turns `True` with the
+   reason `Slewing`. When no target is eligible, the reservation gets
+   the `Event` `AstrophotographyIdle`.
+3. **It slews.** It stops PHD2, unparks the mount if it is parked,
+   with the `Event` `AstrophotographyUnparked` on the reservation,
+   turns tracking on, converts the J2000 coordinates to the equinox of
+   the date, slews, and waits 5 seconds for the tube to settle.
+4. **It centers**, when the target states `centering`, with the reason
+   `Centering`. It takes a short frame, plate-solves it, syncs the
+   mount to the solved position, and slews again, until the error is
+   within the tolerance. The result is in `status.centering`.
+5. **It guides**, when the telescope has a `Guider`, with the reason
+   `Guiding`. It starts PHD2 looping, selects a star, starts guiding,
+   and waits for the star to settle. PHD2 calibrates first when it has
+   no calibration.
+6. **It exposes** one frame of the first sequence with work left, with
+   the reason `Exposing`. The camera writes the frame into the outbox,
+   at `/outbox/<Camera>/<Reservation>/<Target>/<name>.fits`, under its
+   final name. The frame in flight is in `status.exposure`. When the
+   frame is saved, the sequence's `pending` count goes up by one.
+7. **It dithers** after every `dither.every` frames, and waits for the
+   star to settle before the next frame. A dither posts no `Event`.
+8. **It moves the frames to the archive.** With the default
+   `promotion: Continuous`, each new frame starts a promotion `Job`,
+   `m42-promote-<number>`. The `Job` copies the frame, checks its
+   SHA-256, records it in the catalog, and deletes it from the outbox.
+   `pending` goes down and `archived` goes up, and the
+   `ArchiveAvailable` condition turns `True` with the reason
+   `Promoted`. With `AfterReservation`, the `Job` starts when the
+   reservation ends.
+9. **It moves on.** Steps 6 to 8 repeat until no sequence has work
+   left. Then the operator releases the target with `Imaging` `False`
+   and the reason `SequencesDone`, and returns to step 2 for the next
+   target. `Complete` turns `True` when the last frame is in the
+   archive.
 
 ## Follow the night
 
-The `Imaging` condition says what the telescope does with the target,
-and its message names the reservation and the sequence:
+Watch the targets of the namespace, with the `Imaging` reason:
 
 ```sh
-kubectl wait target/m42 -n observatory --for=condition=Imaging --timeout=10m
-kubectl get target m42 -n observatory -o jsonpath='{.status.conditions[?(@.type=="Imaging")]}'
+kubectl get targets -n observatory -o wide -w
 ```
 
-`status.sequences` counts the frames of each sequence: `pending` are
-in the outbox, and `archived` are in the archive's catalog. The frame
-in flight is in `status.exposure`:
+```
+NAME   OBJECT   PROGRESS   RESERVATION    COMPLETE   AGE   IMAGING    PRIORITY
+m42    M42      0/5        east-tonight   False      5m    Exposing   0
+```
+
+The condition's message names the reservation, the sequence, and how
+the frame is guided and centered:
+
+```sh
+kubectl get target m42 -n observatory \
+  -o jsonpath='{.status.conditions[?(@.type=="Imaging")].message}'
+```
+
+```
+Reservation east-tonight exposes Luminance 10s, guided by Guider east, centered within 12.3 arcseconds in 2 rounds.
+```
+
+The counts of each sequence, and the frame in flight:
 
 ```sh
 kubectl get target m42 -n observatory -o jsonpath='{.status.sequences}'
 kubectl get target m42 -n observatory -o jsonpath='{.status.exposure.file}'
 ```
 
-`kubectl describe target m42 -n observatory` lists the transitions of
-the night as `Event`s: `Slewing`, `Centering` when the target states
-`centering`, `Guiding` when the telescope has a `Guider`, `Exposing`,
-and `SequencesDone` when the sequences have no work left. The
-reservation's own `Event`s say when the operator unparked the mount,
-found the outbox full, imaged a target without centering it, or had
-no target to image.
+`pending` counts the frames in the outbox, and `archived` counts the
+frames in the archive's catalog.
 
-The result of the centering is in `status.centering`: the rounds, the
-solved center, the error in arcseconds, and the error of each round in
-`roundErrors`:
+The `Event`s give the history of the night. The target's `Event`s are
+the transitions of its conditions, and the reservation's `Event`s with
+the prefix `Astrophotography` are the operator's actions on the
+telescope:
 
 ```sh
-kubectl get target m42 -n observatory -o jsonpath='{.status.centering}'
+kubectl describe target m42 -n observatory
+kubectl describe reservation east-tonight -n observatory
 ```
 
-To stop imaging a target and keep its progress, suspend it. The
-operator finishes the frame in flight and releases the target:
-
-```sh
-kubectl patch target m42 -n observatory --type merge -p '{"spec":{"suspend":true}}'
-```
+You can also watch the night in KStars, connected to the telescope's
+INDI server as
+[Reserve a telescope](https://liken.sh/observatory/docs/guides/reserve-a-telescope/#connect-kstars)
+describes. The operator is one more INDI client. Do not change the
+camera's upload settings from KStars or Ekos during the night, because
+the operator then cannot find the frame, and the exposure fails.
 
 ## End the night
 
-The night ends when the reservation's `end` comes. A reservation that
-reaches its `end` stays, as `Released`, until you delete it. To end the
-night early, move `end` to now:
-
-```sh
-kubectl patch reservation east-tonight -n observatory --type merge \
-  -p "{\"spec\":{\"end\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}}"
-```
-
-Or delete the reservation, which ends the night and removes the
-reservation in one step:
+The night ends at the reservation's `end`. To end it early, delete the
+reservation:
 
 ```sh
 kubectl delete reservation east-tonight -n observatory
 ```
 
-The operator releases the target with `Imaging` `False` and the reason
-`Waiting`, and `observatory-operator` parks the mount through its
-procedures. A frame in flight does not count. If the driver wrote it
-anyway, promotion finds it in the outbox. The next reservation of the
-namespace takes the target again where it stopped.
+[Reserve a telescope](https://liken.sh/observatory/docs/guides/reserve-a-telescope/#end-the-night)
+gives what `observatory-operator` does with the equipment at the end.
 
-## When Imaging is False
+When the reservation ends, the operator stops its work and releases
+the target with `Imaging` `False` and the reason `Waiting`. The frame
+in flight does not count. If the driver saved it anyway, the next
+promotion finds it in the outbox and counts it. With
+`promotion: AfterReservation`, the promotion `Job` starts now.
 
-| Reason | What it means | What to do |
-|---|---|---|
-| `OutboxFull` | the outbox has less than three frames' size free | Wait for promotion to move frames. With `promotion: AfterReservation`, nothing frees space before the reservation ends: give the outbox more space. |
-| `ExposureFailed` | the last exposure gave no frame; the message says why | Read the message. The runner tries the next frame after a minute. A driver that saves the frame under another name means a client changed the camera's upload settings. |
-| `GuidingFailed` | PHD2 did not answer, found no star, refused a guide or a dither, or did not settle; the message gives PHD2's reason | Read the message. Clouds hide the star more often than anything else. The runner guides again a minute later and keeps the target. If PHD2 did not stop for a slew, the runner released the target: check PHD2 in its window or with KStars, then edit the target. |
-| `NoFilter` | a sequence names a filter the wheel does not have, or the train has no `FilterWheel` | Fix the filter's name in the target. The edit makes the target eligible again. |
-| `SlewFailed` | the mount refused to unpark, to track, or to slew, or did not stop in 10 minutes, or the coordinates do not read | Check the mount in KStars, then edit the target, or reserve again. |
-| `CenteringFailed` | no centering frame solved, the rounds ran out outside the tolerance, or the worker, the solver, the camera, or the mount failed; the message says which | Read the message and `status.centering`. A frame with no solution can need a longer `centering.exposure`, or the `Solver`'s index files do not fit the field. Edit the target to make it eligible again. |
-| `Waiting` | the reservation that imaged the target ended | Reserve the telescope again. |
-| `Suspended` | you suspended the target | Set `suspend` to `false`. |
-| `SequencesDone` | every frame the sequences want is pending or archived | Nothing. `Complete` turns `True` when promotion archives the last frame. |
+The target keeps its progress. The next reservation of the namespace
+takes it again where it stopped. To check the frames,
+[find and verify them](/docs/guides/find-your-frames/).
+
+When `Imaging` is `False` with a reason other than `Waiting`,
+`Suspended`, or `SequencesDone`, or a frame does not reach the
+archive, see [Troubleshoot](/docs/guides/troubleshoot/).
