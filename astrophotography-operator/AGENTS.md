@@ -71,7 +71,9 @@ for each `Ready` reservation (`runner.go`): it chooses and claims a
 target (`selection.go`), slews (`slew.go`), exposes each frame
 (`exposure.go`, `framesaved.go`), counts it into the target's status
 (`counting.go`), and finishes a frame in flight after a restart
-(`resume.go`). `steps.go` holds the seams of guiding and centering.
+(`resume.go`). `steps.go` holds the seams of guiding and centering,
+and `guider.go`, `guiding.go`, and `dither.go` guide and dither with
+PHD2.
 `promotion.go` is the loop of plan 03, which
 starts the promotion `Job`s and applies their reports
 (`promotionstatus.go`), and `outboxfinalizer.go` keeps the finalizer

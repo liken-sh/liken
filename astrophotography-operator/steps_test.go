@@ -39,7 +39,8 @@ func (s *steps) call(name string) error {
 func (s *steps) center(context.Context, *work) (string, error) {
 	return "centered by the test", s.call("center")
 }
-func (s *steps) stop(context.Context, *work) error { return s.call("stop") }
+func (s *steps) open(*runner) func(context.Context) { return func(context.Context) {} }
+func (s *steps) stop(context.Context, *work) error  { return s.call("stop") }
 func (s *steps) start(context.Context, *work) (string, error) {
 	return "guided by the test", s.call("start")
 }
@@ -54,8 +55,8 @@ func (s *steps) recorded() []string {
 }
 
 // The runner stops guiding before the slew, centers after it, starts
-// guiding before the first frame, and calls afterFrame after each frame
-// with the count of frames, where dithering goes.
+// guiding before each frame, and calls afterFrame after each frame with
+// the count of frames, where dithering goes.
 func TestTheRunnerCallsGuidingAndCenteringInPlan01sOrder(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newWorld(t)
@@ -71,14 +72,14 @@ func TestTheRunnerCallsGuidingAndCenteringInPlan01sOrder(t *testing.T) {
 			t.Errorf("Imaging says %q", imaging.Message)
 		}
 		waitUntil(t, func() bool { return w.imaging(t, "m42") == "False SequencesDone" })
-		want := []string{"stop", "center", "start", "afterFrame 1", "afterFrame 2"}
+		want := []string{"stop", "center", "start", "afterFrame 1", "start", "afterFrame 2"}
 		if got := recorded.recorded(); !slices.Equal(got, want) {
 			t.Errorf("calls %q, want %q", got, want)
 		}
 	})
 }
 
-// With no guiding and no centering, the Imaging condition says that the
+// With no Guider and no centering, the Imaging condition says that the
 // frames are unguided and the mount went to the coordinates with no
 // solve.
 func TestTheRunnerSaysItGuidesAndCentersNothing(t *testing.T) {
@@ -90,18 +91,19 @@ func TestTheRunnerSaysItGuidesAndCentersNothing(t *testing.T) {
 		w.start(t)
 		waitUntil(t, w.inFlight(t, "m42"))
 		imaging, _ := conditions.Find(w.targetNow(t, "m42").Status.Conditions, astrophotography.ConditionImaging)
-		if want := "Reservation east-tonight exposes Luminance 10s, unguided, not centered."; imaging.Message != want {
+		if want := "Reservation east-tonight exposes Luminance 10s, unguided because the telescope has no Guider, not centered."; imaging.Message != want {
 			t.Errorf("Imaging says %q, want %q", imaging.Message, want)
 		}
 	})
 }
 
-// A step that fails ends the work on the target with its reason.
+// A step that fails before the slew or in the centering ends the work
+// on the target with its reason. A failure to guide keeps the target
+// (guidingfailures_test.go).
 func TestAFailedStepFailsTheTarget(t *testing.T) {
 	cases := []struct{ step, reason string }{
 		{"stop", astrophotography.ReasonGuidingFailed},
 		{"center", astrophotography.ReasonCenteringFailed},
-		{"start", astrophotography.ReasonGuidingFailed},
 	}
 	for _, c := range cases {
 		t.Run(c.step, func(t *testing.T) {

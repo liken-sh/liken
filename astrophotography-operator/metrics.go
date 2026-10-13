@@ -55,6 +55,9 @@ type metrics struct {
 	// solve holds the series of plate solves (solvemetrics.go).
 	solve *solveMetrics
 
+	// guiding holds the series of guiding and dithering
+	// (guidingmetrics.go).
+	guiding *guidingMetrics
 	// runner holds the runner's series of layer 3 (runnermetrics.go).
 	runner *runnerMetrics
 }
@@ -108,6 +111,7 @@ func newMetrics(release string) *metrics {
 		m.watchRestarts.WithLabelValues(w.kind)
 	}
 	m.runner = newRunnerMetrics(m.registry)
+	m.guiding = newGuidingMetrics(m.registry)
 	return m
 }
 

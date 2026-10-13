@@ -39,9 +39,12 @@ const (
 
 type night struct {
 	// t is the test of the bubble the world lives in.
-	t      *testing.T
-	api    *fakeAPI
-	indi   *inditest.Server
+	t    *testing.T
+	api  *fakeAPI
+	indi *inditest.Server
+	// phd2 is the switchboard of the telescope's PHD2. Only a session
+	// that names a Guider dials it (guided).
+	phd2   *switchboard
 	worker *fakeWorker
 	o      *operator
 	// stop stops the operator, as a SIGTERM does, and waits for it.
@@ -56,6 +59,7 @@ type night struct {
 func newWorld(t *testing.T) *night {
 	w := &night{t: t, api: startFakeAPI(t), indi: inditest.NewServer(t, "telescope", "ccd", "wheel")}
 	w.worker = startFakeWorker(t)
+	w.phd2 = newSwitchboard()
 	w.put(observatoriesPath, &observatory.Observatory{Metadata: meta("lab"),
 		Spec: observatory.ObservatorySpec{Location: observatory.Location{Latitude: 51.5, Longitude: -75}}})
 	w.put(mountsPath, &observatory.Mount{Metadata: meta("east-mount"),
@@ -153,6 +157,7 @@ func (w *night) startWith(t *testing.T, dialer indi.Dialer) {
 	recorder := events.New(t.Context(), client, managedBy, events.Options{Log: io.Discard})
 	o := newOperator(client, recorder, newMetrics("dev"), testLog{t})
 	o.indiDialer = dialer
+	o.phd2Dialer = w.phd2
 	o.workerClient = w.worker.server.Client()
 	if w.configure != nil {
 		w.configure(o)

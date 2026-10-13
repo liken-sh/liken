@@ -21,8 +21,10 @@ until promotion moves it to your archive. You need:
   worker answers. [Solvers](/docs/concepts/solvers/) says where the
   worker runs and what it needs.
 
-The operator slews and exposes. It does not center with a plate solve
-and does not guide yet, so the frames are unguided.
+The operator slews, guides with PHD2 when the telescope has a
+`Guider`, dithers when the target asks, and exposes. It does not
+center with a plate solve yet. A telescope with no `Guider` takes
+unguided frames.
 [Imaging](/docs/concepts/imaging/) explains each step.
 
 ## Declare the claims and the target
@@ -127,8 +129,9 @@ kubectl get target m42 -n observatory -o jsonpath='{.status.exposure.file}'
 ```
 
 `kubectl describe target m42 -n observatory` lists the transitions of
-the night as `Event`s: `Slewing`, `Exposing`, and `SequencesDone` when
-the sequences have no work left. The reservation's own `Event`s say
+the night as `Event`s: `Slewing`, `Guiding` when the telescope has a
+`Guider`, `Exposing`, and `SequencesDone` when the sequences have no
+work left. The reservation's own `Event`s say
 when the operator unparked the mount, found the outbox full, or had
 no target to image.
 
@@ -159,6 +162,7 @@ namespace takes the target again where it stopped.
 |---|---|---|
 | `OutboxFull` | the outbox has less than three frames' size free | Wait for promotion to move frames. With `promotion: AfterReservation`, nothing frees space before the reservation ends: give the outbox more space. |
 | `ExposureFailed` | the last exposure gave no frame; the message says why | Read the message. The runner tries the next frame after a minute. A driver that saves the frame under another name means a client changed the camera's upload settings. |
+| `GuidingFailed` | PHD2 did not answer, found no star, refused a guide or a dither, or did not settle; the message gives PHD2's reason | Read the message. Clouds hide the star more often than anything else. The runner guides again a minute later and keeps the target. If PHD2 did not stop for a slew, the runner released the target: check PHD2 in its window or with KStars, then edit the target. |
 | `NoFilter` | a sequence names a filter the wheel does not have, or the train has no `FilterWheel` | Fix the filter's name in the target. The edit makes the target eligible again. |
 | `SlewFailed` | the mount refused to unpark, to track, or to slew, or did not stop in 10 minutes, or the coordinates do not read | Check the mount in KStars, then edit the target, or reserve again. |
 | `Waiting` | the reservation that imaged the target ended | Reserve the telescope again. |

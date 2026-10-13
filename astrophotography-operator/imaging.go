@@ -1,8 +1,7 @@
 package main
 
 // The work on one claimed target (plan 01's order of operations). The
-// runner stops guiding, slews, centers, starts guiding, and then
-// exposes the first sequence with work left, one frame at a time, until
+// runner stops guiding, slews, centers, and then guides and exposes the first sequence with work left, one frame at a time, until
 // no sequence has any. Before each frame it reads the target again, so
 // a target that a person suspends, edits, or deletes changes the work
 // at the next frame, not in the middle of one.
@@ -29,9 +28,10 @@ type work struct {
 	// aimed is the target's coordinates at the last slew. A person who
 	// edits them during the night moves the mount at the next frame.
 	aimed astrophotography.Coordinates
-	// how says how the frames are guided and centered, for the Imaging
-	// condition's message.
-	how string
+	// centered says how the mount was centered, and how says how the
+	// frames are guided and centered, for the Imaging condition's
+	// message.
+	centered, how string
 	// frames counts the frames this reservation took of the target, for
 	// a dither every dither.every frames.
 	frames int
@@ -124,11 +124,7 @@ func (w *work) run(ctx context.Context) error {
 	if err != nil {
 		return fail(astrophotography.ReasonCenteringFailed, "%w", err)
 	}
-	guided, err := w.r.guiding.start(ctx, w)
-	if err != nil {
-		return fail(astrophotography.ReasonGuidingFailed, "%w", err)
-	}
-	w.how = guided + ", " + centered
+	w.centered = centered
 	for ctx.Err() == nil {
 		done, err := w.next(ctx)
 		if done || err != nil {
@@ -154,16 +150,27 @@ func (w *work) next(ctx context.Context) (bool, error) {
 		return true, w.r.releaseIneligible(t)
 	}
 	if t.Spec.Coordinates != w.aimed {
+		if err := w.r.guiding.stop(ctx, w); err != nil {
+			return true, fail(astrophotography.ReasonGuidingFailed, "stopping the guiding: %w", err)
+		}
 		if err := w.slew(ctx); err != nil {
 			return true, err
 		}
 	}
+	guided, err := w.r.guiding.start(ctx, w)
+	if err != nil {
+		return false, w.guidingFailed(ctx, err)
+	}
+	w.how = guided + ", " + w.centered
 	err = w.expose(ctx, index)
 	var full *outboxFull
 	switch {
 	case err == nil:
 		w.frames++
-		return false, w.r.guiding.afterFrame(ctx, w, w.frames)
+		if err := w.r.guiding.afterFrame(ctx, w, w.frames); err != nil {
+			return false, w.guidingFailed(ctx, err)
+		}
+		return false, nil
 	case errors.As(err, &full):
 		return false, w.waitForSpace(ctx, full)
 	case errors.Is(err, errClaimLost):

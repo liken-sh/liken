@@ -5,8 +5,9 @@ built on 2026-10-12, and [what they built](#what-b-and-d-built) lists
 them with each deviation. Pieces E, F, and G of stage 2 were built
 on 2026-10-12, and [what E built](#what-e-built),
 [what F built](#what-f-built), and [what G built](#what-g-built) list
-them the same way. The rest is
-not built. This plan builds
+them the same way. Piece H of stage 3 was built on 2026-10-12, and
+[what H built](#what-h-built) lists it the same way. The rest is not
+built. This plan builds
 first: it gives the component that plans 01, 02, and 03 build into,
 the changes they need from `observatory-operator`, the order of the
 build, and the drill that proves them together.
@@ -620,6 +621,86 @@ The deviations, each with its reason:
 - **Not proved:** the pods in a cluster, a `NetworkPolicy`, and the
   header's position 6.8° from the drawn stars, which the drill checks
   on a frame of a reservation.
+
+## What H built
+
+Piece H, guiding and dithering in the runner, was built on 2026-10-12,
+after E, F, and G, against the PHD2 client of piece C.
+
+- **The connection.** Each runner whose session names a `Guider`
+  keeps one connection to PHD2 open for the whole reservation, with
+  E's backoff of 1 second that doubles to a minute. Its dialer reads
+  the `Guider`'s `status.endpoint` from the watch's store at each dial,
+  so a connection that ends follows the `Guider` to a new endpoint, and
+  a `Guider` with no endpoint yet is a failed dial. A session with more
+  than one `Guider` guides with the first by name.
+- **The steps.** Before each slew, the runner sends `stop_capture` when
+  PHD2 loops, calibrates, or guides, and waits until PHD2 reports the
+  stop. Before each frame, it checks that PHD2 guides a star that
+  settled, and when it does not, sends `loop`, waits for the first
+  guide frame, sends `find_star` and `guide` with no `recalibrate`, and
+  waits for `SettleDone`, with the `Imaging` reason `Guiding`. After
+  every `dither.every` counted frames, it sends `dither` and waits for
+  `SettleDone`. A dither posts no `Event`.
+- **The settle** is 1.5 pixels for 8 seconds with a timeout of a
+  minute, the values that `observatory-operator`'s plan 09 drill
+  settled with. The wait for a guide is bounded at 10 minutes, because
+  PHD2 calibrates first when it holds no calibration, and the drill's
+  calibration took 73 seconds.
+- **The series** of layer 3 are `astrophotography_dithers_total` and
+  `astrophotography_guiding_failures_total`, by namespace and target,
+  and `astrophotography_settle_seconds`, by operation, `guide` or
+  `dither`.
+- **The tests** run the operator against `phd2test` behind a dialer
+  that records each address and can switch to a new PHD2. They cover
+  the guide before the first frame and its settle, the wait for
+  `SettleDone`, `stop_capture` before the slew after a restart, a PHD2
+  that does not stop, the dither cadence and its params, a settle that
+  fails, no star, no camera, a refused dither, a star lost during an
+  exposure, a PHD2 that exits during an exposure, a `Guider` with no
+  endpoint, a reservation that ends during a settle, and a session
+  with no `Guider`. The total coverage is 98.3%.
+
+The deviations, each with its reason:
+
+- **The seam changed.** E's `guiding.start` ran once, before the first
+  frame. Plan 01 asks for `find_star` and `guide` again before the
+  next frame after a lost star, so `start` runs before each frame and
+  sends nothing while PHD2 guides a settled star. `guiding.open`
+  starts the runner's connection before its first step, and
+  `guiding.stop` also runs before the slew that follows an edit of the
+  coordinates. The centering seam is unchanged.
+- **`GuidingFailed` keeps the target.** Plan 01 lists the reason and
+  no policy. A cloud is the common cause, and it passes, so a failure
+  to guide or to dither sets `Imaging` `False` with `GuidingFailed`,
+  keeps the claim, and guides again before the next frame after a
+  minute, as `ExposureFailed` does. A start that retries while the
+  reason is `GuidingFailed` does not set `Guiding`, so a failure that
+  repeats posts one `Warning`. Only a PHD2 that refuses or does not
+  finish `stop_capture` within 30 seconds releases the target, because
+  the mount does not slew while PHD2 may still guide.
+- **The frames wait for the guiding.** A session with a `Guider` takes
+  no unguided frame while guiding fails. A long unguided frame trails,
+  and grading (plan 06) does not exist to discard it.
+- **A PHD2 that does not answer within 30 seconds of a slew** does not
+  stop the slew: its pulses go to the mount through the same INDI
+  server, and the guide before the next frame reports the failure.
+- **A frame with a lost star counts,** as plan 01 states, and gets no
+  dither. The guide before the next frame selects a star where it is,
+  which moves the lock position too. A dither that falls due while the
+  connection to PHD2 is down is skipped the same way.
+- **No settle fields on the `Target`.** Plan 01's `dither` has no
+  settle, and the values are constants until a drill shows a rig that
+  needs others.
+- **No `set_exposure`.** PHD2 keeps the exposure of its profile, which
+  `observatory-operator` writes.
+- **The dashboard** of the monitoring component does not show the
+  three series of guiding yet.
+
+Open after H:
+
+- **`dither` and a settle that fails** have met only the fake. The
+  drill's step 9 is their first check against PHD2.
 
 ## The drill of the first session
 
