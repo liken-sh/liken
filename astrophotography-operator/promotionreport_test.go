@@ -189,9 +189,8 @@ func TestAJobWhosePodIsGoneRunsAgain(t *testing.T) {
 		if again := decode[jobObject](api, jobsPath, observatoryNS, "m42-promote-1"); len(again.Status.Conditions) != 0 {
 			t.Errorf("the Job is %+v", again)
 		}
-		events := api.recorded.About("Target", "m42")
-		if len(events) != 1 || events[0].Reason != reasonReportLost || events[0].Type != "Normal" {
-			t.Errorf("the Events are %+v", events)
+		if got, want := targetEvents(api), []string{"Normal WorkLeft", "Normal " + reasonReportLost}; !slices.Equal(got, want) {
+			t.Errorf("the Events are %q, want %q", got, want)
 		}
 
 		finish(t, api, "m42-promote-1", &promote.Report{Totals: luminance(3)})
@@ -226,8 +225,8 @@ func TestAJobThatIsGoingIsNotDeletedAgain(t *testing.T) {
 		if got := api.writes(jobsPath); slices.Contains(got, deleted) {
 			t.Errorf("the Job writes are %v", got)
 		}
-		if events := api.recorded.About("Target", "m42"); len(events) != 0 {
-			t.Errorf("the Events are %+v", events)
+		if got, want := targetEvents(api), []string{"Normal WorkLeft"}; !slices.Equal(got, want) {
+			t.Errorf("the Events are %q, want %q", got, want)
 		}
 	})
 }

@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"slices"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -229,11 +230,20 @@ func (w *night) imaging(t *testing.T, name string) string {
 	return ""
 }
 
-// eventReasons answers the reasons of the Events about one object, in
-// order.
+// runnerEvents answers the Events about one object, in order, without
+// the Events of Complete. The promotion loop posts Complete's first
+// Event on each target in its first pass, in no fixed order with the
+// runner's, and targetprogress_test.go tests it.
+func (w *night) runnerEvents(kind, name string) []events.Event {
+	return slices.DeleteFunc(w.api.recorded.About(kind, name), func(e events.Event) bool {
+		return e.Reason == astrophotography.ReasonWorkLeft || e.Reason == astrophotography.ReasonArchived
+	})
+}
+
+// eventReasons answers the reasons of runnerEvents.
 func (w *night) eventReasons(kind, name string) []string {
 	var out []string
-	for _, e := range w.api.recorded.About(kind, name) {
+	for _, e := range w.runnerEvents(kind, name) {
 		out = append(out, e.Reason)
 	}
 	return out

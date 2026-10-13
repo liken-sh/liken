@@ -110,8 +110,8 @@ func TestATargetTheMountCannotReachFails(t *testing.T) {
 				if slews(w) != before {
 					t.Error("the runner slewed again to a target that failed")
 				}
-				events := w.api.recorded.About("Target", "m42")
-				if last := events[len(events)-1]; last.Type != "Warning" {
+				posted := w.runnerEvents("Target", "m42")
+				if last := posted[len(posted)-1]; last.Type != "Warning" {
 					t.Errorf("the last Event is %s %s %q, want a Warning", last.Type, last.Reason, last.Message)
 				}
 			})

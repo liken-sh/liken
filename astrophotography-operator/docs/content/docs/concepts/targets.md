@@ -76,7 +76,10 @@ A frame counts toward a sequence by its settings: the same filter,
 exposure, binning, gain, and offset. So you can reorder or extend the
 sequences, and the frames that still match keep counting.
 `status.sequences` shows `archived`, the frames in the archive's
-catalog, and `pending`, the frames that wait in an outbox. The work
+catalog, and `pending`, the frames that wait in an outbox. The
+operator writes it with zero counts, with `status.progress` and
+`Complete`, as soon as it reads a new target, and again after each
+edit of the sequences. The work
 left is `count - archived - pending`, so a target can end with more
 frames than it asked for when a promotion lags, and never with fewer.
 

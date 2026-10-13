@@ -96,6 +96,16 @@ func putClaim(api *fakeAPI, name string, finalizers ...any) {
 	api.put(claimsPath, claim)
 }
 
+// targetEvents answers the type and the reason of each Event about the
+// target m42, in order.
+func targetEvents(api *fakeAPI) []string {
+	var out []string
+	for _, e := range api.recorded.About("Target", "m42") {
+		out = append(out, e.Type+" "+e.Reason)
+	}
+	return out
+}
+
 func readTarget(api *fakeAPI) astrophotography.Target {
 	return decode[astrophotography.Target](api, targetsPath, observatoryNS, "m42")
 }

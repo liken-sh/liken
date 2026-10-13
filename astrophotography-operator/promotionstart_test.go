@@ -164,8 +164,8 @@ func TestAMissingArchiveClaimStartsNoJob(t *testing.T) {
 			got.Message != "the PersistentVolumeClaim archive does not exist in observatory" {
 			t.Errorf("ArchiveAvailable is %+v", got)
 		}
-		if posted := api.recorded.About("Target", "m42"); len(posted) != 1 || posted[0].Type != "Warning" {
-			t.Errorf("the Events are %+v", posted)
+		if got, want := targetEvents(api), []string{"Normal WorkLeft", "Warning ClaimMissing"}; !slices.Equal(got, want) {
+			t.Errorf("the Events are %q, want %q", got, want)
 		}
 		if job := api.get(jobsPath, observatoryNS, "m42-promote-1"); job != nil {
 			t.Error("the loop started a Job")

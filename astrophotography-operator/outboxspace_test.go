@@ -50,7 +50,7 @@ func TestAFullOutboxWithPromotionAfterTheReservation(t *testing.T) {
 		w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
 		w.start(t)
 		waitUntil(t, func() bool { return w.imaging(t, "m42") == "False OutboxFull" })
-		events := w.api.recorded.About("Target", "m42")
+		events := w.runnerEvents("Target", "m42")
 		if last := events[len(events)-1]; !strings.Contains(last.Message, "nothing frees the space before the reservation ends") {
 			t.Errorf("the Event says %q", last.Message)
 		}
@@ -83,7 +83,7 @@ func TestAWorkerThatCannotAnswerHoldsTheExposures(t *testing.T) {
 				w.playCamera(t, saves)
 				w.start(t)
 				waitUntil(t, func() bool { return w.imaging(t, "m42") == "False ExposureFailed" })
-				events := w.api.recorded.About("Target", "m42")
+				events := w.runnerEvents("Target", "m42")
 				if last := events[len(events)-1]; !strings.Contains(last.Message, c.message) {
 					t.Errorf("the Event says %q, want %q in it", last.Message, c.message)
 				}

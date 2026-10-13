@@ -11,7 +11,10 @@ package main
 // memory, and a restart of the operator loses nothing: the next pass
 // reads the same status.
 //
-// For each target, a pass does one of three things:
+// For each target, a pass first keeps status.sequences,
+// status.progress, and Complete current with the spec (progress), so a
+// target shows its progress from the moment the store holds it, before
+// any reservation claims it. Then it does one of three things:
 //
 //  1. When the target's next Job has ended, it applies the Job's report
 //     to the status (promotionstatus.go). When the Job succeeded and its
@@ -27,6 +30,7 @@ package main
 // link carries one copy at a time.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -164,6 +168,9 @@ func (p *promotions) pass() error {
 // target serves one target: the report of its next Job when that Job
 // has ended, the pod of that Job while it runs, or a new Job.
 func (p *promotions) target(t *astrophotography.Target, w world) error {
+	if err := p.progress(t); err != nil {
+		return err
+	}
 	next := applied(t) + 1
 	job, exists := w.promotionJob(t, next)
 	if !exists {
@@ -187,6 +194,21 @@ func (p *promotions) target(t *astrophotography.Target, w world) error {
 		return p.setCondition(t, archiveAvailable(conditions.False, astrophotography.ReasonUnschedulable, message))
 	}
 	return nil
+}
+
+// progress writes status.sequences, status.progress, and Complete from
+// the spec and the counts the status holds, when they differ. A new
+// target then shows 0 of its frames, and an edit of the sequences
+// changes the frames wanted before the next report.
+func (p *promotions) progress(t *astrophotography.Target) error {
+	_, err := p.settle(t, func(held *astrophotography.Target) ([]conditions.Condition, bool) {
+		before, _ := json.Marshal(held.Status)
+		alignSequences(held)
+		changed := setCondition(held, nil, completeness(held))
+		after, _ := json.Marshal(held.Status)
+		return changed, !bytes.Equal(before, after)
+	})
+	return err
 }
 
 // promotionJob answers the target's promotion Job of a number.

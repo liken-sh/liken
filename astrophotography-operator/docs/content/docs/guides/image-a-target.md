@@ -84,6 +84,20 @@ with no `opticalTrain` is imaged on a telescope with exactly one
 imaging camera. `centering` names the `Solver` and the largest error,
 in arcseconds, that counts as centered.
 
+The operator writes the target's progress as soon as it reads the
+target, before any reservation. `PROGRESS` counts the frames in the
+archive of the frames wanted, and `Complete` is `False` with the reason
+`WorkLeft`:
+
+```sh
+kubectl get target m42 -n observatory
+```
+
+```
+NAME   OBJECT   PROGRESS   RESERVATION   COMPLETE   AGE
+m42    M42      0/5                      False      10s
+```
+
 ## Reserve the telescope
 
 Give the telescope to the operator with a `Reservation` whose holder

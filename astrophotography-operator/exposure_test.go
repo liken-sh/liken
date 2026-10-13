@@ -147,7 +147,7 @@ func TestAnExposureThatGivesNoFrameDoesNotCount(t *testing.T) {
 					t.Errorf("exposure %+v, reservation %q, pending %v; want none, %s, [0]", status.Exposure, status.Reservation, pendingOf(status), tonight)
 				}
 				requireSample(t, scrape(t, w.o.metrics), `astrophotography_exposure_failures_total{namespace="observatory",target="m42"} 1`)
-				events := w.api.recorded.About("Target", "m42")
+				events := w.runnerEvents("Target", "m42")
 				if last := events[len(events)-1]; last.Type != "Warning" || last.Reason != astrophotography.ReasonExposureFailed {
 					t.Errorf("the last Event is %s %s, want a Warning ExposureFailed", last.Type, last.Reason)
 				}
