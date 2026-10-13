@@ -537,7 +537,7 @@ jobs:
       packages: write
 
   astrophotography-operator:
-    needs: [plan]
+    needs: [plan, astrometry]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['astrophotography-operator'].check }}
     uses: ./.github/workflows/component-astrophotography-operator.yaml
     with:
@@ -552,7 +552,7 @@ jobs:
       packages: write
 
   astrophotography-operator-publish:
-    needs: [plan, astrophotography-operator, indi, kubernetes, notices, observatory-operator, trust, vulkan, weston]
+    needs: [plan, astrophotography-operator, astrometry, indi, kubernetes, notices, observatory-operator, trust, vulkan, weston]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['astrophotography-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-astrophotography-operator.yaml
     with:

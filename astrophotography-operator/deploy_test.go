@@ -50,8 +50,8 @@ func TestTheBaseAppliesEveryManifestInLikenSystem(t *testing.T) {
 	}
 }
 
-// deployment reads the operator's Deployment from deploy/operator.yaml.
-type deployment struct {
+// operatorDeployment reads the operator's Deployment from deploy/operator.yaml.
+type operatorDeployment struct {
 	Spec struct {
 		Replicas int `json:"replicas"`
 		Strategy struct {
@@ -106,7 +106,7 @@ func manifest(t *testing.T, file, kind string, into any) {
 // name the Lease and its holder.
 func TestTheDeploymentRollsOverToACopyThatWaits(t *testing.T) {
 	t.Parallel()
-	var d deployment
+	var d operatorDeployment
 	manifest(t, "operator.yaml", "Deployment", &d)
 	strategy := d.Spec.Strategy
 	if d.Spec.Replicas != 1 || strategy.Type != "RollingUpdate" ||

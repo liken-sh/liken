@@ -40,7 +40,9 @@ type ExtractRequest struct {
 type Hint struct {
 	// Center is the expected center, J2000, in degrees.
 	Center sky.Position `json:"center"`
-	// Radius is how far from Center to search, in degrees.
+	// Radius is how far from Center to search, in degrees. A radius of
+	// 0 writes no position into the .axy, so the solver searches the
+	// whole sky: a blind solve.
 	Radius float64 `json:"radius"`
 	// ScaleLow and ScaleHigh bound the plate scale, in arcseconds per
 	// pixel.
@@ -53,7 +55,8 @@ type Hint struct {
 type ExtractAnswer struct {
 	// AXY is the .axy file that solve-field --just-augment wrote, a few
 	// kilobytes, which the operator carries to the solver as it is. JSON
-	// carries it in base64.
+	// carries it in base64. It is empty when SourceExtractor found no
+	// star, because a list of no stars cannot solve.
 	AXY []byte `json:"axy"`
 	// Stars counts the stars that SourceExtractor found.
 	Stars int32 `json:"stars"`

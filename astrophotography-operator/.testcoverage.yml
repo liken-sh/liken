@@ -20,17 +20,17 @@ exclude:
     - ^main\.go$
 
 threshold:
-  # The total covers every package. The tests measure 98.2%:
-  # astrophotography/, outbox/, and sky/ 100%, catalog/ 98.7%, promote/
-  # 96.5%, and the operator's package 98.4% of the lines the gate counts,
-  # with main.go left out. solver/ and worker/ hold only the types of
-  # their contracts, with no statement. The operator's package leaves out
+  # The total covers every package. The operator's package leaves out
   # the return of an error from the election and from the Event
   # recorder's shutdown, a list of the Targets and a Job create that the
-  # API server refuses, a status write that fails twice, and the runner's
+  # API server refuses, a status write that fails twice, the runner's
   # checks of a claim that another writer took between a read and a
-  # write. promote/
-  # and catalog/ leave out the errors of a file system that fails a sync,
-  # a stat, or a read after an open, and the fallback of a share that
-  # refuses RENAME_NOREPLACE, which tmpfs never does.
+  # write, and a few failed writes of the solver and worker loops after
+  # another write of the same pass failed. promote/ and catalog/ leave
+  # out the errors of a file system that fails a sync, a stat, or a read
+  # after an open, and the fallback of a share that refuses
+  # RENAME_NOREPLACE, which tmpfs never does. solver/ and worker/ leave
+  # out a write into a job's directory that fails after the directory
+  # was made, and a centering frame that matches and then cannot be
+  # removed. The tests measure 98.5%.
   total: 98

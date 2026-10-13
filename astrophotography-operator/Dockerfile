@@ -39,6 +39,7 @@ COPY --from=observatory observatory/*.go /observatory-operator/observatory/
 COPY *.go ./
 COPY astrophotography/*.go ./astrophotography/
 COPY catalog/*.go ./catalog/
+COPY fits/*.go ./fits/
 COPY outbox/*.go ./outbox/
 COPY promote/*.go ./promote/
 COPY sky/*.go ./sky/

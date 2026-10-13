@@ -1,0 +1,57 @@
+# The image of the solver's and the workers' pods: the operator's own
+# binary on the astrometry image, which holds astrometry-engine,
+# solve-field, and source-extractor with every library they load. The
+# operator runs the binary in its solver mode for each Solver, and in
+# its worker mode beside each reservation's outbox (plan 02). The
+# build stage is the one of Dockerfile, so both images hold the same
+# binary.
+
+FROM golang:1.27.1-bookworm AS build
+# proxy.golang.org sometimes drops a module download partway through
+# the stream. With the default comma, `go` tries the origin only when
+# the proxy answers 404 or 410, so a dropped stream fails the build.
+# With a pipe, `go` fetches the module from its origin after any proxy
+# error, with the git that this image includes. `GOSUMDB` keeps its
+# default, so the checksum database still verifies a module that `go`
+# fetched from its origin.
+ENV GOPROXY="https://proxy.golang.org|direct"
+WORKDIR /src
+# The module files come first, so a source edit reuses the cached
+# download layer.
+COPY go.mod go.sum ./
+# go.mod replaces the shared kubernetes module with ../kubernetes and
+# observatory-operator with ../observatory-operator, and the build takes
+# those directories as the build contexts named kubernetes and
+# observatory, as Dockerfile does.
+COPY --from=kubernetes go.mod go.sum /kubernetes/
+COPY --from=observatory go.mod go.sum /observatory-operator/
+RUN go mod download
+COPY --from=kubernetes . /kubernetes/
+COPY --from=observatory indi/*.go /observatory-operator/indi/
+COPY --from=observatory phd2/*.go /observatory-operator/phd2/
+COPY --from=observatory observatory/*.go /observatory-operator/observatory/
+COPY *.go ./
+COPY astrophotography/*.go ./astrophotography/
+COPY catalog/*.go ./catalog/
+COPY fits/*.go ./fits/
+COPY outbox/*.go ./outbox/
+COPY promote/*.go ./promote/
+COPY sky/*.go ./sky/
+COPY solver/*.go ./solver/
+COPY worker/*.go ./worker/
+ARG VERSION=dev
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /astrophotography-operator .
+# The license files of the Go standard library and of each module that
+# the binary links. notices/go.sh says why the image needs them. They
+# land under /usr/share/doc beside the astrometry image's own.
+COPY --from=notices go.sh /
+RUN CGO_ENABLED=0 sh /go.sh /notices .
+
+# The bake file at the top of the repository gives this build the
+# astrometry image of the same commit as the named context astrometry.
+FROM astrometry
+COPY --from=build /astrophotography-operator /astrophotography-operator
+COPY --from=build /notices /
+# The modes run the programs by their full paths, so the image needs no
+# PATH.
+ENTRYPOINT ["/astrophotography-operator"]

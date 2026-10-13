@@ -1,7 +1,8 @@
 package main
 
 // The parts of a Job, a pod, and a PersistentVolumeClaim that the
-// promotion loop reads and writes. Each is decoded from a watch's store
+// promotion loop reads and writes, and the parts of a pod that the
+// solvers' and workers' Deployments write (kube.go). Each is decoded from a watch's store
 // with runtime.DefaultUnstructuredConverter, so a field that is not
 // here costs nothing.
 
@@ -78,18 +79,21 @@ type podTemplate struct {
 }
 
 type podSpec struct {
-	RestartPolicy   string       `json:"restartPolicy,omitempty"`
-	SecurityContext *podSecurity `json:"securityContext,omitempty"`
-	Containers      []container  `json:"containers"`
-	Volumes         []volume     `json:"volumes,omitempty"`
+	RestartPolicy                 string       `json:"restartPolicy,omitempty"`
+	TerminationGracePeriodSeconds *int64       `json:"terminationGracePeriodSeconds,omitempty"`
+	EnableServiceLinks            *bool        `json:"enableServiceLinks,omitempty"`
+	AutomountServiceAccountToken  *bool        `json:"automountServiceAccountToken,omitempty"`
+	SecurityContext               *podSecurity `json:"securityContext,omitempty"`
+	Containers                    []container  `json:"containers"`
+	Volumes                       []volume     `json:"volumes,omitempty"`
 }
 
 type podSecurity struct {
 	RunAsUser           int64           `json:"runAsUser"`
 	RunAsGroup          int64           `json:"runAsGroup"`
 	RunAsNonRoot        bool            `json:"runAsNonRoot"`
-	FSGroup             int64           `json:"fsGroup"`
-	FSGroupChangePolicy string          `json:"fsGroupChangePolicy"`
+	FSGroup             int64           `json:"fsGroup,omitempty"`
+	FSGroupChangePolicy string          `json:"fsGroupChangePolicy,omitempty"`
 	SeccompProfile      *seccompProfile `json:"seccompProfile,omitempty"`
 }
 
@@ -101,8 +105,10 @@ type container struct {
 	Name            string             `json:"name"`
 	Image           string             `json:"image"`
 	Args            []string           `json:"args,omitempty"`
+	Ports           []containerPort    `json:"ports,omitempty"`
 	VolumeMounts    []volumeMount      `json:"volumeMounts,omitempty"`
 	SecurityContext *containerSecurity `json:"securityContext,omitempty"`
+	ReadinessProbe  *probe             `json:"readinessProbe,omitempty"`
 	Resources       *resources         `json:"resources,omitempty"`
 }
 
@@ -124,15 +130,18 @@ type resources struct {
 type volumeMount struct {
 	Name      string `json:"name"`
 	MountPath string `json:"mountPath"`
+	ReadOnly  bool   `json:"readOnly,omitempty"`
 }
 
 type volume struct {
 	Name                  string     `json:"name"`
 	PersistentVolumeClaim *claimName `json:"persistentVolumeClaim,omitempty"`
+	EmptyDir              *emptyDir  `json:"emptyDir,omitempty"`
 }
 
 type claimName struct {
 	ClaimName string `json:"claimName"`
+	ReadOnly  bool   `json:"readOnly,omitempty"`
 }
 
 type podObject struct {

@@ -21,11 +21,6 @@ type envVar struct {
 	Value string `json:"value"`
 }
 
-type containerPort struct {
-	Name          string `json:"name"`
-	ContainerPort int32  `json:"containerPort"`
-}
-
 // metricsContainer reads the operator's labels, its metrics port, and
 // its listener's address from deploy/operator.yaml.
 type metricsContainer struct {

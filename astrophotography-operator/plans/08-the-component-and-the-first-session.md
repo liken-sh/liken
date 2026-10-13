@@ -2,9 +2,10 @@
 
 Proposed and designed on 2026-10-12. Pieces B and D of stage 1 were
 built on 2026-10-12, and [what they built](#what-b-and-d-built) lists
-them with each deviation. Pieces E and F of stage 2 were built on
-2026-10-12, and [what E built](#what-e-built) and
-[what F built](#what-f-built) list them the same way. The rest is
+them with each deviation. Pieces E, F, and G of stage 2 were built
+on 2026-10-12, and [what E built](#what-e-built),
+[what F built](#what-f-built), and [what G built](#what-g-built) list
+them the same way. The rest is
 not built. This plan builds
 first: it gives the component that plans 01, 02, and 03 build into,
 the changes they need from `observatory-operator`, the order of the
@@ -510,6 +511,115 @@ The deviations, each with its reason:
 - **`promotion.go` shares the operator's memo of `Target`s**
   (`targetVersions`), so the runner and the promotion loop each read
   a copy at least as new as the other's last write.
+
+## What G built
+
+Piece G, the `Solver`, the `solver` and `worker` modes, and the
+client of a solve from plan 02, was built on 2026-10-12, beside F.
+
+- **The `solver` mode** (`solver/`) reads the header of every
+  `index-*.fits` in `--indexes` at its start, writes an engine
+  configuration that names each file and `cpulimit 60`, and serves
+  `GET /indexes` and `POST /solve`. A solve writes the `.axy` into a
+  new directory under `/work`, runs `astrometry-engine -c <config>
+  job.axy` there, and answers from the WCS file that the `.axy`'s
+  `ANWCS` names, or `{"solved": false}` when the engine wrote none. A
+  channel of one token runs one engine at a time, and a request whose
+  client goes away leaves the queue. Each run has a wall limit of two
+  minutes. The answer's scale and parity come from the `CD` matrix,
+  its rotation from astrometry.net's `tan_get_orientation`, and its
+  index from the comment `index id:` of the WCS file.
+- **The `worker` mode** (`worker/`) answers `POST /extract`, `GET
+  /outbox`, and `DELETE /centering/<FRAMEID>`. An extraction reads the
+  frame's `NAXIS1` and `NAXIS2`, runs `source-extractor` with the six
+  columns of plan 02 and the options of the image's smoke check, and
+  `solve-field --just-augment --no-remove-lines --uniformize 0
+  --crpix-center --cpulimit 60 -o field -D .` with the scale range
+  and, for a radius above 0, `--ra`, `--dec`, and `--radius`. The
+  median `FWHM_IMAGE` counts every detection. E's runner reads `GET
+  /outbox` for the free space and the frames (`workerclient.go`).
+- **`fits/`** reads a header and the numeric columns of a binary
+  table. The solver reads index files, `.axy` files, and WCS files
+  with it, and the worker reads frames and catalogs.
+- **The `Solver` loop** (`solvers.go`, `solverpod.go`) keeps a
+  `Deployment` of one pod, `Recreate`, and a `Service`, both
+  `<name>-solver`, with the claim mounted read-only at `/indexes`. It
+  reads the index list from the pod once for each pod's UID, when the
+  pod is `Ready`, and writes `status.endpoint`, `status.indexes`, and
+  `Ready`, with one `Event` for each transition.
+- **The worker loop** (`workers.go`) keeps `<reservation>-astrophotography`
+  for each held reservation that is `Activating` or `Ready` with
+  `status.session.outbox`, and deletes every other worker. A pod that
+  cannot start posts `AstrophotographyWorkerPending` once for each pod
+  and message.
+- **The client of a solve** (`platesolve.go`) is the entry point of
+  piece I: `o.plateSolve(ctx, solveRequest{Namespace, Reservation,
+  Solver, Frame, Center, Scale})` answers a `solveResult` with the
+  `solver.SolveAnswer`, the stars and median FWHM, and each attempt's
+  radius, star count, outcome, and time. It answers
+  `errSolverNotReady` when the `Solver` is missing or not `Ready`, and
+  an error when the worker or the solver fails. It ends at the first
+  attempt that solves, and at once for a frame with no star.
+- **The image** `astrophotography-operator-worker`, from
+  `Dockerfile.worker`, is the operator's binary on the `astrometry`
+  image, 80.8 MB. Its smoke check,
+  `smoke/astrophotography-operator-worker.sh`, runs both modes in
+  containers as the caller on a read-only root, and solves the
+  astrometry image's synthetic field over HTTP: 109 stars, solved at
+  150.000002°, 30.000009°, 2.2353 arcseconds per pixel.
+- **The series** `astrophotography_solves_total{result}` and
+  `astrophotography_solve_duration_seconds`.
+
+The smoke on the laptop ran both containers of the image with the
+lab's 13 index files of 4207 and 4208, and the frame `C_001.fits` of
+the CCD simulator, through HTTP, with the hint of the frame's header
+(35.627°, 53.820°) and the scale 2.68 ±10%. Both pods answered 0.46 s
+after `docker run`.
+
+| Attempt | Extraction | Solve | Result |
+|---|---|---|---|
+| radius 5° | 0.088 s, 1,675 stars, FWHM 4.93 pixels | 52.2 s | no solution |
+| radius 10° | 0.088 s | 0.096 s | 29.6070°, 59.8193°, 2.6815 arcseconds per pixel, rotation 180.0°, negative parity, index 4207 |
+
+Each container held under 9 MiB of memory after the solves. A probe
+of the engine with a configured `cpulimit 5` on an `.axy` whose
+`ANCLIM` was 60 logged "Decreasing CPU time limit to the engine's
+limit of 5 seconds", and gave up after 33 s of wall time; with a
+radius of 1° and the limit of 60, it gave up after 43 s. A field that
+cannot solve holds the queue for most of a minute.
+
+The deviations, each with its reason:
+
+- **A directory for each job, and the outputs of the `.axy`.**
+  `solve-field` writes `ANWCS` and the other outputs as paths under
+  its `-D` directory, so `-D /w` wrote `/w/field.wcs` into the `.axy`.
+  The worker passes `-D .`, the solver runs the engine in a new
+  directory, and it refuses an `.axy` whose outputs leave that
+  directory. Plan 02's `/work/<id>.axy` names the input alone.
+- **`spec.search` on the `Solver`,** with `radii` (default `[5, 10]`)
+  and `blind` (default `true`). Plan 02 tried one radius of 5° and
+  then twice the exposure. The frame above missed at 5° and solved at
+  10°, so the client widens the radius before the runner of piece I
+  lengthens the exposure. The setting is the `Solver`'s, because each
+  attempt that cannot solve costs that solver's queue. The CRD also
+  holds a `Solver`'s name to 56 characters, so `<name>-solver` fits a
+  `Service`.
+- **A radius of 0 is a blind solve** in `worker.Hint`, and an
+  `ExtractAnswer` with no star has an empty `axy`.
+- **`ClaimMissing` comes from the scheduler's message**
+  `persistentvolumeclaim "<name>" not found` on the solver's pod. The
+  operator watches no claims for the solver.
+- **The pod's types are F's** (`promotionobjects.go`), with the fields
+  a `Deployment`'s pod adds, and the solver and worker pods run as user
+  and group 1000, the drivers', so the worker can delete a centering
+  frame. The worker image's tag comes from F's `ownImage`, and
+  `ASTROPHOTOGRAPHY_WORKER_IMAGE` overrides it.
+- **Two readers of a FITS header.** `promote/` keeps F's, and `fits/`
+  holds G's, which also reads a binary table. Moving `promote/` to
+  `fits/` is left for a later change.
+- **Not proved:** the pods in a cluster, a `NetworkPolicy`, and the
+  header's position 6.8° from the drawn stars, which the drill checks
+  on a frame of a reservation.
 
 ## The drill of the first session
 

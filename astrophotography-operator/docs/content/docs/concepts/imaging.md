@@ -82,7 +82,11 @@ target you suspend is released with the reason `Suspended`.
 ## One frame
 
 Before each frame, the runner asks the reservation's worker for the
-free space of the outbox. With less than three frames' size free, it
+free space of the outbox. The worker is a pod that the operator starts
+beside the outbox while the reservation is `Activating` or `Ready`
+([Solvers](/docs/concepts/solvers/)), so a runner that starts before
+its worker is ready fails its first exposure with `ExposureFailed` and
+tries again a minute later. With less than three frames' size free, it
 does not expose (see [Problems during a night](#problems-during-a-night)).
 
 Then it writes every setting the frame depends on, in this order, and

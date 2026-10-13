@@ -67,6 +67,7 @@ group "default" {
     "observatory-operator",
     "observatory-operator-cli",
     "astrophotography-operator",
+    "astrophotography-operator-worker",
     "audio-operator",
     "audio-operator-cli",
     "bluetooth-operator",
@@ -538,6 +539,24 @@ target "astrophotography-operator" {
   tags       = ["ghcr.io/liken-sh/astrophotography-operator:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/astrophotography-operator:buildcache"]
   cache-to   = CACHE_WRITE == "astrophotography-operator" ? ["type=registry,ref=ghcr.io/liken-sh/astrophotography-operator:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "astrophotography-operator-worker" {
+  context    = "astrophotography-operator"
+  dockerfile = "Dockerfile.worker"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "astrometry" = "target:astrometry"
+    "kubernetes" = "kubernetes"
+    "notices" = "notices"
+    "observatory" = "observatory-operator"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/astrophotography-operator-worker:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/astrophotography-operator-worker:buildcache"]
+  cache-to   = CACHE_WRITE == "astrophotography-operator-worker" ? ["type=registry,ref=ghcr.io/liken-sh/astrophotography-operator-worker:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "audio-operator" {

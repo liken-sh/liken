@@ -64,6 +64,15 @@ The base creates:
 * the operator, a `Deployment` with one replica in `liken-system`, the
   namespace of every `liken` operator
 
+The operator then creates a `Deployment` and a `Service` for each
+`Solver`, and for each reservation it holds, in the namespace of that
+resource. Their pods run the image
+`ghcr.io/liken-sh/astrophotography-operator-worker` at the tag of the
+operator's own image, so the pin above moves both images. For an
+operator image named by digest, which has no tag, set the variable
+`ASTROPHOTOGRAPHY_WORKER_IMAGE` of the operator's `Deployment` to the
+worker image.
+
 This site also serves the [manifests](https://liken.sh/astrophotography/deploy/kustomization.yaml) as
 raw YAML, if you want to read them first or write your own.
 

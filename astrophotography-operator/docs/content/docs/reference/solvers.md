@@ -17,6 +17,7 @@ Where the index files are.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="spec--indexfiles"></span>`indexFiles` | [object](#specindexfiles) | yes | A claim, and a directory in it, that holds astrometry.net's index files. The solver reads every `index-*.fits` in the directory when its pod starts. To add index files, copy them into the directory and restart the solver's `Deployment`. |
+| <span id="spec--search"></span>`search` | [object](#specsearch) | no | How far from the expected center a solve looks. The operator asks the solver for the first radius around the position it expects. While the frame does not solve, it asks for each next radius, and then, when `blind` is `true`, for a solve of the whole sky. A field that cannot solve holds the solver for up to 60 s of CPU time at each attempt, so each attempt delays every other telescope's solve. |
 
 ### spec.indexFiles
 
@@ -26,6 +27,15 @@ A claim, and a directory in it, that holds astrometry.net's index files. The sol
 | --- | --- | --- | --- |
 | <span id="specindexfiles--claimname"></span>`claimName` | string | yes | A `PersistentVolumeClaim` in the solver's namespace. The solver's pod mounts it read-only. |
 | <span id="specindexfiles--path"></span>`path` | string | no | The directory in the claim that holds the index files. The default is the claim's root. Default: ``. |
+
+### spec.search
+
+How far from the expected center a solve looks. The operator asks the solver for the first radius around the position it expects. While the frame does not solve, it asks for each next radius, and then, when `blind` is `true`, for a solve of the whole sky. A field that cannot solve holds the solver for up to 60 s of CPU time at each attempt, so each attempt delays every other telescope's solve.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specsearch--radii"></span>`radii` | []number | no | The radius of each attempt, in degrees, in order. The default is `[5, 10]`. A frame of the CCD simulator whose header pointed 6.8° from the stars it drew did not solve at 5°, and solved at 10°. |
+| <span id="specsearch--blind"></span>`blind` | boolean | no | Whether to try a solve of the whole sky after the last radius. The default is `true`. Default: `true`. |
 
 ## status
 

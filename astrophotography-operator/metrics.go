@@ -52,6 +52,8 @@ type metrics struct {
 	reconcileDuration *prometheus.HistogramVec
 	reconcileErrors   *prometheus.CounterVec
 	watchRestarts     *prometheus.CounterVec
+	// solve holds the series of plate solves (solvemetrics.go).
+	solve *solveMetrics
 
 	// runner holds the runner's series of layer 3 (runnermetrics.go).
 	runner *runnerMetrics
@@ -92,6 +94,7 @@ func newMetrics(release string) *metrics {
 		buildInfo,
 		m.reconcileDuration, m.reconcileErrors, m.watchRestarts,
 	)
+	m.solve = newSolveMetrics(m.registry)
 
 	// Each kind publishes its counters at zero from the first scrape.
 	// Prometheus computes a rate or an increase from two readings, so a

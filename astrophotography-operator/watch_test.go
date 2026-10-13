@@ -20,7 +20,6 @@ func watching(t *testing.T, api *fakeAPI) (*stores, *bell) {
 
 const (
 	targetsPath      = "/apis/astrophotography.liken.sh/v1alpha1/targets"
-	solversPath      = "/apis/astrophotography.liken.sh/v1alpha1/solvers"
 	reservationsPath = "/apis/observatory.liken.sh/v1alpha1/reservations"
 	camerasPath      = "/apis/observatory.liken.sh/v1alpha1/cameras"
 	podsPath         = "/api/v1/pods"

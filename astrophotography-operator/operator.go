@@ -9,17 +9,21 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"sync"
+	"time"
 
 	"k8s.io/client-go/dynamic"
 
+	"github.com/liken-sh/liken/astrophotography-operator/astrophotography"
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/memo"
 	"github.com/liken-sh/liken/observatory-operator/indi"
+	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
 type operator struct {
@@ -31,6 +35,9 @@ type operator struct {
 	// logs receives the operator's log: standard error in a pod, and the
 	// test's log in a test.
 	logs io.Writer
+	// workerImage is the image of the solvers' and the workers' pods
+	// (images.go), and empty when the lead could not name it.
+	workerImage string
 
 	changed *bell
 	stores  *stores
@@ -72,9 +79,47 @@ func newOperator(client *apiclient.Client, recorder *events.Recorder, m *metrics
 func (o *operator) run(ctx context.Context, watcher dynamic.Interface) {
 	o.stores = startWatches(ctx, watcher, o.changed, o.metrics)
 	var loops sync.WaitGroup
+	solvers, workers := newSolverLoop(), newWorkerLoop()
+	loops.Go(func() {
+		o.loop(ctx, astrophotography.SolverKind.Name, func(ctx context.Context) error { return o.solverPass(ctx, solvers) })
+	})
+	loops.Go(func() {
+		o.loop(ctx, observatory.ReservationKind.Name, func(ctx context.Context) error { return o.workerPass(ctx, workers) })
+	})
 	loops.Go(func() { o.promote(ctx) })
 	loops.Go(func() { o.superviseRunners(ctx) })
 	<-ctx.Done()
 	loops.Wait()
 	o.stores.done()
+}
+
+// retryAfter is the wait before a pass that failed runs again with no
+// change to wake it: a write the API server refused, or a solver's pod
+// that did not answer its index list. It is a backoff, a clock, and
+// not a poll: a change wakes the pass sooner.
+const retryAfter = 10 * time.Second
+
+// loop runs a pass each time the bell rings, once every watch has read
+// its collection, until ctx ends. A pass that fails runs again after
+// retryAfter.
+func (o *operator) loop(ctx context.Context, kind string, pass func(context.Context) error) {
+	for {
+		rang := o.changed.wait()
+		var retry <-chan time.Time
+		if o.stores.synced() {
+			started := time.Now()
+			err := pass(ctx)
+			o.metrics.observePass(kind, time.Since(started), err != nil)
+			if err != nil {
+				fmt.Fprintf(o.logs, "%s: a pass of the %s loop: %v\n", managedBy, kind, err)
+				retry = time.After(retryAfter)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-rang:
+		case <-retry:
+		}
+	}
 }

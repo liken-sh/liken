@@ -86,6 +86,11 @@ func (p process) operate(stop context.Context) error {
 	recorder := events.New(context.Background(), client, managedBy, events.Options{Instance: p.pod, Log: p.logs})
 	o := newOperator(client, recorder, newMetrics(version), p.logs)
 	o.pod, o.namespace = p.pod, p.namespace
+	// A lead that cannot name the worker image still runs, and each
+	// Solver's Ready condition says why its pod does not start.
+	if o.workerImage, err = workerImage(client, p.namespace, p.pod); err != nil {
+		fmt.Fprintf(p.logs, "%s: %v\n", managedBy, err)
+	}
 	// Only the copy that holds the Lease serves metrics, because only
 	// that copy has series to serve. A listener that fails to open is
 	// logged and does not stop the operator's work.

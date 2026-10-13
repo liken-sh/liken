@@ -37,6 +37,10 @@ func (a *fakeAPI) serveObject(w http.ResponseWriter, r *http.Request) bool {
 	if _, held := a.collections[path]; !held || (name == "") != (r.Method == http.MethodPost) {
 		return false
 	}
+	if a.refusing && r.Method != http.MethodGet {
+		answerStatus(w, http.StatusInternalServerError, "InternalError")
+		return true
+	}
 	body, _ := io.ReadAll(r.Body)
 	var sent map[string]any
 	if len(body) > 0 && json.Unmarshal(body, &sent) != nil {

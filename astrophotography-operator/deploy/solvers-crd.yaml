@@ -50,6 +50,12 @@ spec:
             worker beside each reservation's outbox finds the stars in
             each frame.
           required: [spec]
+          # The solver's Deployment and Service take the name
+          # <name>-solver, and a Service's name is at most 63
+          # characters.
+          x-kubernetes-validations:
+            - rule: "self.metadata.name.size() <= 56"
+              message: "a Solver's name is at most 56 characters, because its Service is named <name>-solver"
           properties:
             spec:
               type: object
@@ -83,6 +89,42 @@ spec:
                       x-kubernetes-validations:
                         - rule: "!self.startsWith('/') && !self.matches('(^|/)[.][.](/|$)')"
                           message: "path is a directory inside the claim, so it cannot start with '/' or hold '..'"
+                search:
+                  type: object
+                  default: {}
+                  description: >-
+                    How far from the expected center a solve looks. The
+                    operator asks the solver for the first radius around
+                    the position it expects. While the frame does not
+                    solve, it asks for each next radius, and then, when
+                    `blind` is `true`, for a solve of the whole sky. A
+                    field that cannot solve holds the solver for up to
+                    60 s of CPU time at each attempt, so each attempt
+                    delays every other telescope's solve.
+                  properties:
+                    radii:
+                      type: array
+                      minItems: 1
+                      maxItems: 8
+                      default: [5, 10]
+                      description: >-
+                        The radius of each attempt, in degrees, in order.
+                        The default is `[5, 10]`. A frame of the CCD
+                        simulator whose header pointed 6.8° from the
+                        stars it drew did not solve at 5°, and solved at
+                        10°.
+                      items:
+                        type: number
+                        minimum: 0
+                        exclusiveMinimum: true
+                        maximum: 180
+                        description: "A radius in degrees, above 0 and at most 180."
+                    blind:
+                      type: boolean
+                      default: true
+                      description: >-
+                        Whether to try a solve of the whole sky after the
+                        last radius. The default is `true`.
             status:
               type: object
               description: "What `astrophotography-operator` reports. A person never writes it."

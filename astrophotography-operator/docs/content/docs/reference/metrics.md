@@ -37,6 +37,8 @@ listener off.
 | --- | --- | --- | --- |
 | astrophotography-operator | `astrophotography_reconcile_duration_seconds{kind}` | histogram | how long one pass of a loop took, by the kind of resource it serves: `Target`, `Solver`, or `Reservation` |
 | astrophotography-operator | `astrophotography_reconcile_errors_total{kind}` | counter | passes of a loop that failed, by the kind of resource it serves |
+| astrophotography-operator | `astrophotography_solves_total{result}` | counter | attempts to solve a frame, by their outcome: `solved`, `unsolved`, or `failed` when the worker or the solver answered an error |
+| astrophotography-operator | `astrophotography_solve_duration_seconds` | histogram | how long a solver took to answer one star list, with the wait in its queue |
 | astrophotography-operator | `astrophotography_watch_restarts_total{kind}` | counter | watches that the API server closed and the operator opened again, by kind |
 | astrophotography-operator | `liken_build_info{component, version}` | gauge | the release that the operator runs; always 1 |
 | astrophotography-operator | `astrophotography_frames_exposed_total{namespace, target}` | counter | frames that the driver saved in the outbox and the runner counted as pending, by target |
@@ -46,10 +48,11 @@ listener off.
 | astrophotography-operator | `astrophotography_promotion_bytes_total` | counter | bytes that promotion `Job`s copied from an outbox to an archive; a move within one claim copies none |
 | astrophotography-operator | `astrophotography_promotion_failures_total{reason}` | counter | frames that a promotion `Job` failed to move, by `CopyFailed`, `VerifyFailed`, or `NameConflict` |
 
-The promotion loop counts its passes under the kind `Target`, and the
-supervisor of the runners under the kind `Reservation`. The kind
-`Solver` stays at zero until its loop is built. The runner sets its
-three series when a frame is counted or fails
+The promotion loop counts its passes under the kind `Target`, the
+loop of the `Solver`s under the kind `Solver`, and the supervisor of
+the runners and the loop of the workers under the kind `Reservation`.
+The runner sets its three series when a frame is counted or fails
 ([Imaging](/docs/concepts/imaging/)). The three
 promotion series count each `Job`'s report once, when the operator
 applies it to the `Target`'s status ([The archive](/docs/concepts/archive/)).
+No centering sends a solve yet, so the two solve series stay at zero.

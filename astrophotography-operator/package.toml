@@ -10,9 +10,10 @@ license = "MIT"
 # and resource types, so a change to them runs these tests again, and
 # the tests hold the Target's FITS keywords to that operator's CRDs.
 # The image builds against the shared kubernetes module, and ships the
-# license notices that notices/ collects.
+# license notices that notices/ collects. The worker image builds on
+# the astrometry image of the same commit.
 [depends]
-components = ["kubernetes", "notices", "observatory-operator"]
+components = ["astrometry", "kubernetes", "notices", "observatory-operator"]
 
 [docs]
 prefix = "astrophotography"
@@ -55,3 +56,13 @@ deploy = "deploy"
 name = "astrophotography-operator"
 file = "Dockerfile"
 contexts = { kubernetes = "kubernetes", notices = "notices", observatory = "observatory-operator" }
+
+# The image of the solver's and the workers' pods: the same binary on
+# the astrometry image. Its smoke check extracts and solves the
+# astrometry image's synthetic field through the two modes' HTTP
+# servers.
+[[outputs.images]]
+name = "astrophotography-operator-worker"
+file = "Dockerfile.worker"
+contexts = { kubernetes = "kubernetes", notices = "notices", observatory = "observatory-operator" }
+smoke = "astrophotography-operator/smoke/astrophotography-operator-worker.sh"

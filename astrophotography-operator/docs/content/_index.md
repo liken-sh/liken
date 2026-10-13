@@ -16,8 +16,9 @@ nights, and its status keeps the count.
 
 The operator is under development. This version slews and exposes
 unguided: it does not center a target with a plate solve and does not
-guide with PHD2 yet, and it does not start the worker that answers for
-the outbox's space, so no exposure goes out until the worker arrives.
+guide with PHD2 yet. It runs the pod of each `Solver` and a worker
+beside each reservation's outbox, which together plate-solve a frame,
+and nothing sends them a frame yet.
 The design is in the
 [plans](https://github.com/liken-sh/liken/tree/main/astrophotography-operator/plans),
 and each piece joins this manual as it is built.
@@ -31,8 +32,10 @@ Start here:
   for the operator and follows the night.
 * [The archive](/docs/concepts/archive/) explains how frames move from
   the outbox to your archive, and how they are named and counted.
-* [Solvers](/docs/concepts/solvers/) explains how a frame will be
+* [Solvers](/docs/concepts/solvers/) explains how a frame is
   plate-solved, and why the index files stay in one place.
+* [Set up a solver](/docs/guides/set-up-a-solver/) loads the index
+  files into a claim and declares a `Solver`.
 
 `astrophotography-operator` is one of the extension operators for
 [running an observatory](https://liken.sh/docs/concepts/running-an-observatory/).

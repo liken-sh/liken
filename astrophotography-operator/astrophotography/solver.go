@@ -10,6 +10,21 @@ type Solver = Object[SolverSpec, SolverStatus]
 
 type SolverSpec struct {
 	IndexFiles IndexFiles `json:"indexFiles"`
+	// Search is how far from the expected center a solve looks. The CRD
+	// fills it in when a person leaves it out.
+	Search Search `json:"search,omitzero"`
+}
+
+// Search is the order of the attempts to solve one frame. The operator
+// asks for the first radius around the position it expects. While the
+// frame does not solve, it asks for each next radius, and then, when
+// Blind is true, for a solve of the whole sky. A wider search costs
+// the solver's queue more time for a frame that does not solve.
+type Search struct {
+	// Radii are the radii of the attempts, in degrees, in order.
+	Radii []float64 `json:"radii,omitempty"`
+	// Blind adds an attempt with no position after the last radius.
+	Blind bool `json:"blind,omitempty"`
 }
 
 // IndexFiles is a claim, and a directory in it, that holds index files.

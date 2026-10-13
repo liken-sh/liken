@@ -14,10 +14,12 @@ until promotion moves it to your archive. You need:
   ([Install the operator](/docs/guides/install/)), and a telescope
   that `observatory-operator` runs, such as its example observatory of
   INDI simulators.
-* The reservation's worker, the pod that answers for the outbox's
-  free space. The operator does not start the worker yet, so in this
-  version every exposure fails with `ExposureFailed` and the message
-  names the worker. The worker arrives with plate solving.
+* The image `astrophotography-operator-worker` in reach of the
+  cluster. The operator starts a worker for the reservation, a pod
+  named `<reservation>-astrophotography` that mounts the outbox and
+  answers for its free space, and the runner exposes only when the
+  worker answers. [Solvers](/docs/concepts/solvers/) says where the
+  worker runs and what it needs.
 
 The operator slews and exposes. It does not center with a plate solve
 and does not guide yet, so the frames are unguided.

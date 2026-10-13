@@ -35,8 +35,8 @@ func TestAPendingFrameStartsAPromotionJob(t *testing.T) {
 		if len(c) != 1 || c[0].Image != operatorImage || !reflect.DeepEqual(c[0].Args, wantArgs) {
 			t.Fatalf("the Job runs %+v", c)
 		}
-		wantMounts := []volumeMount{{"outbox", "/outbox"}, {"archive", "/archive"}}
-		wantVolumes := []volume{{"outbox", &claimName{"frames"}}, {"archive", &claimName{"archive"}}}
+		wantMounts := []volumeMount{{Name: "outbox", MountPath: "/outbox"}, {Name: "archive", MountPath: "/archive"}}
+		wantVolumes := []volume{{Name: "outbox", PersistentVolumeClaim: &claimName{ClaimName: "frames"}}, {Name: "archive", PersistentVolumeClaim: &claimName{ClaimName: "archive"}}}
 		if !reflect.DeepEqual(c[0].VolumeMounts, wantMounts) || !reflect.DeepEqual(job.Spec.Template.Spec.Volumes, wantVolumes) {
 			t.Errorf("the Job mounts %+v from %+v", c[0].VolumeMounts, job.Spec.Template.Spec.Volumes)
 		}

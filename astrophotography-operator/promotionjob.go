@@ -74,12 +74,12 @@ func promotionJob(t *astrophotography.Target, claim string, number, pending int3
 	encoded, _ := json.Marshal(cameras)
 	args := []string{"promote", "--target", t.Metadata.Name, "--path", t.Spec.Archive.Path, "--cameras", string(encoded)}
 	mounts := []volumeMount{{Name: outboxVolume, MountPath: outbox.Root}}
-	volumes := []volume{{Name: outboxVolume, PersistentVolumeClaim: &claimName{claim}}}
+	volumes := []volume{{Name: outboxVolume, PersistentVolumeClaim: &claimName{ClaimName: claim}}}
 	if same {
 		args = append(args, "--same-claim", "--archive", outbox.Root)
 	} else {
 		mounts = append(mounts, volumeMount{Name: archiveVolume, MountPath: promote.ArchiveRoot})
-		volumes = append(volumes, volume{Name: archiveVolume, PersistentVolumeClaim: &claimName{t.Spec.Archive.ClaimName}})
+		volumes = append(volumes, volume{Name: archiveVolume, PersistentVolumeClaim: &claimName{ClaimName: t.Spec.Archive.ClaimName}})
 	}
 	owner := ownerReference{APIVersion: astrophotography.APIVersion, Kind: astrophotography.TargetKind.Name,
 		Name: t.Metadata.Name, UID: t.Metadata.UID, Controller: true}

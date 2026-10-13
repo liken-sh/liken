@@ -70,6 +70,9 @@ type fakeAPI struct {
 	absent map[string]bool
 	// recorded holds the Events that the operator writes.
 	recorded eventstest.Events
+	// refusing makes every write to a collection answer 500, the way an
+	// API server that cannot reach etcd does (fakeobjects_test.go).
+	refusing bool
 	// objectHooks script the status writes (fakewrites_test.go).
 	objectHooks
 }

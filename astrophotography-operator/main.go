@@ -5,9 +5,10 @@
 // that name it as their holder.
 //
 // One binary holds every program of the component, and its first
-// argument names the program. With no argument it runs the operator,
-// and promote runs the container of a promotion Job (plan 03). Plan 02
-// adds worker and solver, the modes of the operator's other pods.
+// argument names the program. With no argument it runs the operator.
+// promote runs the container of a promotion Job (plan 03), and modes.go
+// names the modes of the operator's other pods, the solver and the
+// worker of plan 02.
 package main
 
 import (
@@ -44,8 +45,19 @@ func main() {
 		os.Exit(promote.Main(os.Args[2:], os.Stderr))
 	}
 	if len(os.Args) > 1 {
-		fmt.Fprintf(os.Stderr, "%s: no mode %q; run with no argument for the operator\n", managedBy, os.Args[1])
-		os.Exit(2)
+		run, known := modes[os.Args[1]]
+		if !known {
+			fmt.Fprintf(os.Stderr, "%s: no mode %q; run with no argument for the operator\n", managedBy, os.Args[1])
+			os.Exit(2)
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+		err := run(ctx, os.Args[2:], os.Stderr)
+		stop()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s %s: %v\n", managedBy, os.Args[1], err)
+			os.Exit(1)
+		}
+		return
 	}
 	if err := operate(); err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", managedBy, err)
