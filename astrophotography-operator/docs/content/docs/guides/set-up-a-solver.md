@@ -1,6 +1,6 @@
 ---
 title: Set up a solver
-weight: 20
+weight: 30
 description: "Choose astrometry.net's index files for a camera's field, load them into a PersistentVolumeClaim, declare a Solver, and check that it is Ready with its index series. Use when a Target needs spec.centering, when adding index files, or when a Solver is not Ready."
 ---
 

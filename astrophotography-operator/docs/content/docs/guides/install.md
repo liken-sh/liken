@@ -1,17 +1,16 @@
 ---
 title: Install the operator
 weight: 10
-description: "Install astrophotography-operator beside observatory-operator on a liken cluster, check that it leads, and declare a first Target. Use when a cluster has no astrophotography.liken.sh resources yet, when running a development build, or when removing the operator."
+description: "Install astrophotography-operator beside observatory-operator on a liken cluster, check that it runs and holds its Lease, and collect its metrics. Use when a cluster has no astrophotography.liken.sh resources yet, when running a development build, or when removing the operator."
 ---
 
 # Install the operator
 
 This guide installs `astrophotography-operator` on a
 [`liken`](https://liken.sh/docs/) cluster that runs
-`observatory-operator`, checks that the operator runs and holds its
-`Lease`, and declares a first `Target`. No telescope moves until you
-reserve one for the operator, which
-[Image a target](/docs/guides/image-a-target/) does.
+`observatory-operator`, and checks that the operator runs and holds
+its `Lease`. No telescope moves until you reserve one for the
+operator, which [Image a target](/docs/guides/image-a-target/) does.
 
 You need:
 
@@ -84,40 +83,18 @@ kubectl -n liken-system get lease astrophotography-operator
 
 The `Lease`'s holder is the operator's pod and a random suffix.
 
-## Declare a target
-
-The operator watches every namespace, and a target belongs in the
-namespace of your observatory, beside the claims it names. This guide
-uses `observatory`, the namespace of `observatory-operator`'s example:
+Check that the API server serves both kinds. They are in the category
+`astro` with `observatory-operator`'s kinds, so one command lists the
+observatory and its targets:
 
 ```sh
-kubectl apply -n observatory -f - <<'EOF'
-apiVersion: astrophotography.liken.sh/v1alpha1
-kind: Target
-metadata:
-  name: m42
-spec:
-  object: M42
-  coordinates: {ra: "05:35:17.3", dec: "-05:23:28"}
-  sequences:
-    - {filter: Luminance, exposure: 10s, count: 3}
-  archive:
-    claimName: archive
-EOF
+kubectl get crd targets.astrophotography.liken.sh solvers.astrophotography.liken.sh
+kubectl get astro -A
 ```
 
-Both kinds are in the category `astro` with `observatory-operator`'s
-kinds, so one command lists the observatory and its targets:
-
-```sh
-kubectl get astro -n observatory
-```
-
-The API server fills in the defaults, such as `archive.format` and
-`archive.promotion`, and refuses a field it cannot read. A right
-ascension in decimal hours, such as `5.588`, is refused with a message
-that gives the form. [Targets](/docs/concepts/targets/) explains each
-field.
+The operator watches every namespace. Next,
+[declare a target](/docs/guides/declare-a-target/) in the namespace of
+your observatory.
 
 ## Rollouts and failover
 
