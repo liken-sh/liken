@@ -172,21 +172,31 @@ func (c *centeringPass) end(failed error) error {
 // syncTo tells the mount that it points at a solved position: SYNC in
 // ON_COORD_SET, the position at the equinox of the date, and TRACK
 // again, so the next write of coordinates slews.
+//
+// The mount answers the position with where it now computes that it
+// points, and that need not be the position sent: the telescope
+// simulator feeds a sync to its alignment model and answers a position
+// 3 arcseconds from the one sent. So the position's write ends on the
+// mount's first answer, in any state but Busy or Alert, and does not
+// wait for the values sent, which such a mount never reports.
 func (w *work) syncTo(ctx context.Context, solved sky.Position) error {
 	c, mount := w.r.client, w.mountDevice
 	jnow := sky.ToDate(solved, time.Now())
-	for _, write := range []func() (indi.Sent, error){
-		func() (indi.Sent, error) {
+	for _, write := range []struct {
+		send   func() (indi.Sent, error)
+		answer func(context.Context, indi.Sent) (indi.Property, error)
+	}{
+		{func() (indi.Sent, error) {
 			return c.SetSwitches(mount, "ON_COORD_SET", map[string]bool{"SYNC": true})
-		},
-		func() (indi.Sent, error) {
+		}, c.Settle},
+		{func() (indi.Sent, error) {
 			return c.SetNumbers(mount, "EQUATORIAL_EOD_COORD", map[string]float64{"RA": jnow.RAHours(), "DEC": jnow.Dec})
-		},
-		func() (indi.Sent, error) {
+		}, c.Answered},
+		{func() (indi.Sent, error) {
 			return c.SetSwitches(mount, "ON_COORD_SET", map[string]bool{"TRACK": true})
-		},
+		}, c.Settle},
 	} {
-		if _, err := w.r.settle(ctx, settingTimeout, write); err != nil {
+		if _, err := w.r.answer(ctx, settingTimeout, write.send, write.answer); err != nil {
 			return fmt.Errorf("syncing the mount: %w", err)
 		}
 	}

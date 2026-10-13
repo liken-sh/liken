@@ -1,7 +1,13 @@
 # The astrophotography-operator design
 
-Not built. `astrophotography-operator` images the targets a person
-declares, on the telescopes that `observatory-operator` controls. A
+Plans 01, 02, and 03 are built, through the pieces of [plan
+08](08-the-component-and-the-first-session.md), and the first imaging
+session ran on the QEMU dev cluster on 2026-10-12: [the first
+session](08-the-component-and-the-first-session.md#the-first-session)
+records it. Plans 04 to 07 are not built.
+
+`astrophotography-operator` images the targets a person declares, on
+the telescopes that `observatory-operator` controls. A
 person states what they want, such as sixty five-minute frames of M42
 through each of three filters, and the operator fits that work into
 the nights the sky allows, and delivers each frame, fully labeled, to

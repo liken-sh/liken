@@ -68,15 +68,22 @@ func (r *runner) syncDevices(ctx context.Context, devices ...string) error {
 }
 
 // settle sends one change and waits up to timeout for the driver's
-// answer.
+// answer with the values sent.
 func (r *runner) settle(ctx context.Context, timeout time.Duration, send func() (indi.Sent, error)) (indi.Property, error) {
+	return r.answer(ctx, timeout, send, r.client.Settle)
+}
+
+// answer sends one change and waits up to timeout for the driver's
+// answer, as wait reads it: Settle for the values sent, or Answered for
+// any answer that is not Busy.
+func (r *runner) answer(ctx context.Context, timeout time.Duration, send func() (indi.Sent, error), wait func(context.Context, indi.Sent) (indi.Property, error)) (indi.Property, error) {
 	sent, err := send()
 	if err != nil {
 		return indi.Property{}, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	p, err := r.client.Settle(ctx, sent)
+	p, err := wait(ctx, sent)
 	if err != nil {
 		return p, fmt.Errorf("%s.%s: %w", sent.Device, sent.Property, err)
 	}
