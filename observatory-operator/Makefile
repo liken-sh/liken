@@ -56,7 +56,7 @@ schema:
 crosscheck:
 	go run ./schema/crosscheck -root . $(if $(COMMIT),-commit $(COMMIT))
 
-# The captures in indi/standard/ and the transcripts in indi/testdata/
+# The captures in indi/standard/ and the transcripts in indi/inditest/testdata/
 # are what a real indiserver sent on the libindi that indi/package.toml
 # pins. After a bump of the INDI images, this records both again: it
 # builds the bare drivers of indi/standard/bare/ and captures each one,
@@ -83,7 +83,7 @@ standard:
 .PHONY: transcripts
 transcripts:
 	cd .. && docker buildx bake indi-simulators --load
-	go run ./indi/capture/record -image ghcr.io/liken-sh/indi-simulators:$(INDI_TAG) simulators indi/testdata
+	go run ./indi/capture/record -image ghcr.io/liken-sh/indi-simulators:$(INDI_TAG) simulators indi/inditest/testdata
 
 .PHONY: test-docs
 test-docs:

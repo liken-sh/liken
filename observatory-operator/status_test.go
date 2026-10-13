@@ -228,7 +228,7 @@ func TestStatusWritesAreCoalesced(t *testing.T) {
 			for _, d := range server.drivers {
 				if p := d.find("ABS_FOCUS_POSITION"); p != nil {
 					p.Members[0].Value = strings.Repeat("1", 1) + string(rune('0'+i%10)) + "000"
-					server.broadcast(p.set())
+					server.broadcast(p.Set())
 				}
 			}
 			w.indi.mu.Unlock()

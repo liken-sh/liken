@@ -7,6 +7,8 @@ package main
 import (
 	"fmt"
 	"slices"
+
+	"github.com/liken-sh/liken/observatory-operator/indi/inditest"
 )
 
 // preset makes each driver of a device turn one member of a switch
@@ -28,9 +30,9 @@ func (w *indiWorld) presetText(device, property, member, value string) {
 
 // applyPreset sets a property that a driver defines to its preset. The
 // caller holds w.mu.
-func (w *indiWorld) applyPreset(p *fakeProperty) {
+func (w *indiWorld) applyPreset(p *inditest.Property) {
 	if member, ok := w.presets[p.Device+"."+p.Name]; ok {
-		p.setSwitch(member)
+		p.Switch(member)
 	}
 	for i, m := range p.Members {
 		if text, ok := w.texts[p.Device+"."+p.Name+"."+m.Name]; ok {
@@ -60,10 +62,10 @@ func (w *indiWorld) reveal(device, property string) {
 			}
 			for _, prop := range d.onConnect {
 				if prop.Name == property {
-					added := prop.copy()
+					added := prop.Clone()
 					w.applyPreset(added)
 					d.props = append(d.props, added)
-					s.broadcast(added.def())
+					s.broadcast(added.Def())
 				}
 			}
 		}
@@ -81,8 +83,8 @@ func (w *indiWorld) conceal(device, property string) {
 			if d.device != device || d.find(property) == nil {
 				continue
 			}
-			d.props = slices.DeleteFunc(d.props, func(p *fakeProperty) bool { return p.Name == property })
-			s.broadcast(fmt.Sprintf("<delProperty device=\"%s\" name=\"%s\"/>\n", escape(device), escape(property)))
+			d.props = slices.DeleteFunc(d.props, func(p *inditest.Property) bool { return p.Name == property })
+			s.broadcast(fmt.Sprintf("<delProperty device=\"%s\" name=\"%s\"/>\n", inditest.Escape(device), inditest.Escape(property)))
 		}
 	}
 }

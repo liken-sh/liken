@@ -11,14 +11,15 @@ package main
 // driver, with an image, because the indi images hold no such driver.
 
 import (
-	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/liken-sh/liken/observatory-operator/indi/inditest"
 )
 
 // fakeVariant is one driver made from the transcripts of simulators.
 type fakeVariant struct {
-	// simulators are the directories of indi/testdata/ whose
+	// simulators are the directories of indi/inditest/testdata/ whose
 	// definitions the driver joins, the first one's first.
 	simulators []string
 	// device is the name the driver gives its device.
@@ -47,12 +48,12 @@ const variantImage = "ghcr.io/example/indi-fake:1.0"
 // its device's name, with the variant's own DRIVER_INFO.
 func (v fakeVariant) transcripts(t *testing.T, exec string) transcriptPair {
 	var out transcriptPair
-	join := func(into []*fakeProperty, from []*fakeProperty) []*fakeProperty {
+	join := func(into []*inditest.Property, from []*inditest.Property) []*inditest.Property {
 		for _, p := range from {
-			if slices.ContainsFunc(into, func(o *fakeProperty) bool { return o.Name == p.Name }) {
+			if slices.ContainsFunc(into, func(o *inditest.Property) bool { return o.Name == p.Name }) {
 				continue
 			}
-			p = p.copy()
+			p = p.Clone()
 			p.Device = v.device
 			if p.Name == "DRIVER_INFO" {
 				for i := range p.Members {
@@ -71,9 +72,8 @@ func (v fakeVariant) transcripts(t *testing.T, exec string) transcriptPair {
 		return into
 	}
 	for _, simulator := range v.simulators {
-		base := filepath.Join("indi", "testdata", simulator)
-		out.baseline = join(out.baseline, definitions(t, filepath.Join(base, "baseline.xml")))
-		out.connect = join(out.connect, definitions(t, filepath.Join(base, "connect.xml")))
+		out.baseline = join(out.baseline, definitions(t, simulator, "baseline"))
+		out.connect = join(out.connect, definitions(t, simulator, "connect"))
 	}
 	return out
 }

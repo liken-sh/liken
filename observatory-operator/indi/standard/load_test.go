@@ -103,7 +103,7 @@ func TestLoadRefusesAMistakeInASource(t *testing.T) {
 // park position of the telescope holds the members of every park
 // type, and the camera's set holds the conventions of the CCD.
 func TestLoadMergesTheVariantsAndTheConventions(t *testing.T) {
-	sets, report, err := Load(".", "../testdata")
+	sets, report, err := Load(".", "../inditest/testdata")
 	if err != nil {
 		t.Fatal(err)
 	}

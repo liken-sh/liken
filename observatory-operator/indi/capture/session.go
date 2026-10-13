@@ -1,6 +1,6 @@
 // Package capture records what a real indiserver sends with one driver
 // behind it. Two kinds of file come from it: the transcripts of the
-// simulators in indi/testdata/, which the replay tests serve back, and
+// simulators in indi/inditest/testdata/, which the replay tests serve back, and
 // the captures of the bare drivers in indi/standard/, which hold the
 // standard properties of each INDI interface. One command makes both,
 // so both are made the same way after a bump of the INDI images.

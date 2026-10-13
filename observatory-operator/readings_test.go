@@ -26,7 +26,7 @@ func TestAWeatherLightIsAVerdict(t *testing.T) {
 
 // A weather station's verdict is its SAFETY light. The weather
 // simulator leaves the light Idle and sets the state of SAFETY_STATUS,
-// as the transcript in indi/testdata/weather/connect.xml records, so
+// as the transcript in indi/inditest/testdata/weather/connect.xml records, so
 // an Idle light reads the property's state.
 func TestAWeatherStationsVerdict(t *testing.T) {
 	t.Parallel()

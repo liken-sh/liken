@@ -1,6 +1,6 @@
 // The replay server answers each message of a client with the bytes
 // that indiserver sent in reply to the same message, as the recorder
-// captured them in testdata/. It parses what the client sends with its
+// captured them in inditest/testdata/. It parses what the client sends with its
 // own types, so a client that sends a wrong message gets no reply, and
 // its test fails. The client dials it through WithDialer, and each dial
 // is one end of a net.Pipe, so the tests run in a synctest bubble on
@@ -13,7 +13,6 @@ import (
 	"encoding/xml"
 	"net"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +21,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/observatory-operator/indi/capture"
+	"github.com/liken-sh/liken/observatory-operator/indi/inditest"
 )
 
 // A request is one element that a client sent, as the server read it.
@@ -113,7 +113,7 @@ func startReplay(t *testing.T, simulator string) *replayServer {
 
 func transcript(t *testing.T, simulator, name string) []byte {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("testdata", simulator, name+".xml"))
+	data, err := inditest.Transcript(simulator, name)
 	if err != nil {
 		t.Fatal(err)
 	}

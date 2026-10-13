@@ -10,17 +10,21 @@ package main
 // file again on each getProperties, so a client that connects later
 // turns the policy back to the saved value.
 
-import "slices"
+import (
+	"slices"
+
+	"github.com/liken-sh/liken/observatory-operator/indi/inditest"
+)
 
 // saveConfig saves the configuration after a client changed p, as the
 // driver does.
-func (d *fakeDriver) saveConfig(p *fakeProperty) {
+func (d *fakeDriver) saveConfig(p *inditest.Property) {
 	mount := d.find("DOME_POLICY") != nil
 	switch {
 	case p.Name == "CONFIG_PROCESS":
 		save := d.value("CONFIG_PROCESS", "CONFIG_SAVE") == "On"
 		// The driver turns every member Off after it acts.
-		p.setSwitch("")
+		p.Switch("")
 		if save {
 			d.save()
 		}
@@ -30,7 +34,7 @@ func (d *fakeDriver) saveConfig(p *fakeProperty) {
 }
 
 func (d *fakeDriver) save() {
-	d.saved = map[string][]fakeMember{}
+	d.saved = map[string][]inditest.Member{}
 	for _, p := range d.props {
 		d.saved[p.Name] = slices.Clone(p.Members)
 	}

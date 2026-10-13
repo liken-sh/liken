@@ -1,4 +1,4 @@
-// The transcripts in testdata/: the bytes that a real indiserver sent,
+// The transcripts in inditest/testdata/: the bytes that a real indiserver sent,
 // with one simulator behind it, in reply to one message each:
 // getProperties, then CONNECTION.CONNECT=On, the simulator's own steps,
 // and CONNECTION.DISCONNECT=On. capture.SimulatorScript holds the

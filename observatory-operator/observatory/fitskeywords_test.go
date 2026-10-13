@@ -2,12 +2,13 @@ package observatory
 
 import (
 	"bufio"
-	"os"
-	"path/filepath"
+	"bytes"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/liken-sh/liken/observatory-operator/indi/inditest"
 )
 
 func keyword(name, value, comment string) FITSKeyword {
@@ -56,16 +57,11 @@ func TestMergeFITSKeywords(t *testing.T) {
 }
 
 // headerKeywords answers the keyword of each card of the frame header
-// that indi/testdata/ccd/frame-header.txt holds, in order.
+// that inditest.FrameHeader answers, in order.
 func headerKeywords(t *testing.T) []string {
 	t.Helper()
-	file, err := os.Open(filepath.Join("..", "indi", "testdata", "ccd", "frame-header.txt"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
 	var out []string
-	lines := bufio.NewScanner(file)
+	lines := bufio.NewScanner(bytes.NewReader(inditest.FrameHeader()))
 	for lines.Scan() {
 		// A card's keyword is in its first eight columns.
 		card := lines.Text()

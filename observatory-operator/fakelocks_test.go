@@ -13,11 +13,13 @@ import (
 	"encoding/xml"
 	"fmt"
 	"strings"
+
+	"github.com/liken-sh/liken/observatory-operator/indi/inditest"
 )
 
 // relay records a report that a client relayed, and hands it to each
 // driver of the server that snoops it.
-func (w *indiWorld) relay(server string, s *fakeServer, v xmlVector) {
+func (w *indiWorld) relay(server string, s *fakeServer, v inditest.Vector) {
 	values := map[string]string{}
 	var members []string
 	for _, m := range v.Members {
@@ -53,7 +55,7 @@ func (d *fakeDriver) snoops(device, property string) bool {
 // lockRefuses answers whether a lock refuses a change, and sets the
 // property as the driver reports a refusal: Alert, with the position it
 // keeps.
-func (d *fakeDriver) lockRefuses(p *fakeProperty, v xmlVector) bool {
+func (d *fakeDriver) lockRefuses(p *inditest.Property, v inditest.Vector) bool {
 	asks := func(member string) bool {
 		for _, m := range v.Members {
 			if m.Name == member && strings.TrimSpace(m.Value) == "On" {
@@ -65,10 +67,10 @@ func (d *fakeDriver) lockRefuses(p *fakeProperty, v xmlVector) bool {
 	switch {
 	case v.Name == "TELESCOPE_PARK" && asks("UNPARK") && d.value("DOME_POLICY", "DOME_LOCKS") == "On" &&
 		d.snooped[d.value("ACTIVE_DEVICES", "ACTIVE_DOME")+".DOME_PARK"]["PARK"] == "On":
-		p.setSwitch("PARK")
+		p.Switch("PARK")
 	case v.Name == "DOME_PARK" && asks("PARK") && d.value("MOUNT_POLICY", "MOUNT_LOCKS") == "On" &&
 		d.snooped[d.value("ACTIVE_DEVICES", "ACTIVE_TELESCOPE")+".TELESCOPE_PARK"]["UNPARK"] == "On":
-		p.setSwitch("UNPARK")
+		p.Switch("UNPARK")
 	default:
 		return false
 	}
@@ -88,28 +90,18 @@ func (d *fakeDriver) value(property, member string) string {
 	return ""
 }
 
-// setSwitch turns one member On and the others Off.
-func (p *fakeProperty) setSwitch(on string) {
-	for i := range p.Members {
-		p.Members[i].Value = "Off"
-		if p.Members[i].Name == on {
-			p.Members[i].Value = "On"
-		}
-	}
-}
-
 // ask sends one change to a server as another client does, such as a
 // person's KStars, and the server's driver answers it.
 func (w *indiWorld) ask(server, device, property string, members ...string) {
 	w.t.Helper()
 	var b strings.Builder
-	fmt.Fprintf(&b, `<newSwitchVector device="%s" name="%s">`, escape(device), escape(property))
+	fmt.Fprintf(&b, `<newSwitchVector device="%s" name="%s">`, inditest.Escape(device), inditest.Escape(property))
 	for _, m := range members {
 		name, value, _ := strings.Cut(m, "=")
 		fmt.Fprintf(&b, `<oneSwitch name="%s">%s</oneSwitch>`, name, value)
 	}
 	b.WriteString("</newSwitchVector>")
-	var v xmlVector
+	var v inditest.Vector
 	if err := xml.Unmarshal([]byte(b.String()), &v); err != nil {
 		w.t.Fatal(err)
 	}
@@ -159,12 +151,12 @@ func (d *fakeDriver) shutterFollowsPark(s *fakeServer) {
 	}
 	switch {
 	case d.value("DOME_PARK", "PARK") == "On" && d.value("DOME_SHUTTER_PARK_POLICY", "SHUTTER_CLOSE_ON_PARK") == "On":
-		shutter.setSwitch("SHUTTER_CLOSE")
+		shutter.Switch("SHUTTER_CLOSE")
 	case d.value("DOME_PARK", "UNPARK") == "On" && d.value("DOME_SHUTTER_PARK_POLICY", "SHUTTER_OPEN_ON_UNPARK") == "On":
-		shutter.setSwitch("SHUTTER_OPEN")
+		shutter.Switch("SHUTTER_OPEN")
 	default:
 		return
 	}
 	shutter.State = "Ok"
-	s.broadcast(shutter.set())
+	s.broadcast(shutter.Set())
 }

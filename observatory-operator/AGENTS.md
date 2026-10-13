@@ -119,7 +119,7 @@ holds each one:
 
 ### Tests
 
-The transcripts in `indi/testdata/` are the bytes that a real
+The transcripts in `indi/inditest/testdata/` are the bytes that a real
 `indiserver` sent with one simulator behind it, for each of the 14
 simulators that a kind runs. Each directory has `baseline.xml`,
 `connect.xml`, and `disconnect.xml`, and the focuser and the dome have
@@ -130,7 +130,18 @@ reply. They come from the simulators of the pinned `indi-simulators`
 tag, and `capture.SimulatorScript` in `indi/capture/` holds the
 message that each file answers.
 
-`indi/testdata/ccd/frame-header.txt` holds the 80-column header cards,
+`indi/inditest` embeds the transcripts, so a test of another component
+reads them with no path into this one. Its `Server` is a fake
+`indiserver` for a fixed set of simulators: each driver defines what
+its baseline transcript defines, adds what its connect transcript
+defines when a client connects it, and answers every other change with
+the values sent. A test can hold, refuse, or move a property, and set
+its state, report a value, or send a message. The package uses the
+standard library alone. The operator's fake servers in
+`fakeindi_test.go` take their properties, drivers, and connections
+from it.
+
+`indi/inditest/testdata/ccd/frame-header.txt` holds the 80-column header cards,
 with trailing spaces removed, of a frame that the CCD simulator saved.
 `observatory/fitskeywords_test.go` holds the driver's list of keywords
 to it, so a capture after a bump that holds a new keyword fails until
@@ -171,7 +182,22 @@ where it is silent, `src/event_server.cpp` in `OpenPHDGuiding/phd2`.
 PHD2 sends `AppState` only to a new connection, so the client sets the
 state from the events that imply one, and reads it again after a stop.
 `phd2/phd2test` is a fake event server on `net.Pipe`, which the
-package's tests and the operator's tests share.
+package's tests and the operator's tests share. It answers the methods
+that guide, `set_exposure`, `loop`, `find_star`, `guide`, and
+`dither`, with the events and the error messages of
+`src/event_server.cpp` and `src/phdcontrol.cpp`, and holds or fails a
+settle when a test asks.
+
+## A second user of the packages
+
+`astrophotography-operator` imports `indi`, `phd2`, and `observatory`,
+and its tests run against `indi/inditest` and `phd2/phd2test`. Its
+[plan 08](../astrophotography-operator/plans/08-the-component-and-the-first-session.md)
+lists this component in that operator's `package.toml`, so CI runs
+both components' tests on a change to these packages. Keep them on the
+standard library and `kubernetes/conditions`, so the import links no
+more of this operator than they are, and run that component's tests
+before you change one of their exported names or behaviors.
 
 ## The operator
 

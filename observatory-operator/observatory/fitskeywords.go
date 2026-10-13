@@ -28,7 +28,7 @@ type FITSKeyword struct {
 
 // DriverFITSKeywords are the keywords that INDI's CCD writes into a
 // frame by itself. The first groups are in
-// indi/testdata/ccd/frame-header.txt, the header of a frame that the
+// indi/inditest/testdata/ccd/frame-header.txt, the header of a frame that the
 // CCD simulator saved with the mount, focuser, rotator, filter wheel,
 // and SQM simulators connected. libindi's CCD writes the rest under
 // conditions that the simulators did not meet

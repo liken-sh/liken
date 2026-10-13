@@ -16,10 +16,10 @@ import (
 // generate writes every output of the schema, by its path from the
 // component's directory, root: the CRD of each template in dir, and
 // the Go types of each fields file in dir. The standard sets come from
-// indi/standard/ and the simulator transcripts from indi/testdata/.
+// indi/standard/ and the simulator transcripts from indi/inditest/testdata/.
 func generate(root string) (map[string][]byte, error) {
 	dir := filepath.Join(root, "schema")
-	sets, _, err := standard.Load(filepath.Join(root, "indi", "standard"), filepath.Join(root, "indi", "testdata"))
+	sets, _, err := standard.Load(filepath.Join(root, "indi", "standard"), filepath.Join(root, "indi", "inditest", "testdata"))
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +90,7 @@ func generate(root string) (map[string][]byte, error) {
 // loadKinds reads the standard sets and every fields file in schema/,
 // and answers the disagreements that Load found.
 func loadKinds(root string) (map[string]standard.Interface, []string, []kind, error) {
-	sets, report, err := standard.Load(filepath.Join(root, "indi", "standard"), filepath.Join(root, "indi", "testdata"))
+	sets, report, err := standard.Load(filepath.Join(root, "indi", "standard"), filepath.Join(root, "indi", "inditest", "testdata"))
 	if err != nil {
 		return nil, nil, nil, err
 	}

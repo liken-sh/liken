@@ -9,7 +9,6 @@ package main
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/liken-sh/liken/observatory-operator/indi/inditest"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
@@ -108,11 +108,10 @@ func TestAWheelThatNoResourceIsStaysInTheCamerasList(t *testing.T) {
 // family, or each property that a member of the kind's NamedBy names.
 func heldBy(t *testing.T, kind observatory.Kind, simulator string) map[string][]string {
 	t.Helper()
-	dir := filepath.Join("indi", "testdata", simulator)
-	defined := map[string]*fakeProperty{}
+	defined := map[string]*inditest.Property{}
 	var order []string
-	for _, file := range []string{"baseline.xml", "connect.xml"} {
-		for _, p := range definitions(t, filepath.Join(dir, file)) {
+	for _, phase := range []string{"baseline", "connect"} {
+		for _, p := range definitions(t, simulator, phase) {
 			if _, seen := defined[p.Name]; !seen {
 				order = append(order, p.Name)
 			}

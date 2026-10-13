@@ -1,171 +1,64 @@
 package main
 
 // Fake INDI servers for the operator's tests, built from the bytes that
-// the real simulators sent, which indi/testdata/ records. Each server
-// runs a driver for each device pod that its server pod's annotation
-// names and that the fake API server holds Ready, as indiserver does
-// through the shims: a device pod that comes or goes defines or deletes its device
-// on the server, and a new pod is a new driver, disconnected, with its
-// settings lost. A driver defines what its baseline transcript
-// defines, adds what its connect transcript defines when it connects,
-// and answers every other change with the values sent and the state
-// Ok. A test can hold a property, so that its driver never answers.
+// the real simulators sent, which indi/inditest/testdata/ records. Each
+// server runs a driver for each device pod that its server pod's
+// annotation names and that the fake API server holds Ready, as
+// indiserver does through the shims: a device pod that comes or goes
+// defines or deletes its device on the server, and a new pod is a new
+// driver, disconnected, with its settings lost. A driver defines what
+// its baseline transcript defines, adds what its connect transcript
+// defines when it connects, and answers every other change with the
+// values sent and the state Ok. A test can hold a property, so that
+// its driver never answers.
+//
+// indi/inditest holds the properties, the drivers, and the connections
+// that these servers share with that package's own Server, which serves
+// one fixed set of simulators to another component's tests. These
+// servers follow the fake API server's pods, and add the locks, the
+// presets, and the configuration files that the operator's tests need.
 //
 // The servers answer over in-memory pipes, so the tests run in a
 // synctest bubble.
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/xml"
 	"fmt"
-	"io"
 	"maps"
 	"net"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/observatory-operator/indi/inditest"
 )
 
-type fakeMember struct {
-	Name, Label, Format, Min, Max, Step, Value string
-}
-
-type fakeProperty struct {
-	Type                                          string
-	Device, Name, Label, Group, State, Perm, Rule string
-	Members                                       []fakeMember
-}
-
-func (p *fakeProperty) copy() *fakeProperty {
-	out := *p
-	out.Members = slices.Clone(p.Members)
-	return &out
-}
-
-func escape(text string) string {
-	var b bytes.Buffer
-	_ = xml.EscapeText(&b, []byte(text))
-	return b.String()
-}
-
-func (p *fakeProperty) def() string {
-	var b strings.Builder
-	fmt.Fprintf(&b, `<def%sVector device="%s" name="%s" label="%s" group="%s" state="%s"`, p.Type, escape(p.Device), escape(p.Name), escape(p.Label), escape(p.Group), p.State)
-	if p.Type != "Light" {
-		fmt.Fprintf(&b, ` perm="%s"`, p.Perm)
-	}
-	if p.Type == "Switch" {
-		fmt.Fprintf(&b, ` rule="%s"`, p.Rule)
-	}
-	b.WriteString(` timeout="60">`)
-	for _, m := range p.Members {
-		fmt.Fprintf(&b, `<def%s name="%s" label="%s"`, p.Type, escape(m.Name), escape(m.Label))
-		if p.Type == "Number" {
-			fmt.Fprintf(&b, ` format="%s" min="%s" max="%s" step="%s"`, escape(m.Format), m.Min, m.Max, m.Step)
-		}
-		fmt.Fprintf(&b, ">%s</def%s>", escape(m.Value), p.Type)
-	}
-	fmt.Fprintf(&b, "</def%sVector>\n", p.Type)
-	return b.String()
-}
-
-func (p *fakeProperty) set() string {
-	var b strings.Builder
-	fmt.Fprintf(&b, `<set%sVector device="%s" name="%s" state="%s">`, p.Type, escape(p.Device), escape(p.Name), p.State)
-	for _, m := range p.Members {
-		fmt.Fprintf(&b, `<one%s name="%s">%s</one%s>`, p.Type, escape(m.Name), escape(m.Value), p.Type)
-	}
-	fmt.Fprintf(&b, "</set%sVector>\n", p.Type)
-	return b.String()
-}
-
-// xmlVector is one vector as a transcript or a client writes it.
-type xmlVector struct {
-	XMLName xml.Name
-	Device  string `xml:"device,attr"`
-	Name    string `xml:"name,attr"`
-	Label   string `xml:"label,attr"`
-	Group   string `xml:"group,attr"`
-	State   string `xml:"state,attr"`
-	Perm    string `xml:"perm,attr"`
-	Rule    string `xml:"rule,attr"`
-	Members []struct {
-		Name   string `xml:"name,attr"`
-		Label  string `xml:"label,attr"`
-		Format string `xml:"format,attr"`
-		Min    string `xml:"min,attr"`
-		Max    string `xml:"max,attr"`
-		Step   string `xml:"step,attr"`
-		Value  string `xml:",chardata"`
-	} `xml:",any"`
-}
-
-// definitions reads the def*Vector elements of one transcript, in
-// order, with a later definition of a property in place of an earlier
-// one. Each set*Vector after a definition changes it, so a property
-// holds the state and the values that the driver reported last: the
-// telescope simulator defines TELESCOPE_PARK with both switches Off,
-// and then reports UNPARK On.
-func definitions(t *testing.T, path string) []*fakeProperty {
+// definitions reads what one phase of a simulator's transcripts
+// defines, such as definitions(t, "ccd", "connect").
+func definitions(t *testing.T, simulator, phase string) []*inditest.Property {
 	t.Helper()
-	raw, err := os.ReadFile(path)
+	data, err := inditest.Transcript(simulator, phase)
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoder := xml.NewDecoder(bytes.NewReader(raw))
-	decoder.Strict = false
-	var out []*fakeProperty
-	for {
-		token, err := decoder.Token()
-		if err == io.EOF {
-			return out
-		}
-		if err != nil {
-			t.Fatalf("%s: %v", path, err)
-		}
-		start, ok := token.(xml.StartElement)
-		if !ok {
-			continue
-		}
-		var v xmlVector
-		if err := decoder.DecodeElement(&v, &start); err != nil {
-			t.Fatalf("%s: %v", path, err)
-		}
-		tag := v.XMLName.Local
-		if strings.HasPrefix(tag, "set") && strings.HasSuffix(tag, "Vector") {
-			if i := slices.IndexFunc(out, func(o *fakeProperty) bool { return o.Name == v.Name }); i >= 0 {
-				out[i] = settled(out[i], v)
-			}
-			continue
-		}
-		if !strings.HasPrefix(tag, "def") || !strings.HasSuffix(tag, "Vector") || v.Name == "" {
-			continue
-		}
-		p := &fakeProperty{Type: strings.TrimSuffix(strings.TrimPrefix(tag, "def"), "Vector"),
-			Device: v.Device, Name: v.Name, Label: v.Label, Group: v.Group, State: v.State, Perm: v.Perm, Rule: v.Rule}
-		for _, m := range v.Members {
-			p.Members = append(p.Members, fakeMember{m.Name, m.Label, m.Format, m.Min, m.Max, m.Step, strings.TrimSpace(m.Value)})
-		}
-		if i := slices.IndexFunc(out, func(o *fakeProperty) bool { return o.Name == p.Name }); i >= 0 {
-			out[i] = p
-		} else {
-			out = append(out, p)
-		}
+	props, err := inditest.Definitions(data)
+	if err != nil {
+		t.Fatalf("%s/%s: %v", simulator, phase, err)
 	}
+	return props
 }
 
 // fakeDriver is one simulator behind a fake server.
 type fakeDriver struct {
 	device    string
-	onConnect []*fakeProperty
-	props     []*fakeProperty
+	onConnect []*inditest.Property
+	props     []*inditest.Property
 	connected bool
 	// snooped holds the reports that clients relayed to the driver
 	// (fakelocks_test.go), by "<device>.<property>", each member's
@@ -174,14 +67,14 @@ type fakeDriver struct {
 	// saved holds the driver's configuration file
 	// (fakeconfig_test.go), each property's members by its name, or
 	// nil while the driver has saved none.
-	saved map[string][]fakeMember
+	saved map[string][]inditest.Member
 }
 
 var transcriptCache sync.Map
 
 // transcriptPair is what a driver defines before it connects and what
 // it defines when it connects.
-type transcriptPair struct{ baseline, connect []*fakeProperty }
+type transcriptPair struct{ baseline, connect []*inditest.Property }
 
 func newFakeDriver(t *testing.T, exec string) *fakeDriver {
 	cached, ok := transcriptCache.Load(exec)
@@ -189,26 +82,17 @@ func newFakeDriver(t *testing.T, exec string) *fakeDriver {
 		if v, isVariant := fakeVariants[exec]; isVariant {
 			cached = v.transcripts(t, exec)
 		} else {
-			base := filepath.Join("indi", "testdata", strings.TrimPrefix(exec, "indi_simulator_"))
-			cached = transcriptPair{definitions(t, filepath.Join(base, "baseline.xml")), definitions(t, filepath.Join(base, "connect.xml"))}
+			simulator := strings.TrimPrefix(exec, "indi_simulator_")
+			cached = transcriptPair{definitions(t, simulator, "baseline"), definitions(t, simulator, "connect")}
 		}
 		transcriptCache.Store(exec, cached)
 	}
 	p := cached.(transcriptPair)
-	d := &fakeDriver{}
-	for _, prop := range p.baseline {
-		d.props = append(d.props, prop.copy())
-		d.device = prop.Device
-	}
-	for _, prop := range p.connect {
-		if d.find(prop.Name) == nil {
-			d.onConnect = append(d.onConnect, prop)
-		}
-	}
-	return d
+	d := inditest.DriverOf(p.baseline, p.connect)
+	return &fakeDriver{device: d.Device, props: d.Props, onConnect: d.OnConnect}
 }
 
-func (d *fakeDriver) find(name string) *fakeProperty {
+func (d *fakeDriver) find(name string) *inditest.Property {
 	for _, p := range d.props {
 		if p.Name == name {
 			return p
@@ -223,61 +107,11 @@ type fakeServer struct {
 	uid     string
 	drivers map[string]*fakeDriver
 	uids    map[string]string
-	conns   []*fakeConn
+	conns   []*inditest.Conn
 	// applied is the list of device pods that the shim applied last,
 	// and target is the list that the server pod's annotation names
 	// now (fakeshim_test.go).
 	applied, target []string
-}
-
-// fakeConn queues what the server writes, the way a socket's send
-// buffer does, and a goroutine of its own writes the queue to the pipe.
-// A net.Pipe has no buffer, so a write blocks until the client reads.
-// The fake writes while it holds its lock, and a client that waits for
-// that lock to dial reads nothing, so a write under the lock must never
-// block.
-type fakeConn struct {
-	conn  net.Conn
-	mu    sync.Mutex
-	queue []string
-	ready chan struct{}
-}
-
-func newFakeConn(conn net.Conn) *fakeConn {
-	c := &fakeConn{conn: conn, ready: make(chan struct{}, 1)}
-	go c.write()
-	return c
-}
-
-func (c *fakeConn) send(text string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.queue = append(c.queue, text)
-	select {
-	case c.ready <- struct{}{}:
-	default:
-	}
-}
-
-// write writes the queue until a write fails, as each one does after
-// either end closes the pipe. close wakes it to find that out.
-func (c *fakeConn) write() {
-	for range c.ready {
-		c.mu.Lock()
-		queue := c.queue
-		c.queue = nil
-		c.mu.Unlock()
-		for _, text := range queue {
-			if _, err := io.WriteString(c.conn, text); err != nil {
-				return
-			}
-		}
-	}
-}
-
-func (c *fakeConn) close() {
-	_ = c.conn.Close()
-	c.send("")
 }
 
 type indiWorld struct {
@@ -325,7 +159,7 @@ type indiWorld struct {
 	// unanswered until answerLate, and waiting holds those clients
 	// (fakesync_test.go).
 	late    map[string]bool
-	waiting map[string][]*fakeConn
+	waiting map[string][]*inditest.Conn
 	// shimDelay is the time from a change of a server pod's annotation
 	// to the shim's start or stop of a driver (fakeshim_test.go).
 	shimDelay time.Duration
@@ -340,7 +174,7 @@ type indiWorld struct {
 }
 
 func startIndiWorld(t *testing.T, api *fakeAPI) *indiWorld {
-	w := &indiWorld{t: t, api: api, servers: map[string]*fakeServer{}, held: map[string]bool{}, refused: map[string]bool{}, moving: map[string]bool{}, lateDials: map[string]int{}, presets: map[string]string{}, texts: map[string]string{}, withheld: map[string]bool{}, silent: map[string]bool{}, asked: map[string]int{}, late: map[string]bool{}, waiting: map[string][]*fakeConn{}}
+	w := &indiWorld{t: t, api: api, servers: map[string]*fakeServer{}, held: map[string]bool{}, refused: map[string]bool{}, moving: map[string]bool{}, lateDials: map[string]int{}, presets: map[string]string{}, texts: map[string]string{}, withheld: map[string]bool{}, silent: map[string]bool{}, asked: map[string]int{}, late: map[string]bool{}, waiting: map[string][]*inditest.Conn{}}
 	go w.follow(t.Context())
 	return w
 }
@@ -358,7 +192,7 @@ func (w *indiWorld) follow(ctx context.Context) {
 			w.mu.Lock()
 			for _, s := range w.servers {
 				for _, c := range s.conns {
-					c.close()
+					c.Close()
 				}
 			}
 			w.mu.Unlock()
@@ -434,7 +268,7 @@ func (w *indiWorld) sync(pods map[string]map[string]any) {
 			// The server stopped: every connection ends, and every
 			// driver behind it restarts with the next server.
 			for _, c := range s.conns {
-				c.close()
+				c.Close()
 			}
 			delete(w.servers, name)
 		}
@@ -464,18 +298,18 @@ func (w *indiWorld) sync(pods map[string]map[string]any) {
 				continue
 			}
 			if old, ok := s.drivers[link]; ok {
-				s.broadcast(fmt.Sprintf("<delProperty device=\"%s\"/>\n", escape(old.device)))
+				s.broadcast(fmt.Sprintf("<delProperty device=\"%s\"/>\n", inditest.Escape(old.device)))
 			}
 			d := newFakeDriver(w.t, execOf(device))
 			s.drivers[link], s.uids[link] = d, podUID(device)
 			for _, prop := range d.props {
 				w.applyPreset(prop)
-				s.broadcast(prop.def())
+				s.broadcast(prop.Def())
 			}
 		}
 		for link, d := range s.drivers {
 			if !running[link] {
-				s.broadcast(fmt.Sprintf("<delProperty device=\"%s\"/>\n", escape(d.device)))
+				s.broadcast(fmt.Sprintf("<delProperty device=\"%s\"/>\n", inditest.Escape(d.device)))
 				delete(s.drivers, link)
 				delete(s.uids, link)
 			}
@@ -485,7 +319,7 @@ func (w *indiWorld) sync(pods map[string]map[string]any) {
 
 func (s *fakeServer) broadcast(text string) {
 	for _, c := range s.conns {
-		c.send(text)
+		c.Send(text)
 	}
 }
 
@@ -502,35 +336,35 @@ func (w *indiWorld) DialContext(ctx context.Context, network, address string) (n
 		return nil, &net.OpError{Op: "dial", Net: "tcp", Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}
 	}
 	client, server := net.Pipe()
-	c := newFakeConn(server)
+	c := inditest.NewConn(server)
 	s.conns = append(s.conns, c)
 	go w.serve(name, s, c)
 	return client, nil
 }
 
 // serve reads one client's messages until the connection closes.
-func (w *indiWorld) serve(name string, s *fakeServer, c *fakeConn) {
-	decoder := xml.NewDecoder(bufio.NewReader(c.conn))
+func (w *indiWorld) serve(name string, s *fakeServer, c *inditest.Conn) {
+	decoder := xml.NewDecoder(bufio.NewReader(c))
 	for {
 		token, err := decoder.Token()
 		if err != nil {
-			c.close()
+			c.Close()
 			return
 		}
 		start, ok := token.(xml.StartElement)
 		if !ok {
 			continue
 		}
-		var v xmlVector
+		var v inditest.Vector
 		if err := decoder.DecodeElement(&v, &start); err != nil {
-			c.close()
+			c.Close()
 			return
 		}
 		w.answer(name, s, c, v)
 	}
 }
 
-func (w *indiWorld) answer(name string, s *fakeServer, c *fakeConn, v xmlVector) {
+func (w *indiWorld) answer(name string, s *fakeServer, c *inditest.Conn, v inditest.Vector) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	tag := v.XMLName.Local
@@ -574,17 +408,17 @@ func (w *indiWorld) answer(name string, s *fakeServer, c *fakeConn, v xmlVector)
 		return
 	}
 	if d.lockRefuses(p, v) {
-		s.broadcast(p.set())
+		s.broadcast(p.Set())
 		return
 	}
 	if w.refused[v.Device+"."+v.Name] {
 		p.State = "Alert"
-		s.broadcast(p.set())
+		s.broadcast(p.Set())
 		return
 	}
 	if w.moving[v.Device+"."+v.Name] && p.State == "Busy" {
-		interrupt(p)
-		s.broadcast(p.set())
+		inditest.Interrupt(p)
+		s.broadcast(p.Set())
 		return
 	}
 	parked := d.value("DOME_PARK", "PARK")
@@ -603,24 +437,24 @@ func (w *indiWorld) answer(name string, s *fakeServer, c *fakeConn, v xmlVector)
 	if parked != d.value("DOME_PARK", "PARK") {
 		d.shutterFollowsPark(s)
 	}
-	s.broadcast(p.set())
+	s.broadcast(p.Set())
 	// An abort ends what moves, as the simulators' abort does.
 	if moving, ok := aborts[p.Name]; ok {
 		if target := d.find(moving); target != nil && target.State == "Busy" {
 			target.State = "Ok"
-			s.broadcast(target.set())
+			s.broadcast(target.Set())
 		}
 	}
 	// An abort during a park ends the park, as libindi's telescope does
 	// (Telescope::ISNewSwitch in libs/indibase/inditelescope.cpp).
 	if park := d.find("TELESCOPE_PARK"); p.Name == "TELESCOPE_ABORT_MOTION" && park != nil && park.State == "Busy" {
-		interrupt(park)
-		s.broadcast(park.set())
+		inditest.Interrupt(park)
+		s.broadcast(park.Set())
 	}
 	if p.Name != "CONNECTION" {
 		return
 	}
-	connect := slices.ContainsFunc(p.Members, func(m fakeMember) bool { return m.Name == "CONNECT" && m.Value == "On" })
+	connect := slices.ContainsFunc(p.Members, func(m inditest.Member) bool { return m.Name == "CONNECT" && m.Value == "On" })
 	switch {
 	case connect && !d.connected:
 		d.connected = true
@@ -628,16 +462,16 @@ func (w *indiWorld) answer(name string, s *fakeServer, c *fakeConn, v xmlVector)
 			if w.withheld[d.device+"."+prop.Name] {
 				continue
 			}
-			added := prop.copy()
+			added := prop.Clone()
 			w.applyPreset(added)
 			d.props = append(d.props, added)
-			s.broadcast(added.def())
+			s.broadcast(added.Def())
 		}
 	case !connect && d.connected:
 		d.connected = false
 		for _, prop := range d.onConnect {
-			d.props = slices.DeleteFunc(d.props, func(o *fakeProperty) bool { return o.Name == prop.Name })
-			s.broadcast(fmt.Sprintf("<delProperty device=\"%s\" name=\"%s\"/>\n", escape(d.device), escape(prop.Name)))
+			d.props = slices.DeleteFunc(d.props, func(o *inditest.Property) bool { return o.Name == prop.Name })
+			s.broadcast(fmt.Sprintf("<delProperty device=\"%s\" name=\"%s\"/>\n", inditest.Escape(d.device), inditest.Escape(prop.Name)))
 		}
 	}
 }
@@ -706,7 +540,7 @@ func (w *indiWorld) setState(server, device, property, state string) {
 	for _, d := range w.servers[server].drivers {
 		if p := d.find(property); d.device == device && p != nil {
 			p.State = state
-			w.servers[server].broadcast(p.set())
+			w.servers[server].broadcast(p.Set())
 		}
 	}
 }
@@ -743,7 +577,7 @@ func (w *indiWorld) report(device, property, member, value string) {
 					p.Members[i].Value = value
 				}
 			}
-			s.broadcast(p.set())
+			s.broadcast(p.Set())
 		}
 	}
 }
@@ -778,7 +612,7 @@ func (w *indiWorld) cut(server string) {
 	defer w.mu.Unlock()
 	s := w.servers[server]
 	for _, c := range s.conns {
-		c.close()
+		c.Close()
 	}
 	s.conns = nil
 }

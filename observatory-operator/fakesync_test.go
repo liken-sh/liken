@@ -1,5 +1,7 @@
 package main
 
+import "github.com/liken-sh/liken/observatory-operator/indi/inditest"
+
 // A client asks for the properties of every device with a
 // getProperties when it connects, and asks a driver for its properties
 // with a getProperties that names the device (indi.Client.Sync). These
@@ -32,7 +34,7 @@ func (w *indiWorld) requests(device string) int {
 // define answers a getProperties that names device, or every device
 // when device is empty. indiserver hands a getProperties that names a
 // device to that device's driver alone.
-func (w *indiWorld) define(s *fakeServer, c *fakeConn, device string) {
+func (w *indiWorld) define(s *fakeServer, c *inditest.Conn, device string) {
 	for _, link := range sortedKeys(s.drivers) {
 		if w.silent[device] {
 			break
@@ -42,7 +44,7 @@ func (w *indiWorld) define(s *fakeServer, c *fakeConn, device string) {
 		}
 		s.drivers[link].reloadDomePolicy()
 		for _, prop := range s.drivers[link].props {
-			c.send(prop.def())
+			c.Send(prop.Def())
 		}
 	}
 }

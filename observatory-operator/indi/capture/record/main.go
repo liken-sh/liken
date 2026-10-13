@@ -4,7 +4,7 @@
 // twice:
 //
 //	go run ./indi/capture/record -image IMAGE standard indi/standard
-//	go run ./indi/capture/record -image IMAGE simulators indi/testdata
+//	go run ./indi/capture/record -image IMAGE simulators indi/inditest/testdata
 //
 // standard runs each bare driver in the image of indi/standard/bare/
 // and writes one capture for each, the union of every definition it

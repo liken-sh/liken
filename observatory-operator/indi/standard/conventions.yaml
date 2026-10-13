@@ -5,7 +5,7 @@
 # indi-3rdparty v2.2.0 define, and names the definitions it was read
 # from. `interface` names the captures of the interface it belongs to.
 #
-# `simulators` lists the directories of indi/testdata whose transcripts
+# `simulators` lists the directories of indi/inditest/testdata whose transcripts
 # define the property. A test fails when that list is wrong, and the
 # report lists each place where a simulator's definition differs from
 # the entry.

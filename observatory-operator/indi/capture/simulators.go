@@ -4,7 +4,7 @@ import "fmt"
 
 // Simulators are the drivers that observatory-operator runs, without
 // their indi_simulator_ prefix. Plan 06 gives a kind to each. Each one
-// has a directory of transcripts in indi/testdata/.
+// has a directory of transcripts in indi/inditest/testdata/.
 var Simulators = []string{
 	"telescope", "ccd", "guide", "wheel", "focus", "rotator", "dome",
 	"weather", "dustcover", "lightpanel", "gps", "pac", "io",
