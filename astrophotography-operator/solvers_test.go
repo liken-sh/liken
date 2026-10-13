@@ -84,6 +84,9 @@ func TestReadyFollowsTheSolversPod(t *testing.T) {
 		if got := readyOf(lab).Message; got != "13 index files of the series 4207, 4208" {
 			t.Errorf("message %q", got)
 		}
+		if lab.Status.Series != "4207,4208" {
+			t.Errorf("series %q, want 4207,4208", lab.Status.Series)
+		}
 		var posted []string
 		for _, e := range w.api.recorded.About("Solver", "lab") {
 			posted = append(posted, e.Type+" "+e.Reason)

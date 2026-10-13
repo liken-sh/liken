@@ -29,7 +29,7 @@ spec:
           jsonPath: '.status.conditions[?(@.type=="Ready")].reason'
         - name: Indexes
           type: string
-          jsonPath: .status.indexes[*].id
+          jsonPath: .status.series
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -178,6 +178,12 @@ spec:
                           high:
                             type: number
                             description: "The largest size, in arcminutes."
+                series:
+                  type: string
+                  description: >-
+                    The series of `status.indexes`, joined by commas,
+                    such as `4207,4208`. The `INDEXES` column of
+                    `kubectl get` reads this field.
                 conditions:
                   type: array
                   description: >-

@@ -205,6 +205,11 @@ func (o *operator) writeSolverStatus(s *astrophotography.Solver, loop *solverLoo
 		}
 		if r.indexes != nil {
 			status.Indexes = r.indexes
+			series := make([]string, 0, len(r.indexes))
+			for _, s := range r.indexes {
+				series = append(series, fmt.Sprint(s.ID))
+			}
+			status.Series = strings.Join(series, ",")
 		}
 		next.ObservedGeneration = copied.Metadata.Generation
 		transitioned = conditions.Set(&status.Conditions, next)

@@ -46,6 +46,7 @@ What `astrophotography-operator` reports. A person never writes it.
 | <span id="status--observedgeneration"></span>`observedGeneration` | integer | no | The `metadata.generation` of the spec that the status reflects. |
 | <span id="status--endpoint"></span>`endpoint` | [object](#statusendpoint) | no | The solver's `Service`, while its pod is ready. |
 | <span id="status--indexes"></span>`indexes` | [\[\]object](#statusindexes) | no | Each series of index files in the claim, which the solver reads from the headers of each file when its pod starts. |
+| <span id="status--series"></span>`series` | string | no | The series of `status.indexes`, joined by commas, such as `4207,4208`. The `INDEXES` column of `kubectl get` reads this field. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | `Ready` is `True` with the reason `Loaded` when the solver's pod is ready and holds at least one index file. Otherwise it is `False` with the reason `ClaimMissing`, `NoIndexFiles`, or `PodNotReady`. |
 
 ### status.endpoint

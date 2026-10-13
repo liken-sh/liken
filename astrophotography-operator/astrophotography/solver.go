@@ -40,8 +40,12 @@ type SolverStatus struct {
 	Endpoint *observatory.Endpoint `json:"endpoint,omitempty"`
 	// Indexes lists each index series in the claim, which the solver
 	// reads from each file's headers when it starts.
-	Indexes    []IndexSeries `json:"indexes,omitempty"`
-	Conditions []Condition   `json:"conditions,omitempty"`
+	Indexes []IndexSeries `json:"indexes,omitempty"`
+	// Series names the series of Indexes in one string, such as
+	// "4207,4208", for the INDEXES column of kubectl get. The API server
+	// prints only the first value of a column over a list.
+	Series     string      `json:"series,omitempty"`
+	Conditions []Condition `json:"conditions,omitempty"`
 }
 
 // IndexSeries is one series of index files, such as 4207, and the range

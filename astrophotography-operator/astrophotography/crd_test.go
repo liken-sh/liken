@@ -212,6 +212,22 @@ func TestEachPrinterColumnNamesAField(t *testing.T) {
 	}
 }
 
+// The API server prints only the first value that a column's path
+// gives, so a column over a list, such as .status.indexes[*].id, shows
+// one item and hides the rest. A column names one field that holds
+// the whole answer.
+func TestNoPrinterColumnSpansAList(t *testing.T) {
+	for _, kind := range Kinds {
+		t.Run(kind.Name, func(t *testing.T) {
+			for _, column := range loadCRD(t, kind).Spec.Versions[0].AdditionalPrinterColumns {
+				if strings.Contains(column.JSONPath, "[*]") {
+					t.Errorf("column %s: %s prints only the first item", column.Name, column.JSONPath)
+				}
+			}
+		})
+	}
+}
+
 // resolve walks a column's path through the schema. A step that ends
 // in [] steps into the array's items.
 func resolve(schema *apiextensionsv1.JSONSchemaProps, steps []string) *apiextensionsv1.JSONSchemaProps {
