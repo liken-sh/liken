@@ -90,14 +90,18 @@ parent field, or a parent in another namespace.
 
 A `Telescope` whose `spec.horizon` names a `Horizon` that does not
 exist reports `HorizonFound` `False`, and the message names the
-missing horizon. The telescope still runs, and a reservation of it
-still activates, but a scheduler that reads the telescope's horizon
-finds none. Create the `Horizon` in the telescope's namespace, or
-correct the name in `spec.horizon`:
+missing horizon, such as `Missing Horizon yard`. The telescope still
+runs, and a reservation of it still activates. Create the `Horizon` in
+the telescope's namespace, or correct the name in `spec.horizon`:
 
 ```sh
 kubectl get horizons -n observatory
 ```
+
+A telescope whose `HorizonFound` is `True` still slews below its
+horizon, because no component reads the profile today, as [Save the
+horizon of each place](/docs/guides/describe-your-equipment/#save-the-horizon-of-each-place)
+describes.
 
 ## StartSite or PowerOn fails: two devices name one driver
 

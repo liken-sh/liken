@@ -314,12 +314,19 @@ gives the rule.
 ## Save the horizon of each place
 
 Trees, buildings, and roofs block part of the sky that a telescope's
-latitude allows. A `Horizon` saves the blocked part for one place, so
-a scheduler skips the targets behind it. The blocked part depends on
-where the telescope stands: two piers at one site see different
-treelines, and a portable telescope on the roof sees more than in the
-yard. So save one `Horizon` for each place, and name the one for where
-the telescope stands now in the telescope's `spec.horizon`.
+latitude allows. A `Horizon` saves the blocked part for one place. The
+blocked part depends on where the telescope stands: two piers at one
+site see different treelines, and a portable telescope on the roof
+sees more than in the yard. So save one `Horizon` for each place, and
+name the one for where the telescope stands now in the telescope's
+`spec.horizon`.
+
+A saved horizon limits nothing yet. Neither `observatory-operator` nor
+`astrophotography-operator` reads the profile today, and neither one
+checks a target against it before a slew. So a mount slews to a
+target behind the trees or below the horizon when KStars or
+`astrophotography-operator` asks it to. Check a target's altitude
+before you slew to it.
 
 The profile is a horizon file in the format of N.I.N.A.'s custom
 horizon and of Cartes du Ciel's, so you can paste in a horizon that
@@ -369,8 +376,8 @@ kubectl patch telescope east -n observatory --type merge -p '{"spec":{"horizon":
 
 The telescope's `HorizonFound` condition is `True` when the `Horizon`
 that it names exists. When it is `False`, the message names the
-missing horizon. The telescope still runs, because only a scheduler
-reads a horizon. A telescope with no `spec.horizon` has no horizon
+missing horizon. The telescope still runs, because nothing reads the
+horizon's profile. A telescope with no `spec.horizon` has no horizon
 and no `HorizonFound` condition.
 
 ## Check the result

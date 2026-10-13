@@ -8,7 +8,7 @@ toc: true
 
 # `Horizon`
 
-A `Horizon` is the part of the sky that trees, buildings, and roofs block from one place, such as `yard` or `roof`. A `Telescope` names its current horizon in `spec.horizon`, so a portable telescope that moves to another place takes another saved `Horizon` with one edit. A horizon is for a scheduler, which skips the targets behind it. It is not a limit on where the mount moves.
+A `Horizon` is the part of the sky that trees, buildings, and roofs block from one place, such as `yard` or `roof`. A `Telescope` names its current horizon in `spec.horizon`, so a portable telescope that moves to another place takes another saved `Horizon` with one edit. Neither `observatory-operator` nor `astrophotography-operator` reads the profile today, and neither one checks a target against it before a slew. So a mount slews to a target behind the trees or below the horizon.
 
 ## spec
 

@@ -192,8 +192,8 @@ spec:
 # the mount and the focuser of its train only on the same server. It
 # stands in the yard. A telescope that names a `Horizon` reports the
 # condition `HorizonFound`, which is `False` while the `Horizon` does
-# not exist. The telescope runs either way, because only a scheduler
-# reads a horizon. The driver writes the name of the INDI mount,
+# not exist. The telescope runs either way, because no component reads
+# a horizon's profile today, and no slew checks it. The driver writes the name of the INDI mount,
 # `Telescope Simulator`, in `TELESCOP`, so the telescope declares its
 # own name in its place.
 apiVersion: observatory.liken.sh/v1alpha1

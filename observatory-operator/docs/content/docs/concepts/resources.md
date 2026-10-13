@@ -13,7 +13,8 @@ gives someone the use of a telescope, and an `OpticalTrain` and a
 `Guider` describe how light reaches a camera and how the telescope
 guides. A `Horizon` saves the part of the sky that trees and buildings
 block from one place, and a `Telescope` names the one for where it
-stands now. Each kind has its own reference page with every field.
+stands now. No component reads a horizon's profile today, so it limits
+no slew. Each kind has its own reference page with every field.
 
 Every kind is namespaced, and every kind is in the category `astro`,
 so `kubectl get astro` lists the whole observatory. Each resource names

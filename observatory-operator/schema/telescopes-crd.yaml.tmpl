@@ -99,8 +99,9 @@ spec:
                   description: >-
                     The name of the `Horizon`, in the telescope's
                     namespace, that the telescope sees from where it
-                    stands now. Optional. With no horizon, only the
-                    sky's own geometry limits the telescope. A missing
+                    stands now. Optional. No component reads the
+                    horizon's profile today, so it limits no slew. A
+                    missing
                     `Horizon` never stops a reservation: the
                     `HorizonFound` condition reports it.
 {{ include "fits keywords" . | indent 16 }}

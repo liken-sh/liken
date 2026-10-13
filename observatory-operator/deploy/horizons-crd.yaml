@@ -1,9 +1,9 @@
 # A `Horizon` is the part of the sky that trees, buildings, and roofs
 # block from one place, such as `yard` or `roof`. A `Telescope` names
-# the one for where it stands now. A horizon is for a scheduler, such
-# as the planned `astrophotography-operator`, which skips the targets
-# behind the trees. observatory-operator starts nothing for it and
-# writes no status to it.
+# the one for where it stands now. No component reads the profile
+# yet: observatory-operator starts nothing for a `Horizon` and writes
+# no status to it, and astrophotography-operator does not check a
+# target against it before a slew.
 #
 # The rules on `spec.profile` refuse a profile that no program could
 # read. Each rule matches the whole profile with one regular
@@ -54,9 +54,11 @@ spec:
             and roofs block from one place, such as `yard` or `roof`. A
             `Telescope` names its current horizon in `spec.horizon`, so
             a portable telescope that moves to another place takes
-            another saved `Horizon` with one edit. A horizon is for a
-            scheduler, which skips the targets behind it. It is not a
-            limit on where the mount moves.
+            another saved `Horizon` with one edit. Neither
+            `observatory-operator` nor `astrophotography-operator`
+            reads the profile today, and neither one checks a target
+            against it before a slew. So a mount slews to a target
+            behind the trees or below the horizon.
           required: [spec]
           properties:
             spec:
