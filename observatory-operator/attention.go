@@ -80,6 +80,15 @@ func attention(runs []observatory.ProcedureRun, stored []observatory.Condition, 
 			strings.Join(open, ". ")), true
 	case wasCleared && !answered.After(cleared) && !activated.After(cleared):
 		return held, true
+	// The time of the condition's last transition moves only when its
+	// status changes, so a person's answer from before the activation
+	// that cleared the request can be later than it. Once the activity
+	// ends, the start of that activation is gone and cannot outrank the
+	// answer, so the condition keeps the reason Activated. Without this
+	// case, the end of every activity would turn the old answer into a
+	// new transition to Acknowledged and post its Event.
+	case wasCleared && held.Reason == observatory.ReasonActivated && activated.IsZero():
+		return held, true
 	case answered.After(activated):
 		return condition(observatory.ConditionAttentionNeeded, observatory.ConditionFalse, observatory.ReasonAcknowledged, answer), true
 	}
