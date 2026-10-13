@@ -42,6 +42,24 @@ func TestAParkedMountIsUnparked(t *testing.T) {
 	})
 }
 
+// INDI's telescope base reports TELESCOPE_TRACK_STATE Busy for as long
+// as the mount tracks, so the runner takes a Busy answer with TRACK_ON
+// On as tracking, and slews.
+func TestAMountThatTracksAsBusyIsTracking(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := newWorld(t)
+		w.indi.Move(mountINDI, "TELESCOPE_TRACK_STATE")
+		w.put(targetsPath, target("m42", lights(1)))
+		w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+		w.playCamera(t, saves)
+		w.start(t)
+		waitUntil(t, func() bool { return w.imaging(t, "m42") == "False SequencesDone" })
+		if slews(w) != 1 {
+			t.Errorf("%d slews, want 1", slews(w))
+		}
+	})
+}
+
 // A target that the runner cannot slew to fails with SlewFailed, a
 // Warning, and the runner leaves it for the rest of the reservation.
 func TestATargetTheMountCannotReachFails(t *testing.T) {

@@ -186,21 +186,32 @@ func (c *Client) Answered(ctx context.Context, sent Sent) (Property, error) {
 	return c.settle(ctx, sent, false)
 }
 
+// Accepted waits until the device answers a change that the client
+// sent with the values sent, in any state but Alert. It fails as Settle
+// does. A property whose Busy state means that the change is in
+// effect never turns Ok, so Settle would wait until its limit: INDI's
+// telescope base answers TRACK_ON with TELESCOPE_TRACK_STATE Busy, and
+// keeps it Busy for as long as the mount tracks. Accepted ends on that
+// Busy answer.
+func (c *Client) Accepted(ctx context.Context, sent Sent) (Property, error) {
+	var accepted Property
+	err := c.waitFor(ctx, func(s *Store) (bool, error) {
+		e, err := s.answer(sent)
+		if e == nil || err != nil || !sent.carries(e.property) {
+			return false, err
+		}
+		accepted = e.property.clone()
+		return true, nil
+	})
+	return accepted, err
+}
+
 func (c *Client) settle(ctx context.Context, sent Sent, carries bool) (Property, error) {
 	var settled Property
 	err := c.waitFor(ctx, func(s *Store) (bool, error) {
-		if !s.connected || s.connection != sent.connection {
-			return false, fmt.Errorf("%w: waiting for %s.%s", ErrDisconnected, sent.Device, sent.Property)
-		}
-		e := s.entry(sent.Device, sent.Property)
-		if e == nil || e.defined != sent.defined {
-			return false, fmt.Errorf("%w: waiting for %s.%s", ErrDeleted, sent.Device, sent.Property)
-		}
-		if e.updated <= sent.sequence || e.property.State == Busy {
-			return false, nil
-		}
-		if e.property.State == Alert {
-			return false, &AlertError{Property: e.property.clone()}
+		e, err := s.answer(sent)
+		if e == nil || err != nil || e.property.State == Busy {
+			return false, err
 		}
 		if carries && e.busy <= sent.sequence && !sent.carries(e.property) {
 			return false, nil
@@ -209,6 +220,27 @@ func (c *Client) settle(ctx context.Context, sent Sent, carries bool) (Property,
 		return true, nil
 	})
 	return settled, err
+}
+
+// answer reads the property of a sent change once the device updated
+// it after the send. It answers nil while no update came, and an error
+// when the connection ended, the device deleted the property, or the
+// update is Alert.
+func (s *Store) answer(sent Sent) (*entry, error) {
+	if !s.connected || s.connection != sent.connection {
+		return nil, fmt.Errorf("%w: waiting for %s.%s", ErrDisconnected, sent.Device, sent.Property)
+	}
+	e := s.entry(sent.Device, sent.Property)
+	if e == nil || e.defined != sent.defined {
+		return nil, fmt.Errorf("%w: waiting for %s.%s", ErrDeleted, sent.Device, sent.Property)
+	}
+	if e.updated <= sent.sequence {
+		return nil, nil
+	}
+	if e.property.State == Alert {
+		return nil, &AlertError{Property: e.property.clone()}
+	}
+	return e, nil
 }
 
 // BLOBMode says which messages a server sends this client for a

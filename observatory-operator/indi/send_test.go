@@ -133,6 +133,64 @@ func TestSettleReportsAnAlert(t *testing.T) {
 	})
 }
 
+// INDI's telescope base answers TRACK_ON with TELESCOPE_TRACK_STATE
+// Busy, and keeps it Busy for as long as the mount tracks. Accepted
+// ends on that answer, and on no update that came before it or does not
+// carry the change.
+func TestAcceptedEndsOnABusyAnswer(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c, server := connectedDevice(t, "telescope")
+		server.mute()
+		sent, err := c.SetSwitches(server.device, "TELESCOPE_TRACK_STATE", map[string]bool{"TRACK_ON": true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := make(chan error, 1)
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+			defer cancel()
+			_, err := c.Accepted(ctx, sent)
+			result <- err
+		}()
+		server.await("TELESCOPE_TRACK_STATE")
+		tracking := func(state, on, off string) string {
+			return `<setSwitchVector device="Telescope Simulator" name="TELESCOPE_TRACK_STATE" state="` + state +
+				`"><oneSwitch name="TRACK_ON">` + on + `</oneSwitch><oneSwitch name="TRACK_OFF">` + off +
+				`</oneSwitch></setSwitchVector>`
+		}
+		server.send(tracking("Idle", "Off", "On"))
+		synctest.Wait()
+		select {
+		case err := <-result:
+			t.Fatalf("Accepted ended on a report of tracking off: %v", err)
+		default:
+		}
+		server.send(tracking("Busy", "On", "Off"))
+		if err := <-result; err != nil {
+			t.Errorf("Accepted = %v, want the Busy answer with TRACK_ON On", err)
+		}
+	})
+}
+
+func TestAcceptedReportsAnAlert(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c, server := connectedDevice(t, "telescope")
+		server.mute()
+		sent, err := c.SetSwitches(server.device, "TELESCOPE_TRACK_STATE", map[string]bool{"TRACK_ON": true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		server.await("TELESCOPE_TRACK_STATE")
+		server.send(`<setSwitchVector device="Telescope Simulator" name="TELESCOPE_TRACK_STATE" state="Alert"/>`)
+		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+		defer cancel()
+		var alert *AlertError
+		if _, err := c.Accepted(ctx, sent); !errors.As(err, &alert) {
+			t.Errorf("Accepted = %v, want an AlertError", err)
+		}
+	})
+}
+
 func TestSettleFailsWhenTheConnectionEnds(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, server := connectedDevice(t, "focus")

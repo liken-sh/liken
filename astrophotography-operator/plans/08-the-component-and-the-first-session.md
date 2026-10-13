@@ -5,8 +5,9 @@ built on 2026-10-12, and [what they built](#what-b-and-d-built) lists
 them with each deviation. Pieces E, F, and G of stage 2 were built
 on 2026-10-12, and [what E built](#what-e-built),
 [what F built](#what-f-built), and [what G built](#what-g-built) list
-them the same way. The rest is
-not built. This plan builds
+them the same way. [The early run](#the-early-run) records a
+session of E, F, and G on the dev cluster, and the fault it fixed. The
+rest is not built. This plan builds
 first: it gives the component that plans 01, 02, and 03 build into,
 the changes they need from `observatory-operator`, the order of the
 build, and the drill that proves them together.
@@ -673,3 +674,103 @@ the rounds and error of each centering, the time from the end of one
 exposure to the start of the next, the time from a frame's end to its
 line in the catalog, the memory of the worker and the solver pods, and
 the disk in use.
+
+## The early run
+
+On 2026-10-12, before H and I were built, a session of E, F, and G ran
+on the QEMU dev cluster, to find the faults that only a cluster shows
+before the drill of the first session runs. The cluster was `node-1`
+alone, with 4 GB of memory and a state disk of 6 GB. The three images
+were built from adde1c25, and then again with the fix below, and
+reached the lab through the lab registry. Each `Deployment` named its
+image by digest, because the node held older `:dev` images and
+`IfNotPresent` keeps them, and the operator's
+`ASTROPHOTOGRAPHY_WORKER_IMAGE` named the worker's digest.
+`observatory-operator` ran the same commit, with its CRDs applied
+again. The observatory was the example in `observatory`, with
+`Guider east`. The runner guided nothing and centered nothing, and the
+`Imaging` message said `unguided, not centered`.
+
+The `Target` `m42` had the example's coordinates, train, `dither`, and
+`centering`, and two sequences of two frames of 5 s each, Luminance
+and Red. Its archive was `archive` under `astro`, with the format
+`{object}/{night}/{filter}/{object}_{filter}_{exposure}_{n}` and
+`Continuous` promotion. The `Reservation` `east-tonight` held `east`
+for `astrophotography-operator`, with the outbox `frames`.
+
+| Check | Result |
+|---|---|
+| Copy the 13 index files into `astrometry-indexes` with `tar` over `kubectl exec` | 236 MiB in 1.5 s. The MD5 sum of each file matched the laptop's. |
+| Apply `Solver lab` | `Ready` 4 s after creation, with `Loaded` and the message `13 index files of the series 4207, 4208`. `status.indexes` listed 4207 with 12 files and 4208 with 1 file. |
+| Reserve `east` | `Ready` 40 s after creation. `Activation` took 24 s, and the camera's cooling to -10 °C took 20 s of that. The worker `east-tonight-astrophotography` started on `node-1` in the same second as `east-telescope`. |
+| The first slew | `SlewFailed` 30 s after `Slewing`, with `Telescope Simulator.TELESCOPE_TRACK_STATE: context deadline exceeded`. The fix follows this table. |
+| The slew with the fix | `Exposing` 22 s after `Slewing`, and 5 s of that was the settle time. |
+| Expose four frames | The frames started 6.95 s, 7.02 s, and 7.10 s apart, so the runner took about 2 s between the end of one exposure and the start of the next, and the change from Luminance to Red took no longer. |
+| Promote each frame | Each frame had its own `Job`, `m42-promote-1` to `-4`. From the end of a frame to the end of its `Job` took 6 s for the first and 3 s for each other, and `archived` rose within 1 s after the `Job` ended. `Complete` turned `True` with `Archived` and `4/4` 3 s after the last exposure ended. |
+| Read the archive from a `busybox` pod that mounts it read-only | Four files of 2,629,440 bytes, such as `astro/M42/2026-10-12/Luminance/M42_Luminance_5s_0001_40d7a8a9d7f3.fits`, owned by user and group 1000. Each name ends in the last 12 digits of its `FRAMEID`. |
+| Read each header | `OBSERVER = 'Simulated Observer'`, `TELESCOP = 'East refractor'`, `OBJECT = 'M42'`, a UUIDv7 `FRAMEID` that matched its name, the sequence's `FILTER`, and `EXPTIME = 5`. |
+| Read `astro/catalog/m42.jsonl` | Four lines, one for each `FRAMEID`. The `sha256` of each line matched `sha256sum` of its file. |
+| Read the outbox | The directories of `m42` held no file. |
+| End the reservation | `Released` 56 s after the delete. The worker went, and `Mount east` parked in 4 s. |
+
+The fix: INDI's telescope base answers `TRACK_ON` with
+`TELESCOPE_TRACK_STATE` `Busy`, and keeps it `Busy` for as long as the
+mount tracks. The `Mount`'s status read `{"state":"Busy","value":"TRACK_ON"}`
+while the runner waited. The runner turned tracking on with `Settle`,
+which waits for a state that is not `Busy`, so it waited until the
+limit of 30 s, and the target failed. `indi` gained `Client.Accepted`,
+which ends on the first update after the send that carries the values
+sent, in any state but `Alert`, and `readyMount` turns tracking on with
+it. A test of `indi` and a test of the slew, with a fake mount that
+answers `TRACK_ON` with `Busy`, failed before the fix. A second
+reservation, which started the mount with `TRACK_OFF`, reached
+`Exposing` 22 s after `Slewing` and archived its one frame.
+
+A solve through the worker and the solver ran on one archived frame
+after the session. The frame went into the outbox's `_centering`
+directory, the only directory beside a target's that the worker
+extracts from, and port forwards reached both `Service`s. The hint was
+the header's position, `RA` 83.81965° and `DEC` -5.393677°, and the
+train's scale, 206.265 × 5.2 µm / 480 mm = 2.2345 arcseconds per pixel,
+±10%.
+
+| Step | Result |
+|---|---|
+| `POST /extract` | 0.12 s, 2,614 stars, median FWHM 6.26 pixels |
+| `POST /solve`, radius 5° | 0.09 s: 83.82031°, -5.39357°, 2.2345 arcseconds per pixel, rotation 180.0°, negative parity, index 4207 |
+| `POST /solve`, blind | 0.10 s, the same solution |
+| `DELETE /centering/<FRAMEID>` | 204, and the file was gone |
+
+So on this frame, the header's position and the drawn stars agree
+within 2.4 arcseconds, and the 6.8° of G's smoke did not occur. The
+solution is 10.9 arcseconds from the `Target`'s J2000 coordinates, and
+the header's position is 12.7 arcseconds from them. That difference
+comes from the runner's conversion to the equinox of the date and the
+driver's conversion back, and the run did not establish which one
+differs. The solver and the worker each held under 7 MiB of memory
+after the solves.
+
+Found and not fixed:
+
+- **The `Solver`'s index list is read through its `Service`.** When the
+  operator rolled out a new worker image, the new solver pod was
+  `Ready`, and the read of `GET /indexes` through `lab-solver` timed
+  out after 30 s, so the `Solver` was `PodNotReady` for 30 s. On the
+  first `Solver`, the first three reads were refused within 5 ms, and a
+  read 2 s later answered. Each time, the `Service` did not yet route
+  to the new pod. The list is kept by the pod's UID, so a read from
+  the pod's own address would answer for that pod alone.
+- **The `INDEXES` column shows one series.** `kubectl get solver`
+  printed `4207`, and the set-up guide shows `4207,4208`. The API
+  server prints only the first value of a column whose JSONPath gives
+  several, so `.status.indexes[*].id` shows the first series.
+  `equipment-operator`'s `CECBus` has two columns of the same kind.
+- **"moved 1 frames".** The `Promoted` `Event` and the operator's log
+  line say `1 frames`.
+- **A `promotion: conflict` line** appeared in the log once in each
+  session, and the next try 1 s later succeeded.
+
+At the end, the `Solver` `lab`, its claim `astrometry-indexes`, the
+claim `archive` with its five frames and two catalogs, and both
+operators stayed installed. Both reservations were deleted, and every
+device of `east` was `Idle`.

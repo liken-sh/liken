@@ -92,18 +92,34 @@ func (w *work) readyMount(ctx context.Context) error {
 		w.r.o.recorder.Normal(reservationRef(w.res), reasonUnparked,
 			fmt.Sprintf("astrophotography-operator unparked %s to slew to %s for target %s.", mount, w.target.Spec.Object, w.target.Metadata.Name))
 	}
-	for _, s := range []struct{ property, member string }{
-		{"TELESCOPE_TRACK_STATE", "TRACK_ON"},
-		{"ON_COORD_SET", "TRACK"},
+	// INDI's telescope base answers TRACK_ON with TELESCOPE_TRACK_STATE
+	// Busy, and keeps it Busy for as long as the mount tracks, so the
+	// runner takes the Busy answer as tracking. Settle would wait for a
+	// state that is not Busy until its limit.
+	for _, s := range []struct {
+		property, member string
+		busyIsOn         bool
+	}{
+		{"TELESCOPE_TRACK_STATE", "TRACK_ON", true},
+		{"ON_COORD_SET", "TRACK", false},
 	} {
 		p, ok := c.Property(mount, s.property)
 		if !ok || switchOn(p, s.member) {
 			continue
 		}
-		if _, err := w.r.settle(ctx, settingTimeout, func() (indi.Sent, error) {
-			return c.SetSwitches(mount, s.property, map[string]bool{s.member: true})
-		}); err != nil {
+		sent, err := c.SetSwitches(mount, s.property, map[string]bool{s.member: true})
+		if err != nil {
 			return err
+		}
+		answered, cancel := context.WithTimeout(ctx, settingTimeout)
+		if s.busyIsOn {
+			_, err = c.Accepted(answered, sent)
+		} else {
+			_, err = c.Settle(answered, sent)
+		}
+		cancel()
+		if err != nil {
+			return fmt.Errorf("%s.%s: %w", mount, s.property, err)
 		}
 	}
 	return nil
