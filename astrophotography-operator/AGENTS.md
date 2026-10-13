@@ -1,8 +1,8 @@
 # Working on astrophotography-operator
 
-This directory holds the operator that will run imaging sessions on an
-observatory that `observatory-operator` controls, and the manifests
-that run it. `plans/00-design.md` is the design, and the `plans/`
+This directory holds the operator that images the targets a person
+declares on a telescope that `observatory-operator` controls, and the
+manifests that run it. `plans/00-design.md` is the design, and the `plans/`
 directory holds the plans that build it. Code exists only where a plan
 calls for it. This component depends on `observatory-operator`, and
 `observatory-operator` does not depend on it. [Root plan

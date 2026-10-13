@@ -29,8 +29,8 @@ that is built has its own manual on this site, and its source is a directory of 
   watch them, and control of the receiver and the TV.
 * [Running an observatory](/docs/concepts/running-an-observatory/):
   `observatory-operator` runs a telescope's mount, cameras, and other
-  equipment through INDI. `astrophotography-operator` will run imaging
-  sessions on that telescope. It is planned, and not built yet.
+  equipment through INDI. `astrophotography-operator` takes the
+  frames of the targets you declare on that telescope.
 
 ## Install only what you need
 

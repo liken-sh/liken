@@ -25,11 +25,14 @@ Things you can do with it:
 * Keep frames on a network share or a disk of your choice, and check
   each one against the SHA-256 the catalog recorded.
 
-The operator is under development, and it has no release yet. It
-slews, centers, guides, dithers, exposes, and moves frames to the
-archive. It does not check whether a target is above the horizon, and
-it does not take calibration frames.
-The design and the work still to come are in the
+The operator slews, centers, guides, dithers, exposes, and moves
+frames to the archive, and it skips a target that is below the
+telescope's horizon. It images the eligible target with the highest
+priority, and does not yet weigh the moon, twilight, or how soon a
+target sets. It does not reserve the telescope on its own, grade
+frames, or take calibration frames. Its tests and drills run against
+the INDI simulators, and no drill has run on real equipment yet. The
+design and the work still to come are in the
 [plans](https://github.com/liken-sh/liken/tree/main/astrophotography-operator/plans).
 
 Start here:

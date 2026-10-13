@@ -3,7 +3,9 @@
 Proposed on 2026-10-12, and designed on 2026-10-12. Built on
 2026-10-12 as piece F of [plan 08](08-the-component-and-the-first-session.md),
 whose section [what F built](08-the-component-and-the-first-session.md#what-f-built)
-lists the deviations; the drill of plan 08 has not run. [The
+lists the deviations. [The first
+session](08-the-component-and-the-first-session.md#the-first-session)
+of plan 08 promoted frames on the dev cluster on 2026-10-12. [The
 design](#the-design) answers what the design conversation left open,
 and changes two decisions on evidence: frames carry no FITS
 checksums to check, and the same claim still runs a `Job`, which

@@ -34,11 +34,10 @@ Things you can do with it:
 
 The operator does not take pictures, plate-solve, or guide on its own.
 It starts PHD2 and connects it to your guide camera and mount, and you
-run the session from KStars.
+run the session from KStars, or `astrophotography-operator` runs it.
 
-The operator is under development, and it has no release yet. Its
-tests and the drills on a test cluster run against the INDI
-simulators. Real hardware connects through the same resources, but no
+The operator's tests and the drills on a test cluster run against the
+INDI simulators. Real hardware connects through the same resources, but no
 drill has run on real equipment yet, and a QHY camera that loads its
 firmware through udev rules on the host does not work.
 [Connect USB equipment](/docs/guides/connect-usb-equipment/) gives

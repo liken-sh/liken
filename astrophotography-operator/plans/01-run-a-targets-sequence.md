@@ -1,6 +1,10 @@
 # 01, Run a target's sequence
 
-Proposed on 2026-10-12, and designed on 2026-10-12. Not built. [The
+Proposed on 2026-10-12, and designed on 2026-10-12. Built on
+2026-10-12 as pieces B, E, and H of [plan
+08](08-the-component-and-the-first-session.md), which lists what each
+piece built and its deviations from this design, and drilled in [its
+first session](08-the-component-and-the-first-session.md#the-first-session). [The
 design](#the-design) answers what the design conversation left open,
 from probes of the pinned `indi-simulators` image on the laptop.
 [Plan 08](08-the-component-and-the-first-session.md) gives the

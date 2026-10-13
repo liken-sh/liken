@@ -19,8 +19,8 @@ the operator and four packages:
 
 - [`observatory/`](observatory/) holds the 20 kinds of
   `observatory.liken.sh/v1alpha1` as Go types. The operator reads and
-  writes them, and `astrophotography-operator` will import them to read
-  a telescope's state and to create a `Reservation`.
+  writes them, and `astrophotography-operator` imports them to read a
+  reservation's session and a telescope's state.
 - [`indi/`](indi/) is a client of the INDI protocol, version 1.7, in
   Go with no cgo. It keeps every device and property that a server
   defines, follows each update, sends changes that follow each

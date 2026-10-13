@@ -22,31 +22,23 @@ You need:
 
 ## Apply the manifests
 
-The operator has no release yet, so you install a development build.
-Every push to `main` that changes the operator publishes one. Its
-version is the most recent release tag of the repository, plus a
-suffix: `2026.10.04-004-dev-124-93f85ef4` is 124 commits past
-release `2026.10.04-004`, at commit `93f85ef4`. The summary of the CI
-run for that commit gives the version, and the
-[package page](https://github.com/liken-sh/liken/pkgs/container/astrophotography-operator)
-lists every version that exists.
-
-A development build has no git tag, so the manifests pin to the
-commit's full sha, and the image pins to the version. Write this
+Pin the manifests and the image to one release. The
+[GitHub releases](https://github.com/liken-sh/liken/releases) list
+each tag and the version of every component in it, and a component's
+version is the tag that last released it. Write this
 `kustomization.yaml`:
 
 ```yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - https://github.com/liken-sh/liken//astrophotography-operator/deploy?ref=<full 40-character sha>
+  - https://github.com/liken-sh/liken//astrophotography-operator/deploy?ref=<version>
 images:
   - name: ghcr.io/liken-sh/astrophotography-operator
     newTag: <version>
 ```
 
-A git fetch by sha needs all forty characters. The eight in the
-version are not enough. Then apply it:
+Then apply it:
 
 ```sh
 kubectl apply -k .
@@ -117,12 +109,40 @@ and a Grafana dashboard in the `monitoring` namespace:
 
 ```yaml
 resources:
-  - https://github.com/liken-sh/liken//astrophotography-operator/deploy?ref=<full 40-character sha>
+  - https://github.com/liken-sh/liken//astrophotography-operator/deploy?ref=<version>
 components:
-  - https://github.com/liken-sh/liken//astrophotography-operator/deploy/monitoring?ref=<full 40-character sha>
+  - https://github.com/liken-sh/liken//astrophotography-operator/deploy/monitoring?ref=<version>
 ```
 
 [Metrics](/docs/reference/metrics/) lists every series.
+
+## Run a development build
+
+A push to `main` that changes the operator publishes a development
+build of it. Its version is the most recent release tag plus a suffix:
+`2026.10.13-003-dev-012-93f85ef4` is 12 commits past release
+`2026.10.13-003`, at commit `93f85ef4`. The summary of the CI run for
+that commit gives the version, and `:latest` still names the most
+recent release.
+
+A development build has no git tag, so the manifests pin to the
+commit's full sha, and the image pins to the version:
+
+```yaml
+resources:
+  - https://github.com/liken-sh/liken//astrophotography-operator/deploy?ref=<full 40-character sha>
+images:
+  - name: ghcr.io/liken-sh/astrophotography-operator
+    newTag: <version>
+```
+
+A git fetch by sha needs all forty characters. The eight in the
+version are not enough.
+
+The same build publishes the manifests as the OCI artifact
+`oci://ghcr.io/liken-sh/astrophotography-operator-deploy:<version>`, with the image set
+to that version. A Flux `OCIRepository` can pull that artifact by the
+version, with no sha.
 
 ## Remove the operator
 

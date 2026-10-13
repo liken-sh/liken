@@ -4,7 +4,8 @@ Plans 01, 02, and 03 are built, through the pieces of [plan
 08](08-the-component-and-the-first-session.md), and the first imaging
 session ran on the QEMU dev cluster on 2026-10-12: [the first
 session](08-the-component-and-the-first-session.md#the-first-session)
-records it. Plans 04 to 07 are not built.
+records it, and the operator was released in `2026.10.13-001`. Plan
+04's horizon filter is built, and the rest of plans 04 to 07 is not.
 
 `astrophotography-operator` images the targets a person declares, on
 the telescopes that `observatory-operator` controls. A
@@ -106,10 +107,10 @@ The plans are otherwise in the order they build on each other.
 
 | Plan | Subject |
 |---|---|
-| [01](01-run-a-targets-sequence.md) | Designed: `Target`, running its sequences inside a reservation, and the frame catalog |
-| [02](02-solving-and-centering.md) | Designed: the `astrometry` image, the `Solver`, the worker, and centering |
-| [03](03-promotion-to-the-archive.md) | Designed: moving frames from the outbox to the target's archive, and verifying them |
-| [04](04-the-scheduler.md) | Choosing the next target from the sky, the horizon, and the work left |
+| [01](01-run-a-targets-sequence.md) | Built: `Target`, running its sequences inside a reservation, and the frame catalog |
+| [02](02-solving-and-centering.md) | Built: the `astrometry` image, the `Solver`, the worker, and centering |
+| [03](03-promotion-to-the-archive.md) | Built: moving frames from the outbox to the target's archive, and verifying them |
+| [04](04-the-scheduler.md) | Choosing the next target from the sky, the horizon, and the work left. The horizon filter is built |
 | [05](05-reservations-on-demand.md) | Creating and ending reservations as the sky allows |
 | [06](06-grading-policies.md) | Rejecting frames by a person's policy |
 | [07](07-calibration-frames.md) | Capturing and keeping darks and flats |

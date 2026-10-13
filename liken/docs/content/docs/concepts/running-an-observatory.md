@@ -34,11 +34,16 @@ power off. The dome and the weather station run on the observatory's
 own INDI server, which every telescope there shares. One telescope serves one reservation at a time, and other
 reservations wait in order of their start times.
 
-[`astrophotography-operator`](https://github.com/liken-sh/liken/tree/main/astrophotography-operator)
-is planned and not built. It will run imaging sessions on a telescope
-that `observatory-operator` controls: it will plan each night one
-exposure at a time, center and guide through the INDI server and
-PHD2, and record each frame and its grade.
+[`astrophotography-operator`](https://liken.sh/astrophotography/)
+takes the frames you ask for, under the API group
+`astrophotography.liken.sh`. You declare a `Target`, an object and the
+frames you want of it, and reserve a telescope for the operator. While
+that reservation is active, the operator chooses a target, slews to
+it, centers it with a plate solve, guides through PHD2, and takes the
+frames through the telescope's INDI server. It moves each frame to the
+archive the target names, and keeps a target's progress across
+nights. It runs the plate solver, astrometry.net, in a pod for each
+`Solver`.
 
 ## What they depend on
 

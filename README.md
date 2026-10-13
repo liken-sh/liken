@@ -46,9 +46,8 @@ Each top-level directory is one component, named for what it ships:
 - [`observatory-operator/`](observatory-operator/) runs an
   observatory's hardware through INDI, and its manual is at
   [liken.sh/observatory](https://liken.sh/observatory/).
-  [`astrophotography-operator/`](astrophotography-operator/) will run
-  imaging sessions on it. Its resources and its operator are in
-  place, and it does not image yet. Its manual is at
+  [`astrophotography-operator/`](astrophotography-operator/) images
+  the targets a person declares on it, and its manual is at
   [liken.sh/astrophotography](https://liken.sh/astrophotography/).
 - [`git-csi-driver/`](git-csi-driver/) mounts git repositories as
   volumes.
