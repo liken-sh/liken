@@ -105,29 +105,34 @@ and each change of reason posts an `Event` on the target.
    `east-tonight-astrophotography` beside the outbox.
 2. **The operator claims a target.** It takes the eligible target with
    the highest priority and writes the reservation's name into the
-   target's `status.reservation`. `Imaging` turns `True` with the
-   reason `Slewing`. When no target is eligible, the reservation gets
-   the `Event` `AstrophotographyIdle`.
-3. **It slews.** It stops PHD2, unparks the mount if it is parked,
-   with the `Event` `AstrophotographyUnparked` on the reservation,
-   turns tracking on, converts the J2000 coordinates to the equinox of
+   target's `status.reservation`. When no target is eligible, the
+   reservation gets the `Event` `AstrophotographyIdle`.
+3. **It checks the filters.** When the train has a `FilterWheel`, it
+   reads the wheel's filter names. When a sequence with work left or
+   the centering names a filter that the wheel does not have, it
+   releases the target with `NoFilter` before the mount moves, and
+   returns to step 2 for the next target.
+4. **It slews.** It stops PHD2, and `Imaging` turns `True` with the
+   reason `Slewing`. It unparks the mount if it is parked, with the
+   `Event` `AstrophotographyUnparked` on the reservation, turns
+   tracking on, converts the J2000 coordinates to the equinox of
    the date, slews, and waits 5 seconds for the tube to settle.
-4. **It centers**, when the target states `centering`, with the reason
+5. **It centers**, when the target states `centering`, with the reason
    `Centering`. It takes a short frame, plate-solves it, syncs the
    mount to the solved position, and slews again, until the error is
    within the tolerance. The result is in `status.centering`.
-5. **It guides**, when the telescope has a `Guider`, with the reason
+6. **It guides**, when the telescope has a `Guider`, with the reason
    `Guiding`. It starts PHD2 looping, selects a star, starts guiding,
    and waits for the star to settle. PHD2 calibrates first when it has
    no calibration.
-6. **It exposes** one frame of the first sequence with work left, with
+7. **It exposes** one frame of the first sequence with work left, with
    the reason `Exposing`. The camera writes the frame into the outbox,
    at `/outbox/<Camera>/<Reservation>/<Target>/<name>.fits`, under its
    final name. The frame in flight is in `status.exposure`. When the
    frame is saved, the sequence's `pending` count goes up by one.
-7. **It dithers** after every `dither.every` frames, and waits for the
+8. **It dithers** after every `dither.every` frames, and waits for the
    star to settle before the next frame. A dither posts no `Event`.
-8. **It moves the frames to the archive.** With the default
+9. **It moves the frames to the archive.** With the default
    `promotion: Continuous`, each new frame starts a promotion `Job`,
    `m42-promote-<number>`. The `Job` copies the frame, checks its
    SHA-256, records it in the catalog, and deletes it from the outbox.
@@ -135,7 +140,7 @@ and each change of reason posts an `Event` on the target.
    `ArchiveAvailable` condition turns `True` with the reason
    `Promoted`. With `AfterReservation`, the `Job` starts when the
    reservation ends.
-9. **It moves on.** Steps 6 to 8 repeat until no sequence has work
+10. **It moves on.** Steps 7 to 9 repeat until no sequence has work
    left. Then the operator releases the target with `Imaging` `False`
    and the reason `SequencesDone`, and returns to step 2 for the next
    target. `Complete` turns `True` when the last frame is in the

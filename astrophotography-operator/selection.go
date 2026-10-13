@@ -107,7 +107,11 @@ func (r *runner) claimNext() (*astrophotography.Target, error) {
 			continue
 		}
 		claimed := false
-		_, err := r.o.writeTarget(t, func(fresh *astrophotography.Target, change *statusChange) bool {
+		// The claim leaves the Imaging condition to the work that
+		// follows, which checks the target's filters before the slew
+		// sets Imaging True with Slewing. So a target that fails the
+		// check posts no Slewing Event for a slew that never starts.
+		_, err := r.o.writeTarget(t, func(fresh *astrophotography.Target, _ *statusChange) bool {
 			claimed = eligible(fresh, session, ready, r.name) && !failedOn(fresh, r.name)
 			if !claimed {
 				return false
@@ -118,8 +122,6 @@ func (r *runner) claimNext() (*astrophotography.Target, error) {
 			if f := fresh.Status.Failed; f != nil && f.Reservation == r.name {
 				fresh.Status.Failed = nil
 			}
-			change.setImaging(fresh, true, astrophotography.ReasonSlewing,
-				fmt.Sprintf("Reservation %s slews to %s.", r.name, fresh.Spec.Object))
 			return true
 		})
 		if err != nil {

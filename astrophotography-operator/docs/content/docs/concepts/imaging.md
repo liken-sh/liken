@@ -63,27 +63,36 @@ the `Event` `AstrophotographyIdle`, and the runner waits for a change.
 
 ## The order of a target's work
 
-1. Claim the target. `Imaging` turns `True` with the reason `Slewing`.
-2. Stop PHD2 with `stop_capture` if it loops or guides, and wait until
+1. Claim the target.
+2. Check the filters, if the train has a `FilterWheel`. The runner
+   reads the wheel's `FILTER_NAME` and looks for the filter of each
+   sequence with work left, and for the filter of the centering frames
+   when the target states `centering`. When a name is missing, `Imaging` turns
+   `False` with `NoFilter` before the mount moves, and the runner
+   releases the target and chooses the next one. A sequence with no
+   work left needs no filter, so you can take its filter out of the
+   wheel when its frames are done.
+3. Stop PHD2 with `stop_capture` if it loops or guides, and wait until
    it reports the stop, so that it does not chase the stars while the
    mount moves.
-3. Unpark the mount if it is parked, with the `Event`
-   `AstrophotographyUnparked` on the reservation, and turn tracking on.
-   A mount that already tracks gets no write.
-4. Convert the target's J2000 coordinates to the equinox of the date,
+4. `Imaging` turns `True` with the reason `Slewing`. Unpark the mount
+   if it is parked, with the `Event` `AstrophotographyUnparked` on the
+   reservation, and turn tracking on. A mount that already tracks gets
+   no write.
+5. Convert the target's J2000 coordinates to the equinox of the date,
    which an INDI mount takes in `EQUATORIAL_EOD_COORD`, slew, and wait
    for the mount to report the end of the slew, and then 5 seconds
    more for the tube to settle.
-5. If the target states `centering`, center it, with `Imaging` `True`
+6. If the target states `centering`, center it, with `Imaging` `True`
    and the reason `Centering` ([Centering](#centering)).
-6. Guide, if the session has a `Guider`: `loop`, `find_star`, and
+7. Guide, if the session has a `Guider`: `loop`, `find_star`, and
    `guide`, with `Imaging` `True` and the reason `Guiding`, and wait for
    PHD2's `SettleDone` ([Guiding and dithering](#guiding-and-dithering)).
-7. Take one frame of the first sequence with work left, and then the
+8. Take one frame of the first sequence with work left, and then the
    next, with `Imaging` `True` and the reason `Exposing`. After every
    `dither.every` frames, dither and wait for `SettleDone`, unless the
    frame was the target's last or the mount slews before the next.
-8. When no sequence has work left, release the claim. `Imaging` turns
+9. When no sequence has work left, release the claim. `Imaging` turns
    `False` with the reason `SequencesDone`, and the runner chooses the
    next target.
 
@@ -288,7 +297,9 @@ when it moves to the archive.
 |---|---|
 | The outbox has less than three frames' size free | `Imaging` `False` with `OutboxFull`, and the `Warning` `AstrophotographyOutboxFull` on the reservation. The runner keeps the claim and asks again on the next change, such as the end of a promotion `Job`. |
 | The driver answers a setting or the exposure with `Alert`, does not finish within the exposure plus 2 minutes, saves the frame under another name, or the worker does not answer | `Imaging` `False` with `ExposureFailed` and the reason in the message. The frame does not count. The runner keeps the claim and starts the next frame after a minute. An exposure that did not finish is aborted first. |
-| The sequence names a filter that the wheel does not have, or the train has no `FilterWheel` | `Imaging` `False` with `NoFilter`, and the runner releases the target |
+| A sequence with work left, or the centering, names a filter that the wheel's `FILTER_NAME` does not have | `Imaging` `False` with `NoFilter`, and the runner releases the target before the mount moves |
+| A frame names a filter that the wheel no longer has, because a person renamed the wheel's filters during the night | `Imaging` `False` with `NoFilter` at that frame, and the runner releases the target |
+| A frame names a filter, and the train has no `FilterWheel` | `Imaging` `False` with `NoFilter` at the first frame that names a filter, after the slew and the centering, and the runner releases the target |
 | The mount refuses to unpark, to track, or to slew, or does not stop within 10 minutes | `Imaging` `False` with `SlewFailed`, and the runner releases the target |
 | A centering frame does not solve at its exposure or at twice it, `centering.attempts` rounds (5 by default) end outside the tolerance, the plate scale is unknown, the worker or the solver answers an error, the camera fails the centering frame, or the mount refuses the sync | `Imaging` `False` with `CenteringFailed` and the reason in the message, and the runner releases the target |
 | The connection to the INDI server drops | The runner connects again after a backoff of 1 second that doubles up to a minute, finishes the frame in flight as after a restart, and slews again |

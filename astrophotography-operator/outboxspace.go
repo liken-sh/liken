@@ -12,7 +12,6 @@ import (
 	"fmt"
 
 	"github.com/liken-sh/liken/astrophotography-operator/astrophotography"
-	"github.com/liken-sh/liken/observatory-operator/indi"
 )
 
 // outboxFull is the error of an outbox with too little space for the
@@ -77,32 +76,4 @@ func (w *work) waitForSpace(ctx context.Context, full *outboxFull) error {
 	case <-ctx.Done():
 	}
 	return nil
-}
-
-// selectFilter turns the filter wheel to the sequence's filter, by its
-// name in FILTER_NAME, the name that the driver writes into FILTER. A
-// sequence with no filter takes the light path as it is.
-func (w *work) selectFilter(ctx context.Context, filter string) error {
-	if filter == "" {
-		return nil
-	}
-	if w.wheelDevice == "" {
-		return fail(astrophotography.ReasonNoFilter, "the sequence names the filter %q, and optical train %q has no FilterWheel", filter, w.camera.train)
-	}
-	names, _ := w.r.client.Property(w.wheelDevice, "FILTER_NAME")
-	slot := 0
-	var known []string
-	for i, m := range names.Members {
-		known = append(known, m.Text)
-		if m.Text == filter && slot == 0 {
-			slot = i + 1
-		}
-	}
-	if slot == 0 {
-		return fail(astrophotography.ReasonNoFilter, "filter wheel %s has no filter named %q; its FILTER_NAME holds %q", w.wheelDevice, filter, known)
-	}
-	_, err := w.r.settle(ctx, filterTimeout, func() (indi.Sent, error) {
-		return w.r.client.SetNumbers(w.wheelDevice, "FILTER_SLOT", map[string]float64{"FILTER_SLOT_VALUE": float64(slot)})
-	})
-	return err
 }

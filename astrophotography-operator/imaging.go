@@ -1,9 +1,10 @@
 package main
 
 // The work on one claimed target (plan 01's order of operations). The
-// runner stops guiding, slews, centers, and then guides and exposes the
-// first sequence with work left, one frame at a time, until no sequence
-// has any. Before each frame it reads the target again, so
+// runner checks that the filter wheel holds the target's filters
+// (filters.go), stops guiding, slews, centers, and then guides and
+// exposes the first sequence with work left, one frame at a time, until
+// no sequence has any. Before each frame it reads the target again, so
 // a target that a person suspends, edits, or deletes changes the work
 // at the next frame, not in the middle of one.
 
@@ -121,6 +122,9 @@ func (r *runner) prepare(t *astrophotography.Target) (*work, error) {
 // run is plan 01's order of operations for one target.
 func (w *work) run(ctx context.Context) error {
 	if err := w.r.syncDevices(ctx, w.mountDevice, w.cameraDevice, w.wheelDevice); err != nil {
+		return err
+	}
+	if err := w.checkFilters(); err != nil {
 		return err
 	}
 	if err := w.aim(ctx); err != nil {

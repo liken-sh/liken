@@ -70,7 +70,8 @@ every change: the `Target`s and `Solver`s, the `Reservation`s whose
 `PersistentVolumeClaim`. `runners.go` starts the runner of plan 01
 for each `Ready` reservation (`runner.go`): it chooses and claims a
 target (`selection.go`) that stands above the telescope's horizon
-(`horizon.go`), slews (`slew.go`), exposes each frame
+(`horizon.go`), checks that the filter wheel holds its filters
+(`filters.go`), slews (`slew.go`), exposes each frame
 (`exposure.go`, `framesaved.go`), counts it into the target's status
 (`counting.go`), and finishes a frame in flight after a restart
 (`resume.go`). `steps.go` holds the seams of guiding and centering.

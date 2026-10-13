@@ -173,16 +173,26 @@ func TestATargetThatCannotBeImagedIsReleased(t *testing.T) {
 	}
 }
 
-// slewsOf counts the claims of a target: each one posts Slewing, and a
-// repeat within 10 minutes adds to the count of the same Event.
-func (w *night) slewsOf(name string) int32 {
-	var count int32
-	for _, e := range w.runnerEvents("Target", name) {
-		if e.Reason == astrophotography.ReasonSlewing {
-			count += e.Count
+// claimsOf counts the claims of a target in the API server's history:
+// each change of status.reservation from none to this night's
+// reservation.
+func (w *night) claimsOf(name string) int {
+	w.api.mu.Lock()
+	defer w.api.mu.Unlock()
+	claims, held := 0, ""
+	for _, e := range w.api.events {
+		metadata, _ := e.object["metadata"].(map[string]any)
+		if e.collection != targetsPath || metadata["namespace"] != ns || metadata["name"] != name {
+			continue
 		}
+		status, _ := e.object["status"].(map[string]any)
+		reservation, _ := status["reservation"].(string)
+		if held == "" && reservation == tonight {
+			claims++
+		}
+		held = reservation
 	}
-	return count
+	return claims
 }
 
 // A target that failed on a reservation stays released after a restart
@@ -190,10 +200,10 @@ func (w *night) slewsOf(name string) int32 {
 // An edit of the spec makes it eligible again on the same reservation.
 func TestAFailedTargetStaysReleased(t *testing.T) {
 	cases := []struct {
-		name  string
-		after func(*testing.T, *night)
-		slews int32
-		want  string
+		name   string
+		after  func(*testing.T, *night)
+		claims int
+		want   string
 		// failed is the reservation that status.failed names after.
 		failed string
 	}{
@@ -227,8 +237,8 @@ func TestAFailedTargetStaysReleased(t *testing.T) {
 				if got := w.imaging(t, "m42"); got != c.want {
 					t.Errorf("Imaging %q, want %q", got, c.want)
 				}
-				if got := w.slewsOf("m42"); got != c.slews {
-					t.Errorf("%d claims, want %d", got, c.slews)
+				if got := w.claimsOf("m42"); got != c.claims {
+					t.Errorf("%d claims, want %d", got, c.claims)
 				}
 				if got := failedReservation(w.targetNow(t, "m42")); got != c.failed {
 					t.Errorf("status.failed names %q, want %q", got, c.failed)
