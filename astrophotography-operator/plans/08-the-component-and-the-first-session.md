@@ -1104,10 +1104,6 @@ every device of `east` was `Idle`.
 
 ### Found and not fixed
 
-- **A sync that fails records no round.** `rounds` returns the error
-  of `syncTo` or `goTo` without `end`, so `status.centering` and the
-  series of rounds have no record of a centering that failed there.
-  `m42-sync`'s first try left `status.centering` empty.
 - **The frame in flight across a restart is not in
   `astrophotography_frames_exposed_total`.** The new process counts it
   in the status and not in the series, which read 1 for the three
@@ -1152,3 +1148,13 @@ were deleted, and every device of `east` was `Idle`.
   frame of the target, not after the frame it counted, so the frame
   that completes the work, or a frame before a slew to new
   coordinates, gets no dither (`imaging.go`, `dither_test.go`).
+- **A sync that fails records no round.** `rounds` returns the error
+  of `syncTo` or `goTo` without `end`, so `status.centering` and the
+  series of rounds have no record of a centering that failed there.
+  `m42-sync`'s first try left `status.centering` empty.
+  Fixed on 2026-10-13, with the gap that [centering by a
+  sync](#centering-by-a-sync) found: whatever ends a centering after a
+  round's solve answered, the runner records it in `status.centering`
+  and in `astrophotography_centering_rounds`, and the new
+  `status.centering.roundErrors` holds the error of each round that
+  solved, at most 20 (`centering.go`, `centeringfailures_test.go`).

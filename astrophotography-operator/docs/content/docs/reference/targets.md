@@ -164,6 +164,7 @@ The last result of centering.
 | <span id="statuscentering--rounds"></span>`rounds` | integer | yes | The rounds of solving and slewing it took. |
 | <span id="statuscentering--solution"></span>`solution` | [object](#statuscenteringsolution) | no | Where the last solved frame points. Absent when no frame solved. |
 | <span id="statuscentering--error"></span>`error` | number | no | The angle between the solved center and `spec.coordinates`, in arcseconds. Absent when no frame solved. |
+| <span id="statuscentering--rounderrors"></span>`roundErrors` | []number | no | The `error` of each round that solved, in order, in arcseconds. The first shows how far the slew landed from the target before a sync corrected the mount. |
 
 #### status.centering.solution
 

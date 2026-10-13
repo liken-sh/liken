@@ -132,14 +132,45 @@ func TestCenteringGivesUpAfterItsRounds(t *testing.T) {
 		w := centeringNight(t, c, northOf(m42Position(), 600), northOf(m42Position(), 300), northOf(m42Position(), 120))
 		waitUntil(t, func() bool { return w.imaging(t, "m42") == "False CenteringFailed" })
 		got := w.targetNow(t, "m42").Status.Centering
-		if got == nil || got.Rounds != 3 || got.Error == nil || math.Abs(*got.Error-120) > 0.1 {
-			t.Errorf("status.centering %+v, want 3 rounds and an error of 120", got)
+		if got == nil || got.Rounds != 3 || got.Error == nil || math.Abs(*got.Error-120) > 0.1 || !near(got.RoundErrors, []float64{600, 300, 120}) {
+			t.Errorf("status.centering %+v, want 3 rounds and the errors 600, 300, and 120", got)
 		}
 		if n := syncs(w); n != 2 {
 			t.Errorf("%d syncs, want 2", n)
 		}
 		requireSample(t, scrape(t, w.o.metrics), "astrophotography_centering_rounds_sum 3")
 	})
+}
+
+// A centering that ends after a round that solved records its rounds,
+// whatever ends it: a mount that refuses the sync, or a Solver that goes
+// away before the next round.
+func TestACenteringCutShortRecordsItsRounds(t *testing.T) {
+	cases := []struct {
+		name   string
+		change func(*night)
+		end    string
+	}{
+		{"the mount refuses the sync", func(w *night) { w.indi.Refuse(mountINDI, "ON_COORD_SET") }, "False " + astrophotography.ReasonCenteringFailed},
+		{"the Solver goes away", func(w *night) {
+			w.worker.peers.set(func(f *fakePeers) { f.solved = func() { w.api.remove(solversPath, ns, "lab") } })
+		}, "False SequencesDone"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				w := centeringWorld(t, centeringOn("lab"), northOf(m42Position(), 600))
+				c.change(w)
+				w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+				waitUntil(t, func() bool { return w.imaging(t, "m42") == c.end })
+				got := w.targetNow(t, "m42").Status.Centering
+				if got == nil || got.Rounds != 1 || !near(got.RoundErrors, []float64{600}) {
+					t.Errorf("status.centering %+v, want one round with an error of 600", got)
+				}
+				requireSample(t, scrape(t, w.o.metrics), "astrophotography_centering_rounds_count 1")
+			})
+		})
+	}
 }
 
 // A target whose Solver is missing or not Ready is imaged where the

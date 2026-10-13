@@ -116,9 +116,15 @@ func syncs(w *night) int {
 	return len(slices.DeleteFunc(shapes(mountWrites(w)), func(c string) bool { return c != "ON_COORD_SET SYNC=On" }))
 }
 
+// near reports whether the errors of the rounds are the scripted ones,
+// within the tenth of an arcsecond that the runner rounds to.
+func near(got, want []float64) bool {
+	return slices.EqualFunc(got, want, func(a, b float64) bool { return math.Abs(a-b) <= 0.1 })
+}
+
 // The runner centers until the error is within the tolerance, syncs
 // and slews again after each round outside it, and records the last
-// round in status.centering.
+// round in status.centering with the error of each round.
 func TestCenteringEndsWithinTheTolerance(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -151,6 +157,9 @@ func TestCenteringEndsWithinTheTolerance(t *testing.T) {
 				}
 				if want := (astrophotography.Solution{Center: astrophotography.Coordinates{RA: "05:35:17.3", Dec: sky.FormatDec(m42Position().Dec + last/3600)}, Rotation: 180, Scale: 2.2345}); *got.Solution != want {
 					t.Errorf("solution %+v, want %+v", *got.Solution, want)
+				}
+				if !near(got.RoundErrors, c.answers) {
+					t.Errorf("the errors of the rounds are %v, want %v", got.RoundErrors, c.answers)
 				}
 				if n := syncs(w); n != c.syncs {
 					t.Errorf("%d syncs, want %d", n, c.syncs)

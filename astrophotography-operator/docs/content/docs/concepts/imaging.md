@@ -127,9 +127,12 @@ to the next targets of the night land closer too. The runner converts
 both the solved center and the target with the same formulas, so an
 error of the conversion cancels.
 
-`status.centering` records the last round: the reservation, the time,
-the rounds, the solved center, the frame's rotation and plate scale,
-and the error in arcseconds. The `Imaging` condition's message names
+`status.centering` records the last centering: the reservation, the
+time, the rounds, the solved center, the frame's rotation and plate
+scale, the error in arcseconds, and in `roundErrors` the error of each
+round that solved. A centering that fails after a round solved, such
+as when the mount refuses the sync, records its rounds too. The
+`Imaging` condition's message names
 the error and the rounds, such as `centered within 12.3 arcseconds in
 2 rounds`.
 

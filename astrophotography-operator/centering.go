@@ -96,9 +96,21 @@ func (w *work) centeringRun(spec astrophotography.Centering) (*centeringPass, er
 }
 
 // rounds solves, syncs, and slews again until the error is within the
-// tolerance or spec.attempts rounds have passed, and records the last
-// round in status.centering.
+// tolerance or spec.attempts rounds have passed. Whatever ends the
+// centering after a round's solve answered, such as a sync that the
+// mount refuses, it records the rounds in status.centering and in the
+// series, so a centering that failed leaves the errors it measured.
 func (c *centeringPass) rounds(ctx context.Context) (string, error) {
+	how, failed := c.round(ctx)
+	if c.result.Rounds == 0 {
+		return how, failed
+	}
+	return how, c.end(failed)
+}
+
+// round runs the rounds of rounds, and answers how the target was
+// centered or why the centering failed.
+func (c *centeringPass) round(ctx context.Context) (string, error) {
 	w := c.w
 	for round := int32(1); ; round++ {
 		answer, err := c.solve(ctx)
@@ -110,23 +122,24 @@ func (c *centeringPass) rounds(ctx context.Context) (string, error) {
 		}
 		c.result.Rounds, c.result.Time = round, time.Now().UTC().Truncate(time.Second)
 		if !answer.Solved {
-			return "", c.end(fmt.Errorf("no centering frame of round %d solved, at %s or at %s", round, c.settings.exposure, 2*c.settings.exposure))
+			return "", fmt.Errorf("no centering frame of round %d solved, at %s or at %s", round, c.settings.exposure, 2*c.settings.exposure)
 		}
 		// A solve places the center to a fraction of a pixel, a few
 		// tenths of an arcsecond, so a tenth is the last digit that means
 		// anything.
 		offBy := math.Round(sky.Separation(*answer.Center, c.target)*36000) / 10
 		c.result.Error = &offBy
+		c.result.RoundErrors = append(c.result.RoundErrors, offBy)
 		c.result.Solution = &astrophotography.Solution{
 			Center:   astrophotography.Coordinates{RA: sky.FormatRA(answer.Center.RA), Dec: sky.FormatDec(answer.Center.Dec)},
 			Rotation: answer.Rotation, Scale: answer.Scale,
 		}
 		w.r.o.metrics.centering.lastError.WithLabelValues(w.target.Metadata.Namespace, w.target.Metadata.Name).Set(offBy)
 		if offBy <= c.spec.Tolerance {
-			return fmt.Sprintf("centered within %.1f arcseconds in %s", offBy, roundsText(round)), c.end(nil)
+			return fmt.Sprintf("centered within %.1f arcseconds in %s", offBy, roundsText(round)), nil
 		}
 		if round >= c.spec.Attempts {
-			return "", c.end(fmt.Errorf("after %s the error is %.1f arcseconds, more than the tolerance of %g", roundsText(round), offBy, c.spec.Tolerance))
+			return "", fmt.Errorf("after %s the error is %.1f arcseconds, more than the tolerance of %g", roundsText(round), offBy, c.spec.Tolerance)
 		}
 		if err := w.syncTo(ctx, *answer.Center); err != nil {
 			return "", err
@@ -153,7 +166,7 @@ func (c *centeringPass) solve(ctx context.Context) (solver.SolveAnswer, error) {
 	return answer, nil
 }
 
-// end records the last round in status.centering and in the series of
+// end records the centering in status.centering and in the series of
 // rounds, and answers failed, the centering's outcome.
 func (c *centeringPass) end(failed error) error {
 	w := c.w

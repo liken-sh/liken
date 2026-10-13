@@ -17,7 +17,7 @@ func newCenteringMetrics(registry *prometheus.Registry) *centeringMetrics {
 		// or three rounds.
 		rounds: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    metricsPrefix + "centering_rounds",
-			Help:    "Rounds of solving and slewing that one centering took, whether it ended within the tolerance or gave up.",
+			Help:    "Rounds of solving and slewing that one centering took, whether it ended within the tolerance, gave up, or failed after a round solved.",
 			Buckets: []float64{1, 2, 3, 5, 10, 20},
 		}),
 		lastError: prometheus.NewGaugeVec(prometheus.GaugeOpts{

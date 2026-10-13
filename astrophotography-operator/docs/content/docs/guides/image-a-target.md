@@ -143,7 +143,8 @@ found the outbox full, imaged a target without centering it, or had
 no target to image.
 
 The result of the centering is in `status.centering`: the rounds, the
-solved center, and the error in arcseconds:
+solved center, the error in arcseconds, and the error of each round in
+`roundErrors`:
 
 ```sh
 kubectl get target m42 -n observatory -o jsonpath='{.status.centering}'

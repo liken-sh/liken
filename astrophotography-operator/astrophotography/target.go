@@ -202,6 +202,10 @@ type CenteringResult struct {
 	// Error is the angle between the solved center and the target, both
 	// J2000, in arcseconds.
 	Error *float64 `json:"error,omitempty"`
+	// RoundErrors holds the Error of each round that solved, in order,
+	// so a centering that a sync corrected shows how far the first
+	// round was off. spec.centering.attempts bounds it at 20.
+	RoundErrors []float64 `json:"roundErrors,omitempty"`
 }
 
 // Solution is where a solved frame points.

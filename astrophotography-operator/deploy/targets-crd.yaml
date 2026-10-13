@@ -613,6 +613,16 @@ spec:
                         The angle between the solved center and
                         `spec.coordinates`, in arcseconds. Absent when no
                         frame solved.
+                    roundErrors:
+                      type: array
+                      maxItems: 20
+                      items:
+                        type: number
+                      description: >-
+                        The `error` of each round that solved, in order,
+                        in arcseconds. The first shows how far the slew
+                        landed from the target before a sync corrected
+                        the mount.
                 conditions:
                   type: array
                   description: >-

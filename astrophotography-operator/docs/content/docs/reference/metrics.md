@@ -44,7 +44,7 @@ listener off.
 | astrophotography-operator | `astrophotography_frames_exposed_total{namespace, target}` | counter | frames that the driver saved in the outbox and the runner counted as pending, by target |
 | astrophotography-operator | `astrophotography_exposure_failures_total{namespace, target}` | counter | exposures that gave no frame: the driver answered `Alert`, did not finish in time, saved the frame elsewhere, or the worker did not answer, by target |
 | astrophotography-operator | `astrophotography_frame_preparation_seconds` | histogram | how long the settings before one exposure took: the upload, the frame type, the filter, and the keywords |
-| astrophotography-operator | `astrophotography_centering_rounds` | histogram | rounds of solving and slewing that one centering took, whether it ended within the tolerance or gave up |
+| astrophotography-operator | `astrophotography_centering_rounds` | histogram | rounds of solving and slewing that one centering took, whether it ended within the tolerance, gave up, or failed after a round solved |
 | astrophotography-operator | `astrophotography_centering_error_arcseconds{namespace, target}` | gauge | the angle between the last solved center and the target's coordinates, in arcseconds |
 | astrophotography-operator | `astrophotography_dithers_total{namespace, target}` | counter | dithers that PHD2 settled after, by target |
 | astrophotography-operator | `astrophotography_guiding_failures_total{namespace, target}` | counter | attempts to guide or dither that failed, such as no star found or a settle that timed out, by target |
