@@ -66,9 +66,10 @@ const heldBy = "spec.holder=" + managedBy
 
 // observatoryKinds are the kinds of observatory-operator that the runner
 // reads besides the Reservation: the site, the telescope and its optics
-// for the plate scale, the devices it drives, and the guider (plan 01).
+// for the plate scale, the devices it drives, and the guider (plan 01),
+// and the telescope's horizon (plan 04).
 var observatoryKinds = []observatory.Kind{
-	observatory.ObservatoryKind, observatory.TelescopeKind,
+	observatory.ObservatoryKind, observatory.TelescopeKind, observatory.HorizonKind,
 	observatory.OpticalTrainKind, observatory.OpticalTubeKind,
 	observatory.MountKind, observatory.CameraKind, observatory.FilterWheelKind,
 	observatory.FocuserKind, observatory.GuiderKind,

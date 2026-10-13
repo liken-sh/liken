@@ -50,6 +50,9 @@ The target's `RESERVATION` column is empty while a reservation is
   A target with no `opticalTrain` needs a telescope with exactly one
   imaging camera.
 * The target is not suspended, and `Complete` is not `True`.
+* The target is above the telescope's horizon. A target below it has
+  `Imaging` `False` with the reason `BelowHorizon`, and the message
+  gives its altitude, the horizon's altitude there, and when it rises.
 * No other `Ready` reservation holds the target. A target's
   `RESERVATION` names the one that holds it.
 * The target did not fail earlier on this reservation. A target that
@@ -76,6 +79,7 @@ kubectl get target m42 -n observatory \
 |---|---|---|
 | `Waiting` | The reservation that imaged the target ended. | Reserve the telescope again. The target keeps its progress. |
 | `Suspended` | `spec.suspend` is `true`. | Set it to `false`. |
+| `BelowHorizon` | The target stands below the horizon of the reservation's telescope: the `Horizon` that the `Telescope`'s `spec.horizon` names, or 0° when it names none or the `Horizon` does not exist. The operator does not claim it, or released it before the next frame when it set. The message gives the altitude, the azimuth, the horizon's altitude there, and when the target rises. | Nothing. The reservation claims the target when it rises, if no other target holds the telescope. The condition keeps the message of the moment the target went below the horizon until a reservation claims it. If the horizon is wrong, edit the `Horizon`. |
 | `SequencesDone` | Every frame the sequences want is pending or archived. | Nothing. `Complete` turns `True` when the last frame reaches the archive. If it stays `False`, see [A frame does not reach the archive](#a-frame-does-not-reach-the-archive). |
 | `OutboxFull` | The outbox has less than three frames' size free. The reservation gets the `Warning` `AstrophotographyOutboxFull`. The operator keeps the target and exposes again when space is free. | With `promotion: Continuous`, check that promotion moves frames out. With `AfterReservation`, nothing frees space before the reservation ends, so give the outbox more space. |
 | `ExposureFailed` | The last exposure gave no frame: the driver answered `Alert`, did not finish within the exposure plus 2 minutes, saved the frame under another name, or the worker did not answer. The operator keeps the target and starts the next frame a minute later. | Read the message. A frame under another name means a client, such as Ekos, changed the camera's upload settings. A worker that does not answer is often still starting; see `AstrophotographyWorkerPending` below. |

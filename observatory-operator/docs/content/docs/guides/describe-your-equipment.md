@@ -321,12 +321,12 @@ sees more than in the yard. So save one `Horizon` for each place, and
 name the one for where the telescope stands now in the telescope's
 `spec.horizon`.
 
-A saved horizon limits nothing yet. Neither `observatory-operator` nor
-`astrophotography-operator` reads the profile today, and neither one
-checks a target against it before a slew. So a mount slews to a
-target behind the trees or below the horizon when KStars or
-`astrophotography-operator` asks it to. Check a target's altitude
-before you slew to it.
+`astrophotography-operator` reads the horizon of a reservation's
+telescope. It does not claim or slew to a target that stands below
+the horizon, and it releases a target that sets below it before the
+next frame. `observatory-operator` checks nothing against the
+horizon, so a mount still slews behind the trees when KStars asks it
+to. Check a target's altitude before you slew to it from KStars.
 
 The profile is a horizon file in the format of N.I.N.A.'s custom
 horizon and of Cartes du Ciel's, so you can paste in a horizon that
@@ -376,9 +376,10 @@ kubectl patch telescope east -n observatory --type merge -p '{"spec":{"horizon":
 
 The telescope's `HorizonFound` condition is `True` when the `Horizon`
 that it names exists. When it is `False`, the message names the
-missing horizon. The telescope still runs, because nothing reads the
-horizon's profile. A telescope with no `spec.horizon` has no horizon
-and no `HorizonFound` condition.
+missing horizon. The telescope still runs, and
+`astrophotography-operator` counts the horizon as 0° at every azimuth
+until the `Horizon` exists. A telescope with no `spec.horizon` has no
+horizon and no `HorizonFound` condition.
 
 ## Check the result
 

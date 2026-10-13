@@ -45,6 +45,7 @@ type runner struct {
 	// on this reservation, so the runner does not take it again until a
 	// person edits it. A restart forgets it, and costs one more try.
 	skipped     map[string]int64
+	nextRise    time.Time
 	idle        bool
 	warnedNoBox bool
 }
@@ -100,7 +101,7 @@ func (r *runner) run(ctx context.Context) {
 			r.logf("%v", err)
 			sleep(ctx, retryWait, wake)
 		case !again:
-			sleep(ctx, forever, wake)
+			sleep(ctx, r.riseWait(), wake)
 		}
 	}
 }

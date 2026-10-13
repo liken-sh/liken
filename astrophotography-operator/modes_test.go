@@ -107,10 +107,23 @@ func TestAModeWhosePortIsTakenFails(t *testing.T) {
 	restore := listen
 	listen = func(string, string) (net.Listener, error) { return nil, errors.New("address already in use") }
 	t.Cleanup(func() { listen = restore })
-	if err := serveMode(t.Context(), ":8080", http.NotFoundHandler()); err == nil {
-		t.Error("no error")
+	cases := []struct {
+		name  string
+		serve func(t *testing.T) error
+	}{
+		{"a handler", func(t *testing.T) error { return serveMode(t.Context(), ":8080", http.NotFoundHandler()) }},
+		{"the solver", func(t *testing.T) error {
+			return modes["solver"](t.Context(), []string{"--indexes", t.TempDir(), "--work", t.TempDir()}, io.Discard)
+		}},
+		{"the worker", func(t *testing.T) error {
+			return modes["worker"](t.Context(), []string{"--outbox", t.TempDir(), "--work", t.TempDir()}, io.Discard)
+		}},
 	}
-	if err := modes["solver"](t.Context(), []string{"--indexes", t.TempDir(), "--work", t.TempDir()}, io.Discard); err == nil {
-		t.Error("the solver mode: no error")
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if err := c.serve(t); err == nil {
+				t.Error("no error")
+			}
+		})
 	}
 }

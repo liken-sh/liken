@@ -75,7 +75,10 @@ func TestEveryWatchSyncs(t *testing.T) {
 
 // A cluster can run this operator before observatory-operator's CRDs
 // exist. Its kinds then answer 404, and the operator's own watches
-// still read their collections.
+// still read their collections. Each kind that answers 404 costs two
+// reads, a streaming list and a list, and client-go's rate limit of 5
+// requests a second after a burst of 10 spaces them, so the test lets
+// the clock run until every watch has read.
 func TestTheWatchesSyncWithNoObservatoryOperator(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startFakeAPI(t)
@@ -85,10 +88,7 @@ func TestTheWatchesSyncWithNoObservatoryOperator(t *testing.T) {
 			}
 		}
 		s, _ := watching(t, api)
-		synctest.Wait()
-		if !s.synced() {
-			t.Error("a watch has not read its collection")
-		}
+		waitUntil(t, s.synced)
 	})
 }
 

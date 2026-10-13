@@ -99,9 +99,11 @@ the telescope's namespace, or correct the name in `spec.horizon`:
 kubectl get horizons -n observatory
 ```
 
-A telescope whose `HorizonFound` is `True` still slews below its
-horizon, because no component reads the profile today, as [Save the
-horizon of each place](https://liken.sh/observatory/docs/guides/describe-your-equipment/#save-the-horizon-of-each-place)
+While the `Horizon` is missing, `astrophotography-operator` counts
+the telescope's horizon as 0° at every azimuth. A slew that KStars
+asks for is not checked against the horizon, whether or not the
+`Horizon` exists, as [Save the horizon of each
+place](https://liken.sh/observatory/docs/guides/describe-your-equipment/#save-the-horizon-of-each-place)
 describes.
 
 ## StartSite or PowerOn fails: two devices name one driver

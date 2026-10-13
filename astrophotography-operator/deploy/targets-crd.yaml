@@ -632,7 +632,9 @@ spec:
                     while a reservation images the target, with the
                     reason `Slewing`, `Centering`, `Guiding`, or
                     `Exposing`, and a message that names the reservation
-                    and the sequence. `ArchiveAvailable` is `True` when
+                    and the sequence. It is `False` with the reason
+                    `BelowHorizon` while the target stands below the
+                    horizon of the telescope. `ArchiveAvailable` is `True` when
                     the last promotion succeeded, and `False` with a
                     reason such as `ClaimMissing` or `NameConflict` when
                     it did not.
