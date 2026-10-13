@@ -47,11 +47,10 @@ refused:
   hold no value
 
 The API server also refuses `FRAMEID`, with a message that names
-`astrophotography-operator`. That operator writes a new `FRAMEID`
-into each frame that it takes, and its catalog and archive find each
-frame by it. A declared `FRAMEID` would give every frame of the
-session the same identity, the frames that KStars and Ekos take
-included.
+`astrophotography-operator`, because that operator writes a new
+`FRAMEID` into each frame that it takes. A declared `FRAMEID` would
+give every frame of the session the same identity, the frames that
+KStars and Ekos take included.
 
 The driver writes `INSTRUME` and `TELESCOP` too, but it fills them with
 the names of INDI devices, such as `CCD Simulator` and `Telescope

@@ -29,7 +29,11 @@ spec:
 
 * `telescope` names the `Telescope`. It cannot change later.
 * `holder` says who uses the telescope, as free text. The operator
-  shows it in messages, such as `In use by desktop`.
+  shows it in messages, such as `In use by desktop`. The holder
+  `astrophotography-operator` gives the telescope to that operator, which
+  images your targets on it, as
+  [Image a target](https://liken.sh/astrophotography/docs/guides/image-a-target/)
+  describes.
 * `start` and `end` are RFC 3339 times. With no `start`, activation
   begins as soon as you create the reservation. With no `end`, the
   reservation lasts until you delete it.
