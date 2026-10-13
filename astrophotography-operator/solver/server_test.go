@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -27,8 +29,69 @@ func serve(s *Server, method, path string, body []byte) *httptest.ResponseRecord
 
 var lab = Indexes{{ID: 4207, Files: 12, ScaleArcmin: astrophotography.ScaleRange{Low: 22, High: 30}}}
 
+// servedSet is an index set that holds the series and follows no
+// directory.
+func servedSet(series Indexes) *indexSet {
+	if series == nil {
+		series = Indexes{}
+	}
+	return &indexSet{series: series, changed: make(chan struct{})}
+}
+
+// lineWriter hands each write of a response to the test, as the
+// operator's client reads each line of a followed list.
+type lineWriter struct {
+	header http.Header
+	lines  chan string
+	broken bool
+}
+
+func (w *lineWriter) Header() http.Header { return w.header }
+func (w *lineWriter) WriteHeader(int)     {}
+func (w *lineWriter) Flush()              {}
+func (w *lineWriter) Write(p []byte) (int, error) {
+	if w.broken {
+		return 0, errors.New("connection reset by peer")
+	}
+	w.lines <- string(p)
+	return len(p), nil
+}
+
+// A follower whose connection breaks ends the request.
+func TestAFollowerWhoseConnectionBreaksEnds(t *testing.T) {
+	w := &lineWriter{header: http.Header{}, broken: true}
+	newServer(nil, servedSet(lab), io.Discard).ServeHTTP(w, httptest.NewRequest(http.MethodGet, PathIndexes+"?watch=true", nil))
+}
+
+// A client that follows the index list gets the list at once, and the
+// new list after each change, until it goes away.
+func TestAFollowerGetsEachNewList(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		set := newIndexSet(filepath.Join(t.TempDir(), "engine.cfg"), 60, io.Discard)
+		s := newServer(nil, set, io.Discard)
+		w := &lineWriter{header: http.Header{}, lines: make(chan string, 4)}
+		ctx, leave := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() {
+			s.ServeHTTP(w, httptest.NewRequestWithContext(ctx, http.MethodGet, PathIndexes+"?watch=true", nil))
+			close(done)
+		}()
+		first := <-w.lines
+		if err := set.put(IndexFile{Path: "/indexes/index-4208.fits", ID: 4208, Low: 30, High: 42}); err != nil {
+			t.Fatal(err)
+		}
+		second := <-w.lines
+		leave()
+		<-done
+		want := []string{"[]\n", `[{"id":4208,"files":1,"scaleArcmin":{"low":30,"high":42}}]` + "\n"}
+		if got := []string{first, second}; !slices.Equal(got, want) {
+			t.Errorf("the follower read %q, want %q", got, want)
+		}
+	})
+}
+
 func TestTheServerAnswersItsIndexes(t *testing.T) {
-	reply := serve(newServer(nil, lab, io.Discard), http.MethodGet, PathIndexes, nil)
+	reply := serve(newServer(nil, servedSet(lab), io.Discard), http.MethodGet, PathIndexes, nil)
 	var got Indexes
 	if err := json.Unmarshal(reply.Body.Bytes(), &got); err != nil || len(got) != 1 || got[0].ID != 4207 {
 		t.Errorf("answered %d %s, want the lab's series", reply.Code, reply.Body)
@@ -38,7 +101,7 @@ func TestTheServerAnswersItsIndexes(t *testing.T) {
 // A solver with no index file answers an empty list, not null, so the
 // operator reads the list and reports NoIndexFiles.
 func TestTheServerAnswersAnEmptyListWithNoIndexFiles(t *testing.T) {
-	reply := serve(newServer(nil, nil, io.Discard), http.MethodGet, PathIndexes, nil)
+	reply := serve(newServer(nil, servedSet(nil), io.Discard), http.MethodGet, PathIndexes, nil)
 	if body := strings.TrimSpace(reply.Body.String()); body != "[]" {
 		t.Errorf("answered %s, want []", body)
 	}
@@ -48,7 +111,7 @@ func TestTheServerAnswersAnEmptyListWithNoIndexFiles(t *testing.T) {
 // the pod's log holds every solve.
 func TestASolveThroughTheServerAnswersAndLogsTheSolution(t *testing.T) {
 	var logs bytes.Buffer
-	s := NewServer(fakeEngineAt(t, engineSolves), lab, &logs)
+	s := newServer(fakeEngineAt(t, engineSolves).Solve, servedSet(lab), &logs)
 	reply := serve(s, http.MethodPost, PathSolve, readFixture(t, fixtureAXY))
 	var got SolveAnswer
 	if err := json.Unmarshal(reply.Body.Bytes(), &got); err != nil || !got.Solved || got.Index != 4207 {
@@ -77,7 +140,7 @@ func TestEachFailedRequestAnswersAStatusAndAReason(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			reply := serve(newServer(c.solve, lab, io.Discard), c.method, c.path, c.body)
+			reply := serve(newServer(c.solve, servedSet(lab), io.Discard), c.method, c.path, c.body)
 			if reply.Code != c.status || strings.TrimSpace(reply.Body.String()) == "" {
 				t.Errorf("answered %d %q, want %d with a reason", reply.Code, reply.Body, c.status)
 			}
@@ -126,7 +189,7 @@ func TestTheQueueRunsOneSolveAtATime(t *testing.T) {
 			mu.Unlock()
 			return SolveAnswer{}, nil
 		}
-		s := newServer(slow, lab, io.Discard)
+		s := newServer(slow, servedSet(lab), io.Discard)
 		for range 2 {
 			go serve(s, http.MethodPost, PathSolve, nil)
 		}

@@ -118,8 +118,8 @@ kubectl wait -n observatory --for=condition=Ready solver/lab --timeout=5m
 ```
 
 The operator creates the `Deployment` and the `Service` `lab-solver`.
-The pod reads the header of each index file when it starts, and the
-`Solver` lists each series it found:
+The pod reads the header of each index file, and the `Solver` lists
+each series it found:
 
 ```sh
 kubectl get solver -n observatory lab
@@ -153,8 +153,25 @@ spec:
 
 ## Add index files
 
-The solver reads the claim only when its pod starts. Copy the new
-files into the claim as above, then restart the solver:
+Copy the new files into the claim as above, while the solver runs.
+The solver's pod watches its directory, and loads each file when the
+program that writes it closes it, or renames it into the directory.
+So a file in the middle of its copy is never loaded half written, and
+a `Job` that downloads index files into the claim can run beside the
+solver. The `Solver`'s `INDEXES` column and its `Ready` message change
+when the file is loaded:
+
+```sh
+kubectl get solver -n observatory lab
+```
+
+The solver also leaves out a file that is deleted, renamed away, or
+written again in place, until its writer closes it.
+
+The watch sees the writes of every pod on the solver's node, which is
+where a `local-path` claim's pods all run. On a network file system,
+such as NFS, the watch does not see a file that a pod on another node
+writes. In that case, restart the solver after the copy:
 
 ```sh
 kubectl rollout restart -n observatory deployment/lab-solver
@@ -172,11 +189,18 @@ the `Event` of each transition:
 | Reason | What to do |
 |---|---|
 | `ClaimMissing` | Create the claim that `spec.indexFiles.claimName` names, in the `Solver`'s namespace. |
-| `NoIndexFiles` | The directory holds no `index-*.fits` file. Check `spec.indexFiles.path`, copy the files, and restart the solver. |
+| `NoIndexFiles` | The directory holds no `index-*.fits` file that the solver could read. Check `spec.indexFiles.path`, and copy the files. The `Solver` turns `Ready` when the first file is loaded. |
 | `PodNotReady` | The message gives the scheduler's reason, or the error of the pod. `kubectl logs -n observatory deployment/lab-solver` shows what the solver read and each solve. |
 
-A file that is not an index file but matches `index-*.fits` stops the
-pod at its start, and its log names the file.
+The solver leaves out a file that matches `index-*.fits` but does not
+read as an index file, or that ends before all of its data, and loads
+the rest. Its log names each file it left out:
+
+```sh
+kubectl logs -n observatory deployment/lab-solver | grep 'left out'
+```
+
+Replace the file. The solver reads it again when the copy closes it.
 
 While the `Solver` is not `Ready`, the operator images each target
 that names it without centering, and each such reservation gets the

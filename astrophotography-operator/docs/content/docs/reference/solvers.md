@@ -16,12 +16,12 @@ Where the index files are.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="spec--indexfiles"></span>`indexFiles` | [object](#specindexfiles) | yes | A claim, and a directory in it, that holds astrometry.net's index files. The solver reads every `index-*.fits` in the directory when its pod starts. To add index files, copy them into the directory and restart the solver's `Deployment`. |
+| <span id="spec--indexfiles"></span>`indexFiles` | [object](#specindexfiles) | yes | A claim, and a directory in it, that holds astrometry.net's index files. The solver reads every `index-*.fits` in the directory, and watches the directory, so a file that you copy in later joins when its writer closes it. The watch does not see a write that another node makes to a network file system, such as NFS. After such a write, restart the solver's `Deployment`. |
 | <span id="spec--search"></span>`search` | [object](#specsearch) | no | How far from the expected center a solve looks. The operator asks the solver for the first radius around the position it expects. While the frame does not solve, it asks for each next radius, and then, when `blind` is `true`, for a solve of the whole sky. A field that cannot solve holds the solver for up to 60 s of CPU time at each attempt, so each attempt delays every other telescope's solve. |
 
 ### spec.indexFiles
 
-A claim, and a directory in it, that holds astrometry.net's index files. The solver reads every `index-*.fits` in the directory when its pod starts. To add index files, copy them into the directory and restart the solver's `Deployment`.
+A claim, and a directory in it, that holds astrometry.net's index files. The solver reads every `index-*.fits` in the directory, and watches the directory, so a file that you copy in later joins when its writer closes it. The watch does not see a write that another node makes to a network file system, such as NFS. After such a write, restart the solver's `Deployment`.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -45,7 +45,7 @@ What `astrophotography-operator` reports. A person never writes it.
 | --- | --- | --- | --- |
 | <span id="status--observedgeneration"></span>`observedGeneration` | integer | no | The `metadata.generation` of the spec that the status reflects. |
 | <span id="status--endpoint"></span>`endpoint` | [object](#statusendpoint) | no | The solver's `Service`, while its pod is ready. |
-| <span id="status--indexes"></span>`indexes` | [\[\]object](#statusindexes) | no | Each series of index files in the claim, which the solver reads from the headers of each file when its pod starts. |
+| <span id="status--indexes"></span>`indexes` | [\[\]object](#statusindexes) | no | Each series of index files in the claim, which the solver reads from the headers of each file. It changes when a file joins or leaves the directory. |
 | <span id="status--series"></span>`series` | string | no | The series of `status.indexes`, joined by commas, such as `4207,4208`. The `INDEXES` column of `kubectl get` reads this field. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | `Ready` is `True` with the reason `Loaded` when the solver's pod is ready and holds at least one index file. Otherwise it is `False` with the reason `ClaimMissing`, `NoIndexFiles`, or `PodNotReady`. |
 

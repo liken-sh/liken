@@ -1,8 +1,9 @@
 // Package fits reads the parts of a FITS file that this operator needs:
 // the header of an HDU, and the numeric columns of a binary table. The
 // worker reads a frame's size from its header and the stars from
-// SourceExtractor's catalog, and the solver reads the headers of the
-// index files, of each .axy it receives, and of each WCS file that the
+// SourceExtractor's catalog, and the solver checks that each index
+// file holds all of its data and reads its header, and reads the
+// headers of each .axy it receives and of each WCS file that the
 // engine writes. Each of these is a small header or a table of a few
 // kilobytes, so the package reads from an io.Reader and holds nothing
 // else.

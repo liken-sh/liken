@@ -33,6 +33,8 @@ threshold:
   # after an open, and the fallback of a share that refuses
   # RENAME_NOREPLACE, which tmpfs never does. solver/ and worker/ leave
   # out a write into a job's directory that fails after the directory
-  # was made, and a centering frame that matches and then cannot be
-  # removed. The tests measure 98.3%.
+  # was made, a centering frame that matches and then cannot be
+  # removed, an inotify instance that the kernel refuses, and an index
+  # directory that appears or leaves between its watch and its read.
+  # The tests measure 98.0%.
   total: 98

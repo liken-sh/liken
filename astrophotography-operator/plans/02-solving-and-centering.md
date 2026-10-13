@@ -7,7 +7,12 @@ piece built and its deviations from this design. The drill of plan 08
 has not run, so no centering has run against the simulators in a
 cluster. [The design](#the-design) answers what the design conversation left open,
 from solves of CCD simulator frames on the laptop with the
-astrometry.net and SourceExtractor of Ubuntu 26.04.
+astrometry.net and SourceExtractor of Ubuntu 26.04. On 2026-10-13,
+the solver's pod began to watch its index directory with inotify, and
+the operator to follow the pod's list, in place of the one read when
+the pod starts that [the design](#the-design) gives. A solver had
+reported a partial set while a `Job` still downloaded files into its
+claim.
 
 ## The problem
 

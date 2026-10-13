@@ -68,9 +68,12 @@ spec:
                   description: >-
                     A claim, and a directory in it, that holds
                     astrometry.net's index files. The solver reads every
-                    `index-*.fits` in the directory when its pod starts.
-                    To add index files, copy them into the directory and
-                    restart the solver's `Deployment`.
+                    `index-*.fits` in the directory, and watches the
+                    directory, so a file that you copy in later joins
+                    when its writer closes it. The watch does not see a
+                    write that another node makes to a network file
+                    system, such as NFS. After such a write, restart the
+                    solver's `Deployment`.
                   properties:
                     claimName:
                       type: string
@@ -152,8 +155,8 @@ spec:
                   type: array
                   description: >-
                     Each series of index files in the claim, which the
-                    solver reads from the headers of each file when its
-                    pod starts.
+                    solver reads from the headers of each file. It
+                    changes when a file joins or leaves the directory.
                   items:
                     type: object
                     required: [id, files, scaleArcmin]

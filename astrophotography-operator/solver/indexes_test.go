@@ -60,8 +60,8 @@ func TestTheSolverListsEachSeriesOfItsClaim(t *testing.T) {
 	for tile := range 12 {
 		files[fmt.Sprintf("index-2mass-07-%02d.fits", tile)] = indexOfSeries(4207, arcmin22, arcmin30)
 	}
-	found, err := ScanIndexes(writeFiles(t, files))
-	if err != nil {
+	found, skipped, err := ScanIndexes(writeFiles(t, files))
+	if err != nil || skipped != nil {
 		t.Fatal(err)
 	}
 	want := Indexes{
@@ -83,42 +83,48 @@ func TestTheEngineConfigNamesEachFileAndTheLimit(t *testing.T) {
 	}
 }
 
-// A file that the engine could not read fails the start, with the
-// file's name, so the pod's log says which file to replace.
-func TestAnIndexFileThatDoesNotReadFailsTheStart(t *testing.T) {
+// A file that the engine could not read is left out, with the file's
+// name, so the pod's log says which file to replace, and the solver
+// serves the rest. A file that a Job still writes ends in the middle of
+// its data.
+func TestAnIndexFileThatDoesNotReadIsLeftOut(t *testing.T) {
 	cases := []struct {
 		name string
 		data []byte
 	}{
 		{"not FITS", []byte("truncated")},
+		{"empty, as a download just made it", []byte{}},
+		{"cut in its data", append(indexHeader("NAXIS1  = 3000", "INDEXID = 4207"), make([]byte, 100)...)},
 		{"no INDEXID", indexHeader("SCALE_U = " + arcmin30)},
 		{"no SCALE_L", indexHeader("INDEXID = 4207", "SCALE_U = "+arcmin30)},
 		{"no SCALE_U", indexHeader("INDEXID = 4207", "SCALE_L = "+arcmin22)},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := ScanIndexes(writeFiles(t, map[string][]byte{"index-bad.fits": c.data}))
-			if err == nil || !strings.Contains(err.Error(), "index-bad.fits") {
-				t.Errorf("answered %v, want an error that names the file", err)
+			dir := writeFiles(t, map[string][]byte{"index-4208.fits": indexOfSeries(4208, arcmin30, arcmin42)})
+			write(t, filepath.Join(dir, "index-bad.fits"), c.data)
+			found, skipped, err := ScanIndexes(dir)
+			if err != nil || len(found) != 1 || len(skipped) != 1 || !strings.Contains(skipped[0].Error(), "index-bad.fits") {
+				t.Errorf("found %d files and left out %v, %v, want one found and one left out by name", len(found), skipped, err)
 			}
 		})
 	}
 }
 
 // A link whose file is gone, such as one into a claim that a person
-// emptied, does not open.
-func TestAnIndexFileThatDoesNotOpenFailsTheStart(t *testing.T) {
+// emptied, does not open, and is left out.
+func TestAnIndexFileThatDoesNotOpenIsLeftOut(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Symlink(filepath.Join(dir, "gone"), filepath.Join(dir, "index-gone.fits")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ScanIndexes(dir); err == nil {
-		t.Error("no error")
+	if found, skipped, err := ScanIndexes(dir); err != nil || len(found) != 0 || len(skipped) != 1 {
+		t.Errorf("found %d files and left out %v, %v", len(found), skipped, err)
 	}
 }
 
-func TestAPatternThatDoesNotParseIsAnError(t *testing.T) {
-	if _, err := ScanIndexes("["); err == nil {
+func TestADirectoryThatDoesNotReadIsAnError(t *testing.T) {
+	if _, _, err := ScanIndexes(filepath.Join(t.TempDir(), "gone")); err == nil {
 		t.Error("no error")
 	}
 }

@@ -148,6 +148,20 @@ frames in the catalog, moves nothing, and reports the counts again.
 [Set up a solver](/docs/guides/set-up-a-solver/#when-the-solver-is-not-ready)
 gives the fix for `ClaimMissing`, `NoIndexFiles`, and `PodNotReady`.
 
+A `Solver` that is `Ready` but lists fewer series or files than the
+claim holds has left out a file. The solver loads a file only when
+its writer closes it, so a copy that is still running is not loaded
+yet. A file that does not read is left out, and the solver's log names
+it:
+
+```sh
+kubectl logs -n observatory deployment/lab-solver | grep 'left out'
+```
+
+A file that a pod on another node wrote to a network file system, such
+as NFS, does not reach the solver's watch. Restart the solver's
+`Deployment` to read it.
+
 ## An outbox claim does not delete
 
 The operator puts the finalizer `astrophotography.liken.sh/frames` on

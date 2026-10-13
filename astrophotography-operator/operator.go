@@ -95,6 +95,7 @@ func (o *operator) run(ctx context.Context, watcher dynamic.Interface) {
 	loops.Go(func() { o.superviseRunners(ctx) })
 	<-ctx.Done()
 	loops.Wait()
+	solvers.wait()
 	o.stores.done()
 }
 

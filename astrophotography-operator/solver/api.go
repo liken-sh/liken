@@ -23,8 +23,10 @@ const (
 	// when the engine exits. Requests wait their turn in a queue.
 	PathSolve = "/solve"
 	// PathIndexes takes a GET and answers the index series that the
-	// solver read from its claim when it started, as a list of
-	// astrophotography.IndexSeries. The operator copies it into the
+	// solver holds now, as a list of astrophotography.IndexSeries. With
+	// the query watch=true, it answers the list as one line of JSON,
+	// then one more line each time the series change, until the client
+	// goes away. The operator follows it and copies each list into the
 	// Solver's status.indexes.
 	PathIndexes = "/indexes"
 )

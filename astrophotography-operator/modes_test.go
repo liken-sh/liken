@@ -7,15 +7,21 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
-	"testing/synctest"
+	"time"
 
 	"github.com/liken-sh/liken/astrophotography-operator/solver"
 	"github.com/liken-sh/liken/astrophotography-operator/worker"
 )
 
 // Each mode serves its paths until its context ends, the kubelet's
-// SIGTERM.
+// SIGTERM. The test runs outside a synctest bubble, because the
+// solver's watch of its index directory waits on a file descriptor,
+// which a bubble does not count as blocked. A dial of the in-memory
+// listener waits until the mode serves, so the test needs no wait.
 func TestEachModeServesUntilItsContextEnds(t *testing.T) {
 	cases := []struct {
 		mode string
@@ -27,25 +33,53 @@ func TestEachModeServesUntilItsContextEnds(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.mode, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				client := listenInMemory(t)
-				ctx, cancel := context.WithCancel(t.Context())
-				done := make(chan error)
-				go func() { done <- modes[c.mode](ctx, c.args(t), io.Discard) }()
-				synctest.Wait()
-				response, err := client.Get("http://127.0.0.1:8080" + c.path)
-				if err != nil {
-					t.Fatal(err)
-				}
-				var answer any
-				err = json.NewDecoder(response.Body).Decode(&answer)
-				_ = response.Body.Close()
-				cancel()
-				if err != nil || response.StatusCode != http.StatusOK || <-done != nil {
-					t.Errorf("answered %d and %v", response.StatusCode, err)
-				}
-			})
+			client := listenInMemory(t)
+			ctx, cancel := context.WithCancel(t.Context())
+			done := make(chan error)
+			go func() { done <- modes[c.mode](ctx, c.args(t), io.Discard) }()
+			response, err := client.Get("http://127.0.0.1:8080" + c.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var answer any
+			err = json.NewDecoder(response.Body).Decode(&answer)
+			_ = response.Body.Close()
+			cancel()
+			if err != nil || response.StatusCode != http.StatusOK || <-done != nil {
+				t.Errorf("answered %d and %v", response.StatusCode, err)
+			}
 		})
+	}
+}
+
+// A solver whose index directory turns into a file can no longer
+// watch it, so the mode ends with the error, and the kubelet starts the
+// container again.
+func TestASolverThatCannotWatchItsIndexesEnds(t *testing.T) {
+	client := listenInMemory(t)
+	indexes := filepath.Join(t.TempDir(), "2mass")
+	if err := os.Mkdir(indexes, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	done := make(chan error)
+	go func() {
+		done <- modes["solver"](ctx, []string{"--indexes", indexes, "--work", t.TempDir()}, io.Discard)
+	}()
+	response, err := client.Get("http://127.0.0.1:8080" + solver.PathIndexes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if err := os.Remove(indexes); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(indexes, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err == nil || !strings.Contains(err.Error(), "watching the index files") {
+		t.Errorf("the mode ended with %v, want the watch's error", err)
 	}
 }
 
@@ -75,5 +109,8 @@ func TestAModeWhosePortIsTakenFails(t *testing.T) {
 	t.Cleanup(func() { listen = restore })
 	if err := serveMode(t.Context(), ":8080", http.NotFoundHandler()); err == nil {
 		t.Error("no error")
+	}
+	if err := modes["solver"](t.Context(), []string{"--indexes", t.TempDir(), "--work", t.TempDir()}, io.Discard); err == nil {
+		t.Error("the solver mode: no error")
 	}
 }

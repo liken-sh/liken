@@ -36,10 +36,16 @@ var simulatorSolution = solver.SolveAnswer{
 
 type fakePeers struct {
 	mu sync.Mutex
-	// indexes is every solver's index list.
+	// indexes is every solver's index list, and changed closes at each
+	// call of set, so each request that follows the list answers it
+	// again.
 	indexes solver.Indexes
+	changed chan struct{}
 	// refuseIndexes counts the next index lists that answer 503.
 	refuseIndexes int
+	// endIndexes makes each request that follows the list end after
+	// one list, the way a connection that breaks does.
+	endIndexes bool
 	// reach is the distance, in degrees, from the hint to the stars: a
 	// hint whose radius is at least this solves, and so does a blind
 	// one. Below zero, no hint solves.
@@ -65,21 +71,22 @@ type fakePeers struct {
 }
 
 func newFakePeers() *fakePeers {
-	return &fakePeers{indexes: labIndexes, reach: 6.8, stars: 1675}
+	return &fakePeers{indexes: labIndexes, changed: make(chan struct{}), reach: 6.8, stars: 1675}
 }
 
 func (f *fakePeers) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.requests = append(f.requests, r.Method+" "+r.Host+r.URL.Path)
+	if strings.HasPrefix(r.Host, "10.42.") && r.URL.Path == solver.PathIndexes && f.refuseIndexes == 0 {
+		f.mu.Unlock()
+		f.followIndexes(w, r)
+		return
+	}
+	defer f.mu.Unlock()
 	switch {
 	case strings.HasPrefix(r.Host, "10.42.") && r.URL.Path == solver.PathIndexes:
-		if f.refuseIndexes > 0 {
-			f.refuseIndexes--
-			http.Error(w, "starting", http.StatusServiceUnavailable)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(f.indexes)
+		f.refuseIndexes--
+		http.Error(w, "starting", http.StatusServiceUnavailable)
 	case strings.Contains(r.Host, "-solver.") && r.URL.Path == solver.PathSolve && f.failSolve:
 		http.Error(w, "astrometry-engine: exit status 1: Failed to load index file", http.StatusInternalServerError)
 	case strings.Contains(r.Host, "-solver.") && r.URL.Path == solver.PathSolve:
@@ -115,6 +122,27 @@ func (f *fakePeers) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// followIndexes answers the list, and again after each change, until
+// the client goes away, the way a solver's pod does.
+func (f *fakePeers) followIndexes(w http.ResponseWriter, r *http.Request) {
+	encoder := json.NewEncoder(w)
+	for {
+		f.mu.Lock()
+		indexes, changed, end := f.indexes, f.changed, f.endIndexes
+		f.mu.Unlock()
+		_ = encoder.Encode(indexes)
+		_ = http.NewResponseController(w).Flush()
+		if end {
+			return
+		}
+		select {
+		case <-changed:
+		case <-r.Context().Done():
+			return
+		}
+	}
+}
+
 // count answers how many requests reached one host and path.
 func (f *fakePeers) count(request string) int {
 	f.mu.Lock()
@@ -132,4 +160,6 @@ func (f *fakePeers) set(change func(f *fakePeers)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	change(f)
+	close(f.changed)
+	f.changed = make(chan struct{})
 }

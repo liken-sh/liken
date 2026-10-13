@@ -80,15 +80,28 @@ to 30 arcminutes, and 4208, of 30 to 42 arcminutes, each solved that
 field in about a second on a laptop, and 4209, of 42 to 60
 arcminutes, did not. The 13 files of 4207 and 4208 take 236 MiB.
 
-The solver reads the header of every index file in the directory when
-its pod starts, and the operator lists each series in
-`status.indexes` with its range of scales. The operator reads the
-list once for each pod, from the pod's own address, when the pod
-turns ready, because the `Service` routes to a new pod only some
-seconds later. The solver reads each
-file's series from its header, so only the pattern `index-*.fits`
-matters in a file's name. To add index files, copy them into the
-claim and restart the solver's `Deployment`.
+The solver reads the header of every index file in the directory, and
+the operator lists each series in `status.indexes` with its range of
+scales. The solver reads each file's series from its header, so only
+the pattern `index-*.fits` matters in a file's name.
+
+The solver's pod watches the directory with inotify, so you can add
+index files while it runs, and a `Job` can download them into the
+claim. A file joins the list when the program that writes it closes
+it or renames it into the directory, and leaves the list when it is
+deleted, renamed away, or written again in place. A file that ends
+before all of its data, such as one in the middle of a download when
+the pod starts, is left out until its writer closes it. So the engine
+never reads a file that is half written. inotify reports the writes
+of every pod on the solver's node. It does not report a write that
+another node makes to a network file system, such as NFS, so after
+such a copy, restart the solver's `Deployment`.
+
+The operator holds one request open to each solver pod, which answers
+the list when the pod turns ready and again each time the list
+changes, and the operator writes each list into the status. The
+request goes to the pod's own address, because the `Service` routes
+to a new pod only some seconds after it turns ready.
 
 ## The search
 
@@ -118,7 +131,7 @@ reasons:
 | Reason | What it means |
 |---|---|
 | `ClaimMissing` | The claim that `spec.indexFiles.claimName` names does not exist, so the scheduler cannot place the pod. |
-| `NoIndexFiles` | The pod started, and the directory holds no `index-*.fits` file. |
+| `NoIndexFiles` | The pod started, and the directory holds no `index-*.fits` file that the solver could read. |
 | `PodNotReady` | The pod does not exist yet, waits, or does not answer. The message gives the scheduler's reason or the error. |
 
 Each transition posts one `Event` on the `Solver`. It is a `Warning`
