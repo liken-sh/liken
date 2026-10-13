@@ -187,6 +187,7 @@ kubectl liken observatory take-down telescope east -n observatory
 ```
 
 `SetUp` turns `False` with the reason `TakenDown`, and
-`AttentionNeeded` turns `False` with the reason `Acknowledged`. The
+`AttentionNeeded` turns `False` with the reason `Acknowledged` and the
+message of your take-down, such as `Taken down by ada`. The
 next activation of the telescope clears `AttentionNeeded` too, with
 the reason `Activated`.

@@ -48,7 +48,7 @@ func TestANotifyAsksAPersonAndNeverWaits(t *testing.T) {
 		time.Sleep(2 * statusWindow)
 		synctest.Wait()
 		if c := w.conditionOn(observatory.TelescopeKind, "east", observatory.ConditionAttentionNeeded); c.Status != observatory.ConditionFalse ||
-			c.Reason != observatory.ReasonAcknowledged {
+			c.Reason != observatory.ReasonAcknowledged || c.Message != "Taken down by stargazer" {
 			t.Errorf("AttentionNeeded after the take-down = %+v", c)
 		}
 	})
@@ -117,6 +117,13 @@ func setUpAt(hour int, reason string) []observatory.Condition {
 	return []observatory.Condition{{Type: observatory.ConditionSetUp, Status: observatory.ConditionTrue, Reason: reason, LastTransitionTime: *at(hour)}}
 }
 
+// takenDownAt is a person's take-down at an hour, with the message the
+// plugin writes, or with none.
+func takenDownAt(hour int, message string) []observatory.Condition {
+	return []observatory.Condition{{Type: observatory.ConditionSetUp, Status: observatory.ConditionFalse, Reason: observatory.ReasonTakenDown,
+		Message: message, LastTransitionTime: *at(hour)}}
+}
+
 // clearedAt is a stored AttentionNeeded that turned False at an hour.
 func clearedAt(hour int) observatory.Condition {
 	return observatory.Condition{Type: observatory.ConditionAttentionNeeded, Status: observatory.ConditionFalse,
@@ -133,8 +140,12 @@ func TestAttentionClearsWhenAPersonAnswersOrTheNextActivationBegins(t *testing.T
 	}{
 		{"no request", []observatory.ProcedureRun{activatedAt(1)}, nil, nil, ""},
 		{"a request", []observatory.ProcedureRun{activatedAt(1), notified(5)}, nil, nil, "True Notified Cover the telescope"},
-		{"a request before the set-up", []observatory.ProcedureRun{activatedAt(1), notified(5)}, setUpAt(6, observatory.ReasonTakenDown), nil,
-			"False Acknowledged A person wrote SetUp after the request"},
+		{"a request before the take-down", []observatory.ProcedureRun{activatedAt(1), notified(5)}, takenDownAt(6, "Taken down by admin"), nil,
+			"False Acknowledged Taken down by admin"},
+		{"a request before a take-down with no message", []observatory.ProcedureRun{activatedAt(1), notified(5)}, takenDownAt(6, ""), nil,
+			"False Acknowledged Taken down"},
+		{"a request before the set-up", []observatory.ProcedureRun{activatedAt(1), notified(5)}, setUpAt(6, observatory.ReasonSetUp), nil,
+			"False Acknowledged Set up"},
 		{"a request after the set-up", []observatory.ProcedureRun{activatedAt(1), notified(5)}, setUpAt(0, observatory.ReasonSetUp), nil, "True Notified Cover the telescope"},
 		{"a set-up that expired after the request", []observatory.ProcedureRun{activatedAt(1), notified(5)}, setUpAt(6, observatory.ReasonExpired), nil,
 			"True Notified Cover the telescope"},
