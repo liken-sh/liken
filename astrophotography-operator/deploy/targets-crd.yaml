@@ -111,6 +111,7 @@ spec:
                 priority:
                   type: integer
                   format: int32
+                  default: 0
                   description: >-
                     Which eligible target a reservation images first: the
                     highest priority, then the oldest target, then the

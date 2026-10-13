@@ -74,3 +74,17 @@ func TestTheCRDFillsTheDefaultsOfPlans02And03(t *testing.T) {
 		})
 	}
 }
+
+// The operator orders an unset priority as 0. The CRD stores that 0,
+// so the Priority printer column shows it instead of a blank.
+func TestTheCRDStoresAnUnsetPriorityAsZero(t *testing.T) {
+	structural, err := structuralschema.NewStructural(internalSchema(t, loadCRD(t, TargetKind)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	object := resource(TargetKind, m42(nil))
+	defaulting.Default(object, structural)
+	if got := object["spec"].(map[string]any)["priority"]; got != int64(0) {
+		t.Errorf("spec.priority is stored as %#v, want 0", got)
+	}
+}
