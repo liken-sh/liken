@@ -3,7 +3,7 @@ package main
 // The supervisor of the runners. On each change it starts a runner for
 // each Reservation of this operator that is Ready, and stops the runner
 // of each one that is not. A reservation leaves Ready when it ends:
-// observatory-operator's Abort step stops the devices, and the runner
+// observatory-operator's StopWork step stops the devices, and the runner
 // stops with them. Then the supervisor ends the claims of every target
 // whose status.reservation names a reservation that is not Ready: it
 // clears status.reservation and status.exposure, and does not count the

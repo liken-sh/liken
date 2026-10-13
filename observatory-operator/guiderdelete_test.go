@@ -15,7 +15,7 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/phd2/phd2test"
 )
 
-// The Abort step stops a PHD2 whose Guider is gone, because its pod
+// The StopWork step stops a PHD2 whose Guider is gone, because its pod
 // still runs on the server and a guide pulse after the mount's stop
 // would move the mount.
 func TestAbortStopsThePHD2OfADeletedGuider(t *testing.T) {

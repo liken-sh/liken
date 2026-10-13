@@ -8,7 +8,7 @@ package main
 // Disconnect and deletes the guider's pod, so PHD2 never sees its
 // devices disconnect and never enters its reconnect path, which can
 // open a modal progress dialog, and a modal dialog ends PHD2 on a
-// compositor with no seat (plan 09). Abort stops PHD2's exposures and
+// compositor with no seat (plan 09). StopWork stops PHD2's exposures and
 // guiding first (deactivation.go).
 
 import (
@@ -226,7 +226,7 @@ func (r *runner) stopGuider(ctx context.Context, w *stepWork) (outcome, error) {
 	return done("stopped %s", strings.Join(stopped, ", "))
 }
 
-// stopCapture stops PHD2's exposures and guiding, for Abort. It finds
+// stopCapture stops PHD2's exposures and guiding, for StopWork. It finds
 // PHD2 by the guider pod that runs on the telescope's server, not by the
 // Guider: a Guider has no finalizer, so one that a person deleted with
 // the reservation is gone while its PHD2 still guides. A PHD2 whose

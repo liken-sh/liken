@@ -33,7 +33,7 @@ var stepTimeouts = map[observatory.StepName]time.Duration{
 	// StartGuider pulls the PHD2 image and the weston image on a node's
 	// first start, and PHD2 then connects real hardware in seconds.
 	observatory.StepStartGuider: 10 * time.Minute,
-	observatory.StepAbort:       2 * time.Minute,
+	observatory.StepStopWork:    2 * time.Minute,
 	observatory.StepStopGuider:  2 * time.Minute,
 	observatory.StepDisconnect:  2 * time.Minute,
 	observatory.StepStopDevices: 2 * time.Minute,

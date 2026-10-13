@@ -17,8 +17,8 @@ func TestEachStepEndIsOneLogLine(t *testing.T) {
 	}{
 		{"a step that is done", observatory.Step{Name: observatory.StepActivation, State: observatory.StepDone, StartTime: &start, StopTime: &stop,
 			Summary: "Cooled Camera east-main to -10 °C"}, "Activation done in 19 s: cooled Camera east-main to -10 °C"},
-		{"a step with nothing to do", observatory.Step{Name: observatory.StepAbort, State: observatory.StepSkipped, StartTime: &start, StopTime: &start,
-			Summary: "Found no exposure or slew to abort"}, "Abort skipped in 0 s: found no exposure or slew to abort"},
+		{"a step with nothing to do", observatory.Step{Name: observatory.StepStopWork, State: observatory.StepSkipped, StartTime: &start, StopTime: &start,
+			Summary: "Found no exposure or slew to abort"}, "StopWork skipped in 0 s: found no exposure or slew to abort"},
 		{"a step that failed", observatory.Step{Name: observatory.StepConnect, State: observatory.StepFailed, StartTime: &start, StopTime: &stop,
 			Summary: "Failed: Mount east: indi: Telescope Simulator.CONNECTION is Alert"}, "Connect failed: Mount east: indi: Telescope Simulator.CONNECTION is Alert"},
 		{"a step that timed out", observatory.Step{Name: observatory.StepActivation, State: observatory.StepFailed, StartTime: &start, StopTime: &stop,

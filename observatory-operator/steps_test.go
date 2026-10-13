@@ -52,7 +52,7 @@ func TestAStepThatPassesItsDeadlineFailsTheReservation(t *testing.T) {
 			t.Errorf("the camera whose pod is Pending is %s", camera.Status.Phase)
 		}
 
-		// A delete runs deactivation from Abort, and stops what
+		// A delete runs deactivation from StopWork, and stops what
 		// activation started.
 		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
 		w.until(10*time.Minute, "the reservation stays", func() bool {
@@ -270,7 +270,7 @@ func TestAReservationDeletedWhileItWaitsGoesAtOnce(t *testing.T) {
 			_, ok := w.reservation("east-tonight")
 			return !ok
 		})
-		if slices.ContainsFunc(w.api.eventReasons(), func(r string) bool { return r == string(observatory.StepAbort) }) {
+		if slices.ContainsFunc(w.api.eventReasons(), func(r string) bool { return r == string(observatory.StepStopWork) }) {
 			t.Errorf("deactivation ran: %v", w.api.eventReasons())
 		}
 	})

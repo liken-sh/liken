@@ -244,7 +244,7 @@ func TestADomeDeletedOverAnUnparkedMountNamesItsLock(t *testing.T) {
 // A dust cap deleted together with the reservation, as `kubectl delete
 // -f` of a whole observatory does, closes in the reservation's
 // Deactivation step before it goes, whether it runs its driver or a
-// Flip-Flat serves it. An exposure that the Abort step waits for holds
+// Flip-Flat serves it. An exposure that the StopWork step waits for holds
 // the step until the cap's delete arrives, so the Deactivation step
 // finds the cap deleted.
 func TestADeviceDeletedWithItsReservationRunsItsDeactivation(t *testing.T) {
@@ -267,7 +267,7 @@ func TestADeviceDeletedWithItsReservationRunsItsDeactivation(t *testing.T) {
 				w.indi.setState("east-telescope", "CCD Simulator", "CCD_EXPOSURE", "Busy")
 				w.indi.hold("CCD Simulator", "CCD_ABORT_EXPOSURE")
 				w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
-				w.until(time.Minute, "the Abort step does not abort the exposure", func() bool {
+				w.until(time.Minute, "the StopWork step does not abort the exposure", func() bool {
 					return w.indi.count("east-telescope", "CCD Simulator.CCD_ABORT_EXPOSURE") > 0
 				})
 				w.api.deleteNamed(kindCollection(observatory.DustCapKind), "east")
@@ -293,7 +293,7 @@ type named struct {
 }
 
 // deleteDuringAbort deletes the east reservation, and deletes the
-// resources while an exposure holds its Abort step. The Deactivation
+// resources while an exposure holds its StopWork step. The Deactivation
 // step then finds them deleted, as it does when a person deletes them
 // in one command with the reservation and the operator reads the
 // reservation's delete first.
@@ -302,7 +302,7 @@ func (w *world) deleteDuringAbort(resources ...named) {
 	w.indi.setState("east-telescope", "CCD Simulator", "CCD_EXPOSURE", "Busy")
 	w.indi.hold("CCD Simulator", "CCD_ABORT_EXPOSURE")
 	w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
-	w.until(time.Minute, "the Abort step does not abort the exposure", func() bool {
+	w.until(time.Minute, "the StopWork step does not abort the exposure", func() bool {
 		return w.indi.count("east-telescope", "CCD Simulator.CCD_ABORT_EXPOSURE") > 0
 	})
 	for _, r := range resources {

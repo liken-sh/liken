@@ -136,7 +136,7 @@ func TestAReservationDeactivatesAtItsEnd(t *testing.T) {
 		r := w.phase("east-tonight", observatory.ReservationReleased, 10*time.Minute)
 		want := []string{
 			"Wait=Done", "StartSite=Done", "Requires=Skipped", "PowerOn=Done", "StartDevices=Done", "Connect=Done", "Configure=Done", "Activation=Done", "StartGuider=Done",
-			"Abort=Skipped", "Deactivation=Done", "StopGuider=Done", "Disconnect=Done", "StopDevices=Done", "PowerOff=Done", "StopSite=Done",
+			"StopWork=Skipped", "Deactivation=Done", "StopGuider=Done", "Disconnect=Done", "StopDevices=Done", "PowerOff=Done", "StopSite=Done",
 		}
 		if got := stepStates(r); !slices.Equal(got, want) {
 			t.Errorf("steps = %v, want %v", got, want)

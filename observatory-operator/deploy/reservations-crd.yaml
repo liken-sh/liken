@@ -262,7 +262,7 @@ spec:
                     failed, and the `Ready` condition names it.
                 step:
                   type: string
-                  enum: [Wait, StartSite, Requires, PowerOn, StartDevices, Connect, Configure, Activation, StartGuider, Abort, Deactivation, StopGuider, Disconnect, StopDevices, PowerOff, StopSite]
+                  enum: [Wait, StartSite, Requires, PowerOn, StartDevices, Connect, Configure, Activation, StartGuider, StopWork, Deactivation, StopGuider, Disconnect, StopDevices, PowerOff, StopSite]
                   description: >-
                     The step that runs now, or the step that failed.
                     It is empty while the phase is `Ready` or
@@ -280,7 +280,7 @@ spec:
                     in either one at the next astronomical dawn ends
                     there: the step is `Skipped`, and its summary names
                     the conditions it waited for. The deactivation steps are
-                    `Abort`, `Deactivation`, `StopGuider`, `Disconnect`,
+                    `StopWork`, `Deactivation`, `StopGuider`, `Disconnect`,
                     `StopDevices`, `PowerOff`, and `StopSite`, and the
                     list holds them from when
                     deactivation begins. A step starts only when the
@@ -294,7 +294,7 @@ spec:
                     properties:
                       name:
                         type: string
-                        enum: [Wait, StartSite, Requires, PowerOn, StartDevices, Connect, Configure, Activation, StartGuider, Abort, Deactivation, StopGuider, Disconnect, StopDevices, PowerOff, StopSite]
+                        enum: [Wait, StartSite, Requires, PowerOn, StartDevices, Connect, Configure, Activation, StartGuider, StopWork, Deactivation, StopGuider, Disconnect, StopDevices, PowerOff, StopSite]
                         description: "The step's name."
                       state:
                         type: string
