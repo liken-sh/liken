@@ -30,6 +30,22 @@ test-go:
 	go test -race -covermode=atomic -coverprofile=coverage.out ./...
 	go tool go-test-coverage --config=.testcoverage.yml
 
+# `liken plugins sync` installs the plugin of a release, so a developer
+# who tests a change to cli/ against the dev cluster builds it from the
+# checkout instead. kubectl finds a plugin by the name
+# kubectl-liken-observatory on PATH, so BINDIR must be a directory on
+# PATH. The binary reports the version dev unless VERSION names
+# another, so it warns that its version differs from an operator that
+# runs a release; --force silences the warning.
+BINDIR ?= $(HOME)/.local/bin
+VERSION ?= dev
+
+.PHONY: install-plugin
+install-plugin:
+	mkdir -p $(BINDIR)
+	CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=$(VERSION)" \
+		-o $(BINDIR)/kubectl-liken-observatory ./cli
+
 # drivers/generated.go maps each driver to the image that holds it, from
 # indi/images/ and the tag in indi/package.toml, and holds the tag of
 # the weston image from weston/package.toml. A test fails when the file
