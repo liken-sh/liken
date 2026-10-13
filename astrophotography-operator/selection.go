@@ -25,7 +25,8 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// eligible reports whether a runner can claim a target now. ready names
+// eligible reports whether a runner can claim a target now, before the
+// horizon filter (horizon.go). ready names
 // the Ready reservations of the namespace, and self the runner's own.
 func eligible(t *astrophotography.Target, session *observatory.Session, ready map[string]bool, self string) bool {
 	if t.Spec.Suspend || t.Metadata.DeletionTimestamp != nil {
@@ -85,6 +86,8 @@ func (r *runner) claimNext() (*astrophotography.Target, error) {
 	ready := r.o.readyIn(r.namespace)
 	ready[r.name] = true
 	slices.SortFunc(targets, byPriority)
+	limit, now := r.skyLimit(), time.Now()
+	r.nextRise = time.Time{}
 	for i := range targets {
 		t := &targets[i]
 		if failedOn(t, r.name) {
@@ -92,6 +95,13 @@ func (r *runner) claimNext() (*astrophotography.Target, error) {
 		}
 		if !eligible(t, session, ready, r.name) {
 			if err := r.releaseIneligible(t); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if b := limit.check(t, now); b != nil {
+			r.noteRise(b)
+			if err := r.markBelow(t, b); err != nil {
 				return nil, err
 			}
 			continue

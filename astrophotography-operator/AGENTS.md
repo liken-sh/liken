@@ -17,7 +17,8 @@ packages:
 - `astrophotography/`, the Go types of `Target` and `Solver`, whose
   CRDs in `deploy/` are written by hand.
 - `sky/`, the conversion between J2000 and the equinox of the date,
-  from Meeus's *Astronomical Algorithms*.
+  and the altitude and azimuth at a site, from Meeus's *Astronomical
+  Algorithms*.
 - `outbox/`, the layout of a reservation's outbox, which the runner,
   the worker, and the promotion `Job` share.
 - `catalog/`, a target's frame catalog: the line, the reader that
@@ -68,7 +69,8 @@ every change: the `Target`s and `Solver`s, the `Reservation`s whose
 `Service`s, `Deployment`s, and `Job`s the operator creates, and every
 `PersistentVolumeClaim`. `runners.go` starts the runner of plan 01
 for each `Ready` reservation (`runner.go`): it chooses and claims a
-target (`selection.go`), slews (`slew.go`), exposes each frame
+target (`selection.go`) that stands above the telescope's horizon
+(`horizon.go`), slews (`slew.go`), exposes each frame
 (`exposure.go`, `framesaved.go`), counts it into the target's status
 (`counting.go`), and finishes a frame in flight after a restart
 (`resume.go`). `steps.go` holds the seams of guiding and centering.

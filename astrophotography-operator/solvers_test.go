@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/astrophotography-operator/astrophotography"
+	"github.com/liken-sh/liken/astrophotography-operator/solver"
 	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
@@ -48,8 +49,9 @@ func TestASolverGetsItsDeploymentAndService(t *testing.T) {
 }
 
 // Ready follows the pod: no pod yet, then a pod whose claim does not
-// exist, then a ready pod with the lab's index files. Each transition
-// posts one Event, a Warning for the missing claim.
+// exist, then a ready pod whose list the operator reads, then the lab's
+// index files. Each transition posts one Event, a Warning for the
+// missing claim.
 func TestReadyFollowsTheSolversPod(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)
@@ -91,7 +93,7 @@ func TestReadyFollowsTheSolversPod(t *testing.T) {
 		for _, e := range w.api.recorded.About("Solver", "lab") {
 			posted = append(posted, e.Type+" "+e.Reason)
 		}
-		want := []string{"Normal PodNotReady", "Warning ClaimMissing", "Normal Loaded"}
+		want := []string{"Normal PodNotReady", "Warning ClaimMissing", "Normal PodNotReady", "Normal Loaded"}
 		if !slices.Equal(posted, want) {
 			t.Errorf("Events %q, want %q", posted, want)
 		}
@@ -100,10 +102,10 @@ func TestReadyFollowsTheSolversPod(t *testing.T) {
 
 type astrophotographyCondition = conditions.Condition
 
-// The solver reads its claim only when its pod starts, so the operator
-// reads the index list once for each pod, and again for a new pod. It
-// reads the list from the pod's own address, because the Service routes
-// to a new pod only some time after the pod turns Ready.
+// The operator holds one request open to each pod, which answers each
+// new list, and opens one to a new pod. It asks the pod's own address,
+// because the Service routes to a new pod only some time after the pod
+// turns Ready.
 func TestTheIndexListIsReadOnceFromEachPod(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)
@@ -126,11 +128,67 @@ func TestTheIndexListIsReadOnceFromEachPod(t *testing.T) {
 	})
 }
 
+// A Job that downloads index files into the claim while the solver
+// runs reaches the status with no restart of the pod, through the one
+// request the operator holds open.
+func TestAnIndexFileAddedToTheClaimReachesTheStatus(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := startWorkloads(t, nil)
+		w.peers.set(func(f *fakePeers) { f.indexes = labIndexes[:1] })
+		w.api.put(solversPath, solverObject("lab", nil))
+		w.readySolverPod("lab-solver-0", "pod-0")
+		settle()
+		before := readyOf(w.solver(t, "lab")).Message
+		w.peers.set(func(f *fakePeers) { f.indexes = labIndexes })
+		settle()
+		lab := w.solver(t, "lab")
+		cases := []struct {
+			name      string
+			got, want any
+		}{
+			{"the message before", before, "12 index files of the series 4207"},
+			{"the message after", readyOf(lab).Message, "13 index files of the series 4207, 4208"},
+			{"the series", lab.Status.Series, "4207,4208"},
+			{"the requests", w.peers.count("GET 10.42.0.10:8080/indexes"), 1},
+		}
+		for _, c := range cases {
+			if c.got != c.want {
+				t.Errorf("%s = %v, want %v", c.name, c.got, c.want)
+			}
+		}
+	})
+}
+
+// A request that ends after it ran a while opens again at once, and
+// one that ends at once waits retryAfter, so a pod that closes each
+// request is not asked again and again. The list stays in the status
+// meanwhile.
+func TestARequestForTheListThatEndsOpensAgain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := startWorkloads(t, nil)
+		w.api.put(solversPath, solverObject("lab", nil))
+		w.readySolverPod("lab-solver-0", "pod-0")
+		settle()
+		w.peers.set(func(f *fakePeers) { f.endIndexes = true })
+		settle()
+		ended := w.peers.count("GET 10.42.0.10:8080/indexes")
+		w.peers.set(func(f *fakePeers) { f.endIndexes = false })
+		time.Sleep(retryAfter)
+		synctest.Wait()
+		if got := w.peers.count("GET 10.42.0.10:8080/indexes"); ended != 2 || got != 3 {
+			t.Errorf("%d requests after the end and %d after the wait, want 2 and 3", ended, got)
+		}
+		if ready := readyOf(w.solver(t, "lab")); ready.Reason != astrophotography.ReasonLoaded {
+			t.Errorf("Ready %s: %s", ready.Reason, ready.Message)
+		}
+	})
+}
+
 // A claim with no index file starts a pod that reports none.
 func TestASolverWithNoIndexFilesIsNotReady(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)
-		w.peers.set(func(f *fakePeers) { f.indexes = nil })
+		w.peers.set(func(f *fakePeers) { f.indexes = solver.Indexes{} })
 		w.api.put(solversPath, solverObject("lab", nil))
 		w.readySolverPod("lab-solver-0", "pod-0")
 		settle()
@@ -171,6 +229,25 @@ func TestAPodThatCannotStartSaysWhy(t *testing.T) {
 		ready := readyOf(w.solver(t, "lab"))
 		if ready.Reason != astrophotography.ReasonPodNotReady || !strings.Contains(ready.Message, "Insufficient memory") {
 			t.Errorf("Ready %s: %s", ready.Reason, ready.Message)
+		}
+	})
+}
+
+// A pod that goes away while the operator waits to ask it again is not
+// asked again.
+func TestAPodThatGoesIsNotAskedAgain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := startWorkloads(t, nil)
+		w.peers.set(func(f *fakePeers) { f.refuseIndexes = 1000 })
+		w.api.put(solversPath, solverObject("lab", nil))
+		w.readySolverPod("lab-solver-0", "pod-0")
+		settle()
+		w.api.remove(podsPath, "observatory", "lab-solver-0")
+		settle()
+		time.Sleep(2 * retryAfter)
+		synctest.Wait()
+		if got := w.peers.count("GET 10.42.0.10:8080/indexes"); got != 1 {
+			t.Errorf("the pod that went was asked %d times, want once", got)
 		}
 	})
 }

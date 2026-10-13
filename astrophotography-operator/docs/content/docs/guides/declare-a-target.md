@@ -124,9 +124,12 @@ and `archive.promotion: Continuous`. To choose the file names, see
 [Targets](/docs/concepts/targets/) explains each field, and
 [`Target`](/docs/reference/targets/) lists them all.
 
-The operator does not check whether a target is above the horizon. It
-slews to the coordinates you give it, so choose a target that is up
-during the reservation.
+The operator images a target only while it stands above the
+telescope's horizon: the `Horizon` that the `Telescope`'s
+`spec.horizon` names, or 0° when it names none. A target below the
+horizon gets `Imaging` `False` with the reason `BelowHorizon`, and its
+message gives its altitude and when it rises.
+[The horizon](/docs/concepts/imaging/#the-horizon) gives the detail.
 
 ## Check the target
 
@@ -191,7 +194,7 @@ kubectl patch target m42 -n observatory --type merge -p '{"spec":{"priority":10}
 ```
 
 The reservation keeps its target until the target has no work left,
-is suspended, or fails. A higher priority on another target does not
+is suspended, sets below the horizon, or fails. A higher priority on another target does not
 take the telescope away from the target in progress. To switch now,
 suspend the target in progress.
 

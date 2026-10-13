@@ -45,14 +45,14 @@ func TestStartWritesTheConfigAndLogsTheSeries(t *testing.T) {
 	indexes := writeFiles(t, map[string][]byte{"index-4208.fits": indexOfSeries(4208, arcmin30, arcmin42)})
 	work := t.TempDir()
 	var logs bytes.Buffer
-	s, err := Start(Options{Indexes: indexes, Work: work, Engine: "astrometry-engine", CPULimit: 60}, &logs)
+	s, err := Start(t.Context(), Options{Indexes: indexes, Work: work, Engine: "astrometry-engine", CPULimit: 60}, &logs)
 	if err != nil {
 		t.Fatal(err)
 	}
 	config, _ := os.ReadFile(filepath.Join(work, "engine.cfg"))
 	want := "index " + filepath.Join(indexes, "index-4208.fits") + "\ncpulimit 60\n"
-	if string(config) != want || len(s.indexes) != 1 {
-		t.Errorf("config %q with %d series, want %q with one", config, len(s.indexes), want)
+	if series, _ := s.set.current(); string(config) != want || len(series) != 1 {
+		t.Errorf("config %q with %d series, want %q with one", config, len(series), want)
 	}
 	if !strings.Contains(logs.String(), "index series 4208: 1 files, quads of 30 to 42 arcminutes") {
 		t.Errorf("logged %q", logs.String())
@@ -64,9 +64,12 @@ func TestStartWritesTheConfigAndLogsTheSeries(t *testing.T) {
 // restart again and again.
 func TestStartWithNoIndexFilesServesAnEmptyList(t *testing.T) {
 	var logs bytes.Buffer
-	s, err := Start(Options{Indexes: t.TempDir(), Work: t.TempDir()}, &logs)
-	if err != nil || len(s.indexes) != 0 || !strings.Contains(logs.String(), "no index-*.fits") {
-		t.Errorf("answered %v with %d series and logged %q", err, len(s.indexes), logs.String())
+	s, err := Start(t.Context(), Options{Indexes: t.TempDir(), Work: t.TempDir()}, &logs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if series, _ := s.set.current(); len(series) != 0 || !strings.Contains(logs.String(), "no index-*.fits") {
+		t.Errorf("served %d series and logged %q", len(series), logs.String())
 	}
 }
 
@@ -75,11 +78,11 @@ func TestStartFails(t *testing.T) {
 		name    string
 		options Options
 	}{
-		{"an index file that does not read", Options{Indexes: writeFiles(t, map[string][]byte{"index-x.fits": nil}), Work: t.TempDir()}},
 		{"a work directory that is gone", Options{Indexes: t.TempDir(), Work: filepath.Join(t.TempDir(), "gone")}},
+		{"a work directory that is gone, with no index directory", Options{Indexes: filepath.Join(t.TempDir(), "gone"), Work: filepath.Join(t.TempDir(), "gone")}},
 	}
 	for _, c := range cases {
-		if _, err := Start(c.options, io.Discard); err == nil {
+		if _, err := Start(t.Context(), c.options, io.Discard); err == nil {
 			t.Errorf("%s: no error", c.name)
 		}
 	}

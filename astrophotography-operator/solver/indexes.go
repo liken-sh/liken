@@ -1,15 +1,16 @@
 package solver
 
-// The index files. The solver reads the header of every index-*.fits
-// in its claim's directory once, when it starts: the series from
-// INDEXID, and the range of quad sizes from SCALE_L and SCALE_U. It
-// names each file in the engine's configuration, so the engine opens
-// exactly the files that GET /indexes reports. A person who adds files
-// restarts the solver's Deployment, and the new pod reads them.
+// The index files. The solver reads the header of each index-*.fits in
+// its claim's directory: the series from INDEXID, and the range of quad
+// sizes from SCALE_L and SCALE_U. It names each file in the engine's
+// configuration, so the engine opens exactly the files that GET
+// /indexes reports. indexwatch.go keeps the set current while files
+// come and go.
 
 import (
 	"cmp"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -30,32 +31,63 @@ type IndexFile struct {
 	Low, High float64
 }
 
-// ScanIndexes reads the header of every index-*.fits in dir, in the
-// order of their names. A file whose header does not read is an error,
-// because the engine would fail on it too.
-func ScanIndexes(dir string) ([]IndexFile, error) {
-	paths, err := filepath.Glob(filepath.Join(dir, "index-*.fits"))
+// ScanIndexes reads every index-*.fits in dir, in the order of their
+// names. It leaves out each file that does not read, and answers why in
+// skipped, so the engine never opens a file it would fail on and the
+// solver still serves the rest. A file that a Job still downloads is
+// one of these until the Job closes it.
+func ScanIndexes(dir string) (files []IndexFile, skipped []error, err error) {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	files := make([]IndexFile, 0, len(paths))
-	for _, path := range paths {
-		file, err := readIndex(path)
+	for _, entry := range entries {
+		if !isIndexName(entry.Name()) {
+			continue
+		}
+		file, err := readIndex(filepath.Join(dir, entry.Name()))
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
+			skipped = append(skipped, err)
+			continue
 		}
 		files = append(files, file)
 	}
-	return files, nil
+	return files, skipped, nil
 }
 
+// isIndexName answers whether a name is an index file's. A claim can
+// hold other files, and astrometry.net names its index files
+// index-*.fits.
+func isIndexName(name string) bool {
+	matched, _ := filepath.Match("index-*.fits", name)
+	return matched
+}
+
+// readIndex reads one file's header, after it checks that the file
+// holds all the data its headers announce. The error names the file,
+// so the log says which file to replace.
 func readIndex(path string) (IndexFile, error) {
+	file, err := readIndexFile(path)
+	if err != nil {
+		return IndexFile{}, fmt.Errorf("%s: %w", path, err)
+	}
+	return file, nil
+}
+
+func readIndexFile(path string) (IndexFile, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return IndexFile{}, err
 	}
 	defer func() { _ = f.Close() }()
-	h, err := fits.ReadHeader(f)
+	info, err := f.Stat()
+	if err != nil {
+		return IndexFile{}, err
+	}
+	if err := fits.Complete(f, info.Size()); err != nil {
+		return IndexFile{}, err
+	}
+	h, err := fits.ReadHeader(io.NewSectionReader(f, 0, info.Size()))
 	if err != nil {
 		return IndexFile{}, err
 	}

@@ -41,6 +41,7 @@ type runner struct {
 	client      *indi.Client
 	centering   centering
 	guiding     guiding
+	nextRise    time.Time
 	idle        bool
 	warnedNoBox bool
 }
@@ -95,7 +96,7 @@ func (r *runner) run(ctx context.Context) {
 			r.logf("%v", err)
 			sleep(ctx, retryWait, wake)
 		case !again:
-			sleep(ctx, forever, wake)
+			sleep(ctx, r.riseWait(), wake)
 		}
 	}
 }

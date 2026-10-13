@@ -51,6 +51,9 @@ The target's `RESERVATION` column is empty while a reservation is
   imaging camera.
 * The target is not suspended or being deleted, and `Complete` is not
   `True`.
+* The target is above the telescope's horizon. A target below it has
+  `Imaging` `False` with the reason `BelowHorizon`, and the message
+  gives its altitude, the horizon's altitude there, and when it rises.
 * No other `Ready` reservation holds the target. A target's
   `RESERVATION` names the one that holds it.
 * The target did not fail earlier on this reservation. A target that
@@ -79,6 +82,7 @@ kubectl get target m42 -n observatory \
 | `Waiting` | The reservation that imaged the target ended. | Reserve the telescope again. The target keeps its progress. |
 | `Suspended` | `spec.suspend` is `true`. | Set it to `false`. |
 | `Deleting` | A person deleted the target while frames of it are pending in an outbox. The finalizer holds the delete until promotion moves them. | Nothing, or see [A target does not delete](#a-target-does-not-delete). |
+| `BelowHorizon` | The target stands below the horizon of the reservation's telescope: the `Horizon` that the `Telescope`'s `spec.horizon` names, or 0° when it names none or the `Horizon` does not exist. The operator does not claim it, or released it before the next frame when it set. The message gives the altitude, the azimuth, the horizon's altitude there, and when the target rises. | Nothing. The reservation claims the target when it rises, if no other target holds the telescope. The condition keeps the message of the moment the target went below the horizon until a reservation claims it. If the horizon is wrong, edit the `Horizon`. |
 | `SequencesDone` | Every frame the sequences want is pending or archived. | Nothing. `Complete` turns `True` when the last frame reaches the archive. If it stays `False`, see [A frame does not reach the archive](#a-frame-does-not-reach-the-archive). |
 | `OutboxFull` | The outbox has less than three frames' size free. The reservation gets the `Warning` `AstrophotographyOutboxFull`. The operator keeps the target and exposes again when space is free. | With `promotion: Continuous`, check that promotion moves frames out. With `AfterReservation`, nothing frees space before the reservation ends, so give the outbox more space. |
 | `ExposureFailed` | The last exposure gave no frame: the driver answered `Alert`, did not finish within the exposure plus 2 minutes, saved the frame under another name, or the worker did not answer. The operator keeps the target and starts the next frame a minute later. | Read the message. A frame under another name means a client, such as Ekos, changed the camera's upload settings. A worker that does not answer is often still starting; see `AstrophotographyWorkerPending` below. |
@@ -164,6 +168,20 @@ frames in the catalog, moves nothing, and reports the counts again.
 `kubectl get solver -n observatory` shows the reason.
 [Set up a solver](https://liken.sh/astrophotography/docs/guides/set-up-a-solver/#when-the-solver-is-not-ready)
 gives the fix for `ClaimMissing`, `NoIndexFiles`, and `PodNotReady`.
+
+A `Solver` that is `Ready` but lists fewer series or files than the
+claim holds has left out a file. The solver loads a file only when
+its writer closes it, so a copy that is still running is not loaded
+yet. A file that does not read is left out, and the solver's log names
+it:
+
+```sh
+kubectl logs -n observatory deployment/lab-solver | grep 'left out'
+```
+
+A file that a pod on another node wrote to a network file system, such
+as NFS, does not reach the solver's watch. Restart the solver's
+`Deployment` to read it.
 
 ## A target does not delete
 

@@ -2,19 +2,17 @@ package main
 
 // The Solver loop (plan 02). For each Solver, the operator keeps its
 // Deployment and Service, and reports in the status where the solver
-// listens, the index series it read, and the condition Ready. It reads
-// the index list from the solver's pod once for each pod, when the pod
-// turns Ready, because the pod reads the claim only when it starts.
+// listens, the index series it holds, and the condition Ready. The
+// solver's pod follows its claim's directory, so the operator follows
+// the pod's index list from the time the pod turns Ready, and each new
+// list wakes the loop.
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
-	"net/http"
 	"reflect"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -34,16 +32,20 @@ func solverPath(namespace, name string) string {
 }
 
 // solverLoop is the memory of the Solver loop: the memo of the
-// Solvers' status writes, and the index list of each solver pod by the
-// pod's UID. Both are caches: a new lead reads each list once more.
+// Solvers' status writes, and the index list that each solver pod
+// reports, by the pod's UID (solverindexes.go). Both are caches: a new
+// lead follows each pod's list again.
 type solverLoop struct {
 	versions *memo.Versions
 	mu       sync.Mutex
-	listed   map[string]solver.Indexes
+	follows  map[string]*indexFollow
+	// running counts the goroutines that follow a pod's list, so the
+	// operator stops them all before it releases the Lease.
+	running sync.WaitGroup
 }
 
 func newSolverLoop() *solverLoop {
-	return &solverLoop{versions: memo.New(), listed: map[string]solver.Indexes{}}
+	return &solverLoop{versions: memo.New(), follows: map[string]*indexFollow{}}
 }
 
 // solverPass serves every Solver once.
@@ -70,18 +72,6 @@ func (o *operator) solverPass(ctx context.Context, loop *solverLoop) error {
 	return errors.Join(errs...)
 }
 
-// forget drops the index list of each pod that no Solver reports any
-// more.
-func (loop *solverLoop) forget(current map[string]bool) {
-	loop.mu.Lock()
-	defer loop.mu.Unlock()
-	for uid := range loop.listed {
-		if !current[uid] {
-			delete(loop.listed, uid)
-		}
-	}
-}
-
 // serveSolver keeps one Solver's workload and writes its status. It
 // answers the UID of the pod it reported, so the loop keeps that pod's
 // index list.
@@ -99,7 +89,6 @@ func (o *operator) serveSolver(ctx context.Context, loop *solverLoop, s *astroph
 		report.failure = failed
 	case p != nil && p.ready():
 		report.indexes, report.failure = loop.indexes(ctx, o, p)
-		failed = report.failure
 	}
 	uid := ""
 	if p != nil {
@@ -111,30 +100,6 @@ func (o *operator) serveSolver(ctx context.Context, loop *solverLoop, s *astroph
 // errNoWorkerImage is the failure of a lead that could not name the
 // worker image, which the Ready condition reports.
 var errNoWorkerImage = errors.New("the operator could not name the image of the solver's pod; see its log")
-
-// indexes answers the index list of a ready pod, from the cache or from
-// the pod. It reads the pod's own address, not the Service: the cache
-// keeps the list by the pod's UID, and the Service routes to a new pod
-// only after the endpoints controller adds it, some time after the pod
-// turns Ready. Until then a read through the Service is refused, or
-// times out.
-func (loop *solverLoop) indexes(ctx context.Context, o *operator, p *podObject) (solver.Indexes, error) {
-	loop.mu.Lock()
-	listed, held := loop.listed[p.Metadata.UID]
-	loop.mu.Unlock()
-	if held {
-		return listed, nil
-	}
-	var indexes solver.Indexes
-	url := "http://" + net.JoinHostPort(p.Status.PodIP, strconv.Itoa(solver.Port)) + solver.PathIndexes
-	if err := o.peer(ctx, http.MethodGet, url, nil, &indexes); err != nil {
-		return nil, fmt.Errorf("reading the index list of pod %s: %w", p.Metadata.Name, err)
-	}
-	loop.mu.Lock()
-	loop.listed[p.Metadata.UID] = indexes
-	loop.mu.Unlock()
-	return indexes, nil
-}
 
 // solverReport is what the pass learned of one Solver.
 type solverReport struct {
@@ -163,6 +128,8 @@ func (r solverReport) ready() (conditions.Condition, conditions.Status) {
 		return notReady(astrophotography.ReasonPodNotReady, "the solver's pod cannot start: "+waits), conditions.False
 	case !r.pod.ready():
 		return notReady(astrophotography.ReasonPodNotReady, "the solver's pod "+r.pod.Metadata.Name+" is not ready"), ""
+	case r.indexes == nil:
+		return notReady(astrophotography.ReasonPodNotReady, "the operator is reading the index list of the solver's pod "+r.pod.Metadata.Name), ""
 	case len(r.indexes) == 0:
 		return notReady(astrophotography.ReasonNoIndexFiles, "the claim "+r.claim+" holds no index-*.fits file in the directory spec.indexFiles.path names"), conditions.False
 	}
@@ -204,7 +171,12 @@ func (o *operator) writeSolverStatus(s *astrophotography.Solver, loop *solverLoo
 			status.Endpoint = &endpoint
 		}
 		if r.indexes != nil {
-			status.Indexes = r.indexes
+			// The API server stores an empty list as no list, so an empty
+			// list is written as none, and compares equal to what it stores.
+			status.Indexes = nil
+			if len(r.indexes) > 0 {
+				status.Indexes = r.indexes
+			}
 			series := make([]string, 0, len(r.indexes))
 			for _, s := range r.indexes {
 				series = append(series, fmt.Sprint(s.ID))

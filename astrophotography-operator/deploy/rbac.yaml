@@ -16,14 +16,15 @@ metadata:
   name: astrophotography-operator
 rules:
   # A watch of each kind that the runner reads: the Reservations that
-  # name this operator as their holder, the site, the telescope and its
-  # optics, the devices it drives, and the guider. get reads one again
-  # after a write that met a conflict.
+  # name this operator as their holder, the site, the telescope, its
+  # horizon, and its optics, the devices it drives, and the guider. get
+  # reads one again after a write that met a conflict.
   - apiGroups: [observatory.liken.sh]
     resources:
       - reservations
       - observatories
       - telescopes
+      - horizons
       - opticaltrains
       - opticaltubes
       - mounts

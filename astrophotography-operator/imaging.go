@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/liken-sh/liken/astrophotography-operator/astrophotography"
 	"github.com/liken-sh/liken/kubernetes/apiclient"
@@ -166,6 +167,9 @@ func (w *work) next(ctx context.Context) (bool, error) {
 	index, left := nextSequence(aligned(t))
 	if t.Spec.Suspend || !left || t.Metadata.DeletionTimestamp != nil {
 		return true, w.r.releaseIneligible(t)
+	}
+	if b := w.r.skyLimit().check(t, time.Now()); b != nil {
+		return true, w.r.markBelow(t, b)
 	}
 	if t.Spec.Coordinates != w.aimed {
 		w.afterFrame = false

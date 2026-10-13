@@ -1,8 +1,13 @@
 # 04, The scheduler
 
-Proposed on 2026-10-12. Not built. This plan records the problem and
-the decisions of the design conversation; the filters and the score are
-not designed yet.
+Proposed on 2026-10-12. The horizon filter is built (2026-10-13): a
+runner does not claim a target below the telescope's `Horizon`, or
+below 0° when the telescope names none, releases a target that sets
+before its next frame, and waits for the first rise on a timer. The
+sky's geometry is a port of Meeus in `sky/`, with the rise found by a
+search at one-minute steps. This plan records the problem and the
+decisions of the design conversation; the other filters and the score
+are not designed yet.
 
 ## The problem
 

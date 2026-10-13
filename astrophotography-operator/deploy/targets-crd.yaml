@@ -661,7 +661,9 @@ spec:
                     `Exposing`, and a message that names the reservation
                     and the sequence. `Imaging` is `False` with the
                     reason `Deleting` while a delete of the target waits
-                    for promotion. `ArchiveAvailable` is `True` when
+                    for promotion, and with the reason `BelowHorizon`
+                    while the target stands below the horizon of the
+                    telescope. `ArchiveAvailable` is `True` when
                     the last promotion succeeded, and `False` with a
                     reason such as `ClaimMissing` or `NameConflict` when
                     it did not.

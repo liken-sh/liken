@@ -48,9 +48,11 @@ must land in a claim that outlives the camera's pod. It gets the
 The runner takes the eligible target of its namespace with the highest
 `priority`, then the oldest, then the first name. A target is eligible
 when it is not suspended or being deleted, its `Complete` condition is
-not `True`, a sequence has work left, its `opticalTrain` is on the session, and no
-other `Ready` reservation images it. A target with no `opticalTrain`
-is eligible on a session with exactly one imaging camera.
+not `True`, a sequence has work left, its `opticalTrain` is on the
+session, no other `Ready` reservation images it, and it stands above
+the telescope's horizon ([The horizon](#the-horizon)). A target with no
+`opticalTrain` is eligible on a session with exactly one imaging
+camera.
 
 The runner claims the target by writing its reservation's name into
 the target's `status.reservation`, with the version of the target it
@@ -92,6 +94,49 @@ target you suspend is released with the reason `Suspended`, and a
 target you delete with the reason `Deleting`: its finalizer holds the
 delete until promotion moves its pending frames
 ([Delete a target](/docs/guides/declare-a-target/#delete-a-target)).
+A target that set below the horizon is released with the reason
+`BelowHorizon`.
+
+## The horizon
+
+A frame of a target behind trees or a roof holds no stars, so the
+runner images a target only while it stands above the horizon of the
+reservation's telescope. The horizon is the `Horizon` that the
+`Telescope`'s `spec.horizon` names now
+([Save the horizon of each place](https://liken.sh/observatory/docs/guides/describe-your-equipment/#save-the-horizon-of-each-place)).
+When the telescope names no `Horizon`, or names one that does not
+exist, the horizon is 0° at every azimuth.
+
+The runner computes the target's altitude and azimuth at the site of
+the session's `Observatory` from its coordinates and the time, with
+the formulas of Meeus's *Astronomical Algorithms*. The altitude is
+geometric: refraction lifts a star at the horizon by about half a
+degree, so a target counts as below a little before it disappears
+from view. Between two points of the `Horizon`'s profile, the
+horizon's altitude changes in a straight line with the azimuth, and
+the last point joins the first through 360°, as N.I.N.A. reads the
+same file.
+
+The runner checks the horizon at two moments:
+
+* **Before it claims a target.** A target below the horizon is not
+  claimed, and the mount does not move. The target gets `Imaging`
+  `False` with the reason `BelowHorizon`, once each time it goes below,
+  and the message gives its altitude and azimuth, the horizon's
+  altitude there, and the time it rises, such as `It rises above it at
+  2026-10-14T03:12:00Z`. A target that another `Ready` reservation
+  images is left alone.
+* **Before each frame.** A target that set during its sequences is
+  released with `BelowHorizon` before the next frame. The frames
+  before it count, and the runner chooses the next target at once.
+
+The runner computes a target's altitude only when it chooses a
+target and before a frame. When no target is eligible, it waits for a change in the
+cluster, or for the time the first target below the horizon rises,
+whichever comes first. The rise is a time on the clock, so the
+runner sets a timer for it and reads nothing in the meantime. It
+finds the rise to the minute within the next day, so a target that
+does not rise within a day gets no timer, and its message says so.
 
 ## Centering
 
@@ -291,7 +336,7 @@ reservation with the prefix `Astrophotography`:
 | Reason | Type | When |
 |---|---|---|
 | `AstrophotographyNoOutbox` | `Warning` | the reservation has no outbox |
-| `AstrophotographyIdle` | `Normal` | no target of the namespace is eligible |
+| `AstrophotographyIdle` | `Normal` | no target of the namespace is eligible, such as when every target is below the horizon |
 | `AstrophotographyUnparked` | `Normal` | the runner unparked the mount |
 | `AstrophotographyOutboxFull` | `Warning` | a target found the outbox full |
 | `AstrophotographyWorkerPending` | `Warning` | the reservation's worker pod cannot start; the message gives the scheduler's reason |

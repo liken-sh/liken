@@ -26,38 +26,66 @@ type solve func(ctx context.Context, axy []byte) (SolveAnswer, error)
 
 // Server answers PathSolve and PathIndexes.
 type Server struct {
-	solve   solve
-	indexes Indexes
+	solve solve
+	set   *indexSet
 	// turn holds one token while the engine runs. A channel and not a
 	// mutex, so a request whose client goes away leaves the queue.
 	turn chan struct{}
 	// logs receives one line for each solve.
 	logs io.Writer
+	// failed receives the error of a watch of the index directory that
+	// ended for good.
+	failed chan error
 }
 
-// NewServer serves an engine and the index series it reads, and logs
-// each solve to logs.
-func NewServer(engine Engine, indexes Indexes, logs io.Writer) *Server {
-	return newServer(engine.Solve, indexes, logs)
+// newServer serves an engine's solve and an index set, and logs each
+// solve to logs.
+func newServer(s solve, set *indexSet, logs io.Writer) *Server {
+	return &Server{solve: s, set: set, turn: make(chan struct{}, 1), logs: logs, failed: make(chan error, 1)}
 }
 
-func newServer(s solve, indexes Indexes, logs io.Writer) *Server {
-	if indexes == nil {
-		indexes = Indexes{}
-	}
-	return &Server{solve: s, indexes: indexes, turn: make(chan struct{}, 1), logs: logs}
-}
+// Failed receives the error of a watch of the index directory that
+// the kernel refused, or of a configuration that did not write. The
+// set no longer follows the directory after it, so the solver mode
+// ends, and the kubelet starts the container again.
+func (s *Server) Failed() <-chan error { return s.failed }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
+	case r.URL.Path == PathIndexes && r.Method == http.MethodGet && r.URL.Query().Get("watch") == "true":
+		s.followIndexes(w, r)
 	case r.URL.Path == PathIndexes && r.Method == http.MethodGet:
-		answer(w, s.indexes)
+		series, _ := s.set.current()
+		answer(w, series)
 	case r.URL.Path == PathSolve && r.Method == http.MethodPost:
 		s.serveSolve(w, r)
 	case r.URL.Path == PathIndexes || r.URL.Path == PathSolve:
 		http.Error(w, r.Method+" is not allowed on "+r.URL.Path, http.StatusMethodNotAllowed)
 	default:
 		http.NotFound(w, r)
+	}
+}
+
+// followIndexes answers the series as one line of JSON, and one more
+// line after each change, until the client goes away. The operator
+// holds one such request open to each solver pod, so a file that
+// lands in the claim reaches the Solver's status with no restart and
+// no poll.
+func (s *Server) followIndexes(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	flush := http.NewResponseController(w)
+	encoder := json.NewEncoder(w)
+	for {
+		series, changed := s.set.current()
+		if err := encoder.Encode(series); err != nil {
+			return
+		}
+		_ = flush.Flush()
+		select {
+		case <-changed:
+		case <-r.Context().Done():
+			return
+		}
 	}
 }
 

@@ -28,7 +28,7 @@ type Search struct {
 }
 
 // IndexFiles is a claim, and a directory in it, that holds index files.
-// The solver reads every index-*.fits in the directory.
+// The solver reads every index-*.fits in the directory, and watches it.
 type IndexFiles struct {
 	ClaimName string `json:"claimName"`
 	Path      string `json:"path,omitempty"`
@@ -39,7 +39,8 @@ type SolverStatus struct {
 	// Endpoint is the solver's Service, while its pod is ready.
 	Endpoint *observatory.Endpoint `json:"endpoint,omitempty"`
 	// Indexes lists each index series in the claim, which the solver
-	// reads from each file's headers when it starts.
+	// reads from each file's headers. It changes when a file joins or
+	// leaves the directory.
 	Indexes []IndexSeries `json:"indexes,omitempty"`
 	// Series names the series of Indexes in one string, such as
 	// "4207,4208", for the INDEXES column of kubectl get. The API server

@@ -48,6 +48,10 @@ const (
 	// of it wait in an outbox. No reservation claims it, and its
 	// finalizer keeps it until promotion moves those frames.
 	ReasonDeleting = "Deleting"
+	// ReasonBelowHorizon says that the target stands below the horizon
+	// of the telescope, so no runner claims it, and a runner that held
+	// it released it before its next frame.
+	ReasonBelowHorizon = "BelowHorizon"
 )
 
 // The reasons of ArchiveAvailable.

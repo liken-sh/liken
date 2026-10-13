@@ -1,10 +1,10 @@
 package solver
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"time"
 )
@@ -50,26 +50,26 @@ func ParseOptions(args []string, output io.Writer) (Options, error) {
 	return o, nil
 }
 
-// Start reads the index files, writes the engine's configuration, and
-// answers the server. It logs each series it found. A directory with
-// no index file starts a server that reports none, so the Solver's
-// status says NoIndexFiles instead of a pod that restarts.
-func Start(o Options, logs io.Writer) (*Server, error) {
-	files, err := ScanIndexes(o.Indexes)
+// Start opens the watch of the index directory, reads the index files,
+// writes the engine's configuration, and answers the server. It logs
+// each series it found. The watch keeps the set current until ctx
+// ends. A directory with no index file starts a server that reports
+// none, so the Solver's status says NoIndexFiles instead of a pod that
+// restarts.
+func Start(ctx context.Context, o Options, logs io.Writer) (*Server, error) {
+	config := filepath.Join(o.Work, "engine.cfg")
+	set := newIndexSet(config, o.CPULimit, logs)
+	w := &indexWatch{dir: o.Indexes, set: set, logs: logs}
+	watch, inside, err := w.open()
 	if err != nil {
 		return nil, err
 	}
-	config := filepath.Join(o.Work, "engine.cfg")
-	if err := os.WriteFile(config, []byte(EngineConfig(files, o.CPULimit)), 0o600); err != nil {
-		return nil, err
-	}
-	series := Series(files)
-	for _, s := range series {
-		fmt.Fprintf(logs, "index series %d: %d files, quads of %g to %g arcminutes\n", s.ID, s.Files, s.ScaleArcmin.Low, s.ScaleArcmin.High)
-	}
-	if len(series) == 0 {
-		fmt.Fprintf(logs, "no index-*.fits in %s, so every solve answers no solution\n", o.Indexes)
-	}
 	engine := Engine{Program: o.Engine, Config: config, Work: o.Work, Timeout: o.Timeout}
-	return NewServer(engine, series, logs), nil
+	s := newServer(engine.Solve, set, logs)
+	go func() {
+		if err := w.run(ctx, watch, inside); err != nil {
+			s.failed <- err
+		}
+	}()
+	return s, nil
 }

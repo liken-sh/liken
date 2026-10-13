@@ -33,11 +33,28 @@ func runSolver(ctx context.Context, args []string, logs io.Writer) error {
 	if err != nil {
 		return err
 	}
-	server, err := solver.Start(options, logs)
+	serving, stop := context.WithCancelCause(ctx)
+	defer stop(nil)
+	server, err := solver.Start(serving, options, logs)
 	if err != nil {
 		return err
 	}
-	return serveMode(ctx, ":"+strconv.Itoa(solver.Port), server)
+	// A watch of the index directory that fails for good ends the mode,
+	// so the kubelet starts the container again and it watches again.
+	go func() {
+		select {
+		case err := <-server.Failed():
+			stop(fmt.Errorf("watching the index files: %w", err))
+		case <-serving.Done():
+		}
+	}()
+	if err := serveMode(serving, ":"+strconv.Itoa(solver.Port), server); err != nil {
+		return err
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
+	return context.Cause(serving)
 }
 
 func runWorker(ctx context.Context, args []string, logs io.Writer) error {
