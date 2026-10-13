@@ -102,7 +102,8 @@ m42    M42      0/5                      False      10s
 ## Reserve the telescope
 
 Give the telescope to the operator with a `Reservation` whose holder
-is `astrophotography-operator` and whose outbox is the claim above:
+is `astrophotography-operator`, whose outbox is the claim above, and
+whose `end` is near the next dawn at your site:
 
 ```sh
 kubectl apply -n observatory -f - <<'EOF'
@@ -113,10 +114,17 @@ metadata:
 spec:
   telescope: east
   holder: astrophotography-operator
+  end: 2026-10-14T06:30:00-04:00
   outbox:
     claimName: frames
 EOF
 ```
+
+The operator does not end a reservation itself. When no target has
+work left, the reservation gets the `Event` `AstrophotographyIdle`,
+and the telescope stays as activation left it, with the mount
+tracking and the camera cooled, until `end` comes or you delete the
+reservation. So give each reservation an `end`.
 
 `observatory-operator` starts the devices. When the reservation is
 `Ready`, the operator claims the eligible target with the highest
@@ -174,7 +182,17 @@ kubectl patch target m42 -n observatory --type merge -p '{"spec":{"suspend":true
 
 ## End the night
 
-Delete the reservation, or let its `spec.end` pass:
+The night ends when the reservation's `end` comes. A reservation that
+reaches its `end` stays, as `Released`, until you delete it. To end the
+night early, move `end` to now:
+
+```sh
+kubectl patch reservation east-tonight -n observatory --type merge \
+  -p "{\"spec\":{\"end\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}}"
+```
+
+Or delete the reservation, which ends the night and removes the
+reservation in one step:
 
 ```sh
 kubectl delete reservation east-tonight -n observatory
