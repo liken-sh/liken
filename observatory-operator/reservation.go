@@ -81,6 +81,7 @@ func (r *runner) run(ctx context.Context) {
 		}
 		if first {
 			r.status, r.logged, first = r.res.Status, r.res.Status.Phase, false
+			r.status.Steps = renameStoredSteps(r.res.Status.Steps)
 			r.session = storedSession(r.res.Status)
 			if finished(r.res) {
 				// A Released reservation that a person edits has no step
@@ -209,6 +210,24 @@ func isDeactivation(name observatory.StepName) bool {
 		}
 	}
 	return false
+}
+
+// renameStoredSteps answers a copy of stored steps with a step named
+// Abort renamed StopWork. An operator that names the step Abort can
+// stop partway through a deactivation, and the operator that replaces
+// it reads that status. Without the rename, deactivate finds no
+// StopWork step and adds every deactivation step again, so the status
+// holds each of them twice. The next status write stores the new name.
+// The slice is copied because the stored one belongs to the watch's
+// cache.
+func renameStoredSteps(stored []observatory.Step) []observatory.Step {
+	steps := slices.Clone(stored)
+	for i := range steps {
+		if steps[i].Name == observatory.StepStoredAbort {
+			steps[i].Name = observatory.StepStopWork
+		}
+	}
+	return steps
 }
 
 func pendingSteps(names []observatory.StepName) []observatory.Step {

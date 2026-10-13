@@ -30,7 +30,7 @@ var (
 	safeties          = strs(SafetySafe, SafetyWarning, SafetyDanger, SafetyUnknown)
 	reservationPhases = strs(ReservationScheduled, ReservationActivating,
 		ReservationReady, ReservationDeactivating, ReservationReleased, ReservationFailed)
-	stepNames    = strs(append(slices.Clone(ActivationSteps), DeactivationSteps...)...)
+	stepNames    = strs(append(slices.Concat(ActivationSteps, DeactivationSteps), StepStoredAbort)...)
 	guiderStates = strs(GuiderStopped, GuiderSelected, GuiderCalibrating, GuiderGuiding,
 		GuiderLostLock, GuiderPaused, GuiderLooping)
 	stepStates = strs(StepPending, StepRunning, StepDone, StepFailed, StepSkipped)

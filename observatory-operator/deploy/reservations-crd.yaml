@@ -262,7 +262,7 @@ spec:
                     failed, and the `Ready` condition names it.
                 step:
                   type: string
-                  enum: [Wait, StartSite, Requires, PowerOn, StartDevices, Connect, Configure, Activation, StartGuider, StopWork, Deactivation, StopGuider, Disconnect, StopDevices, PowerOff, StopSite]
+                  enum: [Wait, StartSite, Requires, PowerOn, StartDevices, Connect, Configure, Activation, StartGuider, StopWork, Deactivation, StopGuider, Disconnect, StopDevices, PowerOff, StopSite, Abort]
                   description: >-
                     The step that runs now, or the step that failed.
                     It is empty while the phase is `Ready` or
@@ -292,10 +292,18 @@ spec:
                     required: [name, state]
                     description: "One step."
                     properties:
+                      # Abort stays in the enum because a stored
+                      # reservation can still hold it, and every update
+                      # of that reservation validates its steps again.
                       name:
                         type: string
-                        enum: [Wait, StartSite, Requires, PowerOn, StartDevices, Connect, Configure, Activation, StartGuider, StopWork, Deactivation, StopGuider, Disconnect, StopDevices, PowerOff, StopSite]
-                        description: "The step's name."
+                        enum: [Wait, StartSite, Requires, PowerOn, StartDevices, Connect, Configure, Activation, StartGuider, StopWork, Deactivation, StopGuider, Disconnect, StopDevices, PowerOff, StopSite, Abort]
+                        description: >-
+                          The step's name. `Abort` is the name that an
+                          earlier operator gave `StopWork`. A stored
+                          reservation can still hold it, and the
+                          operator reads it as `StopWork` and writes
+                          `StopWork` in its place.
                       state:
                         type: string
                         enum: [Pending, Running, Done, Failed, Skipped]

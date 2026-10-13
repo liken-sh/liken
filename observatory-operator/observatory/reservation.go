@@ -87,6 +87,13 @@ const (
 	StepStopDevices  StepName = "StopDevices"
 	StepPowerOff     StepName = "PowerOff"
 	StepStopSite     StepName = "StopSite"
+
+	// StepStoredAbort is the name that an earlier operator gave
+	// StepStopWork. A stored reservation can still hold it, so the CRD
+	// accepts it: a Released reservation keeps its steps, and each
+	// update of that reservation validates them again. The runner
+	// reads it as StepStopWork and never writes it.
+	StepStoredAbort StepName = "Abort"
 )
 
 // ActivationSteps run in this order. Plan 07 states what each one
