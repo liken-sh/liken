@@ -96,9 +96,17 @@ func podFixture(name, uid string, labels map[string]string, ready bool, unschedu
 	if unschedulable != "" {
 		conditions = append(conditions, map[string]any{"type": "PodScheduled", "status": "False", "message": unschedulable})
 	}
-	o["status"] = map[string]any{"conditions": conditions}
+	podStatus := map[string]any{"conditions": conditions}
+	if ready {
+		podStatus["podIP"] = podIPs[uid]
+	}
+	o["status"] = podStatus
 	return o
 }
+
+// podIPs holds the address the fake cluster gives each ready pod, by
+// its UID, in k3s's default pod network.
+var podIPs = map[string]string{"pod-0": "10.42.0.10", "pod-1": "10.42.0.11", "worker-0": "10.42.0.20"}
 
 // readyPod puts a ready pod of one Solver.
 func (w *operatorWorld) readySolverPod(name, uid string) {

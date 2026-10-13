@@ -98,8 +98,10 @@ func TestReadyFollowsTheSolversPod(t *testing.T) {
 type astrophotographyCondition = conditions.Condition
 
 // The solver reads its claim only when its pod starts, so the operator
-// reads the index list once for each pod, and again for a new pod.
-func TestTheIndexListIsReadOnceForEachPod(t *testing.T) {
+// reads the index list once for each pod, and again for a new pod. It
+// reads the list from the pod's own address, because the Service routes
+// to a new pod only some time after the pod turns Ready.
+func TestTheIndexListIsReadOnceFromEachPod(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorkloads(t, nil)
 		w.api.put(solversPath, solverObject("lab", nil))
@@ -107,13 +109,13 @@ func TestTheIndexListIsReadOnceForEachPod(t *testing.T) {
 		settle()
 		w.api.put(targetsPath, object("observatory", "m42", nil, map[string]any{}))
 		settle()
-		once := w.peers.count("GET lab-solver.observatory.svc:8080/indexes")
 		w.api.remove(podsPath, "observatory", "lab-solver-0")
 		w.peers.set(func(f *fakePeers) { f.indexes = labIndexes[:1] })
 		w.readySolverPod("lab-solver-1", "pod-1")
 		settle()
-		if twice := w.peers.count("GET lab-solver.observatory.svc:8080/indexes"); once != 1 || twice != 2 {
-			t.Errorf("the index list was read %d and then %d times, want 1 and 2", once, twice)
+		first, second := w.peers.count("GET 10.42.0.10:8080/indexes"), w.peers.count("GET 10.42.0.11:8080/indexes")
+		if first != 1 || second != 1 {
+			t.Errorf("the index list was read %d times from the first pod and %d from the second, want 1 and 1", first, second)
 		}
 		if got := w.solver(t, "lab").Status.Indexes; !slices.Equal(got, labIndexes[:1]) {
 			t.Errorf("indexes %+v, want the new pod's", got)

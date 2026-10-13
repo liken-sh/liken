@@ -10,9 +10,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -96,7 +98,7 @@ func (o *operator) serveSolver(ctx context.Context, loop *solverLoop, s *astroph
 	case failed != nil:
 		report.failure = failed
 	case p != nil && p.ready():
-		report.indexes, report.failure = loop.indexes(ctx, o, p, report.endpoint.Host)
+		report.indexes, report.failure = loop.indexes(ctx, o, p)
 		failed = report.failure
 	}
 	uid := ""
@@ -111,8 +113,12 @@ func (o *operator) serveSolver(ctx context.Context, loop *solverLoop, s *astroph
 var errNoWorkerImage = errors.New("the operator could not name the image of the solver's pod; see its log")
 
 // indexes answers the index list of a ready pod, from the cache or from
-// the pod.
-func (loop *solverLoop) indexes(ctx context.Context, o *operator, p *podObject, host string) (solver.Indexes, error) {
+// the pod. It reads the pod's own address, not the Service: the cache
+// keeps the list by the pod's UID, and the Service routes to a new pod
+// only after the endpoints controller adds it, some time after the pod
+// turns Ready. Until then a read through the Service is refused, or
+// times out.
+func (loop *solverLoop) indexes(ctx context.Context, o *operator, p *podObject) (solver.Indexes, error) {
 	loop.mu.Lock()
 	listed, held := loop.listed[p.Metadata.UID]
 	loop.mu.Unlock()
@@ -120,7 +126,7 @@ func (loop *solverLoop) indexes(ctx context.Context, o *operator, p *podObject, 
 		return listed, nil
 	}
 	var indexes solver.Indexes
-	url := fmt.Sprintf("http://%s:%d%s", host, solver.Port, solver.PathIndexes)
+	url := "http://" + net.JoinHostPort(p.Status.PodIP, strconv.Itoa(solver.Port)) + solver.PathIndexes
 	if err := o.peer(ctx, http.MethodGet, url, nil, &indexes); err != nil {
 		return nil, fmt.Errorf("reading the index list of pod %s: %w", p.Metadata.Name, err)
 	}

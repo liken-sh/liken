@@ -152,6 +152,7 @@ type podObject struct {
 
 type podStatus struct {
 	Conditions        []objectCondition `json:"conditions,omitempty"`
+	PodIP             string            `json:"podIP,omitempty"`
 	ContainerStatuses []containerStatus `json:"containerStatuses,omitempty"`
 }
 

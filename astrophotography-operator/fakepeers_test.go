@@ -3,7 +3,10 @@ package main
 // Fakes of the operator's own pods, the solvers and the workers, behind
 // its peer client. One handler answers every host, and tells a solver
 // from a worker by the host's name, the way the cluster's DNS does. A
-// worker answers each extraction with a star list that holds the hint
+// solver answers its index list only at its pod's address in
+// 10.42.0.0/16. Its Service does not answer the index list, the way a
+// Service does not route to a pod that its endpoints do not hold yet.
+// A worker answers each extraction with a star list that holds the hint
 // it was given, and a solver solves that list when the hint's radius
 // reaches the field: the frame of the CCD simulator whose header
 // pointed 6.8° from its stars, which needs 10°.
@@ -70,7 +73,7 @@ func (f *fakePeers) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer f.mu.Unlock()
 	f.requests = append(f.requests, r.Method+" "+r.Host+r.URL.Path)
 	switch {
-	case strings.Contains(r.Host, "-solver.") && r.URL.Path == solver.PathIndexes:
+	case strings.HasPrefix(r.Host, "10.42.") && r.URL.Path == solver.PathIndexes:
 		if f.refuseIndexes > 0 {
 			f.refuseIndexes--
 			http.Error(w, "starting", http.StatusServiceUnavailable)

@@ -82,7 +82,10 @@ arcminutes, did not. The 13 files of 4207 and 4208 take 236 MiB.
 
 The solver reads the header of every index file in the directory when
 its pod starts, and the operator lists each series in
-`status.indexes` with its range of scales. The solver reads each
+`status.indexes` with its range of scales. The operator reads the
+list once for each pod, from the pod's own address, when the pod
+turns ready, because the `Service` routes to a new pod only some
+seconds later. The solver reads each
 file's series from its header, so only the pattern `index-*.fits`
 matters in a file's name. To add index files, copy them into the
 claim and restart the solver's `Deployment`.
