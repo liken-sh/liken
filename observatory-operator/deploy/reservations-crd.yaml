@@ -155,6 +155,10 @@ spec:
                         `ReadWriteOnce` volume bound on another node,
                         leaves the camera's pod `Pending`, and
                         `StartDevices` gives the scheduler's message.
+                        A `ReadWriteOncePod` claim lets one pod mount
+                        it, so a second imaging camera, or the worker
+                        of `astrophotography-operator` as the holder,
+                        cannot start beside the first camera.
                 fitsKeywords:
                   type: array
                   maxItems: 64

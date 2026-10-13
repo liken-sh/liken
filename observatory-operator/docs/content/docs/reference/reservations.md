@@ -29,7 +29,7 @@ The volume that the telescope's imaging cameras write their frames to. Optional.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specoutbox--claimname"></span>`claimName` | string | yes | The name of a `PersistentVolumeClaim` in the reservation's namespace. The `PowerOn` step fails when it does not exist. A claim that exists and cannot be mounted on the camera's node, such as a `ReadWriteOnce` volume bound on another node, leaves the camera's pod `Pending`, and `StartDevices` gives the scheduler's message. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
+| <span id="specoutbox--claimname"></span>`claimName` | string | yes | The name of a `PersistentVolumeClaim` in the reservation's namespace. The `PowerOn` step fails when it does not exist. A claim that exists and cannot be mounted on the camera's node, such as a `ReadWriteOnce` volume bound on another node, leaves the camera's pod `Pending`, and `StartDevices` gives the scheduler's message. A `ReadWriteOncePod` claim lets one pod mount it, so a second imaging camera, or the worker of `astrophotography-operator` as the holder, cannot start beside the first camera. Pattern: `^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`. |
 
 ### spec.fitsKeywords[]
 

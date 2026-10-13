@@ -38,6 +38,8 @@ spec:
   telescope's imaging cameras write each frame to it, as
   [The outbox](https://liken.sh/observatory/docs/concepts/how-a-reservation-runs/#the-outbox)
   describes. The claim must exist before `PowerOn`, or the step fails.
+  Give it the access mode `ReadWriteOnce`: a `ReadWriteOncePod` claim
+  lets only one pod mount it.
 * `fitsKeywords` is optional. It lists FITS keywords for the header of
   every frame of the reservation, such as `OBJECT`, and its values
   replace those of the same names on the `Observatory`, the

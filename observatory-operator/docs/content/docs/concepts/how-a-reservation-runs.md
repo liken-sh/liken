@@ -223,6 +223,18 @@ mount, such as a `ReadWriteOnce` volume bound on another node, leaves
 the camera's pod `Pending`, and the summary of `StartDevices` gives
 the scheduler's message.
 
+The claim's access mode decides which pods can mount it at once. A
+`ReadWriteOnce` claim lets every pod on the node that holds the volume
+mount it. A `ReadWriteOncePod` claim lets one pod in the cluster mount
+it, so it works only for a telescope with one imaging camera and a
+holder that mounts nothing. A second imaging camera's pod stays
+`Pending`. When `astrophotography-operator` holds the reservation, its
+worker pod mounts the outbox beside the camera's pod, so a
+`ReadWriteOncePod` claim leaves the worker `Pending`. Use
+`ReadWriteOnce` or `ReadWriteMany`, as [Image a
+target](https://liken.sh/astrophotography/docs/guides/image-a-target/)
+does.
+
 `Configure` then sets the driver's `UPLOAD_DIR` to the directory of
 the camera's name in the outbox, such as `/outbox/east-main`, and its
 `UPLOAD_MODE` to `UPLOAD_BOTH`, so each frame lands in the outbox and
