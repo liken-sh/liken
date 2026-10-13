@@ -67,7 +67,7 @@ func TestARefusedDitherGuidesAgain(t *testing.T) {
 		if got := pendingOf(w.targetNow(t, "m42").Status); !slices.Equal(got, []int32{5}) {
 			t.Errorf("pending %v, want [5]", got)
 		}
-		if got := guidingCalls(w.phd2.now()); got != "loop find_star guide dither loop find_star guide dither dither dither dither" {
+		if got := guidingCalls(w.phd2.now()); got != "loop find_star guide dither loop find_star guide dither dither dither" {
 			t.Errorf("PHD2 received %q", got)
 		}
 		requireSample(t, scrape(t, w.o.metrics), `astrophotography_guiding_failures_total{namespace="observatory",target="m42"} 1`)
@@ -114,7 +114,7 @@ func TestAPHD2ThatExitsDuringAnExposure(t *testing.T) {
 		if got := guidingCalls(first); got != "loop find_star guide" {
 			t.Errorf("the first PHD2 received %q", got)
 		}
-		if got := guidingCalls(second); got != "loop find_star guide dither dither dither dither" {
+		if got := guidingCalls(second); got != "loop find_star guide dither dither dither" {
 			t.Errorf("the new PHD2 received %q", got)
 		}
 	})

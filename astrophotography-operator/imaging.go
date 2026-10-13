@@ -36,6 +36,12 @@ type work struct {
 	// frames counts the frames this reservation took of the target, for
 	// a dither every dither.every frames.
 	frames int
+	// afterFrame says that guiding.afterFrame waits for the frame that
+	// follows a counted one. The runner calls it only when another
+	// frame of the target follows with no slew, because a dither moves
+	// the lock position for the next frame, and a settle after the last
+	// frame or before a slew is time that no frame uses.
+	afterFrame bool
 }
 
 // imagingFailure ends the work on a target with a reason of the
@@ -161,8 +167,15 @@ func (w *work) next(ctx context.Context) (bool, error) {
 		return true, w.r.releaseIneligible(t)
 	}
 	if t.Spec.Coordinates != w.aimed {
+		w.afterFrame = false
 		if err := w.aim(ctx); err != nil {
 			return true, err
+		}
+	}
+	if w.afterFrame {
+		w.afterFrame = false
+		if err := w.r.guiding.afterFrame(ctx, w, w.frames); err != nil {
+			return false, w.guidingFailed(ctx, err)
 		}
 	}
 	guided, err := w.r.guiding.start(ctx, w)
@@ -175,9 +188,7 @@ func (w *work) next(ctx context.Context) (bool, error) {
 	switch {
 	case err == nil:
 		w.frames++
-		if err := w.r.guiding.afterFrame(ctx, w, w.frames); err != nil {
-			return false, w.guidingFailed(ctx, err)
-		}
+		w.afterFrame = true
 		return false, nil
 	case errors.As(err, &full):
 		return false, w.waitForSpace(ctx, full)

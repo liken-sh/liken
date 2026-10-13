@@ -79,7 +79,8 @@ the `Event` `AstrophotographyIdle`, and the runner waits for a change.
    PHD2's `SettleDone` ([Guiding and dithering](#guiding-and-dithering)).
 7. Take one frame of the first sequence with work left, and then the
    next, with `Imaging` `True` and the reason `Exposing`. After every
-   `dither.every` frames, dither and wait for `SettleDone`.
+   `dither.every` frames, dither and wait for `SettleDone`, unless the
+   frame was the target's last or the mount slews before the next.
 8. When no sequence has work left, release the claim. `Imaging` turns
    `False` with the reason `SequencesDone`, and the runner chooses the
    next target.
@@ -166,8 +167,10 @@ A `Target` with `dither` moves the lock position after every
 in right ascension alone with `raOnly`. A hot pixel or another fixed
 pattern of the sensor then falls on another part of the sky in each
 frame, and stacking removes it. The runner waits for `SettleDone`
-before the next frame. A dither changes no condition, so it posts no
-`Event`.
+before the next frame. The frame that completes the target's work gets
+no dither, and neither does a frame before a slew to new coordinates,
+because no frame would use the new lock position. A dither changes no
+condition, so it posts no `Event`.
 
 A star that PHD2 loses during an exposure does not stop the exposure,
 and the frame counts. Unless PHD2 finds the star again on its own, the

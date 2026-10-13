@@ -1104,11 +1104,6 @@ every device of `east` was `Idle`.
 
 ### Found and not fixed
 
-- **A dither after the last frame.** The runner dithers after every
-  `dither.every` counted frames, including the last frame of the
-  target, so `m42-first` waited 10.2 s for a settle that no frame
-  used before `SequencesDone`. `Complete` turned `True` 7 s before
-  `Imaging` left `Exposing`.
 - **A sync that fails records no round.** `rounds` returns the error
   of `syncTo` or `goTo` without `end`, so `status.centering` and the
   series of rounds have no record of a centering that failed there.
@@ -1148,3 +1143,12 @@ were deleted, and every device of `east` was `Idle`.
   `Normal` `Event` `PromotionReportLost` on the target, and starts the
   same number again, which finds the frames in the catalog and
   reports the counts (`promotion.go`, `promotionreport_test.go`).
+- **A dither after the last frame.** The runner dithers after every
+  `dither.every` counted frames, including the last frame of the
+  target, so `m42-first` waited 10.2 s for a settle that no frame
+  used before `SequencesDone`. `Complete` turned `True` 7 s before
+  `Imaging` left `Exposing`.
+  Fixed on 2026-10-13: the runner calls `afterFrame` before the next
+  frame of the target, not after the frame it counted, so the frame
+  that completes the work, or a frame before a slew to new
+  coordinates, gets no dither (`imaging.go`, `dither_test.go`).

@@ -61,8 +61,9 @@ func (s *steps) recorded() []string {
 }
 
 // The runner stops guiding before the slew, centers after it, starts
-// guiding before each frame, and calls afterFrame after each frame with
-// the count of frames, where dithering goes.
+// guiding before each frame, and calls afterFrame with the count of
+// frames before each frame that follows a counted one, where
+// dithering goes. The last frame gets no afterFrame.
 func TestTheRunnerCallsGuidingAndCenteringInPlan01sOrder(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newWorld(t)
@@ -78,7 +79,7 @@ func TestTheRunnerCallsGuidingAndCenteringInPlan01sOrder(t *testing.T) {
 			t.Errorf("Imaging says %q", imaging.Message)
 		}
 		waitUntil(t, func() bool { return w.imaging(t, "m42") == "False SequencesDone" })
-		want := []string{"stop", "center", "start", "afterFrame 1", "start", "afterFrame 2"}
+		want := []string{"stop", "center", "start", "afterFrame 1", "start"}
 		if got := recorded.recorded(); !slices.Equal(got, want) {
 			t.Errorf("calls %q, want %q", got, want)
 		}
@@ -141,7 +142,9 @@ func (w *night) moveDuringTheFirstFrame(t *testing.T) {
 
 // New coordinates during the night move the mount as a claim does: the
 // runner stops guiding, slews, and centers again before the next frame,
-// because a slew lands near the target, not on it.
+// because a slew lands near the target, not on it. The slew moves the
+// stars on the guide camera anyway, so the frame before it gets no
+// afterFrame.
 func TestNewCoordinatesAreCenteredAgain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newWorld(t)
@@ -153,7 +156,7 @@ func TestNewCoordinatesAreCenteredAgain(t *testing.T) {
 		w.start(t)
 		w.moveDuringTheFirstFrame(t)
 		waitUntil(t, func() bool { return w.imaging(t, "m42") == "False SequencesDone" })
-		want := []string{"stop", "center", "start", "afterFrame 1", "stop", "center", "start", "afterFrame 2"}
+		want := []string{"stop", "center", "start", "stop", "center", "start"}
 		if got := recorded.recorded(); !slices.Equal(got, want) {
 			t.Errorf("calls %q, want %q", got, want)
 		}

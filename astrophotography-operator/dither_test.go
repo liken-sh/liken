@@ -53,6 +53,23 @@ func TestTheRunnerDithersEveryNFrames(t *testing.T) {
 	})
 }
 
+// The frame that completes the target's work gets no dither, because no
+// frame of the target follows it to use the new lock position.
+func TestNoDitherAfterTheLastFrame(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m42 := dithered(2)
+		m42.Spec.Sequences = []astrophotography.Sequence{lights(4)}
+		w := guidedNight(t, m42)
+		w.start(t)
+		w.done(t, "m42")
+
+		if got := guidingCalls(w.phd2.now()); got != "loop find_star guide dither" {
+			t.Errorf("PHD2 received %q", got)
+		}
+		requireSample(t, scrape(t, w.o.metrics), `astrophotography_dithers_total{namespace="observatory",target="m42"} 1`)
+	})
+}
+
 // A dither of every frame says so in words.
 func TestADitherAfterEachFrame(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {

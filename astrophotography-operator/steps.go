@@ -12,8 +12,10 @@ package main
 //  3. guiding.start before each frame: loop, find_star, and guide,
 //     then SettleDone, with the reason Guiding, when PHD2 does not
 //     guide a settled star;
-//  4. guiding.afterFrame after each frame the runner counts, which
-//     dithers every dither.every frames and waits for SettleDone.
+//  4. guiding.afterFrame after a frame the runner counts, which dithers
+//     every dither.every frames and waits for SettleDone. The runner
+//     calls it when the next frame of the target follows with no slew,
+//     because the new lock position matters only to that frame.
 //
 // guiding.go guides with PHD2, and centering.go centers with a plate
 // solve.
@@ -45,8 +47,9 @@ type guiding interface {
 	// sets Imaging False with GuidingFailed until a later start
 	// succeeds.
 	start(ctx context.Context, w *work) (string, error)
-	// afterFrame runs after each counted frame, with the count of the
-	// frames this reservation took of the target. An error sets
-	// Imaging False with GuidingFailed, as start's does.
+	// afterFrame runs after a counted frame, with the count of the
+	// frames this reservation took of the target, when another frame
+	// of the target follows with no slew. An error sets Imaging False
+	// with GuidingFailed, as start's does.
 	afterFrame(ctx context.Context, w *work, frames int) error
 }
