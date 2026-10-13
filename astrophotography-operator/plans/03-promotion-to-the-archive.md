@@ -257,6 +257,26 @@ sequences; a target with more reports the first 25 and says so.
 The operator writes `archived` and `pending` into the target's status
 from the report, and `ArchiveAvailable` from its failures.
 
+A report can be lost: a person, the garbage collector, or a lost node
+can delete the pod of a `Job` that succeeded before the operator reads
+its status, and a pod that is gone never changes again. So the
+operator waits for the report only while its store holds the pod.
+When the pod is gone, the operator deletes the `Job` with background
+propagation, posts the `Normal` `Event` `PromotionReportLost` on the
+target, and starts the `Job` of the same number again. The new `Job`
+reads the catalog, skips the frames it holds, and reports the whole
+catalog's totals, so nothing is moved twice and the counts come back.
+Decided on 2026-10-13, after the first session's `m42-batch` waited
+for a lost report for 5 minutes ([plan 08](08-the-component-and-the-first-session.md#fixed-after-the-session)).
+The `ttlSecondsAfterFinished` of one hour meets this rule only when
+the operator has not applied a report for an hour, such as while it is
+down. The TTL controller deletes in the foreground, so the pods go
+before the `Job`, and the loop finds a `Job` that succeeded with no
+pod. That `Job` is already being deleted, so the loop sends no delete
+and posts no `Event`, and it starts the same number again when the
+`Job` is gone. A report that the operator applied names a `Job` that
+the loop no longer reads.
+
 ### The outbox's claim and its space
 
 - **The finalizer.** The operator adds

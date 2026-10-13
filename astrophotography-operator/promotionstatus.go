@@ -53,7 +53,9 @@ type promotionResult struct {
 // The watches of Jobs and pods deliver their changes apart, so a Job
 // that succeeded can reach the store before its pod's last status. The
 // result is then not ready, and the pod's change wakes the loop again.
-// A Job that failed has no report to wait for.
+// The loop waits only while the store holds the pod: a pod that is gone
+// never changes again, so the loop runs the Job again (rerun in
+// promotion.go). A Job that failed has no report to wait for.
 func resultOf(j jobObject, number int32, succeeded bool, pods []podObject) (promotionResult, bool) {
 	pending, _ := strconv.Atoi(j.Metadata.Annotations[annotationPending])
 	result := promotionResult{job: j.Metadata.Name, number: number, claim: j.Metadata.Annotations[annotationClaim], pending: int32(pending)}

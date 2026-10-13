@@ -183,6 +183,13 @@ runner counts a frame while a `Job` moves it, `pending` counts the
 frame once too often, and the next `Job` corrects it. A target can end
 with more frames than it asked for, and never with fewer.
 
+The report is the termination message of the `Job`'s pod. When a
+person, the garbage collector, or a lost node deletes the pod of a
+`Job` that succeeded before the operator reads the report, the
+operator deletes the `Job` and starts it again, and posts the `Normal`
+`Event` `PromotionReportLost` on the target. The new `Job` finds the
+frames in the catalog, moves nothing, and reports the counts again.
+
 ## The outbox claim's finalizer
 
 The operator puts the finalizer `astrophotography.liken.sh/frames` on

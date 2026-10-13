@@ -12,6 +12,8 @@ package main
 //     Reservation, with the reasons below. They take the prefix
 //     Astrophotography, because the Reservation is observatory-operator's
 //     resource.
+//   - The promotion loop posts reasonReportLost on a Target when it
+//     runs a Job again because the Job's report is gone.
 //   - An exposure and a dither change no condition and post nothing, so
 //     a target posts a few Events in a night, not one for each frame.
 
@@ -37,3 +39,8 @@ const (
 	// not Ready, so the runner images the target without centering it.
 	reasonNotCentered = "AstrophotographyNotCentered"
 )
+
+// reasonReportLost is Normal, on a Target: the pod of a promotion Job
+// that succeeded is gone, and its report with it, so the loop deleted
+// the Job and starts it again (plan 03).
+const reasonReportLost = "PromotionReportLost"

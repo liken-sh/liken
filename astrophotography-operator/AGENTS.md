@@ -80,8 +80,8 @@ dither with PHD2.
 starts the promotion `Job`s and applies their reports
 (`promotionstatus.go`), and `outboxfinalizer.go` keeps the finalizer
 on the outbox claims. `metrics.go` holds the registry and the listener
-of root plan 65, and `events.go` the reasons of the `Event`s on a
-`Reservation`. Each loop of plans 01, 02, and 03 starts in
+of root plan 65, and `events.go` the reasons of the `Event`s that no
+condition transition gives. Each loop of plans 01, 02, and 03 starts in
 `operator.run` and waits on the bell.
 
 The tests run the operator in a `testing/synctest` bubble against

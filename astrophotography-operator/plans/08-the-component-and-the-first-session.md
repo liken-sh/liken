@@ -980,7 +980,8 @@ no other action `observatory-operator` started the telescope and PHD2,
 and `astrophotography-operator` slewed, centered with a plate solve,
 guided, exposed ten frames with dithers, and moved each frame to the
 archive, where its hash matched its catalog line. The drill found one
-fault, which it fixed, and five it did not fix.
+fault, which it fixed, and five it did not fix. [Fixed after the
+session](#fixed-after-the-session) records the faults fixed later.
 
 The lab was the one of [the early run](#the-early-run): the example
 observatory in `observatory`, with `Guider east`, the `Solver` `lab`
@@ -1103,20 +1104,6 @@ every device of `east` was `Idle`.
 
 ### Found and not fixed
 
-- **A promotion `Job` whose pod is deleted after it succeeded stops
-  promotion for its target.** The report is the termination message
-  of the pod, and `resultOf` waits for the pod of a `Job` that
-  succeeded, because the watches of `Job`s and pods deliver their
-  changes apart. A pod that is deleted does not come back, so the loop
-  waits for ever: `m42-batch` held `archived` 0 and `pending` 8 for 5
-  minutes with all eight frames in the archive, and no `Job` started.
-  A person, the garbage collector, or a lost node can delete the pod.
-  Deleting the `Job` recovered the target: the loop created `Job` 1
-  again, which found the eight frames in the catalog and moved
-  nothing, and the target was `Complete` with `8/8` 3 s later. The
-  catalog still held eight lines. Which rule fits, a time limit on the
-  wait or a read of the pod from the API server, is a decision for
-  plan 03.
 - **A dither after the last frame.** The runner dithers after every
   `dither.every` counted frames, including the last frame of the
   target, so `m42-first` waited 10.2 s for a settle that no frame
@@ -1137,3 +1124,27 @@ every device of `east` was `Idle`.
 At the end, both operators, the `Solver` `lab`, the claims, the
 targets, and the archived frames stayed in place. Both reservations
 were deleted, and every device of `east` was `Idle`.
+
+### Fixed after the session
+
+- **A promotion `Job` whose pod is deleted after it succeeded stops
+  promotion for its target.** The report is the termination message
+  of the pod, and `resultOf` waits for the pod of a `Job` that
+  succeeded, because the watches of `Job`s and pods deliver their
+  changes apart. A pod that is deleted does not come back, so the loop
+  waits for ever: `m42-batch` held `archived` 0 and `pending` 8 for 5
+  minutes with all eight frames in the archive, and no `Job` started.
+  A person, the garbage collector, or a lost node can delete the pod.
+  Deleting the `Job` recovered the target: the loop created `Job` 1
+  again, which found the eight frames in the catalog and moved
+  nothing, and the target was `Complete` with `8/8` 3 s later. The
+  catalog still held eight lines. Which rule fits, a time limit on the
+  wait or a read of the pod from the API server, is a decision for
+  plan 03.
+  Fixed on 2026-10-13 by the rule that plan 03 records in [the
+  report](03-promotion-to-the-archive.md#the-report): the loop waits
+  for a report only while its store holds the pod. When the pod of a
+  `Job` that succeeded is gone, the loop deletes the `Job`, posts the
+  `Normal` `Event` `PromotionReportLost` on the target, and starts the
+  same number again, which finds the frames in the catalog and
+  reports the counts (`promotion.go`, `promotionreport_test.go`).

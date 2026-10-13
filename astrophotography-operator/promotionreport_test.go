@@ -5,6 +5,7 @@ package main
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 	"testing/synctest"
 
@@ -162,6 +163,71 @@ func TestTheFinalizerFollowsTheOutboxes(t *testing.T) {
 		}
 		if got := finalizers("archive"); len(got) != 0 {
 			t.Errorf("archive holds %v", got)
+		}
+	})
+}
+
+// A Job that succeeded and whose pod is gone holds no report, so the
+// loop deletes the Job and starts it again. The next Job reads the
+// whole catalog, so its report gives the counts that the lost one held.
+func TestAJobWhosePodIsGoneRunsAgain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		putClaim(api, "frames")
+		putClaim(api, "archive")
+		putTarget(t, api, withPending(m42(), 3, 0))
+		startOperator(t, api)
+		synctest.Wait()
+
+		complete(t, api, "m42-promote-1")
+		synctest.Wait()
+
+		deleted := "DELETE /apis/batch/v1/namespaces/observatory/jobs/m42-promote-1"
+		if got := api.writes(jobsPath); !slices.Contains(got, deleted) {
+			t.Errorf("the Job writes are %v", got)
+		}
+		if again := decode[jobObject](api, jobsPath, observatoryNS, "m42-promote-1"); len(again.Status.Conditions) != 0 {
+			t.Errorf("the Job is %+v", again)
+		}
+		events := api.recorded.About("Target", "m42")
+		if len(events) != 1 || events[0].Reason != reasonReportLost || events[0].Type != "Normal" {
+			t.Errorf("the Events are %+v", events)
+		}
+
+		finish(t, api, "m42-promote-1", &promote.Report{Totals: luminance(3)})
+		synctest.Wait()
+
+		status := readTarget(api).Status
+		if status.Progress != "3/3" || status.Promotion == nil || status.Promotion.Applied != 1 {
+			t.Errorf("the status is %+v", status)
+		}
+	})
+}
+
+// The TTL controller deletes a finished Job in the foreground, so its
+// pod goes first. The loop sends no second delete and posts no Event
+// for a Job that is already going.
+func TestAJobThatIsGoingIsNotDeletedAgain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		putClaim(api, "frames")
+		putClaim(api, "archive")
+		putTarget(t, api, withPending(m42(), 3, 0))
+		startOperator(t, api)
+		synctest.Wait()
+
+		going := api.get(jobsPath, observatoryNS, "m42-promote-1")
+		going["metadata"].(map[string]any)["deletionTimestamp"] = "2026-10-13T02:00:00Z"
+		api.put(jobsPath, going)
+		complete(t, api, "m42-promote-1")
+		synctest.Wait()
+
+		deleted := "DELETE /apis/batch/v1/namespaces/observatory/jobs/m42-promote-1"
+		if got := api.writes(jobsPath); slices.Contains(got, deleted) {
+			t.Errorf("the Job writes are %v", got)
+		}
+		if events := api.recorded.About("Target", "m42"); len(events) != 0 {
+			t.Errorf("the Events are %+v", events)
 		}
 	})
 }

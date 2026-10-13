@@ -125,3 +125,15 @@ func finish(t *testing.T, api *fakeAPI, job string, report *promote.Report) {
 	}}}
 	api.put(podsPath, pod)
 }
+
+// complete ends a Job as Complete with no pod in the store, the way the
+// store holds it after something deleted the pod with its report.
+func complete(t *testing.T, api *fakeAPI, job string) {
+	t.Helper()
+	held := api.get(jobsPath, observatoryNS, job)
+	if held == nil {
+		t.Fatalf("no Job %s", job)
+	}
+	held["status"] = map[string]any{"conditions": []any{map[string]any{"type": "Complete", "status": "True"}}}
+	api.put(jobsPath, held)
+}

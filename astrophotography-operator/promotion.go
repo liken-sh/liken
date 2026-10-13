@@ -14,7 +14,9 @@ package main
 // For each target, a pass does one of three things:
 //
 //  1. When the target's next Job has ended, it applies the Job's report
-//     to the status (promotionstatus.go).
+//     to the status (promotionstatus.go). When the Job succeeded and its
+//     pod is gone with the report, it deletes the Job, and the next pass
+//     starts it again.
 //  2. When the next Job runs, it reports a pod that cannot start.
 //  3. Otherwise, when an outbox holds frames to move, it creates the
 //     next Job, if the target's pacing allows and no other Job uses the
@@ -168,6 +170,9 @@ func (p *promotions) target(t *astrophotography.Target, w world) error {
 		return p.startJob(t, w, next)
 	}
 	if ended, succeeded := finished(job); ended {
+		if succeeded && !w.hasPod(job) {
+			return p.rerun(t, job)
+		}
 		result, ready := resultOf(job, next, succeeded, w.pods)
 		if !ready {
 			return nil
@@ -194,6 +199,43 @@ func (w world) promotionJob(t *astrophotography.Target, number int32) (jobObject
 		return jobObject{}, false
 	}
 	return w.jobs[index], true
+}
+
+// hasPod reports whether the store holds a pod of a Job.
+func (w world) hasPod(j jobObject) bool {
+	return slices.ContainsFunc(w.pods, func(pod podObject) bool {
+		return pod.Metadata.Namespace == j.Metadata.Namespace && pod.Metadata.Labels[labelPromotionJob] == j.Metadata.Name
+	})
+}
+
+// rerun deletes a Job that succeeded and whose pod is gone. The report
+// was the pod's termination message, so a person, the garbage
+// collector, or a lost node that deleted the pod deleted the report
+// too, and no later change brings it back. Each Job reads the whole
+// catalog and skips the frames that the catalog holds, so the next
+// pass starts the same Job again, and its report gives the counts that
+// the lost one held. The Job's pods go with it, because the delete
+// propagates in the background; the API's own default for a Job
+// orphans them. A Job that is already going, such as one that the TTL
+// controller deletes in the foreground, needs no second delete: the
+// loop starts it again when the store no longer holds it.
+func (p *promotions) rerun(t *astrophotography.Target, j jobObject) error {
+	if j.Metadata.DeletionTimestamp != nil {
+		return nil
+	}
+	path := "/apis/batch/v1/namespaces/" + j.Metadata.Namespace + "/jobs/" + j.Metadata.Name
+	err := p.client.RequestJSON(http.MethodDelete, path, []byte(`{"propagationPolicy":"Background"}`), nil)
+	if errors.Is(err, apiclient.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	message := fmt.Sprintf("the pod of the promotion Job %s is gone with its report, so the Job runs again", j.Metadata.Name)
+	fmt.Fprintf(p.logs, "%s: Target %s/%s: %s\n", managedBy, t.Metadata.Namespace, t.Metadata.Name, message)
+	p.recorder.Normal(events.ObjectReference{APIVersion: astrophotography.APIVersion, Kind: astrophotography.TargetKind.Name,
+		Namespace: t.Metadata.Namespace, Name: t.Metadata.Name, UID: t.Metadata.UID}, reasonReportLost, message)
+	return nil
 }
 
 // claimBusy reports whether a promotion Job that has not ended uses an
