@@ -4,41 +4,54 @@ title: astrophotography-operator
 
 # `astrophotography-operator`
 
-`astrophotography-operator` images the objects you choose, on a
+`astrophotography-operator` takes the pictures you ask for on a
 telescope that [`observatory-operator`](https://liken.sh/observatory/)
 runs. You declare a `Target`: an object, its coordinates, and the
 frames you want of it, such as sixty five-minute frames of M42
-through each of three filters. When you reserve a telescope for the
-operator, it slews to the target and takes the frames. It moves each
-frame to the archive you chose, names it the way you asked, and
-records it in a catalog beside the frames. A target can take many
-nights, and its status keeps the count.
+through each of three filters. When you reserve the telescope for the
+operator, it slews to the target, centers it with a plate solve,
+guides with PHD2, and takes the frames. It moves each frame to the
+archive you chose, names it the way you asked, and records it in a
+catalog beside the frames. A target can take many nights, and its
+status keeps the count.
 
-The operator is under development. This version slews, centers a
-target with a plate solve, and exposes unguided: it does not guide
-with PHD2 yet.
-The design is in the
-[plans](https://github.com/liken-sh/liken/tree/main/astrophotography-operator/plans),
-and each piece joins this manual as it is built.
+Things you can do with it:
+
+* Image one object across several nights, and pick up where the last
+  night stopped.
+* Queue several targets, and let the highest priority go first.
+* Name each frame by object, night, and filter, so a stacking tool
+  finds a night's frames in one directory.
+* Keep frames on a network share or a disk of your choice, and check
+  each one against the SHA-256 the catalog recorded.
+
+The operator is under development, and it has no release yet. It
+slews, centers, guides, dithers, exposes, and moves frames to the
+archive. It does not check whether a target is above the horizon, and
+it does not take calibration frames.
+The design and the work still to come are in the
+[plans](https://github.com/liken-sh/liken/tree/main/astrophotography-operator/plans).
 
 Start here:
 
 * [Install the operator](/docs/guides/install/) beside
   `observatory-operator`.
-* [Targets](/docs/concepts/targets/) explains what a target states.
-* [Image a target](/docs/guides/image-a-target/) reserves a telescope
-  for the operator and follows the night.
-* [The archive](/docs/concepts/archive/) explains how frames move from
-  the outbox to your archive, and how they are named and counted.
-* [Solvers](/docs/concepts/solvers/) explains how a frame is
-  plate-solved, and why the index files stay in one place.
-* [Set up a solver](/docs/guides/set-up-a-solver/) loads the index
-  files into a claim and declares a `Solver`.
+* [Declare a target](/docs/guides/declare-a-target/) and the archive
+  for its frames.
+* [Set up a solver](/docs/guides/set-up-a-solver/), if you want each
+  target centered.
+* [Image a target](/docs/guides/image-a-target/): reserve a telescope
+  for the operator and follow the night.
+* [Find and verify your frames](/docs/guides/find-your-frames/), and
+  copy them to your computer.
+* [Troubleshoot](/docs/guides/troubleshoot/) a target that does not
+  start, or a frame that does not reach the archive.
 
 `astrophotography-operator` is one of the extension operators for
 [running an observatory](https://liken.sh/docs/concepts/running-an-observatory/).
-It drives the telescopes that `observatory-operator` runs, and
-`observatory-operator` runs with or without it.
+`observatory-operator` runs the equipment, and this operator chooses
+the targets and takes the frames. `observatory-operator` runs with or
+without it.
 
 * [The source](https://github.com/liken-sh/liken/tree/main/astrophotography-operator)
 * [The design documents](https://github.com/liken-sh/liken/tree/main/astrophotography-operator/plans)
