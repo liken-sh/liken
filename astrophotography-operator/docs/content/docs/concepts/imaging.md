@@ -193,7 +193,7 @@ free space of the outbox. The worker is a pod that the operator starts
 beside the outbox while the reservation is `Activating` or `Ready`
 ([Solvers](/docs/concepts/solvers/)), so a runner that starts before
 its worker is ready fails its first exposure with `ExposureFailed` and
-tries again a minute later. With less than three frames' size free, it
+exposes again a minute later. With less than three frames' size free, it
 does not expose (see [Problems during a night](#problems-during-a-night)).
 
 Then it writes every setting the frame depends on, in this order, and
@@ -239,7 +239,7 @@ when it moves to the archive.
 | What happens | What the runner does |
 |---|---|
 | The outbox has less than three frames' size free | `Imaging` `False` with `OutboxFull`, and the `Warning` `AstrophotographyOutboxFull` on the reservation. The runner keeps the claim and asks again on the next change, such as the end of a promotion `Job`. |
-| The driver answers a setting or the exposure with `Alert`, does not finish within the exposure plus 2 minutes, saves the frame under another name, or the worker does not answer | `Imaging` `False` with `ExposureFailed` and the reason in the message. The frame does not count. The runner keeps the claim and tries the next frame after a minute. An exposure that did not finish is aborted first. |
+| The driver answers a setting or the exposure with `Alert`, does not finish within the exposure plus 2 minutes, saves the frame under another name, or the worker does not answer | `Imaging` `False` with `ExposureFailed` and the reason in the message. The frame does not count. The runner keeps the claim and starts the next frame after a minute. An exposure that did not finish is aborted first. |
 | The sequence names a filter that the wheel does not have, or the train has no `FilterWheel` | `Imaging` `False` with `NoFilter`, and the runner releases the target |
 | The mount refuses to unpark, to track, or to slew, or does not stop within 10 minutes | `Imaging` `False` with `SlewFailed`, and the runner releases the target |
 | A centering frame does not solve at its exposure or at twice it, `centering.attempts` rounds (5 by default) end outside the tolerance, the plate scale is unknown, the worker or the solver answers an error, the camera fails the centering frame, or the mount refuses the sync | `Imaging` `False` with `CenteringFailed` and the reason in the message, and the runner releases the target |
@@ -251,7 +251,7 @@ when it moves to the archive.
 
 A target released for `NoFilter`, `SlewFailed`, `CenteringFailed`, or
 a PHD2 that did not stop is not taken again by the same reservation
-until you edit it. A new reservation tries it again.
+until you edit it. A new reservation takes it again.
 
 ## Restarts and the end of a reservation
 
@@ -289,4 +289,5 @@ reservation with the prefix `Astrophotography`:
 | `AstrophotographyIdle` | `Normal` | no target of the namespace is eligible |
 | `AstrophotographyUnparked` | `Normal` | the runner unparked the mount |
 | `AstrophotographyOutboxFull` | `Warning` | a target found the outbox full |
+| `AstrophotographyWorkerPending` | `Warning` | the reservation's worker pod cannot start; the message gives the scheduler's reason |
 | `AstrophotographyNotCentered` | `Warning` | the runner images a target without centering it, because its `Solver` is missing or not `Ready` |

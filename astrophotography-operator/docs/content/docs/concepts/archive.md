@@ -90,19 +90,10 @@ The operator renders the name before each exposure, the camera writes
 the frame into the outbox under that name, and the frame keeps it in
 the archive.
 
-| Token | Value |
-|---|---|
-| `{target}` | the `Target`'s name |
-| `{object}` | `spec.object` |
-| `{filter}` | the sequence's filter, or `none` |
-| `{exposure}` | the exposure in seconds, such as `300s` or `0.5s` |
-| `{binning}` | such as `1x1`, or `default` when the sequence leaves the camera's binning |
-| `{gain}`, `{offset}` | the sequence's values, or `default` |
-| `{camera}`, `{telescope}`, `{train}`, `{reservation}` | the names of those resources |
-| `{night}` | the date of the night, as `YYYY-MM-DD`: the local mean solar date at the observatory's longitude, 12 hours before the exposure, so one night has one date |
-| `{datetime}` | the time the operator requested the exposure, in UTC, such as `20261012T231506Z` |
-| `{n}` | the frame's number in its sequence, with four digits |
-| `{frameid}` | the frame's `FRAMEID` |
+The tokens name the target, the object, the sequence's settings, the
+resources that took the frame, the night, the time, and the frame's
+number and `FRAMEID`. [Choose the file names](/docs/guides/find-your-frames/#choose-the-file-names)
+lists each token and its value.
 
 Each character of a value outside `A-Z`, `a-z`, `0-9`, `.`, `_`, `+`,
 and `-` becomes `_`, so an object named `M 42` gives `M_42`. `XXX` and
@@ -110,13 +101,11 @@ and `-` becomes `_`, so an object named `M 42` gives `M_42`. `XXX` and
 those patterns in a file name. A part of the path that starts with `.`
 starts with `_` instead, so no value can climb out of `archive.path`.
 
-The driver replaces a frame of the same name with no warning. So unless
-the format holds `{frameid}`, the operator adds `_` and the last 12
-hexadecimal digits of the frame's `FRAMEID` to the name, such as
-`M42_Luminance_300s_20261012T231506Z_4f2a9c01d3e7`. Those digits are
-random, and two frames of one target share them with a chance near 2
-in a billion at 1,000 frames. `{n}` alone does not make a name unique,
-because a restart of the operator can count one frame twice.
+Unless the format holds `{frameid}`, the operator adds `_` and the
+last 12 hexadecimal digits of the frame's `FRAMEID` to the name,
+because the driver replaces a file of the same name with no warning.
+[Why a name ends with 12 digits](/docs/guides/find-your-frames/#why-a-name-ends-with-12-digits)
+gives the odds of two names meeting.
 
 ## The catalog
 
@@ -145,18 +134,8 @@ frames, so a backup of the archive takes it along.
 
 Every name is camelCase English for what the value means, and a
 quantity whose unit you could guess wrong carries the unit in its name.
-`jq` answers questions about the frames. The frames of one night's
-reservation:
-
-```sh
-jq -r 'select(.reservation == "east-tonight") | .path' astro/catalog/m42.jsonl
-```
-
-The frames whose file no longer matches its hash:
-
-```sh
-cd astro && jq -r '"\(.sha256)  \(.path)"' catalog/m42.jsonl | sha256sum --check --quiet
-```
+[Check the frames](/docs/guides/find-your-frames/#check-the-frames)
+uses `jq` and `sha256sum` to check each file against its line.
 
 ## The counts
 
@@ -199,37 +178,19 @@ while frames of a target are in it and not yet in the archive.
 
 Kubernetes starts no new pod on a claim that is being deleted, so a
 promotion `Job` cannot move the frames after the delete. To keep the
-frames, move them before you delete the claim. To delete the claim and
-its frames, remove the finalizer:
-
-```sh
-kubectl -n observatory patch pvc frames --type=json \
-  -p='[{"op":"remove","path":"/metadata/finalizers/0"}]'
-```
-
-The command removes the first finalizer, so check
-`kubectl -n observatory get pvc frames -o jsonpath='{.metadata.finalizers}'`
-first. While the operator is not running, nobody removes the
-finalizer for you.
+frames, let promotion move them before you delete the claim.
+[An outbox claim does not delete](/docs/guides/troubleshoot/#an-outbox-claim-does-not-delete)
+gives the command that removes the finalizer.
 
 ## When a frame does not move
 
 `ArchiveAvailable` is `True` with the reason `Promoted` after a `Job`
-that moved every frame. Each `False` reason names what to fix:
-
-| Reason | What happened | What to do |
-|---|---|---|
-| `ClaimMissing` | the claim in `archive.claimName` does not exist | create the claim; the next frame starts a `Job` |
-| `Unschedulable` | no node can mount both claims | use a `ReadWriteMany` archive, or a `local-path` archive on the outbox's node |
-| `CopyFailed` | a read, a write, or a rename failed, or the `Job` failed | read the `Job`'s log with `kubectl logs job/<Target>-promote-<number>` |
-| `VerifyFailed` | the copy read back with another hash, or the frame differs from its catalog line | check the archive's storage and the link |
-| `NameConflict` | another file has the frame's name in the archive | move the other file away; the operator never replaces it |
-
-A frame that failed stays in the outbox. The operator does not start a
-`Job` again for it alone. The next `Job` of the target tries it again:
-after the next exposure, or after the operator restarts, which you can
-cause with
-`kubectl -n liken-system rollout restart deployment astrophotography-operator`.
+that moved every frame. It turns `False` with the reasons
+`ClaimMissing`, `Unschedulable`, `CopyFailed`, `VerifyFailed`, and
+`NameConflict`, and a frame that failed stays in the outbox until the
+next `Job` of the target moves it.
+[A frame does not reach the archive](/docs/guides/troubleshoot/#a-frame-does-not-reach-the-archive)
+gives the cause and the fix for each reason.
 
 The operator's metrics count `astrophotography_frames_archived_total`,
 `astrophotography_promotion_bytes_total`, and
