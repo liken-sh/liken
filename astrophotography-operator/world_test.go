@@ -39,9 +39,12 @@ const (
 
 type night struct {
 	// t is the test of the bubble the world lives in.
-	t      *testing.T
-	api    *fakeAPI
-	indi   *inditest.Server
+	t    *testing.T
+	api  *fakeAPI
+	indi *inditest.Server
+	// phd2 is the switchboard of the telescope's PHD2. Only a session
+	// that names a Guider dials it (guided).
+	phd2   *switchboard
 	worker *fakeWorker
 	o      *operator
 	// stop stops the operator, as a SIGTERM does, and waits for it.
@@ -56,6 +59,7 @@ type night struct {
 func newWorld(t *testing.T) *night {
 	w := &night{t: t, api: startFakeAPI(t), indi: inditest.NewServer(t, "telescope", "ccd", "wheel")}
 	w.worker = startFakeWorker(t)
+	w.phd2 = newSwitchboard()
 	w.put(observatoriesPath, &observatory.Observatory{Metadata: meta("lab"),
 		Spec: observatory.ObservatorySpec{Location: observatory.Location{Latitude: 51.5, Longitude: -75}}})
 	w.put(mountsPath, &observatory.Mount{Metadata: meta("east-mount"),
@@ -95,9 +99,10 @@ func connectSimulators(t *testing.T, server *inditest.Server) {
 	}
 }
 
-// reservation is east-tonight, Ready, with the session that
-// observatory-operator records: the three devices, the outbox frames,
-// and the session's keywords for the camera.
+// readyOrNot is east-tonight in a phase, with the session that
+// observatory-operator records: the three devices, the train and its
+// tube of 480 mm, the outbox frames, and the session's keywords for
+// the camera.
 func readyOrNot(phase observatory.ReservationPhase) *observatory.Reservation {
 	return &observatory.Reservation{
 		Metadata: meta(tonight),
@@ -111,6 +116,12 @@ func readyOrNot(phase observatory.ReservationPhase) *observatory.Reservation {
 					"Camera/east-main":       {OpticalTrain: "east-imaging"},
 					"FilterWheel/east-wheel": {OpticalTrain: "east-imaging"},
 					"Mount/east-mount":       {Telescope: "east"},
+				},
+				Trains: map[string]observatory.SessionTrain{
+					"east-imaging": {OpticalTrainSpec: observatory.OpticalTrainSpec{Telescope: "east", OpticalTube: "east-refractor"}},
+				},
+				Tubes: map[string]observatory.SessionTube{
+					"east-refractor": {OpticalTubeSpec: observatory.OpticalTubeSpec{Telescope: "east", Aperture: 80, FocalLength: 480}},
 				},
 				Outbox: &observatory.Outbox{ClaimName: "frames"},
 				FITSKeywords: map[string][]observatory.FITSKeyword{
@@ -153,6 +164,7 @@ func (w *night) startWith(t *testing.T, dialer indi.Dialer) {
 	recorder := events.New(t.Context(), client, managedBy, events.Options{Log: io.Discard})
 	o := newOperator(client, recorder, newMetrics("dev"), testLog{t})
 	o.indiDialer = dialer
+	o.phd2Dialer = w.phd2
 	o.workerClient = w.worker.server.Client()
 	if w.configure != nil {
 		w.configure(o)

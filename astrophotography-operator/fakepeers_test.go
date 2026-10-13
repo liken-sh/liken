@@ -41,6 +41,14 @@ type fakePeers struct {
 	// hint whose radius is at least this solves, and so does a blind
 	// one. Below zero, no hint solves.
 	reach float64
+	// answers holds the solutions of the next solves that reach, in
+	// order, as a mount that a centering moves gives a new center each
+	// round. With none left, a solve that reaches answers the fixture's
+	// frame.
+	answers []solver.SolveAnswer
+	// solved runs after each solve that reaches, such as a test's
+	// delete of the Solver in the middle of a centering.
+	solved func()
 	// stars is the count of stars each frame holds.
 	stars int32
 	// failExtract makes every extraction answer 500, and failSolve every
@@ -77,6 +85,12 @@ func (f *fakePeers) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		answer := solver.SolveAnswer{}
 		if f.reach >= 0 && (hint.Radius == 0 || hint.Radius >= f.reach) {
 			answer = simulatorSolution
+			if len(f.answers) > 0 {
+				answer, f.answers = f.answers[0], f.answers[1:]
+			}
+			if f.solved != nil {
+				f.solved()
+			}
 		}
 		_ = json.NewEncoder(w).Encode(answer)
 	case strings.Contains(r.Host, "-astrophotography.") && r.URL.Path == worker.PathExtract:

@@ -33,4 +33,7 @@ const (
 	// reasonOutboxFull is a Warning: the outbox has less than three
 	// frames' space free, so the runner does not expose.
 	reasonOutboxFull = "AstrophotographyOutboxFull"
+	// reasonNotCentered is a Warning: the target's Solver is missing or
+	// not Ready, so the runner images the target without centering it.
+	reasonNotCentered = "AstrophotographyNotCentered"
 )

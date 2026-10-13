@@ -178,3 +178,7 @@ the `Event` of each transition:
 
 A file that is not an index file but matches `index-*.fits` stops the
 pod at its start, and its log names the file.
+
+While the `Solver` is not `Ready`, the operator images each target
+that names it without centering, and each such reservation gets the
+`Warning` `AstrophotographyNotCentered`.

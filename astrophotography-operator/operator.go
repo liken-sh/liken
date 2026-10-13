@@ -24,6 +24,7 @@ import (
 	"github.com/liken-sh/liken/kubernetes/memo"
 	"github.com/liken-sh/liken/observatory-operator/indi"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
+	"github.com/liken-sh/liken/observatory-operator/phd2"
 )
 
 type operator struct {
@@ -56,9 +57,12 @@ type operator struct {
 	// worker. A test replaces both with fakes in memory.
 	indiDialer   indi.Dialer
 	workerClient *http.Client
+	// phd2Dialer opens each runner's connection to PHD2's event server
+	// (guider.go). A test replaces it with a fake PHD2 in memory.
+	phd2Dialer phd2.Dialer
 	// centering and guiding are the steps of plan 01's order that
 	// pieces H and I of plan 08 fill in (steps.go). Every runner takes
-	// them from here.
+	// them from here, and a test replaces them to watch the order.
 	centering centering
 	guiding   guiding
 }
@@ -69,8 +73,9 @@ func newOperator(client *apiclient.Client, recorder *events.Recorder, m *metrics
 		targetVersions: memo.New(),
 		indiDialer:     &net.Dialer{Timeout: indi.DialTimeout},
 		workerClient:   &http.Client{},
-		centering:      noCentering{},
-		guiding:        noGuiding{},
+		centering:      plateCentering{},
+		guiding:        newPHD2Guiding(),
+		phd2Dialer:     &net.Dialer{Timeout: phd2.DialTimeout},
 	}
 }
 

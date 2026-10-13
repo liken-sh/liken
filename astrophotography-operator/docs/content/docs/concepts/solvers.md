@@ -10,11 +10,10 @@ the operator takes a short frame, plate-solves it to find where the
 telescope points, syncs the mount to that position, and slews again,
 until the error is within the target's `spec.centering.tolerance`. A
 `Solver` is the plate solver that a target names in
-`spec.centering.solver`. The operator runs the `Solver`'s pod and each
-reservation's worker today. The runner's centering, which sends them
-frames, is not built yet. [Set up a solver](/docs/guides/set-up-a-solver/)
-gives the steps, and [`Solver`](/docs/reference/solvers/) lists every
-field.
+`spec.centering.solver`. [Imaging](/docs/concepts/imaging/#centering)
+gives the rounds of the centering,
+[Set up a solver](/docs/guides/set-up-a-solver/) gives the steps, and
+[`Solver`](/docs/reference/solvers/) lists every field.
 
 ```yaml
 apiVersion: astrophotography.liken.sh/v1alpha1

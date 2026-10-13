@@ -59,3 +59,56 @@ func TestParseDec(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatRA(t *testing.T) {
+	cases := []struct {
+		degrees float64
+		want    string
+	}{
+		{83.822083, "05:35:17.3"},
+		{0, "00:00:00.0"},
+		// A value that rounds up to 24 hours is the same point as 0.
+		{359.9999999, "00:00:00.0"},
+		{-15, "23:00:00.0"},
+		{29.6070, "01:58:25.7"},
+	}
+	for _, c := range cases {
+		t.Run(c.want, func(t *testing.T) {
+			if got := FormatRA(c.degrees); got != c.want {
+				t.Errorf("FormatRA(%f) = %q, want %q", c.degrees, got, c.want)
+			}
+		})
+	}
+}
+
+func TestFormatDec(t *testing.T) {
+	cases := []struct {
+		degrees float64
+		want    string
+	}{
+		{-5.391111, "-05:23:28.0"},
+		{59.8193, "+59:49:09.5"},
+		{-0.5, "-00:30:00.0"},
+		{-0.00000001, "+00:00:00.0"},
+		{90, "+90:00:00.0"},
+	}
+	for _, c := range cases {
+		t.Run(c.want, func(t *testing.T) {
+			if got := FormatDec(c.degrees); got != c.want {
+				t.Errorf("FormatDec(%f) = %q, want %q", c.degrees, got, c.want)
+			}
+		})
+	}
+}
+
+// What FormatRA and FormatDec write, ParseRA and ParseDec read back.
+func TestFormatReadsBack(t *testing.T) {
+	ra, err := ParseRA(FormatRA(83.822083))
+	if err != nil || !near(ra, 83.822083, 1.5/3600) {
+		t.Errorf("ParseRA(FormatRA) = %f, %v", ra, err)
+	}
+	dec, err := ParseDec(FormatDec(-5.391111))
+	if err != nil || !near(dec, -5.391111, 0.05/3600) {
+		t.Errorf("ParseDec(FormatDec) = %f, %v", dec, err)
+	}
+}

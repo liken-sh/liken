@@ -14,11 +14,9 @@ frame to the archive you chose, names it the way you asked, and
 records it in a catalog beside the frames. A target can take many
 nights, and its status keeps the count.
 
-The operator is under development. This version slews and exposes
-unguided: it does not center a target with a plate solve and does not
-guide with PHD2 yet. It runs the pod of each `Solver` and a worker
-beside each reservation's outbox, which together plate-solve a frame,
-and nothing sends them a frame yet.
+The operator is under development. This version slews, centers a
+target with a plate solve, and exposes unguided: it does not guide
+with PHD2 yet.
 The design is in the
 [plans](https://github.com/liken-sh/liken/tree/main/astrophotography-operator/plans),
 and each piece joins this manual as it is built.

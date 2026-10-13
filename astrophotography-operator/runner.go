@@ -83,6 +83,13 @@ func (r *runner) run(ctx context.Context) {
 		r.connect(ctx)
 	}()
 	defer func() { <-connected }()
+	keepGuider := r.guiding.open(r)
+	guider := make(chan struct{})
+	go func() {
+		defer close(guider)
+		keepGuider(ctx)
+	}()
+	defer func() { <-guider }()
 	for ctx.Err() == nil {
 		wake := r.o.changed.wait()
 		again, err := r.pass(ctx)
@@ -125,20 +132,25 @@ func (r *runner) pass(ctx context.Context) (bool, error) {
 	return true, r.image(ctx, t)
 }
 
-// connect keeps the INDI connection open until ctx ends. A connection
-// that ends opens again after a backoff, which a connection that lasted
-// resets, so a server that restarts is reached again within seconds,
-// and a server that is down is not dialed in a tight loop.
+// connect keeps the INDI connection open until ctx ends.
 func (r *runner) connect(ctx context.Context) {
+	r.keepOpen(ctx, "the INDI connection", r.client.Run)
+}
+
+// keepOpen runs one connection after another until ctx ends. A
+// connection that ends opens again after a backoff, which a connection
+// that lasted resets, so a server that restarts is reached again within
+// seconds, and a server that is down is not dialed in a tight loop.
+func (r *runner) keepOpen(ctx context.Context, what string, run func(context.Context) error) {
 	const first, most = time.Second, time.Minute
 	backoff := first
 	for {
 		opened := time.Now()
-		err := r.client.Run(ctx)
+		err := run(ctx)
 		if ctx.Err() != nil {
 			return
 		}
-		r.logf("the INDI connection ended: %v", err)
+		r.logf("%s ended: %v", what, err)
 		if time.Since(opened) > most {
 			backoff = first
 		}

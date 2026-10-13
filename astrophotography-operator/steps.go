@@ -5,19 +5,18 @@ package main
 // pieces H and I of plan 08 each replace one implementation and leave
 // the order alone:
 //
-//  1. guiding.stop before the slew, so PHD2 does not chase the stars
+//  1. guiding.stop before each slew, so PHD2 does not chase the stars
 //     the mount leaves behind (stop_capture);
 //  2. centering.center after the slew, the solve and sync loop of plan
 //     02, with the Imaging reason Centering;
-//  3. guiding.start before the first frame: loop, find_star, and guide,
-//     then SettleDone, with the reason Guiding;
+//  3. guiding.start before each frame: loop, find_star, and guide,
+//     then SettleDone, with the reason Guiding, when PHD2 does not
+//     guide a settled star;
 //  4. guiding.afterFrame after each frame the runner counts, which
 //     dithers every dither.every frames and waits for SettleDone.
 //
-// The implementations here guide nothing and center nothing, and say
-// so in the Imaging condition's message, so a person reads that the
-// frames are unguided and that the mount went to the coordinates
-// without a solve.
+// guiding.go guides with PHD2, and centering.go centers with a plate
+// solve.
 
 import (
 	"context"
@@ -32,27 +31,22 @@ type centering interface {
 
 // guiding keeps the stars still on the camera between frames.
 type guiding interface {
-	// stop ends any guiding before the mount moves.
+	// open prepares a runner's connection to its guider, and answers
+	// the function that keeps it open until ctx ends. The runner calls
+	// open before its first step, and runs the function beside its
+	// work.
+	open(r *runner) func(ctx context.Context)
+	// stop ends any guiding before the mount moves. An error releases
+	// the target with GuidingFailed, because the mount does not slew
+	// while PHD2 may still guide.
 	stop(ctx context.Context, w *work) error
-	// start guides before the first frame, and answers how the frames
-	// are guided, for the Imaging condition's message, or an error that
-	// sets Imaging False with GuidingFailed.
+	// start guides before each frame, and answers how the frames are
+	// guided, for the Imaging condition's message, or an error that
+	// sets Imaging False with GuidingFailed until a later start
+	// succeeds.
 	start(ctx context.Context, w *work) (string, error)
 	// afterFrame runs after each counted frame, with the count of the
-	// frames this reservation took of the target.
+	// frames this reservation took of the target. An error sets
+	// Imaging False with GuidingFailed, as start's does.
 	afterFrame(ctx context.Context, w *work, frames int) error
 }
-
-// noCentering slews and does not solve.
-type noCentering struct{}
-
-func (noCentering) center(context.Context, *work) (string, error) {
-	return "not centered", nil
-}
-
-// noGuiding exposes unguided and does not dither.
-type noGuiding struct{}
-
-func (noGuiding) stop(context.Context, *work) error            { return nil }
-func (noGuiding) start(context.Context, *work) (string, error) { return "unguided", nil }
-func (noGuiding) afterFrame(context.Context, *work, int) error { return nil }
