@@ -127,11 +127,23 @@ components:
 
 ## Remove the operator
 
-Delete the base:
+Delete the targets first, while the operator runs. Each target's
+finalizer holds its delete until promotion has moved its pending
+frames, and only the operator removes it:
+
+```sh
+kubectl delete targets --all --all-namespaces --wait=false
+kubectl get targets --all-namespaces
+```
+
+When the second command lists no target, delete the base:
 
 ```sh
 kubectl delete -k .
 ```
 
-This deletes the CRDs, and with them every `Target` and `Solver` in
-the cluster. `observatory-operator` and its resources stay.
+This deletes the CRDs, and with them every `Solver` in the cluster.
+A `Target` that still has its finalizer holds the delete of its CRD
+until you remove the finalizer
+([A target does not delete](https://liken.sh/astrophotography/docs/guides/troubleshoot/#a-target-does-not-delete)).
+`observatory-operator` and its resources stay.

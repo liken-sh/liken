@@ -56,7 +56,10 @@ spec:
             `astrophotography-operator`, and moves each frame to the claim
             that `spec.archive` names. The target lasts until a person
             deletes it, and `status.sequences` keeps the progress across
-            nights.
+            nights. The operator puts the finalizer
+            `astrophotography.liken.sh/frames` on each target, so a
+            delete waits while frames of the target are pending in an
+            outbox and promotion moves them to the archive first.
           required: [spec]
           properties:
             spec:
@@ -503,7 +506,8 @@ spec:
                     that are not yet in the archive, so a frame that
                     waits is never forgotten after its reservation ends.
                     The operator keeps a finalizer on each claim listed
-                    here.
+                    here. A delete of the target waits while an entry
+                    whose claim exists has `pending` frames.
                   items:
                     type: object
                     required: [claimName, pending]
@@ -632,7 +636,9 @@ spec:
                     while a reservation images the target, with the
                     reason `Slewing`, `Centering`, `Guiding`, or
                     `Exposing`, and a message that names the reservation
-                    and the sequence. `ArchiveAvailable` is `True` when
+                    and the sequence. `Imaging` is `False` with the
+                    reason `Deleting` while a delete of the target waits
+                    for promotion. `ArchiveAvailable` is `True` when
                     the last promotion succeeded, and `False` with a
                     reason such as `ClaimMissing` or `NameConflict` when
                     it did not.

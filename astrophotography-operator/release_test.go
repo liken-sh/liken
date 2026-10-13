@@ -101,6 +101,36 @@ func TestADeletedTargetEndsTheWork(t *testing.T) {
 	})
 }
 
+// A person deletes a target during an exposure, and its finalizer holds
+// the delete. The runner counts the frame in flight, releases the
+// target with Deleting, and exposes no more of it. The target goes when
+// promotion has moved the frame.
+func TestADeletedTargetIsReleasedAfterItsFrame(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := newWorld(t)
+		w.put(targetsPath, target("m42", lights(3)))
+		w.put(reservationsPath, readyOrNot(observatory.ReservationReady))
+		w.playCamera(t, saves)
+		w.start(t)
+		waitUntil(t, w.inFlight(t, "m42"))
+		w.api.delete(targetsPath, ns, "m42")
+		waitUntil(t, func() bool { return w.imaging(t, "m42") == "False "+astrophotography.ReasonDeleting })
+		status := w.targetNow(t, "m42").Status
+		if status.Reservation != "" || !slices.Equal(pendingOf(status), []int32{1}) {
+			t.Errorf("reservation %q, pending %v; want none and [1]", status.Reservation, pendingOf(status))
+		}
+
+		// Promotion moves the frame, the way a report empties the outbox.
+		promoted := w.targetNow(t, "m42")
+		promoted.Status.Outboxes = nil
+		w.put(targetsPath, promoted)
+		waitUntil(t, func() bool { return w.api.get(targetsPath, ns, "m42") == nil })
+		if got := len(w.worker.held()); got != 1 {
+			t.Errorf("%d frames, want the one in flight", got)
+		}
+	})
+}
+
 // A target that the runner cannot image leaves the reservation with a
 // reason, and the runner takes the next target.
 func TestATargetThatCannotBeImagedIsReleased(t *testing.T) {

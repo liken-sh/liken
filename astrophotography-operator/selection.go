@@ -110,7 +110,7 @@ func (r *runner) claimNext() (*astrophotography.Target, error) {
 
 // releaseIneligible ends this reservation's claim of a target it can no
 // longer image, such as a target whose last frame a restart counted, or
-// one a person suspended while the operator was down.
+// one a person suspended or deleted while the operator was down.
 // Any other claim of this reservation that it cannot image came from
 // another writer, and stays as that writer left it.
 func (r *runner) releaseIneligible(t *astrophotography.Target) error {
@@ -118,6 +118,8 @@ func (r *runner) releaseIneligible(t *astrophotography.Target) error {
 	switch {
 	case t.Status.Reservation != r.name:
 		return nil
+	case t.Metadata.DeletionTimestamp != nil:
+		return r.release(t, astrophotography.ReasonDeleting, deletingMessage)
 	case t.Spec.Suspend:
 		return r.release(t, astrophotography.ReasonSuspended, "The target is suspended. It keeps its progress.")
 	case !left:

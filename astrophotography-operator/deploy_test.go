@@ -212,6 +212,14 @@ func TestTheClusterRoleGrantsEachWatchAndStatus(t *testing.T) {
 	}
 }
 
+// A merge patch adds and removes the finalizer on each Target.
+func TestTheClusterRoleGrantsTheTargetFinalizer(t *testing.T) {
+	t.Parallel()
+	if !grants(clusterRole(t), astrophotography.Group, astrophotography.TargetKind.Plural, "patch") {
+		t.Error("the ClusterRole does not grant patch on targets")
+	}
+}
+
 // Plan 08 gives the ClusterRole's table, and the operator writes no
 // spec and no status of observatory-operator's resources.
 func TestTheClusterRoleIsPlan08sTable(t *testing.T) {

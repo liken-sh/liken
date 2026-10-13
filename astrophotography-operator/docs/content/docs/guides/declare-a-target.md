@@ -232,14 +232,28 @@ reason.
 ## Delete a target
 
 Delete a target when you no longer need its status. The frames and the
-catalog in the archive stay. Frames that still wait in an outbox stay
-there, and the operator no longer moves them, so check first that no
-frame waits:
+catalog in the archive stay:
 
 ```sh
-kubectl get target m42 -n observatory -o jsonpath='{.status.outboxes}'
 kubectl delete target m42 -n observatory
 ```
 
-An empty answer, or a `pending` of `0` for each claim, means that
-every frame is in the archive.
+The operator puts the finalizer `astrophotography.liken.sh/frames` on
+each target, so the delete waits while frames of the target are
+pending in an outbox. During the wait, no reservation claims the
+target, a reservation that images it finishes the frame in flight and
+releases it, and promotion moves the pending frames to the archive.
+`Imaging` is `False` with the reason `Deleting`, and the target gets
+the `Event` `Deleting`. The target goes when `status.outboxes`
+shows no `pending` frame:
+
+```sh
+kubectl get target m42 -n observatory -o jsonpath='{.status.outboxes}'
+```
+
+With `promotion: AfterReservation`, the frames move after the
+reservation that writes to the outbox ends, so the delete waits for
+that too. When a frame cannot reach the archive, the delete waits until
+you fix the cause, or until you remove the finalizer:
+[A target does not delete](/docs/guides/troubleshoot/#a-target-does-not-delete)
+gives both.

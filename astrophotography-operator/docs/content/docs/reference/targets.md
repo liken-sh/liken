@@ -8,7 +8,7 @@ toc: true
 
 # `Target`
 
-A `Target` states an object to image and the frames wanted of it, as sequences of a filter, an exposure, and a count. `astrophotography-operator` images it in each `Reservation` of the same namespace whose `spec.holder` is `astrophotography-operator`, and moves each frame to the claim that `spec.archive` names. The target lasts until a person deletes it, and `status.sequences` keeps the progress across nights.
+A `Target` states an object to image and the frames wanted of it, as sequences of a filter, an exposure, and a count. `astrophotography-operator` images it in each `Reservation` of the same namespace whose `spec.holder` is `astrophotography-operator`, and moves each frame to the claim that `spec.archive` names. The target lasts until a person deletes it, and `status.sequences` keeps the progress across nights. The operator puts the finalizer `astrophotography.liken.sh/frames` on each target, so a delete waits while frames of the target are pending in an outbox and promotion moves them to the archive first.
 
 ## spec
 
@@ -102,11 +102,11 @@ What `astrophotography-operator` reports. A person never writes it.
 | <span id="status--progress"></span>`progress` | string | no | The frames in the archive of the frames wanted, over every sequence, such as `37/180`. |
 | <span id="status--reservation"></span>`reservation` | string | no | The `Reservation` that images the target now. Empty while none does. A runner claims the target by writing it, so two telescopes never image one target at once. |
 | <span id="status--sequences"></span>`sequences` | [\[\]object](#statussequences) | no | Each sequence of the spec, in the same order, with its counts. The work left of a sequence is `count - archived - pending`, so a target can end with more frames than it asked for when a promotion lags, and never with fewer. |
-| <span id="status--outboxes"></span>`outboxes` | [\[\]object](#statusoutboxes) | no | The outbox claims that hold frames of this target that are not yet in the archive, so a frame that waits is never forgotten after its reservation ends. The operator keeps a finalizer on each claim listed here. |
+| <span id="status--outboxes"></span>`outboxes` | [\[\]object](#statusoutboxes) | no | The outbox claims that hold frames of this target that are not yet in the archive, so a frame that waits is never forgotten after its reservation ends. The operator keeps a finalizer on each claim listed here. A delete of the target waits while an entry whose claim exists has `pending` frames. |
 | <span id="status--promotion"></span>`promotion` | [object](#statuspromotion) | no | The target's promotion `Job`s. The `Job`s of a target run one at a time, and their names end in a number that counts up. |
 | <span id="status--exposure"></span>`exposure` | [object](#statusexposure) | no | The frame in flight. The operator writes it before the exposure starts and clears it after the exposure ends, so an operator that restarts during an exposure counts the frame once. |
 | <span id="status--centering"></span>`centering` | [object](#statuscentering) | no | The last result of centering. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | `Complete` is `True` when every sequence has at least its count of frames archived. `Imaging` is `True` while a reservation images the target, with the reason `Slewing`, `Centering`, `Guiding`, or `Exposing`, and a message that names the reservation and the sequence. `ArchiveAvailable` is `True` when the last promotion succeeded, and `False` with a reason such as `ClaimMissing` or `NameConflict` when it did not. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | `Complete` is `True` when every sequence has at least its count of frames archived. `Imaging` is `True` while a reservation images the target, with the reason `Slewing`, `Centering`, `Guiding`, or `Exposing`, and a message that names the reservation and the sequence. `Imaging` is `False` with the reason `Deleting` while a delete of the target waits for promotion. `ArchiveAvailable` is `True` when the last promotion succeeded, and `False` with a reason such as `ClaimMissing` or `NameConflict` when it did not. |
 
 ### status.sequences[]
 

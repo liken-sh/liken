@@ -146,8 +146,8 @@ func targetPath(namespace, name string) string {
 	return "/apis/" + astrophotography.APIVersion + "/namespaces/" + namespace + "/" + astrophotography.TargetKind.Plural + "/" + name
 }
 
-// pass serves every target once, and then the finalizers of the
-// outbox claims.
+// pass serves every target once, with the finalizer of each, and then
+// the finalizers of the outbox claims.
 func (p *promotions) pass() error {
 	held := informer.Held{View: p.stores.view(astrophotography.TargetKind.Name), Versions: p.versions}
 	targets, err := informer.CurrentList[astrophotography.Target](p.client, held, memo.NamespacedPath(targetPath))
@@ -157,7 +157,11 @@ func (p *promotions) pass() error {
 	w := p.read()
 	var problems []error
 	for i := range targets {
-		if err := p.target(&targets[i], w); err != nil {
+		err := p.target(&targets[i], w)
+		if err == nil {
+			err = p.keepTargetFinalizer(&targets[i], w)
+		}
+		if err != nil {
 			problems = append(problems, fmt.Errorf("Target %s/%s: %w", targets[i].Metadata.Namespace, targets[i].Metadata.Name, err))
 		}
 	}

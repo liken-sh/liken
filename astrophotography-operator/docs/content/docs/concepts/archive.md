@@ -182,6 +182,19 @@ frames, let promotion move them before you delete the claim.
 [An outbox claim does not delete](/docs/guides/troubleshoot/#an-outbox-claim-does-not-delete)
 gives the command that removes the finalizer.
 
+## The target's finalizer
+
+The operator puts the same finalizer on each `Target`. Promotion learns
+which frames wait, and in which claim, only from the target's
+`status.outboxes`, so a target that went while frames of it wait would
+leave them in the outbox with nothing to move them. A delete of the
+target therefore waits, with `Imaging` `False` and the reason
+`Deleting`, until no reservation holds the target and no frame of it
+is pending in an outbox claim that exists. Promotion goes on as before
+during the wait.
+[A target does not delete](/docs/guides/troubleshoot/#a-target-does-not-delete)
+gives the command that removes the finalizer.
+
 ## When a frame does not move
 
 `ArchiveAvailable` is `True` with the reason `Promoted` after a `Job`

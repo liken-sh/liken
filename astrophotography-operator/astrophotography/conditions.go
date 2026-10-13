@@ -44,6 +44,10 @@ const (
 	// frame under another name. The runner keeps the target and tries
 	// the next frame after a wait.
 	ReasonExposureFailed = "ExposureFailed"
+	// ReasonDeleting says that a person deleted the target while frames
+	// of it wait in an outbox. No reservation claims it, and its
+	// finalizer keeps it until promotion moves those frames.
+	ReasonDeleting = "Deleting"
 )
 
 // The reasons of ArchiveAvailable.

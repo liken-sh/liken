@@ -1,7 +1,7 @@
 ---
 title: Troubleshoot
 weight: 60
-description: "Find why a Target does not start, stops, or does not reach the archive, from its conditions and Events and the reservation's Events, and fix it: a target with no reservation, Imaging False with OutboxFull, ExposureFailed, GuidingFailed, NoFilter, NoTrain, SlewFailed, or CenteringFailed, ArchiveAvailable False with ClaimMissing, Unschedulable, CopyFailed, VerifyFailed, or NameConflict, the Events AstrophotographyNoOutbox, AstrophotographyIdle, AstrophotographyWorkerPending, AstrophotographyOutboxFull, AstrophotographyNotCentered, and PromotionReportLost, a Solver that is not Ready, and an outbox claim that does not delete. Use when a target does not image, when frames stay pending, or when a condition is False."
+description: "Find why a Target does not start, stops, or does not reach the archive, from its conditions and Events and the reservation's Events, and fix it: a target with no reservation, Imaging False with OutboxFull, ExposureFailed, GuidingFailed, NoFilter, NoTrain, SlewFailed, CenteringFailed, or Deleting, ArchiveAvailable False with ClaimMissing, Unschedulable, CopyFailed, VerifyFailed, or NameConflict, the Events AstrophotographyNoOutbox, AstrophotographyIdle, AstrophotographyWorkerPending, AstrophotographyOutboxFull, AstrophotographyNotCentered, and PromotionReportLost, a Solver that is not Ready, a target that does not delete, and an outbox claim that does not delete. Use when a target does not image, when frames stay pending, or when a condition is False."
 ---
 
 # Troubleshoot
@@ -48,7 +48,8 @@ The target's `RESERVATION` column is empty while a reservation is
   `kubectl get reservation east-tonight -n observatory -o jsonpath='{.status.session.trains}'`.
   A target with no `opticalTrain` needs a telescope with exactly one
   imaging camera.
-* The target is not suspended, and `Complete` is not `True`.
+* The target is not suspended or being deleted, and `Complete` is not
+  `True`.
 * No other `Ready` reservation holds the target. A target's
   `RESERVATION` names the one that holds it.
 * The target did not fail earlier on this reservation. A target that
@@ -75,6 +76,7 @@ kubectl get target m42 -n observatory \
 |---|---|---|
 | `Waiting` | The reservation that imaged the target ended. | Reserve the telescope again. The target keeps its progress. |
 | `Suspended` | `spec.suspend` is `true`. | Set it to `false`. |
+| `Deleting` | A person deleted the target while frames of it are pending in an outbox. The finalizer holds the delete until promotion moves them. | Nothing, or see [A target does not delete](#a-target-does-not-delete). |
 | `SequencesDone` | Every frame the sequences want is pending or archived. | Nothing. `Complete` turns `True` when the last frame reaches the archive. If it stays `False`, see [A frame does not reach the archive](#a-frame-does-not-reach-the-archive). |
 | `OutboxFull` | The outbox has less than three frames' size free. The reservation gets the `Warning` `AstrophotographyOutboxFull`. The operator keeps the target and exposes again when space is free. | With `promotion: Continuous`, check that promotion moves frames out. With `AfterReservation`, nothing frees space before the reservation ends, so give the outbox more space. |
 | `ExposureFailed` | The last exposure gave no frame: the driver answered `Alert`, did not finish within the exposure plus 2 minutes, saved the frame under another name, or the worker did not answer. The operator keeps the target and starts the next frame a minute later. | Read the message. A frame under another name means a client, such as Ekos, changed the camera's upload settings. A worker that does not answer is often still starting; see `AstrophotographyWorkerPending` below. |
@@ -147,6 +149,38 @@ frames in the catalog, moves nothing, and reports the counts again.
 `kubectl get solver -n observatory` shows the reason.
 [Set up a solver](/docs/guides/set-up-a-solver/#when-the-solver-is-not-ready)
 gives the fix for `ClaimMissing`, `NoIndexFiles`, and `PodNotReady`.
+
+## A target does not delete
+
+A target that you deleted stays, with `Imaging` `False` and the
+reason `Deleting`. The finalizer `astrophotography.liken.sh/frames`
+holds the delete while frames of the target are pending in an outbox
+claim, so promotion can still move them to the archive. The target
+goes when `status.outboxes` shows no `pending` frame:
+
+```sh
+kubectl get target m42 -n observatory -o jsonpath='{.status.outboxes}'
+```
+
+When the frames do not move, the reason is in `ArchiveAvailable`, and
+[A frame does not reach the archive](#a-frame-does-not-reach-the-archive)
+gives the fix. With `promotion: AfterReservation`, the frames move only
+after the reservation that writes to the outbox ends. An outbox claim
+that no longer exists holds no delete, because its frames went with
+it.
+
+To delete the target now and leave its frames in the outbox, remove
+the finalizer. Nothing moves those frames after that. Check its place
+in the list first, because the patch removes the first entry:
+
+```sh
+kubectl -n observatory get target m42 -o jsonpath='{.metadata.finalizers}'
+kubectl -n observatory patch target m42 --type=json \
+  -p='[{"op":"remove","path":"/metadata/finalizers/0"}]'
+```
+
+While the operator is not running, nobody removes the finalizer for
+you.
 
 ## An outbox claim does not delete
 

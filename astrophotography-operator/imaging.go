@@ -163,7 +163,7 @@ func (w *work) next(ctx context.Context) (bool, error) {
 	}
 	w.target = t
 	index, left := nextSequence(aligned(t))
-	if t.Spec.Suspend || !left {
+	if t.Spec.Suspend || !left || t.Metadata.DeletionTimestamp != nil {
 		return true, w.r.releaseIneligible(t)
 	}
 	if t.Spec.Coordinates != w.aimed {

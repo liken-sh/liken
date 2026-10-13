@@ -47,8 +47,8 @@ must land in a claim that outlives the camera's pod. It gets the
 
 The runner takes the eligible target of its namespace with the highest
 `priority`, then the oldest, then the first name. A target is eligible
-when it is not suspended, its `Complete` condition is not `True`, a
-sequence has work left, its `opticalTrain` is on the session, and no
+when it is not suspended or being deleted, its `Complete` condition is
+not `True`, a sequence has work left, its `opticalTrain` is on the session, and no
 other `Ready` reservation images it. A target with no `opticalTrain`
 is eligible on a session with exactly one imaging camera.
 
@@ -88,7 +88,10 @@ the `Event` `AstrophotographyIdle`, and the runner waits for a change.
 Before each frame the runner reads the target again, so an edit takes
 effect at the next frame. New coordinates stop PHD2, slew the mount
 again, and center the target again when it states `centering`. A
-target you suspend is released with the reason `Suspended`.
+target you suspend is released with the reason `Suspended`, and a
+target you delete with the reason `Deleting`: its finalizer holds the
+delete until promotion moves its pending frames
+([Delete a target](/docs/guides/declare-a-target/#delete-a-target)).
 
 ## Centering
 

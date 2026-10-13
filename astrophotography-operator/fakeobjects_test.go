@@ -2,7 +2,9 @@ package main
 
 // The fake API server's answers about one namespaced object: a read, a
 // create, an update of the object or of its status, a merge patch, and
-// a delete. An update or a patch that states a resourceVersion other
+// a delete. A delete of an object with finalizers marks it with
+// deletionTimestamp, and the object goes when a write leaves it no
+// finalizer, the way the API server does. An update or a patch that states a resourceVersion other
 // than the stored one answers 409, the way the API server does, so a
 // test sees the operator's optimistic concurrency at work. Each write
 // tells every watch, like a change from put.
@@ -66,7 +68,7 @@ func (a *fakeAPI) serveObject(w http.ResponseWriter, r *http.Request) bool {
 	case r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, stored)
 	case r.Method == http.MethodDelete:
-		a.store(path, key, stored, "DELETED")
+		a.deleteHeld(path, key)
 		writeJSON(w, http.StatusOK, stored)
 	case stale(sent, stored):
 		answerStatus(w, http.StatusConflict, "Conflict")
@@ -85,12 +87,42 @@ func (a *fakeAPI) serveObject(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// write stores an object and answers the stored copy. Callers hold mu.
+// write stores an object and answers the stored copy. An object that
+// is being deleted goes with its last finalizer. Callers hold mu.
 func (a *fakeAPI) write(w http.ResponseWriter, path, key string, object map[string]any, kind string, code int) {
 	c := a.collections[path]
 	object["apiVersion"], object["kind"] = c.apiVersion, c.kind
+	metadata := object["metadata"].(map[string]any)
+	if finalizers, _ := metadata["finalizers"].([]any); metadata["deletionTimestamp"] != nil && len(finalizers) == 0 {
+		a.store(path, key, object, "DELETED")
+		writeJSON(w, code, object)
+		return
+	}
 	a.store(path, key, object, kind)
 	writeJSON(w, code, a.objects[path][key])
+}
+
+// deleteHeld deletes a stored object, or marks it with
+// deletionTimestamp while it has a finalizer. Callers hold mu.
+func (a *fakeAPI) deleteHeld(path, key string) {
+	stored := a.objects[path][key]
+	metadata := stored["metadata"].(map[string]any)
+	if finalizers, _ := metadata["finalizers"].([]any); len(finalizers) == 0 {
+		a.store(path, key, stored, "DELETED")
+		return
+	}
+	if metadata["deletionTimestamp"] == nil {
+		marked := clone(stored)
+		marked["metadata"].(map[string]any)["deletionTimestamp"] = time.Now().UTC().Format(time.RFC3339)
+		a.store(path, key, marked, "MODIFIED")
+	}
+}
+
+// delete deletes an object the way kubectl delete does.
+func (a *fakeAPI) delete(path, namespace, name string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.deleteHeld(path, namespace+"/"+name)
 }
 
 // stale reports whether a write states a resourceVersion that is not
