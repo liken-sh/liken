@@ -218,7 +218,7 @@ released 67 s after its delete.
 removes every keyword, the ones `observatory-operator` wrote included,
 so after each clear, `astrophotography-operator` writes the session's
 list from `status.session.fitsKeywords` again with its own. Its [plan
-01](../../../astrophotography-operator/plans/01-run-a-targets-sequence.md)
+01](../../../astrophotography-operator/plans/completed/01-run-a-targets-sequence.md)
 has to account for this.
 
 The change of `/` to `\` in a value is worth a report to libindi.

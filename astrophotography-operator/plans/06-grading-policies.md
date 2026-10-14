@@ -23,7 +23,7 @@ hour counts as progress.
   the guide star's signal during each exposure, which catches lost
   guiding, wind, and most clouds without reading the frame. Measures of
   the frame itself, such as the star count and the stars' size and
-  shape, come from the worker of [plan 02](02-solving-and-centering.md),
+  shape, come from the worker of [plan 02](completed/02-solving-and-centering.md),
   and only a policy that asks for them pays to read the frame.
 - **A policy can name the person's own container** in place of the
   operator's measures, run as a `Job`, or as an Indexed `Job` to grade a

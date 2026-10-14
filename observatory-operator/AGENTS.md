@@ -202,7 +202,7 @@ settle when a test asks.
 
 `astrophotography-operator` imports `indi`, `phd2`, and `observatory`,
 and its tests run against `indi/inditest` and `phd2/phd2test`. Its
-[plan 08](../astrophotography-operator/plans/08-the-component-and-the-first-session.md)
+[plan 08](../astrophotography-operator/plans/completed/08-the-component-and-the-first-session.md)
 lists this component in that operator's `package.toml`, so CI runs
 both components' tests on a change to these packages. Keep them on the
 standard library and `kubernetes/conditions`, so the import links no

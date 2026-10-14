@@ -32,8 +32,8 @@ as it takes.
   group it. The name `Session` stays unused.
 - **In this plan, a person creates the reservation** and names this
   operator as its holder. The scheduler of [plan
-  04](04-the-scheduler.md) and the reservations of [plan
-  05](05-reservations-on-demand.md) build on a sequence that already
+  04](../04-the-scheduler.md) and the reservations of [plan
+  05](../05-reservations-on-demand.md) build on a sequence that already
   runs by hand.
 - **The operator drives the telescope over INDI and PHD2's API, not
   through Kubernetes objects.** An exposure, a dither, and a guide pulse
@@ -43,10 +43,10 @@ as it takes.
   Before each exposure the operator sets the camera's directory and
   file prefix inside the reservation's outbox
   ([`observatory-operator` plan
-  19](../../observatory-operator/plans/completed/19-the-frames-outbox.md)), and
+  19](../../../observatory-operator/plans/completed/19-the-frames-outbox.md)), and
   the keywords it owns, such as the target, through the declared
   keywords of [`observatory-operator` plan
-  20](../../observatory-operator/plans/completed/20-declared-fits-keywords.md).
+  20](../../../observatory-operator/plans/completed/20-declared-fits-keywords.md).
   The operator never asks the server for a frame's bytes.
 - **Each frame has a global identity, written in its header.** The
   file name is the person's format and can change; the identity cannot.
@@ -71,7 +71,7 @@ as it takes.
 On 2026-10-12, the CCD simulator of the pinned `indi-simulators` image
 answered three questions that bore on the identity
 ([`observatory-operator` plan
-20](../../observatory-operator/plans/completed/20-declared-fits-keywords.md)
+20](../../../observatory-operator/plans/completed/20-declared-fits-keywords.md)
 has the probe):
 
 - `DATE-OBS` has millisecond precision, such as
@@ -216,7 +216,7 @@ reasons. A list of targets on the `Reservation` would put imaging into
 `observatory-operator`'s resource, which knows nothing of targets. A
 list of reservations on the `Target` would need an edit every night,
 because a reservation lasts one night. And every target of a namespace
-being eligible is how pods meet nodes: [plan 04](04-the-scheduler.md)
+being eligible is how pods meet nodes: [plan 04](../04-the-scheduler.md)
 replaces only the order, with a choice for each exposure, and keeps
 the rule of eligibility. Until then, a person suspends a target that
 is below the horizon.
@@ -277,7 +277,7 @@ frame must land in a claim that outlives the pod.
 6. **Guide**, if the session has a `Guider`: `loop`, `find_star`, and
    `guide` with its settle, then wait for `SettleDone`, with the reason
    `Guiding`. This is the order that `observatory-operator`'s [plan
-   09](../../observatory-operator/plans/completed/09-the-guider.md)
+   09](../../../observatory-operator/plans/completed/09-the-guider.md)
    drilled. A session with no `Guider` exposes unguided.
 7. **Expose** each frame, with the reason `Exposing`:
    1. Ask the worker of [plan 02](02-solving-and-centering.md) for the
@@ -318,7 +318,7 @@ to 43 ms for each settled keyword, so ten keywords cost well under a
 second against an exposure of minutes.
 
 A `StarLost` during an exposure does not stop the exposure; [plan
-06](06-grading-policies.md) decides whether the frame counts. The
+06](../06-grading-policies.md) decides whether the frame counts. The
 runner runs `find_star` and `guide` again before the next frame.
 
 ### The keywords of a frame
@@ -373,7 +373,7 @@ it needs no database and works on a network share. `jq` and `grep`
 answer the query of the decisions: the frames of one reservation are
 `jq 'select(.reservation == "east-tonight")'`. And a frame's record
 never edits the frame. Later records, such as a grade from [plan
-06](06-grading-policies.md), are new lines keyed by `FRAMEID`.
+06](../06-grading-policies.md), are new lines keyed by `FRAMEID`.
 
 These homes were set aside:
 
@@ -476,7 +476,7 @@ and the operator holds nothing else that it cannot read again.
   declared identity. [Plan 08](08-the-component-and-the-first-session.md)
   lists it as a small change to that operator.
 - Which form of `IMAGETYP` a person chooses. The driver writes the
-  SBFITSEXT form, `Light Frame`, and [plan 07](07-calibration-frames.md)
+  SBFITSEXT form, `Light Frame`, and [plan 07](../07-calibration-frames.md)
   decides the forms when it adds darks and flats.
 - A meridian flip, a dome that follows the mount, and autofocus. None
   is in the first session, and each adds a step to the order above.

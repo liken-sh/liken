@@ -9,7 +9,7 @@ catalog.
 
 `deploy/` holds the CRDs of `Target` and `Solver`, the RBAC, and the
 operator. [`plans/00-design.md`](plans/00-design.md) is the design,
-[plan 08](plans/08-the-component-and-the-first-session.md) gives the
+[plan 08](plans/completed/08-the-component-and-the-first-session.md) gives the
 order of the build and the drill of the first session, and [root plan
 74](../plans/74-astrophotography.md) holds the two components and the
 contract between them. The manual is at

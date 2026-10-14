@@ -300,7 +300,7 @@ The worker answers the operator alone:
   `solve-field --just-augment --no-remove-lines --uniformize 0
   --crpix-center` with the hints, and answers with the `.axy` and the
   star count and median `FWHM_IMAGE`. The catalog's other columns are
-  there for the grading of [plan 06](06-grading-policies.md).
+  there for the grading of [plan 06](../06-grading-policies.md).
 - `GET /outbox` answers the free bytes of the outbox's file system and
   the frames of each target's directory, for [plan
   01](01-run-a-targets-sequence.md) and [plan
@@ -324,7 +324,7 @@ of paths: from the operator to the worker and to the solver, on port
    precession and nutation, from Meeus's *Astronomical Algorithms*,
    chapters 21 and 22, in a small package of this operator, `sky`,
    whose tests hold the book's worked examples. [Plan
-   04](04-the-scheduler.md) chooses its source of the sky's geometry,
+   04](../04-the-scheduler.md) chooses its source of the sky's geometry,
    and can replace the package.
 3. **A centering exposure** of `centering.exposure` (default 5 s),
    through `centering.filter` (default the first sequence's filter),

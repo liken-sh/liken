@@ -7,7 +7,7 @@ on `scratch`. `astrophotography-operator`'s worker image builds on it.
 The worker extracts the stars of a frame beside the frames, and the
 solver solves the star list against the index files, as
 [`astrophotography-operator` plan
-02](../astrophotography-operator/plans/02-solving-and-centering.md)
+02](../astrophotography-operator/plans/completed/02-solving-and-centering.md)
 describes.
 
 ## What the image holds
