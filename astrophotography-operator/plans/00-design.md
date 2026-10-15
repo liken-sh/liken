@@ -31,8 +31,13 @@ the person's archive. This is mode 2 of [root plan
   time the way a scheduler places workloads on nodes. It computes the
   sky from the site's coordinates and the date, removes the targets
   that are below the telescope's horizon, too close to the moon, or
-  not dark enough, and scores the rest. It chooses one exposure at a
-  time, so a cloud or a failed solve costs only that exposure.
+  not dark enough, and orders the rest by priority and then by how
+  little of their season is left for their work. It chooses after
+  each frame, so a cloud or a failed solve costs only that frame, and
+  it switches only when the gain beats the time the switch costs.
+- **Targets by name.** A person can name an object, such as M42, in
+  place of its coordinates, and the operator looks it up in a catalog
+  in its image.
 - **Reservations on demand.** When a telescope allows it, the operator
   creates a reservation when some target can be imaged and ends it
   when none can. A person's own reservation always takes the telescope
@@ -115,3 +120,5 @@ The plans are otherwise in the order they build on each other.
 | [06](06-grading-policies.md) | Rejecting frames by a person's policy |
 | [07](07-calibration-frames.md) | Capturing and keeping darks and flats |
 | [08](completed/08-the-component-and-the-first-session.md) | The component's scaffold, the order of the build, and the drill of the first session |
+| [09](09-a-targets-position-by-name.md) | A target's position by name, from a catalog in the image |
+| [10](10-planetary-and-solar-imaging.md) | Planetary and solar imaging, a stub |
