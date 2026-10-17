@@ -1,13 +1,8 @@
 #!/bin/sh
-# Collects the VA-API loader and the Intel media driver into one directory
-# tree, less every file the vulkan tree holds. The tree is the
-# ghcr.io/liken-sh/vaapi image, the base for a program that decodes
-# video on the node's GPU.
-#
-# Mesa's VA driver for AMD is left out. On Debian it is a link into
-# libgallium, which the vulkan tree does not hold, so the seed would
-# add 40 MB for a card no liken machine decodes on yet. A machine with
-# AMD graphics decodes in software until that changes.
+# Collects the VA-API loader, the Intel media driver, and Mesa's VA
+# driver for AMD into one directory tree, less every file the vulkan
+# tree holds. The tree is the ghcr.io/liken-sh/vaapi image, the base for
+# a program that decodes video on the node's GPU.
 #
 # Run it in a builder that has the packages installed. It writes a
 # rootfs to the first directory named on the command line, less every
@@ -29,9 +24,11 @@ seeds="
 $lib/libva.so.2
 $lib/libva-drm.so.2
 $lib/dri/iHD_drv_video.so
+$lib/dri/radeonsi_drv_video.so
 "
 
-# Neither libva nor the Intel driver reads a data file Debian ships.
+# Mesa's VA driver reads the drirc defaults, which the vulkan tree
+# holds. libva and the Intel driver read no data file Debian ships.
 data=""
 
 collect "$out" "$seeds" "$data"

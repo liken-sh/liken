@@ -122,7 +122,13 @@ libva's error text:
 
 A GPU whose kernel driver has no VA-API driver in the agent's image,
 such as an NVIDIA GPU, fails its query this way. The image carries
-the Intel iHD driver.
+two drivers: the Intel iHD driver for `i915` and `xe`, and Mesa's
+`radeonsi` driver for `amdgpu`.
+
+The iHD driver is Debian's non-free build. Debian's free build lists
+no AV1 decoder, no VC-1 decoder, and no full H.264 or HEVC encoder on
+a Gen12 GPU such as Tiger Lake or Alder Lake, though the hardware has
+them, so the agent would publish each of them as `false`.
 
 ## Device classes
 

@@ -6,7 +6,12 @@
 # runs this file from the vulkan directory, the lowest base, so that
 # one script states where the packages come from.
 #
-# Usage: snapshot.sh <YYYYMMDD>
+# Usage: snapshot.sh <YYYYMMDD> [component ...]
+#
+# Every base installs from the main component. A base names another
+# component, such as non-free, only for a package that Debian keeps
+# there. One InRelease file covers every component of a suite, so the
+# checksums below cover an added component too.
 #
 # The archive and the security archive both come from the snapshot at
 # midnight UTC of that day. The Release files of an old snapshot are
@@ -23,7 +28,9 @@
 # packages are bound together.
 set -eu
 
-date=${1:?usage: snapshot.sh <YYYYMMDD>}
+date=${1:?usage: snapshot.sh <YYYYMMDD> [component ...]}
+shift
+components="main${*:+ $*}"
 case $date in
 [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;;
 *)
@@ -38,14 +45,14 @@ cat >/etc/apt/sources.list.d/snapshot.sources <<EOF
 Types: deb
 URIs: http://snapshot.debian.org/archive/debian/$stamp/
 Suites: trixie trixie-updates
-Components: main
+Components: $components
 Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp
 Check-Valid-Until: no
 
 Types: deb
 URIs: http://snapshot.debian.org/archive/debian-security/$stamp/
 Suites: trixie-security
-Components: main
+Components: $components
 Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp
 Check-Valid-Until: no
 EOF
