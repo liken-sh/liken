@@ -3,7 +3,7 @@
 This plan, written on 2026-10-18, lets a person state that one season
 of a series is, on one provider, a season of a different show. The
 facts that ask a provider about a season or an episode then ask that
-show. Built on 2026-10-18. The drill has not run.
+show. Built on 2026-10-18, and drilled on a home cluster the same day.
 
 ## The problem
 
@@ -165,6 +165,27 @@ Tests seed a series whose `Season 02/season.nfo` maps TMDb and run:
 * TheIntroDB and IntroDB ask with a mapped id and its season.
 * A skipped `<showid>` and an unreadable `season.nfo` are reported.
 
-A drill adds the four `season.nfo` files to a `Monster` series folder,
-turns on `episode-thumb` for the drill, and checks that each season's
-episode thumbnails are its own installment's stills.
+### The drill
+
+On 2026-10-18, a home cluster ran release `2026.10.18-002` over a
+`Monster` series folder whose `tvshow.nfo` named TMDb `299939` and
+TVmaze `68626`. Four `season.nfo` files mapped each season to its
+installment's TMDb and TVmaze show. A webhook rescan of the one folder
+ran a walk `Job` of 24 seconds, which reopened 84 rows.
+
+* Seasons 02 to 04: `episode-thumb` recorded 25 found attempts under
+  the new mapping. The MD5 of `S02E01`'s still matched the still that
+  TMDb holds for episode 1 of `225634`; the others were not checked.
+* Season 01: `episode-thumb` wrote the two episodes that had no still.
+  The eight episodes that held a `299939` still kept it. A refresh of
+  `episode-thumb` earlier that day had found those files on disk and
+  recorded them as `provider: existing`, so the fact read them as a
+  person's files and did not write over them. After the eight files
+  were deleted by hand, a second rescan wrote the Dahmer stills, and
+  their MD5s matched TMDb's `113988`.
+* `season-poster` recorded four found attempts, and `marks` recorded
+  35.
+
+The Season 01 case is a defect in the art phase, not in this plan: an
+attempt that finds a file the fact wrote earlier records the file as
+`existing` and loses its `written` time.
