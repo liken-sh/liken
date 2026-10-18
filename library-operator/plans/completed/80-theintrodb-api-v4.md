@@ -3,8 +3,8 @@
 This plan, written on 2026-10-18, moves the marks fact's asks to
 TheIntroDB from `/v3/media` to `/v4/media`. It asks for a series by
 its TheTVDB id where the catalog holds one, and it paces a keyed
-account at the faster rate that v4 gives a key. Built on 2026-10-18.
-The drill on `liken-1` has not run.
+account at the faster rate that v4 gives a key. Built on 2026-10-18,
+and drilled on `liken-1` the same day.
 
 ## The problem
 
@@ -129,5 +129,28 @@ A probe of the live API on 2026-10-18 asked
 the headers `X-RateLimit-Limit: 30`, `X-UsageLimit-Limit: 5000`, and
 `X-UsageLimit-SpecificMedia-Limit: 2000`.
 
-A drill on `liken-1` runs the marks fact over a series library and
-checks that the files that held spans with v3 still hold spans.
+### The drill on `liken-1`
+
+On 2026-10-18, `liken-1` ran the development build
+`2026.10.17-001-dev-002-966aa5aa` with a keyed account. A refresh of
+`marks` on the `movies` and `series` libraries asked every file again.
+Each keyed answer carried `X-UsageLimit-Limit: 100000`.
+
+| Library | TheIntroDB spans before | After | Files before | After |
+|---|---|---|---|---|
+| `movies` | 181 | 182 | 110 | 110 |
+| `series` | 7,106 | 6,551 | 4,299 | 4,119 |
+
+In `series`, 264 files lost their TheIntroDB spans and 83 files gained
+spans. One lost file had left the catalog. A probe asked TheIntroDB v4
+about each of the other 263 files, once with `tvdb_id` and once with
+`tmdb_id`, with the key. Every ask answered 404. A spot check of
+`/v3/media` by `tmdb_id` also answered 404. TheIntroDB no longer holds
+those spans in any version, so the loss came from its conversion to
+TheTVDB's order, not from the id that the fact names. The losses
+gathered in a few long series. The same probe of the 83 gained files
+answered 200 for both ids.
+
+The drill did not find a file where the two ids give different
+answers, so it does not measure the benefit of asking by `tvdb_id`
+first. Both ids gave the same answer for every file that changed.
