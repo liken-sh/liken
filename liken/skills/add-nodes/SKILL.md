@@ -8,8 +8,9 @@ This skill is the guide at https://liken.sh/docs/guides/add-nodes/, emitted for 
 # Add machines to a cluster
 
 You add one declared machine at a time. Describe the new machine, build
-the install stick again, and boot the machine from it. This procedure
-makes no changes to the running machines.
+the install stick again, and boot the machine from it. A new follower
+makes no changes to the running machines. A new leader reboots every
+machine one at a time, as step 2 explains.
 
 ## 1. Describe the new machine
 
@@ -74,6 +75,14 @@ If the new machine will run a control plane, add its name to
 
 Make the live edit before you install the machine. Keep an odd number
 of leaders, so that the datastore can always make a majority.
+
+A change to `spec.leaders` reboots every machine, one at a time,
+because each machine reads the leaders only when it boots. The leaders
+give each follower its time sources, and the founder's address gives
+each leader its join URL. Under `Manual`, each machine reports
+`RebootPending`. Approve each one with
+[`liken approve-reboot`](https://liken.sh/docs/reference/cli/#liken-approve-reboot), as
+in [Upgrade the fleet](https://liken.sh/docs/guides/upgrade/).
 
 ## 3. Rebuild the install stick
 

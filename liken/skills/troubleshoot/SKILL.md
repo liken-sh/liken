@@ -79,6 +79,11 @@ whether `liken-machine-operator` restarted on that node. The operator
 stops its heartbeat and ends its own process when its reconcile loop has
 been busy for 60 seconds, and the kubelet then starts it again.
 
+A `Lost` machine counts against the disruption budget, so while it
+stays, other machines wait for their reboot turns. If the machine will
+not return, remove it as in
+[Remove machines](https://liken.sh/docs/guides/remove-nodes/#a-machine-that-is-already-gone).
+
 ## A machine shows Blocked
 
 A change exists that the system refuses to stage. The condition that
