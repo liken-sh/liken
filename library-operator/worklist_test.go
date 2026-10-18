@@ -98,3 +98,40 @@ func TestAClearRemovesEveryTopicOfTheList(t *testing.T) {
 		t.Errorf("the broker still holds %v", held)
 	}
 }
+
+// A session whose connection is gone fails each operation on the list with
+// the bus's error, so a close container records the failure and the operator
+// starts no worker for a list the broker may not hold.
+func TestAListOperationOnALostConnectionFails(t *testing.T) {
+	cases := []struct {
+		name      string
+		operation func(*busSession) error
+	}{
+		{name: "a publish of three videos", operation: func(session *busSession) error {
+			return publishWorkList(session, defaultTopicBase, testWorkList, threeVideos())
+		}},
+		{name: "a publish of an empty list", operation: func(session *busSession) error {
+			return publishWorkList(session, defaultTopicBase, testWorkList, nil)
+		}},
+		{name: "a read of one index", operation: func(session *busSession) error {
+			_, _, err := readWorkItem(session, defaultTopicBase, testWorkList, 0)
+			return err
+		}},
+		{name: "a clear of three videos", operation: func(session *busSession) error {
+			return clearWorkList(session, defaultTopicBase, testWorkList, 3)
+		}},
+		{name: "a clear of an empty list", operation: func(session *busSession) error {
+			return clearWorkList(session, defaultTopicBase, testWorkList, 0)
+		}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			session := testSession(t, newRetainBroker(t))
+			session.close()
+
+			if err := test.operation(session); err == nil {
+				t.Error("the operation succeeded on a closed connection, want the bus's error")
+			}
+		})
+	}
+}

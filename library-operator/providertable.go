@@ -80,7 +80,7 @@ type providerBlock struct {
 // The paces follow what each provider publishes. TMDb states about 40 to 50
 // requests a second; OMDb a daily count and no rate; TVmaze 20 calls every
 // 10 seconds; a PeerTube instance 50 every 10 seconds by default; TheIntroDB
-// 30 asks every 10 seconds; Fanart.tv, the Internet Archive, IntroDB, and the
+// 30 asks every 10 seconds, or 120 with a key; Fanart.tv, the Internet Archive, IntroDB, and the
 // IMDb datasets no number for these calls. Each pace is at or under its
 // provider's number, and the 429 cooldown covers a stricter day.
 var providerBlocks = []providerBlock{
@@ -219,7 +219,8 @@ var providerBlocks = []providerBlock{
 	},
 	// TheIntroDB holds the spans of movies and episodes alone, so it serves the
 	// marks fact and nothing else. Its pace is 30 asks every 10 seconds, with
-	// room for the check.
+	// room for the check. An account with a key asks faster, at the pace
+	// theintrodb.go sets.
 	{
 		name:        providerBlockTheIntroDB,
 		facts:       []string{factMarks},

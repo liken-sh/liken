@@ -61,12 +61,16 @@ The providers, and the facts each one serves:
   with an empty block, `archive: {}`. It holds trailers for many older
   films, and the operator asks it no faster than four times a second.
 * `theintrodb`, TheIntroDB: marks only, the intro, recap, credits, and
-  preview spans of movies and episodes. It finds a work by its TMDb id,
-  and a key is optional. Declare it with an empty block,
-  `theintrodb: {}`, or name a `Secret` under `secretRef` to use a key.
-  Without a key it answers 500 asks a day for your address. With one it
-  answers 1000 a day for your account, and it adds your own pending
-  submissions to each answer.
+  preview spans of movies and episodes. It finds an episode by its
+  series' TheTVDB id, then its TMDb id, then its IMDb id, and a movie
+  by its TMDb id first. TheIntroDB stores episodes in TheTVDB's default
+  order, which is the order Sonarr names files in. A key is optional.
+  Declare it with an empty block, `theintrodb: {}`, or name a `Secret`
+  under `secretRef` to use a key. Without a key it answers 5,000 asks
+  a day for your address, and the operator asks it about three times a
+  second. With one it answers 100,000 a day for your account, the
+  operator asks about eleven times a second, and it adds your own
+  pending submissions to each answer.
 * `introdb`, IntroDB: marks only, the intro, recap, credits, and
   post-credits spans of movies and episodes. It finds a work by its IMDb
   id and needs no account. Declare it with an empty block,
@@ -767,6 +771,14 @@ spans of the release whose length is closest, such as the theatrical
 cut or the extended one. IntroDB reads no length. A file that holds two
 episodes is asked about neither, because each provider places an
 episode's spans in that episode's own file.
+
+The fact asks about an episode by the season and the episode number
+the catalog holds, which come from the file's name or its `.nfo` file.
+TheIntroDB reads those numbers in TheTVDB's default order when the ask
+names the series' TheTVDB id, and in TMDb's numbering when it names the
+TMDb id. A series whose files follow a DVD or an absolute order gets the
+spans of a different episode, so name those files in TheTVDB's default
+order.
 
 The community adds marks for a new episode or film in the days after
 it comes out, so the fact asks again about a new work sooner than
