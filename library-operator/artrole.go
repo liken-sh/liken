@@ -172,11 +172,20 @@ func (e *enricher) writeArt(ctx context.Context, answerer artAnswerer, art artTy
 // The item entry and the attempt are one write of one file, so a reader never
 // sees an answer without its attempt. A provider name of nothing is a miss or
 // an error, which the attempt itself states.
+//
+// A file found in place that the ledger says this fact wrote keeps that
+// item. A refresh asks again about every entry and finds each file the fact
+// wrote, and an item that called those files another tool's would stop the
+// art phase from replacing one when its season's mapping names another show.
+// The replace door still keeps a file that someone changed after the write.
 func (e *enricher) recordArt(folder, fact string, gap artGap, provider, result string) {
 	e.tallies.add(tallyAttempts, 1, "fact", fact, "result", result)
 	now := time.Now().UTC()
 	entry, show := gap.entry(), gap.shows.signature()
 	err := e.writer.updateLikenLedger(folder, fact, func(ledger *likenLedger) {
+		if provider == artProviderExisting && ledger.wroteItem(entry) {
+			provider = ""
+		}
 		if provider != "" {
 			item := likenItem{Path: entry, Provider: providerNames{provider}}
 			if provider != artProviderExisting {

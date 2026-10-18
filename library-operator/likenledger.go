@@ -220,6 +220,13 @@ func (l *likenLedger) itemAt(path string) (likenItem, bool) {
 	return likenItem{}, false
 }
 
+// Whether the ledger says the fact itself wrote the file of one entry, as
+// opposed to finding a file another tool put there.
+func (l *likenLedger) wroteItem(path string) bool {
+	item, held := l.itemAt(path)
+	return held && !item.Written.IsZero() && !item.Provider.is(artProviderExisting)
+}
+
 // A folder with no .liken directory reads as an empty ledger and not as an
 // error, because the first write to a folder starts from nothing.
 func readLikenLedger(folder, fact string) (likenLedger, error) {

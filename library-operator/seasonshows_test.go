@@ -311,6 +311,35 @@ func TestTheArtPhaseReplacesAStillOfAnotherShow(t *testing.T) {
 	}
 }
 
+// An attempt that finds on disk a still this fact wrote keeps the record that
+// the fact wrote it. A refresh of the fact asks again about every episode and
+// finds each still in place, and a still it recorded as another tool's would
+// stay when a mapping later names another show.
+func TestARefreshKeepsTheRecordOfAStillTheFactWrote(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		episode := seedEnrichedEpisode(t)
+		writeFactLedger(t, episode.season, factEpisodeThumb, likenLedger{
+			Items: []likenItem{{Path: replacedEntry, Provider: providerNames{providerBlockTMDb},
+				Written: episode.made}},
+		})
+		setModified(t, episode.thumb, episode.made)
+		client, _ := newArtTMDb(t, map[string]string{
+			tmdbKey("/3/tv/113988/season/1/episode/2/images", "", ""): imagesAnswer(tmdbStills, "/mapped.jpg", artLanguage),
+			tmdbKey("/t/p/w300/mapped.jpg", "", ""):                   testImage,
+		})
+		work, _ := testEnricher(t, libraryKindSeries, episode.root, nil)
+		gap := artGap{key: episode.path, tmdb: "2001", season: 1, episode: 2}
+
+		work.artOne(t.Context(), tmdbArtLine(client), artTypes[factEpisodeThumb], gap)
+		writeFile(t, filepath.Join(episode.season, seasonNFOName), mappedSeason)
+		work.artOne(t.Context(), tmdbArtLine(client), artTypes[factEpisodeThumb], gap)
+
+		if got := readFileString(t, episode.thumb); got != testImage {
+			t.Errorf("the thumbnail holds %q, want the mapped show's still", got)
+		}
+	})
+}
+
 // Fanart.tv's season art reads the season of the TheTVDB show the season
 // maps, so the folder's Season 02 takes the mapped show's season 1 poster.
 func TestFanartSeasonArtReadsTheMappedSeason(t *testing.T) {
