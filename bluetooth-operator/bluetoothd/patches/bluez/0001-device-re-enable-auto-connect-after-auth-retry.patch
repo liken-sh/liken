@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chris Guidry <chris@theguidrys.us>
+Date: Sat, 17 Oct 2026 21:06:25 -0400
+Subject: [PATCH] device: Re-enable auto connect when a reconnect cancels the
+ auth retry
+
+When a link to an auto connect device ends with an authentication
+failure, device_remove_connection() turns auto connect off and arms
+a 1, 2, or 4 second timer whose callback turns it back on. If the
+device connects again before the timer fires, device_add_connection()
+removes the timer and resets the failure count, but nothing turns
+auto connect back on. The connection works, and after the device's
+next disconnect the kernel no longer reconnects it. Only a restart
+of bluetoothd, which probes the profiles again, recovers the device.
+
+Since 7ca747652d ("device: Fix auth_retry timeout not being removed
+on reconnect") the removal works, so the timer no longer fires after
+such a reconnect, and a bonded LE HID remote that sleeps between
+uses stops reconnecting for good.
+
+The reconnect proves the keys work, so turn auto connect back on
+where the timer is removed.
+---
+ src/device.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/src/device.c b/src/device.c
+index 65d84be..155cdaa 100644
+--- a/src/device.c
++++ b/src/device.c
+@@ -3810,6 +3810,15 @@ void device_add_connection(struct btd_device *dev, uint8_t bdaddr_type,
+ 		timeout_remove(dev->auth_retry_id);
+ 		dev->auth_retry_id = 0;
+ 		dev->auth_failures = 0;
++
++		/*
++		 * The retry timer is the only path that turns auto connect
++		 * back on after an authentication failure turned it off. This
++		 * connection proves the keys work, so turn auto connect back
++		 * on here. Without it the device never reconnects on its own
++		 * after its next disconnect.
++		 */
++		device_set_auto_connect(dev, TRUE);
+ 	}
+ 
+ 	device_update_last_seen(dev, bdaddr_type, true);

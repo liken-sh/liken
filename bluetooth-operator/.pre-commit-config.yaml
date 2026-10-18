@@ -6,8 +6,13 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      # A patch keeps each blank line of its context as a single
+      # space, and a patch whose context loses that space no longer
+      # applies, so the hygiene fixers leave the BlueZ patches alone.
       - id: trailing-whitespace
+        exclude: ^bluetoothd/patches/bluez/
       - id: end-of-file-fixer
+        exclude: ^bluetoothd/patches/bluez/
       - id: check-yaml
         # Kubernetes manifests are multi-document streams.
         args: [--allow-multiple-documents]

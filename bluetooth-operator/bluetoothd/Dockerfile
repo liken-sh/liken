@@ -1,8 +1,8 @@
 # The bluetoothd image: the static programs the pod runs (bluetoothd,
-# dbus-daemon, btmon, and the two Go entrypoints, start-bluetoothd and
-# start-btmon), three more that a person runs with kubectl exec
-# (bluetoothctl, btmgmt, and dbus-send), their configuration, and
-# nothing else.
+# dbus-daemon, btmon, and the three Go entrypoints, start-bluetoothd,
+# start-btmon, and start-rescan), three more that a person runs with
+# kubectl exec (bluetoothctl, btmgmt, and dbus-send), their
+# configuration, and nothing else.
 #
 # bluetoothd ships here, in a workload's image, and not in the
 # read-only root that every liken machine boots. That is why the
@@ -10,6 +10,10 @@
 # it is why this image builds BlueZ rather than installing a
 # distribution's package: a package brings a package manager, a shell,
 # and a base filesystem, and this container runs three programs.
+#
+# The build applies the patches in bluetoothd/patches/bluez/ to the
+# BlueZ source. bluetoothd/patches/README.md lists each one and the
+# bug it fixes.
 #
 # The BlueZ shells have one limit in this image. BlueZ parses each
 # command's argument specification with wordexp(3), musl implements
@@ -47,8 +51,10 @@ ARG BLUEZ_SHA256=26bdcf2cebd7310c6f598850606b037ef0c515fe6608ebc54d22c50c4c32b35
 ARG DBUS_VERSION=1.16.2
 ARG DBUS_SHA256=0ba2a1a4b16afe7bceb2c07e9ce99a8c2c3508e5dec290dbb643384bd6beb7e2
 
+# patch is GNU patch. BusyBox's patch, which Alpine ships by default,
+# has no --forward, and the patches below depend on it.
 RUN apk add --no-cache \
-        build-base pkgconf meson ninja wget tar xz linux-headers \
+        build-base pkgconf meson ninja wget tar xz linux-headers patch \
         expat-dev expat-static \
         glib-dev glib-static pcre2-dev pcre2-static libffi-dev zlib-static \
         eudev-dev json-c-dev readline-dev readline-static ncurses-static
@@ -93,6 +99,29 @@ RUN wget -q "https://mirrors.edge.kernel.org/pub/linux/bluetooth/bluez-${BLUEZ_V
     && echo "${BLUEZ_SHA256}  bluez-${BLUEZ_VERSION}.tar.xz" | sha256sum -c - \
     && tar xf "bluez-${BLUEZ_VERSION}.tar.xz"
 WORKDIR /build/bluez-${BLUEZ_VERSION}
+
+# THE BLUEZ IN THIS IMAGE IS PATCHED. Each file in
+# bluetoothd/patches/bluez/ fixes a BlueZ bug that stops a controller
+# from working and that no release fixes yet, and
+# bluetoothd/patches/README.md says what each one fixes, why, and
+# where it stands upstream. Read that file before you change
+# BLUEZ_VERSION.
+#
+# Today there is one patch. BlueZ 5.87 can turn off the kernel's
+# reconnect of a bonded Bluetooth LE remote for good when the remote
+# reconnects within 4 seconds of an authentication failure. The
+# remote then never reconnects after its next sleep, and only a
+# restart of bluetoothd recovers it.
+#
+# --forward makes a patch that a new release already carries fail
+# instead of being reversed, and the build stops. That failure is the
+# reminder: delete the patch and its entry in the README, and build
+# again. The patches are applied in the order of their names.
+COPY bluetoothd/patches/bluez/ /build/patches/bluez/
+RUN set -eux; \
+    for patch in /build/patches/bluez/*.patch; do \
+        patch -p1 --forward --batch < "$patch"; \
+    done
 RUN ./configure \
         --prefix=/usr --sysconfdir=/etc --localstatedir=/var --libexecdir=/usr/libexec \
         --enable-client --enable-datafiles \
@@ -152,19 +181,22 @@ RUN set -eux; \
 
 # The licenses of BlueZ and dbus ask that their notices travel with the
 # programs, and the GPL that BlueZ uses also requires that the source of
-# a static program be available, the libraries it links included. So
-# the image carries the license files and the authors of the two
-# projects, and a list of the Alpine packages whose static libraries
-# the build installed, with the license that Alpine states for each.
-# Alpine's packages carry no license files of their own.
+# a static program be available, the libraries it links included, and
+# the changes made to it. So the image carries the license files and
+# the authors of the two projects, the patches applied to BlueZ, and a
+# list of the Alpine packages whose static libraries the build
+# installed, with the license that Alpine states for each. Alpine's
+# packages carry no license files of their own.
 RUN set -eux; \
     mkdir -p /out/usr/share/doc/bluez /out/usr/share/doc/dbus /out/usr/share/doc/liken; \
+    cp -r /build/patches/bluez /out/usr/share/doc/liken/bluez-patches; \
     cp "/build/bluez-${BLUEZ_VERSION}/COPYING" "/build/bluez-${BLUEZ_VERSION}/COPYING.LIB" \
         "/build/bluez-${BLUEZ_VERSION}/AUTHORS" /out/usr/share/doc/bluez/; \
     cp "/build/dbus-${DBUS_VERSION}/COPYING" "/build/dbus-${DBUS_VERSION}/AUTHORS" /out/usr/share/doc/dbus/; \
     { \
         echo "ghcr.io/liken-sh/bluetoothd holds static programs built from BlueZ ${BLUEZ_VERSION},"; \
         echo "https://mirrors.edge.kernel.org/pub/linux/bluetooth/bluez-${BLUEZ_VERSION}.tar.xz,"; \
+        echo "with the patches in /usr/share/doc/liken/bluez-patches applied,"; \
         echo "and dbus ${DBUS_VERSION},"; \
         echo "https://dbus.freedesktop.org/releases/dbus/dbus-${DBUS_VERSION}.tar.xz,"; \
         echo "unmodified. They link the static libraries of the Alpine $(cut -d. -f1,2 /etc/alpine-release)"; \
@@ -185,10 +217,13 @@ RUN set -eux; \
     printf 'root:x:0:0:root:/root:/sbin/nologin\nmessagebus:x:100:100:D-Bus message bus:/:/sbin/nologin\n' > /out/etc/passwd; \
     printf 'root:x:0:\nmessagebus:x:100:\n' > /out/etc/group
 
-# The two entrypoints. They are built from this repository's own
+# The three entrypoints. They are built from this repository's own
 # module, which is also where the operator comes from, so the images
 # move together. start-btmon is the command of the pod's btmon
 # container, and it runs btmon while the Adapter's spec.btmon is true.
+# start-rescan is the command of the pod's rescan container, and it
+# works around a kernel bug that leaves the passive scan off after a
+# failed connection (bluetoothd/rescan/main.go).
 FROM golang:1.27.1-bookworm AS entrypoint
 # proxy.golang.org sometimes drops a module download partway through
 # the stream. With the default comma, `go` tries the origin only when
@@ -208,17 +243,21 @@ COPY --from=kubernetes go.mod /kubernetes/
 RUN go mod download
 COPY bluetoothd/*.go ./bluetoothd/
 COPY bluetoothd/btmon/*.go ./bluetoothd/btmon/
+COPY bluetoothd/mgmt/*.go ./bluetoothd/mgmt/
+COPY bluetoothd/rescan/*.go ./bluetoothd/rescan/
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /start-bluetoothd ./bluetoothd
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /start-btmon ./bluetoothd/btmon
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /start-rescan ./bluetoothd/rescan
 # The license files of the Go standard library and of each module that
 # the binaries link. notices/go.sh says why the image needs them.
 COPY --from=notices go.sh /
-RUN CGO_ENABLED=0 sh /go.sh /notices ./bluetoothd ./bluetoothd/btmon
+RUN CGO_ENABLED=0 sh /go.sh /notices ./bluetoothd ./bluetoothd/btmon ./bluetoothd/rescan
 
 FROM scratch
 COPY --from=daemons /out/ /
 COPY --from=entrypoint /start-bluetoothd /usr/local/bin/start-bluetoothd
 COPY --from=entrypoint /start-btmon /usr/local/bin/start-btmon
+COPY --from=entrypoint /start-rescan /usr/local/bin/start-rescan
 COPY --from=entrypoint /notices /
 
 # /etc/bluetooth holds no file in the image. The entrypoint writes

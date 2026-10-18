@@ -289,6 +289,41 @@ range, it can connect with no press, and the operator writes the
 press then. So a remote that comes back into range wakes the room
 although nobody pressed a button.
 
+<a id="when-a-sleeping-remote-does-not-reconnect"></a>
+
+### When a sleeping remote does not reconnect
+
+A Low Energy remote reconnects because the kernel scans for it while
+it sleeps, and connects when a press makes it advertise. Two bugs
+outside this project can stop that scan or that connection, with no
+log line, until the pod restarts. The pod works around both.
+
+- **The kernel leaves the scan off after a failed connection.** When
+  a connection to the remote fails, for example because the remote
+  stopped advertising while the radio connected, Linux can leave the
+  scan off. The pod's `rescan` container reads the kernel's HCI
+  monitor channel. When a connection to a device that `bluetoothd`
+  reconnects on its own fails, and the kernel does not scan again
+  within 5 seconds, the container adds the device again with the
+  same command `bluetoothd` sent, and the kernel starts the scan. No
+  link drops. The container's log has a line for each one:
+
+      kubectl -n liken-system logs ds/bluetooth-operator -c rescan
+
+- **BlueZ 5.87 turns off the reconnect after an authentication
+  failure.** When the remote connects again within 4 seconds of a
+  link that ended with an authentication failure, `bluetoothd` never
+  turns the kernel's reconnect of the remote back on. The
+  `bluetoothd` image carries a patch for this. The image lists its
+  patches in `/usr/share/doc/liken/bluez-patches/`.
+
+If the `rescan` log says the kernel did not scan after the device was
+added again, or a remote stops reconnecting with no line in that log,
+turn on the [btmon trace](https://liken.sh/bluetooth/docs/guides/install/#look-inside-the-stack)
+for the radio, press the remote's buttons, and read the trace before
+you delete the pod. A restart of the pod recovers the remote, and it
+also ends the state that the trace shows.
+
 ## Unpair
 
 Deleting the `Peripheral` is the unpair:

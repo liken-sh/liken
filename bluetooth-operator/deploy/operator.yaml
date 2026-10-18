@@ -241,6 +241,47 @@ spec:
             - name: settings
               mountPath: /var/run/bluetooth.liken.sh/settings
               readOnly: true
+        # start-rescan, as a sidecar that runs as long as the pod. It
+        # works around a kernel bug: after a failed connection to a
+        # bonded Low Energy remote, Linux can leave the radio's passive
+        # scan off with no log line, and the remote then never
+        # reconnects. The program reads the HCI monitor channel, and
+        # when the kernel leaves the scan off after a failed
+        # connection to a device that bluetoothd added for auto
+        # connect, it adds the device again, which starts the scan.
+        # bluetoothd/rescan/main.go explains the bug and the fix, and
+        # when to delete this container.
+        #
+        # The container starts before bluetoothd, for the reason the
+        # btmon container does: the program learns which devices
+        # reconnect from the Add Device commands that bluetoothd sends
+        # when it registers the adapter, and it sees only the commands
+        # that come after it binds the monitor channel.
+        - name: rescan
+          image: ghcr.io/liken-sh/bluetoothd:latest
+          restartPolicy: Always
+          command:
+            - /usr/local/bin/start-rescan
+          securityContext:
+            # NET_RAW for the bind of the monitor channel, the same
+            # test the btmon container passes, and NET_ADMIN for Add
+            # Device, the same test bluetoothd passes. The container
+            # runs as root because the kubelet sets no ambient
+            # capabilities, and it writes nothing.
+            capabilities:
+              drop: ["ALL"]
+              add: ["NET_RAW", "NET_ADMIN"]
+            runAsUser: 0
+            runAsGroup: 0
+            readOnlyRootFilesystem: true
+            privileged: false
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 5m
+              memory: 8Mi
+            limits:
+              memory: 32Mi
         # bluetoothd, as a sidecar: an init container that restarts
         # always, which the kubelet starts before the operator and
         # stops after it. Both halves of that order matter. The bus

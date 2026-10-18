@@ -17,15 +17,16 @@ func initContainerNames(containers []corev1.Container) []string {
 	return names
 }
 
-// btmon reports only what happens after it binds the monitor channel,
-// so it starts before bluetoothd: the commands that bluetoothd sends at
-// adapter registration, which tell the kernel which bonded devices may
-// reconnect, are in the trace. bondfetch runs to completion first, as
-// the comment on the pod explains.
-func TestTheTraceStartsBeforeBluetoothd(t *testing.T) {
+// btmon and start-rescan read only what happens after they bind the
+// monitor channel, so both start before bluetoothd. The commands that
+// bluetoothd sends at adapter registration, which tell the kernel
+// which bonded devices may reconnect, are then in the trace, and
+// start-rescan learns from them which devices to add again. bondfetch
+// runs to completion first, as the comment on the pod explains.
+func TestTheMonitorReadersStartBeforeBluetoothd(t *testing.T) {
 	daemonSet := daemonSetIn(t, "deploy/operator.yaml")
 	got := initContainerNames(daemonSet.Spec.Template.Spec.InitContainers)
-	want := []string{"bondfetch", "btmon", "bluetoothd"}
+	want := []string{"bondfetch", "btmon", "rescan", "bluetoothd"}
 	if !slices.Equal(got, want) {
 		t.Errorf("the init containers are %v, want %v", got, want)
 	}

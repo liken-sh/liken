@@ -8,12 +8,13 @@ package main
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"maps"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/liken-sh/bluetooth-operator/bluetoothd/mgmt"
 )
 
 // fakeManagement answers the two management commands the way the
@@ -51,19 +52,19 @@ func (m *fakeManagement) Write(packet []byte) (int, error) {
 		return len(packet), nil
 	}
 	switch opcode {
-	case mgmtOpReadIndexList:
+	case mgmt.OpReadIndexList:
 		indexes := slices.Sorted(maps.Keys(m.powered))
 		reply := binary.LittleEndian.AppendUint16(nil, uint16(len(indexes)))
 		for _, each := range indexes {
 			reply = binary.LittleEndian.AppendUint16(reply, each)
 		}
 		m.complete(opcode, index, 0, reply)
-	case mgmtOpSetPowered:
+	case mgmt.OpSetPowered:
 		if status, refused := m.refuse[index]; refused {
-			m.send(mgmtEvCmdStatus, index, binary.LittleEndian.AppendUint16(nil, opcode), status)
+			m.send(mgmt.EvCmdStatus, index, binary.LittleEndian.AppendUint16(nil, opcode), status)
 			return len(packet), nil
 		}
-		m.powered[index] = packet[mgmtHeaderSize] == 1
+		m.powered[index] = packet[mgmt.HeaderSize] == 1
 		if m.announce {
 			m.send(0x0006, index, []byte{0, 0, 0, 0})
 		}
@@ -74,7 +75,7 @@ func (m *fakeManagement) Write(packet []byte) (int, error) {
 
 func (m *fakeManagement) complete(opcode, index uint16, status byte, reply []byte) {
 	params := binary.LittleEndian.AppendUint16(nil, opcode)
-	m.send(mgmtEvCmdComplete, index, append(append(params, status), reply...))
+	m.send(mgmt.EvCmdComplete, index, append(append(params, status), reply...))
 }
 
 func (m *fakeManagement) send(event, index uint16, params []byte, more ...byte) {
@@ -249,25 +250,5 @@ func TestTheChannelClosesBeforeTheExec(t *testing.T) {
 	}
 	if !closedAtExec {
 		t.Fatal("the management channel was open at the exec")
-	}
-}
-
-// The status names come from the Management API's list, and a status
-// outside it still prints its number.
-func TestManagementStatusNames(t *testing.T) {
-	cases := []struct {
-		status mgmtStatus
-		want   string
-	}{
-		{0x0a, "Busy (0x0a)"},
-		{0x12, "RFKilled (0x12)"},
-		{0x7f, "status 0x7f"},
-	}
-	for _, c := range cases {
-		t.Run(fmt.Sprint(c.status), func(t *testing.T) {
-			if got := c.status.Error(); got != c.want {
-				t.Fatalf("%d reads %q, want %q", c.status, got, c.want)
-			}
-		})
 	}
 }

@@ -275,6 +275,12 @@ The `bluetoothd` container's log has a line for each adapter:
 
     kubectl -n liken-system logs ds/bluetooth-operator -c bluetoothd
 
+The `bluetoothd` image builds BlueZ from its release with patches
+for bugs that stop a controller from reconnecting, and the `rescan`
+container works around a kernel bug with the same effect.
+[When a sleeping remote does not reconnect](/docs/guides/pair-a-controller/#when-a-sleeping-remote-does-not-reconnect)
+describes both.
+
 ## Verify
 
     kubectl get pods -n liken-system -l app=bluetooth-operator
@@ -402,12 +408,15 @@ rotates the log or the pod goes away.
 
 ## The privilege it takes
 
-The pod is four containers, and the privilege is confined to two of
+The pod is five containers, and the privilege is confined to three of
 them. The `bluetoothd` container takes four capabilities
 (`NET_ADMIN`, `NET_BIND_SERVICE`, `SETUID`, `SETGID`), because it is
 the Bluetooth stack. The `btmon` container takes only `NET_RAW`,
 because it binds the kernel's HCI monitor channel, and that bind
-tests `CAP_NET_RAW`. Every container shares the pod's `hostNetwork`.
+tests `CAP_NET_RAW`. The `rescan` container takes `NET_RAW` for the
+same bind and `NET_ADMIN` for the one management command it sends,
+as [When a sleeping remote does not reconnect](/docs/guides/pair-a-controller/#when-a-sleeping-remote-does-not-reconnect)
+explains. Every container shares the pod's `hostNetwork`.
 The `operator` and `bondfetch` containers drop every capability. The comments in
 [`deploy/operator.yaml`](/deploy/operator.yaml) state the kernel or
 daemon check behind each grant.

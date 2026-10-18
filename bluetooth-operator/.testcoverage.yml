@@ -29,7 +29,16 @@ override:
   # Starting the daemon needs a real bus, and opening the channel
   # needs a real adapter.
   - path: ^bluetoothd$
+    threshold: 65
+  # The management channel: the commands and the replies are tested
+  # over a fake channel. Opening the socket needs a real kernel.
+  - path: ^bluetoothd/mgmt$
     threshold: 58
+  # start-rescan: the watcher and the loop are tested against a fake
+  # monitor channel and a fake management channel. The sockets and
+  # main need a real kernel.
+  - path: ^bluetoothd/rescan$
+    threshold: 86
   # start-btmon: the supervisor, the watch, and the child are tested.
   # main and run name the real settings directory and the real btmon.
   - path: ^bluetoothd/btmon$

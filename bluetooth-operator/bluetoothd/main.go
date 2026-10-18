@@ -33,6 +33,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/liken-sh/bluetooth-operator/bluetoothd/mgmt"
 )
 
 const (
@@ -141,7 +143,7 @@ func run() error {
 
 	// The power-off comes last, after the bus is up, so that the
 	// adapters are off for the shortest time (poweroff.go).
-	return becomeBluetoothd(openManagement, os.Stdout, syscall.Exec)
+	return becomeBluetoothd(mgmt.Open, os.Stdout, syscall.Exec)
 }
 
 // busSocket reads the socket path out of a D-Bus address. Only the
