@@ -60,6 +60,10 @@ type markFile struct {
 	season   int
 	episode  int
 	duration int64 // milliseconds
+	// The mapping of the episode's season, which names the show and the
+	// season a provider holds the episode under where it differs from the
+	// series.
+	shows seasonShows
 }
 
 // One provider block, asked for the spans of one file. A provider that holds

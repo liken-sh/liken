@@ -160,6 +160,10 @@ type likenItem struct {
 	Wrote      string           `yaml:"wrote,omitempty"`
 	Written    time.Time        `yaml:"written,omitempty"`
 	Candidates []likenCandidate `yaml:"candidates,omitempty"`
+	// The season mapping a fact asked under when it wrote the file, as
+	// seasonShows.signature writes it, and empty for a season it asked as
+	// the series. A file written under another mapping is replaced.
+	Show string `yaml:"show,omitempty"`
 }
 
 // One name reads back as the one provider that answered, so a fact that takes
@@ -193,6 +197,10 @@ type likenAttempt struct {
 	// fact that runs a tool. A person reads the cause beside the title, and
 	// the next attempt replaces it.
 	Reason string `yaml:"reason,omitempty"`
+	// The season mapping the attempt asked under, for a fact that asks about
+	// one season or one episode. The walk lifts the attempt only while the
+	// season's mapping is the same.
+	Show string `yaml:"show,omitempty"`
 }
 
 // A fact's file is named for the fact itself, so the one-file-per-

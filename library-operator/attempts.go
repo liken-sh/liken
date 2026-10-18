@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -143,6 +144,9 @@ type likenDir struct {
 	// title's own, which is the list below, and a person's directory holds the
 	// three contributor facts and no other.
 	facts []string
+	// The season mapping each entry of a season fact is due to be asked
+	// under. A folder of no series maps nothing.
+	shows folderShows
 }
 
 // The facts this folder is read for, which is the title list where the caller
@@ -212,6 +216,9 @@ type likenRows struct {
 	marks    []markRow
 	// The stale partial files the listing of the .liken directory found.
 	stale []string
+	// The art files a fact wrote under a season mapping that is no longer the
+	// season's, relative to the root.
+	reshown []string
 }
 
 // Reads every .liken file the folder holds into attempts rows. A folder that
@@ -250,17 +257,20 @@ func (s likenDir) read(now time.Time) (likenRows, error) {
 		if err != nil {
 			return held, err
 		}
+		reshown := s.reshownEntries(fact, ledger)
+		held.reshown = append(held.reshown, s.reshownOutputs(fact, ledger)...)
 		switch fact {
 		case factCredits:
 			held.credits = append(held.credits, creditRows(s.library, s.item, ledger.Credits)...)
 		case factTrailer:
 			held.trailers = append(held.trailers, s.trailerRows(ledger.Trailers)...)
 		case factMarks:
-			held.marks = append(held.marks, s.markRows(ledger.Marks)...)
+			held.marks = append(held.marks, s.markRows(slices.DeleteFunc(ledger.Marks,
+				func(mark markEntry) bool { return reshown[mark.Path] }))...)
 		}
 		for _, attempt := range ledger.Attempts {
 			item := s.itemOf(fact, attempt.Path)
-			if item == "" || attempt.Result == "" {
+			if item == "" || attempt.Result == "" || reshown[attempt.Path] {
 				continue
 			}
 			held.attempts = append(held.attempts, attemptRow{
@@ -310,6 +320,7 @@ func readLikenDir(liken likenDir, result *walkResult) {
 	result.credits = append(result.credits, held.credits...)
 	result.trailers = append(result.trailers, held.trailers...)
 	result.marks = append(result.marks, held.marks...)
+	result.reshown = append(result.reshown, held.reshown...)
 }
 
 // The reporter counts a gap with the same query the container works from, so

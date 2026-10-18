@@ -31,7 +31,11 @@ and the kind that directory holds:
 The block named by `kind` must be present, and the other kinds'
 blocks must not. An empty block is a complete one. The kinds are
 `movies`, `series`, and `franchises`. A series library holds one
-folder per series with a season folder inside. A franchises library
+folder per series with a season folder inside. A season that a
+provider keeps as a show of its own, such as one installment of an
+anthology, names that show in its `season.nfo`, as
+[A season that is another show](https://liken.sh/library/docs/guides/enrichment/#a-season-that-is-another-show)
+describes. A franchises library
 is the one kind whose files are written by people, and
 [Franchises](https://liken.sh/library/docs/guides/franchises/) covers it.
 

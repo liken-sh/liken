@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 	"testing/synctest"
+	"time"
 )
 
 // wantOpaque checks one log against the rule: every word in want is in it,
@@ -87,7 +88,7 @@ func TestAnArtLineNamesTheFileByItsPath(t *testing.T) {
 		image := artCandidate{URL: client.base + "/t/p/w780/quiet.jpg"}
 
 		work.writeArt(t.Context(), newTMDbArtAnswerer(client), artTypes[factPoster],
-			gap, folder, filepath.Join(folder, "poster.jpg"), image, 0)
+			gap, folder, filepath.Join(folder, "poster.jpg"), image, 0, time.Time{})
 
 		named := opaquePath(root, "Some Film (2014)/poster.jpg")
 		wantOpaque(t, logged.String(),

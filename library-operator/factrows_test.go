@@ -195,7 +195,7 @@ func TestTheTrickplayFactWritesTheTrickplayColumn(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		work.recordArt(filepath.Join(root, "The Long Survey (1982)"), factTrickplay, "The Long Survey (1982).mkv", artProviderExisting, attemptFound)
+		work.recordArt(filepath.Join(root, "The Long Survey (1982)"), factTrickplay, artGap{key: "The Long Survey (1982).mkv"}, artProviderExisting, attemptFound)
 
 		rows := catalogLines(t, catalog, `SELECT trickplay FROM files WHERE library = ? AND type = 'video'`)
 		if len(rows) != 1 || rows[0] == "" {

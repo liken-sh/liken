@@ -32,12 +32,18 @@ var fileFacts = map[string]bool{
 type reopenedFacts struct {
 	replaced []replacedFile
 	missing  int
+	// The art files a fact wrote under another season mapping.
+	reshown int
+	// Each <showid> a season.nfo held that the walk skipped.
+	skippedShows []skippedShow
 }
 
 // The sum of two reads, for a walk that reads many folders.
 func (r reopenedFacts) add(other reopenedFacts) reopenedFacts {
 	r.replaced = append(r.replaced, other.replaced...)
 	r.missing += other.missing
+	r.reshown += other.reshown
+	r.skippedShows = append(r.skippedShows, other.skippedShows...)
 	return r
 }
 
@@ -55,6 +61,7 @@ func (r *walkResult) settleFacts() {
 	identities := r.identities
 	r.identities = nil
 	r.dropEarlierOutputs(identities)
+	r.dropReshownOutputs()
 	outputs := r.outputsOnVolume()
 	earlierMarks := map[string]bool{}
 	kept := r.attempts[:0]

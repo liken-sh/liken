@@ -83,15 +83,25 @@ func (e *enricher) marksOne(ctx context.Context, line *markLine, path string, fi
 	if err != nil {
 		e.logf("could not read the probe record of %s: %v", e.named(path), err)
 	}
+	if !file.movie {
+		shows, err := folderSeasonShows(filepath.Dir(absolute))
+		if err != nil {
+			e.logf("could not read the season mapping of %s: %v", e.named(path), err)
+			e.recordMarks(folder, entry, markAnswer{}, attemptError, earlier, "")
+			return false
+		}
+		file.shows = shows
+	}
+	show := file.shows.signature()
 	if file.episodes > 1 {
-		e.recordMarks(folder, entry, markAnswer{complete: true}, attemptNothing, earlier)
+		e.recordMarks(folder, entry, markAnswer{complete: true}, attemptNothing, earlier, show)
 		return false
 	}
 	answer := line.ask(ctx, file)
 	if answer.failure != nil {
 		e.logf("could not read the marks of %s: %v", e.named(path), answer.failure)
 	}
-	e.recordMarks(folder, entry, answer, answer.result(), earlier)
+	e.recordMarks(folder, entry, answer, answer.result(), earlier, show)
 	return len(answer.entries) > 0
 }
 
@@ -105,16 +115,18 @@ func (e *enricher) marksOne(ctx context.Context, line *markLine, path string, fi
 // A file whose last attempt came before the second a new file took its path
 // is the exception. Every span it holds, from every source, was placed on
 // the earlier file, so they all go before the answer lands, and a source
-// that did not answer holds no span of the new file until it answers.
-func (e *enricher) recordMarks(folder, entry string, answer markAnswer, result string, earlier int64) {
+// that did not answer holds no span of the new file until it answers. A file
+// whose last attempt asked under another season mapping is the same case:
+// its spans are another show's.
+func (e *enricher) recordMarks(folder, entry string, answer markAnswer, result string, earlier int64, show string) {
 	e.tallies.add(tallyAttempts, 1, "fact", factMarks, "result", result)
 	now := time.Now().UTC()
 	err := e.writer.updateLikenLedger(folder, factMarks, func(ledger *likenLedger) {
-		if earlier > 0 && !ledger.attemptedSince(entry, earlier) {
+		if (earlier > 0 && !ledger.attemptedSince(entry, earlier)) || ledger.askedUnderAnother(entry, show) {
 			ledger.Marks = slices.DeleteFunc(ledger.Marks, func(mark markEntry) bool { return mark.Path == entry })
 		}
 		ledger.Marks = replacedMarks(ledger.Marks, entry, answer.answered, answer.entries)
-		ledger.noteAttempt(likenAttempt{Path: entry, At: now, Result: result, Provider: answer.held})
+		ledger.noteAttempt(likenAttempt{Path: entry, At: now, Result: result, Provider: answer.held, Show: show})
 	})
 	if err != nil {
 		e.logf("could not record the %s attempt at %s: %v",

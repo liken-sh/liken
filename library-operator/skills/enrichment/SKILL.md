@@ -612,6 +612,61 @@ movie and the TVDB id for a series. These ids identify the title;
 OMDb and Fanart.tv still require their own API keys, configured through
 each provider's `secretRef`.
 
+### A season that is another show
+
+Providers do not agree on what a series is. Netflix's anthology
+`Monster` is one series of four seasons on TheTVDB and IMDb, and Sonarr
+puts it in one folder, `Monster (2022)/Season 01` to `Season 04`. TMDb
+and TVmaze give each installment its own show:
+
+| Season | TheTVDB | TMDb | TVmaze |
+|---|---|---|---|
+| Dahmer | `389492` season 1 | `113988` season 1 | `50907` season 1 |
+| Menendez | `389492` season 2 | `225634` season 1 | `68626` season 1 |
+| Ed Gein | `389492` season 3 | `286801` season 1 | `86754` season 1 |
+| Lizzie Borden | `389492` season 4 | `299939` season 1 | `87597` season 1 |
+
+The series folder holds one id for each provider, so no TMDb id fits
+all four seasons. To tell the facts which show a season is on a
+provider, add a `<showid>` to the season folder's `season.nfo`:
+
+    <season>
+      <showid type="tmdb" season="1">225634</showid>
+      <showid type="tvmaze" season="1">68626</showid>
+    </season>
+
+`type` names the provider, by the names a `<uniqueid>` takes: `tmdb`,
+`tvdb`, `imdb`, or `tvmaze`. The text is the show's id on that
+provider, and `season` is that show's season. Without `season`, the
+show's season is the folder's own. An episode keeps its number, so
+`S02E03` of the folder is episode 3 of season 1 of TMDb's `225634`.
+Jellyfin and Kodi read `season.nfo` too, and skip an element they do
+not know.
+
+These facts read the mapping before they ask about a season or an
+episode:
+
+* `episode-thumb` and `season-poster` from TMDb ask the mapped show
+  and season.
+* `season-poster` and `season-banner` from Fanart.tv read the season
+  art of the mapped TheTVDB show.
+* `marks` from TheIntroDB and IntroDB send the mapped id with its
+  season.
+
+Every other fact asks about the series as a whole, with the ids in
+`tvshow.nfo`. The IMDb ratings of episodes read each episode's own
+IMDb id, and they do not read the mapping.
+
+Each attempt records the mapping it asked under. When you add,
+change, or remove a `<showid>`, the next walk opens these facts again
+for the season's episodes, and the next `Job` asks again. An episode
+still or a season poster that the art phase wrote under the earlier
+mapping leaves the catalog until the phase writes the new one over it.
+The phase writes over the file only while the file is as the phase
+left it, so a still you replaced by hand stays. A `<showid>` the walk
+cannot use, such as one with no id or an unknown `type`, is skipped,
+and the walk logs one line that names the file and the reason.
+
 ### The write rule
 
 Each fact owns a fixed group of elements in the `.nfo` file and writes

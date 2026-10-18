@@ -56,7 +56,7 @@ func (a introdbMarkAnswerer) providerBlock() string { return providerBlockIntroD
 // two aired numbers, and a movie names the movie flag in their place. An
 // answer of nulls and a 404 are both IntroDB holding nothing for the work.
 func (a introdbMarkAnswerer) marks(ctx context.Context, file markFile) ([]markEntry, error) {
-	id := file.ids["imdb"]
+	id, season := file.shows.on("imdb", file.ids["imdb"], file.season)
 	if id == "" {
 		return nil, nil
 	}
@@ -64,7 +64,7 @@ func (a introdbMarkAnswerer) marks(ctx context.Context, file markFile) ([]markEn
 	if file.movie {
 		query.Set("is_movie", "true")
 	} else {
-		query.Set("season", strconv.Itoa(file.season))
+		query.Set("season", strconv.Itoa(season))
 		query.Set("episode", strconv.Itoa(file.episode))
 	}
 	var segments introdbSegments

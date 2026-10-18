@@ -90,7 +90,19 @@ func scanSeriesFolder(scan folderScan, dir string, result *walkResult) {
 	})
 	result.genres = append(result.genres, genreRows(library, seriesID, body.Genres)...)
 	result.aliases = append(result.aliases, aliasRowsForItem(library, scopeSeries, meta.ProviderIDs, key, seriesID)...)
-	readLikenDir(likenDir{root: root, dir: dir, library: library, item: seriesID}, result)
+	// The season mappings are read before any ledger, because each ledger
+	// lifts an attempt only while its season's mapping is still the one the
+	// attempt asked under.
+	seasons, err := seriesSeasonShows(dir, ignore)
+	result.noteReadError(err)
+	for _, season := range seasons {
+		for _, reason := range season.skipped {
+			result.reopened.skippedShows = append(result.reopened.skippedShows, skippedShow{
+				path: filepath.Join(relativePath(root, dir), season.name, seasonNFOName), reason: reason})
+		}
+	}
+	seriesShows, folderShowsByName := seriesFolderShows(seasons)
+	readLikenDir(likenDir{root: root, dir: dir, library: library, item: seriesID, shows: seriesShows}, result)
 	result.titles++
 	if !identified {
 		result.unidentified++
@@ -115,7 +127,7 @@ func scanSeriesFolder(scan folderScan, dir string, result *walkResult) {
 		}
 	}
 
-	scanSeriesFiles(root, dir, library, seriesID, ignore, folders, ledgers, result)
+	scanSeriesFiles(root, dir, library, seriesID, ignore, folders, ledgers, folderShowsByName, result)
 }
 
 // The arrival of every episode file, read from one ledger per folder that
@@ -183,7 +195,8 @@ func (f seriesFolders) note(episode episodeFile, episodeItemIDs []string) {
 // Every folder this pass reads files from has its .liken lifted here, because
 // the probe records an attempt beside every file it opens, an extras folder's
 // among them.
-func scanSeriesFiles(root, dir, library, seriesID string, ignore ignoreSet, folders seriesFolders, ledgers *probeLedgers, result *walkResult) {
+func scanSeriesFiles(root, dir, library, seriesID string, ignore ignoreSet, folders seriesFolders,
+	ledgers *probeLedgers, shows map[string]string, result *walkResult) {
 	probes, err := ledgers.of(dir)
 	result.noteReadError(err)
 	rows, streams, subdirectories, err := folderFiles{
@@ -229,6 +242,7 @@ func scanSeriesFiles(root, dir, library, seriesID string, ignore ignoreSet, fold
 		readLikenDir(likenDir{
 			root: root, dir: child, library: library,
 			item: seriesID, items: folders.items[child],
+			shows: folderShows{folder: shows[name]},
 		}, result)
 	}
 }

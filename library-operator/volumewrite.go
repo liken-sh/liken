@@ -424,6 +424,26 @@ func (w *volumeWriter) replaceEarlierFile(target string, data []byte, before int
 	return true, w.write(target, data)
 }
 
+// The replace door for an art file that the art phase itself wrote under a
+// season mapping that is no longer the season's: a still or a poster of
+// another show. The door writes over the file only while the file is as the
+// phase left it, not modified after the second the ledger says the phase
+// wrote it. A file a person or another tool changed since is theirs, and the
+// door keeps it.
+func (w *volumeWriter) replaceOwnFile(target string, data []byte, written time.Time) (bool, error) {
+	info, err := os.Lstat(target)
+	if errors.Is(err, fs.ErrNotExist) {
+		return w.createOnce(target, data)
+	}
+	if err != nil {
+		return false, err
+	}
+	if !info.Mode().IsRegular() || info.ModTime().Unix() > written.Unix() {
+		return false, nil
+	}
+	return true, w.write(target, data)
+}
+
 // The replace door for a tile directory that shows an earlier file, which
 // the trickplay worker staged a new tree for. The tiles of an earlier encode
 // place each thumbnail at that encode's times, so they are not this file's

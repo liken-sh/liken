@@ -341,7 +341,7 @@ func TestARescanLogsTheFileItFoundReplaced(t *testing.T) {
 	for _, want := range []string{
 		"bytes in the probe record, 34 on the volume",
 		"16 bytes in the probe record",
-		"reopened the facts of 1 replaced files and 0 missing outputs",
+		"reopened the facts of 1 replaced files, 0 missing outputs, and 0 art files of another show",
 	} {
 		if !strings.Contains(log.String(), want) {
 			t.Errorf("log = %q, want %q", log.String(), want)

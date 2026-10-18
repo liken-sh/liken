@@ -142,6 +142,9 @@ type artGap struct {
 	tmdb    string
 	season  int
 	episode int
+	// The season's mapping, for a fact that asks about one season or one
+	// episode. The art phase reads it from season.nfo before it asks.
+	shows seasonShows
 }
 
 // The folder the file lands in and the entry the ledger keys on. Both come

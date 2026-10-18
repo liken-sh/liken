@@ -103,7 +103,11 @@ The scanner reads `movie.nfo`, `tvshow.nfo`, and the `.nfo` beside
 each episode, leniently, because Jellyfin writes bare ampersands in
 URLs. It reads the title, the year, the plot, the genres, the people,
 the ratings, and the provider ids in `uniqueid` elements, with
-`imdbid`, `tmdbid`, and `tvdbid` as fallbacks. The scanner writes the
+`imdbid`, `tmdbid`, and `tvdbid` as fallbacks. In a season folder, it
+reads the `<showid>` elements of `season.nfo`, which name the show a
+provider keeps the season under. The
+[enrichment guide](https://liken.sh/library/docs/guides/enrichment/#a-season-that-is-another-show)
+explains them. The scanner writes the
 genres to the catalog in the spelling the enricher uses, so a `.nfo`
 file that holds `Sci-Fi` shows `Science Fiction` in the browser. The
 file itself does not change, whether another program or an earlier

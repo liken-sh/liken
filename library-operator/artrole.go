@@ -68,34 +68,47 @@ func (e *enricher) artGap(ctx context.Context, fact string, line *artLine) error
 func (e *enricher) artOne(ctx context.Context, line *artLine, art artType, gap artGap) bool {
 	folder := filepath.Join(e.root, gap.folder())
 	target := filepath.Join(folder, art.fileFor(gap))
+	shows, err := e.gapShows(art.fact, gap)
+	if err != nil {
+		e.logf("could not read the season mapping of %s: %v", e.named(gap.key), err)
+		e.recordArt(folder, art.fact, gap, "", attemptError)
+		return false
+	}
+	gap.shows = shows
 	earlier, err := e.earlierArt(art, gap)
 	if err != nil {
 		e.logf("could not read the probe record of %s: %v", e.named(gap.key), err)
-		e.recordArt(folder, art.fact, gap.entry(), "", attemptError)
+		e.recordArt(folder, art.fact, gap, "", attemptError)
+		return false
+	}
+	own, err := e.reshownArt(folder, art.fact, gap)
+	if err != nil {
+		e.logf("could not read the %s ledger of %s: %v", art.fact, e.named(gap.key), err)
+		e.recordArt(folder, art.fact, gap, "", attemptError)
 		return false
 	}
 	if held, err := fileExists(target); err != nil {
 		e.logf("could not read %s: %v", e.named(target), err)
-		e.recordArt(folder, art.fact, gap.entry(), "", attemptError)
+		e.recordArt(folder, art.fact, gap, "", attemptError)
 		return false
-	} else if held && !madeBefore(target, earlier) {
-		e.recordArt(folder, art.fact, gap.entry(), artProviderExisting, attemptFound)
+	} else if held && !madeBefore(target, earlier) && own.IsZero() {
+		e.recordArt(folder, art.fact, gap, artProviderExisting, attemptFound)
 		return false
 	}
 
 	answerer, candidates, err := line.ask(ctx, art.fact, gap, e.artTitle(gap))
 	if err != nil {
 		e.logf("could not read the %s of %s: %v", art.fact, e.named(gap.key), err)
-		e.recordArt(folder, art.fact, gap.entry(), "", attemptError)
+		e.recordArt(folder, art.fact, gap, "", attemptError)
 		return false
 	}
 	image, held := chooseArt(candidates, artLanguage)
 	if answerer == nil || !held {
 		e.logf("no provider holds the %s of %s", art.fact, e.named(gap.key))
-		e.recordArt(folder, art.fact, gap.entry(), "", attemptNothing)
+		e.recordArt(folder, art.fact, gap, "", attemptNothing)
 		return false
 	}
-	return e.writeArt(ctx, answerer, art, gap, folder, target, image, earlier)
+	return e.writeArt(ctx, answerer, art, gap, folder, target, image, earlier, own)
 }
 
 // The second before which an art file belongs to an earlier file at the path
@@ -126,48 +139,52 @@ func (e *enricher) artTitle(gap artGap) titleRef {
 // and no longer. A create that finds the file there answers as the read above
 // does, because another writer reached it first.
 func (e *enricher) writeArt(ctx context.Context, answerer artAnswerer, art artType, gap artGap,
-	folder, target string, image artCandidate, earlier int64) bool {
+	folder, target string, image artCandidate, earlier int64, own time.Time) bool {
 	data, err := answerer.fetchFile(ctx, image.URL)
 	if err != nil {
 		e.logf("could not read %s: %v", opaqueText(image.URL), err)
-		e.recordArt(folder, art.fact, gap.entry(), "", attemptError)
+		e.recordArt(folder, art.fact, gap, "", attemptError)
 		return false
 	}
 	var written bool
-	if art.fact == factEpisodeThumb {
+	switch {
+	case !own.IsZero():
+		written, err = e.writer.replaceOwnFile(target, data, own)
+	case art.fact == factEpisodeThumb:
 		written, err = e.writer.replaceEarlierFile(target, data, earlier)
-	} else {
+	default:
 		written, err = e.writer.createOnce(target, data)
 	}
 	if err != nil {
 		e.logf("could not write %s: %v", e.named(target), err)
-		e.recordArt(folder, art.fact, gap.entry(), "", attemptError)
+		e.recordArt(folder, art.fact, gap, "", attemptError)
 		return false
 	}
 	if !written {
-		e.recordArt(folder, art.fact, gap.entry(), artProviderExisting, attemptFound)
+		e.recordArt(folder, art.fact, gap, artProviderExisting, attemptFound)
 		return false
 	}
 	e.logf("wrote the %s of %s from %s", art.fact, e.named(gap.key), answerer.providerBlock())
-	e.recordArt(folder, art.fact, gap.entry(), answerer.providerBlock(), attemptFound)
+	e.recordArt(folder, art.fact, gap, answerer.providerBlock(), attemptFound)
 	return true
 }
 
 // The item entry and the attempt are one write of one file, so a reader never
 // sees an answer without its attempt. A provider name of nothing is a miss or
 // an error, which the attempt itself states.
-func (e *enricher) recordArt(folder, fact, entry, provider, result string) {
+func (e *enricher) recordArt(folder, fact string, gap artGap, provider, result string) {
 	e.tallies.add(tallyAttempts, 1, "fact", fact, "result", result)
 	now := time.Now().UTC()
+	entry, show := gap.entry(), gap.shows.signature()
 	err := e.writer.updateLikenLedger(folder, fact, func(ledger *likenLedger) {
 		if provider != "" {
 			item := likenItem{Path: entry, Provider: providerNames{provider}}
 			if provider != artProviderExisting {
-				item.Written = now
+				item.Written, item.Show = now, show
 			}
 			ledger.noteItem(item)
 		}
-		ledger.noteAttempt(likenAttempt{Path: entry, At: now, Result: result})
+		ledger.noteAttempt(likenAttempt{Path: entry, At: now, Result: result, Show: show})
 	})
 	if err != nil {
 		e.logf("could not record the %s attempt at %s: %v", fact, e.named(filepath.Join(folder, entry)), err)

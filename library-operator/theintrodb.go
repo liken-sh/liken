@@ -112,19 +112,21 @@ type theintrodbID struct {
 	parameter string
 }
 
-// The first id the work holds, as the query that names it, or nothing for a
-// work that holds none.
-func theintrodbQuery(file markFile) (url.Values, bool) {
+// The first id the work holds, as the query that names it, and the season
+// that goes with that id, or nothing for a work that holds none. A season that
+// maps the id's provider to a show of its own names that show and its season.
+func theintrodbQuery(file markFile) (url.Values, int, bool) {
 	order := theintrodbEpisodeIDs
 	if file.movie {
 		order = theintrodbMovieIDs
 	}
 	for _, id := range order {
-		if value := theintrodbIDValue(id.provider, file.ids[id.provider]); value != "" {
-			return url.Values{id.parameter: {value}}, true
+		value, season := file.shows.on(id.provider, file.ids[id.provider], file.season)
+		if value = theintrodbIDValue(id.provider, value); value != "" {
+			return url.Values{id.parameter: {value}}, season, true
 		}
 	}
-	return nil, false
+	return nil, 0, false
 }
 
 // TheTVDB and TMDb ids are positive numbers, and an IMDb id is a tt id. Any
@@ -149,12 +151,12 @@ func theintrodbIDValue(provider, value string) string {
 // not record which of TheTVDB's orders a library follows. The length goes
 // with the ask wherever the probe measured one.
 func (a theintrodbMarkAnswerer) marks(ctx context.Context, file markFile) ([]markEntry, error) {
-	query, named := theintrodbQuery(file)
+	query, season, named := theintrodbQuery(file)
 	if !named {
 		return nil, nil
 	}
 	if !file.movie {
-		query.Set("season", strconv.Itoa(file.season))
+		query.Set("season", strconv.Itoa(season))
 		query.Set("episode", strconv.Itoa(file.episode))
 	}
 	if file.duration > 0 {

@@ -86,7 +86,10 @@ type walkResult struct {
 	// read settles its attempts with and then drops.
 	identities fileIdentities
 	// What the settle reopened, which the walk and a rescan log.
-	reopened     reopenedFacts
+	reopened reopenedFacts
+	// The art files a fact wrote under a season mapping that is no longer the
+	// season's. The settle takes them out of the rows.
+	reshown      []string
 	titles       int
 	unidentified int
 	// the paths of the folders this walk could not identify, so a

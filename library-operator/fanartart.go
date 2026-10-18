@@ -66,7 +66,7 @@ func fanartMovieKey(gap artGap, title titleRef) string {
 // because a title this provider cannot be asked about is the ordinary case.
 func (a fanartArtAnswerer) seriesCandidates(ctx context.Context, fact string, gap artGap,
 	title titleRef) ([]artCandidate, error) {
-	id := strings.TrimSpace(title.ids["tvdb"])
+	id, season := gap.shows.on("tvdb", strings.TrimSpace(title.ids["tvdb"]), gap.season)
 	if id == "" {
 		return nil, nil
 	}
@@ -74,7 +74,7 @@ func (a fanartArtAnswerer) seriesCandidates(ctx context.Context, fact string, ga
 	if err != nil || series == nil {
 		return nil, err
 	}
-	return fanartCandidates(fanartSeriesImages(series, fact, gap.season)), nil
+	return fanartCandidates(fanartSeriesImages(series, fact, season)), nil
 }
 
 // Which of the movie lists each art fact reads. The logo and the clearart

@@ -126,16 +126,16 @@ func (c *tmdbClient) images(ctx context.Context, kind, fact string, gap artGap) 
 // Which endpoint one fact reads. The season and the episode hang off the
 // series, and the title's own art follows the kind of the library.
 func tmdbImagesPath(kind, fact string, gap artGap) string {
-	series := "/3/tv/" + gap.tmdb
+	show, season := gap.shows.on("tmdb", gap.tmdb, gap.season)
 	switch fact {
 	case factSeasonPoster:
-		return series + "/season/" + strconv.Itoa(gap.season) + "/images"
+		return "/3/tv/" + show + "/season/" + strconv.Itoa(season) + "/images"
 	case factEpisodeThumb:
-		return series + "/season/" + strconv.Itoa(gap.season) +
+		return "/3/tv/" + show + "/season/" + strconv.Itoa(season) +
 			"/episode/" + strconv.Itoa(gap.episode) + "/images"
 	}
 	if kind == libraryKindSeries {
-		return series + "/images"
+		return "/3/tv/" + gap.tmdb + "/images"
 	}
 	return "/3/movie/" + gap.tmdb + "/images"
 }
