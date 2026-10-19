@@ -183,12 +183,20 @@ func wirelessConfig(w machine.WirelessSpec, stateRoot, ctrlDir string) (string, 
 	}
 	fmt.Printf("liken: wireless: the passphrase for %s comes from %s\n", w.SSID, source)
 
-	// All three key managements are named at once because a home
-	// access point today commonly offers WPA2 and WPA3 together. The
+	// Every key management is named at once because a home access
+	// point today commonly offers WPA2 and WPA3 together. The
 	// supplicant picks the strongest one the access point
 	// advertises. Naming only one would refuse half the networks a
 	// machine may meet.
-	b.WriteString("\tkey_mgmt=WPA-PSK WPA-PSK-SHA256 SAE\n")
+	//
+	// FT-PSK and FT-SAE are the 802.11r forms of the same two keys.
+	// An access point that advertises 802.11r lets the radio move to
+	// another access point of the network with the key it already
+	// holds, so a move takes one exchange and not a full handshake.
+	// The supplicant prefers the FT form when the access point offers
+	// it, and an access point without 802.11r never offers it, so
+	// the two names change nothing on such a network.
+	b.WriteString("\tkey_mgmt=WPA-PSK WPA-PSK-SHA256 SAE FT-PSK FT-SAE\n")
 
 	// Protected management frames are optional (1) rather than off
 	// or required. WPA3 requires them and WPA2 does not: required

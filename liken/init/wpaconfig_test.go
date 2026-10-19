@@ -163,7 +163,7 @@ func TestWirelessConfigJoinsWPA2AndWPA3AtOnce(t *testing.T) {
 		"ctrl_interface=/run/liken/wireless/wlan0/ctrl\n",
 		"\tssid=686f6d656e6574\n",
 		"\tbgscan=\"simple:30:-70:3600\"\n",
-		"\tkey_mgmt=WPA-PSK WPA-PSK-SHA256 SAE\n",
+		"\tkey_mgmt=WPA-PSK WPA-PSK-SHA256 SAE FT-PSK FT-SAE\n",
 		"\tieee80211w=1\n",
 		"\tpsk=" + derivePMK("homenet", "correcthorse") + "\n",
 		"\tsae_password=636f7272656374686f727365\n",

@@ -60,11 +60,17 @@ condition is `False` with the reason `Joining`, and the machine stays
 passphrase is wrong, the machine blocks the boot and waits. It says so on the
 console and in `kubectl get machines`. A machine with a working wired
 interface joins anyway and reports the wifi failure as a condition.
+The supplicant keeps trying, and when the radio joins later, the
+machine addresses it then.
 
 A network can have several access points with the same SSID. The
 machine scans for a stronger one every 30 seconds while the signal is
 below -70 dBm, and once an hour above that, and moves when a scan
-finds one. To see which access point a machine holds, read
+finds one. An access point controller can also ask the radio to move,
+with an 802.11v BSS transition request, and the radio follows it. When
+the access points offer 802.11r fast transition, the radio uses it, so
+a move does not repeat the full handshake. To see which access point a
+machine holds, read
 [`status.network.interfaces[].wireless`](/docs/reference/machine/#statusnetworkinterfaceswireless).
 Its `bssid`, `frequency`, and `band` name the access point, and
 `kubectl describe machine` lists a `Roamed` or `Associated` event for

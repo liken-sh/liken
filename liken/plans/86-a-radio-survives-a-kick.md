@@ -1,6 +1,8 @@
 # 86. A radio survives a kick
 
-Milestone 86. Proposed 2026-10-19. When an access point's controller
+Milestone 86. Proposed 2026-10-19. Partly built 2026-10-19: step 3
+and the late join are built, and steps 1 and 2 wait for the capture
+on stick-1. When an access point's controller
 disconnects stick-1 on purpose, the radio does not join again. It
 fails authentication again and again until the machine reboots. An
 access point controller kicks a client for ordinary reasons, such as
@@ -39,10 +41,17 @@ each one must be tested before the next one is considered:
 ## The change
 
 1. **Find the cause.** Run the controller's reconnect action on
-   stick-1 with the supplicant's debug output on the console (`-dd`
-   for one boot), and record each event from the kick to the failed
-   joins. Record the controller's own log for the same minutes. Write
-   the cause here before any fix.
+   stick-1 with the supplicant's debug output on the console, and
+   record each event from the kick to the failed joins. Record the
+   controller's own log for the same minutes. Write the cause here
+   before any fix. The supplicant raises its log level at run time
+   when it receives `LOG_LEVEL DEBUG` on its control socket, so the
+   capture needs no reboot, and a radio already in the failure can be
+   captured as it is. A node debug pod runs in the host's network
+   namespace and mounts the host's root, so a client in that pod
+   reaches the socket at
+   `/host/run/liken/wireless/<if>/ctrl/<if>` and binds an abstract
+   address for the reply, the way `machine.AskSupplicant` does.
 2. **Fix it, with a test.** The fix depends on the cause. A test
    replays the recorded events against the stand-in supplicant
    (`machine/supplicanttest`), and fails before the fix.
@@ -56,16 +65,43 @@ each one must be tested before the next one is considered:
    whether each one changes what the controller does, before keeping
    it.
 
-## Questions to answer
+## The answers
 
 - **A background radio that joins late gets no address.**
   `bringUpRadio` addresses a radio only when its first join succeeds.
   A background radio whose first join failed, and whose supplicant
   joins later, is associated with no address. Since milestone 85, the
   radio watch reports that radio as `Connected`, and `WirelessJoined`
-  is `True` while the interface has no address. Decide whether the
-  watch starts the addressing on such a join, as the park does for a
-  foreground radio.
+  is `True` while the interface has no address. Answer: the watch
+  starts the addressing on each new association of a radio with no
+  address, the same addressing the park starts for a foreground
+  radio. A failed addressing leaves the radio `Connected` with the
+  error as its message, which is the boot's verdict for a radio that
+  joined and failed its DHCP, and the next association tries again.
+
+## What was built (2026-10-19)
+
+Step 3 and the answer above are built. Steps 1 and 2 wait for the
+capture on stick-1.
+
+- **802.11v and 802.11k were already in the binary.** Upstream's
+  Makefile turns on `CONFIG_WNM` when `CONFIG_BGSCAN_SIMPLE` is set,
+  so the build of milestone 85 already answered BSS transition
+  requests. Upstream builds the radio measurement code, which answers
+  neighbor and beacon report requests, unless `CONFIG_NO_RRM` is set.
+  `wpa-supplicant/build.config` now names `CONFIG_WNM` so the list
+  shows it.
+- **802.11r.** `CONFIG_IEEE80211R` is on, and `init/wpaconfig.go`
+  adds `FT-PSK` and `FT-SAE` to `key_mgmt`. The rebuilt supplicant
+  parses the line as the key management mask `0xd42`, which holds
+  all five. The supplicant prefers the FT form only when an access
+  point advertises it, so a network without 802.11r is not changed.
+  The drill must check whether the controller's 802.11r setting is on,
+  and whether the radio's joins use FT after it is.
+- **The late join.** `init/radiowatch.go` addresses a radio on a new
+  association with no address, at the watch's baseline and on each
+  `CTRL-EVENT-CONNECTED`, and rewrites `resolv.conf` with the radio's
+  nameservers.
 
 ## Done when
 

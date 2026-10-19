@@ -484,7 +484,7 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	// writes the network subtree itself: a verdict written before it
 	// would be overwritten with the pending state it replaced.
 	if radios != nil || declaresRadio(conns) {
-		plane.start("the radio watch", watchRadios(conns, radios, factsTree, clusterDoc))
+		plane.start("the radio watch", watchRadios(conns, radios, m.Spec.Network.Interfaces, factsTree, clusterDoc))
 	}
 	// The hardware watch keeps that walk correct for the whole
 	// life of the machine. Hot-plugged devices arrive as uevents,

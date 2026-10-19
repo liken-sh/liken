@@ -23,6 +23,11 @@ package main
 // publishBootFacts. It also lands each background radio's verdict
 // (plans/completed/64-the-boot-does-not-wait-for-radios.md), so the
 // verdict and the association can never race to write the same files.
+//
+// The watch also addresses a radio that associates with no address.
+// The boot addresses a radio only when its first join succeeds, so a
+// radio whose first join failed, and whose supplicant joined later,
+// would otherwise hold an access point and carry no traffic.
 
 import (
 	"context"
@@ -59,6 +64,12 @@ type radioWatch struct {
 	events     chan radioEvent
 	following  int
 	now        func() time.Time
+
+	// interfaces is the spec's list, which holds how to address each
+	// radio. address is the addressing itself, a function value so a
+	// test can address a radio with no link and no DHCP server.
+	interfaces []machine.InterfaceSpec
+	address    func(machine.InterfaceSpec) (*connection, error)
 }
 
 // watchRadios is the machine-plane component behind every declared
@@ -67,13 +78,16 @@ type radioWatch struct {
 // component ends when every radio has answered and no radio has a
 // supplicant left to watch, which is the case for a radio whose
 // configuration was refused.
-func watchRadios(conns []*connection, pass *radioPass, tree machine.FactsTree, clusterDoc *cluster.Cluster) func(context.Context) error {
+func watchRadios(conns []*connection, pass *radioPass, interfaces []machine.InterfaceSpec,
+	tree machine.FactsTree, clusterDoc *cluster.Cluster) func(context.Context) error {
 	return func(ctx context.Context) error {
 		w := &radioWatch{
 			ctx:  ctx,
 			tree: tree, clusterDoc: clusterDoc,
-			events: make(chan radioEvent, 16),
-			now:    time.Now,
+			events:     make(chan radioEvent, 16),
+			now:        time.Now,
+			interfaces: interfaces,
+			address:    addressByName,
 		}
 		var settled chan *connection
 		pending := 0
@@ -145,7 +159,7 @@ func (w *radioWatch) follow(conn *connection) (*connection, bool) {
 		w.send(radioEvent{ifname: ifname, closed: true})
 	}(conn.ifname, conn.radio.control.events())
 	if next, changed := w.associate(conn); changed {
-		return next, true
+		return w.addressLate(next), true
 	}
 	return conn, true
 }
@@ -216,9 +230,43 @@ func (w *radioWatch) apply(e radioEvent) bool {
 		}
 	}
 	if changed {
-		w.conns[i] = next
+		w.conns[i] = w.addressLate(next)
 	}
 	return changed
+}
+
+// addressLate addresses a radio that has just associated and has no
+// address, and answers the connection with the address. A radio that
+// already has an address keeps it across a move to another access
+// point, because the access points of one network share its subnet.
+//
+// A failed addressing leaves the radio Connected with the error as its
+// message, the same verdict the boot gives a radio that joined and then
+// failed its DHCP. The next association tries again.
+func (w *radioWatch) addressLate(conn *connection) *connection {
+	if conn.addr != nil || conn.radio.state != machine.WirelessConnected {
+		return conn
+	}
+	var spec machine.InterfaceSpec
+	for _, ifc := range w.interfaces {
+		if ifc.Name == conn.ifname {
+			spec = ifc
+		}
+	}
+	addressed, err := w.address(spec)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "liken: network: %s: %v\n", conn.ifname, err)
+		return withRadio(conn, func(r *radio) { r.message = err.Error() })
+	}
+	addressed.radio = conn.radio
+	// The radio's nameservers join resolv.conf the same way a radio's
+	// that joined at boot would have: in interface order, under the
+	// cap of three.
+	w.fold(addressed)
+	if err := writeResolvConf(w.conns); err != nil {
+		fmt.Fprintf(os.Stderr, "liken: network: %v\n", err)
+	}
+	return addressed
 }
 
 // index answers the position of one interface in the list, or -1.

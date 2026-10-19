@@ -294,6 +294,16 @@ func anyAddressed(conns []*connection) bool {
 	return false
 }
 
+// addressByName addresses one interface of the spec by its name, after
+// the boot's first pass has already raised it.
+func addressByName(ifc machine.InterfaceSpec) (*connection, error) {
+	link, err := linkByName(ifc.Name)
+	if err != nil {
+		return nil, err
+	}
+	return addressInterface(link, ifc)
+}
+
 // readdressRadio addresses the interface behind a radio that joined
 // after the park released the boot. It replaces the addressless
 // connection that the failed join left behind.
@@ -307,12 +317,7 @@ func readdressRadio(conns []*connection, interfaces []machine.InterfaceSpec, r *
 			spec = ifc
 		}
 	}
-	link, err := linkByName(r.ifname)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "liken: network: %s: %v\n", r.ifname, err)
-		return conns
-	}
-	conn, err := addressInterface(link, spec)
+	conn, err := addressByName(spec)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "liken: network: %s: %v\n", r.ifname, err)
 		return conns

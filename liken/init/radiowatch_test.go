@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -210,7 +213,7 @@ func TestTheRadioWatchPublishesTheBaselineAndEndsWhenTheStreamCloses(t *testing.
 	tree := machine.FactsTree{Dir: filepath.Join(t.TempDir(), "facts")}
 	conn.radio.control.close()
 
-	if err := watchRadios([]*connection{conn}, nil, tree, nil)(context.Background()); err != nil {
+	if err := watchRadios([]*connection{conn}, nil, nil, tree, nil)(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -229,5 +232,60 @@ func TestTheRadioWatchPublishesTheBaselineAndEndsWhenTheStreamCloses(t *testing.
 	got.AssociatedAt = nil
 	if !reflect.DeepEqual(&got, want) {
 		t.Errorf("the facts hold\n%+v\nwant\n%+v", &got, want)
+	}
+}
+
+// lateRadio is a radio whose first join failed, so the boot gave its
+// interface no address, with a watch that addresses through address.
+func lateRadio(t *testing.T, address func(machine.InterfaceSpec) (*connection, error)) *radioWatch {
+	t.Helper()
+	conn, s := watchedRadio(t, radio{state: machine.WirelessAssociating})
+	conn.addr = nil
+	s.Answer("STATUS", statusNear)
+	return &radioWatch{
+		conns: []*connection{conn}, now: func() time.Time { return watchTime },
+		interfaces: []machine.InterfaceSpec{declaredRadio("wlan0", "homenet")},
+		address:    address,
+	}
+}
+
+func TestARadioThatJoinsLateGetsAnAddress(t *testing.T) {
+	resolv := aimResolvConf(t)
+	w := lateRadio(t, func(ifc machine.InterfaceSpec) (*connection, error) {
+		return withNameserver(addressed(ifc.Name, "192.168.1.20/24"), "192.168.1.1"), nil
+	})
+
+	w.apply(radioEvent{ifname: "wlan0", event: event(t, "<3>CTRL-EVENT-CONNECTED - Connection to "+nearAP+" completed")})
+
+	got := w.conns[0]
+	if got.addr == nil || got.addr.String() != "192.168.1.20/24" {
+		t.Errorf("the radio holds the address %v", got.addr)
+	}
+	if got.radio.state != machine.WirelessConnected || got.radio.bssid != nearAP {
+		t.Errorf("the radio is %+v", got.radio.wirelessStatus())
+	}
+	written, err := os.ReadFile(resolv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(written), "nameserver 192.168.1.1") {
+		t.Errorf("resolv.conf holds\n%s", written)
+	}
+}
+
+func TestARadioThatJoinsLateAndFailsItsAddressingSaysWhy(t *testing.T) {
+	aimResolvConf(t)
+	w := lateRadio(t, func(machine.InterfaceSpec) (*connection, error) {
+		return nil, errors.New("no DHCP offer on wlan0 in 30s")
+	})
+
+	w.apply(radioEvent{ifname: "wlan0", event: event(t, "<3>CTRL-EVENT-CONNECTED - Connection to "+nearAP+" completed")})
+
+	got := w.conns[0]
+	if got.addr != nil {
+		t.Errorf("the radio holds the address %v", got.addr)
+	}
+	if got.radio.state != machine.WirelessConnected || got.radio.message != "no DHCP offer on wlan0 in 30s" {
+		t.Errorf("the radio is %+v", got.radio.wirelessStatus())
 	}
 }
