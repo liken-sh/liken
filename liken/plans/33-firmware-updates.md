@@ -185,27 +185,30 @@ spec:
   `liken` checks the digest before fwupd reads the file.
 - No machine fetches the LVFS catalog. fwupd's own refresh is a timer
   on each machine that reads remote state again to find a change. The
-  updater below is the one process that reads the catalog.
+  `firmware-operator` below is the one process that reads the catalog.
 - An object stays after its update is done. Its status shows when
   every matched device reports the version, and the next release is a
   bump of the same object. A deleted object would leave a replaced
   board or a new machine on the old version, and deleting it does not
   undo a flash.
 
-### The updater proposes, and a person adopts
+### `firmware-operator` proposes, and a person adopts
 
-The updater is an ordinary workload in the cluster, a `Deployment`
-with no access to devices. It watches the `Machine`s, so a new device
+`firmware-operator` is its own component in the repository. It is one
+`Deployment` for the cluster, like cluster-operator, with leader
+election under root plan 80 and no access to devices. Its design is
+here until its directory exists, and then it moves to that
+component's plans. `firmware-operator` watches the `Machine`s, so a new device
 in `status.hardware.firmware.devices` reaches it at once. It reads the
 LVFS catalog on a schedule, because LVFS has no feed of changes to
 subscribe to, and it checks the catalog's signature before it uses it.
 It never runs `fwupdmgr` against hardware, and it never writes to git.
 
 For each device model that a machine reports and no `Firmware` covers,
-the updater creates a `Firmware` with the label `liken.sh/discovered`,
+`firmware-operator` creates a `Firmware` with the label `liken.sh/discovered`,
 the device's selector, and an `update` with no `version`. An `update`
 with no `version` approves nothing, so the object does nothing until a
-person sets the version. The updater writes the newer releases it
+person sets the version. It writes the newer releases it
 found into `status.available`, each with its version, its cabinet
 URL, and the cabinet's digest. This is the pattern of a `Display`,
 which display-operator creates with an empty spec for a person to
@@ -214,11 +217,11 @@ pairs only the device that a person writes into its spec.
 
 A person adopts the proposal by setting `spec.update.version` and the
 cabinet from `status.available`. The object is then an approval, and
-the flow below runs. An option on the updater sets the version itself
+the flow below runs. An option on `firmware-operator` sets the version itself
 for the devices a person chose, which is how a cluster updates
 automatically.
 
-The updater deletes only its own objects: an object with its label,
+`firmware-operator` deletes only its own objects: an object with its label,
 with no `version`, that no machine matches any more. It never deletes
 an object with a version, because a person or the option approved
 that version.
@@ -252,9 +255,9 @@ which the shim below replaces. That is the reason it runs only inside
 a rollout turn, and the reason the report runs in a separate pod that
 only reads.
 
-The fields have two writers, each with its own part:
-the updater writes `status.available`, and cluster-operator writes the
-count of machines at the version, as milestone 87 says.
+`firmware-operator` writes all of a `Firmware` object's status:
+`status.available` and the count of machines at the version, as
+milestone 87 says.
 
 An `update` and an `upload` never match one device. `upload` matches a
 chip that holds no firmware, and `update` matches a device that fwupd
@@ -263,16 +266,22 @@ both as a conflict and runs neither.
 
 ### The guides and skills
 
-The guides are the documentation, and `make -C docs skills` writes
-each guide as an Agent Skill, so a guide and its skill change in the
-same commit:
+The guides are the documentation, and each component's docs build
+writes each guide as an Agent Skill, so a guide and its skill change
+in the same commit. `firmware-operator` gets its own manual, like
+every other operator:
 
-- A new guide, `update-firmware`, and its skill
-  `liken:update-firmware`: install the updater, read
-  `status.available`, adopt a proposal, follow the rollout turn, and
-  read the version that the device reports after the update.
+- `firmware:install`: install `firmware-operator` and confirm that it
+  holds its `Lease` and reads the catalog.
+- `firmware:update-a-device`: read `status.available`, adopt a
+  proposal, turn on automatic approval for chosen devices, follow the
+  rollout turn, and read the version that the device reports after
+  the update.
+
+`liken`'s own guides change too:
+
 - `upgrade` says that a firmware update takes a rollout turn the same
-  way a release does, and links to `update-firmware`.
+  way a release does, and links to `firmware:update-a-device`.
 - `troubleshoot` adds an update that waits for its turn, a flash that
   waits because another claim holds the device, and a failed flash.
 - The `Firmware` reference page gains the `update` fields from the

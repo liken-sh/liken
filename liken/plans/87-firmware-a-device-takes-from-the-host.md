@@ -86,7 +86,7 @@ spec:
   value, the rule applies on every machine.
 - Exactly one of `spec.upload` and `spec.update` is set. A CEL rule in
   the CRD refuses an object with both or neither. An `update` with no
-  `version` approves nothing. Milestone 33's updater creates objects
+  `version` approves nothing. `firmware-operator` creates objects
   of that form as proposals, and a person adopts one by setting the
   version.
 - `spec.upload` names an image and the command to run in it. `liken`
@@ -224,9 +224,12 @@ because the machine's own work does not depend on the device.
 
 The `Firmware` object's status holds the rule's own facts: whether its
 selector compiles, and a count of devices loaded and failed across the
-fleet. cluster-operator writes the count from the `Machine`s, because
-it already reads every `Machine` for rollouts, so the object keeps one
-writer.
+fleet. `firmware-operator` writes it from the `Machine`s, so the
+object has one writer. `firmware-operator` is optional: it is one
+`Deployment` for the cluster, like cluster-operator, and its own
+plans describe it. A cluster without it runs every upload, and its
+`Firmware` objects have no status. The entries on each `Machine` are
+the record.
 
 ## Firmware the kernel did not find
 
