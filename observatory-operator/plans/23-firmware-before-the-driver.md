@@ -111,14 +111,22 @@ output, the bare chip appears, machine-operator loads it, and the
 camera appears. The camera's pod stays `Pending` until then, and
 `StartDevices` already waits for it.
 
-The manual changes in the same commit:
+### The guides and skills
 
-- `connect-usb-equipment` moves QHY cameras to the equipment that
-  works, and says that the operator's install includes their
-  `Firmware` objects.
-- `troubleshoot` adds the case of a QHY camera's pod that stays
-  `Pending`: read `status.hardware.firmware.uploads` on the machine's
-  `Machine`.
+The guides are the manual, and `make -C docs generate skills` writes
+each guide as an Agent Skill, so the guides and their skills change in
+the same commit:
+
+- `connect-usb-equipment` and its skill move QHY cameras to the
+  equipment that works. They say that the operator's install includes
+  a `Firmware` object for each QHY model, and that the camera's claim
+  selects the loaded camera's product ID, not the bare chip's. They
+  link to `liken`'s `device-firmware` guide for the mechanism.
+- `troubleshoot` and its skill add a QHY camera whose pod stays
+  `Pending` in `StartDevices`: read `status.hardware.firmware.uploads`
+  on the machine's `Machine`.
+- `install` lists `deploy/firmware/` among what the install applies,
+  and says that `liken`'s milestone 87 must be on the cluster for it.
 
 ## Decisions
 

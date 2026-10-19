@@ -177,30 +177,53 @@ spec:
       sha256: <digest>
 ```
 
-- The object is the approval. No other field approves an update, and
-  `Cluster` and `Machine` gain no spec.
+- `spec.update.version` is the approval. No other field approves an
+  update, and `Cluster` and `Machine` gain no spec.
 - `spec.update.cabinet` pins the file, the way an image is pinned by
   its digest. fwupd installs a local cabinet and checks the vendor's
   signature inside it, so the apply path needs no LVFS catalog.
   `liken` checks the digest before fwupd reads the file.
-- No machine fetches the LVFS catalog on a timer. fwupd's own refresh
-  is a timer that reads remote state again to find a change, and the
-  catalog it reads is outside `liken`'s chain of digests. A list of
-  the updates that are available is a later step, from a catalog that
-  is pinned and bumped in git like the other pins of plan 48.
-- Automatic updates are a program that proposes `Firmware` objects.
-  It reads the fwupd GUIDs from `status.hardware.firmware.devices` on
-  each `Machine`, finds newer releases in the LVFS catalog, and opens
-  a commit that adds a `Firmware` object or bumps the version of one.
-  A person approves by merging, or the repository merges a class of
-  proposals on its own. It runs where plan 48's checks of the other
-  pins run, not on the machines, because LVFS has no feed of changes
-  to subscribe to.
+- No machine fetches the LVFS catalog. fwupd's own refresh is a timer
+  on each machine that reads remote state again to find a change. The
+  updater below is the one process that reads the catalog.
 - An object stays after its update is done. Its status shows when
   every matched device reports the version, and the next release is a
   bump of the same object. A deleted object would leave a replaced
   board or a new machine on the old version, and deleting it does not
   undo a flash.
+
+### The updater proposes, and a person adopts
+
+The updater is an ordinary workload in the cluster, a `Deployment`
+with no access to devices. It watches the `Machine`s, so a new device
+in `status.hardware.firmware.devices` reaches it at once. It reads the
+LVFS catalog on a schedule, because LVFS has no feed of changes to
+subscribe to, and it checks the catalog's signature before it uses it.
+It never runs `fwupdmgr` against hardware, and it never writes to git.
+
+For each device model that a machine reports and no `Firmware` covers,
+the updater creates a `Firmware` with the label `liken.sh/discovered`,
+the device's selector, and an `update` with no `version`. An `update`
+with no `version` approves nothing, so the object does nothing until a
+person sets the version. The updater writes the newer releases it
+found into `status.available`, each with its version, its cabinet
+URL, and the cabinet's digest. This is the pattern of a `Display`,
+which display-operator creates with an empty spec for a person to
+fill, and of a `PairingRequest`, which reports what the radio sees and
+pairs only the device that a person writes into its spec.
+
+A person adopts the proposal by setting `spec.update.version` and the
+cabinet from `status.available`. The object is then an approval, and
+the flow below runs. An option on the updater sets the version itself
+for the devices a person chose, which is how a cluster updates
+automatically.
+
+The updater deletes only its own objects: an object with its label,
+with no `version`, that no machine matches any more. It never deletes
+an object with a version, because a person or the option approved
+that version.
+
+### The steps of an update
 
 The flow has four steps:
 
@@ -229,10 +252,32 @@ which the shim below replaces. That is the reason it runs only inside
 a rollout turn, and the reason the report runs in a separate pod that
 only reads.
 
+The fields have two writers, each with its own part:
+the updater writes `status.available`, and cluster-operator writes the
+count of machines at the version, as milestone 87 says.
+
 An `update` and an `upload` never match one device. `upload` matches a
 chip that holds no firmware, and `update` matches a device that fwupd
 reports, which holds firmware. machine-operator reports a match of
 both as a conflict and runs neither.
+
+### The guides and skills
+
+The guides are the documentation, and `make -C docs skills` writes
+each guide as an Agent Skill, so a guide and its skill change in the
+same commit:
+
+- A new guide, `update-firmware`, and its skill
+  `liken:update-firmware`: install the updater, read
+  `status.available`, adopt a proposal, follow the rollout turn, and
+  read the version that the device reports after the update.
+- `upgrade` says that a firmware update takes a rollout turn the same
+  way a release does, and links to `update-firmware`.
+- `troubleshoot` adds an update that waits for its turn, a flash that
+  waits because another claim holds the device, and a failed flash.
+- The `Firmware` reference page gains the `update` fields from the
+  CRD's descriptions, and the `Machine` page gains
+  `status.hardware.firmware.devices`.
 
 ## Prerequisites for fwupd
 

@@ -85,7 +85,10 @@ spec:
 - `spec.machines` is an optional label selector on `Machine`s. With no
   value, the rule applies on every machine.
 - Exactly one of `spec.upload` and `spec.update` is set. A CEL rule in
-  the CRD refuses an object with both or neither.
+  the CRD refuses an object with both or neither. An `update` with no
+  `version` approves nothing. Milestone 33's updater creates objects
+  of that form as proposals, and a person adopts one by setting the
+  version.
 - `spec.upload` names an image and the command to run in it. `liken`
   does not implement a loader. The loaders differ by chip and by
   vendor: `fxload -t fx2`, `-t fx3`, a second-stage loader for older
@@ -282,6 +285,31 @@ component covers the generator and the image. No operator adds a step
 to load firmware. A pod that claims the loaded device stays `Pending`
 until the device appears, and that wait is already part of each
 operator's start.
+
+## The guides and skills
+
+The guides are the documentation, and `make -C docs skills` writes
+each guide as an Agent Skill. A change to what a person declares or
+reads changes the guide in the same commit, and the skill with it:
+
+- A new guide, `device-firmware`, and its skill
+  `liken:device-firmware`: how to tell that a device needs firmware
+  from the host, how to write a `Firmware` with `upload`, how to read
+  `status.hardware.firmware.uploads` and the `Event`s, and what a
+  `Conflict` means.
+- `hardware-modules` says that a bare chip that no module drives can
+  need an upload in place of a module, and links to `device-firmware`.
+  It also covers `status.hardware.firmware.missing`: a file the image
+  does not ship is a report against the release, and no setting fixes
+  it.
+- `devices` says that a claim on a device that appears only after an
+  upload stays `Pending` until the upload finishes.
+- `troubleshoot` adds a `Failed` or `Conflict` upload, and a missing
+  firmware file.
+- A new reference page for `Firmware`. `crdref` generates the
+  reference pages from the CRDs of `Machine` and `Cluster`, so it reads
+  a third schema. The `Machine` page gains `status.hardware.firmware`
+  from the same CRD descriptions.
 
 ## Decisions
 
