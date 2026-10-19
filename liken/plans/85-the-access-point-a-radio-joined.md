@@ -9,13 +9,15 @@ radio moves to another one, and publishes the signal as a metric.
 
 ## What happened
 
-On 2026-10-19 the switch that powers one of the testbed's two access
-points lost power. Both access points serve one SSID. When power came
-back, stick-1's round trip from the laptop was 3 to 12 seconds, with
-10% loss and more duplicate replies than requests, while liken-1 on
-the same LAN answered in 2 ms. The likely cause is that stick-1
-reassociated with the farther access point and stayed there. The
-cluster could not confirm it:
+On 2026-10-19 the switch that powers the access point nearest
+stick-1 lost power. The network has several access points on one
+SSID. When power came back, stick-1's round trip from the laptop was
+3 to 12 seconds, with 10% loss and more duplicate replies than
+requests, while liken-1 on the same LAN answered in 2 ms. stick-1 had
+reassociated with an access point at the far end of the house and
+stayed there, and its heartbeat lease expired, so its `Machine` went
+`Lost`. The access point's own controller showed the association. The
+cluster could not:
 
 - `status.network.interfaces[].wireless` holds the SSID, the state,
   and a message. It has no BSSID, no frequency, and no signal.
@@ -64,7 +66,7 @@ cluster could not confirm it:
 - **Whether the radio should roam back.** The supplicant
   configuration in `init` sets no `bgscan`, so the radio leaves an
   access point only when the link drops. That is consistent with
-  stick-1 staying on the farther access point. A `bgscan` with a
+  stick-1 staying on the far access point. A `bgscan` with a
   signal threshold makes the radio scan and move when the signal is
   weak. Decide whether `liken` sets one by default, and what it costs
   in scans on a radio that does not move.
