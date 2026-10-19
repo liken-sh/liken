@@ -135,18 +135,38 @@ controller's "reconnect" action ran three times.
   `WRONG_KEY` explanations do not fit: no attempt reached the key.
 - **The controller sent no 802.11v request.** It moved the client by
   deauthentication only. It sent two 802.11k radio measurement frames.
-- **The supplicant's output never reaches the cluster.** init sends
-  a child process's output to the serial console and not to kmsg
-  (`init/console.go`), which keeps k3s's volume out of the ring buffer.
-  The supplicant writes a few lines for each join at its default level,
-  and those lines are the record of each refusal, so they are a
-  candidate for kmsg. The monitor above was the only way to read them.
+- **The refusals reach the cluster through init.** init sends a
+  child process's output to the serial console and not to kmsg
+  (`init/console.go`), so the supplicant's own lines stay on the
+  console. The radio watch prints a line of its own for each refusal
+  and each wait, and those lines reached the cluster's logs for all
+  three kicks. They printed the raw event, with the status code as a
+  number.
 
 The lock flow is still open: a person who locks the radio to an
 access point and then runs the reconnect action gets an outage of
 minutes. Whether that comes from the controller alone, and whether a
 lock set while the radio is on another access point moves it without
 an outage, is not measured yet.
+
+## What was built after the capture (2026-10-19)
+
+- **The refusals print in words.** The console line for an
+  authentication or an association refusal names the access point
+  and the 802.11 status code with its meaning, from a table in
+  `machine/supplicant.go` beside the disconnect reasons. The line for
+  `CTRL-EVENT-NETWORK-NOT-FOUND` says that no access point is left to
+  try, which is also true when the supplicant ignores each access
+  point that refused it.
+- **The wait after a refusal is capped at 30 seconds.** When the
+  supplicant disables the network for more than 30 seconds with the
+  reason `CONN_FAILED`, the radio watch sends `SELECT_NETWORK` after
+  30 seconds. That clears the wait and the count of failures and
+  starts a join. A wrong passphrase keeps the supplicant's whole wait.
+  In the third run, the last refusal came 1 minute 14 seconds after
+  the kick and the join 2 minutes 15 seconds after it, so the refusal
+  ended somewhere in the 60-second wait between them. With the cap,
+  the radio would have tried again at 1 minute 44 seconds.
 
 ## Done when
 

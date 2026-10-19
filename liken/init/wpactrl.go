@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -164,15 +165,35 @@ func describeWirelessEvent(ifname string, event wpaEvent) string {
 	case "CTRL-EVENT-SCAN-RESULTS":
 		return fmt.Sprintf("liken: wireless: %s finished a scan", ifname)
 	case "CTRL-EVENT-NETWORK-NOT-FOUND":
-		return fmt.Sprintf("liken: wireless: %s found no access point for its network", ifname)
-	case "CTRL-EVENT-ASSOC-REJECT", "CTRL-EVENT-AUTH-REJECT":
-		return fmt.Sprintf("liken: wireless: %s: %s", ifname, event.text)
+		// The supplicant sends this event when no access point of
+		// the network is left to try: none answered the scan, or each
+		// one that did is on the list it ignores after a refusal.
+		return fmt.Sprintf("liken: wireless: %s has no access point left to try for its network", ifname)
+	case "CTRL-EVENT-AUTH-REJECT":
+		// The access point's address is the first word after the
+		// event's name, with no key of its own.
+		bssid := ""
+		if words := strings.Fields(event.text); len(words) > 1 {
+			bssid = words[1]
+		}
+		return fmt.Sprintf("liken: wireless: %s: %s refused the authentication (%s)",
+			ifname, orUnknown(bssid), statusText(event))
+	case "CTRL-EVENT-ASSOC-REJECT":
+		return fmt.Sprintf("liken: wireless: %s: %s refused the association (%s)",
+			ifname, orUnknown(event.fields["bssid"]), statusText(event))
 	}
 	return ""
 }
 
-// wpaControl is an attached client on one supplicant's control socket.
-//
+// statusText renders the 802.11 status code a refusal carries.
+func statusText(event wpaEvent) string {
+	code, err := strconv.Atoi(event.fields["status_code"])
+	if err != nil {
+		return "no status code"
+	}
+	return machine.StatusCodeText(code)
+}
+
 // wpaControl is an attached client on one supplicant's control
 // socket. The client binds a path of its own because the socket is a
 // datagram socket: the supplicant answers by sending to the address

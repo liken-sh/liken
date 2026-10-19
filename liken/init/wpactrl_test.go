@@ -145,7 +145,9 @@ func TestDescribeWirelessEventNamesWhatHappened(t *testing.T) {
 		"<3>CTRL-EVENT-CONNECTED - Connection to 04:4a:2c:11:22:33 completed [id=0]":                  "associated",
 		"<3>CTRL-EVENT-DISCONNECTED bssid=04:4a:2c:11:22:33 reason=3":                                 "reason 3",
 		"<3>CTRL-EVENT-SCAN-RESULTS ":                                                                 "finished a scan",
-		"<3>CTRL-EVENT-NETWORK-NOT-FOUND ":                                                            "found no access point",
+		"<3>CTRL-EVENT-NETWORK-NOT-FOUND ":                                                            "no access point left to try",
+		"<3>CTRL-EVENT-AUTH-REJECT 04:4a:2c:11:22:33 auth_type=3 auth_transaction=1 status_code=37":   "04:4a:2c:11:22:33 refused the authentication (status 37, the request was declined)",
+		"<3>CTRL-EVENT-ASSOC-REJECT bssid=04:4a:2c:11:22:33 status_code=17":                           "04:4a:2c:11:22:33 refused the association (status 17, the access point cannot handle another station)",
 		`<3>CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="x" auth_failures=1 duration=10 reason=WRONG_KEY`: "retrying in 10s",
 	} {
 		event, _ := parseWPAEvent(message)

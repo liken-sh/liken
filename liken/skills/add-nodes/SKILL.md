@@ -77,7 +77,11 @@ Its `bssid`, `frequency`, and `band` name the access point, and
 `kubectl describe machine` lists a `Roamed` or `Associated` event for
 each move. When the radio loses its access point, `WirelessJoined`
 goes `False` with the reason `Joining` until the supplicant rejoins,
-and the message gives the 802.11 reason code. The signal level is the
+and the message gives the 802.11 reason code. An access point
+controller can refuse a client for a minute or two after it
+disconnects it. During that time the machine tries every access point
+of the network at least every 30 seconds, and the console names each
+access point that refused it and the 802.11 status code it gave. The signal level is the
 metric `liken_wireless_signal_dbm`
 ([Metrics](https://liken.sh/docs/reference/metrics/#the-radios)).
 

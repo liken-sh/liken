@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -287,5 +288,87 @@ func TestARadioThatJoinsLateAndFailsItsAddressingSaysWhy(t *testing.T) {
 	}
 	if got.radio.state != machine.WirelessConnected || got.radio.message != "no DHCP offer on wlan0 in 30s" {
 		t.Errorf("the radio is %+v", got.radio.wirelessStatus())
+	}
+}
+
+// pendingRetries is a watch's stand-in for time.AfterFunc: it records
+// each delay, and the test runs the function itself.
+type pendingRetries struct {
+	delays []time.Duration
+	fire   []func()
+}
+
+func (p *pendingRetries) after(d time.Duration, f func()) {
+	p.delays = append(p.delays, d)
+	p.fire = append(p.fire, f)
+}
+
+func TestTheRadioWatchCapsTheWaitAfterAnAccessPointRefusesTheJoin(t *testing.T) {
+	cases := []struct {
+		name  string
+		event string
+		want  []time.Duration
+	}{
+		{
+			name:  "a refusal with a wait longer than the cap",
+			event: `<3>CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="homenet" auth_failures=4 duration=60 reason=CONN_FAILED`,
+			want:  []time.Duration{wirelessRetryCap},
+		},
+		{
+			name:  "a refusal with a wait inside the cap",
+			event: `<3>CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="homenet" auth_failures=2 duration=20 reason=CONN_FAILED`,
+		},
+		{
+			name:  "a wrong passphrase",
+			event: `<3>CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="homenet" auth_failures=4 duration=60 reason=WRONG_KEY`,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			conn, s := watchedRadio(t, radio{state: machine.WirelessAssociating})
+			s.Answer("STATUS", statusLost)
+			retries := &pendingRetries{}
+			w := &radioWatch{
+				conns: []*connection{conn}, now: func() time.Time { return watchTime },
+				events: make(chan radioEvent, 1), after: retries.after,
+			}
+
+			w.apply(radioEvent{ifname: "wlan0", event: event(t, c.event)})
+
+			if !reflect.DeepEqual(retries.delays, c.want) {
+				t.Errorf("the watch scheduled %v, want %v", retries.delays, c.want)
+			}
+		})
+	}
+}
+
+func TestARetrySelectsTheNetworkAgain(t *testing.T) {
+	conn, s := watchedRadio(t, radio{state: machine.WirelessAssociating})
+	s.Answer("STATUS", statusLost)
+	s.Answer("SELECT_NETWORK 0", "OK\n")
+	retries := &pendingRetries{}
+	w := &radioWatch{
+		conns: []*connection{conn}, now: func() time.Time { return watchTime },
+		events: make(chan radioEvent, 1), after: retries.after,
+	}
+	w.apply(radioEvent{ifname: "wlan0", event: event(t,
+		`<3>CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="homenet" auth_failures=4 duration=60 reason=CONN_FAILED`)})
+
+	retries.fire[0]()
+	w.apply(<-w.events)
+
+	if asked := s.Asked(); !slices.Contains(asked, "SELECT_NETWORK 0") {
+		t.Errorf("the watch asked %q", asked)
+	}
+}
+
+func TestARetryLeavesAJoinedRadioAlone(t *testing.T) {
+	conn, s := watchedRadio(t, onNear)
+	w := &radioWatch{conns: []*connection{conn}, now: func() time.Time { return watchTime }}
+
+	w.apply(radioEvent{ifname: "wlan0", event: wpaEvent{name: wpaRetry, fields: map[string]string{"id": "0"}}})
+
+	if asked := s.Asked(); len(asked) != 0 {
+		t.Errorf("the watch asked %q of a joined radio", asked)
 	}
 }

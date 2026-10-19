@@ -40,6 +40,21 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
+// wirelessRetryCap is the longest the radio waits between rounds of
+// joins after access points refuse it. The supplicant waits 10, 20,
+// and 30 seconds after its first refusals, then 60, 90, 120, and at
+// last 300 seconds. An access point controller refuses a client for a
+// minute or two after it disconnects it, and the supplicant's wait
+// then holds the radio off the network for up to 300 seconds after
+// the refusals end. A round of joins costs one authentication frame
+// to each access point, so a round every 30 seconds costs the network
+// little.
+const wirelessRetryCap = 30 * time.Second
+
+// wpaRetry is the name of the event the watch puts on its own stream
+// when a capped wait ends.
+const wpaRetry = "LIKEN-RETRY"
+
 // supplicantAskPatience bounds one request to the supplicant. The
 // supplicant answers STATUS from memory in microseconds, so a request
 // still out after two seconds is a supplicant that is restarting.
@@ -70,6 +85,11 @@ type radioWatch struct {
 	// test can address a radio with no link and no DHCP server.
 	interfaces []machine.InterfaceSpec
 	address    func(machine.InterfaceSpec) (*connection, error)
+
+	// after runs a function once a delay has passed. It is
+	// time.AfterFunc, and a function value so a test can run the
+	// function itself.
+	after func(time.Duration, func())
 }
 
 // watchRadios is the machine-plane component behind every declared
@@ -88,6 +108,7 @@ func watchRadios(conns []*connection, pass *radioPass, interfaces []machine.Inte
 			now:        time.Now,
 			interfaces: interfaces,
 			address:    addressByName,
+			after:      func(d time.Duration, f func()) { time.AfterFunc(d, f) },
 		}
 		var settled chan *connection
 		pending := 0
@@ -220,7 +241,10 @@ func (w *radioWatch) apply(e radioEvent) bool {
 		next, changed = w.associate(conn)
 	case "CTRL-EVENT-DISCONNECTED":
 		next, changed = disconnect(conn, e.event)
+	case wpaRetry:
+		w.retry(conn, e.event.fields["id"])
 	default:
+		w.capWait(conn.ifname, e.event)
 		state, message, settled := judgeWirelessEvent(e.event)
 		if settled && state != conn.radio.state {
 			next, changed = withRadio(conn, func(r *radio) {
@@ -267,6 +291,51 @@ func (w *radioWatch) addressLate(conn *connection) *connection {
 		fmt.Fprintf(os.Stderr, "liken: network: %v\n", err)
 	}
 	return addressed
+}
+
+// capWait shortens the supplicant's wait after access points refused a
+// join. The supplicant reports the wait in
+// CTRL-EVENT-SSID-TEMP-DISABLED, and the watch asks it to try again
+// once wirelessRetryCap has passed. Only CONN_FAILED is capped: it
+// means the access points refused the join. A refused passphrase gets
+// the supplicant's whole wait, because trying it sooner cannot change
+// the answer.
+func (w *radioWatch) capWait(ifname string, event wpaEvent) {
+	if event.name != "CTRL-EVENT-SSID-TEMP-DISABLED" || event.fields["reason"] != "CONN_FAILED" {
+		return
+	}
+	wait, err := strconv.Atoi(event.fields["duration"])
+	if err != nil || time.Duration(wait)*time.Second <= wirelessRetryCap {
+		return
+	}
+	retry := radioEvent{ifname: ifname, event: wpaEvent{
+		name: wpaRetry, fields: map[string]string{"id": event.fields["id"]},
+	}}
+	w.after(wirelessRetryCap, func() {
+		// The retry is only an early start. When the watch is busy or
+		// has ended, the supplicant's own wait still ends, so the
+		// retry is dropped and not queued.
+		select {
+		case w.events <- retry:
+		default:
+		}
+	})
+}
+
+// retry asks the supplicant to try the network again now. SELECT_NETWORK
+// clears the network's wait and its count of failures, and starts a
+// join. ENABLE_NETWORK would not: it changes only a network that is
+// disabled, and a wait leaves the network enabled. A radio that
+// joined during the wait is left alone.
+func (w *radioWatch) retry(conn *connection, id string) {
+	if conn.radio.state == machine.WirelessConnected {
+		return
+	}
+	fmt.Printf("liken: wireless: %s: trying the network again after %s\n", conn.ifname, wirelessRetryCap)
+	socket := machine.SupplicantSocket(wirelessRunDir, conn.ifname)
+	if _, err := machine.AskSupplicant(socket, "SELECT_NETWORK "+id, supplicantAskPatience); err != nil {
+		fmt.Fprintf(os.Stderr, "liken: wireless: %s: %v\n", conn.ifname, err)
+	}
 }
 
 // index answers the position of one interface in the list, or -1.

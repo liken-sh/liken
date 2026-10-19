@@ -153,3 +153,34 @@ func DisconnectReasonText(code int) string {
 	}
 	return fmt.Sprintf("reason %d", code)
 }
+
+// statusCodes gives the IEEE 802.11 status codes that an access point
+// commonly answers when it refuses an authentication or an association
+// (IEEE 802.11-2020, table 9-50). The names follow upstream's
+// WLAN_STATUS_ constants. A code outside the table prints as its number
+// alone.
+var statusCodes = map[int]string{
+	1:   "unspecified failure",
+	10:  "the access point cannot support all the requested capabilities",
+	12:  "the association was denied for a reason outside the standard",
+	13:  "the access point does not support the authentication algorithm",
+	15:  "the challenge failed",
+	16:  "the authentication timed out",
+	17:  "the access point cannot handle another station",
+	30:  "the association was rejected for now; try again later",
+	37:  "the request was declined",
+	53:  "the PMKID is not valid",
+	72:  "the RSN element is not valid",
+	76:  "an anti-clogging token is required",
+	77:  "the access point does not support the SAE group",
+	126: "the access point requires SAE hash-to-element",
+}
+
+// StatusCodeText renders an 802.11 status code as its number and, when
+// the table holds it, its meaning.
+func StatusCodeText(code int) string {
+	if text, ok := statusCodes[code]; ok {
+		return fmt.Sprintf("status %d, %s", code, text)
+	}
+	return fmt.Sprintf("status %d", code)
+}

@@ -99,3 +99,19 @@ func TestDisconnectReasonTextNamesAKnownCode(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusCodeTextNamesAKnownCode(t *testing.T) {
+	cases := []struct {
+		code int
+		want string
+	}{
+		{37, "status 37, the request was declined"},
+		{53, "status 53, the PMKID is not valid"},
+		{999, "status 999"},
+	}
+	for _, c := range cases {
+		if got := StatusCodeText(c.code); got != c.want {
+			t.Errorf("StatusCodeText(%d) = %q, want %q", c.code, got, c.want)
+		}
+	}
+}
