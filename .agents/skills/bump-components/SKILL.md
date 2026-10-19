@@ -28,7 +28,7 @@ named bump in step 2.
 ## 2. Bump
 
 Run `<domain>/latest.sh --bump` for each behind domain, sequentially,
-in one background task. Two orderings and one repeat matter:
+in one background task. These rules matter:
 
 1. Put `systemd-boot` and `grub` last. Their source mirrors fetch
    from launchpad.net, which is slow and sometimes refuses
@@ -39,7 +39,11 @@ in one background task. Two orderings and one repeat matter:
    `linux-firmware/latest.sh --bump wireless-regdb`. The alpine builder is one
    image pinned by three domains; when it moves, run `--bump alpine`
    in `open-iscsi`, `nfs-utils`, and `tzdata`.
-3. Finish with one `licensing/sources.sh --repin`. The mirror cache
+3. Bump `k3s` before `xtables`. The xtables pin follows the k3s-root
+   release that the pinned k3s names as `VERSION_ROOT`, so
+   `xtables/latest.sh` reads `k3s/VERSION` and reports xtables as
+   behind only after k3s moves.
+4. Finish with one `licensing/sources.sh --repin`. The mirror cache
    in `licensing/cache/` skips files it already has, so the final
    pass is cheap and proves the source pins match their bytes.
 
