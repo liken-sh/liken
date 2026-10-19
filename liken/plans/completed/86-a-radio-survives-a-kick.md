@@ -1,9 +1,10 @@
 # 86. A radio survives a kick
 
-Milestone 86. Proposed 2026-10-19. Partly built 2026-10-19: step 3
-and the late join are built. The capture of step 1 ran on stick-1 the
-same day and found no fault in the supplicant (see "The capture"), so
-step 2 has nothing to fix; the lock flow is still open. When an access point's controller
+Milestone 86. Proposed 2026-10-19. Built 2026-10-19. The capture of
+step 1 found no fault in the supplicant, so step 2 had nothing to fix,
+and the failure after a kick is the controller's lock flow (see "The
+lock flow"). The drill measured one reconnect with no lock, not the
+three that "Done when" names. When an access point's controller
 disconnects stick-1 on purpose, the radio does not join again. It
 fails authentication again and again until the machine reboots. An
 access point controller kicks a client for ordinary reasons, such as
@@ -143,11 +144,6 @@ controller's "reconnect" action ran three times.
   three kicks. They printed the raw event, with the status code as a
   number.
 
-The lock flow is still open: a person who locks the radio to an
-access point and then runs the reconnect action gets an outage of
-minutes. Whether that comes from the controller alone, and whether a
-lock set while the radio is on another access point moves it without
-an outage, is not measured yet.
 
 ## What was built after the capture (2026-10-19)
 
@@ -167,6 +163,21 @@ an outage, is not measured yet.
   the kick and the join 2 minutes 15 seconds after it, so the refusal
   ended somewhere in the 60-second wait between them. With the cap,
   the radio would have tried again at 1 minute 44 seconds.
+
+## The lock flow (2026-10-19)
+
+A fourth run on release `2026.10.19-003` locked the radio to the
+access point it was on and ran the reconnect action. Every access
+point refused each authentication with status 37 for 3 minutes 20
+seconds, the locked one included. The radio watch cut both 60-second
+waits to 30 seconds. The lock was then removed, and the radio joined
+the locked access point on the next try, about one second later. So
+with the lock on, the access point that kicked the radio refuses it
+for as long as the lock stays, and the lock refuses it everywhere
+else. The radio has no access point to join until the lock comes
+off. That is the controller's behavior, and nothing on the machine
+can change it. A lock set while the radio is on a different access
+point was not measured.
 
 ## Done when
 
