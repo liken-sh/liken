@@ -6,8 +6,8 @@ name = "astrometry"
 # The date of the snapshot.debian.org archive that the build installs
 # from, as YYYYMMDD. Every image on Debian uses the same date, because
 # vulkan/snapshot.sha256 holds the checksums of one date.
-version = "20260928"
-revision = 2
+version = "20261019"
+revision = 1
 license = "MIT"
 
 # The upstream releases that the snapshot holds, as Debian names them.

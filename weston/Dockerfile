@@ -21,7 +21,7 @@
 
 # The shim needs no libudev to build, because its source declares the
 # two libudev types it names.
-FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS shim
+FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS shim
 ARG VERSION
 COPY --from=builder snapshot.sh snapshot.sha256 /
 RUN sh /snapshot.sh "$VERSION" \
@@ -40,7 +40,7 @@ RUN gcc -Wall -Wextra -Werror -shared -fPIC \
 # copy from the weston 14.0 tag. The .so links nothing: weston resolves
 # every libweston and libwayland symbol in it at dlopen, which is why
 # pkg-config gives only the include paths here.
-FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS layout
+FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS layout
 ARG VERSION
 COPY --from=builder snapshot.sh snapshot.sha256 /
 RUN sh /snapshot.sh "$VERSION" \
@@ -57,7 +57,7 @@ RUN gcc -Wall -Wextra -Werror -shared -fPIC \
 # weston-closure.sh names weston 14. A snapshot that moves weston to 15
 # fails this build, which is the report that the module set needs
 # reading again.
-FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS closure
+FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS closure
 ARG VERSION
 COPY --from=builder snapshot.sh snapshot.sha256 /
 # libgl1-mesa-dri is what the GL renderer builds its EGL device from.
