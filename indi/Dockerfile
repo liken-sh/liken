@@ -39,7 +39,7 @@ RUN sh /check-lists.sh /images
 
 # The shim that stands in for a driver in another pod. It is static, so
 # it needs nothing from the closure.
-FROM golang:1.27.1-bookworm@sha256:69a7b9788769bec032d238959b61854e9ae87f57be9029ec04e9885fabf99195 AS shim
+FROM golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61 AS shim
 WORKDIR /src
 COPY shim/go.mod shim/*.go ./
 RUN CGO_ENABLED=0 go build -trimpath -ldflags=-s -o /indi-shim .

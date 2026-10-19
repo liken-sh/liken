@@ -4,7 +4,7 @@
 # every liken machine boots. That pairing is the device operator
 # pattern's whole reason for a separate repository.
 
-FROM golang:1.27.1-bookworm AS build
+FROM golang:1.27.2-bookworm AS build
 # proxy.golang.org sometimes drops a module download partway through
 # the stream. With the default comma, `go` tries the origin only when
 # the proxy answers 404 or 410, so a dropped stream fails the build.

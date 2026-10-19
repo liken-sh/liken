@@ -3,7 +3,7 @@
 // own.
 module github.com/liken-sh/git-csi-driver
 
-go 1.27.1
+go 1.27.2
 
 replace github.com/liken-sh/liken/kubernetes => ../kubernetes
 

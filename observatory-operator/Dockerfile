@@ -4,7 +4,7 @@
 # there is to attack. It speaks TLS only to the API server, with the CA
 # that the kubelet mounts, so it needs no trust store.
 
-FROM golang:1.27.1-bookworm AS build
+FROM golang:1.27.2-bookworm AS build
 # proxy.golang.org sometimes drops a module download partway through
 # the stream. With the default comma, `go` tries the origin only when
 # the proxy answers 404 or 410, so a dropped stream fails the build.

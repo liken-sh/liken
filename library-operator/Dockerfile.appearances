@@ -23,7 +23,7 @@
 
 # The pod program, built the way Dockerfile.ffmpeg builds it, which says
 # why each step is there.
-FROM golang:1.27.1-bookworm AS pod
+FROM golang:1.27.2-bookworm AS pod
 ENV GOPROXY="https://proxy.golang.org|direct"
 WORKDIR /src
 COPY go.mod go.sum ./

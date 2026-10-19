@@ -3,7 +3,7 @@
 // follows the same build discipline: a static binary, no cgo.
 module github.com/liken-sh/library-operator
 
-go 1.27.1
+go 1.27.2
 
 replace github.com/liken-sh/liken/kubernetes => ../kubernetes
 

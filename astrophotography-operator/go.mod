@@ -1,6 +1,6 @@
 module github.com/liken-sh/liken/astrophotography-operator
 
-go 1.27.1
+go 1.27.2
 
 // The operator imports three packages of observatory-operator: the INDI
 // client, the PHD2 client, and the Go types of the observatory.liken.sh

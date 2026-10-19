@@ -2,7 +2,7 @@
 // in one image, so nothing here versions or releases on its own.
 module github.com/liken-sh/per-node-csi-driver
 
-go 1.27.1
+go 1.27.2
 
 replace github.com/liken-sh/liken/kubernetes => ../kubernetes
 

@@ -6,14 +6,14 @@
 # check, and a change that gains coverage should raise the number
 # here to keep the gain.
 #
-# The numbers are measured with Go 1.27.1. Its profiles count a basic
-# block once for each row that comments split the block into
-# (golang/go#80974), so the floors move when Go 1.27.2 fixes that.
+# The numbers are measured with Go 1.27.2, which counts each basic
+# block once. Go 1.27.1 and earlier count a block once for each row
+# that comments split it into (golang/go#80974), and measure higher.
 #
 # The number is what CI measures, not what a developer's machine
 # measures. Four tests create a virtual input device through
 # /dev/uinput, and CI's runner does not permit that, so a machine
-# that does measures about two points higher. To measure what CI
+# that does measures about one point higher. To measure what CI
 # measures, skip those four tests:
 #
 #   go test -race -covermode=atomic -skip 'TestCreateAVirtualDeviceOnTheRealKernel|TestReadBackTheCapabilitiesOfADeviceThisTestCreated|TestNarrowARealNodeOnTheRealKernel|TestTuneARealAxisOnTheRealKernel' -coverprofile=coverage.out ./...
@@ -21,7 +21,7 @@
 profile: coverage.out
 
 threshold:
-  total: 75
+  total: 76
 
 override:
   # The bluetoothd supervisor: what is testable is the argument

@@ -224,7 +224,7 @@ RUN set -eux; \
 # start-rescan is the command of the pod's rescan container, and it
 # works around a kernel bug that leaves the passive scan off after a
 # failed connection (bluetoothd/rescan/main.go).
-FROM golang:1.27.1-bookworm AS entrypoint
+FROM golang:1.27.2-bookworm AS entrypoint
 # proxy.golang.org sometimes drops a module download partway through
 # the stream. With the default comma, `go` tries the origin only when
 # the proxy answers 404 or 410, so a dropped stream fails the build.

@@ -8,9 +8,9 @@
 # coverage should raise the number here to keep the gain. The numbers
 # only go up, and no package sits below 60.
 #
-# The numbers are measured with Go 1.27.1. Its profiles count a basic
-# block once for each row that comments split the block into
-# (golang/go#80974), so the floors move when Go 1.27.2 fixes that.
+# The numbers are measured with Go 1.27.2, which counts each basic
+# block once. Go 1.27.1 and earlier count a block once for each row
+# that comments split it into (golang/go#80974), and measure higher.
 #
 # The numbers deliberately differ by package. machine/ is pure types
 # and parsing, testable to the last line. init/ is mostly boot
@@ -24,7 +24,7 @@ profile: coverage.out
 
 threshold:
   # The whole module, everything counted.
-  total: 85
+  total: 87
 
 override:
   # The API group's grammar: the shared shapes, the version format,

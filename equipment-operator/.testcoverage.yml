@@ -6,9 +6,9 @@
 # check, and a change that gains coverage should raise the number
 # here to keep the gain.
 #
-# The numbers are measured with Go 1.27.1. Its profiles count a basic
-# block once for each row that comments split the block into
-# (golang/go#80974), so the floors move when Go 1.27.2 fixes that.
+# The numbers are measured with Go 1.27.2, which counts each basic
+# block once. Go 1.27.1 and earlier count a block once for each row
+# that comments split it into (golang/go#80974), and measure higher.
 
 profile: coverage.out
 
@@ -16,4 +16,4 @@ threshold:
   # One package, so the total is the whole gate. go test never calls
   # main(), so its statements never run under the gate, and the
   # number sits below the whole rest of the tree.
-  total: 94
+  total: 93
