@@ -1,21 +1,29 @@
-# Updating the machine's own firmware
+# Updating firmware that a machine and its devices keep
 
 Milestone 33. Proposed, except for one part that is built and drilled:
 the fallback that survives a firmware update. This milestone would let
 a `liken` machine update its own firmware. fwupd would do the
 vendor-specific work, and `init` would stay the only process that
-writes the boot chain.
+writes the boot chain. A person declares an update with a `Firmware`
+object that sets `spec.update`, the resource that
+[milestone 87](87-firmware-a-device-takes-from-the-host.md) adds.
 
-## Two kinds of firmware
+## Three kinds of firmware
 
-The word "firmware" names two different things in this project.
+The word "firmware" names three different things in this project.
 
 Milestone 32 ships firmware that the kernel loads into a device at
 boot: wifi blobs, GPU blobs, CPU microcode. Those are files in the
 image. The kernel reads them and the device runs them. Nothing on the
 machine changes when the image changes.
 
-This milestone is about the other kind: the firmware that the machine
+Milestone 87 writes firmware into a device that holds none of its own,
+such as a camera on a bare USB microcontroller, each time the device
+appears. The bytes come from the vendor's container image, and a
+power cycle removes them.
+
+This milestone is about the third kind: firmware that a device keeps
+across a power cycle, and that the machine
 itself runs before any kernel loads. The UEFI firmware on the board, a
 network card's NVRAM, an SSD's controller, a dock. Vendors ship
 updates to these, and on Linux the program that detects and applies them
@@ -148,6 +156,84 @@ a real board.
   they prove that a BIOS machine's boot chain still reads the same
   command line.
 
+## The declaration
+
+A `Firmware` object with `spec.update` approves one version for one
+device model across the fleet:
+
+```yaml
+apiVersion: liken.sh/v1alpha1
+kind: Firmware
+metadata:
+  name: framework-13-bios
+spec:
+  selector: <the device's fwupd GUID>
+  machines:
+    matchLabels: { hardware: framework-13 }   # labels a person set
+  update:
+    version: "3.09"
+    cabinet:
+      url: https://fwupd.org/downloads/<hash>-bios.cab
+      sha256: <digest>
+```
+
+- The object is the approval. No other field approves an update, and
+  `Cluster` and `Machine` gain no spec.
+- `spec.update.cabinet` pins the file, the way an image is pinned by
+  its digest. fwupd installs a local cabinet and checks the vendor's
+  signature inside it, so the apply path needs no LVFS catalog.
+  `liken` checks the digest before fwupd reads the file.
+- No machine fetches the LVFS catalog on a timer. fwupd's own refresh
+  is a timer that reads remote state again to find a change, and the
+  catalog it reads is outside `liken`'s chain of digests. A list of
+  the updates that are available is a later step, from a catalog that
+  is pinned and bumped in git like the other pins of plan 48.
+- Automatic updates are a program that proposes `Firmware` objects.
+  It reads the fwupd GUIDs from `status.hardware.firmware.devices` on
+  each `Machine`, finds newer releases in the LVFS catalog, and opens
+  a commit that adds a `Firmware` object or bumps the version of one.
+  A person approves by merging, or the repository merges a class of
+  proposals on its own. It runs where plan 48's checks of the other
+  pins run, not on the machines, because LVFS has no feed of changes
+  to subscribe to.
+- An object stays after its update is done. Its status shows when
+  every matched device reports the version, and the next release is a
+  bump of the same object. A deleted object would leave a replaced
+  board or a new machine on the old version, and deleting it does not
+  undo a flash.
+
+The flow has four steps:
+
+1. **Report.** machine-operator runs fwupd in a pod that only reads,
+   at boot and when a `Firmware` with `update` changes. The pod writes
+   each device's ID and version as JSON. machine-operator writes them
+   to `status.hardware.firmware.devices` on its `Machine`, beside the
+   board's `bios_version` from `/sys/class/dmi/id`.
+2. **Stage.** When a device's version differs from the version that a
+   matching `Firmware` declares, machine-operator sets
+   `FirmwareConverged` to `False` with the reason `AwaitingTurn`.
+3. **Apply.** The rollout conductor grants a turn and drains the
+   machine. machine-operator runs the fwupd pod that writes. A UEFI
+   capsule goes through the shim below, and the reboot applies it. A
+   device that fwupd flashes with no reboot, such as a dock or a USB
+   receiver, is flashed only when no other claim holds the device, so
+   a flash never runs while a workload uses the device.
+4. **Prove.** The ESRT or the next report shows the declared version,
+   and the machine joins its cluster again. A failed flash has no
+   earlier state to return to, so it sets the condition and an
+   `Event`, and nothing runs it again on its own.
+
+The pod that writes needs wide access to devices: NVMe admin commands,
+hidraw, and sysfs. It is privileged except for the variable store,
+which the shim below replaces. That is the reason it runs only inside
+a rollout turn, and the reason the report runs in a separate pod that
+only reads.
+
+An `update` and an `upload` never match one device. `upload` matches a
+chip that holds no firmware, and `update` matches a device that fwupd
+reports, which holds firmware. machine-operator reports a match of
+both as a conflict and runs neither.
+
 ## Prerequisites for fwupd
 
 Four pieces of work are missing, and the rest of this plan assumes
@@ -165,7 +251,9 @@ by the console parity rule. That plan's table and
 `machine-operator/metrics.go` name the metrics `liken_firmware_info`
 and `liken_firmware_update_pending` as waiting on this field. This is
 the first part of this milestone, and it needs no fwupd, no capsule,
-and no new trust relationship.
+and no new trust relationship. The field is part of
+`status.hardware.firmware`, the status that milestone 87 adds, so all
+three kinds of firmware report in one place.
 
 **A release must be able to carry an artifact for one machine.**
 `fetchRelease` in `machine-operator/fetch.go` writes every artifact in
@@ -176,15 +264,22 @@ payload that one machine needs and the fleet does not.
 [Milestone 34](34-gpu-add-ons.md)'s GPU add-on has the same need, and
 both plans wait on this one prerequisite. The proposed design is an artifact that the release document marks as
 optional, that a Machine selects by name, and that the fetcher writes
-only to the machine that selected it.
+only to the machine that selected it. fwupd can also run as a
+container image that the machine pulls like any other workload, which
+needs no release artifact. Nothing in this plan requires fwupd's files
+on a slot: the shim gives init fwupd's requests, and init writes the
+variables itself. If that holds, firmware no longer waits on this
+prerequisite, and only milestone 34 does.
 
 **A feature must be able to run one pod per machine.** Every feature
 of kind `FeatureWorkload` in `cluster/features.go` is a cluster
 singleton. `flux` is the only one, and the cluster operator seeds it
 once. fwupd runs on each machine that updates, with that machine's
 devices. The feature kinds need a second workload kind: one
-DaemonSet-like pod on each machine that opts in. A `fwupd` feature
-slug cannot work until that kind exists. The open problem
+DaemonSet-like pod on each machine that opts in. Milestone 87 builds
+part of this: machine-operator creates a pod for its own machine that
+holds one claimed device. The fwupd pods reuse that code, with a
+privileged pod template in place of a restricted one. The open problem
 [firmware-bootorder-persistence](open-problems/firmware-bootorder-persistence.md)
 is a fourth prerequisite of a different kind. Any firmware trial
 assumes that `BootOrder` survives a reset, and the safeguard that
@@ -289,10 +384,9 @@ detection. fwupd never reboots
 a machine itself. The machine reboots only when the conductor grants
 it a turn, the same as for every other staged change.
 
-The plan does not yet say which process computes `FirmwareConverged`.
-The machine operator sets `AwaitingTurn` generically in `converge.go`,
-so it is the likely process, and it would read the ESRT through the
-facts tree.
+machine-operator computes `FirmwareConverged`. It sets `AwaitingTurn`
+generically in `converge.go`, it reads the `Firmware` objects that
+match its devices, and it reads the ESRT through the facts tree.
 
 ### Proving a change that the firmware applied
 
