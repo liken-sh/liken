@@ -9,14 +9,13 @@ radio moves to another one, and publishes the signal as a metric.
 
 ## What happened
 
-On 2026-10-19 the switch that powers the access point nearest
-stick-1 lost power. The network has several access points on one
-SSID. When power came back, stick-1's round trip from the laptop was
-3 to 12 seconds, with 10% loss and more duplicate replies than
-requests, while liken-1 on the same LAN answered in 2 ms. stick-1 had
-reassociated with an access point at the far end of the house and
-stayed there, and its heartbeat lease expired, so its `Machine` went
-`Lost`. The access point's own controller showed the association. The
+On 2026-10-19 the access point nearest stick-1 lost power for a
+while. stick-1 reassociated with a farther access point on the same
+SSID and stayed there after the near one came back. Its round trip
+from the laptop rose to 3 to 12 seconds, with 10% loss and more
+duplicate replies than requests, while liken-1 on the same LAN
+answered in 2 ms. Its heartbeat lease expired, so its `Machine` went
+`Lost`. The access point's controller showed the association. The
 cluster could not:
 
 - `status.network.interfaces[].wireless` holds the SSID, the state,
