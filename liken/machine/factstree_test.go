@@ -150,7 +150,11 @@ func everythingSet() *MachineStatus {
 				// with no address at all, whose only fact is why.
 				{
 					Name: "wlan0", MAC: "04:4a:2c:11:22:33", Address: "192.168.1.11/24", Method: MethodStatic,
-					Wireless: &WirelessStatus{SSID: "homenet", State: WirelessConnected},
+					Wireless: &WirelessStatus{
+						SSID: "homenet", State: WirelessConnected,
+						BSSID: "04:4a:2c:aa:bb:cc", Frequency: 5180, Band: "5GHz",
+						AssociatedAt: &booted, LastDisconnectReason: 4,
+					},
 				},
 				{
 					Name: "wlan1", MAC: "04:4a:2c:11:22:34",

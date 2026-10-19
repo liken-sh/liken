@@ -41,7 +41,7 @@ const supplicantBinary = "/sbin/wpa_supplicant"
 //
 // It is a variable rather than a constant so tests can write into a
 // directory of their own. A real boot never points it anywhere but /run.
-var wirelessRunDir = "/run/liken/wireless"
+var wirelessRunDir = machine.WirelessDir
 
 // How long a boot waits for a radio to associate. A scan of both
 // bands plus a four-way handshake finishes in a few seconds on a
@@ -65,6 +65,17 @@ type radio struct {
 	state   machine.WirelessState
 	message string
 
+	// The access point the radio is associated with, from the
+	// supplicant's answer to STATUS, and when it associated. The radio
+	// watch keeps them current (radiowatch.go).
+	bssid        string
+	frequency    int
+	associatedAt time.Time
+
+	// lastDisconnectReason is the 802.11 reason code of the last time
+	// the radio lost an access point, or zero.
+	lastDisconnectReason int
+
 	// control is the attached client on the supplicant's control
 	// socket. The park below keeps reading it, which is what lets a fix
 	// on the network side resume a parked boot with no power cycle.
@@ -82,7 +93,16 @@ func (r *radio) deterministic() bool {
 
 // wirelessStatus renders the radio for the facts tree.
 func (r *radio) wirelessStatus() *machine.WirelessStatus {
-	return &machine.WirelessStatus{SSID: r.ssid, State: r.state, Message: r.message}
+	w := &machine.WirelessStatus{
+		SSID: r.ssid, State: r.state, Message: r.message,
+		BSSID: r.bssid, Frequency: r.frequency, Band: machine.WirelessBand(r.frequency),
+		LastDisconnectReason: r.lastDisconnectReason,
+	}
+	if !r.associatedAt.IsZero() {
+		at := r.associatedAt
+		w.AssociatedAt = &at
+	}
+	return w
 }
 
 // joinWireless runs the wireless half of one interface's bring-up: it

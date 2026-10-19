@@ -61,6 +61,19 @@ passphrase is wrong, the machine blocks the boot and waits. It says so on the
 console and in `kubectl get machines`. A machine with a working wired
 interface joins anyway and reports the wifi failure as a condition.
 
+A network can have several access points with the same SSID. The
+machine scans for a stronger one every 30 seconds while the signal is
+below -70 dBm, and once an hour above that, and moves when a scan
+finds one. To see which access point a machine holds, read
+[`status.network.interfaces[].wireless`](/docs/reference/machine/#statusnetworkinterfaceswireless).
+Its `bssid`, `frequency`, and `band` name the access point, and
+`kubectl describe machine` lists a `Roamed` or `Associated` event for
+each move. When the radio loses its access point, `WirelessJoined`
+goes `False` with the reason `Joining` until the supplicant rejoins,
+and the message gives the 802.11 reason code. The signal level is the
+metric `liken_wireless_signal_dbm`
+([Metrics](/docs/reference/metrics/#the-radios)).
+
 ## 2. If the new machine is a leader
 
 If the new machine will run a control plane, add its name to

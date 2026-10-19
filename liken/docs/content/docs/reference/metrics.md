@@ -58,6 +58,8 @@ metrics of their own domain:
 | machine-operator | `liken_machine_passes_total{cause}` | counter | passes by what started each one; a settled machine runs few |
 | machine-operator | `liken_time_offset_seconds` | gauge | the clock's exact error; see [the clock](#the-clock) |
 | machine-operator | `liken_time_last_sync_timestamp_seconds` | gauge | when a time source last answered |
+| machine-operator | `liken_wireless_signal_dbm{interface,bssid}` | gauge | each radio's signal level; see [the radios](#the-radios) |
+| machine-operator | `liken_wireless_tx_bitrate_bits_per_second{interface,bssid}` | gauge | the bitrate each radio last sent at |
 | cluster-operator | `liken_machines{phase}` | gauge | fleet by phase |
 | cluster-operator | `liken_disruption_approvals_pending` | gauge | approvals outstanding |
 | cluster-operator | `liken_machines_behind_target` | gauge | nodes not yet on the target release |
@@ -114,6 +116,27 @@ the asymmetry of the path, plus 100 ppm of its age, for the drift of
 the clock since. On wifi, single exchanges vary by tens of
 milliseconds, and this filter keeps that noise out of the clock, the
 bound, and the metric.
+
+## The radios
+
+`status.network.interfaces[].wireless` names the access point that
+each radio holds, and it changes only when the radio moves. The signal
+changes all the time, so it is a metric and not a status field. The
+machine operator asks each radio's `wpa_supplicant` for the signal
+only when Prometheus scrapes. The driver measures the signal on the
+frames the radio already receives, so a scrape sends nothing over the
+air.
+
+`liken_wireless_signal_dbm` is the signal level of the access point,
+and `liken_wireless_tx_bitrate_bits_per_second` is the bitrate the
+radio last sent at. The `bssid` label names the access point, so a
+graph shows a move to another access point as one series that ends
+and another that starts. Both series are absent while the radio is not
+associated. A signal below about -70 dBm is weak, and at that level
+the machine scans for a stronger access point every 30 seconds.
+
+Without Prometheus, read the same endpoint through the API server, as
+for the clock, and filter for `^liken_wireless_`.
 
 ## The monitoring component
 

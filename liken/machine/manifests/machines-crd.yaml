@@ -33,7 +33,7 @@ metadata:
     # that use its fields (init/schemarevision.go). Raise it in the
     # same change that changes the schema below; a test holds the two
     # together.
-    liken.sh/schema-revision: "10"
+    liken.sh/schema-revision: "11"
 spec:
   group: liken.sh
   names:
@@ -1608,7 +1608,11 @@ spec:
                                 description: >-
                                   What the join did. Associating
                                   means the supplicant still works
-                                  on it. Connected means the radio
+                                  on it, or that the radio lost its
+                                  access point after the join and
+                                  the supplicant is rejoining; the
+                                  message then names the access
+                                  point and the reason. Connected means the radio
                                   associated and the interface then
                                   took its address. WrongKey means a
                                   credential failure the machine can
@@ -1645,6 +1649,48 @@ spec:
                                   the supplicant's words, or in
                                   init's words when the passphrase
                                   file itself is the problem.
+                              bssid:
+                                type: string
+                                description: >-
+                                  The BSSID of the access point the
+                                  radio is associated with, present
+                                  only while the state is Connected.
+                                  One network can have many access
+                                  points, and this field says which
+                                  one carries the machine's traffic.
+                                  When the radio moves to another
+                                  access point, machine-operator
+                                  posts a Roamed Event that names
+                                  both.
+                              frequency:
+                                type: integer
+                                description: >-
+                                  The center frequency of the
+                                  access point's channel, in MHz.
+                              band:
+                                type: string
+                                description: >-
+                                  The band of that frequency:
+                                  2.4GHz, 5GHz, 6GHz, or 60GHz.
+                              associatedAt:
+                                type: string
+                                format: date-time
+                                description: >-
+                                  When the radio associated with
+                                  this access point.
+                              lastDisconnectReason:
+                                type: integer
+                                description: >-
+                                  The IEEE 802.11 reason code of the
+                                  last time the radio lost an access
+                                  point during this boot, for
+                                  example 4 for inactivity or 3 for
+                                  a deauthentication. Absent when the
+                                  radio has not lost one. The signal
+                                  level is not in status, because it
+                                  changes all the time; the metric
+                                  liken_wireless_signal_dbm reports
+                                  it.
                 time:
                   type: object
                   description: >-

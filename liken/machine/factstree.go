@@ -32,6 +32,7 @@ package machine
 //	boot/restarts                  the restart path
 //	features/, registries/         the restart path
 //	runtime/                       the restart path
+//	network/                       the boot step, then the radio watch
 //	everything else                the boot step that discovers it
 //
 // A boot step writes its subtree once, at the point where it discovers
@@ -58,8 +59,9 @@ package machine
 //
 // Rule 5 applies to four boot records, boot/manifest,
 // boot/clusterManifest, boot/credentials, and boot/imports, to the
-// clock's standing, time/standing, and to each element of the two
-// serio lists, serio/ and boot/serio/. Each of
+// clock's standing, time/standing, to each radio's association,
+// network/interfaces/<name>/wireless/association, and to each element
+// of the two serio lists, serio/ and boot/serio/. Each of
 // these is rewritten while the machine runs. A rename replaces one
 // inode in one step, so a rename of one file is the only write that a
 // concurrent reader can never see half done. The paired fields of each

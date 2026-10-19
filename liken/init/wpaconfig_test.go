@@ -162,6 +162,7 @@ func TestWirelessConfigJoinsWPA2AndWPA3AtOnce(t *testing.T) {
 	for _, want := range []string{
 		"ctrl_interface=/run/liken/wireless/wlan0/ctrl\n",
 		"\tssid=686f6d656e6574\n",
+		"\tbgscan=\"simple:30:-70:3600\"\n",
 		"\tkey_mgmt=WPA-PSK WPA-PSK-SHA256 SAE\n",
 		"\tieee80211w=1\n",
 		"\tpsk=" + derivePMK("homenet", "correcthorse") + "\n",
@@ -183,6 +184,9 @@ func TestWirelessConfigForAnOpenNetworkCarriesNoKey(t *testing.T) {
 	if !strings.Contains(got, "\tkey_mgmt=NONE\n") {
 		t.Errorf("an open network takes no key: %s", got)
 	}
+	if !strings.Contains(got, "\tbgscan=\"simple:30:-70:3600\"\n") {
+		t.Errorf("an open network scans for a stronger access point too: %s", got)
+	}
 	for _, unwanted := range []string{"psk=", "sae_password="} {
 		if strings.Contains(got, unwanted) {
 			t.Errorf("an open network must carry no %s: %s", unwanted, got)
@@ -203,7 +207,8 @@ func TestWirelessConfigWritesEveryValueAsHex(t *testing.T) {
 	}
 	for _, line := range strings.Split(strings.TrimSpace(got), "\n") {
 		_, value, found := strings.Cut(line, "=")
-		if !found || strings.HasPrefix(line, "ctrl_interface") || strings.HasPrefix(line, "\tkey_mgmt") {
+		if !found || strings.HasPrefix(line, "ctrl_interface") || strings.HasPrefix(line, "\tkey_mgmt") ||
+			strings.HasPrefix(line, "\tbgscan") {
 			continue
 		}
 		if strings.ContainsAny(value, `"# `) {
@@ -226,7 +231,7 @@ func TestWirelessConfigCountsTheLinesItMeansTo(t *testing.T) {
 	if cerr == nil {
 		t.Fatalf("a passphrase holding a newline must be refused:\n%s", injected)
 	}
-	if strings.Count(plain, "\n") != 8 {
+	if strings.Count(plain, "\n") != 9 {
 		t.Errorf("the configuration is %d lines:\n%s", strings.Count(plain, "\n"), plain)
 	}
 }

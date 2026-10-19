@@ -130,6 +130,11 @@ func derivePMK(ssid, passphrase string) string {
 	return hex.EncodeToString(key)
 }
 
+// wirelessBackgroundScan is the bgscan setting of every network: the
+// simple module, a short interval in seconds, the signal threshold in
+// dBm, and a long interval in seconds.
+const wirelessBackgroundScan = "simple:30:-70:3600"
+
 // wirelessConfig renders the supplicant's whole configuration for one
 // interface. It refuses rather than render a value it cannot write
 // safely, because a machine with no shell cannot be asked afterwards.
@@ -148,6 +153,18 @@ func wirelessConfig(w machine.WirelessSpec, stateRoot, ctrlDir string) (string, 
 	// hex, and hex cannot hold the quote, the space, or the comment
 	// character that would otherwise end the line early.
 	fmt.Fprintf(&b, "\tssid=%s\n", hex.EncodeToString([]byte(w.SSID)))
+
+	// Without bgscan the radio leaves an access point only when the
+	// link drops. A radio that rejoined a far access point while the
+	// near one was off stays on the far one after the near one comes
+	// back, with round trips of seconds. bgscan's simple module scans
+	// every 30 seconds while the signal is below -70 dBm, and once an
+	// hour above it, and the supplicant moves to a stronger access
+	// point of the same network that a scan finds. On a radio with a
+	// good signal, the cost is one background scan an hour. The
+	// module also sets the driver's signal monitor at -70 dBm, which
+	// is what makes a weak signal start the faster scans.
+	fmt.Fprintf(&b, "\tbgscan=%q\n", wirelessBackgroundScan)
 
 	if w.SecurityOrDefault() == machine.WirelessOpen {
 		// NONE is the supplicant's word for a network with no

@@ -26,6 +26,9 @@ package main
 //     the cordon before a drain and the uncordon after the reboot.
 //   - The creation of the Machine from the boot manifest posts one
 //     Event.
+//   - Each new association of a radio posts one Event: Roamed when the
+//     radio moved from one access point to another, and Associated when
+//     status named no access point before, or named the same one.
 //
 // Nothing that repeats on each pass posts an Event: a refused
 // eviction, a sysctl written back, or a heartbeat renewal.
@@ -48,6 +51,8 @@ const (
 	reasonBootRefused   = "BootRefused"
 	reasonCordoned      = "Cordoned"
 	reasonUncordoned    = "Uncordoned"
+	reasonRoamed        = "Roamed"
+	reasonAssociated    = "Associated"
 
 	// reasonBackstopRepaired marks a write by a pass that only the
 	// backstop started, which names a wake the code does not send
@@ -100,6 +105,46 @@ func postStatusEvents(e machineEvents, stored, written *machine.MachineStatus) {
 			"init refused the boot at %s and powered the machine off: %s",
 			stop.Time.UTC().Format(time.RFC3339), stop.Reason))
 	}
+	postAssociationEvents(e, stored, written)
+}
+
+// postAssociationEvents posts one Event for each radio whose time of
+// association moved. Init moves it only on a new association, so a
+// radio that stays with one access point posts nothing. The Event is
+// the one record of the access point a radio left, because status
+// names only the current one.
+func postAssociationEvents(e machineEvents, stored, written *machine.MachineStatus) {
+	before := map[string]*machine.WirelessStatus{}
+	for _, iface := range stored.Network.Interfaces {
+		before[iface.Name] = iface.Wireless
+	}
+	for _, iface := range written.Network.Interfaces {
+		now := iface.Wireless
+		if now == nil || now.AssociatedAt == nil {
+			continue
+		}
+		was := before[iface.Name]
+		if was != nil && was.AssociatedAt != nil && was.AssociatedAt.Equal(*now.AssociatedAt) {
+			continue
+		}
+		to := accessPoint(now)
+		if was != nil && was.BSSID != "" && was.BSSID != now.BSSID {
+			e.normal(reasonRoamed, fmt.Sprintf("%s moved from %s to %s", iface.Name, accessPoint(was), to))
+			continue
+		}
+		message := fmt.Sprintf("%s associated with %s", iface.Name, to)
+		if now.LastDisconnectReason != 0 {
+			message += fmt.Sprintf(" after it lost its access point (%s)",
+				machine.DisconnectReasonText(now.LastDisconnectReason))
+		}
+		e.normal(reasonAssociated, message)
+	}
+}
+
+// accessPoint names an access point by its BSSID, its channel's
+// frequency, and its band.
+func accessPoint(w *machine.WirelessStatus) string {
+	return fmt.Sprintf("%s on %d MHz (%s)", w.BSSID, w.Frequency, w.Band)
 }
 
 // sameCrash reports whether the stored status already names the crash

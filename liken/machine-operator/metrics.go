@@ -51,6 +51,7 @@ func serveMetrics(address string, f *fetcher, health func() error) (*metrics.Ope
 	o.SetHealth(health)
 	layer := newMachineMetrics(o, f)
 	o.Registry().MustRegister(clockCollector{dir: machine.ClockDir, now: time.Now})
+	o.Registry().MustRegister(wirelessCollector{dir: machine.WirelessDir})
 	if addr, err := o.Serve(address); err != nil {
 		fmt.Fprintf(os.Stderr, "the metrics listener is not serving: %v\n", err)
 	} else if addr != nil {

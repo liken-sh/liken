@@ -336,6 +336,22 @@ type WirelessStatus struct {
 	SSID    string        `json:"ssid,omitempty"`
 	State   WirelessState `json:"state,omitempty"`
 	Message string        `json:"message,omitempty"`
+
+	// The access point the radio is associated with, present only
+	// while the state is Connected. An SSID names a network, and a
+	// network can have many access points, so the BSSID is the only
+	// field that says which one carries this machine's traffic. The
+	// fields change only when the radio associates, so they cost no
+	// status write while the radio stays with one access point.
+	BSSID        string     `json:"bssid,omitempty"`
+	Frequency    int        `json:"frequency,omitempty"`
+	Band         string     `json:"band,omitempty"`
+	AssociatedAt *time.Time `json:"associatedAt,omitempty"`
+
+	// LastDisconnectReason is the IEEE 802.11 reason code of the last
+	// time the radio lost an access point during this boot. Zero
+	// means the radio has not lost one.
+	LastDisconnectReason int `json:"lastDisconnectReason,omitempty"`
 }
 
 // TimeState is a machine clock's condition. FreeRunning and

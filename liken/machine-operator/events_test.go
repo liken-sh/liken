@@ -47,6 +47,16 @@ func posted(recorded *eventstest.Events) []string {
 
 var crashTime = testNow.Add(-time.Hour)
 
+var roamTime = testNow.Add(-time.Minute)
+
+// onRadio is a status whose one interface, wlan0, is a radio with the
+// given standing.
+func onRadio(w *machine.WirelessStatus) machine.MachineStatus {
+	return machine.MachineStatus{Network: machine.NetworkStatus{
+		Interfaces: []machine.InterfaceStatus{{Name: "wlan0", Wireless: w}},
+	}}
+}
+
 func TestAStatusWritePostsTheEventOfEachChange(t *testing.T) {
 	converged := api.Condition{Type: "SpecConverged", Status: api.ConditionTrue, Reason: "Converged", Message: "this boot actuated the current spec"}
 	ready := api.Condition{Type: "Ready", Status: api.ConditionTrue, Reason: "Reconciled"}
@@ -120,6 +130,38 @@ func TestAStatusWritePostsTheEventOfEachChange(t *testing.T) {
 			stored:  machine.MachineStatus{LastFailStop: &machine.FailStop{Reason: "an older refusal", Time: crashTime.Add(-time.Hour)}},
 			written: machine.MachineStatus{LastFailStop: &machine.FailStop{Reason: "no disk holds machineState", Time: crashTime}},
 			want:    []string{"Warning BootRefused: init refused the boot at 2026-07-06T11:00:00Z and powered the machine off: no disk holds machineState"},
+		},
+		{
+			name:    "a radio that moved to another access point",
+			stored:  onRadio(&machine.WirelessStatus{BSSID: "04:4a:2c:11:22:33", Frequency: 5180, Band: "5GHz", AssociatedAt: &crashTime}),
+			written: onRadio(&machine.WirelessStatus{BSSID: "04:4a:2c:44:55:66", Frequency: 2437, Band: "2.4GHz", AssociatedAt: &roamTime}),
+			want:    []string{"Normal Roamed: wlan0 moved from 04:4a:2c:11:22:33 on 5180 MHz (5GHz) to 04:4a:2c:44:55:66 on 2437 MHz (2.4GHz)"},
+		},
+		{
+			name:   "a radio that rejoined after it lost its access point",
+			stored: onRadio(&machine.WirelessStatus{State: machine.WirelessAssociating, LastDisconnectReason: 4}),
+			written: onRadio(&machine.WirelessStatus{
+				BSSID: "04:4a:2c:44:55:66", Frequency: 2437, Band: "2.4GHz", AssociatedAt: &roamTime, LastDisconnectReason: 4,
+			}),
+			want: []string{"Normal Associated: wlan0 associated with 04:4a:2c:44:55:66 on 2437 MHz (2.4GHz) after it lost its access point (reason 4, disassociated because of inactivity)"},
+		},
+		{
+			name:    "the first association of a boot",
+			stored:  machine.MachineStatus{},
+			written: onRadio(&machine.WirelessStatus{BSSID: "04:4a:2c:11:22:33", Frequency: 5180, Band: "5GHz", AssociatedAt: &roamTime}),
+			want:    []string{"Normal Associated: wlan0 associated with 04:4a:2c:11:22:33 on 5180 MHz (5GHz)"},
+		},
+		{
+			name:    "a radio that stayed with its access point",
+			stored:  onRadio(&machine.WirelessStatus{BSSID: "04:4a:2c:11:22:33", Frequency: 5180, AssociatedAt: &roamTime}),
+			written: onRadio(&machine.WirelessStatus{BSSID: "04:4a:2c:11:22:33", Frequency: 5745, AssociatedAt: &roamTime}),
+			want:    nil,
+		},
+		{
+			name:    "a radio that lost its access point",
+			stored:  onRadio(&machine.WirelessStatus{BSSID: "04:4a:2c:11:22:33", Frequency: 5180, AssociatedAt: &roamTime}),
+			written: onRadio(&machine.WirelessStatus{State: machine.WirelessAssociating, LastDisconnectReason: 4}),
+			want:    nil,
 		},
 	}
 	for _, c := range cases {

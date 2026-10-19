@@ -414,7 +414,7 @@ func TestTheVerdictComponentEndsAfterAStuckRaise(t *testing.T) {
 	}, labCluster())
 
 	done := make(chan error, 1)
-	go func() { done <- publishRadioVerdicts(pass, tree, nil)(context.Background()) }()
+	go func() { done <- watchRadios(nil, pass, tree, nil)(context.Background()) }()
 	select {
 	case err := <-done:
 		if err != nil {
@@ -641,7 +641,7 @@ func TestALateRadioReachesTheFactsTreeAndResolvConf(t *testing.T) {
 	}
 	pass.settled <- withNameserver(joinedRadio("wlan0", "homenet", "192.168.1.20/24"), "192.168.1.1")
 
-	if err := publishRadioVerdicts(pass, tree, nil)(context.Background()); err != nil {
+	if err := watchRadios(nil, pass, tree, nil)(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 

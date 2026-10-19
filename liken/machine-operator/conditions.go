@@ -530,7 +530,8 @@ func featuresCondition(observed []machine.FeatureStatus) api.Condition {
 //
 // A radio still associating is work in progress, not a failure: the
 // boot handed it to the background on purpose, and the verdict
-// arrives in seconds. The Joining reason marks that window so the
+// arrives in seconds. A radio that lost its access point after the
+// join is Associating too, because the supplicant rejoins on its own. The Joining reason marks that window so the
 // phase mapping can leave the machine Ready while it lasts.
 func wirelessCondition(interfaces []machine.InterfaceStatus) api.Condition {
 	declared, joining := 0, 0

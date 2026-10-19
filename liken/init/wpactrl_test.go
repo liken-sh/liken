@@ -230,13 +230,17 @@ func TestAttachCarriesTheSupplicantsEvents(t *testing.T) {
 	defer control.close()
 
 	s.push(t, "<3>CTRL-EVENT-CONNECTED - Connection to 04:4a:2c:11:22:33 completed [id=0]")
-	select {
-	case event := <-control.events():
-		if event.name != "CTRL-EVENT-CONNECTED" {
-			t.Errorf("got %+v", event)
+	// The client marks each attach on the stream first, so a reader
+	// reads the whole state again.
+	for _, want := range []string{wpaAttached, "CTRL-EVENT-CONNECTED"} {
+		select {
+		case event := <-control.events():
+			if event.name != want {
+				t.Errorf("got %+v, want %s", event, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%s never arrived", want)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("no event arrived")
 	}
 }
 
@@ -278,6 +282,12 @@ func TestClosingTheControlEndsTheEventStream(t *testing.T) {
 	}
 	control.close()
 	control.close() // closing twice must be safe: the shutdown may race the park
+	// The attach marker was already on the stream, and a closed
+	// channel still delivers what it buffered before it reports the
+	// close.
+	if event := <-control.events(); event.name != wpaAttached {
+		t.Errorf("got %+v before the close", event)
+	}
 	if _, open := <-control.events(); open {
 		t.Error("the stream must be closed")
 	}

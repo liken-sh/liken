@@ -150,7 +150,19 @@ func (t FactsTree) writeInterfaceWireless(base string, w *WirelessStatus) error 
 	if w == nil {
 		return os.RemoveAll(filepath.Join(t.Dir, dir))
 	}
+	// The association is one record, because init rewrites it while
+	// the machine runs and its fields change together on each
+	// association (rule 5). It is written before the state, so a
+	// reader that sees the new state also sees the access point that
+	// goes with it.
 	return firstError(
+		t.writeRecordFact(filepath.Join(dir, "association"), [][2]string{
+			{"bssid", w.BSSID},
+			{"frequency", formatInt(w.Frequency)},
+			{"band", w.Band},
+			{"associatedAt", formatTime(w.AssociatedAt)},
+			{"lastDisconnectReason", formatInt(w.LastDisconnectReason)},
+		}),
 		t.writeFact(filepath.Join(dir, "ssid"), w.SSID),
 		t.writeFact(filepath.Join(dir, "state"), string(w.State)),
 		t.writeFact(filepath.Join(dir, "message"), w.Message),

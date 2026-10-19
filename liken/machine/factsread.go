@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/liken-sh/liken/liken/api"
 )
@@ -321,7 +322,42 @@ func (t FactsTree) readInterfaceWireless(base string) (*WirelessStatus, error) {
 	if w.Message, err = t.readFact(filepath.Join(dir, "message")); err != nil {
 		return nil, err
 	}
+	association, err := t.readRecordFact(filepath.Join(dir, "association"))
+	if err != nil {
+		return nil, err
+	}
+	w.BSSID = association["bssid"]
+	w.Band = association["band"]
+	path := filepath.Join(t.Dir, dir, "association")
+	if w.Frequency, err = recordInt(association, "frequency", path); err != nil {
+		return nil, err
+	}
+	if w.LastDisconnectReason, err = recordInt(association, "lastDisconnectReason", path); err != nil {
+		return nil, err
+	}
+	if at := association["associatedAt"]; at != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, at)
+		if err != nil {
+			return nil, fmt.Errorf("%s: associatedAt: %w", path, err)
+		}
+		w.AssociatedAt = &parsed
+	}
 	return w, nil
+}
+
+// recordInt reads one decimal field of a record. An absent field is
+// zero, and a field that does not hold an integer is an error that
+// names the record's path.
+func recordInt(record map[string]string, key, path string) (int, error) {
+	value := record[key]
+	if value == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %s: %w", path, key, err)
+	}
+	return n, nil
 }
 
 func (t FactsTree) readTimeStatus() (TimeStatus, error) {

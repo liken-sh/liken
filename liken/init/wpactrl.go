@@ -32,6 +32,13 @@ const wpaMessageMax = 4096
 // short.
 const wpaSocketPatience = 10 * time.Second
 
+// wpaAttached is the name of the event the client puts on its own
+// stream each time an ATTACH succeeds. The supplicant sends no event
+// for what happened while no client was attached, such as an
+// association during a restart, so a reader of the stream reads the
+// whole state again with STATUS when this event arrives.
+const wpaAttached = "LIKEN-ATTACHED"
+
 // wpaEvent is one message the supplicant pushed to an attached client.
 type wpaEvent struct {
 	// level is the priority the supplicant stamped on the message,
@@ -250,6 +257,15 @@ func (c *wpaControl) attach() error {
 	c.mu.Lock()
 	old := c.conn
 	c.conn = conn
+	// The attached marker goes out under the lock, because close
+	// closes the channel under the same lock, and a send on a closed
+	// channel panics.
+	if !c.closed {
+		select {
+		case c.out <- wpaEvent{name: wpaAttached}:
+		default:
+		}
+	}
 	c.mu.Unlock()
 	if old != nil {
 		old.Close()
