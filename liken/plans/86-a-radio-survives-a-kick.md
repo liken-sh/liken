@@ -1,8 +1,9 @@
 # 86. A radio survives a kick
 
 Milestone 86. Proposed 2026-10-19. Partly built 2026-10-19: step 3
-and the late join are built, and steps 1 and 2 wait for the capture
-on stick-1. When an access point's controller
+and the late join are built. The capture of step 1 ran on stick-1 the
+same day and found no fault in the supplicant (see "The capture"), so
+step 2 has nothing to fix; the lock flow is still open. When an access point's controller
 disconnects stick-1 on purpose, the radio does not join again. It
 fails authentication again and again until the machine reboots. An
 access point controller kicks a client for ordinary reasons, such as
@@ -102,6 +103,50 @@ capture on stick-1.
   association with no address, at the watch's baseline and on each
   `CTRL-EVENT-CONNECTED`, and rewrites `resolv.conf` with the radio's
   nameservers.
+
+## The capture (2026-10-19)
+
+stick-1 ran release `2026.10.19-002` on a network of two access points
+with one controller. The network offered WPA2 and WPA3 together, with
+no 802.11r, so each join used SAE. A node debug pod attached to the
+supplicant's control socket as a monitor at the debug level
+(`ATTACH`, then `LEVEL 2`) and printed every message. The
+controller's "reconnect" action ran three times.
+
+- **A reconnect with no lock rejoins in 9 seconds.** The controller
+  deauthenticated the radio from access point A with reason 1. Access
+  point A did not answer the next authentication for 5 seconds, and
+  access point B accepted the one after it. The radio watch posted
+  `Joining` and then `Roamed`, 7 seconds apart.
+- **A reconnect with the radio locked to one access point is out for
+  minutes.** The controller's "lock to access point" setting refuses
+  the client everywhere but the locked one. After a reconnect from the
+  locked access point, every access point refused each authentication
+  with status 37 ("declined") about 14 ms after the first SAE frame,
+  so no key was checked. The supplicant backed off 10, 20, 30, and 60
+  seconds, and the radio joined the locked access point 2 minutes 15
+  seconds after the kick. The time the lock was lifted in the third
+  run is not recorded, so the capture does not separate the end of
+  the refusal from the lift.
+- **The supplicant is not at fault.** It flushed its keys at each
+  disconnect, tried every access point it could see, and joined on
+  the first attempt that an access point accepted. Its backoff caps at
+  300 seconds, so it never stops trying. The cached PMKSA and the
+  `WRONG_KEY` explanations do not fit: no attempt reached the key.
+- **The controller sent no 802.11v request.** It moved the client by
+  deauthentication only. It sent two 802.11k radio measurement frames.
+- **The supplicant's output never reaches the cluster.** init sends
+  a child process's output to the serial console and not to kmsg
+  (`init/console.go`), which keeps k3s's volume out of the ring buffer.
+  The supplicant writes a few lines for each join at its default level,
+  and those lines are the record of each refusal, so they are a
+  candidate for kmsg. The monitor above was the only way to read them.
+
+The lock flow is still open: a person who locks the radio to an
+access point and then runs the reconnect action gets an outage of
+minutes. Whether that comes from the controller alone, and whether a
+lock set while the radio is on another access point moves it without
+an outage, is not measured yet.
 
 ## Done when
 
