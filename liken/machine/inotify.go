@@ -140,8 +140,7 @@ type watch struct {
 	dir int32
 
 	// fdMu makes the reader's close of fd and a TreeWatch's Sync
-	// exclusive. The reader closes the wake channel before it closes
-	// fd, so a caller can see an open channel, call Sync, and add a
+	// exclusive. A caller can see an open channel, call Sync, and add a
 	// watch to a descriptor number that the process has since given to
 	// another file. fdClosed tells Sync that the reader has stopped.
 	fdMu     sync.Mutex
@@ -223,7 +222,9 @@ func (w *watch) start(ctx context.Context) {
 // died from one whose context ended. A watch that died misses every
 // change after it, so the caller watches again and reads the whole
 // state again. Only this goroutine sends on the channel, so the close
-// cannot race a send. It closes the descriptors it owns as it leaves.
+// cannot race a send. It closes the descriptors it owns as it leaves,
+// and it closes fd before the wake channel, so a caller that sees the
+// channel close and then calls Sync always gets errWatchClosed.
 func (w *watch) run() {
 	defer w.closeFd()
 	defer unix.Close(w.cancelR)
@@ -238,6 +239,7 @@ func (w *watch) run() {
 			continue
 		}
 		if err != nil {
+			w.closeFd()
 			close(w.wake)
 			return
 		}
@@ -245,6 +247,7 @@ func (w *watch) run() {
 			return
 		}
 		if !w.drain(buf) {
+			w.closeFd()
 			close(w.wake)
 			return
 		}
