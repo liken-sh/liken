@@ -256,6 +256,8 @@ starts with the condition's name. The other events are these:
 | `BootRefused` | `Machine` | `Warning` | Init refused a boot and powered the machine off. [`status.lastFailStop`](https://liken.sh/docs/reference/machine/#status--lastfailstop) holds the reason. |
 | `Cordoned` | `Machine` | `Normal` | The operator cordoned the machine's `Node` before a reboot. |
 | `Uncordoned` | `Machine` | `Normal` | The operator returned the `Node` to the scheduler after the reboot. |
+| `Roamed` | `Machine` | `Normal` | A radio moved from one access point of its network to another. The message names both, with the channel and the band of each. |
+| `Associated` | `Machine` | `Normal` | A radio associated with an access point: at boot, or again after it lost one. The message names the access point and the reason for the loss. |
 | `BackstopRepaired` | `Machine` | `Warning` | A pass that no event started changed the machine. The message names each step that wrote. The operator missed a wake, which is a bug in `liken`: report it with the message. The machine is correct again. |
 | `RebootTurnGranted` | `Machine` | `Normal` | The cluster granted the machine a reboot turn. |
 | `RebootTurnReclaimed` | `Machine` | `Normal` | The machine no longer needs its turn, and the turn returns to the disruption budget. |
