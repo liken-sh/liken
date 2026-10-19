@@ -80,8 +80,8 @@ builder="docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a
 openiscsi_sha256="1c3a8ad7d86e57d247a08c013f5055ef695b3a07ed760d1aea7d90b9f9011602"
 kmod_version="34"
 kmod_sha256="12e7884484151fbd432b6a520170ea185c159f4393c7a2c2a886ab820313149a"
-libeconf_version="0.8.4"
-libeconf_sha256="7c311d55237f1fc6ac437caca194d170c9cae314235d60a9fbf11e980114e25e"
+libeconf_version="0.8.6"
+libeconf_sha256="0d4ae78a5924e1af0e1c4fe9e538cb62d507dfb6f50b827654f89caabe83a33b"
 
 cache="$here/cache/$version"
 out="$here/dist/$version"

@@ -42,7 +42,7 @@ done
 version="$(cat "$here/VERSION")"
 url="https://raw.githubusercontent.com/vcrhonek/hwdata/$version/pci.ids"
 
-digest="52c37d78429df463be8aba3ad8a0fc795d22081084ef39ed48cf69b102fbde4e"
+digest="4f020f031d1f2d011b2a656a191519a056cb9744229551aed2cf7f90dfc2e18a"
 
 cache="$here/cache/$version"
 out="$here/dist/$version"

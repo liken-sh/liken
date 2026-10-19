@@ -239,7 +239,7 @@ mirror "xtables/$xtables_version" "iptables-1.8.11.tar.xz" \
     "d87303d55ef8c92bcad4dd3f978b26d272013642b029425775f5bad1009fe7b2" \
     "https://www.netfilter.org/pub/iptables/iptables-1.8.11.tar.xz"
 mirror "xtables/$xtables_version" "k3s-root-$xtables_version.tar.gz" \
-    "ab4ddff445f4aa19add06f1a53d9f1c8194b65f5e31ca54ab2abb67036bf442f" \
+    "e0f04c1b7747a2637babd95fc8683a95ca8bee940b4058dc7b474638b4e9a621" \
     "https://github.com/k3s-io/k3s-root/archive/refs/tags/$xtables_version.tar.gz"
 mirror "xtables/$xtables_version" "buildroot-2025.02.14.tar.gz" \
     "8133a06142f6eb0177726b54a948b46289ebe48f9cbcaac5403cffd1a3cc9f36" \
