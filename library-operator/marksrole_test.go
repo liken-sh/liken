@@ -268,7 +268,7 @@ func TestAMissClearsTheSpansAndAFailureKeepsThem(t *testing.T) {
 		{name: "a miss", answerer: scriptedMarks{block: providerBlockTheIntroDB},
 			wantResult: attemptNothing, wantSpans: 0},
 		{name: "a failure", answerer: scriptedMarks{block: providerBlockTheIntroDB,
-			err: errors.New(`theintrodb /v3/media: 500: {"error":"internal"}`)},
+			err: errors.New(`theintrodb /v4/media: 500: {"error":"internal"}`)},
 			wantResult: attemptError, wantSpans: 2},
 	}
 	for _, test := range cases {
