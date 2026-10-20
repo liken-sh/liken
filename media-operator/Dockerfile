@@ -18,7 +18,7 @@
 # The sidecar image is this image, so each node that runs a sidecar
 # pulls both builds, about 40MB where one build was 17MB.
 
-FROM golang:1.27.2-bookworm AS build
+FROM golang:1.27.3-bookworm AS build
 # proxy.golang.org sometimes drops a module download partway through
 # the stream. With the default comma, `go` tries the origin only when
 # the proxy answers 404 or 410, so a dropped stream fails the build.

@@ -5,7 +5,7 @@
 // that is not static: it loads libva when it runs (capabilities/libva.go).
 module github.com/liken-sh/media-operator
 
-go 1.27.2
+go 1.27.3
 
 replace github.com/liken-sh/liken/kubernetes => ../kubernetes
 

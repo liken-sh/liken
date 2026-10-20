@@ -12,7 +12,7 @@
 // CSS, so nothing here needs it.
 module github.com/liken-sh/bluetooth-operator/docs
 
-go 1.27.2
+go 1.27.3
 
 tool (
 	github.com/gohugoio/hugo

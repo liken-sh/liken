@@ -8,7 +8,7 @@
 // matches liken's for the same reason.
 module github.com/liken-sh/display-operator
 
-go 1.27.2
+go 1.27.3
 
 replace github.com/liken-sh/liken/kubernetes => ../kubernetes
 

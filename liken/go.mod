@@ -12,7 +12,7 @@
 // required.
 module github.com/liken-sh/liken/liken
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/beevik/ntp v1.5.0

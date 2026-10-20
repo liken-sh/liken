@@ -10,7 +10,7 @@
 # cannot be built or sent, a body that does not encode, and a second
 # status write that fails.
 #
-# The numbers are measured with Go 1.27.2, which counts each basic
+# The numbers are measured with Go 1.27.2 and later, which count each basic
 # block once. Go 1.27.1 and earlier count a block once for each row
 # that comments split it into (golang/go#80974), and measure higher.
 

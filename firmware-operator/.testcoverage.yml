@@ -6,7 +6,7 @@
 # check, and a change that gains coverage should raise the number
 # here to keep the gain.
 #
-# The numbers are measured with Go 1.27.2, which counts each basic
+# The numbers are measured with Go 1.27.2 and later, which count each basic
 # block once.
 
 profile: coverage.out

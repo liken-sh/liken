@@ -11,7 +11,7 @@
 // site uses none of the extended build's SCSS pipeline.
 module github.com/liken-sh/display-operator/docs
 
-go 1.27.2
+go 1.27.3
 
 tool (
 	github.com/gohugoio/hugo

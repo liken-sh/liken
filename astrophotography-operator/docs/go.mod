@@ -9,7 +9,7 @@
 // already requires.
 module github.com/liken-sh/astrophotography-operator/docs
 
-go 1.27.2
+go 1.27.3
 
 tool (
 	github.com/gohugoio/hugo
