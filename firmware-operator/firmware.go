@@ -60,7 +60,7 @@ type firmwareStatus struct {
 	ObservedGeneration int64         `json:"observedGeneration,omitempty"`
 	Conditions         []condition   `json:"conditions,omitempty"`
 	Devices            []deviceEntry `json:"devices,omitempty"`
-	Counts             counts        `json:"counts,omitzero"`
+	Counts             counts        `json:"counts"`
 }
 
 // deviceEntry is the latest appearance of a matched device in one

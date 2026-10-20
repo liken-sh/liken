@@ -1,6 +1,9 @@
 # 81, Firmware
 
-Proposed on 2026-10-19. Not built. This plan records which component
+Proposed on 2026-10-19. Steps 1 to 3 of [Order](#order) were built on
+2026-10-19, except the report of missing kernel firmware, and the test
+cluster's guide camera loaded with no hand-run `Job` on 2026-10-20.
+Step 4 is not built. This plan records which component
 owns each part of firmware in `liken`. The component plans hold the
 design.
 
@@ -9,7 +12,7 @@ design.
 | Kind | Example | Owner | Plan |
 |---|---|---|---|
 | The kernel loads it from the image | i915 and wifi blobs | the OS image | `liken` [milestone 32](../liken/plans/completed/32-hardware-support-in-the-image.md), built |
-| The host uploads it each time a device appears | a QHY guide camera on a bare FX2 chip | `firmware-operator`, a `Firmware` with `upload` | `firmware-operator` [plan 01](../firmware-operator/plans/01-uploads.md) |
+| The host uploads it each time a device appears | a QHY guide camera on a bare FX2 chip | `firmware-operator`, a `Firmware` with `upload` | `firmware-operator` [plan 01](../firmware-operator/plans/completed/01-uploads.md) |
 | The device keeps it across a power cycle | UEFI, a dock, an SSD | `firmware-operator`, a `Firmware` with `update` | `firmware-operator` [plan 02](../firmware-operator/plans/02-updates.md), and `liken` [milestone 33](../liken/plans/33-firmware-updates.md) for the boot chain |
 
 ## The boundaries
@@ -37,7 +40,7 @@ function of the OS.
 
 **A component that runs a device ships the device's `upload` rules**
 next to the image that holds the firmware bytes. observatory-operator
-[plan 23](../observatory-operator/plans/23-firmware-before-the-driver.md)
+[plan 23](../observatory-operator/plans/completed/23-firmware-before-the-driver.md)
 ships one for each rule in INDI's `85-qhyccd.rules`, in a
 kustomization of its own that a cluster applies when it runs
 `firmware-operator`.

@@ -5,6 +5,7 @@ package main
 // one device, and spec.machines.
 
 import (
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -48,6 +49,24 @@ func TestTwoRulesOnOneDeviceConflict(t *testing.T) {
 		w.settle()
 		if e := w.entry(t, "qhy5l-ii"); e.Result != resultRunning {
 			t.Errorf("after the other rule went, the entry is %+v, want Running", e)
+		}
+	})
+}
+
+// A rule that matches no device writes each count as 0, so the printer
+// columns of kubectl get show 0 and not an empty cell.
+func TestARuleWithNoDevicesWritesZeroCounts(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := startWorld(t)
+		w.api.putFirmware(qhy5lii())
+		w.settle()
+
+		w.api.mu.Lock()
+		status := clone(w.api.objects[firmwaresPath]["qhy5l-ii"])["status"].(map[string]any)
+		w.api.mu.Unlock()
+		want := map[string]any{"running": 0.0, "loaded": 0.0, "failed": 0.0, "conflict": 0.0}
+		if got, _ := status["counts"].(map[string]any); !maps.Equal(got, want) {
+			t.Errorf("status.counts = %v, want %v", status["counts"], want)
 		}
 	})
 }

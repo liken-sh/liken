@@ -1,7 +1,7 @@
 # 02, Updates
 
 Proposed on 2026-10-19, as a stub. Not built. This plan adds the
-`update` action to the `Firmware` resource of [plan 01](01-uploads.md):
+`update` action to the `Firmware` resource of [plan 01](completed/01-uploads.md):
 a declared version of firmware that a device keeps across a power
 cycle, such as a board's UEFI, a dock, or an SSD. fwupd does the
 vendor-specific work. The operator also proposes updates from the LVFS

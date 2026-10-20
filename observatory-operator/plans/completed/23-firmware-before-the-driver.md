@@ -4,14 +4,14 @@ Proposed on 2026-10-19. Built on 2026-10-19, in `indi` revision 7,
 `20261005-7`, and in `deploy/firmware/qhy.yaml`, with 47 `Firmware`
 objects. The build left out the FX3 chips and two generic chips, for
 the reasons under
-[What the build found](#what-the-build-found). The three drills below
-have not run. They run on liken-1 with the QHY5L-II-C when
-`firmware-operator` runs there. Its
-[plan 01](../../firmware-operator/plans/01-uploads.md) adds the
+[What the build found](#what-the-build-found). The first drill below
+passed on liken-1 on 2026-10-20, and the two drills with a reservation
+have not run. `firmware-operator`'s
+[plan 01](../../../firmware-operator/plans/completed/01-uploads.md) adds the
 `Firmware` resource and the pods that write firmware into a device
 when it appears. This plan ships the `Firmware` objects for QHY
 cameras and the files they need in `indi-qhy`. The operator's own code
-does not change. Root [plan 81](../../plans/81-firmware.md) records
+does not change. Root [plan 81](../../../plans/81-firmware.md) records
 the boundary between the components.
 
 ## The problem
@@ -57,7 +57,7 @@ cluster, behind a powered USB 3 hub:
 The camera after the load is a different USB device from the chip
 before it: a new product ID on a new device number. A claim on one does
 not follow to the other. That makes this a different problem from
-[a replugged USB device](open-problems/a-replugged-usb-device.md),
+[a replugged USB device](../open-problems/a-replugged-usb-device.md),
 where the same device comes back.
 
 ## The design
@@ -202,7 +202,8 @@ files. No file names the firmware files themselves.
   QHY camera, and a person with another QHY model needs no extra step.
 - **The loader runs as user 1000.** `liken` gives a claimed device node
   to the pod's user, so `fxload` needs no root. The proof ran as root,
-  so the drill of `firmware-operator`'s plan 01 measures this.
+  so the drill of `firmware-operator`'s plan 01 measures this. It
+  passed on 2026-10-20.
 
 ## Drills
 
@@ -213,6 +214,13 @@ plan 01 is built:
 - A reservation that starts with the camera off powers it, loads it,
   and connects the guide camera in `StartDevices`.
 - A power cycle of the camera during a reservation.
+
+The first drill passed on 2026-10-20, with the `Firmware` from
+`qhy-1618-0920` and `indi-qhy` `20261005-7`. The camera was unplugged
+and plugged in again, and `firmware-operator` loaded `QHY5II.HEX` with
+`fxload` as user 1000 in 4 seconds, with no person acting. The camera
+came back as `1618:0921`. The two drills with a reservation have not
+run.
 
 ## Open questions
 

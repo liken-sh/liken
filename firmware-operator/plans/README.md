@@ -41,5 +41,5 @@ verifies with the CA of its `ServiceAccount`.
 
 | Plan | Status |
 |---|---|
-| [01](01-uploads.md) | Being built: the `Firmware` resource and its `upload` action, which writes firmware into a device each time the device appears |
+| [01](completed/01-uploads.md) | Built: the `Firmware` resource and its `upload` action, which writes firmware into a device each time the device appears |
 | [02](02-updates.md) | Proposed, a stub: the `update` action, which flashes a new version into a device that keeps it, and the proposals that the operator makes from the LVFS catalog |

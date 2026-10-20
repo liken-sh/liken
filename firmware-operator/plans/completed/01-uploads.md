@@ -1,13 +1,16 @@
 # 01, Uploads
 
-Proposed on 2026-10-19. Being built from 2026-10-19. It needs `liken`'s
-[milestone 87](../../liken/plans/87-firmware-facts-a-machine-publishes.md),
+Proposed on 2026-10-19. Built on 2026-10-19 and released in
+2026.10.19-004. The first drill passed on liken-1 on 2026-10-20, under
+[Tests](#tests). The replug during a reservation and the operator
+restart during an upload have not run on hardware. It needs `liken`'s
+[milestone 87](../../../liken/plans/87-firmware-facts-a-machine-publishes.md),
 which publishes the USB bus and device numbers of each device, and
 whose USB part was built on 2026-10-19. This
 plan adds the cluster-scoped `Firmware` resource and its `upload`
 action: when a device that a rule matches appears on any machine,
 `firmware-operator` writes the device's firmware into it from the
-vendor's image. [Plan 02](02-updates.md) adds the `update` action to
+vendor's image. [Plan 02](../02-updates.md) adds the `update` action to
 the same resource.
 
 ## The problem
@@ -31,7 +34,7 @@ load the same way, and so do Xilinx's platform cables and sigrok's
 
 On 2026-10-19 a `Job` written by hand loaded a QHY5L-II-C on the
 liken-1 test cluster. observatory-operator's
-[plan 23](../../observatory-operator/plans/23-firmware-before-the-driver.md)
+[plan 23](../../../observatory-operator/plans/completed/23-firmware-before-the-driver.md)
 records the details. The facts that shape this design:
 
 - machine-operator publishes the bare chip, `1618:0920`, as a device,
@@ -243,7 +246,7 @@ the device, and the `Machine`'s status belongs to the OS.
 ## Plan 83 and a device that changes its identity
 
 `liken`'s
-[milestone 83](../../liken/plans/83-a-usb-device-is-named-for-its-unit.md)
+[milestone 83](../../../liken/plans/83-a-usb-device-is-named-for-its-unit.md)
 names a USB device by its vendor, product, and serial in place of its
 port. An upload changes the product, and on some chips the vendor too,
 so the loaded device gets a different name from the bare chip. That is
@@ -334,10 +337,21 @@ against `kubernetes/apiservertest`:
 
 The drills run on liken-1 with the QHY5L-II-C:
 
-- Upload after a cold power cycle, with `fxload` as user 1000. The
-  proof `Job` ran as root, so this is not proven yet.
+- Upload after a cold power cycle, with `fxload` as user 1000.
 - Replug the camera, and power-cycle it during a reservation.
 - Restart the operator during an upload.
+
+The first drill passed on 2026-10-20, on `liken` 2026.10.19-005 and
+`firmware-operator` 2026.10.19-004. The camera was unplugged and
+plugged into another port of the same hub, which cut its power. It
+appeared as the bare chip, `1618:0920`. The operator posted
+`UploadStarted` at 13:18:25 UTC and `Loaded` at 13:18:29, 4 seconds
+later. `fxload` ran as user 1000 under the `restricted` profile and
+exited 0. The camera then published as `1618:0921`, "QHY-CCD QHY5-II",
+with a new device number. The new port did not matter, because the
+rule selects on the vendor and product. The other two drills have not run on
+hardware. A partial run on `dev-cluster/` covered the restart with a
+fake device: the restarted operator created no second pod.
 
 ## Open questions
 
