@@ -21,8 +21,9 @@ import (
 const uploadDeadline = 5 * time.Minute
 
 // settleWindow is how long the operator waits for the bare device to
-// leave the slice after the loader exits 0. In the lab a QHY5L-II's FX2
-// chip left 14 seconds after fxload reset it.
+// leave the slice after the loader exits 0. A chip that took its
+// firmware resets and enumerates again within seconds, so a minute
+// leaves room for a slow hub without holding a failed upload open.
 const settleWindow = time.Minute
 
 // verdict is the result of one upload pod. A zero result means the

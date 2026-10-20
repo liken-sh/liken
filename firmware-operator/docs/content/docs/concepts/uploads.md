@@ -53,8 +53,8 @@ so a portable camera loads on whichever machine you connect it to.
 
 The exit code alone is not enough, because a loader can exit 0 after
 it writes firmware that the chip does not run. A chip that took its
-firmware resets and leaves the slice: a QHY5L-II's FX2 chip left
-14 seconds after `fxload` reset it. The device that comes back is not
+firmware resets and leaves the slice, and the operator waits up to a
+minute after the loader exits for that. The device that comes back is not
 part of the check, because the `Firmware` does not name its IDs.
 
 The operator writes the result into the `Firmware`'s status first,
