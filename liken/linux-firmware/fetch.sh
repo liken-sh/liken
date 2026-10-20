@@ -58,7 +58,7 @@ version="$(cat "$here/VERSION")"
 tarball="linux-firmware-$version.tar.xz"
 url="https://cdn.kernel.org/pub/linux/kernel/firmware/$tarball"
 
-digest="f80dcb757a623deda62200c08e0e1a88c76fb6b54964f31b35fa74da1c90ccc5"
+digest="a10d1ab5baf2c74ba92e8c7cf313e691696c26bddfa6df00db795e48d70cd4ca"
 
 # The nested pin. wireless-regdb names its releases for the date, the
 # way linux-firmware does, and kernel.org publishes one clearsigned
