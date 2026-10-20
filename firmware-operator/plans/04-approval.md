@@ -8,13 +8,14 @@ discovered `Firmware` objects that this plan approves.
 
 ## The approval
 
-A person sets `spec.update.version` on a discovered `Firmware`, and
+A person sets `spec.update.version` on a discovered `Firmware` for a
+catalog component, and
 pins the cabinet from the release that `status.machines` lists:
 
 ```yaml
 spec:
   update:
-    guids: [9c13b7f1-d618-5d68-be61-6b17881014a7]
+    component: work.frame.Laptop.RyzenAI300.BIOS.firmware
     version: 0.0.4.2
     cabinet:
       url: https://fwupd.org/downloads/9c085d03…-Framework_Laptop_13_RyzenAI300_fwupd_4.02.cab

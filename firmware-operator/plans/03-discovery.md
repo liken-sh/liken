@@ -1,6 +1,11 @@
 # 03, Discovery
 
-Proposed on 2026-10-20. Not built. This plan finds the firmware that
+Proposed on 2026-10-20. Built on 2026-10-20 with one object for each
+set of GUIDs, and drilled on liken-1 the same day. The drill showed
+that a set of GUIDs does not name one kind of device, so
+[Grouping devices by catalog component](#grouping-devices-by-catalog-component)
+revises how the operator groups devices into objects. That revision
+is not built. This plan finds the firmware that
 each machine's devices keep, and the newer releases that a catalog
 offers for it, and records both in the cluster. It installs nothing.
 [Plan 04](04-approval.md) lets a person approve a version, and
@@ -253,6 +258,86 @@ status:
 - The operator deletes a discovered object when no entry is left and
   `spec.update` holds nothing but `guids`. It never deletes an object
   that a person changed.
+
+## What the drill found
+
+On 2026-10-20, liken-1 ran a development build, and the operator
+scanned liken-1 and stick-1 within 40 seconds of its start. liken-1
+reported 9 updatable devices and stick-1 5, and the operator created
+13 discovered objects. The catalog offered three updates, all to the
+Secure Boot databases: stick-1's `dbx` from 2016 to `20260402`, its
+UEFI CA from the 2011 certificate to the 2023 one, and liken-1's `dbx`
+from `20260402` to `20260707`. liken-1's 4 ESRT devices have no
+release on LVFS.
+
+The drill also showed that one kind of device became two objects. The
+`dbx` of liken-1 has the GUIDs `f8ba2887…` and `d07ff664…`, and the
+`dbx` of stick-1 has only `f8ba2887…`, so each machine's `dbx` got an
+object of its own. The UEFI CA and the KEK CA split the same way.
+
+## Grouping devices by catalog component
+
+Proposed on 2026-10-20. Not built. A set of GUIDs is not a stable name
+for a kind of device, for two reasons:
+
+- **A device's GUIDs change with what is installed.** fwupd's `dbx`
+  device adds one GUID for each Key Exchange Key certificate that the
+  machine has enrolled (`plugins/uefi-dbx/fu-uefi-dbx-device.c` in
+  fwupd 2.1.1). liken-1 has Microsoft's 2023 KEK and stick-1 does
+  not, so their sets differ, and stick-1's set changes when it enrolls
+  that key. The hash of the `dbx` contents is an instance ID for
+  quirks only, and fwupd does not publish it as a GUID.
+- **No single GUID is the stable one.** For a USB device, fwupd lists
+  the GUIDs from the most specific to the least: vendor, product, and
+  revision first, then vendor and product, then vendor alone, as the
+  [LVFS metainfo guide](https://lvfs.readthedocs.io/en/latest/metainfo.html)
+  shows. The revision is often the firmware version, so the first GUID
+  changes with an update. A less specific GUID can be too broad: a
+  [ModemManager issue](https://gitlab.freedesktop.org/mobile-broadband/ModemManager/-/issues/502)
+  reports that one vendor reuses its USB IDs across different modems.
+
+An LVFS release names the GUIDs it flashes, and fwupd offers it when a
+device has any one of them. What a person approves in plan 04 is a
+version of one catalog component, such as
+`org.linuxfoundation.dbx.x64.firmware`. So the operator groups by
+component:
+
+- **A device that a catalog offers a release for** is an entry in the
+  object of the release's component, the `id` of the release. The
+  object's name is the component ID in lowercase, with each character
+  that a DNS subdomain does not allow replaced by `-`, such as
+  `org.linuxfoundation.dbx.x64.firmware`. Its spec is
+  `spec.update.component`. liken-1's and stick-1's `dbx` are then two
+  entries in one object.
+- **A device with no release** has nothing to approve. It stays in an
+  object for its set of GUIDs, named and specified as above. Two of
+  these objects for one kind of device cost one extra row and nothing
+  else.
+- **An entry moves only toward a component.** Each entry records the
+  fwupd `DeviceId` of the device on its machine. A scan puts a device
+  in the object that already holds its entry, unless the catalog now
+  offers it a release of another component. A device that installs the
+  newest release gets no offer, and it stays in its component's object
+  with no release, so the machines of a component stay together after
+  an update. The record is in status, so the rule holds across an
+  operator restart.
+- A `Firmware` has exactly one of `spec.update.component` and
+  `spec.update.guids`. The deletion rule stays: an object with no entry
+  and an unchanged spec is deleted, so an object for a set of GUIDs
+  goes away when its last device moves to a component.
+
+When the releases a device is offered come from more than one
+component, the operator takes the component of the newest release, and
+posts a `Warning` that names the others. LVFS usually serves one
+component for one device, and this has not been observed.
+
+The guides change with it: `firmware:find-updates` explains the two
+kinds of object and the move toward a component, and the reference
+gains `spec.update.component`. The tests add a device whose GUID set
+differs between two machines and lands in one component object, a
+device that installs the newest release and keeps its entry, and a
+device that gains its first release and leaves its GUID-set object,
+which is then deleted.
 
 ## Conditions and `Event`s
 
