@@ -3,7 +3,7 @@
 Proposed on 2026-10-20, as a stub. Not built. This plan lets a person
 approve one version of a firmware device model for the machines that
 have it. It applies nothing: [plan 05](05-applying-updates.md) applies
-an approved version. [Plan 03](03-discovery.md) creates the
+an approved version. [Plan 03](completed/03-discovery.md) creates the
 discovered `Firmware` objects that this plan approves.
 
 ## The approval

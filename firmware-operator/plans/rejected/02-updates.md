@@ -2,7 +2,7 @@
 
 Proposed on 2026-10-19, as a stub. Replaced on 2026-10-20, before it
 was built, by three plans that separate its parts:
-[plan 03](../03-discovery.md) finds the hardware and the updates for
+[plan 03](../completed/03-discovery.md) finds the hardware and the updates for
 it, [plan 04](../04-approval.md) approves a version, and
 [plan 05](../05-applying-updates.md) applies an approved version in
 turns. A spike on 2026-10-20 changed parts of the design below, and

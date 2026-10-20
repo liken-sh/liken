@@ -5,7 +5,7 @@ the fallback that survives a firmware update. This milestone holds the
 OS's part of updating firmware that a machine and its devices keep.
 `firmware-operator`, an add-on that ships apart from the OS, declares
 and runs the updates: its
-[plan 03](../../firmware-operator/plans/03-discovery.md) finds the
+[plan 03](../../firmware-operator/plans/completed/03-discovery.md) finds the
 updates with fwupd and the LVFS catalog,
 [plan 04](../../firmware-operator/plans/04-approval.md) approves one,
 and [plan 05](../../firmware-operator/plans/05-applying-updates.md)

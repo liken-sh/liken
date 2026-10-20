@@ -5,14 +5,17 @@ set of GUIDs, and drilled on liken-1 the same day. The drill showed
 that a set of GUIDs does not name one kind of device, so
 [Grouping devices by catalog component](#grouping-devices-by-catalog-component)
 revises how the operator groups devices into objects. The revision
-was built the same day, and its drill is not run yet. This plan finds the firmware that
+was built and drilled on liken-1 the same day, under
+[The second drill](#the-second-drill). A drill of a device that
+installs the newest release and keeps its entry needs an approved
+update, so it waits for plan 05. This plan finds the firmware that
 each machine's devices keep, and the newer releases that a catalog
 offers for it, and records both in the cluster. It installs nothing.
-[Plan 04](04-approval.md) lets a person approve a version, and
-[plan 05](05-applying-updates.md) applies an approved version, one
+[Plan 04](../04-approval.md) lets a person approve a version, and
+[plan 05](../05-applying-updates.md) applies an approved version, one
 machine at a time. The three plans replace the stub
-[plan 02](rejected/02-updates.md). Root
-[plan 81](../../plans/81-firmware.md) records which component owns
+[plan 02](../rejected/02-updates.md). Root
+[plan 81](../../../plans/81-firmware.md) records which component owns
 each kind of firmware.
 
 ## The problem
@@ -354,13 +357,63 @@ device that gains its first release and leaves its GUID-set object,
 which is then deleted, a release of two components, and a short name
 that a person's upload rule holds.
 
+## The second drill
+
+On 2026-10-20, liken-1 and stick-1 ran `liken` 2026.10.20-001 and
+firmware-operator `2026.10.20-001-dev-002-0d16bf0a`. Both machines
+were scanned again after a reboot into the release, on the build
+before the revision, so the boot time started each scan as
+[When a machine is scanned](#when-a-machine-is-scanned) says.
+
+The revision then grouped the three updates by component:
+`microsoft-dbx-x64` holds stick-1's `dbx`, `microsoft-dbx-x64-kek2023`
+holds liken-1's, and `microsoft-db-uefi-3p` holds stick-1's UEFI CA.
+The two `dbx` objects are two components on LVFS, because the
+`dbx` update for a machine that enrolled Microsoft's 2023 KEK is
+signed with that key. So the two machines need two approvals, and the
+split is correct. The devices with no release got objects named by
+the device, such as `uefi-ca` and `windows-production-pca`, which
+counts both machines. Two names were already held, so the operator
+used the longer names: liken-1's 4 ESRT devices are all named
+`UEFI Device Firmware` with other GUIDs, and the two machines' `KEK CA`
+devices have other GUIDs.
+
+The objects that the first build had created kept their names, because
+the operator finds an object by its group and not by its name. The
+drill deleted them, and the next scans created them under the short
+names. A status write from outside the operator wakes no pass, as
+[`watch.go`](../../watch.go) intends, so the drill restarted the operator
+to start the scans.
+
+## Choices made in the build
+
+The build decided these, where the plan said nothing:
+
+- The scan image's name comes from the tag of the operator's own pod
+  image, and `--scan-image` overrides it.
+- A person changed a discovered object when its `metadata.generation`
+  is greater than 1.
+- The CRD refuses `selector` and `machines` with `update`.
+- Deleting a `FirmwareCatalog` leaves its entries in the discovered
+  objects. They leave when the `Machine` is deleted, or when a
+  `FirmwareCatalog` of the same name scans the machine again.
+- The newest release is the first in fwupd's list.
+- The operator's memory limit is 256Mi. A scan pod requests 10m of CPU
+  and 64Mi of memory, with no limit.
+- The first `kubectl apply -k` of the whole base refuses the `lvfs`
+  `FirmwareCatalog` until its CRD is established. The install guide
+  applies `lvfs.yaml` last, and a Flux `Kustomization` waits for the
+  CRDs.
+
 ## Conditions and `Event`s
 
 A `FirmwareCatalog` has a `Ready` condition, and each transition posts an
 `Event`. A scan posts `ScanStarted` and `Scanned` or `ScanFailed` on
 the `FirmwareCatalog`. A discovered `Firmware` posts `UpdateAvailable` when a
 machine's newest offered release changes, and `Discovered` when the
-operator creates it.
+operator creates it. `ManyComponents` is a `Warning` on a discovered
+`Firmware`, when a catalog offers one device releases of more than one
+component.
 
 ## The guides and skills
 
