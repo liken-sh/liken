@@ -80,14 +80,12 @@ until it loses power.
   powers up as one of them stays bare and does not work yet.
   [`deploy/firmware/qhy.yaml`](https://github.com/liken-sh/liken/blob/main/observatory-operator/deploy/firmware/qhy.yaml)
   lists every chip that the objects load.
-* Two of the rules match generic Cypress chips, not QHY's own IDs:
-  `04b4:8613`, a Cypress FX2 with no EEPROM, and `0547:1002`, an Anchor
-  Chips EZ-USB. The objects load a QHY5's firmware into any device
-  that powers up with one of those IDs, as `libqhy` does on a Linux
-  host. If a cluster has such a device that is not a QHY camera, such
-  as a logic analyzer with no EEPROM, leave `qhy-04b4-8613` or
-  `qhy-0547-1002` out with a `$patch: delete` patch in your
-  `kustomization.yaml`.
+* Two of the rules match generic chips, not QHY's own IDs: `04b4:8613`,
+  a Cypress FX2 with no EEPROM, and `0547:1002`, an Anchor Chips
+  EZ-USB. `libqhy` loads a QHY5's firmware into any device that powers
+  up with one of them. On a cluster that would also flash a logic
+  analyzer or a development board that powers up blank, so
+  `deploy/firmware/` has no object for either ID.
 
 ## 1. Load the kernel driver
 

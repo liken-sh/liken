@@ -95,8 +95,8 @@ func TestEveryFirmwareRunsTheDriversTagOfIndiQHY(t *testing.T) {
 // sets.
 func TestTheCommittedObjectsAreWellFormed(t *testing.T) {
 	objects := committedObjects(t)
-	if len(objects) != 49 {
-		t.Errorf("deploy/firmware/qhy.yaml holds %d objects, want 49", len(objects))
+	if len(objects) != 47 {
+		t.Errorf("deploy/firmware/qhy.yaml holds %d objects, want 47", len(objects))
 	}
 	seen := map[string]bool{}
 	for _, object := range objects {
@@ -110,6 +110,18 @@ func TestTheCommittedObjectsAreWellFormed(t *testing.T) {
 		command := strings.Join(object.Spec.Upload.Command, " ")
 		if !strings.HasPrefix(command, "fxload -t ") || !strings.Contains(command, " -D $(LIKEN_DEVICE)") {
 			t.Errorf("%s runs %q", object.Metadata.Name, command)
+		}
+	}
+}
+
+// The rules name two IDs that a chip vendor gives every unprogrammed
+// chip of a family, and the objects leave both out, so that no other
+// device with a blank chip gets a QHY5's firmware.
+func TestNoObjectMatchesAGenericChip(t *testing.T) {
+	for _, object := range committedObjects(t) {
+		switch object.Metadata.Name {
+		case "qhy-04b4-8613", "qhy-0547-1002":
+			t.Errorf("%s matches a generic chip", object.Metadata.Name)
 		}
 	}
 }
@@ -213,10 +225,14 @@ ATTRS{idVendor}=="1618", ATTRS{idProduct}=="0482", RUN+="/sbin/fxload -t fx2lp -
 			map[string]string{"qhy-1618-0482": "fxload -t fx2lp -I /usr/lib/firmware/qhy/A.img -D $(LIKEN_DEVICE)"},
 		},
 		"a loader, a pause, and the image": {
-			`ATTRS{idVendor}=="0547", ATTRS{idProduct}=="1002", RUN+="/sbin/fxload -t fx2 -I /usr/lib/firmware/qhy/QHY5LOADER.HEX -D $env{DEVNAME}"
-ATTRS{idVendor}=="0547", ATTRS{idProduct}=="1002", RUN+="/bin/sleep 5"
-ATTRS{idVendor}=="0547", ATTRS{idProduct}=="1002", RUN+="/sbin/fxload -t fx2 -I /usr/lib/firmware/qhy/QHY5.HEX -D $env{DEVNAME}"`,
-			map[string]string{"qhy-0547-1002": "fxload -t fx2 -I /usr/lib/firmware/qhy/QHY5.HEX -D $(LIKEN_DEVICE) -s /usr/lib/firmware/qhy/QHY5LOADER.HEX"},
+			`ATTRS{idVendor}=="16c0", ATTRS{idProduct}=="296c", RUN+="/sbin/fxload -t fx2 -I /usr/lib/firmware/qhy/QHY5LOADER.HEX -D $env{DEVNAME}"
+ATTRS{idVendor}=="16c0", ATTRS{idProduct}=="296c", RUN+="/bin/sleep 5"
+ATTRS{idVendor}=="16c0", ATTRS{idProduct}=="296c", RUN+="/sbin/fxload -t fx2 -I /usr/lib/firmware/qhy/QHY5.HEX -D $env{DEVNAME}"`,
+			map[string]string{"qhy-16c0-296c": "fxload -t fx2 -I /usr/lib/firmware/qhy/QHY5.HEX -D $(LIKEN_DEVICE) -s /usr/lib/firmware/qhy/QHY5LOADER.HEX"},
+		},
+		"a generic chip": {
+			`ATTRS{idVendor}=="04b4", ATTRS{idProduct}=="8613", RUN+="/sbin/fxload -t fx2 -I /usr/lib/firmware/qhy/QHY5.HEX -D $env{DEVNAME}"`,
+			map[string]string{},
 		},
 		"an FX3 chip, a comment, and the rules that set no load": {
 			`# a comment

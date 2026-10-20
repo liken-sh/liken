@@ -45,6 +45,14 @@ const firmwareDir = "/usr/lib/firmware/qhy/"
 // FX3 chips.
 var loadableChips = []string{"an21", "fx", "fx2", "fx2lp"}
 
+// genericChips are the IDs that Cypress and Anchor Chips give every
+// EZ-USB chip that holds no program and no EEPROM. libqhy's rules
+// write a QHY5's firmware into any chip with one of them, which on a
+// cluster would also flash a logic analyzer or a development board
+// that powers up blank. QHY's own cameras power up with QHY's own IDs,
+// so these two have no object.
+var genericChips = []string{"04b4:8613", "0547:1002"}
+
 // knownChips are the chip types that the rules name.
 var knownChips = []string{"an21", "fx", "fx2", "fx2lp", "fx3"}
 
@@ -82,6 +90,9 @@ func QHY(rulesPath string) ([]byte, error) {
 	}
 	var written, left []load
 	for _, chip := range chips {
+		if slices.Contains(genericChips, chip.vendor+":"+chip.product) {
+			continue
+		}
 		if slices.Contains(loadableChips, chip.chip) {
 			written = append(written, chip)
 		} else {
@@ -95,7 +106,8 @@ func QHY(rulesPath string) ([]byte, error) {
 	fmt.Fprintf(&out, "# One Firmware for each bare QHY camera chip that a rule of libqhy's\n")
 	fmt.Fprintf(&out, "# 85-qhyccd.rules loads with fxload: %d chips. The rules name %d more\n", len(written), len(left))
 	fmt.Fprintf(&out, "# chips with -t fx3. The fxload of Ubuntu that indi-qhy holds refuses\n")
-	fmt.Fprintf(&out, "# that chip type, so those chips have no Firmware here.\n")
+	fmt.Fprintf(&out, "# that chip type, so those chips have no Firmware here. The rules for the\n")
+	fmt.Fprintf(&out, "# generic chips %s have no Firmware either.\n", strings.Join(genericChips, " and "))
 	for i, chip := range written {
 		if i > 0 {
 			out.WriteString("---\n")
@@ -204,7 +216,8 @@ func parseFxload(args []string) (load, error) {
 // vendor and product, so each chip gets one Firmware with one name.
 //
 // The rules name two chips more than once. One rule is repeated word
-// for word, and one copy is enough. For 0547:1002, one rule writes
+// for word, and one copy is enough. For 0547:1002, a generic chip that
+// QHY leaves out, one rule writes
 // QHY5LOADER.HEX, a second sleeps, and a third writes QHY5.HEX. That
 // is the work of fxload -s, which writes the loader and then uses it
 // to write the image, and the rules for the other QHY5 chips write the

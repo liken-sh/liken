@@ -1,8 +1,9 @@
 # 23, Firmware before the driver
 
 Proposed on 2026-10-19. Built on 2026-10-19, in `indi` revision 7,
-`20261005-7`, and in `deploy/firmware/qhy.yaml`, with 49 `Firmware`
-objects. The build left out the FX3 chips, for the reason under
+`20261005-7`, and in `deploy/firmware/qhy.yaml`, with 47 `Firmware`
+objects. The build left out the FX3 chips and two generic chips, for
+the reasons under
 [What the build found](#what-the-build-found). The three drills below
 have not run. They run on liken-1 with the QHY5L-II-C when
 `firmware-operator` runs there. Its
@@ -173,7 +174,8 @@ The build read the rules file and the packages of the snapshot of
   any Linux host with `libqhy`. On a cluster that applies
   `deploy/firmware/`, another device that powers up with one of these
   IDs, such as a logic analyzer with no EEPROM, takes the QHY5's
-  firmware.
+  firmware. So the generator leaves both out, and the 49 chips that
+  the image's `fxload` loads give 47 objects.
 
 The license of the firmware files is still open. `libqhy/` at the
 pinned commit of indi-3rdparty holds no `COPYRIGHT` or license file,
