@@ -34,19 +34,34 @@ one device, and writes the result into the `Firmware`'s status. The
 camera then enumerates again as the real device, and the pod that
 uses it claims it the usual way.
 
+The operator also finds updates for the firmware that devices keep
+across a power cycle, such as a board's UEFI firmware or an SSD. A
+`Catalog` names a source of releases, and the base installs the one
+for the Linux Vendor Firmware Service (LVFS). The operator runs a short
+read-only scan pod on each machine, and records each device, the
+version it runs, and the newer releases the catalog offers in a
+`Firmware` for that device model. It installs none of them.
+
+```sh
+kubectl get firmware -l firmware.liken.sh/discovered
+```
+
 Start here:
 
 * [Install](/docs/guides/install/) the operator.
 * [Upload firmware to a device](/docs/guides/upload-to-a-device/):
   write a `Firmware` and read what it did.
-* [Troubleshoot](/docs/guides/troubleshoot/) an upload that failed or
-  never started.
+* [Find firmware updates](/docs/guides/find-updates/): read which
+  updates the catalog offers for each machine.
+* [Troubleshoot](/docs/guides/troubleshoot/) an upload or a scan that
+  failed or never started.
 * [Reference](/docs/reference/firmware/): every field of a
-  `Firmware`.
+  `Firmware` and a [`Catalog`](/docs/reference/catalog/).
 
-The operator touches no device itself, and it ships apart from the
-OS: the OS publishes each machine's devices, and this operator reads
-them. [How uploads work](/docs/concepts/uploads/) explains the rules
+The operator ships apart from the OS: the OS publishes each machine's
+devices, and this operator reads them. Only the upload pods write to a
+device, and a scan pod only reads. [How uploads work](/docs/concepts/uploads/)
+and [How discovery works](/docs/concepts/discovery/) explain the rules
 it follows.
 
 * [The source](https://github.com/liken-sh/liken/tree/main/firmware-operator)

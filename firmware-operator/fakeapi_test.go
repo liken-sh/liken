@@ -1,9 +1,10 @@
 package main
 
-// A fake API server that holds the Firmware objects, the slices, the
-// Machines, the upload pods, and their claims, and serves the requests
-// the operator sends: a list and a watch of each collection, a status
-// write, and a pod's or a claim's create, read, and delete. It answers
+// A fake API server that holds the Firmware and Catalog objects, the
+// slices, the Machines, the upload and scan pods, and the upload pods'
+// claims, and serves the requests the operator sends: a list and a
+// watch of each collection, a status write, an object's create, read,
+// and delete, and a pod's log. It answers
 // over the in-memory connections of apiservertest, so each test runs in
 // a synctest bubble on the fake clock. A test plays machine-operator
 // and the kubelet: it publishes a slice and finishes an upload pod.
@@ -38,6 +39,7 @@ var (
 // which a list and a bookmark carry.
 var kinds = map[string][2]string{
 	firmwaresPath:  {firmwareAPIVersion, firmwareKind},
+	catalogsPath:   {firmwareAPIVersion, catalogKind},
 	slicesPath:     {"resource.k8s.io/v1", "ResourceSlice"},
 	machinesPath:   {"liken.sh/v1alpha1", "Machine"},
 	uploadPodsPath: {"v1", "Pod"},
@@ -64,6 +66,11 @@ type fakeAPI struct {
 	creates map[string]int                       // collection, creates that landed
 	events  []fakeEvent
 	changed chan struct{}
+	// logs holds each pod's log, by the pod's name. logsForbidden
+	// refuses every read of a log, the way RBAC refuses an operator with
+	// no grant on pods/log.
+	logs          map[string]string
+	logsForbidden bool
 
 	// refusals is how many status writes the server refuses next, the
 	// way an API server that restarts does.
@@ -82,6 +89,7 @@ func startFakeAPI(t *testing.T) *fakeAPI {
 		objects:  map[string]map[string]map[string]any{},
 		creates:  map[string]int{},
 		changed:  make(chan struct{}),
+		logs:     map[string]string{},
 		recorded: &eventstest.Events{},
 	}
 	for collection := range kinds {
@@ -146,6 +154,10 @@ func (a *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		name, status := strings.CutSuffix(rest, "/status")
+		if pod, log := strings.CutSuffix(rest, "/log"); log && collection == uploadPodsPath {
+			a.log(w, r, pod)
+			return
+		}
 		switch {
 		case status && r.Method == http.MethodPut:
 			a.writeStatus(w, r, collection, name)
@@ -273,6 +285,9 @@ func (a *fakeAPI) create(w http.ResponseWriter, r *http.Request, collection stri
 	if collection == uploadPodsPath {
 		created["status"] = map[string]any{"phase": podPending}
 	}
+	if collection == firmwaresPath {
+		metadata["generation"] = 1
+	}
 	a.creates[collection]++
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(a.store(collection, created, "ADDED"))
@@ -325,4 +340,26 @@ func (a *fakeAPI) writeStatus(w http.ResponseWriter, r *http.Request, collection
 	next := clone(held)
 	next["status"] = written["status"]
 	_ = json.NewEncoder(w).Encode(a.store(collection, next, "MODIFIED"))
+}
+
+// log answers the end of a pod's log as text, the way the kubelet does
+// for tailLines.
+func (a *fakeAPI) log(w http.ResponseWriter, r *http.Request, name string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.logsForbidden {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+	log, held := a.logs[name]
+	if _, exists := a.objects[uploadPodsPath][name]; !exists || !held {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	lines := strings.SplitAfter(log, "\n")
+	if tail, err := strconv.Atoi(r.URL.Query().Get("tailLines")); err == nil && tail < len(lines) {
+		lines = lines[len(lines)-tail:]
+	}
+	w.Header().Set("Content-Type", "text/plain")
+	_, _ = fmt.Fprint(w, strings.Join(lines, ""))
 }

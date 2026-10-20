@@ -11,9 +11,10 @@ describes the component, and its plans hold the design.
 
 The voice rules in that file govern all prose here, comments included.
 
-The operator watches every `Firmware`, every `ResourceSlice` of the
-driver `liken.sh`, every `Machine`, and its own upload pods through
-client-go's reflector, in the shared `kubernetes` module. Load the
+The operator watches every `Firmware`, every `Catalog`, every
+`ResourceSlice` of the driver `liken.sh`, every `Machine`, and its own
+upload and scan pods through client-go's reflector, in the shared
+`kubernetes` module. Load the
 `operators` skill under `.agents/skills` at the top of the repository
 before you change a watch, the pass, or a timer, and the `testing`
 skill before you change a test.

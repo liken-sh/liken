@@ -34,10 +34,10 @@ reads many devices, and it only reads.
 It ships apart from the OS, like display-operator and the other
 hardware operators, and a person installs it from its own manual. In
 the CI graph it is on the same layer as those operators. Its
-`package.toml` depends on `kubernetes` and `notices`, and its docs
-prefix is `firmware`. It does not depend on `trust`, because the
-operator makes no TLS call except to the API server, which it
-verifies with the CA of its `ServiceAccount`.
+`package.toml` depends on `kubernetes`, `notices`, and `trust`, and its
+docs prefix is `firmware`. It depends on `trust` because the operator
+and the scan pods read a `Catalog` over HTTPS. The operator verifies
+the API server with the CA of its `ServiceAccount`.
 
 ## The plans
 

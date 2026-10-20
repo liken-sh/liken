@@ -1,9 +1,9 @@
 package main
 
-// The part of a Pod that the operator writes for an upload and reads
-// back. The operator declares its own structs for the objects it
-// writes, and links k8s.io/api only for the attribute types that the
-// CEL compiler reads (selector.go).
+// The part of a Pod that the operator writes for an upload or a scan
+// and reads back. The operator declares its own structs for the
+// objects it writes, and links k8s.io/api only for the attribute types
+// that the CEL compiler reads (selector.go).
 
 import "encoding/json"
 
@@ -34,14 +34,21 @@ type ownerReference struct {
 }
 
 type podSpec struct {
-	RestartPolicy                string             `json:"restartPolicy,omitempty"`
-	ActiveDeadlineSeconds        *int64             `json:"activeDeadlineSeconds,omitempty"`
-	NodeSelector                 map[string]string  `json:"nodeSelector,omitempty"`
-	AutomountServiceAccountToken *bool              `json:"automountServiceAccountToken,omitempty"`
-	EnableServiceLinks           *bool              `json:"enableServiceLinks,omitempty"`
-	SecurityContext              *podSecurity       `json:"securityContext,omitempty"`
-	ResourceClaims               []podResourceClaim `json:"resourceClaims,omitempty"`
-	Containers                   []container        `json:"containers"`
+	RestartPolicy                 string             `json:"restartPolicy,omitempty"`
+	ActiveDeadlineSeconds         *int64             `json:"activeDeadlineSeconds,omitempty"`
+	TerminationGracePeriodSeconds *int64             `json:"terminationGracePeriodSeconds,omitempty"`
+	NodeName                      string             `json:"nodeName,omitempty"`
+	NodeSelector                  map[string]string  `json:"nodeSelector,omitempty"`
+	Tolerations                   []toleration       `json:"tolerations,omitempty"`
+	AutomountServiceAccountToken  *bool              `json:"automountServiceAccountToken,omitempty"`
+	EnableServiceLinks            *bool              `json:"enableServiceLinks,omitempty"`
+	SecurityContext               *podSecurity       `json:"securityContext,omitempty"`
+	ResourceClaims                []podResourceClaim `json:"resourceClaims,omitempty"`
+	Containers                    []container        `json:"containers"`
+}
+
+type toleration struct {
+	Operator string `json:"operator"`
 }
 
 type podSecurity struct {
@@ -77,6 +84,7 @@ type envVar struct {
 }
 
 type securityContext struct {
+	Privileged               *bool         `json:"privileged,omitempty"`
 	AllowPrivilegeEscalation *bool         `json:"allowPrivilegeEscalation,omitempty"`
 	ReadOnlyRootFilesystem   *bool         `json:"readOnlyRootFilesystem,omitempty"`
 	Capabilities             *capabilities `json:"capabilities,omitempty"`
@@ -143,9 +151,13 @@ func (p pod) scheduled() bool {
 
 // loader answers the terminated state of the upload's container, or
 // nil while it has not ended.
-func (p pod) loader() *terminated {
+func (p pod) loader() *terminated { return p.ended(uploadContainer) }
+
+// ended answers the terminated state of one container, or nil while it
+// has not ended.
+func (p pod) ended(name string) *terminated {
 	for _, held := range p.Status.ContainerStatuses {
-		if held.Name == uploadContainer {
+		if held.Name == name {
 			return held.State.Terminated
 		}
 	}

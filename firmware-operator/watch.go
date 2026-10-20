@@ -1,12 +1,15 @@
 package main
 
-// Four watches wake the pass: one of every Firmware, one of the
-// ResourceSlices that machine-operator publishes, one of the upload
-// pods in the operator's namespace, and one of every Machine for
-// spec.machines. All four run on client-go's reflector, through the
-// shared informer package. A handler only wakes the pass, and the pass
-// reads what it needs. The only timers are clocks: the deadline of an
-// upload in progress, and the wait after a pass that failed.
+// Six watches wake the pass: one of every Firmware, one of every
+// Catalog, one of the ResourceSlices that machine-operator publishes,
+// one each of the upload pods and the scan pods in the operator's
+// namespace, and one of every Machine. All six run on client-go's
+// reflector, through the shared informer package. A handler only wakes
+// the pass, and the pass reads what it needs. The timers are clocks:
+// the deadline of an upload or a scan in progress, and the wait after
+// a pass that failed. The one timer that is not a clock is the read of
+// each Catalog's jcat once an interval, because LVFS publishes no feed
+// of its changes (catalogfetch.go).
 
 import (
 	"context"
@@ -24,6 +27,7 @@ import (
 
 var (
 	firmwaresResource = schema.GroupVersionResource{Group: "firmware.liken.sh", Version: "v1alpha1", Resource: "firmwares"}
+	catalogsResource  = schema.GroupVersionResource{Group: "firmware.liken.sh", Version: "v1alpha1", Resource: "catalogs"}
 	slicesResource    = schema.GroupVersionResource{Group: "resource.k8s.io", Version: "v1", Resource: "resourceslices"}
 	podsResource      = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
 	machinesResource  = schema.GroupVersionResource{Group: "liken.sh", Version: "v1alpha1", Resource: "machines"}
@@ -49,11 +53,13 @@ func (o *operator) run(ctx context.Context, watcher dynamic.Interface) {
 	slices := start(informer.Source{Resource: slicesResource, FieldSelector: "spec.driver=" + driverName}, markHandler(signal, sliceMark))
 	pods := start(informer.Source{Resource: podsResource, Namespace: o.namespace, LabelSelector: uploadLabel + "=" + uploadLabelValue},
 		markHandler(signal, podMark))
+	scanPods := start(informer.Source{Resource: podsResource, Namespace: o.namespace, LabelSelector: scanLabel + "=" + scanLabelValue},
+		markHandler(signal, podMark))
 	machines := start(informer.Source{Resource: machinesResource}, markHandler(signal, machineMark))
-	view := firmwares.View()
-	view.Whole = true
-	o.firmwares = informer.Held{View: view, Versions: memo.New()}
-	o.slices, o.pods, o.machines = slices.View(), pods.View(), machines.View()
+	catalogs := start(informer.Source{Resource: catalogsResource}, markHandler(signal, catalogMark))
+	o.firmwares = informer.Held{View: whole(firmwares), Versions: memo.New()}
+	o.catalogs = informer.Held{View: whole(catalogs), Versions: memo.New()}
+	o.slices, o.pods, o.scanPods, o.machines = slices.View(), pods.View(), scanPods.View(), machines.View()
 
 	var deadline, retry <-chan time.Time
 	for {
@@ -67,7 +73,7 @@ func (o *operator) run(ctx context.Context, watcher dynamic.Interface) {
 		// wake that came with the stop is checked here and starts no
 		// pass.
 		if ctx.Err() != nil {
-			for _, watch := range []*informer.Collection{firmwares, slices, pods, machines} {
+			for _, watch := range []*informer.Collection{firmwares, slices, pods, scanPods, machines, catalogs} {
 				<-watch.Done()
 			}
 			return
@@ -83,6 +89,15 @@ func (o *operator) run(ctx context.Context, watcher dynamic.Interface) {
 			deadline = time.After(time.Until(next))
 		}
 	}
+}
+
+// whole answers the store of a watch with no selector, whose list also
+// holds each object the operator created that the store does not hold
+// yet.
+func whole(watch *informer.Collection) informer.View {
+	view := watch.View()
+	view.Whole = true
+	return view
 }
 
 // poke wakes the pass. The channel holds one wake, so a burst of
@@ -113,15 +128,23 @@ func sliceMark(item resourceSlice) string {
 	return string(mustJSON([]any{item.Metadata.UID, item.Spec.Devices}))
 }
 
-// podMark is the part of an upload pod whose change needs a pass: its
-// phase, its placement, and the start of its deletion.
+// catalogMark is the part of a Catalog whose change needs a pass, for
+// the reasons of firmwareMark.
+func catalogMark(item catalog) string {
+	return fmt.Sprint(item.Metadata.UID, item.Metadata.Generation, item.Metadata.DeletionTimestamp)
+}
+
+// podMark is the part of an upload or a scan pod whose change needs a
+// pass: its phase, its placement, and the start of its deletion.
 func podMark(item pod) string {
 	return fmt.Sprint(item.Status.Phase, item.scheduled(), item.Metadata.DeletionTimestamp)
 }
 
-// machineMark is a Machine's labels, the only part spec.machines reads.
+// machineMark is the part of a Machine that a pass reads: the labels
+// that spec.machines selects, and the phase and the boot time that
+// decide a scan.
 func machineMark(item machine) string {
-	return fmt.Sprint(item.Metadata.Labels)
+	return fmt.Sprint(item.Metadata.Labels, item.Status.Phase, item.Status.Boot.Time)
 }
 
 // markHandler wakes the pass for a new object, a removed object, and

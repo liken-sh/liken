@@ -1,9 +1,11 @@
 package main
 
-// These tests run objects through the CRD's own schema, with the
-// validator and the pruning the API server uses, so a schema edit that
-// refuses a valid Firmware, accepts an invalid one, or prunes a field
-// the operator writes fails here.
+// These tests run objects through the CRDs' own schemas, with the
+// validators and the pruning the API server uses, so a schema edit that
+// refuses a valid object, accepts an invalid one, or prunes a field the
+// operator writes fails here. The structural schema and the
+// x-kubernetes-validations rules are two passes in the API server, and
+// a case runs both.
 
 import (
 	"encoding/json"
@@ -16,28 +18,36 @@ import (
 	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/install"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	structuralschema "k8s.io/apiextensions-apiserver/pkg/apiserver/schema"
+	celschema "k8s.io/apiextensions-apiserver/pkg/apiserver/schema/cel"
 	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/pruning"
 	"k8s.io/apiextensions-apiserver/pkg/apiserver/validation"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	celconfig "k8s.io/apiserver/pkg/apis/cel"
 	"sigs.k8s.io/yaml"
 )
 
-func loadCRD(t *testing.T) *apiextensionsv1.CustomResourceDefinition {
+// The definitions this module ships.
+const (
+	firmwareCRD = "deploy/firmware-crd.yaml"
+	catalogCRD  = "deploy/catalog-crd.yaml"
+)
+
+func loadCRD(t *testing.T, path string) *apiextensionsv1.CustomResourceDefinition {
 	t.Helper()
-	raw, err := os.ReadFile("deploy/firmware-crd.yaml")
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	crd := &apiextensionsv1.CustomResourceDefinition{}
 	if err := yaml.UnmarshalStrict(raw, crd); err != nil {
-		t.Fatalf("decoding deploy/firmware-crd.yaml: %v", err)
+		t.Fatalf("decoding %s: %v", path, err)
 	}
 	return crd
 }
 
 func TestCRDIdentity(t *testing.T) {
-	crd := loadCRD(t)
+	crd := loadCRD(t, firmwareCRD)
 	cases := []struct {
 		name, got, want string
 	}{
@@ -58,36 +68,58 @@ func TestCRDIdentity(t *testing.T) {
 
 func TestCRDPrinterColumns(t *testing.T) {
 	var names []string
-	for _, column := range loadCRD(t).Spec.Versions[0].AdditionalPrinterColumns {
+	for _, column := range loadCRD(t, firmwareCRD).Spec.Versions[0].AdditionalPrinterColumns {
 		names = append(names, column.Name)
 	}
-	want := []string{"Valid", "Loaded", "Running", "Failed", "Conflict", "Age"}
+	want := []string{"Valid", "Loaded", "Running", "Failed", "Conflict", "Machines", "Behind", "Age"}
 	if !slices.Equal(names, want) {
 		t.Errorf("printer columns %v, want %v", names, want)
 	}
 }
 
-// schemaValidator builds the validator the API server itself would run
-// a Firmware through, from the CRD's own schema.
-func schemaValidator(t *testing.T) validation.SchemaValidator {
+// validateObject runs an object through both passes the API server
+// runs: the structural schema and the CEL rules.
+func validateObject(t *testing.T, path string, object map[string]any) field.ErrorList {
 	t.Helper()
-	validator, _, err := validation.NewSchemaValidator(internalSchema(t))
+	validator, _, err := validation.NewSchemaValidator(internalSchema(t, path))
 	if err != nil {
 		t.Fatalf("building the schema validator: %v", err)
 	}
-	return validator
+	errs := validation.ValidateCustomResource(field.NewPath(""), object, validator)
+	structural := structuralSchema(t, path)
+	if rules := celschema.NewValidator(structural, true, celconfig.PerCallLimit); rules != nil {
+		celErrs, _ := rules.Validate(t.Context(), field.NewPath(""), structural, object, nil, celconfig.RuntimeCELCostBudget)
+		errs = append(errs, celErrs...)
+	}
+	return errs
 }
 
-// internalSchema is the CRD's schema as the API server's own type.
-func internalSchema(t *testing.T) *apiextensions.JSONSchemaProps {
+// internalSchema is a CRD's schema as the API server's own type.
+func internalSchema(t *testing.T, path string) *apiextensions.JSONSchemaProps {
 	t.Helper()
 	scheme := runtime.NewScheme()
 	install.Install(scheme)
 	internal := &apiextensions.JSONSchemaProps{}
-	if err := scheme.Convert(loadCRD(t).Spec.Versions[0].Schema.OpenAPIV3Schema, internal, nil); err != nil {
+	if err := scheme.Convert(loadCRD(t, path).Spec.Versions[0].Schema.OpenAPIV3Schema, internal, nil); err != nil {
 		t.Fatalf("converting the schema: %v", err)
 	}
 	return internal
+}
+
+func structuralSchema(t *testing.T, path string) *structuralschema.Structural {
+	t.Helper()
+	structural, err := structuralschema.NewStructural(internalSchema(t, path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return structural
+}
+
+// prunedFrom answers the fields the API server would drop from an
+// object, because a CRD's schema does not name them.
+func prunedFrom(t *testing.T, path string, object map[string]any) []string {
+	t.Helper()
+	return pruning.PruneWithOptions(object, structuralSchema(t, path), true, structuralschema.UnknownFieldPathOptions{TrackUnknownFieldPaths: true})
 }
 
 // object is a Firmware with the spec given, as kubectl sends it.
@@ -100,8 +132,8 @@ func object(spec map[string]any) map[string]any {
 }
 
 func TestCRDValidatesExamples(t *testing.T) {
-	validator := schemaValidator(t)
 	upload := map[string]any{"image": "ghcr.io/liken-sh/indi-qhy:test", "command": []any{"fxload", "-D", "$(LIKEN_DEVICE)"}}
+	update := map[string]any{"guids": []any{biosGUID}}
 	cases := []struct {
 		name    string
 		spec    map[string]any
@@ -112,6 +144,12 @@ func TestCRDValidatesExamples(t *testing.T) {
 			"machines": map[string]any{"matchExpressions": []any{map[string]any{"key": "observatory", "operator": "Exists"}}}}, false},
 		{"no upload", map[string]any{"selector": "true"}, true},
 		{"no selector", map[string]any{"upload": upload}, true},
+		{"an update", map[string]any{"update": update}, false},
+		{"both", map[string]any{"selector": "true", "upload": upload, "update": update}, true},
+		{"neither", map[string]any{}, true},
+		{"an update with a selector", map[string]any{"selector": "true", "update": update}, true},
+		{"an update with machines", map[string]any{"update": update, "machines": map[string]any{"matchLabels": map[string]any{"a": "b"}}}, true},
+		{"an update with no GUIDs", map[string]any{"update": map[string]any{"guids": []any{}}}, true},
 		{"an upload with no command", map[string]any{"selector": "true", "upload": map[string]any{"image": "loader"}}, true},
 		{"an upload with an empty command", map[string]any{"selector": "true", "upload": map[string]any{"image": "loader", "command": []any{}}}, true},
 		{"an unknown operator", map[string]any{"selector": "true", "upload": upload,
@@ -119,7 +157,7 @@ func TestCRDValidatesExamples(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			errs := validation.ValidateCustomResource(field.NewPath(""), object(c.spec), validator)
+			errs := validateObject(t, firmwareCRD, object(c.spec))
 			if got := len(errs) > 0; got != c.wantErr {
 				t.Errorf("got errors %v, want an error: %v", errs, c.wantErr)
 			}
@@ -141,19 +179,21 @@ func TestTheOperatorsStatusValidates(t *testing.T) {
 			generation: 2, result: resultConflict, message: "another rule"}},
 	}, time.Date(2026, 10, 19, 22, 1, 9, 0, time.UTC))
 
+	assertTheSchemaKeeps(t, firmwareCRD, f)
+}
+
+// assertTheSchemaKeeps checks that a CRD's schema takes an object the
+// operator writes, and prunes none of its fields.
+func assertTheSchemaKeeps(t *testing.T, path string, object any) {
+	t.Helper()
 	var written map[string]any
-	if err := json.Unmarshal(mustJSON(f), &written); err != nil {
+	if err := json.Unmarshal(mustJSON(object), &written); err != nil {
 		t.Fatal(err)
 	}
-	if errs := validation.ValidateCustomResource(field.NewPath(""), written, schemaValidator(t)); len(errs) > 0 {
-		t.Errorf("the schema refuses the operator's status: %v", errs)
+	if errs := validateObject(t, path, written); len(errs) > 0 {
+		t.Errorf("the schema refuses the operator's object: %v", errs)
 	}
-	structural, err := structuralschema.NewStructural(internalSchema(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	pruned := pruning.PruneWithOptions(written, structural, true, structuralschema.UnknownFieldPathOptions{TrackUnknownFieldPaths: true})
-	if len(pruned) > 0 {
-		t.Errorf("the API server prunes %v from the operator's status", pruned)
+	if pruned := prunedFrom(t, path, written); len(pruned) > 0 {
+		t.Errorf("the API server prunes %v from the operator's object", pruned)
 	}
 }

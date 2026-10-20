@@ -1,11 +1,16 @@
 ---
 name: troubleshoot
-description: "Find why a Firmware's upload failed or never started: a Failed entry and its message, a Conflict between two rules, a selector that does not compile or matches nothing, an upload pod that stays Pending, and a claimed device that stays Pending because its firmware is not loaded. Use when kubectl get firmware shows Failed or Conflict, when a bare chip gets no upload, or when a pod that claims a camera does not start."
+description: "Find why a Firmware's upload failed or never started: a Failed entry and its message, a Conflict between two rules, a selector that does not compile or matches nothing, an upload pod that stays Pending, and a claimed device that stays Pending because its firmware is not loaded. Find why discovery found nothing: a Catalog that is not Ready, a scan record that is Failed or CatalogMoved, a machine that is never scanned, and a discovered Firmware that keeps the entry of a machine that is off. Use when kubectl get firmware shows Failed or Conflict, when a bare chip gets no upload, when a pod that claims a camera does not start, when kubectl get catalog shows Ready False, or when a machine has no scan record."
 ---
 
 This skill is the guide at https://liken.sh/firmware/docs/guides/troubleshoot/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
-# Troubleshoot an upload
+# Troubleshoot uploads and scans
+
+The first part of this guide covers uploads, and the second part covers
+the scans that find updates ([Find firmware updates](https://liken.sh/firmware/docs/guides/find-updates/)).
+
+## Uploads
 
 Start from the `Firmware`. `kubectl get firmware` shows whether the
 rule is valid and counts the result of each port where it matched a
@@ -13,7 +18,7 @@ device. `kubectl describe firmware <name>` shows the entries in
 `status.devices` and the `Event`s of the last hour. Find the symptom
 below.
 
-## The entry is Failed
+### The entry is Failed
 
 The entry's `message` says why. The operator does not retry a failed
 upload. A new attempt starts when the device appears again, after a
@@ -31,7 +36,7 @@ To try again without a replug, edit the spec, for example with an
 argument that the loader accepts, or delete the `Firmware` and apply
 it again.
 
-## The entry is Conflict
+### The entry is Conflict
 
 Two or more `Firmware` objects match the same device, so the operator
 runs none of them on it. The message names the other rules:
@@ -44,7 +49,7 @@ Narrow one selector, for example with the product ID, or delete the
 duplicate. The rule that still matches then uploads to the device
 that is in the slice.
 
-## Valid is False
+### Valid is False
 
 The selector or `spec.machines` does not compile, and the rule runs
 nowhere. The condition's message gives the compiler's error:
@@ -59,7 +64,7 @@ that device, and the device counts as not matched. Guard such an
 attribute with `has()`, for example
 `has(device.attributes["liken.sh"].serial)`.
 
-## No entry appears
+### No entry appears
 
 The rule matched no device. Check the device in the machine's slice:
 
@@ -82,7 +87,7 @@ kubectl get resourceslice <node>-liken.sh -o yaml
   with the labels of the `Machine`:
   `kubectl get machine <node> --show-labels`.
 
-## The upload pod stays Pending
+### The upload pod stays Pending
 
 The entry is `Running`, and the pod in `liken-system` does not start:
 
@@ -103,10 +108,114 @@ kubectl -n liken-system describe pod <pod>
   denies the pod's traffic does not apply to the pull, because the
   node's container runtime pulls the image, not the pod.
 
-## A pod that claims the loaded device stays Pending
+### A pod that claims the loaded device stays Pending
 
 A pod that claims the camera by its loaded IDs, such as `0921`, stays
 `Pending` until the device with those IDs is in the slice. That is
 the expected wait while the upload runs. When the upload is `Failed`
 or `Conflict`, fix that first. When the camera has no `Firmware` at
 all, nothing loads it, and the pod waits for good.
+
+## Scans
+
+Start from the `Catalog`. `kubectl get catalog` shows whether the
+last read of the jcat succeeded, and `kubectl describe catalog <name>`
+shows its `Event`s of the last hour. The record of each machine is in
+`status.machines`:
+
+```sh
+kubectl get catalog <name> -o jsonpath='{range .status.machines[*]}{.machine}{"\t"}{.result}{"\t"}{.message}{"\n"}{end}'
+```
+
+### A Catalog is not Ready
+
+`Ready` is `False` when the operator could not read the jcat or the
+file it names. The condition's message gives the error. The status
+keeps the last good `file`, and no scan starts while `Ready` is `False`.
+
+```sh
+kubectl get catalog <name> -o jsonpath='{.status.conditions[?(@.type=="Ready")]}'
+```
+
+| Reason | Cause and fix |
+|---|---|
+| `JcatUnreadable` | The operator could not download the jcat at `spec.url` with `.jcat` added, the answer was not `200`, or the jcat did not parse. Check `spec.url`, and check that the operator's pod can reach the host over HTTPS. The `firmware-scan` policy applies only to the scan pods. |
+| `FileUnreadable` | The operator downloaded the jcat, and could not download or read the versioned file that it names. The file must be in the same directory as `spec.url`. A mirror must serve the versioned file under the name the jcat gives. |
+| `ChecksumMismatch` | The SHA-256 of the versioned file differs from the one in the jcat. A mirror that serves a stale jcat, or a stale file, causes this. Fix the mirror. |
+
+The operator reads the jcat again after an hour, when you edit the
+`Catalog`, and when the operator starts. To read it now, edit the
+`Catalog` or restart the operator.
+
+### A scan record is Failed
+
+The record's `message` says why. A failed scan does not run again
+until the machine boots, its set of device names changes, or the
+catalog names a new file that offers other releases for its devices.
+
+| Message | Cause and fix |
+|---|---|
+| `downloading the jcat: ...` or `downloading <file>: ...` | The scan pod could not reach the catalog's host. Check the `NetworkPolicy` `firmware-scan`, a policy of your own that denies egress from `liken-system`, and DNS. A mirror on a port other than 443 needs a policy of its own. |
+| `the SHA-256 of <file> is <a>, and the operator expects <b>` | The scan pod downloaded a file whose SHA-256 differs from the one the operator read. A mirror that serves different bytes to two readers causes this. |
+| `mounting efivarfs at /sys/firmware/efi/efivars: ...` | The pod could not mount `efivarfs`. Check that the pod is privileged, and that the policy of your cluster admits a privileged pod. |
+| `fwupdtool refresh: ...` | fwupd refused the catalog, for example because the signature of the jcat does not verify. The message is the last line of fwupd's error. |
+| `fwupdtool get-devices: ...` or `fwupdtool get-updates: ...` | fwupd failed to read the devices or to match the releases. The message is the last line of fwupd's error. |
+| `the scan pod did not finish within 10m0s of its creation` | The pod never ran, or ran for 10 minutes. Check for a pod that stays `Pending` or does not pull its image. |
+| `the scan pod wrote no log: ...` | The pod ended with no log, for example with `DeadlineExceeded`. The message adds the pod's reason and, if the container ran, its exit code. |
+| `the scan wrote no result; its last line was: ...` | The scan program crashed. The message holds the last line of its log. |
+| `the scan pod is gone; ...` | Someone deleted the scan pod before the operator read its result. |
+
+The operator deletes a scan pod after it writes the result, so the
+log of a failed scan is gone. Reboot the machine to run the scan again.
+While a scan runs, its pod is in `liken-system`:
+
+```sh
+kubectl -n liken-system get pods -l firmware.liken.sh/scan=true
+kubectl -n liken-system logs <pod>
+```
+
+### A scan record is CatalogMoved
+
+The scan pod read a jcat that names another file than the one the
+operator gave it, because LVFS published a new catalog between the
+operator's read and the scan's. The record's message gives the new
+file name. The operator reads the jcat at once. When the jcat names the
+new file, the `Catalog`'s `status.file` changes, and the machine is
+scanned against the new file. This needs no action.
+
+When the record stays `CatalogMoved`, the jcat that the operator reads
+still names the old file. The machine is scanned again when that jcat
+names a new file.
+
+### A machine is never scanned
+
+A machine has no record in `status.machines`. Check these in order:
+
+- **The machine is not Ready.** The operator scans only a `Machine`
+  whose `status.phase` is `Ready`. Check with
+  `kubectl get machine <node>`.
+- **The Catalog is not Ready.** No scan starts against it. See
+  [A Catalog is not Ready](#a-catalog-is-not-ready).
+- **The API server refuses the scan pod.** A privileged pod fails the
+  admission of a `liken-system` that carries a Pod Security level below
+  `privileged`. The operator's log gives the error:
+  `kubectl -n liken-system logs deployment/firmware-operator`.
+- **The scan pod cannot reach the catalog.** The record is `Running`
+  until the scan fails with a `downloading` message, up to 10 minutes
+  after the pod started. See
+  [A scan record is Failed](#a-scan-record-is-failed).
+- **The operator does not lead.** Only the copy that holds the `Lease`
+  scans. See [Confirm that it leads](https://liken.sh/firmware/docs/guides/install/#confirm-that-it-leads).
+
+### A discovered Firmware keeps an entry for a machine that is off
+
+This is expected. A scan replaces the entries of its own machine only,
+so the entries of a machine that is off, or that cannot be scanned,
+stay at the version and the releases of its last scan. The `time` of
+each entry says when that was. An entry leaves when the machine's next
+scan does not report the device, or when you delete the `Machine`.
+
+The operator deletes a discovered `Firmware` when no entry is left and
+nobody edited its spec. An object whose spec someone edited stays, and
+you delete it with `kubectl delete firmware <name>`. The operator then
+creates it again at the next scan that reports the device model.

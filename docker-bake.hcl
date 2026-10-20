@@ -82,6 +82,7 @@ group "default" {
     "display-operator-cli",
     "equipment-operator",
     "firmware-operator",
+    "firmware-operator-scan",
     "git-csi-driver",
     "library-operator",
     "library-operator-ffmpeg",
@@ -789,6 +790,7 @@ target "firmware-operator" {
   contexts = {
     "kubernetes" = "kubernetes"
     "notices" = "notices"
+    "trust" = "target:trust"
   }
   args = {
     VERSION = VERSION
@@ -796,6 +798,23 @@ target "firmware-operator" {
   tags       = ["ghcr.io/liken-sh/firmware-operator:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/firmware-operator:buildcache"]
   cache-to   = CACHE_WRITE == "firmware-operator" ? ["type=registry,ref=ghcr.io/liken-sh/firmware-operator:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "firmware-operator-scan" {
+  context    = "firmware-operator"
+  dockerfile = "scan/Dockerfile"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "kubernetes" = "kubernetes"
+    "notices" = "notices"
+    "trust" = "target:trust"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/firmware-operator-scan:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/firmware-operator-scan:buildcache"]
+  cache-to   = CACHE_WRITE == "firmware-operator-scan" ? ["type=registry,ref=ghcr.io/liken-sh/firmware-operator-scan:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "git-csi-driver" {

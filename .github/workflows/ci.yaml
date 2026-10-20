@@ -776,7 +776,7 @@ jobs:
       packages: write
 
   firmware-operator:
-    needs: [plan]
+    needs: [plan, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['firmware-operator'].check }}
     uses: ./.github/workflows/component-firmware-operator.yaml
     with:
@@ -791,7 +791,7 @@ jobs:
       packages: write
 
   firmware-operator-publish:
-    needs: [plan, firmware-operator, kubernetes, notices]
+    needs: [plan, firmware-operator, kubernetes, notices, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['firmware-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-firmware-operator.yaml
     with:

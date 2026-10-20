@@ -1,0 +1,194 @@
+# A Catalog is one source of firmware releases, such as the Linux
+# Vendor Firmware Service (LVFS). firmware-operator reads the catalog's
+# jcat to learn its current file, and scans each Ready machine against
+# that file with fwupd in a short pod. It writes the status: the file,
+# whether it read it, and the record of each machine's last scan. It is
+# cluster-scoped because one catalog serves every machine of the
+# cluster.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: catalogs.firmware.liken.sh
+spec:
+  group: firmware.liken.sh
+  names:
+    kind: Catalog
+    listKind: CatalogList
+    plural: catalogs
+    singular: catalog
+    categories: [firmware]
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      # The status subresource splits spec and status into two write
+      # paths. People declare the spec, and firmware-operator writes the
+      # status.
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: File
+          type: string
+          jsonPath: .status.file
+        - name: Ready
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].status
+        - name: Checked
+          type: date
+          jsonPath: .status.checked
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [url]
+              properties:
+                url:
+                  type: string
+                  pattern: "^https?://"
+                  description: >-
+                    The catalog's unversioned URL, such as
+                    `https://cdn.fwupd.org/downloads/firmware.xml.zst`.
+                    The jcat is at the same URL with `.jcat` added, and
+                    names the versioned file, such as
+                    `firmware-09138-stable.xml.zst`, in the same
+                    directory. `firmware-operator` and each scan pod read
+                    the versioned file, because a CDN can serve an older
+                    copy at the unversioned URL for hours. A mirror for a
+                    cluster with no route to the internet serves the same
+                    three files under its own URL.
+            status:
+              type: object
+              properties:
+                file:
+                  type: string
+                  description: >-
+                    The versioned file the jcat named at the last read
+                    that succeeded. The scans read this file. A read that
+                    fails keeps it.
+                sha256:
+                  type: string
+                  description: "The SHA-256 of `file`, from the jcat. `firmware-operator` checked the file against it."
+                etag:
+                  type: string
+                  description: >-
+                    The `ETag` of the jcat at the last read that
+                    succeeded. The next read sends it, so a jcat that did
+                    not change costs one small answer.
+                checked:
+                  type: string
+                  format: date-time
+                  description: >-
+                    When `firmware-operator` last read the jcat. It reads
+                    it again an hour later, because LVFS publishes no
+                    feed of its changes, and at once when the `Catalog`
+                    changes or a scan answers `CatalogMoved`.
+                conditions:
+                  type: array
+                  description: >-
+                    `Ready` is `True` with the reason `Fetched` when the
+                    last read of the jcat and of the file it names
+                    succeeded. It is `False` with the reason
+                    `JcatUnreadable`, `FileUnreadable`, or
+                    `ChecksumMismatch` when a read failed or the file's
+                    SHA-256 differs from the jcat's, and the message
+                    gives the error. No scan starts while `Ready` is
+                    `False`.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  items:
+                    type: object
+                    required: [type, status, reason, lastTransitionTime]
+                    properties:
+                      type:
+                        type: string
+                        description: "The condition's name."
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                        description: "Whether the condition holds."
+                      reason:
+                        type: string
+                        description: "One word for the cause."
+                      message:
+                        type: string
+                        description: "The cause, for a person to read."
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        description: "The generation of the spec that the condition answers."
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: "When the status last changed."
+                machines:
+                  type: array
+                  description: >-
+                    The record of each machine's last scan against this
+                    catalog. `firmware-operator` scans a Ready machine
+                    again when the time it booted changes, when the set
+                    of device names in its `ResourceSlice` changes, or
+                    when the catalog names a new file that offers other
+                    releases for the GUIDs the machine reported. Each
+                    attempt runs once, so a `Failed` scan waits for one
+                    of the three to change.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [machine]
+                  items:
+                    type: object
+                    required: [machine, devices, file, result, time]
+                    properties:
+                      machine:
+                        type: string
+                        description: "The `Machine`, which has the name of its node."
+                      boot:
+                        type: string
+                        format: date-time
+                        description: "The `Machine`'s `status.boot.time` when the scan started."
+                      devices:
+                        type: string
+                        description: >-
+                          A hash of the device names in the machine's
+                          `ResourceSlice` when the scan started. A device
+                          number that changes on a replug does not change
+                          it.
+                      file:
+                        type: string
+                        description: "The catalog file the scan read."
+                      releases:
+                        type: string
+                        description: >-
+                          A hash of the releases that `file` offers for
+                          `guids`. When the catalog names a new file with
+                          the same hash, `firmware-operator` records the
+                          new file and does not scan.
+                      guids:
+                        type: array
+                        items:
+                          type: string
+                        description: "The GUIDs of every updatable device the machine reported in its last scan that answered."
+                      result:
+                        type: string
+                        enum: [Running, Scanned, Failed, CatalogMoved]
+                        description: >-
+                          `Running` while the scan pod runs. `Scanned`
+                          when the scan answered, and the discovered
+                          `Firmware` objects hold its devices. `Failed`
+                          when the scan failed, did not finish within ten
+                          minutes, or its pod is gone. `CatalogMoved` when
+                          the jcat named another file than the one the
+                          scan was given, and `firmware-operator` then
+                          reads the jcat at once.
+                      message:
+                        type: string
+                        description: "What the scan found, such as `4 devices, no updates`, or why it failed."
+                      time:
+                        type: string
+                        format: date-time
+                        description: "When the record got its result."

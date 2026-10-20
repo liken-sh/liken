@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -22,10 +23,24 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// world is one running operator and the server it talks to.
+// world is one running operator, the server it talks to, and the LVFS
+// it reads catalogs from.
 type world struct {
-	api *fakeAPI
+	api  *fakeAPI
+	lvfs *fakeLVFS
 }
+
+// discovery answers the operator's settings for discovery, with the
+// world's LVFS as the catalogs' server.
+func (w *world) discovery() discoverySettings {
+	if w.lvfs == nil {
+		w.lvfs = newFakeLVFS()
+	}
+	return discoverySettings{scanImage: testScanImage, interval: time.Hour, http: &http.Client{Transport: w.lvfs}}
+}
+
+// testScanImage is the scan image of the test operator.
+const testScanImage = "ghcr.io/liken-sh/firmware-operator-scan:test"
 
 // startWorld runs the operator until the test ends. The test runs in a
 // synctest bubble.
@@ -48,7 +63,7 @@ func (w *world) run(t *testing.T) (stop func()) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		newOperator(client, operatorNS, recorder).run(ctx, watcher)
+		newOperator(client, operatorNS, recorder, w.discovery()).run(ctx, watcher)
 	}()
 	stop = func() {
 		cancel()
@@ -69,7 +84,7 @@ func (w *world) settle() {
 func qhy5lii() firmware {
 	f := firmware{Spec: firmwareSpec{
 		Selector: `device.attributes["liken.sh"].vendor == "1618" && device.attributes["liken.sh"].product == "0920"`,
-		Upload: upload{
+		Upload: &upload{
 			Image:   "ghcr.io/liken-sh/indi-qhy:test",
 			Command: []string{"fxload", "-t", "fx2", "-I", "/lib/firmware/qhy/QHY5II.HEX", "-D", "$(" + deviceVariable + ")"},
 		},

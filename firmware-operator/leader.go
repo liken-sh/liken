@@ -51,6 +51,9 @@ type process struct {
 	pod       string
 	namespace string
 
+	// discovery holds the flags of discovery.
+	discovery discoverySettings
+
 	// report receives each line the election logs, and eventLog each
 	// line of the Event recorder. exit ends the process after a lost
 	// Lease. A test sets all three.
@@ -88,7 +91,7 @@ func (p process) operate(stop context.Context) error {
 	}
 	client := p.client.WithWriteGuard(lead.MayWrite)
 	recorder := events.New(context.Background(), client, component, events.Options{Instance: p.pod, Log: p.eventLog})
-	newOperator(client, p.namespace, recorder).run(stop, p.watcher)
+	newOperator(client, p.namespace, recorder, p.discovery).run(stop, p.watcher)
 	ctx, cancel := context.WithTimeout(context.Background(), events.ShutdownTimeout)
 	defer cancel()
 	if err := recorder.Shutdown(ctx); err != nil {

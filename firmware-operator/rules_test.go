@@ -64,7 +64,7 @@ func TestARuleWithNoDevicesWritesZeroCounts(t *testing.T) {
 		w.api.mu.Lock()
 		status := clone(w.api.objects[firmwaresPath]["qhy5l-ii"])["status"].(map[string]any)
 		w.api.mu.Unlock()
-		want := map[string]any{"running": 0.0, "loaded": 0.0, "failed": 0.0, "conflict": 0.0}
+		want := map[string]any{"running": 0.0, "loaded": 0.0, "failed": 0.0, "conflict": 0.0, "machines": 0.0, "behind": 0.0}
 		if got, _ := status["counts"].(map[string]any); !maps.Equal(got, want) {
 			t.Errorf("status.counts = %v, want %v", status["counts"], want)
 		}

@@ -2,8 +2,12 @@ package main
 
 // The operator posts a Kubernetes Event about a Firmware for each
 // change of its Valid condition, and for each upload it starts and each
-// result, which change no condition. A Firmware is cluster-scoped, so
-// its Events are in the namespace default. A device that did not load
+// result, which change no condition. It posts one about a discovered
+// Firmware when it creates it and when a machine's newest offered
+// release changes, and one about a Catalog for each change of its Ready
+// condition and for each scan it starts and each result. A Firmware and
+// a Catalog are cluster-scoped, so their Events are in the namespace
+// default. A device that did not load
 // sets no condition on its Machine, because the Machine's status
 // belongs to the OS.
 
@@ -17,23 +21,40 @@ import (
 const component = "firmware-operator"
 
 // The reasons of the Events that change no condition. Valid's own
-// reasons are in firmware.go.
+// reasons are in firmware.go, and Ready's in catalog.go.
 const (
-	reasonUploadStarted = "UploadStarted"
-	reasonLoaded        = "Loaded"
-	reasonUploadFailed  = "UploadFailed"
-	reasonConflict      = "Conflict"
+	reasonUploadStarted   = "UploadStarted"
+	reasonLoaded          = "Loaded"
+	reasonUploadFailed    = "UploadFailed"
+	reasonConflict        = "Conflict"
+	reasonDiscovered      = "Discovered"
+	reasonUpdateAvailable = "UpdateAvailable"
+	reasonScanStarted     = "ScanStarted"
+	reasonScanned         = "Scanned"
+	reasonScanFailed      = "ScanFailed"
+	reasonCatalogMoved    = "CatalogMoved"
 )
 
 type eventReference = events.ObjectReference
 
-// post posts the Events of a status write after it landed. A write
-// that the API server refused posts nothing, and the next pass finds
-// the same change again.
+// post posts the Events of a Firmware's status write after it landed.
+// A write that the API server refused posts nothing, and the next pass
+// finds the same change again.
 func (o *operator) post(f *firmware, validity condition, notices []notice, transitioned bool) {
-	about := f.reference()
+	o.postAbout(f.reference(), validity, notices, transitioned)
+}
+
+// postCatalog posts the Events of a Catalog's status write after it
+// landed.
+func (o *operator) postCatalog(c *catalog, readiness condition, notices []notice, transitioned bool) {
+	o.postAbout(c.reference(), readiness, notices, transitioned)
+}
+
+// postAbout posts the transition of an object's condition, when it
+// transitioned, and then each notice.
+func (o *operator) postAbout(about eventReference, c condition, notices []notice, transitioned bool) {
 	if transitioned {
-		o.recorder.Transition(about, validity, conditions.False)
+		o.recorder.Transition(about, c, conditions.False)
 	}
 	for _, n := range notices {
 		if n.warning {

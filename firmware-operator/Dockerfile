@@ -1,10 +1,9 @@
-# The operator's image: one static Go binary and its license notices,
-# and nothing else. The operator holds the cluster credentials and
-# starts pods on every machine, so the image carries no shell, no libc,
-# and no tools, which is the least there is to attack. It carries no
-# CA bundle either: the operator talks only to the API server, and it
-# verifies the API server with the CA in its ServiceAccount's token
-# volume.
+# The operator's image: one static Go binary, its license notices, and
+# the CA bundle that its reads of a catalog verify, and nothing else.
+# The operator holds the cluster credentials and starts pods on every
+# machine, so the image carries no shell, no libc, and no tools, which
+# is the least there is to attack. It verifies the API server with the
+# CA in its ServiceAccount's token volume, not with the bundle.
 
 FROM golang:1.27.2-bookworm AS build
 # proxy.golang.org sometimes drops a module download partway through
@@ -40,4 +39,8 @@ RUN CGO_ENABLED=0 sh /go.sh /notices .
 FROM scratch
 COPY --from=build /firmware-operator /firmware-operator
 COPY --from=build /notices /
+# A scratch image carries no trust store, and every HTTPS read of a
+# catalog fails without one. The bundle is the one that the trust
+# component pins for every image of liken, with its notice.
+COPY --from=trust / /
 ENTRYPOINT ["/firmware-operator"]

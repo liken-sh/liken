@@ -1,9 +1,13 @@
-# A Firmware is a rule that writes firmware into the USB devices it
-# matches, on any machine of the cluster, each time one appears. It is
-# cluster-scoped because it describes a device model, the way a
-# DeviceClass does, and a device can move from one machine to another.
-# firmware-operator writes the status: one entry for each port where
-# the rule matched a device.
+# A Firmware is a rule for one device model. With upload, it writes
+# firmware into the USB devices it matches, on any machine of the
+# cluster, each time one appears. With update, it covers the devices
+# that keep their firmware and that fwupd names by a set of GUIDs, and
+# firmware-operator creates one such object for each model a scan
+# finds. It is cluster-scoped because it describes a device model, the
+# way a DeviceClass does, and a device can move from one machine to
+# another. firmware-operator writes the status: one entry for each port
+# where an upload rule matched a device, and one for each machine's
+# device of an update rule's model.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -42,6 +46,12 @@ spec:
         - name: Conflict
           type: integer
           jsonPath: .status.counts.conflict
+        - name: Machines
+          type: integer
+          jsonPath: .status.counts.machines
+        - name: Behind
+          type: integer
+          jsonPath: .status.counts.behind
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -52,13 +62,24 @@ spec:
           properties:
             spec:
               type: object
-              required: [selector, upload]
+              # A rule loads a device that holds no firmware, or covers a
+              # device that keeps its own, never both: an upload matches a
+              # bare chip, and an update matches a device that already
+              # runs firmware. selector and machines choose the devices of
+              # an upload. An update chooses its devices by their GUIDs.
+              x-kubernetes-validations:
+                - rule: has(self.upload) != has(self.update)
+                  message: a Firmware has exactly one of upload and update
+                - rule: "!has(self.upload) || has(self.selector)"
+                  message: an upload needs a selector
+                - rule: "!has(self.update) || (!has(self.selector) && !has(self.machines))"
+                  message: selector and machines belong to upload; an update selects its devices by update.guids
               properties:
                 selector:
                   type: string
                   minLength: 1
                   description: >-
-                    A CEL expression that selects the devices this rule
+                    A CEL expression that selects the devices an upload
                     loads, with the same variables as a `DeviceClass`
                     selector, for example
                     `device.attributes["liken.sh"].vendor == "1618" &&
@@ -68,13 +89,14 @@ spec:
                     allocation, so it means here what it means in a
                     `DeviceClass`. A selector that does not compile sets
                     `Valid` to `False`, and the rule runs nowhere.
+                    Required with `upload`, and refused with `update`.
                 machines:
                   type: object
                   description: >-
-                    A label selector on `Machine` objects. The rule runs
+                    A label selector on `Machine` objects. An upload runs
                     only on the machines whose labels it selects.
-                    Optional. With no value, the rule runs on every
-                    machine.
+                    Optional. With no value, the upload runs on every
+                    machine. Refused with `update`.
                   properties:
                     matchLabels:
                       type: object
@@ -138,6 +160,32 @@ spec:
                       items:
                         type: string
                       description: "Arguments after the command. Kubernetes expands `$(LIKEN_DEVICE)` in them too. Optional."
+                update:
+                  type: object
+                  required: [guids]
+                  description: >-
+                    Marks the rule for the firmware of a device model that
+                    keeps its own firmware, such as a board's UEFI
+                    firmware or an SSD. `firmware-operator` creates one
+                    such `Firmware` for each model a scan reports as
+                    updatable, with the label
+                    `firmware.liken.sh/discovered`, and records in
+                    `status.machines` the version each machine runs and
+                    the releases each `Catalog` offers. It installs
+                    nothing.
+                  properties:
+                    guids:
+                      type: array
+                      minItems: 1
+                      items:
+                        type: string
+                        minLength: 1
+                      description: >-
+                        The GUIDs that fwupd reports for the device
+                        model, sorted. A device whose set of GUIDs is
+                        exactly this set belongs to the rule. The name
+                        of a discovered `Firmware` ends in a hash of
+                        this set.
             status:
               type: object
               properties:
@@ -233,9 +281,76 @@ spec:
                         type: string
                         format: date-time
                         description: "When the entry got its result."
+                machines:
+                  type: array
+                  description: >-
+                    One entry for each machine's device of an update
+                    rule's model, from that machine's last scan against
+                    each `Catalog`. A scan replaces its machine's entries.
+                    An entry leaves only when the machine's next scan does
+                    not report the device, or when its `Machine` is
+                    deleted, so a machine that is off keeps its entries.
+                  items:
+                    type: object
+                    required: [machine, device, catalog, file, time]
+                    properties:
+                      machine:
+                        type: string
+                        description: "The `Machine`, which has the name of its node."
+                      device:
+                        type: string
+                        description: "The device's name, as fwupd reports it, such as `System Firmware`."
+                      version:
+                        type: string
+                        description: "The version of the firmware the device runs, as fwupd reports it."
+                      catalog:
+                        type: string
+                        description: "The `Catalog` the scan matched the device against."
+                      file:
+                        type: string
+                        description: "The catalog file the scan read, such as `firmware-09138-stable.xml.zst`."
+                      releases:
+                        type: array
+                        description: >-
+                          Each release the catalog offers for the device,
+                          newest first, as fwupd offered it. Empty when the
+                          device runs the newest release the catalog has
+                          for it.
+                        items:
+                          type: object
+                          required: [version]
+                          properties:
+                            version:
+                              type: string
+                              description: "The release's version."
+                            id:
+                              type: string
+                              description: "The AppStream ID of the catalog's component that offers the release."
+                            urgency:
+                              type: string
+                              description: "How urgent the vendor says the release is, such as `high`."
+                            cabinet:
+                              type: object
+                              required: [url, sha256]
+                              description: "The cabinet file that carries the release."
+                              properties:
+                                url:
+                                  type: string
+                                  description: "Where the cabinet downloads from."
+                                sha256:
+                                  type: string
+                                  description: "The cabinet's SHA-256, in hex."
+                                size:
+                                  type: integer
+                                  format: int64
+                                  description: "The cabinet's size, in bytes."
+                      time:
+                        type: string
+                        format: date-time
+                        description: "When the scan that reported the entry ended."
                 counts:
                   type: object
-                  description: "The number of entries in `devices` with each result."
+                  description: "The number of entries in `devices` with each result, and the machines that `machines` names."
                   properties:
                     running:
                       type: integer
@@ -249,3 +364,9 @@ spec:
                     conflict:
                       type: integer
                       description: "Entries that are `Conflict`."
+                    machines:
+                      type: integer
+                      description: "The machines that `machines` names."
+                    behind:
+                      type: integer
+                      description: "The machines with at least one release offered in `machines`."

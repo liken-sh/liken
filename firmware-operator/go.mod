@@ -5,6 +5,9 @@ go 1.27.2
 replace github.com/liken-sh/liken/kubernetes => ../kubernetes
 
 require (
+	// The zstd decoder of an LVFS catalog file. The standard library's
+	// decoder is internal, and no package outside it may import it.
+	github.com/klauspost/compress v1.19.2
 	// The client, the watch, and the cache that the operators share. The
 	// module is in this repository, and the replace above builds against
 	// the copy in the tree, so no version of it is published.
@@ -12,6 +15,9 @@ require (
 	k8s.io/api v0.36.3
 	k8s.io/apiextensions-apiserver v0.36.3
 	k8s.io/apimachinery v0.36.3
+	// The limits of the CEL validator of a CRD's rules, which the CRD
+	// tests run the way the API server does. Only the tests link it.
+	k8s.io/apiserver v0.36.3
 	k8s.io/client-go v0.36.3
 	// The CEL environment of a DeviceClass selector. Its compiler takes
 	// the device's attributes as k8s.io/api's resource types, so the
@@ -106,7 +112,6 @@ require (
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/apiserver v0.36.3 // indirect
 	k8s.io/component-base v0.36.3 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260317180543-43fb72c5454a // indirect

@@ -186,6 +186,20 @@ func TestGetAnswersTheObjectOrNothing(t *testing.T) {
 	}
 }
 
+// An answer that is not JSON, such as a pod's log, reaches a caller
+// that asks for the bytes as they are.
+func TestABodyThatIsNotJSONReachesARawCaller(t *testing.T) {
+	log := "fwupdtool: loading\n{\"result\":\"Scanned\"}\n"
+	client, _ := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(log))
+	}))
+
+	var body []byte
+	if err := client.RequestJSON(http.MethodGet, "/api/v1/namespaces/a/pods/b/log", nil, &body); err != nil || string(body) != log {
+		t.Errorf("the body is %q, %v; want %q", body, err, log)
+	}
+}
+
 // statusObject is an object with a status that the API server stores
 // only in part.
 type statusObject struct {

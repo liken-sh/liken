@@ -3,7 +3,8 @@ package main
 // One pass answers every Firmware: it follows the rule's upload pods
 // to their results, starts an upload for each new appearance of a
 // device that the rule alone matches, reports each conflict, and
-// writes the status. The watches wake a pass (watch.go). A pass reads
+// writes the status. Then it answers every Catalog (scans.go). The
+// watches wake a pass (watch.go). A pass reads
 // each Firmware from the watch's store, and from the API server when
 // the store's copy is older than the operator's own last write, so a
 // pass never starts an upload again because its own status write has
@@ -30,27 +31,36 @@ type operator struct {
 	namespace string
 
 	firmwares informer.Held
+	catalogs  informer.Held
 	slices    informer.View
 	pods      informer.View
+	scanPods  informer.View
 	machines  informer.View
 
 	selectors *selectors
+
+	// discovery holds the flags of discovery, and catalogCaches what the
+	// operator keeps in memory of each Catalog (catalogfetch.go).
+	discovery     discoverySettings
+	catalogCaches map[string]*catalogCache
 
 	// recorder posts the Events (events.go). Nil posts none.
 	recorder *events.Recorder
 }
 
-func newOperator(client *apiclient.Client, namespace string, recorder *events.Recorder) *operator {
-	return &operator{client: client, namespace: namespace, selectors: newSelectors(), recorder: recorder}
+func newOperator(client *apiclient.Client, namespace string, recorder *events.Recorder, discovery discoverySettings) *operator {
+	return &operator{client: client, namespace: namespace, selectors: newSelectors(), recorder: recorder,
+		discovery: discovery, catalogCaches: map[string]*catalogCache{}}
 }
 
-// pass answers every Firmware, and answers the earliest time at which
-// an upload in progress is due, or the zero time when none is. A pass
-// before the watches of the slices, the pods, and the Machines hold
-// their first read does nothing, because a pass that sees no pod for a
-// device starts one. The first read of each watch wakes another pass.
+// pass answers every Firmware and every Catalog, and answers the
+// earliest time at which an upload or a scan in progress is due, or a
+// jcat read, or the zero time when none is. A pass before the watches
+// of the slices, the pods, and the Machines hold their first read does
+// nothing, because a pass that sees no pod for a device or a machine
+// starts one. The first read of each watch wakes another pass.
 func (o *operator) pass(ctx context.Context) (time.Time, error) {
-	if !o.slices.Ready() || !o.pods.Ready() || !o.machines.Ready() {
+	if !o.slices.Ready() || !o.pods.Ready() || !o.scanPods.Ready() || !o.machines.Ready() {
 		return time.Time{}, nil
 	}
 	rules, err := informer.List[firmware](o.client, o.firmwares, firmwaresPath, firmwarePath)
@@ -68,7 +78,7 @@ func (o *operator) pass(ctx context.Context) (time.Time, error) {
 			break
 		}
 		f := &rules[index]
-		if f.Metadata.DeletionTimestamp != "" {
+		if f.Metadata.DeletionTimestamp != "" || f.Spec.Upload == nil {
 			continue
 		}
 		due, err := o.answer(f, m, w, time.Now())
@@ -77,7 +87,11 @@ func (o *operator) pass(ctx context.Context) (time.Time, error) {
 		}
 		next = earliest(next, due)
 	}
-	return next, errors.Join(problems...)
+	if ctx.Err() != nil {
+		return next, errors.Join(problems...)
+	}
+	due, err := o.discover(ctx, &rules, w, time.Now())
+	return earliest(next, due), errors.Join(append(problems, err)...)
 }
 
 // answer brings one rule's status up to date, and answers when its

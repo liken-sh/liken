@@ -8,7 +8,9 @@ package main
 // gave it on its bus in busNumber and deviceNumber.
 
 import (
+	"crypto/sha256"
 	"fmt"
+	"strings"
 
 	resourceapi "k8s.io/api/resource/v1"
 )
@@ -97,4 +99,12 @@ func devicesOf(slice resourceSlice) []device {
 		})
 	}
 	return out
+}
+
+// deviceSetHash answers a hash of a machine's device names. A new
+// device changes a name in the set and starts a scan. A device number
+// that changes on a replug is an attribute, not a name, so it does not.
+func deviceSetHash(names []string) string {
+	sum := sha256.Sum256([]byte(strings.Join(sortedSet(names), "\x00")))
+	return shortHex(sum[:])
 }

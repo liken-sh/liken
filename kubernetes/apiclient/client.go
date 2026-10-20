@@ -270,6 +270,9 @@ func (c *Client) RequestJSON(method, path string, body []byte, out any) error {
 // status that is not 2xx answers an error that holds the server's own
 // message. A 429 is sent again after the wait the API server asks for,
 // as maxThrottleWait describes.
+//
+// An out of type *[]byte takes the answer's body as it is, up to
+// maxDrain bytes, for an answer that is not JSON, such as a pod's log.
 func (c *Client) Request(method, path, contentType string, body []byte, out any) error {
 	status, err := c.request(method, path, contentType, body, out)
 	if c.observer != nil {
@@ -366,6 +369,10 @@ func (c *Client) send(method, path, contentType string, body []byte, out any) (i
 		return status, err
 	case out == nil:
 		return status, nil
+	}
+	if text, raw := out.(*[]byte); raw {
+		*text, err = io.ReadAll(io.LimitReader(resp.Body, maxDrain))
+		return status, err
 	}
 	return status, json.NewDecoder(resp.Body).Decode(out)
 }

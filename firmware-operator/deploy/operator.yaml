@@ -1,8 +1,12 @@
 # The operator: one unprivileged Deployment for the cluster. It reads
 # every Firmware and every machine's ResourceSlice, starts an upload pod
 # on a device's machine for each new appearance of a matched device,
-# and writes each Firmware's status. It keeps no state outside the
-# status and the upload pods, so a new pod reads both and carries on.
+# and writes each Firmware's status. It reads each Catalog's jcat over
+# HTTPS, starts a scan pod on each Ready machine that needs a scan, and
+# writes each Catalog's status and the discovered Firmware objects. It
+# keeps no state outside the status and the pods, so a new pod reads
+# both and carries on. Its memory holds the index of each catalog file,
+# which it reads again after a restart.
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -49,6 +53,12 @@ spec:
       containers:
         - name: operator
           image: ghcr.io/liken-sh/firmware-operator:latest
+          # With no --scan-image, the operator reads this container's
+          # image from its own pod and runs the scan pods on the image
+          # firmware-operator-scan at the same tag, so the pin of this
+          # image in the kustomization pins both. --catalog-interval is
+          # the time between two reads of a Catalog's jcat, an hour by
+          # default.
           env:
             # The operator starts the upload pods in its own namespace.
             # The two values also name the Lease the operator holds and
@@ -70,15 +80,18 @@ spec:
             privileged: false
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
-          # The operator holds the watches of the Firmware objects, the
-          # slices, the Machines, and the upload pods, and evaluates each
-          # selector in its own memory. Its memory on a cluster is not
-          # measured yet, so the limit only bounds a leak, with room
-          # above the 20 to 30 MB that the other operators on client-go
-          # measured.
+          # The operator holds the watches of the Firmware and Catalog
+          # objects, the slices, the Machines, and the pods, evaluates
+          # each selector in its own memory, and reads each catalog file
+          # into an index of its GUIDs and releases. LVFS's file
+          # decompresses to tens of megabytes, which the operator reads
+          # as a stream, so the index is the part it keeps. Its memory
+          # on a cluster is not measured yet, so the limit only bounds a
+          # leak, with room above the 20 to 30 MB that the other
+          # operators on client-go measured and for the index.
           resources:
             requests:
               cpu: 10m
               memory: 32Mi
             limits:
-              memory: 128Mi
+              memory: 256Mi

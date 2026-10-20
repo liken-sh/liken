@@ -1,17 +1,19 @@
-# The Firmware kind: rules that write firmware into the USB devices of
-# a liken cluster that hold none of their own, and the operator that
-# runs one short pod on a device's machine for each new appearance of
-# the device.
+# The Firmware and Catalog kinds, and the operator that runs one short
+# pod on a machine for each piece of work: an upload that writes
+# firmware into a USB device that holds none of its own, each time the
+# device appears, and a scan that reads which firmware each device
+# keeps and which newer releases a catalog offers for it.
 #
-# The image needs no trust: the operator makes no TLS call except to
-# the API server, which it verifies with the CA in its ServiceAccount's
-# token volume, and the scratch image carries no CA bundle.
+# Both images take the trust component's CA bundle. The operator reads
+# each Catalog's jcat and catalog file over HTTPS, and the scan image
+# reads the catalog too. The operator verifies the API server with the
+# CA in its ServiceAccount's token volume, not with the bundle.
 [package]
 name = "firmware-operator"
 license = "MIT"
 
 [depends]
-components = ["kubernetes", "notices"]
+components = ["kubernetes", "notices", "trust"]
 
 [docs]
 prefix = "firmware"
@@ -52,4 +54,13 @@ deploy = "deploy"
 [[outputs.images]]
 name = "firmware-operator"
 file = "Dockerfile"
+contexts = { kubernetes = "kubernetes", notices = "notices" }
+
+# The scan image holds fwupd from a dated Ubuntu snapshot and the scan
+# program that the operator runs in a privileged pod on each machine.
+# The snapshot is read over HTTPS, so the build takes the trust
+# component's CA bundle.
+[[outputs.images]]
+name = "firmware-operator-scan"
+file = "scan/Dockerfile"
 contexts = { kubernetes = "kubernetes", notices = "notices" }

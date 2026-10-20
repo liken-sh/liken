@@ -2,9 +2,12 @@ package main
 
 // These tests read the manifests in deploy/ for the facts the code
 // depends on: the environment the operator reads, the class an upload's
-// claim names, and the policy that keeps an upload pod off the network.
+// claim names, the policy that keeps an upload pod off the network, the
+// policy that lets a scan pod reach only DNS and HTTPS, and the lvfs
+// Catalog.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -109,6 +112,37 @@ func TestTheUploadPodsHaveNoNetwork(t *testing.T) {
 	}
 	if dig(policy, "spec", "ingress") != nil || dig(policy, "spec", "egress") != nil {
 		t.Errorf("the policy allows %v and %v, want nothing", dig(policy, "spec", "ingress"), dig(policy, "spec", "egress"))
+	}
+}
+
+// The scan pods' policy selects every scan pod, allows nothing in, and
+// allows out only DNS and HTTPS.
+func TestTheScanPodsReachOnlyDNSAndHTTPS(t *testing.T) {
+	policy := find(t, "scan.yaml", "NetworkPolicy")
+	if got := dig(policy, "spec", "podSelector", "matchLabels", scanLabel); got != scanLabelValue {
+		t.Errorf("the policy selects %v, want the label %s=%s", dig(policy, "spec", "podSelector"), scanLabel, scanLabelValue)
+	}
+	if types := dig(policy, "spec", "policyTypes"); !slices.Equal(types.([]any), []any{"Ingress", "Egress"}) {
+		t.Errorf("the policy's types are %v, want Ingress and Egress", types)
+	}
+	if dig(policy, "spec", "ingress") != nil || dig(policy, "spec", "egress", 0, "to") != nil || dig(policy, "spec", "egress", 1) != nil {
+		t.Errorf("the policy allows %v in and %v out, want nothing in and one rule out on ports alone",
+			dig(policy, "spec", "ingress"), dig(policy, "spec", "egress"))
+	}
+	var ports []string
+	for _, port := range dig(policy, "spec", "egress", 0, "ports").([]any) {
+		ports = append(ports, fmt.Sprint(dig(port, "protocol"), "/", dig(port, "port")))
+	}
+	if want := []string{"UDP/53", "TCP/53", "TCP/443"}; !slices.Equal(ports, want) {
+		t.Errorf("the policy allows out %v, want %v", ports, want)
+	}
+}
+
+// The lvfs Catalog names LVFS's catalog.
+func TestTheLVFSCatalog(t *testing.T) {
+	lvfs := find(t, "lvfs.yaml", catalogKind)
+	if dig(lvfs, "metadata", "name") != "lvfs" || dig(lvfs, "spec", "url") != lvfsURL {
+		t.Errorf("the Catalog is %v, want lvfs at %s", lvfs, lvfsURL)
 	}
 }
 

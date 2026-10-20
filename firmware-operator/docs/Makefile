@@ -1,9 +1,9 @@
 # The docs domain builds firmware-operator's manual at
-# liken.sh/firmware. The reference page is generated, never edited:
-# crdref, the generator the brand component publishes, renders it from
-# deploy/firmware-crd.yaml, so a schema edit is a manual edit.
-# GENERATED lists that page, and the rule names the generator's sources
-# as inputs, so a change to the generator regenerates it.
+# liken.sh/firmware. The reference pages are generated, never edited:
+# crdref, the generator the brand component publishes, renders each one
+# from its CRD in deploy/, so a schema edit is a manual edit. GENERATED
+# lists the pages, and each rule names the generator's sources as
+# inputs, so a change to the generator regenerates them.
 HUGO := go tool hugo
 CRDREF := go tool crdref
 
@@ -17,7 +17,7 @@ CRDREF_SOURCES := go.mod $(BRAND)/go.mod \
 
 REFERENCE := content/docs/reference
 
-GENERATED := $(REFERENCE)/firmware.md
+GENERATED := $(REFERENCE)/firmware.md $(REFERENCE)/catalog.md
 
 SKILLS := go tool skills
 BASE := https://liken.sh/firmware/
@@ -41,6 +41,9 @@ test: $(GENERATED)
 
 $(REFERENCE)/firmware.md: ../deploy/firmware-crd.yaml $(CRDREF_SOURCES)
 	$(CRDREF) -title Firmware -weight 10 $< $@
+
+$(REFERENCE)/catalog.md: ../deploy/catalog-crd.yaml $(CRDREF_SOURCES)
+	$(CRDREF) -title Catalog -weight 20 $< $@
 
 # The skills target emits every guide as an Agent Skill into ../skills,
 # one SKILL.md per guide, with the generator the brand component

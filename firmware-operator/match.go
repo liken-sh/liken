@@ -21,22 +21,41 @@ type observed struct {
 	machines map[string]map[string]string
 	// uploads holds the upload pods by the rule that each one runs.
 	uploads map[string][]pod
+
+	// fleet holds every Machine by its name.
+	fleet map[string]machine
+	// deviceSets holds the hash of the device names in each machine's
+	// slices (deviceSetHash).
+	deviceSets map[string]string
+	// scans holds the scan pods by the Catalog that each one reads.
+	scans map[string][]pod
 }
 
 func (o *operator) observe() observed {
-	w := observed{present: map[appearance]bool{}, machines: map[string]map[string]string{}, uploads: map[string][]pod{}}
+	w := observed{present: map[appearance]bool{}, machines: map[string]map[string]string{}, uploads: map[string][]pod{},
+		fleet: map[string]machine{}, deviceSets: map[string]string{}, scans: map[string][]pod{}}
+	names := map[string][]string{}
 	for _, slice := range informer.CachedList[resourceSlice](o.slices) {
 		for _, d := range devicesOf(slice) {
 			w.devices = append(w.devices, d)
 			w.present[d.appearance] = true
 		}
+		for _, d := range slice.Spec.Devices {
+			names[slice.Spec.NodeName] = append(names[slice.Spec.NodeName], d.Name)
+		}
 	}
 	for _, m := range informer.CachedList[machine](o.machines) {
 		w.machines[m.Metadata.Name] = m.Metadata.Labels
+		w.fleet[m.Metadata.Name] = m
+		w.deviceSets[m.Metadata.Name] = deviceSetHash(names[m.Metadata.Name])
 	}
 	for _, upload := range informer.CachedList[pod](o.pods) {
 		rule, _, _ := uploadOf(upload)
 		w.uploads[rule] = append(w.uploads[rule], upload)
+	}
+	for _, scan := range informer.CachedList[pod](o.scanPods) {
+		a := scanOf(scan)
+		w.scans[a.catalog] = append(w.scans[a.catalog], scan)
 	}
 	return w
 }
@@ -58,7 +77,9 @@ func (o *operator) match(ctx context.Context, rules []firmware, w observed) matc
 	inUse := map[string]bool{}
 	for index := range rules {
 		f := &rules[index]
-		if f.Metadata.DeletionTimestamp != "" {
+		// An update rule has no selector, and discovery answers it
+		// (discovered.go).
+		if f.Metadata.DeletionTimestamp != "" || f.Spec.Upload == nil {
 			continue
 		}
 		inUse[f.Spec.Selector] = true

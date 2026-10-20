@@ -28,6 +28,13 @@ machine with a claim on that one device, and writes the result into
 the rule's status. The firmware bytes stay in the vendor's image and
 never enter the OS image.
 
+The operator also finds updates for the firmware that devices keep. A
+`Catalog`, such as the `lvfs` object that `deploy/` ships, names a
+source of firmware releases. The operator runs a short privileged scan
+pod on each machine, which only reads, and records each updatable
+device, the version it runs, and the releases the catalog offers in a
+`Firmware` with `spec.update`. It installs none of them.
+
 The manual is at [liken.sh/firmware](https://liken.sh/firmware/).
 The `plans/` directory holds the design, and `make test` runs every
 check CI runs.
