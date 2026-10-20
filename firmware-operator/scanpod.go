@@ -1,7 +1,7 @@
 package main
 
 // A scan is one bare pod on a machine that runs fwupd against one
-// Catalog. It reads the machine's firmware devices and the releases the
+// FirmwareCatalog. It reads the machine's firmware devices and the releases the
 // catalog offers for them, and writes the answer to its log. The pod is
 // privileged, because fwupd reads SMBIOS tables, efivarfs, sysfs, and
 // device nodes, and it holds no claim, because fwupd reads many
@@ -50,7 +50,7 @@ const (
 // starts.
 const scanDeadline = 10 * time.Minute
 
-// scanAttempt is one scan of one machine against one Catalog: the boot,
+// scanAttempt is one scan of one machine against one FirmwareCatalog: the boot,
 // the device set, and the catalog file it ran with. Each attempt runs
 // once.
 type scanAttempt struct {
@@ -113,7 +113,7 @@ func buildScanPod(c *catalog, a scanAttempt, sum, image, namespace string) pod {
 				devicesKey: a.devices,
 				fileKey:    a.file,
 			},
-			// A deleted Catalog deletes its scan pods. A cluster-scoped
+			// A deleted FirmwareCatalog deletes its scan pods. A cluster-scoped
 			// owner may own a namespaced object.
 			OwnerReferences: []ownerReference{{
 				APIVersion: firmwareAPIVersion, Kind: catalogKind, Name: c.Metadata.Name, UID: c.Metadata.UID,

@@ -1,6 +1,6 @@
 package main
 
-// The operator reads a Catalog's jcat when the Catalog changes, once
+// The operator reads a FirmwareCatalog's jcat when the FirmwareCatalog changes, once
 // after the operator starts, when a scan answers CatalogMoved, and once
 // an interval after the last read. LVFS publishes no feed of its
 // changes to subscribe to, so the interval is the only way to see a new
@@ -39,7 +39,7 @@ type discoverySettings struct {
 	http *http.Client
 }
 
-// catalogCache is what the operator keeps of each Catalog in memory:
+// catalogCache is what the operator keeps of each FirmwareCatalog in memory:
 // whether it has read the jcat since it started, and the index of the
 // file. Both are caches. Losing them costs one read of the jcat and one
 // download of the file.
@@ -48,7 +48,7 @@ type catalogCache struct {
 	index *catalogIndex
 }
 
-// fetched is what one read of a jcat gives a Catalog's status.
+// fetched is what one read of a jcat gives a FirmwareCatalog's status.
 type fetched struct {
 	file, sha256, etag, checked string
 	ready                       condition
@@ -61,7 +61,7 @@ var errChecksum = errors.New("the SHA-256 differs")
 // catalog is a few megabytes.
 const maxFileSize = 64 << 20
 
-// refreshDue reports whether a Catalog's jcat needs a read, and when
+// refreshDue reports whether a FirmwareCatalog's jcat needs a read, and when
 // the next timed read is due.
 func (o *operator) refreshDue(c *catalog, moved bool, now time.Time) (bool, time.Time) {
 	next := parseTime(c.Status.Checked).Add(o.discovery.interval)
@@ -70,7 +70,7 @@ func (o *operator) refreshDue(c *catalog, moved bool, now time.Time) (bool, time
 	return due, next
 }
 
-// refresh reads a Catalog's jcat, and the file it names when that file
+// refresh reads a FirmwareCatalog's jcat, and the file it names when that file
 // is new. It answers what the status takes. A failure keeps the last
 // good file and its ETag, so the next read gets the whole jcat again.
 func (o *operator) refresh(ctx context.Context, c *catalog, now time.Time) fetched {
@@ -110,7 +110,7 @@ func (o *operator) refresh(ctx context.Context, c *catalog, now time.Time) fetch
 	return out
 }
 
-// indexOf answers the index of a file that a Catalog's status names,
+// indexOf answers the index of a file that a FirmwareCatalog's status names,
 // and downloads it when the cache does not hold it.
 func (o *operator) indexOf(ctx context.Context, c *catalog, file, sum string) (catalogIndex, error) {
 	cached := o.cache(c.Metadata.Name)
@@ -134,8 +134,8 @@ func (o *operator) cache(name string) *catalogCache {
 	return cached
 }
 
-// forgetCaches drops the caches of the Catalogs that are gone, so the
-// memory grows only with the Catalogs.
+// forgetCaches drops the caches of the FirmwareCatalogs that are gone, so the
+// memory grows only with the FirmwareCatalogs.
 func (o *operator) forgetCaches(present map[string]bool) {
 	for name := range o.catalogCaches {
 		if !present[name] {

@@ -4,9 +4,9 @@ package main
 // change of its Valid condition, and for each upload it starts and each
 // result, which change no condition. It posts one about a discovered
 // Firmware when it creates it and when a machine's newest offered
-// release changes, and one about a Catalog for each change of its Ready
+// release changes, and one about a FirmwareCatalog for each change of its Ready
 // condition and for each scan it starts and each result. A Firmware and
-// a Catalog are cluster-scoped, so their Events are in the namespace
+// a FirmwareCatalog are cluster-scoped, so their Events are in the namespace
 // default. A device that did not load
 // sets no condition on its Machine, because the Machine's status
 // belongs to the OS.
@@ -44,7 +44,7 @@ func (o *operator) post(f *firmware, validity condition, notices []notice, trans
 	o.postAbout(f.reference(), validity, notices, transitioned)
 }
 
-// postCatalog posts the Events of a Catalog's status write after it
+// postCatalog posts the Events of a FirmwareCatalog's status write after it
 // landed.
 func (o *operator) postCatalog(c *catalog, readiness condition, notices []notice, transitioned bool) {
 	o.postAbout(c.reference(), readiness, notices, transitioned)

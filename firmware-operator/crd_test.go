@@ -30,7 +30,7 @@ import (
 // The definitions this module ships.
 const (
 	firmwareCRD = "deploy/firmware-crd.yaml"
-	catalogCRD  = "deploy/catalog-crd.yaml"
+	catalogCRD  = "deploy/firmwarecatalog-crd.yaml"
 )
 
 func loadCRD(t *testing.T, path string) *apiextensionsv1.CustomResourceDefinition {

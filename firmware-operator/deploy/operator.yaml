@@ -1,9 +1,9 @@
 # The operator: one unprivileged Deployment for the cluster. It reads
 # every Firmware and every machine's ResourceSlice, starts an upload pod
 # on a device's machine for each new appearance of a matched device,
-# and writes each Firmware's status. It reads each Catalog's jcat over
+# and writes each Firmware's status. It reads each FirmwareCatalog's jcat over
 # HTTPS, starts a scan pod on each Ready machine that needs a scan, and
-# writes each Catalog's status and the discovered Firmware objects. It
+# writes each FirmwareCatalog's status and the discovered Firmware objects. It
 # keeps no state outside the status and the pods, so a new pod reads
 # both and carries on. Its memory holds the index of each catalog file,
 # which it reads again after a restart.
@@ -57,7 +57,7 @@ spec:
           # image from its own pod and runs the scan pods on the image
           # firmware-operator-scan at the same tag, so the pin of this
           # image in the kustomization pins both. --catalog-interval is
-          # the time between two reads of a Catalog's jcat, an hour by
+          # the time between two reads of a FirmwareCatalog's jcat, an hour by
           # default.
           env:
             # The operator starts the upload pods in its own namespace.
@@ -80,7 +80,7 @@ spec:
             privileged: false
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
-          # The operator holds the watches of the Firmware and Catalog
+          # The operator holds the watches of the Firmware and FirmwareCatalog
           # objects, the slices, the Machines, and the pods, evaluates
           # each selector in its own memory, and reads each catalog file
           # into an index of its GUIDs and releases. LVFS's file

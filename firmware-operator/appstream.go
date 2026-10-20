@@ -34,7 +34,7 @@ import (
 // each GUID, the releases of the components that flash it, as
 // "<component id> <version>", sorted. The index is a cache. The
 // operator reads the file again after a restart when it needs the
-// index, and the Catalog's status holds the file's name and SHA-256.
+// index, and the FirmwareCatalog's status holds the file's name and SHA-256.
 type catalogIndex struct {
 	file     string
 	releases map[string][]string

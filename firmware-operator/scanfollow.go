@@ -1,7 +1,7 @@
 package main
 
 // The operator follows each scan pod to its result. When the pod ends,
-// the operator reads its log, writes the result into the Catalog's
+// the operator reads its log, writes the result into the FirmwareCatalog's
 // record of the machine, then writes the discovered Firmware objects,
 // and then deletes the pod. An operator that stops between two of
 // those steps reads the same pod again and writes the same result, so
@@ -92,7 +92,7 @@ func scanPodFailure(p pod) string {
 	return message
 }
 
-// endsOf follows a Catalog's scan pods, and answers the attempts that
+// endsOf follows a FirmwareCatalog's scan pods, and answers the attempts that
 // ended, the machines with a scan pod, and the earliest deadline of a
 // scan in progress. A Running record whose pod is gone ends Failed, and
 // the operator does not run that attempt again.

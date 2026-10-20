@@ -1,11 +1,11 @@
-# The Firmware and Catalog kinds, and the operator that runs one short
+# The Firmware and FirmwareCatalog kinds, and the operator that runs one short
 # pod on a machine for each piece of work: an upload that writes
 # firmware into a USB device that holds none of its own, each time the
 # device appears, and a scan that reads which firmware each device
 # keeps and which newer releases a catalog offers for it.
 #
 # Both images take the trust component's CA bundle. The operator reads
-# each Catalog's jcat and catalog file over HTTPS, and the scan image
+# each FirmwareCatalog's jcat and catalog file over HTTPS, and the scan image
 # reads the catalog too. The operator verifies the API server with the
 # CA in its ServiceAccount's token volume, not with the bundle.
 [package]

@@ -1,4 +1,4 @@
-# A Catalog is one source of firmware releases, such as the Linux
+# A FirmwareCatalog is one source of firmware releases, such as the Linux
 # Vendor Firmware Service (LVFS). firmware-operator reads the catalog's
 # jcat to learn its current file, and scans each Ready machine against
 # that file with fwupd in a short pod. It writes the status: the file,
@@ -8,14 +8,14 @@
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: catalogs.firmware.liken.sh
+  name: firmwarecatalogs.firmware.liken.sh
 spec:
   group: firmware.liken.sh
   names:
-    kind: Catalog
-    listKind: CatalogList
-    plural: catalogs
-    singular: catalog
+    kind: FirmwareCatalog
+    listKind: FirmwareCatalogList
+    plural: firmwarecatalogs
+    singular: firmwarecatalog
   scope: Cluster
   versions:
     - name: v1alpha1
@@ -86,7 +86,7 @@ spec:
                   description: >-
                     When `firmware-operator` last read the jcat. It reads
                     it again an hour later, because LVFS publishes no
-                    feed of its changes, and at once when the `Catalog`
+                    feed of its changes, and at once when the `FirmwareCatalog`
                     changes or a scan answers `CatalogMoved`.
                 conditions:
                   type: array

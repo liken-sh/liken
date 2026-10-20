@@ -1,12 +1,12 @@
 package main
 
-// One pass answers each Catalog in two steps. First it follows the
-// Catalog's scan pods to their results, and writes each result to the
+// One pass answers each FirmwareCatalog in two steps. First it follows the
+// FirmwareCatalog's scan pods to their results, and writes each result to the
 // machine's record and to the discovered Firmware objects. Then it
 // reads the jcat when a read is due, and starts a scan of each Ready
 // machine that needs one, and writes both to the status in one write.
 //
-// A machine needs a scan against a Catalog when one of these changed
+// A machine needs a scan against a FirmwareCatalog when one of these changed
 // since its record: the time it booted, the set of device names in its
 // slice, or the catalog file. A version changes only across a reboot or
 // a flash, and a device number that changes on a replug does not count.
@@ -31,12 +31,12 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// discover answers every Catalog, and answers the earliest time at
+// discover answers every FirmwareCatalog, and answers the earliest time at
 // which a scan's deadline or a jcat read is due.
 func (o *operator) discover(ctx context.Context, rules *[]firmware, w observed, now time.Time) (time.Time, error) {
 	catalogs, err := informer.List[catalog](o.client, o.catalogs, catalogsPath, catalogPath)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("listing the Catalog objects: %w", err)
+		return time.Time{}, fmt.Errorf("listing the FirmwareCatalog objects: %w", err)
 	}
 	var next time.Time
 	var problems []error
@@ -44,14 +44,14 @@ func (o *operator) discover(ctx context.Context, rules *[]firmware, w observed, 
 	for index := range catalogs {
 		c := &catalogs[index]
 		present[c.Metadata.Name] = true
-		// The stop ends the pass between two Catalogs, so a shutdown
-		// waits for the writes of one Catalog and no more.
+		// The stop ends the pass between two FirmwareCatalogs, so a shutdown
+		// waits for the writes of one FirmwareCatalog and no more.
 		if ctx.Err() != nil || c.Metadata.DeletionTimestamp != "" {
 			continue
 		}
 		due, err := o.answerCatalog(ctx, c, rules, w, now)
 		if err != nil {
-			problems = append(problems, fmt.Errorf("the Catalog %s: %w", c.Metadata.Name, err))
+			problems = append(problems, fmt.Errorf("the FirmwareCatalog %s: %w", c.Metadata.Name, err))
 		}
 		next = earliest(next, due)
 	}
@@ -62,7 +62,7 @@ func (o *operator) discover(ctx context.Context, rules *[]firmware, w observed, 
 	return next, errors.Join(problems...)
 }
 
-// answerCatalog brings one Catalog's status and its scans up to date.
+// answerCatalog brings one FirmwareCatalog's status and its scans up to date.
 func (o *operator) answerCatalog(ctx context.Context, c *catalog, rules *[]firmware, w observed, now time.Time) (time.Time, error) {
 	ends, busy, due, err := o.endsOf(c, w.scans[c.Metadata.Name], now)
 	problems := []error{err}
@@ -74,7 +74,7 @@ func (o *operator) answerCatalog(ctx context.Context, c *catalog, rules *[]firmw
 	return earliest(due, next), errors.Join(append(problems, err)...)
 }
 
-// recordEnds writes the end of each attempt to the Catalog's status and
+// recordEnds writes the end of each attempt to the FirmwareCatalog's status and
 // removes the record of each machine whose Machine is deleted. Then it
 // writes each answered scan to the discovered Firmware objects, and
 // deletes each finished pod whose result is written.
@@ -256,9 +256,9 @@ func (o *operator) startScan(c *catalog, a scanAttempt, sum string) error {
 	return err
 }
 
-// settleCatalog writes the status that compose gives a Catalog, and
+// settleCatalog writes the status that compose gives a FirmwareCatalog, and
 // writes nothing when the status already holds it. compose runs again
-// on the API server's copy after a 409. A Catalog deleted during the
+// on the API server's copy after a 409. A FirmwareCatalog deleted during the
 // pass needs no status.
 func (o *operator) settleCatalog(c *catalog, compose func(catalogStatus) catalogStatus) (bool, error) {
 	written, err := informer.SettleStatus[catalog](o.client, o.catalogs.Versions, catalogPath(c.Metadata.Name), c, func(held *catalog) bool {

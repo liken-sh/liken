@@ -1,6 +1,6 @@
 package main
 
-// A fake API server that holds the Firmware and Catalog objects, the
+// A fake API server that holds the Firmware and FirmwareCatalog objects, the
 // slices, the Machines, the upload and scan pods, and the upload pods'
 // claims, and serves the requests the operator sends: a list and a
 // watch of each collection, a status write, an object's create, read,

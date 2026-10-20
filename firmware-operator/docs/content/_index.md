@@ -36,7 +36,7 @@ uses it claims it the usual way.
 
 The operator also finds updates for the firmware that devices keep
 across a power cycle, such as a board's UEFI firmware or an SSD. A
-`Catalog` names a source of releases, and the base installs the one
+`FirmwareCatalog` names a source of releases, and the base installs the one
 for the Linux Vendor Firmware Service (LVFS). The operator runs a short
 read-only scan pod on each machine, and records each device, the
 version it runs, and the newer releases the catalog offers in a
@@ -56,7 +56,7 @@ Start here:
 * [Troubleshoot](/docs/guides/troubleshoot/) an upload or a scan that
   failed or never started.
 * [Reference](/docs/reference/firmware/): every field of a
-  `Firmware` and a [`Catalog`](/docs/reference/catalog/).
+  `Firmware` and a [`FirmwareCatalog`](/docs/reference/firmwarecatalog/).
 
 The operator ships apart from the OS: the OS publishes each machine's
 devices, and this operator reads them. Only the upload pods write to a

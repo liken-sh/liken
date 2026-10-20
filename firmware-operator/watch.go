@@ -1,14 +1,14 @@
 package main
 
 // Six watches wake the pass: one of every Firmware, one of every
-// Catalog, one of the ResourceSlices that machine-operator publishes,
+// FirmwareCatalog, one of the ResourceSlices that machine-operator publishes,
 // one each of the upload pods and the scan pods in the operator's
 // namespace, and one of every Machine. All six run on client-go's
 // reflector, through the shared informer package. A handler only wakes
 // the pass, and the pass reads what it needs. The timers are clocks:
 // the deadline of an upload or a scan in progress, and the wait after
 // a pass that failed. The one timer that is not a clock is the read of
-// each Catalog's jcat once an interval, because LVFS publishes no feed
+// each FirmwareCatalog's jcat once an interval, because LVFS publishes no feed
 // of its changes (catalogfetch.go).
 
 import (
@@ -27,7 +27,7 @@ import (
 
 var (
 	firmwaresResource = schema.GroupVersionResource{Group: "firmware.liken.sh", Version: "v1alpha1", Resource: "firmwares"}
-	catalogsResource  = schema.GroupVersionResource{Group: "firmware.liken.sh", Version: "v1alpha1", Resource: "catalogs"}
+	catalogsResource  = schema.GroupVersionResource{Group: "firmware.liken.sh", Version: "v1alpha1", Resource: "firmwarecatalogs"}
 	slicesResource    = schema.GroupVersionResource{Group: "resource.k8s.io", Version: "v1", Resource: "resourceslices"}
 	podsResource      = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
 	machinesResource  = schema.GroupVersionResource{Group: "liken.sh", Version: "v1alpha1", Resource: "machines"}
@@ -128,7 +128,7 @@ func sliceMark(item resourceSlice) string {
 	return string(mustJSON([]any{item.Metadata.UID, item.Spec.Devices}))
 }
 
-// catalogMark is the part of a Catalog whose change needs a pass, for
+// catalogMark is the part of a FirmwareCatalog whose change needs a pass, for
 // the reasons of firmwareMark.
 func catalogMark(item catalog) string {
 	return fmt.Sprint(item.Metadata.UID, item.Metadata.Generation, item.Metadata.DeletionTimestamp)

@@ -4,7 +4,7 @@ package main
 // depends on: the environment the operator reads, the class an upload's
 // claim names, the policy that keeps an upload pod off the network, the
 // policy that lets a scan pod reach only DNS and HTTPS, and the lvfs
-// Catalog.
+// FirmwareCatalog.
 
 import (
 	"fmt"
@@ -138,11 +138,11 @@ func TestTheScanPodsReachOnlyDNSAndHTTPS(t *testing.T) {
 	}
 }
 
-// The lvfs Catalog names LVFS's catalog.
+// The lvfs FirmwareCatalog names LVFS's catalog.
 func TestTheLVFSCatalog(t *testing.T) {
 	lvfs := find(t, "lvfs.yaml", catalogKind)
 	if dig(lvfs, "metadata", "name") != "lvfs" || dig(lvfs, "spec", "url") != lvfsURL {
-		t.Errorf("the Catalog is %v, want lvfs at %s", lvfs, lvfsURL)
+		t.Errorf("the FirmwareCatalog is %v, want lvfs at %s", lvfs, lvfsURL)
 	}
 }
 

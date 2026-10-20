@@ -21,7 +21,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-// lvfsURL is the catalog's unversioned URL, as the lvfs Catalog names
+// lvfsURL is the catalog's unversioned URL, as the lvfs FirmwareCatalog names
 // it.
 const lvfsURL = "https://cdn.fwupd.org/downloads/firmware.xml.zst"
 

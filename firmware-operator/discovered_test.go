@@ -88,7 +88,7 @@ func TestADeletedMachineLeavesNoEntry(t *testing.T) {
 		w.settle()
 
 		if got := w.api.catalog(t, "lvfs").Status.Machines; len(got) != 0 {
-			t.Errorf("the Catalog's records are %+v, want none", got)
+			t.Errorf("the FirmwareCatalog's records are %+v, want none", got)
 		}
 		if got := w.api.discoveredObjects(t); len(got) != 0 {
 			t.Errorf("the discovered objects are %+v, want none", got)

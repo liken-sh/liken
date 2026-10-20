@@ -1,17 +1,17 @@
-# The operator's identity. It reads every Firmware, every Catalog,
+# The operator's identity. It reads every Firmware, every FirmwareCatalog,
 # every slice that machine-operator publishes, and every Machine, and
-# writes the status of each Firmware and each Catalog. It creates and
+# writes the status of each Firmware and each FirmwareCatalog. It creates and
 # deletes the discovered Firmware objects. It creates, reads, and
 # deletes the upload pods and their claims and the scan pods in its own
 # namespace, reads each scan pod's log, and posts the Events about each
-# Firmware and each Catalog.
+# Firmware and each FirmwareCatalog.
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: firmware-operator
 ---
-# A ClusterRole for the cluster-scoped kinds: a Firmware, a Catalog, a
+# A ClusterRole for the cluster-scoped kinds: a Firmware, a FirmwareCatalog, a
 # ResourceSlice, and a Machine.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -19,11 +19,11 @@ metadata:
   name: firmware-operator
 rules:
   # The watches wake the pass, and the pass reads each Firmware and
-  # each Catalog from the watch's store. get reads one again after a
+  # each FirmwareCatalog from the watch's store. get reads one again after a
   # status write that met a conflict, and reads a discovered Firmware
   # whose create met one that exists.
   - apiGroups: [firmware.liken.sh]
-    resources: [firmwares, catalogs]
+    resources: [firmwares, firmwarecatalogs]
     verbs: [get, list, watch]
   # The operator creates one Firmware for each device model a scan
   # reports, and deletes it when no machine's entry is left and nobody
@@ -36,7 +36,7 @@ rules:
   # not create. It replaces the whole status with a PUT, which is the
   # update verb.
   - apiGroups: [firmware.liken.sh]
-    resources: [firmwares/status, catalogs/status]
+    resources: [firmwares/status, firmwarecatalogs/status]
     verbs: [update]
   # Each machine's devices. The watch selects the slices whose driver is
   # liken.sh with a field selector, which needs list and watch on every
@@ -101,7 +101,7 @@ subjects:
     name: firmware-operator
     namespace: liken-system
 ---
-# The Events about a Firmware and a Catalog: one for each change of a
+# The Events about a Firmware and a FirmwareCatalog: one for each change of a
 # condition, each upload or scan and its result, and each discovered
 # model and offered release. Both kinds are cluster-scoped, and the API
 # server takes an Event about a cluster-scoped object only in default

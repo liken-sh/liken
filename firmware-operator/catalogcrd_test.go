@@ -1,6 +1,6 @@
 package main
 
-// These tests run Catalogs and discovered Firmware objects through the
+// These tests run FirmwareCatalogs and discovered Firmware objects through the
 // CRDs' schemas, so a schema edit that refuses what a person or the
 // operator writes, or prunes a field the operator writes, fails here.
 
@@ -23,7 +23,7 @@ func TestCatalogCRDIdentity(t *testing.T) {
 		{"cluster-scoped", crd.Spec.Scope == "Cluster"},
 		{"the group", crd.Spec.Group == "firmware.liken.sh"},
 		{"the kind", crd.Spec.Names.Kind == catalogKind},
-		{"the plural", crd.Spec.Names.Plural == "catalogs"},
+		{"the plural", crd.Spec.Names.Plural == "firmwarecatalogs"},
 		{"the status subresource", crd.Spec.Versions[0].Subresources.Status != nil},
 		{"the printer columns", slices.Equal(columns, []string{"File", "Ready", "Checked", "Age"})},
 	}
@@ -57,7 +57,7 @@ func TestCatalogCRDValidatesExamples(t *testing.T) {
 	}
 }
 
-// The status the operator writes to a Catalog is one the schema takes
+// The status the operator writes to a FirmwareCatalog is one the schema takes
 // and keeps whole.
 func TestTheOperatorsCatalogStatusValidates(t *testing.T) {
 	when := time.Date(2026, 10, 20, 15, 12, 4, 0, time.UTC)

@@ -11,7 +11,7 @@ vendors publish newer versions on the Linux Vendor Firmware Service
 (LVFS). A `liken` machine runs no fwupd daemon, so nothing tells you
 which machine runs which version, or that an update exists.
 `firmware-operator` answers both questions with a scan of each machine
-against a `Catalog`, and records the answers in the cluster.
+against a `FirmwareCatalog`, and records the answers in the cluster.
 [Find firmware updates](/docs/guides/find-updates/) shows how to read
 the records.
 
@@ -35,7 +35,7 @@ error. So the scan changes only fwupd's remotes, and leaves the
 plugin list alone.
 
 The scan also disables the remotes that fwupd's package ships, and
-enables one remote for the `Catalog`. Every release then comes from a
+enables one remote for the `FirmwareCatalog`. Every release then comes from a
 catalog that you declared.
 
 ## The ESP is an empty directory

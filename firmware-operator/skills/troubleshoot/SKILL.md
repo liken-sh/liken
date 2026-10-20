@@ -1,6 +1,6 @@
 ---
 name: troubleshoot
-description: "Find why a Firmware's upload failed or never started: a Failed entry and its message, a Conflict between two rules, a selector that does not compile or matches nothing, an upload pod that stays Pending, and a claimed device that stays Pending because its firmware is not loaded. Find why discovery found nothing: a Catalog that is not Ready, a scan record that is Failed or CatalogMoved, a machine that is never scanned, and a discovered Firmware that keeps the entry of a machine that is off. Use when kubectl get firmware shows Failed or Conflict, when a bare chip gets no upload, when a pod that claims a camera does not start, when kubectl get catalog.firmware.liken.sh shows Ready False, or when a machine has no scan record."
+description: "Find why a Firmware's upload failed or never started: a Failed entry and its message, a Conflict between two rules, a selector that does not compile or matches nothing, an upload pod that stays Pending, and a claimed device that stays Pending because its firmware is not loaded. Find why discovery found nothing: a FirmwareCatalog that is not Ready, a scan record that is Failed or CatalogMoved, a machine that is never scanned, and a discovered Firmware that keeps the entry of a machine that is off. Use when kubectl get firmware shows Failed or Conflict, when a bare chip gets no upload, when a pod that claims a camera does not start, when kubectl get firmwarecatalog shows Ready False, or when a machine has no scan record."
 ---
 
 This skill is the guide at https://liken.sh/firmware/docs/guides/troubleshoot/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
@@ -118,23 +118,23 @@ all, nothing loads it, and the pod waits for good.
 
 ## Scans
 
-Start from the `Catalog`. `kubectl get catalog.firmware.liken.sh` shows whether the
-last read of the jcat succeeded, and `kubectl describe catalog.firmware.liken.sh <name>`
+Start from the `FirmwareCatalog`. `kubectl get firmwarecatalog` shows whether the
+last read of the jcat succeeded, and `kubectl describe firmwarecatalog <name>`
 shows its `Event`s of the last hour. The record of each machine is in
 `status.machines`:
 
 ```sh
-kubectl get catalog.firmware.liken.sh <name> -o jsonpath='{range .status.machines[*]}{.machine}{"\t"}{.result}{"\t"}{.message}{"\n"}{end}'
+kubectl get firmwarecatalog <name> -o jsonpath='{range .status.machines[*]}{.machine}{"\t"}{.result}{"\t"}{.message}{"\n"}{end}'
 ```
 
-### A Catalog is not Ready
+### A FirmwareCatalog is not Ready
 
 `Ready` is `False` when the operator could not read the jcat or the
 file it names. The condition's message gives the error. The status
 keeps the last good `file`, and no scan starts while `Ready` is `False`.
 
 ```sh
-kubectl get catalog.firmware.liken.sh <name> -o jsonpath='{.status.conditions[?(@.type=="Ready")]}'
+kubectl get firmwarecatalog <name> -o jsonpath='{.status.conditions[?(@.type=="Ready")]}'
 ```
 
 | Reason | Cause and fix |
@@ -144,8 +144,8 @@ kubectl get catalog.firmware.liken.sh <name> -o jsonpath='{.status.conditions[?(
 | `ChecksumMismatch` | The SHA-256 of the versioned file differs from the one in the jcat. A mirror that serves a stale jcat, or a stale file, causes this. Fix the mirror. |
 
 The operator reads the jcat again after an hour, when you edit the
-`Catalog`, and when the operator starts. To read it now, edit the
-`Catalog` or restart the operator.
+`FirmwareCatalog`, and when the operator starts. To read it now, edit the
+`FirmwareCatalog` or restart the operator.
 
 ### A scan record is Failed
 
@@ -180,7 +180,7 @@ The scan pod read a jcat that names another file than the one the
 operator gave it, because LVFS published a new catalog between the
 operator's read and the scan's. The record's message gives the new
 file name. The operator reads the jcat at once. When the jcat names the
-new file, the `Catalog`'s `status.file` changes, and the machine is
+new file, the `FirmwareCatalog`'s `status.file` changes, and the machine is
 scanned against the new file. This needs no action.
 
 When the record stays `CatalogMoved`, the jcat that the operator reads
@@ -194,8 +194,8 @@ A machine has no record in `status.machines`. Check these in order:
 - **The machine is not Ready.** The operator scans only a `Machine`
   whose `status.phase` is `Ready`. Check with
   `kubectl get machine <node>`.
-- **The Catalog is not Ready.** No scan starts against it. See
-  [A Catalog is not Ready](#a-catalog-is-not-ready).
+- **The FirmwareCatalog is not Ready.** No scan starts against it. See
+  [A FirmwareCatalog is not Ready](#a-firmwarecatalog-is-not-ready).
 - **The API server refuses the scan pod.** A privileged pod fails the
   admission of a `liken-system` that carries a Pod Security level below
   `privileged`. The operator's log gives the error:

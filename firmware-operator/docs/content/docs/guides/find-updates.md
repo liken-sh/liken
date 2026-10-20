@@ -1,7 +1,7 @@
 ---
 title: Find firmware updates
 weight: 25
-description: "Find which firmware each machine's devices keep and which newer releases the LVFS catalog offers, with the lvfs Catalog and the scan pods of firmware-operator. Read kubectl get catalog.firmware.liken.sh and its status.machines records, kubectl get firmware and the Machines and Behind columns, a discovered Firmware's status.machines entries with their cabinet URL and SHA-256, and the Events. Use when you want to know whether a board's UEFI firmware, an SSD, or a dock has an update, when a scan did not run, or to understand what a scan touches on a machine."
+description: "Find which firmware each machine's devices keep and which newer releases the LVFS catalog offers, with the lvfs FirmwareCatalog and the scan pods of firmware-operator. Read kubectl get firmwarecatalog and its status.machines records, kubectl get firmware and the Machines and Behind columns, a discovered Firmware's status.machines entries with their cabinet URL and SHA-256, and the Events. Use when you want to know whether a board's UEFI firmware, an SSD, or a dock has an update, when a scan did not run, or to understand what a scan touches on a machine."
 ---
 
 # Find firmware updates
@@ -13,13 +13,13 @@ it. `firmware-operator` finds these updates and installs none of
 them.
 
 You need `firmware-operator` running (see the
-[install guide](../install/)), the `lvfs` `Catalog` that the base
+[install guide](../install/)), the `lvfs` `FirmwareCatalog` that the base
 installs, and machines that can open HTTPS connections to
 `cdn.fwupd.org`. Only a machine whose `Machine` is `Ready` is scanned.
 
 ## How scans happen
 
-A `Catalog` is one source of firmware releases. The `lvfs` object
+A `FirmwareCatalog` is one source of firmware releases. The `lvfs` object
 names the LVFS catalog. The operator reads the catalog's jcat, a
 small file that names the current catalog file and its SHA-256. When
 the jcat names a new file, the operator downloads that file once and
@@ -48,19 +48,15 @@ answer.
 Each combination of boot, device set, and catalog file runs once. A
 failed scan does not run again until one of the three changes. No
 command forces a scan. To scan a machine again, reboot it. To scan
-every machine again, delete the `Catalog` and apply it again: the new
+every machine again, delete the `FirmwareCatalog` and apply it again: the new
 object has no records, so each `Ready` machine is scanned. The
 discovered `Firmware` objects stay, and the new scans replace their
 entries.
 
-## Read the Catalog
-
-Name the kind with its group, `catalog.firmware.liken.sh`, because
-library-operator also defines a kind named `Catalog`, and
-`kubectl get catalog` can answer with that one.
+## Read the FirmwareCatalog
 
 ```sh
-kubectl get catalog.firmware.liken.sh
+kubectl get firmwarecatalog
 ```
 
 ```
@@ -70,13 +66,13 @@ lvfs   firmware-09138-stable.xml.zst   True    2026-10-20T15:10:00Z   2d
 
 `FILE` is the catalog file that the last good read of the jcat
 named. `READY` is `False` when the jcat or the file could not be read,
-and the [troubleshoot guide](../troubleshoot/#a-catalog-is-not-ready)
+and the [troubleshoot guide](../troubleshoot/#a-firmwarecatalog-is-not-ready)
 lists the reasons. `CHECKED` is the time of the last read of the jcat.
 
 The record of each machine's last scan is in `status.machines`:
 
 ```sh
-kubectl get catalog.firmware.liken.sh lvfs -o jsonpath='{range .status.machines[*]}{.machine}{"\t"}{.result}{"\t"}{.message}{"\n"}{end}'
+kubectl get firmwarecatalog lvfs -o jsonpath='{range .status.machines[*]}{.machine}{"\t"}{.result}{"\t"}{.message}{"\n"}{end}'
 ```
 
 ```
@@ -150,14 +146,14 @@ status:
 ```
 
 Each entry says which version the device runs (`version`), which
-`Catalog` and which catalog file the scan matched it against
+`FirmwareCatalog` and which catalog file the scan matched it against
 (`catalog` and `file`), and the releases fwupd offers, newest first.
 An empty `releases` means the device runs the newest release the
 catalog has for it. A release gives the URL of its cabinet file and the
 cabinet's SHA-256. The example is a Framework Laptop 13 that runs
 BIOS 0.0.3.5, and the catalog offers 0.0.4.2.
 
-A scan replaces its machine's entries for its `Catalog` in every
+A scan replaces its machine's entries for its `FirmwareCatalog` in every
 discovered object. An entry leaves only when that machine's next scan
 does not report the device, or when its `Machine` is deleted. So a
 machine that is off keeps the entries of its last scan, and the `time`
@@ -170,16 +166,16 @@ changed.
 ## Read the Events
 
 The operator posts an `Event` for each step, in the namespace
-`default`. `kubectl describe catalog.firmware.liken.sh lvfs` and
+`default`. `kubectl describe firmwarecatalog lvfs` and
 `kubectl describe firmware <name>` show the last hour of them.
 
 | Object | Reason | When |
 |---|---|---|
-| `Catalog` | `Fetched`, `JcatUnreadable`, `FileUnreadable`, or `ChecksumMismatch` | The `Ready` condition changed. A change to `False` is a `Warning`. |
-| `Catalog` | `ScanStarted` | The operator created a scan pod. |
-| `Catalog` | `Scanned` | A scan answered. The message gives the machine and what it found. |
-| `Catalog` | `ScanFailed` | A scan failed. This is a `Warning`. |
-| `Catalog` | `CatalogMoved` | A scan found another file in the jcat than the one it was given. |
+| `FirmwareCatalog` | `Fetched`, `JcatUnreadable`, `FileUnreadable`, or `ChecksumMismatch` | The `Ready` condition changed. A change to `False` is a `Warning`. |
+| `FirmwareCatalog` | `ScanStarted` | The operator created a scan pod. |
+| `FirmwareCatalog` | `Scanned` | A scan answered. The message gives the machine and what it found. |
+| `FirmwareCatalog` | `ScanFailed` | A scan failed. This is a `Warning`. |
+| `FirmwareCatalog` | `CatalogMoved` | A scan found another file in the jcat than the one it was given. |
 | `Firmware` | `Discovered` | The operator created the object for a new device model. |
 | `Firmware` | `UpdateAvailable` | The newest release offered for a machine's device changed. |
 

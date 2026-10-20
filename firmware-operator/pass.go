@@ -3,7 +3,7 @@ package main
 // One pass answers every Firmware: it follows the rule's upload pods
 // to their results, starts an upload for each new appearance of a
 // device that the rule alone matches, reports each conflict, and
-// writes the status. Then it answers every Catalog (scans.go). The
+// writes the status. Then it answers every FirmwareCatalog (scans.go). The
 // watches wake a pass (watch.go). A pass reads
 // each Firmware from the watch's store, and from the API server when
 // the store's copy is older than the operator's own last write, so a
@@ -40,7 +40,7 @@ type operator struct {
 	selectors *selectors
 
 	// discovery holds the flags of discovery, and catalogCaches what the
-	// operator keeps in memory of each Catalog (catalogfetch.go).
+	// operator keeps in memory of each FirmwareCatalog (catalogfetch.go).
 	discovery     discoverySettings
 	catalogCaches map[string]*catalogCache
 
@@ -53,7 +53,7 @@ func newOperator(client *apiclient.Client, namespace string, recorder *events.Re
 		discovery: discovery, catalogCaches: map[string]*catalogCache{}}
 }
 
-// pass answers every Firmware and every Catalog, and answers the
+// pass answers every Firmware and every FirmwareCatalog, and answers the
 // earliest time at which an upload or a scan in progress is due, or a
 // jcat read, or the zero time when none is. A pass before the watches
 // of the slices, the pods, and the Machines hold their first read does

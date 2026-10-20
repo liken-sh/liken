@@ -11,7 +11,7 @@ describes the component, and its plans hold the design.
 
 The voice rules in that file govern all prose here, comments included.
 
-The operator watches every `Firmware`, every `Catalog`, every
+The operator watches every `Firmware`, every `FirmwareCatalog`, every
 `ResourceSlice` of the driver `liken.sh`, every `Machine`, and its own
 upload and scan pods through client-go's reflector, in the shared
 `kubernetes` module. Load the

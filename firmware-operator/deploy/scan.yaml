@@ -1,7 +1,7 @@
 # The network policy of every scan pod. A scan pod reads the catalog's
 # jcat and its versioned file over HTTPS, and needs DNS to find the
 # catalog's host. So the policy allows its egress to port 53 and to
-# TCP port 443, on any address, and allows nothing in. A Catalog that
+# TCP port 443, on any address, and allows nothing in. A FirmwareCatalog that
 # names a mirror on another port needs a policy of its own beside this
 # one. A cluster with no network policy controller ignores it.
 #

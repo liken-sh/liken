@@ -1,12 +1,12 @@
 ---
-title: Catalog
+title: FirmwareCatalog
 weight: 20
 toc: true
 ---
 
-<!-- Generated from deploy/catalog-crd.yaml by crdref. Do not edit. -->
+<!-- Generated from deploy/firmwarecatalog-crd.yaml by crdref. Do not edit. -->
 
-# `Catalog`
+# `FirmwareCatalog`
 
 ## spec
 
@@ -21,7 +21,7 @@ toc: true
 | <span id="status--file"></span>`file` | string | no | The versioned file the jcat named at the last read that succeeded. The scans read this file. A read that fails keeps it. |
 | <span id="status--sha256"></span>`sha256` | string | no | The SHA-256 of `file`, from the jcat. `firmware-operator` checked the file against it. |
 | <span id="status--etag"></span>`etag` | string | no | The `ETag` of the jcat at the last read that succeeded. The next read sends it, so a jcat that did not change costs one small answer. |
-| <span id="status--checked"></span>`checked` | string | no | When `firmware-operator` last read the jcat. It reads it again an hour later, because LVFS publishes no feed of its changes, and at once when the `Catalog` changes or a scan answers `CatalogMoved`. |
+| <span id="status--checked"></span>`checked` | string | no | When `firmware-operator` last read the jcat. It reads it again an hour later, because LVFS publishes no feed of its changes, and at once when the `FirmwareCatalog` changes or a scan answers `CatalogMoved`. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | `Ready` is `True` with the reason `Fetched` when the last read of the jcat and of the file it names succeeded. It is `False` with the reason `JcatUnreadable`, `FileUnreadable`, or `ChecksumMismatch` when a read failed or the file's SHA-256 differs from the jcat's, and the message gives the error. No scan starts while `Ready` is `False`. |
 | <span id="status--machines"></span>`machines` | [\[\]object](#statusmachines) | no | The record of each machine's last scan against this catalog. `firmware-operator` scans a Ready machine again when the time it booted changes, when the set of device names in its `ResourceSlice` changes, or when the catalog names a new file that offers other releases for the GUIDs the machine reported. Each attempt runs once, so a `Failed` scan waits for one of the three to change. |
 

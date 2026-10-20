@@ -15,7 +15,7 @@ toc: true
 | <span id="spec--selector"></span>`selector` | string | no | A CEL expression that selects the devices an upload loads, with the same variables as a `DeviceClass` selector, for example `device.attributes["liken.sh"].vendor == "1618" && device.attributes["liken.sh"].product == "0920"`. `firmware-operator` compiles it with the CEL environment of Kubernetes' dynamic resource allocation, so it means here what it means in a `DeviceClass`. A selector that does not compile sets `Valid` to `False`, and the rule runs nowhere. Required with `upload`, and refused with `update`. |
 | <span id="spec--machines"></span>`machines` | [object](#specmachines) | no | A label selector on `Machine` objects. An upload runs only on the machines whose labels it selects. Optional. With no value, the upload runs on every machine. Refused with `update`. |
 | <span id="spec--upload"></span>`upload` | [object](#specupload) | no | The pod that writes the firmware into a device that holds none of its own. `firmware-operator` runs it once for each appearance of a matched device, on the device's machine, with a claim on that one device. |
-| <span id="spec--update"></span>`update` | [object](#specupdate) | no | Marks the rule for the firmware of a device model that keeps its own firmware, such as a board's UEFI firmware or an SSD. `firmware-operator` creates one such `Firmware` for each model a scan reports as updatable, with the label `firmware.liken.sh/discovered`, and records in `status.machines` the version each machine runs and the releases each `Catalog` offers. It installs nothing. |
+| <span id="spec--update"></span>`update` | [object](#specupdate) | no | Marks the rule for the firmware of a device model that keeps its own firmware, such as a board's UEFI firmware or an SSD. `firmware-operator` creates one such `Firmware` for each model a scan reports as updatable, with the label `firmware.liken.sh/discovered`, and records in `status.machines` the version each machine runs and the releases each `FirmwareCatalog` offers. It installs nothing. |
 
 ### spec.machines
 
@@ -48,7 +48,7 @@ The pod that writes the firmware into a device that holds none of its own. `firm
 
 ### spec.update
 
-Marks the rule for the firmware of a device model that keeps its own firmware, such as a board's UEFI firmware or an SSD. `firmware-operator` creates one such `Firmware` for each model a scan reports as updatable, with the label `firmware.liken.sh/discovered`, and records in `status.machines` the version each machine runs and the releases each `Catalog` offers. It installs nothing.
+Marks the rule for the firmware of a device model that keeps its own firmware, such as a board's UEFI firmware or an SSD. `firmware-operator` creates one such `Firmware` for each model a scan reports as updatable, with the label `firmware.liken.sh/discovered`, and records in `status.machines` the version each machine runs and the releases each `FirmwareCatalog` offers. It installs nothing.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -61,7 +61,7 @@ Marks the rule for the firmware of a device model that keeps its own firmware, s
 | <span id="status--observedgeneration"></span>`observedGeneration` | integer | no | The generation of the spec that the status answers. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | `Valid` is `True` with the reason `Compiled` when the selector and `spec.machines` compile. It is `False` with the reason `SelectorInvalid` when either one does not, and the message gives the error. A rule that is not valid runs nowhere. |
 | <span id="status--devices"></span>`devices` | [\[\]object](#statusdevices) | no | One entry for each port, a machine and a USB address, where the rule matched a device. The entry describes the latest appearance of a device in the port, so the list grows only with the number of ports. A `Loaded` entry stays after the bare device leaves. |
-| <span id="status--machines"></span>`machines` | [\[\]object](#statusmachines) | no | One entry for each machine's device of an update rule's model, from that machine's last scan against each `Catalog`. A scan replaces its machine's entries. An entry leaves only when the machine's next scan does not report the device, or when its `Machine` is deleted, so a machine that is off keeps its entries. |
+| <span id="status--machines"></span>`machines` | [\[\]object](#statusmachines) | no | One entry for each machine's device of an update rule's model, from that machine's last scan against each `FirmwareCatalog`. A scan replaces its machine's entries. An entry leaves only when the machine's next scan does not report the device, or when its `Machine` is deleted, so a machine that is off keeps its entries. |
 | <span id="status--counts"></span>`counts` | [object](#statuscounts) | no | The number of entries in `devices` with each result, and the machines that `machines` names. |
 
 ### status.conditions[]
@@ -94,14 +94,14 @@ One entry for each port, a machine and a USB address, where the rule matched a d
 
 ### status.machines[]
 
-One entry for each machine's device of an update rule's model, from that machine's last scan against each `Catalog`. A scan replaces its machine's entries. An entry leaves only when the machine's next scan does not report the device, or when its `Machine` is deleted, so a machine that is off keeps its entries.
+One entry for each machine's device of an update rule's model, from that machine's last scan against each `FirmwareCatalog`. A scan replaces its machine's entries. An entry leaves only when the machine's next scan does not report the device, or when its `Machine` is deleted, so a machine that is off keeps its entries.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="statusmachines--machine"></span>`machine` | string | yes | The `Machine`, which has the name of its node. |
 | <span id="statusmachines--device"></span>`device` | string | yes | The device's name, as fwupd reports it, such as `System Firmware`. |
 | <span id="statusmachines--version"></span>`version` | string | no | The version of the firmware the device runs, as fwupd reports it. |
-| <span id="statusmachines--catalog"></span>`catalog` | string | yes | The `Catalog` the scan matched the device against. |
+| <span id="statusmachines--catalog"></span>`catalog` | string | yes | The `FirmwareCatalog` the scan matched the device against. |
 | <span id="statusmachines--file"></span>`file` | string | yes | The catalog file the scan read, such as `firmware-09138-stable.xml.zst`. |
 | <span id="statusmachines--releases"></span>`releases` | [\[\]object](#statusmachinesreleases) | no | Each release the catalog offers for the device, newest first, as fwupd offered it. Empty when the device runs the newest release the catalog has for it. |
 | <span id="statusmachines--time"></span>`time` | string | yes | When the scan that reported the entry ended. |

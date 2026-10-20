@@ -111,7 +111,7 @@ func TestAScanResultBecomesTheRecordAndTheDiscoveredObjects(t *testing.T) {
 		}
 		wantCatalog := []posted{{"Normal", reasonFetched}, {"Normal", reasonScanStarted}, {"Normal", reasonScanned}}
 		if got := w.postedAboutCatalog("lvfs"); !slices.Equal(got, wantCatalog) {
-			t.Errorf("the Catalog Events are %v, want %v", got, wantCatalog)
+			t.Errorf("the FirmwareCatalog Events are %v, want %v", got, wantCatalog)
 		}
 	})
 }

@@ -171,7 +171,7 @@ spec:
                     updatable, with the label
                     `firmware.liken.sh/discovered`, and records in
                     `status.machines` the version each machine runs and
-                    the releases each `Catalog` offers. It installs
+                    the releases each `FirmwareCatalog` offers. It installs
                     nothing.
                   properties:
                     guids:
@@ -286,7 +286,7 @@ spec:
                   description: >-
                     One entry for each machine's device of an update
                     rule's model, from that machine's last scan against
-                    each `Catalog`. A scan replaces its machine's entries.
+                    each `FirmwareCatalog`. A scan replaces its machine's entries.
                     An entry leaves only when the machine's next scan does
                     not report the device, or when its `Machine` is
                     deleted, so a machine that is off keeps its entries.
@@ -305,7 +305,7 @@ spec:
                         description: "The version of the firmware the device runs, as fwupd reports it."
                       catalog:
                         type: string
-                        description: "The `Catalog` the scan matched the device against."
+                        description: "The `FirmwareCatalog` the scan matched the device against."
                       file:
                         type: string
                         description: "The catalog file the scan read, such as `firmware-09138-stable.xml.zst`."

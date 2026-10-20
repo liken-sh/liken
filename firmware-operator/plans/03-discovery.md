@@ -84,14 +84,14 @@ Framework Laptop 13 and a GMKtec mini PC. Every run only read.
   cameras or the CEC adapter, so the project assumes a scan does not
   disturb them.
 
-## The `Catalog` resource
+## The `FirmwareCatalog` resource
 
-A `Catalog` is one source of firmware releases. It is cluster-scoped,
+A `FirmwareCatalog` is one source of firmware releases. It is cluster-scoped,
 in `firmware.liken.sh/v1alpha1`:
 
 ```yaml
 apiVersion: firmware.liken.sh/v1alpha1
-kind: Catalog
+kind: FirmwareCatalog
 metadata:
   name: lvfs
 spec:
@@ -110,7 +110,7 @@ status:
 - `spec.url` is the catalog's unversioned URL. The jcat is at the same
   URL with `.jcat` added, and the versioned file is in the same
   directory, under the name the jcat gives.
-- The operator reads the jcat when the `Catalog` changes and once an
+- The operator reads the jcat when the `FirmwareCatalog` changes and once an
   hour after that, with the jcat's `ETag`, so an unchanged jcat costs
   one small response. LVFS has no feed of changes to subscribe to, so
   this timer is the only way to see a new catalog. A comment at the
@@ -131,7 +131,7 @@ one more object.
 
 ## The scan pod
 
-One scan answers both questions for one machine and one `Catalog`,
+One scan answers both questions for one machine and one `FirmwareCatalog`,
 because `get-updates` needs the live devices. The operator creates a
 bare pod in `liken-system` on the machine's node. The pod is
 privileged, because fwupd reads SMBIOS tables, `efivarfs`, sysfs, and
@@ -144,7 +144,7 @@ Its image, `firmware-operator-scan`, holds fwupd from a dated Ubuntu
    it names another file than the one in the pod's spec.
 3. Downloads the versioned file, and refuses when its SHA-256 differs
    from the one in the pod's spec.
-4. Writes one fwupd remote for the `Catalog` and disables the remotes
+4. Writes one fwupd remote for the `FirmwareCatalog` and disables the remotes
    that the package ships, so every release comes from that catalog.
 5. Runs `fwupdtool refresh` with the file and the jcat, which checks
    the signature, then `fwupdtool get-devices --json` and
@@ -160,7 +160,7 @@ the pod's log, writes it to status, and then deletes the pod.
 ## When a machine is scanned
 
 The operator scans a machine when one of these changes since its last
-scan against a `Catalog`:
+scan against a `FirmwareCatalog`:
 
 - **The machine booted.** `status.boot.time` of the `Machine` changed.
   A version changes only across a reboot or a flash.
@@ -168,13 +168,13 @@ scan against a `Catalog`:
   machine's `liken.sh` `ResourceSlice` changed. A device number that
   changes on a replug does not count.
 - **The catalog changed the releases for one of its devices.** When the
-  `Catalog` names a new file, the operator computes, for each machine,
+  `FirmwareCatalog` names a new file, the operator computes, for each machine,
   a hash of the catalog's releases for the GUIDs that the machine
   reported last time. When the hash changed, the machine is scanned.
   When it did not, the operator records the new file for that machine
   and scans nothing.
 
-The record of each machine's last scan is in the `Catalog`'s status,
+The record of each machine's last scan is in the `FirmwareCatalog`'s status,
 so a restarted operator holds no state in memory:
 
 ```yaml
@@ -240,7 +240,7 @@ status:
   `spec.update.version`, the approval. A `Firmware` has exactly one of
   `upload` and `update`, and `selector` belongs to `upload` alone.
 - Each entry in `status.machines` is one machine's device, with the
-  `Catalog`, the file it was matched against, and each release fwupd
+  `FirmwareCatalog`, the file it was matched against, and each release fwupd
   offered with its cabinet's URL and SHA-256. Plan 04 pins an approval
   to that SHA-256.
 - `counts.behind` counts the machines with at least one release.
@@ -256,9 +256,9 @@ status:
 
 ## Conditions and `Event`s
 
-A `Catalog` has a `Ready` condition, and each transition posts an
+A `FirmwareCatalog` has a `Ready` condition, and each transition posts an
 `Event`. A scan posts `ScanStarted` and `Scanned` or `ScanFailed` on
-the `Catalog`. A discovered `Firmware` posts `UpdateAvailable` when a
+the `FirmwareCatalog`. A discovered `Firmware` posts `UpdateAvailable` when a
 machine's newest offered release changes, and `Discovered` when the
 operator creates it.
 
@@ -268,13 +268,13 @@ The guides are the documentation, and each one is a skill. They change
 in the commit that builds this plan:
 
 - `firmware:find-updates`, a new guide: what a scan reads, the `lvfs`
-  `Catalog`, reading `kubectl get firmware` and a machine's entry, and
+  `FirmwareCatalog`, reading `kubectl get firmware` and a machine's entry, and
   where each release came from.
-- `firmware:install` adds the scan image, the `Catalog` object, and the
+- `firmware:install` adds the scan image, the `FirmwareCatalog` object, and the
   egress the scan pods need.
-- `firmware:troubleshoot` adds a `Catalog` that is not `Ready`, a scan
+- `firmware:troubleshoot` adds a `FirmwareCatalog` that is not `Ready`, a scan
   that failed, `CatalogMoved`, and a machine that is never scanned.
-- The reference gains a `Catalog` page and the `update` fields of a
+- The reference gains a `FirmwareCatalog` page and the `update` fields of a
   `Firmware`, from the CRDs' descriptions.
 - The concepts gain a page on discovery: why the scan runs fwupd's
   default plugins, why it never stages anything, and why a `Firmware`
@@ -289,7 +289,7 @@ The tests run on the Go toolchain alone, against
 `kubernetes/apiservertest`, with a fake LVFS behind an in-memory
 `http.RoundTripper`:
 
-- A new jcat file updates the `Catalog`'s status, a SHA-256 that
+- A new jcat file updates the `FirmwareCatalog`'s status, a SHA-256 that
   differs sets `Ready` to `False`, and an unchanged `ETag` changes
   nothing.
 - A `Machine` with no record gets a scan pod with the catalog file and
@@ -325,4 +325,4 @@ on a machine with an LVFS update needs a cluster with such a machine.
   which is the boot chain. Discovery reports them like any release,
   and plan 05 has to apply them through `init`.
 - **Machines with no internet route.** A scan pod downloads the
-  catalog itself. A cluster with no route needs a mirror `Catalog`.
+  catalog itself. A cluster with no route needs a mirror `FirmwareCatalog`.

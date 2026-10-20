@@ -36,7 +36,7 @@ hardware operators, and a person installs it from its own manual. In
 the CI graph it is on the same layer as those operators. Its
 `package.toml` depends on `kubernetes`, `notices`, and `trust`, and its
 docs prefix is `firmware`. It depends on `trust` because the operator
-and the scan pods read a `Catalog` over HTTPS. The operator verifies
+and the scan pods read a `FirmwareCatalog` over HTTPS. The operator verifies
 the API server with the CA of its `ServiceAccount`.
 
 ## The plans
@@ -45,6 +45,6 @@ the API server with the CA of its `ServiceAccount`.
 |---|---|
 | [01](completed/01-uploads.md) | Built: the `Firmware` resource and its `upload` action, which writes firmware into a device each time the device appears |
 | [02](rejected/02-updates.md) | Replaced by plans 03, 04, and 05 before it was built |
-| [03](03-discovery.md) | Proposed: the `Catalog` resource, the scan pod that runs fwupd on each machine, and a discovered `Firmware` for each firmware device model with the releases a catalog offers for it |
+| [03](03-discovery.md) | Proposed: the `FirmwareCatalog` resource, the scan pod that runs fwupd on each machine, and a discovered `Firmware` for each firmware device model with the releases a catalog offers for it |
 | [04](04-approval.md) | Proposed, a stub: `spec.update.version`, a person's approval of one version, pinned to its cabinet |
 | [05](05-applying-updates.md) | Proposed, a stub: applying an approved version in a rollout turn, through `init` for the boot chain |

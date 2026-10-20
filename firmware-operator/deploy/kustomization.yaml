@@ -1,9 +1,9 @@
-# The kustomize base for firmware-operator: the Firmware and Catalog
+# The kustomize base for firmware-operator: the Firmware and FirmwareCatalog
 # resource definitions, the operator that runs the uploads and the
 # scans, the class and network policy of the upload pods, the network
-# policy of the scan pods, and the lvfs Catalog.
+# policy of the scan pods, and the lvfs FirmwareCatalog.
 #
-# The lvfs Catalog is an object of a kind that this base defines. On
+# The lvfs FirmwareCatalog is an object of a kind that this base defines. On
 # the first apply, kubectl sends the object before the API server
 # serves the new kind, and refuses it with "ensure CRDs are installed
 # first". A second apply creates it. Flux applies the definitions first
@@ -18,7 +18,7 @@ kind: Kustomization
 # The namespace is set with a transformer, not with the top-level
 # namespace field, because unsetOnly keeps an object that states its
 # own namespace where it belongs: the Events Role in default. The CRDs,
-# the DeviceClass, and the Catalog are cluster-scoped, and the API
+# the DeviceClass, and the FirmwareCatalog are cluster-scoped, and the API
 # server ignores a namespace on them.
 transformers:
   - |-
@@ -31,7 +31,7 @@ transformers:
 
 resources:
   - firmware-crd.yaml
-  - catalog-crd.yaml
+  - firmwarecatalog-crd.yaml
   - rbac.yaml
   - operator.yaml
   - upload.yaml

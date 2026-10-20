@@ -17,7 +17,7 @@ CRDREF_SOURCES := go.mod $(BRAND)/go.mod \
 
 REFERENCE := content/docs/reference
 
-GENERATED := $(REFERENCE)/firmware.md $(REFERENCE)/catalog.md
+GENERATED := $(REFERENCE)/firmware.md $(REFERENCE)/firmwarecatalog.md
 
 SKILLS := go tool skills
 BASE := https://liken.sh/firmware/
@@ -42,8 +42,8 @@ test: $(GENERATED)
 $(REFERENCE)/firmware.md: ../deploy/firmware-crd.yaml $(CRDREF_SOURCES)
 	$(CRDREF) -title Firmware -weight 10 $< $@
 
-$(REFERENCE)/catalog.md: ../deploy/catalog-crd.yaml $(CRDREF_SOURCES)
-	$(CRDREF) -title Catalog -weight 20 $< $@
+$(REFERENCE)/firmwarecatalog.md: ../deploy/firmwarecatalog-crd.yaml $(CRDREF_SOURCES)
+	$(CRDREF) -title FirmwareCatalog -weight 20 $< $@
 
 # The skills target emits every guide as an Agent Skill into ../skills,
 # one SKILL.md per guide, with the generator the brand component

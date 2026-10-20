@@ -1,8 +1,8 @@
 package main
 
 // These tests play LVFS and read what the operator writes into a
-// Catalog's status: the file the jcat names, its SHA-256 and ETag, and
-// the Ready condition. The operator reads the jcat when the Catalog
+// FirmwareCatalog's status: the file the jcat names, its SHA-256 and ETag, and
+// the Ready condition. The operator reads the jcat when the FirmwareCatalog
 // changes and once an hour, on the bubble's clock.
 
 import (
@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// catalogWorld runs the operator with the lvfs Catalog and LVFS
+// catalogWorld runs the operator with the lvfs FirmwareCatalog and LVFS
 // serving one file, and no machine.
 func catalogWorld(t *testing.T) *world {
 	w := startWorld(t)
@@ -23,7 +23,7 @@ func catalogWorld(t *testing.T) *world {
 	return w
 }
 
-// A jcat that names a file gives the Catalog's status the file, its
+// A jcat that names a file gives the FirmwareCatalog's status the file, its
 // SHA-256, and the jcat's ETag, and sets Ready.
 func TestANewJcatFileUpdatesTheStatus(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -61,7 +61,7 @@ func TestASHA256ThatDiffersSetsReadyFalse(t *testing.T) {
 			t.Errorf("the status names %s %s, want the last good file", status.File, status.SHA256)
 		}
 		if got := len(w.api.scans(t)); got != 0 {
-			t.Errorf("%d scan pods, want none while the Catalog is not Ready", got)
+			t.Errorf("%d scan pods, want none while the FirmwareCatalog is not Ready", got)
 		}
 		want := []posted{{"Normal", reasonFetched}, {"Warning", reasonChecksumMismatch}}
 		if got := w.postedAboutCatalog("lvfs"); !slices.Equal(got, want) {
@@ -185,7 +185,7 @@ func TestAJcatThatIsTooLargeIsRefused(t *testing.T) {
 	})
 }
 
-// A deleted Catalog starts no scan, and the operator forgets what it
+// A deleted FirmwareCatalog starts no scan, and the operator forgets what it
 // kept of it.
 func TestADeletedCatalogStartsNoScan(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -196,7 +196,7 @@ func TestADeletedCatalogStartsNoScan(t *testing.T) {
 		w.settle()
 
 		if got := len(w.api.scans(t)); got != 0 {
-			t.Errorf("%d scan pods, want none with no Catalog", got)
+			t.Errorf("%d scan pods, want none with no FirmwareCatalog", got)
 		}
 	})
 }

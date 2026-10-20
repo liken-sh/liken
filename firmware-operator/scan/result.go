@@ -65,7 +65,7 @@ func emit(w io.Writer, r Result) error {
 	return json.NewEncoder(w).Encode(r)
 }
 
-// summary describes a scan for a person who reads the Catalog's status.
+// summary describes a scan for a person who reads the FirmwareCatalog's status.
 func summary(devices []Device) string {
 	withUpdates := 0
 	for _, d := range devices {

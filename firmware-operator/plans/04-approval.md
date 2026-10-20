@@ -35,7 +35,7 @@ spec:
 ## Questions for the full plan
 
 - **Approval that the operator sets.** An option on the operator, or a
-  field on a `Catalog`, could approve each new release of chosen
+  field on a `FirmwareCatalog`, could approve each new release of chosen
   models on its own.
 - **A model to leave alone.** A field that keeps a model out of
   proposals, for a device that a person never wants to update.

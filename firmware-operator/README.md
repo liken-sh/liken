@@ -29,7 +29,7 @@ the rule's status. The firmware bytes stay in the vendor's image and
 never enter the OS image.
 
 The operator also finds updates for the firmware that devices keep. A
-`Catalog`, such as the `lvfs` object that `deploy/` ships, names a
+`FirmwareCatalog`, such as the `lvfs` object that `deploy/` ships, names a
 source of firmware releases. The operator runs a short privileged scan
 pod on each machine, which only reads, and records each updatable
 device, the version it runs, and the releases the catalog offers in a

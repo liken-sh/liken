@@ -27,7 +27,7 @@ type observed struct {
 	// deviceSets holds the hash of the device names in each machine's
 	// slices (deviceSetHash).
 	deviceSets map[string]string
-	// scans holds the scan pods by the Catalog that each one reads.
+	// scans holds the scan pods by the FirmwareCatalog that each one reads.
 	scans map[string][]pod
 }
 

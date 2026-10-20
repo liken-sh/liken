@@ -1,6 +1,6 @@
 package main
 
-// The part of the test world that discovery needs: a Catalog, Machines
+// The part of the test world that discovery needs: a FirmwareCatalog, Machines
 // with a phase and a boot time, the scan pods, and the result line a
 // scan writes. A test plays a person, machine-operator, the kubelet,
 // and the scan program.
@@ -17,7 +17,7 @@ const (
 	secondBoot = "2026-10-21T06:00:00Z"
 )
 
-// putCatalog creates a Catalog, or replaces its spec the way kubectl
+// putCatalog creates a FirmwareCatalog, or replaces its spec the way kubectl
 // apply does. A change of the spec moves the generation.
 func (a *fakeAPI) putCatalog(name, address string) {
 	a.mu.Lock()
@@ -40,7 +40,7 @@ func (a *fakeAPI) putCatalog(name, address string) {
 	a.store(catalogsPath, object, kind)
 }
 
-// catalog answers the stored Catalog.
+// catalog answers the stored FirmwareCatalog.
 func (a *fakeAPI) catalog(t *testing.T, name string) catalog {
 	t.Helper()
 	var out catalog
@@ -115,13 +115,13 @@ func (a *fakeAPI) finishScan(t *testing.T, name, phase, log string) {
 	a.store(uploadPodsPath, next, "MODIFIED")
 }
 
-// record answers a machine's record in a Catalog's status, and fails
+// record answers a machine's record in a FirmwareCatalog's status, and fails
 // the test when there is none.
 func (w *world) record(t *testing.T, catalog, machine string) machineRecord {
 	t.Helper()
 	r, held := w.api.catalog(t, catalog).Status.record(machine)
 	if !held {
-		t.Fatalf("the Catalog %s holds no record of %s", catalog, machine)
+		t.Fatalf("the FirmwareCatalog %s holds no record of %s", catalog, machine)
 	}
 	return r
 }
@@ -173,7 +173,7 @@ func secureBootDBX(version string, offered ...string) scanDevice {
 }
 
 // postedAboutCatalog answers what the operator posted about one
-// Catalog, in the order it posted it.
+// FirmwareCatalog, in the order it posted it.
 func (w *world) postedAboutCatalog(name string) []posted {
 	var out []posted
 	for _, event := range w.api.recorded.About(catalogKind, name) {
@@ -182,14 +182,14 @@ func (w *world) postedAboutCatalog(name string) []posted {
 	return out
 }
 
-// discoveryWorld runs the operator with the lvfs Catalog at a file that
+// discoveryWorld runs the operator with the lvfs FirmwareCatalog at a file that
 // offers BIOS 0.0.4.2, and one Ready machine, node-2, with a camera on
 // a USB port. It answers once the first scan has started.
 func discoveryWorld(t *testing.T) *world {
 	w := startWorld(t)
 	w.lvfs.publish("firmware-09138-stable.xml.zst", frameworkBIOS("0.0.3.5", "0.0.4.2"), dbx("1", "2"))
 	// The machine's slice reaches the operator before the Machine and
-	// the Catalog, the way it does on a cluster where the machine has
+	// the FirmwareCatalog, the way it does on a cluster where the machine has
 	// run a while.
 	w.api.publish("node-2", camera("1-3", 4))
 	w.settle()

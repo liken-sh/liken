@@ -1,6 +1,6 @@
 package main
 
-// The Catalog kind, as the operator reads and writes it. A Catalog is
+// The FirmwareCatalog kind, as the operator reads and writes it. A FirmwareCatalog is
 // one source of firmware releases, such as LVFS. The operator writes
 // its whole status: the catalog file the jcat names, the Ready
 // condition, and the record of each machine's last scan against it. A
@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	catalogKind  = "Catalog"
-	catalogsPath = "/apis/firmware.liken.sh/v1alpha1/catalogs"
+	catalogKind  = "FirmwareCatalog"
+	catalogsPath = "/apis/firmware.liken.sh/v1alpha1/firmwarecatalogs"
 )
 
 func catalogPath(name string) string { return catalogsPath + "/" + name }
@@ -76,7 +76,7 @@ const (
 	resultCatalogMoved = "CatalogMoved"
 )
 
-// ready is the one condition of a Catalog: whether the operator read
+// ready is the one condition of a FirmwareCatalog: whether the operator read
 // the jcat and the file it names.
 const ready = "Ready"
 
@@ -102,7 +102,7 @@ func (s catalogStatus) record(machine string) (machineRecord, bool) {
 	return machineRecord{}, false
 }
 
-// reference names a Catalog in its Events.
+// reference names a FirmwareCatalog in its Events.
 func (c *catalog) reference() eventReference {
 	return eventReference{APIVersion: firmwareAPIVersion, Kind: catalogKind, Name: c.Metadata.Name, UID: c.Metadata.UID}
 }

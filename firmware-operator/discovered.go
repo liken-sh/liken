@@ -9,7 +9,7 @@ package main
 // machine's device of that model, with the releases each catalog
 // offers.
 //
-// A scan replaces its machine's entries for its Catalog in every
+// A scan replaces its machine's entries for its FirmwareCatalog in every
 // discovered object. An entry leaves only when that machine's next scan
 // does not report the device, or when its Machine is deleted, so a
 // machine that is off keeps its entries.
@@ -33,7 +33,7 @@ const (
 )
 
 // machineEntry is one machine's device of a discovered model, matched
-// against one Catalog's file.
+// against one FirmwareCatalog's file.
 type machineEntry struct {
 	Machine  string           `json:"machine"`
 	Device   string           `json:"device"`
@@ -124,7 +124,7 @@ func entriesOf(record machineRecord, catalog string, devices []scanDevice) scanE
 	return s
 }
 
-// applyScan replaces a machine's entries for a Catalog in every
+// applyScan replaces a machine's entries for a FirmwareCatalog in every
 // discovered object with what its scan reported, creates an object for
 // a model that has none, and deletes an object that is left with no
 // entry. objects holds every Firmware the pass read, and gains the ones

@@ -13,7 +13,7 @@ import (
 // config is the scan's input, which the operator sets as environment
 // variables on the pod's container.
 type config struct {
-	name   string // CATALOG_NAME, the Catalog object's name
+	name   string // CATALOG_NAME, the FirmwareCatalog object's name
 	url    string // CATALOG_URL, the unversioned catalog URL
 	file   string // CATALOG_FILE, the versioned file the operator expects
 	sha256 string // CATALOG_SHA256, the digest of that file
