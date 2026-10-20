@@ -1,6 +1,6 @@
 ---
 name: troubleshoot
-description: "Find why a Firmware's upload failed or never started: a Failed entry and its message, a Conflict between two rules, a selector that does not compile or matches nothing, an upload pod that stays Pending, and a claimed device that stays Pending because its firmware is not loaded. Find why discovery found nothing: a Catalog that is not Ready, a scan record that is Failed or CatalogMoved, a machine that is never scanned, and a discovered Firmware that keeps the entry of a machine that is off. Use when kubectl get firmware shows Failed or Conflict, when a bare chip gets no upload, when a pod that claims a camera does not start, when kubectl get catalog shows Ready False, or when a machine has no scan record."
+description: "Find why a Firmware's upload failed or never started: a Failed entry and its message, a Conflict between two rules, a selector that does not compile or matches nothing, an upload pod that stays Pending, and a claimed device that stays Pending because its firmware is not loaded. Find why discovery found nothing: a Catalog that is not Ready, a scan record that is Failed or CatalogMoved, a machine that is never scanned, and a discovered Firmware that keeps the entry of a machine that is off. Use when kubectl get firmware shows Failed or Conflict, when a bare chip gets no upload, when a pod that claims a camera does not start, when kubectl get catalog.firmware.liken.sh shows Ready False, or when a machine has no scan record."
 ---
 
 This skill is the guide at https://liken.sh/firmware/docs/guides/troubleshoot/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
@@ -118,13 +118,13 @@ all, nothing loads it, and the pod waits for good.
 
 ## Scans
 
-Start from the `Catalog`. `kubectl get catalog` shows whether the
-last read of the jcat succeeded, and `kubectl describe catalog <name>`
+Start from the `Catalog`. `kubectl get catalog.firmware.liken.sh` shows whether the
+last read of the jcat succeeded, and `kubectl describe catalog.firmware.liken.sh <name>`
 shows its `Event`s of the last hour. The record of each machine is in
 `status.machines`:
 
 ```sh
-kubectl get catalog <name> -o jsonpath='{range .status.machines[*]}{.machine}{"\t"}{.result}{"\t"}{.message}{"\n"}{end}'
+kubectl get catalog.firmware.liken.sh <name> -o jsonpath='{range .status.machines[*]}{.machine}{"\t"}{.result}{"\t"}{.message}{"\n"}{end}'
 ```
 
 ### A Catalog is not Ready
@@ -134,7 +134,7 @@ file it names. The condition's message gives the error. The status
 keeps the last good `file`, and no scan starts while `Ready` is `False`.
 
 ```sh
-kubectl get catalog <name> -o jsonpath='{.status.conditions[?(@.type=="Ready")]}'
+kubectl get catalog.firmware.liken.sh <name> -o jsonpath='{.status.conditions[?(@.type=="Ready")]}'
 ```
 
 | Reason | Cause and fix |

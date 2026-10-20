@@ -16,7 +16,6 @@ spec:
     listKind: CatalogList
     plural: catalogs
     singular: catalog
-    categories: [firmware]
   scope: Cluster
   versions:
     - name: v1alpha1

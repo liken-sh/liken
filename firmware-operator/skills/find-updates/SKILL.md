@@ -1,6 +1,6 @@
 ---
 name: find-updates
-description: "Find which firmware each machine's devices keep and which newer releases the LVFS catalog offers, with the lvfs Catalog and the scan pods of firmware-operator. Read kubectl get catalog and its status.machines records, kubectl get firmware and the Machines and Behind columns, a discovered Firmware's status.machines entries with their cabinet URL and SHA-256, and the Events. Use when you want to know whether a board's UEFI firmware, an SSD, or a dock has an update, when a scan did not run, or to understand what a scan touches on a machine."
+description: "Find which firmware each machine's devices keep and which newer releases the LVFS catalog offers, with the lvfs Catalog and the scan pods of firmware-operator. Read kubectl get catalog.firmware.liken.sh and its status.machines records, kubectl get firmware and the Machines and Behind columns, a discovered Firmware's status.machines entries with their cabinet URL and SHA-256, and the Events. Use when you want to know whether a board's UEFI firmware, an SSD, or a dock has an update, when a scan did not run, or to understand what a scan touches on a machine."
 ---
 
 This skill is the guide at https://liken.sh/firmware/docs/guides/find-updates/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
@@ -56,8 +56,12 @@ entries.
 
 ## Read the Catalog
 
+Name the kind with its group, `catalog.firmware.liken.sh`, because
+library-operator also defines a kind named `Catalog`, and
+`kubectl get catalog` can answer with that one.
+
 ```sh
-kubectl get catalog
+kubectl get catalog.firmware.liken.sh
 ```
 
 ```
@@ -73,7 +77,7 @@ lists the reasons. `CHECKED` is the time of the last read of the jcat.
 The record of each machine's last scan is in `status.machines`:
 
 ```sh
-kubectl get catalog lvfs -o jsonpath='{range .status.machines[*]}{.machine}{"\t"}{.result}{"\t"}{.message}{"\n"}{end}'
+kubectl get catalog.firmware.liken.sh lvfs -o jsonpath='{range .status.machines[*]}{.machine}{"\t"}{.result}{"\t"}{.message}{"\n"}{end}'
 ```
 
 ```
@@ -167,7 +171,7 @@ changed.
 ## Read the Events
 
 The operator posts an `Event` for each step, in the namespace
-`default`. `kubectl describe catalog lvfs` and
+`default`. `kubectl describe catalog.firmware.liken.sh lvfs` and
 `kubectl describe firmware <name>` show the last hour of them.
 
 | Object | Reason | When |
