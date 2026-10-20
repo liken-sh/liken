@@ -194,7 +194,15 @@ func TestADirectoryRemovedAndMadeAgainIsReadAgain(t *testing.T) {
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	write(t, filepath.Join(dir, "index-4208.fits"), indexOfSeries(4208, arcmin30, arcmin42))
+	// The file arrives by a rename, in one event. The read of the new
+	// directory can find a file that is written in place before the
+	// watch delivers its IN_MODIFY and IN_CLOSE_WRITE, and the watch then
+	// writes the configuration again after the test ends, while the
+	// cleanup removes the work directory.
+	write(t, filepath.Join(claim, "index-4208.fits"), indexOfSeries(4208, arcmin30, arcmin42))
+	if err := os.Rename(filepath.Join(claim, "index-4208.fits"), filepath.Join(dir, "index-4208.fits")); err != nil {
+		t.Fatal(err)
+	}
 	waitForSeries(t, s, Indexes{series4208})
 }
 
