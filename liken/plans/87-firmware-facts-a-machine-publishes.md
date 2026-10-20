@@ -1,6 +1,9 @@
 # 87. Firmware facts a machine publishes
 
-Milestone 87. Proposed 2026-10-19. Not built. The OS publishes two
+Milestone 87. Proposed 2026-10-19. The USB bus and device numbers
+were built on 2026-10-19, for `firmware-operator`'s uploads. The
+report of missing kernel firmware is not built, and its open
+questions below are still open. The OS publishes two
 kinds of fact that firmware work needs, and does nothing more about
 device firmware. Each USB device in a machine's `ResourceSlice` gains
 its bus number and device number, so `firmware-operator` can find the

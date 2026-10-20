@@ -220,6 +220,15 @@ radio in the Bluetooth operator's:
 The entry in `status.hardware.unclaimed` is gone once a driver binds
 the device.
 
+Some USB devices need no driver from this list and still do not
+work: they power up as a bare chip with no program of their own, and
+the host must upload firmware into the chip each time it gets power.
+Many astronomy cameras built on a Cypress FX2 or FX3 chip work this
+way. `liken` does not load that firmware, because it comes from the
+vendor and the OS image does not ship it.
+[`firmware-operator`](https://liken.sh/firmware/docs/guides/upload-to-a-device/)
+uploads it from the vendor's container image.
+
 ## 7. Write the list into the manifest
 
 A live patch changes the cluster and nothing else. Copy the final

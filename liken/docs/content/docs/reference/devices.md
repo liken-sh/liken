@@ -146,6 +146,8 @@ correct result.
 | `serial` | string | the serial number of the hardware, when it has one |
 | `vendor` | string | the vendor ID, lowercase hex with no prefix |
 | `product` | string | the product ID, lowercase hex with no prefix |
+| `busNumber` | int | the number of the USB bus that the device is on, from `busnum` in sysfs. Only USB devices have it |
+| `deviceNumber` | int | the number that the kernel gave the USB device on its bus, from `devnum` in sysfs. The kernel gives a new number each time the device enumerates, after a replug, a reset, or a firmware upload. Only USB devices have it |
 | `sound.liken.sh/supportsSound` | bool | a sound server can run against this device. The attribute carries its own domain, so a selector reads it as `device.attributes["sound.liken.sh"].supportsSound`. The domain belongs to no single driver, so a DeviceClass that selects the attribute names no driver, and any driver may stamp it on a device that supports a sound server |
 | `resource.kubernetes.io/pciBusID` | string | the address of a PCI device, the same value as `address`, on every device `liken` publishes for a PCI device. Kubernetes defines the attribute and its format, Domain:Bus:Device.Function, in the [standard device attributes](https://kubernetes.io/docs/reference/node/dra-standard-device-attributes/). The domain belongs to no single driver, so another driver can publish the same attribute for the same card, and a `matchAttribute` constraint can pair a device of `liken` with a device of that driver. A USB device has no such attribute |
 
@@ -296,7 +298,11 @@ that its image gives its user.
 ### USB devices
 
 A claim on a USB device also delivers that device's usbfs node,
-`/dev/bus/usb/<busnum>/<devnum>`. The devices of an attached serial
+`/dev/bus/usb/<busnum>/<devnum>`, with three digits in each number.
+The `busNumber` and `deviceNumber` attributes give the two numbers.
+Do not select on them in a claim: both change each time the device
+enumerates, so a claim that names them stops matching after a replug.
+The devices of an attached serial
 line are the exception, and
 [Serial-line adapters](#serial-line-adapters) says why. A program that uses libusb, for
 example Network UPS Tools, reads sysfs to find the hardware and then

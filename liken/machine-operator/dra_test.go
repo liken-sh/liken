@@ -66,6 +66,30 @@ func TestInventoryPublishesDrivenDeliverableDevices(t *testing.T) {
 	}
 }
 
+// A USB device publishes its bus number and device number as numbers,
+// because firmware-operator builds the usbfs path from them and tells
+// one enumeration of a device from the next by the device number. A
+// PCI device has neither, and publishes neither.
+func TestInventoryPublishesTheUSBBusAndDeviceNumbers(t *testing.T) {
+	devices := inventoryDevices([]hardware.Device{
+		{Bus: "usb", Address: "1-4.1.2", Driver: "usb", Vendor: "1618", Product: "0920", BusNumber: 1, DeviceNumber: 12},
+		{Bus: "usb", Address: "1-4.1.2:1.0", Class: "vendor-specific"},
+		{Bus: "pci", Address: "0000:00:02.0", Driver: "i915", Class: "display"},
+	}, delivering(hardware.Delivery{Nodes: []hardware.DeliveredNode{{Path: "/dev/bus/usb/001/012", Subsystem: "usb"}}}), noRoles, nil)
+
+	numbers := map[string][2]*int64{}
+	for _, d := range devices {
+		numbers[d.Name] = [2]*int64{d.Attributes["busNumber"].Int, d.Attributes["deviceNumber"].Int}
+	}
+	usb := numbers["usb-1-4-1-2"]
+	if usb[0] == nil || *usb[0] != 1 || usb[1] == nil || *usb[1] != 12 {
+		t.Errorf("usb-1-4-1-2 numbers = %v, want bus 1 and device 12", usb)
+	}
+	if pci := numbers["pci-0000-00-02-0"]; pci[0] != nil || pci[1] != nil {
+		t.Errorf("pci-0000-00-02-0 numbers = %v, want none", pci)
+	}
+}
+
 // gpu is the testbed's integrated GPU: a driven display device whose
 // subtree delivers its two DRM nodes, the legacy framebuffer that
 // fbdev emulation creates beside them, and the i2c monitor-control

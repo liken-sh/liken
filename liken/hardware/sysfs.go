@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -62,6 +63,15 @@ import (
 // controller from a 3D one, and neither the kernel nor a database is
 // needed to read it, so liken publishes it rather than growing a
 // table of its own for every distinction a selector might need.
+//
+// BusNumber and DeviceNumber are a USB device's busnum and devnum,
+// and an interface carries its device's. Together they name the
+// device's usbfs node, /dev/bus/usb/<bus>/<device>, which a firmware
+// loader such as fxload opens. The kernel gives a device a new devnum
+// each time it enumerates, so the pair also tells one appearance of
+// a device in a port from the next. Both are zero on PCI, and the
+// kernel numbers USB buses and devices from one, so zero means
+// absent.
 type Device struct {
 	Bus       string
 	Address   string
@@ -73,6 +83,9 @@ type Device struct {
 	Serial    string
 	Vendor    string
 	Product   string
+
+	BusNumber    int
+	DeviceNumber int
 }
 
 // DiscoverDevices walks the pci and usb buses under one sysfs root.
@@ -110,6 +123,8 @@ func DiscoverDevices(sysRoot string, naming *PCIIDs) []Device {
 				d.Class = usbClassWord(readAttr(path, "bInterfaceClass"))
 				d.ClassCode = classCode(readAttr(path, "bInterfaceClass"))
 				d.Serial = parentAttr(dir, entry.Name(), "serial")
+				d.BusNumber, _ = strconv.Atoi(parentAttr(dir, entry.Name(), "busnum"))
+				d.DeviceNumber, _ = strconv.Atoi(parentAttr(dir, entry.Name(), "devnum"))
 			}
 			devices = append(devices, d)
 		}

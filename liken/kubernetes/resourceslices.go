@@ -305,3 +305,7 @@ func AttrString(s string) DeviceAttribute { return DeviceAttribute{String: &s} }
 // boolean, so a DeviceClass asks device.attributes["liken.sh"].x
 // rather than comparing it against the string "true".
 func AttrBool(b bool) DeviceAttribute { return DeviceAttribute{Bool: &b} }
+
+// AttrInt builds an integer attribute value, which a selector compares
+// as a number.
+func AttrInt(i int64) DeviceAttribute { return DeviceAttribute{Int: &i} }

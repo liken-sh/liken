@@ -242,6 +242,19 @@ func inventoryDevices(discovered []hardware.Device,
 					attrs[name] = kubernetes.AttrString(value)
 				}
 			}
+			// The bus number and device number are published as numbers
+			// for every USB device, because the facts belong to the
+			// device. firmware-operator builds the usbfs path of a bare
+			// chip from them, and tells a new appearance of a device in
+			// a port from the last by the device number. A claim must
+			// not select on either one: both change each time the
+			// device enumerates. They add no writes to the slice,
+			// because a device that enumerates again leaves the slice
+			// and comes back in it anyway.
+			if d.BusNumber > 0 && d.DeviceNumber > 0 {
+				attrs["busNumber"] = kubernetes.AttrInt(int64(d.BusNumber))
+				attrs["deviceNumber"] = kubernetes.AttrInt(int64(d.DeviceNumber))
+			}
 			// A render node is the fact a workload actually selects on. A
 			// person who deploys a transcoder asks for any GPU that can
 			// encode, and asking for a vendor and a product ID instead
