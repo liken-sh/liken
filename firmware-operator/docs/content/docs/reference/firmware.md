@@ -53,7 +53,7 @@ Marks the rule for the firmware of a device that keeps its own firmware, such as
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specupdate--component"></span>`component` | string | no | The ID of the catalog component, such as `org.linuxfoundation.dbx.x64.firmware`. A device belongs to the rule when a catalog offers it a release of this component. A device keeps its entry after it installs the newest release, by its fwupd device ID. A discovered `Firmware` is named by this ID with no top-level domain and no `firmware` part, such as `microsoft-dbx-x64`, or by the whole ID in lowercase when another `Firmware` has that name. |
-| <span id="specupdate--guids"></span>`guids` | []string | no | The GUIDs that fwupd reports for a device that no catalog offers a release for, sorted. A device whose set of GUIDs is exactly this set belongs to the rule, until a catalog offers it a release. A discovered `Firmware` is named by the device's name, such as `uefi-dbx`, or by the device's name and a hash of this set when another `Firmware` has that name. |
+| <span id="specupdate--guids"></span>`guids` | []string | no | The GUIDs that fwupd reports for a device that no catalog offers a release for, sorted. A device whose set of GUIDs is exactly this set belongs to the rule, until a catalog offers it a release. A discovered `Firmware` is named by the device's name and eight hex digits of a hash of this set, such as `uefi-ca-7420e8dc`. |
 
 ## status
 

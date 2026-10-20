@@ -378,6 +378,13 @@ used the longer names: liken-1's 4 ESRT devices are all named
 `UEFI Device Firmware` with other GUIDs, and the two machines' `KEK CA`
 devices have other GUIDs.
 
+After the drill, the GUID sets' names changed. Of liken-1's 4 ESRT
+devices, which fwupd all names `UEFI Device Firmware`, the first one
+the operator met got the plain name and the other three a hash, so
+the plain name depended on the order of creation. A GUID set's object
+now always takes the device's name and the hash, and only a
+component's object takes the short name.
+
 The objects that the first build had created kept their names, because
 the operator finds an object by its group and not by its name. The
 drill deleted them, and the next scans created them under the short

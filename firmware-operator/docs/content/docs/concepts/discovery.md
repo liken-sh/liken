@@ -77,10 +77,12 @@ object, and the operator deletes the emptied object.
 
 The name of a component's object is the component ID with no
 top-level domain and no `firmware` part, such as `microsoft-dbx-x64`.
-The name of a GUID set's object is the device's name, such as
-`uefi-dbx`. When another `Firmware` already has the name, the operator
-uses a longer one: the whole component ID in lowercase, or the
-device's name and a hash of the GUIDs.
+When another `Firmware` already has that name, the operator uses the
+whole component ID in lowercase. The name of a GUID set's object is
+the device's name and eight hex digits of a hash of the GUIDs, such as
+`uefi-device-firmware-042452fb`. Many devices share one name, because
+fwupd names each entry of the firmware's ESRT `UEFI Device Firmware`,
+so the hash keeps each device's name the same on every cluster.
 
 ## Each scan pod reads the versioned catalog file
 

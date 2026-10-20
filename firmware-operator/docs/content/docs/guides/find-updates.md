@@ -102,12 +102,12 @@ offers a release to a device a scan reports. Its name is the component
 ID with no top-level domain and no `firmware` part:
 `com.microsoft.dbx.x64.firmware` becomes `microsoft-dbx-x64`, and
 `work.frame.Laptop.RyzenAI300.BIOS.firmware` becomes
-`frame-laptop-ryzenai300-bios`. An updatable device that no catalog
-has offered a release gets an object named by the device, such as
-`uefi-dbx`, and the operator moves its entry to the component's object
-when a release appears. When another `Firmware` already has a name,
-the operator uses the whole component ID in lowercase, or the device's
-name and a hash of its GUIDs. [How discovery
+`frame-laptop-ryzenai300-bios`. When another `Firmware` already has
+that name, the operator uses the whole component ID in lowercase. An
+updatable device that no catalog has offered a release gets an object
+named by the device and a hash of its GUIDs, such as
+`uefi-ca-7420e8dc`, and the operator moves its entry to the
+component's object when a release appears. [How discovery
 works](../../concepts/discovery/#a-firmware-is-a-catalog-component)
 gives the reasons. The label `firmware.liken.sh/discovered` marks
 these objects, so you can list them apart from your upload rules:
@@ -120,7 +120,7 @@ kubectl get firmware -l firmware.liken.sh/discovered
 NAME                           VALID    LOADED   RUNNING   FAILED   CONFLICT   MACHINES   BEHIND   AGE
 frame-laptop-ryzenai300-bios   <none>   <none>   <none>    <none>   <none>     3          1        2d
 microsoft-dbx-x64              <none>   <none>   <none>    <none>   <none>     3          2        2d
-uefi-ca                        <none>   <none>   <none>    <none>   <none>     1          0        2d
+uefi-ca-7420e8dc               <none>   <none>   <none>    <none>   <none>     1          0        2d
 ```
 
 `MACHINES` counts the machines that have an entry in the object.

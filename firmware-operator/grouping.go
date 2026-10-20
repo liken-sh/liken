@@ -133,27 +133,22 @@ func modelKey(guids []string) string {
 	return strings.Join(sortedSet(guids), ",")
 }
 
-// groupNames answers the names of a group's object, the one to try
-// first and the one to use when another object holds it. The first is
-// short enough to read in a list: the component ID with no top-level
-// domain and no "firmware" part, such as microsoft-dbx-x64, or the
-// device's name, such as uefi-dbx. Two components of one catalog
-// rarely share a short name, and two devices with no release can share
-// one, such as the System Firmware of two models of laptop. The second
-// is the whole component ID in lowercase, or the device's name with a
-// hash of its GUIDs.
+// groupNames answers the names of a group's object, in the order the
+// operator tries them. A component's object takes the component ID
+// with no top-level domain and no "firmware" part, such as
+// microsoft-dbx-x64, because two IDs of one catalog give one such name
+// only when they differ in case alone, and then the second takes the
+// whole ID in lowercase. A set of GUIDs' object always takes the
+// device's name and a hash of the GUIDs, such as
+// uefi-device-firmware-042452fb, because many devices share a name:
+// fwupd names each ESRT entry UEFI Device Firmware. So a device gets
+// the same name on every cluster, whichever device the operator meets
+// first.
 func groupNames(key groupKey, d scanDevice) []string {
 	if key.component != "" {
 		return []string{shortComponentName(key.component), componentName(key.component)}
 	}
-	short := slug(d.Name)
-	if len(short) > 63 {
-		short = strings.TrimRight(short[:63], "-")
-	}
-	if short == "" {
-		short = "device"
-	}
-	return []string{short, discoveredName(d.Name, d.GUIDs)}
+	return []string{discoveredName(d.Name, d.GUIDs)}
 }
 
 // shortComponentName answers a component ID with no top-level domain

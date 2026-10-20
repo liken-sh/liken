@@ -204,9 +204,8 @@ spec:
                         whose set of GUIDs is exactly this set belongs
                         to the rule, until a catalog offers it a
                         release. A discovered `Firmware` is named by the
-                        device's name, such as `uefi-dbx`, or by the
-                        device's name and a hash of this set when
-                        another `Firmware` has that name.
+                        device's name and eight hex digits of a hash of
+                        this set, such as `uefi-ca-7420e8dc`.
             status:
               type: object
               properties:

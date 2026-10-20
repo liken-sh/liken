@@ -137,7 +137,11 @@ func (o *operator) forgetMachines(objects []firmware, fleet map[string]machine) 
 // exists under a name answers 409, and the operator reads it: the
 // group's own object, such as one a create in an earlier pass made
 // before the watch showed it, ends the search, and any other object
-// moves it to the next name.
+// moves it to the next name. A set of GUIDs' object whose GUIDs a
+// person changed also ends the search, and keeps the entries of the
+// device its name was made from. A component's object never takes
+// another component's entries, because an approval of plan 04 names
+// one component.
 func (o *operator) createDiscovered(key groupKey, d scanDevice) (*firmware, error) {
 	u := &update{Component: key.component}
 	about := fmt.Sprintf("%s, the catalog component %s", d.Name, key.component)
@@ -163,7 +167,7 @@ func (o *operator) createDiscovered(key groupKey, d scanDevice) (*firmware, erro
 		if err != nil {
 			return nil, fmt.Errorf("creating the Firmware %s: %w", name, err)
 		}
-		if !discovered(stored) || keyOf(stored.Spec.Update) != key {
+		if !ownedBy(stored, key) {
 			continue
 		}
 		if created {
@@ -172,6 +176,16 @@ func (o *operator) createDiscovered(key groupKey, d scanDevice) (*firmware, erro
 		return stored, nil
 	}
 	return nil, fmt.Errorf("creating the Firmware of %s: other Firmware objects hold the names %s", d.Name, strings.Join(names, " and "))
+}
+
+// ownedBy reports whether an object under one of a group's names holds
+// the group's entries.
+func ownedBy(f *firmware, key groupKey) bool {
+	if !discovered(f) {
+		return false
+	}
+	held := keyOf(f.Spec.Update)
+	return held == key || (key.component == "" && held.component == "" && !pristine(f))
 }
 
 // settleEntries writes the entries that change gives a discovered

@@ -259,10 +259,10 @@ func TestADeviceWithNoGUIDIsNoModel(t *testing.T) {
 	}
 }
 
-// A person who changed a discovered object's GUIDs keeps the object,
-// with no entry. The device it no longer names gets an object under its
-// longer name.
-func TestAnObjectAPersonChangedKeepsItsNameAndNoEntry(t *testing.T) {
+// A person who changed a discovered object's GUIDs keeps the object
+// under its name. A scan that reports the device of that name again
+// meets the object, and records the machine's entry in it.
+func TestAGroupWhoseObjectAPersonChangedKeepsItsName(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := scannedWorld(t)
 		changed := w.api.firmware(t, dbxGUIDsName)
@@ -271,12 +271,8 @@ func TestAnObjectAPersonChangedKeepsItsNameAndNoEntry(t *testing.T) {
 		rescan(t, w, secureBootDBX("2"))
 
 		kept := w.api.firmware(t, dbxGUIDsName)
-		if len(kept.Status.Machines) != 0 || !slices.Equal(kept.Spec.Update.GUIDs, []string{meGUID}) {
-			t.Errorf("the object is %+v, want the person's GUIDs and no entry", kept)
-		}
-		moved := w.api.firmware(t, discoveredName("UEFI dbx", []string{dbxGUID}))
-		if len(moved.Status.Machines) != 1 {
-			t.Errorf("the longer name's entries are %+v, want node-2's", moved.Status.Machines)
+		if len(kept.Status.Machines) != 1 || !slices.Equal(kept.Spec.Update.GUIDs, []string{meGUID}) {
+			t.Errorf("the object is %+v, want the person's GUIDs and node-2's entry", kept)
 		}
 	})
 }

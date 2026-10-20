@@ -206,7 +206,7 @@ func discoveryWorld(t *testing.T) *world {
 // dbxObjectName is the dbx's object once a catalog offers it a release.
 const (
 	biosObjectName = "frame-laptop-ryzenai300-bios"
-	dbxGUIDsName   = "uefi-dbx"
+	dbxGUIDsName   = "uefi-dbx-7bc32f04"
 	dbxObjectName  = "microsoft-dbx-x64"
 )
 
