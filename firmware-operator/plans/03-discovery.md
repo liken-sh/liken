@@ -1,0 +1,328 @@
+# 03, Discovery
+
+Proposed on 2026-10-20. Not built. This plan finds the firmware that
+each machine's devices keep, and the newer releases that a catalog
+offers for it, and records both in the cluster. It installs nothing.
+[Plan 04](04-approval.md) lets a person approve a version, and
+[plan 05](05-applying-updates.md) applies an approved version, one
+machine at a time. The three plans replace the stub
+[plan 02](rejected/02-updates.md). Root
+[plan 81](../../plans/81-firmware.md) records which component owns
+each kind of firmware.
+
+## The problem
+
+A machine's board firmware, its SSD, its dock, and the Secure Boot
+revocation list (`dbx`) all keep a version across a power cycle, and
+their vendors publish newer versions on the Linux Vendor Firmware
+Service (LVFS). On a desktop, the fwupd daemon reads the devices,
+downloads the LVFS catalog, and tells the user which updates apply. A
+`liken` machine runs no fwupd daemon, so nobody can see which machine
+runs which firmware, or that an update exists.
+
+Applying an update is risky, and the boot chain belongs to `init`.
+Finding updates changes nothing. So this plan builds the finding part
+alone, and keeps four questions apart:
+
+1. Which firmware devices does each machine have, at which version?
+2. Which newer releases does a catalog offer for each of them?
+3. Which version has a person approved? This is plan 04.
+4. When does each machine take its turn to apply it? This is plan 05.
+
+This plan answers the first two.
+
+## What the lab measured
+
+A spike on 2026-10-20 ran fwupd 2.1.1 from Ubuntu 26.04 in a
+privileged pod with `fwupdtool`, which needs no daemon. It ran on
+liken-1 and stick-1, and on two machines of another cluster: a
+Framework Laptop 13 and a GMKtec mini PC. Every run only read.
+
+- **The UEFI plugin needs `efivarfs`.** A container's `/sys` has no
+  `efivarfs`, and `uefi_capsule` disables itself without it. Mounted
+  read-only, it reads each ESRT entry: liken-1 has 4, the GMKtec mini
+  PC has 2, the Framework has 1, and stick-1 has none.
+- **The ESP gates the answer.** fwupd finds an EFI system partition
+  through udisks on the system D-Bus, and udisks reads its block
+  devices from udev. A pod has neither, so fwupd marked every UEFI
+  device `updatable-hidden` and listed no update for it. A fake ESP on
+  a loop device and a udisks daemon in the pod did not help, because
+  udisks saw no udev events. The environment variable
+  `FWUPD_UEFI_ESP_PATH`, which `libfwupdplugin/fu-path-store.c` reads,
+  skips the search: with it pointing at an empty directory, the
+  Framework's BIOS became `updatable`.
+- **fwupd needs its default plugins.** With `--plugins`, even a list
+  of every plugin, `get-updates` offered nothing. With
+  `DisabledPlugins` in `fwupd.conf`, disabling plugins one at a time
+  showed that the Framework's BIOS release needs `uefi_pk`, which
+  reports the Secure Boot Platform Key as a device. Disabling a plugin
+  can hide the update of a device that the plugin does not own, with
+  no error.
+- **LVFS serves each catalog under its own name.** The jcat at
+  `https://cdn.fwupd.org/downloads/firmware.xml.zst.jcat` names one
+  versioned file, such as `firmware-09138-stable.xml.zst`, with its
+  SHA-256. The file at the unversioned URL had a different SHA-256
+  than the jcat named, three times in a row: the CDN caches each for
+  up to 4 hours. The versioned file matched the jcat.
+- **Matching runs offline.** `fwupdtool refresh FILE JCAT REMOTE`
+  loaded the versioned catalog, and `get-updates` matched it, in a
+  network namespace with no interfaces. A catalog with one byte
+  appended failed the refresh with a checksum error.
+- **The answers.** On the Framework, fwupd offered BIOS 0.0.4.2 over
+  0.0.3.5, and two `dbx` releases. On the GMKtec machines it offered
+  nothing, because GMKtec publishes nothing on LVFS. One of liken-1's
+  GUIDs, the generic Intel ME GUID, is in the catalog under a Lenovo
+  component, and fwupd refused it because the hardware IDs differ.
+- **What a release reports.** `get-updates --json` gives each
+  release's `AppstreamId`, `ReleaseId`, `Version`, `Checksum` (the
+  SHA-1 and SHA-256 of the cabinet), `Locations`, `Size`, and
+  `Flags`.
+- **What a scan opens.** With only `uefi_capsule`, fwupd opened
+  `/dev/dri/card0`, `/dev/urandom`, and the directory `/dev/bus/usb`.
+  A scan with every plugin was not traced. fwupd opens a USB device
+  only when a plugin claims its IDs, and no plugin claims the rig's
+  cameras or the CEC adapter, so the project assumes a scan does not
+  disturb them.
+
+## The `Catalog` resource
+
+A `Catalog` is one source of firmware releases. It is cluster-scoped,
+in `firmware.liken.sh/v1alpha1`:
+
+```yaml
+apiVersion: firmware.liken.sh/v1alpha1
+kind: Catalog
+metadata:
+  name: lvfs
+spec:
+  url: https://cdn.fwupd.org/downloads/firmware.xml.zst
+status:
+  file: firmware-09138-stable.xml.zst
+  sha256: 5ad15d603bdb60befea76491b19db88b9323f5542e6ea21a770508bb7470f5dc
+  checked: "2026-10-20T15:10:00Z"
+  conditions:
+    - type: Ready
+      status: "True"
+      reason: Fetched
+  machines: [...]   # below
+```
+
+- `spec.url` is the catalog's unversioned URL. The jcat is at the same
+  URL with `.jcat` added, and the versioned file is in the same
+  directory, under the name the jcat gives.
+- The operator reads the jcat when the `Catalog` changes and once an
+  hour after that, with the jcat's `ETag`, so an unchanged jcat costs
+  one small response. LVFS has no feed of changes to subscribe to, so
+  this timer is the only way to see a new catalog. A comment at the
+  timer gives that reason.
+- When the jcat names a new file, the operator downloads that file
+  once, checks its SHA-256 against the jcat, and writes `file` and
+  `sha256`. It reads the file only to decide which machines to scan
+  again. It never decides that a release applies, so it does not check
+  the jcat's signature: fwupd checks it in each scan pod, and refuses
+  a catalog that fails.
+- `Ready` is `False` when the jcat or the file cannot be read or the
+  SHA-256 differs. The status keeps the last good `file`, and no scan
+  starts against a catalog that is not `Ready`.
+
+`deploy/` ships the `lvfs` object. A cluster can add others, such as a
+mirror for a cluster with no route to the internet. `lvfs-testing` is
+one more object.
+
+## The scan pod
+
+One scan answers both questions for one machine and one `Catalog`,
+because `get-updates` needs the live devices. The operator creates a
+bare pod in `liken-system` on the machine's node. The pod is
+privileged, because fwupd reads SMBIOS tables, `efivarfs`, sysfs, and
+device nodes, and it holds no claim, because fwupd reads many devices.
+Its image, `firmware-operator-scan`, holds fwupd from a dated Ubuntu
+26.04 snapshot and one small program, `scan`, which:
+
+1. Mounts `efivarfs` read-only at `/sys/firmware/efi/efivars`.
+2. Downloads the jcat, and refuses with the result `CatalogMoved` when
+   it names another file than the one in the pod's spec.
+3. Downloads the versioned file, and refuses when its SHA-256 differs
+   from the one in the pod's spec.
+4. Writes one fwupd remote for the `Catalog` and disables the remotes
+   that the package ships, so every release comes from that catalog.
+5. Runs `fwupdtool refresh` with the file and the jcat, which checks
+   the signature, then `fwupdtool get-devices --json` and
+   `fwupdtool get-updates --json`, with `FWUPD_UEFI_ESP_PATH` set to
+   an empty directory, so no ESP is read or written.
+6. Writes one line of JSON to its log: the catalog file, each device
+   with the `updatable` flag, and the releases fwupd offers for each.
+
+The pod has a deadline of 10 minutes, and a `NetworkPolicy` allows its
+egress only to DNS and to port 443. The operator reads the result from
+the pod's log, writes it to status, and then deletes the pod.
+
+## When a machine is scanned
+
+The operator scans a machine when one of these changes since its last
+scan against a `Catalog`:
+
+- **The machine booted.** `status.boot.time` of the `Machine` changed.
+  A version changes only across a reboot or a flash.
+- **The machine has a new device.** The set of device names in the
+  machine's `liken.sh` `ResourceSlice` changed. A device number that
+  changes on a replug does not count.
+- **The catalog changed the releases for one of its devices.** When the
+  `Catalog` names a new file, the operator computes, for each machine,
+  a hash of the catalog's releases for the GUIDs that the machine
+  reported last time. When the hash changed, the machine is scanned.
+  When it did not, the operator records the new file for that machine
+  and scans nothing.
+
+The record of each machine's last scan is in the `Catalog`'s status,
+so a restarted operator holds no state in memory:
+
+```yaml
+status:
+  machines:
+    - machine: liken-1
+      boot: "2026-10-20T01:47:55Z"
+      devices: 3f9a…      # hash of the slice's device names
+      file: firmware-09138-stable.xml.zst
+      releases: 77c1…     # hash of the catalog's releases for guids
+      guids: [69585d92-…, 4e88068b-…, 23192307-…, 2fe2cbfc-…]
+      result: Scanned     # Running, Scanned, Failed, or CatalogMoved
+      message: 4 devices, no updates
+      time: "2026-10-20T15:12:04Z"
+```
+
+A machine that is not `Ready` is not scanned. A failed scan does not
+run again until the boot, the devices, or the catalog file change, the
+way a failed upload waits for a new appearance. A `CatalogMoved` result
+makes the operator read the jcat at once instead of at the next hour,
+and the new file starts the scan again.
+
+## Discovered `Firmware` objects
+
+The operator keeps one `Firmware` for each firmware device model that
+any scan reports with the `updatable` flag. A model is the sorted set
+of the device's GUIDs. The object's name is the fwupd device name and
+a short hash of the GUIDs, such as `system-firmware-3c1f0a2b`, and it
+carries the label `firmware.liken.sh/discovered`.
+
+```yaml
+apiVersion: firmware.liken.sh/v1alpha1
+kind: Firmware
+metadata:
+  name: system-firmware-3c1f0a2b
+  labels:
+    firmware.liken.sh/discovered: "true"
+spec:
+  update:
+    guids: [9c13b7f1-d618-5d68-be61-6b17881014a7]
+status:
+  machines:
+    - machine: node-2
+      device: System Firmware
+      version: 0.0.3.5
+      catalog: lvfs
+      file: firmware-09138-stable.xml.zst
+      releases:
+        - version: 0.0.4.2
+          id: work.frame.Laptop.RyzenAI300.BIOS.firmware
+          cabinet:
+            url: https://fwupd.org/downloads/9c085d03…-Framework_Laptop_13_RyzenAI300_fwupd_4.02.cab
+            sha256: 9c085d03d6ea515101a8519f7855bf951e7693ff4f392585bbb692275a8b27f5
+            size: 36134500
+      time: "2026-10-20T15:12:04Z"
+  counts:
+    machines: 1
+    behind: 1
+```
+
+- `spec.update` marks the object as a rule for firmware that a device
+  keeps. Its `guids` say which devices the object covers. Plan 04 adds
+  `spec.update.version`, the approval. A `Firmware` has exactly one of
+  `upload` and `update`, and `selector` belongs to `upload` alone.
+- Each entry in `status.machines` is one machine's device, with the
+  `Catalog`, the file it was matched against, and each release fwupd
+  offered with its cabinet's URL and SHA-256. Plan 04 pins an approval
+  to that SHA-256.
+- `counts.behind` counts the machines with at least one release.
+  `kubectl get firmware` shows `MACHINES` and `BEHIND` beside the
+  upload columns.
+- A scan replaces its machine's entries in every discovered object.
+  An entry leaves only when its machine's next scan does not report
+  the device, or when its `Machine` is deleted. A machine that is off
+  keeps its entries.
+- The operator deletes a discovered object when no entry is left and
+  `spec.update` holds nothing but `guids`. It never deletes an object
+  that a person changed.
+
+## Conditions and `Event`s
+
+A `Catalog` has a `Ready` condition, and each transition posts an
+`Event`. A scan posts `ScanStarted` and `Scanned` or `ScanFailed` on
+the `Catalog`. A discovered `Firmware` posts `UpdateAvailable` when a
+machine's newest offered release changes, and `Discovered` when the
+operator creates it.
+
+## The guides and skills
+
+The guides are the documentation, and each one is a skill. They change
+in the commit that builds this plan:
+
+- `firmware:find-updates`, a new guide: what a scan reads, the `lvfs`
+  `Catalog`, reading `kubectl get firmware` and a machine's entry, and
+  where each release came from.
+- `firmware:install` adds the scan image, the `Catalog` object, and the
+  egress the scan pods need.
+- `firmware:troubleshoot` adds a `Catalog` that is not `Ready`, a scan
+  that failed, `CatalogMoved`, and a machine that is never scanned.
+- The reference gains a `Catalog` page and the `update` fields of a
+  `Firmware`, from the CRDs' descriptions.
+- The concepts gain a page on discovery: why the scan runs fwupd's
+  default plugins, why it never stages anything, and why a `Firmware`
+  is a device model.
+
+The README of `plans/` and the front page say that the operator also
+runs a privileged scan pod with no claim.
+
+## Tests
+
+The tests run on the Go toolchain alone, against
+`kubernetes/apiservertest`, with a fake LVFS behind an in-memory
+`http.RoundTripper`:
+
+- A new jcat file updates the `Catalog`'s status, a SHA-256 that
+  differs sets `Ready` to `False`, and an unchanged `ETag` changes
+  nothing.
+- A `Machine` with no record gets a scan pod with the catalog file and
+  SHA-256 in its spec, and a result in the pod's log becomes the
+  record and the discovered objects.
+- A new boot time and a new device name start a scan, and a new device
+  number does not.
+- A new catalog that changes no release for a machine's GUIDs records
+  the file and starts no scan. One that changes a release scans only
+  the machines with that GUID.
+- `CatalogMoved` reads the jcat at once.
+- A failed scan does not run again for the same boot, devices, and
+  file.
+- An operator restart during a scan creates no second pod.
+- A discovered object loses its last entry and is deleted, and an
+  object with a changed spec is not.
+
+The `scan` program has tests of its own with recorded `fwupdtool`
+output from the spike.
+
+The drill runs on liken-1: install the release, and see each machine
+scanned once, liken-1's 4 UEFI devices as discovered `Firmware`
+objects with no release, and stick-1 recorded with no devices. A drill
+on a machine with an LVFS update needs a cluster with such a machine.
+
+## Open questions
+
+- **Devices beyond UEFI.** The spike traced only UEFI devices. NVMe
+  drives, docks, and Thunderbolt controllers appear with the default
+  plugins, and their GUID sets can change with a firmware version,
+  which would change the model.
+- **The `dbx` releases.** They change the Secure Boot revocation list,
+  which is the boot chain. Discovery reports them like any release,
+  and plan 05 has to apply them through `init`.
+- **Machines with no internet route.** A scan pod downloads the
+  catalog itself. A cluster with no route needs a mirror `Catalog`.

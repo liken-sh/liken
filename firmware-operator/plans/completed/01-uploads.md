@@ -10,7 +10,7 @@ whose USB part was built on 2026-10-19. This
 plan adds the cluster-scoped `Firmware` resource and its `upload`
 action: when a device that a rule matches appears on any machine,
 `firmware-operator` writes the device's firmware into it from the
-vendor's image. [Plan 02](../02-updates.md) adds the `update` action to
+vendor's image. [Plan 02](../rejected/02-updates.md) adds the `update` action to
 the same resource.
 
 ## The problem
