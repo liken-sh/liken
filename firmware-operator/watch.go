@@ -104,10 +104,13 @@ func firmwareMark(item firmware) string {
 	return fmt.Sprint(item.Metadata.UID, item.Metadata.Generation, item.Metadata.DeletionTimestamp)
 }
 
-// sliceMark is the pool's generation, which machine-operator moves on
-// each change of the slice's devices.
+// sliceMark is the slice's devices. machine-operator moves the pool's
+// generation on each write, but a mark on the generation alone would
+// miss a device that a writer changed under the same generation, so
+// the mark holds the devices themselves. A slice holds a few dozen
+// devices, so the comparison is cheap.
 func sliceMark(item resourceSlice) string {
-	return fmt.Sprint(item.Metadata.UID, item.Spec.Pool.Generation)
+	return string(mustJSON([]any{item.Metadata.UID, item.Spec.Devices}))
 }
 
 // podMark is the part of an upload pod whose change needs a pass: its
