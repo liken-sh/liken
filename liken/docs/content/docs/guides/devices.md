@@ -315,6 +315,20 @@ two adapters of the same model and you must select one of them. The
 name of the device follows the port, not the unit, so a replacement
 adapter in the same port has the same name.
 
+Do not select on `busNumber` or `deviceNumber`. The kernel gives the
+device a new device number each time it enumerates, after a replug, a
+reset, or a firmware upload, so a claim that names one stops matching.
+The [device reference](/docs/reference/devices/#usb-devices) says what
+the two numbers are for.
+
+Some USB devices, such as many astronomy cameras, hold no firmware of
+their own and get it from the host each time they get power. Until
+the firmware loads, the device publishes as a bare chip with the chip
+maker's vendor and product IDs. After the load, it publishes again
+with its own IDs. Select the IDs it has after the load.
+[`firmware-operator`](https://liken.sh/firmware/docs/guides/upload-to-a-device/)
+loads the firmware each time the bare chip appears.
+
 Then give each pod its own claim:
 
     apiVersion: resource.k8s.io/v1
@@ -356,7 +370,10 @@ usually no device matched the claim. Do these checks in this order:
    published. If the device is not there, usually no driver is bound
    to it: go back to step 2. The
    [device reference](/docs/reference/devices/#what-a-node-publishes)
-   lists every reason a device stays out of the slice.
+   lists every reason a device stays out of the slice. A USB device
+   that is there with other vendor and product IDs than you expect can
+   be a bare chip that waits for its firmware, as
+   [step 5](#5-give-one-pod-a-device-alone) describes.
 2. Compare your selector with the device's attributes. A selector that
    reads an attribute the device does not have errors on that device
    and aborts the allocation, so it never matches. Guard the reference

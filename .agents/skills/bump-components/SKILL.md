@@ -209,6 +209,13 @@ section "The notices" in `indi/README.md` holds the steps. Build every target in
 new release adds a third-party driver that no list in `indi/images/`
 names; add it to an image's list or to `indi/images/unpublished`, and
 say which in the report. Then run `make -C observatory-operator
+drivers firmware-rules`. `drivers` writes the new tag into
+`drivers/generated.go`, and `firmware-rules` copies `85-qhyccd.rules`
+out of the new `indi-qhy` image and writes `deploy/firmware/qhy.yaml`
+from it, one `Firmware` for each bare QHY chip, on the new tag. Report
+each object it adds or removes: a new object is a new QHY camera that
+`firmware-operator` loads, and the test that counts the objects needs
+the new count. Then run `make -C observatory-operator
 captures`, which records the captures of the standard INDI properties
 and the simulator transcripts again on the new libindi; the operator's
 tests fail until it runs. Then run `make -C observatory-operator
