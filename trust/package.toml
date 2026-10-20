@@ -9,12 +9,12 @@ name = "trust"
 # date as curl names it, and the Dockerfile fetches that snapshot by
 # its checksum. latest.sh --bump writes all three, and the smoke check
 # fails when they disagree.
-version = "20260925"
-revision = 2
+version = "20261020"
+revision = 1
 license = "MIT"
 
 [package.upstream]
-mozilla-ca = "2026-09-25"
+mozilla-ca = "2026-10-20"
 
 # shellcheck and the whitespace checks, from .pre-commit-config.yaml.
 [[jobs]]

@@ -7,8 +7,8 @@
 # The snapshot is the one that VERSION names, fetched by the checksum
 # that curl.se publishes beside it.
 FROM scratch AS fetch
-ADD --checksum=sha256:a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505 \
-    https://curl.se/ca/cacert-2026-09-25.pem /cacert.pem
+ADD --checksum=sha256:796f1389bfea13c0ed78f663b765baaff54a508e5483786bd6ece73c5e3e3cbe \
+    https://curl.se/ca/cacert-2026-10-20.pem /cacert.pem
 
 # --chmod applies to the directories that COPY creates as well, so the
 # mode is symbolic: X sets execute on the directories alone.

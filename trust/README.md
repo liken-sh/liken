@@ -25,8 +25,10 @@ date as curl names it.
 --bump` writes the newest one into `VERSION`, `package.toml`, and the
 `Dockerfile`. Then run `make workflows` at the top of the repository,
 raise the revision of each pinned component that copies the bundle,
-and run the smoke check, which fails when the three disagree or when
-the image's bundle differs from the checksum curl.se publishes.
+and run the smoke check. It fails when the three disagree, when the
+image's bundle differs from the checksum curl.se publishes, or when the
+bundle holds one of the roots of the compromised eMudhra intermediates
+that `smoke/trust.sh` names.
 
 A snapshot removes trust as well as adding it. Read which roots left
 the bundle before you take the bump: a root that leaves is one that
