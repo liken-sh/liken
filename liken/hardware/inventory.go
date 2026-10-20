@@ -29,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -61,14 +62,18 @@ func usbDevices(sysRoot string) []Device {
 		if strings.Contains(name, ":") || readAttr(path, "modalias") != "" {
 			continue
 		}
+		bus, _ := strconv.Atoi(readAttr(path, "busnum"))
+		number, _ := strconv.Atoi(readAttr(path, "devnum"))
 		devices = append(devices, Device{
-			Bus:     "usb",
-			Address: name,
-			Driver:  boundDriver(path),
-			Name:    usbName(dir, name),
-			Vendor:  readAttr(path, "idVendor"),
-			Product: readAttr(path, "idProduct"),
-			Serial:  readAttr(path, "serial"),
+			Bus:          "usb",
+			Address:      name,
+			Driver:       boundDriver(path),
+			Name:         usbName(dir, name),
+			Vendor:       readAttr(path, "idVendor"),
+			Product:      readAttr(path, "idProduct"),
+			Serial:       readAttr(path, "serial"),
+			BusNumber:    bus,
+			DeviceNumber: number,
 		})
 	}
 	return devices

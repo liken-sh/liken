@@ -269,15 +269,18 @@ func TestDiscoverToleratesAMissingBus(t *testing.T) {
 	}
 }
 
-// A USB device and each of its interfaces report the bus number and
-// the device number of the device, because the usbfs node that a
-// claim on either one delivers is named by those two numbers.
+// A USB interface reports the bus number and the device number of its
+// device, because the usbfs node that a claim on the interface
+// delivers is named by those two numbers. The device itself has no
+// modalias, so DiscoverDevices lists the interface alone, and
+// DiscoverInventory lists the device with its own numbers.
 func TestDiscoverReadsTheUSBBusAndDeviceNumbers(t *testing.T) {
 	sysfs := newFakeSysfs(t)
 	sysfs.device("usb", "1-4.1.2", "usb", map[string]string{
-		"modalias": "usb:v1618p0920d0000dcFFdscFFdpFFicFFiscFFipFFin00",
-		"busnum":   "1",
-		"devnum":   "12",
+		"idVendor":  "1618",
+		"idProduct": "0920",
+		"busnum":    "1",
+		"devnum":    "12",
 	})
 	sysfs.device("usb", "1-4.1.2:1.0", "", map[string]string{
 		"modalias":        "usb:v1618p0920d0000dcFFdscFFdpFFicFFiscFFipFFin00",
@@ -286,12 +289,10 @@ func TestDiscoverReadsTheUSBBusAndDeviceNumbers(t *testing.T) {
 
 	devices := DiscoverDevices(sysfs.root, nil)
 
-	if len(devices) != 2 {
-		t.Fatalf("devices = %+v, want the device and its interface", devices)
+	if len(devices) != 1 {
+		t.Fatalf("devices = %+v, want the interface alone", devices)
 	}
-	for _, d := range devices {
-		if d.BusNumber != 1 || d.DeviceNumber != 12 {
-			t.Errorf("%s: bus %d device %d, want bus 1 device 12", d.Address, d.BusNumber, d.DeviceNumber)
-		}
+	if d := devices[0]; d.BusNumber != 1 || d.DeviceNumber != 12 {
+		t.Errorf("%s: bus %d device %d, want bus 1 device 12", d.Address, d.BusNumber, d.DeviceNumber)
 	}
 }

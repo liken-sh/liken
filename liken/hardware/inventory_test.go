@@ -213,6 +213,7 @@ func TestDiscoverInventoryListsTheUSBDeviceBesideItsInterfaces(t *testing.T) {
 	sysfs := newFakeSysfs(t)
 	sysfs.device("usb", "1-2", "usb", map[string]string{
 		"idVendor": "08e6", "idProduct": "4433", "manufacturer": "QEMU", "product": "QEMU USB CCID", "serial": "1-0000:00:03.0-2",
+		"busnum": "1", "devnum": "3",
 	})
 	sysfs.device("usb", "1-2:1.0", "", map[string]string{"modalias": "usb:v08E6p4433d0000dc00dsc00dp00ic0Bisc00ip00in00", "bInterfaceClass": "0b"})
 
@@ -223,7 +224,7 @@ func TestDiscoverInventoryListsTheUSBDeviceBesideItsInterfaces(t *testing.T) {
 		}
 	}
 
-	want := []Device{{Bus: "usb", Address: "1-2", Driver: "usb", Name: "QEMU QEMU USB CCID", Vendor: "08e6", Product: "4433", Serial: "1-0000:00:03.0-2"}}
+	want := []Device{{Bus: "usb", Address: "1-2", Driver: "usb", Name: "QEMU QEMU USB CCID", Vendor: "08e6", Product: "4433", Serial: "1-0000:00:03.0-2", BusNumber: 1, DeviceNumber: 3}}
 	if !slices.Equal(got, want) {
 		t.Errorf("DiscoverInventory listed %+v for the device, want %+v", got, want)
 	}
