@@ -38,8 +38,9 @@ run the session from KStars, or `astrophotography-operator` runs it.
 
 The operator's tests and the drills on a test cluster run against the
 INDI simulators. Real hardware connects through the same resources, but no
-drill has run on real equipment yet, and a QHY camera that loads its
-firmware through udev rules on the host does not work.
+drill has run on real equipment yet. A QHY camera that powers up with
+no firmware needs `firmware-operator` to load it, and a QHY camera on
+an FX3 chip that needs firmware does not work yet.
 [Connect USB equipment](/docs/guides/connect-usb-equipment/) gives
 the details.
 

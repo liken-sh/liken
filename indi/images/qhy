@@ -1,5 +1,26 @@
-# ghcr.io/liken-sh/indi-qhy: QHY cameras. QHY firmware loads on the host
-# through udev, not in a pod. The QHY focuser needs no SDK, so it is in
-# indi-open.
+# ghcr.io/liken-sh/indi-qhy: QHY cameras. The QHY focuser needs no SDK,
+# so it is in indi-open.
 sdk libqhyccd
 driver indi_qhy_ccd
+# Many QHY cameras power up as a bare Cypress EZ-USB chip, and the host
+# writes the camera's firmware into the chip before the driver can open
+# it. On a Linux distribution, a udev rule of libqhy runs fxload when the
+# bare chip appears. A liken machine runs no udev, so firmware-operator
+# runs fxload from this image in a pod instead, and
+# observatory-operator's deploy/firmware/ holds one Firmware object for
+# each rule. Ubuntu installs fxload at /sbin/fxload, where /sbin is a
+# link to usr/sbin. The image keeps that link, so the program's path in
+# the package's file list holds in the image and its copyright file
+# travels with it, and puts fxload on PATH, which names only /usr/bin.
+seed /usr/sbin/fxload
+link /sbin usr/sbin
+link /usr/bin/fxload ../sbin/fxload
+# The firmware files that the rules name, and the rules file itself, which
+# observatory-operator's make firmware-rules reads from this image.
+data /usr/lib/firmware/qhy
+data /usr/lib/udev/rules.d/85-qhyccd.rules
+# The libqhy directory of indi-3rdparty holds no license file. The
+# copyright file of its own Debian package, debian/libqhy/copyright,
+# names QHY CCD as the copyright holder, so it travels with the SDK and
+# the firmware.
+license debian/libqhy/copyright

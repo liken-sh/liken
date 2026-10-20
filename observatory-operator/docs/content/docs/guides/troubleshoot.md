@@ -1,7 +1,7 @@
 ---
 title: Troubleshoot
 weight: 70
-description: "Find why a reservation failed or waits, from the step and the device its status names: a reservation in Wait or Requires with Waiting for ... SetUp=True or Safe=True, a Missing Telescope, ParentFound False, HorizonFound False, two devices on one driver in StartSite or PowerOn, a missing outbox PersistentVolumeClaim, a pod that stays Pending in StartDevices, a device that does not connect, a device in Error because its driver does not serve the kind, a device that waits for the next session, an action that times out, a park that a lock refused with MountUnparkRefused or DomeParkRefused, a failed job, or a delete that does not finish. Then run the failed step again with the retry annotation. Use when a Reservation is Failed or stuck, when a device reports Error, or when a resource will not delete."
+description: "Find why a reservation failed or waits, from the step and the device its status names: a reservation in Wait or Requires with Waiting for ... SetUp=True or Safe=True, a Missing Telescope, ParentFound False, HorizonFound False, two devices on one driver in StartSite or PowerOn, a missing outbox PersistentVolumeClaim, a pod that stays Pending in StartDevices, a QHY camera whose Firmware object reports a failed upload, a device that does not connect, a device in Error because its driver does not serve the kind, a device that waits for the next session, an action that times out, a park that a lock refused with MountUnparkRefused or DomeParkRefused, a failed job, or a delete that does not finish. Then run the failed step again with the retry annotation. Use when a Reservation is Failed or stuck, when a device reports Error, or when a resource will not delete."
 ---
 
 # Troubleshoot
@@ -172,6 +172,25 @@ kubectl describe pod east-mount -n observatory
   node. The step's summary gives the scheduler's message, such as
   `volume node affinity conflict`. Bind the claim on the camera's
   node, or name another claim, and run the failed step again.
+* **A QHY camera's pod is `Pending`.** The camera can still be a bare
+  chip that waits for its firmware. Look for the bare chip in the
+  node's `ResourceSlice`: its `vendor` and `product` match a rule of
+  `deploy/firmware/`, such as `1618` and `0920` for a QHY5L-II. Then
+  read the status of the `Firmware` object for that chip, which is
+  named `qhy-<vendor>-<product>`:
+
+  ```sh
+  kubectl get firmware qhy-1618-0920 -o yaml
+  ```
+
+  The status reports each upload and why one failed, and the
+  [`firmware-operator` manual](https://liken.sh/firmware/) explains
+  it. When the cluster has no object for the chip, either the cluster
+  does not run `firmware-operator` with `deploy/firmware/`, or the chip
+  is an FX3 chip, which `deploy/firmware/` does not load yet.
+  [QHY cameras that need firmware](/docs/guides/connect-usb-equipment/#qhy-cameras-that-need-firmware)
+  explains both. When the camera is loaded, check that its
+  `DeviceClass` selects the product ID after the load.
 * **The image does not pull.** A vendor's driver image is large. The
   ToupTek image is over 300 MB, so the first pull on a slow link can
   take most of the deadline. Run the step again once the image is on

@@ -1,7 +1,7 @@
 ---
 title: Install the operator
 weight: 10
-description: "Install observatory-operator on a liken cluster, run the example observatory of INDI simulators, reserve its telescope, and connect KStars to it. Use when a cluster has no observatory.liken.sh resources yet, to try the operator with no hardware, or when removing the operator."
+description: "Install observatory-operator on a liken cluster, run the example observatory of INDI simulators, reserve its telescope, and connect KStars to it. Covers deploy/firmware/, the Firmware objects that load QHY cameras on a cluster that runs firmware-operator. Use when a cluster has no observatory.liken.sh resources yet, to try the operator with no hardware, or when removing the operator."
 ---
 
 # Install the operator
@@ -198,6 +198,31 @@ components:
 
 [Metrics](/docs/reference/metrics/) lists every series and suggests
 the alerts for a night of observing.
+
+## Load the firmware of QHY cameras
+
+Many QHY cameras power up as a bare chip with no firmware, and
+`indi_qhy_ccd` cannot open one until the host writes the camera's
+firmware into it. [`firmware-operator`](https://liken.sh/firmware/)
+does that for every machine of the cluster, from the `Firmware`
+objects in `deploy/firmware/`: one for each bare QHY chip that it can
+load. Install `firmware-operator` first, as its manual describes,
+because it defines the `Firmware` resource. Then add the directory
+beside the base in your `kustomization.yaml`:
+
+```yaml
+resources:
+  - https://github.com/liken-sh/liken//observatory-operator/deploy?ref=<version>
+  - https://github.com/liken-sh/liken//observatory-operator/deploy/firmware?ref=<version>
+```
+
+The objects are cluster-scoped, and each one runs `fxload` from the
+`indi-qhy` image of the same release as the operator's drivers. A
+cluster without `firmware-operator` leaves the directory out. Every
+other device works there, and a QHY camera that needs firmware stays a
+bare chip.
+[QHY cameras that need firmware](/docs/guides/connect-usb-equipment/#qhy-cameras-that-need-firmware)
+lists which cameras the objects load.
 
 ## Rollouts and failover
 

@@ -4,7 +4,8 @@ This directory holds the operator that controls an observatory's
 hardware through INDI, and the manifests that run it: the operator's
 `package main` at the top, the resources' Go types in `observatory/`,
 the generator of their schema in `schema/`, the INDI client in `indi/`, the client of PHD2's event server in
-`phd2/`, the map of driver images in `drivers/`,
+`phd2/`, the map of driver images in `drivers/`, the generator of the QHY
+`Firmware` objects in `firmware/`,
 the CRDs, the RBAC, and the operator's `Deployment` in `deploy/`, the
 example in `examples/`, the `kubectl liken observatory` plugin in
 `cli/` with its image's `Dockerfile.cli`, the manual in `docs/`, the
@@ -266,6 +267,16 @@ writer, the runners, and the connections set.
 - `drivers/generated.go` comes from `indi/images/` and
   `indi/package.toml`. `make drivers` writes it again, and a test fails
   when it is stale.
+- `deploy/firmware/qhy.yaml` comes from `firmware/85-qhyccd.rules`,
+  a copy of `libqhy`'s udev rules from the `indi-qhy` image, and from
+  the `indi-qhy` tag in `drivers/generated.go`. It holds one `Firmware`
+  for `firmware-operator` for each bare QHY chip that the image's
+  `fxload` loads. `make firmware` writes it again, and a test fails
+  when it is stale. After a bump of the INDI images, `make
+  firmware-rules` copies the rules file from the new image in Docker
+  and runs `make firmware`. The base in `deploy/` does not name
+  `deploy/firmware/`, because the `Firmware` CRD comes from
+  `firmware-operator`.
 
 ### Tests of the operator
 

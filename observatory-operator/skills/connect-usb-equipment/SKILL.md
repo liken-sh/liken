@@ -1,6 +1,6 @@
 ---
 name: connect-usb-equipment
-description: "Give an INDI device its USB hardware: load the kernel driver on the liken machine, find the device in the node's ResourceSlice, write a DeviceClass, and put a claim in the device's spec.claim. Covers which astronomy equipment can reach a pod today and which cannot. Use when connecting a real mount, focuser, filter wheel, power box, or camera, or when a device's pod stays Pending."
+description: "Give an INDI device its USB hardware: load the kernel driver on the liken machine, find the device in the node's ResourceSlice, write a DeviceClass, and put a claim in the device's spec.claim. Covers which astronomy equipment can reach a pod today and which cannot, and the QHY cameras that need firmware-operator to load their firmware. Use when connecting a real mount, focuser, filter wheel, power box, or camera, or when a device's pod stays Pending."
 ---
 
 This skill is the guide at https://liken.sh/observatory/docs/guides/connect-usb-equipment/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
@@ -20,8 +20,11 @@ Two warnings come first.
   through the same Kubernetes machinery that other `liken` operators
   use for their hardware, but whether each INDI driver can open its
   device as the pod's user has not been checked.
-* A QHY camera that loads its firmware through udev rules on the host
-  does not work yet. The next section explains which equipment works.
+* A QHY camera that powers up with no firmware works only on a cluster
+  that runs `firmware-operator`, and a QHY camera on an FX3 chip that
+  needs firmware does not work yet.
+  [QHY cameras that need firmware](#qhy-cameras-that-need-firmware)
+  explains.
 
 Equipment on the network, such as a mount with a Wi-Fi adapter or a
 weather station that serves its data over HTTP, needs no claim. Give
@@ -45,9 +48,46 @@ A device with no kernel driver publishes whole, named by its USB port,
 such as `usb-1-2`, and a claim on it delivers its USB node and nothing
 else. The `liken`
 [device reference](https://liken.sh/docs/reference/devices/#usb-devices-with-no-kernel-driver)
-gives the rule. QHY cameras also load their firmware through udev
-rules on the host, and those rules do not run on a `liken` machine, so
-a QHY camera that needs its firmware loaded does not work yet.
+gives the rule.
+
+## QHY cameras that need firmware
+
+Many QHY cameras hold no firmware of their own. Such a camera powers up
+as a bare Cypress EZ-USB chip, and the host must write the camera's
+firmware into the chip before `indi_qhy_ccd` can open it. On a Linux
+distribution, a udev rule of INDI's `libqhy` runs `fxload` to do that.
+A `liken` machine runs no udev rules, so
+[`firmware-operator`](https://liken.sh/firmware/) does it instead.
+When the bare chip appears on any machine, `firmware-operator` runs
+`fxload` from the `indi-qhy` image in a pod. The chip then resets and
+enumerates again as the camera, with a new product ID.
+
+The operator's `deploy/firmware/` holds one `Firmware` object for each
+bare chip that a rule of `libqhy`'s `85-qhyccd.rules` loads with an
+FX2 or FX2LP loader: 49 chips. To load QHY cameras, install
+`firmware-operator` and apply `deploy/firmware/` beside the operator,
+as [Install the operator](https://liken.sh/observatory/docs/guides/install/#load-the-firmware-of-qhy-cameras)
+describes. `firmware-operator` then loads each camera on every machine,
+with or without a reservation, and the firmware stays in the camera
+until it loses power.
+
+* Write the camera's `DeviceClass` for the product ID after the load,
+  not for the bare chip. A QHY5L-II, for example, publishes as
+  `1618:0920` before the load and as `1618:0921` after it. A claim on
+  the bare chip does not follow it when it enumerates again.
+* The rules name 65 more chips that load with `fxload -t fx3`. The
+  `fxload` in `indi-qhy` does not load FX3 chips, so a QHY camera that
+  powers up as one of them stays bare and does not work yet.
+  [`deploy/firmware/qhy.yaml`](https://github.com/liken-sh/liken/blob/main/observatory-operator/deploy/firmware/qhy.yaml)
+  lists every chip that the objects load.
+* Two of the rules match generic Cypress chips, not QHY's own IDs:
+  `04b4:8613`, a Cypress FX2 with no EEPROM, and `0547:1002`, an Anchor
+  Chips EZ-USB. The objects load a QHY5's firmware into any device
+  that powers up with one of those IDs, as `libqhy` does on a Linux
+  host. If a cluster has such a device that is not a QHY camera, such
+  as a logic analyzer with no EEPROM, leave `qhy-04b4-8613` or
+  `qhy-0547-1002` out with a `$patch: delete` patch in your
+  `kustomization.yaml`.
 
 ## 1. Load the kernel driver
 
@@ -155,7 +195,10 @@ kubectl get resourceclaims -n observatory
 
 A pod that stays `Pending` has a claim that no device satisfies. The
 step's summary names the device it waits for, and
-`kubectl describe pod` gives the scheduler's reason.
+`kubectl describe pod` gives the scheduler's reason. A QHY camera's
+pod also stays `Pending` until `firmware-operator` loads the camera,
+because its claim selects the product ID that the camera has after the
+load.
 
 ## 6. Check the port
 

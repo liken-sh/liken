@@ -9,7 +9,7 @@ name = "indi"
 # that the build installs from, as YYYYMMDD. A new INDI is a new date:
 # CI builds these images only when this tag is not published yet.
 version = "20261005"
-revision = 6
+revision = 7
 license = "MIT"
 
 # The upstream releases that the snapshots hold, as the packages name
@@ -67,7 +67,7 @@ smoke = "indi/smoke/drivers.sh"
 [[outputs.images]]
 name = "indi-qhy"
 target = "indi-qhy"
-smoke = "indi/smoke/drivers.sh"
+smoke = "indi/smoke/qhy.sh"
 
 [[outputs.images]]
 name = "indi-playerone"

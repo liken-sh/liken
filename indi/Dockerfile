@@ -31,6 +31,7 @@ RUN sh /snapshot.sh "$VERSION" \
         gsc-data \
         socat \
         dash \
+        fxload \
     && rm -rf /var/lib/apt/lists/*
 COPY closure.sh indi-closure.sh family.sh check-lists.sh /
 COPY images /images

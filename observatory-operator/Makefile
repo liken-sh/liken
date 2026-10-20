@@ -54,6 +54,27 @@ install-plugin:
 drivers:
 	go test ./drivers -run TestTheMapIsCurrent -update
 
+# deploy/firmware/qhy.yaml holds one Firmware for each bare QHY camera
+# chip that a rule of firmware/85-qhyccd.rules loads, on the indi-qhy
+# tag of drivers/generated.go. A test fails when the file is stale;
+# this writes it again. Run it after make drivers.
+.PHONY: firmware
+firmware:
+	go test ./firmware -run TestTheQHYFirmwareIsCurrent -update
+
+# firmware/85-qhyccd.rules is a copy of the rules file in the indi-qhy
+# image at the tag that indi/package.toml pins. After a bump of the
+# INDI images, this builds the image, copies the file again, and writes
+# deploy/firmware/qhy.yaml from it. It runs Docker, so it runs on a
+# workstation, never in CI.
+.PHONY: firmware-rules
+firmware-rules:
+	cd .. && docker buildx bake indi-qhy --load
+	id=$$(docker create ghcr.io/liken-sh/indi-qhy:$(INDI_TAG) /none) \
+		&& docker cp $$id:/usr/lib/udev/rules.d/85-qhyccd.rules firmware/85-qhyccd.rules; \
+		status=$$?; docker rm $$id >/dev/null; exit $$status
+	$(MAKE) firmware
+
 # The schema comes from schema/ and from the standard properties of
 # each INDI interface in indi/standard/: the CRD in deploy/ of each kind
 # with procedures, and the typed fields in observatory/generated_*.go. A

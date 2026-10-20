@@ -51,8 +51,9 @@ driver.
 An image that holds a driver does not mean the driver's hardware can
 reach a pod. Most of the cameras in the table connect through their
 vendor's library with no kernel driver, and `liken` publishes such a
-device whole, with its USB node. A QHY camera that loads its firmware
-through udev rules on the host does not work yet.
+device whole, with its USB node. A QHY camera that powers up with no
+firmware needs `firmware-operator` to load the firmware first, and a QHY
+camera on an FX3 chip that needs firmware does not work yet.
 [Connect USB equipment](/docs/guides/connect-usb-equipment/#what-can-reach-a-pod)
 gives the details.
 

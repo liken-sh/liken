@@ -3,7 +3,7 @@
 package drivers
 
 // Tag is the tag of the indi images, <version>-<revision> from indi/package.toml.
-const Tag = "20261005-6"
+const Tag = "20261005-7"
 
 // WestonTag is the tag of the weston image, <version>-<revision> from weston/package.toml.
 const WestonTag = "20261019-1"

@@ -23,6 +23,15 @@ the eleven ToupTek brands. Only `indi-simulators` and `indi-phd2` have
 a shell: the CCD simulator runs `gsc` through `popen()`, and PHD2's
 entrypoint is a script.
 
+`indi-qhy` also holds `fxload`, the QHY firmware files in
+`/usr/lib/firmware/qhy/`, and `libqhy`'s udev rules,
+`/usr/lib/udev/rules.d/85-qhyccd.rules`. Many QHY cameras power up as
+a bare Cypress EZ-USB chip, and a `liken` machine runs no udev, so
+`firmware-operator` runs `fxload` from this image to write the
+camera's firmware into the chip. `observatory-operator` writes its
+`Firmware` objects from the rules file. Its smoke check, `smoke/qhy.sh`,
+runs `fxload` as user 1000 on a read-only root.
+
 ## The shim
 
 `indiserver` starts every driver as its own child process, with no
@@ -125,6 +134,9 @@ images build when someone bumps them, and at no other time.
 4. Build every image with `docker buildx bake --load` and the 17
    targets of `package.toml`, and run each image's smoke check with
    its tag.
+5. Run `make -C observatory-operator firmware-rules`, which copies
+   `libqhy`'s udev rules from the new `indi-qhy` image and writes the
+   operator's QHY `Firmware` objects again.
 
 A new snapshot can carry a new SDK, or an SDK whose license file
 changed. Compare each SDK directory of indi-3rdparty at the commit the
@@ -178,8 +190,13 @@ newest commit of its master branch when the PPA built the packages of
 2026-10-04 that the snapshot installs. The `license` entries of
 a list copy them to `/usr/share/doc/indi-3rdparty-libs/<directory>/`.
 The directories of the QHY, Atik, Astroasis, and SVBONY SDKs, and of
-`libflipro`, hold no license file, so their images carry none for
-those SDKs.
+`libflipro`, hold no license file, so their images carry none from
+those directories. The repository also holds `debian/libqhy/copyright`,
+the copyright file of a Debian package of the QHY SDK, `libqhy`, which
+the snapshot of the PPA does not serve. It names QHY CCD as the
+copyright holder of that package, and `indi-qhy` holds it at
+`/usr/share/doc/indi-3rdparty-libs/debian/libqhy/copyright`, because
+the image holds the QHY SDK and its firmware files.
 
 Each smoke check runs `notices/check.sh` at the top of the repository,
 which fails when a package that a list names has no copyright file in
