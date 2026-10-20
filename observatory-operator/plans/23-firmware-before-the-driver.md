@@ -1,11 +1,12 @@
 # 23, Firmware before the driver
 
-Proposed on 2026-10-19. Not built. It waits for `liken`'s
-[milestone 87](../../liken/plans/87-firmware-a-device-takes-from-the-host.md),
-which adds the `Firmware` resource and the upload that machine-operator
-runs. This plan ships the `Firmware` objects for QHY cameras and the
-files they need in `indi-qhy`. The operator's own code does not
-change.
+Proposed on 2026-10-19. Not built. It waits for `firmware-operator`'s
+[plan 01](../../firmware-operator/plans/01-uploads.md), which adds the
+`Firmware` resource and the pods that write firmware into a device
+when it appears. This plan ships the `Firmware` objects for QHY
+cameras and the files they need in `indi-qhy`. The operator's own code
+does not change. Root [plan 81](../../plans/81-firmware.md) records
+the boundary between the components.
 
 ## The problem
 
@@ -55,12 +56,13 @@ where the same device comes back.
 
 ## The design
 
-`liken` owns the mechanism and this component owns the data, the same
-split as udev and `libqhy` on a Linux distribution. machine-operator
-sees the bare chip appear, runs the command that a `Firmware` object
-names in the image it names, and reports the result on the `Machine`.
-This component supplies the image and one `Firmware` object for each
-rule.
+`firmware-operator` owns the mechanism and this component owns the
+data, the same split as udev and `libqhy` on a Linux distribution.
+`firmware-operator` reads the bare chip from the machine's
+`ResourceSlice`, runs the command that a `Firmware` object names in
+the image it names, and reports the result in the `Firmware` object's
+status. This component supplies the image and one `Firmware` object
+for each rule.
 
 ### The image
 
@@ -83,7 +85,7 @@ the image, the same way `make captures` reads the INDI images, so the
 file follows the package at each bump of `indi`:
 
 ```yaml
-apiVersion: liken.sh/v1alpha1
+apiVersion: firmware.liken.sh/v1alpha1
 kind: Firmware
 metadata:
   name: qhy-1618-0920
@@ -100,14 +102,17 @@ The generator reads each rule's vendor, product, chip type, firmware
 file, and second-stage loader, and refuses a rule of any other form.
 A test holds each object's image to the tag of `indi-qhy` in
 `drivers/generated.go`, so the objects and the drivers never name two
-releases of the image. The operator's install applies the file with
-the CRDs, so a cluster that runs this operator loads every QHY camera
-on every machine, with or without a reservation.
+releases of the image. `deploy/firmware/` is its own kustomization,
+because the `Firmware` CRD comes from `firmware-operator`. A cluster
+that runs both operators applies it, and then loads every QHY camera
+on every machine, with or without a reservation. A cluster without
+`firmware-operator` runs every other device, and its QHY cameras stay
+bare.
 
 ### The operator
 
 The operator does not change. `PowerOn` switches on a camera's power
-output, the bare chip appears, machine-operator loads it, and the
+output, the bare chip appears, `firmware-operator` loads it, and the
 camera appears. The camera's pod stays `Pending` until then, and
 `StartDevices` already waits for it.
 
@@ -121,16 +126,17 @@ the same commit:
   equipment that works. They say that the operator's install includes
   a `Firmware` object for each QHY model, and that the camera's claim
   selects the loaded camera's product ID, not the bare chip's. They
-  link to `liken`'s `device-firmware` guide for the mechanism.
+  link to `firmware-operator`'s `firmware:upload-to-a-device` for the
+  mechanism.
 - `troubleshoot` and its skill add a QHY camera whose pod stays
-  `Pending` in `StartDevices`: read `status.hardware.firmware.uploads`
-  on the machine's `Machine`.
-- `install` lists `deploy/firmware/` among what the install applies,
-  and says that `liken`'s milestone 87 must be on the cluster for it.
+  `Pending` in `StartDevices`: read the status of the camera's
+  `Firmware` object.
+- `install` says to install `firmware-operator` and apply
+  `deploy/firmware/` for QHY cameras.
 
 ## Decisions
 
-- **The load is `liken`'s, not this operator's.** Firmware state
+- **The load is `firmware-operator`'s, not this operator's.** Firmware state
   belongs to the device on its machine, not to a session. A step in
   `StartDevices` would load a camera only during a reservation, would
   need to read `ResourceSlice`s to tell a loaded camera from an absent
@@ -140,11 +146,12 @@ the same commit:
   QHY camera, and a person with another QHY model needs no extra step.
 - **The loader runs as user 1000.** `liken` gives a claimed device node
   to the pod's user, so `fxload` needs no root. The proof ran as root,
-  so milestone 87's drill measures this.
+  so the drill of `firmware-operator`'s plan 01 measures this.
 
 ## Drills
 
-On the test cluster, with the QHY5L-II-C, after milestone 87 is built:
+On the test cluster, with the QHY5L-II-C, after `firmware-operator`'s
+plan 01 is built:
 
 - A cold power cycle of the camera loads it with no person acting.
 - A reservation that starts with the camera off powers it, loads it,

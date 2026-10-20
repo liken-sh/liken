@@ -9,32 +9,38 @@ design.
 | Kind | Example | Owner | Plan |
 |---|---|---|---|
 | The kernel loads it from the image | i915 and wifi blobs | the OS image | `liken` [milestone 32](../liken/plans/completed/32-hardware-support-in-the-image.md), built |
-| The host uploads it each time a device appears | a QHY guide camera on a bare FX2 chip | a `Firmware` with `upload` | `liken` [milestone 87](../liken/plans/87-firmware-a-device-takes-from-the-host.md) |
-| The device keeps it across a power cycle | UEFI, a dock, an SSD | a `Firmware` with `update` | `liken` [milestone 33](../liken/plans/33-firmware-updates.md) |
+| The host uploads it each time a device appears | a QHY guide camera on a bare FX2 chip | `firmware-operator`, a `Firmware` with `upload` | `firmware-operator` [plan 01](../firmware-operator/plans/01-uploads.md) |
+| The device keeps it across a power cycle | UEFI, a dock, an SSD | `firmware-operator`, a `Firmware` with `update` | `firmware-operator` [plan 02](../firmware-operator/plans/02-updates.md), and `liken` [milestone 33](../liken/plans/33-firmware-updates.md) for the boot chain |
 
-## Who does what
+## The boundaries
 
-- **`liken` owns the `Firmware` resource.** It is cluster-scoped in
-  `liken.sh/v1alpha1`, beside `Machine` and `Cluster`, and selects a
-  device model with CEL over the devices that machine-operator
-  publishes. Exactly one of `upload` and `update` is set.
-- **machine-operator is the only process that touches a device.** On
-  each machine, it runs the upload pods and the fwupd pods, and it
-  writes the results to that machine's `status.hardware.firmware`.
-  `init` takes no part, except the efivars shim that milestone 33
-  needs to stay the only writer of the boot chain.
-- **`firmware-operator` proposes updates.** It is a new, optional
-  component: one `Deployment` for the cluster, like cluster-operator,
-  with no access to devices. It reads the LVFS catalog, creates a
-  labeled `Firmware` with an `update` that has no `version` for each
-  device model that no object covers, and writes all of each
-  `Firmware` object's status. A person adopts a proposal by setting
-  the version. A cluster without it still runs every upload and every
-  update that a person declares.
-- **A component that runs a device ships its `upload` rules** next to
-  the image that holds the firmware bytes. observatory-operator
-  [plan 23](../observatory-operator/plans/23-firmware-before-the-driver.md)
-  ships one for each rule in INDI's `85-qhyccd.rules`.
+**The OS publishes facts and guards the boot chain.** It knows nothing
+about vendor firmware. `liken`'s
+[milestone 87](../liken/plans/87-firmware-facts-a-machine-publishes.md)
+adds the USB bus and device numbers to each device in a machine's
+`ResourceSlice`, and reports in `status.hardware.missingFirmware` the
+files that the kernel requested and did not find. Milestone 33 keeps
+`init` the only writer of the boot chain, with an efivars shim for
+fwupd, and gives a component a rollout turn for a machine. Nothing in
+the OS reads a `Firmware` object.
+
+**`firmware-operator` owns the rest.** It is an add-on that ships
+apart from the OS, like display-operator, and it is on the same layer
+of the CI graph as the other hardware operators. It is one
+`Deployment` for the cluster, like cluster-operator, and it touches no
+device itself. It owns the cluster-scoped `Firmware` resource in
+`firmware.liken.sh`, watches every machine's `ResourceSlice`, creates
+the short pods that load or flash one device on its node, reads the
+LVFS catalog and proposes updates for a person to adopt, and writes
+all of each `Firmware` object's status. A cluster without it loses no
+function of the OS.
+
+**A component that runs a device ships the device's `upload` rules**
+next to the image that holds the firmware bytes. observatory-operator
+[plan 23](../observatory-operator/plans/23-firmware-before-the-driver.md)
+ships one for each rule in INDI's `85-qhyccd.rules`, in a
+kustomization of its own that a cluster applies when it runs
+`firmware-operator`.
 
 The firmware bytes for an upload stay in the vendor's image, and the
 bytes for an update come from a cabinet that the `Firmware` pins by
@@ -42,16 +48,15 @@ digest. Neither kind enters the OS image.
 
 ## Order
 
-1. `liken` milestone 87: the resource, `upload`, and
-   `status.hardware.firmware`, with the report of missing kernel
-   firmware.
-2. observatory-operator plan 23: the QHY rules and the `indi-qhy`
+1. `liken` milestone 87: the USB attributes and the report of missing
+   kernel firmware.
+2. `firmware-operator` plan 01: the component, its manual, the
+   `Firmware` resource, and uploads.
+3. observatory-operator plan 23: the QHY rules and the `indi-qhy`
    image. Then the test cluster's guide camera loads with no hand-run
    `Job`.
-3. `liken` milestone 33's prerequisites, then `update` and the fwupd
-   pods.
-4. `firmware-operator`, in its own directory, with its own plans and
-   manual.
+4. `liken` milestone 33's prerequisites and the shim, then
+   `firmware-operator` plan 02.
 
 Each step changes its component's guides, and the skills generated
 from them, in the same commit.
