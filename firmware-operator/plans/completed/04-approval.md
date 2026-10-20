@@ -1,7 +1,7 @@
 # 04, Approval
 
-Proposed on 2026-10-20. Built on 2026-10-20. The drill on liken-1 has
-not run. This plan lets a person approve one version of a catalog
+Proposed on 2026-10-20. Built on 2026-10-20, and drilled on liken-1
+the same day, under [The drill](#the-drill). This plan lets a person approve one version of a catalog
 component for the machines that have it, and shows in status which
 machines the approval waits for. It applies nothing:
 [plan 05](../05-applying-updates.md) applies an approved version.
@@ -127,3 +127,31 @@ The printer columns gain `Version`, `Approved`, and `Pending`.
 - **The schema refuses a `sha256` that is not 64 lowercase hex
   digits,** so a truncated copy of the hash fails at `kubectl apply`
   and does not reach `CabinetDiffers`.
+
+## The drill
+
+Run on 2026-10-20 on liken-1, with the operator at
+`2026.10.20-001-dev-005-27b95762`, against the discovered
+`microsoft-dbx-x64-kek2023`, whose one entry was liken-1's `dbx` at
+20260402 with 20260707 offered. Each step was a `kubectl patch` of the
+spec, and each answer arrived within the 4 seconds the drill waited.
+
+- A `version` on `uefi-ca-7420e8dc`, a set of GUIDs, and a `sha256` of
+  8 hex digits: the API server refused both, with the CRD's messages.
+- `version: "20260707"` with the release's cabinet: `Approved` `True`,
+  `Offered`, "a catalog offers 20260707 in the pinned cabinet to
+  liken-1", and `PENDING` 1.
+- The same version with another SHA-256: `False`, `CabinetDiffers`,
+  and `PENDING` 0.
+- The right cabinet, with `spec.machines` selecting a label that no
+  `Machine` has: `False`, `NotOffered`. The drill labeled no `Machine`.
+- `version`, `cabinet`, and `machines` removed: no `Approved`
+  condition, and `PENDING` 0.
+- The `Events` were a `Normal` `Offered`, a `Warning`
+  `CabinetDiffers`, and a `Warning` `NotOffered`. The move from
+  `CabinetDiffers` to `NotOffered` kept the `lastTransitionTime`,
+  because the status stayed `False`.
+
+The drill did not show `Installed`, or a release that a later catalog
+withdraws, because both need the device's version to change. The tests
+cover both.
