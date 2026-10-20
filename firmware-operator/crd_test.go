@@ -71,7 +71,7 @@ func TestCRDPrinterColumns(t *testing.T) {
 	for _, column := range loadCRD(t, firmwareCRD).Spec.Versions[0].AdditionalPrinterColumns {
 		names = append(names, column.Name)
 	}
-	want := []string{"Valid", "Loaded", "Running", "Failed", "Conflict", "Machines", "Behind", "Age"}
+	want := []string{"Valid", "Loaded", "Running", "Failed", "Conflict", "Machines", "Behind", "Version", "Approved", "Pending", "Age"}
 	if !slices.Equal(names, want) {
 		t.Errorf("printer columns %v, want %v", names, want)
 	}
@@ -131,9 +131,18 @@ func object(spec map[string]any) map[string]any {
 	}
 }
 
+// The component and the cabinet of a dbx release that a person
+// approves.
+const (
+	dbxComponent = "com.microsoft.dbx.x64-kek2023.firmware"
+	dbxCabinet   = "1bf2dd354e35e86138478f17c83724be644e0dc4c2b82fa95a2cfc7ebfad13d5"
+)
+
 func TestCRDValidatesExamples(t *testing.T) {
 	upload := map[string]any{"image": "ghcr.io/liken-sh/indi-qhy:test", "command": []any{"fxload", "-D", "$(LIKEN_DEVICE)"}}
 	update := map[string]any{"guids": []any{biosGUID}}
+	cabinet := map[string]any{"url": "https://fwupd.org/downloads/dbx.cab", "sha256": dbxCabinet}
+	approval := map[string]any{"component": dbxComponent, "version": "20260707", "cabinet": cabinet}
 	cases := []struct {
 		name    string
 		spec    map[string]any
@@ -153,6 +162,15 @@ func TestCRDValidatesExamples(t *testing.T) {
 		{"an update of a component", map[string]any{"update": map[string]any{"component": "com.microsoft.dbx.x64.firmware"}}, false},
 		{"an update of a component and GUIDs", map[string]any{"update": map[string]any{"component": "com.microsoft.dbx.x64.firmware", "guids": []any{biosGUID}}}, true},
 		{"an update of nothing", map[string]any{"update": map[string]any{}}, true},
+		{"an approval", map[string]any{"update": approval}, false},
+		{"an approval on some machines", map[string]any{"update": approval, "machines": map[string]any{"matchLabels": map[string]any{"canary": "true"}}}, false},
+		{"a version with no cabinet", map[string]any{"update": map[string]any{"component": dbxComponent, "version": "20260707"}}, true},
+		{"a cabinet with no version", map[string]any{"update": map[string]any{"component": dbxComponent, "cabinet": cabinet}}, true},
+		{"an approval of GUIDs", map[string]any{"update": map[string]any{"guids": []any{biosGUID}, "version": "20260707", "cabinet": cabinet}}, true},
+		{"a cabinet with a short SHA-256", map[string]any{"update": map[string]any{"component": dbxComponent, "version": "20260707",
+			"cabinet": map[string]any{"url": "https://fwupd.org/a.cab", "sha256": "1bf2dd35"}}}, true},
+		{"a cabinet with no URL", map[string]any{"update": map[string]any{"component": dbxComponent, "version": "20260707",
+			"cabinet": map[string]any{"sha256": dbxCabinet}}}, true},
 		{"an upload with no command", map[string]any{"selector": "true", "upload": map[string]any{"image": "loader"}}, true},
 		{"an upload with an empty command", map[string]any{"selector": "true", "upload": map[string]any{"image": "loader", "command": []any{}}}, true},
 		{"an unknown operator", map[string]any{"selector": "true", "upload": upload,

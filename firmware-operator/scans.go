@@ -59,6 +59,9 @@ func (o *operator) discover(ctx context.Context, rules *[]firmware, w observed, 
 	if ctx.Err() == nil {
 		problems = append(problems, o.forgetMachines(*rules, w.fleet))
 	}
+	if ctx.Err() == nil {
+		problems = append(problems, o.approveAll(*rules, w.machines, now))
+	}
 	return next, errors.Join(problems...)
 }
 

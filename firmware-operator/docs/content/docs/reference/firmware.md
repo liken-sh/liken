@@ -13,13 +13,13 @@ toc: true
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="spec--selector"></span>`selector` | string | no | A CEL expression that selects the devices an upload loads, with the same variables as a `DeviceClass` selector, for example `device.attributes["liken.sh"].vendor == "1618" && device.attributes["liken.sh"].product == "0920"`. `firmware-operator` compiles it with the CEL environment of Kubernetes' dynamic resource allocation, so it means here what it means in a `DeviceClass`. A selector that does not compile sets `Valid` to `False`, and the rule runs nowhere. Required with `upload`, and refused with `update`. |
-| <span id="spec--machines"></span>`machines` | [object](#specmachines) | no | A label selector on `Machine` objects. An upload runs only on the machines whose labels it selects. Optional. With no value, the upload runs on every machine. Refused with `update`. |
+| <span id="spec--machines"></span>`machines` | [object](#specmachines) | no | A label selector on `Machine` objects. An upload runs only on the machines whose labels it selects, and an approval in `update.version` covers only those machines. Optional. With no value, the upload runs on every machine, and the approval covers every machine. Refused with an `update` that has no `version`. |
 | <span id="spec--upload"></span>`upload` | [object](#specupload) | no | The pod that writes the firmware into a device that holds none of its own. `firmware-operator` runs it once for each appearance of a matched device, on the device's machine, with a claim on that one device. |
-| <span id="spec--update"></span>`update` | [object](#specupdate) | no | Marks the rule for the firmware of a device that keeps its own firmware, such as a board's UEFI firmware or an SSD. `firmware-operator` creates one such `Firmware` for each catalog component that a scan finds a release of, and one for each set of GUIDs of an updatable device with no release. Each carries the label `firmware.liken.sh/discovered`. `status.machines` records the version each machine runs and the releases each `FirmwareCatalog` offers. It installs nothing. |
+| <span id="spec--update"></span>`update` | [object](#specupdate) | no | Marks the rule for the firmware of a device that keeps its own firmware, such as a board's UEFI firmware or an SSD. `firmware-operator` creates one such `Firmware` for each catalog component that a scan finds a release of, and one for each set of GUIDs of an updatable device with no release. Each carries the label `firmware.liken.sh/discovered`. `status.machines` records the version each machine runs and the releases each `FirmwareCatalog` offers. A person approves one release with `version` and `cabinet`. The approval installs nothing. |
 
 ### spec.machines
 
-A label selector on `Machine` objects. An upload runs only on the machines whose labels it selects. Optional. With no value, the upload runs on every machine. Refused with `update`.
+A label selector on `Machine` objects. An upload runs only on the machines whose labels it selects, and an approval in `update.version` covers only those machines. Optional. With no value, the upload runs on every machine, and the approval covers every machine. Refused with an `update` that has no `version`.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -48,26 +48,37 @@ The pod that writes the firmware into a device that holds none of its own. `firm
 
 ### spec.update
 
-Marks the rule for the firmware of a device that keeps its own firmware, such as a board's UEFI firmware or an SSD. `firmware-operator` creates one such `Firmware` for each catalog component that a scan finds a release of, and one for each set of GUIDs of an updatable device with no release. Each carries the label `firmware.liken.sh/discovered`. `status.machines` records the version each machine runs and the releases each `FirmwareCatalog` offers. It installs nothing.
+Marks the rule for the firmware of a device that keeps its own firmware, such as a board's UEFI firmware or an SSD. `firmware-operator` creates one such `Firmware` for each catalog component that a scan finds a release of, and one for each set of GUIDs of an updatable device with no release. Each carries the label `firmware.liken.sh/discovered`. `status.machines` records the version each machine runs and the releases each `FirmwareCatalog` offers. A person approves one release with `version` and `cabinet`. The approval installs nothing.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="specupdate--component"></span>`component` | string | no | The ID of the catalog component, such as `org.linuxfoundation.dbx.x64.firmware`. A device belongs to the rule when a catalog offers it a release of this component. A device keeps its entry after it installs the newest release, by its fwupd device ID. A discovered `Firmware` is named by this ID with no top-level domain and no `firmware` part, such as `microsoft-dbx-x64`, or by the whole ID in lowercase when another `Firmware` has that name. |
 | <span id="specupdate--guids"></span>`guids` | []string | no | The GUIDs that fwupd reports for a device that no catalog offers a release for, sorted. A device whose set of GUIDs is exactly this set belongs to the rule, until a catalog offers it a release. A discovered `Firmware` is named by the device's name and eight hex digits of a hash of this set, such as `uefi-ca-7420e8dc`. |
+| <span id="specupdate--version"></span>`version` | string | no | The version of the component that a person approves, as `status.machines` lists it in a release, such as `20260707`. Optional. It needs `component` and `cabinet`. `firmware-operator` answers it with the `Approved` condition and `status.counts.pending`. With no value, the `Firmware` approves nothing. |
+| <span id="specupdate--cabinet"></span>`cabinet` | [object](#specupdatecabinet) | no | The cabinet file of the approved release, copied from the release in `status.machines`. Required with `version`. |
+
+#### spec.update.cabinet
+
+The cabinet file of the approved release, copied from the release in `status.machines`. Required with `version`.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specupdatecabinet--url"></span>`url` | string | yes | Where the cabinet downloads from. The approval does not compare it with the catalog's URL, so a mirror works. Pattern: `^https://`. |
+| <span id="specupdatecabinet--sha256"></span>`sha256` | string | yes | The cabinet's SHA-256, in lowercase hex. It pins the file the way a digest pins an image: a catalog that offers the version in another cabinet does not match the approval. Pattern: `^[0-9a-f]{64}$`. |
 
 ## status
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="status--observedgeneration"></span>`observedGeneration` | integer | no | The generation of the spec that the status answers. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | `Valid` is `True` with the reason `Compiled` when the selector and `spec.machines` compile. It is `False` with the reason `SelectorInvalid` when either one does not, and the message gives the error. A rule that is not valid runs nowhere. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | An upload has `Valid`. It is `True` with the reason `Compiled` when the selector and `spec.machines` compile. It is `False` with the reason `SelectorInvalid` when either one does not, and the message gives the error. A rule that is not valid runs nowhere. An update with `version` has `Approved`, over the machines that `spec.machines` covers. It is `True` with the reason `Offered` when a catalog offers the version in the pinned cabinet to at least one machine, and with `Installed` when none is offered it and at least one runs it. It is `False` with `CabinetDiffers` when a catalog offers the version only in another cabinet, with `NotOffered` when no catalog offers it, and with `MachinesInvalid` when `spec.machines` does not compile. The message names the machines. |
 | <span id="status--devices"></span>`devices` | [\[\]object](#statusdevices) | no | One entry for each port, a machine and a USB address, where the rule matched a device. The entry describes the latest appearance of a device in the port, so the list grows only with the number of ports. A `Loaded` entry stays after the bare device leaves. |
 | <span id="status--machines"></span>`machines` | [\[\]object](#statusmachines) | no | One entry for each machine's device in an update rule's group, from that machine's last scan against each `FirmwareCatalog`. A scan replaces its machine's entries. An entry leaves only when the machine's next scan does not report the device, or when its `Machine` is deleted, so a machine that is off keeps its entries. |
-| <span id="status--counts"></span>`counts` | [object](#statuscounts) | no | The number of entries in `devices` with each result, and the machines that `machines` names. |
+| <span id="status--counts"></span>`counts` | [object](#statuscounts) | no | The number of entries in `devices` with each result, the machines that `machines` names, and the machines an approval waits for. |
 
 ### status.conditions[]
 
-`Valid` is `True` with the reason `Compiled` when the selector and `spec.machines` compile. It is `False` with the reason `SelectorInvalid` when either one does not, and the message gives the error. A rule that is not valid runs nowhere.
+An upload has `Valid`. It is `True` with the reason `Compiled` when the selector and `spec.machines` compile. It is `False` with the reason `SelectorInvalid` when either one does not, and the message gives the error. A rule that is not valid runs nowhere. An update with `version` has `Approved`, over the machines that `spec.machines` covers. It is `True` with the reason `Offered` when a catalog offers the version in the pinned cabinet to at least one machine, and with `Installed` when none is offered it and at least one runs it. It is `False` with `CabinetDiffers` when a catalog offers the version only in another cabinet, with `NotOffered` when no catalog offers it, and with `MachinesInvalid` when `spec.machines` does not compile. The message names the machines.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -127,11 +138,11 @@ The cabinet file that carries the release.
 | --- | --- | --- | --- |
 | <span id="statusmachinesreleasescabinet--url"></span>`url` | string | yes | Where the cabinet downloads from. |
 | <span id="statusmachinesreleasescabinet--sha256"></span>`sha256` | string | yes | The cabinet's SHA-256, in hex. |
-| <span id="statusmachinesreleasescabinet--size"></span>`size` | integer | no | The cabinet's size, in bytes. |
+| <span id="statusmachinesreleasescabinet--size"></span>`size` | integer | no | The size of the firmware payload the release installs, in bytes, as the catalog states it. The cabinet file is larger. |
 
 ### status.counts
 
-The number of entries in `devices` with each result, and the machines that `machines` names.
+The number of entries in `devices` with each result, the machines that `machines` names, and the machines an approval waits for.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -141,3 +152,4 @@ The number of entries in `devices` with each result, and the machines that `mach
 | <span id="statuscounts--conflict"></span>`conflict` | integer | no | Entries that are `Conflict`. |
 | <span id="statuscounts--machines"></span>`machines` | integer | no | The machines that `machines` names. |
 | <span id="statuscounts--behind"></span>`behind` | integer | no | The machines with at least one release offered in `machines`. |
+| <span id="statuscounts--pending"></span>`pending` | integer | no | The machines that an approval covers and waits for: a catalog offers one of the machine's devices the approved version in the pinned cabinet. |

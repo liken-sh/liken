@@ -7,7 +7,7 @@ OS's part of updating firmware that a machine and its devices keep.
 and runs the updates: its
 [plan 03](../../firmware-operator/plans/completed/03-discovery.md) finds the
 updates with fwupd and the LVFS catalog,
-[plan 04](../../firmware-operator/plans/04-approval.md) approves one,
+[plan 04](../../firmware-operator/plans/completed/04-approval.md) approves one,
 and [plan 05](../../firmware-operator/plans/05-applying-updates.md)
 applies it. The OS keeps `init` the only
 process that writes the boot chain, and gives the add-on a rollout

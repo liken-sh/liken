@@ -20,8 +20,11 @@ the records.
 Applying a firmware update is risky, and the boot chain belongs to
 `init`. Finding an update changes nothing. So discovery stands alone:
 it reads the devices and the catalog and writes status, and it
-installs nothing. A later release lets you approve a version, and a
-later release applies an approved version one machine at a time.
+installs nothing. An approval records which version you want, also
+with no install, and
+[Approve a firmware update](/docs/guides/approve-an-update/) shows
+how. A later release applies an approved version one machine at a
+time.
 
 ## A scan runs fwupd's default plugins
 

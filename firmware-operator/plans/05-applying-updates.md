@@ -1,34 +1,255 @@
 # 05, Applying updates
 
-Proposed on 2026-10-20, as a stub. Not built. This plan applies the
-version that [plan 04](04-approval.md) approves, on one machine at a
-time. The parts that write the boot chain stay in the OS, in `liken`'s
+Proposed on 2026-10-20. Not built. This plan applies the version that
+[plan 04](completed/04-approval.md) approves, on one machine at a time. Before
+any machine writes, a rehearsal runs the install against a copy of
+the machine's firmware variables and records in status exactly what
+the install would write. The parts that write the boot chain stay in
+the OS, in `liken`'s
 [milestone 33](../../liken/plans/33-firmware-updates.md), which also
-lists what the OS must build first.
+lists what the OS must build first. The rehearsal ran by hand on
+liken-1, under [The rehearsal on liken-1](#the-rehearsal-on-liken-1).
+No real write has run.
+
+## The problem
+
+A firmware update cannot be undone. A machine has two boot slots for
+its OS, so a bad release falls back to the other slot, but a machine
+has one variable store and one board firmware. fwupd has no dry run:
+`fwupdtool install` writes the device. And a person who approves a
+version in plan 04 sees a version string and a cabinet, not what the
+install changes on the machine.
+
+Two kinds of update reach `liken` machines from LVFS, and they write
+different things:
+
+- **The Secure Boot databases.** fwupd's `uefi_dbx`, `uefi_db`, and
+  `uefi_kek` plugins add entries to `dbx`, `db`, or `KEK`. Every
+  update that a catalog offered to liken-1 and stick-1 in the plan 03
+  drills was of this kind.
+- **Capsules.** fwupd's `uefi_capsule` plugin updates the board
+  firmware, and other plugins update devices such as SSDs and docks.
+
+## What each kind writes
+
+These facts come from the source of fwupd 2.1.1, the version in the
+scan image, and the rehearsal confirmed the first one.
+
+A Secure Boot database update makes one write: an authenticated
+append to its own variable, with the attributes `0x67` (append,
+time-based authenticated, runtime, boot service, non-volatile). It
+writes no `BootNext`, no `BootOrder`, no `Boot####`, and nothing on
+the ESP. The firmware checks the append's signature against `KEK`, or
+against `PK` for a `KEK` update, and refuses an append that does not
+verify. fwupd marks the device as needing a reboot, and the new
+entries take effect at the next boot.
+
+A capsule writes the variables that milestone 33 is about. In NVRAM
+mode, fwupd creates a boot entry named "Linux Firmware Updater" and
+sets `BootNext` to it. With the `modify-bootorder` quirk, which fwupd
+applies to Lenovo, Dell, ASUS, Framework, and HP machines, it also
+appends the entry to `BootOrder`, and it never removes the entry.
+Capsule-on-disk writes only `OsIndications`, and a file on the ESP of
+the next boot option.
+
+So the Secure Boot databases never touch a variable that `init`
+reads or writes, and capsules do. This plan applies the first kind
+before the second. Capsules wait for milestone 33's shim and its rule
+of one change per reboot.
 
 ## The steps
 
-1. **Stage.** When a machine's device runs another version than the
-   approved one, the operator asks the OS for a rollout turn for that
-   machine, through the interface that milestone 33 adds.
-2. **Apply.** The rollout conductor grants the turn and drains the
-   machine. The operator downloads the cabinet, checks its SHA-256,
-   and runs fwupd in a pod that writes. A UEFI capsule and a `dbx`
-   update go through `init`'s efivars shim, which stages the capsule in
-   the right boot slot's ESP, and the reboot applies it. A device that
-   fwupd flashes with no reboot, such as a dock, is flashed only when
-   no claim holds the device.
-3. **Prove.** The ESRT or the next scan of plan 03 shows the approved
-   version, and the machine joins its cluster again. A failed flash
-   has no earlier state to return to, so the operator records it in
-   status with an `Event`, and nothing runs it again on its own.
+1. **Rehearse.** When a machine's device runs another version than
+   the approved one, the operator runs a rehearsal pod on that
+   machine. The pod copies the firmware's variables and tables into
+   memory and runs `fwupdtool install` against the copy. The operator
+   compares the copy before and after, and records the difference in
+   the machine's entry: each variable that changed, the bytes
+   written, and the free space the variable store needs and has. A
+   rehearsal that changed anything the kind does not allow fails the
+   approval for that machine, and nothing writes.
+2. **Request a turn.** A machine with a passed rehearsal asks the OS
+   for a rollout turn, through the interface that milestone 33 adds.
+3. **Apply.** The rollout conductor grants the turn and drains the
+   machine. The write is the rehearsal's difference, and nothing
+   else: for a Secure Boot database, the one authenticated append the
+   rehearsal recorded. The machine reboots inside the turn.
+4. **Prove.** The next scan of plan 03 shows the approved version, and
+   the machine joins its cluster again. A failed write has no earlier
+   state to return to, so the operator records it in status with an
+   `Event`, and nothing runs it again on its own.
 
-## Questions for the full plan
+## The rehearsal
 
-- **The turn interface.** Milestone 33 has to give a component a way to
-  request a rollout turn for a machine and to see it granted.
-- **Which ESP.** A `liken` machine has two boot slots, each an ESP.
-  The shim has to choose the slot the capsule goes into, and keep the
-  release trials of `init` working.
-- **The privilege of the pod that writes.** It runs only inside a
-  turn, and it needs more than the scan pod.
+fwupd reads the firmware through three paths that the environment
+variable `FWUPD_SYSFSFWDIR` redirects together: the variable store,
+the ESRT, and the DMI tables. A rehearsal points it at a copy:
+
+- The pod mounts the host's `/sys/firmware` read-only, with
+  `recursiveReadOnly: Enabled`, so the `efivars` mount under it is
+  read-only too. It is not privileged. It drops every capability and
+  adds `DAC_READ_SEARCH`, which reading the variables needs.
+- It copies `efi/efivars`, `efi/esrt`, and `dmi/tables` into an
+  `emptyDir` in memory.
+- It runs `fwupdtool refresh` with the catalog file the machine's
+  last scan read, and its jcat, so fwupd offers the same releases the
+  scan saw.
+- It runs `fwupdtool install` with the approved cabinet and the
+  device's fwupd ID, with `FWUPD_SYSFSFWDIR` at the copy,
+  `FWUPD_UEFI_ESP_PATH` at an empty directory, and
+  `FWUPD_LOCALSTATEDIR` in memory.
+- It reports the name, size, and SHA-256 of each variable before and
+  after, the files written under the ESP path, and fwupd's
+  `RequiredFree`.
+
+The operator then checks the difference against the kind. For a
+Secure Boot database: exactly one variable changed, it is the
+device's own variable, it grew, and nothing was written on the ESP.
+The bytes it grew by are the append, and the apply writes those bytes
+and no others.
+
+fwupd exits 1 at the end of a database rehearsal, with `failed to
+reload: SignatureListSize invalid: 0x0`. A plain file stores the raw
+authenticated append, where firmware verifies it and merges its
+entries into the list, so fwupd's read of the variable after its write
+fails. The check reads the difference, not fwupd's exit code, and it
+accepts this one message only after the write that the difference
+shows.
+
+A rehearsal cannot prove three things. The copy verifies no
+signature, so it cannot show that the firmware accepts the append.
+It cannot show what the firmware does with its store as it fills,
+such as garbage collection. And it cannot show that the machine
+boots after the write. The [proof before the first real
+write](#proof-before-the-first-real-write) covers those.
+
+## The rehearsal on liken-1
+
+Run by hand on 2026-10-20, on liken-1 (a GMKtec NucBox G3S, BIOS 5.27
+of 2025-08-26) at `liken` 2026.10.20-001, with the scan image
+`ghcr.io/liken-sh/firmware-operator-scan:2026.10.20-001-dev-004-ce6d6341`.
+Secure Boot is off, the machine is not in setup mode, and Microsoft's
+`PK` is enrolled.
+
+The update was `dbx` 20260402 to 20260707, of the component
+`com.microsoft.dbx.x64-kek2023.firmware`, from the cabinet with the
+SHA-256 `1bf2dd354e35e86138478f17c83724be644e0dc4c2b82fa95a2cfc7ebfad13d5`
+(41,456 bytes).
+
+- The pod copied 70 variables. After the install, it still had 70.
+- `dbx` grew from 21,352 to 38,612 bytes: 17,260 bytes, which are 4
+  bytes of attributes and the 17,256-byte authenticated payload. The
+  other 69 variables were the same byte for byte. Nothing was written
+  under the ESP path.
+- The payload carries one signature list of 291 SHA-256 entries. Its
+  signer is "Microsoft Windows UEFI Key Exchange Key", issued by
+  "Microsoft Corporation KEK 2K CA 2023". liken-1's `KEK` holds that
+  CA, valid until 2038, and "Microsoft Corporation KEK CA 2011", which
+  expired in June 2026. So the firmware should accept the append. This
+  was read from the certificates and not proved on the firmware.
+- fwupd asked for 24,629 bytes free. liken-1's variable store is
+  192K, with 65.6K free.
+- The real `dbx` had the same SHA-256 before and after the rehearsal.
+
+The 17,256 bytes are also the `size` that plan 03's status reports for
+this release. The catalog's size is the size of the payload, not the
+cabinet.
+
+## What fwupd does not check on a `liken` machine
+
+- **Revocation of the running boot chain.** Before a `dbx` update,
+  fwupd checks that the new entries do not revoke a binary that the
+  machine boots. It finds those binaries through UDisks and the
+  entries of `BootOrder`. A `liken` machine has no UDisks, and with
+  `FWUPD_UEFI_ESP_PATH` fwupd makes a volume with no binaries, so the
+  check passes with nothing checked. `--force` does not skip the check,
+  but here there is nothing to skip. `liken`'s binaries are unsigned
+  today, so `liken` machines boot with Secure Boot off, and a firmware
+  with Secure Boot off enforces no `dbx` entry. So no `dbx` update can
+  stop a `liken` machine from booting today. When `liken` signs its boot chain, the operator must hash
+  both slots' EFI binaries with Authenticode and refuse an update
+  whose entries name one of them.
+- **Trust of the cabinet.** `fwupdtool` checks the catalog's signature
+  when it reads the catalog, but only the daemon enforces `OnlyTrusted`
+  on a cabinet. The approval's pinned SHA-256, which the operator
+  checks before the pod reads the cabinet, is the trust.
+- **History.** fwupd records its history in `/var/lib/fwupd`, which a
+  pod loses when it ends, so `fwupdtool get-results` has nothing to
+  read after a reboot. The proof reads the next scan's version
+  instead.
+
+## Field risks
+
+Read in fwupd's issues and in vendors' reports, not measured. The most
+likely first:
+
+1. A variable store too full for the append. The rehearsal records
+   `RequiredFree` against the free space, so the operator refuses this
+   before a write.
+2. Checks of the ESP failing. These belong to capsules.
+3. A `KEK` that does not chain to the update's signer. The firmware
+   refuses the append, and nothing changes. The two `dbx` components
+   in plan 03 exist because of this: each is signed by a different
+   `KEK`.
+4. A TPM PCR 7 measurement that changes with `dbx`. It breaks disk
+   encryption sealed to PCR 7. `liken` seals nothing to it today.
+5. A firmware that resets Secure Boot to its defaults and discards
+   the appended entries.
+6. A rare brick on old or white-label firmware. The reports name
+   machines from Fujitsu, Toshiba, and Framework.
+7. A capsule's boot entry left in `BootOrder`, and its `BootNext`
+   competing with a release trial. Milestone 33 covers both.
+8. A status of failed for an update that applied
+   ([fwupd#11119](https://github.com/fwupd/fwupd/issues/11119)). A
+   status that the operator trusted would retry the update. The proof
+   reads the version from the next scan, not fwupd's status.
+
+## Proof before the first real write
+
+Each step runs only after the one before it passes.
+
+1. **The rehearsal on a real machine.** Done on liken-1, above.
+2. **Real writes under OVMF.** A lab guest with Microsoft's keys
+   enrolled through `virt-fw-vars` and Secure Boot on takes the same
+   `dbx`, `db`, and `KEK` cabinets for real, reboots, and boots `liken`.
+   `make -C dev-cluster reset-nvram` returns the store between runs.
+   This shows the firmware accepting the append, and the next scan
+   reading the new version.
+3. **The revocation check.** Hash `liken`'s EFI binaries of a release
+   with Authenticode, and compare them with every entry of the new
+   `dbx`. This runs against the release's files, with no machine.
+4. **One real machine.** liken-1 first, with plan 04's `spec.machines`
+   selecting it alone.
+
+Capsules come after milestone 33, with their own proof.
+
+## Questions for the full design
+
+- **Who makes the write.** Milestone 33 makes `init` the only process
+  that writes the variable store, and its shim turns fwupd's writes
+  into requests. The rehearsal is already the shim's first half: its
+  difference is the request. The open choice is the second half. `init`
+  can write the recorded append when the OS's interface carries it,
+  which keeps one writer. Or the apply pod can write it, with
+  `efivarfs` read-write inside the turn, because a database update
+  touches no variable `init` uses. The first is the likely choice.
+- **The turn interface.** Milestone 33 has to give a component a way
+  to request a rollout turn for a machine and to see it granted.
+- **When to rehearse.** A rehearsal after the approval shows what the
+  approved version writes. A rehearsal of each machine's newest
+  release before any approval would show it to the person who
+  decides, at the cost of a download of each cabinet on each machine.
+- **Which ESP.** For capsules. A `liken` machine has two boot slots,
+  each an ESP. The shim has to choose the slot the capsule goes into,
+  and keep the release trials of `init` working.
+
+## Considered and set aside
+
+- **`fwupdtool install-blob`.** It writes a payload with no cabinet,
+  so it checks no signature and records no history. The approval pins
+  the cabinet, and the rehearsal reads the payload from it.
+- **The fwupd daemon.** It enforces `OnlyTrusted`, but it holds memory
+  on every machine all the time, and it writes the variable store on
+  its own schedule.
+- **Capsules first.** They write `BootNext` and `BootOrder`, which
+  `init` owns, and none was offered to the testbed in the drills.

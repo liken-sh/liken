@@ -41,7 +41,9 @@ for the Linux Vendor Firmware Service (LVFS). The operator runs a short
 read-only scan pod on each machine, and records each device, the
 version it runs, and the newer releases the catalog offers in a
 `Firmware` for each catalog component, such as `microsoft-dbx-x64`
-for the Secure Boot revocation list. It installs none of them.
+for the Secure Boot revocation list. You approve a release by pinning
+its version and cabinet on that `Firmware`. The operator installs
+none of them yet.
 
 ```sh
 kubectl get firmware -l firmware.liken.sh/discovered
@@ -54,8 +56,10 @@ Start here:
   write a `Firmware` and read what it did.
 * [Find firmware updates](/docs/guides/find-updates/): read which
   updates the catalog offers for each machine.
+* [Approve a firmware update](/docs/guides/approve-an-update/): pin
+  the release you want and read which machines wait for it.
 * [Troubleshoot](/docs/guides/troubleshoot/) an upload or a scan that
-  failed or never started.
+  failed or never started, or an approval that is `False`.
 * [Reference](/docs/reference/firmware/): every field of a
   `Firmware` and a [`FirmwareCatalog`](/docs/reference/firmwarecatalog/).
 

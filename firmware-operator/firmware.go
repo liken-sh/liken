@@ -61,11 +61,22 @@ type upload struct {
 }
 
 // update marks a Firmware as the rule for the firmware that a device
-// keeps. Exactly one of its fields names the group of devices it covers
-// (grouping.go): a catalog component, or a set of GUIDs.
+// keeps. Exactly one of Component and GUIDs names the group of devices
+// it covers (grouping.go): a catalog component, or a set of GUIDs.
+// Version and Cabinet are a person's approval of one release of the
+// component (approval.go).
 type update struct {
-	Component string   `json:"component,omitempty"`
-	GUIDs     []string `json:"guids,omitempty"`
+	Component string         `json:"component,omitempty"`
+	GUIDs     []string       `json:"guids,omitempty"`
+	Version   string         `json:"version,omitempty"`
+	Cabinet   *pinnedCabinet `json:"cabinet,omitempty"`
+}
+
+// pinnedCabinet is the file an approval installs, pinned by its SHA-256
+// the way a digest pins an image.
+type pinnedCabinet struct {
+	URL    string `json:"url"`
+	SHA256 string `json:"sha256"`
 }
 
 type firmwareStatus struct {
@@ -97,10 +108,11 @@ const (
 	resultConflict = "Conflict"
 )
 
-// counts gives the number of upload entries in each result, and the
+// counts gives the number of upload entries in each result, the
 // number of machines that an update rule's entries name and that a
-// catalog offers a release. Each count is written even when it is
-// zero, so a printer column shows 0 and not an empty cell.
+// catalog offers a release, and the number of machines an approval
+// waits for. Each count is written even when it is zero, so a printer
+// column shows 0 and not an empty cell.
 type counts struct {
 	Running  int `json:"running"`
 	Loaded   int `json:"loaded"`
@@ -108,6 +120,7 @@ type counts struct {
 	Conflict int `json:"conflict"`
 	Machines int `json:"machines"`
 	Behind   int `json:"behind"`
+	Pending  int `json:"pending"`
 }
 
 // condition is the condition type that every liken component reports,

@@ -11,7 +11,7 @@ installs the newest release and keeps its entry needs an approved
 update, so it waits for plan 05. This plan finds the firmware that
 each machine's devices keep, and the newer releases that a catalog
 offers for it, and records both in the cluster. It installs nothing.
-[Plan 04](../04-approval.md) lets a person approve a version, and
+[Plan 04](04-approval.md) lets a person approve a version, and
 [plan 05](../05-applying-updates.md) applies an approved version, one
 machine at a time. The three plans replace the stub
 [plan 02](../rejected/02-updates.md). Root

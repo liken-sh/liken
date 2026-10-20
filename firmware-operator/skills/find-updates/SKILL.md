@@ -118,17 +118,19 @@ kubectl get firmware -l firmware.liken.sh/discovered
 ```
 
 ```
-NAME                           VALID    LOADED   RUNNING   FAILED   CONFLICT   MACHINES   BEHIND   AGE
-frame-laptop-ryzenai300-bios   <none>   <none>   <none>    <none>   <none>     3          1        2d
-microsoft-dbx-x64              <none>   <none>   <none>    <none>   <none>     3          2        2d
-uefi-ca-7420e8dc               <none>   <none>   <none>    <none>   <none>     1          0        2d
+NAME                           VALID    LOADED   RUNNING   FAILED   CONFLICT   MACHINES   BEHIND   VERSION   APPROVED   PENDING   AGE
+frame-laptop-ryzenai300-bios   <none>   <none>   <none>    <none>   <none>     3          1        <none>    <none>     0         2d
+microsoft-dbx-x64              <none>   <none>   <none>    <none>   <none>     3          2        <none>    <none>     0         2d
+uefi-ca-7420e8dc               <none>   <none>   <none>    <none>   <none>     1          0        <none>    <none>     0         2d
 ```
 
 `MACHINES` counts the machines that have an entry in the object.
 `BEHIND` counts the machines for which the catalog offers at least one
 release. A machine whose device installed the newest release stays in
 `MACHINES` and leaves `BEHIND`. A discovered `Firmware` has no `Valid` condition and no
-upload counts, so those columns are empty.
+upload counts, so those columns are empty. `VERSION`, `APPROVED`, and
+`PENDING` belong to an approval, which
+[Approve a firmware update](https://liken.sh/firmware/docs/guides/approve-an-update/) covers.
 
 The entries are in `status.machines`, one for each machine's device:
 
@@ -220,8 +222,9 @@ minutes is `Failed`.
 
 ## What comes next
 
-This release finds updates and records them. It does not approve a
-version, and it does not apply one. A later release adds the approval
-and the apply. Until then, no `Firmware` that the operator discovers
-changes a device. [How discovery works](https://liken.sh/firmware/docs/concepts/discovery/)
-gives the reasons for the design.
+This release finds updates and records them, and
+[Approve a firmware update](https://liken.sh/firmware/docs/guides/approve-an-update/) records which
+release you want. It does not apply one. A later release adds the
+apply. Until then, no `Firmware` that the operator discovers changes a
+device. [How discovery works](https://liken.sh/firmware/docs/concepts/discovery/) gives the
+reasons for the design.

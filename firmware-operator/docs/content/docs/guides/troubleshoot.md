@@ -1,13 +1,15 @@
 ---
-title: Troubleshoot uploads and scans
+title: Troubleshoot uploads, scans, and approvals
 weight: 30
-description: "Find why a Firmware's upload failed or never started: a Failed entry and its message, a Conflict between two rules, a selector that does not compile or matches nothing, an upload pod that stays Pending, and a claimed device that stays Pending because its firmware is not loaded. Find why discovery found nothing: a FirmwareCatalog that is not Ready, a scan record that is Failed or CatalogMoved, a machine that is never scanned, and a discovered Firmware that keeps the entry of a machine that is off. Use when kubectl get firmware shows Failed or Conflict, when a bare chip gets no upload, when a pod that claims a camera does not start, when kubectl get firmwarecatalog shows Ready False, or when a machine has no scan record."
+description: "Find why a Firmware's upload failed or never started: a Failed entry and its message, a Conflict between two rules, a selector that does not compile or matches nothing, an upload pod that stays Pending, and a claimed device that stays Pending because its firmware is not loaded. Find why discovery found nothing: a FirmwareCatalog that is not Ready, a scan record that is Failed or CatalogMoved, a machine that is never scanned, and a discovered Firmware that keeps the entry of a machine that is off. Find why an approval's Approved condition is False: CabinetDiffers, NotOffered, or MachinesInvalid, and why the API server refuses an approval. Use when kubectl get firmware shows Failed or Conflict, when a bare chip gets no upload, when a pod that claims a camera does not start, when kubectl get firmwarecatalog shows Ready False, when a machine has no scan record, or when kubectl get firmware shows Approved False."
 ---
 
-# Troubleshoot uploads and scans
+# Troubleshoot uploads, scans, and approvals
 
-The first part of this guide covers uploads, and the second part covers
-the scans that find updates ([Find firmware updates](../find-updates/)).
+The first part of this guide covers uploads, the second part covers
+the scans that find updates ([Find firmware updates](../find-updates/)),
+and the third part covers approvals
+([Approve a firmware update](../approve-an-update/)).
 
 ## Uploads
 
@@ -218,3 +220,55 @@ The operator deletes a discovered `Firmware` when no entry is left and
 nobody edited its spec. An object whose spec someone edited stays, and
 you delete it with `kubectl delete firmware <name>`. The operator then
 creates it again at the next scan that reports a device of its group.
+
+## Approvals
+
+`kubectl get firmware` shows the `Approved` condition in the
+`APPROVED` column. The condition's message names the machines, so read
+it first:
+
+```sh
+kubectl get firmware <name> -o jsonpath='{.status.conditions[?(@.type=="Approved")].message}'
+```
+
+### The API server refuses the approval
+
+The CRD checks an approval before the operator sees it:
+
+- `an approval needs both version and cabinet`: add the one that is
+  missing.
+- `only an update of a component takes a version`: the `Firmware` is
+  for a set of GUIDs, such as `uefi-ca-7420e8dc`. No catalog offers its
+  device a release, so it has nothing to approve.
+- `machines limits an approval`: `spec.machines` needs
+  `spec.update.version`.
+- A `sha256` that is not 64 lowercase hex digits, or a `url` that does
+  not start with `https://`, fails the schema.
+
+### Approved is False with CabinetDiffers
+
+A catalog offers the version you approved, but in a cabinet whose
+SHA-256 is not the one you pinned. Compare your `spec.update.cabinet.sha256`
+with the release's `cabinet.sha256` in `status.machines`. When you
+copied it wrong, fix it. When you copied it right, the catalog serves
+another file under the same version. Read the release again, and
+decide whether to approve the new file.
+
+### Approved is False with NotOffered
+
+No catalog offers the version to a machine that the approval covers.
+Check each of these:
+
+- **The version.** It must match a release's `version` in
+  `status.machines` exactly, as a string.
+- **`spec.machines`.** It must select a `Machine` that has an entry in
+  `status.machines`. List the labels with
+  `kubectl get machine --show-labels`.
+- **The catalog withdrew the release.** LVFS can remove a release. The
+  scan after that writes entries with no such release, and the
+  approval moves to `False`. Choose another release.
+
+### Approved is False with MachinesInvalid
+
+`spec.machines` does not compile, such as a label key with a space in
+it. The message gives the error. Fix the selector.
