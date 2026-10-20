@@ -84,7 +84,7 @@ type firmwareStatus struct {
 	Conditions         []condition    `json:"conditions,omitempty"`
 	Devices            []deviceEntry  `json:"devices,omitempty"`
 	Machines           []machineEntry `json:"machines,omitempty"`
-	Counts             counts         `json:"counts"`
+	Counts             counts         `json:"counts,omitzero"`
 }
 
 // deviceEntry is the latest appearance of a matched device in one
@@ -108,16 +108,31 @@ const (
 	resultConflict = "Conflict"
 )
 
-// counts gives the number of upload entries in each result, the
-// number of machines that an update rule's entries name and that a
-// catalog offers a release, and the number of machines an approval
-// waits for. Each count is written even when it is zero, so a printer
-// column shows 0 and not an empty cell.
+// counts holds the counts of one kind of rule: an upload rule's or an
+// update rule's, never both. The JSON encoder writes an embedded
+// struct's fields at the level of counts, and writes none of them when
+// its pointer is nil. So a rule's own counts are written even when they
+// are zero, and its printer columns show 0, and the other kind's
+// columns stay empty.
 type counts struct {
+	*UploadCounts
+	*UpdateCounts
+}
+
+// UploadCounts gives the number of an upload rule's entries in each
+// result. It is exported because the JSON decoder cannot allocate an
+// embedded pointer to an unexported type.
+type UploadCounts struct {
 	Running  int `json:"running"`
 	Loaded   int `json:"loaded"`
 	Failed   int `json:"failed"`
 	Conflict int `json:"conflict"`
+}
+
+// UpdateCounts gives the number of machines that an update rule's
+// entries name, the number of those that a catalog offers a release,
+// and the number that an approval waits for.
+type UpdateCounts struct {
 	Machines int `json:"machines"`
 	Behind   int `json:"behind"`
 	Pending  int `json:"pending"`

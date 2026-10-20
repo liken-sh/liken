@@ -118,10 +118,10 @@ kubectl get firmware -l firmware.liken.sh/discovered
 ```
 
 ```
-NAME                           VALID    LOADED   RUNNING   FAILED   CONFLICT   MACHINES   BEHIND   VERSION   APPROVED   PENDING   AGE
-frame-laptop-ryzenai300-bios   <none>   <none>   <none>    <none>   <none>     3          1        <none>    <none>     0         2d
-microsoft-dbx-x64              <none>   <none>   <none>    <none>   <none>     3          2        <none>    <none>     0         2d
-uefi-ca-7420e8dc               <none>   <none>   <none>    <none>   <none>     1          0        <none>    <none>     0         2d
+NAME                           VALID   LOADED   RUNNING   FAILED   CONFLICT   MACHINES   BEHIND   VERSION   APPROVED   PENDING   AGE
+frame-laptop-ryzenai300-bios                                                3          1                             0         2d
+microsoft-dbx-x64                                                           3          2                             0         2d
+uefi-ca-7420e8dc                                                            1          0                             0         2d
 ```
 
 `MACHINES` counts the machines that have an entry in the object.

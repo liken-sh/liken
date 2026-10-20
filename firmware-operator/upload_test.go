@@ -146,7 +146,7 @@ func TestAStartedUploadIsRunningInTheStatus(t *testing.T) {
 		if e != want {
 			t.Errorf("the entry is %+v, want %+v", e, want)
 		}
-		if got := w.api.firmware(t, "qhy5l-ii").Status.Counts; got != (counts{Running: 1}) {
+		if got := uploadCountsOf(t, w.api.firmware(t, "qhy5l-ii")); got != (UploadCounts{Running: 1}) {
 			t.Errorf("status.counts = %+v, want one running", got)
 		}
 		want2 := []posted{{"Normal", reasonCompiled}, {"Normal", reasonUploadStarted}}

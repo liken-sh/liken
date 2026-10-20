@@ -198,7 +198,7 @@ func (o *operator) settleEntries(f *firmware, change func([]machineEntry) []mach
 		next := held.Status
 		next.Machines = change(held.Status.Machines)
 		sortEntries(next.Machines)
-		next.Counts.Machines, next.Counts.Behind = machineCounts(next.Machines)
+		next.Counts = counts{UpdateCounts: updateCounts(next.Machines, held.Status.Counts.pending())}
 		if len(next.Machines) == 0 {
 			next.Machines = nil
 		}
@@ -235,9 +235,12 @@ func sortEntries(entries []machineEntry) {
 	})
 }
 
-// machineCounts answers the number of machines the entries name, and
-// the number of those with at least one release offered.
-func machineCounts(entries []machineEntry) (int, int) {
+// updateCounts answers an update rule's counts: the machines the
+// entries name, the machines with at least one release offered, and
+// the machines an approval waits for, which approval.go counts. The
+// counts are new, so a change to them never writes through to the
+// status that the API server holds.
+func updateCounts(entries []machineEntry, pending int) *UpdateCounts {
 	all, behind := map[string]bool{}, map[string]bool{}
 	for _, e := range entries {
 		all[e.Machine] = true
@@ -245,7 +248,16 @@ func machineCounts(entries []machineEntry) (int, int) {
 			behind[e.Machine] = true
 		}
 	}
-	return len(all), len(behind)
+	return &UpdateCounts{Machines: len(all), Behind: len(behind), Pending: pending}
+}
+
+// pending answers the count of machines an approval waits for, or 0
+// when the status holds no update counts.
+func (c counts) pending() int {
+	if c.UpdateCounts == nil {
+		return 0
+	}
+	return c.UpdateCounts.Pending
 }
 
 // offers answers an UpdateAvailable notice for each entry whose newest

@@ -96,14 +96,14 @@ func TestAScanResultBecomesTheRecordAndTheDiscoveredObjects(t *testing.T) {
 		if bios.Spec.Update.Component != frameworkBIOS().id || bios.Spec.Update.GUIDs != nil || bios.Spec.Selector != "" || bios.Spec.Upload != nil {
 			t.Errorf("the BIOS spec is %+v, want only update.component", bios.Spec)
 		}
-		if got := bios.Status.Counts; got != (counts{Machines: 1, Behind: 1}) {
+		if got := updateCountsOf(t, &bios); got != (UpdateCounts{Machines: 1, Behind: 1}) {
 			t.Errorf("the BIOS counts are %+v, want one machine, one behind", got)
 		}
 		dbxObject := w.api.firmware(t, dbxGUIDsName)
 		if !slices.Equal(dbxObject.Spec.Update.GUIDs, []string{dbxGUID}) || dbxObject.Spec.Update.Component != "" {
 			t.Errorf("the dbx spec is %+v, want only update.guids", dbxObject.Spec.Update)
 		}
-		if got := dbxObject.Status.Counts; got != (counts{Machines: 1}) {
+		if got := updateCountsOf(t, &dbxObject); got != (UpdateCounts{Machines: 1}) {
 			t.Errorf("the dbx counts are %+v, want one machine, none behind", got)
 		}
 		if got := len(w.api.scans(t)); got != 0 {

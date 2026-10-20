@@ -38,7 +38,7 @@ func approved(t *testing.T, w *world) (condition, int) {
 	t.Helper()
 	f := w.api.firmware(t, biosObjectName)
 	c, _ := conditions.Find(f.Status.Conditions, approvedCondition)
-	return c, f.Status.Counts.Pending
+	return c, updateCountsOf(t, &f).Pending
 }
 
 func TestAnApprovedVersionThatACatalogOffersIsPending(t *testing.T) {

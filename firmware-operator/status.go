@@ -94,7 +94,7 @@ func composeStatus(f *firmware, p plan, now time.Time) (firmwareStatus, []notice
 		notices = append(notices, notice{reason: reasonUploadStarted, message: a.device + " on " + a.machine + ": " + a.message})
 	}
 
-	next := firmwareStatus{ObservedGeneration: f.Metadata.Generation}
+	next := firmwareStatus{ObservedGeneration: f.Metadata.Generation, Counts: counts{UploadCounts: &UploadCounts{}}}
 	for _, e := range entries {
 		next.Devices = append(next.Devices, e)
 		next.Counts.add(e.Result)
@@ -114,7 +114,7 @@ func composeStatus(f *firmware, p plan, now time.Time) (firmwareStatus, []notice
 	return next, notices, transitioned
 }
 
-func (c *counts) add(result string) {
+func (c *UploadCounts) add(result string) {
 	switch result {
 	case resultRunning:
 		c.Running++

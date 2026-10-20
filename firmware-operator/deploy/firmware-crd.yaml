@@ -440,7 +440,14 @@ spec:
                         description: "When the scan that reported the entry ended."
                 counts:
                   type: object
-                  description: "The number of entries in `devices` with each result, the machines that `machines` names, and the machines an approval waits for."
+                  description: >-
+                    The counts of the rule's own kind. An upload has the
+                    number of entries in `devices` with each result. An
+                    update has the machines that `machines` names, the
+                    ones a catalog offers a release, and the ones an
+                    approval waits for. A rule writes its own counts even
+                    when they are 0, and never the other kind's, so the
+                    other kind's printer columns stay empty.
                   properties:
                     running:
                       type: integer

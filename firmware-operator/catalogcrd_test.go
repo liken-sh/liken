@@ -88,6 +88,6 @@ func TestADiscoveredFirmwareValidates(t *testing.T) {
 	c, pending, _ := approval(f.Spec.Update, f.Spec.Machines, f.Status.Machines, map[string]map[string]string{"node-2": {"canary": "true"}})
 	c.ObservedGeneration, c.LastTransitionTime = 2, time.Date(2026, 10, 20, 22, 0, 0, 0, time.UTC)
 	f.Status.Conditions = []condition{c}
-	f.Status.Counts = counts{Machines: 1, Behind: 1, Pending: pending}
+	f.Status.Counts = counts{UpdateCounts: &UpdateCounts{Machines: 1, Behind: 1, Pending: pending}}
 	assertTheSchemaKeeps(t, firmwareCRD, f)
 }

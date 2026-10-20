@@ -130,8 +130,10 @@ func (o *operator) settleApproval(f *firmware, machineLabels map[string]map[stri
 	written, err := informer.SettleStatus[firmware](o.client, o.firmwares.Versions, firmwarePath(f.Metadata.Name), f, func(held *firmware) bool {
 		next := held.Status
 		next.Conditions = slices.Clone(held.Status.Conditions)
+		var pending int
 		var holds bool
-		c, next.Counts.Pending, holds = approval(held.Spec.Update, held.Spec.Machines, held.Status.Machines, machineLabels)
+		c, pending, holds = approval(held.Spec.Update, held.Spec.Machines, held.Status.Machines, machineLabels)
+		next.Counts = counts{UpdateCounts: updateCounts(held.Status.Machines, pending)}
 		transitioned = false
 		if holds {
 			c.ObservedGeneration = held.Metadata.Generation

@@ -112,9 +112,13 @@ starts the upload. `kubectl get firmware` counts the result of each
 port where the rule matched a device:
 
 ```
-NAME       VALID   LOADED   RUNNING   FAILED   CONFLICT   AGE
-qhy5l-ii   True    1        0         0        0          5m
+NAME       VALID   LOADED   RUNNING   FAILED   CONFLICT   MACHINES   BEHIND   VERSION   APPROVED   PENDING   AGE
+qhy5l-ii   True    1        0         0        0                                                                   5m
 ```
+
+`MACHINES`, `BEHIND`, `VERSION`, `APPROVED`, and `PENDING` belong to
+the `Firmware` objects that find and approve updates, so an upload
+rule leaves them empty.
 
 `status.devices` has one entry for each port:
 

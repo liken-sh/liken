@@ -322,3 +322,23 @@ func (w *world) postedAbout(name string) []posted {
 	}
 	return out
 }
+
+// uploadCountsOf answers an upload rule's counts, and fails the test
+// when the status holds no upload counts or holds an update rule's.
+func uploadCountsOf(t *testing.T, f firmware) UploadCounts {
+	t.Helper()
+	if f.Status.Counts.UploadCounts == nil || f.Status.Counts.UpdateCounts != nil {
+		t.Fatalf("status.counts of %s is %+v, want only the upload counts", f.Metadata.Name, f.Status.Counts)
+	}
+	return *f.Status.Counts.UploadCounts
+}
+
+// updateCountsOf answers an update rule's counts, and fails the test
+// when the status holds no update counts or holds an upload rule's.
+func updateCountsOf(t *testing.T, f *firmware) UpdateCounts {
+	t.Helper()
+	if f.Status.Counts.UpdateCounts == nil || f.Status.Counts.UploadCounts != nil {
+		t.Fatalf("status.counts of %s is %+v, want only the update counts", f.Metadata.Name, f.Status.Counts)
+	}
+	return *f.Status.Counts.UpdateCounts
+}

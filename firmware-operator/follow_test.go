@@ -28,7 +28,7 @@ func TestTheDeviceLeavingAfterSuccessIsLoaded(t *testing.T) {
 		if e.Result != resultLoaded || e.DeviceNumber != 12 {
 			t.Errorf("the entry is %+v, want Loaded for device number 12", e)
 		}
-		if got := w.api.firmware(t, "qhy5l-ii").Status.Counts; got != (counts{Loaded: 1}) {
+		if got := uploadCountsOf(t, w.api.firmware(t, "qhy5l-ii")); got != (UploadCounts{Loaded: 1}) {
 			t.Errorf("status.counts = %+v, want one loaded", got)
 		}
 		if got, claims := len(w.api.uploads(t)), len(w.api.claims(t)); got+claims != 0 {

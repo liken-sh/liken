@@ -36,7 +36,7 @@ func TestTwoRulesOnOneDeviceConflict(t *testing.T) {
 			if e.Result != resultConflict || !strings.Contains(e.Message, other) {
 				t.Errorf("the entry of %s is %+v, want Conflict naming %s", rule, e, other)
 			}
-			if got := w.api.firmware(t, rule).Status.Counts; got != (counts{Conflict: 1}) {
+			if got := uploadCountsOf(t, w.api.firmware(t, rule)); got != (UploadCounts{Conflict: 1}) {
 				t.Errorf("status.counts of %s = %+v, want one conflict", rule, got)
 			}
 			want := []posted{{"Normal", reasonCompiled}, {"Warning", reasonConflict}}
@@ -53,8 +53,9 @@ func TestTwoRulesOnOneDeviceConflict(t *testing.T) {
 	})
 }
 
-// A rule that matches no device writes each count as 0, so the printer
-// columns of kubectl get show 0 and not an empty cell.
+// A rule that matches no device writes each upload count as 0, so its
+// printer columns show 0 and not an empty cell. It writes no count of an
+// update rule, so those columns stay empty.
 func TestARuleWithNoDevicesWritesZeroCounts(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
@@ -64,7 +65,7 @@ func TestARuleWithNoDevicesWritesZeroCounts(t *testing.T) {
 		w.api.mu.Lock()
 		status := clone(w.api.objects[firmwaresPath]["qhy5l-ii"])["status"].(map[string]any)
 		w.api.mu.Unlock()
-		want := map[string]any{"running": 0.0, "loaded": 0.0, "failed": 0.0, "conflict": 0.0, "machines": 0.0, "behind": 0.0, "pending": 0.0}
+		want := map[string]any{"running": 0.0, "loaded": 0.0, "failed": 0.0, "conflict": 0.0}
 		if got, _ := status["counts"].(map[string]any); !maps.Equal(got, want) {
 			t.Errorf("status.counts = %v, want %v", status["counts"], want)
 		}

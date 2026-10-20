@@ -74,7 +74,7 @@ The cabinet file of the approved release, copied from the release in `status.mac
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | An upload has `Valid`. It is `True` with the reason `Compiled` when the selector and `spec.machines` compile. It is `False` with the reason `SelectorInvalid` when either one does not, and the message gives the error. A rule that is not valid runs nowhere. An update with `version` has `Approved`, over the machines that `spec.machines` covers. It is `True` with the reason `Offered` when a catalog offers the version in the pinned cabinet to at least one machine, and with `Installed` when none is offered it and at least one runs it. It is `False` with `CabinetDiffers` when a catalog offers the version only in another cabinet, with `NotOffered` when no catalog offers it, and with `MachinesInvalid` when `spec.machines` does not compile. The message names the machines. |
 | <span id="status--devices"></span>`devices` | [\[\]object](#statusdevices) | no | One entry for each port, a machine and a USB address, where the rule matched a device. The entry describes the latest appearance of a device in the port, so the list grows only with the number of ports. A `Loaded` entry stays after the bare device leaves. |
 | <span id="status--machines"></span>`machines` | [\[\]object](#statusmachines) | no | One entry for each machine's device in an update rule's group, from that machine's last scan against each `FirmwareCatalog`. A scan replaces its machine's entries. An entry leaves only when the machine's next scan does not report the device, or when its `Machine` is deleted, so a machine that is off keeps its entries. |
-| <span id="status--counts"></span>`counts` | [object](#statuscounts) | no | The number of entries in `devices` with each result, the machines that `machines` names, and the machines an approval waits for. |
+| <span id="status--counts"></span>`counts` | [object](#statuscounts) | no | The counts of the rule's own kind. An upload has the number of entries in `devices` with each result. An update has the machines that `machines` names, the ones a catalog offers a release, and the ones an approval waits for. A rule writes its own counts even when they are 0, and never the other kind's, so the other kind's printer columns stay empty. |
 
 ### status.conditions[]
 
@@ -142,7 +142,7 @@ The cabinet file that carries the release.
 
 ### status.counts
 
-The number of entries in `devices` with each result, the machines that `machines` names, and the machines an approval waits for.
+The counts of the rule's own kind. An upload has the number of entries in `devices` with each result. An update has the machines that `machines` names, the ones a catalog offers a release, and the ones an approval waits for. A rule writes its own counts even when they are 0, and never the other kind's, so the other kind's printer columns stay empty.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

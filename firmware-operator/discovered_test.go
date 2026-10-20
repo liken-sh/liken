@@ -38,7 +38,7 @@ func TestAnObjectWithNoEntryIsDeletedUnlessChanged(t *testing.T) {
 			t.Fatalf("%d Firmware objects remain, want only the changed one", got)
 		}
 		kept := w.api.firmware(t, dbxGUIDsName)
-		if len(kept.Status.Machines) != 0 || kept.Status.Counts != (counts{}) {
+		if len(kept.Status.Machines) != 0 || updateCountsOf(t, &kept) != (UpdateCounts{}) {
 			t.Errorf("the changed object's status is %+v, want no entry and zero counts", kept.Status)
 		}
 	})
@@ -55,7 +55,7 @@ func TestADeviceThatInstallsTheNewestReleaseKeepsItsComponent(t *testing.T) {
 		if len(bios.Status.Machines) != 1 || bios.Status.Machines[0].Version != "0.0.4.2" || len(bios.Status.Machines[0].Releases) != 0 {
 			t.Errorf("the BIOS entries are %+v, want node-2 at 0.0.4.2 with no release", bios.Status.Machines)
 		}
-		if bios.Status.Counts != (counts{Machines: 1}) {
+		if updateCountsOf(t, &bios) != (UpdateCounts{Machines: 1}) {
 			t.Errorf("the BIOS counts are %+v, want one machine, none behind", bios.Status.Counts)
 		}
 		if got := len(w.api.discoveredObjects(t)); got != 2 {
@@ -81,7 +81,7 @@ func TestADeviceWithAFirstReleaseMovesToItsComponent(t *testing.T) {
 			t.Fatalf("the discovered objects are %v, want %v", names, want)
 		}
 		moved := w.api.firmware(t, dbxObjectName)
-		if moved.Status.Counts != (counts{Machines: 1, Behind: 1}) {
+		if updateCountsOf(t, &moved) != (UpdateCounts{Machines: 1, Behind: 1}) {
 			t.Errorf("the dbx component's counts are %+v, want one machine, one behind", moved.Status.Counts)
 		}
 	})
@@ -110,7 +110,7 @@ func TestOneComponentOnTwoMachinesIsOneObject(t *testing.T) {
 		if len(objects) != 1 || objects[0].Metadata.Name != dbxObjectName {
 			t.Fatalf("the discovered objects are %+v, want only the dbx component's", objects)
 		}
-		if got := objects[0].Status.Counts; got != (counts{Machines: 2, Behind: 2}) {
+		if got := updateCountsOf(t, &objects[0]); got != (UpdateCounts{Machines: 2, Behind: 2}) {
 			t.Errorf("the counts are %+v, want two machines, both behind", got)
 		}
 	})
