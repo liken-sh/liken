@@ -3,7 +3,7 @@
 This directory holds the design documents of `firmware-operator`, the
 add-on that loads and updates the firmware of the devices on `liken`
 machines. Root [plan 81](../../plans/81-firmware.md) records which
-component owns each kind of firmware. The component has no code yet.
+component owns each kind of firmware.
 
 Each `plans/` directory numbers its own plans. A new plan takes the
 next number after the highest one in this directory and its
@@ -32,14 +32,14 @@ the device's node, with a claim on that one device.
 It ships apart from the OS, like display-operator and the other
 hardware operators, and a person installs it from its own manual. In
 the CI graph it is on the same layer as those operators. Its
-`package.toml` will depend on `kubernetes`, `notices`, and `trust`,
-and its docs prefix will be `firmware`. The directory has no
-`package.toml` until it has code, because `ci/` builds every directory
-that has one.
+`package.toml` depends on `kubernetes` and `notices`, and its docs
+prefix is `firmware`. It does not depend on `trust`, because the
+operator makes no TLS call except to the API server, which it
+verifies with the CA of its `ServiceAccount`.
 
 ## The plans
 
 | Plan | Status |
 |---|---|
-| [01](01-uploads.md) | Proposed: the `Firmware` resource and its `upload` action, which writes firmware into a device each time the device appears |
+| [01](01-uploads.md) | Being built: the `Firmware` resource and its `upload` action, which writes firmware into a device each time the device appears |
 | [02](02-updates.md) | Proposed, a stub: the `update` action, which flashes a new version into a device that keeps it, and the proposals that the operator makes from the LVFS catalog |

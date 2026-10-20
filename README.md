@@ -43,6 +43,10 @@ Each top-level directory is one component, named for what it ships:
   bus rules of a screen client. The idle screen and the media browser
   both link it.
 - [`people-operator/`](people-operator/) defines the `Person` resource.
+- [`firmware-operator/`](firmware-operator/) writes firmware into the
+  USB devices that hold none of their own, each time one appears on a
+  machine, and its manual is at
+  [liken.sh/firmware](https://liken.sh/firmware/).
 - [`observatory-operator/`](observatory-operator/) runs an
   observatory's hardware through INDI, and its manual is at
   [liken.sh/observatory](https://liken.sh/observatory/).

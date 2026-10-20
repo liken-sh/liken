@@ -1,0 +1,150 @@
+package main
+
+// Four watches wake the pass: one of every Firmware, one of the
+// ResourceSlices that machine-operator publishes, one of the upload
+// pods in the operator's namespace, and one of every Machine for
+// spec.machines. All four run on client-go's reflector, through the
+// shared informer package. A handler only wakes the pass, and the pass
+// reads what it needs. The only timers are clocks: the deadline of an
+// upload in progress, and the wait after a pass that failed.
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"time"
+
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/tools/cache"
+
+	"github.com/liken-sh/liken/kubernetes/informer"
+	"github.com/liken-sh/liken/kubernetes/memo"
+)
+
+var (
+	firmwaresResource = schema.GroupVersionResource{Group: "firmware.liken.sh", Version: "v1alpha1", Resource: "firmwares"}
+	slicesResource    = schema.GroupVersionResource{Group: "resource.k8s.io", Version: "v1", Resource: "resourceslices"}
+	podsResource      = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+	machinesResource  = schema.GroupVersionResource{Group: "liken.sh", Version: "v1alpha1", Resource: "machines"}
+)
+
+// retryDelay is the wait after a pass that failed, such as a status
+// write the API server refused while it restarts.
+const retryDelay = 30 * time.Second
+
+// run watches until the context ends, and runs a pass for each wake.
+// It returns after the pass in flight, once the watches have ended, so
+// the caller may release the Lease when it returns.
+func (o *operator) run(ctx context.Context, watcher dynamic.Interface) {
+	wake := make(chan struct{}, 1)
+	signal := func() { poke(wake) }
+	start := func(source informer.Source, handler cache.ResourceEventHandler) *informer.Collection {
+		return informer.Start(ctx, watcher, source, informer.Options{Handler: handler, Synced: signal})
+	}
+
+	firmwares := start(informer.Source{Resource: firmwaresResource}, markHandler(signal, firmwareMark))
+	// The API server filters the slices by driver, so a GPU vendor's
+	// slices never reach the operator.
+	slices := start(informer.Source{Resource: slicesResource, FieldSelector: "spec.driver=" + driverName}, markHandler(signal, sliceMark))
+	pods := start(informer.Source{Resource: podsResource, Namespace: o.namespace, LabelSelector: uploadLabel + "=" + uploadLabelValue},
+		markHandler(signal, podMark))
+	machines := start(informer.Source{Resource: machinesResource}, markHandler(signal, machineMark))
+	view := firmwares.View()
+	view.Whole = true
+	o.firmwares = informer.Held{View: view, Versions: memo.New()}
+	o.slices, o.pods, o.machines = slices.View(), pods.View(), machines.View()
+
+	var deadline, retry <-chan time.Time
+	for {
+		select {
+		case <-ctx.Done():
+		case <-wake:
+		case <-deadline:
+		case <-retry:
+		}
+		// select picks at random among the cases that are ready, so a
+		// wake that came with the stop is checked here and starts no
+		// pass.
+		if ctx.Err() != nil {
+			for _, watch := range []*informer.Collection{firmwares, slices, pods, machines} {
+				<-watch.Done()
+			}
+			return
+		}
+		next, err := o.pass(ctx)
+		retry = nil
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "firmware-operator: %v\n", err)
+			retry = time.After(retryDelay)
+		}
+		deadline = nil
+		if !next.IsZero() {
+			deadline = time.After(time.Until(next))
+		}
+	}
+}
+
+// poke wakes the pass. The channel holds one wake, so a burst of
+// events makes one pass.
+func poke(wake chan<- struct{}) {
+	select {
+	case wake <- struct{}{}:
+	default:
+	}
+}
+
+// firmwareMark is the part of a Firmware whose change needs a pass: its
+// spec, through the generation, and the start of its deletion. A
+// status write changes neither, so the operator's own writes wake
+// nothing. The UID is in the mark because a Firmware deleted and
+// created again under one name while the watch was down arrives as an
+// update.
+func firmwareMark(item firmware) string {
+	return fmt.Sprint(item.Metadata.UID, item.Metadata.Generation, item.Metadata.DeletionTimestamp)
+}
+
+// sliceMark is the pool's generation, which machine-operator moves on
+// each change of the slice's devices.
+func sliceMark(item resourceSlice) string {
+	return fmt.Sprint(item.Metadata.UID, item.Spec.Pool.Generation)
+}
+
+// podMark is the part of an upload pod whose change needs a pass: its
+// phase, its placement, and the start of its deletion.
+func podMark(item pod) string {
+	return fmt.Sprint(item.Status.Phase, item.scheduled(), item.Metadata.DeletionTimestamp)
+}
+
+// machineMark is a Machine's labels, the only part spec.machines reads.
+func machineMark(item machine) string {
+	return fmt.Sprint(item.Metadata.Labels)
+}
+
+// markHandler wakes the pass for a new object, a removed object, and
+// an update that changes the object's mark. An object that does not
+// convert is reported and wakes the pass, because one extra pass costs
+// less than a missed change.
+func markHandler[T any](signal func(), mark func(T) string) cache.ResourceEventHandler {
+	return cache.ResourceEventHandlerFuncs{
+		AddFunc:    func(any) { signal() },
+		DeleteFunc: func(any) { signal() },
+		UpdateFunc: func(previous, current any) {
+			before, err := informer.Convert[T](previous)
+			if err != nil {
+				informer.Report("an earlier copy", err)
+				signal()
+				return
+			}
+			after, err := informer.Convert[T](current)
+			if err != nil {
+				informer.Report("a new copy", err)
+				signal()
+				return
+			}
+			if mark(before) != mark(after) {
+				signal()
+			}
+		},
+	}
+}

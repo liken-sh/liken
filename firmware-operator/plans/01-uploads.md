@@ -1,8 +1,9 @@
 # 01, Uploads
 
-Proposed on 2026-10-19. Not built. It needs `liken`'s
+Proposed on 2026-10-19. Being built from 2026-10-19. It needs `liken`'s
 [milestone 87](../../liken/plans/87-firmware-facts-a-machine-publishes.md),
-which publishes the USB bus and device numbers of each device. This
+which publishes the USB bus and device numbers of each device, and
+whose USB part was built on 2026-10-19. This
 plan adds the cluster-scoped `Firmware` resource and its `upload`
 action: when a device that a rule matches appears on any machine,
 `firmware-operator` writes the device's firmware into it from the
@@ -72,8 +73,10 @@ spec:
   selector means what it means in a `DeviceClass`.
 - `spec.machines` is an optional label selector on `Machine`s. With no
   value, the rule applies on every machine.
-- Exactly one of `spec.upload` and `spec.update` is set. A CEL rule in
-  the CRD refuses an object with both or neither.
+- `spec.upload` is required in this plan's version of the CRD. Plan 02
+  adds `spec.update`, and with it a CEL rule that refuses an object
+  with both or neither. Making `upload` optional then is a change that
+  every existing object still passes.
 - `spec.upload` names an image and the command to run in it. The
   operator implements no loader. The loaders differ by chip and by
   vendor: `fxload -t fx2`, `-t fx3`, a second-stage loader for older
@@ -95,19 +98,36 @@ The operator watches the `ResourceSlice`s of every machine and the
 appears is a change to its machine's slice, so the operator reads it
 from the watch, with no timer.
 
-When a device matches a `Firmware` with `upload`, and no upload for
-that appearance has run, the operator creates a `Pod` in
-`liken-system`:
+The operator watches only the slices whose driver is `liken.sh`,
+the ones machine-operator publishes. When a device matches a
+`Firmware` with `upload`, and no upload for that appearance has run,
+the operator creates a `Pod` and a `ResourceClaim` in its own
+namespace, `liken-system`:
 
-- A node selector puts the pod on the device's machine.
-- Its `resourceClaimTemplate` selects the one device by its vendor, its
-  product, and its `address` attribute. The address is the port path,
-  so it is unique on the machine even when two bare chips of one model
-  are connected. A claim from a template is deleted with its pod.
+- A node selector on `kubernetes.io/hostname` puts the pod on the
+  slice's node.
+- The pod names the claim by name, and the claim's owner reference
+  names the pod, so the claim is deleted with its pod. The operator
+  creates the pod first, because the claim needs the pod's UID. A pod
+  whose claim does not exist yet stays unscheduled, and the next pass
+  creates a claim that is missing.
+- The claim asks for one device of the `DeviceClass`
+  `firmware-upload`, which the manifests ship and which selects the
+  USB devices of `liken.sh`. Its selector names the device's `address`
+  and `deviceNumber`. The address is the port path, so it is unique on
+  the machine even when two bare chips of one model are connected. The
+  device number limits the claim to this appearance, so a claim that
+  was not allocated before a replug cannot take the next appearance.
 - `restartPolicy: Never` and an `activeDeadlineSeconds` of five
-  minutes. The pod runs once.
-- The owner reference names the `Firmware`, so a deleted rule deletes
-  its pods.
+  minutes. The pod runs once. `activeDeadlineSeconds` counts from the
+  pod's start, so the operator also measures five minutes from the
+  pod's creation, for a pod that never schedules.
+- The owner reference of the pod names the `Firmware`, so a deleted
+  rule deletes its pods.
+- Labels and annotations record the rule, its generation, the
+  machine, the address, and the device number. The operator reads
+  them after its own restart, and the pod's name is a hash of them, so
+  a second create for one appearance answers `409`.
 
 The command needs the path of its device node. The slice gives the
 device's USB bus number and device number, and the usbfs node is
@@ -121,7 +141,23 @@ An upload succeeds when the pod exits 0 and the bare device leaves the
 machine's slice. The exit code alone is not enough, because a loader
 can exit 0 after it writes firmware that the chip does not run. The
 device that comes back is not part of the check, because the rule does
-not know its IDs.
+not know its IDs. In the lab the chip left 14 seconds after `fxload`
+reset it, so the operator waits one minute after the container ends.
+A device still in the slice after that minute is a failed upload. A
+pod that exits with another code is a failed upload, and the message
+gives the exit code and the last line of the pod's log. The container
+sets `terminationMessagePolicy: FallbackToLogsOnError`, so the kubelet
+copies the end of the log into the container's terminated state, and
+the operator reads the line from the pod with no permission on
+`pods/log`.
+
+A port runs one upload at a time. While a rule's pod for a port
+exists, a new generation of the rule or a second rule waits for that
+pod's result, and the new rule takes effect on the next appearance.
+
+The operator writes the result to status first and then deletes the
+pod, so an operator that stops between the two reads the same pod
+again and writes the same result.
 
 Each appearance of a device gets one attempt. A failure goes to status
 and to an `Event`, and nothing retries it until the device appears
@@ -181,16 +217,22 @@ status:
       device: usb-1-4-1-2
       address: 1-4.1.2
       deviceNumber: 12
+      generation: 1
       result: Loaded        # Running, Loaded, Failed, Conflict
       message: ""
       time: "2026-10-19T22:01:09Z"
+  counts: { running: 0, loaded: 1, failed: 0, conflict: 0 }
 ```
 
-`status.devices` has one entry for each device that the rule matched
-since the machine last booted. An entry that is `Loaded` stays after
-the bare device leaves, so the entry shows which rule loaded the
-device that replaced it. A printer column gives the count of devices
-in each result, so `kubectl get firmware` shows the fleet at a glance.
+`status.devices` has one entry for each port, a machine and an
+address, where the rule matched a device. The entry describes the
+latest appearance, so a camera that is power-cycled every night keeps
+one entry, and the list grows only with the number of ports. Each
+entry also records the rule's `generation` that ran. An entry that is
+`Loaded` stays after the bare device leaves, so the entry shows which
+rule loaded the device that replaced it. `status.counts` gives the
+number of entries in each result, and the printer columns show those
+counts, so `kubectl get firmware` shows the fleet at a glance.
 
 The operator posts an `Event` on the `Firmware` for each upload it
 starts and for each result, as root plan 78 requires for an action

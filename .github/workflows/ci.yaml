@@ -256,6 +256,7 @@ jobs:
             --skip ffmpeg/
             --skip display-operator/
             --skip equipment-operator/
+            --skip firmware-operator/
             --skip git-csi-driver/
             --skip media-screen/
             --skip library-operator/
@@ -774,6 +775,36 @@ jobs:
       contents: read
       packages: write
 
+  firmware-operator:
+    needs: [plan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['firmware-operator'].check }}
+    uses: ./.github/workflows/component-firmware-operator.yaml
+    with:
+      stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['firmware-operator'].dryrun }}
+      version: ${{ fromJSON(needs.plan.outputs.components)['firmware-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['firmware-operator'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['firmware-operator'].jobs) }}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['firmware-operator'].images) }}
+    permissions:
+      contents: read
+      packages: write
+
+  firmware-operator-publish:
+    needs: [plan, firmware-operator, kubernetes, notices]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['firmware-operator'].publish != 'none' }}
+    uses: ./.github/workflows/component-firmware-operator.yaml
+    with:
+      stage: publish
+      dryrun: false
+      version: ${{ fromJSON(needs.plan.outputs.components)['firmware-operator'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['firmware-operator'].publish }}
+      jobs: '[]'
+      images: '[]'
+    permissions:
+      contents: read
+      packages: write
+
   git-csi-driver:
     needs: [plan, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['git-csi-driver'].check }}
@@ -1017,7 +1048,7 @@ jobs:
   # check jobs. So it waits for the plan and each component's checks,
   # and not for the publish jobs, and it deploys while they run.
   site:
-    needs: [plan, vulkan, astrometry, kubernetes, notices, trust, indi, weston, observatory-operator, astrophotography-operator, audio-operator, bluetooth-operator, brand, ci, vaapi, ffmpeg, display-operator, equipment-operator, git-csi-driver, media-screen, library-operator, liken, mpv, media-operator, people-operator, per-node-csi-driver]
+    needs: [plan, vulkan, astrometry, kubernetes, notices, trust, indi, weston, observatory-operator, astrophotography-operator, audio-operator, bluetooth-operator, brand, ci, vaapi, ffmpeg, display-operator, equipment-operator, firmware-operator, git-csi-driver, media-screen, library-operator, liken, mpv, media-operator, people-operator, per-node-csi-driver]
     if: ${{ !failure() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH == 'true' && needs.plan.outputs.site == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 20
@@ -1127,6 +1158,12 @@ jobs:
         with:
           name: coverage-equipment-operator-go
           path: equipment-operator
+
+      - uses: actions/download-artifact@v8
+        if: ${{ fromJSON(needs.plan.outputs.components)['firmware-operator'].check && contains(fromJSON(needs.plan.outputs.components)['firmware-operator'].jobs, 'go') }}
+        with:
+          name: coverage-firmware-operator-go
+          path: firmware-operator
 
       - uses: actions/download-artifact@v8
         if: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].check && contains(fromJSON(needs.plan.outputs.components)['git-csi-driver'].jobs, 'go') }}
@@ -1253,6 +1290,9 @@ jobs:
           echo "checking the equipment-operator manual"
           fetch https://liken.sh/equipment/ > page.html
           grep -q "<title>" page.html
+          echo "checking the firmware-operator manual"
+          fetch https://liken.sh/firmware/ > page.html
+          grep -q "<title>" page.html
           echo "checking the git-csi-driver manual"
           fetch https://liken.sh/git/ > page.html
           grep -q "<title>" page.html
@@ -1273,7 +1313,7 @@ jobs:
   # component and its version at this tag, whether this tag published
   # it or an earlier one did.
   record:
-    needs: [plan, vulkan, vulkan-publish, astrometry, astrometry-publish, kubernetes, notices, trust, trust-publish, indi, indi-publish, weston, weston-publish, observatory-operator, observatory-operator-publish, astrophotography-operator, astrophotography-operator-publish, audio-operator, audio-operator-publish, bluetooth-operator, bluetooth-operator-publish, brand, ci, vaapi, vaapi-publish, ffmpeg, ffmpeg-publish, display-operator, display-operator-publish, equipment-operator, equipment-operator-publish, git-csi-driver, git-csi-driver-publish, media-screen, library-operator, library-operator-publish, liken, liken-publish, mpv, mpv-publish, media-operator, media-operator-publish, people-operator, people-operator-publish, per-node-csi-driver, per-node-csi-driver-publish]
+    needs: [plan, vulkan, vulkan-publish, astrometry, astrometry-publish, kubernetes, notices, trust, trust-publish, indi, indi-publish, weston, weston-publish, observatory-operator, observatory-operator-publish, astrophotography-operator, astrophotography-operator-publish, audio-operator, audio-operator-publish, bluetooth-operator, bluetooth-operator-publish, brand, ci, vaapi, vaapi-publish, ffmpeg, ffmpeg-publish, display-operator, display-operator-publish, equipment-operator, equipment-operator-publish, firmware-operator, firmware-operator-publish, git-csi-driver, git-csi-driver-publish, media-screen, library-operator, library-operator-publish, liken, liken-publish, mpv, mpv-publish, media-operator, media-operator-publish, people-operator, people-operator-publish, per-node-csi-driver, per-node-csi-driver-publish]
     if: ${{ !cancelled() && github.ref_type == 'tag' && vars.PUBLISH == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10

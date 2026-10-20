@@ -1,0 +1,251 @@
+# A Firmware is a rule that writes firmware into the USB devices it
+# matches, on any machine of the cluster, each time one appears. It is
+# cluster-scoped because it describes a device model, the way a
+# DeviceClass does, and a device can move from one machine to another.
+# firmware-operator writes the status: one entry for each port where
+# the rule matched a device.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: firmwares.firmware.liken.sh
+spec:
+  group: firmware.liken.sh
+  names:
+    kind: Firmware
+    listKind: FirmwareList
+    plural: firmwares
+    singular: firmware
+    categories: [firmware]
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      # The status subresource splits spec and status into two write
+      # paths. People declare the spec, and firmware-operator writes the
+      # status.
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Valid
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Valid")].status
+        - name: Loaded
+          type: integer
+          jsonPath: .status.counts.loaded
+        - name: Running
+          type: integer
+          jsonPath: .status.counts.running
+        - name: Failed
+          type: integer
+          jsonPath: .status.counts.failed
+        - name: Conflict
+          type: integer
+          jsonPath: .status.counts.conflict
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [selector, upload]
+              properties:
+                selector:
+                  type: string
+                  minLength: 1
+                  description: >-
+                    A CEL expression that selects the devices this rule
+                    loads, with the same variables as a `DeviceClass`
+                    selector, for example
+                    `device.attributes["liken.sh"].vendor == "1618" &&
+                    device.attributes["liken.sh"].product == "0920"`.
+                    `firmware-operator` compiles it with the CEL
+                    environment of Kubernetes' dynamic resource
+                    allocation, so it means here what it means in a
+                    `DeviceClass`. A selector that does not compile sets
+                    `Valid` to `False`, and the rule runs nowhere.
+                machines:
+                  type: object
+                  description: >-
+                    A label selector on `Machine` objects. The rule runs
+                    only on the machines whose labels it selects.
+                    Optional. With no value, the rule runs on every
+                    machine.
+                  properties:
+                    matchLabels:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: "Labels that a `Machine` must have, each with this value."
+                    matchExpressions:
+                      type: array
+                      description: "Requirements on a `Machine`'s labels. A machine must meet all of them."
+                      items:
+                        type: object
+                        required: [key, operator]
+                        properties:
+                          key:
+                            type: string
+                            description: "The label's key."
+                          operator:
+                            type: string
+                            enum: [In, NotIn, Exists, DoesNotExist]
+                            description: "How the label's values must compare with `values`."
+                          values:
+                            type: array
+                            items:
+                              type: string
+                            description: "The values for `In` and `NotIn`. Empty for `Exists` and `DoesNotExist`."
+                upload:
+                  type: object
+                  required: [image, command]
+                  description: >-
+                    The pod that writes the firmware into a device that
+                    holds none of its own. `firmware-operator` runs it
+                    once for each appearance of a matched device, on the
+                    device's machine, with a claim on that one device.
+                  properties:
+                    image:
+                      type: string
+                      minLength: 1
+                      description: >-
+                        The image that holds the loader and the firmware
+                        files, usually the vendor's own image, such as
+                        `ghcr.io/liken-sh/indi-qhy`. The pod runs it as
+                        user 1000 with no capabilities and a read-only
+                        root file system.
+                    command:
+                      type: array
+                      minItems: 1
+                      items:
+                        type: string
+                      description: >-
+                        The loader's command, such as `[fxload, -t, fx2,
+                        -I, /lib/firmware/qhy/QHY5II.HEX, -D,
+                        $(LIKEN_DEVICE)]`. The pod sets `LIKEN_DEVICE` to
+                        the device's usbfs node,
+                        `/dev/bus/usb/<bus>/<device>`, and Kubernetes
+                        expands `$(LIKEN_DEVICE)` in the command. The
+                        upload succeeds when the command exits 0 and the
+                        bare device leaves the machine's
+                        `ResourceSlice` within one minute.
+                    args:
+                      type: array
+                      items:
+                        type: string
+                      description: "Arguments after the command. Kubernetes expands `$(LIKEN_DEVICE)` in them too. Optional."
+            status:
+              type: object
+              properties:
+                observedGeneration:
+                  type: integer
+                  format: int64
+                  description: "The generation of the spec that the status answers."
+                conditions:
+                  type: array
+                  description: >-
+                    `Valid` is `True` with the reason `Compiled` when the
+                    selector and `spec.machines` compile. It is `False`
+                    with the reason `SelectorInvalid` when either one
+                    does not, and the message gives the error. A rule
+                    that is not valid runs nowhere.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  items:
+                    type: object
+                    required: [type, status, reason, lastTransitionTime]
+                    properties:
+                      type:
+                        type: string
+                        description: "The condition's name."
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                        description: "Whether the condition holds."
+                      reason:
+                        type: string
+                        description: "One word for the cause."
+                      message:
+                        type: string
+                        description: "The cause, for a person to read."
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                        description: "The generation of the spec that the condition answers."
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                        description: "When the status last changed."
+                devices:
+                  type: array
+                  description: >-
+                    One entry for each port, a machine and a USB address,
+                    where the rule matched a device. The entry describes
+                    the latest appearance of a device in the port, so the
+                    list grows only with the number of ports. A `Loaded`
+                    entry stays after the bare device leaves.
+                  items:
+                    type: object
+                    required: [machine, device, address, deviceNumber, generation, result, time]
+                    properties:
+                      machine:
+                        type: string
+                        description: "The `Machine`, which has the name of its node."
+                      device:
+                        type: string
+                        description: "The device's name in the machine's `ResourceSlice`."
+                      address:
+                        type: string
+                        description: "The USB port path, such as `1-4.1.2`."
+                      deviceNumber:
+                        type: integer
+                        format: int64
+                        description: >-
+                          The device number that the kernel gave this
+                          appearance. A new number is a new appearance,
+                          after a replug or a power cycle, and gets a new
+                          upload.
+                      generation:
+                        type: integer
+                        format: int64
+                        description: "The generation of the rule that this entry ran. A new generation gets a new upload."
+                      result:
+                        type: string
+                        enum: [Running, Loaded, Failed, Conflict]
+                        description: >-
+                          `Running` while the upload pod runs. `Loaded`
+                          when the loader exited 0 and the bare device
+                          left the slice. `Failed` when the loader failed,
+                          the device stayed for a minute after it exited
+                          0, the pod did not finish within five minutes,
+                          or the pod is gone. `Conflict` when another rule
+                          matches the same device, so neither runs. A
+                          `Failed` upload does not run again until the
+                          device appears again or the rule changes.
+                      message:
+                        type: string
+                        description: "Why the entry has its result, such as the loader's exit code and the last line of its log."
+                      time:
+                        type: string
+                        format: date-time
+                        description: "When the entry got its result."
+                counts:
+                  type: object
+                  description: "The number of entries in `devices` with each result."
+                  properties:
+                    running:
+                      type: integer
+                      description: "Entries that are `Running`."
+                    loaded:
+                      type: integer
+                      description: "Entries that are `Loaded`."
+                    failed:
+                      type: integer
+                      description: "Entries that are `Failed`."
+                    conflict:
+                      type: integer
+                      description: "Entries that are `Conflict`."

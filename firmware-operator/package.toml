@@ -1,0 +1,55 @@
+# The Firmware kind: rules that write firmware into the USB devices of
+# a liken cluster that hold none of their own, and the operator that
+# runs one short pod on a device's machine for each new appearance of
+# the device.
+#
+# The image needs no trust: the operator makes no TLS call except to
+# the API server, which it verifies with the CA in its ServiceAccount's
+# token volume, and the scratch image carries no CA bundle.
+[package]
+name = "firmware-operator"
+license = "MIT"
+
+[depends]
+components = ["kubernetes", "notices"]
+
+[docs]
+prefix = "firmware"
+
+# gofmt, vet, a tidy check of go.mod, and one run of the tests that
+# checks for races and writes the coverage profile, then the coverage
+# gate on that profile. .testcoverage.yml holds the floor.
+[[jobs]]
+name = "go"
+toolchain = "go"
+run = "make test-go"
+timeout = 15
+coverage = ["coverage.out"]
+
+# The link check, the generated skills, and the site build.
+[[jobs]]
+name = "docs"
+toolchain = "hugo"
+module = "docs"
+run = "make test-docs"
+
+# The hooks in .pre-commit-config.yaml: the formatters, the linters,
+# and the hygiene checks. The jobs above run the tests and the
+# coverage gates.
+[[jobs]]
+name = "prek"
+toolchain = "prek"
+# The go job runs the same checks as these hooks.
+skip = ["gofmt", "go-vet", "go-mod-tidy"]
+
+[outputs]
+deploy = "deploy"
+
+# The image builds from this module's go.mod, which replaces the shared
+# kubernetes module with ../kubernetes, so it takes that directory as a
+# build context. The notices context holds the script that copies the
+# license files of the modules the binary links.
+[[outputs.images]]
+name = "firmware-operator"
+file = "Dockerfile"
+contexts = { kubernetes = "kubernetes", notices = "notices" }

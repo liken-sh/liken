@@ -1,0 +1,149 @@
+# The operator's identity. It reads every Firmware, every slice that
+# machine-operator publishes, and every Machine, and writes each
+# Firmware's status. It creates, reads, and deletes the upload pods and
+# their claims in its own namespace, and posts the Events about each
+# Firmware.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: firmware-operator
+---
+# A ClusterRole for the cluster-scoped kinds: a Firmware, a
+# ResourceSlice, and a Machine.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: firmware-operator
+rules:
+  # The watch wakes the pass, and the pass reads each Firmware from the
+  # watch's store. get reads one Firmware again after a status write
+  # that met a conflict.
+  - apiGroups: [firmware.liken.sh]
+    resources: [firmwares]
+    verbs: [get, list, watch]
+  # The status is the one thing the operator writes to a Firmware. It
+  # replaces the whole status with a PUT, which is the update verb, and
+  # it never writes the spec.
+  - apiGroups: [firmware.liken.sh]
+    resources: [firmwares/status]
+    verbs: [update]
+  # Each machine's devices. The watch selects the slices whose driver is
+  # liken.sh with a field selector, which needs list and watch on every
+  # slice.
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceslices]
+    verbs: [get, list, watch]
+  # The labels that spec.machines selects.
+  - apiGroups: [liken.sh]
+    resources: [machines]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: firmware-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: firmware-operator
+subjects:
+  - kind: ServiceAccount
+    name: firmware-operator
+    namespace: liken-system
+---
+# The upload pods and their claims, which run in the operator's own
+# namespace. The watch selects the pods by the label
+# firmware.liken.sh/upload, and a watch by label selector needs list
+# and watch on every pod in the namespace. get reads a pod after a
+# create that met a conflict, and checks that a Running upload's pod
+# still exists. delete removes a pod after its result is in the status,
+# and the garbage collector deletes its claim. The operator deletes
+# only a pod that carries the upload label.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: firmware-operator
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch, create, delete]
+  - apiGroups: [resource.k8s.io]
+    resources: [resourceclaims]
+    verbs: [get, create, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: firmware-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: firmware-operator
+subjects:
+  - kind: ServiceAccount
+    name: firmware-operator
+    namespace: liken-system
+---
+# The Events about a Firmware, one for each change of its Valid
+# condition and one for each upload and its result. A Firmware is
+# cluster-scoped, and the API server takes an Event about a
+# cluster-scoped object only in default or kube-system, so this Role
+# grants the one namespace the operator posts to. patch counts a repeat
+# on the Event it repeats.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: firmware-operator-events
+  namespace: default
+rules:
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: firmware-operator-events
+  namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: firmware-operator-events
+subjects:
+  - kind: ServiceAccount
+    name: firmware-operator
+    namespace: liken-system
+---
+# The Lease that elects the one copy of the operator that acts
+# (leader.go). client-go's election reads the Lease with a get, takes
+# and renews it with an update, and releases it with an update. A
+# namespaced Role, because the Lease is in the operator's own namespace,
+# and the operator has no reason to read any other Lease.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: firmware-operator-lease
+rules:
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    resourceNames: [firmware-operator]
+    verbs: [get, update]
+  # create carries no resourceNames, because RBAC cannot read a name off
+  # a create. The first copy to start creates the Lease.
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: firmware-operator-lease
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: firmware-operator-lease
+subjects:
+  - kind: ServiceAccount
+    name: firmware-operator
+    namespace: liken-system

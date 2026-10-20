@@ -1,13 +1,24 @@
 # Working on firmware-operator
 
 This directory holds `firmware-operator`, the add-on that loads and
-updates the firmware of the devices on `liken` machines. It has no
-code yet. `plans/README.md` describes the component, and its plans
-hold the design.
+updates the firmware of the devices on `liken` machines. It defines
+the cluster-scoped `Firmware` resource, and the operator that runs
+each upload as a short pod on the device's machine. The manifests, the
+source, and the tests are the documentation. `plans/README.md`
+describes the component, and its plans hold the design.
 
 @../brand/voice.md
 
 The voice rules in that file govern all prose here, comments included.
+
+The operator watches every `Firmware`, every `ResourceSlice` of the
+driver `liken.sh`, every `Machine`, and its own upload pods through
+client-go's reflector, in the shared `kubernetes` module. Load the
+`operators` skill under `.agents/skills` at the top of the repository
+before you change a watch, the pass, or a timer, and the `testing`
+skill before you change a test.
+
+`make test` runs every check CI runs.
 
 ## The boundary with the OS
 

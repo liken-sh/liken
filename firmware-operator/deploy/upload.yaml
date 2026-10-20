@@ -1,0 +1,33 @@
+# What every upload pod uses: the class its claim asks for, and the
+# network policy that keeps it off the network.
+#
+# The DeviceClass selects the USB devices that machine-operator
+# publishes. An upload's claim narrows it to one device by its address
+# and device number. A cluster-scoped class, so the API server ignores
+# the namespace the kustomization sets.
+---
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: firmware-upload
+spec:
+  selectors:
+    - cel:
+        expression: >-
+          device.driver == "liken.sh" &&
+          device.attributes["liken.sh"].bus == "usb"
+---
+# The firmware is in the upload's image and the device is on a USB
+# cable, so an upload pod needs no network. A policy that selects the
+# pods, names both directions, and allows nothing denies every packet
+# in and out of them. A cluster with no network policy controller
+# ignores it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: firmware-upload
+spec:
+  podSelector:
+    matchLabels:
+      firmware.liken.sh/upload: "true"
+  policyTypes: [Ingress, Egress]

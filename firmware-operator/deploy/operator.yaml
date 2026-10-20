@@ -1,0 +1,84 @@
+# The operator: one unprivileged Deployment for the cluster. It reads
+# every Firmware and every machine's ResourceSlice, starts an upload pod
+# on a device's machine for each new appearance of a matched device,
+# and writes each Firmware's status. It keeps no state outside the
+# status and the upload pods, so a new pod reads both and carries on.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: firmware-operator
+spec:
+  # One replica is enough, because the kubelet restarts a crashed
+  # operator. Two are safe: the Lease named firmware-operator lets one
+  # copy act, and the other waits and takes over when the first stops
+  # (leader.go says what two acting copies would break).
+  replicas: 1
+  selector:
+    matchLabels:
+      app: firmware-operator
+  # A rollout starts the new pod beside the old one, and stops the old
+  # one only when the new one runs. The new pod waits for the Lease while
+  # the old one leads. On SIGTERM the old pod finishes the Firmware it
+  # answers and releases the Lease, and the new pod takes it on its next
+  # read, within about 11 seconds. So the image pull happens while the
+  # old pod still leads.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: firmware-operator
+    spec:
+      serviceAccountName: firmware-operator
+      # A shutdown finishes the writes of the Firmware in flight, and
+      # then releases the Lease. Those writes are the creates of an
+      # upload's pod and claim, a status write, which reads the Firmware
+      # again and writes once more after a conflict, and the deletes of
+      # finished upload pods, and the client bounds each request at
+      # 15 s. The release waits up to 11 s for client-go's election to
+      # end (its 10 s renew deadline and 1 s), and then up to 5 s for the
+      # release that follows a late renewal, 16 s in all. 60 s leaves the
+      # writes 44 s. A kill before the release leaves the Lease to
+      # expire, and a waiting copy then takes it 30 to 41 s after the
+      # last renewal instead of within about 11 s.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: operator
+          image: ghcr.io/liken-sh/firmware-operator:latest
+          env:
+            # The operator starts the upload pods in its own namespace.
+            # The two values also name the Lease the operator holds and
+            # the identity it holds it under, so the operator exits when
+            # either is unset.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+          # The operator holds the watches of the Firmware objects, the
+          # slices, the Machines, and the upload pods, and evaluates each
+          # selector in its own memory. Its memory on a cluster is not
+          # measured yet, so the limit only bounds a leak, with room
+          # above the 20 to 30 MB that the other operators on client-go
+          # measured.
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
