@@ -56,7 +56,7 @@ func TestReadCatalogIndexesFlashedGUIDs(t *testing.T) {
 	}{
 		{biosGUID, []string{frameworkBIOS().id + " 0.0.3.5", frameworkBIOS().id + " 0.0.4.2"}},
 		{"abcdef00-0000-0000-0000-000000000003", []string{"com.vendor.ssd 7"}},
-		{dbxGUID, []string{"org.uefi.dbx 2"}},
+		{dbxGUID, []string{"com.microsoft.dbx.x64.firmware 2"}},
 		{meGUID, nil},
 		{"00000000-0000-0000-0000-00000000ffff", nil},
 	}

@@ -65,8 +65,9 @@ func TestAMachineWithNoRecordGetsAScanPod(t *testing.T) {
 }
 
 // A scan's result becomes the machine's record, with the GUIDs of its
-// devices, and one discovered Firmware for each device model. Then the
-// operator deletes the pod.
+// devices, and one discovered Firmware for each group: the BIOS's
+// catalog component and the dbx's set of GUIDs. Then the operator
+// deletes the pod.
 func TestAScanResultBecomesTheRecordAndTheDiscoveredObjects(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := scannedWorld(t)
@@ -80,25 +81,28 @@ func TestAScanResultBecomesTheRecordAndTheDiscoveredObjects(t *testing.T) {
 		for _, f := range objects {
 			names = append(names, f.Metadata.Name)
 		}
-		want := []string{discoveredName("System Firmware", []string{biosGUID}), discoveredName("UEFI dbx", []string{dbxGUID})}
+		want := []string{biosObjectName, dbxGUIDsName}
 		slices.Sort(want)
 		slices.Sort(names)
 		if !slices.Equal(names, want) {
 			t.Fatalf("the discovered objects are %v, want %v", names, want)
 		}
-		bios := w.api.firmware(t, discoveredName("System Firmware", []string{biosGUID}))
-		entry := machineEntry{Machine: "node-2", Device: "System Firmware", Version: "0.0.3.5", Catalog: "lvfs",
+		bios := w.api.firmware(t, biosObjectName)
+		entry := machineEntry{Machine: "node-2", Device: "System Firmware", DeviceID: "3fcf", Version: "0.0.3.5", Catalog: "lvfs",
 			File: "firmware-09138-stable.xml.zst", Releases: systemFirmware("0.0.3.5", "0.0.4.2").Releases, Time: r.Time}
 		if len(bios.Status.Machines) != 1 || !entriesEqual(bios.Status.Machines[0], entry) {
 			t.Errorf("the BIOS entries are %+v, want %+v", bios.Status.Machines, entry)
 		}
-		if !slices.Equal(bios.Spec.Update.GUIDs, []string{biosGUID}) || bios.Spec.Selector != "" || bios.Spec.Upload != nil {
-			t.Errorf("the BIOS spec is %+v, want only update.guids", bios.Spec)
+		if bios.Spec.Update.Component != frameworkBIOS().id || bios.Spec.Update.GUIDs != nil || bios.Spec.Selector != "" || bios.Spec.Upload != nil {
+			t.Errorf("the BIOS spec is %+v, want only update.component", bios.Spec)
 		}
 		if got := bios.Status.Counts; got != (counts{Machines: 1, Behind: 1}) {
 			t.Errorf("the BIOS counts are %+v, want one machine, one behind", got)
 		}
-		dbxObject := w.api.firmware(t, discoveredName("UEFI dbx", []string{dbxGUID}))
+		dbxObject := w.api.firmware(t, dbxGUIDsName)
+		if !slices.Equal(dbxObject.Spec.Update.GUIDs, []string{dbxGUID}) || dbxObject.Spec.Update.Component != "" {
+			t.Errorf("the dbx spec is %+v, want only update.guids", dbxObject.Spec.Update)
+		}
 		if got := dbxObject.Status.Counts; got != (counts{Machines: 1}) {
 			t.Errorf("the dbx counts are %+v, want one machine, none behind", got)
 		}
@@ -129,7 +133,7 @@ func TestTheUploadPassSkipsADiscoveredObject(t *testing.T) {
 		w.api.publish("node-2", camera("1-3", 4), bareChip("1-4", 9))
 		w.settle()
 
-		bios := w.api.firmware(t, discoveredName("System Firmware", []string{biosGUID}))
+		bios := w.api.firmware(t, biosObjectName)
 		if len(bios.Status.Conditions) != 0 || len(bios.Status.Devices) != 0 {
 			t.Errorf("the discovered object's status is %+v, want no condition and no upload entry", bios.Status)
 		}

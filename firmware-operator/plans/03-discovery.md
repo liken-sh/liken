@@ -4,8 +4,8 @@ Proposed on 2026-10-20. Built on 2026-10-20 with one object for each
 set of GUIDs, and drilled on liken-1 the same day. The drill showed
 that a set of GUIDs does not name one kind of device, so
 [Grouping devices by catalog component](#grouping-devices-by-catalog-component)
-revises how the operator groups devices into objects. That revision
-is not built. This plan finds the firmware that
+revises how the operator groups devices into objects. The revision
+was built the same day, and its drill is not run yet. This plan finds the firmware that
 each machine's devices keep, and the newer releases that a catalog
 offers for it, and records both in the cluster. It installs nothing.
 [Plan 04](04-approval.md) lets a person approve a version, and
@@ -277,7 +277,7 @@ object of its own. The UEFI CA and the KEK CA split the same way.
 
 ## Grouping devices by catalog component
 
-Proposed on 2026-10-20. Not built. A set of GUIDs is not a stable name
+Proposed and built on 2026-10-20. A set of GUIDs is not a stable name
 for a kind of device, for two reasons:
 
 - **A device's GUIDs change with what is installed.** fwupd's `dbx`
@@ -303,14 +303,11 @@ version of one catalog component, such as
 component:
 
 - **A device that a catalog offers a release for** is an entry in the
-  object of the release's component, the `id` of the release. The
-  object's name is the component ID in lowercase, with each character
-  that a DNS subdomain does not allow replaced by `-`, such as
-  `org.linuxfoundation.dbx.x64.firmware`. Its spec is
-  `spec.update.component`. liken-1's and stick-1's `dbx` are then two
-  entries in one object.
+  object of the release's component, the `id` of the release. Its spec
+  is `spec.update.component`. liken-1's and stick-1's `dbx` are then
+  two entries in one object.
 - **A device with no release** has nothing to approve. It stays in an
-  object for its set of GUIDs, named and specified as above. Two of
+  object for its set of GUIDs, with `spec.update.guids`. Two of
   these objects for one kind of device cost one extra row and nothing
   else.
 - **An entry moves only toward a component.** Each entry records the
@@ -326,9 +323,26 @@ component:
   and an unchanged spec is deleted, so an object for a set of GUIDs
   goes away when its last device moves to a component.
 
+The names are short enough to read in `kubectl get firmware`. A
+component's object is named by the component ID with no top-level
+domain and no last part `firmware`, as one DNS label:
+`com.microsoft.dbx.x64.firmware` becomes `microsoft-dbx-x64`. A GUID
+set's object is named by the device's name, such as `uefi-dbx`. When
+another `Firmware` holds the name, such as a person's upload rule or a
+GUID set of another laptop's `System Firmware`, the operator uses a
+longer name: the whole component ID in lowercase, with each part made
+a DNS label, or the device's name and eight hex digits of a hash of
+the GUIDs. On 2026-10-20 the LVFS stable catalog had 2,748 component
+IDs. The short rule gave 6 pairs of IDs one name, and each pair
+differed in case alone, such as `com.hp.laptop.system.S70.firmware`
+and `com.hp.laptop.System.S70.firmware`, which the whole ID in
+lowercase also gives one name. Dropping the vendor's domain too gave
+11 pairs, such as `com.dell.xg6-nvme-ssd.firmware` and
+`com.lenovo.xg6-nvme-ssd.firmware`, so the vendor stays in the name.
+
 When the releases a device is offered come from more than one
 component, the operator takes the component of the newest release, and
-posts a `Warning` that names the others. LVFS usually serves one
+posts a `ManyComponents` `Warning` that names the others. LVFS usually serves one
 component for one device, and this has not been observed.
 
 The guides change with it: `firmware:find-updates` explains the two
@@ -337,7 +351,8 @@ gains `spec.update.component`. The tests add a device whose GUID set
 differs between two machines and lands in one component object, a
 device that installs the newest release and keeps its entry, and a
 device that gains its first release and leaves its GUID-set object,
-which is then deleted.
+which is then deleted, a release of two components, and a short name
+that a person's upload rule holds.
 
 ## Conditions and `Event`s
 

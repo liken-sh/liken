@@ -1,13 +1,11 @@
 package main
 
-// The operator keeps one Firmware for each firmware device model that a
-// scan reports as updatable. A model is the sorted set of the device's
-// GUIDs, because fwupd matches a release to a device by its GUIDs. The
-// object's name is the device's name and a short hash of the GUIDs, and
-// it carries the label firmware.liken.sh/discovered. Its spec.update
-// holds the GUIDs, and its status.machines holds one entry for each
-// machine's device of that model, with the releases each catalog
-// offers.
+// The operator keeps one Firmware for each group of devices that a scan
+// reports as updatable: a catalog component, or a set of GUIDs for a
+// device with no release. grouping.go chooses the group. The object
+// carries the label firmware.liken.sh/discovered, its spec.update names
+// the group, and its status.machines holds one entry for each machine's
+// device in the group, with the releases each catalog offers.
 //
 // A scan replaces its machine's entries for its FirmwareCatalog in every
 // discovered object. An entry leaves only when that machine's next scan
@@ -15,7 +13,6 @@ package main
 // machine that is off keeps its entries.
 
 import (
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net/http"
@@ -32,11 +29,14 @@ const (
 	discoveredLabelValue = "true"
 )
 
-// machineEntry is one machine's device of a discovered model, matched
-// against one FirmwareCatalog's file.
+// machineEntry is one machine's device in a discovered group, matched
+// against one FirmwareCatalog's file. DeviceID is fwupd's ID of the
+// device, which keeps the entry in its component's object once the
+// device runs the newest release.
 type machineEntry struct {
 	Machine  string           `json:"machine"`
 	Device   string           `json:"device"`
+	DeviceID string           `json:"deviceId,omitempty"`
 	Version  string           `json:"version,omitempty"`
 	Catalog  string           `json:"catalog"`
 	File     string           `json:"file"`
@@ -53,36 +53,6 @@ func (e machineEntry) newest() string {
 	return e.Releases[0].Version
 }
 
-// modelKey names a device model by its GUIDs.
-func modelKey(guids []string) string {
-	return strings.Join(sortedSet(guids), ",")
-}
-
-// discoveredName answers the name of a model's object: the device's
-// name as a DNS label, and eight hex digits of a hash of the GUIDs, so
-// two models with one device name get two objects.
-func discoveredName(device string, guids []string) string {
-	sum := sha256.Sum256([]byte(modelKey(guids)))
-	suffix := "-" + shortHex(sum[:])[:8]
-	var slug strings.Builder
-	for _, r := range strings.ToLower(device) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			slug.WriteRune(r)
-		case !strings.HasSuffix(slug.String(), "-"):
-			slug.WriteRune('-')
-		}
-	}
-	prefix := strings.Trim(slug.String(), "-")
-	if len(prefix) > 63-len(suffix) {
-		prefix = strings.TrimRight(prefix[:63-len(suffix)], "-")
-	}
-	if prefix == "" {
-		prefix = "device"
-	}
-	return prefix + suffix
-}
-
 // discovered reports whether a Firmware is one the operator keeps.
 func discovered(f *firmware) bool {
 	return f.Spec.Update != nil && f.Metadata.Labels[discoveredLabel] == discoveredLabelValue && f.Metadata.DeletionTimestamp == ""
@@ -92,82 +62,55 @@ func discovered(f *firmware) bool {
 // spec as the operator created it. The operator writes the spec only in
 // the create, so any edit of the spec moves the generation past 1. Only
 // a pristine object with no entry is deleted: a person who approved a
-// version or changed the GUIDs keeps the object.
+// version or changed the group keeps the object.
 func pristine(f *firmware) bool {
 	return f.Metadata.Generation == 1
 }
 
-// scanEntries groups the entries of one scan by device model.
-type scanEntries struct {
-	machine, catalog string
-	byModel          map[string][]machineEntry
-	// names holds the device's name and GUIDs of each model, for an
-	// object the operator creates.
-	names map[string]scanDevice
-}
-
-func entriesOf(record machineRecord, catalog string, devices []scanDevice) scanEntries {
-	s := scanEntries{machine: record.Machine, catalog: catalog, byModel: map[string][]machineEntry{}, names: map[string]scanDevice{}}
-	for _, d := range devices {
-		key := modelKey(d.GUIDs)
-		if key == "" {
-			continue
-		}
-		s.byModel[key] = append(s.byModel[key], machineEntry{
-			Machine: record.Machine, Device: d.Name, Version: d.Version, Catalog: catalog,
-			File: record.File, Releases: d.Releases, Time: record.Time,
-		})
-		if _, held := s.names[key]; !held {
-			s.names[key] = d
-		}
-	}
-	return s
-}
-
 // applyScan replaces a machine's entries for a FirmwareCatalog in every
 // discovered object with what its scan reported, creates an object for
-// a model that has none, and deletes an object that is left with no
+// a group that has none, and deletes an object that is left with no
 // entry. objects holds every Firmware the pass read, and gains the ones
 // the operator creates.
 func (o *operator) applyScan(objects *[]firmware, s scanEntries) error {
 	var problems []error
-	models := map[string]bool{}
+	present := map[groupKey]bool{}
 	for index := range *objects {
 		f := &(*objects)[index]
 		if !discovered(f) {
 			continue
 		}
-		key := modelKey(f.Spec.Update.GUIDs)
-		models[key] = true
-		problems = append(problems, o.settleEntries(f, func(held []machineEntry) []machineEntry {
-			kept := slices.DeleteFunc(slices.Clone(held), func(e machineEntry) bool {
-				return e.Machine == s.machine && e.Catalog == s.catalog
-			})
-			return append(kept, s.byModel[key]...)
-		}))
+		key := keyOf(f.Spec.Update)
+		present[key] = true
+		problems = append(problems, o.settleEntries(f, s.replace(s.byGroup[key])))
+		o.post(f, condition{}, s.warnings[key], false)
 	}
-	keys := make([]string, 0, len(s.byModel))
-	for key := range s.byModel {
-		if !models[key] {
-			keys = append(keys, key)
+	for _, key := range sortedGroups(s.byGroup) {
+		if present[key] {
+			continue
 		}
-	}
-	slices.Sort(keys)
-	for _, key := range keys {
-		f, err := o.createDiscovered(s.names[key])
+		f, err := o.createDiscovered(key, s.devices[key])
 		if err != nil {
 			problems = append(problems, err)
 			continue
 		}
 		*objects = append(*objects, *f)
-		entries := s.byModel[key]
-		problems = append(problems, o.settleEntries(&(*objects)[len(*objects)-1], func(held []machineEntry) []machineEntry {
-			return append(slices.DeleteFunc(slices.Clone(held), func(e machineEntry) bool {
-				return e.Machine == s.machine && e.Catalog == s.catalog
-			}), entries...)
-		}))
+		created := &(*objects)[len(*objects)-1]
+		problems = append(problems, o.settleEntries(created, s.replace(s.byGroup[key])))
+		o.post(created, condition{}, s.warnings[key], false)
 	}
 	return errors.Join(problems...)
+}
+
+// replace answers the change that swaps the scan's machine's entries
+// for its FirmwareCatalog in an object for entries.
+func (s scanEntries) replace(entries []machineEntry) func([]machineEntry) []machineEntry {
+	return func(held []machineEntry) []machineEntry {
+		kept := slices.DeleteFunc(slices.Clone(held), func(e machineEntry) bool {
+			return e.Machine == s.machine && e.Catalog == s.catalog
+		})
+		return append(kept, entries...)
+	}
 }
 
 // forgetMachines removes the entries of every machine whose Machine is
@@ -189,32 +132,46 @@ func (o *operator) forgetMachines(objects []firmware, fleet map[string]machine) 
 	return errors.Join(problems...)
 }
 
-// createDiscovered creates the object of a model. An object that
-// already exists under the name, such as one a create in an earlier
-// pass made before the watch showed it, answers 409, and the operator
-// reads it.
-func (o *operator) createDiscovered(d scanDevice) (*firmware, error) {
-	name := discoveredName(d.Name, d.GUIDs)
-	f := firmware{APIVersion: firmwareAPIVersion, Kind: firmwareKind, Spec: firmwareSpec{Update: &update{GUIDs: sortedSet(d.GUIDs)}}}
-	f.Metadata.Name = name
-	f.Metadata.Labels = map[string]string{discoveredLabel: discoveredLabelValue, "app.kubernetes.io/managed-by": component}
-	created := true
-	stored, err := memo.Written[firmware](o.firmwares.Versions, name, func() (*firmware, error) {
-		var answer firmware
-		err := o.client.RequestJSON(http.MethodPost, firmwaresPath, mustJSON(f), &answer)
-		if errors.Is(err, apiclient.ErrConflict) {
-			created = false
-			return apiclient.Get[firmware](o.client, firmwarePath(name))
+// createDiscovered creates the object of a group under the first of
+// its names that no other group's object holds. An object that already
+// exists under a name answers 409, and the operator reads it: the
+// group's own object, such as one a create in an earlier pass made
+// before the watch showed it, ends the search, and any other object
+// moves it to the next name.
+func (o *operator) createDiscovered(key groupKey, d scanDevice) (*firmware, error) {
+	u := &update{Component: key.component}
+	about := fmt.Sprintf("%s, the catalog component %s", d.Name, key.component)
+	if key.component == "" {
+		u = &update{GUIDs: sortedSet(d.GUIDs)}
+		about = fmt.Sprintf("%s, with the GUIDs %s", d.Name, strings.Join(u.GUIDs, ", "))
+	}
+	names := groupNames(key, d)
+	for _, name := range names {
+		f := firmware{APIVersion: firmwareAPIVersion, Kind: firmwareKind, Spec: firmwareSpec{Update: u}}
+		f.Metadata.Name = name
+		f.Metadata.Labels = map[string]string{discoveredLabel: discoveredLabelValue, "app.kubernetes.io/managed-by": component}
+		created := true
+		stored, err := memo.Written[firmware](o.firmwares.Versions, name, func() (*firmware, error) {
+			var answer firmware
+			err := o.client.RequestJSON(http.MethodPost, firmwaresPath, mustJSON(f), &answer)
+			if errors.Is(err, apiclient.ErrConflict) {
+				created = false
+				return apiclient.Get[firmware](o.client, firmwarePath(name))
+			}
+			return &answer, err
+		})
+		if err != nil {
+			return nil, fmt.Errorf("creating the Firmware %s: %w", name, err)
 		}
-		return &answer, err
-	})
-	if err != nil {
-		return nil, fmt.Errorf("creating the Firmware %s: %w", name, err)
+		if !discovered(stored) || keyOf(stored.Spec.Update) != key {
+			continue
+		}
+		if created {
+			o.recorder.Normal(stored.reference(), reasonDiscovered, about)
+		}
+		return stored, nil
 	}
-	if created {
-		o.recorder.Normal(stored.reference(), reasonDiscovered, fmt.Sprintf("%s, with the GUIDs %s", d.Name, strings.Join(f.Spec.Update.GUIDs, ", ")))
-	}
-	return stored, nil
+	return nil, fmt.Errorf("creating the Firmware of %s: other Firmware objects hold the names %s", d.Name, strings.Join(names, " and "))
 }
 
 // settleEntries writes the entries that change gives a discovered

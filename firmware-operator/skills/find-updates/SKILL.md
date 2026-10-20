@@ -98,34 +98,48 @@ no second scan.
 
 ## Read the discovered Firmware objects
 
-The operator keeps one `Firmware` for each firmware device model that
-a scan reports as updatable. A model is the set of GUIDs that fwupd
-reports for the device. The object's name is the device's name and
-eight hex digits of a hash of the GUIDs, such as
-`system-firmware-3c1f0a2b`. The label `firmware.liken.sh/discovered`
-marks these objects, so you can list them apart from your upload rules:
+The operator keeps one `Firmware` for each catalog component that
+offers a release to a device a scan reports. Its name is the component
+ID with no top-level domain and no `firmware` part:
+`com.microsoft.dbx.x64.firmware` becomes `microsoft-dbx-x64`, and
+`work.frame.Laptop.RyzenAI300.BIOS.firmware` becomes
+`frame-laptop-ryzenai300-bios`. An updatable device that no catalog
+has offered a release gets an object named by the device, such as
+`uefi-dbx`, and the operator moves its entry to the component's object
+when a release appears. When another `Firmware` already has a name,
+the operator uses the whole component ID in lowercase, or the device's
+name and a hash of its GUIDs. [How discovery
+works](https://liken.sh/firmware/docs/concepts/discovery/#a-firmware-is-a-catalog-component)
+gives the reasons. The label `firmware.liken.sh/discovered` marks
+these objects, so you can list them apart from your upload rules:
 
 ```sh
 kubectl get firmware -l firmware.liken.sh/discovered
 ```
 
 ```
-NAME                       VALID   LOADED   RUNNING   FAILED   CONFLICT   MACHINES   BEHIND   AGE
-system-firmware-3c1f0a2b   <none>   <none>   <none>    <none>   <none>     3          1        2d
+NAME                           VALID    LOADED   RUNNING   FAILED   CONFLICT   MACHINES   BEHIND   AGE
+frame-laptop-ryzenai300-bios   <none>   <none>   <none>    <none>   <none>     3          1        2d
+microsoft-dbx-x64              <none>   <none>   <none>    <none>   <none>     3          2        2d
+uefi-ca                        <none>   <none>   <none>    <none>   <none>     1          0        2d
 ```
 
-`MACHINES` counts the machines that have a device of this model.
+`MACHINES` counts the machines that have an entry in the object.
 `BEHIND` counts the machines for which the catalog offers at least one
-release. A discovered `Firmware` has no `Valid` condition and no
+release. A machine whose device installed the newest release stays in
+`MACHINES` and leaves `BEHIND`. A discovered `Firmware` has no `Valid` condition and no
 upload counts, so those columns are empty.
 
 The entries are in `status.machines`, one for each machine's device:
 
 ```sh
-kubectl get firmware system-firmware-3c1f0a2b -o yaml
+kubectl get firmware frame-laptop-ryzenai300-bios -o yaml
 ```
 
 ```yaml
+spec:
+  update:
+    component: work.frame.Laptop.RyzenAI300.BIOS.firmware
 status:
   counts:
     behind: 1
@@ -133,6 +147,7 @@ status:
   machines:
     - machine: node-2
       device: System Firmware
+      deviceId: 3fcf9b4a0e1d2c5b6a7f8e9d0c1b2a3f4e5d6c7b
       version: 0.0.3.5
       catalog: lvfs
       file: firmware-09138-stable.xml.zst
@@ -146,7 +161,8 @@ status:
       time: "2026-10-20T15:12:04Z"
 ```
 
-Each entry says which version the device runs (`version`), which
+Each entry says which device it is, by name and by fwupd's ID
+(`device` and `deviceId`), which version the device runs (`version`), which
 `FirmwareCatalog` and which catalog file the scan matched it against
 (`catalog` and `file`), and the releases fwupd offers, newest first.
 An empty `releases` means the device runs the newest release the
@@ -177,8 +193,9 @@ The operator posts an `Event` for each step, in the namespace
 | `FirmwareCatalog` | `Scanned` | A scan answered. The message gives the machine and what it found. |
 | `FirmwareCatalog` | `ScanFailed` | A scan failed. This is a `Warning`. |
 | `FirmwareCatalog` | `CatalogMoved` | A scan found another file in the jcat than the one it was given. |
-| `Firmware` | `Discovered` | The operator created the object for a new device model. |
+| `Firmware` | `Discovered` | The operator created the object for a new component or set of GUIDs. |
 | `Firmware` | `UpdateAvailable` | The newest release offered for a machine's device changed. |
+| `Firmware` | `ManyComponents` | A catalog offered one device releases of more than one component. The device's entry is in the object of the newest release's component, and the message names the others. This is a `Warning`. |
 
 ## What a scan touches
 

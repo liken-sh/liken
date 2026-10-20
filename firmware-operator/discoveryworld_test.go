@@ -200,6 +200,16 @@ func discoveryWorld(t *testing.T) *world {
 	return w
 }
 
+// The names of scannedWorld's discovered objects: the BIOS's catalog
+// component, which offers it a release, and the set of GUIDs of the
+// dbx, which runs the newest release.
+// dbxObjectName is the dbx's object once a catalog offers it a release.
+const (
+	biosObjectName = "frame-laptop-ryzenai300-bios"
+	dbxGUIDsName   = "uefi-dbx"
+	dbxObjectName  = "microsoft-dbx-x64"
+)
+
 // scannedWorld is discoveryWorld after node-2's scan answered with its
 // BIOS, behind by one release, and its dbx, current.
 func scannedWorld(t *testing.T) *world {

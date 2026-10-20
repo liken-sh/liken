@@ -218,4 +218,4 @@ scan does not report the device, or when you delete the `Machine`.
 The operator deletes a discovered `Firmware` when no entry is left and
 nobody edited its spec. An object whose spec someone edited stays, and
 you delete it with `kubectl delete firmware <name>`. The operator then
-creates it again at the next scan that reports the device model.
+creates it again at the next scan that reports a device of its group.

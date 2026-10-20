@@ -75,10 +75,10 @@ func TestTheOperatorsCatalogStatusValidates(t *testing.T) {
 // A discovered Firmware, as the operator creates it and writes its
 // status, is one the schema takes and keeps whole.
 func TestADiscoveredFirmwareValidates(t *testing.T) {
-	f := firmware{APIVersion: firmwareAPIVersion, Kind: firmwareKind, Spec: firmwareSpec{Update: &update{GUIDs: []string{biosGUID}}}}
-	f.Metadata.Name = discoveredName("System Firmware", []string{biosGUID})
+	f := firmware{APIVersion: firmwareAPIVersion, Kind: firmwareKind, Spec: firmwareSpec{Update: &update{Component: frameworkBIOS().id}}}
+	f.Metadata.Name = biosObjectName
 	f.Metadata.Labels = map[string]string{discoveredLabel: discoveredLabelValue}
-	f.Status.Machines = []machineEntry{{Machine: "node-2", Device: "System Firmware", Version: "0.0.3.5", Catalog: "lvfs",
+	f.Status.Machines = []machineEntry{{Machine: "node-2", Device: "System Firmware", DeviceID: "3fcf", Version: "0.0.3.5", Catalog: "lvfs",
 		File: "firmware-09138-stable.xml.zst", Releases: systemFirmware("0.0.3.5", "0.0.4.2").Releases, Time: stamp(time.Now())}}
 	f.Status.Counts = counts{Machines: 1, Behind: 1}
 	assertTheSchemaKeeps(t, firmwareCRD, f)

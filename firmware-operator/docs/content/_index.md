@@ -40,7 +40,8 @@ across a power cycle, such as a board's UEFI firmware or an SSD. A
 for the Linux Vendor Firmware Service (LVFS). The operator runs a short
 read-only scan pod on each machine, and records each device, the
 version it runs, and the newer releases the catalog offers in a
-`Firmware` for that device model. It installs none of them.
+`Firmware` for each catalog component, such as `microsoft-dbx-x64`
+for the Secure Boot revocation list. It installs none of them.
 
 ```sh
 kubectl get firmware -l firmware.liken.sh/discovered

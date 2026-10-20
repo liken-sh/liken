@@ -7,8 +7,8 @@
 // one device, and writes the result into the Firmware's status. A
 // FirmwareCatalog names a source of firmware releases, such as LVFS. The
 // operator scans each machine against it with fwupd in a short pod, and
-// keeps one discovered Firmware with update for each device model it
-// finds, with the releases the catalog offers.
+// keeps one discovered Firmware with update for each catalog component
+// it finds a release of, with the releases the catalog offers.
 package main
 
 import (

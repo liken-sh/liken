@@ -11,4 +11,4 @@ one on its own.
 
 [How discovery works](/docs/concepts/discovery/) explains why the
 operator finds updates apart from approving and applying them, what a
-scan reads, and why each `Firmware` it creates is a device model.
+scan reads, and why each `Firmware` it creates is a catalog component.

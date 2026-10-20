@@ -108,6 +108,9 @@ const (
 	biosGUID = "9c13b7f1-d618-5d68-be61-6b17881014a7"
 	meGUID   = "69585d92-0000-0000-0000-000000000001"
 	dbxGUID  = "23192307-0000-0000-0000-000000000002"
+	// kekGUID is the GUID fwupd adds to the dbx device of a machine
+	// that enrolled one more Key Exchange Key.
+	kekGUID = "d07ff664-0000-0000-0000-000000000003"
 )
 
 // frameworkBIOS is the component that offers the Framework's BIOS.
@@ -117,7 +120,7 @@ func frameworkBIOS(versions ...string) fwComponent {
 
 // dbx is the component that offers the Secure Boot revocation list.
 func dbx(versions ...string) fwComponent {
-	return fwComponent{id: "org.uefi.dbx", guids: []string{dbxGUID}, versions: versions}
+	return fwComponent{id: "com.microsoft.dbx.x64.firmware", guids: []string{dbxGUID}, versions: versions}
 }
 
 func appStreamOf(components ...fwComponent) string {

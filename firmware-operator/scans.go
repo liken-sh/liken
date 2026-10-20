@@ -123,7 +123,7 @@ func (o *operator) recordEnds(ctx context.Context, c *catalog, ends []scanEnd, r
 	for _, end := range ends {
 		r, held := c.Status.record(end.attempt.machine)
 		if held && end.result == resultScanned && end.attempt.is(r) && r.Result == resultScanned {
-			if err := o.applyScan(rules, entriesOf(r, c.Metadata.Name, end.devices)); err != nil {
+			if err := o.applyScan(rules, entriesOf(r, c.Metadata.Name, end.devices, *rules)); err != nil {
 				// The pod stays, so the next pass reads its result again.
 				problems = append(problems, err)
 				continue

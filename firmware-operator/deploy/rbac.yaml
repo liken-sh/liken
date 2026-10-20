@@ -25,7 +25,7 @@ rules:
   - apiGroups: [firmware.liken.sh]
     resources: [firmwares, firmwarecatalogs]
     verbs: [get, list, watch]
-  # The operator creates one Firmware for each device model a scan
+  # The operator creates one Firmware for each group of devices a scan
   # reports, and deletes it when no machine's entry is left and nobody
   # changed its spec. It never updates a spec: a spec it wrote is the
   # one in its create.

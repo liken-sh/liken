@@ -33,6 +33,7 @@ const (
 	reasonScanned         = "Scanned"
 	reasonScanFailed      = "ScanFailed"
 	reasonCatalogMoved    = "CatalogMoved"
+	reasonManyComponents  = "ManyComponents"
 )
 
 type eventReference = events.ObjectReference

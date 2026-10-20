@@ -61,9 +61,11 @@ type upload struct {
 }
 
 // update marks a Firmware as the rule for the firmware that a device
-// keeps, and its guids name the device model it covers (discovered.go).
+// keeps. Exactly one of its fields names the group of devices it covers
+// (grouping.go): a catalog component, or a set of GUIDs.
 type update struct {
-	GUIDs []string `json:"guids"`
+	Component string   `json:"component,omitempty"`
+	GUIDs     []string `json:"guids,omitempty"`
 }
 
 type firmwareStatus struct {

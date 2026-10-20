@@ -51,15 +51,36 @@ releases. The directory is empty and stays empty, because the scan
 stages no capsule. Staging a capsule on the real ESP is part of
 applying an update, and applying belongs to `init`.
 
-## A Firmware is a device model
+## A Firmware is a catalog component
 
-fwupd matches a release to a device by the device's GUIDs. So the
-operator keeps one `Firmware` for each set of GUIDs, and each machine
-with that model has an entry in its status. The name of the object
-holds a hash of the GUIDs and no version, so the object stays the same
-when a machine installs a new release. The machines that have one
-model share the object, and `kubectl get firmware` shows how many of
-them the catalog offers a release for.
+What you approve is a version of one catalog component, such as
+`com.microsoft.dbx.x64.firmware`, the Secure Boot revocation list for
+x64 machines. So the operator keeps one `Firmware` for each component
+that a catalog offers a release of, and each machine's device that
+gets an offer has an entry in its status. `kubectl get firmware` shows
+how many of those machines the catalog offers a release for.
+
+The operator does not group by the GUIDs that fwupd reports, because a
+device's set of GUIDs does not name one kind of device. fwupd adds a
+GUID to the `dbx` device for each Key Exchange Key that the machine
+has enrolled, so two machines with one revocation list can report two
+sets. A USB device's first GUID holds its revision, which an update
+changes.
+
+A device keeps its entry in the component's object after it installs
+the newest release and gets no offer. The entry records fwupd's ID of
+the device, and the next scan finds the entry by that ID. A device that
+no catalog has offered a release has nothing to approve, and the
+operator keeps it in an object for its set of GUIDs. When a catalog
+offers that device a release, its entry moves to the component's
+object, and the operator deletes the emptied object.
+
+The name of a component's object is the component ID with no
+top-level domain and no `firmware` part, such as `microsoft-dbx-x64`.
+The name of a GUID set's object is the device's name, such as
+`uefi-dbx`. When another `Firmware` already has the name, the operator
+uses a longer one: the whole component ID in lowercase, or the
+device's name and a hash of the GUIDs.
 
 ## Each scan pod reads the versioned catalog file
 
