@@ -13,7 +13,7 @@ rehearses it against a copy of the machine's variables, and plans
 [06](../../firmware-operator/plans/06-applying-a-database-update.md)
 to [08](../../firmware-operator/plans/08-applying-a-capsule.md) apply
 it. The OS offers capabilities, and the add-on uses them: a reboot
-turn ([milestone 88](88-a-component-takes-a-reboot-turn.md)), the
+turn ([milestone 88](88-disruptions.md)), the
 one-shot boot of that turn's reboot, a boot order that survives a
 reset, and the ESP of the next boot. The add-on makes every write to
 the firmware itself. Root [plan 81](../../plans/81-firmware.md)
@@ -182,15 +182,15 @@ store and the ESP itself, from its own pods, inside a turn.
 
 ### A reboot turn
 
-[Milestone 88](88-a-component-takes-a-reboot-turn.md) lets a
-component ask for a machine's turn, start its work after the drain,
-and release the machine to reboot. The turn gives a firmware write
-the disruption budget, one leader at a time, the drain, and a reboot
-that only the conductor orders. It also keeps a turn and a staged
-release from sharing a reboot: a machine with a staged release gets no
-component turn, and a machine in a component turn stages no release
-until it reboots. A failed boot after a firmware write then has one
-cause.
+[Milestone 88](88-disruptions.md) lets a
+component ask for a machine's turn with a `Disruption`, hold the turn
+after the drain while it works, and then release the machine to
+reboot. The turn gives a firmware write the machine's
+`MachineDisruptionBudget`s, one leader at a time, the drain, and a
+reboot that only the conductor orders. A capsule's `Disruption` is
+exclusive: under the turn's one cordon, it takes a reboot of its own,
+and the requests that share a reboot, such as a release, take the last
+one. A failed boot after a firmware write then has one cause.
 
 A Secure Boot database update needs only this capability.
 
@@ -200,7 +200,8 @@ When a component releases its turn, it can say that it set
 `BootNext` for this reboot. machine-operator carries that in the
 `RebootIntent` it writes for `init` (`machine/reboot.go`). On that
 reboot, `assertAndArmForReboot` leaves `BootNext` as it finds it, and
-arms no release trial, which the rule above already ensures. It still
+arms no release trial: a release that is staged stays staged, and
+`armProvingBoot` arms it on the turn's last reboot. It still
 asserts `BootOrder` and heals the slots' entries, which writes nothing
 when nothing drifted.
 
@@ -211,7 +212,7 @@ resets. The next boot finds no one-shot, so it starts the head of
 proven slot again. Nothing else in `init` changes. fwupd's
 "Linux Firmware Updater" entry stays in `BootOrder` behind the slots,
 where `bootOrderWith` keeps every entry it did not write, and
-`firmware-operator` removes it in a later turn.
+`firmware-operator` removes it in the machine's next turn.
 
 The handover is for one reboot. A machine that does not reboot within
 the turn, or an intent that carries no handover, gets the ordinary
@@ -220,7 +221,7 @@ reboot could leave the machine with no way back: the proven slot has
 no default-path loader, or `chooseBootActuator` returned `noActuator`.
 A firmware update cannot be undone, so these checks are stricter than
 a release's, in the pattern of `canArmTrial`. `init` prints the
-refusal, and machine-operator reports it on the turn, so the
+refusal, and machine-operator reports it on the `Disruption`, so the
 component reads that its update did not run.
 
 ### A boot order that survives a reset
@@ -240,8 +241,7 @@ check is worth building for release trials alone.
 
 fwupd writes its updater and the capsule to the ESP that the firmware
 reads at the next boot. On a `liken` machine, that is the proven
-slot, because the turn's rule keeps a release trial out of the same
-reboot. The OS has to let the component's pod mount that one
+slot, because a handover reboot arms no release trial. The OS has to let the component's pod mount that one
 partition. One shape is a fixed path on the host that `init` binds to
 the proven slot at each boot, so fwupd's `EspLocation` never changes.
 The shape is not decided.
@@ -290,11 +290,12 @@ Everything the OS offers runs under QEMU, because each capability
 depends on boot order or filesystem behavior, and none depends on the
 hardware:
 
-* Write a competing `BootNext` by hand and release a turn with the
+* Write a competing `BootNext` by hand and release a hold with the
   handover. The one-shot survives the reboot, and the boot after it
   starts the proven slot.
-* Stage a release and ask for a component turn. The conductor grants
-  none until the release's reboot.
+* Stage a release and an exclusive `Disruption` with the handover on
+  one machine. The first reboot arms no trial, and the release's
+  trial arms on the turn's last reboot.
 * Write a file into `\EFI\UpdateCapsule` on the slot that is not the
   proven slot. The next boot deletes it.
 

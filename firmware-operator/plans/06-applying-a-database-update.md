@@ -2,11 +2,13 @@
 
 Proposed on 2026-10-21. Not built. This plan writes an approved
 `dbx`, `db`, or `KEK` update to a machine, inside a reboot turn that
-the OS grants, and proves it from the next scan. It follows
+the OS grants through a `Disruption`, and proves it from the next
+scan. It follows
 [plan 05](completed/05-rehearsal.md), whose rehearsal records the one
 append that the update makes, and it needs `liken`'s
-[milestone 88](../../liken/plans/88-a-component-takes-a-reboot-turn.md)
-for the turn. It needs nothing else from the OS, because a database
+[milestone 88](../../liken/plans/88-disruptions.md)
+for the turn, in its second stage, which adds `spec.hold`. It needs
+nothing else from the OS, because a database
 update writes no variable that `init` reads or writes
 ([milestone 33](../../liken/plans/33-firmware-updates.md)). Capsules
 follow in plans [07](07-rehearsing-a-capsule.md) and
@@ -27,11 +29,17 @@ drained machine for the write and a record of each result.
 1. **Rehearse.** Plan 05, as built. A machine whose rehearsal did
    not pass gets no turn.
 2. **Ask for a turn.** For each machine whose rehearsal passed, the
-   operator asks for a turn through milestone 88. A `Firmware` asks
-   for one machine at a time. The conductor's budget limits the fleet,
-   so the operator adds no budget of its own.
-3. **Write.** When the turn reports the machine drained, the operator
-   starts an apply pod on it. The pod runs the rehearsal again against
+   operator creates a `Disruption` with `kind: Reboot`, `hold: true`,
+   and the requester `firmware.liken.sh/firmware-operator`. A
+   `Firmware` asks for one machine at a time. The machine's
+   `MachineDisruptionBudget`s limit the fleet, so the operator adds no
+   budget of its own. A database update has no urgency, so by default
+   the operator files the request only when another `Disruption` is
+   pending for the machine, usually its next release, and the update
+   shares that reboot. A deadline on the approval files it on its own
+   when no other turn comes.
+3. **Write.** When the machine is in its turn and drained, the
+   operator starts an apply pod on it. The pod runs the rehearsal again against
    a fresh copy, so the bytes come from the machine's variables as
    they are now. It checks that the append's SHA-256 is the one in
    `status.rehearsals`. It then writes that append to the real
@@ -39,10 +47,11 @@ drained machine for the write and a record of each result.
    reads the variable back. A different SHA-256 means the variables
    changed since the rehearsal: the pod writes nothing, and the
    operator rehearses again after the reboot.
-4. **Release the turn.** The pod's result goes into status, and the
-   operator releases the turn with it. The machine reboots, because a
-   database update takes effect at the next boot, and the turn's
-   workloads are already gone.
+4. **Release the hold.** The pod's result goes into status, and the
+   operator clears `hold`. The machine reboots, because a database
+   update takes effect at the next boot, and the turn's workloads are
+   already gone. The reboot also applies whatever else the turn
+   holds.
 5. **Prove.** The next scan after the reboot reports the device's
    version. Plan 04's `Approved` condition moves to `Installed` when
    every selected machine reports the approved version, as it did on

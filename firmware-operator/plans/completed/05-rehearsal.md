@@ -8,7 +8,7 @@ applies a Secure Boot database update,
 [plan 07](../07-rehearsing-a-capsule.md) rehearses a capsule, and
 [plan 08](../08-applying-a-capsule.md) applies one. The OS offers the
 reboot turn and the other capabilities they use, in `liken`'s
-[milestone 88](../../../liken/plans/88-a-component-takes-a-reboot-turn.md)
+[milestone 88](../../../liken/plans/88-disruptions.md)
 and [milestone 33](../../../liken/plans/33-firmware-updates.md). The
 split also settled [Who makes the write](#questions-for-the-full-design):
 `firmware-operator`'s pod writes inside the turn, and `init` does not.

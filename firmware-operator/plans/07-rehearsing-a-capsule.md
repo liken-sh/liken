@@ -64,8 +64,8 @@ edk2's `FmpDevicePkg` and `EsrtFmpDxe`.
 
 - Which machine has a capsule on LVFS. The proof waits on it.
 - Whether to rehearse each capsule against the running slot's ESP
-  when the proven slot is not the running one. Milestone 88's rule
-  keeps a release trial out of the turn, so the two are the same slot
+  when the proven slot is not the running one. A capsule's reboot
+  arms no release trial (milestone 33), so the two are the same slot
   in a turn, but a rehearsal runs outside a turn.
 - Device updates through fwupd's other plugins, such as SSDs and
   docks. They write the device itself, and no copy can rehearse them.

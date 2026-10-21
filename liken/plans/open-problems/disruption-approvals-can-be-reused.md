@@ -1,6 +1,9 @@
 # Make disruption approvals one-shot
 
-Open bug and design question, low priority. The documentation says that
+Open bug and design question, low priority.
+[Milestone 88](../88-disruptions.md) proposes the fix: an approval
+binds one hash on one `Disruption`, and it goes away when the request
+completes. The documentation says that
 one approval permits one disruption. The implementation leaves the
 approval annotation in place and matches it against a deterministic
 configuration hash. A later return to identical configuration can reuse

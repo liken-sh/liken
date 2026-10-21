@@ -7,7 +7,7 @@ from the next scan. It follows plans
 update in a turn, and [07](07-rehearsing-a-capsule.md), which
 rehearses a capsule. It uses every capability that `liken`'s
 [milestone 33](../../liken/plans/33-firmware-updates.md) offers: the
-turn of [milestone 88](../../liken/plans/88-a-component-takes-a-reboot-turn.md),
+turn of [milestone 88](../../liken/plans/88-disruptions.md),
 the one-shot boot of the turn's reboot, a boot order that survives a
 reset, and the ESP of the next boot.
 
@@ -22,17 +22,20 @@ loads, and a failure there has no slot to fall back to.
 ## The steps
 
 1. **Rehearse.** Plan 07.
-2. **Ask for a turn.** As in plan 06.
+2. **Ask for a turn.** As in plan 06, with `exclusive: true` and no
+   wait: a capsule takes its own reboot under the turn's cordon, and
+   the turn's shared requests, such as a release, take the last one.
 3. **Write.** After the drain, the apply pod runs `fwupdtool install`
    against the real variable store and the ESP of the next boot. Unlike
    a database update, the writes are several, and fwupd makes them in
    its own order, so the pod runs fwupd instead of replaying the
    rehearsal's record. It then compares what fwupd wrote with the
    rehearsal's record. A difference fails the apply, and the operator
-   releases the turn with no handover, so `init` pins `BootNext` at
-   the proven slot and the capsule does not apply.
-4. **Release the turn with the handover.** The operator tells the OS
-   that it set `BootNext` for this reboot. The firmware boots the
+   clears the hold with no handover, so `init` pins `BootNext` at the
+   proven slot and the capsule does not apply. A failed step holds
+   the rest of the turn until a person clears it.
+4. **Release the hold with the handover.** The operator clears `hold`
+   and tells the OS that it set `BootNext` for this reboot. The firmware boots the
    updater, applies the capsule, and resets. The next boot starts the
    proven slot, and `init` restores its own `BootNext`.
 5. **Prove.** The next scan reads the version from the ESRT through
@@ -41,8 +44,8 @@ loads, and a failure there has no slot to fall back to.
    report a failure for an update that applied
    ([fwupd#11119](https://github.com/fwupd/fwupd/issues/11119)), so
    the version decides.
-6. **Clean up.** A later turn, or the next one the machine takes,
-   removes the "Linux Firmware Updater" boot entry and the files
+6. **Clean up.** A `Disruption` that waits for the machine's next
+   turn removes the "Linux Firmware Updater" boot entry and the files
    under `\EFI\fwupd` and `\EFI\UpdateCapsule` on the slot.
 
 ## Preconditions
@@ -80,5 +83,3 @@ catalog offers one, after plan 07's rehearsal of it.
   but fwupd calls that path uncommon.
 - How long the firmware's update may take before the machine's
   `Ready` counts as late, and what the turn's deadline is for it.
-- Whether the cleanup of step 6 needs its own turn, or rides the next
-  turn the machine takes for any reason.
