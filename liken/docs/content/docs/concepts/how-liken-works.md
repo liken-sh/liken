@@ -120,7 +120,11 @@ Whatever the budgets allow, only one leader is out of service at a
 time, because the datastore needs a majority of the leaders.
 
 When a machine has an approved request and every budget that selects
-it has room, `cluster-operator` gives it a turn. It records the turn
+it has room, `cluster-operator` gives it a turn. When more machines
+wait than the budgets allow, the machine with the oldest request goes
+first, so a machine that asks again after each turn cannot keep
+another machine waiting. Among requests made in the same second, a
+follower goes before a leader. `cluster-operator` records the turn
 in the `Cluster`'s
 [`status.rebootTurns`](/docs/reference/cluster/#statusrebootturns),
 with the names of the requests that the turn covers. The entry is

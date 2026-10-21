@@ -24,6 +24,8 @@
 package disruption
 
 import (
+	"time"
+
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/machine"
 )
@@ -65,6 +67,10 @@ type Disruption struct {
 type Meta struct {
 	api.ObjectMeta  `json:",inline"`
 	OwnerReferences []Owner `json:"ownerReferences,omitempty"`
+
+	// CreationTimestamp is when the API server stored the request. The
+	// conductor grants turns to the oldest requests first.
+	CreationTimestamp time.Time `json:"creationTimestamp,omitzero"`
 }
 
 // Owner is one owner reference.

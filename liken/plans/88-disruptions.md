@@ -494,6 +494,15 @@ differences:
   turn.
 - **The CLI writes `Disruption`s only.** `request-reboot` and
   `approve-reboot` refuse a cluster that does not serve the kind.
+- **The oldest request goes first.** The conductor granted every
+  waiting worker a turn before any leader. With a budget of one and
+  two workers that each asked again as soon as their turn ended, a
+  leader's request waited more than four minutes and would have
+  waited for as long as the workers kept asking. The conductor now
+  orders every waiting machine by the creation time of its oldest
+  open request. Among requests made in the same second, workers go
+  before leaders, and then name order applies. The lag gate still
+  sends a leader first while the system-pod template lags.
 - **The uncordon says what happened.** A person's request deleted
   during its drain uncordoned the machine with no reboot, and the
   `Uncordoned` `Event` said "its reboot is complete". The message now
@@ -541,6 +550,11 @@ service or more than one ledger entry.
   `default` budget deleted came back within a second. machine-operator's
   pod deleted during a leader's drain: the new pod finished the drain
   and the reboot.
+
+On `-906`, which adds the order by request age, the same three
+machines asked again as soon as each reboot ended, 40 times each,
+and every request, the leader's included, became a new boot in 22 to
+109 seconds: at most two other turns ahead of it, and its own.
 
 A turn ends later when the drain evicts the conductor. The new
 conductor reclaims no entry until it has read the heartbeats for

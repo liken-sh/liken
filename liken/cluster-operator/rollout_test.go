@@ -11,6 +11,7 @@ import (
 
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/disruption"
 	"github.com/liken-sh/liken/liken/machine"
 )
 
@@ -145,6 +146,40 @@ func TestRolloutGrantsInNameOrder(t *testing.T) {
 	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
 	if !slices.Equal(r.grant, []string{"node-4"}) {
 		t.Errorf("deterministic order, lowest name first: %v", r.grant)
+	}
+}
+
+// A machine that asks again after each turn does not keep a machine
+// that asked before it waiting: the oldest request goes first, and the
+// worker goes ahead of a leader only when they asked at the same time.
+func TestRolloutGrantsTheOldestRequestFirst(t *testing.T) {
+	cases := []struct {
+		name        string
+		leaderAsked time.Duration
+		workerAsked time.Duration
+		want        string
+	}{
+		{"the leader asked first", 5 * time.Minute, 10 * time.Second, "node-1"},
+		{"the worker asked first", 10 * time.Second, 5 * time.Minute, "node-4"},
+		{"both asked in the same second", time.Minute, time.Minute, "node-4"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			machines, renewals := rolloutInputs(
+				rolloutEntry{"node-1", api.PhaseUpdatePending, fresh, true, -1},
+				rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
+			)
+			q := asking(machines)
+			q.disruptions[0].Metadata.CreationTimestamp = sweepNow.Add(-c.leaderAsked)
+			q.disruptions[1].Metadata.CreationTimestamp = sweepNow.Add(-c.workerAsked)
+			q.budgets = []disruption.Budget{*disruption.NewDefaultBudget(1)}
+
+			r := decideRollout(machines, renewals, time.Time{}, labCluster(0), "", q, sweepNow)
+
+			if !slices.Equal(r.grant, []string{c.want}) {
+				t.Errorf("granted %v, want %s", r.grant, c.want)
+			}
+		})
 	}
 }
 

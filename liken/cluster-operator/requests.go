@@ -15,6 +15,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
@@ -80,6 +81,31 @@ func (q fleetRequests) open(m *machine.Machine) []string {
 		}
 	}
 	return names
+}
+
+// oldestOpen answers when the machine's oldest open request was made,
+// to the second the API server records. The conductor serves the
+// oldest request first.
+func (q fleetRequests) oldestOpen(m *machine.Machine) time.Time {
+	open := q.open(m)
+	var oldest time.Time
+	for _, d := range q.of(m.Metadata.Name) {
+		if slices.Contains(open, d.Metadata.Name) && (oldest.IsZero() || d.Metadata.CreationTimestamp.Before(oldest)) {
+			oldest = d.Metadata.CreationTimestamp
+		}
+	}
+	return oldest.Truncate(time.Second)
+}
+
+// compareLeader orders a worker ahead of a leader.
+func compareLeader(a, b bool) int {
+	switch {
+	case a == b:
+		return 0
+	case a:
+		return 1
+	}
+	return -1
 }
 
 // joined answers an entry's Disruptions with each open request of its

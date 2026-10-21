@@ -13,7 +13,9 @@ package main
 // and the conductor hands out reboot turns one budget slot at a
 // time.
 //
-// Turns normally go to workers before leaders, because a worker
+// Turns go to the oldest request first, so a machine that asks again
+// after each turn cannot keep another machine waiting. Among requests
+// made in the same second, workers go before leaders, because a worker
 // mistake costs little while every leader carries a share of quorum.
 // One case reorders that default: a version rollout, while the
 // machine-operator DaemonSet's applied template lags the fleet's
@@ -26,18 +28,15 @@ package main
 // the lag instead, so while it lasts, the gate holds workers back and
 // grants a waiting leader its turn.
 //
-// The coordination happens through conditions. A machine that needs
-// a reboot sets reason AwaitingTurn on its convergence condition and
-// waits. This program responds by writing a RebootApproved condition
-// onto that Machine. That condition is a grant: it is present while
-// the turn is extended, it is removed when the turn is spent, and it
-// is never set to False. Writing one condition type that you own
-// onto an object that another controller manages is a standard
-// arrangement: the scheduler writes PodScheduled onto Pods that the
-// kubelet owns. The machine's own operator carries the grant along
-// untouched, because its status writes preserve condition types it
-// does not set, and it acts on the grant: it cordons, drains, and
-// reboots the machine (see drain.go).
+// A machine asks for a turn with an approved Disruption (requests.go).
+// This program grants the turn with the machine's entry in the
+// ledger below, and the machine's own operator acts on that entry: it
+// cordons, drains, and reboots the machine
+// (machine-operator/turn.go). This program also writes a
+// RebootApproved condition onto the Machine, because a machine-operator
+// of the release before acts on that condition alone. The condition is
+// present while the turn is extended, it is removed when the turn is
+// spent, and it is never set to False.
 //
 // The budget counts all unavailability, planned or not. A machine
 // that is Lost or Degraded occupies a slot just like a machine that
@@ -186,8 +185,9 @@ func machineNamed(machines []machine.Machine, name string) *machine.Machine {
 }
 
 // decideRollout computes the whole rollout decision, over the same
-// inputs that the fleet sweep reads. It grants turns to workers
-// first, then to leaders, each group in name order. Workers go first
+// inputs that the fleet sweep reads. It grants turns to the oldest
+// request first, and among requests made in the same second, to
+// workers before leaders and then in name order. Workers go first
 // because a mistake with a worker costs little, while every leader
 // carries a share of quorum. Name order makes the decision
 // deterministic, so two sweeps of the same fleet agree.
@@ -407,25 +407,35 @@ func decideRollout(machines []machine.Machine, heard map[string]time.Time, heard
 		inProgress = append(inProgress, name)
 		book.take(name)
 	}
-	if !holdWorkers {
-		for _, name := range workers {
-			if why := held(); why != "" {
-				wait(name, why)
-				continue
-			}
-			if why := book.refusal(name); why != "" {
-				wait(name, why)
-				continue
-			}
-			give(name)
-		}
+	// One queue holds every machine that waits for a turn, oldest
+	// request first, so a machine that asks again after each turn never
+	// keeps one that asked before it waiting. Requests made in the same
+	// second put workers ahead of leaders, then go in name order.
+	queue := slices.Concat(workers, leaders)
+	asked := map[string]time.Time{}
+	for _, name := range queue {
+		asked[name] = q.oldestOpen(machineNamed(machines, name))
 	}
-	for _, name := range leaders {
-		if why := held(); why != "" {
-			wait(name, why)
-			continue
+	slices.SortStableFunc(queue, func(a, b string) int {
+		if c := asked[a].Compare(asked[b]); c != 0 {
+			return c
 		}
-		if leaderBusy {
+		return compareLeader(slices.Contains(leaders, a), slices.Contains(leaders, b))
+	})
+	for _, name := range queue {
+		leader := slices.Contains(leaders, name)
+		switch {
+		case !leader && holdWorkers:
+			// Every waiting worker sits out the sweep: the gate holds
+			// the whole group back rather than admit some of them ahead
+			// of the leader turn that ends the lag.
+			wait(name, fmt.Sprintf("the applied system-pod template (%s) lags the fleet's target (%s), and a leader goes first to advance it",
+				appliedVersion, clusterDoc.Spec.Version))
+			continue
+		case held() != "":
+			wait(name, held())
+			continue
+		case leader && leaderBusy:
 			wait(name, "another leader is out of service, and only one leader is out at a time")
 			continue
 		}
@@ -434,18 +444,9 @@ func decideRollout(machines []machine.Machine, heard map[string]time.Time, heard
 			continue
 		}
 		give(name)
-		leaderBusy = true
+		leaderBusy = leaderBusy || leader
 	}
 	slices.SortFunc(r.turns, func(a, b cluster.RebootTurn) int { return strings.Compare(a.Machine, b.Machine) })
-	if holdWorkers {
-		// Every waiting worker sits out the sweep: the gate holds the
-		// whole group back rather than admit some of them ahead of the
-		// leader turn that ends the lag.
-		for _, name := range workers {
-			wait(name, fmt.Sprintf("the applied system-pod template (%s) lags the fleet's target (%s), and a leader goes first to advance it",
-				appliedVersion, clusterDoc.Spec.Version))
-		}
-	}
 	r.budgets = book.statuses(q.budgets)
 	if listening {
 		// A reclaim waits too: the machine reads available from a
