@@ -94,8 +94,8 @@ func TestTheCredentialsDirectory(t *testing.T) {
 const namespaceTerminating = `{"kind":"Status","apiVersion":"v1","status":"Failure","message":"events \"east.\" is forbidden: unable to create new content in namespace observatory because it is being terminated","reason":"Forbidden","details":{"name":"east.","kind":"events","causes":[{"reason":"NamespaceTerminating","message":"namespace observatory is being terminated","field":"metadata.namespace"}]},"code":403}`
 
 // Each status maps to the answer its caller handles: an absent object,
-// a conflict, a create in a namespace being deleted, and a failure that
-// holds the server's own text on one line.
+// a conflict, a request RBAC refuses, a create in a namespace being
+// deleted, and a failure that holds the server's own text on one line.
 func TestEachStatusAnswersWhatItsCallerHandles(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -106,7 +106,7 @@ func TestEachStatusAnswersWhatItsCallerHandles(t *testing.T) {
 	}{
 		{"a 404", http.StatusNotFound, `{"kind":"Status"}`, ErrNotFound, ""},
 		{"a 409", http.StatusConflict, `{"kind":"Status"}`, ErrConflict, ""},
-		{"a 403", http.StatusForbidden, "forbidden: no list\n", nil, "GET /things: 403 Forbidden: forbidden: no list"},
+		{"a 403", http.StatusForbidden, "forbidden: no list\n", ErrForbidden, "GET /things: 403 Forbidden: forbidden: no list"},
 		{"a 403 in a namespace being deleted", http.StatusForbidden, namespaceTerminating, ErrNamespaceTerminating, ""},
 		{"a 500", http.StatusInternalServerError, "etcd is gone\n\n", nil, "500 Internal Server Error: etcd is gone"},
 	}

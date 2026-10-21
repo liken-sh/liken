@@ -51,6 +51,12 @@ type View struct {
 	// it false for a store with a selector, because an object the
 	// operator wrote can be outside the selection.
 	Whole bool
+
+	// Absent says the store's empty collection stands in for a kind the
+	// cluster does not serve (Options.Absent). A caller that would
+	// create an object of the kind reads it to send no create that the
+	// API server must refuse.
+	Absent bool
 }
 
 // Ready reports whether a list can come from the store.

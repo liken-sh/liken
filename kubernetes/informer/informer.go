@@ -171,6 +171,11 @@ type Collection struct {
 
 	// strict is Options.UnreadyOnWatchError.
 	strict bool
+
+	// absent is true while the last list of the collection was refused
+	// as absent (Options.Absent), so the copy's empty collection stands
+	// in for a kind the cluster does not serve.
+	absent atomic.Bool
 }
 
 // noteWatch records whether the API server grants the watch. An
@@ -216,7 +221,9 @@ func Start(ctx context.Context, client dynamic.Interface, source Source, options
 	lister := &cache.ListWatch{
 		ListWithContextFunc: func(ctx context.Context, list metav1.ListOptions) (runtime.Object, error) {
 			scope(&list)
-			items, err := absent.list(collection.List(ctx, list))
+			listed, err := collection.List(ctx, list)
+			c.absent.Store(absent.is(err))
+			items, err := absent.list(listed, err)
 			if err != nil && options.ListFailed != nil {
 				options.ListFailed(err)
 			}
@@ -238,6 +245,9 @@ func Start(ctx context.Context, client dynamic.Interface, source Source, options
 			if err != nil {
 				failed.Store(true)
 			} else {
+				// The API server serves the collection, whether this
+				// watch is a streaming list or follows a plain list.
+				c.absent.Store(false)
 				accepted()
 			}
 			// The first accepted watch is the streaming list of the first
@@ -308,7 +318,7 @@ func (c *Collection) View() View {
 	if c == nil {
 		return View{}
 	}
-	return View{Store: c.store, Synced: c.Synced}
+	return View{Store: c.store, Synced: c.Synced, Absent: c.absent.Load()}
 }
 
 // trim answers the transform that removes metadata.managedFields from

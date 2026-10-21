@@ -47,6 +47,12 @@ var (
 	ErrConflict = errors.New("conflict: something else wrote this object first")
 )
 
+// ErrForbidden is any other 403: RBAC does not grant the request. A
+// caller that runs beside an older release's RBAC, such as an operator
+// that reads a kind the older release does not grant, reads it as the
+// absence of that kind.
+var ErrForbidden = errors.New("forbidden")
+
 // ErrNamespaceTerminating is the 403 that refuses a create in a
 // namespace the API server is deleting. The delete removes everything
 // in the namespace, so a caller drops the write instead of sending it
@@ -362,6 +368,9 @@ func (c *Client) send(method, path, contentType string, body []byte, out any) (i
 			return status, fmt.Errorf("%s %s: %w", method, path, ErrNamespaceTerminating)
 		}
 		err := fmt.Errorf("%s %s: %s: %s", method, path, resp.Status, message)
+		if status == http.StatusForbidden {
+			return status, &forbiddenError{err: err}
+		}
 		if status == http.StatusTooManyRequests {
 			seconds := retryAfter(resp.Header.Get("Retry-After"), message)
 			return status, &throttledError{err: err, wait: time.Duration(max(seconds, 1)) * time.Second, seconds: seconds}
@@ -406,6 +415,14 @@ type throttledError struct {
 }
 
 func (e *throttledError) Error() string { return e.err.Error() }
+
+// forbiddenError is a 403 with the API server's own text, which
+// errors.Is matches to ErrForbidden.
+type forbiddenError struct{ err error }
+
+func (e *forbiddenError) Error() string { return e.err.Error() }
+
+func (e *forbiddenError) Is(target error) bool { return target == ErrForbidden }
 
 // Is makes a throttledError match ErrThrottled.
 func (e *throttledError) Is(target error) bool { return target == ErrThrottled }

@@ -48,7 +48,7 @@ func undefinedWatcher(t *testing.T, server *undefined) dynamic.Interface {
 }
 
 // A collection whose definition is absent reads as an empty copy that
-// answers a pass. The quiet stream asks the API server nothing, and
+// answers a pass, and reports the collection absent. The quiet stream asks the API server nothing, and
 // counts as no watch opened again. When the definition arrives, the
 // copy holds its objects after the next recheck and the reflector's
 // backoff.
@@ -64,6 +64,9 @@ func TestAnAbsentCollectionReadsAsEmptyUntilItArrives(t *testing.T) {
 		if held := CachedList[thing](c.View()); !c.View().Ready() || len(held) != 0 {
 			t.Errorf("the copy of an absent collection holds %+v, ready: %v; want an empty copy that answers", held, c.View().Ready())
 		}
+		if !c.View().Absent {
+			t.Error("the copy of an absent collection does not report the collection absent")
+		}
 		if server.plainWatches.Load() != 0 {
 			t.Errorf("the watch of an absent collection sent %d plain watches", server.plainWatches.Load())
 		}
@@ -73,6 +76,9 @@ func TestAnAbsentCollectionReadsAsEmptyUntilItArrives(t *testing.T) {
 		synctest.Wait()
 		if _, held := Cached[thing](c.View(), "a"); !held {
 			t.Error("the copy does not hold the collection that arrived")
+		}
+		if c.View().Absent {
+			t.Error("the copy reports a collection that arrived as absent")
 		}
 		if reopened.Load() != 0 {
 			t.Errorf("the watch counted %d reopened watches, want none", reopened.Load())
