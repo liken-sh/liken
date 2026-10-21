@@ -44,7 +44,33 @@ type podSpec struct {
 	EnableServiceLinks            *bool              `json:"enableServiceLinks,omitempty"`
 	SecurityContext               *podSecurity       `json:"securityContext,omitempty"`
 	ResourceClaims                []podResourceClaim `json:"resourceClaims,omitempty"`
+	Volumes                       []volume           `json:"volumes,omitempty"`
 	Containers                    []container        `json:"containers"`
+}
+
+// volume is a host directory or a directory in memory. A rehearsal pod
+// mounts the machine's /sys/firmware and keeps its copy in memory.
+type volume struct {
+	Name     string    `json:"name"`
+	HostPath *hostPath `json:"hostPath,omitempty"`
+	EmptyDir *emptyDir `json:"emptyDir,omitempty"`
+}
+
+type hostPath struct {
+	Path string `json:"path"`
+	Type string `json:"type,omitempty"`
+}
+
+type emptyDir struct {
+	Medium    string `json:"medium,omitempty"`
+	SizeLimit string `json:"sizeLimit,omitempty"`
+}
+
+type volumeMount struct {
+	Name              string `json:"name"`
+	MountPath         string `json:"mountPath"`
+	ReadOnly          bool   `json:"readOnly,omitempty"`
+	RecursiveReadOnly string `json:"recursiveReadOnly,omitempty"`
 }
 
 type toleration struct {
@@ -75,6 +101,7 @@ type container struct {
 	Env                      []envVar         `json:"env,omitempty"`
 	SecurityContext          *securityContext `json:"securityContext,omitempty"`
 	Resources                *resources       `json:"resources,omitempty"`
+	VolumeMounts             []volumeMount    `json:"volumeMounts,omitempty"`
 	TerminationMessagePolicy string           `json:"terminationMessagePolicy,omitempty"`
 }
 
@@ -91,6 +118,7 @@ type securityContext struct {
 }
 
 type capabilities struct {
+	Add  []string `json:"add,omitempty"`
 	Drop []string `json:"drop,omitempty"`
 }
 

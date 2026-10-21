@@ -71,14 +71,15 @@ The cabinet file of the approved release, copied from the release in `status.mac
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="status--observedgeneration"></span>`observedGeneration` | integer | no | The generation of the spec that the status answers. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | An upload has `Valid`. It is `True` with the reason `Compiled` when the selector and `spec.machines` compile. It is `False` with the reason `SelectorInvalid` when either one does not, and the message gives the error. A rule that is not valid runs nowhere. An update with `version` has `Approved`, over the machines that `spec.machines` covers. It is `True` with the reason `Offered` when a catalog offers the version in the pinned cabinet to at least one machine, and with `Installed` when none is offered it and at least one runs it. It is `False` with `CabinetDiffers` when a catalog offers the version only in another cabinet, with `NotOffered` when no catalog offers it, and with `MachinesInvalid` when `spec.machines` does not compile. The message names the machines. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | An upload has `Valid`. It is `True` with the reason `Compiled` when the selector and `spec.machines` compile. It is `False` with the reason `SelectorInvalid` when either one does not, and the message gives the error. A rule that is not valid runs nowhere. An update with `version` has `Approved`, over the machines that `spec.machines` covers. It is `True` with the reason `Offered` when a catalog offers the version in the pinned cabinet to at least one machine, and with `Installed` when none is offered it and at least one runs it. It is `False` with `CabinetDiffers` when a catalog offers the version only in another cabinet, with `NotOffered` when no catalog offers it, and with `MachinesInvalid` when `spec.machines` does not compile. The message names the machines. An approval that a catalog offers to at least one machine also has `Rehearsed`, over the rehearsals in `rehearsals`. It is `True` with the reason `Passed` when the install passed its rehearsal on every machine the approval waits for. It is `False` with `Refused` when a rehearsal shows that the install writes more than one authenticated append, or that the variable store has no room for it, and with `Failed` when a rehearsal could not run. It is `Unknown` with `Rehearsing` while a machine waits for its rehearsal. The message names the machines. |
 | <span id="status--devices"></span>`devices` | [\[\]object](#statusdevices) | no | One entry for each port, a machine and a USB address, where the rule matched a device. The entry describes the latest appearance of a device in the port, so the list grows only with the number of ports. A `Loaded` entry stays after the bare device leaves. |
 | <span id="status--machines"></span>`machines` | [\[\]object](#statusmachines) | no | One entry for each machine's device in an update rule's group, from that machine's last scan against each `FirmwareCatalog`. A scan replaces its machine's entries. An entry leaves only when the machine's next scan does not report the device, or when its `Machine` is deleted, so a machine that is off keeps its entries. |
+| <span id="status--rehearsals"></span>`rehearsals` | [\[\]object](#statusrehearsals) | no | One record for each machine that an approval waits for, from the latest rehearsal of the approved install on that machine. A rehearsal runs the install against a copy of the machine's firmware variables in memory, and records what it would write. It runs once for each boot of the machine, device, approved version and cabinet, and catalog file. A record leaves when its machine is no longer pending, or when the approval changes. |
 | <span id="status--counts"></span>`counts` | [object](#statuscounts) | no | The counts of the rule's own kind. An upload has the number of entries in `devices` with each result. An update has the machines that `machines` names, the ones a catalog offers a release, and the ones an approval waits for. A rule writes its own counts even when they are 0, and never the other kind's, so the other kind's printer columns stay empty. |
 
 ### status.conditions[]
 
-An upload has `Valid`. It is `True` with the reason `Compiled` when the selector and `spec.machines` compile. It is `False` with the reason `SelectorInvalid` when either one does not, and the message gives the error. A rule that is not valid runs nowhere. An update with `version` has `Approved`, over the machines that `spec.machines` covers. It is `True` with the reason `Offered` when a catalog offers the version in the pinned cabinet to at least one machine, and with `Installed` when none is offered it and at least one runs it. It is `False` with `CabinetDiffers` when a catalog offers the version only in another cabinet, with `NotOffered` when no catalog offers it, and with `MachinesInvalid` when `spec.machines` does not compile. The message names the machines.
+An upload has `Valid`. It is `True` with the reason `Compiled` when the selector and `spec.machines` compile. It is `False` with the reason `SelectorInvalid` when either one does not, and the message gives the error. A rule that is not valid runs nowhere. An update with `version` has `Approved`, over the machines that `spec.machines` covers. It is `True` with the reason `Offered` when a catalog offers the version in the pinned cabinet to at least one machine, and with `Installed` when none is offered it and at least one runs it. It is `False` with `CabinetDiffers` when a catalog offers the version only in another cabinet, with `NotOffered` when no catalog offers it, and with `MachinesInvalid` when `spec.machines` does not compile. The message names the machines. An approval that a catalog offers to at least one machine also has `Rehearsed`, over the rehearsals in `rehearsals`. It is `True` with the reason `Passed` when the install passed its rehearsal on every machine the approval waits for. It is `False` with `Refused` when a rehearsal shows that the install writes more than one authenticated append, or that the variable store has no room for it, and with `Failed` when a rehearsal could not run. It is `Unknown` with `Rehearsing` while a machine waits for its rehearsal. The message names the machines.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -139,6 +140,35 @@ The cabinet file that carries the release.
 | <span id="statusmachinesreleasescabinet--url"></span>`url` | string | yes | Where the cabinet downloads from. |
 | <span id="statusmachinesreleasescabinet--sha256"></span>`sha256` | string | yes | The cabinet's SHA-256, in hex. |
 | <span id="statusmachinesreleasescabinet--size"></span>`size` | integer | no | The size of the firmware payload the release installs, in bytes, as the catalog states it. The cabinet file is larger. |
+
+### status.rehearsals[]
+
+One record for each machine that an approval waits for, from the latest rehearsal of the approved install on that machine. A rehearsal runs the install against a copy of the machine's firmware variables in memory, and records what it would write. It runs once for each boot of the machine, device, approved version and cabinet, and catalog file. A record leaves when its machine is no longer pending, or when the approval changes.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusrehearsals--machine"></span>`machine` | string | yes | The `Machine`, which has the name of its node. |
+| <span id="statusrehearsals--boot"></span>`boot` | string | yes | The time the machine booted, from its `Machine`'s status, when the rehearsal started. |
+| <span id="statusrehearsals--deviceid"></span>`deviceId` | string | yes | fwupd's ID of the device the rehearsal installed on. |
+| <span id="statusrehearsals--version"></span>`version` | string | yes | The approved version. |
+| <span id="statusrehearsals--cabinetsha256"></span>`cabinetSHA256` | string | yes | The SHA-256 of the approved cabinet. |
+| <span id="statusrehearsals--catalog"></span>`catalog` | string | yes | The `FirmwareCatalog` of the machine's last scan. |
+| <span id="statusrehearsals--file"></span>`file` | string | yes | The catalog file the rehearsal loaded, which is the one the machine's last scan read. |
+| <span id="statusrehearsals--result"></span>`result` | string | yes | `Running` while the rehearsal pod runs. `Passed` when the install wrote one authenticated append to its device's own variable, nothing else, and the variable store has room for it. `Refused` when the install would write anything else, or the store has no room. `Failed` when the rehearsal could not run, such as a cabinet whose SHA-256 is not the pinned one. One of: `Running`, `Passed`, `Refused`, `Failed`. |
+| <span id="statusrehearsals--message"></span>`message` | string | no | Why the rehearsal has its result. |
+| <span id="statusrehearsals--append"></span>`append` | [object](#statusrehearsalsappend) | no | The one write that a passed rehearsal recorded. |
+| <span id="statusrehearsals--free"></span>`free` | integer | no | The bytes free in the machine's variable store when the rehearsal ran. |
+| <span id="statusrehearsals--time"></span>`time` | string | yes | When the rehearsal got its result. |
+
+#### status.rehearsals[].append
+
+The one write that a passed rehearsal recorded.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusrehearsalsappend--variable"></span>`variable` | string | yes | The variable, as efivarfs names its file, such as `dbx-d719b2cb-3d3a-4596-a3bc-dad00e67656f`. |
+| <span id="statusrehearsalsappend--bytes"></span>`bytes` | integer | yes | The length of the write: four bytes of attributes, then the signed payload. |
+| <span id="statusrehearsalsappend--sha256"></span>`sha256` | string | yes | The SHA-256 of the write's bytes, in hex. |
 
 ### status.counts
 

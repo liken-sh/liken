@@ -54,27 +54,36 @@ type cabinet struct {
 // the result line is. fwupd can write many lines before it.
 const scanLogLines = 50
 
-// readScanLog reads the end of a finished scan pod's log.
-func (o *operator) readScanLog(p pod) (string, error) {
+// readPodLog reads the end of a finished scan or rehearsal pod's log.
+func (o *operator) readPodLog(p pod, container string) (string, error) {
 	var body []byte
-	path := fmt.Sprintf("%s/log?container=%s&tailLines=%d", podPath(p.Metadata.Namespace, p.Metadata.Name), scanContainer, scanLogLines)
+	path := fmt.Sprintf("%s/log?container=%s&tailLines=%d", podPath(p.Metadata.Namespace, p.Metadata.Name), container, scanLogLines)
 	if err := o.client.RequestJSON(http.MethodGet, path, nil, &body); err != nil {
 		return "", err
 	}
 	return string(body), nil
 }
 
-// parseScanLog answers the last result line of a log, or false and the
-// last line of the log when there is none.
+// parseScanLog answers the last result line of a scan's log, or false
+// and the last line of the log when there is none.
 func parseScanLog(log string) (scanResult, string, bool) {
+	return parseResultLine[scanResult](log, func(r scanResult) string { return r.Result })
+}
+
+// parseResultLine answers the last line of a log that parses as a JSON
+// object with a result, or false and the last line of the log when
+// there is none. A rehearsal writes its answer the same way a scan
+// does.
+func parseResultLine[T any](log string, result func(T) string) (T, string, bool) {
 	lines := strings.Split(strings.TrimSpace(log), "\n")
 	for index := len(lines) - 1; index >= 0; index-- {
-		var result scanResult
+		var parsed T
 		line := strings.TrimSpace(lines[index])
-		if !strings.HasPrefix(line, "{") || json.Unmarshal([]byte(line), &result) != nil || result.Result == "" {
+		if !strings.HasPrefix(line, "{") || json.Unmarshal([]byte(line), &parsed) != nil || result(parsed) == "" {
 			continue
 		}
-		return result, "", true
+		return parsed, "", true
 	}
-	return scanResult{}, lastLine(log), false
+	var none T
+	return none, lastLine(log), false
 }

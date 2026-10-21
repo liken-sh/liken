@@ -23,7 +23,9 @@ it reads the devices and the catalog and writes status, and it
 installs nothing. An approval records which version you want, also
 with no install, and
 [Approve a firmware update](/docs/guides/approve-an-update/) shows
-how. A later release applies an approved version one machine at a
+how. The operator then rehearses the install against a copy of each
+pending machine's firmware variables, and records what it would
+write. A later release applies an approved version one machine at a
 time.
 
 ## A scan runs fwupd's default plugins

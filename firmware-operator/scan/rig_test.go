@@ -63,9 +63,11 @@ func (s server) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 // tool is a fake fwupdtool. Each command answers from a table keyed by
-// its first argument, and the calls are recorded.
+// its first argument, and the calls are recorded. An effect plays what
+// a command writes, such as an install's write to the variable store.
 type tool struct {
 	answers map[string]answer
+	effects map[string]func()
 	calls   [][]string
 }
 
@@ -77,6 +79,9 @@ type answer struct {
 
 func (f *tool) run(_ context.Context, args ...string) ([]byte, []byte, error) {
 	f.calls = append(f.calls, args)
+	if effect := f.effects[args[0]]; effect != nil {
+		effect()
+	}
 	a := f.answers[args[0]]
 	return []byte(a.stdout), []byte(a.stderr), a.err
 }

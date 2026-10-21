@@ -1,7 +1,9 @@
 # The scan image: fwupd and the one small program, `scan`, that firmware-operator
 # runs in a privileged pod on a machine. The program downloads one
 # catalog, hands it to fwupdtool, and prints which firmware devices the
-# machine has and which releases the catalog offers for them. The image
+# machine has and which releases the catalog offers for them. As
+# `scan rehearse`, in a pod that is not privileged, it runs an approved
+# install against a copy of the machine's firmware variables. The image
 # is Ubuntu, not scratch, because fwupd links dozens of libraries and
 # reads plugin and quirk data from the files of its package.
 
@@ -78,6 +80,7 @@ RUN mkdir -p /usr/share/doc/liken \
     } >/usr/share/doc/liken/firmware-operator-scan.packages
 COPY --from=build /scan /usr/local/bin/scan
 COPY --from=build /notices /
-# The pod is privileged and runs as root, because fwupd reads SMBIOS
-# tables, efivarfs, sysfs, and device nodes.
+# The scan pod is privileged and runs as root, because fwupd reads
+# SMBIOS tables, efivarfs, sysfs, and device nodes. The rehearsal pod
+# runs as root with only DAC_READ_SEARCH, and reads a read-only mount.
 ENTRYPOINT ["/usr/local/bin/scan"]

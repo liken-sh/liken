@@ -115,26 +115,34 @@ func TestTheUploadPodsHaveNoNetwork(t *testing.T) {
 	}
 }
 
-// The scan pods' policy selects every scan pod, allows nothing in, and
-// allows out only DNS and HTTPS.
-func TestTheScanPodsReachOnlyDNSAndHTTPS(t *testing.T) {
-	policy := find(t, "scan.yaml", "NetworkPolicy")
-	if got := dig(policy, "spec", "podSelector", "matchLabels", scanLabel); got != scanLabelValue {
-		t.Errorf("the policy selects %v, want the label %s=%s", dig(policy, "spec", "podSelector"), scanLabel, scanLabelValue)
+// The scan and rehearsal pods' policies each select every pod of their
+// kind, allow nothing in, and allow out only DNS and HTTPS.
+func TestTheScanAndRehearsalPodsReachOnlyDNSAndHTTPS(t *testing.T) {
+	cases := []struct{ file, label, value string }{
+		{"scan.yaml", scanLabel, scanLabelValue},
+		{"rehearsal.yaml", rehearsalLabel, rehearsalLabelValue},
 	}
-	if types := dig(policy, "spec", "policyTypes"); !slices.Equal(types.([]any), []any{"Ingress", "Egress"}) {
-		t.Errorf("the policy's types are %v, want Ingress and Egress", types)
-	}
-	if dig(policy, "spec", "ingress") != nil || dig(policy, "spec", "egress", 0, "to") != nil || dig(policy, "spec", "egress", 1) != nil {
-		t.Errorf("the policy allows %v in and %v out, want nothing in and one rule out on ports alone",
-			dig(policy, "spec", "ingress"), dig(policy, "spec", "egress"))
-	}
-	var ports []string
-	for _, port := range dig(policy, "spec", "egress", 0, "ports").([]any) {
-		ports = append(ports, fmt.Sprint(dig(port, "protocol"), "/", dig(port, "port")))
-	}
-	if want := []string{"UDP/53", "TCP/53", "TCP/443"}; !slices.Equal(ports, want) {
-		t.Errorf("the policy allows out %v, want %v", ports, want)
+	for _, c := range cases {
+		t.Run(c.file, func(t *testing.T) {
+			policy := find(t, c.file, "NetworkPolicy")
+			if got := dig(policy, "spec", "podSelector", "matchLabels", c.label); got != c.value {
+				t.Errorf("the policy selects %v, want the label %s=%s", dig(policy, "spec", "podSelector"), c.label, c.value)
+			}
+			if types := dig(policy, "spec", "policyTypes"); !slices.Equal(types.([]any), []any{"Ingress", "Egress"}) {
+				t.Errorf("the policy's types are %v, want Ingress and Egress", types)
+			}
+			if dig(policy, "spec", "ingress") != nil || dig(policy, "spec", "egress", 0, "to") != nil || dig(policy, "spec", "egress", 1) != nil {
+				t.Errorf("the policy allows %v in and %v out, want nothing in and one rule out on ports alone",
+					dig(policy, "spec", "ingress"), dig(policy, "spec", "egress"))
+			}
+			var ports []string
+			for _, port := range dig(policy, "spec", "egress", 0, "ports").([]any) {
+				ports = append(ports, fmt.Sprint(dig(port, "protocol"), "/", dig(port, "port")))
+			}
+			if want := []string{"UDP/53", "TCP/53", "TCP/443"}; !slices.Equal(ports, want) {
+				t.Errorf("the policy allows out %v, want %v", ports, want)
+			}
+		})
 	}
 }
 

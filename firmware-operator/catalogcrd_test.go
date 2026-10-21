@@ -75,7 +75,8 @@ func TestTheOperatorsCatalogStatusValidates(t *testing.T) {
 }
 
 // A discovered Firmware that a person approved, as the operator writes
-// its status, is one the schema takes and keeps whole.
+// its status with a passed rehearsal, is one the schema takes and keeps
+// whole.
 func TestADiscoveredFirmwareValidates(t *testing.T) {
 	approved := &update{Component: frameworkBIOS().id, Version: "0.0.4.2",
 		Cabinet: &pinnedCabinet{URL: "https://fwupd.org/downloads/0.0.4.2.cab", SHA256: dbxCabinet}}
@@ -87,7 +88,11 @@ func TestADiscoveredFirmwareValidates(t *testing.T) {
 		File: "firmware-09138-stable.xml.zst", Releases: systemFirmware("0.0.3.5", "0.0.4.2").Releases, Time: stamp(time.Now())}}
 	c, pending, _ := approval(f.Spec.Update, f.Spec.Machines, f.Status.Machines, map[string]map[string]string{"node-2": {"canary": "true"}})
 	c.ObservedGeneration, c.LastTransitionTime = 2, time.Date(2026, 10, 20, 22, 0, 0, 0, time.UTC)
-	f.Status.Conditions = []condition{c}
-	f.Status.Counts = counts{UpdateCounts: &UpdateCounts{Machines: 1, Behind: 1, Pending: pending}}
+	f.Status.Rehearsals = []rehearsal{recordOfRehearsal(rehearsalAttempt{firmware: biosObjectName, machine: "node-2", boot: firstBoot,
+		device: "3fcf", version: "0.0.4.2", cabinet: dbxCabinet, catalog: "lvfs", file: "firmware-09138-stable.xml.zst"}, passed, time.Now())}
+	r, _ := rehearsed(f.Status.Rehearsals, map[string]bool{"node-2": true})
+	r.ObservedGeneration, r.LastTransitionTime = c.ObservedGeneration, c.LastTransitionTime
+	f.Status.Conditions = []condition{c, r}
+	f.Status.Counts = counts{UpdateCounts: &UpdateCounts{Machines: 1, Behind: 1, Pending: len(pending)}}
 	assertTheSchemaKeeps(t, firmwareCRD, f)
 }

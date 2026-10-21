@@ -32,14 +32,15 @@ type fwupdtool func(ctx context.Context, args ...string) (stdout, stderr []byte,
 // FWUPD_UEFI_ESP_PATH points the uefi_capsule plugin at an empty
 // directory. Without an ESP it reports the device as not updatable, and
 // with the machine's real ESP the plugin would read it. The scan never
-// stages a capsule, so an empty directory is all it needs.
-func execFwupdtool(espDir string) fwupdtool {
+// stages a capsule, so an empty directory is all it needs. A rehearsal
+// passes more of fwupd's variables in env (rehearse.go).
+func execFwupdtool(espDir string, env ...string) fwupdtool {
 	return func(ctx context.Context, args ...string) ([]byte, []byte, error) {
 		if err := os.MkdirAll(espDir, 0o755); err != nil {
 			return nil, nil, err
 		}
 		cmd := exec.CommandContext(ctx, "fwupdtool", args...)
-		cmd.Env = append(os.Environ(), "FWUPD_UEFI_ESP_PATH="+espDir)
+		cmd.Env = append(append(os.Environ(), "FWUPD_UEFI_ESP_PATH="+espDir), env...)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = io.MultiWriter(&stderr, os.Stderr)

@@ -84,6 +84,7 @@ type firmwareStatus struct {
 	Conditions         []condition    `json:"conditions,omitempty"`
 	Devices            []deviceEntry  `json:"devices,omitempty"`
 	Machines           []machineEntry `json:"machines,omitempty"`
+	Rehearsals         []rehearsal    `json:"rehearsals,omitempty"`
 	Counts             counts         `json:"counts,omitzero"`
 }
 

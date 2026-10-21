@@ -30,12 +30,13 @@ type operator struct {
 	// namespace is the operator's own, where the upload pods run.
 	namespace string
 
-	firmwares informer.Held
-	catalogs  informer.Held
-	slices    informer.View
-	pods      informer.View
-	scanPods  informer.View
-	machines  informer.View
+	firmwares     informer.Held
+	catalogs      informer.Held
+	slices        informer.View
+	pods          informer.View
+	scanPods      informer.View
+	rehearsalPods informer.View
+	machines      informer.View
 
 	selectors *selectors
 
@@ -60,7 +61,7 @@ func newOperator(client *apiclient.Client, namespace string, recorder *events.Re
 // nothing, because a pass that sees no pod for a device or a machine
 // starts one. The first read of each watch wakes another pass.
 func (o *operator) pass(ctx context.Context) (time.Time, error) {
-	if !o.slices.Ready() || !o.pods.Ready() || !o.scanPods.Ready() || !o.machines.Ready() {
+	if !o.slices.Ready() || !o.pods.Ready() || !o.scanPods.Ready() || !o.rehearsalPods.Ready() || !o.machines.Ready() {
 		return time.Time{}, nil
 	}
 	rules, err := informer.List[firmware](o.client, o.firmwares, firmwaresPath, firmwarePath)

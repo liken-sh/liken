@@ -11,12 +11,15 @@
 
 profile: coverage.out
 
-# go test never calls main(), so the statements in main.go never run
-# under the gate. main.go holds only the wiring of the in-cluster
-# clients, and the gate measures every other file.
+# go test never calls main(), so the statements in the two main.go
+# files never run under the gate. The operator's holds only the wiring
+# of the in-cluster clients, and the scan program's holds only the
+# wiring of fwupdtool and the paths of its pod. The gate measures every
+# other file.
 exclude:
   paths:
     - ^main\.go$
+    - ^scan/main\.go$
 
 threshold:
   # One package, so the total is the whole gate. The rest below 100 is

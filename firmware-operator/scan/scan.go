@@ -52,52 +52,64 @@ func (s scanner) scan(ctx context.Context) Result {
 	if err := s.mounter.ensureEFIVars(); err != nil {
 		return failed(cfg.file, "%v", err)
 	}
-
-	jcatURL := cfg.url + ".jcat"
-	jcatData, err := get(ctx, s.client, jcatURL)
-	if err != nil {
-		return failed(cfg.file, "downloading the jcat: %v", err)
+	if end := s.loadCatalog(ctx); end != nil {
+		return *end
 	}
-	item, err := parseJcat(jcatData)
-	if err != nil {
-		return failed(cfg.file, "reading the jcat: %v", err)
-	}
-	if item.file != cfg.file {
-		return Result{
-			Result: resultCatalogMoved, File: cfg.file,
-			Message: fmt.Sprintf("the jcat now names %s", item.file),
-		}
-	}
-
-	fileURL, err := siblingURL(cfg.url, item.file)
-	if err != nil {
-		return failed(cfg.file, "building the URL of %s: %v", item.file, err)
-	}
-	fileData, err := get(ctx, s.client, fileURL)
-	if err != nil {
-		return failed(cfg.file, "downloading %s: %v", item.file, err)
-	}
-	got := sum(fileData)
-	if got != cfg.sha256 || (item.sha256 != "" && got != item.sha256) {
-		return failed(cfg.file, "the SHA-256 of %s is %s, and the operator expects %s", item.file, got, cfg.sha256)
-	}
-
-	if err := configureRemotes(s.remotesDir, cfg.name, cfg.url); err != nil {
-		return failed(cfg.file, "writing the fwupd remote: %v", err)
-	}
-	paths, err := s.save(item.file, fileData, jcatData)
-	if err != nil {
-		return failed(cfg.file, "saving the catalog: %v", err)
-	}
-	if _, stderr, err := s.fwupdtool(ctx, "refresh", paths[0], paths[1], remoteID(cfg.name)); err != nil {
-		return failed(cfg.file, "fwupdtool refresh: %s", lastLine(stderr))
-	}
-
 	devices, err := discover(ctx, s.fwupdtool)
 	if err != nil {
 		return failed(cfg.file, "%v", err)
 	}
 	return Result{Result: resultScanned, File: cfg.file, Message: summary(devices), Devices: devices}
+}
+
+// loadCatalog downloads the catalog file that the operator named,
+// checks it against the jcat and the operator's SHA-256, makes its
+// FirmwareCatalog fwupd's only remote, and refreshes fwupd from it. A
+// result other than nil ends the run: the jcat names another file, or
+// a step failed.
+func (s scanner) loadCatalog(ctx context.Context) *Result {
+	cfg := s.cfg
+	end := func(r Result) *Result { return &r }
+	jcatURL := cfg.url + ".jcat"
+	jcatData, err := get(ctx, s.client, jcatURL)
+	if err != nil {
+		return end(failed(cfg.file, "downloading the jcat: %v", err))
+	}
+	item, err := parseJcat(jcatData)
+	if err != nil {
+		return end(failed(cfg.file, "reading the jcat: %v", err))
+	}
+	if item.file != cfg.file {
+		return end(Result{
+			Result: resultCatalogMoved, File: cfg.file,
+			Message: fmt.Sprintf("the jcat now names %s", item.file),
+		})
+	}
+
+	fileURL, err := siblingURL(cfg.url, item.file)
+	if err != nil {
+		return end(failed(cfg.file, "building the URL of %s: %v", item.file, err))
+	}
+	fileData, err := get(ctx, s.client, fileURL)
+	if err != nil {
+		return end(failed(cfg.file, "downloading %s: %v", item.file, err))
+	}
+	got := sum(fileData)
+	if got != cfg.sha256 || (item.sha256 != "" && got != item.sha256) {
+		return end(failed(cfg.file, "the SHA-256 of %s is %s, and the operator expects %s", item.file, got, cfg.sha256))
+	}
+
+	if err := configureRemotes(s.remotesDir, cfg.name, cfg.url); err != nil {
+		return end(failed(cfg.file, "writing the fwupd remote: %v", err))
+	}
+	paths, err := s.save(item.file, fileData, jcatData)
+	if err != nil {
+		return end(failed(cfg.file, "saving the catalog: %v", err))
+	}
+	if _, stderr, err := s.fwupdtool(ctx, "refresh", paths[0], paths[1], remoteID(cfg.name)); err != nil {
+		return end(failed(cfg.file, "fwupdtool refresh: %s", lastLine(stderr)))
+	}
+	return nil
 }
 
 // save writes the catalog and its jcat side by side under the names

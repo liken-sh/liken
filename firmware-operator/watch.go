@@ -1,13 +1,14 @@
 package main
 
-// Six watches wake the pass: one of every Firmware, one of every
+// Seven watches wake the pass: one of every Firmware, one of every
 // FirmwareCatalog, one of the ResourceSlices that machine-operator publishes,
-// one each of the upload pods and the scan pods in the operator's
-// namespace, and one of every Machine. All six run on client-go's
+// one each of the upload, scan, and rehearsal pods in the operator's
+// namespace, and one of every Machine. All seven run on client-go's
 // reflector, through the shared informer package. A handler only wakes
 // the pass, and the pass reads what it needs. The timers are clocks:
-// the deadline of an upload or a scan in progress, and the wait after
-// a pass that failed. The one timer that is not a clock is the read of
+// the deadline of an upload, a scan, or a rehearsal in progress, and
+// the wait after a pass that failed. The one timer that is not a clock
+// is the read of
 // each FirmwareCatalog's jcat once an interval, because LVFS publishes no feed
 // of its changes (catalogfetch.go).
 
@@ -55,11 +56,13 @@ func (o *operator) run(ctx context.Context, watcher dynamic.Interface) {
 		markHandler(signal, podMark))
 	scanPods := start(informer.Source{Resource: podsResource, Namespace: o.namespace, LabelSelector: scanLabel + "=" + scanLabelValue},
 		markHandler(signal, podMark))
+	rehearsalPods := start(informer.Source{Resource: podsResource, Namespace: o.namespace, LabelSelector: rehearsalLabel + "=" + rehearsalLabelValue},
+		markHandler(signal, podMark))
 	machines := start(informer.Source{Resource: machinesResource}, markHandler(signal, machineMark))
 	catalogs := start(informer.Source{Resource: catalogsResource}, markHandler(signal, catalogMark))
 	o.firmwares = informer.Held{View: whole(firmwares), Versions: memo.New()}
 	o.catalogs = informer.Held{View: whole(catalogs), Versions: memo.New()}
-	o.slices, o.pods, o.scanPods, o.machines = slices.View(), pods.View(), scanPods.View(), machines.View()
+	o.slices, o.pods, o.scanPods, o.rehearsalPods, o.machines = slices.View(), pods.View(), scanPods.View(), rehearsalPods.View(), machines.View()
 
 	var deadline, retry <-chan time.Time
 	for {
@@ -73,7 +76,7 @@ func (o *operator) run(ctx context.Context, watcher dynamic.Interface) {
 		// wake that came with the stop is checked here and starts no
 		// pass.
 		if ctx.Err() != nil {
-			for _, watch := range []*informer.Collection{firmwares, slices, pods, scanPods, machines, catalogs} {
+			for _, watch := range []*informer.Collection{firmwares, slices, pods, scanPods, rehearsalPods, machines, catalogs} {
 				<-watch.Done()
 			}
 			return

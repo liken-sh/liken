@@ -61,6 +61,9 @@ spec:
         - name: Pending
           type: integer
           jsonPath: .status.counts.pending
+        - name: Rehearsed
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Rehearsed")].status
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -284,7 +287,18 @@ spec:
                     version only in another cabinet, with `NotOffered`
                     when no catalog offers it, and with `MachinesInvalid`
                     when `spec.machines` does not compile. The message
-                    names the machines.
+                    names the machines. An approval that a catalog
+                    offers to at least one machine also has `Rehearsed`,
+                    over the rehearsals in `rehearsals`. It is `True`
+                    with the reason `Passed` when the install passed its
+                    rehearsal on every machine the approval waits for.
+                    It is `False` with `Refused` when a rehearsal shows
+                    that the install writes more than one authenticated
+                    append, or that the variable store has no room for
+                    it, and with `Failed` when a rehearsal could not
+                    run. It is `Unknown` with `Rehearsing` while a
+                    machine waits for its rehearsal. The message names
+                    the machines.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:
@@ -438,6 +452,82 @@ spec:
                         type: string
                         format: date-time
                         description: "When the scan that reported the entry ended."
+                rehearsals:
+                  type: array
+                  description: >-
+                    One record for each machine that an approval waits
+                    for, from the latest rehearsal of the approved
+                    install on that machine. A rehearsal runs the
+                    install against a copy of the machine's firmware
+                    variables in memory, and records what it would
+                    write. It runs once for each boot of the machine,
+                    device, approved version and cabinet, and catalog
+                    file. A record leaves when its machine is no longer
+                    pending, or when the approval changes.
+                  items:
+                    type: object
+                    required: [machine, boot, deviceId, version, cabinetSHA256, catalog, file, result, time]
+                    properties:
+                      machine:
+                        type: string
+                        description: "The `Machine`, which has the name of its node."
+                      boot:
+                        type: string
+                        description: "The time the machine booted, from its `Machine`'s status, when the rehearsal started."
+                      deviceId:
+                        type: string
+                        description: "fwupd's ID of the device the rehearsal installed on."
+                      version:
+                        type: string
+                        description: "The approved version."
+                      cabinetSHA256:
+                        type: string
+                        description: "The SHA-256 of the approved cabinet."
+                      catalog:
+                        type: string
+                        description: "The `FirmwareCatalog` of the machine's last scan."
+                      file:
+                        type: string
+                        description: "The catalog file the rehearsal loaded, which is the one the machine's last scan read."
+                      result:
+                        type: string
+                        enum: [Running, Passed, Refused, Failed]
+                        description: >-
+                          `Running` while the rehearsal pod runs.
+                          `Passed` when the install wrote one
+                          authenticated append to its device's own
+                          variable, nothing else, and the variable store
+                          has room for it. `Refused` when the install
+                          would write anything else, or the store has no
+                          room. `Failed` when the rehearsal could not
+                          run, such as a cabinet whose SHA-256 is not the
+                          pinned one.
+                      message:
+                        type: string
+                        description: "Why the rehearsal has its result."
+                      append:
+                        type: object
+                        required: [variable, bytes, sha256]
+                        description: "The one write that a passed rehearsal recorded."
+                        properties:
+                          variable:
+                            type: string
+                            description: "The variable, as efivarfs names its file, such as `dbx-d719b2cb-3d3a-4596-a3bc-dad00e67656f`."
+                          bytes:
+                            type: integer
+                            format: int64
+                            description: "The length of the write: four bytes of attributes, then the signed payload."
+                          sha256:
+                            type: string
+                            description: "The SHA-256 of the write's bytes, in hex."
+                      free:
+                        type: integer
+                        format: int64
+                        description: "The bytes free in the machine's variable store when the rehearsal ran."
+                      time:
+                        type: string
+                        format: date-time
+                        description: "When the rehearsal got its result."
                 counts:
                   type: object
                   description: >-

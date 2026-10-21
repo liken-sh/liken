@@ -59,9 +59,10 @@ func failed(file, format string, args ...any) Result {
 	return Result{Result: resultFailed, File: file, Message: fmt.Sprintf(format, args...)}
 }
 
-// emit writes the result as one line. json.Encoder ends the line with a
-// newline and never writes one inside, so the line is whole.
-func emit(w io.Writer, r Result) error {
+// emit writes a scan's or a rehearsal's result as one line.
+// json.Encoder ends the line with a newline and never writes one
+// inside, so the line is whole.
+func emit(w io.Writer, r any) error {
 	return json.NewEncoder(w).Encode(r)
 }
 

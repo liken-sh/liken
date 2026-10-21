@@ -1,6 +1,6 @@
 ---
 name: approve-an-update
-description: "Approve one release of a firmware component that firmware-operator discovered, by setting spec.update.version and pinning the cabinet's URL and SHA-256 on its Firmware, and limit the approval to some machines with spec.machines. Read the Approved condition, its reasons Offered, Installed, CabinetDiffers, NotOffered, and MachinesInvalid, the Version, Approved, and Pending columns, and the Events. Withdraw an approval. Use when a person wants a board's UEFI firmware, the Secure Boot revocation list, or another device to move to a newer release, or when an approval is False."
+description: "Approve one release of a firmware component that firmware-operator discovered, by setting spec.update.version and pinning the cabinet's URL and SHA-256 on its Firmware, and limit the approval to some machines with spec.machines. Read the Approved condition, its reasons Offered, Installed, CabinetDiffers, NotOffered, and MachinesInvalid, the Version, Approved, Pending, and Rehearsed columns, the rehearsal of the install on each machine in status.rehearsals and the Rehearsed condition, and the Events. Withdraw an approval. Use when a person wants a board's UEFI firmware, the Secure Boot revocation list, or another device to move to a newer release, or when an approval is False."
 ---
 
 This skill is the guide at https://liken.sh/firmware/docs/guides/approve-an-update/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
@@ -9,8 +9,10 @@ This skill is the guide at https://liken.sh/firmware/docs/guides/approve-an-upda
 
 At the end of this guide, a discovered `Firmware` records which
 release you approve, pinned to its cabinet file, and its status shows
-which machines wait for it. `firmware-operator` installs nothing yet:
-the approval records your decision, and a later release applies it.
+which machines wait for it and exactly what the install would write
+on each one. `firmware-operator` installs nothing yet: it rehearses
+the install against a copy of each machine's firmware variables, and
+a later release applies it.
 
 You need a discovered `Firmware` whose `status.machines` lists a
 release. [Find firmware updates](https://liken.sh/firmware/docs/guides/find-updates/) shows how to read
@@ -100,8 +102,8 @@ kubectl get firmware microsoft-dbx-x64-kek2023
 ```
 
 ```
-NAME                        VALID    LOADED   RUNNING   FAILED   CONFLICT   MACHINES   BEHIND   VERSION    APPROVED   PENDING   AGE
-microsoft-dbx-x64-kek2023                                                   1          1        20260707   True       1         2d
+NAME                        VALID    LOADED   RUNNING   FAILED   CONFLICT   MACHINES   BEHIND   VERSION    APPROVED   PENDING   REHEARSED   AGE
+microsoft-dbx-x64-kek2023                                                   1          1        20260707   True       1         True        2d
 ```
 
 `VERSION` is the version you approved. `APPROVED` is the `Approved`
@@ -131,19 +133,70 @@ no scan. A catalog that withdraws the release, or serves it in another
 cabinet, changes the entries at the next scan, and the approval moves
 to `False` then.
 
+## Read the rehearsal
+
+`fwupd` has no dry run, and a firmware update cannot be undone. So
+before any machine installs the release, the operator rehearses the
+install on each machine that `PENDING` counts. A rehearsal is a short
+pod in `liken-system` on that machine. It copies the machine's
+firmware variables, its ESRT, and its DMI tables into memory, and runs
+`fwupdtool install` with the pinned cabinet against the copy. Then it
+compares the copy before and after. The pod mounts the machine's
+`/sys/firmware` read-only, so the rehearsal cannot write the real
+variables.
+
+A rehearsal runs when the machine is `Ready` and its last scan read
+the `FirmwareCatalog`'s current file. It runs once for each boot of
+the machine, so a reboot, a new approval, or a scan of a new catalog
+file runs it again. `status.rehearsals` holds one record for each
+pending machine:
+
+```sh
+kubectl get firmware microsoft-dbx-x64-kek2023 -o jsonpath='{range .status.rehearsals[*]}{.machine}{"\t"}{.result}{"\t"}{.message}{"\n"}{end}'
+```
+
+```
+liken-1   Passed   the install appends 17260 bytes to dbx-d719b2cb-3d3a-4596-a3bc-dad00e67656f, and the variable store has 67174 bytes free
+```
+
+A Secure Boot database update, such as a `dbx` update, passes when the
+install writes one authenticated append to its own variable and
+nothing else, and the variable store has room for it. The record's
+`append` gives the variable, the length of the write, and its SHA-256.
+The firmware verifies the append's signature and merges the new
+entries into the list at the write, so the variable grows by less than
+the append.
+
+The `Rehearsed` condition sums the records, and the `REHEARSED` column
+shows it:
+
+| Status | Reason | Meaning |
+|---|---|---|
+| `True` | `Passed` | The install passed its rehearsal on every machine the approval waits for. |
+| `False` | `Refused` | The install would write more than one authenticated append, such as a boot variable or a file on the ESP, or the store has no room. A capsule update, such as a board's UEFI firmware, is refused for now. |
+| `False` | `Failed` | A rehearsal could not run, such as a cabinet whose SHA-256 is not the one you pinned. |
+| `Unknown` | `Rehearsing` | A machine waits for its rehearsal. |
+
+The message names the machines and says why.
+[Troubleshoot](https://liken.sh/firmware/docs/guides/troubleshoot/#rehearsals) covers each case.
+
 ## Read the Events
 
-The operator posts an `Event` each time `Approved` changes, in the
-namespace `default`. A change to `True` is `Normal`, and a change to
-`False` is a `Warning`, so a withdrawn release shows in
+The operator posts an `Event` each time `Approved` or `Rehearsed`
+changes, in the namespace `default`. A change to `True` is `Normal`,
+and a change to `False` is a `Warning`, so a withdrawn release shows in
 `kubectl describe firmware <name>` and in
-`kubectl get events --field-selector type=Warning`.
+`kubectl get events --field-selector type=Warning`. It also posts
+`RehearsalStarted` when a rehearsal pod starts, `RehearsalPassed` when
+one passes, and a `Warning` `RehearsalRefused` or `RehearsalFailed`
+when one does not.
 
 ## Withdraw an approval
 
 Remove `version` and `cabinet` from `spec.update`, and `spec.machines`
-with them. The operator removes the `Approved` condition, and
-`PENDING` returns to 0.
+with them. The operator removes the `Approved` and `Rehearsed`
+conditions and the records in `status.rehearsals`, and `PENDING`
+returns to 0.
 
 An approved `Firmware` is one you changed, so the operator never
 deletes it, even when its last entry leaves. Delete it yourself when

@@ -94,6 +94,13 @@ func (w *world) onlyScan(t *testing.T) pod {
 // the log and ended in the phase.
 func (a *fakeAPI) finishScan(t *testing.T, name, phase, log string) {
 	t.Helper()
+	a.finishPod(t, name, scanContainer, phase, log)
+}
+
+// finishPod plays the kubelet and the program in a scan or rehearsal
+// pod: the container wrote the log and the pod ended in the phase.
+func (a *fakeAPI) finishPod(t *testing.T, name, container, phase, log string) {
+	t.Helper()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	next := clone(a.objects[uploadPodsPath][name])
@@ -108,7 +115,7 @@ func (a *fakeAPI) finishScan(t *testing.T, name, phase, log string) {
 	next["status"] = map[string]any{
 		"phase": phase,
 		"containerStatuses": []any{map[string]any{
-			"name":  scanContainer,
+			"name":  container,
 			"state": map[string]any{"terminated": map[string]any{"exitCode": exitCode, "finishedAt": time.Now().UTC().Format(time.RFC3339)}},
 		}},
 	}

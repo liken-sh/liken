@@ -57,9 +57,10 @@ file = "Dockerfile"
 contexts = { kubernetes = "kubernetes", notices = "notices" }
 
 # The scan image holds fwupd from a dated Ubuntu snapshot and the scan
-# program that the operator runs in a privileged pod on each machine.
-# The snapshot is read over HTTPS, so the build takes the trust
-# component's CA bundle.
+# program that the operator runs in a privileged pod on each machine,
+# and as `scan rehearse` in an unprivileged pod that rehearses an
+# approved install. The snapshot is read over HTTPS, so the build takes
+# the trust component's CA bundle.
 [[outputs.images]]
 name = "firmware-operator-scan"
 file = "scan/Dockerfile"

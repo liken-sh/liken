@@ -40,24 +40,24 @@ const (
 	reasonMachinesInvalid = "MachinesInvalid"
 )
 
-// approval answers an update rule's Approved condition and the number
-// of machines the approval waits for. A rule with no version approves
+// approval answers an update rule's Approved condition and the
+// machines the approval waits for. A rule with no version approves
 // nothing, and answers false: it has no Approved condition.
 //
 // A machine is pending when a catalog offers one of its devices the
 // version in the pinned cabinet, and installed when a device runs the
 // version and none is pending. A machine with two devices of the
 // component, one updated and one not, is pending.
-func approval(u *update, selector *metav1.LabelSelector, entries []machineEntry, machineLabels map[string]map[string]string) (condition, int, bool) {
+func approval(u *update, selector *metav1.LabelSelector, entries []machineEntry, machineLabels map[string]map[string]string) (condition, map[string]bool, bool) {
 	if u == nil || u.Version == "" || u.Cabinet == nil {
-		return condition{}, 0, false
+		return condition{}, nil, false
 	}
 	approved := func(status conditions.Status, reason, message string) condition {
 		return condition{Type: approvedCondition, Status: status, Reason: reason, Message: message}
 	}
 	covers, err := filterMachines(selector, machineLabels)
 	if err != nil {
-		return approved(conditions.False, reasonMachinesInvalid, err.Error()), 0, true
+		return approved(conditions.False, reasonMachinesInvalid, err.Error()), nil, true
 	}
 	pending, installed, differs := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, e := range entries {
@@ -86,16 +86,16 @@ func approval(u *update, selector *metav1.LabelSelector, entries []machineEntry,
 		if len(installed) > 0 {
 			message += fmt.Sprintf(", and %s already runs it", machineList(installed))
 		}
-		return approved(conditions.True, reasonOffered, message), len(pending), true
+		return approved(conditions.True, reasonOffered, message), pending, true
 	case len(installed) > 0:
 		return approved(conditions.True, reasonInstalled, fmt.Sprintf(
-			"%s runs %s, and no catalog offers it to another machine the approval covers", machineList(installed), u.Version)), 0, true
+			"%s runs %s, and no catalog offers it to another machine the approval covers", machineList(installed), u.Version)), nil, true
 	case len(differs) > 0:
 		return approved(conditions.False, reasonCabinetDiffers, fmt.Sprintf(
-			"a catalog offers %s to %s in a cabinet whose SHA-256 is not %s", u.Version, machineList(differs), u.Cabinet.SHA256)), 0, true
+			"a catalog offers %s to %s in a cabinet whose SHA-256 is not %s", u.Version, machineList(differs), u.Cabinet.SHA256)), nil, true
 	}
 	return approved(conditions.False, reasonNotOffered, fmt.Sprintf(
-		"no catalog offers %s to a machine the approval covers", u.Version)), 0, true
+		"no catalog offers %s to a machine the approval covers", u.Version)), nil, true
 }
 
 // machineList names a set of machines in a fixed order.
@@ -108,40 +108,54 @@ func machineList(machines map[string]bool) string {
 	return strings.Join(names, ", ")
 }
 
-// approveAll writes the approval of every update rule. It runs after the
-// scans' entries are written, so it reads the entries of this pass.
-func (o *operator) approveAll(rules []firmware, machineLabels map[string]map[string]string, now time.Time) error {
+// approveAll answers every update rule: its approval, and the
+// rehearsals of each machine the approval waits for (rehearsal.go). It
+// runs after the scans' entries are written, so it reads the entries
+// of this pass. It answers the earliest deadline of a rehearsal in
+// progress.
+func (o *operator) approveAll(rules []firmware, w observed, catalogs map[string]*catalog, now time.Time) (time.Time, error) {
+	var next time.Time
 	var problems []error
 	for index := range rules {
 		f := &rules[index]
 		if f.Spec.Update == nil || f.Metadata.DeletionTimestamp != "" {
 			continue
 		}
-		problems = append(problems, o.settleApproval(f, machineLabels, now))
+		due, err := o.answerUpdate(f, w, catalogs, now)
+		next = earliest(next, due)
+		problems = append(problems, err)
 	}
-	return errors.Join(problems...)
+	return next, errors.Join(problems...)
 }
 
-// settleApproval writes one rule's Approved condition and pending
-// count, and posts the condition's transition.
-func (o *operator) settleApproval(f *firmware, machineLabels map[string]map[string]string, now time.Time) error {
-	var c condition
-	var transitioned bool
+// answerUpdate follows one rule's rehearsals, starts the ones its
+// pending machines need, and writes its approval, its rehearsals, and
+// their conditions in one status write. Then it posts the transitions
+// and deletes each finished rehearsal pod.
+func (o *operator) answerUpdate(f *firmware, w observed, catalogs map[string]*catalog, now time.Time) (time.Time, error) {
+	ends, busy, due, err := o.rehearsalEnds(f, w.rehearsals[f.Metadata.Name], now)
+	problems := []error{err}
+	var starts []rehearsalAttempt
+	if c, pending, holds := approval(f.Spec.Update, f.Spec.Machines, f.Status.Machines, w.machines); holds && c.Status == conditions.True {
+		started, err := o.startRehearsals(f, pending, w, catalogs, busy)
+		starts, problems = started, append(problems, err)
+	}
+
+	var approved, rehearsals condition
+	var approvedMoved, rehearsedMoved bool
+	var notices []notice
 	written, err := informer.SettleStatus[firmware](o.client, o.firmwares.Versions, firmwarePath(f.Metadata.Name), f, func(held *firmware) bool {
 		next := held.Status
 		next.Conditions = slices.Clone(held.Status.Conditions)
-		var pending int
+		var pending map[string]bool
 		var holds bool
-		c, pending, holds = approval(held.Spec.Update, held.Spec.Machines, held.Status.Machines, machineLabels)
-		next.Counts = counts{UpdateCounts: updateCounts(held.Status.Machines, pending)}
-		transitioned = false
-		if holds {
-			c.ObservedGeneration = held.Metadata.Generation
-			c.LastTransitionTime = now.UTC().Truncate(time.Second)
-			transitioned = conditions.Set(&next.Conditions, c)
-		} else {
-			next.Conditions = slices.DeleteFunc(next.Conditions, func(held condition) bool { return held.Type == approvedCondition })
-		}
+		approved, pending, holds = approval(held.Spec.Update, held.Spec.Machines, held.Status.Machines, w.machines)
+		next.Counts = counts{UpdateCounts: updateCounts(held.Status.Machines, len(pending))}
+		next.Rehearsals, notices = composeRehearsals(held, pending, ends, starts, now)
+		approvedMoved = holdCondition(&next.Conditions, approvedCondition, approved, holds, held.Metadata.Generation, now)
+		var rehearsing bool
+		rehearsals, rehearsing = rehearsed(next.Rehearsals, pending)
+		rehearsedMoved = holdCondition(&next.Conditions, rehearsedCondition, rehearsals, rehearsing, held.Metadata.Generation, now)
 		if len(next.Conditions) == 0 {
 			next.Conditions = nil
 		}
@@ -152,10 +166,32 @@ func (o *operator) settleApproval(f *firmware, machineLabels map[string]map[stri
 		return true
 	})
 	if errors.Is(err, apiclient.ErrNotFound) {
-		return nil
+		return due, errors.Join(problems...)
+	}
+	if err != nil {
+		return due, errors.Join(append(problems, err)...)
 	}
 	if written {
-		o.post(f, c, nil, transitioned)
+		o.post(f, approved, nil, approvedMoved)
+		o.post(f, rehearsals, notices, rehearsedMoved)
 	}
-	return err
+	for _, end := range ends {
+		if end.rehearsal != nil {
+			problems = append(problems, o.remove(*end.rehearsal))
+		}
+	}
+	return due, errors.Join(problems...)
+}
+
+// holdCondition sets c in a list of conditions when it holds, and
+// removes the condition of its type when it does not. It reports a
+// transition.
+func holdCondition(list *[]condition, kind string, c condition, holds bool, generation int64, now time.Time) bool {
+	if !holds {
+		*list = slices.DeleteFunc(*list, func(held condition) bool { return held.Type == kind })
+		return false
+	}
+	c.ObservedGeneration = generation
+	c.LastTransitionTime = now.UTC().Truncate(time.Second)
+	return conditions.Set(list, c)
 }

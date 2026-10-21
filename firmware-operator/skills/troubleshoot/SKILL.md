@@ -1,16 +1,17 @@
 ---
 name: troubleshoot
-description: "Find why a Firmware's upload failed or never started: a Failed entry and its message, a Conflict between two rules, a selector that does not compile or matches nothing, an upload pod that stays Pending, and a claimed device that stays Pending because its firmware is not loaded. Find why discovery found nothing: a FirmwareCatalog that is not Ready, a scan record that is Failed or CatalogMoved, a machine that is never scanned, and a discovered Firmware that keeps the entry of a machine that is off. Find why an approval's Approved condition is False: CabinetDiffers, NotOffered, or MachinesInvalid, and why the API server refuses an approval. Use when kubectl get firmware shows Failed or Conflict, when a bare chip gets no upload, when a pod that claims a camera does not start, when kubectl get firmwarecatalog shows Ready False, when a machine has no scan record, or when kubectl get firmware shows Approved False."
+description: "Find why a Firmware's upload failed or never started: a Failed entry and its message, a Conflict between two rules, a selector that does not compile or matches nothing, an upload pod that stays Pending, and a claimed device that stays Pending because its firmware is not loaded. Find why discovery found nothing: a FirmwareCatalog that is not Ready, a scan record that is Failed or CatalogMoved, a machine that is never scanned, and a discovered Firmware that keeps the entry of a machine that is off. Find why an approval's Approved condition is False: CabinetDiffers, NotOffered, or MachinesInvalid, and why the API server refuses an approval. Find why the Rehearsed condition is False with Refused or Failed, or stays Unknown, from the message of each record in status.rehearsals. Use when kubectl get firmware shows Failed or Conflict, when a bare chip gets no upload, when a pod that claims a camera does not start, when kubectl get firmwarecatalog shows Ready False, when a machine has no scan record, when kubectl get firmware shows Approved False, or when it shows Rehearsed False or Unknown."
 ---
 
 This skill is the guide at https://liken.sh/firmware/docs/guides/troubleshoot/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
-# Troubleshoot uploads, scans, and approvals
+# Troubleshoot uploads, scans, approvals, and rehearsals
 
 The first part of this guide covers uploads, the second part covers
 the scans that find updates ([Find firmware updates](https://liken.sh/firmware/docs/guides/find-updates/)),
-and the third part covers approvals
-([Approve a firmware update](https://liken.sh/firmware/docs/guides/approve-an-update/)).
+the third part covers approvals
+([Approve a firmware update](https://liken.sh/firmware/docs/guides/approve-an-update/)), and the fourth
+part covers the rehearsal of an approved install on each machine.
 
 ## Uploads
 
@@ -273,3 +274,61 @@ Check each of these:
 
 `spec.machines` does not compile, such as a label key with a space in
 it. The message gives the error. Fix the selector.
+
+## Rehearsals
+
+`kubectl get firmware` shows the `Rehearsed` condition in the
+`REHEARSED` column. The condition's message names each machine with
+its rehearsal's message, and `status.rehearsals` holds the records:
+
+```sh
+kubectl get firmware <name> -o jsonpath='{range .status.rehearsals[*]}{.machine}{"\t"}{.result}{"\t"}{.message}{"\n"}{end}'
+```
+
+A rehearsal runs once for each boot of the machine, the approval, and
+the catalog file. So a rehearsal that failed runs again only after the
+machine reboots, you change the approval, or the machine's next scan
+reads a new catalog file.
+
+### Rehearsed is False with Refused
+
+The install would write something that the operator does not apply:
+
+| Message | What it means |
+|---|---|
+| `fwupd's uefi_capsule plugin updates ...` | The release is a capsule, such as a board's UEFI firmware. A capsule writes boot variables and a file on the ESP, and `liken` does not apply capsules yet. |
+| `the install changed ..., which is not ...`, `the install created ...`, `the install removed ...` | The install writes a variable other than its device's own. |
+| `the install wrote ... under the ESP path` | The install stages a file on the ESP. |
+| `the install rewrote ... instead of appending to it` | The install replaces the list instead of appending to it. |
+| `the append to ... has the attributes ...` | The write is not an authenticated append, so the firmware would check no signature. |
+| `the install did not change ...` | The device already holds the release's entries. |
+| `the append to ... needs ... bytes, and the variable store has ... free` | The machine's variable store is too full for the write. |
+
+### Rehearsed is False with Failed
+
+The rehearsal could not run:
+
+| Message | What to check |
+|---|---|
+| `the SHA-256 of the cabinet is ..., and the approval pins ...` | The cabinet at `spec.update.cabinet.url` is not the file you pinned. Check the URL and the SHA-256. |
+| `downloading the cabinet: ...` | The pod could not download the cabinet. The policy in `deploy/rehearsal.yaml` allows HTTPS on port 443 only. |
+| `the jcat now names ...` | The catalog moved since the machine's last scan. The scan of the new file starts a new rehearsal. |
+| `fwupd reports no device ...` | fwupd in the pod does not find the device that the scan reported. |
+| `copying the firmware tables: the machine has no UEFI variable store` | The machine booted in BIOS mode. |
+| `fwupdtool install: ...` | fwupd refused the install. The rest of the line is fwupd's reason. |
+| `the rehearsal pod did not finish within 10m0s of its creation` | The pod never ran, such as an image that does not pull, or it hung. Check `kubectl -n liken-system get events`. |
+| `the rehearsal pod is gone` | Someone deleted the pod before it ended. |
+
+### Rehearsed stays Unknown
+
+A pending machine waits for its rehearsal. Check each of these:
+
+- **The machine is not `Ready`.** A rehearsal starts only on a `Ready`
+  machine.
+- **The machine's last scan read an older catalog file.** The
+  rehearsal loads the file that the scan read, so it waits for the scan
+  of the current file.
+- **The API server refuses the rehearsal pod.** The pod mounts a host
+  path, which the `baseline` Pod Security level forbids. A cluster
+  that labels `liken-system` with a level below `privileged` refuses
+  it. Look for the refusal in the operator's log.

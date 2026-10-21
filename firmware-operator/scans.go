@@ -41,9 +41,11 @@ func (o *operator) discover(ctx context.Context, rules *[]firmware, w observed, 
 	var next time.Time
 	var problems []error
 	present := map[string]bool{}
+	byName := map[string]*catalog{}
 	for index := range catalogs {
 		c := &catalogs[index]
 		present[c.Metadata.Name] = true
+		byName[c.Metadata.Name] = c
 		// The stop ends the pass between two FirmwareCatalogs, so a shutdown
 		// waits for the writes of one FirmwareCatalog and no more.
 		if ctx.Err() != nil || c.Metadata.DeletionTimestamp != "" {
@@ -60,7 +62,9 @@ func (o *operator) discover(ctx context.Context, rules *[]firmware, w observed, 
 		problems = append(problems, o.forgetMachines(*rules, w.fleet))
 	}
 	if ctx.Err() == nil {
-		problems = append(problems, o.approveAll(*rules, w.machines, now))
+		due, err := o.approveAll(*rules, w, byName, now)
+		next = earliest(next, due)
+		problems = append(problems, err)
 	}
 	return next, errors.Join(problems...)
 }

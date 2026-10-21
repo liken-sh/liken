@@ -40,7 +40,7 @@ func (o *operator) judgeScan(p pod, now time.Time) (scanEnd, bool, time.Time, er
 		end.message = fmt.Sprintf("the scan pod did not finish within %s of its creation", scanDeadline)
 		return end, true, time.Time{}, nil
 	}
-	log, err := o.readScanLog(p)
+	log, err := o.readPodLog(p, scanContainer)
 	if errors.Is(err, apiclient.ErrNotFound) {
 		// The store can still hold a pod that this operator deleted after
 		// it wrote the result. A pod that someone else deleted leaves a
@@ -65,7 +65,7 @@ func (o *operator) judgeScan(p pod, now time.Time) (scanEnd, bool, time.Time, er
 	case !found && last != "":
 		end.message = "the scan wrote no result; its last line was: " + last
 	case !found:
-		end.message = scanPodFailure(p)
+		end.message = podFailure(p, "scan", scanContainer)
 	case result.Result == resultScanned || result.Result == resultCatalogMoved || result.Result == resultFailed:
 		end.result, end.message, end.devices = result.Result, result.Message, result.Devices
 	default:
@@ -74,17 +74,18 @@ func (o *operator) judgeScan(p pod, now time.Time) (scanEnd, bool, time.Time, er
 	return end, true, time.Time{}, nil
 }
 
-// scanPodFailure says why a scan pod with no log failed, such as the
-// DeadlineExceeded of activeDeadlineSeconds before the container ran.
-func scanPodFailure(p pod) string {
-	message := "the scan pod wrote no log"
+// podFailure says why a scan or rehearsal pod with no log failed, such
+// as the DeadlineExceeded of activeDeadlineSeconds before the container
+// ran. kind names the pod in the message.
+func podFailure(p pod, kind, container string) string {
+	message := "the " + kind + " pod wrote no log"
 	for _, part := range []string{p.Status.Reason, p.Status.Message} {
 		if part != "" {
 			message += ": " + part
 		}
 	}
-	if ended := p.ended(scanContainer); ended != nil {
-		message += fmt.Sprintf(": the scan exited with code %d", ended.ExitCode)
+	if ended := p.ended(container); ended != nil {
+		message += fmt.Sprintf(": the %s exited with code %d", kind, ended.ExitCode)
 		if line := lastLine(ended.Message); line != "" {
 			message += ": " + line
 		}

@@ -29,11 +29,14 @@ type observed struct {
 	deviceSets map[string]string
 	// scans holds the scan pods by the FirmwareCatalog that each one reads.
 	scans map[string][]pod
+	// rehearsals holds the rehearsal pods by the Firmware that each one
+	// rehearses.
+	rehearsals map[string][]pod
 }
 
 func (o *operator) observe() observed {
 	w := observed{present: map[appearance]bool{}, machines: map[string]map[string]string{}, uploads: map[string][]pod{},
-		fleet: map[string]machine{}, deviceSets: map[string]string{}, scans: map[string][]pod{}}
+		fleet: map[string]machine{}, deviceSets: map[string]string{}, scans: map[string][]pod{}, rehearsals: map[string][]pod{}}
 	names := map[string][]string{}
 	for _, slice := range informer.CachedList[resourceSlice](o.slices) {
 		for _, d := range devicesOf(slice) {
@@ -56,6 +59,10 @@ func (o *operator) observe() observed {
 	for _, scan := range informer.CachedList[pod](o.scanPods) {
 		a := scanOf(scan)
 		w.scans[a.catalog] = append(w.scans[a.catalog], scan)
+	}
+	for _, p := range informer.CachedList[pod](o.rehearsalPods) {
+		a := rehearsalOf(p)
+		w.rehearsals[a.firmware] = append(w.rehearsals[a.firmware], p)
 	}
 	return w
 }
