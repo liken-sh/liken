@@ -146,8 +146,19 @@ done
 ends at `reboot: machine restart`, QEMU spins at 100 to 200% CPU, and
 nothing more prints. OVMF's DXE phase hangs after the warm reset,
 before systemd-boot or `liken` runs, and only while several guests
-are busy at once. Power-cycle the guest: kill its QEMU process and
-`make run` it again. Its variable store boots normally.
+are busy at once. Run every guest of a drill with `COLD_REBOOT=1`,
+which starts a fresh QEMU process at each reboot, so no reboot takes
+the warm-reset path. It needs `CONSOLE=file:<path>`, and the console
+keeps every boot:
+
+```bash
+setsid make run NODE=node-2 CONSOLE=file:guests/node-2/console.log COLD_REBOOT=1 \
+    </dev/null >/tmp/node-2.make.log 2>&1 &
+```
+
+A guest that hangs without the mode recovers when you power-cycle
+it: kill its QEMU process and `make run` it again. Its variable store
+boots normally.
 `liken/plans/88-disruptions.md` records the evidence. To read a hung
 guest's CPUs, start it with
 `QEMU_EXTRA="-qmp unix:guests/<node>/qmp,server=on,wait=off"`, a path

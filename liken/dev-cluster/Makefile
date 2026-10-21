@@ -369,6 +369,30 @@ endif
 # should exit and return the console log, rather than boot again.
 QEMU_EXIT_ON_REBOOT :=
 
+# COLD_REBOOT=1 restarts the machine from a fresh QEMU process at each
+# reboot instead of a warm reset. Under OVMF, a warm reset can hang in
+# the firmware's DXE phase while several guests are busy: the console
+# ends at "reboot: machine restart" and QEMU spins with no further
+# output. plans/88-disruptions.md records the evidence. A fresh
+# process is a cold start, which never took that path. The recipe
+# adds -no-reboot, and when QEMU exits it reads the console: a last
+# kernel "reboot:" line of "machine restart" starts the next process,
+# and any other end, such as a power off, ends the run. So the mode
+# needs CONSOLE=file:<path>, and that console appends, so it still
+# holds every boot. A BOOT=kernel machine reads -kernel and -initrd
+# again at each reboot in this mode.
+COLD_REBOOT ?=
+CONSOLE_PATH := $(patsubst file:%,%,$(CONSOLE))
+ifeq ($(COLD_REBOOT),1)
+ifeq ($(filter file:%,$(CONSOLE)),)
+$(error COLD_REBOOT=1 needs CONSOLE=file:<path>, because the recipe reads the console to tell a reboot from a power off)
+endif
+QEMU_EXIT_ON_REBOOT := -no-reboot
+QEMU_SERIAL := -chardev file,id=console,path=$(CONSOLE_PATH),append=on -serial chardev:console
+else
+QEMU_SERIAL := -serial $(CONSOLE)
+endif
+
 # Where the boot comes from. BOOT=disk (the default) leaves booting
 # entirely to the firmware: no -kernel, no -append. OVMF consults its
 # boot entries (or, under FIRMWARE=bios, SeaBIOS runs the disk's boot
@@ -562,7 +586,7 @@ DISK_DEPS_emmc := guests/$(NODE)/emmc.qcow2
 DISK_DEPS := $(DISK_DEPS_$(HARDWARE))
 
 run: $(DISK_DEPS) $(FIRMWARE_DEPS)
-	qemu-system-x86_64 \
+	while :; do qemu-system-x86_64 \
 		-accel kvm -accel tcg \
 		-cpu max \
 		-smp $(SMP) \
@@ -571,7 +595,7 @@ run: $(DISK_DEPS) $(FIRMWARE_DEPS)
 		$(QEMU_BOOT) \
 		$(QEMU_EXTRA) \
 		-display none \
-		-serial $(CONSOLE) \
+		$(QEMU_SERIAL) \
 		-monitor none \
 		$(RTC_BASE) \
 		$(QEMU_EXIT_ON_REBOOT) \
@@ -579,7 +603,10 @@ run: $(DISK_DEPS) $(FIRMWARE_DEPS)
 		-netdev socket,id=cluster,mcast=239.192.76.75:26443 \
 		$(QEMU_NICS) \
 		$(QEMU_DRIVES) \
-		$(QEMU_DISKS)
+		$(QEMU_DISKS) || exit $$?; \
+		[ "$(COLD_REBOOT)" = 1 ] && grep -a "reboot: " "$(CONSOLE_PATH)" | tail -1 | grep -q "machine restart" || exit 0; \
+		echo "dev-cluster: $(NODE) rebooted; starting it again from a fresh QEMU process"; \
+	done
 
 # One-shot boots, for debugging and automation. liken.oneshot tells
 # init not to restart k3s. When k3s exits for the first time, the

@@ -441,8 +441,11 @@ guest took 60 reboots in a row with none, and three guests that
 rebooted at the same time hung once in 38. The same three loops on
 `2026.10.21-901`, built before this work, hung once in 67, in the same
 image of the same size, so the hang does not come from this work. The
-lab ran QEMU 10.2.1 and OVMF 2025.11 on the laptop. The drills skill tells the next drill to
-power-cycle a guest that hangs this way.
+lab ran QEMU 10.2.1 and OVMF 2025.11 on the laptop. The lab's
+`COLD_REBOOT=1` starts a fresh QEMU process at each reboot instead of
+a warm reset. The same three loops in that mode took 120 reboots, 40
+on each guest, with none hung, and the drills skill tells every drill
+to use it.
 
 ## Considered and set aside
 
