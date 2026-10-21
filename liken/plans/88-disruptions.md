@@ -206,9 +206,9 @@ the budgets and the leader floor are checked in that same write.
 `Disruption` when every budget that selects it has room, in the order
 it uses today: leaders first while the release lags on them, then
 name order. It does not grant a turn to a machine whose release is
-still downloading, so the release joins the same drain, unless a
-person's `Disruption` is pending for it. A person who asks for a reboot
-gets it now. While a machine holds its entry, the conductor adds each new
+still downloading, so the release joins the same drain. The rule
+holds for every requester, a person included. A download that fails
+moves the machine out of `Downloading`, so no request waits forever. While a machine holds its entry, the conductor adds each new
 approved `Disruption` for that machine to the entry. The conductor
 removes the entry when the machine is available and every
 `Disruption` the entry names is complete or deleted.
