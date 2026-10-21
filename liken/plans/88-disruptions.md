@@ -438,8 +438,10 @@ before the boot manager starts systemd-boot, and no `liken` code runs
 there. The variable store that hung boots on a power cycle, so nothing
 `init` wrote to it is the trigger. The hang needs a busy host: one
 guest took 60 reboots in a row with none, and three guests that
-rebooted at the same time hung once in 38. The lab ran QEMU 10.2.1 and
-OVMF 2025.11 on the laptop. The drills skill tells the next drill to
+rebooted at the same time hung once in 38. The same three loops on
+`2026.10.21-901`, built before this work, hung once in 67, in the same
+image of the same size, so the hang does not come from this work. The
+lab ran QEMU 10.2.1 and OVMF 2025.11 on the laptop. The drills skill tells the next drill to
 power-cycle a guest that hangs this way.
 
 ## Considered and set aside
