@@ -125,9 +125,11 @@ machine creates them again. Delete them, because a `Lost` machine
 counts against every
 [`MachineDisruptionBudget`](https://liken.sh/docs/reference/machinedisruptionbudget/)
 that selects it. With the `default` budget of one, no other machine
-gets a reboot turn, and upgrades and Cluster edits stop. The
-`Disruption`s that `machine-operator` and `liken request-reboot` file
-name the `Machine` as their owner, so Kubernetes deletes them with it.
+gets a reboot turn, and upgrades and Cluster edits stop. Each
+`Disruption` names its `Machine` as its owner, so Kubernetes deletes
+the machine's requests with it. `machine-operator` and
+`liken request-reboot` set the owner when they file a request, and
+`machine-operator` adds it to a request created with `kubectl`.
 
 Power off before you delete. A machine that still runs creates its
 Machine again when its operator starts, and its kubelet registers the
