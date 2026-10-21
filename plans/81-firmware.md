@@ -3,8 +3,9 @@
 Proposed on 2026-10-19. Steps 1 to 3 of [Order](#order) were built on
 2026-10-19, except the report of missing kernel firmware, and the test
 cluster's guide camera loaded with no hand-run `Job` on 2026-10-20.
-Steps 4 to 6 are not built. This plan records which component
-owns each part of firmware in `liken`. The component plans hold the
+Steps 4 to 6 were built on 2026-10-20. Steps 7 and 8 are not built.
+This plan records which component owns each part of firmware in
+`liken`. The component plans hold the
 design.
 
 ## Three kinds of firmware
@@ -13,7 +14,7 @@ design.
 |---|---|---|---|
 | The kernel loads it from the image | i915 and wifi blobs | the OS image | `liken` [milestone 32](../liken/plans/completed/32-hardware-support-in-the-image.md), built |
 | The host uploads it each time a device appears | a QHY guide camera on a bare FX2 chip | `firmware-operator`, a `Firmware` with `upload` | `firmware-operator` [plan 01](../firmware-operator/plans/completed/01-uploads.md) |
-| The device keeps it across a power cycle | UEFI, a dock, an SSD | `firmware-operator`, a `Firmware` with `update` | `firmware-operator` plans [03](../firmware-operator/plans/completed/03-discovery.md), [04](../firmware-operator/plans/completed/04-approval.md), and [05](../firmware-operator/plans/05-applying-updates.md), and `liken` [milestone 33](../liken/plans/33-firmware-updates.md) for the boot chain |
+| The device keeps it across a power cycle | UEFI, a dock, an SSD | `firmware-operator`, a `Firmware` with `update` | `firmware-operator` plans [03](../firmware-operator/plans/completed/03-discovery.md) to [08](../firmware-operator/plans/08-applying-a-capsule.md), and `liken` milestones [33](../liken/plans/33-firmware-updates.md) and [88](../liken/plans/88-a-component-takes-a-reboot-turn.md) for the capabilities they use |
 
 ## The boundaries
 
@@ -22,10 +23,12 @@ about vendor firmware. `liken`'s
 [milestone 87](../liken/plans/87-firmware-facts-a-machine-publishes.md)
 adds the USB bus and device numbers to each device in a machine's
 `ResourceSlice`, and reports in `status.hardware.missingFirmware` the
-files that the kernel requested and did not find. Milestone 33 keeps
-`init` the only writer of the boot chain, with an efivars shim for
-fwupd, and gives a component a rollout turn for a machine. Nothing in
-the OS reads a `Firmware` object.
+files that the kernel requested and did not find. The OS offers
+capabilities that an add-on uses, and makes no firmware write itself.
+Milestone 88 gives a component a reboot turn for a machine. Milestone
+33 hands the turn's one-shot boot to the component, keeps the boot
+order through a reset, and lets a pod reach the ESP of the next boot.
+Nothing in the OS reads a `Firmware` object.
 
 **`firmware-operator` owns the rest.** It is an add-on that ships
 apart from the OS, like display-operator, and it is on the same layer
@@ -61,8 +64,12 @@ digest. Neither kind enters the OS image.
 4. `firmware-operator` plan 03: discovery of the firmware that devices
    keep and of the releases for it, which installs nothing.
 5. `firmware-operator` plan 04: approval of one version.
-6. `liken` milestone 33's prerequisites and the shim, then
-   `firmware-operator` plan 05, which applies an approved version.
+6. `firmware-operator` plan 05: the rehearsal of an approved install.
+7. `liken` milestone 88, the reboot turn, then `firmware-operator`
+   plan 06, which applies a Secure Boot database update.
+8. `firmware-operator` plan 07, the rehearsal of a capsule, then
+   `liken` milestone 33's capabilities, then `firmware-operator`
+   plan 08, which applies a capsule.
 
 Each step changes its component's guides, and the skills generated
 from them, in the same commit.

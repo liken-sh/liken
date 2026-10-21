@@ -8,11 +8,16 @@ and runs the updates: its
 [plan 03](../../firmware-operator/plans/completed/03-discovery.md) finds the
 updates with fwupd and the LVFS catalog,
 [plan 04](../../firmware-operator/plans/completed/04-approval.md) approves one,
-and [plan 05](../../firmware-operator/plans/05-applying-updates.md)
-applies it. The OS keeps `init` the only
-process that writes the boot chain, and gives the add-on a rollout
-turn. Root [plan 81](../../plans/81-firmware.md) records the
-boundary.
+[plan 05](../../firmware-operator/plans/completed/05-rehearsal.md)
+rehearses it against a copy of the machine's variables, and plans
+[06](../../firmware-operator/plans/06-applying-a-database-update.md)
+to [08](../../firmware-operator/plans/08-applying-a-capsule.md) apply
+it. The OS offers capabilities, and the add-on uses them: a reboot
+turn ([milestone 88](88-a-component-takes-a-reboot-turn.md)), the
+one-shot boot of that turn's reboot, a boot order that survives a
+reset, and the ESP of the next boot. The add-on makes every write to
+the firmware itself. Root [plan 81](../../plans/81-firmware.md)
+records the boundary.
 
 ## Three kinds of firmware
 
@@ -42,8 +47,9 @@ catalog. A vendor signs each update, and LVFS serves it.
 
 fwupd is a daemon with a memory cost, which matters on a 1 GB machine.
 It has a live trust relationship with LVFS, and LVFS's vendor-signed
-downloads are outside `liken`'s own digest chain. A deployment can
-accept these costs.
+downloads are outside `liken`'s own digest chain. `firmware-operator`
+answers both: it runs `fwupdtool` in short pods instead of the daemon,
+and an approval pins each cabinet by its SHA-256.
 
 The variables that fwupd writes are the problem. To apply a UEFI
 update, fwupd
@@ -54,15 +60,17 @@ one-shot choice of what to boot next; it creates a boot entry of its
 own; and it writes `OsIndications`, the flag that tells the firmware a
 capsule is waiting. Those are exactly the variables that `liken`'s
 release trials depend on. `init/proving.go` explains the rule: the
-store on disk is the authority, and init is the one process that talks
-to the firmware. A second writer to `BootNext` can overwrite a staged
-release trial. In the other direction, when init arms a release trial
-(sets the one-shot `BootNext` for the trial boot), it can overwrite
-fwupd's `BootNext`, and fwupd's update is lost.
+store on disk is the authority, and init keeps the firmware's boot
+preference a copy of it. A second writer to `BootNext` can overwrite a
+staged release trial. In the other direction, init pins `BootNext` at
+the proven slot on every boot and before every reboot
+(`assertAndArmForReboot`), so today it overwrites fwupd's `BootNext`,
+and fwupd's update is lost.
 
-The design below keeps init as the only writer: it removes fwupd's
-access to the variable store. It does not schedule fwupd's writes into
-rollout turns.
+A Secure Boot database update writes none of those variables. It is
+one authenticated append to `dbx`, `db`, or `KEK`, which `init` never
+reads or writes. So a database update needs only the turn, and a
+capsule needs every capability below.
 
 ## What is built: the fallback that a firmware update can erase
 
@@ -164,255 +172,172 @@ a real board.
   they prove that a BIOS machine's boot chain still reads the same
   command line.
 
-## What the add-on does and what the OS does
 
-`firmware-operator` reads the LVFS catalog, proposes `Firmware`
-objects, runs fwupd in pods on each machine, and records each device's
-version and each update's result in `Firmware` status. Its plan 02
-describes those steps.
+## What the OS offers
 
-The OS does four things for it, and each is a section of this plan:
+The OS keeps as little of firmware as it can. It knows no vendor, no
+cabinet, and no `Firmware` object. It offers four capabilities, each
+useful without fwupd, and `firmware-operator` writes the variable
+store and the ESP itself, from its own pods, inside a turn.
 
-- It reports the board's firmware version in `Machine` status, in the
-  first prerequisite below.
-- It gives a component a rollout turn for a machine, in the third
-  prerequisite below.
-- It gives the fwupd pod a copy of the variable store and turns each
-  write into a real write only when `init` allows it, in "How init
-  makes fwupd's variable writes".
-- It never arms a capsule and a release trial for the same reboot, and
-  it proves a capsule from the ESRT after the boot.
+### A reboot turn
 
-## Prerequisites for fwupd
+[Milestone 88](88-a-component-takes-a-reboot-turn.md) lets a
+component ask for a machine's turn, start its work after the drain,
+and release the machine to reboot. The turn gives a firmware write
+the disruption budget, one leader at a time, the drain, and a reboot
+that only the conductor orders. It also keeps a turn and a staged
+release from sharing a reboot: a machine with a staged release gets no
+component turn, and a machine in a component turn stages no release
+until it reboots. A failed boot after a firmware write then has one
+cause.
 
-Four pieces of work are missing, and the rest of this plan assumes
-them. None of them involves fwupd. Each is a separate change, and each
-is useful without the others.
+A Secure Boot database update needs only this capability.
 
-**The machine must report its firmware version.** `FirmwareStatus` in
-`machine/status.go` carries the boot mode, `BootCurrent`, `BootNext`,
-and `BootOrder`, and no version. `firmwareFacts` in `init/efi.go` reads
-those from the variable store. The kernel exposes the board's firmware
-version and date under `/sys/class/dmi/id` as `bios_version` and
-`bios_date`, on BIOS and UEFI machines alike. Milestone 65 waits for
-one new field on `FirmwareStatus`, read from there and printed at boot
-by the console parity rule. That plan's table and
-`machine-operator/metrics.go` name the metrics `liken_firmware_info`
-and `liken_firmware_update_pending` as waiting on this field. This is
-the first part of this milestone, and it needs no fwupd, no capsule,
-and no new trust relationship.
+### The one-shot boot of a turn's reboot
 
-**A release must be able to carry an artifact for one machine.**
-`fetchRelease` in `machine-operator/fetch.go` writes every artifact in
-the release document to every slot, and `releases/bundle.go` sums all
-artifacts against one fleet-wide slot size. fwupd, its plugins, and
-its LVFS metadata cannot ship in every image; they are the kind of
-payload that one machine needs and the fleet does not.
-[Milestone 34](34-gpu-add-ons.md)'s GPU add-on has the same need, and
-both plans wait on this one prerequisite. The proposed design is an artifact that the release document marks as
-optional, that a Machine selects by name, and that the fetcher writes
-only to the machine that selected it. fwupd can also run as a
-container image that the machine pulls like any other workload, which
-needs no release artifact, and `firmware-operator` runs it that way.
-Nothing in this plan requires fwupd's files on a slot: the shim gives
-init fwupd's requests, and init writes the variables itself. If that
-holds, firmware no longer waits on this prerequisite, and only
-milestone 34 does.
+When a component releases its turn, it can say that it set
+`BootNext` for this reboot. machine-operator carries that in the
+`RebootIntent` it writes for `init` (`machine/reboot.go`). On that
+reboot, `assertAndArmForReboot` leaves `BootNext` as it finds it, and
+arms no release trial, which the rule above already ensures. It still
+asserts `BootOrder` and heals the slots' entries, which writes nothing
+when nothing drifted.
 
-**A component must be able to request a rollout turn.**
-`firmware-operator` runs fwupd in its own pods, so the OS needs no
-feature kind that runs a pod on each machine. It does need to give the
-add-on a turn: a flash must run while the machine is drained, inside
-the disruption budget, and a capsule needs a reboot that only the
-conductor may order. Today the conductor grants a turn to a machine
-when a condition on its `Machine` has the reason `AwaitingTurn`, and
-machine-operator is the only writer of `Machine` status. The interface
-is not designed. "Firmware updates in the rollout conductor" below
-lists the choices. The open problem
+The firmware then boots fwupd's updater once, applies the capsule, and
+resets. The next boot finds no one-shot, so it starts the head of
+`BootOrder`, which is the proven slot. That boot runs
+`assertProvenSlot` as every boot does, which pins `BootNext` at the
+proven slot again. Nothing else in `init` changes. fwupd's
+"Linux Firmware Updater" entry stays in `BootOrder` behind the slots,
+where `bootOrderWith` keeps every entry it did not write, and
+`firmware-operator` removes it in a later turn.
+
+The handover is for one reboot. A machine that does not reboot within
+the turn, or an intent that carries no handover, gets the ordinary
+pin. `init` also refuses the handover, and pins as usual, when the
+reboot could leave the machine with no way back: the proven slot has
+no default-path loader, or `chooseBootActuator` returned `noActuator`.
+A firmware update cannot be undone, so these checks are stricter than
+a release's, in the pattern of `canArmTrial`. `init` prints the
+refusal, and machine-operator reports it on the turn, so the
+component reads that its update did not run.
+
+### A boot order that survives a reset
+
+The open problem
 [firmware-bootorder-persistence](open-problems/firmware-bootorder-persistence.md)
-is a fourth prerequisite of a different kind. Any firmware trial
-assumes that `BootOrder` survives a reset, and the safeguard that
-document proposes does not exist yet. The pin of `BootNext` at the
-proven slot is built in `efiActuator.assertProven`. The
-record-and-compare check is not built.
+records a firmware that reads a `BootOrder` write back correctly and
+loses it at the reset. On such a firmware, the one-shot is the only
+preference that survives, and a capsule's reboot consumes it. The boot
+after the capsule then follows the old `BootOrder`. The proven slot's
+entries and the default-path loader mean the machine still boots
+`liken`, but it may boot the other slot. A capsule turn needs the
+record-and-compare check that the open problem proposes, and the
+check is worth building for release trials alone.
 
-## The fwupd design
+### The ESP of the next boot
 
-Everything below is proposed. It depends on the four prerequisites
-above.
+fwupd writes its updater and the capsule to the ESP that the firmware
+reads at the next boot. On a `liken` machine, that is the proven
+slot, because the turn's rule keeps a release trial out of the same
+reboot. The OS has to let the component's pod mount that one
+partition. One shape is a fixed path on the host that `init` binds to
+the proven slot at each boot, so fwupd's `EspLocation` never changes.
+The shape is not decided.
 
-### How init makes fwupd's variable writes
+Read in the code, not measured: `verifySlotContents` hashes only the
+artifacts that a slot's release document lists, so a file that fwupd
+adds does not fail a slot's verification. The file does use the
+slot's free space, and a later release written to that slot must
+still fit. `firmware-operator` removes the files after it proves the
+update.
 
-The fwupd pod gets no access to
-`/sys/firmware/efi/efivars`, the filesystem through which Linux
-exposes the variable store. In its place, the pod sees a tmpfs that
-looks like efivarfs. This plan calls that tmpfs the shim. The ESRT,
-the table under `/sys/firmware/efi/esrt` where the firmware lists each
-updatable component and its version, is bind-mounted read-only, so
-fwupd's device discovery still works.
-
-init watches the shim with the inotify machinery that the facts tree
-already uses. A write from fwupd changes only the shim, and init reads
-it as a request. init decides whether that request becomes a real
-variable write, and when. After init writes the real variable, it
-copies the value into the shim so later reads agree.
-
-The alternative is a scheduled window: give fwupd the real variable
-store, and let it apply updates only while `liken` holds a conductor
-grant. The shim is better. A window protects the boot chain only
-through timing. It leaves NVRAM writable to a privileged pod at all
-times. It also needs a way to handle a crash in the middle of the
-window that leaves a foreign `BootNext` behind. With the shim, fwupd
-has no path to the real variable store, so init is always the only
-writer.
-
-The OS delivers the shim to the add-on's pod. One shape is a device in
-the machine's `ResourceSlice` whose CDI edits mount the shim, the
-ESRT, and the ESP path that the next section names, so the pod claims
-the shim the same way it claims any device. CDI specs can carry
-mounts, and machine-operator's specs carry only device nodes today.
-This shape is not decided.
-
-fwupd's configuration offers no third option. Its UEFI plugin reads
-`EspLocation`, `DisableCapsuleUpdateOnDisk`, and `RequireESPFreeSpace`,
-and none of them stops the `BootNext` write.
-
-One measurement is still needed to show whether the shim works as
-written. fwupd
-clears the per-file immutable flag before it writes a variable, the
-same sequence `writeEFIVar` performs, and `FS_IOC_GETFLAGS` may return
-`ENOTTY` on tmpfs. `writeEFIVar` already treats an error from that call
-as nothing to clear. The shim works only if fwupd does the same.
-
-### One reboot applies one change
-
-The UEFI specification has the firmware read `\EFI\UpdateCapsule` only
-from the ESP on the device named in the active boot option. That
-option is `BootNext` when it is set and `BootOrder` otherwise. `liken`
-controls that entry completely: `registerSlotEntries` puts both slots
-at the head of `BootOrder`, and `efiActuator.assertProven` keeps the
-proven slot first.
-
-So the rule is that init never arms a capsule and a release trial for
-the same reboot. This rule keeps the boot device known. It also means
-that when a proving boot fails, the failure has one cause: the capsule
-or the release, never both.
-
-`armProvingBoot` already supports this deferral. It has five early
-returns that leave the staged record untouched, and
-`settleSystemRelease` reads that state as a release that still waits
-for its proving boot. A staged capsule adds one more condition for an
-early return that already exists. The deferral costs one reboot.
-
-A capsule on a slot that is no longer the proven slot does nothing
-until a later boot from that slot. That boot then applies it, and the
-machine gets a firmware change that nobody requested. So init deletes
-`\EFI\UpdateCapsule` from any slot that is not the proven slot.
+`init` also deletes `\EFI\UpdateCapsule` from any slot that is not the
+proven slot. A capsule on such a slot applies at a later boot from
+it, which gives the machine a firmware change that nobody requested.
 Milestone 37 applies the same rule to partitions, and milestone 42
 applies it to the work of a retracted feature.
 
-### The ESP that the firmware reads
+### What firmware-operator owns
 
-fwupd finds an ESP on its own only when one is mounted at `/boot/efi`,
-`/boot`, or `/efi`, or when UDisks reports one. `liken` has none of those
-mounts and no UDisks, so detection fails. This failure is safe.
+Everything else. It rehearses each install, asks for the turn, writes
+the variables and the ESP with `fwupdtool` in a pod inside the turn,
+proves the update from its next scan, which reads the ESRT through
+fwupd, and cleans up the updater's entry and files. Its plans 05 to 08
+hold the design. Its manual states the risk that a firmware update can
+turn Secure Boot on or reset its keys. That stops `liken`'s unsigned
+`vmlinuz` from loading, and the default-path loader is unsigned too,
+so no boot order repairs it. The fix is the signed releases and UKIs
+of the hardening tier.
 
-The rule of one change per reboot decides which ESP is correct. With
-no slot switch pending, it is always the running slot's ESP. Slots already mount
-at fixed role paths (`init/grubactuator.go`), so init binds the running
-slot at one constant path and sets `EspLocation` to it. fwupd's
-configuration then never changes, and each boot binds that path to the
-correct slot.
+## The firmware version in Machine status
 
-Where the firmware supports capsule-on-disk, prefer it. fwupd then
-writes `OsIndications` instead of `BootNext`, so the shim has fewer
-writes to handle. The design must not depend on capsule-on-disk,
-because fwupd itself calls that path uncommon.
-
-### Firmware updates in the rollout conductor
-
-`wantsTurn` in `cluster-operator/rollout.go` matches the `AwaitingTurn`
-reason on any condition. So the rollout conductor gives a turn to a
-machine whose `FirmwareConverged` condition sets that reason, with no
-change to the conductor. Firmware updates then get the disruption
-budget, the limit of one leader at a time, the drain, and stall
-detection. fwupd never reboots
-a machine itself. The machine reboots only when the conductor grants
-it a turn, the same as for every other staged change.
-
-`firmware-operator` decides that a machine needs a turn, and it is not
-a writer of `Machine` status. Three ways can carry the request, and
-none is chosen:
-
-- machine-operator sets `FirmwareConverged` from the `Firmware`
-  objects' status. The OS then reads the CRD of an add-on.
-- `firmware-operator` writes that one condition with its own
-  server-side apply field manager. `Machine` status then has a second
-  writer.
-- The conductor reads a request for a turn that any component can
-  write, and reports the grant on it.
-
-The third keeps the OS free of the add-on's API and keeps one writer
-of `Machine` status, so it is the likely choice. Uploads need no turn,
-so this waits for updates.
-
-### Proving a change that the firmware applied
-
-Read the evidence from the machine, not from fwupd. After the boot,
-the ESRT reports each component's version, and the firmware writes
-its own result into a capsule status variable. Proven means the ESRT
-reports the declared target and the machine joined its cluster. Both
-facts belong in the facts tree and in Machine status, by the console
-parity rule.
-
-A firmware update has no second slot and cannot be undone, so
-`RejectedLastBoot` does not apply: there is no earlier state to return
-to. The preconditions must be
-stricter than a release's, in the `canArmTrial` pattern: refuse when
-the default-path loader is absent, when `chooseBootActuator` returned
-`noActuator`, when a release is staged for the other slot, and when
-the ESP lacks free space.
-
-One risk has no precondition that can catch it in advance. An update
-that turns Secure Boot on, or resets its keys, stops `liken`'s unsigned
-`vmlinuz` from loading, and the default-path loader is unsigned too.
-No boot order repairs that. The fix is the signed releases and UKIs
-of the hardening tier. Until those exist, `firmware-operator`'s manual
-must state this risk.
+[Milestone 65](../../plans/completed/65-prometheus-metrics.md) names
+the metrics `liken_firmware_info` and `liken_firmware_update_pending`
+as waiting on a firmware version in `Machine` status. `FirmwareStatus`
+in `machine/status.go` carries the boot mode, `BootCurrent`,
+`BootNext`, and `BootOrder`, and no version. The kernel exposes the
+board's firmware version and date under `/sys/class/dmi/id` as
+`bios_version` and `bios_date`, on BIOS and UEFI machines alike.
+One new field, read from there and printed at boot by the console
+parity rule, closes that gap. `firmware-operator` does not need it,
+because its scan reads the version from fwupd.
 
 ## What the lab can measure
 
-Almost all of this runs under QEMU, because every decision above
+Everything the OS offers runs under QEMU, because each capability
 depends on boot order or filesystem behavior, and none depends on the
-hardware. Two drills need
-no fwupd, no capsule, and no ESRT:
+hardware:
 
-* Write a capsule directory and a competing `BootNext` by hand. This
-  drills the one-change-per-reboot rule, the false-rejection path through
-  `settleSystemRelease`, and the sweep.
-* Mount the tmpfs and run fwupd against it. This drills the shim,
-  including the immutable-flag question.
+* Write a competing `BootNext` by hand and release a turn with the
+  handover. The one-shot survives the reboot, and the boot after it
+  starts the proven slot.
+* Stage a release and ask for a component turn. The conductor grants
+  none until the release's reboot.
+* Write a file into `\EFI\UpdateCapsule` on the slot that is not the
+  proven slot. The next boot deletes it.
 
-One question needs more than stock OVMF. Whether the firmware consumes
-a staged capsule needs an ESRT and an updatable firmware device. That
-means OVMF built with edk2's `FmpDevicePkg` and `EsrtFmpDxe`, or real
-metal. No decision above depends on the answer, so the design does not
-wait for it.
-
-Real vendor targets stay on metal. NIC NVRAM, SSD firmware, and docks
-need their own buses, and a guest cannot update the firmware image
-that its host owns.
+Whether the firmware consumes a staged capsule needs an ESRT and an
+updatable firmware device. That means OVMF built with edk2's
+`FmpDevicePkg` and `EsrtFmpDxe`, or real metal. `firmware-operator`'s
+plan 08 needs the answer, and the OS does not.
 
 ## Running fwupd before this milestone
 
 A deployment can run fwupd as a privileged workload today, but that
 has a cost for `liken`. Such a pod writes `BootNext`, so it can
-overwrite a staged release trial, and init's arming of a trial can
-overwrite fwupd's update. A deployment that runs fwupd now should do
-it with no release staged.
+overwrite a staged release trial, and init's pin of the proven slot
+overwrites fwupd's update. A deployment that runs fwupd now should do
+it with no release staged, and expect a capsule not to apply. A
+Secure Boot database update writes no boot variable, and stick-1 took
+one this way
+([plan 05](../../firmware-operator/plans/completed/05-rehearsal.md#the-real-write-on-stick-1)).
 
 An update that resets NVRAM no longer strands the machine, because the
 proven slot holds a loader that a firmware at its defaults finds. An
 update that turns Secure Boot on still strands it, because `liken`'s
 `vmlinuz` and that loader are both unsigned. That risk stays until the
 hardening tier's signed releases and UKIs exist.
+
+## Considered and set aside
+
+- **A shim that makes `init` the only writer.** An earlier design of
+  this milestone gave fwupd's pod a tmpfs in place of `efivarfs`.
+  `init` watched it, read each write as a request, and wrote the real
+  variable when it allowed it. It kept one writer of the variable
+  store, but it put fwupd's write semantics into `init`: the
+  immutable flag, the append, the boot entry, and `OsIndications`.
+  `liken` keeps the OS to capabilities that any add-on can use, so the
+  add-on writes inside a turn instead. The shim's case against a
+  window was that a window leaves the variable store writable to a
+  privileged pod at all times. Inside a turn, only `firmware-operator`'s
+  pod writes, and only while the conductor's grant holds.
+- **A release artifact for one machine.** `fetchRelease` in
+  `machine-operator/fetch.go` writes every artifact to every slot. An
+  optional artifact that one machine selects would carry fwupd on a
+  slot. `firmware-operator` runs fwupd as a container image, so
+  firmware does not need it. Milestone 34 still does.
+- **`init` proves a capsule from the ESRT.** The proof reads the next
+  scan of `firmware-operator`, which reads the ESRT through fwupd. A
+  second reader in `init` adds a fact that nothing in the OS acts on.

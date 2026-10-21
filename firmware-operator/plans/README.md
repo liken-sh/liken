@@ -47,4 +47,7 @@ the API server with the CA of its `ServiceAccount`.
 | [02](rejected/02-updates.md) | Replaced by plans 03, 04, and 05 before it was built |
 | [03](completed/03-discovery.md) | Built: the `FirmwareCatalog` resource, the scan pod that runs fwupd on each machine, and a discovered `Firmware` for each catalog component with the releases a catalog offers for it |
 | [04](completed/04-approval.md) | Built: `spec.update.version` and `spec.update.cabinet`, a person's approval of one release pinned to its cabinet, with the `Approved` condition and the count of pending machines |
-| [05](05-applying-updates.md) | Proposed: a rehearsal of each install against a copy of the machine's firmware variables, then the write in a rollout turn, with the Secure Boot databases before capsules |
+| [05](completed/05-rehearsal.md) | Built: a rehearsal of each approved install against a copy of the machine's firmware variables, with the `Rehearsed` condition |
+| [06](06-applying-a-database-update.md) | Proposed: the write of a Secure Boot database update inside a reboot turn that the OS grants |
+| [07](07-rehearsing-a-capsule.md) | Proposed: the rehearsal of a capsule, with the ESP of the next boot |
+| [08](08-applying-a-capsule.md) | Proposed: the write of a capsule inside a turn, with the one-shot boot that the OS hands over |

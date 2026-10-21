@@ -1,14 +1,25 @@
 # 05, Applying updates
 
-Proposed on 2026-10-20. Step 1, the rehearsal, is built, under [The
-rehearsal in the operator](#the-rehearsal-in-the-operator). Steps 2 to
-4 are not built. This plan applies the version that
-[plan 04](completed/04-approval.md) approves, on one machine at a time. Before
+Proposed on 2026-10-20. Step 1, the rehearsal, was built on
+2026-10-20, under [The rehearsal in the operator](#the-rehearsal-in-the-operator),
+and this plan closed on 2026-10-21 with it. Steps 2 to 4 were split
+into plans of their own: [plan 06](../06-applying-a-database-update.md)
+applies a Secure Boot database update,
+[plan 07](../07-rehearsing-a-capsule.md) rehearses a capsule, and
+[plan 08](../08-applying-a-capsule.md) applies one. The OS offers the
+reboot turn and the other capabilities they use, in `liken`'s
+[milestone 88](../../../liken/plans/88-a-component-takes-a-reboot-turn.md)
+and [milestone 33](../../../liken/plans/33-firmware-updates.md). The
+split also settled [Who makes the write](#questions-for-the-full-design):
+`firmware-operator`'s pod writes inside the turn, and `init` does not.
+
+This plan applies the version that
+[plan 04](04-approval.md) approves, on one machine at a time. Before
 any machine writes, a rehearsal runs the install against a copy of
 the machine's firmware variables and records in status exactly what
 the install would write. The parts that write the boot chain stay in
 the OS, in `liken`'s
-[milestone 33](../../liken/plans/33-firmware-updates.md), which also
+[milestone 33](../../../liken/plans/33-firmware-updates.md), which also
 lists what the OS must build first. The rehearsal ran by hand on
 liken-1, under [The rehearsal on liken-1](#the-rehearsal-on-liken-1).
 Real writes ran on a lab guest under OVMF, under [The real writes

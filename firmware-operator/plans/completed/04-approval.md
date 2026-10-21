@@ -4,7 +4,7 @@ Proposed on 2026-10-20. Built on 2026-10-20, and drilled on liken-1
 the same day, under [The drill](#the-drill). This plan lets a person approve one version of a catalog
 component for the machines that have it, and shows in status which
 machines the approval waits for. It applies nothing:
-[plan 05](../05-applying-updates.md) applies an approved version.
+[plan 05](05-rehearsal.md) applies an approved version.
 [Plan 03](03-discovery.md) creates the discovered `Firmware` objects
 that this plan approves.
 

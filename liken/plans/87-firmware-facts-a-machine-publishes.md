@@ -25,8 +25,8 @@ The word "firmware" names three different jobs. Root
 display-operator, and a cluster that does not install it loses
 nothing that the OS does. The OS keeps only what an add-on cannot do
 for itself: it publishes the facts about each device, it reports the
-kernel's own firmware, and, for milestone 33, it stays the only writer
-of the boot chain. Vendor firmware, vendor tools, and the `Firmware`
+kernel's own firmware, and, for milestones 33 and 88, it gives an
+add-on a turn in which to write the firmware itself. Vendor firmware, vendor tools, and the `Firmware`
 resource stay out of `liken`.
 
 ## USB bus and device numbers

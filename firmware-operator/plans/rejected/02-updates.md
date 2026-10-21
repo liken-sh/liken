@@ -4,7 +4,7 @@ Proposed on 2026-10-19, as a stub. Replaced on 2026-10-20, before it
 was built, by three plans that separate its parts:
 [plan 03](../completed/03-discovery.md) finds the hardware and the updates for
 it, [plan 04](../completed/04-approval.md) approves a version, and
-[plan 05](../05-applying-updates.md) applies an approved version in
+[plan 05](../completed/05-rehearsal.md) applies an approved version in
 turns. A spike on 2026-10-20 changed parts of the design below, and
 plan 03 records what it measured. This plan adds the
 `update` action to the `Firmware` resource of [plan 01](../completed/01-uploads.md):
