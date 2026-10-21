@@ -26,6 +26,7 @@ func installFakePlugin(t *testing.T, dir, domain string) {
 }
 
 func TestFindPluginReadsTheBinDir(t *testing.T) {
+	t.Setenv("PATH", "")
 	binDir := t.TempDir()
 	installFakePlugin(t, binDir, "audio")
 	if got := findPlugin(binDir, "audio"); got != filepath.Join(binDir, "kubectl-liken-audio") {
@@ -64,7 +65,10 @@ func TestDispatchPluginExecsTheCLI(t *testing.T) {
 	}
 }
 
+// The test empties PATH, because a plugin found there would replace
+// the test process, and every test after this one would not run.
 func TestDispatchPluginReportsNoPlugin(t *testing.T) {
+	t.Setenv("PATH", "")
 	dispatched, err := dispatchPlugin(t.TempDir(), "audio", nil)
 	if dispatched || err != nil {
 		t.Fatalf("no CLI must not dispatch: dispatched=%v err=%v", dispatched, err)
