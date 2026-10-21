@@ -155,7 +155,7 @@ kubectl get firmware microsoft-dbx-x64-kek2023 -o jsonpath='{range .status.rehea
 ```
 
 ```
-liken-1   Passed   the install appends 17260 bytes to dbx-d719b2cb-3d3a-4596-a3bc-dad00e67656f, and the variable store has 67174 bytes free
+liken-1   Passed   the install appends 17260 bytes to dbx-d719b2cb-3d3a-4596-a3bc-dad00e67656f, and the variable store has 67149 bytes free
 ```
 
 A Secure Boot database update, such as a `dbx` update, passes when the

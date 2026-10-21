@@ -1,6 +1,8 @@
 # 05, Applying updates
 
-Proposed on 2026-10-20. Not built. This plan applies the version that
+Proposed on 2026-10-20. Step 1, the rehearsal, is built, under [The
+rehearsal in the operator](#the-rehearsal-in-the-operator). Steps 2 to
+4 are not built. This plan applies the version that
 [plan 04](completed/04-approval.md) approves, on one machine at a time. Before
 any machine writes, a rehearsal runs the install against a copy of
 the machine's firmware variables and records in status exactly what
@@ -289,6 +291,60 @@ The steps were the ones in [The steps](#the-steps), each by hand:
 
 The approval and the label stay on the testbed as a record.
 
+## The rehearsal in the operator
+
+Built on 2026-10-20. Step 1 of [The steps](#the-steps) runs in
+`firmware-operator`. Steps 2 to 4 wait for milestone 33.
+
+- **When it runs.** For each machine that an approval waits for (plan
+  04's `PENDING`), once the machine is `Ready` and its last scan read
+  the `FirmwareCatalog`'s current file. Each attempt runs once: the
+  machine's boot, fwupd's device ID, the approved version and cabinet,
+  and the catalog file. A reboot, a new approval, or a scan of a new
+  file runs it again.
+- **The pod.** `scan rehearse` in the scan image, as the hand
+  rehearsal ran: not privileged, `/sys/firmware` mounted read-only with
+  `recursiveReadOnly: Enabled`, every capability dropped but
+  `DAC_READ_SEARCH`, and the copy in a 64Mi `emptyDir` in memory. The
+  label `firmware.liken.sh/rehearsal` selects the pods for the
+  operator's seventh watch and for the NetworkPolicy
+  `firmware-rehearsal`, which allows DNS and HTTPS out.
+- **The check.** The program refuses a device whose fwupd plugin is
+  not `uefi_dbx`, `uefi_db`, or `uefi_kek`, without an install. It
+  checks the cabinet's SHA-256 against the pin before fwupd reads it.
+  It passes an install that changed only the device's own variable, by
+  an append whose attributes set append-write and time-based
+  authentication, wrote nothing under the ESP path, and fits in the
+  real store's free space, which `statfs` on `efivarfs` reads. It
+  compares the payload with the free space, not fwupd's
+  `RequiredFree`: fwupd checks `RequiredFree` against the copy in
+  memory, where it always passes.
+- **The record.** `status.rehearsals` holds one record for each pending
+  machine, with the result `Running`, `Passed`, `Refused`, or `Failed`,
+  and for a pass the append's variable, length, and SHA-256 and the
+  store's free space. The bytes themselves are not kept. Whichever
+  writer step 3 uses, the bytes it writes must have that SHA-256.
+- **The condition.** `Rehearsed` is `True` with `Passed` when every
+  pending machine passed, `False` with `Refused` or `Failed` when one
+  did not, and `Unknown` with `Rehearsing` while one waits. Refused
+  outweighs Failed. The operator posts `RehearsalStarted`,
+  `RehearsalPassed`, `RehearsalRefused`, and `RehearsalFailed` for each
+  rehearsal, beside the condition's transitions.
+
+### The drill on liken-1
+
+Run on 2026-10-20 with `firmware-operator`
+2026.10.20-001-dev-011-80227c7d. An approval of `dbx` 20260707 on
+`microsoft-dbx-x64-kek2023`, which only liken-1 is offered, started one
+rehearsal pod on liken-1. `Rehearsed` read `Unknown` with
+`Rehearsing`, then `True` with `Passed`. The record holds an append of
+17,260 bytes to `dbx`, with the SHA-256 `cf901743...`, and 67,149 bytes
+free. That SHA-256 is the one the hand rehearsal on the lab's `node-1`
+recorded from the same 20260402 list. The operator posted
+`RehearsalStarted` and `RehearsalPassed` with the two transitions, and
+deleted the pod. liken-1's real `dbx` kept its 21,352 bytes and its
+SHA-256, `480fd968...`.
+
 ## What fwupd does not check on a `liken` machine
 
 - **Revocation of the running boot chain.** Before a `dbx` update,
@@ -372,10 +428,11 @@ Capsules come after milestone 33, with their own proof.
   the same `dbx`, so either writer gives the same result.
 - **The turn interface.** Milestone 33 has to give a component a way
   to request a rollout turn for a machine and to see it granted.
-- **When to rehearse.** A rehearsal after the approval shows what the
-  approved version writes. A rehearsal of each machine's newest
-  release before any approval would show it to the person who
-  decides, at the cost of a download of each cabinet on each machine.
+- **When to rehearse.** Settled in the build: after the approval, so
+  a cabinet downloads only for a release a person chose. A rehearsal
+  of each machine's newest release before any approval would show it
+  to the person who decides, at the cost of a download of each cabinet
+  on each machine.
 - **Which ESP.** For capsules. A `liken` machine has two boot slots,
   each an ESP. The shim has to choose the slot the capsule goes into,
   and keep the release trials of `init` working.
