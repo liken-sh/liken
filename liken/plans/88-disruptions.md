@@ -3,8 +3,9 @@
 Milestone 88. Proposed 2026-10-21. Release 1 of stage 1 was built
 and drilled on the `lab` fleet on 2026-10-21
 ([Release 1 as built](#release-1-as-built)), and so was release 2
-([Release 2 as built](#release-2-as-built)). Stage 2 is not built, and
-the drills on liken-1 and stick-1 have not run. Five
+([Release 2 as built](#release-2-as-built)). Both releases then
+rolled to liken-1 and stick-1 on the same day
+([On the testbed](#on-the-testbed)). Stage 2 is not built. Five
 reviews from different angles read an earlier draft on the same day,
 and this version answers them
 ([Considered and set aside](#considered-and-set-aside)).
@@ -562,6 +563,36 @@ conductor reclaims no entry until it has read the heartbeats for
 whose request went away, stayed 40 to 55 seconds after the machine
 was back. The wait protects the budget from a machine that is down
 but reads `Ready`, so release 2 keeps it.
+
+## On the testbed
+
+Both releases rolled to liken-1, the leader, and stick-1, the
+follower, on 2026-10-21. The `default` budget allowed one machine out,
+and no more than one was out at any time.
+
+`2026.10.21-001` came from `2026.10.20-001` in 5.5 minutes, one
+machine at a time. The release 1 conductor granted stick-1's turn
+while stick-1 still ran the machine-operator of `2026.10.20-001`, by
+the old `RebootApproved` path. Then a CLI request for stick-1, a
+second `Disruption` for stick-1 created during its drain, and a CLI
+request for liken-1 ended in one reboot of stick-1 for both of its
+requests, and then one reboot of liken-1.
+
+`2026.10.21-002` came from `2026.10.21-001` in 5 minutes. liken-1
+finished its download first and took the first turn, from the release
+1 conductor, while stick-1 still downloaded. The release 2 conductor
+then granted stick-1, which still ran the release 1 machine-operator,
+and stick-1 acted on the grant. On `-002` everywhere:
+
+- The `liken.sh/request-reboot` annotation set to stick-1's boot
+  identity made no `Disruption`, no ledger entry, and no cordon in 90
+  seconds.
+- The same drill as on `-001`, with the CLI of `-002`, ended in one
+  reboot of stick-1 for its two requests, then one reboot of liken-1.
+  Each `Uncordoned` `Event` read "its reboot is complete".
+
+After each boot of liken-1, `firmware-operator` loaded the QHY5L-II
+guide camera's firmware again with no request.
 
 ## Considered and set aside
 
