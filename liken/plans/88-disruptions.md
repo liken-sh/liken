@@ -207,8 +207,12 @@ the budgets and the leader floor are checked in that same write.
 it uses today: leaders first while the release lags on them, then
 name order. It does not grant a turn to a machine whose release is
 still downloading, so the release joins the same drain. The rule
-holds for every requester, a person included. A download that fails
-moves the machine out of `Downloading`, so no request waits forever. While a machine holds its entry, the conductor adds each new
+holds for every requester, a person included. machine-operator
+reports a fetch that failed and waits to retry with the reason
+`DownloadRetrying`, in the phase `Downloading`, and the conductor holds
+a turn only for the reason `Downloading`. So a release server that is
+down holds no request. While a machine holds its entry, the conductor
+adds each new
 approved `Disruption` for that machine to the entry. The conductor
 removes the entry when the machine is available and every
 `Disruption` the entry names is complete or deleted.
@@ -285,22 +289,32 @@ decide the order:
 the entry, then `RebootApproved` on the `Machine`, and machine-operator
 acts on `RebootApproved` alone. machine-operator files its
 `Disruption` and still sets `AwaitingTurn`, so an older conductor sees
-the request. The conductor counts a `Disruption` and an `AwaitingTurn`
-with no `Disruption` as the same request, so an older machine-operator
-still gets its turn. The CLI writes `Disruption`s, and machine-operator
-still honors the two annotations. Both binaries treat a `403` or a
+the request. The conductor still grants a turn on `AwaitingTurn`, and
+the entry names the machine's approved `Disruption`s. A conductor that
+granted on a `Disruption` alone would grant a machine-operator of the
+release before, which ignores a `Disruption`, and that grant would hold
+a slot of the budget with no reboot to spend it. machine-operator
+treats a person's `Disruption` as the request annotation, and its
+`approvedHash` as the approve annotation. For its own documents it
+still gates on the approve annotation, because one annotation approves
+one document and `spec.hash` covers them all. The CLI writes each
+`Disruption` and the annotation with it, so a machine on either
+release acts on the request. Both binaries treat a `403` or a
 `404` on the new resources as "the old protocol only". The conductor
 also stops dropping a ledger entry whose machine changed without a
 `RebootApproved`, when the entry names a `Disruption`, so release 2's
 grant by entry alone is safe beside it.
 
 **Release 2** takes release 1 as its rollback floor. machine-operator
-acts on its ledger entry alone, and the conductor stops writing
-`RebootApproved`. The two annotations, `AwaitingTurn` as a request,
-and `spec.disruption` as the source of the budget are removed from the
-code. Milestone 82's rules for confirming a grant on the `Machine`
-are removed with `RebootApproved`. The fields stay in the CRDs, unread,
-until the floor passes release 2, so a rollback finds what it reads.
+acts on its ledger entry alone, and on `approvedHash` for its own
+`Disruption`. The conductor grants on a `Disruption`, and still writes
+`RebootApproved`, because a machine-operator of release 1 acts on
+nothing else. The two annotations, `AwaitingTurn` as a request, and
+`spec.disruption` as the source of the budget are removed from the
+code. `RebootApproved`, and milestone 82's rules for confirming it on
+the `Machine`, are removed when the floor passes release 2. The fields
+stay in the CRDs, unread, until then, so a rollback finds what it
+reads.
 
 ## The manual
 
