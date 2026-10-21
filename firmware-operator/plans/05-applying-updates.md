@@ -9,7 +9,9 @@ the OS, in `liken`'s
 [milestone 33](../../liken/plans/33-firmware-updates.md), which also
 lists what the OS must build first. The rehearsal ran by hand on
 liken-1, under [The rehearsal on liken-1](#the-rehearsal-on-liken-1).
-No real write has run.
+Real writes ran on a lab guest under OVMF, under [The real writes
+under OVMF](#the-real-writes-under-ovmf). No real write has run on a
+physical machine.
 
 ## The problem
 
@@ -155,6 +157,68 @@ The 17,256 bytes are also the `size` that plan 03's status reports for
 this release. The catalog's size is the size of the payload, not the
 cabinet.
 
+## The real writes under OVMF
+
+Run by hand on 2026-10-20, on the lab's `node-1`, at a development
+build of `liken` 2026.10.19-005, with the scan image of the rehearsal
+on liken-1. The guest ran Ubuntu's OVMF 2025.11 build with SMM
+(`OVMF_CODE_4M.secboot.fd`, on a `q35` machine with `smm=on`), the
+build that verifies authenticated writes in protected code.
+`virt-fw-vars` enrolled Microsoft's OEM `PK`, both `KEK`s, and the
+`db` certificates, and set `SecureBootEnable` to false. It also seeded
+`dbx` with liken-1's 20260402 list, so fwupd read the same version as
+on liken-1. In the guest, `SecureBoot` and `SetupMode` both read 0,
+the state of liken-1.
+
+1. **The rehearsal.** The same pod as on liken-1 gave the same
+   result: `dbx` grew from 21,352 to 38,612 bytes in the copy, the
+   other 46 variables did not change, nothing was written under the
+   ESP path, fwupd asked for 24,629 bytes free, and fwupd exited 1
+   with the same message.
+2. **A tampered append.** A privileged pod wrote the recorded
+   17,260 bytes with one byte of the last hash changed. The write
+   failed with `EACCES`, which is how the kernel reports the
+   firmware's `EFI_SECURITY_VIOLATION`, and `dbx` did not change.
+3. **The recorded append.** The same pod wrote the recorded bytes in
+   one `write` through a file opened with `O_APPEND`. The write
+   succeeded. `dbx` grew from 21,352 to 21,476 bytes, not by 17,260,
+   because the firmware merges the signed list into the stored one
+   and keeps no duplicate. The payload's 291 hashes held 2 that
+   20260402 did not, and the new `dbx` holds 445 entries with no
+   duplicate.
+4. **The reboot.** A warm reboot kept the new `dbx`, byte for byte,
+   and `liken` booted. fwupd, reading the real store, reported `dbx`
+   version 20260707 and offered no `dbx` update.
+5. **fwupd's own write.** On the 20260402 store again, a privileged
+   pod ran `fwupdtool install` against the real store. It exited 0,
+   changed only `dbx`, wrote nothing under the ESP path, and set the
+   immutable flag again. The new `dbx` had the same SHA-256 as the
+   recorded append's, `a87a88a3...`.
+
+Three facts from these runs change the design:
+
+- **The real store grows less than the copy.** The copy appends the
+  signed list, and the firmware merges it. So the proof compares the
+  version from the next scan, not the size or the bytes of `dbx`.
+  fwupd's `RequiredFree` asked for much more room than the merged
+  write took. The check stays, because it errs toward refusing a
+  write.
+- **fwupd clears the immutable flag only under `/sys`.** A path that
+  does not start with `/sys` is not bare metal to fwupd
+  (`fu-linux-efivars.c` in fwupd 2.1.1), so it skips the flag, and
+  the write fails with `EPERM`. A pod that runs fwupd for real must
+  mount `efivarfs` at `/sys/firmware/efi/efivars`. The rehearsal is
+  not affected, because its copy has no flags.
+- **The write is one `write` call.** `efivarfs` refuses a seek, so
+  `dd` fails before it writes. The 4 attribute bytes and the payload
+  go in one call, as fwupd does.
+
+This OVMF build also enrolls `KEK` 2023 by itself at boot when the
+store holds `KEK` 2011 alone. So a guest cannot run the case of a
+`KEK` that does not chain to the signer (field risk 3). The tampered
+append shows that the firmware checks the signature, and the `KEK`
+case waits for a firmware that does not change its own keys.
+
 ## What fwupd does not check on a `liken` machine
 
 - **Revocation of the running boot chain.** Before a `dbx` update,
@@ -209,12 +273,12 @@ likely first:
 Each step runs only after the one before it passes.
 
 1. **The rehearsal on a real machine.** Done on liken-1, above.
-2. **Real writes under OVMF.** A lab guest with Microsoft's keys
-   enrolled through `virt-fw-vars` and Secure Boot on takes the same
-   `dbx`, `db`, and `KEK` cabinets for real, reboots, and boots `liken`.
-   `make -C dev-cluster reset-nvram` returns the store between runs.
-   This shows the firmware accepting the append, and the next scan
-   reading the new version.
+2. **Real writes under OVMF.** Done for `dbx`, under [The real
+   writes under OVMF](#the-real-writes-under-ovmf). The guest ran with
+   Secure Boot off and Microsoft's keys enrolled, as liken-1 does,
+   because OVMF with Secure Boot on refuses `liken`'s unsigned kernel.
+   No `db` or `KEK` cabinet was offered to liken-1 or to the guest, so
+   none ran.
 3. **The revocation check.** Hash `liken`'s EFI binaries of a release
    with Authenticode, and compare them with every entry of the new
    `dbx`. This runs against the release's files, with no machine.
@@ -233,6 +297,8 @@ Capsules come after milestone 33, with their own proof.
   which keeps one writer. Or the apply pod can write it, with
   `efivarfs` read-write inside the turn, because a database update
   touches no variable `init` uses. The first is the likely choice.
+  In the OVMF runs, the recorded append and fwupd's own write left
+  the same `dbx`, so either writer gives the same result.
 - **The turn interface.** Milestone 33 has to give a component a way
   to request a rollout turn for a machine and to see it granted.
 - **When to rehearse.** A rehearsal after the approval shows what the
