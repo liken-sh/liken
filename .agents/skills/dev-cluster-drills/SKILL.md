@@ -142,25 +142,16 @@ while (( $(date +%s) < deadline )); do
 done
 ```
 
-**A guest can hang in its firmware after a reboot.** The console
-ends at `reboot: machine restart`, QEMU spins at 100 to 200% CPU, and
-nothing more prints. OVMF's DXE phase hangs after the warm reset,
-before systemd-boot or `liken` runs, and only while several guests
-are busy at once. Run every guest of a drill with `COLD_REBOOT=1`,
-which starts a fresh QEMU process at each reboot, so no reboot takes
-the warm-reset path. It needs `CONSOLE=file:<path>`, and the console
-keeps every boot:
-
-```bash
-setsid make run NODE=node-2 CONSOLE=file:guests/node-2/console.log COLD_REBOOT=1 \
-    </dev/null >/tmp/node-2.make.log 2>&1 &
-```
-
-A guest that hangs without the mode recovers when you power-cycle
-it: kill its QEMU process and `make run` it again. Its variable store
-boots normally.
-`liken/plans/88-disruptions.md` records the evidence. To read a hung
-guest's CPUs, start it with
+**A guest that hangs after `reboot: machine restart` is a firmware
+fault.** The lab pins Debian's OVMF in `dev-cluster/firmware/`,
+because the host's edk2 2025.11 can read a kernel's leftover data as
+an IGVM memory map after a warm reset and loop forever in
+PciHostBridgeDxe, before systemd-boot runs. `firmware/fetch.sh` gives
+the mechanism, and `liken/plans/88-disruptions.md` records the
+evidence. If a guest hangs anyway, check that its QEMU reads
+`firmware/dist/<version>/OVMF_CODE_4M.fd`, then power-cycle it: kill
+its QEMU process and `make run` it again. To read a hung guest's
+CPUs, start it with
 `QEMU_EXTRA="-qmp unix:guests/<node>/qmp,server=on,wait=off"`, a path
 relative to `dev-cluster/` because a socket path must be shorter than
 108 bytes, and send `info registers -a` over QMP.

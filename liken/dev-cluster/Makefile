@@ -163,7 +163,9 @@ guests/$(NODE)/emmc.qcow2:
 #
 # FIRMWARE=uefi (the default) gives the guest real UEFI. OVMF is
 # TianoCore edk2, the same codebase that physical motherboards ship,
-# built for virtual machines (Ubuntu's ovmf package). OVMF comes as
+# built for virtual machines. The lab pins Debian's build of it in
+# firmware/, because the host's OVMF can hang after a warm reset
+# (firmware/fetch.sh gives the reason). OVMF comes as
 # two pflash images, and this split matches how a physical board is
 # organized. OVMF_CODE is the firmware program itself. It is
 # read-only and shared by every guest. OVMF_VARS is the firmware's
@@ -180,11 +182,17 @@ guests/$(NODE)/emmc.qcow2:
 # Everything the boot needs lives on the disk itself: the MBR's boot
 # code, GRUB's core image, and the environment block that GRUB reads
 # in place of variables.
-OVMF_CODE := /usr/share/OVMF/OVMF_CODE_4M.fd
+OVMF_DIR := firmware/dist/$(shell cat firmware/VERSION)
+OVMF_CODE := $(OVMF_DIR)/OVMF_CODE_4M.fd
+OVMF_VARS := $(OVMF_DIR)/OVMF_VARS_4M.fd
 
-guests/$(NODE)/OVMF_VARS.fd:
+ovmf: $(OVMF_CODE)
+$(OVMF_CODE) $(OVMF_VARS) &: firmware/VERSION firmware/fetch.sh
+	firmware/fetch.sh
+
+guests/$(NODE)/OVMF_VARS.fd: | $(OVMF_VARS)
 	mkdir -p guests/$(NODE)
-	cp /usr/share/OVMF/OVMF_VARS_4M.fd $@
+	cp $(OVMF_VARS) $@
 
 # Selected by name at recipe expansion, the same idiom as QEMU_BOOT
 # below. The prerequisite list is separate because make expands
@@ -194,7 +202,7 @@ FIRMWARE ?= uefi
 QEMU_FIRMWARE_uefi = -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=guests/$(NODE)/OVMF_VARS.fd
 QEMU_FIRMWARE_bios =
 QEMU_FIRMWARE = $(QEMU_FIRMWARE_$(FIRMWARE))
-FIRMWARE_DEPS_uefi := guests/$(NODE)/OVMF_VARS.fd
+FIRMWARE_DEPS_uefi := $(OVMF_CODE) guests/$(NODE)/OVMF_VARS.fd
 FIRMWARE_DEPS_bios :=
 FIRMWARE_DEPS := $(FIRMWARE_DEPS_$(FIRMWARE))
 
@@ -368,30 +376,6 @@ endif
 # If anything reboots unexpectedly during one of these boots, QEMU
 # should exit and return the console log, rather than boot again.
 QEMU_EXIT_ON_REBOOT :=
-
-# COLD_REBOOT=1 restarts the machine from a fresh QEMU process at each
-# reboot instead of a warm reset. Under OVMF, a warm reset can hang in
-# the firmware's DXE phase while several guests are busy: the console
-# ends at "reboot: machine restart" and QEMU spins with no further
-# output. plans/88-disruptions.md records the evidence. A fresh
-# process is a cold start, which never took that path. The recipe
-# adds -no-reboot, and when QEMU exits it reads the console: a last
-# kernel "reboot:" line of "machine restart" starts the next process,
-# and any other end, such as a power off, ends the run. So the mode
-# needs CONSOLE=file:<path>, and that console appends, so it still
-# holds every boot. A BOOT=kernel machine reads -kernel and -initrd
-# again at each reboot in this mode.
-COLD_REBOOT ?=
-CONSOLE_PATH := $(patsubst file:%,%,$(CONSOLE))
-ifeq ($(COLD_REBOOT),1)
-ifeq ($(filter file:%,$(CONSOLE)),)
-$(error COLD_REBOOT=1 needs CONSOLE=file:<path>, because the recipe reads the console to tell a reboot from a power off)
-endif
-QEMU_EXIT_ON_REBOOT := -no-reboot
-QEMU_SERIAL := -chardev file,id=console,path=$(CONSOLE_PATH),append=on -serial chardev:console
-else
-QEMU_SERIAL := -serial $(CONSOLE)
-endif
 
 # Where the boot comes from. BOOT=disk (the default) leaves booting
 # entirely to the firmware: no -kernel, no -append. OVMF consults its
@@ -586,7 +570,7 @@ DISK_DEPS_emmc := guests/$(NODE)/emmc.qcow2
 DISK_DEPS := $(DISK_DEPS_$(HARDWARE))
 
 run: $(DISK_DEPS) $(FIRMWARE_DEPS)
-	while :; do qemu-system-x86_64 \
+	qemu-system-x86_64 \
 		-accel kvm -accel tcg \
 		-cpu max \
 		-smp $(SMP) \
@@ -595,7 +579,7 @@ run: $(DISK_DEPS) $(FIRMWARE_DEPS)
 		$(QEMU_BOOT) \
 		$(QEMU_EXTRA) \
 		-display none \
-		$(QEMU_SERIAL) \
+		-serial $(CONSOLE) \
 		-monitor none \
 		$(RTC_BASE) \
 		$(QEMU_EXIT_ON_REBOOT) \
@@ -603,10 +587,7 @@ run: $(DISK_DEPS) $(FIRMWARE_DEPS)
 		-netdev socket,id=cluster,mcast=239.192.76.75:26443 \
 		$(QEMU_NICS) \
 		$(QEMU_DRIVES) \
-		$(QEMU_DISKS) || exit $$?; \
-		[ "$(COLD_REBOOT)" = 1 ] && grep -a "reboot: " "$(CONSOLE_PATH)" | tail -1 | grep -q "machine restart" || exit 0; \
-		echo "dev-cluster: $(NODE) rebooted; starting it again from a fresh QEMU process"; \
-	done
+		$(QEMU_DISKS)
 
 # One-shot boots, for debugging and automation. liken.oneshot tells
 # init not to restart k3s. When k3s exits for the first time, the
@@ -659,8 +640,8 @@ install: run
 # matches the hardware shape. The installer never reads the stick
 # after boot, because everything it needs already came in the
 # initramfs.
-install-stick: $(DISK_DEPS)
-	cp /usr/share/OVMF/OVMF_VARS_4M.fd guests/$(NODE)/OVMF_VARS.fd
+install-stick: $(DISK_DEPS) $(OVMF_VARS)
+	cp $(OVMF_VARS) guests/$(NODE)/OVMF_VARS.fd
 	$(MAKE) run NODE=$(NODE) QEMU_EXIT_ON_REBOOT=-no-reboot QEMU_EXTRA="-device qemu-xhci \
 		-drive file=image/stick.img,format=raw,if=none,id=stick \
 		-device usb-storage,drive=stick"
@@ -736,8 +717,8 @@ grow-state:
 # boot has to write the entries again (init/bootentries.go). Run this
 # only while the machine is off. QEMU holds the varstore open while a
 # guest runs, and writes the file back when the guest exits.
-reset-nvram:
-	cp /usr/share/OVMF/OVMF_VARS_4M.fd guests/$(NODE)/OVMF_VARS.fd
+reset-nvram: $(OVMF_VARS)
+	cp $(OVMF_VARS) guests/$(NODE)/OVMF_VARS.fd
 	@echo "node $(NODE) now has vendor-default firmware variables"
 
 # The unattended smoke drills. Each drill takes node-1 from blank

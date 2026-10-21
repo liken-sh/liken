@@ -447,6 +447,26 @@ a warm reset. The same three loops in that mode took 120 reboots, 40
 on each guest, with none hung, and the drills skill tells every drill
 to use it.
 
+A later hang on the `q35` machine, which hangs the same way, gave the
+cause. The boot CPU looped in PciHostBridgeDxe: the check after
+`AddMemoryMappedIoSpace` asked the GCD for the descriptor at
+`0x400000000000`, the end of a 46-bit address space, got no answer,
+and asked again forever. The platform-info HOB placed the 64-bit PCI
+aperture at `0x0497032800000000`, far outside that space. That base
+came from the IGVM parameter area, the page at `0x812000` that edk2
+added in 2025.08: the firmware reads a memory map there when its
+first entry holds a nonzero page count. A cold start leaves the page
+zero. After a warm reset it held the last boot's kernel data, and its
+first entry read as RAM ending at an address that wrapped past 2^64.
+Aligned to the aperture, that end gave the base exactly. edk2 commit
+`e4f99a8554` reserves the page so the kernel never writes it, after
+edk2-stable202511, and Ubuntu 26.04 ships 2025.11. The lab now pins
+Debian's edk2 2026.08 in `dev-cluster/firmware/`, and
+`COLD_REBOOT` is gone. On that firmware, three guests on the `pc`
+machine that asked for a reboot as soon as each one ended took 120
+warm reboots, 40 each, with none hung. On edk2 2025.11 the same load
+hung once in 38 reboots on `pc` and once in 24 on `q35`.
+
 ## Considered and set aside
 
 - **One `Lease` for each unit of a budget.** A slot per `Lease` counts

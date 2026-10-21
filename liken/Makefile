@@ -776,20 +776,20 @@ test-docs:
 
 # Every domain that vendors something says what it pins and what its
 # upstream has now. The domains are listed in build order, so the
-# table reads in the order a release is assembled, and the last two
-# are the pins that belong to no build: the source mirror's own, and
-# the lab's storage guest.
+# table reads in the order a release is assembled, and the last three
+# are the pins that belong to no build: the source mirror's own, the
+# lab's storage guest, and the lab's UEFI firmware.
 #
 # Each latest.sh prints tab-separated rows and no formatting, so the
-# rule adds the verdict and the alignment here, once, instead of
-# seventeen times. A domain that pins more than one thing prints a row
+# rule adds the verdict and the alignment here, once, instead of in
+# every domain. A domain that pins more than one thing prints a row
 # for each, and indents the name of a pin that hangs off another,
 # because which pin owns which is the domain's own knowledge.
 #
 # This target reaches the network, so it is not part of any build.
 VERSION_DOMAINS := kernel k3s xtables ../trust e2fsprogs open-iscsi \
 	nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware \
-	microcode flux docs licensing dev-cluster/storage
+	microcode flux docs licensing dev-cluster/storage dev-cluster/firmware
 
 versions:
 	@{ printf 'COMPONENT\tPINNED\tLATEST\tSTATE\tNOTE\n'; \
