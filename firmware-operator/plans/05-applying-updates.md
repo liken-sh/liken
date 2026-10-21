@@ -219,6 +219,35 @@ store holds `KEK` 2011 alone. So a guest cannot run the case of a
 append shows that the firmware checks the signature, and the `KEK`
 case waits for a firmware that does not change its own keys.
 
+## The revocation check
+
+Run by hand on 2026-10-20. A `liken` machine's firmware loads two EFI
+binaries: `vmlinuz`, through the slots' boot entries, and
+`systemd-bootx64.efi`, as the fallback loader on each slot and as the
+stick's menu. The check read both from release 2026.10.20-001 on
+the channel, and checked each file's SHA-256 against the release's
+`release.yaml`.
+
+- Both binaries are unsigned: each has an empty certificate table. A
+  `dbx` entry that names a certificate cannot match them.
+- Their Authenticode SHA-256s are `74ba3130...` for `vmlinuz` and
+  `b9ebe4b0...` for `systemd-bootx64.efi`. The `signify` library and
+  a direct reading of the PE layout gave the same hashes. On Ubuntu's
+  signed shim, the same code gave the digest that Microsoft's
+  signature carries, so the hashing is correct.
+- liken-1's `dbx` 20260402 holds 443 entries, and the 20260707
+  payload holds 291. All of them are SHA-256 hashes, and neither
+  binary's hash is among them.
+- The nine older releases in a workstation's release directory, from
+  2026.10.09-078 to 2026.10.10-912, ship the same two files byte for
+  byte, so the result covers them too. That covers a machine whose
+  other slot holds one of them.
+
+So the 20260707 `dbx` revokes no `liken` binary of these releases.
+With Secure Boot off, a revoked binary would still boot, so this check
+matters only once `liken` signs its boot chain. Then the operator runs
+it before each approval, on both slots of each machine.
+
 ## What fwupd does not check on a `liken` machine
 
 - **Revocation of the running boot chain.** Before a `dbx` update,
@@ -279,9 +308,8 @@ Each step runs only after the one before it passes.
    because OVMF with Secure Boot on refuses `liken`'s unsigned kernel.
    No `db` or `KEK` cabinet was offered to liken-1 or to the guest, so
    none ran.
-3. **The revocation check.** Hash `liken`'s EFI binaries of a release
-   with Authenticode, and compare them with every entry of the new
-   `dbx`. This runs against the release's files, with no machine.
+3. **The revocation check.** Done, under [The revocation
+   check](#the-revocation-check).
 4. **One real machine.** liken-1 first, with plan 04's `spec.machines`
    selecting it alone.
 
