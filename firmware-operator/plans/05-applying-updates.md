@@ -10,8 +10,8 @@ the OS, in `liken`'s
 lists what the OS must build first. The rehearsal ran by hand on
 liken-1, under [The rehearsal on liken-1](#the-rehearsal-on-liken-1).
 Real writes ran on a lab guest under OVMF, under [The real writes
-under OVMF](#the-real-writes-under-ovmf). No real write has run on a
-physical machine.
+under OVMF](#the-real-writes-under-ovmf), and one real write ran on
+stick-1, under [The real write on stick-1](#the-real-write-on-stick-1).
 
 ## The problem
 
@@ -248,6 +248,47 @@ With Secure Boot off, a revoked binary would still boot, so this check
 matters only once `liken` signs its boot chain. Then the operator runs
 it before each approval, on both slots of each machine.
 
+## The real write on stick-1
+
+Run by hand on 2026-10-20, on stick-1, at `liken` 2026.10.20-001, with
+`firmware-operator` 2026.10.20-001-dev-007-3eb6a9df. stick-1 is in
+user mode with Secure Boot off. Its `PK` is "DO NOT TRUST - AMI Test
+PK", the AMI test key that many boards shipped with. A `dbx` update
+is signed by `KEK`, so the `PK` does not affect it. Its `KEK` holds
+"Microsoft Corporation KEK CA 2011" alone.
+
+The update was `dbx` 20160809 to 20260402, of the component
+`com.microsoft.dbx.x64.firmware`, signed by `KEK` 2011, from the
+cabinet with the SHA-256
+`9edea8bc287bf9bf4659856b28cf421f330eb2f658c163eab0a03512a98c0e78`.
+The steps were the ones in [The steps](#the-steps), each by hand:
+
+1. **Approve.** stick-1 got the label `canary: "true"`, and
+   `microsoft-dbx-x64` got the version, the pinned cabinet, and
+   `spec.machines` selecting that label. `Approved` read `True` with
+   the reason `Offered`, and `PENDING` read 1.
+2. **Rehearse.** The unprivileged pod on stick-1 copied 61 variables.
+   Only `dbx` changed, from 3,728 to 28,361 bytes: a 24,633-byte
+   append with the attributes `0x67`. Nothing was written under the
+   ESP path. fwupd asked for 24,629 bytes free, and the store of 128K
+   had 57K free.
+3. **Check the revocation.** The payload's 443 SHA-256 hashes did not
+   include `liken`'s `vmlinuz` or `systemd-bootx64.efi`.
+4. **Write.** A privileged pod on stick-1 wrote the recorded append
+   in one `write`. The firmware accepted it. `dbx` grew from 3,728 to
+   23,724 bytes, and its entries from 77 to 493: the 416 hashes that
+   were new, with no duplicate. The store's free space fell from 57K
+   to 38K.
+5. **Reboot.** The annotation `liken.sh/request-reboot` drained
+   stick-1 and rebooted it, and stick-1 was `Ready` again within 95
+   seconds of the request.
+6. **Prove.** The next scan, within 20 seconds of `Ready`, reported
+   `dbx` 20260402 on stick-1. `Approved` moved to `True` with the
+   reason `Installed`, `PENDING` and `BEHIND` read 0, and the operator
+   posted a `Normal` `Installed` `Event`.
+
+The approval and the label stay on the testbed as a record.
+
 ## What fwupd does not check on a `liken` machine
 
 - **Revocation of the running boot chain.** Before a `dbx` update,
@@ -310,8 +351,10 @@ Each step runs only after the one before it passes.
    none ran.
 3. **The revocation check.** Done, under [The revocation
    check](#the-revocation-check).
-4. **One real machine.** liken-1 first, with plan 04's `spec.machines`
-   selecting it alone.
+4. **One real machine.** Done on stick-1, under [The real write on
+   stick-1](#the-real-write-on-stick-1). stick-1 went first instead of
+   liken-1, because its update was the harder one: a `dbx` ten years
+   old, a store half full, and a payload signed by `KEK` 2011.
 
 Capsules come after milestone 33, with their own proof.
 
