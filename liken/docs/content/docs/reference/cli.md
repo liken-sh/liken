@@ -71,14 +71,22 @@ machine whose
 `Manual` stages each change and waits. This command reads the
 machine's `status.pending`, prints each waiting change, and writes
 the `liken.sh/approve-disruption` annotation with the staged
-change's hash. The machine then takes the same path an `Auto`
-machine takes: it waits for the cluster's turn, drains, and applies
-the change with the smallest disruption it needs. For a credentials
-change that disruption is a k3s restart, not a reboot.
+change's hash. It also sets
+[`spec.approvedHash`](/docs/reference/disruption/#spec--approvedhash)
+to `spec.hash` on the [`Disruption`](/docs/reference/disruption/)
+that covers the change: `<machine>.machine-operator` for a staged
+change, or the person's request `<machine>.reboot-<boot>` for a
+requested reboot. It prints the name of the request it approved. The
+machine then takes the same path an `Auto` machine takes: it waits
+for the cluster's turn, drains, and applies the change with the
+smallest disruption it needs. For a credentials change that
+disruption is a k3s restart, not a reboot.
 
 The grant is one-shot. Once the change applies, its hash is no
 longer pending, and the next change hashes differently, so a stale
-annotation approves nothing. Running the command twice writes the
+annotation approves nothing. The same is true of the request: when
+more changes wait, its `spec.hash` changes, and the earlier
+`spec.approvedHash` no longer matches it. Running the command twice writes the
 same annotation. When two changes are pending, the command approves
 the reboot-class one, because a reboot applies every staged change.
 When nothing is pending, it reports that and writes nothing.
@@ -92,22 +100,27 @@ reboot that `liken` performs applies a staged document, so a machine
 that agrees with every document it was given has no way to reboot,
 and it has no shell for a person to use. Two cases need one anyway: a
 kernel driver that bound the wrong device, which releases it only at
-boot, and a machine you are experimenting on. The command writes the
-`liken.sh/request-reboot` annotation, valued with the identity of the
-boot that is running now.
+boot, and a machine you are experimenting on. The command files a
+[`Disruption`](/docs/reference/disruption/) named
+`<machine>.reboot-<boot>`, where `<boot>` is the first 12 characters
+of the identity of the boot that is running now. The request's
+`spec.requester` is your Kubernetes user name, such as
+`kubernetes-admin`, or `liken-cli` when the API server does not report
+it. The command also writes the `liken.sh/request-reboot` annotation,
+valued with the same boot identity.
 
 The request skips none of the cluster's coordination. The machine
-waits for the cluster to grant it a reboot turn under
-[`spec.disruption`](/docs/reference/cluster/#specdisruption), cordons
-its node, and drains its workloads, the same as a machine applying a
-staged change. The two policies control only the approval:
+waits for the cluster to grant it a reboot turn under the
+[`MachineDisruptionBudget`s](/docs/reference/machinedisruptionbudget/),
+cordons its node, and drains its workloads, the same as a machine
+applying a staged change. The two policies control only the approval:
 
 * `rebootPolicy: Auto` needs nothing more. The machine takes its
   turn, drains, and reboots.
 * `rebootPolicy: Manual`, the default, reports `RebootPending` and
   waits, the same as it does for a staged change.
   [`liken approve-reboot`](#liken-approve-reboot) releases it,
-  through the same annotation.
+  through the same annotation and the request's `spec.approvedHash`.
 
 Nothing is staged, so the machine comes back on the documents it
 already runs. The reboot promotes no system slot and proves no
@@ -116,12 +129,29 @@ release.
 The request is one-shot, and nothing has to clear it. It names the
 boot it was written for, so the boot that comes back is a boot the
 annotation does not name. The `RebootRequestHonored` condition then
-reads `True` again. Run the command a second time and it names the
+reads `True` again, and `machine-operator` sets the request's
+`Complete` condition to `True`. `cluster-operator` deletes the
+request one day later. Run the command a second time and it names the
 new boot.
 
-The annotation is the whole interface, so `kubectl` alone can write
-it. The machine reports the value to use in the same
-`RebootRequestHonored` condition:
+`kubectl` alone can make the request too. Create a `Disruption` with
+no `spec.hash`, and `machine-operator` writes the identity of the
+running boot into it, and names the `Machine` as its owner:
+
+    kubectl create -f - <<EOF
+    apiVersion: liken.sh/v1alpha1
+    kind: Disruption
+    metadata:
+      name: <name>.reboot-now
+    spec:
+      machine: <name>
+      requester: kubernetes-admin
+      kind: Reboot
+      reason: the driver bound the wrong device
+    EOF
+
+Or write the annotation. The machine reports the value to use in the
+same `RebootRequestHonored` condition:
 
     kubectl describe machine <name>
     kubectl annotate machine <name> liken.sh/request-reboot=<identity>

@@ -7,6 +7,7 @@ package main
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 	"slices"
 	"testing"
@@ -64,6 +65,13 @@ func asObject(t *testing.T, v any) map[string]any {
 // leaders, a disruption budget of one, and node-2 waiting for a turn.
 func raceFleet(t *testing.T) *fakeapi.Server {
 	t.Helper()
+	return raceFleetWith(t, nil)
+}
+
+// raceFleetWith is raceFleet with more collections, such as the
+// Disruptions and the budgets.
+func raceFleetWith(t *testing.T, more map[string]*fakeapi.Collection) *fakeapi.Server {
+	t.Helper()
 	clusterDoc := cluster.Cluster{APIVersion: api.APIVersion, Kind: "Cluster",
 		Metadata: api.ObjectMeta{Name: "lab", ResourceVersion: "5", UID: "uid-lab"}}
 	clusterDoc.Spec.Leaders = []string{"node-1", "node-2", "node-3"}
@@ -73,7 +81,7 @@ func raceFleet(t *testing.T) *fakeapi.Server {
 		return fakeapi.Object("coordination.k8s.io/v1", "Lease", "liken-system", name,
 			map[string]any{"spec": map[string]any{"renewTime": renewed}})
 	}
-	fake := fakeapi.New(map[string]*fakeapi.Collection{
+	collections := map[string]*fakeapi.Collection{
 		kubernetes.MachinesPath: {APIVersion: api.APIVersion, Kind: "Machine", Items: []map[string]any{
 			fleetMachine(t, "node-1", false), fleetMachine(t, "node-2", true), fleetMachine(t, "node-3", false),
 		}},
@@ -84,7 +92,9 @@ func raceFleet(t *testing.T) *fakeapi.Server {
 		// nothing to steward.
 		daemonSetsPath:                         {APIVersion: "apps/v1", Kind: "DaemonSet"},
 		"/api/v1/namespaces/liken-system/pods": {APIVersion: "v1", Kind: "Pod"},
-	})
+	}
+	maps.Copy(collections, more)
+	fake := fakeapi.New(collections)
 	fake.CheckVersions()
 	return fake
 }

@@ -69,6 +69,17 @@ rules:
   - apiGroups: [liken.sh]
     resources: [clusters]
     verbs: [get, list, watch, create]
+  # The machine's Disruptions (requests.go): keep its own request for
+  # what is staged, read a person's request to reboot, write the boot
+  # into a request that names none, and mark a person's request
+  # Complete. The program watches only its own machine's requests, by
+  # the field selector spec.machine, which the CRD declares.
+  - apiGroups: [liken.sh]
+    resources: [disruptions]
+    verbs: [get, list, watch, create, update, delete]
+  - apiGroups: [liken.sh]
+    resources: [disruptions/status]
+    verbs: [update]
   # Nodes: watch its own Node, by name, to see role labels and cordon
   # state, delete for demotion cleanup (demotion.go; deleting the stale
   # Node is what triggers k3s's etcd member removal), and patch for the

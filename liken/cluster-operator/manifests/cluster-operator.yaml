@@ -58,6 +58,22 @@ rules:
   - apiGroups: [liken.sh]
     resources: [clusters/status]
     verbs: [update]
+  # The requests and the budgets (requests.go, requeststatus.go): read
+  # every Disruption and MachineDisruptionBudget, report on each in
+  # its status, delete a request a day after it completed, and create
+  # the default budget when it is missing.
+  - apiGroups: [liken.sh]
+    resources: [disruptions]
+    verbs: [get, list, watch, delete]
+  - apiGroups: [liken.sh]
+    resources: [disruptions/status]
+    verbs: [update]
+  - apiGroups: [liken.sh]
+    resources: [machinedisruptionbudgets]
+    verbs: [get, list, watch, create]
+  - apiGroups: [liken.sh]
+    resources: [machinedisruptionbudgets/status]
+    verbs: [update]
   # The pod steward (steward.go): watch the OS DaemonSets' pods and
   # evict the stale ones after an upgrade. This role uses eviction
   # instead of delete for the same reason the drain does: the API

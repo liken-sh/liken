@@ -107,12 +107,19 @@ func versionAsk(clusterDoc *cluster.Cluster, facts *machine.MachineStatus) (fetc
 // verified. (decideSystemStaging owns the verified state, because a
 // verified download is reported through its staged record.) Every
 // state here means "not converged yet". What differs is whether
-// time will fix it. A failed fetch deliberately reads as
-// Downloading: a down release server is transient by definition,
-// the fetcher retries after its backoff, and the condition's message
-// says what failed and when the retry starts. The message names the
-// retry's time, not the wait left, so it stays the same from one pass
-// to the next and the status is not written again for it. A digest
+// time will fix it. A failed fetch reads as DownloadRetrying, in the
+// phase Downloading: a down release server is transient by
+// definition, the fetcher retries after its backoff, and the
+// condition's message says what failed and when the retry starts. The
+// reason stays DownloadRetrying through each retry until a download
+// verifies, so a server that keeps failing posts one Event and not two
+// for each retry. The reason differs from Downloading because the
+// rollout conductor holds a machine's turn while its release
+// downloads, so the release shares the turn's reboot, and a server
+// that is down must hold no turn (cluster-operator/requests.go). The
+// message names the retry's time, not the wait left, so it stays the
+// same from one pass to the next and the status is not written again
+// for it. A digest
 // mismatch is the opposite. Refetching cannot change what the server
 // publishes, so the machine holds at DigestMismatch (phase Blocked)
 // until the catalog names different bytes, and nothing is ever
@@ -122,9 +129,13 @@ func versionCondition(ask fetchAsk, snap fetchSnapshot) api.Condition {
 	case fetchRejected:
 		return notConverged("VersionConverged", "DigestMismatch", snap.detail)
 	case fetchFailed:
-		return notConverged("VersionConverged", "Downloading",
+		return notConverged("VersionConverged", "DownloadRetrying",
 			fmt.Sprintf("downloading release %s to slot %s; will retry at %s: %s",
 				ask.version, ask.slot, snap.retryAt.UTC().Format(time.RFC3339), snap.detail))
+	}
+	if snap.retrying {
+		return notConverged("VersionConverged", "DownloadRetrying",
+			fmt.Sprintf("downloading release %s to slot %s: %s", ask.version, ask.slot, snap.detail))
 	}
 	return notConverged("VersionConverged", "Downloading",
 		fmt.Sprintf("downloading release %s to slot %s: %s", ask.version, ask.slot, snap.detail))

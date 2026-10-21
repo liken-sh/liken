@@ -3,7 +3,9 @@
 Proposed on 2026-10-19. Steps 1 to 3 of [Order](#order) were built on
 2026-10-19, except the report of missing kernel firmware, and the test
 cluster's guide camera loaded with no hand-run `Job` on 2026-10-20.
-Steps 4 to 6 were built on 2026-10-20. Steps 7 and 8 are not built.
+Steps 4 to 6 were built on 2026-10-20. Release 1 of `liken`
+milestone 88, the first part of step 7, was built on 2026-10-21. The
+rest of steps 7 and 8 is not built.
 This plan records which component owns each part of firmware in
 `liken`. The component plans hold the
 design.

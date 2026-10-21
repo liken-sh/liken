@@ -5,11 +5,11 @@
 # land side by side in the output tree.
 #
 # The build has three inputs: the hand-written content here, the CRD
-# schemas in machine/ and cluster/ (which crdref turns into the
-# reference pages), and the brand theme, brand/ at the top of the
-# repository, which supplies the shared page shell, stylesheet, and
-# public brand files. Hugo assembles them into dist/site/, the tree
-# that GitHub Pages serves as liken.sh.
+# schemas in machine/, cluster/, and disruption/ (which crdref turns
+# into the reference pages), and the brand theme, brand/ at the top
+# of the repository, which supplies the shared page shell,
+# stylesheet, and public brand files. Hugo assembles them into
+# dist/site/, the tree that GitHub Pages serves as liken.sh.
 #
 # Hugo itself is a pinned tool dependency of this domain's own Go
 # module (go.mod explains why the module is nested), so `go tool
@@ -17,11 +17,12 @@
 # file.
 HUGO := go tool hugo
 
-# The reference pages for the two CRDs are generated, never edited:
+# The reference pages for the CRDs are generated, never edited:
 # the schemas hold every field's description, and crdref arranges
 # them into pages, so the reference cannot drift from what the API
 # server enforces.
-GENERATED := content/docs/reference/machine.md content/docs/reference/cluster.md
+GENERATED := content/docs/reference/machine.md content/docs/reference/cluster.md \
+	content/docs/reference/disruption.md content/docs/reference/machinedisruptionbudget.md
 
 SKILLS := go tool skills
 BASE := https://liken.sh
@@ -48,6 +49,15 @@ content/docs/reference/machine.md: ../machine/manifests/machines-crd.yaml crdref
 
 content/docs/reference/cluster.md: ../cluster/manifests/clusters-crd.yaml crdref/cluster-preamble.md $(CRDREF_SOURCES)
 	go tool crdref $< $@ crdref/cluster-preamble.md
+
+# The two kinds that take a machine out of service sort after Machine
+# and Cluster in the reference section, because a reader meets them
+# through those two.
+content/docs/reference/disruption.md: ../disruption/manifests/disruptions-crd.yaml crdref/disruption-preamble.md $(CRDREF_SOURCES)
+	go tool crdref -weight 11 $< $@ crdref/disruption-preamble.md
+
+content/docs/reference/machinedisruptionbudget.md: ../disruption/manifests/machinedisruptionbudgets-crd.yaml crdref/machinedisruptionbudget-preamble.md $(CRDREF_SOURCES)
+	go tool crdref -weight 11 $< $@ crdref/machinedisruptionbudget-preamble.md
 
 # The generate target builds every generated reference page and
 # nothing else. The test-docs target in ../Makefile runs it with -B,

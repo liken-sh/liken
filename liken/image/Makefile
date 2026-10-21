@@ -64,6 +64,7 @@ $(DIST)/liken.sqfs $(DIST)/boot.cpio &: build.sh boot-modules.conf \
 		$(wildcard ../cluster-operator/manifests/*.yaml) \
 		$(wildcard ../machine/manifests/*.yaml) \
 		$(wildcard ../cluster/manifests/*.yaml) \
+		$(wildcard ../disruption/manifests/*.yaml) \
 		$(wildcard ../kubernetes/manifests/*.yaml) \
 		$(LOGS_DIST)/liken-logs-image.tar \
 		$(wildcard ../logs/manifests/*.yaml) \

@@ -1,8 +1,12 @@
 # 88. Disruptions and machine disruption budgets
 
-Milestone 88. Proposed 2026-10-21. Not built. Five reviews from
-different angles read an earlier draft on the same day, and this
-version answers them ([Considered and set aside](#considered-and-set-aside)).
+Milestone 88. Proposed 2026-10-21. Release 1 of stage 1 was built
+and drilled on the `lab` fleet on 2026-10-21
+([Release 1 as built](#release-1-as-built)). Release 2 and stage 2 are
+not built, and the drills on liken-1 and stick-1 have not run. Five
+reviews from different angles read an earlier draft on the same day,
+and this version answers them
+([Considered and set aside](#considered-and-set-aside)).
 
 Every time a machine must go out of service, a `Disruption` records
 it, and `kubectl get disruptions` shows who asked, why, and whether it
@@ -352,6 +356,83 @@ The drills:
   write gets `409`, and the budget holds.
 - Release 1 beside release 0, and release 2 beside release 1, in both
   directions.
+
+## Release 1 as built
+
+Release 1 follows [Two releases](#two-releases), with three additions
+that the build found it needed:
+
+- **A person's approval of machine-operator's request.** The request
+  covers every staged document, and machine-operator still approves
+  one document at a time through the approve annotation. So
+  machine-operator reads a request whose `approvedHash` names its
+  hash as an approval of the change that `liken approve-reboot`
+  picks: the first reboot-class change, or else the first
+  restart-class one. Without it, `kubectl patch` of `approvedHash`
+  showed `Approved` and moved nothing.
+- **An owner for a request made with `kubectl`.** machine-operator
+  names the `Machine` as the owner of a person's request that has
+  none, in the same write that names the running boot, so the request
+  goes with its `Machine`.
+- **The conductor's view of a kind it does not serve.** The shared
+  informer now reports a collection that the API server refuses as
+  absent, and the shared client reports a `403` as `ErrForbidden`.
+  The conductor creates the `default` budget only when the kind is
+  served, and both operators read a refused kind as no requests.
+
+The approve annotation still approves a return to bytes it approved
+before. Release 2 removes the annotation, and with it that path.
+
+The drills ran on the five QEMU guests of the `lab` fleet, with
+`2026.10.21-901` built from the commit before this work and
+`2026.10.21-902` and `-903` built from it. A monitor read the fleet
+every five seconds, and every drill below kept the budget: no sample
+showed more machines out of service, or more ledger entries, than the
+limit, and none showed two leaders out.
+
+- `-901` to `-902` with the conductor's pod deleted mid-rollout, so it
+  moved from a `-901` node to a `-902` node. The new CRDs arrived with
+  the first leader's boot, and the conductor created `default`. Five
+  turns, one at a time.
+- A person's request through `liken request-reboot`: approved,
+  granted, rebooted, and `Complete` in under a minute.
+- A request created with `kubectl`, with no hash, during another
+  request's 60-second drain: it joined the entry, and one drain and
+  one reboot completed both.
+- A Cluster change that k3s applies with a restart: five `Restart`
+  requests, one turn at a time, no cordon, and no machine rebooted.
+- A `Manual` machine: its request read `Approved False` and waited.
+  An `approvedHash` alone, in the short form, released it. A return
+  to the same staged bytes made a new request that waited again.
+- A `gpus` budget of one over `node-4` and `node-5`, with `default` at
+  two: at most two out, never both `gpus` machines, never two leaders.
+- `node-5` powered off during its drain: it held its entry, read
+  `Lost`, and after ten minutes the rollout stalled. A new request
+  waited with the stall in its `Granted` message. The machine
+  returned, its request completed, and the rollout went on.
+- `-902` to `-903` through a release server limited to 1.5 MB/s, with
+  a reboot-class spec staged on `node-4` at the same time. `node-4`'s
+  turn waited for the download, and one turn and one reboot applied
+  both. Mid-rollout, a deleted request came back on the next pass,
+  and a deleted conductor pod changed nothing.
+- The release server down while `node-4` staged a spec: every machine
+  read `DownloadRetrying`, posted one `Event` across several retries,
+  and `node-4` took its turn for the spec alone.
+- `-903` to `-902`, to `-901`, and forward to `-903` again. The CRDs,
+  the budgets, and the old requests survived `-901`.
+- Two conductors, with the leader stopped by `SIGSTOP` for 45 seconds
+  and resumed, seven times through a rollout of five reboots. The
+  Lease changed hands seven times.
+- The `default` budget deleted: the conductor created it again from
+  `spec.disruption`. machine-operator's pod deleted during a drain: the
+  new pod finished the drain and the reboot.
+
+Three of about 40 reboots hung in QEMU: the guest printed `reboot:
+machine restart`, then nothing, with QEMU at 100 to 200% CPU, and a
+power cycle booted it normally. All three ran this work's `init`, but
+this work changes nothing in `init`, the kernel, or the reboot path,
+and the hangs came on a person's reboot and on a release's alike. The
+lab ran QEMU 10.2.1 and OVMF 2025.11. The cause is not known.
 
 ## Considered and set aside
 

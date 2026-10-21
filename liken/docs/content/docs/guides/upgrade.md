@@ -63,7 +63,8 @@ Each machine that runs a different version:
 
 1. Downloads the release into the boot slot it does not run from, and
    verifies each artifact against the digest chain.
-2. Stages the change and asks the cluster for a reboot turn.
+2. Stages the change and asks the cluster for a reboot turn, with
+   the request `<machine>.machine-operator`.
 3. Cordons and drains its node when the cluster grants the turn. The
    PodDisruptionBudgets of the workloads apply during the drain. The
    drain removes a pod that holds a DRA claim before the pod that runs
@@ -75,15 +76,24 @@ Each machine that runs a different version:
    returns to the other slot without help:
    [Roll back](/docs/guides/rollback/) describes this.
 
-The cluster grants turns within
-[`spec.disruption.maxUnavailable`](/docs/reference/cluster/#specdisruption)
-(the default is one machine at a time). Only one leader is down at a
-time, whatever the budget says, because the datastore needs a majority
-of the leaders.
+The cluster grants turns within the
+[`MachineDisruptionBudget`s](/docs/reference/machinedisruptionbudget/).
+The budget `default` allows one machine at a time unless you change
+it. Only one leader is down at a time, whatever the budgets say,
+because the datastore needs a majority of the leaders.
+[The reboot turn](/docs/concepts/how-liken-works/#the-reboot-turn)
+explains the requests and the budgets.
+
+A machine whose release still downloads does not take a turn until
+the download verifies, even when another change waits for a reboot
+on that machine. So the release and the other change share one drain
+and one reboot. A download that failed and waits to retry holds no
+turn, so a release server that is down does not hold up the other
+changes.
 
 `cluster-operator` records each turn in the Cluster's
 [`status.rebootTurns`](/docs/reference/cluster/#statusrebootturns)
-before it grants the turn, and the record counts against the budget.
+before it grants the turn, and the record counts against the budgets.
 The record is a write that names the Cluster's `resourceVersion`, so
 two copies of `cluster-operator` cannot both give one slot of the
 budget to a machine. A copy that paused, for example on a stalled
@@ -101,14 +111,15 @@ message gives the time that granting resumes.
 If a machine's
 [`rebootPolicy`](/docs/reference/machine/#spec--rebootpolicy) is
 `Manual` (the default), the machine stages the change, reports
-`RebootPending`, and waits for you. Grant the reboot with
+`RebootPending`, and waits for you. Its request reads `False` in the
+APPROVED column of `kubectl get disruptions`. Grant the reboot with
 [`liken approve-reboot`](/docs/reference/cli/#liken-approve-reboot):
 
     liken approve-reboot mycluster <machine>
 
-The machine then takes its turn under the same disruption budget as
-an `Auto` machine: it drains first, and only one leader is ever down
-at a time. Set `rebootPolicy: Auto` on machines that must take their
+The machine then takes its turn under the same budgets as an `Auto`
+machine: it drains first, and only one leader is ever down at a
+time. Set `rebootPolicy: Auto` on machines that must take their
 turn without an operator.
 
 You can change `spec.version` again before every machine reboots. A
@@ -129,7 +140,7 @@ the STATUS column shows each machine's step in the rollout:
 
 * `Downloading`: the machine downloads the release into its other
   slot. It still serves its workloads, so the download does not count
-  against the disruption budget.
+  against the budgets.
 * `UpdatePending`: the release is staged, and the machine waits for
   its reboot turn, or for you when its `rebootPolicy` is `Manual`.
 * `Updating`: the machine drains, reboots into the new slot, and
@@ -145,6 +156,17 @@ reboot turn:
 
     NAME   STATUS     MACHINES   VERSION          NEWEST           AVAILABLE        LEADERS                        ENDPOINT   AGE   TURNS
     lab    Updating   4/5        2026.10.12-001   2026.10.12-001   2026.10.12-001   ["node-1","node-2","node-3"]   ...        9d    node-4
+
+Each machine's request shows where its turn stands. The GRANTED
+column is `True` for each machine that holds a turn:
+
+    kubectl get disruptions
+
+For a request that waits, the message of its `Granted` condition
+names what it waits for: a budget with no room, another leader that
+is out, or a release that still downloads.
+
+    kubectl describe disruption <machine>.machine-operator
 
 If a machine with a granted turn does not return, the cluster sets its
 `Progressing` condition to `False` with the reason `RolloutStalled`.

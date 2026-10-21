@@ -25,9 +25,9 @@
 // is the YAML converter. Importing apimachinery for two structs
 // would add its whole dependency tree and release cadence. The
 // narrow copies also do real work. metav1.ObjectMeta has about
-// twenty-five fields, and liken uses four of them. Every liken
+// twenty-five fields, and liken uses six of them. Every liken
 // document parses strictly, so liken refuses metadata it would
-// otherwise ignore silently: labels and owner references in a
+// otherwise ignore silently, such as owner references in a
 // hand-written manifest. The wire format stays compatible with the
 // Kubernetes convention. The Go types represent only the fields
 // liken uses.
@@ -63,11 +63,17 @@ const APIVersion = "liken.sh/v1alpha1"
 // does not also name an object that is deleted and created again under
 // the same name. The machine operator reads its Machine's UID to name
 // the Machine as the owner of its heartbeat lease.
+//
+// Labels group machines for a MachineDisruptionBudget, whose selector
+// reads them the way a PodDisruptionBudget's selector reads a pod's.
+// A label never reaches a staged document, for the same reason an
+// annotation never does.
 type ObjectMeta struct {
 	Name            string            `json:"name"`
 	UID             string            `json:"uid,omitempty"`
 	ResourceVersion string            `json:"resourceVersion,omitempty"`
 	Generation      int64             `json:"generation,omitempty"`
+	Labels          map[string]string `json:"labels,omitempty"`
 	Annotations     map[string]string `json:"annotations,omitempty"`
 }
 

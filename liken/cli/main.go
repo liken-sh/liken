@@ -72,10 +72,12 @@ usage:
 
   liken approve-reboot [-server URL] <deployment-dir> <machine>
       Report what a machine waits for, and grant it the one
-      disruption its rebootPolicy withholds. The grant is an
-      annotation naming the staged change's hash, so it spends
-      itself when the change applies, and running this twice is
-      the same grant. When nothing waits, this writes nothing.
+      disruption its rebootPolicy withholds. The grant sets
+      spec.approvedHash on the Disruption that covers the change,
+      and an annotation naming the staged change's hash for a
+      machine on an older release. Both spend themselves when the
+      change applies, and running this twice is the same grant.
+      When nothing waits, this writes nothing.
 
   liken request-reboot [-server URL] <deployment-dir> <machine>
       Ask a machine to reboot when no change asks it to: a driver
@@ -83,8 +85,9 @@ usage:
       on. The machine still takes its turn from the cluster,
       cordons, and drains. On rebootPolicy: Auto that is the whole
       procedure. On Manual the request waits for approve-reboot.
-      The request names the running boot, so it spends itself when
-      the machine comes back.
+      The request is a Disruption named for the running boot, with
+      an annotation for a machine on an older release, so it spends
+      itself when the machine comes back.
 
   liken kubectl [-server URL] <deployment-dir> [args...]
   liken stern   [-server URL] <deployment-dir> [args...]

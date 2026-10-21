@@ -178,7 +178,7 @@ for one:
 The machine waits for the cluster to grant its turn and drains
 before it goes down, under the same policy as any other reboot.
 [`liken request-reboot`](/docs/reference/cli/#liken-request-reboot)
-describes the annotation it writes.
+describes the `Disruption` and the annotation it writes.
 
 ## 6. Confirm the device appears
 

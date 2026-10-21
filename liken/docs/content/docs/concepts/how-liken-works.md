@@ -13,8 +13,8 @@ editing Kubernetes resources with `kubectl`.
 
 ## The `Cluster` and `Machine` resources
 
-A `liken` cluster is an ordinary Kubernetes cluster with two extra
-resources:
+A `liken` cluster is an ordinary Kubernetes cluster with extra
+resources. Two of them describe the machines:
 
 * A [`Cluster`](/docs/reference/cluster/) describes the whole fleet:
   the release that every machine runs, the network, and the settings
@@ -43,9 +43,9 @@ change needs:
 
 A machine never reboots on its own schedule. When a change needs a
 reboot, the machine stages the change, reports it in the `Machine`'s
-`status.pending`, and waits until the cluster's disruption budget
-gives it a turn. With the default `rebootPolicy`, `Manual`, it also
-waits for you to approve the reboot, which
+`status.pending`, and waits until the cluster gives it a reboot turn.
+With the default `rebootPolicy`, `Manual`, it also waits for you to
+approve the reboot, which
 [`liken approve-reboot`](/docs/reference/cli/#liken-approve-reboot) does. With `Auto`, it
 takes the reboot when its turn comes. Either way, it cordons and
 drains itself before it goes down.
@@ -57,6 +57,87 @@ experimenting on.
 makes that request. The reboot then waits for its turn and, under
 `Manual`, for your approval, with the same cordon and drain as any
 other.
+
+## The reboot turn
+
+A reboot, and a restart of k3s, take a machine out of service for a
+time. So no machine does either until `cluster-operator` gives it a
+reboot turn, and the turns keep enough of the fleet in service.
+
+Each request for a turn is a
+[`Disruption`](/docs/reference/disruption/). It names the machine,
+who asked, the kind (`Reboot` or `Restart`), and the reason.
+`machine-operator` keeps one request for each machine in the
+cluster, `<machine>.machine-operator`, for every staged change that waits for a
+reboot or a restart, and for a demotion. It updates the request when
+more changes wait, and deletes it when nothing waits. A person's
+request has the name `<machine>.reboot-<boot>`, after the boot it asks
+to end. `liken request-reboot` files one, and you can also create one
+with `kubectl`. `kubectl get disruptions` lists every request of the
+fleet:
+
+    kubectl get disruptions
+
+    NAME                          MACHINE   REQUESTER                   KIND     APPROVED   GRANTED   AGE
+    node-3.machine-operator       node-3    liken.sh/machine-operator   Reboot   True       True      4m
+    node-4.machine-operator       node-4    liken.sh/machine-operator   Reboot   True       False     4m
+    node-5.reboot-77b0c1d9e2a4    node-5    kubernetes-admin            Reboot   False      False     30s
+
+`cluster-operator` reports two conditions on each request. `Approved`
+is `True` when the machine's `rebootPolicy` is `Auto`, or when you
+approved the request with `liken approve-reboot`. `Granted` is `True`
+while the machine holds a turn that covers the request. While the
+request waits, the message of `Granted` names what it waits for, for
+example `the default budget allows 1 out of service, and node-3 is
+out`.
+
+A [`MachineDisruptionBudget`](/docs/reference/machinedisruptionbudget/)
+limits how many of the machines it selects can be out of service at
+the same time. A machine counts against a budget when it holds a
+turn, and also when it is `Lost`, `Degraded`, or unavailable for any
+other reason. So a fleet that already has a machine down waits before
+it takes another one down. The budget named `default` selects every
+machine. When it is missing, `cluster-operator` creates it from the
+`Cluster`'s
+[`spec.disruption.maxUnavailable`](/docs/reference/cluster/#specdisruption),
+which is one machine when you do not set it. After that, edit the
+budget to change the fleet's limit, because `cluster-operator` reads
+`spec.disruption` only while the `default` budget does not exist:
+
+    kubectl patch mdb default --type=merge -p '{"spec":{"maxUnavailable":2}}'
+
+A budget with a selector gives a group of machines a stricter limit.
+The selector reads the labels on each `Machine`, which you set with
+`kubectl label machine`. A machine takes a turn only when every budget
+that selects it has room. `kubectl get mdb` shows each budget's limit,
+how many machines it selects, how many of them are out, and how many
+more it allows:
+
+    kubectl get mdb
+
+    NAME      MAX   SELECTED   OUT   ALLOWED   AGE
+    default   1     5          1     0         9d
+
+Whatever the budgets allow, only one leader is out of service at a
+time, because the datastore needs a majority of the leaders.
+
+When a machine has an approved request and every budget that selects
+it has room, `cluster-operator` gives it a turn. It records the turn
+in the `Cluster`'s
+[`status.rebootTurns`](/docs/reference/cluster/#statusrebootturns),
+with the names of the requests that the turn covers, and then writes
+the `RebootApproved` condition on the `Machine`. `machine-operator`
+then cordons and drains the node and reboots. For a restart of k3s
+with no reboot, it drains nothing, because the pods keep running. All
+of a machine's requests share one turn, one drain, and one reboot. A
+request that arrives while the machine holds its turn joins that
+turn. While a machine's new release still downloads, `cluster-operator`
+holds back the machine's turn, so the release shares the reboot too.
+
+A request ends when its work is done. `machine-operator` deletes its
+own request when nothing waits. It marks a person's request
+`Complete` when the machine runs another boot, and `cluster-operator`
+deletes a complete request one day later.
 
 ## What a machine boots
 

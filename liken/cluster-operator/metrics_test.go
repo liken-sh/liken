@@ -150,7 +150,7 @@ func TestMachinesBehindTargetCountsTheOnesNotOnTheTarget(t *testing.T) {
 
 	layer, scrape := fleetMetrics(t)
 	layer.observeSweep(fleetSweep{},
-		decideRollout(machines, renewals, time.Time{}, targetingCluster(1, "2026.09.10-001"), "", sweepNow))
+		decideRollout(machines, renewals, time.Time{}, targetingCluster(1, "2026.09.10-001"), "", fleetRequests{}, sweepNow))
 
 	requireSeries(t, scrape(), "liken_machines_behind_target 1")
 }
@@ -163,7 +163,7 @@ func TestAFleetWithNoTargetHasNobodyBehind(t *testing.T) {
 	machines[0].Status.Version.Liken = "2026.09.10-001"
 
 	layer, scrape := fleetMetrics(t)
-	layer.observeSweep(fleetSweep{}, decideRollout(machines, renewals, time.Time{}, labCluster(1), "", sweepNow))
+	layer.observeSweep(fleetSweep{}, decideRollout(machines, renewals, time.Time{}, labCluster(1), "", fleetRequests{}, sweepNow))
 
 	requireSeries(t, scrape(), "liken_machines_behind_target 0")
 }

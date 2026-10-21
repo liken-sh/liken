@@ -110,18 +110,21 @@ func TestVersionAskWithoutASource(t *testing.T) {
 func TestVersionConditionFollowsTheFetch(t *testing.T) {
 	ask := fetchAsk{version: "0.2.0", slot: "B"}
 	cases := []struct {
+		name       string
 		state      fetchState
+		retrying   bool
 		wantStatus api.ConditionStatus
 		wantReason string
 	}{
-		{fetchIdle, "False", "Downloading"},
-		{fetchRunning, "False", "Downloading"},
-		{fetchFailed, "False", "Downloading"},
-		{fetchRejected, "False", "DigestMismatch"},
+		{"idle", fetchIdle, false, "False", "Downloading"},
+		{"running", fetchRunning, false, "False", "Downloading"},
+		{"failed", fetchFailed, true, "False", "DownloadRetrying"},
+		{"running a retry", fetchRunning, true, "False", "DownloadRetrying"},
+		{"rejected", fetchRejected, false, "False", "DigestMismatch"},
 	}
 	for _, tt := range cases {
-		t.Run(string(tt.state), func(t *testing.T) {
-			cond := versionCondition(ask, fetchSnapshot{ask: ask, state: tt.state, detail: "the story so far"})
+		t.Run(tt.name, func(t *testing.T) {
+			cond := versionCondition(ask, fetchSnapshot{ask: ask, state: tt.state, detail: "the story so far", retrying: tt.retrying})
 			if cond.Type != "VersionConverged" || cond.Status != tt.wantStatus || cond.Reason != tt.wantReason {
 				t.Errorf("got %s/%s", cond.Status, cond.Reason)
 			}

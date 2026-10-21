@@ -41,6 +41,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/liken/api"
+	"github.com/liken-sh/liken/liken/disruption"
 	"github.com/liken-sh/liken/liken/machine"
 )
 
@@ -67,11 +68,22 @@ const rebootRequestCondition = "RebootRequestHonored"
 //     already looking.
 //  4. The annotation names this boot: gate the reboot on the policy
 //     and the turn.
-func decideRebootRequest(m *machine.Machine, facts *machine.MachineStatus, t turn) convergence {
+//
+// A person's Disruption for the running boot is the same request as the
+// annotation (requests.go), and its approvedHash approves it the way
+// the approve annotation does.
+func decideRebootRequest(m *machine.Machine, facts *machine.MachineStatus, t turn, requests []disruption.Disruption) convergence {
 	request := m.Metadata.Annotations[machine.RequestRebootAnnotation]
+	approval := m.Metadata.Annotations[machine.ApproveDisruptionAnnotation]
 	bootID := ""
 	if facts != nil {
 		bootID = machine.BootID(facts.Boot)
+	}
+	if d := requestForBoot(requests, bootID); d != nil && bootID != "" {
+		request = d.Spec.Hash
+		if d.ApprovedByHash() {
+			approval = d.Spec.Hash
+		}
 	}
 	if request == "" {
 		message := "no reboot has been requested"
@@ -92,7 +104,7 @@ func decideRebootRequest(m *machine.Machine, facts *machine.MachineStatus, t tur
 
 	c := convergence{hash: bootID}
 	gateDisruption(&c, rebootRequestCondition, m.Spec.RebootPolicyOrDefault(), t, false,
-		m.Metadata.Annotations[machine.ApproveDisruptionAnnotation],
+		approval,
 		"a reboot of this machine, with no change to apply",
 		fmt.Sprintf("a reboot is requested for this boot (%.12s); rebootPolicy is Manual, so approve the reboot (or set rebootPolicy: Auto) to let it run", bootID),
 		fmt.Sprintf("a reboot is requested for this boot (%.12s); waiting for the cluster to grant a reboot turn", bootID),

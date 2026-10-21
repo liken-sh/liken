@@ -103,7 +103,8 @@ A change to `spec.leaders` reboots every machine, one at a time,
 because each machine reads the leaders only when it boots. The leaders
 give each follower its time sources, and the founder's address gives
 each leader its join URL. Under `Manual`, each machine reports
-`RebootPending`. Approve each one with
+`RebootPending`, and its request reads `False` in the APPROVED column
+of `kubectl get disruptions`. Approve each one with
 [`liken approve-reboot`](https://liken.sh/docs/reference/cli/#liken-approve-reboot), as
 in [Upgrade the fleet](https://liken.sh/docs/guides/upgrade/).
 

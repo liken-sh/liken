@@ -73,13 +73,15 @@ func TestServerFailuresAreTransientAndRetried(t *testing.T) {
 		}
 
 		// The retry must carry the failure's reason, so a condition
-		// written while the retry runs still says what failed.
+		// written while the retry runs still says what failed, and it
+		// stays a retry, so the condition's reason does not flip back
+		// to Downloading for each attempt.
 		broken.Store(false)
 		time.Sleep(fetchFirstRetry * 11 / 10)
-		if snap := f.Ensure(ask); snap.state != fetchRunning || !strings.Contains(snap.detail, "retrying after") {
+		if snap := f.Ensure(ask); snap.state != fetchRunning || !snap.retrying || !strings.Contains(snap.detail, "retrying after") {
 			t.Errorf("a retry should say what it's retrying after: %+v", snap)
 		}
-		if snap := awaitSettled(f); snap.state != fetchVerified {
+		if snap := awaitSettled(f); snap.state != fetchVerified || snap.retrying {
 			t.Errorf("recovery: %+v", snap)
 		}
 	})

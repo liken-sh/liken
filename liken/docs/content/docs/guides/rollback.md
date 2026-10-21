@@ -47,7 +47,10 @@ The version must still be in
 This is a reason to keep the old entries. The rollout is the same as
 for an upgrade: each machine downloads the older release into its
 inactive slot, verifies it, and reboots on its granted turn, one
-machine at a time. The cluster continues to serve during the rollout.
+machine at a time under the `default`
+[`MachineDisruptionBudget`](/docs/reference/machinedisruptionbudget/)
+unless you raised its limit. The cluster continues to serve during the
+rollout.
 
 ### The oldest release you can roll back to
 
@@ -71,6 +74,18 @@ release leads, and a copy that paused can then land a grant beyond the
 budget, as on every release before the record. When you roll forward,
 the newer `cluster-operator` adds a record for each grant that the
 older release wrote, before it grants a new turn.
+
+A release from before the
+[`Disruption`](/docs/reference/disruption/) and
+[`MachineDisruptionBudget`](/docs/reference/machinedisruptionbudget/)
+kinds reads neither of them. Its `cluster-operator` limits the
+rollout with
+[`spec.disruption.maxUnavailable`](/docs/reference/cluster/#specdisruption)
+alone, and its `machine-operator` reads only the
+`liken.sh/request-reboot` and `liken.sh/approve-disruption`
+annotations. So before you roll back past those kinds, set
+`spec.disruption.maxUnavailable` to the limit you want. A budget with
+a selector has no effect until you roll forward.
 
 ### Before you roll back past a spec field
 

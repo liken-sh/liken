@@ -25,6 +25,12 @@ package main
 //     leader's boot writes the new release's template, and the steward
 //     refreshes pods from it. The DaemonSet controller writes status
 //     all the time, and none of it concerns the sweep.
+//   - A Disruption and a MachineDisruptionBudget wake the loop on an
+//     edit: a new request, an approval, a deleted request, and a new
+//     limit. This program writes the status of both, and its own write
+//     must not start another sweep. machine-operator's write of a
+//     person's Complete condition arrives with the new boot, which
+//     changes the Machine.
 //   - The heartbeat Leases and the pods wake nothing. The ticker is the
 //     clock that judges a heartbeat's age, and the steward acts on a
 //     machine's version, which arrives as a Machine change. The
@@ -52,6 +58,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -63,9 +70,11 @@ import (
 	"github.com/liken-sh/liken/kubernetes/memo"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/disruption"
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/kubernetes/watch"
 	"github.com/liken-sh/liken/liken/machine"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/cache"
@@ -73,24 +82,28 @@ import (
 
 // The kinds this operator watches, as the dynamic client names them.
 var (
-	likenVersion      = schema.GroupVersion{Group: "liken.sh", Version: strings.TrimPrefix(api.APIVersion, "liken.sh/")}
-	machineResource   = likenVersion.WithResource("machines")
-	clusterResource   = likenVersion.WithResource("clusters")
-	leaseResource     = schema.GroupVersionResource{Group: "coordination.k8s.io", Version: "v1", Resource: "leases"}
-	daemonSetResource = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "daemonsets"}
-	podResource       = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+	likenVersion       = schema.GroupVersion{Group: "liken.sh", Version: strings.TrimPrefix(api.APIVersion, "liken.sh/")}
+	machineResource    = likenVersion.WithResource("machines")
+	clusterResource    = likenVersion.WithResource("clusters")
+	leaseResource      = schema.GroupVersionResource{Group: "coordination.k8s.io", Version: "v1", Resource: "leases"}
+	daemonSetResource  = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "daemonsets"}
+	podResource        = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+	disruptionResource = likenVersion.WithResource("disruptions")
+	budgetResource     = likenVersion.WithResource("machinedisruptionbudgets")
 )
 
 // The kind labels of liken_watch_restarts_total, one for each watch.
 const (
-	leaseKind     = "Lease"
-	daemonSetKind = "DaemonSet"
-	podKind       = "Pod"
+	leaseKind      = "Lease"
+	daemonSetKind  = "DaemonSet"
+	podKind        = "Pod"
+	disruptionKind = "Disruption"
+	budgetKind     = "MachineDisruptionBudget"
 )
 
 // watchKinds lists every kind label, so the counter reports a zero for
 // each watch before its first restart.
-var watchKinds = []string{machineKind, clusterKind, leaseKind, daemonSetKind, podKind}
+var watchKinds = []string{machineKind, clusterKind, leaseKind, daemonSetKind, podKind, disruptionKind, budgetKind}
 
 // appLabel is the label each stewarded DaemonSet puts on its pods. The
 // pod copy is indexed by it, so the steward reads one DaemonSet's pods
@@ -109,11 +122,13 @@ type fleetReader struct {
 	// reads through the fleet reader. A nil recorder posts nothing.
 	recorder *events.Recorder
 
-	machineCopy   *informer.Collection
-	clusterCopy   *informer.Collection
-	leaseCopy     *informer.Collection
-	daemonSetCopy *informer.Collection
-	podCopy       *informer.Collection
+	machineCopy    *informer.Collection
+	clusterCopy    *informer.Collection
+	leaseCopy      *informer.Collection
+	daemonSetCopy  *informer.Collection
+	podCopy        *informer.Collection
+	disruptionCopy *informer.Collection
+	budgetCopy     *informer.Collection
 
 	// machineVersions and clusterVersions are the memos of this
 	// program's own status writes to the Machines and the Cluster, and
@@ -127,6 +142,13 @@ type fleetReader struct {
 	machineVersions *memo.Versions
 	clusterVersions *memo.Versions
 
+	// disruptionVersions and budgetVersions are the same memos for this
+	// program's status writes to the Disruptions and the budgets, so a
+	// sweep does not judge a Granted condition or a count from a copy
+	// older than its own last write.
+	disruptionVersions *memo.Versions
+	budgetVersions     *memo.Versions
+
 	// sightings records when this program saw each heartbeat Lease
 	// change (heartbeats.go). The Leases' watch writes it, and each
 	// read of the heartbeats passes through it.
@@ -138,7 +160,7 @@ type fleetReader struct {
 func watchFleet(ctx context.Context, watcher dynamic.Interface, client *apiclient.Client,
 	wake func(), restarted func(kind string)) *fleetReader {
 	start := func(kind string, source informer.Source, handler cache.ResourceEventHandler, indexers cache.Indexers) *informer.Collection {
-		return informer.Start(ctx, watcher, source, informer.Options{
+		options := informer.Options{
 			Handler:  handler,
 			Synced:   wake,
 			Reopened: func() { restarted(kind) },
@@ -146,7 +168,14 @@ func watchFleet(ctx context.Context, watcher dynamic.Interface, client *apiclien
 			// head of this file says.
 			UnreadyOnWatchError: true,
 			Indexers:            indexers,
-		})
+		}
+		// A cluster whose leaders run a release from before the
+		// Disruption kinds does not serve them, and its copies hold
+		// none until the definitions arrive with a leader's boot.
+		if kind == disruptionKind || kind == budgetKind {
+			options.Absent = apierrors.IsNotFound
+		}
+		return informer.Start(ctx, watcher, source, options)
 	}
 	machines := informer.Source{Resource: machineResource}
 	clusters := informer.Source{Resource: clusterResource}
@@ -164,6 +193,11 @@ func watchFleet(ctx context.Context, watcher dynamic.Interface, client *apiclien
 		machineVersions: memo.New(),
 		clusterVersions: memo.New(),
 	}
+	disruptions := informer.Source{Resource: disruptionResource}
+	budgets := informer.Source{Resource: budgetResource}
+	r.disruptionCopy = start(disruptionKind, disruptions, watch.WakeOnEdit[disruption.Disruption](disruptions, wake), nil)
+	r.budgetCopy = start(budgetKind, budgets, watch.WakeOnEdit[disruption.Budget](budgets, wake), nil)
+	r.disruptionVersions, r.budgetVersions = memo.New(), memo.New()
 	r.leaseCopy = start(leaseKind, leases, r.sightings.handler(leases), nil)
 	return r
 }
@@ -214,7 +248,7 @@ func (r *fleetReader) current(held *informer.Collection) informer.View {
 		return informer.View{}
 	}
 	view := held.View()
-	view.Whole = held == r.machineCopy || held == r.clusterCopy
+	view.Whole = held == r.machineCopy || held == r.clusterCopy || held == r.disruptionCopy || held == r.budgetCopy
 	return view
 }
 
@@ -390,3 +424,46 @@ func (r *fleetReader) daemonSetPods(name string) ([]kubernetes.Pod, error) {
 	}
 	return kubernetes.List[kubernetes.Pod](r.client, daemonSetPodsPath(name))
 }
+
+// requests reads every Disruption and every MachineDisruptionBudget. A
+// cluster that does not serve the kinds, or an RBAC from the release
+// before them, reads as none of either, and the sweep keeps the old
+// protocol alone. Any other failure fails the read, because a sweep
+// that missed a budget could grant a turn past it.
+func (r *fleetReader) requests() (fleetRequests, error) {
+	disruptions, _, err := readKind[disruption.Disruption](r, r.disruptionCopy, r.disruptionVersions,
+		kubernetes.DisruptionsPath, disruptionPath)
+	if err != nil {
+		return fleetRequests{}, fmt.Errorf("reading the Disruptions: %w", err)
+	}
+	budgets, served, err := readKind[disruption.Budget](r, r.budgetCopy, r.budgetVersions,
+		kubernetes.BudgetsPath, budgetPath)
+	if err != nil {
+		return fleetRequests{}, fmt.Errorf("reading the MachineDisruptionBudgets: %w", err)
+	}
+	return fleetRequests{disruptions: disruptions, budgets: budgets, budgetsServed: served}, nil
+}
+
+// readKind lists one of the two kinds through its copy, and answers
+// none for a kind the cluster does not serve or does not let this
+// program read. served is false in that case.
+func readKind[T any, P informer.Object[T]](r *fleetReader, copy *informer.Collection, versions *memo.Versions,
+	listPath string, path func(string) string) (items []T, served bool, err error) {
+	held := informer.Held{View: r.current(copy), Versions: versions}
+	if held.View.Ready() && held.View.Absent {
+		return nil, false, nil
+	}
+	items, err = informer.List[T, P](r.client, held, listPath, path)
+	if errors.Is(err, apiclient.ErrNotFound) || errors.Is(err, apiclient.ErrForbidden) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	settleMemo[T, P](held, items)
+	return items, true, nil
+}
+
+func disruptionPath(name string) string { return kubernetes.DisruptionsPath + "/" + name }
+
+func budgetPath(name string) string { return kubernetes.BudgetsPath + "/" + name }

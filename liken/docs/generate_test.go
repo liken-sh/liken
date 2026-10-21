@@ -24,6 +24,8 @@ func TestGenerateHandlesTheRealCRDs(t *testing.T) {
 	}{
 		{"../machine/manifests/machines-crd.yaml", "### spec.storage"},
 		{"../cluster/manifests/clusters-crd.yaml", "### spec.releases"},
+		{"../disruption/manifests/disruptions-crd.yaml", "### status.conditions[]"},
+		{"../disruption/manifests/machinedisruptionbudgets-crd.yaml", "### spec.selector"},
 	} {
 		out := filepath.Join(t.TempDir(), "page.md")
 		cmd := exec.Command("go", "tool", "crdref", tc.path, out)

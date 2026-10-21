@@ -340,8 +340,8 @@ ln -s ../run "$root/var/run"
 # This section stages the liken API and the programs that operate it,
 # delivered through k3s's own mechanisms: the manifests go where k3s
 # auto-applies them, and the OCI images go where k3s auto-imports
-# them. The manifests come from each domain: the machine and cluster
-# domains carry their CRDs, the kubernetes domain carries the
+# them. The manifests come from each domain: the machine, cluster, and
+# disruption domains carry their CRDs, the kubernetes domain carries the
 # liken-system namespace, and each operator and the log relays carry
 # their own deployment beside their code. The LIKEN_VERSION
 # substitution stamps each manifest with the release it shipped in.
@@ -360,6 +360,7 @@ ln -s ../run "$root/var/run"
 mkdir -p "$root/var/lib/rancher/k3s/server/manifests/liken"
 for manifest in "$here"/../machine/manifests/*.yaml \
         "$here"/../cluster/manifests/*.yaml \
+        "$here"/../disruption/manifests/*.yaml \
         "$here"/../kubernetes/manifests/*.yaml \
         "$here"/../machine-operator/manifests/*.yaml \
         "$here"/../cluster-operator/manifests/*.yaml \

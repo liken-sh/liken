@@ -76,12 +76,15 @@ const (
 
 // A fetchSnapshot is what a reconcile pass sees: the ask the state
 // describes, the state, a human sentence for condition messages, and,
-// for a Failed state, when the retry starts.
+// for a Failed state, when the retry starts. retrying is true from the
+// ask's first failure until a download of it verifies, through each
+// retry that runs in between.
 type fetchSnapshot struct {
-	ask     fetchAsk
-	state   fetchState
-	detail  string
-	retryAt time.Time
+	ask      fetchAsk
+	state    fetchState
+	detail   string
+	retryAt  time.Time
+	retrying bool
 }
 
 const (
@@ -250,6 +253,7 @@ func (f *fetcher) run(ctx context.Context, ask fetchAsk) {
 	switch {
 	case err == nil:
 		f.snap.state = fetchVerified
+		f.snap.retrying = false
 		f.snap.detail = fmt.Sprintf("%d artifacts fetched, the rest already verified in place", fetched)
 		f.retryDelay = 0
 	case errors.Is(err, errLayer):
@@ -260,6 +264,7 @@ func (f *fetcher) run(ctx context.Context, ask fetchAsk) {
 		f.snap.detail = fmt.Sprintf("release %s at %s is corrupt (%v); publish a corrected release under a new version", ask.version, ask.source, err)
 	default:
 		f.snap.state = fetchFailed
+		f.snap.retrying = true
 		f.snap.detail = err.Error()
 		f.retryDelay = grow(f.retryDelay, true, fetchFirstRetry, fetchRetryLimit)
 		f.snap.retryAt = time.Now().Add(f.retryDelay + time.Duration(float64(f.retryDelay)*f.random()/10))

@@ -169,6 +169,11 @@ func sweepFleet(reads *fleetReader, clusterDoc *cluster.Cluster, available strin
 		fmt.Printf("listing heartbeats for the fleet sweep: %v\n", err)
 		return err
 	}
+	requests, err := reads.requests()
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		return err
+	}
 	s := decideFleetSweep(machines, heard, now)
 
 	// The rollout decision uses the same listing: which machines may
@@ -182,7 +187,7 @@ func sweepFleet(reads *fleetReader, clusterDoc *cluster.Cluster, available strin
 	// applied template lags, because only a leader's boot can advance
 	// it.
 	appliedVersion, err := daemonSetVersion(reads, machineOperatorDaemonSet)
-	r := decideRollout(machines, heard, reads.sightings.since(), clusterDoc, appliedVersion, now)
+	r := decideRollout(machines, heard, reads.sightings.since(), clusterDoc, appliedVersion, requests, now)
 	if err != nil {
 		fmt.Printf("reading the %s DaemonSet for the rollout: %v\n", machineOperatorDaemonSet, err)
 		r = r.withoutGrants(err)
@@ -223,6 +228,12 @@ func sweepFleet(reads *fleetReader, clusterDoc *cluster.Cluster, available strin
 	stored := publishClusterStatus(reads, clusterDoc, s, r, fluxTeardown, available, publicKey, now)
 	carryOutRollout(reads, machines, r, stored, now)
 	markLost(reads, machines, s.lost, heard, now)
+
+	// The requests and the budgets report what the ledger the API
+	// server stored says, so a request reads Granted only after its
+	// turn is recorded (requeststatus.go).
+	reportRequests(reads, machines, requests, r, stored, now)
+	reportBudgets(reads, clusterDoc, requests, r, now)
 
 	// The fleet's metrics come from the verdict that the write above
 	// carries, so the graph and the Cluster's status report one
@@ -361,7 +372,7 @@ func publishClusterStatus(reads *fleetReader, clusterDoc *cluster.Cluster, s fle
 		if stored == nil {
 			return nil
 		}
-		if !sameTurns(r.turns, stored.Status.RebootTurns) {
+		if !sameSlots(r.turns, stored.Status.RebootTurns) {
 			return schemaPrunedTurns(reads, stored, now)
 		}
 		return stored.Status.RebootTurns
@@ -395,11 +406,26 @@ func schemaPrunedTurns(reads *fleetReader, stored *cluster.Cluster, now time.Tim
 }
 
 // sameTurns reports whether two ledgers hold the same entries in the
-// same order. It compares times with Equal, because a time decoded
-// from the API server carries another location than one the sweep
-// made.
+// same order, with the same Disruptions. It compares times with Equal,
+// because a time decoded from the API server carries another location
+// than one the sweep made.
 func sameTurns(a, b []cluster.RebootTurn) bool {
 	return slices.EqualFunc(a, b, func(x, y cluster.RebootTurn) bool {
-		return x.Machine == y.Machine && x.MachineResourceVersion == y.MachineResourceVersion && x.Since.Equal(y.Since)
+		return sameSlot(x, y) && slices.Equal(x.Disruptions, y.Disruptions)
 	})
+}
+
+// sameSlots reports whether two ledgers hold the same entries, with
+// no regard to the Disruptions each entry names. A Cluster schema from
+// the release before the Disruptions stores the entries and prunes
+// their Disruptions, and the entries alone are what keep the budget,
+// so the grants still go out. The next sweep writes the Disruptions
+// again, and the API server prunes them again, until a leader's boot
+// serves the newer schema.
+func sameSlots(a, b []cluster.RebootTurn) bool {
+	return slices.EqualFunc(a, b, sameSlot)
+}
+
+func sameSlot(x, y cluster.RebootTurn) bool {
+	return x.Machine == y.Machine && x.MachineResourceVersion == y.MachineResourceVersion && x.Since.Equal(y.Since)
 }

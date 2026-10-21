@@ -1,0 +1,192 @@
+# The Disruption API, declared to Kubernetes.
+#
+# A Disruption asks for one machine to go out of service: to reboot,
+# or to restart k3s. Every reboot and restart that liken makes waits
+# for a turn that the cluster grants from its machine disruption
+# budgets, and a Disruption is the record of each request. machine-
+# operator keeps one for a machine's staged documents, and a person
+# files one with `liken request-reboot`. The grant itself is the entry
+# in the Cluster's status.rebootTurns (cluster-operator/rollout.go).
+#
+# This file goes in liken's subdirectory of k3s's auto-deploy
+# manifests and applies at every startup, like the Machine CRD.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: disruptions.liken.sh
+  annotations:
+    # init keeps whichever copy of this file declares the higher
+    # revision, so an older slot's boot cannot downgrade the schema
+    # the cluster serves (init/schemarevision.go). Raise it in the same
+    # change that changes the schema below; a test holds the two
+    # together.
+    liken.sh/schema-revision: "1"
+spec:
+  group: liken.sh
+  names:
+    kind: Disruption
+    listKind: DisruptionList
+    plural: disruptions
+    singular: disruption
+    categories: [liken]
+  # Cluster-scoped, like the Machine it disrupts.
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      # The requester writes the spec, and the operators write the
+      # status: cluster-operator the approval and the grant, and
+      # machine-operator the completion of a person's reboot.
+      subresources:
+        status: {}
+      # Each machine's operator lists and watches only its own
+      # machine's requests, with the field selector spec.machine, so no
+      # other machine's request wakes it.
+      selectableFields:
+        - jsonPath: .spec.machine
+      additionalPrinterColumns:
+        - name: Machine
+          type: string
+          jsonPath: .spec.machine
+        - name: Requester
+          type: string
+          jsonPath: .spec.requester
+        - name: Kind
+          type: string
+          jsonPath: .spec.kind
+        - name: Approved
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Approved")].status
+        - name: Granted
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Granted")].status
+        - name: Complete
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Complete")].status
+          priority: 1
+        - name: Reason
+          type: string
+          jsonPath: .spec.reason
+          priority: 1
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            A Disruption asks for one machine to reboot or to restart
+            k3s. The request waits until its machine's rebootPolicy
+            approves it and every MachineDisruptionBudget that selects
+            the machine has room, and then the machine takes a turn:
+            cluster-operator records the turn in the Cluster's
+            status.rebootTurns, and machine-operator drains the
+            machine and reboots it. Every request pending for a machine
+            when it takes its turn shares the one drain and the one
+            reboot.
+          properties:
+            spec:
+              type: object
+              description: >-
+                The request: which machine, who asks, what for, and
+                the approval of a machine whose rebootPolicy is Manual.
+              required: [machine, requester, kind]
+              x-kubernetes-validations:
+                # Only machine-operator asks for a k3s restart. It
+                # knows which staged change a restart applies, and a
+                # restart leaves no new boot behind to mark a person's
+                # request complete.
+                - rule: self.kind == 'Reboot' || self.requester == 'liken.sh/machine-operator'
+                  message: only liken.sh/machine-operator requests a Restart; ask for a Reboot
+              properties:
+                machine:
+                  type: string
+                  minLength: 1
+                  description: >-
+                    The name of the Machine to take out of service. It
+                    does not change after the request is created.
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: spec.machine does not change; create another Disruption
+                requester:
+                  type: string
+                  minLength: 1
+                  description: >-
+                    Who asked: a key with a domain prefix for a
+                    program, such as liken.sh/machine-operator, and the
+                    Kubernetes user name for a person. It does not
+                    change after the request is created.
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: spec.requester does not change; create another Disruption
+                kind:
+                  type: string
+                  enum: [Reboot, Restart]
+                  description: >-
+                    Reboot reboots the machine. Restart restarts k3s
+                    and nothing else, so the pods keep running and the
+                    machine is not drained. A reboot covers a restart,
+                    so a machine with both pending only reboots.
+                reason:
+                  type: string
+                  description: Why the machine goes out of service, for the person who reads the request.
+                hash:
+                  type: string
+                  description: >-
+                    What the request applies. For machine-operator's
+                    request, the hash of the documents it staged. For a
+                    person's reboot, the identity of the boot it was
+                    filed against, so the request is spent when the
+                    machine boots again.
+                approvedHash:
+                  type: string
+                  description: >-
+                    The approval of a machine whose rebootPolicy is
+                    Manual. The request is approved while this names
+                    spec.hash, as the full hash or a prefix of 12
+                    characters or more. When the request changes to
+                    apply other bytes, its hash changes and the
+                    approval no longer matches. `liken approve-reboot`
+                    sets it. A machine whose rebootPolicy is Auto
+                    approves every request and ignores this field.
+            status:
+              type: object
+              description: Where the request stands.
+              properties:
+                conditions:
+                  type: array
+                  description: >-
+                    Approved, written by cluster-operator, is True when
+                    the machine's rebootPolicy or approvedHash approves
+                    the request. Granted, written by cluster-operator,
+                    is True while the machine's turn in the Cluster's
+                    status.rebootTurns names the request, and its
+                    message names what a waiting request waits for.
+                    Complete, written by machine-operator, is True when
+                    a person's reboot has happened. machine-operator
+                    deletes its own request when nothing is staged, and
+                    cluster-operator deletes a complete request a day
+                    after it completed.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  items:
+                    type: object
+                    required: [type, status, lastTransitionTime, reason]
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                        minLength: 1
+                      message:
+                        type: string

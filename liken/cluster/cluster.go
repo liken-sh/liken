@@ -164,10 +164,13 @@ type ClusterFluxStatus struct {
 // write only while the Machine is still at this version, so once the
 // Machine is at another version and holds no grant, no grant that this
 // entry covers can land. Since is when the entry entered the ledger.
+// Disruptions names the Disruptions that the turn grants, so every
+// request pending for the machine shares the turn's one drain.
 type RebootTurn struct {
 	Machine                string    `json:"machine"`
 	MachineResourceVersion string    `json:"machineResourceVersion"`
 	Since                  time.Time `json:"since"`
+	Disruptions            []string  `json:"disruptions,omitempty"`
 }
 
 // MachineTally counts the cluster's Machines: how many are fully

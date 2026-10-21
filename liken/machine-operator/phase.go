@@ -95,13 +95,14 @@ func conditionPhase(c api.Condition) api.Phase {
 		// the server publishes. A malformed credentials Secret has
 		// the same shape: only a corrected Secret fixes it.
 		return api.PhaseBlocked
-	case "Downloading":
+	case "Downloading", "DownloadRetrying":
 		// A release downloads to the inactive slot in the background,
 		// and the machine serves its workloads until the reboot that
 		// proves the release. The cluster operator counts a machine
 		// that downloads as available, so a download takes no slot
 		// of the disruption budget, and a download that never ends
-		// holds no other machine's turn.
+		// holds no other machine's turn. A download that failed and
+		// waits to retry is still a download in this phase.
 		return api.PhaseDownloading
 	case "RebootRequested", "RestartRequested", "DemotionRebooting", "Draining",
 		"Proving", "LoadRequested":

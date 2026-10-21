@@ -1,6 +1,6 @@
 ---
 name: troubleshoot
-description: "Diagnose a liken machine from its Machine resource: the phase, the condition that is False, and the status field it names, for each failure from the stick menu to a Pending device claim. Use when a machine is Lost, Blocked, crashed, on the old version, or refuses a disk."
+description: "Diagnose a liken machine from its Machine resource: the phase, the condition that is False, and the status field it names, for each failure from the stick menu to a Pending device claim. Use when a machine is Lost, Blocked, crashed, on the old version, waits for a reboot turn, or refuses a disk."
 ---
 
 This skill is the guide at https://liken.sh/docs/guides/troubleshoot/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
@@ -79,8 +79,10 @@ whether `liken-machine-operator` restarted on that node. The operator
 stops its heartbeat and ends its own process when its reconcile loop has
 been busy for 60 seconds, and the kubelet then starts it again.
 
-A `Lost` machine counts against the disruption budget, so while it
-stays, other machines wait for their reboot turns. If the machine will
+A `Lost` machine counts against every
+[`MachineDisruptionBudget`](https://liken.sh/docs/reference/machinedisruptionbudget/)
+that selects it, so while it stays, other machines wait for their
+reboot turns. If the machine will
 not return, remove it as in
 [Remove machines](https://liken.sh/docs/guides/remove-nodes/#a-machine-that-is-already-gone).
 
@@ -118,17 +120,23 @@ column. For a machine that did not move, read its conditions:
   the default, and the machine waits for you. Read what it waits for
   and grant the reboot with
   [`liken approve-reboot`](https://liken.sh/docs/reference/cli/#liken-approve-reboot).
-* `AwaitingTurn`: the machine waits for the cluster's disruption
-  budget. The default budget is one machine at a time, and only one
-  leader is down at a time whatever the budget says.
+* `AwaitingTurn`: the machine waits for a reboot turn.
+  [A machine waits for its reboot turn](#a-machine-waits-for-its-reboot-turn)
+  shows how to find what it waits for.
 * `Downloading`: the machine still fetches or verifies the release.
-  A slow link makes this step long. A download that receives no bytes
-  for one minute stops, and the machine retries it on its own. A
-  download that fails waits 10 seconds before the first retry, and the
-  wait doubles after each failure up to 2 minutes. A change of the
-  target release starts the new download without that wait. The
-  condition's message
-  gives the reason of the last failure and the time of the next retry.
+  A slow link makes this step long. While the release downloads,
+  the machine takes no reboot turn for another change, so the
+  release shares that reboot.
+* `DownloadRetrying`: a download failed, and the machine retries it
+  on its own. The phase is still `Downloading`. A download that
+  receives no bytes for one minute stops and retries. A download that
+  fails waits 10 seconds before the first retry, and the wait doubles
+  after each failure up to 2 minutes. A change of the target release
+  starts the new download without that wait. The condition's message
+  gives the reason of the last failure and the time of the next
+  retry. The reason stays `DownloadRetrying` until a download
+  verifies. Unlike `Downloading`, it holds no reboot turn, so the
+  machine's other changes can still take their turn.
 * `StagingFailed`: the machine could not write or withdraw a staged
   record. The message gives the error. When the target changed while
   another release was staged, the machine does not download the new
@@ -142,18 +150,66 @@ If the Cluster's `Progressing` condition is `False` with the reason
 cluster grants no more turns until you examine that machine, so the
 rest of the fleet is safe while you do.
 
+## A machine waits for its reboot turn
+
+A machine that reports `AwaitingTurn` has a request that waits for
+the cluster.
+[The reboot turn](https://liken.sh/docs/concepts/how-liken-works/#the-reboot-turn)
+explains the requests and the budgets. Start with the requests:
+
+    kubectl get disruptions -o wide
+
+The wide listing adds the COMPLETE and REASON columns. Read the
+request of the machine:
+
+* APPROVED is `False`: the machine's `rebootPolicy` is `Manual`, and
+  the request waits for you. Run
+  [`liken approve-reboot`](https://liken.sh/docs/reference/cli/#liken-approve-reboot).
+* APPROVED is `True` and GRANTED is `False`: the request waits for a
+  turn. The message of the `Granted` condition names the cause:
+
+      kubectl describe disruption <request>
+
+  The message names a budget with no room and the machines that fill
+  it, another leader that is out of service, a release that still
+  downloads, a stalled rollout, or the first 40 seconds after
+  `cluster-operator` starts. A message that says it waits for
+  `machine-operator` to ask for the turn means the machine has not
+  reported `AwaitingTurn` yet.
+
+When a budget has no room, read the budgets:
+
+    kubectl get mdb
+
+The OUT column counts the selected machines that are out of service,
+and ALLOWED is how many more can go. The `DisruptionAllowed`
+condition of a full budget is `False` with the reason `BudgetFull`,
+and its message names the machines that fill it:
+
+    kubectl describe mdb <name>
+
+A machine fills a budget while it holds a turn, and also while it is
+`Lost`, `Degraded`, or unavailable for any other reason. Bring that
+machine back, or remove it as in
+[Remove machines](https://liken.sh/docs/guides/remove-nodes/#a-machine-that-is-already-gone).
+To allow more machines out at the same time, raise the budget's
+`spec.maxUnavailable`.
+
 The Cluster's
 [`status.rebootTurns`](https://liken.sh/docs/reference/cluster/#statusrebootturns)
-names each machine that holds a reboot turn, and each entry counts
-against the disruption budget. An entry can name a machine with no
-`RebootApproved` condition, because `cluster-operator` records a turn
-before it grants it, and a copy that stopped between the two writes
-leaves the record alone. `cluster-operator` then writes the grant
-itself, when the machine is available, and the turn goes on as
-normal. It removes the entry when the machine holds no grant and its
-`resourceVersion` differs from the entry's `machineResourceVersion`,
-or when the Machine is gone. A machine that is down keeps its entry
-until it returns or reads `Lost`.
+names each machine that holds a reboot turn, with the requests that
+the turn covers, and each entry counts against the budgets. An entry
+can name a machine with no `RebootApproved` condition, because
+`cluster-operator` records a turn before it grants it, and a copy that
+stopped between the two writes leaves the record alone.
+`cluster-operator` then writes the grant itself, when the machine is
+available, and the turn goes on as normal. It removes the entry when
+the Machine is gone. It also removes the entry when the machine holds
+no grant, its `resourceVersion` differs from the entry's
+`machineResourceVersion`, and the machine is available with no open
+request in the entry. A machine that is down keeps an entry that
+names a request until it returns. An entry that names no request
+leaves when the machine reads `Lost`.
 
 If the `Progressing` message says that reboot turns wait for a Cluster
 schema that stores `status.rebootTurns`, the API server serves the
@@ -210,12 +266,15 @@ asks for that boot:
 
     ./liken request-reboot mycluster <name>
 
-The machine waits for its reboot turn, cordons, and drains, the same
-as a machine applying a staged change. If its `rebootPolicy` is
-`Manual`, it reports `RebootPending` and waits for
+The command files the request `<name>.reboot-<boot>`, which
+`kubectl get disruptions` lists. The machine waits for its reboot
+turn, cordons, and drains, the same as a machine applying a staged
+change. If its `rebootPolicy` is `Manual`, it reports `RebootPending`
+and waits for
 [`liken approve-reboot`](https://liken.sh/docs/reference/cli/#liken-approve-reboot).
 The `RebootRequestHonored` condition reports the progress of the
-request.
+request, and the request reads `Complete` when the machine runs
+another boot.
 
 ## A pod with a device claim stays Pending
 
@@ -226,14 +285,17 @@ gives the checks, in order.
 
 The operators post a Kubernetes `Event` for each change of a
 condition, and for each action they take: a machine marked `Lost`, a
-reboot turn granted, a spec refused, a kernel crash found.
-`kubectl describe` lists the events of the last hour below the
-status:
+reboot turn granted, a spec refused, a kernel crash found. The
+conditions of a `Disruption` and of a `MachineDisruptionBudget` post
+events too. `kubectl describe` lists the events of the last hour below
+the status:
 
     kubectl describe machine <name>
     kubectl describe cluster <name>
+    kubectl describe disruption <request>
 
-A `Machine` and a `Cluster` are in no namespace, so their events are
+A `Machine`, a `Cluster`, a `Disruption`, and a
+`MachineDisruptionBudget` are in no namespace, so their events are
 in the `default` namespace. `kubectl events` finds them only with
 `-n default` or `-A`:
 
@@ -260,7 +322,9 @@ starts with the condition's name. The other events are these:
 | `Associated` | `Machine` | `Normal` | A radio associated with an access point: at boot, or again after it lost one. The message names the access point and the reason for the loss. |
 | `BackstopRepaired` | `Machine` | `Warning` | A pass that no event started changed the machine. The message names each step that wrote. The operator missed a wake, which is a bug in `liken`: report it with the message. The machine is correct again. |
 | `RebootTurnGranted` | `Machine` | `Normal` | The cluster granted the machine a reboot turn. |
-| `RebootTurnReclaimed` | `Machine` | `Normal` | The machine no longer needs its turn, and the turn returns to the disruption budget. |
+| `RebootTurnReclaimed` | `Machine` | `Normal` | The machine no longer needs its turn, and the turn returns to the budgets. |
+| `DisruptionDeleted` | `Disruption` | `Normal` | `cluster-operator` deleted a request that completed more than a day ago. |
+| `MachineDisruptionBudgetCreated` | `Cluster` | `Normal` | `cluster-operator` created the `default` budget from `spec.disruption.maxUnavailable`. Edit the budget to change the limit. |
 | `FluxDeployKeyMinted` | `Cluster` | `Normal` | The cluster operator made the deploy key. Register its public half at the forge. |
 | `FluxEngineSeeded` | `Cluster` | `Normal` | The flux engine was absent, and the cluster operator created it from the seed that the release carries. |
 

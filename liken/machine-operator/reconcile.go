@@ -48,6 +48,12 @@ var sysctlRoot = machine.SysctlDir
 // so the loop can retry the pass when something failed (retry.go).
 func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm *machineMetrics, out *passOutcome) error {
 	now := time.Now()
+	// The requests read and write through a client that reports
+	// nothing into the pass's outcome. A cluster whose RBAC or CRDs
+	// come from the release before the Disruptions refuses those
+	// requests on every pass, and that refusal is no failure of the
+	// pass (requests.go).
+	quiet := r
 	r = r.observedBy(out)
 	c := r.client
 
@@ -273,11 +279,22 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 	// through the disruption gate on its way to its side effects,
 	// and the gate depends on the order in which the documents
 	// converge (see disruptions).
+	// The machine's Disruptions: a person's request for this boot, and
+	// this operator's own request (requests.go). A pass whose read of
+	// them fails acts on the annotations alone, and leaves its own
+	// request as it is. The decisions read the Machine with the own
+	// request's approval in its approve annotation.
+	requests, requestsErr := quiet.requests(m.Metadata.Name)
+	if requestsErr != nil {
+		fmt.Printf("reading this machine's Disruptions: %v\n", requestsErr)
+	}
+	decided := withOwnApproval(m, requests)
+
 	disr := &disruptions{events: notes, out: out}
 	machineStore := machine.MachineManifests(machine.MachineStateDir)
 	machineRejection, _ := machineStore.LoadRejection()
 	conv := disr.gate(r, node, nodeErr, t, now,
-		decideConvergence(m, facts, machineRejection, readStagedHash(machineStore), t))
+		decideConvergence(decided, facts, machineRejection, readStagedHash(machineStore), t))
 	status.Conditions = api.SetCondition(status.Conditions,
 		carryOutConvergence(conv, machineStore, machine.OperatorRunDir, "spec", now, out), now)
 	// Each gated document also reports itself in status.pending, so
@@ -299,7 +316,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 	if clusterName != "" {
 		clusterStore := machine.ClusterManifests(machine.MachineStateDir)
 		var cconv convergence
-		cconv, liveCluster = convergeClusterDocument(r, clusterStore, clusterName, m, facts, t)
+		cconv, liveCluster = convergeClusterDocument(r, clusterStore, clusterName, decided, facts, t)
 		cconv = disr.gate(r, node, nodeErr, t, now, cconv)
 		status.Conditions = api.SetCondition(status.Conditions,
 			carryOutConvergence(cconv, clusterStore, machine.OperatorRunDir, "cluster document", now, out), now)
@@ -312,7 +329,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 		if liveCluster != nil {
 			systemStore := machine.SystemReleases(machine.MachineStateDir)
 			vconv := disr.gate(r, node, nodeErr, t, now,
-				convergeSystemRelease(systemStore, liveCluster, m, facts, f, t, out))
+				convergeSystemRelease(systemStore, liveCluster, decided, facts, f, t, out))
 			status.Conditions = api.SetCondition(status.Conditions,
 				carryOutConvergence(vconv, systemStore, machine.OperatorRunDir, "system release", now, out), now)
 			if vconv.pending != nil {
@@ -322,7 +339,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 
 		credentialsStore := machine.RegistryCredentialsStore(machine.MachineStateDir)
 		rconv := disr.gate(r, node, nodeErr, t, now,
-			convergeRegistryCredentials(r, credentialsStore, m, facts, t))
+			convergeRegistryCredentials(r, credentialsStore, decided, facts, t))
 		status.Conditions = api.SetCondition(status.Conditions,
 			carryOutConvergence(rconv, credentialsStore, machine.OperatorRunDir, "registry credentials", now, out), now)
 		if rconv.pending != nil {
@@ -339,7 +356,7 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 	// machine and satisfies the request along the way. This runs
 	// outside the cluster block above, because a standalone machine
 	// can be asked to reboot too.
-	rreq := disr.gate(r, node, nodeErr, t, now, decideRebootRequest(m, facts, t))
+	rreq := disr.gate(r, node, nodeErr, t, now, decideRebootRequest(m, facts, t, requests))
 	status.Conditions = api.SetCondition(status.Conditions,
 		carryOutRebootRequest(machine.OperatorRunDir, rreq, now, out), now)
 	if rreq.pending != nil {
@@ -384,6 +401,14 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 		status.Conditions = api.SetCondition(status.Conditions, condition, now)
 		disr.rebooting = disr.rebooting || d.cleanup
 
+		// This operator's own request lists what this pass found
+		// waiting. A pass with no Node read cannot judge the demotion,
+		// so it leaves the request as it is, and so does a machine
+		// with no cluster, which has no conductor to grant a turn.
+		if clusterName != "" && requestsErr == nil {
+			syncOwnRequest(quiet, m, requests, ownRequest(m.Metadata.Name, status.Pending, d.condition))
+		}
+
 		// When this operator set a cordon and no longer needs it,
 		// because the reboot happened and the machine converged, the
 		// node goes back to the scheduler. This applies only to
@@ -397,6 +422,10 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 				notes.normal(reasonUncordoned, "uncordoned the Node "+node.Metadata.Name+"; its reboot is complete")
 			}
 		}
+	}
+
+	if requestsErr == nil && facts != nil {
+		settlePeopleRequests(quiet, m, requests, machine.BootID(facts.Boot), now)
 	}
 
 	// Ready is the roll-up: True exactly when every other condition

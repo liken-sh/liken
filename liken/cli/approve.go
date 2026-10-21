@@ -4,11 +4,13 @@ package main
 // meaning instead of handing the terminal to another tool. A machine
 // whose rebootPolicy is Manual stages a change and waits for a
 // person. This command is how the person answers: it reads
-// status.pending, reports what is waiting, and writes the
-// approve-disruption annotation with the staged document's hash. The
-// hash makes the grant one-shot (machine.ApproveDisruptionAnnotation
-// explains why), and writing the same annotation twice is the same
-// grant, so the command is repeatable.
+// status.pending, reports what is waiting, writes the
+// approve-disruption annotation with the staged document's hash, and
+// sets spec.approvedHash on the Disruption that covers it
+// (disruptions.go). The hash makes the grant one-shot
+// (machine.ApproveDisruptionAnnotation explains why), and writing the
+// same annotation twice is the same grant, so the command is
+// repeatable.
 
 import (
 	"flag"
@@ -97,11 +99,22 @@ func approveReboot(args []string, out io.Writer) error {
 	if choice == nil {
 		return nil
 	}
+	// The request's approval goes first. The annotation wakes the
+	// operators, and their writes to the request would race a later
+	// write of its approval.
+	approved, err := approveRequest(c, m, choice)
+	if err != nil {
+		return fmt.Errorf("approving the Disruption: %w", err)
+	}
 	short := fmt.Sprintf("%.12s", choice.Hash)
 	patch := fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`, machine.ApproveDisruptionAnnotation, short)
 	if err := kubernetes.PatchJSON(c, kubernetes.MachinesPath+"/"+m.Metadata.Name, []byte(patch)); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "\napproved: %s=%s\n", machine.ApproveDisruptionAnnotation, short)
+	fmt.Fprintln(out)
+	if approved != "" {
+		fmt.Fprintf(out, "approved: Disruption %s\n", approved)
+	}
+	fmt.Fprintf(out, "approved: %s=%s\n", machine.ApproveDisruptionAnnotation, short)
 	return nil
 }

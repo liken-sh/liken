@@ -5,8 +5,9 @@ package main
 // with every document it was given has no way to reboot, and a
 // machine with no shell has no other way to be told. This command is
 // how a person asks: it reads status.boot.time, derives the running
-// boot's identity, and writes the request-reboot annotation naming
-// it. Naming the running boot makes the request one-shot
+// boot's identity, files a Disruption named for it, and writes the
+// request-reboot annotation naming it (disruptions.go). Naming the
+// running boot makes the request one-shot
 // (machine.RequestRebootAnnotation explains why), so a later request
 // works with no cleanup in between.
 //
@@ -73,10 +74,17 @@ func requestReboot(args []string, out io.Writer) error {
 	if bootID == "" {
 		return fmt.Errorf("%s reports no boot time, so there is no boot to request a reboot of; the machine is still starting, or it has never reported", m.Metadata.Name)
 	}
+	filed, err := fileRebootRequest(c, m, bootID)
+	if err != nil {
+		return fmt.Errorf("filing the Disruption: %w", err)
+	}
 	short := fmt.Sprintf("%.12s", bootID)
 	patch := fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`, machine.RequestRebootAnnotation, short)
 	if err := kubernetes.PatchJSON(c, kubernetes.MachinesPath+"/"+m.Metadata.Name, []byte(patch)); err != nil {
 		return err
+	}
+	if filed != "" {
+		fmt.Fprintf(out, "filed: Disruption %s\n", filed)
 	}
 	fmt.Fprint(out, renderRequest(m, fs.Arg(0), short))
 	return nil

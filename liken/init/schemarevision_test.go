@@ -636,8 +636,10 @@ var schemaPins = map[string]struct {
 	revision    int
 	fingerprint string
 }{
-	"machines-crd.yaml": {11, "46e853e70cd64671af88b03084d9a45efbf86d4a8a1ec10d8792740b9de8700e"},
-	"clusters-crd.yaml": {3, "680cd7ac9c750affe7dd7dee86340b88a5c05515a290fd1011a13c4fee7b2c89"},
+	"machines-crd.yaml":                 {11, "46e853e70cd64671af88b03084d9a45efbf86d4a8a1ec10d8792740b9de8700e"},
+	"clusters-crd.yaml":                 {4, "ba444c40cc91e0769ddb2da79bcc283f8cee70433ab5c90edb53574c7eb0448c"},
+	"disruptions-crd.yaml":              {1, "36cb0f55bb27a48b21532e199921e20e72272780f039d7dfb30152a7946ab428"},
+	"machinedisruptionbudgets-crd.yaml": {1, "cbc781c5475da7535be3de4f4f3cfca858d88900ecacc625af5d2779e6f6713b"},
 }
 
 // TestTheSeededCRDsPinTheirSchemaRevision is the enforcement behind

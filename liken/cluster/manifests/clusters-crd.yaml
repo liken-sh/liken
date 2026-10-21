@@ -25,7 +25,7 @@ metadata:
     # older slot's boot cannot downgrade the schema the cluster
     # serves (init/schemarevision.go). Raise it in the same change
     # that changes the schema below; a test holds the two together.
-    liken.sh/schema-revision: "3"
+    liken.sh/schema-revision: "4"
 spec:
   group: liken.sh
   names:
@@ -479,20 +479,16 @@ spec:
                 disruption:
                   type: object
                   description: >-
-                    How much of the fleet can be down at the same time
-                    when the cluster sequences reboots. This is the
-                    machine-level equivalent of a workload's
-                    PodDisruptionBudget, as one number. A staged
-                    change that needs a reboot waits for the cluster
-                    to grant the machine a turn, which is a
-                    RebootApproved condition written onto the Machine.
-                    This budget sets how many turns can be open at
-                    once. The count includes the machines that are
-                    down for any other reason, so a fleet that already
-                    has machines down pauses its own rollout. The
-                    cluster records each turn in status.rebootTurns
-                    before it grants it, and counts each recorded turn
-                    against this budget.
+                    The starting limit of the MachineDisruptionBudget
+                    named default, which limits how much of the fleet
+                    can be down at the same time when the cluster
+                    sequences reboots. When that budget is missing,
+                    cluster-operator creates it from this value, and
+                    this value limits the fleet until the budget
+                    exists. After that, the budget is the limit: edit
+                    the budget to change it, because a later edit here
+                    changes nothing. A release from before the
+                    MachineDisruptionBudget reads this value alone.
                   properties:
                     maxUnavailable:
                       type: integer
@@ -500,7 +496,8 @@ spec:
                       default: 1
                       description: >-
                         How many machines can be unavailable at the
-                        same time, planned and unplanned together. The
+                        same time, planned and unplanned together, when
+                        cluster-operator creates the default budget. The
                         default is one, the safest rollout. The
                         leaders keep a stricter automatic floor that
                         this number cannot raise: only one leader is
@@ -1140,10 +1137,12 @@ spec:
                     that names the Cluster's resourceVersion. A second
                     copy of cluster-operator that read the same Cluster
                     gets 409 Conflict on its own write, so two copies
-                    cannot both use one slot of spec.disruption. An
-                    entry leaves only when the Machine is gone, or holds
-                    no grant at a version other than the one the entry
-                    records. When an entry's Machine holds no grant at
+                    cannot both use one slot of a
+                    MachineDisruptionBudget. An entry leaves only when
+                    the Machine is gone, or holds no grant at a version
+                    other than the one the entry records and is
+                    available with no open Disruption in the entry's
+                    disruptions. When an entry's Machine holds no grant at
                     the recorded version, cluster-operator writes the
                     grant itself, because the grant write of the copy
                     that recorded the entry can still be in flight, and
@@ -1185,6 +1184,26 @@ spec:
                           When the entry entered the ledger. It tells
                           you how long a turn has been open while the
                           Machine holds no grant.
+                      disruptions:
+                        type: array
+                        maxItems: 256
+                        x-kubernetes-list-type: set
+                        items:
+                          type: string
+                          maxLength: 253
+                        description: >-
+                          The Disruptions that this turn grants. An
+                          approved Disruption for the machine that
+                          arrives while the machine holds its turn joins
+                          the list, and shares the turn's drain. While
+                          the list names a Disruption that is approved
+                          and not done, the entry stays even when the
+                          Machine holds no grant, and when the Machine
+                          then asks for its turn again, cluster-operator
+                          grants it in the same entry. The entry leaves
+                          when the machine is available and every
+                          Disruption it names is complete, spent, or
+                          deleted.
                 machines:
                   type: object
                   description: >-

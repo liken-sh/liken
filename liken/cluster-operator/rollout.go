@@ -101,6 +101,7 @@ import (
 
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/disruption"
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/machine"
 )
@@ -138,6 +139,15 @@ type rollout struct {
 	// machine's version. A cluster with no target counts nobody
 	// behind: there is nothing to be behind (metrics.go).
 	behind int
+
+	// waits holds, for each machine that asks for a turn and gets none
+	// on this sweep, what it waits for, in the words its Disruptions'
+	// Granted condition reports.
+	waits map[string]string
+
+	// budgets holds what each served MachineDisruptionBudget counts
+	// after this sweep's grants.
+	budgets map[string]disruption.BudgetStatus
 }
 
 // wantsTurn reports whether any of the machine's conditions carry
@@ -168,6 +178,16 @@ func available(phase api.Phase) bool {
 		return true
 	}
 	return false
+}
+
+// machineNamed answers the machine of a name from the sweep's list.
+func machineNamed(machines []machine.Machine, name string) *machine.Machine {
+	for i := range machines {
+		if machines[i].Metadata.Name == name {
+			return &machines[i]
+		}
+	}
+	return &machine.Machine{Metadata: api.ObjectMeta{Name: name}}
 }
 
 // decideRollout computes the whole rollout decision, over the same
@@ -201,14 +221,14 @@ func available(phase api.Phase) bool {
 // that a machine reads available only when it is up. The zero time
 // means the record is old enough.
 func decideRollout(machines []machine.Machine, heard map[string]time.Time, heardSince time.Time,
-	clusterDoc *cluster.Cluster, appliedVersion string, now time.Time) rollout {
-	var r rollout
+	clusterDoc *cluster.Cluster, appliedVersion string, q fleetRequests, now time.Time) rollout {
+	r := rollout{waits: map[string]string{}}
 	judgedFrom := heardSince.Add(kubernetes.HeartbeatStaleAfter)
 	listening := !heardSince.IsZero() && !now.After(judgedFrom)
-	inFlight := 0 // budget slots occupied: unavailable machines and unspent grants
+	var occupying []string // machines out of service: unavailable, or holding a turn
 	leaderBusy := false
 	leaderAdvancing := false // a leader holds an unspent grant; its boot advances the template
-	var stalled, inProgress, waiting, workers, leaders []string
+	var stalled, inProgress, waiting, workers, leaders, fetching, rejoining []string
 	ledger := map[string]cluster.RebootTurn{}
 	for _, turn := range clusterDoc.Status.RebootTurns {
 		ledger[turn.Machine] = turn
@@ -231,17 +251,23 @@ func decideRollout(machines []machine.Machine, heard map[string]time.Time, heard
 		// grant from the API server (fleetReader.readTurns), so its
 		// version here is current. At another version, no grant that
 		// the entry covers can land, so the entry leaves and its slot
-		// is free. A grant that no entry names, from an older binary
-		// or from a ledger that an older schema pruned, enters the
-		// ledger at the Machine's current version.
+		// is free, unless the entry's Disruptions hold it
+		// (holdsEntry). A grant that no entry names, from an older
+		// binary or from a ledger that an older schema pruned, enters
+		// the ledger at the Machine's current version.
+		open := q.open(m)
 		turn, recorded := ledger[name]
-		if recorded && grant == nil && m.Metadata.ResourceVersion != turn.MachineResourceVersion {
+		if recorded && grant == nil && m.Metadata.ResourceVersion != turn.MachineResourceVersion &&
+			!holdsEntry(turn, open, phase) {
 			recorded = false
 		}
 		if !recorded && grant != nil {
 			turn, recorded = cluster.RebootTurn{Machine: name, MachineResourceVersion: m.Metadata.ResourceVersion, Since: since}, true
 		}
 		if recorded {
+			// Each open request joins the turn, so it shares the
+			// turn's drain.
+			turn.Disruptions = joined(turn.Disruptions, open)
 			r.turns = append(r.turns, turn)
 		}
 		// A pending entry records a turn whose grant this sweep does
@@ -258,20 +284,39 @@ func decideRollout(machines []machine.Machine, heard map[string]time.Time, heard
 			// budget. Its entry keeps the slot until a later sweep
 			// reads the Machine without the grant.
 			r.revoke = append(r.revoke, name)
-			inFlight++
+			occupying = append(occupying, name)
 			leaderBusy = leaderBusy || leader
 		case grant != nil && !available(phase) && now.Sub(grant.LastTransitionTime) > rolloutStallAfter:
 			// This machine was granted a turn, went down, and has
 			// stayed down too long. That is no longer a reboot in
 			// progress. It is an outage.
 			stalled = append(stalled, name)
-			inFlight++
+			occupying = append(occupying, name)
+		case pending && m.Metadata.ResourceVersion != turn.MachineResourceVersion && available(phase) && wantsTurn(m):
+			// The entry outlived its grant, because one of its
+			// requests is still open, and the machine asks for a turn
+			// again: a request that arrived as the last grant was
+			// reclaimed. The machine still holds its turn and its slot,
+			// so the grant goes out again in the same entry, at the
+			// Machine's current version, once the stall and the
+			// heartbeats allow it (below). A release that is still
+			// downloading waits, so it joins this grant too.
+			occupying = append(occupying, name)
+			inProgress = append(inProgress, name)
+			leaderBusy = leaderBusy || leader
+			leaderAdvancing = leaderAdvancing || leader
+			if downloading(m) {
+				fetching = append(fetching, name)
+				r.waits[name] = "the machine's release is still downloading, and it joins this turn when it finishes"
+				continue
+			}
+			rejoining = append(rejoining, name)
 		case grant != nil || !available(phase) || pending:
 			// A machine that is mid-turn, recorded for a turn, or
 			// unwell occupies a budget slot either way. The budget
 			// counts unavailability itself, not whether the
 			// unavailability was planned.
-			inFlight++
+			occupying = append(occupying, name)
 			if grant != nil || pending {
 				inProgress = append(inProgress, name)
 			}
@@ -293,6 +338,12 @@ func decideRollout(machines []machine.Machine, heard map[string]time.Time, heard
 				// with no grant, advances nothing.
 				leaderAdvancing = leaderAdvancing || grant != nil || pending
 			}
+		case wantsTurn(m) && downloading(m):
+			// The release is still on its way, so the turn waits for
+			// it, and the machine takes one drain and one reboot for
+			// both.
+			fetching = append(fetching, name)
+			r.waits[name] = "the machine's release is still downloading, and the turn waits so the release shares its reboot"
 		case wantsTurn(m):
 			if leader {
 				leaders = append(leaders, name)
@@ -304,7 +355,40 @@ func decideRollout(machines []machine.Machine, heard map[string]time.Time, heard
 
 	slices.Sort(workers)
 	slices.Sort(leaders)
-	capacity := clusterDoc.Spec.Disruption.MaxUnavailableOrDefault() - inFlight
+	book := newBudgetBook(q.budgetsOf(clusterDoc), machines, occupying)
+	wait := func(name, why string) {
+		waiting = append(waiting, name)
+		r.waits[name] = why
+	}
+	// held answers why no machine takes a new turn on this sweep, or
+	// the empty string when turns can go out.
+	held := func() string {
+		switch {
+		case len(stalled) > 0:
+			return "the rollout is stalled: " + strings.Join(stalled, ", ") + " took a turn and did not come back"
+		case listening:
+			return "cluster-operator started reading the heartbeat leases at " + heardSince.Format(time.RFC3339) +
+				", and grants no turn until " + judgedFrom.Format(time.RFC3339)
+		}
+		return ""
+	}
+
+	// A machine whose entry outlived its grant takes the grant again
+	// in the same entry. It already holds its slot, so no budget
+	// applies, but a stalled rollout and a conductor that cannot judge
+	// the heartbeats yet grant nothing.
+	for _, name := range rejoining {
+		if why := held(); why != "" {
+			r.waits[name] = why
+			continue
+		}
+		r.grant = append(r.grant, name)
+		for i := range r.turns {
+			if r.turns[i].Machine == name {
+				r.turns[i].MachineResourceVersion = versions[name]
+			}
+		}
+	}
 
 	// The gate: while the applied template lags the fleet's target,
 	// advancing it is worth more than a worker's turn. The hold must
@@ -321,27 +405,40 @@ func decideRollout(machines []machine.Machine, heard map[string]time.Time, heard
 	gate := appliedVersion != "" && clusterDoc.Spec.Version != "" && appliedVersion != clusterDoc.Spec.Version
 	holdWorkers := gate && ((len(leaders) > 0 && !leaderBusy) || leaderAdvancing)
 
+	give := func(name string) {
+		r.grant = append(r.grant, name)
+		r.turns = append(r.turns, cluster.RebootTurn{Machine: name, MachineResourceVersion: versions[name], Since: since,
+			Disruptions: q.open(machineNamed(machines, name))})
+		inProgress = append(inProgress, name)
+		book.take(name)
+	}
 	if !holdWorkers {
 		for _, name := range workers {
-			if len(stalled) > 0 || listening || capacity <= 0 {
-				waiting = append(waiting, name)
+			if why := held(); why != "" {
+				wait(name, why)
 				continue
 			}
-			r.grant = append(r.grant, name)
-			r.turns = append(r.turns, cluster.RebootTurn{Machine: name, MachineResourceVersion: versions[name], Since: since})
-			inProgress = append(inProgress, name)
-			capacity--
+			if why := book.refusal(name); why != "" {
+				wait(name, why)
+				continue
+			}
+			give(name)
 		}
 	}
 	for _, name := range leaders {
-		if len(stalled) > 0 || listening || capacity <= 0 || leaderBusy {
-			waiting = append(waiting, name)
+		if why := held(); why != "" {
+			wait(name, why)
 			continue
 		}
-		r.grant = append(r.grant, name)
-		r.turns = append(r.turns, cluster.RebootTurn{Machine: name, MachineResourceVersion: versions[name], Since: since})
-		inProgress = append(inProgress, name)
-		capacity--
+		if leaderBusy {
+			wait(name, "another leader is out of service, and only one leader is out at a time")
+			continue
+		}
+		if why := book.refusal(name); why != "" {
+			wait(name, why)
+			continue
+		}
+		give(name)
 		leaderBusy = true
 	}
 	slices.SortFunc(r.turns, func(a, b cluster.RebootTurn) int { return strings.Compare(a.Machine, b.Machine) })
@@ -349,8 +446,12 @@ func decideRollout(machines []machine.Machine, heard map[string]time.Time, heard
 		// Every waiting worker sits out the sweep: the gate holds the
 		// whole group back rather than admit some of them ahead of the
 		// leader turn that ends the lag.
-		waiting = append(waiting, workers...)
+		for _, name := range workers {
+			wait(name, fmt.Sprintf("the applied system-pod template (%s) lags the fleet's target (%s), and a leader goes first to advance it",
+				appliedVersion, clusterDoc.Spec.Version))
+		}
 	}
+	r.budgets = book.statuses(q.budgets)
 	if listening {
 		// A reclaim waits too: the machine reads available from a
 		// status that may be older than the machine's last power-off.
@@ -364,16 +465,22 @@ func decideRollout(machines []machine.Machine, heard map[string]time.Time, heard
 			Message: fmt.Sprintf("granted a reboot turn more than %s ago and not back: %s; no further turns until it returns",
 				rolloutStallAfter, strings.Join(stalled, ", ")),
 		}
-	case len(inProgress)+len(waiting) > 0:
+	case len(inProgress)+len(waiting)+len(fetching) > 0:
 		message := "taking a reboot turn: " + strings.Join(inProgress, ", ")
-		if len(inProgress) == 0 {
-			message = "reboot turns are waiting on the disruption budget"
-			if listening {
-				message = "reboot turns are waiting on the heartbeats"
-			}
+		switch {
+		case len(inProgress) > 0:
+		case listening:
+			message = "reboot turns are waiting on the heartbeats"
+		case len(waiting) > 0:
+			message = "reboot turns are waiting on the disruption budgets"
+		default:
+			message = "reboot turns are waiting for a release to finish downloading"
 		}
 		if len(waiting) > 0 {
 			message += "; waiting: " + strings.Join(waiting, ", ")
+		}
+		if len(fetching) > 0 {
+			message += "; waiting for a release to finish downloading: " + strings.Join(fetching, ", ")
 		}
 		if holdWorkers && len(workers) > 0 {
 			message += fmt.Sprintf("; the applied system-pod template (%s) lags the fleet's target (%s); "+

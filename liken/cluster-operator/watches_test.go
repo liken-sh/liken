@@ -181,6 +181,8 @@ func TestASettledSweepOverTheCopiesSendsOneRead(t *testing.T) {
 			"GET /apis/liken.sh/v1alpha1/clusters/lab",
 			"GET /apis/liken.sh/v1alpha1/machines",
 			"GET /apis/coordination.k8s.io/v1/namespaces/liken-system/leases",
+			"GET /apis/liken.sh/v1alpha1/disruptions",
+			"GET /apis/liken.sh/v1alpha1/machinedisruptionbudgets",
 			"GET /apis/apps/v1/namespaces/liken-system/daemonsets/liken-machine-operator",
 			"GET /apis/apps/v1/namespaces/liken-system/daemonsets/liken-machine-operator",
 			"GET /api/v1/namespaces/liken-system/pods",

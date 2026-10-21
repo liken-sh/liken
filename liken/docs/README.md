@@ -15,10 +15,11 @@ because a person must decide what comes first. The guides follow
 ASD-STE100, plain technical English: short sentences, one instruction
 per sentence, no metaphor.
 
-The reference for the two CRDs is generated, not written. The
-schemas in `machine/manifests/machines-crd.yaml` and
-`cluster/manifests/clusters-crd.yaml` describe every field, because
-the schemas are written to be read. The `crdref` program reads each
+The reference for the four CRDs is generated, not written. The
+schemas in `machine/manifests/machines-crd.yaml`,
+`cluster/manifests/clusters-crd.yaml`, and
+`disruption/manifests/` describe every field, because the schemas are
+written to be read. The `crdref` program reads each
 schema and arranges those descriptions into a page, so the reference
 stays the same as what the API server enforces. The generated pages
 are gitignored, because they are build products.

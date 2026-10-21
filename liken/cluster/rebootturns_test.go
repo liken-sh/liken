@@ -90,7 +90,8 @@ func TestTheClusterCRDDeclaresTheLedger(t *testing.T) {
 // would never prove itself stored.
 func TestARebootTurnWritesTheDeclaredFields(t *testing.T) {
 	declared := readLedgerSchema(t).Spec.Versions[0].Schema.OpenAPIV3Schema.Properties.Status.Properties.RebootTurns.Items.Properties
-	raw, err := json.Marshal(RebootTurn{Machine: "node-4", MachineResourceVersion: "184467", Since: time.Now()})
+	raw, err := json.Marshal(RebootTurn{Machine: "node-4", MachineResourceVersion: "184467", Since: time.Now(),
+		Disruptions: []string{"node-4.machine-operator"}})
 	if err != nil {
 		t.Fatal(err)
 	}

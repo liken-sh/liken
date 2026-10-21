@@ -76,7 +76,8 @@ A change to `spec.leaders` reboots every machine, one at a time,
 because each machine reads the leaders only when it boots. The leaders
 give each follower its time sources, and the founder's address gives
 each leader its join URL. Under `Manual`, each machine reports
-`RebootPending`. Approve each one with
+`RebootPending`, and its request reads `False` in the APPROVED column
+of `kubectl get disruptions`. Approve each one with
 [`liken approve-reboot`](https://liken.sh/docs/reference/cli/#liken-approve-reboot), as
 in [Upgrade the fleet](https://liken.sh/docs/guides/upgrade/).
 
@@ -85,7 +86,8 @@ in [Upgrade the fleet](https://liken.sh/docs/guides/upgrade/).
     kubectl get machine <name> -o jsonpath='{.status.conditions[?(@.type=="NodeCurrent")]}'
 
 The machine reboots as a follower and reports `AwaitingTurn` until the
-cluster gives it a reboot turn. Then it reports `DemotionRebooting`,
+cluster gives it a reboot turn. The demotion is part of the request
+`<name>.machine-operator`, which `kubectl get disruptions` lists. Then it reports `DemotionRebooting`,
 deletes its Node, and reboots. When it returns, the condition is
 `True` with the reason `NodeMatchesRole`, and `kubectl get nodes` shows
 the machine with no `control-plane` or `etcd` role. Continue from step
@@ -120,10 +122,12 @@ this cluster.
 
 The cluster keeps both objects until you delete them, and no other
 machine creates them again. Delete them, because a `Lost` machine
-counts against the
-[disruption budget](https://liken.sh/docs/reference/cluster/#specdisruption). With the
-default budget of one, no other machine gets a reboot turn, and
-upgrades and Cluster edits stop.
+counts against every
+[`MachineDisruptionBudget`](https://liken.sh/docs/reference/machinedisruptionbudget/)
+that selects it. With the `default` budget of one, no other machine
+gets a reboot turn, and upgrades and Cluster edits stop. The
+`Disruption`s that `machine-operator` and `liken request-reboot` file
+name the `Machine` as their owner, so Kubernetes deletes them with it.
 
 Power off before you delete. A machine that still runs creates its
 Machine again when its operator starts, and its kubelet registers the
@@ -176,8 +180,8 @@ Delete its objects first:
 
 For a leader, the deletion of the Node also removes its datastore
 member. Do this before any other Cluster edit. The `Lost` machine
-holds the disruption budget, so an edit to `spec.leaders` does not
-roll while the Machine exists.
+counts against the `default` budget. With the limit of one, an edit
+to `spec.leaders` does not roll while the Machine exists.
 
 Then, for a leader, remove its name from `spec.leaders` as in step 1,
 both on the live cluster and in `mycluster/cluster.yaml`, and change

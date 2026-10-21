@@ -47,14 +47,16 @@ import (
 // leaves open with sysBlock and devRoot.
 var serviceAccountDir = apiclient.ServiceAccountDir
 
-// MachinesPath and ClustersPath name the URLs where our CRDs' objects
-// live. Every resource in Kubernetes uses the same URL structure.
-// Built-in resources use the legacy /api/v1 root instead of
-// /apis/<group>. Both Machines and Clusters are cluster-scoped kinds,
-// so their URLs have no /namespaces/<ns>/ segment.
+// MachinesPath, ClustersPath, DisruptionsPath, and BudgetsPath name
+// the URLs where our CRDs' objects live. Every resource in Kubernetes
+// uses the same URL structure. Built-in resources use the legacy
+// /api/v1 root instead of /apis/<group>. All four kinds are
+// cluster-scoped, so their URLs have no /namespaces/<ns>/ segment.
 const (
-	MachinesPath = "/apis/" + api.APIVersion + "/machines"
-	ClustersPath = "/apis/" + api.APIVersion + "/clusters"
+	MachinesPath    = "/apis/" + api.APIVersion + "/machines"
+	ClustersPath    = "/apis/" + api.APIVersion + "/clusters"
+	DisruptionsPath = "/apis/" + api.APIVersion + "/disruptions"
+	BudgetsPath     = "/apis/" + api.APIVersion + "/machinedisruptionbudgets"
 )
 
 // InClusterClient builds an operator's client from the pod's

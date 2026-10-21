@@ -1,0 +1,156 @@
+# The MachineDisruptionBudget API, declared to Kubernetes.
+#
+# A MachineDisruptionBudget limits how many of the machines it selects
+# may be out of service at once: the PodDisruptionBudget of machines.
+# cluster-operator grants a machine a reboot turn only when every
+# budget that selects it has room, and it keeps one budget named
+# default, which selects every machine.
+#
+# This file goes in liken's subdirectory of k3s's auto-deploy
+# manifests and applies at every startup, like the Machine CRD.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: machinedisruptionbudgets.liken.sh
+  annotations:
+    # init keeps whichever copy of this file declares the higher
+    # revision, so an older slot's boot cannot downgrade the schema
+    # the cluster serves (init/schemarevision.go). Raise it in the same
+    # change that changes the schema below; a test holds the two
+    # together.
+    liken.sh/schema-revision: "1"
+spec:
+  group: liken.sh
+  names:
+    kind: MachineDisruptionBudget
+    listKind: MachineDisruptionBudgetList
+    plural: machinedisruptionbudgets
+    singular: machinedisruptionbudget
+    shortNames: [mdb]
+    categories: [liken]
+  # Cluster-scoped, like the Machines it selects.
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Max
+          type: integer
+          jsonPath: .spec.maxUnavailable
+        - name: Selected
+          type: integer
+          jsonPath: .status.selected
+        - name: Out
+          type: integer
+          jsonPath: .status.unavailable
+        - name: Allowed
+          type: integer
+          jsonPath: .status.allowed
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            A MachineDisruptionBudget limits how many of the machines it
+            selects may be out of service at the same time, planned and
+            unplanned together. A machine takes a reboot turn only when
+            every budget that selects it has room. The budget named
+            default selects every machine, and cluster-operator creates
+            it from the Cluster's spec.disruption.maxUnavailable when it
+            is missing. Whatever the budgets allow, only one leader is
+            out of service at a time.
+          properties:
+            spec:
+              type: object
+              required: [maxUnavailable]
+              description: The machines the budget covers, and the limit.
+              properties:
+                selector:
+                  type: object
+                  description: >-
+                    Selects machines by the labels on their Machine
+                    objects, with the grammar of a Kubernetes label
+                    selector. An empty selector selects every machine.
+                  properties:
+                    matchLabels:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: Each label a selected machine carries, with its value.
+                    matchExpressions:
+                      type: array
+                      description: Each expression a selected machine's labels meet.
+                      items:
+                        type: object
+                        required: [key, operator]
+                        x-kubernetes-validations:
+                          - rule: "self.operator in ['In', 'NotIn'] ? has(self.values) && size(self.values) > 0 : !has(self.values) || size(self.values) == 0"
+                            message: In and NotIn need values, and Exists and DoesNotExist take none
+                        properties:
+                          key:
+                            type: string
+                            minLength: 1
+                          operator:
+                            type: string
+                            enum: [In, NotIn, Exists, DoesNotExist]
+                          values:
+                            type: array
+                            items:
+                              type: string
+                maxUnavailable:
+                  type: integer
+                  minimum: 1
+                  description: >-
+                    How many of the selected machines can be out of
+                    service at the same time. A machine counts when it
+                    holds a reboot turn, or when it is Lost, Degraded,
+                    or otherwise unavailable without one.
+            status:
+              type: object
+              description: What the budget counted on cluster-operator's last sweep.
+              properties:
+                observedGeneration:
+                  type: integer
+                  format: int64
+                selected:
+                  type: integer
+                  description: How many machines the selector selects.
+                unavailable:
+                  type: integer
+                  description: How many of the selected machines are out of service.
+                allowed:
+                  type: integer
+                  description: How many more of the selected machines may go out of service now.
+                conditions:
+                  type: array
+                  description: >-
+                    DisruptionAllowed is True while the budget has room
+                    for one more machine, and its message names the
+                    machines that fill it.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [type]
+                  items:
+                    type: object
+                    required: [type, status, lastTransitionTime, reason]
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                        minLength: 1
+                      message:
+                        type: string

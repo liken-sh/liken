@@ -40,6 +40,13 @@ client library supplies, `go_*` and `process_*`, and these:
 | both | `liken_reconcile_errors_total{kind}` | counter | passes that failed |
 | both | `liken_watch_restarts_total{kind}` | counter | watches that closed and opened again |
 
+The `kind` label of `liken_watch_restarts_total` names the kind that
+the watch reads. The machine operator watches `Machine`, `Node`,
+`Cluster`, `Secret`, `Pod`, `ResourceSlice`, and `Disruption`. The
+cluster operator watches `Machine`, `Cluster`, `Lease`, `DaemonSet`,
+`Pod`, `Disruption`, and `MachineDisruptionBudget`. Each kind reports
+a zero before its first restart.
+
 The machine operator and the cluster operator each publish the
 metrics of their own domain:
 

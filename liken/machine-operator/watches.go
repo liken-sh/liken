@@ -3,10 +3,11 @@ package main
 // The machine operator's watches, and the reads a pass makes through
 // them.
 //
-// A pass judges six API objects: this machine's Machine, its Node, the
-// Cluster, the registry credentials Secret, this node's own operator
-// pod, and this node's ResourceSlice. A pass that read each object from
-// the API server would send six requests on every pass from every
+// A pass judges seven kinds of API object: this machine's Machine, its
+// Node, the Cluster, the registry credentials Secret, this node's own
+// operator pod, this node's ResourceSlice, and this machine's
+// Disruptions. A pass that read each object from the API server would
+// send seven requests on every pass from every
 // machine, and on most passes find nothing new. So the operator watches
 // each object, keeps a copy in memory, and the pass reads the copies,
 // and a change to a copy is what wakes most passes.
@@ -32,6 +33,11 @@ package main
 //     that somebody set by hand is reverted at once.
 //   - The Secret and the operator pod wake the loop on every change,
 //     and both change rarely.
+//   - The machine's Disruptions wake the loop on an edit: a person's
+//     new request, an approval, and a deleted request. The pass writes
+//     its own request's spec too, and the echo of that write wakes one
+//     more pass, which finds nothing to do. The conductor's status
+//     writes wake nothing.
 //   - The ResourceSlice wakes the loop when it is deleted, or updated
 //     by another writer (sliceHandler). The kubelet deletes a driver's
 //     slices when it starts, so a restart of k3s deletes this node's
@@ -83,9 +89,11 @@ import (
 	"github.com/liken-sh/liken/kubernetes/memo"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/disruption"
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/kubernetes/watch"
 	"github.com/liken-sh/liken/liken/machine"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -94,15 +102,16 @@ import (
 
 // The kinds this operator watches, as the dynamic client names them.
 var (
-	likenVersion     = schema.GroupVersion{Group: "liken.sh", Version: strings.TrimPrefix(api.APIVersion, "liken.sh/")}
-	machineResource  = likenVersion.WithResource("machines")
-	clusterResource  = likenVersion.WithResource("clusters")
-	nodeResource     = schema.GroupVersionResource{Version: "v1", Resource: "nodes"}
-	secretResource   = schema.GroupVersionResource{Version: "v1", Resource: "secrets"}
-	podResource      = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
-	sliceResource    = schema.GroupVersionResource{Group: "resource.k8s.io", Version: "v1", Resource: "resourceslices"}
-	credentialsKey   = "liken-system/" + kubernetes.RegistryCredentialsSecret
-	operatorPodLabel = "app=liken-machine-operator"
+	likenVersion       = schema.GroupVersion{Group: "liken.sh", Version: strings.TrimPrefix(api.APIVersion, "liken.sh/")}
+	machineResource    = likenVersion.WithResource("machines")
+	clusterResource    = likenVersion.WithResource("clusters")
+	nodeResource       = schema.GroupVersionResource{Version: "v1", Resource: "nodes"}
+	secretResource     = schema.GroupVersionResource{Version: "v1", Resource: "secrets"}
+	podResource        = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+	sliceResource      = schema.GroupVersionResource{Group: "resource.k8s.io", Version: "v1", Resource: "resourceslices"}
+	disruptionResource = likenVersion.WithResource("disruptions")
+	credentialsKey     = "liken-system/" + kubernetes.RegistryCredentialsSecret
+	operatorPodLabel   = "app=liken-machine-operator"
 )
 
 // The kind labels of liken_watch_restarts_total, one for each watch.
@@ -112,11 +121,12 @@ const (
 	secretKind        = "Secret"
 	podKind           = "Pod"
 	resourceSliceKind = "ResourceSlice"
+	disruptionKind    = "Disruption"
 )
 
 // watchKinds lists every kind label above, with the Machine's, so the
 // counter reports a zero for each watch before its first restart.
-var watchKinds = []string{machineKind, nodeKind, clusterWatchKind, secretKind, podKind, resourceSliceKind}
+var watchKinds = []string{machineKind, nodeKind, clusterWatchKind, secretKind, podKind, resourceSliceKind, disruptionKind}
 
 // reader reads each API object a pass judges: from the copy a watch
 // keeps, or from the API server when the copy cannot answer. A reader
@@ -136,6 +146,7 @@ type reader struct {
 	credentials *informer.Collection
 	ownPods     *informer.Collection
 	slices      *informer.Collection
+	disruptions *informer.Collection
 
 	// machineVersions is the memo of this operator's own status writes
 	// to its Machine, and of its reads of it from the API server
@@ -225,7 +236,7 @@ func watchThisMachine(ctx context.Context, watcher dynamic.Interface, client *ap
 		statusWritten: &kubernetes.OwnWrite{}, slicesWritten: &kubernetes.SliceWriter{}, recovered: &atomic.Bool{},
 		waits: newWaits(ctx, watcher, wake, name), sysctls: newSysctlMemory()}
 	start := func(kind string, source informer.Source, handler cache.ResourceEventHandler) *informer.Collection {
-		return informer.Start(ctx, watcher, source, informer.Options{
+		options := informer.Options{
 			Handler:  handler,
 			Synced:   wake,
 			Reopened: func() { restarted(kind) },
@@ -236,7 +247,14 @@ func watchThisMachine(ctx context.Context, watcher dynamic.Interface, client *ap
 			// A copy stops answering after any failed watch, as the
 			// head of this file says.
 			UnreadyOnWatchError: true,
-		})
+		}
+		// A cluster whose leaders run a release from before the
+		// Disruptions does not serve the kind until a leader boots a
+		// release that has it (requests.go).
+		if kind == disruptionKind {
+			options.Absent = apierrors.IsNotFound
+		}
+		return informer.Start(ctx, watcher, source, options)
 	}
 	named := func(n string) string { return "metadata.name=" + n }
 
@@ -250,6 +268,8 @@ func watchThisMachine(ctx context.Context, watcher dynamic.Interface, client *ap
 	r.nodes = start(nodeKind, nodes, watch.WakeOnContent[nodeObject](nodes, wake, withoutHeartbeats))
 	r.ownPods = start(podKind, pods, watch.WakeOnChange[kubernetes.Pod](pods, wake))
 	r.slices = start(resourceSliceKind, slices, sliceHandler(r.slicesWritten, wake))
+	requests := requestsSource(name)
+	r.disruptions = start(disruptionKind, requests, watch.WakeOnEdit[disruption.Disruption](requests, wake))
 	if clusterName != "" {
 		clusters := informer.Source{Resource: clusterResource, FieldSelector: named(clusterName)}
 		secrets := informer.Source{Resource: secretResource, Namespace: "liken-system",
