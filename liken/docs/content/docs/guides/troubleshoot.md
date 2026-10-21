@@ -172,9 +172,10 @@ request of the machine:
   The message names a budget with no room and the machines that fill
   it, another leader that is out of service, a release that still
   downloads, a stalled rollout, or the first 40 seconds after
-  `cluster-operator` starts. A message that says it waits for
-  `machine-operator` to ask for the turn means the machine has not
-  reported `AwaitingTurn` yet.
+  `cluster-operator` starts. A message that says the machine is out
+  of service with no turn names its phase, such as `Lost` or
+  `Degraded`: the request waits until the machine is back. A message
+  that says it waits for the next sweep clears within seconds.
 
 When a budget has no room, read the budgets:
 
@@ -198,13 +199,14 @@ The Cluster's
 [`status.rebootTurns`](/docs/reference/cluster/#statusrebootturns)
 names each machine that holds a reboot turn, with the requests that
 the turn covers, and each entry counts against the budgets. An entry
-can name a machine with no `RebootApproved` condition, because
-`cluster-operator` records a turn before it grants it, and a copy that
-stopped between the two writes leaves the record alone.
-`cluster-operator` then writes the grant itself, when the machine is
-available, and the turn goes on as normal. It removes the entry when
-the Machine is gone. It also removes the entry when the machine holds
-no grant, its `resourceVersion` differs from the entry's
+is the grant: `machine-operator` acts on its machine's entry. An
+entry can name a machine with no `RebootApproved` condition, because
+`cluster-operator` records a turn before it writes the condition, and
+a copy that stopped between the two writes leaves the record alone.
+`cluster-operator` then writes the condition itself, when the machine
+is available. It removes the entry when the Machine is gone. It also
+removes the entry when the machine has no `RebootApproved` condition,
+its `resourceVersion` differs from the entry's
 `machineResourceVersion`, and the machine is available with no open
 request in the entry. A machine that is down keeps an entry that
 names a request until it returns. An entry that names no request
@@ -316,14 +318,14 @@ starts with the condition's name. The other events are these:
 | `KernelCrashed` | `Machine` | `Warning` | The boot found a new kernel crash record. [`status.lastCrash`](/docs/reference/machine/#statuslastcrash) holds it. |
 | `BootRefused` | `Machine` | `Warning` | Init refused a boot and powered the machine off. [`status.lastFailStop`](/docs/reference/machine/#status--lastfailstop) holds the reason. |
 | `Cordoned` | `Machine` | `Normal` | The operator cordoned the machine's `Node` before a reboot. |
-| `Uncordoned` | `Machine` | `Normal` | The operator returned the `Node` to the scheduler after the reboot. |
+| `Uncordoned` | `Machine` | `Normal` | The operator returned the `Node` to the scheduler after the reboot, or after the request went away during the drain. The message says which. |
 | `Roamed` | `Machine` | `Normal` | A radio moved from one access point of its network to another. The message names both, with the channel and the band of each. |
 | `Associated` | `Machine` | `Normal` | A radio associated with an access point: at boot, or again after it lost one. The message names the access point and the reason for the loss. |
 | `BackstopRepaired` | `Machine` | `Warning` | A pass that no event started changed the machine. The message names each step that wrote. The operator missed a wake, which is a bug in `liken`: report it with the message. The machine is correct again. |
 | `RebootTurnGranted` | `Machine` | `Normal` | The cluster granted the machine a reboot turn. |
 | `RebootTurnReclaimed` | `Machine` | `Normal` | The machine no longer needs its turn, and the turn returns to the budgets. |
 | `DisruptionDeleted` | `Disruption` | `Normal` | `cluster-operator` deleted a request that completed more than a day ago. |
-| `MachineDisruptionBudgetCreated` | `Cluster` | `Normal` | `cluster-operator` created the `default` budget from `spec.disruption.maxUnavailable`. Edit the budget to change the limit. |
+| `MachineDisruptionBudgetCreated` | `Cluster` | `Normal` | `cluster-operator` created the `default` budget, which allows one machine out of service at a time. Edit the budget to change the limit. |
 | `FluxDeployKeyMinted` | `Cluster` | `Normal` | The cluster operator made the deploy key. Register its public half at the forge. |
 | `FluxEngineSeeded` | `Cluster` | `Normal` | The flux engine was absent, and the cluster operator created it from the seed that the release carries. |
 

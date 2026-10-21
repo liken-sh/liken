@@ -211,14 +211,16 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 
 	// t is this machine's standing with the rollout conductor. A
 	// standalone machine reboots whenever it needs to. A cluster
-	// member reboots only on a granted turn. The grant is a
-	// condition the conductor wrote onto this Machine (rollout.go).
-	// This operator reads it, carries it along in its own status
-	// writes, and never sets or clears it.
+	// member reboots only on a granted turn, which is this machine's
+	// entry in the Cluster's status.rebootTurns (turn.go). The
+	// conductor still writes a RebootApproved condition for a
+	// machine-operator of the release before, and this operator
+	// carries it along in its own status writes and never sets or
+	// clears it.
 	t := turnStandalone
 	if clusterName != "" {
 		t = turnAwaiting
-		if g := api.FindCondition(m.Status.Conditions, machine.RebootApprovedCondition); g != nil && g.Status == api.ConditionTrue {
+		if holdsTurn(r, clusterName, m.Metadata.Name) {
 			t = turnGranted
 		}
 	}
@@ -281,14 +283,14 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 	// converge (see disruptions).
 	// The machine's Disruptions: a person's request for this boot, and
 	// this operator's own request (requests.go). A pass whose read of
-	// them fails acts on the annotations alone, and leaves its own
-	// request as it is. The decisions read the Machine with the own
-	// request's approval in its approve annotation.
+	// them fails acts on no request, and leaves its own request as it
+	// is. The decisions read a copy of the Machine that
+	// carries the own request's approval (requests.go).
 	requests, requestsErr := quiet.requests(m.Metadata.Name)
 	if requestsErr != nil {
 		fmt.Printf("reading this machine's Disruptions: %v\n", requestsErr)
 	}
-	decided := withOwnApproval(m, requests)
+	decided := withRequestApprovals(m, requests)
 
 	disr := &disruptions{events: notes, out: out}
 	machineStore := machine.MachineManifests(machine.MachineStateDir)
@@ -410,16 +412,22 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 		}
 
 		// When this operator set a cordon and no longer needs it,
-		// because the reboot happened and the machine converged, the
-		// node goes back to the scheduler. This applies only to
+		// because the reboot happened and the machine converged, or
+		// because nothing waits for a reboot any more, the node goes
+		// back to the scheduler. This applies only to
 		// cordons the operator set itself: decideUncordon leaves a
 		// person's cordon in place.
 		if !disr.rebooting && !disr.draining && decideUncordon(node) {
 			if err := kubernetes.PatchJSON(c, nodesPath+"/"+node.Metadata.Name, uncordonPatch()); err != nil {
 				fmt.Printf("uncordoning %s: %v\n", node.Metadata.Name, err)
 			} else {
-				fmt.Printf("uncordoned %s; its reboot is complete\n", node.Metadata.Name)
-				notes.normal(reasonUncordoned, "uncordoned the Node "+node.Metadata.Name+"; its reboot is complete")
+				var boot *time.Time
+				if facts != nil {
+					boot = facts.Boot.Time
+				}
+				message := uncordonMessage(node, boot)
+				fmt.Println(message)
+				notes.normal(reasonUncordoned, message)
 			}
 		}
 	}

@@ -1,11 +1,11 @@
 package main
 
-// The Disruptions that request-reboot and approve-reboot write beside
-// the annotations. A Disruption is the request as `kubectl get
-// disruptions` lists it, and the annotation is the request as a
-// machine-operator of the release before the Disruptions reads it, so
-// each command writes both, and a machine on either release acts on
-// the request.
+// The Disruptions that request-reboot and approve-reboot write. A
+// Disruption is the request as `kubectl get disruptions` lists it, and
+// machine-operator and cluster-operator act on it. The release before
+// this one also read two annotations on the Machine. This CLI writes
+// neither, and that release's machine-operator acts on the Disruptions
+// too, so this CLI serves a fleet on either release.
 
 import (
 	"encoding/json"
@@ -46,8 +46,7 @@ func whoAmI(c *apiclient.Client) string {
 // fileRebootRequest creates a person's request to reboot the running
 // boot. A request for the same boot already exists when the command
 // ran before, and that is the same request. A cluster that does not
-// serve the kind answers nothing filed, and the annotation alone
-// carries the request.
+// serve the kind answers nothing filed.
 func fileRebootRequest(c *apiclient.Client, m *machine.Machine, bootID string) (string, error) {
 	name := disruption.RebootRequestName(m.Metadata.Name, bootID)
 	request := disruption.New(name, m, disruption.Spec{
@@ -86,7 +85,7 @@ func approveRequest(c *apiclient.Client, m *machine.Machine, choice *machine.Pen
 	path := kubernetes.DisruptionsPath + "?fieldSelector=" + url.QueryEscape("spec.machine="+m.Metadata.Name)
 	requests, err := kubernetes.List[disruption.Disruption](c, path)
 	if errors.Is(err, apiclient.ErrNotFound) {
-		return "", nil
+		return "", errNoDisruptions
 	}
 	if err != nil {
 		return "", err
@@ -116,6 +115,10 @@ func approveRequest(c *apiclient.Client, m *machine.Machine, choice *machine.Pen
 	}
 	return "", fmt.Errorf("the Disruption %s changed on each of %d writes", name, approveAttempts)
 }
+
+// errNoDisruptions is the answer of a cluster that serves no
+// Disruptions: its leaders run a release from before them.
+var errNoDisruptions = errors.New("the cluster serves no Disruptions, so it runs a liken release from before them; use the liken CLI of that release")
 
 // approveAttempts bounds the writes of one approval.
 const approveAttempts = 5

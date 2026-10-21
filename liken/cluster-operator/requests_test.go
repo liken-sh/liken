@@ -79,7 +79,9 @@ func TestEveryBudgetThatSelectsAMachineMustHaveRoom(t *testing.T) {
 			)
 			machines = labeled(machines, "pool", "gpu", "node-3", "node-4")
 
-			r := decideRollout(machines, renewals, time.Time{}, labCluster(1), "", fleetRequests{budgets: c.budgets}, sweepNow)
+			q := asking(machines)
+			q.budgets = c.budgets
+			r := decideRollout(machines, renewals, time.Time{}, labCluster(1), "", q, sweepNow)
 
 			if !slices.Equal(r.grant, c.grant) {
 				t.Errorf("grants = %v, want %v", r.grant, c.grant)
@@ -91,18 +93,20 @@ func TestEveryBudgetThatSelectsAMachineMustHaveRoom(t *testing.T) {
 	}
 }
 
-// With no budget named default, spec.disruption stands in for it.
-func TestSpecDisruptionStandsInForAMissingDefaultBudget(t *testing.T) {
+// With no budget named default, a stand-in of one machine at a time
+// limits the fleet, and spec.disruption is not read.
+func TestAMissingDefaultBudgetStandsInAtOne(t *testing.T) {
 	machines, renewals := rolloutInputs(
 		rolloutEntry{"node-3", api.PhaseUpdatePending, fresh, true, -1},
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 	)
+	q := asking(machines)
+	q.budgets = []disruption.Budget{budget("gpus", 1, map[string]string{"pool": "gpu"})}
 
-	r := decideRollout(machines, renewals, time.Time{}, labCluster(2), "",
-		fleetRequests{budgets: []disruption.Budget{budget("gpus", 1, map[string]string{"pool": "gpu"})}}, sweepNow)
+	r := decideRollout(machines, renewals, time.Time{}, labCluster(2), "", q, sweepNow)
 
-	if !slices.Equal(r.grant, []string{"node-3", "node-4"}) {
-		t.Errorf("grants = %v, want node-3 and node-4 under spec.disruption's limit of 2", r.grant)
+	if !slices.Equal(r.grant, []string{"node-3"}) {
+		t.Errorf("grants = %v, want node-3 alone under the stand-in's limit of one", r.grant)
 	}
 }
 
@@ -115,8 +119,10 @@ func TestABudgetCountsAfterTheSweepsGrants(t *testing.T) {
 		rolloutEntry{"node-5", api.PhaseReady, fresh, false, -1},
 	)
 	served := []disruption.Budget{budget("default", 3, nil)}
+	q := asking(machines)
+	q.budgets = served
 
-	r := decideRollout(machines, renewals, time.Time{}, labCluster(1), "", fleetRequests{budgets: served}, sweepNow)
+	r := decideRollout(machines, renewals, time.Time{}, labCluster(1), "", q, sweepNow)
 
 	got := r.budgets["default"]
 	if got.Selected != 3 || got.Unavailable != 2 || got.Allowed != 1 {
@@ -156,7 +162,7 @@ func TestATurnWaitsForAReleaseThatIsDownloading(t *testing.T) {
 			machines, renewals := rolloutInputs(rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1})
 			machines = downloadingAs(machines, c.reason, "node-4")
 
-			r := decideRollout(machines, renewals, time.Time{}, labCluster(1), "", fleetRequests{}, sweepNow)
+			r := decideFor(machines, renewals, time.Time{}, labCluster(1), "", sweepNow)
 
 			if !slices.Equal(r.grant, c.grant) {
 				t.Errorf("grants = %v, want %v", r.grant, c.grant)
@@ -171,7 +177,7 @@ func TestProgressingNamesAMachineThatWaitsForItsDownload(t *testing.T) {
 	machines, renewals := rolloutInputs(rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1})
 	machines = downloadingAs(machines, "Downloading", "node-4")
 
-	r := decideRollout(machines, renewals, time.Time{}, labCluster(1), "", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(1), "", sweepNow)
 
 	want := "reboot turns are waiting for a release to finish downloading; waiting for a release to finish downloading: node-4"
 	if r.progressing.Message != want {
@@ -209,8 +215,8 @@ func TestATurnNamesTheRequestsItGrants(t *testing.T) {
 }
 
 // A request that waits for a Manual machine's approval, or that is
-// spent, joins no turn.
-func TestATurnNamesOnlyOpenApprovedRequests(t *testing.T) {
+// spent, asks for no turn.
+func TestOnlyAnOpenApprovedRequestAsksForATurn(t *testing.T) {
 	machines, renewals := rolloutInputs(rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1})
 	booted := sweepNow.Add(-time.Hour)
 	machines[0].Status.Boot = machine.BootStatus{Time: &booted}
@@ -221,8 +227,8 @@ func TestATurnNamesOnlyOpenApprovedRequests(t *testing.T) {
 	r := decideRollout(machines, renewals, time.Time{}, labCluster(1), "",
 		fleetRequests{disruptions: []disruption.Disruption{waiting, spent}}, sweepNow)
 
-	if len(r.turns) != 1 || len(r.turns[0].Disruptions) != 0 {
-		t.Errorf("turns = %+v, want node-4's turn with no request named", r.turns)
+	if len(r.grant) != 0 || len(r.turns) != 0 {
+		t.Errorf("grants = %v and turns = %+v, want none: AwaitingTurn alone asks for nothing", r.grant, r.turns)
 	}
 }
 
@@ -263,7 +269,7 @@ func TestAnEntryWithNoRequestsLeavesAtAnotherVersion(t *testing.T) {
 	machines, renewals := rolloutInputs(rolloutEntry{"node-4", api.PhaseBooting, fresh, false, -1})
 	machines = atVersion7(machines)
 
-	r := decideRollout(machines, renewals, time.Time{}, withTurns(1, turnAt("node-4", "6")), "", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, withTurns(1, turnAt("node-4", "6")), "", sweepNow)
 
 	if len(r.turns) != 0 {
 		t.Errorf("ledger = %v, want empty", turnNames(r.turns))
@@ -314,38 +320,30 @@ func TestAStalledRolloutGrantsNoEntryAgain(t *testing.T) {
 	}
 }
 
-// A request's Approved condition follows its machine's policy, its
-// approvedHash, and the approve annotation that machine-operator still
-// honors.
-func TestARequestIsApprovedByPolicyHashOrAnnotation(t *testing.T) {
+// A request's Approved condition follows its machine's policy and its
+// approvedHash. The approve annotation approves nothing.
+func TestARequestIsApprovedByPolicyOrHash(t *testing.T) {
 	staged := machine.PendingDisruption{Condition: "SpecConverged", Kind: machine.DisruptionReboot, Hash: "9d3b2a7c11e4ff"}
 	cases := []struct {
 		name       string
 		policy     machine.RebootPolicy
-		own        bool
-		hash       string
 		approved   string
 		annotation string
 		reason     string
 	}{
-		{"Auto", machine.RebootAuto, true, "6f2a91c04b7e00", "", "", "AutoPolicy"},
-		{"approvedHash names hash", machine.RebootManual, true, "6f2a91c04b7e00", "6f2a91c04b7e", "", "HashApproved"},
-		{"approvedHash names other bytes", machine.RebootManual, true, "6f2a91c04b7e00", "aaaaaaaaaaaa", "", "AwaitingApproval"},
-		{"the annotation names a staged document", machine.RebootManual, true, "6f2a91c04b7e00", "", "9d3b2a7c11e4", "AnnotationApproved"},
-		{"the annotation names a person's request", machine.RebootManual, false, "0c1e9a2b77b0aa", "", "0c1e9a2b77b0", "AnnotationApproved"},
-		{"the annotation names a staged document, not the person's boot", machine.RebootManual, false, "0c1e9a2b77b0aa", "", "9d3b2a7c11e4", "AwaitingApproval"},
+		{"Auto", machine.RebootAuto, "", "", "AutoPolicy"},
+		{"approvedHash names hash", machine.RebootManual, "6f2a91c04b7e", "", "HashApproved"},
+		{"approvedHash names other bytes", machine.RebootManual, "aaaaaaaaaaaa", "", "AwaitingApproval"},
+		{"the annotation names a staged document", machine.RebootManual, "", "9d3b2a7c11e4", "AwaitingApproval"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			m := &machine.Machine{Metadata: api.ObjectMeta{Name: "node-4",
-				Annotations: map[string]string{machine.ApproveDisruptionAnnotation: c.annotation}}}
+				Annotations: map[string]string{"liken.sh/approve-disruption": c.annotation}}}
 			m.Spec.RebootPolicy = c.policy
 			m.Status.Pending = []machine.PendingDisruption{staged}
 			d := request("node-4.machine-operator", "node-4")
-			if !c.own {
-				d.Spec.Requester = "kubernetes-admin"
-			}
-			d.Spec.Hash, d.Spec.ApprovedHash = c.hash, c.approved
+			d.Spec.Hash, d.Spec.ApprovedHash = "6f2a91c04b7e00", c.approved
 
 			if got := approve(&d, m); got.reason != c.reason {
 				t.Errorf("approval = %s (%s), want %s", got.reason, got.message, c.reason)

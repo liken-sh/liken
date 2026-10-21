@@ -2,8 +2,9 @@
 
 Milestone 88. Proposed 2026-10-21. Release 1 of stage 1 was built
 and drilled on the `lab` fleet on 2026-10-21
-([Release 1 as built](#release-1-as-built)). Release 2 and stage 2 are
-not built, and the drills on liken-1 and stick-1 have not run. Five
+([Release 1 as built](#release-1-as-built)), and so was release 2
+([Release 2 as built](#release-2-as-built)). Stage 2 is not built, and
+the drills on liken-1 and stick-1 have not run. Five
 reviews from different angles read an earlier draft on the same day,
 and this version answers them
 ([Considered and set aside](#considered-and-set-aside)).
@@ -55,7 +56,7 @@ This has four costs:
   in which to work. Writing the annotation also needs `patch` on
   `machines`, which lets a component change any machine's spec.
 - **Approvals can be reused.** The open problem
-  [disruption-approvals-can-be-reused](open-problems/disruption-approvals-can-be-reused.md)
+  `disruption-approvals-can-be-reused`, which release 2 closes,
   shows how an approval of one configuration hash permits a later
   disruption to the same bytes that nobody approved.
 - **A person cannot see the requests.** What a machine waits for is a
@@ -466,6 +467,87 @@ Debian's edk2 2026.08 in `dev-cluster/firmware/`, and
 machine that asked for a reboot as soon as each one ended took 120
 warm reboots, 40 each, with none hung. On edk2 2025.11 the same load
 hung once in 38 reboots on `pc` and once in 24 on `q35`.
+
+## Release 2 as built
+
+Release 2 follows [Two releases](#two-releases), with these
+differences:
+
+- **machine-operator confirms its entry.** It acts on its entry in
+  `status.rebootTurns` (`machine-operator/turn.go`). The watch's copy
+  of the `Cluster` answers when it holds no entry, and an entry it
+  holds is confirmed with a read from the API server, because the
+  watch's copy can be older than the write that removed the entry.
+- **One approval covers the whole request.** An `approvedHash` that
+  names the request's hash approves every staged document the request
+  covers, not only the first reboot-class change. machine-operator
+  carries the approval to its decisions on its own copy of the
+  `Machine`, under a key that never reaches the API server.
+- **`AwaitingTurn` stays.** machine-operator still reports it, and the
+  conductor still writes `RebootApproved`, so a rollback to release 1
+  finds what each side of release 1 reads. Both go when the floor
+  passes release 2.
+- **The default budget has a fixed start.** The conductor no longer
+  reads `spec.disruption`. It creates `default` with `maxUnavailable:
+  1`, and until `default` exists, a limit of one applies in its place.
+  The CRD refuses `maxUnavailable: 0`, so a budget cannot stop every
+  turn.
+- **The CLI writes `Disruption`s only.** `request-reboot` and
+  `approve-reboot` refuse a cluster that does not serve the kind.
+- **The uncordon says what happened.** A person's request deleted
+  during its drain uncordoned the machine with no reboot, and the
+  `Uncordoned` `Event` said "its reboot is complete". The message now
+  compares the boot with the drain's start, and says the machine did
+  not reboot when the boot is older.
+
+The drills ran on the five QEMU guests with `COLD_REBOOT=1`, on
+`2026.10.21-904` and on `-905`, which adds the uncordon message to
+`-904`. The same monitor read the fleet every five seconds through
+every drill, and no sample showed more than one machine out of
+service or more than one ledger entry.
+
+- `-903` to `-904` with the conductor's pod deleted mid-rollout: one
+  turn at a time, and no request left open.
+- The `liken.sh/request-reboot` annotation set to the running boot:
+  no reboot in 60 seconds. `liken request-reboot` then rebooted the
+  machine, and the request completed.
+- A `Manual` machine, three reboot-class changes in a row: each
+  request read `Approved False` and the machine did not reboot in 60
+  seconds, and `liken approve-reboot` released each one. The third
+  staged the same bytes as the first, under the same hash, and waited
+  again.
+- `node-4` powered off during its drain, with `node-5`'s request
+  waiting: `node-4` held its entry and read `Lost`. After ten minutes
+  the `Cluster` read `RolloutStalled`, and `node-5`'s `Granted`
+  message named the stall. Powered on after 13 minutes, `node-4`
+  completed its request, and `node-5` took its turn after it.
+- A person's request deleted during its drain: the machine uncordoned
+  within five seconds and did not reboot.
+- A request made with `kubectl` and no hash, during another request's
+  drain on the same leader, with a request for a second leader filed
+  at the same time: the first joined the entry, one reboot completed
+  both, and the second leader went after.
+- `-904` to `-903`, and forward to `-905`. The release server was
+  down at first, with a reboot-class spec staged on `node-4`: every
+  machine read `DownloadRetrying`, and `node-4` took its turn for the
+  spec alone. Then the server sent 1.5 MB/s, and a standby conductor
+  ran beside the leader while whichever one held the `Lease` was
+  stopped by `SIGSTOP` for 45 seconds, 16 times in 14 minutes.
+- On `-905`: a new `goGC` for k3s in the `Cluster`, which k3s applies
+  with a restart, made five
+  `Restart` requests, one turn at a time, with no cordon and no
+  reboot. machine-operator's own request deleted during its drain
+  came back within four seconds, and the turn ended in one reboot. The
+  `default` budget deleted came back within a second. machine-operator's
+  pod deleted during a leader's drain: the new pod finished the drain
+  and the reboot.
+
+A turn ends later when the drain evicts the conductor. The new
+conductor reclaims no entry until it has read the heartbeats for
+`HeartbeatStaleAfter`, so the entry of a machine that rebooted, or
+whose request went away, stayed 40 to 55 seconds after the machine
+was back. The wait protects the budget from a machine that is down
+but reads `Ready`, so release 2 keeps it.
 
 ## Considered and set aside
 

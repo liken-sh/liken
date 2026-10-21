@@ -137,6 +137,9 @@ func TestApproveRebootApprovesTheDisruptionThatCoversTheChange(t *testing.T) {
 			if len(s.written) != 1 || s.written[0].Metadata.Name != c.approve || s.written[0].Spec.ApprovedHash != s.written[0].Spec.Hash {
 				t.Errorf("wrote %+v, want %s with approvedHash set to its hash", s.written, c.approve)
 			}
+			if !strings.Contains(out.String(), "node-5 is waiting on one change:") {
+				t.Errorf("the report is missing from the output:\n%s", out.String())
+			}
 			if !strings.Contains(out.String(), "approved: Disruption "+c.approve) {
 				t.Errorf("the output does not name the Disruption:\n%s", out.String())
 			}

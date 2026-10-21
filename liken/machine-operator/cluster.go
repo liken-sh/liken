@@ -199,7 +199,7 @@ func decideClusterConvergence(reduced *cluster.Cluster, held []featureHold, m *m
 		stage:    stagedHash != hash,
 	}
 	// On Manual, a person applies the change with a reboot or with
-	// the approve-disruption grant. The boot path applies staged
+	// an approval on the machine's Disruption. The boot path applies staged
 	// documents too, and nobody can restart k3s by hand on a machine
 	// with no shell, but an approved restart-class change converges
 	// through a granted k3s restart in place. The messages used
@@ -213,7 +213,7 @@ func decideClusterConvergence(reduced *cluster.Cluster, held []featureHold, m *m
 		apply = "a k3s restart"
 	}
 	gateDisruption(&c, "ClusterConverged", m.Spec.RebootPolicyOrDefault(), t, restart,
-		m.Metadata.Annotations[machine.ApproveDisruptionAnnotation],
+		m.Metadata.Annotations[requestApprovalKey],
 		"the cluster document",
 		pending,
 		fmt.Sprintf("cluster document staged (%.12s); waiting for the cluster to grant a turn to apply it by %s", hash, apply),

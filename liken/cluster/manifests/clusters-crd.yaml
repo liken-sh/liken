@@ -479,16 +479,14 @@ spec:
                 disruption:
                   type: object
                   description: >-
-                    The starting limit of the MachineDisruptionBudget
-                    named default, which limits how much of the fleet
-                    can be down at the same time when the cluster
-                    sequences reboots. When that budget is missing,
-                    cluster-operator creates it from this value, and
-                    this value limits the fleet until the budget
-                    exists. After that, the budget is the limit: edit
-                    the budget to change it, because a later edit here
-                    changes nothing. A release from before the
-                    MachineDisruptionBudget reads this value alone.
+                    Read only by a release from before the
+                    MachineDisruptionBudget, which limits how much of
+                    the fleet can be down at the same time with this
+                    value alone. This release reads the budget named
+                    default instead, and creates it with a limit of
+                    one machine when it is missing. The field stays so
+                    a rollback to such a release finds it: set it to
+                    the limit you want before you roll back that far.
                   properties:
                     maxUnavailable:
                       type: integer
@@ -496,9 +494,9 @@ spec:
                       default: 1
                       description: >-
                         How many machines can be unavailable at the
-                        same time, planned and unplanned together, when
-                        cluster-operator creates the default budget. The
-                        default is one, the safest rollout. The
+                        same time, planned and unplanned together, under
+                        a release from before the MachineDisruptionBudget.
+                        The default is one, the safest rollout. The
                         leaders keep a stricter automatic floor that
                         this number cannot raise: only one leader is
                         down at a time. The datastore keeps quorum

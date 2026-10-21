@@ -17,6 +17,7 @@ import (
 	"github.com/liken-sh/liken/kubernetes/memo"
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/disruption"
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/kubernetes/fakeapi"
 	"github.com/liken-sh/liken/liken/machine"
@@ -92,6 +93,10 @@ func raceFleetWith(t *testing.T, more map[string]*fakeapi.Collection) *fakeapi.S
 		// nothing to steward.
 		daemonSetsPath:                         {APIVersion: "apps/v1", Kind: "DaemonSet"},
 		"/api/v1/namespaces/liken-system/pods": {APIVersion: "v1", Kind: "Pod"},
+		// node-2's request, which machine-operator files for what it
+		// staged.
+		kubernetes.DisruptionsPath: {APIVersion: api.APIVersion, Kind: "Disruption",
+			Items: []map[string]any{requestObject(t, approvedRequest("node-2"))}},
 	}
 	maps.Copy(collections, more)
 	fake := fakeapi.New(collections)
@@ -141,6 +146,20 @@ func askForATurn(t *testing.T, client *apiclient.Client, name string) {
 	if _, err := kubernetes.PublishStatus(client, m, &status); err != nil {
 		t.Fatal(err)
 	}
+	body, err := json.Marshal(requestObject(t, approvedRequest(name)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.RequestJSON(http.MethodPost, kubernetes.DisruptionsPath, body, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// requestObject is a request as the fake stores it.
+func requestObject(t *testing.T, d disruption.Disruption) map[string]any {
+	t.Helper()
+	d.Metadata.ResourceVersion = "5"
+	return asObject(t, d)
 }
 
 // grantHolders answers the machines that hold a reboot grant in the fake.

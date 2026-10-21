@@ -16,6 +16,7 @@ import (
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/liken/api"
+	"github.com/liken-sh/liken/liken/disruption"
 	"github.com/liken-sh/liken/liken/kubernetes"
 	"github.com/liken-sh/liken/liken/machine"
 )
@@ -25,10 +26,13 @@ const (
 	node2StatusPath   = kubernetes.MachinesPath + "/node-2/status"
 )
 
-// writes answers each write the fake received, as "METHOD path".
+// writes answers each write to a Machine or the Cluster that the fake
+// received, as "METHOD path". The reports on the requests and the
+// budgets are left out: they grant nothing.
 func writes(requests []string) []string {
 	return slices.DeleteFunc(slices.Clone(requests), func(request string) bool {
-		return strings.HasPrefix(request, http.MethodGet)
+		return strings.HasPrefix(request, http.MethodGet) ||
+			strings.Contains(request, kubernetes.DisruptionsPath) || strings.Contains(request, kubernetes.BudgetsPath)
 	})
 }
 
@@ -136,11 +140,15 @@ func (c *crash) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// finishTurn writes node-2's status as its machine operator does after
-// the reboot: the machine converged and asks for nothing, and the
-// grant is still there for the cluster to reclaim.
+// finishTurn does what node-2's machine operator does after the
+// reboot: it deletes its request, because nothing is staged, and
+// writes the status of a machine that converged. The grant is still
+// there for the cluster to reclaim.
 func finishTurn(t *testing.T, client *apiclient.Client, name string) {
 	t.Helper()
+	if err := client.RequestJSON(http.MethodDelete, kubernetes.DisruptionsPath+"/"+disruption.OwnName(name), nil, nil); err != nil {
+		t.Fatal(err)
+	}
 	m, err := kubernetes.GetMachine(client, name)
 	if err != nil {
 		t.Fatal(err)

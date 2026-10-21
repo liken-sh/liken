@@ -141,10 +141,9 @@ func (d *Disruption) Own() bool { return d.Spec.Requester == MachineOperator }
 
 // Approved reports whether a request may take a turn. A machine on
 // rebootPolicy Auto approves every request. A Manual machine's request
-// is approved when its approvedHash names its hash, with the matching
-// rule of the approve annotation: the full hash, or a prefix of 12
-// characters or more, because a person pastes the short form that a
-// listing shows.
+// is approved when its approvedHash names its hash: the full hash, or
+// a prefix of 12 characters or more, because a person pastes the
+// short form that a listing shows (machine.ApprovalGrants).
 func (d *Disruption) Approved(policy machine.RebootPolicy) bool {
 	return policy == machine.RebootAuto || d.ApprovedByHash()
 }

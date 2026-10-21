@@ -4,13 +4,11 @@ package main
 // meaning instead of handing the terminal to another tool. A machine
 // whose rebootPolicy is Manual stages a change and waits for a
 // person. This command is how the person answers: it reads
-// status.pending, reports what is waiting, writes the
-// approve-disruption annotation with the staged document's hash, and
-// sets spec.approvedHash on the Disruption that covers it
-// (disruptions.go). The hash makes the grant one-shot
-// (machine.ApproveDisruptionAnnotation explains why), and writing the
-// same annotation twice is the same grant, so the command is
-// repeatable.
+// status.pending, reports what is waiting, and sets spec.approvedHash
+// to spec.hash on the Disruption that covers the change
+// (disruptions.go). The approval names the request's hash, so it
+// approves only the bytes the person saw, and setting it twice is the
+// same approval, so the command is repeatable.
 
 import (
 	"flag"
@@ -99,22 +97,13 @@ func approveReboot(args []string, out io.Writer) error {
 	if choice == nil {
 		return nil
 	}
-	// The request's approval goes first. The annotation wakes the
-	// operators, and their writes to the request would race a later
-	// write of its approval.
 	approved, err := approveRequest(c, m, choice)
 	if err != nil {
 		return fmt.Errorf("approving the Disruption: %w", err)
 	}
-	short := fmt.Sprintf("%.12s", choice.Hash)
-	patch := fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`, machine.ApproveDisruptionAnnotation, short)
-	if err := kubernetes.PatchJSON(c, kubernetes.MachinesPath+"/"+m.Metadata.Name, []byte(patch)); err != nil {
-		return err
+	if approved == "" {
+		return fmt.Errorf("no Disruption covers the change yet; machine-operator files one on its next pass, so run the command again in a moment")
 	}
-	fmt.Fprintln(out)
-	if approved != "" {
-		fmt.Fprintf(out, "approved: Disruption %s\n", approved)
-	}
-	fmt.Fprintf(out, "approved: %s=%s\n", machine.ApproveDisruptionAnnotation, short)
+	fmt.Fprintf(out, "\napproved: Disruption %s\n", approved)
 	return nil
 }

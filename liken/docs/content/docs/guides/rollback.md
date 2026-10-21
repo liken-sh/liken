@@ -81,11 +81,13 @@ A release from before the
 kinds reads neither of them. Its `cluster-operator` limits the
 rollout with
 [`spec.disruption.maxUnavailable`](/docs/reference/cluster/#specdisruption)
-alone, and its `machine-operator` reads only the
-`liken.sh/request-reboot` and `liken.sh/approve-disruption`
-annotations. So before you roll back past those kinds, set
-`spec.disruption.maxUnavailable` to the limit you want. A budget with
-a selector has no effect until you roll forward.
+alone, and its `machine-operator` acts on no `Disruption`. So before
+you roll back past those kinds, set `spec.disruption.maxUnavailable`
+to the limit you want. This release does not read the field, so the
+edit changes nothing until you roll back. A budget with a selector has no
+effect until you roll forward. `liken request-reboot` and
+`liken approve-reboot` write only `Disruption`s, so on that release,
+use the `liken` CLI of that release to request or approve a reboot.
 
 ### Before you roll back past a spec field
 

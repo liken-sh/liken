@@ -130,11 +130,11 @@ func renderManifest(name string, spec machine.MachineSpec) ([]byte, string, erro
 // A turn is the machine's standing with the rollout conductor
 // (rollout.go): whether the machine may reboot right now. A machine
 // with no cluster document has no conductor, so it reboots whenever
-// it needs to. A cluster member waits until the conductor writes a
-// RebootApproved condition onto it.
-// rebootPolicy: Auto checks this, and so does a Manual machine that
-// a person has approved through the approve-disruption annotation:
-// the approval moves the machine onto the same turn-taking path.
+// it needs to. A cluster member waits until the conductor records its
+// turn in the Cluster's ledger (turn.go). rebootPolicy: Auto checks
+// this, and so does a Manual machine whose request a person approved
+// through its Disruption: the approval moves the machine onto the
+// same turn-taking path.
 type turn int
 
 const (
@@ -223,14 +223,13 @@ func convergedWithCleanup(cond api.Condition, stagedHash string, rejection *mach
 // decision table is the same for every staged document, and it is
 // the safety core of the rollout design, so this function holds it
 // in one place. Manual policy waits for a person, and the
-// approve-disruption annotation is how the person answers: an
-// approval naming the staged hash moves the machine onto the same
-// path Auto takes, through the conductor's turn and the drain,
-// which is safer than the state it replaces, where an operator
-// following the machine's own advice cuts power and no budget
-// applies at all. An approval naming some other hash is reported,
-// not ignored: the pending message carries both values, so a wrong
-// paste is visible where the person is already looking. A cluster
+// approvedHash of the machine's Disruption is how the person answers
+// (requests.go): an approval that covers the staged hash moves the
+// machine onto the same path Auto takes, through the conductor's turn
+// and the drain, which is safer than the state it replaces, where an
+// operator following the machine's own advice cuts power and no
+// budget applies at all. The approval arrives as the comma-separated
+// hashes that the approved request covers. A cluster
 // member on Auto (or approved Manual) waits for the conductor's
 // turn (AwaitingTurn is the same reason for both kinds of
 // disruption, which lets the conductor sequence them without
@@ -257,13 +256,8 @@ func gateDisruption(c *convergence, condType string, policy machine.RebootPolicy
 		Condition: condType, Kind: kind, Hash: c.hash, Summary: summary,
 	}
 	switch {
-	case policy != machine.RebootAuto && !machine.ApprovalGrants(approval, c.hash):
-		message := pending
-		if approval != "" {
-			message = fmt.Sprintf("%s; the %s annotation names %s, and the staged document is %.12s",
-				pending, machine.ApproveDisruptionAnnotation, approval, c.hash)
-		}
-		c.condition = notConverged(condType, pendingReason, message)
+	case policy != machine.RebootAuto && !approvedByRequest(approval, c.hash):
+		c.condition = notConverged(condType, pendingReason, pending)
 	case t == turnAwaiting:
 		c.condition = notConverged(condType, "AwaitingTurn", awaiting)
 	default:
@@ -463,7 +457,7 @@ func decideConvergence(m *machine.Machine, facts *machine.MachineStatus, rejecti
 	}
 
 	gateDisruption(&c, "SpecConverged", m.Spec.RebootPolicyOrDefault(), t, false,
-		m.Metadata.Annotations[machine.ApproveDisruptionAnnotation],
+		m.Metadata.Annotations[requestApprovalKey],
 		"the machine spec: "+diffs,
 		fmt.Sprintf("spec staged for the next boot (%.12s); rebootPolicy is Manual, so reboot the machine (or set rebootPolicy: Auto) to apply: %s", hash, diffs),
 		fmt.Sprintf("spec staged for the next boot (%.12s); waiting for the cluster to grant a reboot turn: %s", hash, diffs),

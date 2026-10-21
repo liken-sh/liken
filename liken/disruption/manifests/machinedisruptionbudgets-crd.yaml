@@ -61,9 +61,9 @@ spec:
             unplanned together. A machine takes a reboot turn only when
             every budget that selects it has room. The budget named
             default selects every machine, and cluster-operator creates
-            it from the Cluster's spec.disruption.maxUnavailable when it
-            is missing. Whatever the budgets allow, only one leader is
-            out of service at a time.
+            it with a limit of one machine when it is missing. Whatever
+            the budgets allow, only one leader is out of service at a
+            time.
           properties:
             spec:
               type: object

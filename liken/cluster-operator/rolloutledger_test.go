@@ -153,7 +153,7 @@ func TestTheLedgerInTheDecision(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			machines, renewals := rolloutInputs(c.machines...)
 
-			r := decideRollout(atVersion7(machines), renewals, c.heardSince, c.cluster, "", fleetRequests{}, sweepNow)
+			r := decideFor(atVersion7(machines), renewals, c.heardSince, c.cluster, "", sweepNow)
 
 			if !slices.Equal(r.grant, c.grant) {
 				t.Errorf("grant = %q, want %q", r.grant, c.grant)
@@ -179,10 +179,10 @@ func TestANewEntryRecordsTheVersionTheGrantNames(t *testing.T) {
 	machines[1].Metadata.ResourceVersion = "184467"
 	kept := turnAt("node-3", "")
 
-	r := decideRollout(machines, renewals, time.Time{}, withTurns(2, kept), "", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, withTurns(2, kept), "", sweepNow)
 
 	want := []cluster.RebootTurn{kept, {Machine: "node-4", MachineResourceVersion: "184467", Since: sweepNow}}
-	if !sameTurns(r.turns, want) {
+	if !sameSlots(r.turns, want) {
 		t.Errorf("ledger = %+v, want %+v", r.turns, want)
 	}
 }
@@ -196,7 +196,7 @@ func TestWithoutGrantsKeepsTheConfirms(t *testing.T) {
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 	)
 
-	r := decideRollout(atVersion7(machines), renewals, time.Time{}, withTurns(2, turnAt("node-3", "7")), "", fleetRequests{}, sweepNow).
+	r := decideFor(atVersion7(machines), renewals, time.Time{}, withTurns(2, turnAt("node-3", "7")), "", sweepNow).
 		withoutGrants(errTemplateRead)
 
 	if len(r.grant) != 0 || !slices.Equal(r.confirm, []string{"node-3"}) {

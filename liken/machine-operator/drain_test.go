@@ -291,6 +291,36 @@ func TestUncordonOnlyTakesBackOurOwnCordon(t *testing.T) {
 	}
 }
 
+// The uncordon says whether the machine rebooted: a boot that started
+// after the drain began is the reboot the drain was for, and an older
+// boot means the request went away before the reboot.
+func TestTheUncordonSaysWhetherTheMachineRebooted(t *testing.T) {
+	since := drainNow.Format(time.RFC3339)
+	after, before := drainNow.Add(time.Minute), drainNow.Add(-time.Hour)
+	cases := []struct {
+		name string
+		node *nodeObject
+		boot *time.Time
+		want string
+	}{
+		{"a boot after the drain", drainNode(true, true, since), &after,
+			"uncordoned the Node node-4; its reboot is complete"},
+		{"the boot the drain began on", drainNode(true, true, since), &before,
+			"uncordoned the Node node-4; nothing waits for its reboot any more, so it did not reboot"},
+		{"a drain with no recorded start", drainNode(true, true, ""), &before,
+			"uncordoned the Node node-4; its reboot is complete"},
+		{"no boot record", drainNode(true, true, since), nil,
+			"uncordoned the Node node-4; its reboot is complete"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := uncordonMessage(c.node, c.boot); got != c.want {
+				t.Errorf("got %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
 // drainAPI is a small API server that records pod listings,
 // eviction posts, and node patches. It can be told to fail the
 // listing or the patch, the two reads and writes a drain step

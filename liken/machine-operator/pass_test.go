@@ -200,6 +200,7 @@ func TestASettledPassOverTheCopiesSendsNoReads(t *testing.T) {
 		wantDirect := []string{
 			"GET /apis/liken.sh/v1alpha1/machines/node-1",
 			"GET /api/v1/namespaces/liken-system/pods",
+			"GET /apis/liken.sh/v1alpha1/clusters/lab",
 			"GET /api/v1/nodes/node-1",
 			"GET /apis/resource.k8s.io/v1/resourceslices/node-1-liken.sh",
 			"GET /apis/liken.sh/v1alpha1/disruptions",

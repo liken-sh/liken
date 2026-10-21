@@ -60,9 +60,12 @@ func requestConditions(d *disruption.Disruption, m *machine.Machine, r rollout, 
 	case r.waits[d.Spec.Machine] != "":
 		granted = api.Condition{Type: disruption.GrantedCondition, Status: api.ConditionFalse, Reason: "AwaitingTurn",
 			Message: r.waits[d.Spec.Machine]}
+	case !available(m.Status.Phase):
+		granted = api.Condition{Type: disruption.GrantedCondition, Status: api.ConditionFalse, Reason: "AwaitingTurn",
+			Message: fmt.Sprintf("%s is %s, out of service with no turn, and takes its turn when it is back", d.Spec.Machine, m.Status.Phase)}
 	default:
 		granted = api.Condition{Type: disruption.GrantedCondition, Status: api.ConditionFalse, Reason: "AwaitingTurn",
-			Message: fmt.Sprintf("waiting for machine-operator on %s to ask for the machine's turn", d.Spec.Machine)}
+			Message: "waiting for the cluster's next sweep to grant the turn"}
 	}
 	approved.ObservedGeneration = d.Metadata.Generation
 	granted.ObservedGeneration = d.Metadata.Generation
@@ -174,17 +177,16 @@ func budgetReference(b *disruption.Budget) events.ObjectReference {
 }
 
 func createDefaultBudget(reads *fleetReader, clusterDoc *cluster.Cluster) {
-	maxUnavailable := clusterDoc.Spec.Disruption.MaxUnavailableOrDefault()
-	body, err := json.Marshal(disruption.NewDefaultBudget(maxUnavailable))
+	body, err := json.Marshal(disruption.NewDefaultBudget(defaultBudgetLimit))
 	if err != nil {
 		return
 	}
 	err = reads.client.RequestJSON(http.MethodPost, kubernetes.BudgetsPath, body, nil)
 	switch {
 	case err == nil:
-		fmt.Printf("created the default MachineDisruptionBudget with maxUnavailable %d\n", maxUnavailable)
+		fmt.Printf("created the default MachineDisruptionBudget with maxUnavailable %d\n", defaultBudgetLimit)
 		reads.recorder.Normal(clusterReference(clusterDoc), reasonBudgetCreated,
-			fmt.Sprintf("created the MachineDisruptionBudget default from spec.disruption.maxUnavailable (%d); edit the budget to change the limit", maxUnavailable))
+			fmt.Sprintf("created the MachineDisruptionBudget default, which allows %d machine out of service at a time; edit the budget to change the limit", defaultBudgetLimit))
 	case errors.Is(err, apiclient.ErrConflict), errors.Is(err, apiclient.ErrNotFound), errors.Is(err, apiclient.ErrForbidden):
 	default:
 		fmt.Printf("creating the default MachineDisruptionBudget: %v\n", err)

@@ -7,6 +7,8 @@ package main
 // status, and the rollout must grant no turn until that time passes.
 
 import (
+	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -39,7 +41,21 @@ func awaitTurnOf(t *testing.T, client *apiclient.Client, name string) {
 	if _, err := kubernetes.PublishStatus(client, waiting, &status); err != nil {
 		t.Fatal(err)
 	}
+	fileRequest(t, client, name)
 	synctest.Wait()
+}
+
+// fileRequest files an approved request for a machine, as its machine
+// operator does for what it staged.
+func fileRequest(t *testing.T, client *apiclient.Client, name string) {
+	t.Helper()
+	body, err := json.Marshal(requestObject(t, approvedRequest(name)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.RequestJSON(http.MethodPost, kubernetes.DisruptionsPath, body, nil); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // sweepFresh runs one sweep, and answers node-1 and node-2 and the

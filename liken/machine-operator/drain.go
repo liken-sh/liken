@@ -342,6 +342,19 @@ func decideUncordon(node *nodeObject) bool {
 	return node.Spec.Unschedulable && node.Metadata.Annotations[cordonedAnnotation] == "true"
 }
 
+// uncordonMessage says why the cordon ends. The drain records when it
+// began on the Node, and a boot that started after that moment is the
+// reboot the drain was for. A boot from before it means the request
+// went away during the drain, a person's deleted Disruption or a
+// staged document taken back, and the machine never rebooted.
+func uncordonMessage(node *nodeObject, boot *time.Time) string {
+	since, err := time.Parse(time.RFC3339, node.Metadata.Annotations[drainingSinceAnnotation])
+	if err == nil && boot != nil && boot.Before(since) {
+		return "uncordoned the Node " + node.Metadata.Name + "; nothing waits for its reboot any more, so it did not reboot"
+	}
+	return "uncordoned the Node " + node.Metadata.Name + "; its reboot is complete"
+}
+
 // uncordonPatch releases the node back to the scheduler and removes
 // the drain's recorded state. In a merge patch, a null value deletes
 // the key.

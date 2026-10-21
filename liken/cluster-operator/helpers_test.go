@@ -10,10 +10,15 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
+	"github.com/liken-sh/liken/liken/api"
+	"github.com/liken-sh/liken/liken/cluster"
+	"github.com/liken-sh/liken/liken/disruption"
 	"github.com/liken-sh/liken/liken/machine"
 	"github.com/liken-sh/liken/liken/metrics"
 )
@@ -62,4 +67,38 @@ func testClient(t *testing.T, handler http.Handler) *apiclient.Client {
 		t.Fatal(err)
 	}
 	return apiclient.New(apiservertest.Host, server.Client(), credentials)
+}
+
+// asking answers the requests of the machines that ask for a turn:
+// one approved request of machine-operator's for each machine that
+// reports AwaitingTurn, the way machine-operator files one for what it
+// staged.
+func asking(machines []machine.Machine) fleetRequests {
+	var q fleetRequests
+	for i := range machines {
+		if !slices.ContainsFunc(machines[i].Status.Conditions, func(c api.Condition) bool { return c.Reason == "AwaitingTurn" }) {
+			continue
+		}
+		q.disruptions = append(q.disruptions, approvedRequest(machines[i].Metadata.Name))
+	}
+	return q
+}
+
+// approvedRequest is machine-operator's request for a machine, approved
+// by its approvedHash whatever the machine's rebootPolicy.
+func approvedRequest(name string) disruption.Disruption {
+	d := disruption.New(disruption.OwnName(name), &machine.Machine{Metadata: api.ObjectMeta{Name: name, UID: "uid-" + name}},
+		disruption.Spec{Machine: name, Requester: disruption.MachineOperator, Kind: disruption.KindReboot,
+			Hash: "6f2a91c04b7e5d", ApprovedHash: "6f2a91c04b7e5d"})
+	return *d
+}
+
+// decideFor decides a rollout over the requests of the machines that
+// ask for a turn, with a default budget of the limit the test's
+// Cluster declares in spec.disruption.
+func decideFor(machines []machine.Machine, heard map[string]time.Time, heardSince time.Time,
+	c *cluster.Cluster, appliedVersion string, now time.Time) rollout {
+	q := asking(machines)
+	q.budgets = []disruption.Budget{*disruption.NewDefaultBudget(c.Spec.Disruption.MaxUnavailableOrDefault())}
+	return decideRollout(machines, heard, heardSince, c, appliedVersion, q, now)
 }

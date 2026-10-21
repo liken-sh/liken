@@ -942,8 +942,8 @@ spec:
                     and the next boot applies the change. Auto permits
                     the operator to reboot the machine. This field
                     also gates a reboot that a person asked for
-                    through the liken.sh/request-reboot annotation,
-                    which is the one reboot that applies no change:
+                    with a Disruption, which is the one reboot that
+                    applies no change:
                     Manual reports RebootPending until the reboot is
                     approved, and Auto takes the reboot turn on its
                     own. Whichever policy is in force, the machine
@@ -3689,8 +3689,8 @@ spec:
                     init or the operator applies; NodeHealthy for the
                     Node's own Ready condition; NodeCurrent for the
                     cleanup after a demotion; RebootRequestHonored
-                    for the reboot that the
-                    liken.sh/request-reboot annotation asks for; and
+                    for the reboot that a person's Disruption asks
+                    for; and
                     SpecConverged, ClusterConverged,
                     VersionConverged, CredentialsConverged, and
                     ImportsConverged for the documents and the
@@ -3705,11 +3705,14 @@ spec:
                     outage reaches every leader at once, so Ready
                     does not count it. RebootApproved is
                     the one condition that another program writes:
-                    the cluster operator adds it to grant this
-                    machine a reboot turn, and removes it to take
-                    the grant back. Its absence carries the meaning,
-                    so it has no False state, and Ready does not
-                    count it.
+                    the cluster operator adds it when this machine
+                    holds a reboot turn, and removes it when the turn
+                    ends. The turn itself is the machine's entry in
+                    the Cluster's status.rebootTurns, and the
+                    condition is for a machine operator of the release
+                    before, which acts on nothing else. Its absence
+                    carries the meaning, so it has no False state, and
+                    Ready does not count it.
                   # A conditions array is a map with one entry per
                   # type. This declaration (list-type map, keyed by
                   # type) lets the API server refuse duplicate types.
@@ -3809,17 +3812,17 @@ spec:
                     Each entry names the convergence condition that
                     reported it, the kind of disruption that applies
                     it, the staged document's hash, and a one-line
-                    summary. To grant one change its disruption on a
-                    machine whose rebootPolicy is Manual, annotate
-                    the machine with liken.sh/approve-disruption set
-                    to the entry's hash (the liken CLI's
-                    approve-reboot command does this). The grant is
-                    one-shot: once the change applies, its hash is no
-                    longer pending, and the next change hashes
-                    differently, so a stale annotation approves
-                    nothing. A reboot that a person requested through
-                    the liken.sh/request-reboot annotation is an entry
-                    here too. It waits on the same policy, the same
+                    summary. machine-operator's Disruption for the
+                    machine covers every entry, and on a machine whose
+                    rebootPolicy is Manual, setting that request's
+                    spec.approvedHash to its spec.hash grants the
+                    disruption (the liken CLI's approve-reboot command
+                    does this). The grant is one-shot: once the
+                    changes apply, the request is deleted, and the
+                    next change files a new request with a new hash,
+                    so an earlier approval approves nothing. A reboot
+                    that a person requested with a Disruption is an
+                    entry here too. It waits on the same policy, the same
                     turn, and the same drain, and the one thing it
                     lacks is a document, so its hash is the running
                     boot's identity instead.
@@ -3846,11 +3849,13 @@ spec:
                       hash:
                         type: string
                         description: >-
-                          The staged document's identity: the value that an
-                          approve-disruption annotation names to grant this
-                          change its disruption. A requested reboot has no
-                          document, so its entry carries the running boot's
-                          identity, which the reboot uses up the same way.
+                          The staged document's identity. The hash of
+                          machine-operator's Disruption covers it, so an
+                          approval of that request approves these bytes
+                          and no others. A requested reboot has no
+                          document, so its entry carries the running
+                          boot's identity, which the reboot uses up the
+                          same way.
                       summary:
                         type: string
                         description: >-

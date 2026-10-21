@@ -951,76 +951,44 @@ type CrashStatus struct {
 	Records string `json:"records,omitempty"`
 }
 
-// RebootApprovedCondition is the rollout conductor's grant of a
-// reboot turn. It is the one condition type on a Machine's status
-// that two different programs use: the cluster operator writes and
-// removes it, and the machine's own operator carries it along
-// unchanged and acts on it. It belongs here because it is shared
-// vocabulary, in the same way that PodScheduled is a condition the
-// scheduler writes onto Pods that the kubelet owns.
+// RebootApprovedCondition is the rollout conductor's record of a
+// reboot turn on the Machine. The turn itself is the machine's entry
+// in the Cluster's status.rebootTurns, and the machine's own operator
+// acts on the entry. The conductor still writes this condition,
+// because a machine operator of the release before acts on nothing
+// else, and the machine's own operator carries it along unchanged. It
+// belongs here because it is shared vocabulary, in the same way that
+// PodScheduled is a condition the scheduler writes onto Pods that the
+// kubelet owns.
 const RebootApprovedCondition = "RebootApproved"
 
-// ApproveDisruptionAnnotation grants a Manual machine one
-// disruption. A person (or the liken CLI's approve-reboot command)
-// sets it on the Machine, valued with the hash of the staged
-// document it approves. The hash makes the grant one-shot by
-// construction: once the change applies, that hash is no longer
-// pending, and the next change hashes differently, so a stale
-// annotation approves nothing. Nobody has to consume the grant, and
-// that matters for RBAC: clearing an annotation would need patch on
-// machines, which would let a per-node operator edit any machine's
-// spec. A grant that expires on its own needs no new verb.
-const ApproveDisruptionAnnotation = "liken.sh/approve-disruption"
-
-// ApprovalGrants reports whether an approve-disruption annotation
-// approves the staged document with this hash.
-func ApprovalGrants(annotation, hash string) bool {
-	return annotationNames(annotation, hash)
+// ApprovalGrants reports whether an approval names a request's hash:
+// a Disruption's spec.approvedHash against its spec.hash.
+func ApprovalGrants(approval, hash string) bool {
+	return hashNames(approval, hash)
 }
 
-// RequestRebootAnnotation asks a machine to reboot once, with no
-// change to apply. Every other reboot liken performs is the tail of
-// a staged document, so a machine whose documents all match its boot
-// has no way to reboot: a driver bound to the wrong device, and a
-// machine used as a testbed, both need one anyway, and the machine
-// has no shell to ask from. A person (or the liken CLI's
-// request-reboot command) sets this on the Machine, valued with the
-// identity of the boot that is running now (BootID).
-//
-// Naming the running boot is what makes the request one-shot, the
-// same construction the approve-disruption grant uses. The boot that
-// comes back has a different identity, so the annotation no longer
-// names the running boot, and a later request names that boot instead.
-// Nobody has to clear it, which matters for the same reason the
-// grant is never consumed: clearing an annotation would need patch
-// on machines, and the machine operator holds no such verb.
-//
-// The request skips none of the coordination. It gates on
-// rebootPolicy, waits for the rollout conductor's turn, and drains
-// the node, exactly as a staged document's reboot does. What it
-// skips is the staged document, and only that.
-const RequestRebootAnnotation = "liken.sh/request-reboot"
-
-// RebootRequestNames reports whether a request-reboot annotation
-// names the boot that is running now. A boot that published no time
-// has no identity, and no annotation names it.
-func RebootRequestNames(annotation, bootID string) bool {
-	return bootID != "" && annotationNames(annotation, bootID)
+// RebootRequestNames reports whether a person's reboot request names
+// the boot that is running now: a Disruption's spec.hash against the
+// boot's identity. A boot that published no time has no identity, and
+// no request names it.
+func RebootRequestNames(request, bootID string) bool {
+	return bootID != "" && hashNames(request, bootID)
 }
 
-// annotationNames is the matching rule both annotations use. The
-// annotation may carry the full hash or a prefix of it, because
-// every condition message shows a hash in its 12-character short
-// form and a person pastes what they can see. A prefix shorter than
-// 12 characters never matches: below that length a paste error could
+// hashNames is the matching rule for a hash a person writes. The value
+// may carry the full hash or a prefix of it, because every condition
+// message and listing shows a hash in its 12-character short form and
+// a person pastes what they can see. A prefix shorter than 12
+// characters never matches: below that length a paste error could
 // match by accident.
-func annotationNames(annotation, hash string) bool {
-	return len(annotation) >= 12 && strings.HasPrefix(hash, annotation)
+func hashNames(value, hash string) bool {
+	return len(value) >= 12 && strings.HasPrefix(hash, value)
 }
 
 // BootID is the running boot's identity: the sha256 of the moment
 // the machine booted, which is the one value in the boot record that
-// no two boots share. A request-reboot annotation names it, so a
+// no two boots share. A person's reboot request names it, so a
 // request applies to one boot and to no other.
 //
 // It is a hash rather than the timestamp itself so that it reads and
@@ -1061,11 +1029,12 @@ type PendingDisruption struct {
 	// documents k3s reads when its process starts.
 	Kind DisruptionKind `json:"kind"`
 
-	// Hash is the staged document's identity, the value an
-	// approve-disruption annotation names to grant this change its
-	// disruption. A requested reboot has no document, so its entry
+	// Hash is the staged document's identity. The hash of
+	// machine-operator's Disruption covers the hash of each entry,
+	// so an approval of that request approves these bytes and no
+	// others. A requested reboot has no document, so its entry
 	// carries the running boot's identity instead (BootID), which
-	// spends itself the same way.
+	// spends itself when the machine boots again.
 	Hash string `json:"hash"`
 
 	// Summary says in one line what the document changes.

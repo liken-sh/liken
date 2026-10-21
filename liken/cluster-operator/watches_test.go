@@ -62,6 +62,7 @@ func newFleetAPI(now time.Time) *fakeapi.Server {
 		kubernetes.MachinesPath: {APIVersion: "liken.sh/v1alpha1", Kind: "Machine", Items: []map[string]any{
 			readyMachine("node-1"), readyMachine("node-2"),
 		}},
+		kubernetes.DisruptionsPath: {APIVersion: "liken.sh/v1alpha1", Kind: "Disruption"},
 		kubernetes.ClustersPath: {APIVersion: "liken.sh/v1alpha1", Kind: "Cluster", Items: []map[string]any{
 			object("liken.sh/v1alpha1", "Cluster", "", "lab", map[string]any{
 				"spec": map[string]any{"leaders": []any{"node-1"}, "version": "2026.09.27-001"},
@@ -250,6 +251,7 @@ func TestASweepRightAfterItsOwnGrantReadsThatMachineDirectly(t *testing.T) {
 		if _, err := kubernetes.PublishStatus(client, waiting, &status); err != nil {
 			t.Fatal(err)
 		}
+		fileRequest(t, client, "node-2")
 		wakes := make(chan struct{}, 1)
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()

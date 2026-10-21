@@ -1,10 +1,8 @@
 package main
 
 // These tests cover request-reboot: renderRequest reports the path
-// the machine's rebootPolicy puts it on, and
-// TestRequestRebootNamesTheRunningBoot drives the whole command
-// against a fake API server, the way approve_test.go drives
-// approve-reboot.
+// the machine's rebootPolicy puts it on. disruptions_test.go drives
+// the whole command against a fake API server.
 
 import (
 	"bytes"
@@ -31,9 +29,9 @@ func requestedMachine(policy machine.RebootPolicy) *machine.Machine {
 }
 
 func TestRenderRequestSaysAnAutoMachineNeedsNothingMore(t *testing.T) {
-	got := renderRequest(requestedMachine(machine.RebootAuto), "mycluster", "3943abfa6adf")
+	got := renderRequest(requestedMachine(machine.RebootAuto), "mycluster", "node-5.reboot-3943abfa6adf")
 	for _, want := range []string{
-		"requested: liken.sh/request-reboot=3943abfa6adf",
+		"filed: Disruption node-5.reboot-3943abfa6adf",
 		"takes a reboot turn from the cluster, drains its workloads, and reboots",
 		"Nothing is staged",
 	} {
@@ -47,7 +45,7 @@ func TestRenderRequestSaysAnAutoMachineNeedsNothingMore(t *testing.T) {
 }
 
 func TestRenderRequestNamesTheApprovalCommandForAManualMachine(t *testing.T) {
-	got := renderRequest(requestedMachine(machine.RebootManual), "mycluster", "3943abfa6adf")
+	got := renderRequest(requestedMachine(machine.RebootManual), "mycluster", "node-5.reboot-3943abfa6adf")
 	for _, want := range []string{
 		"rebootPolicy: Manual",
 		"liken approve-reboot mycluster node-5",
@@ -61,7 +59,7 @@ func TestRenderRequestNamesTheApprovalCommandForAManualMachine(t *testing.T) {
 func TestRenderRequestUsesTheDefaultPolicyWhenNoneIsDeclared(t *testing.T) {
 	m := &machine.Machine{Metadata: api.ObjectMeta{Name: "node-5"}}
 	m.Status.Boot.Time = &requestBootTime
-	if got := renderRequest(m, "mycluster", "3943abfa6adf"); !strings.Contains(got, "approve-reboot") {
+	if got := renderRequest(m, "mycluster", "node-5.reboot-3943abfa6adf"); !strings.Contains(got, "approve-reboot") {
 		t.Fatalf("Manual is the default, so the report must name the second step:\n%s", got)
 	}
 }
@@ -89,28 +87,6 @@ func requestServer(t *testing.T, dir, document string, patch *[]byte) *httptest.
 	server.StartTLS()
 	t.Cleanup(server.Close)
 	return server
-}
-
-func TestRequestRebootNamesTheRunningBoot(t *testing.T) {
-	dir := deploymentDirForTest(t)
-	var gotPatch []byte
-	server := requestServer(t, dir, `{"metadata":{"name":"node-5"},
-		"spec":{"rebootPolicy":"Auto"},
-		"status":{"boot":{"time":"2026-07-06T09:30:00Z"}}}`, &gotPatch)
-
-	var out bytes.Buffer
-	if err := requestReboot([]string{"-server", server.URL, dir, "node-5"}, &out); err != nil {
-		t.Fatal(err)
-	}
-	// The operator computes the same identity from the same boot
-	// record, so this is the value that makes the request match.
-	want := machine.BootID(machine.BootStatus{Time: &requestBootTime})[:12]
-	if !strings.Contains(string(gotPatch), fmt.Sprintf(`"liken.sh/request-reboot":%q`, want)) {
-		t.Fatalf("the patch must name this boot: %s", gotPatch)
-	}
-	if !strings.Contains(out.String(), "requested: liken.sh/request-reboot="+want) {
-		t.Fatalf("the confirmation is missing from the output:\n%s", out.String())
-	}
 }
 
 func TestRequestRebootRefusesAMachineThatReportsNoBoot(t *testing.T) {

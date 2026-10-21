@@ -150,20 +150,15 @@ type rollout struct {
 	budgets map[string]disruption.BudgetStatus
 }
 
-// wantsTurn reports whether any of the machine's conditions carry
-// the AwaitingTurn reason. This reason means the machine has a
-// staged change and may take its disruption as soon as the cluster
-// grants a turn. That readiness comes from either of two paths: the
-// machine's rebootPolicy is Auto, or a person approved the change on
-// a Manual machine through the liken.sh/approve-disruption
-// annotation.
-func wantsTurn(m *machine.Machine) bool {
-	for _, c := range m.Status.Conditions {
-		if c.Reason == "AwaitingTurn" {
-			return true
-		}
-	}
-	return false
+// wantsTurn reports whether the machine has a request that may take a
+// turn: a Disruption that its rebootPolicy or its approvedHash
+// approves, and that is not done (requests.go). The reason
+// AwaitingTurn on a machine's condition still tells a person that the
+// machine waits, and a machine-operator of the release before still
+// sets it, but the conductor grants on the request, so any program
+// that may create a Disruption asks the same way.
+func wantsTurn(open []string) bool {
+	return len(open) > 0
 }
 
 // available reports whether a machine is serving the cluster right
@@ -276,7 +271,7 @@ func decideRollout(machines []machine.Machine, heard map[string]time.Time, heard
 		pending := recorded && grant == nil
 
 		switch {
-		case grant != nil && available(phase) && !wantsTurn(m):
+		case grant != nil && available(phase) && !wantsTurn(open):
 			// The turn is spent, because the machine converged, or it
 			// was never used, because the edit was reverted or the
 			// policy changed to Manual. Either way, the machine is
@@ -292,7 +287,7 @@ func decideRollout(machines []machine.Machine, heard map[string]time.Time, heard
 			// progress. It is an outage.
 			stalled = append(stalled, name)
 			occupying = append(occupying, name)
-		case pending && m.Metadata.ResourceVersion != turn.MachineResourceVersion && available(phase) && wantsTurn(m):
+		case pending && m.Metadata.ResourceVersion != turn.MachineResourceVersion && available(phase) && wantsTurn(open):
 			// The entry outlived its grant, because one of its
 			// requests is still open, and the machine asks for a turn
 			// again: a request that arrived as the last grant was
@@ -338,13 +333,13 @@ func decideRollout(machines []machine.Machine, heard map[string]time.Time, heard
 				// with no grant, advances nothing.
 				leaderAdvancing = leaderAdvancing || grant != nil || pending
 			}
-		case wantsTurn(m) && downloading(m):
+		case wantsTurn(open) && downloading(m):
 			// The release is still on its way, so the turn waits for
 			// it, and the machine takes one drain and one reboot for
 			// both.
 			fetching = append(fetching, name)
 			r.waits[name] = "the machine's release is still downloading, and the turn waits so the release shares its reboot"
-		case wantsTurn(m):
+		case wantsTurn(open):
 			if leader {
 				leaders = append(leaders, name)
 			} else {
@@ -355,7 +350,7 @@ func decideRollout(machines []machine.Machine, heard map[string]time.Time, heard
 
 	slices.Sort(workers)
 	slices.Sort(leaders)
-	book := newBudgetBook(q.budgetsOf(clusterDoc), machines, occupying)
+	book := newBudgetBook(q.budgetsOf(), machines, occupying)
 	wait := func(name, why string) {
 		waiting = append(waiting, name)
 		r.waits[name] = why

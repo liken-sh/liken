@@ -84,8 +84,9 @@ fleet:
     node-5.reboot-77b0c1d9e2a4    node-5    kubernetes-admin            Reboot   False      False     30s
 
 `cluster-operator` reports two conditions on each request. `Approved`
-is `True` when the machine's `rebootPolicy` is `Auto`, or when you
-approved the request with `liken approve-reboot`. `Granted` is `True`
+is `True` when the machine's `rebootPolicy` is `Auto`, or when the
+request's `spec.approvedHash` names its `spec.hash`. `liken
+approve-reboot` sets that field for you. `Granted` is `True`
 while the machine holds a turn that covers the request. While the
 request waits, the message of `Granted` names what it waits for, for
 example `the default budget allows 1 out of service, and node-3 is
@@ -97,12 +98,9 @@ the same time. A machine counts against a budget when it holds a
 turn, and also when it is `Lost`, `Degraded`, or unavailable for any
 other reason. So a fleet that already has a machine down waits before
 it takes another one down. The budget named `default` selects every
-machine. When it is missing, `cluster-operator` creates it from the
-`Cluster`'s
-[`spec.disruption.maxUnavailable`](/docs/reference/cluster/#specdisruption),
-which is one machine when you do not set it. After that, edit the
-budget to change the fleet's limit, because `cluster-operator` reads
-`spec.disruption` only while the `default` budget does not exist:
+machine. When it is missing, `cluster-operator` creates it with a
+limit of one machine, and until it exists, the fleet takes one machine
+out at a time. Edit the budget to change the fleet's limit:
 
     kubectl patch mdb default --type=merge -p '{"spec":{"maxUnavailable":2}}'
 
@@ -125,9 +123,14 @@ When a machine has an approved request and every budget that selects
 it has room, `cluster-operator` gives it a turn. It records the turn
 in the `Cluster`'s
 [`status.rebootTurns`](/docs/reference/cluster/#statusrebootturns),
-with the names of the requests that the turn covers, and then writes
-the `RebootApproved` condition on the `Machine`. `machine-operator`
-then cordons and drains the node and reboots. For a restart of k3s
+with the names of the requests that the turn covers. The entry is
+the grant. `machine-operator` acts on its machine's entry after it
+reads the `Cluster` again from the API server, so an entry that
+`cluster-operator` already removed starts no drain. It cordons and
+drains the node and reboots. `cluster-operator` also writes the
+`RebootApproved` condition on the `Machine`, because the
+`machine-operator` of an earlier release acts on that condition
+alone. For a restart of k3s
 with no reboot, it drains nothing, because the pods keep running. All
 of a machine's requests share one turn, one drain, and one reboot. A
 request that arrives while the machine holds its turn joins that

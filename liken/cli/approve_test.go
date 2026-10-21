@@ -1,13 +1,11 @@
 package main
 
 // These tests cover approve-reboot: chooseApproval picks which
-// staged change to grant, renderPending reports what a machine
-// waits for, and TestApproveRebootReportsAndGrants drives the whole
-// command against a fake API server, the same way
-// kubernetes/kubeconfig_test.go drives KubeconfigClient.
+// staged change to grant, and renderPending reports what a machine
+// waits for. disruptions_test.go drives the whole command against a
+// fake API server.
 
 import (
-	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -15,15 +13,10 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
-	"fmt"
-	"io"
 	"math/big"
 	"net"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -130,91 +123,6 @@ func TestRenderPendingSaysConverged(t *testing.T) {
 	m := &machine.Machine{Metadata: api.ObjectMeta{Name: "node-5"}}
 	if got := renderPending(m); !strings.Contains(got, "node-5 is converged; nothing is waiting") {
 		t.Fatalf("got %q", got)
-	}
-}
-
-func TestApproveRebootReportsAndGrantsTheChosenChange(t *testing.T) {
-	dir := deploymentDirForTest(t)
-	serverCert, clientCAs := issueServerCertForTest(t, dir)
-
-	var gotMethods []string
-	var gotPatch []byte
-	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotMethods = append(gotMethods, r.Method)
-		w.Header().Set("Content-Type", "application/json")
-		switch r.Method {
-		case http.MethodGet:
-			fmt.Fprint(w, `{"metadata":{"name":"node-5"},"status":{"pending":[
-				{"condition":"CredentialsConverged","kind":"Restart",
-				 "hash":"aaaabbbbcccc0000","summary":"registry credentials for 2 hosts"}]}}`)
-		case http.MethodPatch:
-			gotPatch, _ = io.ReadAll(r.Body)
-			fmt.Fprint(w, `{}`)
-		}
-	}))
-	server.TLS = &tls.Config{
-		Certificates: []tls.Certificate{serverCert},
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-		ClientCAs:    clientCAs,
-	}
-	server.StartTLS()
-	defer server.Close()
-
-	var out bytes.Buffer
-	if err := approveReboot([]string{"-server", server.URL, dir, "node-5"}, &out); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out.String(), "node-5 is waiting on one change:") {
-		t.Fatalf("the report is missing from the output:\n%s", out.String())
-	}
-	if !strings.Contains(out.String(), "approved: liken.sh/approve-disruption=aaaabbbbcccc") {
-		t.Fatalf("the grant confirmation is missing from the output:\n%s", out.String())
-	}
-	if !strings.Contains(string(gotPatch), `"liken.sh/approve-disruption":"aaaabbbbcccc"`) {
-		t.Fatalf("the patch is missing the grant: %s", gotPatch)
-	}
-	if !slices.Contains(gotMethods, http.MethodGet) || !slices.Contains(gotMethods, http.MethodPatch) {
-		t.Fatalf("expected a GET and a PATCH, got %v", gotMethods)
-	}
-}
-
-func TestApproveRebootReleasesARequestedReboot(t *testing.T) {
-	// A requested reboot reports itself in status.pending like every
-	// staged change, so the Manual machine's second step is this
-	// same command, with no special case for a request.
-	dir := deploymentDirForTest(t)
-	serverCert, clientCAs := issueServerCertForTest(t, dir)
-
-	var gotPatch []byte
-	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.Method {
-		case http.MethodGet:
-			fmt.Fprint(w, `{"metadata":{"name":"node-5"},"status":{"pending":[
-				{"condition":"RebootRequestHonored","kind":"Reboot",
-				 "hash":"3943abfa6adf0000","summary":"a reboot of this machine, with no change to apply"}]}}`)
-		case http.MethodPatch:
-			gotPatch, _ = io.ReadAll(r.Body)
-			fmt.Fprint(w, `{}`)
-		}
-	}))
-	server.TLS = &tls.Config{
-		Certificates: []tls.Certificate{serverCert},
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-		ClientCAs:    clientCAs,
-	}
-	server.StartTLS()
-	defer server.Close()
-
-	var out bytes.Buffer
-	if err := approveReboot([]string{"-server", server.URL, dir, "node-5"}, &out); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(gotPatch), `"liken.sh/approve-disruption":"3943abfa6adf"`) {
-		t.Fatalf("the patch is missing the grant: %s", gotPatch)
-	}
-	if !strings.Contains(out.String(), "a reboot of this machine, with no change to apply") {
-		t.Fatalf("the report should say what waits:\n%s", out.String())
 	}
 }
 

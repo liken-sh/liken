@@ -211,8 +211,8 @@ func withdrawOtherStage(store machine.ManifestStore, ask fetchAsk, stagedHash st
 // download becomes a staged SystemRelease record, and that record
 // goes through exactly the reboot machinery every other staged
 // document uses. Manual policy reports RebootPending until a person
-// approves the staged release through the approve-disruption
-// annotation. Once approved, or when the policy is Auto from the
+// approves the staged release through the approvedHash of the
+// machine's Disruption. Once approved, or when the policy is Auto from the
 // start, a cluster member waits for its turn from the rollout
 // conductor. A granted turn requests the reboot, gated through the
 // drain like all the rest. The proving boot is the reboot itself:
@@ -241,7 +241,7 @@ func decideSystemStaging(ask fetchAsk, snap fetchSnapshot, m *machine.Machine, r
 
 	c := convergence{manifest: record, hash: hash, stage: stagedHash != hash}
 	gateDisruption(&c, "VersionConverged", m.Spec.RebootPolicyOrDefault(), t, false,
-		m.Metadata.Annotations[machine.ApproveDisruptionAnnotation],
+		m.Metadata.Annotations[requestApprovalKey],
 		fmt.Sprintf("release %s on slot %s", ask.version, ask.slot),
 		fmt.Sprintf("release %s is verified on slot %s and staged (%.12s); rebootPolicy is Manual, so reboot the machine (or set rebootPolicy: Auto) to prove it", ask.version, ask.slot, hash),
 		fmt.Sprintf("release %s is verified on slot %s and staged (%.12s); waiting for the cluster to grant a reboot turn", ask.version, ask.slot, hash),

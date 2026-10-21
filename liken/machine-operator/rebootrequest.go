@@ -13,15 +13,12 @@ package main
 // takes no turn from the cluster, cordons nothing, and drains
 // nothing.
 //
-// The request is an annotation on the Machine
-// (machine.RequestRebootAnnotation), valued with the identity of the
-// boot that is running now. That value is what makes the request
-// one-shot: the boot that comes back has a different identity, so
-// the annotation no longer names the running boot, and nobody has to
-// clear it for a later request to work. The Cluster takes an
-// immediate release check the same way, through the
-// liken.sh/check-releases annotation: an annotation asks for one
-// action, where a spec field declares a standing state.
+// The request is a person's Disruption for the machine (requests.go),
+// whose spec.hash names the identity of the boot that is running now.
+// That value is what makes the request one-shot: the boot that comes
+// back has a different identity, so the request no longer names the
+// running boot, and machine-operator marks it Complete. A later
+// request is a new Disruption, named for the new boot.
 //
 // From the gate onward this is an ordinary disruption. The decision
 // below builds the same convergence value the documents build and
@@ -38,6 +35,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/liken-sh/liken/liken/api"
@@ -51,55 +49,35 @@ import (
 const rebootRequestCondition = "RebootRequestHonored"
 
 // decideRebootRequest is the whole decision, as a pure function over
-// the annotation and the boot record. The cases run in this order:
-//
-//  1. No annotation: nothing was asked for. The message still names
-//     this boot's identity, because that is the value an annotation
-//     has to carry, and kubectl describe machine is where a person
-//     goes to find it. Without it, asking for a reboot would need
-//     the liken CLI and nothing else would do.
-//  2. An annotation, but no boot record, or a boot record with no
-//     time: the machine publishes no identity for an annotation to
-//     name yet, so the verdict is Unknown rather than a guess.
-//  3. The annotation names some other boot. This is either a spent
-//     request, which is what every fulfilled request looks like
-//     afterward, or a value a person mistyped. The message reports
-//     both values, so a mistyped one is visible where the person is
-//     already looking.
-//  4. The annotation names this boot: gate the reboot on the policy
-//     and the turn.
-//
-// A person's Disruption for the running boot is the same request as the
-// annotation (requests.go), and its approvedHash approves it the way
-// the approve annotation does.
+// the machine's requests and the boot record. A request that names
+// this boot gates the reboot on the policy and the turn, and its
+// approvedHash approves it on a Manual machine. With no such request,
+// nothing was asked for. The message then names this boot's identity,
+// because that is the value a request created with kubectl can carry,
+// and kubectl describe machine is where a person goes to find it. A
+// machine with no boot record publishes no identity for a request to
+// name, so while a person's request waits, the verdict is Unknown
+// rather than a guess.
 func decideRebootRequest(m *machine.Machine, facts *machine.MachineStatus, t turn, requests []disruption.Disruption) convergence {
-	request := m.Metadata.Annotations[machine.RequestRebootAnnotation]
-	approval := m.Metadata.Annotations[machine.ApproveDisruptionAnnotation]
 	bootID := ""
 	if facts != nil {
 		bootID = machine.BootID(facts.Boot)
 	}
-	if d := requestForBoot(requests, bootID); d != nil && bootID != "" {
-		request = d.Spec.Hash
-		if d.ApprovedByHash() {
-			approval = d.Spec.Hash
-		}
+	if bootID == "" && slices.ContainsFunc(peopleRequests(requests), func(d disruption.Disruption) bool { return !d.Complete() }) {
+		return factsIncomplete(rebootRequestCondition)
 	}
-	if request == "" {
+	d := requestForBoot(requests, bootID)
+	if d == nil || bootID == "" {
 		message := "no reboot has been requested"
 		if bootID != "" {
-			message = fmt.Sprintf("no reboot has been requested; to ask for one, set the %s annotation to %.12s, this boot's identity",
-				machine.RequestRebootAnnotation, bootID)
+			message = fmt.Sprintf("no reboot has been requested; to ask for one, run liken request-reboot, or create a Disruption for this machine with spec.hash %.12s, this boot's identity",
+				bootID)
 		}
 		return convergence{condition: converged(rebootRequestCondition, "NothingRequested", message)}
 	}
-	if bootID == "" {
-		return factsIncomplete(rebootRequestCondition)
-	}
-	if !machine.RebootRequestNames(request, bootID) {
-		return convergence{condition: converged(rebootRequestCondition, "RequestSpent",
-			fmt.Sprintf("the %s annotation names %s, and this boot is %.12s; the request applies to a boot that is no longer running",
-				machine.RequestRebootAnnotation, request, bootID))}
+	approval := ""
+	if d.ApprovedByHash() {
+		approval = bootID
 	}
 
 	c := convergence{hash: bootID}

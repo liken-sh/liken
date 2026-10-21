@@ -639,7 +639,7 @@ func gateForTest() convergence {
 func TestManualWithAMatchingApprovalTakesTheAutoPath(t *testing.T) {
 	c := gateForTest()
 	gateDisruption(&c, "SpecConverged", machine.RebootManual, turnAwaiting, false,
-		"3943abfa6adf", "a summary", "pending msg", "awaiting msg", "requested msg")
+		gateForTest().hash, "a summary", "pending msg", "awaiting msg", "requested msg")
 	if c.condition.Reason != "AwaitingTurn" {
 		t.Fatalf("an approved Manual cluster member must await its turn, got %s", c.condition.Reason)
 	}
@@ -651,22 +651,18 @@ func TestManualWithAMatchingApprovalTakesTheAutoPath(t *testing.T) {
 func TestManualApprovedAndGrantedRequestsTheDisruption(t *testing.T) {
 	c := gateForTest()
 	gateDisruption(&c, "SpecConverged", machine.RebootManual, turnGranted, false,
-		"3943abfa6adf", "a summary", "pending msg", "awaiting msg", "requested msg")
+		gateForTest().hash, "a summary", "pending msg", "awaiting msg", "requested msg")
 	if c.condition.Reason != "RebootRequested" || !c.requestReboot {
 		t.Fatalf("an approved, granted Manual machine must request the reboot, got %s", c.condition.Reason)
 	}
 }
 
-func TestManualWithAMismatchedApprovalStaysPendingAndNamesBothHashes(t *testing.T) {
+func TestManualWithAMismatchedApprovalStaysPending(t *testing.T) {
 	c := gateForTest()
 	gateDisruption(&c, "SpecConverged", machine.RebootManual, turnAwaiting, false,
 		"deadbeefdead", "a summary", "pending msg", "awaiting msg", "requested msg")
-	if c.condition.Reason != "RebootPending" {
-		t.Fatalf("a mismatched approval must not grant, got %s", c.condition.Reason)
-	}
-	if !strings.Contains(c.condition.Message, "deadbeefdead") ||
-		!strings.Contains(c.condition.Message, "3943abfa6adf") {
-		t.Fatalf("the message must carry both hashes: %s", c.condition.Message)
+	if c.condition.Reason != "RebootPending" || c.condition.Message != "pending msg" {
+		t.Fatalf("a mismatched approval must not grant, got %s: %s", c.condition.Reason, c.condition.Message)
 	}
 }
 

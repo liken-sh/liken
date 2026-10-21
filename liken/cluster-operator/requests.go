@@ -4,16 +4,11 @@ package main
 // and the MachineDisruptionBudgets that the rollout conductor reads on
 // each sweep (rollout.go).
 //
-// A machine still asks for a turn with the reason AwaitingTurn on one
-// of its conditions, and the conductor grants the turn on that reason.
-// machine-operator sets it for every request it acts on: its own
-// staged documents, and a person's Disruption or request annotation. A
-// grant on a Disruption alone would go to a machine-operator of the
-// release before, which ignores a Disruption, and the grant would hold
-// a slot of the budget with no reboot to spend it. So a Disruption
-// tells the conductor what a turn covers, not whether to grant one:
-// the ledger entry names each approved Disruption that is still open,
-// and the entry stays while one of them is open.
+// A machine asks for a turn with a Disruption, and the conductor grants
+// a turn to a machine with a request that is approved and not done.
+// The ledger entry names each such request, and the entry stays while
+// one of them is open, so a request that arrives during the turn
+// joins it.
 
 import (
 	"fmt"
@@ -61,12 +56,8 @@ type approval struct {
 }
 
 // approve judges one request against its machine. A machine on
-// rebootPolicy Auto approves every request. A Manual machine's request
-// is approved by its approvedHash, and also by the approve annotation
-// that machine-operator still honors: for a person's request, the
-// annotation names the request's hash, and for machine-operator's own,
-// the annotation names one of the staged documents in status.pending
-// that the request covers.
+// rebootPolicy Auto approves every request, and a Manual machine's
+// request is approved while its approvedHash names its hash.
 func approve(d *disruption.Disruption, m *machine.Machine) approval {
 	if m.Spec.RebootPolicyOrDefault() == machine.RebootAuto {
 		return approval{true, "AutoPolicy", "the machine's rebootPolicy is Auto, which approves every request"}
@@ -74,32 +65,9 @@ func approve(d *disruption.Disruption, m *machine.Machine) approval {
 	if d.ApprovedByHash() {
 		return approval{true, "HashApproved", fmt.Sprintf("spec.approvedHash names spec.hash (%.12s)", d.Spec.Hash)}
 	}
-	annotation := m.Metadata.Annotations[machine.ApproveDisruptionAnnotation]
-	if annotation != "" && approvedByAnnotation(d, m, annotation) {
-		return approval{true, "AnnotationApproved",
-			fmt.Sprintf("the %s annotation names %s, which this request covers", machine.ApproveDisruptionAnnotation, annotation)}
-	}
 	return approval{false, "AwaitingApproval",
 		fmt.Sprintf("the machine's rebootPolicy is Manual; approve the request with `liken approve-reboot`, or set spec.approvedHash to spec.hash (%.12s)", d.Spec.Hash)}
 }
-
-func approvedByAnnotation(d *disruption.Disruption, m *machine.Machine, annotation string) bool {
-	if !d.Own() {
-		return machine.ApprovalGrants(annotation, d.Spec.Hash)
-	}
-	for _, p := range m.Status.Pending {
-		if p.Condition != rebootRequestCondition && machine.ApprovalGrants(annotation, p.Hash) {
-			return true
-		}
-	}
-	return false
-}
-
-// rebootRequestCondition is the condition machine-operator reports a
-// person's reboot request on. Its status.pending entry is the person's
-// request, not one of the documents machine-operator's own Disruption
-// covers.
-const rebootRequestCondition = "RebootRequestHonored"
 
 // open answers the names of a machine's requests that are approved and
 // not done, in name order. These are the requests a turn grants.
@@ -155,17 +123,21 @@ func downloading(m *machine.Machine) bool {
 }
 
 // budgetsOf answers the budgets that limit the fleet. The default
-// budget always limits it: when the cluster serves no budget named
-// default, because the kind is not served yet or the conductor has not
-// created it yet, a stand-in from spec.disruption takes its place.
-func (q fleetRequests) budgetsOf(clusterDoc *cluster.Cluster) []disruption.Budget {
+// budget always limits it: until the cluster serves a budget named
+// default, a stand-in of one machine at a time takes its place, the
+// limit the conductor creates it with.
+func (q fleetRequests) budgetsOf() []disruption.Budget {
 	budgets := slices.Clone(q.budgets)
 	if !slices.ContainsFunc(budgets, func(b disruption.Budget) bool { return b.Metadata.Name == disruption.DefaultBudget }) {
-		budgets = append(budgets, *disruption.NewDefaultBudget(clusterDoc.Spec.Disruption.MaxUnavailableOrDefault()))
+		budgets = append(budgets, *disruption.NewDefaultBudget(defaultBudgetLimit))
 	}
 	sort.Slice(budgets, func(i, j int) bool { return budgets[i].Metadata.Name < budgets[j].Metadata.Name })
 	return budgets
 }
+
+// defaultBudgetLimit is the limit the default budget starts with: one
+// machine at a time, the safest rollout.
+const defaultBudgetLimit = 1
 
 // A budgetBook counts each budget's room through one sweep. It starts
 // from the machines that are already out of service, and each grant

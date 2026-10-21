@@ -5,11 +5,10 @@ package main
 // with every document it was given has no way to reboot, and a
 // machine with no shell has no other way to be told. This command is
 // how a person asks: it reads status.boot.time, derives the running
-// boot's identity, files a Disruption named for it, and writes the
-// request-reboot annotation naming it (disruptions.go). Naming the
-// running boot makes the request one-shot
-// (machine.RequestRebootAnnotation explains why), so a later request
-// works with no cleanup in between.
+// boot's identity, and files a Disruption named for it
+// (disruptions.go). Naming the running boot makes the request
+// one-shot: machine-operator marks it Complete when the machine runs
+// another boot, so a later request works with no cleanup in between.
 //
 // The request skips no coordination. The machine still takes its
 // turn from the cluster's disruption budget, cordons, and drains. On
@@ -30,9 +29,9 @@ import (
 // next depends on the machine's rebootPolicy, so the report says
 // which of the two paths this machine is on, and names the command
 // that finishes the second one.
-func renderRequest(m *machine.Machine, dir, short string) string {
+func renderRequest(m *machine.Machine, dir, filed string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "requested: %s=%s\n", machine.RequestRebootAnnotation, short)
+	fmt.Fprintf(&b, "filed: Disruption %s\n", filed)
 	if m.Spec.RebootPolicyOrDefault() == machine.RebootAuto {
 		fmt.Fprintf(&b, "%s takes a reboot turn from the cluster, drains its workloads, and reboots.\n", m.Metadata.Name)
 	} else {
@@ -78,14 +77,9 @@ func requestReboot(args []string, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("filing the Disruption: %w", err)
 	}
-	short := fmt.Sprintf("%.12s", bootID)
-	patch := fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`, machine.RequestRebootAnnotation, short)
-	if err := kubernetes.PatchJSON(c, kubernetes.MachinesPath+"/"+m.Metadata.Name, []byte(patch)); err != nil {
-		return err
+	if filed == "" {
+		return errNoDisruptions
 	}
-	if filed != "" {
-		fmt.Fprintf(out, "filed: Disruption %s\n", filed)
-	}
-	fmt.Fprint(out, renderRequest(m, fs.Arg(0), short))
+	fmt.Fprint(out, renderRequest(m, fs.Arg(0), filed))
 	return nil
 }

@@ -4,11 +4,11 @@ package main
 // own staged documents, and the reboots that people ask for.
 //
 // Every reboot and restart this operator makes waits for a turn that
-// the rollout conductor grants (cluster-operator/rollout.go). The turn
-// itself still comes as the RebootApproved condition, and the operator
-// still asks for it with the reason AwaitingTurn, so a conductor of the
-// release before the Disruptions grants it the same way. A Disruption
-// records the request where `kubectl get disruptions` lists it:
+// the rollout conductor grants (cluster-operator/rollout.go), and the
+// conductor grants a turn to a machine with an approved Disruption
+// that is not done. The turn is the machine's entry in the Cluster's
+// ledger (turn.go). The operator still reports the reason AwaitingTurn,
+// which a conductor of the release before grants on.
 //
 //   - The operator keeps one request, <machine>.machine-operator, for
 //     every staged document that waits for a reboot or a restart, and
@@ -16,14 +16,13 @@ package main
 //     deletes it when nothing is. A deleted request takes its approval
 //     with it, so a later return to the same bytes asks again.
 //   - A person's request, <machine>.reboot-<boot>, asks for one reboot
-//     of the boot it names, the same as the request annotation
-//     (rebootrequest.go). The operator writes the running boot into a
-//     request that names none, and marks a request Complete when the
-//     machine runs another boot.
+//     of the boot it names (rebootrequest.go). The operator writes the
+//     running boot into a request that names none, and marks a request
+//     Complete when the machine runs another boot.
 //
 // A cluster that does not serve the kind, or an RBAC from the release
-// before it, reads as no requests at all, and the operator works from
-// the annotations alone.
+// before it, reads as no requests at all, and the operator asks for no
+// turn.
 
 import (
 	"crypto/sha256"
@@ -191,24 +190,32 @@ func ownRequest(name string, pending []machine.PendingDisruption, demotion api.C
 	}
 }
 
-// withOwnApproval answers the Machine that the convergence decisions
-// read: m itself, or a copy whose approve annotation carries the
-// approval of this operator's own request. The decisions approve one
-// staged document at a time through the annotation, and the request's
-// spec.approvedHash approves what the request covers. So a request
-// whose approvedHash names its hash approves the change that `liken
-// approve-reboot` would: the first reboot-class change, whose reboot
-// applies every staged document, or else the first restart-class one.
+// requestApprovalKey carries the approval of this operator's own
+// request to the convergence decisions, on the decisions' own copy of
+// the Machine: the hashes of the staged documents that the approved
+// request covers, separated by commas. The operator writes only the
+// Machine's status subresource, so the key never reaches the API
+// server, and nothing outside this operator reads it.
+const requestApprovalKey = "machine-operator.liken.sh/request-approves"
+
+// withRequestApprovals answers the copy of the Machine that the
+// convergence decisions read. A request whose spec.approvedHash names
+// its hash approves every staged document it covers, so one approval
+// releases one Disruption, whatever it applies.
 //
 // The approval counts only while the request covers what this
 // operator found waiting on its last pass, which status.pending holds.
 // A document staged since then changes the request's hash on this
-// pass, and the approval no longer matches. An annotation that already
-// approves a waiting document stands as it is.
-func withOwnApproval(m *machine.Machine, requests []disruption.Disruption) *machine.Machine {
+// pass, and the approval no longer matches. A request deleted when
+// nothing waited took its approval with it, so a later return to the
+// same bytes asks again.
+func withRequestApprovals(m *machine.Machine, requests []disruption.Disruption) *machine.Machine {
+	decided := *m
+	decided.Metadata.Annotations = maps.Clone(m.Metadata.Annotations)
+	delete(decided.Metadata.Annotations, requestApprovalKey)
 	at := slices.IndexFunc(requests, func(d disruption.Disruption) bool { return d.Own() })
 	if at < 0 || !requests[at].ApprovedByHash() {
-		return m
+		return &decided
 	}
 	demotion := api.Condition{}
 	if c := api.FindCondition(m.Status.Conditions, "NodeCurrent"); c != nil {
@@ -216,32 +223,25 @@ func withOwnApproval(m *machine.Machine, requests []disruption.Disruption) *mach
 	}
 	covered := ownRequest(m.Metadata.Name, m.Status.Pending, demotion)
 	if covered == nil || covered.Hash != requests[at].Spec.Hash {
-		return m
+		return &decided
 	}
-	annotation := m.Metadata.Annotations[machine.ApproveDisruptionAnnotation]
-	var choice *machine.PendingDisruption
-	for i := range m.Status.Pending {
-		p := &m.Status.Pending[i]
-		if p.Condition == rebootRequestCondition {
-			continue
-		}
-		if machine.ApprovalGrants(annotation, p.Hash) {
-			return m
-		}
-		if choice == nil || (p.Kind == machine.DisruptionReboot && choice.Kind != machine.DisruptionReboot) {
-			choice = p
+	var hashes []string
+	for _, p := range m.Status.Pending {
+		if p.Condition != rebootRequestCondition {
+			hashes = append(hashes, p.Hash)
 		}
 	}
-	if choice == nil {
-		return m
+	if decided.Metadata.Annotations == nil {
+		decided.Metadata.Annotations = map[string]string{}
 	}
-	approved := *m
-	approved.Metadata.Annotations = maps.Clone(m.Metadata.Annotations)
-	if approved.Metadata.Annotations == nil {
-		approved.Metadata.Annotations = map[string]string{}
-	}
-	approved.Metadata.Annotations[machine.ApproveDisruptionAnnotation] = choice.Hash
-	return &approved
+	decided.Metadata.Annotations[requestApprovalKey] = strings.Join(hashes, ",")
+	return &decided
+}
+
+// approvedByRequest reports whether a decision's approval names the
+// staged document's hash.
+func approvedByRequest(approval, hash string) bool {
+	return hash != "" && slices.Contains(strings.Split(approval, ","), hash)
 }
 
 // syncOwnRequest makes this operator's request match what waits:

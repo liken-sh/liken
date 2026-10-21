@@ -75,7 +75,7 @@ func TestRolloutGrantsAWaitingMachine(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseReady, fresh, false, -1},
 		rolloutEntry{"node-3", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideRollout(machines, renewals, time.Time{}, labCluster(0), "", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
 	if !slices.Equal(r.grant, []string{"node-3"}) {
 		t.Errorf("got grants %v", r.grant)
 	}
@@ -89,7 +89,7 @@ func TestRolloutAtRestIsComplete(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseReady, fresh, false, -1},
 		rolloutEntry{"node-3", api.PhaseReady, fresh, false, -1},
 	)
-	r := decideRollout(machines, renewals, time.Time{}, labCluster(0), "", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
 	if len(r.grant) != 0 || len(r.revoke) != 0 {
 		t.Errorf("nothing to do here: grant %v revoke %v", r.grant, r.revoke)
 	}
@@ -104,7 +104,7 @@ func TestRolloutHonorsTheDefaultBudgetOfOne(t *testing.T) {
 		rolloutEntry{"node-3", api.PhaseUpdatePending, fresh, true, -1},
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideRollout(machines, renewals, time.Time{}, labCluster(0), "", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
 	if !slices.Equal(r.grant, []string{"node-3"}) {
 		t.Errorf("one turn at a time by default: %v", r.grant)
 	}
@@ -120,7 +120,7 @@ func TestRolloutABiggerBudgetGrantsMoreTurns(t *testing.T) {
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideRollout(machines, renewals, time.Time{}, labCluster(2), "", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(2), "", sweepNow)
 	if !slices.Equal(r.grant, []string{"node-3", "node-4"}) {
 		t.Errorf("got %v", r.grant)
 	}
@@ -131,7 +131,7 @@ func TestRolloutGrantsWorkersBeforeLeaders(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseUpdatePending, fresh, true, -1},
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideRollout(machines, renewals, time.Time{}, labCluster(0), "", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
 	if !slices.Equal(r.grant, []string{"node-4"}) {
 		t.Errorf("the worker goes first: %v", r.grant)
 	}
@@ -142,7 +142,7 @@ func TestRolloutGrantsInNameOrder(t *testing.T) {
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideRollout(machines, renewals, time.Time{}, labCluster(0), "", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
 	if !slices.Equal(r.grant, []string{"node-4"}) {
 		t.Errorf("deterministic order, lowest name first: %v", r.grant)
 	}
@@ -153,7 +153,7 @@ func TestRolloutOneLeaderAtATimeRegardlessOfBudget(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseUpdatePending, fresh, true, -1},
 		rolloutEntry{"node-2", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideRollout(machines, renewals, time.Time{}, labCluster(3), "", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(3), "", sweepNow)
 	if !slices.Equal(r.grant, []string{"node-1"}) {
 		t.Errorf("quorum is arithmetic: %v", r.grant)
 	}
@@ -164,7 +164,7 @@ func TestRolloutNeverGrantsALeaderWhileAnotherLeaderIsDown(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseUpdatePending, fresh, true, -1},
 		rolloutEntry{"node-2", api.PhaseLost, 5 * time.Minute, false, -1},
 	)
-	r := decideRollout(machines, renewals, time.Time{}, labCluster(3), "", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(3), "", sweepNow)
 	if len(r.grant) != 0 {
 		t.Errorf("a downed leader freezes leader turns: %v", r.grant)
 	}
@@ -176,7 +176,7 @@ func TestRolloutUnplannedTroubleConsumesTheBudget(t *testing.T) {
 		rolloutEntry{"node-4", api.PhaseLost, 5 * time.Minute, false, -1},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideRollout(machines, renewals, time.Time{}, labCluster(0), "", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
 	if len(r.grant) != 0 {
 		t.Errorf("a hurting fleet pauses its own rollout: %v", r.grant)
 	}
@@ -188,7 +188,7 @@ func TestRolloutAnOutstandingGrantConsumesTheBudget(t *testing.T) {
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, time.Minute},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideRollout(machines, renewals, time.Time{}, labCluster(0), "", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
 	if len(r.grant) != 0 {
 		t.Errorf("node-4 already holds the turn: %v", r.grant)
 	}
@@ -206,7 +206,7 @@ func TestRolloutKeepsTheGrantThroughTheReboot(t *testing.T) {
 		rolloutEntry{"node-4", api.PhaseUpdating, 3 * time.Minute, false, 3 * time.Minute},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideRollout(machines, renewals, time.Time{}, labCluster(0), "", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
 	if len(r.grant) != 0 || len(r.revoke) != 0 {
 		t.Errorf("mid-reboot means wait: grant %v revoke %v", r.grant, r.revoke)
 	}
@@ -225,7 +225,7 @@ func TestRolloutRevokesAfterTheMachineConverges(t *testing.T) {
 		rolloutEntry{"node-4", api.PhaseReady, fresh, false, 5 * time.Minute},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideRollout(machines, renewals, time.Time{}, labCluster(0), "", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
 	if !slices.Equal(r.revoke, []string{"node-4"}) {
 		t.Errorf("the turn is spent: %v", r.revoke)
 	}
@@ -240,7 +240,7 @@ func TestRolloutStallsOnAMachineThatNeverReturns(t *testing.T) {
 		rolloutEntry{"node-4", api.PhaseUpdating, 12 * time.Minute, false, 12 * time.Minute},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideRollout(machines, renewals, time.Time{}, labCluster(3), "", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(3), "", sweepNow)
 	if len(r.grant) != 0 {
 		t.Errorf("a stalled rollout grants nothing: %v", r.grant)
 	}
@@ -261,7 +261,7 @@ func TestRolloutAManualMachineDoesNotHoldTheQueue(t *testing.T) {
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, false, -1},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideRollout(machines, renewals, time.Time{}, labCluster(0), "", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
 	if !slices.Equal(r.grant, []string{"node-5"}) {
 		t.Errorf("got %v", r.grant)
 	}
@@ -276,7 +276,7 @@ func TestRolloutRevokesAGrantTheMachineNoLongerWants(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseReady, fresh, false, -1},
 		rolloutEntry{"node-4", api.PhaseReady, fresh, false, time.Minute},
 	)
-	r := decideRollout(machines, renewals, time.Time{}, labCluster(0), "", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
 	if !slices.Equal(r.revoke, []string{"node-4"}) {
 		t.Errorf("got %v", r.revoke)
 	}
@@ -291,7 +291,7 @@ func TestRolloutGateSendsAWaitingLeaderFirst(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseUpdatePending, fresh, true, -1}, // leader
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1}, // worker
 	)
-	r := decideRollout(machines, renewals, time.Time{}, targetingCluster(0, "2026.08.12-002"), "2026.08.01-001", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, targetingCluster(0, "2026.08.12-002"), "2026.08.01-001", sweepNow)
 	if !slices.Equal(r.grant, []string{"node-1"}) {
 		t.Errorf("the leader should go first while the template lags: %v", r.grant)
 	}
@@ -313,7 +313,7 @@ func TestRolloutGateGrantsWorkersWhenNoLeaderIsWaiting(t *testing.T) {
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 		rolloutEntry{"node-5", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideRollout(machines, renewals, time.Time{}, targetingCluster(0, "2026.08.12-002"), "2026.08.01-001", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, targetingCluster(0, "2026.08.12-002"), "2026.08.01-001", sweepNow)
 	if !slices.Equal(r.grant, []string{"node-4"}) {
 		t.Errorf("a worker should still be granted: %v", r.grant)
 	}
@@ -328,7 +328,7 @@ func TestRolloutGateHoldsWorkersThroughTheLeaderTurn(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseUpdating, 3 * time.Minute, false, 3 * time.Minute},
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideRollout(machines, renewals, time.Time{}, targetingCluster(2, "2026.08.12-002"), "2026.08.01-001", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, targetingCluster(2, "2026.08.12-002"), "2026.08.01-001", sweepNow)
 	if len(r.grant) != 0 {
 		t.Errorf("the worker waits while the leader's turn runs: %v", r.grant)
 	}
@@ -348,7 +348,7 @@ func TestRolloutGateStandsAsideForALeaderStuckWithoutAGrant(t *testing.T) {
 		rolloutEntry{"node-2", api.PhaseLost, 5 * time.Minute, false, -1},
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1},
 	)
-	r := decideRollout(machines, renewals, time.Time{}, targetingCluster(2, "2026.08.12-002"), "2026.08.01-001", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, targetingCluster(2, "2026.08.12-002"), "2026.08.01-001", sweepNow)
 	if !slices.Equal(r.grant, []string{"node-4"}) {
 		t.Errorf("the worker proceeds; nothing can advance the template now: %v", r.grant)
 	}
@@ -361,7 +361,7 @@ func TestRolloutGateDoesNotHoldWithNoAppliedVersion(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseUpdatePending, fresh, true, -1}, // leader
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1}, // worker
 	)
-	r := decideRollout(machines, renewals, time.Time{}, targetingCluster(0, "2026.08.12-002"), "", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, targetingCluster(0, "2026.08.12-002"), "", sweepNow)
 	if !slices.Equal(r.grant, []string{"node-4"}) {
 		t.Errorf("the worker goes first without an applied version to compare: %v", r.grant)
 	}
@@ -372,7 +372,7 @@ func TestRolloutGateDoesNotHoldWhenTheTemplateAlreadyMatches(t *testing.T) {
 		rolloutEntry{"node-1", api.PhaseUpdatePending, fresh, true, -1}, // leader
 		rolloutEntry{"node-4", api.PhaseUpdatePending, fresh, true, -1}, // worker
 	)
-	r := decideRollout(machines, renewals, time.Time{}, targetingCluster(0, "2026.08.12-002"), "2026.08.12-002", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, targetingCluster(0, "2026.08.12-002"), "2026.08.12-002", sweepNow)
 	if !slices.Equal(r.grant, []string{"node-4"}) {
 		t.Errorf("the worker goes first once the template has caught up: %v", r.grant)
 	}
@@ -397,7 +397,7 @@ func TestRolloutSequencesARequestedRebootLikeAnyOther(t *testing.T) {
 			Type: "RebootRequestHonored", Status: "False", Reason: "AwaitingTurn",
 		}, sweepNow)
 	}
-	r := decideRollout(machines, renewals, time.Time{}, labCluster(0), "", fleetRequests{}, sweepNow)
+	r := decideFor(machines, renewals, time.Time{}, labCluster(0), "", sweepNow)
 	if !slices.Equal(r.grant, []string{"node-3"}) {
 		t.Errorf("one requested reboot at a time, like every other reboot: %v", r.grant)
 	}

@@ -207,11 +207,10 @@ func TestThePeoplesRequestsFollowTheBoot(t *testing.T) {
 	}
 }
 
-// The own request's approvedHash approves what `liken approve-reboot`
-// would: the reboot-class change first. It counts only while the
-// request covers what the last pass found waiting, and an annotation
-// that already approves a waiting change stands.
-func TestTheOwnRequestsApprovalApprovesTheRebootFirst(t *testing.T) {
+// The own request's approvedHash approves every staged change it
+// covers. It counts only while the request covers what the last pass
+// found waiting, and the approve annotation approves nothing.
+func TestTheOwnRequestsApprovalApprovesWhatItCovers(t *testing.T) {
 	waiting := []machine.PendingDisruption{stagedCluster, stagedSpec}
 	covering := ownRequest("node-4", waiting, noDemotion)
 	request := func(hash, approved string) []disruption.Disruption {
@@ -223,29 +222,32 @@ func TestTheOwnRequestsApprovalApprovesTheRebootFirst(t *testing.T) {
 		name       string
 		requests   []disruption.Disruption
 		annotation string
-		want       string
+		approved   []string
 	}{
-		{"no request", nil, "", ""},
-		{"a request with no approval", request(covering.Hash, ""), "", ""},
-		{"an approved request", request(covering.Hash, covering.Hash), "", stagedSpec.Hash},
-		{"an approval of other bytes", request("77aa0b1c2d3e4f", "77aa0b1c2d3e4f"), "", ""},
-		{"an annotation that approves a waiting change", request(covering.Hash, covering.Hash), stagedCluster.Hash, stagedCluster.Hash},
+		{"no request", nil, "", nil},
+		{"a request with no approval", request(covering.Hash, ""), "", nil},
+		{"an approved request", request(covering.Hash, covering.Hash), "", []string{stagedCluster.Hash, stagedSpec.Hash}},
+		{"an approval of other bytes", request("77aa0b1c2d3e4f", "77aa0b1c2d3e4f"), "", nil},
+		{"the approve annotation alone", request(covering.Hash, ""), stagedSpec.Hash, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			m := requestingNode4()
 			m.Status.Pending = waiting
 			if c.annotation != "" {
-				m.Metadata.Annotations = map[string]string{machine.ApproveDisruptionAnnotation: c.annotation}
+				m.Metadata.Annotations = map[string]string{"liken.sh/approve-disruption": c.annotation}
 			}
 
-			decided := withOwnApproval(m, c.requests)
+			decided := withRequestApprovals(m, c.requests)
 
-			if got := decided.Metadata.Annotations[machine.ApproveDisruptionAnnotation]; got != c.want {
-				t.Errorf("the decisions read the approval %q, want %q", got, c.want)
+			approval := decided.Metadata.Annotations[requestApprovalKey]
+			for _, hash := range []string{stagedCluster.Hash, stagedSpec.Hash} {
+				if got, want := approvedByRequest(approval, hash), slices.Contains(c.approved, hash); got != want {
+					t.Errorf("%s approved = %v, want %v", hash, got, want)
+				}
 			}
-			if c.annotation == "" && len(m.Metadata.Annotations) != 0 {
-				t.Errorf("the Machine itself changed: %v", m.Metadata.Annotations)
+			if _, ok := m.Metadata.Annotations[requestApprovalKey]; ok {
+				t.Error("the Machine itself changed")
 			}
 		})
 	}

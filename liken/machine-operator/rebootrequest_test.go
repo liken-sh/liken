@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/liken/api"
+	"github.com/liken-sh/liken/liken/disruption"
 	"github.com/liken-sh/liken/liken/machine"
 )
 
@@ -58,10 +59,10 @@ func TestNoAnnotationAndNoBootRecordStillReadsAsSettled(t *testing.T) {
 }
 
 func TestARequestWithNoBootRecordHoldsAtUnknown(t *testing.T) {
-	m := requestingMachine(machine.RebootAuto, map[string]string{
-		machine.RequestRebootAnnotation: shortBootID(requestBootTime)})
+	m := requestingMachine(machine.RebootAuto, nil)
+	requests := bootRequestFor(requestBootTime, false)
 	for _, facts := range []*machine.MachineStatus{nil, {}} {
-		conv := decideRebootRequest(m, facts, turnGranted, nil)
+		conv := decideRebootRequest(m, facts, turnGranted, requests)
 		if conv.condition.Status != api.ConditionUnknown || conv.condition.Reason != "FactsIncomplete" {
 			t.Fatalf("got %+v", conv.condition)
 		}
@@ -72,9 +73,9 @@ func TestARequestWithNoBootRecordHoldsAtUnknown(t *testing.T) {
 }
 
 func TestAutoWaitsForTheClusterToGrantTheTurn(t *testing.T) {
-	m := requestingMachine(machine.RebootAuto, map[string]string{
-		machine.RequestRebootAnnotation: shortBootID(requestBootTime)})
-	conv := decideRebootRequest(m, requestFacts(requestBootTime), turnAwaiting, nil)
+	m := requestingMachine(machine.RebootAuto, nil)
+	requests := bootRequestFor(requestBootTime, false)
+	conv := decideRebootRequest(m, requestFacts(requestBootTime), turnAwaiting, requests)
 	if conv.condition.Reason != "AwaitingTurn" {
 		t.Fatalf("a request takes its turn like every other reboot: %+v", conv.condition)
 	}
@@ -84,60 +85,67 @@ func TestAutoWaitsForTheClusterToGrantTheTurn(t *testing.T) {
 }
 
 func TestAutoRebootsOnItsGrantedTurnWithNoApproval(t *testing.T) {
-	m := requestingMachine(machine.RebootAuto, map[string]string{
-		machine.RequestRebootAnnotation: shortBootID(requestBootTime)})
-	conv := decideRebootRequest(m, requestFacts(requestBootTime), turnGranted, nil)
+	m := requestingMachine(machine.RebootAuto, nil)
+	requests := bootRequestFor(requestBootTime, false)
+	conv := decideRebootRequest(m, requestFacts(requestBootTime), turnGranted, requests)
 	if conv.condition.Reason != "RebootRequested" || !conv.requestReboot {
 		t.Fatalf("Auto needs no second step once the turn is granted: %+v", conv.condition)
 	}
 }
 
 func TestManualWaitsForAPersonEvenWithATurn(t *testing.T) {
-	m := requestingMachine(machine.RebootManual, map[string]string{
-		machine.RequestRebootAnnotation: shortBootID(requestBootTime)})
-	conv := decideRebootRequest(m, requestFacts(requestBootTime), turnGranted, nil)
+	m := requestingMachine(machine.RebootManual, nil)
+	requests := bootRequestFor(requestBootTime, false)
+	conv := decideRebootRequest(m, requestFacts(requestBootTime), turnGranted, requests)
 	if conv.condition.Reason != "RebootPending" || conv.requestReboot {
 		t.Fatalf("Manual parks where a staged change parks: %+v", conv.condition)
 	}
 }
 
 func TestManualReleasesOnTheApprovalOfTheSameBoot(t *testing.T) {
-	short := shortBootID(requestBootTime)
-	m := requestingMachine(machine.RebootManual, map[string]string{
-		machine.RequestRebootAnnotation:     short,
-		machine.ApproveDisruptionAnnotation: short,
-	})
-	awaiting := decideRebootRequest(m, requestFacts(requestBootTime), turnAwaiting, nil)
+	m := requestingMachine(machine.RebootManual, nil)
+	requests := bootRequestFor(requestBootTime, true)
+	awaiting := decideRebootRequest(m, requestFacts(requestBootTime), turnAwaiting, requests)
 	if awaiting.condition.Reason != "AwaitingTurn" || awaiting.requestReboot {
 		t.Fatalf("an approved Manual machine joins the queue, it does not jump it: %+v", awaiting.condition)
 	}
-	granted := decideRebootRequest(m, requestFacts(requestBootTime), turnGranted, nil)
+	granted := decideRebootRequest(m, requestFacts(requestBootTime), turnGranted, requests)
 	if granted.condition.Reason != "RebootRequested" || !granted.requestReboot {
 		t.Fatalf("an approved, granted machine reboots: %+v", granted.condition)
 	}
 }
 
 func TestAnApprovalOfAnotherHashDoesNotRelease(t *testing.T) {
-	m := requestingMachine(machine.RebootManual, map[string]string{
-		machine.RequestRebootAnnotation:     shortBootID(requestBootTime),
-		machine.ApproveDisruptionAnnotation: "deadbeefdead",
-	})
-	conv := decideRebootRequest(m, requestFacts(requestBootTime), turnGranted, nil)
+	m := requestingMachine(machine.RebootManual, nil)
+	requests := bootRequestFor(requestBootTime, false)
+	requests[0].Spec.ApprovedHash = "deadbeefdead"
+	conv := decideRebootRequest(m, requestFacts(requestBootTime), turnGranted, requests)
 	if conv.condition.Reason != "RebootPending" || conv.requestReboot {
 		t.Fatalf("got %+v", conv.condition)
 	}
-	if !strings.Contains(conv.condition.Message, "deadbeefdead") {
-		t.Fatalf("the message must show what the approval names: %s", conv.condition.Message)
+}
+
+// The annotations of the release before the Disruptions ask for
+// nothing and approve nothing.
+func TestTheAnnotationsAskForNothing(t *testing.T) {
+	short := shortBootID(requestBootTime)
+	m := requestingMachine(machine.RebootAuto, map[string]string{
+		"liken.sh/request-reboot":     short,
+		"liken.sh/approve-disruption": short,
+	})
+	conv := decideRebootRequest(m, requestFacts(requestBootTime), turnGranted, nil)
+	if conv.condition.Reason != "NothingRequested" || conv.requestReboot {
+		t.Fatalf("got %+v", conv.condition)
 	}
 }
 
 func TestTheRequestSpendsItselfOnTheBootThatComesBack(t *testing.T) {
-	m := requestingMachine(machine.RebootAuto, map[string]string{
-		machine.RequestRebootAnnotation: shortBootID(requestBootTime)})
+	m := requestingMachine(machine.RebootAuto, nil)
+	requests := bootRequestFor(requestBootTime, false)
 	rebooted := requestBootTime.Add(3 * time.Minute)
-	conv := decideRebootRequest(m, requestFacts(rebooted), turnGranted, nil)
-	if conv.condition.Status != api.ConditionTrue || conv.condition.Reason != "RequestSpent" {
-		t.Fatalf("the annotation names a boot that is gone: %+v", conv.condition)
+	conv := decideRebootRequest(m, requestFacts(rebooted), turnGranted, requests)
+	if conv.condition.Status != api.ConditionTrue || conv.condition.Reason != "NothingRequested" {
+		t.Fatalf("the request names a boot that is gone: %+v", conv.condition)
 	}
 	if conv.requestReboot || conv.pending != nil {
 		t.Fatal("a spent request must never reboot the machine again")
@@ -146,18 +154,18 @@ func TestTheRequestSpendsItselfOnTheBootThatComesBack(t *testing.T) {
 
 func TestASecondRequestNamesTheNewBootAndRebootsAgain(t *testing.T) {
 	rebooted := requestBootTime.Add(3 * time.Minute)
-	m := requestingMachine(machine.RebootAuto, map[string]string{
-		machine.RequestRebootAnnotation: shortBootID(rebooted)})
-	conv := decideRebootRequest(m, requestFacts(rebooted), turnGranted, nil)
+	m := requestingMachine(machine.RebootAuto, nil)
+	requests := bootRequestFor(rebooted, false)
+	conv := decideRebootRequest(m, requestFacts(rebooted), turnGranted, requests)
 	if conv.condition.Reason != "RebootRequested" || !conv.requestReboot {
 		t.Fatalf("a later request works with no cleanup in between: %+v", conv.condition)
 	}
 }
 
 func TestTheRequestReportsItselfInPending(t *testing.T) {
-	m := requestingMachine(machine.RebootManual, map[string]string{
-		machine.RequestRebootAnnotation: shortBootID(requestBootTime)})
-	conv := decideRebootRequest(m, requestFacts(requestBootTime), turnAwaiting, nil)
+	m := requestingMachine(machine.RebootManual, nil)
+	requests := bootRequestFor(requestBootTime, false)
+	conv := decideRebootRequest(m, requestFacts(requestBootTime), turnAwaiting, requests)
 	if conv.pending == nil {
 		t.Fatal("liken approve-reboot reads status.pending to find what to grant")
 	}
@@ -173,9 +181,9 @@ func TestTheRequestReportsItselfInPending(t *testing.T) {
 }
 
 func TestTheRequestStagesNothing(t *testing.T) {
-	m := requestingMachine(machine.RebootAuto, map[string]string{
-		machine.RequestRebootAnnotation: shortBootID(requestBootTime)})
-	conv := decideRebootRequest(m, requestFacts(requestBootTime), turnGranted, nil)
+	m := requestingMachine(machine.RebootAuto, nil)
+	requests := bootRequestFor(requestBootTime, false)
+	conv := decideRebootRequest(m, requestFacts(requestBootTime), turnGranted, requests)
 	if conv.stage || conv.manifest != nil || conv.withdraw || conv.clearRejection {
 		t.Fatalf("a plain reboot writes no document, so the boot promotes no slot: %+v", conv)
 	}
@@ -186,9 +194,9 @@ func TestTheRequestStagesNothing(t *testing.T) {
 
 func TestCarryOutRebootRequestWritesAnIntentNamingNoManifest(t *testing.T) {
 	dir := t.TempDir()
-	m := requestingMachine(machine.RebootAuto, map[string]string{
-		machine.RequestRebootAnnotation: shortBootID(requestBootTime)})
-	conv := decideRebootRequest(m, requestFacts(requestBootTime), turnGranted, nil)
+	m := requestingMachine(machine.RebootAuto, nil)
+	requests := bootRequestFor(requestBootTime, false)
+	conv := decideRebootRequest(m, requestFacts(requestBootTime), turnGranted, requests)
 
 	if got := carryOutRebootRequest(dir, conv, testNow, nil); got.Reason != "RebootRequested" {
 		t.Fatalf("the decision's condition comes back: %+v", got)
@@ -207,9 +215,9 @@ func TestCarryOutRebootRequestWritesAnIntentNamingNoManifest(t *testing.T) {
 
 func TestCarryOutRebootRequestWritesNothingWhileItWaits(t *testing.T) {
 	dir := t.TempDir()
-	m := requestingMachine(machine.RebootManual, map[string]string{
-		machine.RequestRebootAnnotation: shortBootID(requestBootTime)})
-	conv := decideRebootRequest(m, requestFacts(requestBootTime), turnAwaiting, nil)
+	m := requestingMachine(machine.RebootManual, nil)
+	requests := bootRequestFor(requestBootTime, false)
+	conv := decideRebootRequest(m, requestFacts(requestBootTime), turnAwaiting, requests)
 
 	carryOutRebootRequest(dir, conv, testNow, nil)
 	intent, err := machine.ReadRebootIntent(dir)
@@ -222,15 +230,27 @@ func TestCarryOutRebootRequestWritesNothingWhileItWaits(t *testing.T) {
 }
 
 func TestARequestedRebootReadsAsUpdatePendingUntilItRuns(t *testing.T) {
-	m := requestingMachine(machine.RebootManual, map[string]string{
-		machine.RequestRebootAnnotation: shortBootID(requestBootTime)})
-	waiting := decideRebootRequest(m, requestFacts(requestBootTime), turnAwaiting, nil)
+	m := requestingMachine(machine.RebootManual, nil)
+	requests := bootRequestFor(requestBootTime, false)
+	waiting := decideRebootRequest(m, requestFacts(requestBootTime), turnAwaiting, requests)
 	if got := decidePhase([]api.Condition{waiting.condition}); got != api.PhaseUpdatePending {
 		t.Errorf("a machine waiting on a requested reboot is UpdatePending, got %s", got)
 	}
 	m.Spec.RebootPolicy = machine.RebootAuto
-	running := decideRebootRequest(m, requestFacts(requestBootTime), turnGranted, nil)
+	running := decideRebootRequest(m, requestFacts(requestBootTime), turnGranted, requests)
 	if got := decidePhase([]api.Condition{running.condition}); got != api.PhaseUpdating {
 		t.Errorf("a machine taking its requested reboot is Updating, got %s", got)
 	}
+}
+
+// bootRequestFor is a person's request to reboot the boot that started
+// at the given time, approved or not.
+func bootRequestFor(at time.Time, approved bool) []disruption.Disruption {
+	boot := machine.BootID(machine.BootStatus{Time: &at})
+	d := disruption.New(disruption.RebootRequestName("liken-dev", boot), &machine.Machine{Metadata: api.ObjectMeta{Name: "liken-dev"}},
+		disruption.Spec{Machine: "liken-dev", Requester: "kubernetes-admin", Kind: disruption.KindReboot, Hash: boot})
+	if approved {
+		d.Spec.ApprovedHash = boot[:12]
+	}
+	return []disruption.Disruption{*d}
 }
