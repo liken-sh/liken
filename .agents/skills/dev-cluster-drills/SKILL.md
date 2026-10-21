@@ -142,6 +142,18 @@ while (( $(date +%s) < deadline )); do
 done
 ```
 
+**A guest can hang in its firmware after a reboot.** The console
+ends at `reboot: machine restart`, QEMU spins at 100 to 200% CPU, and
+nothing more prints. OVMF's DXE phase hangs after the warm reset,
+before systemd-boot or `liken` runs, and only while several guests
+are busy at once. Power-cycle the guest: kill its QEMU process and
+`make run` it again. Its variable store boots normally.
+`liken/plans/88-disruptions.md` records the evidence. To read a hung
+guest's CPUs, start it with
+`QEMU_EXTRA="-qmp unix:guests/<node>/qmp,server=on,wait=off"`, a path
+relative to `dev-cluster/` because a socket path must be shorter than
+108 bytes, and send `info registers -a` over QMP.
+
 **QEMU reads `-kernel` and `-initrd` once, at process start,** and
 restores them from its own ROM cache on every guest reset. A
 `BOOT=kernel` guest that reboots comes back on the same initramfs it

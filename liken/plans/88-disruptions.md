@@ -429,10 +429,18 @@ limit, and none showed two leaders out.
 
 Three of about 40 reboots hung in QEMU: the guest printed `reboot:
 machine restart`, then nothing, with QEMU at 100 to 200% CPU, and a
-power cycle booted it normally. All three ran this work's `init`, but
-this work changes nothing in `init`, the kernel, or the reboot path,
-and the hangs came on a person's reboot and on a release's alike. The
-lab ran QEMU 10.2.1 and OVMF 2025.11. The cause is not known.
+power cycle booted it normally. A loop of requested reboots caught a
+fourth with QMP. The boot CPU ran 64-bit code in a PE image that holds
+the `BOOTSERV` and `DXE_SERV` table signatures, OVMF's DXE core, in a
+small loop, and the other three CPUs were still at the reset vector.
+So the guest hangs in the firmware's DXE phase after a warm reset,
+before the boot manager starts systemd-boot, and no `liken` code runs
+there. The variable store that hung boots on a power cycle, so nothing
+`init` wrote to it is the trigger. The hang needs a busy host: one
+guest took 60 reboots in a row with none, and three guests that
+rebooted at the same time hung once in 38. The lab ran QEMU 10.2.1 and
+OVMF 2025.11 on the laptop. The drills skill tells the next drill to
+power-cycle a guest that hangs this way.
 
 ## Considered and set aside
 
