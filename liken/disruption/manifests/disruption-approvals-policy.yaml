@@ -1,0 +1,53 @@
+# Only a person approves a Disruption.
+#
+# spec.approvedHash is the approval of a machine whose rebootPolicy is
+# Manual, and a program that files a Disruption needs to update its
+# own request: firmware-operator removes spec.hold when its work on
+# the drained machine is done. Kubernetes RBAC grants an update of the
+# whole object, so the same permission would let the program approve
+# its own reboot. This policy refuses any change to spec.approvedHash
+# from a service account, so a program can ask for a turn and never
+# grant one, and the approval stays with a person, through
+# `liken approve-reboot` or kubectl.
+#
+# The rule compares the field before and after, so machine-operator
+# and every other service account still update a request that a
+# person approved, as long as they carry the approval through
+# unchanged.
+#
+# This file goes in liken's subdirectory of k3s's auto-deploy
+# manifests and applies at every startup, beside the CRD.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: disruption-approvals.liken.sh
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [liken.sh]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [disruptions]
+  matchConditions:
+    - name: service-accounts
+      expression: request.userInfo.username.startsWith('system:serviceaccount:')
+  variables:
+    - name: approval
+      expression: "has(object.spec.approvedHash) ? object.spec.approvedHash : ''"
+    - name: previous
+      expression: "oldObject != null && has(oldObject.spec.approvedHash) ? oldObject.spec.approvedHash : ''"
+  validations:
+    - expression: variables.approval == variables.previous
+      message: >-
+        a service account cannot set or change spec.approvedHash; a
+        person approves a Disruption with liken approve-reboot
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: disruption-approvals.liken.sh
+spec:
+  policyName: disruption-approvals.liken.sh
+  validationActions: [Deny]

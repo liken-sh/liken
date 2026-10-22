@@ -1,7 +1,7 @@
 ---
 title: Troubleshoot
 weight: 80
-description: "Diagnose a liken machine from its Machine resource: the phase, the condition that is False, and the status field it names, for each failure from the stick menu to a Pending device claim. Use when a machine is Lost, Blocked, crashed, on the old version, waits for a reboot turn, or refuses a disk."
+description: "Diagnose a liken machine from its Machine resource: the phase, the condition that is False, and the status field it names, for each failure from the stick menu to a Pending device claim. Use when a machine is Lost, Blocked, crashed, on the old version, waits for a reboot turn, stays drained without a reboot, or refuses a disk."
 ---
 
 # Troubleshoot
@@ -219,6 +219,30 @@ That happens for a short time after the first leader boots a new
 release, and while a leader on an older release starts k3s again.
 `cluster-operator` grants no turn until the newer CRD returns. The
 leaders apply it again when each one boots the newer release.
+
+## A machine stays drained and does not reboot
+
+A request with `spec.hold` stops its machine's turn after the drain,
+until the component that filed it removes the hold. The HELD column
+reads `True` for that request:
+
+    kubectl get disruptions
+
+The `Held` condition's message names the component that the machine
+waits for, and the condition's time is when the hold began:
+
+    kubectl describe disruption <request>
+
+The component's own resource says why its work has not finished. For
+`firmware-operator`, that is the `Firmware` the request names. While
+the machine is held, it counts against its budgets, so the other
+machines' turns wait too. To let the reboot go ahead without the
+component, remove the hold:
+
+    kubectl patch disruption <request> --type=json -p '[{"op":"remove","path":"/spec/hold"}]'
+
+`Held` turns `False` with the reason `Released`, and the machine
+reboots.
 
 ## A machine crashed
 

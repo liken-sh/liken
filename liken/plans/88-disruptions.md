@@ -244,11 +244,17 @@ The second stage opens `Disruption`s to other components, after the
 first stage has run on the fleet. It adds fields only when a
 requester needs them:
 
-- **`spec.hold`** stops the turn after the drain. The requester's pod,
-  which tolerates the cordon, does its work on the drained machine,
-  then clears `hold`, and the step reboots. A hold has a deadline, and
-  a request whose hold expires leaves the reboot with a `Warning`
-  `Event`. `firmware-operator`'s plan 06 needs this.
+- **`spec.hold`** stops the turn after the drain. machine-operator
+  sets the request's `Held` condition to True when the machine is
+  drained, and the requester's pod, which tolerates the cordon, does
+  its work on the drained machine. The requester removes `hold` when
+  it has checked its work, and the machine reboots. A hold has no
+  deadline: a requester that never removes it keeps the machine
+  drained and its budget full, the same as a machine that does not
+  come back from its reboot. `Held` records when the hold began, so
+  an alert can read it, and a person who removes `hold` by hand
+  releases the turn. `firmware-operator`'s plan 06 needs this, and it
+  is the first part of this stage to be built.
 - **`spec.exclusive`** keeps a request out of a shared reboot. Under
   the same cordon, each exclusive request takes its own reboot, oldest
   first, and the shared requests take the last one, so a release boots

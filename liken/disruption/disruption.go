@@ -16,7 +16,15 @@
 // That one object holds every turn of the fleet, so the budget stays
 // one compare-and-swap on one object (milestone 82). The conditions on
 // a Disruption report the grant for a person to read, and no program
-// acts on them.
+// acts on Approved or Granted, because either one can lag the ledger.
+//
+// Held is the one condition a program acts on. A request with
+// spec.hold stops its machine's turn after the drain, so that its
+// requester can work on the drained machine before the reboot, and
+// Held is how the requester learns that the drain is done. It cannot
+// lag the way a grant can: machine-operator sets it on the machine it
+// drained, and nothing ends the hold except the requester removing
+// spec.hold, or the reboot that spends the request.
 //
 // This package imports the machine package for the reboot policy and
 // for the rule that matches a hash a person pasted. The machine
@@ -46,11 +54,12 @@ const MachineOperator = "liken.sh/machine-operator"
 
 // The conditions a Disruption reports. cluster-operator writes
 // Approved and Granted, and machine-operator writes Complete on a
-// person's request.
+// person's request, and Held on a request with spec.hold.
 const (
 	ApprovedCondition = "Approved"
 	GrantedCondition  = "Granted"
 	CompleteCondition = "Complete"
+	HeldCondition     = "Held"
 )
 
 // Disruption is one request to take one machine out of service.
@@ -90,6 +99,12 @@ type Owner struct {
 // ApprovedHash is a Manual machine's approval, and it approves the
 // request only while it names Hash, so an approval never carries over
 // to a request for other bytes.
+//
+// Hold stops the machine's turn after the drain and before the reboot,
+// until the requester removes it. A requester sets it when it must
+// change the machine while no workload runs there, and the change
+// takes effect at the next boot, such as a Secure Boot database update
+// (firmware-operator's plan 06).
 type Spec struct {
 	Machine      string `json:"machine"`
 	Requester    string `json:"requester"`
@@ -97,6 +112,7 @@ type Spec struct {
 	Reason       string `json:"reason,omitempty"`
 	Hash         string `json:"hash,omitempty"`
 	ApprovedHash string `json:"approvedHash,omitempty"`
+	Hold         bool   `json:"hold,omitempty"`
 }
 
 // Status reports the request.
@@ -162,7 +178,17 @@ func (d *Disruption) ApprovedByHash() bool {
 // Complete reports whether machine-operator recorded the request as
 // carried out.
 func (d *Disruption) Complete() bool {
-	c := api.FindCondition(d.Status.Conditions, CompleteCondition)
+	return d.conditionTrue(CompleteCondition)
+}
+
+// Held reports whether machine-operator recorded that the request's
+// machine is drained and waits for the requester.
+func (d *Disruption) Held() bool {
+	return d.conditionTrue(HeldCondition)
+}
+
+func (d *Disruption) conditionTrue(conditionType string) bool {
+	c := api.FindCondition(d.Status.Conditions, conditionType)
 	return c != nil && c.Status == api.ConditionTrue
 }
 

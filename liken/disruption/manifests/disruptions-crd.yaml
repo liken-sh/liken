@@ -20,7 +20,7 @@ metadata:
     # the cluster serves (init/schemarevision.go). Raise it in the same
     # change that changes the schema below; a test holds the two
     # together.
-    liken.sh/schema-revision: "1"
+    liken.sh/schema-revision: "2"
 spec:
   group: liken.sh
   names:
@@ -37,7 +37,8 @@ spec:
       storage: true
       # The requester writes the spec, and the operators write the
       # status: cluster-operator the approval and the grant, and
-      # machine-operator the completion of a person's reboot.
+      # machine-operator the hold and the completion of a person's
+      # reboot.
       subresources:
         status: {}
       # Each machine's operator lists and watches only its own
@@ -61,6 +62,9 @@ spec:
         - name: Granted
           type: string
           jsonPath: .status.conditions[?(@.type=="Granted")].status
+        - name: Held
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Held")].status
         - name: Complete
           type: string
           jsonPath: .status.conditions[?(@.type=="Complete")].status
@@ -99,6 +103,10 @@ spec:
                 # request complete.
                 - rule: self.kind == 'Reboot' || self.requester == 'liken.sh/machine-operator'
                   message: only liken.sh/machine-operator requests a Restart; ask for a Reboot
+                # A restart drains nothing, so it has no drained
+                # machine to hold.
+                - rule: "!has(self.hold) || !self.hold || self.kind == 'Reboot'"
+                  message: spec.hold stops a reboot after its drain; a Restart has no drain to stop after
               properties:
                 machine:
                   type: string
@@ -150,6 +158,19 @@ spec:
                     approval no longer matches. `liken approve-reboot`
                     sets it. A machine whose rebootPolicy is Auto
                     approves every request and ignores this field.
+                hold:
+                  type: boolean
+                  description: >-
+                    Stops the machine's turn after the drain and before
+                    the reboot. When the machine is drained,
+                    machine-operator sets the Held condition to True,
+                    and the requester does its work on the machine from
+                    a pod that tolerates the cordon. The requester
+                    removes hold when it has checked its work, and the
+                    machine reboots. A hold has no deadline: until it
+                    is removed, the machine stays drained, and the
+                    budgets that select it stay full. A person who
+                    removes hold releases the turn.
             status:
               type: object
               description: Where the request stands.
@@ -164,7 +185,9 @@ spec:
                     status.rebootTurns names the request, and its
                     message names what a waiting request waits for.
                     Complete, written by machine-operator, is True when
-                    a person's reboot has happened. machine-operator
+                    a person's reboot has happened. Held, written by
+                    machine-operator, is True from the end of the drain
+                    until the requester removes spec.hold. machine-operator
                     deletes its own request when nothing is staged, and
                     cluster-operator deletes a complete request a day
                     after it completed.

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"slices"
 	"time"
+
+	"github.com/liken-sh/liken/liken/disruption"
 )
 
 // disruptions is one pass's running record of what has already
@@ -15,6 +18,12 @@ import (
 type disruptions struct {
 	draining  bool
 	rebooting bool
+
+	// holding is the requests that hold this machine's turn after its
+	// drain (hold.go), and drained records that the drain finished
+	// while one did, so the pass sets their Held condition.
+	holding []disruption.Disruption
+	drained bool
 
 	// events posts the drain's cordon about this Machine.
 	events machineEvents
@@ -40,10 +49,23 @@ type disruptions struct {
 // same way. A Node that reads but whose pods do not list holds the
 // reboot (gateThroughDrain): a slow API server must not let a reboot
 // kill pods past their disruption budgets.
+//
+// A request that holds the turn stops the reboot once the drain is
+// clear (hold.go). A holding request's turn ends in a reboot, which
+// covers every restart, so no restart runs while one holds. Once a
+// request is Held the drain is over, and the gate drains no more,
+// because the requester's pod runs on the cordoned node.
 func (d *disruptions) gate(r *reader, node *nodeObject, nodeErr error, t turn, now time.Time, conv convergence) convergence {
-	conv.requestRestart = conv.requestRestart && !d.rebooting
+	holding := t == turnGranted && len(d.holding) > 0
+	conv.requestRestart = conv.requestRestart && !d.rebooting && !holding
 	if conv.requestReboot && t == turnGranted && nodeErr == nil {
-		conv = gateThroughDrain(r, node, conv, now, d.events, d.out)
+		if !slices.ContainsFunc(d.holding, func(h disruption.Disruption) bool { return h.Held() }) {
+			conv = gateThroughDrain(r, node, conv, now, d.events, d.out)
+		}
+		if conv.requestReboot && holding {
+			d.drained = true
+			conv = holdForRequesters(conv, d.holding)
+		}
 		d.draining = d.draining || !conv.requestReboot
 	}
 	d.rebooting = d.rebooting || conv.requestReboot

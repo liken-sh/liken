@@ -141,6 +141,24 @@ request that arrives while the machine holds its turn joins that
 turn. While a machine's new release still downloads, `cluster-operator`
 holds back the machine's turn, so the release shares the reboot too.
 
+A request can stop the turn after the drain with `spec.hold`. A
+component sets it when it must change the machine while no workload
+runs there, and the change takes effect at the next boot:
+`firmware-operator` writes a Secure Boot database update this way.
+When the node is drained, `machine-operator` sets the request's
+`Held` condition to `True` and waits. The component's pod runs on the
+drained node and does its work, and the component removes `spec.hold`
+when it has checked the result. Then the machine reboots. A hold has
+no deadline: until `spec.hold` is gone, the machine stays drained and
+counts against its budgets, so the other turns wait. To let the
+reboot go ahead, remove the hold yourself:
+
+    kubectl patch disruption <request> --type=json -p '[{"op":"remove","path":"/spec/hold"}]'
+
+Only a person approves a request. A service account cannot set or
+change `spec.approvedHash`, so a component that files a request can
+ask for a turn but cannot approve one on a `Manual` machine.
+
 A request ends when its work is done. `machine-operator` deletes its
 own request when nothing waits. It marks a person's request
 `Complete` when the machine runs another boot, and `cluster-operator`

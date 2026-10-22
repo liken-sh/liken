@@ -292,7 +292,12 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 	}
 	decided := withRequestApprovals(m, requests)
 
-	disr := &disruptions{events: notes, out: out}
+	bootID := ""
+	if facts != nil {
+		bootID = machine.BootID(facts.Boot)
+	}
+	disr := &disruptions{events: notes, out: out,
+		holding: holdingRequests(requests, m.Spec.RebootPolicyOrDefault(), bootID)}
 	machineStore := machine.MachineManifests(machine.MachineStateDir)
 	machineRejection, _ := machineStore.LoadRejection()
 	conv := disr.gate(r, node, nodeErr, t, now,
@@ -433,7 +438,8 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 	}
 
 	if requestsErr == nil && facts != nil {
-		settlePeopleRequests(quiet, m, requests, machine.BootID(facts.Boot), now)
+		settlePeopleRequests(quiet, m, requests, bootID, now)
+		settleHolds(quiet, requests, disr.holding, disr.drained, now)
 	}
 
 	// Ready is the roll-up: True exactly when every other condition
