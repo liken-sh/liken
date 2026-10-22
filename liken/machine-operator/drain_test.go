@@ -75,6 +75,11 @@ func evicted(step drainStep) string {
 	return strings.Join(names, " ")
 }
 
+// tolerating gives a pod one toleration.
+func tolerating(t kubernetes.Toleration) func(*kubernetes.Pod) {
+	return func(p *kubernetes.Pod) { p.Spec.Tolerations = append(p.Spec.Tolerations, t) }
+}
+
 func TestEvictablePodsSkipsWhatCannotMove(t *testing.T) {
 	pods := []kubernetes.Pod{
 		pod("web", "default"),
@@ -85,6 +90,34 @@ func TestEvictablePodsSkipsWhatCannotMove(t *testing.T) {
 	evictable := evictablePods(pods)
 	if len(evictable) != 1 || evictable[0].Metadata.Name != "web" {
 		t.Errorf("only the ordinary workload moves: %+v", evictable)
+	}
+}
+
+// A pod that tolerates the cordon by its key can be scheduled straight
+// back onto the cordoned node, so evicting it moves nothing, and a
+// requester's pod that works during a hold stays. A blanket toleration
+// with no key states nothing about the cordon, and that pod moves.
+func TestEvictablePodsLeavesAPodThatToleratesTheCordon(t *testing.T) {
+	cases := []struct {
+		name       string
+		toleration kubernetes.Toleration
+		moves      bool
+	}{
+		{"the key, Exists, NoSchedule", kubernetes.Toleration{Key: unschedulableTaint, Operator: "Exists", Effect: "NoSchedule"}, false},
+		{"the key, every effect", kubernetes.Toleration{Key: unschedulableTaint, Operator: "Exists"}, false},
+		{"the key, Equal with no value", kubernetes.Toleration{Key: unschedulableTaint, Operator: "Equal", Effect: "NoSchedule"}, false},
+		{"the key, NoExecute only", kubernetes.Toleration{Key: unschedulableTaint, Operator: "Exists", Effect: "NoExecute"}, true},
+		{"another key", kubernetes.Toleration{Key: "node.kubernetes.io/not-ready", Operator: "Exists"}, true},
+		{"a blanket Exists", kubernetes.Toleration{Operator: "Exists"}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			evictable := evictablePods([]kubernetes.Pod{pod("apply", "liken-system", tolerating(c.toleration))})
+
+			if moves := len(evictable) == 1; moves != c.moves {
+				t.Errorf("evictable = %+v, want the pod to move: %v", evictable, c.moves)
+			}
+		})
 	}
 }
 

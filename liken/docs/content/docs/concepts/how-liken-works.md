@@ -155,6 +155,15 @@ reboot go ahead, remove the hold yourself:
 
     kubectl patch disruption <request> --type=json -p '[{"op":"remove","path":"/spec/hold"}]'
 
+The drain moves every pod except DaemonSet pods, static pods, and pods
+that tolerate the cordon's taint, `node.kubernetes.io/unschedulable`,
+by its key. Such a pod could be scheduled straight back onto the
+cordoned node, so evicting it moves nothing. A component that holds a
+turn gives this toleration to its own controller and to the pod that
+works on the machine, so both keep running on a small cluster where
+no other node accepts them. A toleration with no key, which tolerates
+every taint, does not count, and that pod still moves.
+
 Only a person approves a request. A service account cannot set or
 change `spec.approvedHash`, so a component that files a request can
 ask for a turn but cannot approve one on a `Manual` machine.

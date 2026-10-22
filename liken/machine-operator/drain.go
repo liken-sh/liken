@@ -53,6 +53,9 @@ const (
 	// skips them.
 	mirrorPodAnnotation = "kubernetes.io/config.mirror"
 
+	// unschedulableTaint is the taint that a cordon puts on a Node.
+	unschedulableTaint = "node.kubernetes.io/unschedulable"
+
 	// drainDeadline limits how long workloads may delay the reboot. A
 	// pod that has not moved by this deadline (because a
 	// PodDisruptionBudget can never be satisfied, or a workload has
@@ -69,6 +72,16 @@ const (
 // kubelet recreates those from disk, and pods that have already run
 // to completion.
 //
+// It also excludes a pod that tolerates the cordon by its key. The
+// scheduler can place such a pod, or its replacement, straight back
+// onto the cordoned node, so an eviction moves nothing, and a drain
+// that repeats it only restarts the pod until the deadline. A pod
+// says this on purpose: a requester whose pod works on the machine
+// while a Disruption holds the turn (hold.go), and the operator that
+// removes the hold, which must keep running on a machine it holds
+// drained when no other node accepts it. A blanket toleration with no
+// key states nothing about the cordon, so that pod still moves.
+//
 // A completed pod also stops counting as a claim holder, and that is
 // safe for its DRA driver. The kubelet unprepares a pod's claims after
 // its containers stop and before it reports a terminal phase, and its
@@ -84,12 +97,26 @@ func evictablePods(pods []kubernetes.Pod) []kubernetes.Pod {
 		if _, ok := p.Metadata.Annotations[mirrorPodAnnotation]; ok {
 			continue
 		}
-		if p.IsDaemon() {
+		if p.IsDaemon() || toleratesCordon(p) {
 			continue
 		}
 		evictable = append(evictable, p)
 	}
 	return evictable
+}
+
+// toleratesCordon reports whether a toleration names the cordon's
+// taint by its key, for the effect NoSchedule that the cordon sets.
+func toleratesCordon(p kubernetes.Pod) bool {
+	for _, t := range p.Spec.Tolerations {
+		if t.Key != unschedulableTaint || (t.Effect != "" && t.Effect != "NoSchedule") {
+			continue
+		}
+		if t.Operator == "Exists" || (t.Operator == "Equal" || t.Operator == "") && t.Value == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // draPluginPaths are the kubelet directories that a DRA driver's

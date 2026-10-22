@@ -51,6 +51,17 @@ type PodSpec struct {
 	NodeName       string             `json:"nodeName"`
 	Volumes        []PodVolume        `json:"volumes"`
 	ResourceClaims []PodResourceClaim `json:"resourceClaims"`
+	Tolerations    []Toleration       `json:"tolerations"`
+}
+
+// Toleration is one entry in spec.tolerations: the taints a pod may
+// be scheduled despite. An empty Key with the operator Exists
+// tolerates every taint, and an empty Effect matches every effect.
+type Toleration struct {
+	Key      string `json:"key"`
+	Operator string `json:"operator"`
+	Value    string `json:"value"`
+	Effect   string `json:"effect"`
 }
 
 // ContainerStatus holds the part of a container's status that liken
