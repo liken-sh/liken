@@ -373,6 +373,9 @@ the machine's `KEK` holds, such as `microsoft-dbx-x64` instead of
 | `the machine left its turn before the hold took effect: the Disruption ... is gone ...` | Someone deleted the `Disruption` before the hold. Approve again. |
 | `the append's SHA-256 is now ..., and the rehearsal recorded ...` | Another writer changed the machine's variables after the rehearsal, such as another operating system or the firmware's setup menu. Nothing was written. Approve again to rehearse against the variables as they are now. |
 | `the rehearsal before the write did not pass, so nothing was written: ...` | The rehearsal in the apply pod failed or was refused. The rest of the message is the rehearsal's, and the [rehearsal tables](#rehearsals) explain it. |
+| `the apply pod ended before the signal to write, so nothing was written: ...` | The apply pod stopped while it waited for the machine's turn, such as at a reboot of the machine or when the kernel killed it for memory. The rest of the message gives its last line or the pod's reason. The pod writes only after the signal, so the operator deletes the `Disruption`, and the machine leaves its turn with no reboot. Approve again. |
+| `the variable ... changed while the apply waited for its turn, so nothing was written` | Another writer changed the variable after the apply pod prepared and before the signal, such as another operating system or the firmware's setup menu. Approve again to rehearse against the variable as it is now. |
+| `waiting for the signal to write: ..., so nothing was written` | The apply pod could not watch its annotations. The rest of the message gives the error. |
 | `clearing the immutable flag of ...: operation not permitted` | The pod lacks `CAP_LINUX_IMMUTABLE`. A policy of your cluster that removes capabilities from pods in `liken-system` causes this. |
 | `writing the append to ...: read-only file system` | The machine's `efivarfs` is mounted read-only, so the pod's read-write mount of `/sys/firmware` cannot write it. |
 | `writing the append to ...: ...` | The kernel refused the write for another reason, which the message gives. |
@@ -386,8 +389,8 @@ machine.
 
 ### Applied is Unknown with Uncertain
 
-The apply pod ended without saying whether it wrote. A write may have
-landed before it stopped, so the operator removes the hold, the
+The apply pod ended after the signal to write without saying whether
+it wrote. A write may have landed before it stopped, so the operator removes the hold, the
 machine reboots in its turn, and the next scan reads the version. The
 record then ends, or turns `Failed` when the machine still reads the
 old version.
@@ -395,7 +398,7 @@ old version.
 | Message | What to check |
 |---|---|
 | `the apply pod is gone, ...` | Someone deleted the apply pod before it ended. |
-| `the apply pod did not finish within 10m0s of its creation` | The pod never ran, such as an image that does not pull, or it hung. Check `kubectl -n liken-system get events`. |
+| `the apply pod did not finish within 10m0s of the signal to write` | The pod hung after the signal, or a pod that the operator started at the hold never ran, such as an image that does not pull. Check `kubectl -n liken-system get events`. |
 | `the apply wrote no result; its last line was: ...` or `the apply pod wrote no log: ...` | The apply program crashed. The message holds its last line, or the pod's reason. |
 | `the apply answered the result ..., which the operator does not know` | The scan image and the operator are from different releases. Pin both to one tag. |
 
@@ -410,7 +413,15 @@ kubectl get disruptions -l firmware.liken.sh/firmware=<name>
 - **The machine has no record.** Its rehearsal has not passed on the
   boot it runs. See [Rehearsals](#rehearsals). The operator also asks
   for no turn on a `liken` release that has no `Disruption` kind.
-- **The record is `Waiting`.** The machine waits for its turn. An
+- **The record is `Waiting`.** The apply pod has prepared, or still
+  prepares, and the machine waits for its turn. The pod runs on the
+  machine before the drain:
+  `kubectl -n liken-system get pods -l firmware.liken.sh/apply=true`.
+  Its log ends with a line whose `phase` is `prepared` once it waits.
+  The pod mounts a host path, which the `baseline` Pod Security level
+  forbids, so a cluster that labels `liken-system` with a level below
+  `privileged` refuses it. Look for the refusal in the operator's log.
+  An
   `APPROVED` of `False` means the machine's `rebootPolicy` is `Manual`,
   and the request waits for you:
   [Apply the update](https://liken.sh/firmware/docs/guides/approve-an-update/#apply-the-update) gives the
@@ -418,12 +429,10 @@ kubectl get disruptions -l firmware.liken.sh/firmware=<name>
   no room, and the `Granted` condition's message names what the turn
   waits for. Once the turn is granted, `machine-operator` drains the
   machine and sets `HELD` to `True`.
-- **The record is `Writing`.** The apply pod runs on the drained
-  machine:
-  `kubectl -n liken-system get pods -l firmware.liken.sh/apply=true`.
-  The pod mounts a host path, which the `baseline` Pod Security level
-  forbids, so a cluster that labels `liken-system` with a level below
-  `privileged` refuses it. Look for the refusal in the operator's log.
+- **The record is `Writing`.** The operator sent the apply pod the
+  signal, and the pod writes on the drained machine. Its annotation
+  `firmware.liken.sh/write-at` gives the time of the signal, and the
+  operator waits 10 minutes from it for the pod's answer.
 - **The record is `Written` or `Uncertain`.** The machine reboots, and
   its next scan ends the record. A scan waits for the machine to be
   `Ready`.
@@ -435,7 +444,12 @@ for the operator, and a hold has no deadline. The operator removes the
 hold after a write, and deletes the `Disruption` after a refusal or a
 failure. A machine stays drained when the operator does not run, or
 does not lead. Check the operator first: see
-[Confirm that it leads](https://liken.sh/firmware/docs/guides/install/#confirm-that-it-leads).
+[Confirm that it leads](https://liken.sh/firmware/docs/guides/install/#confirm-that-it-leads). The
+operator's pod tolerates the cordon by its key, so it can run on the
+drained machine. A `liken` drain that evicts it anyway, on a cluster
+whose other machines take no pod of the operator's, leaves the
+operator with nowhere to run, and the machine stays drained until you
+release it.
 
 To release the machine yourself, remove the hold or delete the request.
 Removing the hold reboots the machine:
@@ -450,8 +464,8 @@ Deleting the request ends the turn with no reboot:
 kubectl delete disruption <machine>.firmware-<name>
 ```
 
-If the apply pod is still running, wait for it to end first, so that
-its result is in the record. When the pod writes, or ends without
+If the record reads `Writing` and the apply pod is still running, wait
+for it to end first, so that its result is in the record. When the pod writes, or ends without
 saying whether it wrote, after you deleted the request, the operator
 files the request again with no hold. The write takes effect only at a
 reboot, so the machine takes its turn again, under its budgets, and

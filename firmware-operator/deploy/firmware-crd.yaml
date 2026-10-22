@@ -308,7 +308,8 @@ spec:
                     machine the approval waits for. It is `False` with
                     `Refused` when the firmware refused the write on a
                     machine, and with `Failed` when a write could not
-                    run, a machine left its turn before the hold, or a
+                    run, an apply pod ended before the signal to write,
+                    a machine left its turn before the hold, or a
                     machine still reads the old version after its
                     reboot. It is `Unknown` with `Uncertain` when the
                     operator cannot tell whether a write landed, until
@@ -551,12 +552,16 @@ spec:
                     One record for each machine that an approval waits
                     for and that asked for its reboot turn, after its
                     rehearsal passed on the boot it runs. The operator
-                    files a `Disruption` with `spec.hold`, so the turn
-                    stops after the drain. An apply pod on the drained
-                    machine rehearses the install again and writes the
-                    recorded append to the real variable, and the
-                    operator then removes `spec.hold`, so the machine
-                    reboots. The machine's next scan proves the write.
+                    starts an apply pod on the machine, which rehearses
+                    the install again while the cluster is whole and
+                    then waits. It files a `Disruption` with
+                    `spec.hold`, so the turn stops after the drain. When
+                    the turn holds, the operator sets the pod's
+                    annotation `firmware.liken.sh/write` to `go`, and
+                    the pod writes the recorded append to the real
+                    variable with no network. The operator then removes
+                    `spec.hold`, so the machine reboots. The machine's
+                    next scan proves the write.
                     A record leaves when its machine is no longer
                     pending, or when the approval changes. The operator
                     does not write again after a refused or failed
@@ -589,22 +594,27 @@ spec:
                         type: string
                         enum: [Waiting, Writing, Written, Uncertain, Refused, Failed]
                         description: >-
-                          `Waiting` until `machine-operator` drains the
-                          machine and holds its turn. `Writing` while the
-                          apply pod runs. `Written` when the firmware
+                          `Waiting` while the apply pod prepares and
+                          waits, until `machine-operator` drains the
+                          machine and holds its turn. `Writing` after
+                          the operator sent the apply pod the signal to
+                          write. `Written` when the firmware
                           took the append; the machine then reboots, and
                           the record stays until its next scan.
-                          `Uncertain` when the apply pod ended without
-                          saying whether it wrote: it is gone, it ran
-                          past its deadline, or it crashed. The machine
+                          `Uncertain` when the apply pod ended after
+                          the signal without saying whether it wrote: it
+                          is gone, it ran past its deadline, which
+                          counts from the signal, or it crashed. The
+                          machine
                           reboots in its turn all the same, and its next
                           scan reads what the firmware holds.
                           `Refused` when the firmware refused the
                           append, which changes nothing. `Failed` when
-                          the apply could not run, the variables changed
-                          since the rehearsal, the machine left its turn
-                          before the hold, or the machine still reads
-                          the old version after its reboot.
+                          the apply could not run, the apply pod ended
+                          before the signal, the variables changed since
+                          the rehearsal, the machine left its turn before
+                          the hold, or the machine still reads the old
+                          version after its reboot.
                       message:
                         type: string
                         description: "Why the record has its result."

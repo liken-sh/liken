@@ -1,6 +1,6 @@
 ---
 name: approve-an-update
-description: "Approve one release of a firmware component that firmware-operator discovered, by setting spec.update.version and pinning the cabinet's URL and SHA-256 on its Firmware, and limit the approval to some machines with spec.machines. Read the Approved condition, its reasons Offered, Installed, CabinetDiffers, NotOffered, and MachinesInvalid, the Version, Approved, Pending, Rehearsed, and Applied columns, the rehearsal of the install on each machine in status.rehearsals and the Rehearsed condition, the apply of a Secure Boot database update in each machine's held reboot turn through a Disruption with spec.hold, status.applies and the Applied condition, the reboot, the proof by the next scan, and the Events. Withdraw an approval. Use when a person wants a board's UEFI firmware, the Secure Boot revocation list, or another device to move to a newer release, when an approval is False, or when a machine waits for its turn to write an update."
+description: "Approve one release of a firmware component that firmware-operator discovered, by setting spec.update.version and pinning the cabinet's URL and SHA-256 on its Firmware, and limit the approval to some machines with spec.machines. Read the Approved condition, its reasons Offered, Installed, CabinetDiffers, NotOffered, and MachinesInvalid, the Version, Approved, Pending, Rehearsed, and Applied columns, the rehearsal of the install on each machine in status.rehearsals and the Rehearsed condition, the apply of a Secure Boot database update in each machine's held reboot turn through a Disruption with spec.hold, the apply pod that prepares before the drain and writes on the signal of its annotation firmware.liken.sh/write, status.applies and the Applied condition, the reboot, the proof by the next scan, and the Events. Withdraw an approval. Use when a person wants a board's UEFI firmware, the Secure Boot revocation list, or another device to move to a newer release, when an approval is False, or when a machine waits for its turn to write an update."
 ---
 
 This skill is the guide at https://liken.sh/firmware/docs/guides/approve-an-update/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
@@ -189,14 +189,27 @@ A Secure Boot database update takes effect at the machine's next
 boot, and the operator writes it while no workload runs on the
 machine. `liken` gives both through the machine's reboot turn. So as
 soon as a machine's rehearsal passes on the boot it runs, the operator
-asks for that machine's turn. It files a `Disruption` with
-`spec.hold`, which stops the turn after the drain and before the
-reboot. You approve nothing more: the approval of the release is the
-approval of the write.
+starts an apply pod on that machine and asks for its turn. It files a
+`Disruption` with `spec.hold`, which stops the turn after the drain
+and before the reboot. You approve nothing more: the approval of the
+release is the approval of the write.
+
+The drain can evict pods that the cluster's network needs, such as
+its DNS. So the apply pod does all its network work when it starts,
+while the cluster is whole, and then waits on the machine. It writes
+only when the operator sends it the signal, after the drain, and the
+write needs no network.
 
 The steps on each machine:
 
-1. **The request.** The operator creates the `Disruption`
+1. **The apply pod and the request.** The operator starts an apply
+   pod in `liken-system` on the machine. The pod loads the catalog,
+   downloads the cabinet, runs the rehearsal again against a fresh
+   copy, and checks that the append has the SHA-256 in the record. A
+   different SHA-256 means the variables changed since the rehearsal,
+   and the pod writes nothing. Then the pod prints a line with
+   `"phase":"prepared"` to its log, and waits, with no deadline. The
+   operator also creates the `Disruption`
    `<machine>.firmware-<firmware>`, with the requester
    `firmware.liken.sh/firmware-operator`, the kind `Reboot`, and
    `spec.hold: true`. The machine's `MachineDisruptionBudget`s decide
@@ -204,16 +217,24 @@ The steps on each machine:
    `status.applies` reads `Waiting`.
 2. **The hold.** `machine-operator` drains the machine, and sets the
    `Disruption`'s `Held` condition to `True` instead of rebooting. A
-   hold has no deadline.
-3. **The write.** The operator starts an apply pod in `liken-system`
-   on the drained machine, and the record reads `Writing`. The pod runs
-   the rehearsal again against a fresh copy, and checks that the append
-   has the SHA-256 in the record. Then it writes that append to the
-   machine's variable in one write, and reads the variable back. The
-   firmware verifies the append's signature, and merges the new entries
-   into the list, so the variable grows by less than the append. A
-   different SHA-256 means the variables changed since the rehearsal,
-   and the pod writes nothing.
+   hold has no deadline. The apply pod and the operator's own pod each
+   tolerate the cordon, `node.kubernetes.io/unschedulable`, by its key,
+   and a `liken` drain that skips such a pod leaves both on the
+   machine.
+3. **The write.** The operator sends the apply pod the signal: it sets
+   the pod's annotation `firmware.liken.sh/write` to `go`, and
+   `firmware.liken.sh/write-at` to the time. The record reads
+   `Writing`. The pod reads its annotations through a downward API
+   volume, so it needs no credentials. It reads the variable again,
+   and writes nothing when the variable changed while the pod waited.
+   Then it writes the append to the machine's variable in one write,
+   and reads the variable back. The firmware verifies the append's
+   signature, and merges the new entries into the list, so the
+   variable grows by less than the append. When the apply pod is gone
+   at the hold, such as when a drain evicted it, the operator starts a
+   new one that carries the signal. That pod prepares on the drained
+   machine, so it needs the cluster's DNS there, and then writes at
+   once.
 4. **The reboot.** When the write succeeds, the record reads
    `Written`, and the operator removes `spec.hold`. The turn goes on,
    and `machine-operator` reboots the machine. When the firmware
@@ -255,13 +276,17 @@ shows it:
 |---|---|---|
 | `True` | `Written` | The firmware took the update on every machine the approval waits for. Each machine applies it at its reboot. |
 | `False` | `Refused` | The firmware refused the append on a machine, and nothing changed there. |
-| `False` | `Failed` | A write could not run, a machine left its turn before the hold, or a machine still reads the old version after its reboot. |
-| `Unknown` | `Uncertain` | The apply pod on a machine ended without saying whether it wrote. The machine reboots in its turn, and its next scan answers. |
+| `False` | `Failed` | A write could not run, an apply pod ended before the signal to write, a machine left its turn before the hold, or a machine still reads the old version after its reboot. |
+| `Unknown` | `Uncertain` | The apply pod on a machine ended after the signal without saying whether it wrote. The machine reboots in its turn, and its next scan answers. |
 | `Unknown` | `Applying` | A machine waits for its rehearsal, its turn, or its write. |
 
-When the operator cannot tell whether an append was written, because
-the apply pod was deleted, ran past its deadline, or crashed, it does
-not withdraw the turn. A write may have landed before the pod stopped,
+An apply pod that ends before the signal wrote nothing, because the
+pod writes only after the signal. Its record reads `Failed`, and the
+operator deletes the `Disruption`, so the machine leaves its turn with
+no reboot. When the operator cannot tell whether an append was
+written, because the apply pod with the signal was deleted, ran past
+its deadline of 10 minutes from the signal, or crashed, it does not
+withdraw the turn. A write may have landed before the pod stopped,
 and the kernel enforces it only after a reboot, so the machine reboots
 in the same turn. The next scan then reads the version: the approved
 one ends the record, and the old one makes it `Failed`.
@@ -296,7 +321,8 @@ release shows in `kubectl describe firmware <name>` and in
 `RehearsalStarted` when a rehearsal pod starts, `RehearsalPassed` when
 one passes, and a `Warning` `RehearsalRefused` or `RehearsalFailed`
 when one does not. It posts `ApplyRequested` when it asks for a
-machine's turn, `ApplyStarted` when the apply pod starts,
+machine's turn and starts the apply pod, `ApplyStarted` when it sends
+the apply pod the signal to write,
 `ApplyWritten` when the firmware took the append, a `Warning`
 `ApplyRefused` or `ApplyFailed` when it did not, and a `Warning`
 `ApplyUncertain` when the pod ended without saying.
@@ -308,7 +334,7 @@ with them. The operator removes the `Approved`, `Rehearsed`, and
 `Applied` conditions and the records in `status.rehearsals` and
 `status.applies`, and `PENDING` returns to 0. It deletes each
 `Disruption` that still holds a machine's turn, so the machine leaves
-its turn with no reboot. A machine whose update is already written
+its turn with no reboot, and each apply pod that waits for a turn. A machine whose update is already written
 keeps it, and a turn whose hold the operator already removed still
 reboots the machine.
 

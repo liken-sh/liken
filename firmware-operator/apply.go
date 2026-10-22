@@ -5,10 +5,14 @@ package main
 // inside a reboot turn that liken grants (disruption.go). The steps,
 // each one in its own pass:
 //
-//  1. The operator files a Disruption with spec.hold, and records the
-//     machine as Waiting.
+//  1. The operator starts the apply pod (applypod.go), which prepares
+//     the write while the cluster is whole and then waits for the
+//     signal to write. The operator files a Disruption with spec.hold,
+//     and records the machine as Waiting.
 //  2. machine-operator drains the machine and sets Held. The operator
-//     starts the apply pod (applypod.go), and records Writing.
+//     sends the apply pod the signal (applyfollow.go), and records
+//     Writing. A pod that is gone by then, such as one that a drain
+//     evicted, is started again with the signal.
 //  3. The pod ends. Written removes spec.hold, so the turn reboots the
 //     machine. Refused and Failed, which wrote nothing, delete the
 //     Disruption, so the machine leaves its turn without a reboot it does
@@ -17,16 +21,19 @@ package main
 //  4. The machine's next scan reads the approved version, the machine
 //     is no longer pending, and Approved moves to Installed (approval.go).
 //
-// status.applies holds one record for each pending machine that asked
-// for a turn, and the Applied condition sums them. Every decision reads
-// the records, the apply pods, and the Disruptions, so an operator that
+// A pod that ends before the signal wrote nothing, so its record is
+// Failed and the Disruption is deleted. status.applies holds one record
+// for each pending machine that asked for a turn, and the Applied
+// condition sums them. Every decision reads the records, the apply pods
+// and their annotations, and the Disruptions, so an operator that
 // restarts at any step takes up where the last one stopped. A write
 // cannot be undone, so nothing here writes again on its own: a Refused
 // or Failed record stays until a person withdraws the approval and
 // approves it again, which removes the record.
 //
-// An apply pod that is gone, that ran past its deadline, that crashed,
-// or whose log does not answer may have written before it stopped. A
+// An apply pod with the signal that is gone, that ran past its
+// deadline, that crashed, or whose log does not answer may have written
+// before it stopped. A
 // force-deleted pod's container can even outlive its API object. If
 // the operator withdrew the turn, the machine would run with variables
 // that its kernel does not enforce until a reboot nobody planned. So an
@@ -37,12 +44,10 @@ package main
 import (
 	"errors"
 	"fmt"
-	"net/http"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
@@ -144,10 +149,11 @@ func step(r applyRecord, result, message string, from ...string) applyStep {
 }
 
 // advanceApplies decides the steps of each pending machine that its
-// record and its turn allow: a request for a machine whose rehearsal
-// passed, the apply pod of a machine whose turn holds, and the failure
-// of a machine that left its turn or rebooted with the old version.
-func (o *operator) advanceApplies(f *firmware, pending map[string]bool, w observed, catalogs map[string]*catalog) ([]applyStep, error) {
+// record and its turn allow: the apply pod and the request of a machine
+// whose rehearsal passed, the signal to a machine whose turn holds, and
+// the failure of a machine that left its turn or rebooted with the old
+// version.
+func (o *operator) advanceApplies(f *firmware, pending map[string]bool, w observed, catalogs map[string]*catalog, now time.Time) ([]applyStep, error) {
 	var steps []applyStep
 	var problems []error
 	for _, name := range sortedKeys(pending) {
@@ -156,9 +162,9 @@ func (o *operator) advanceApplies(f *firmware, pending map[string]bool, w observ
 		r, held := currentApply(f, name)
 		switch {
 		case !held:
-			s, err = o.requestTurn(f, name, w)
+			s, err = o.requestTurn(f, name, w, catalogs)
 		case r.Result == resultWaiting:
-			s, err = o.followTurn(f, r, catalogs)
+			s, err = o.followTurn(f, r, w.applies[f.Metadata.Name], catalogs, now)
 		case r.rebooting():
 			s = checkReboot(f, r, w)
 		}
@@ -170,10 +176,13 @@ func (o *operator) advanceApplies(f *firmware, pending map[string]bool, w observ
 	return steps, errors.Join(problems...)
 }
 
-// requestTurn files the request of a machine whose rehearsal passed on
-// the boot it runs now. A cluster with no Disruption kind has no turn
-// to ask for, and the machine waits.
-func (o *operator) requestTurn(f *firmware, machine string, w observed) (*applyStep, error) {
+// requestTurn starts the apply pod of a machine whose rehearsal passed
+// on the boot it runs now, and files the request for its turn. The pod
+// goes first, so it prepares before the drain can begin, and a pod that
+// cannot start files no request. A cluster with no Disruption kind has
+// no turn to ask for, and the machine waits, as it does while its
+// FirmwareCatalog has no current file for the pod to load.
+func (o *operator) requestTurn(f *firmware, machine string, w observed, catalogs map[string]*catalog) (*applyStep, error) {
 	u := f.Spec.Update
 	rh, rehearsed := rehearsalRecord(f.Status.Rehearsals, machine)
 	m, known := w.fleet[machine]
@@ -181,22 +190,30 @@ func (o *operator) requestTurn(f *firmware, machine string, w observed) (*applyS
 		rh.Boot != m.Status.Boot.Time || rh.Version != u.Version || rh.CabinetSHA256 != u.Cabinet.SHA256 {
 		return nil, nil
 	}
-	d := buildDisruption(f, machine, updateSubject(f, machine))
-	if err := o.fileDisruption(d); err != nil {
-		return nil, fmt.Errorf("requesting the turn of %s: %w", machine, err)
+	c := catalogs[rh.Catalog]
+	if c == nil || c.Status.SHA256 == "" {
+		return nil, nil
 	}
 	r := applyRecord{Machine: machine, Boot: rh.Boot, Version: u.Version, CabinetSHA256: u.Cabinet.SHA256,
-		SHA256: rh.Append.SHA256, Disruption: d.Metadata.Name}
-	s := step(r, resultWaiting, fmt.Sprintf("the Disruption %s asks for the machine's reboot turn, which holds after the drain for the write", d.Metadata.Name))
+		SHA256: rh.Append.SHA256, Disruption: disruptionName(f.Metadata.Name, machine)}
+	p := buildApplyPod(f, attemptOfApply(f.Metadata.Name, r), rh, c, o.discovery.scanImage, o.namespace, time.Time{})
+	if err := o.createApplyPod(p); err != nil {
+		return nil, fmt.Errorf("starting the apply on %s: %w", machine, err)
+	}
+	if err := o.fileDisruption(buildDisruption(f, machine, updateSubject(f, machine))); err != nil {
+		return nil, fmt.Errorf("requesting the turn of %s: %w", machine, err)
+	}
+	s := step(r, resultWaiting, fmt.Sprintf("the apply pod %s prepares the write, and the Disruption %s asks for the machine's reboot turn, which holds after the drain for the write",
+		p.Metadata.Name, r.Disruption))
 	return &s, nil
 }
 
 // followTurn answers the step of a machine that waits for its turn:
-// the apply pod once machine-operator holds the turn, and a failure
-// when the turn ended with no hold. A machine-operator that does not
+// the signal once machine-operator holds the turn, and a failure when
+// the turn ended with no hold. A machine-operator that does not
 // support spec.hold reboots the machine at once and marks the request
 // Complete, and the operator then writes nothing.
-func (o *operator) followTurn(f *firmware, r applyRecord, catalogs map[string]*catalog) (*applyStep, error) {
+func (o *operator) followTurn(f *firmware, r applyRecord, pods []pod, catalogs map[string]*catalog, now time.Time) (*applyStep, error) {
 	d, err := o.readDisruption(r.Disruption)
 	if err != nil {
 		return nil, fmt.Errorf("reading the Disruption %s: %w", r.Disruption, err)
@@ -208,33 +225,10 @@ func (o *operator) followTurn(f *firmware, r applyRecord, catalogs map[string]*c
 	case d.complete():
 		s = step(r, resultFailed, fmt.Sprintf("the machine left its turn before the hold took effect: the Disruption %s is Complete, and nothing was written; a machine-operator that does not hold a turn reboots the machine at once; withdraw the approval and approve it again to try again", r.Disruption), resultWaiting)
 	case d.held() && d.Spec.Hold:
-		return o.startApply(f, r, catalogs)
+		return o.signal(f, r, pods, catalogs, now)
 	default:
 		return nil, nil
 	}
-	return &s, nil
-}
-
-// startApply creates the apply pod of a machine whose turn holds. A pod
-// that exists under the name answers 409, which is the same result.
-func (o *operator) startApply(f *firmware, r applyRecord, catalogs map[string]*catalog) (*applyStep, error) {
-	rh, rehearsed := rehearsalRecord(f.Status.Rehearsals, r.Machine)
-	if !rehearsed || rh.Append == nil || rh.Append.SHA256 != r.SHA256 {
-		s := step(r, resultFailed, "the machine's rehearsal no longer records the append that the turn was asked for, so nothing was written", resultWaiting)
-		return &s, nil
-	}
-	c := catalogs[rh.Catalog]
-	if c == nil || c.Status.SHA256 == "" {
-		s := step(r, resultFailed, fmt.Sprintf("the FirmwareCatalog %s has no current file for the apply to load, so nothing was written", rh.Catalog), resultWaiting)
-		return &s, nil
-	}
-	a := attemptOfApply(f.Metadata.Name, r)
-	p := buildApplyPod(f, a, rh, c, o.discovery.scanImage, o.namespace)
-	err := o.client.RequestJSON(http.MethodPost, podsPathIn(o.namespace), mustJSON(p), nil)
-	if err != nil && !errors.Is(err, apiclient.ErrConflict) {
-		return nil, fmt.Errorf("starting the apply on %s: %w", r.Machine, err)
-	}
-	s := step(r, resultWriting, fmt.Sprintf("the machine is drained, and the apply pod %s writes the append to %s", p.Metadata.Name, rh.Append.Variable), resultWaiting)
 	return &s, nil
 }
 
@@ -254,95 +248,6 @@ func checkReboot(f *firmware, r applyRecord, w observed) *applyStep {
 	}
 	s := step(r, resultFailed, message, resultWritten, resultUncertain)
 	return &s
-}
-
-// applyEnds follows a Firmware's apply pods, and answers the steps of
-// those that ended, the pods to delete once their results are written,
-// and the earliest deadline of an apply in progress. A Writing record
-// whose pod is gone ends Failed.
-func (o *operator) applyEnds(f *firmware, pods []pod, now time.Time) ([]applyStep, []pod, time.Time, error) {
-	var steps []applyStep
-	var finished []pod
-	var problems []error
-	var due time.Time
-	busy := map[string]bool{}
-	for _, p := range pods {
-		a := applyOf(p)
-		busy[a.machine] = true
-		if p.Metadata.DeletionTimestamp != "" {
-			continue
-		}
-		result, decided, deadline, err := o.judgeApply(p, now)
-		if err != nil {
-			problems = append(problems, err)
-			continue
-		}
-		if !decided {
-			due = earliest(due, deadline)
-			continue
-		}
-		r := applyRecord{Machine: a.machine, Boot: a.boot, Version: a.version, CabinetSHA256: a.cabinet, SHA256: a.sha256,
-			Disruption: disruptionName(a.firmware, a.machine)}
-		steps = append(steps, step(r, result.Result, result.Message, resultWaiting, resultWriting))
-		finished = append(finished, p)
-	}
-	for _, r := range f.Status.Applies {
-		if r.Result != resultWriting || busy[r.Machine] {
-			continue
-		}
-		gone, err := o.podGone(applyPodName(attemptOfApply(f.Metadata.Name, r)))
-		if err != nil {
-			problems = append(problems, err)
-			continue
-		}
-		if gone {
-			steps = append(steps, step(r, resultUncertain,
-				"the apply pod is gone, and the operator cannot tell whether it wrote, so the machine reboots and its next scan reads what the firmware holds", resultWriting))
-		}
-	}
-	return steps, finished, due, errors.Join(problems...)
-}
-
-// judgeApply decides the result of an apply pod, the way
-// judgeRehearsal decides a rehearsal's. Only the pod's own answer says
-// whether it wrote. Every other end, a deadline, a crash, a log that
-// does not answer, or an answer the operator does not know, is
-// Uncertain, because the pod may have written before it stopped.
-func (o *operator) judgeApply(p pod, now time.Time) (applyResult, bool, time.Time, error) {
-	uncertain := applyResult{Result: resultUncertain}
-	due := parseTime(p.Metadata.CreationTimestamp).Add(scanDeadline)
-	switch p.Status.Phase {
-	case podSucceeded, podFailed:
-	default:
-		if now.Before(due) {
-			return applyResult{}, false, due, nil
-		}
-		uncertain.Message = fmt.Sprintf("the apply pod did not finish within %s of its creation", scanDeadline)
-		return uncertain, true, time.Time{}, nil
-	}
-	log, err := o.readPodLog(p, applyContainer)
-	if errors.Is(err, apiclient.ErrNotFound) {
-		return applyResult{}, false, time.Time{}, nil
-	}
-	if err != nil && p.Status.Phase == podSucceeded {
-		if now.Before(due) {
-			return applyResult{}, false, time.Time{}, fmt.Errorf("reading the log of the apply pod %s: %w", p.Metadata.Name, err)
-		}
-		uncertain.Message = "the operator could not read the apply's log: " + err.Error()
-		return uncertain, true, time.Time{}, nil
-	}
-	result, last, found := parseResultLine[applyResult](log, func(r applyResult) string { return r.Result })
-	switch {
-	case !found && last != "":
-		uncertain.Message = "the apply wrote no result; its last line was: " + last
-	case !found:
-		uncertain.Message = podFailure(p, "apply", applyContainer)
-	case result.Result == resultWritten || result.Result == resultRefused || result.Result == resultFailed:
-		return result, true, time.Time{}, nil
-	default:
-		uncertain.Message = fmt.Sprintf("the apply answered the result %q, which the operator does not know", result.Result)
-	}
-	return uncertain, true, time.Time{}, nil
 }
 
 // composeApplies answers the records of the pending machines after the

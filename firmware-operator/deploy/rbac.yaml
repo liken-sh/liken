@@ -4,8 +4,9 @@
 # deletes the discovered Firmware objects, and the Disruptions that ask
 # for a machine's reboot turn. It creates, reads, and deletes the upload
 # pods and their claims and the scan, rehearsal, and apply pods in its
-# own namespace, reads the log of each pod that reports a result, and
-# posts the Events about each Firmware and each FirmwareCatalog.
+# own namespace, patches an apply pod's annotations, reads the log of
+# each pod that reports a result, and posts the Events about each
+# Firmware and each FirmwareCatalog.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -84,10 +85,12 @@ subjects:
 # watch on every pod in the namespace. get reads a pod after a create
 # that met a conflict, checks that a running pod still exists, and
 # reads the operator's own pod for the image the scan image is named
-# from. delete removes a pod after its result is in the status, and the
-# garbage collector deletes an upload pod's claim. The operator deletes
-# only a pod that carries one of the four labels. pods/log reads the
-# result line that a scan, rehearsal, or apply pod writes.
+# from. patch sets the annotation that sends an apply pod the signal to
+# write. delete removes a pod after its result is in the status, and an
+# apply pod that waits for a turn that is no longer wanted, and the
+# garbage collector deletes an upload pod's claim. The operator patches
+# and deletes only a pod that carries one of the four labels. pods/log
+# reads the result line that a scan, rehearsal, or apply pod writes.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -95,7 +98,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: [pods]
-    verbs: [get, list, watch, create, delete]
+    verbs: [get, list, watch, create, patch, delete]
   - apiGroups: [""]
     resources: [pods/log]
     verbs: [get]

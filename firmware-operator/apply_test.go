@@ -1,15 +1,14 @@
 package main
 
 // These tests follow the apply of an approved update on a machine whose
-// rehearsal passed: the request for a held reboot turn, the apply pod
-// that starts once machine-operator holds the turn, the hold that a
+// rehearsal passed: the request for a held reboot turn, the hold that a
 // written update releases, the turn that a refused or failed write
 // withdraws, the scan after the reboot that proves the write or fails
-// it, and an operator that restarts in the middle.
+// it, and an operator that restarts in the middle. applysignal_test.go
+// follows the apply pod from the request to the signal to write.
 
 import (
 	"encoding/json"
-	"slices"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -22,7 +21,8 @@ import (
 var turnName = disruptionName(biosObjectName, "node-2")
 
 // rehearsedWorld is approvedWorld after node-2's rehearsal passed, so
-// the operator has asked for node-2's turn.
+// the operator has asked for node-2's turn, and the apply pod prepares
+// on node-2.
 func rehearsedWorld(t *testing.T) *world {
 	w := approvedWorld(t)
 	w.api.finishPod(t, w.onlyRehearsal(t).Metadata.Name, rehearsalContainer, podSucceeded, rehearsalLog(passed))
@@ -31,7 +31,8 @@ func rehearsedWorld(t *testing.T) *world {
 }
 
 // heldWorld is rehearsedWorld after machine-operator drained node-2 and
-// held its turn, so the apply pod has started.
+// held its turn, so the operator has sent the apply pod the signal to
+// write.
 func heldWorld(t *testing.T) *world {
 	w := rehearsedWorld(t)
 	w.api.holdTurn(t, turnName)
@@ -166,55 +167,6 @@ func TestARehearsalOfAnEarlierBootRequestsNoTurn(t *testing.T) {
 	})
 }
 
-func TestNoApplyPodStartsBeforeTheTurnHolds(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		w := rehearsedWorld(t)
-		time.Sleep(time.Hour)
-		synctest.Wait()
-
-		if got := len(w.api.applies(t)); got != 0 {
-			t.Errorf("%d apply pods before the hold, want none", got)
-		}
-		if r := w.onlyApplyRecord(t); r.Result != resultWaiting {
-			t.Errorf("the record is %+v, want Waiting", r)
-		}
-	})
-}
-
-func TestTheApplyPodWritesOnTheDrainedMachine(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		w := heldWorld(t)
-
-		p := w.onlyApply(t)
-		spec := p.Spec
-		if spec.NodeName != "node-2" || !slices.Equal(spec.Containers[0].Args, []string{"apply"}) || spec.Tolerations[0].Operator != "Exists" {
-			t.Errorf("the pod runs %v on %q with %v, want apply on node-2 tolerating every taint", spec.Containers[0].Args, spec.NodeName, spec.Tolerations)
-		}
-		security := spec.Containers[0].SecurityContext
-		if security.Privileged != nil || !slices.Equal(security.Capabilities.Drop, []string{"ALL"}) ||
-			!slices.Equal(security.Capabilities.Add, []string{"DAC_READ_SEARCH", "LINUX_IMMUTABLE"}) {
-			t.Errorf("the security context is %+v, want no privilege and DAC_READ_SEARCH and LINUX_IMMUTABLE alone", security)
-		}
-		mount := spec.Containers[0].VolumeMounts[0]
-		if mount.MountPath != hostFirmwarePath || mount.ReadOnly || mount.RecursiveReadOnly != "" || spec.Volumes[0].HostPath.Path != "/sys/firmware" {
-			t.Errorf("the firmware mount is %+v, want the machine's /sys/firmware read-write", mount)
-		}
-		env := map[string]string{}
-		for _, e := range spec.Containers[0].Env {
-			env[e.Name] = e.Value
-		}
-		if env[appendSHA256Variable] != passed.SHA256 || env[deviceIDVariable] != "3fcf" || env[cabinetSHA256Variable] != biosCabinet {
-			t.Errorf("the environment is %v, want the rehearsed append, the device, and the pinned cabinet", env)
-		}
-		if r := w.onlyApplyRecord(t); r.Result != resultWriting {
-			t.Errorf("the record is %+v, want Writing", r)
-		}
-		if got := w.postedAbout(biosObjectName); !containsPosted(got, posted{"Normal", reasonApplyStarted}) {
-			t.Errorf("the operator posted %v, want a Normal ApplyStarted", got)
-		}
-	})
-}
-
 func TestAWrittenUpdateReleasesTheHold(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := heldWorld(t)
@@ -305,7 +257,10 @@ func TestAnUncertainWriteRebootsTheMachine(t *testing.T) {
 		}, "the apply pod is gone"},
 		{"a pod that never finishes", func(t *testing.T, w *world, name string) {
 			time.Sleep(scanDeadline)
-		}, "the apply pod did not finish within 10m0s of its creation"},
+		}, "the apply pod did not finish within 10m0s of the signal to write"},
+		{"a crash after the prepare", func(t *testing.T, w *world, name string) {
+			w.api.finishPod(t, name, applyContainer, podFailed, preparedLine+"\n")
+		}, "the apply wrote no result; its last line was: " + preparedLine},
 		{"an answer the operator does not know", func(t *testing.T, w *world, name string) {
 			w.api.finishPod(t, name, applyContainer, podSucceeded, applyLog(applyResult{Result: "Maybe", Message: "?"}))
 		}, `the apply answered the result "Maybe", which the operator does not know`},
@@ -396,7 +351,8 @@ func TestNoRequestIsFiledAgainAfterTheReboot(t *testing.T) {
 
 // A machine-operator that does not hold a turn reboots the machine and
 // marks the request Complete, and a person can delete the request. The
-// operator then writes nothing, and does not ask again on its own.
+// operator then deletes the apply pod that waits, writes nothing, and
+// does not ask again on its own.
 func TestATurnThatEndsWithoutAHoldFails(t *testing.T) {
 	cases := []struct {
 		name string
@@ -518,10 +474,11 @@ func TestAMachineThatStillReadsTheOldVersionAfterItsRebootFails(t *testing.T) {
 	}
 }
 
-// An operator that stops after it created the apply pod, before the
-// record said Writing, finds the turn from the Disruption, the attempt
-// from the pod's annotations, and the record in the status, and follows
-// the one pod to its result.
+// An operator that stops after it sent the apply pod the signal, before
+// the record said Writing, finds the turn from the Disruption, the
+// attempt and the signal from the pod's annotations, and the record in
+// the status. It follows the one pod to its result, and sends no second
+// signal.
 func TestARestartDuringTheWriteFollowsThePod(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := &world{api: startFakeAPI(t)}
@@ -543,8 +500,15 @@ func TestARestartDuringTheWriteFollowsThePod(t *testing.T) {
 		if r := w.onlyApplyRecord(t); r.Result != resultWaiting {
 			t.Fatalf("before the restart the record is %+v, want Waiting", r)
 		}
-		w.api.finishPod(t, w.onlyApply(t).Metadata.Name, applyContainer, podSucceeded, applyLog(writtenResult))
+		sent := w.onlyApply(t).Metadata.Annotations[writeAtKey]
+		time.Sleep(time.Minute)
 		w.run(t)
+		if r, p := w.onlyApplyRecord(t), w.onlyApply(t); r.Result != resultWriting || p.Metadata.Annotations[writeAtKey] != sent {
+			t.Errorf("after the restart the record is %+v and the signal was sent at %s, want Writing and the first signal at %s",
+				r, p.Metadata.Annotations[writeAtKey], sent)
+		}
+		w.api.finishPod(t, w.onlyApply(t).Metadata.Name, applyContainer, podSucceeded, applyLog(writtenResult))
+		w.settle()
 
 		if r := w.onlyApplyRecord(t); r.Result != resultWritten {
 			t.Errorf("the record is %+v, want Written", r)
@@ -559,7 +523,7 @@ func TestARestartDuringTheWriteFollowsThePod(t *testing.T) {
 }
 
 // A withdrawn approval needs no turn, so the operator deletes a request
-// that still holds one.
+// that still holds one, and the apply pod that waits for it.
 func TestWithdrawingTheApprovalWithdrawsTheTurn(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := rehearsedWorld(t)
@@ -573,6 +537,9 @@ func TestWithdrawingTheApprovalWithdrawsTheTurn(t *testing.T) {
 		}
 		if records := w.api.firmware(t, biosObjectName).Status.Applies; len(records) != 0 {
 			t.Errorf("status.applies = %+v, want none with no approval", records)
+		}
+		if got := len(w.api.applies(t)); got != 0 {
+			t.Errorf("%d apply pods, want the waiting pod deleted", got)
 		}
 	})
 }

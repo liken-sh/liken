@@ -1,10 +1,24 @@
 package main
 
-// An apply is one bare pod on a drained machine that writes an
-// approved Secure Boot database update to the machine's real variable
-// (scan/apply.go). It runs the scan image as `scan apply`, and starts
-// only when machine-operator holds the machine's turn after the drain
-// (disruption.go).
+// An apply is one bare pod on a machine that writes an approved Secure
+// Boot database update to the machine's real variable (scan/apply.go).
+// It runs the scan image as `scan apply`. The drain of the machine's
+// turn can evict the cluster's DNS, so the pod starts when the operator
+// asks for the turn, while the cluster is whole, and does all its
+// network work then: it loads the catalog, downloads the cabinet, and
+// rehearses the install again. Then it waits on the machine. When
+// machine-operator holds the turn after the drain (disruption.go), the
+// operator sends the signal: it sets the pod's annotation
+// firmware.liken.sh/write to go. The pod reads its own annotations
+// through a downward API volume, so it needs no credentials, and only
+// then writes, with no network.
+//
+// The pod stays on the machine through the drain. liken's drain skips
+// a pod that tolerates the cordon, node.kubernetes.io/unschedulable, by
+// its key, because the cordon does not keep such a pod off the machine,
+// and an eviction would move nothing. The pod has no deadline, because
+// the turn can come much later; the operator deletes the pod when its
+// record leaves.
 //
 // The pod is not privileged. It mounts the machine's /sys/firmware
 // read-write, so the efivarfs mount under it takes the write. It drops
@@ -18,6 +32,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"strings"
+	"time"
 )
 
 // The label and the annotations of an apply pod. The label selects the
@@ -31,6 +46,39 @@ const (
 	appendKey       = "firmware.liken.sh/append-sha256"
 	applyContainer  = "apply"
 )
+
+// The annotations that carry the operator's signal to write, the value
+// of the first, and where the pod reads them. write-at is the time the
+// operator sent the signal, from which the apply's deadline counts.
+const (
+	writeKey   = "firmware.liken.sh/write"
+	writeAtKey = "firmware.liken.sh/write-at"
+	writeGo    = "go"
+	signalPath = "/run/signal"
+)
+
+// cordonTaint is the taint that a cordon sets on a node.
+const cordonTaint = "node.kubernetes.io/unschedulable"
+
+// signalOf answers when the operator sent an apply pod the signal to
+// write, or the zero time when it has not. A signal with no time, which
+// only a person writes, counts from the pod's creation.
+func signalOf(p pod) time.Time {
+	notes := p.Metadata.Annotations
+	if notes[writeKey] != writeGo {
+		return time.Time{}
+	}
+	if sent := parseTime(notes[writeAtKey]); !sent.IsZero() {
+		return sent
+	}
+	return parseTime(p.Metadata.CreationTimestamp)
+}
+
+// signalAnnotations answers the annotations of the signal sent at a
+// time.
+func signalAnnotations(sent time.Time) map[string]string {
+	return map[string]string{writeKey: writeGo, writeAtKey: stamp(sent)}
+}
 
 // appendSHA256Variable is the environment of `scan apply` beside the
 // rehearsal's: the SHA-256 of the append that the rehearsal recorded.
@@ -81,11 +129,12 @@ func applyOf(p pod) applyAttempt {
 // passed rehearsal, whose device the apply installs on, and c is its
 // FirmwareCatalog, whose current file the apply loads. The rehearsal
 // in the pod checks the append, so a catalog that moved since the
-// rehearsal changes nothing that is written.
-func buildApplyPod(f *firmware, a applyAttempt, r rehearsal, c *catalog, image, namespace string) pod {
+// rehearsal changes nothing that is written. A pod built with a signal
+// time carries the signal, so it writes as soon as it has prepared.
+func buildApplyPod(f *firmware, a applyAttempt, r rehearsal, c *catalog, image, namespace string, signal time.Time) pod {
 	no := false
-	deadline, grace := int64(scanDeadline.Seconds()), int64(5)
-	return pod{
+	grace := int64(5)
+	p := pod{
 		APIVersion: "v1",
 		Kind:       "Pod",
 		Metadata: objectMeta{
@@ -110,14 +159,13 @@ func buildApplyPod(f *firmware, a applyAttempt, r rehearsal, c *catalog, image, 
 			}},
 		},
 		Spec: podSpec{
-			// The pod runs once, and stops at the deadline, for the
-			// reasons of the scan pod (scanpod.go). It tolerates every
-			// taint, which covers the cordon of the drain.
+			// The pod runs once. It tolerates every taint, so a taint
+			// on the machine does not stop it, and the cordon by its
+			// key, so the drain skips it.
 			RestartPolicy:                 "Never",
-			ActiveDeadlineSeconds:         &deadline,
 			TerminationGracePeriodSeconds: &grace,
 			NodeName:                      a.machine,
-			Tolerations:                   []toleration{{Operator: "Exists"}},
+			Tolerations:                   []toleration{{Operator: "Exists"}, {Key: cordonTaint, Operator: "Exists", Effect: "NoSchedule"}},
 			AutomountServiceAccountToken:  &no,
 			EnableServiceLinks:            &no,
 			Volumes: []volume{
@@ -125,6 +173,10 @@ func buildApplyPod(f *firmware, a applyAttempt, r rehearsal, c *catalog, image, 
 				// The copy of the rehearsal before the write, as in the
 				// rehearsal pod.
 				{Name: "rehearsal", EmptyDir: &emptyDir{Medium: "Memory", SizeLimit: "64Mi"}},
+				// The pod's own annotations, which carry the signal.
+				{Name: "signal", DownwardAPI: &downwardAPIVolume{Items: []downwardAPIFile{
+					{Path: "annotations", FieldRef: fieldRef{FieldPath: "metadata.annotations"}},
+				}}},
 			},
 			Containers: []container{{
 				Name:  applyContainer,
@@ -147,10 +199,17 @@ func buildApplyPod(f *firmware, a applyAttempt, r rehearsal, c *catalog, image, 
 				VolumeMounts: []volumeMount{
 					{Name: "host-firmware", MountPath: hostFirmwarePath},
 					{Name: "rehearsal", MountPath: rehearsalPath},
+					{Name: "signal", MountPath: signalPath},
 				},
 				Resources:                &resources{Requests: map[string]string{"cpu": "10m", "memory": "64Mi"}},
 				TerminationMessagePolicy: "FallbackToLogsOnError",
 			}},
 		},
 	}
+	if !signal.IsZero() {
+		for key, value := range signalAnnotations(signal) {
+			p.Metadata.Annotations[key] = value
+		}
+	}
+	return p
 }

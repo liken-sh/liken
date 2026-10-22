@@ -48,12 +48,27 @@ type podSpec struct {
 	Containers                    []container        `json:"containers"`
 }
 
-// volume is a host directory or a directory in memory. A rehearsal pod
-// mounts the machine's /sys/firmware and keeps its copy in memory.
+// volume is a host directory, a directory in memory, or the pod's own
+// fields. A rehearsal pod mounts the machine's /sys/firmware and keeps
+// its copy in memory, and an apply pod reads its own annotations.
 type volume struct {
-	Name     string    `json:"name"`
-	HostPath *hostPath `json:"hostPath,omitempty"`
-	EmptyDir *emptyDir `json:"emptyDir,omitempty"`
+	Name        string             `json:"name"`
+	HostPath    *hostPath          `json:"hostPath,omitempty"`
+	EmptyDir    *emptyDir          `json:"emptyDir,omitempty"`
+	DownwardAPI *downwardAPIVolume `json:"downwardAPI,omitempty"`
+}
+
+type downwardAPIVolume struct {
+	Items []downwardAPIFile `json:"items"`
+}
+
+type downwardAPIFile struct {
+	Path     string   `json:"path"`
+	FieldRef fieldRef `json:"fieldRef"`
+}
+
+type fieldRef struct {
+	FieldPath string `json:"fieldPath"`
 }
 
 type hostPath struct {
@@ -74,7 +89,9 @@ type volumeMount struct {
 }
 
 type toleration struct {
+	Key      string `json:"key,omitempty"`
 	Operator string `json:"operator"`
+	Effect   string `json:"effect,omitempty"`
 }
 
 type podSecurity struct {
@@ -176,6 +193,9 @@ func (p pod) scheduled() bool {
 	}
 	return false
 }
+
+// over reports whether the pod runs no more.
+func (p pod) over() bool { return p.Status.Phase == podSucceeded || p.Status.Phase == podFailed }
 
 // loader answers the terminated state of the upload's container, or
 // nil while it has not ended.

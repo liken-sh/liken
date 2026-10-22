@@ -1,7 +1,8 @@
 # The network policy of every apply pod. An apply pod rehearses the
-# install again before it writes, so it reads the catalog's jcat, its
-# versioned file, and the approved cabinet over HTTPS, and needs DNS to
-# find their hosts. So the policy allows its egress to port 53 and to
+# install again when it starts, before the drain, so it reads the
+# catalog's jcat, its versioned file, and the approved cabinet over
+# HTTPS, and needs DNS to find their hosts. The write after the drain
+# needs no network. So the policy allows its egress to port 53 and to
 # TCP port 443, on any address, and allows nothing in. A cabinet or a
 # catalog on a mirror on another port needs a policy of its own beside
 # this one. A cluster with no network policy controller ignores it.

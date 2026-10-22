@@ -38,13 +38,16 @@ The base holds these parts:
   `Disruption`s that ask for a machine's reboot turn;
 - a `Role` in `liken-system`, which creates, reads, and deletes the
   upload pods and their `ResourceClaim`s and the scan, rehearsal, and
-  apply pods, and reads the logs of the scan, rehearsal, and apply
-  pods;
+  apply pods, patches the annotation that sends an apply pod the
+  signal to write, and reads the logs of the scan, rehearsal, and
+  apply pods;
 - a `Role` in `default`, which posts the `Event`s about each
   `Firmware` and each `FirmwareCatalog`;
 - a `Role` in `liken-system`, which creates, reads, and renews the
   `Lease` named `firmware-operator`;
-- the `firmware-operator` `Deployment`, with one replica;
+- the `firmware-operator` `Deployment`, with one replica, whose pod
+  tolerates the cordon `node.kubernetes.io/unschedulable`, so it keeps
+  running on a machine that it holds drained;
 - the `DeviceClass` `firmware-upload`, which selects the USB devices
   of `liken.sh` and which each upload's claim names;
 - the `NetworkPolicy` `firmware-upload` in `liken-system`, which

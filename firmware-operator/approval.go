@@ -132,8 +132,8 @@ func (o *operator) approveAll(rules []firmware, w observed, catalogs map[string]
 // ones its pending machines need, and writes its approval, its
 // rehearsals, its applies, and their conditions in one status write.
 // Then it posts the transitions, brings the requests for a reboot turn
-// in line with the records it wrote, and deletes each finished
-// rehearsal and apply pod.
+// and the apply pods that wait for their turn in line with the records
+// it wrote, and deletes each finished rehearsal and apply pod.
 func (o *operator) answerUpdate(f *firmware, w observed, catalogs map[string]*catalog, now time.Time) (time.Time, error) {
 	ends, busy, due, err := o.rehearsalEnds(f, w.rehearsals[f.Metadata.Name], now)
 	problems := []error{err}
@@ -143,7 +143,7 @@ func (o *operator) answerUpdate(f *firmware, w observed, catalogs map[string]*ca
 	if c, pending, holds := approval(f.Spec.Update, f.Spec.Machines, f.Status.Machines, w.machines); holds && c.Status == conditions.True {
 		started, err := o.startRehearsals(f, pending, w, catalogs, busy)
 		starts, problems = started, append(problems, err)
-		advanced, err := o.advanceApplies(f, pending, w, catalogs)
+		advanced, err := o.advanceApplies(f, pending, w, catalogs, now)
 		steps, problems = append(steps, advanced...), append(problems, err)
 	}
 
@@ -191,6 +191,8 @@ func (o *operator) answerUpdate(f *firmware, w observed, catalogs map[string]*ca
 	// are written, so an operator that stops here finds each result in
 	// the status and does the rest again.
 	problems = append(problems, o.settleTurns(f, records, w.disruptions[f.Metadata.Name], w.fleet))
+	problems = append(problems, o.retireApplyPods(records, w.applies[f.Metadata.Name]))
+	due = earliest(due, writeDeadline(records, now))
 	for _, end := range ends {
 		if end.rehearsal != nil {
 			problems = append(problems, o.remove(*end.rehearsal))

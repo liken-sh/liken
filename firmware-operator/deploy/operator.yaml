@@ -50,6 +50,17 @@ spec:
       # expire, and a waiting copy then takes it 30 to 41 s after the
       # last renewal instead of within about 11 s.
       terminationGracePeriodSeconds: 60
+      # The operator holds a machine drained while an apply writes, and
+      # only the operator removes the hold. So it must keep running on a
+      # machine that it holds drained: liken's drain skips a pod that
+      # tolerates the cordon by its key, and the scheduler places such a
+      # pod on a cordoned machine. Without it, a cluster whose other
+      # machines take no pod of the operator's would hold the machine
+      # drained for good.
+      tolerations:
+        - key: node.kubernetes.io/unschedulable
+          operator: Exists
+          effect: NoSchedule
       containers:
         - name: operator
           image: ghcr.io/liken-sh/firmware-operator:latest

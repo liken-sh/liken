@@ -115,77 +115,84 @@ func (r rehearser) rehearse(ctx context.Context) RehearsalResult {
 	return result
 }
 
+// rehearsedAppend is the bytes of a passed rehearsal: the variable as
+// the rehearsal copied it, and the append that the install made to it.
+type rehearsedAppend struct {
+	before   []byte
+	appended []byte
+}
+
 // rehearseAppend is rehearse, and answers the bytes of a passed
-// rehearsal's append too, which an apply writes (apply.go). The result
-// keeps only their length and SHA-256, so the bytes leave the pod
-// only in the write.
-func (r rehearser) rehearseAppend(ctx context.Context) (RehearsalResult, []byte) {
+// rehearsal too, which an apply writes (apply.go). The result keeps
+// only the append's length and SHA-256, so the bytes leave the pod only
+// in the write.
+func (r rehearser) rehearseAppend(ctx context.Context) (RehearsalResult, rehearsedAppend) {
 	if err := copyFirmware(r.hostDir, r.copyDir); err != nil {
-		return rehearsalFailed("copying the firmware tables: %v", err), nil
+		return rehearsalFailed("copying the firmware tables: %v", err), rehearsedAppend{}
 	}
 	if end := r.loadCatalog(ctx); end != nil {
-		return rehearsalFailed("%s", end.Message), nil
+		return rehearsalFailed("%s", end.Message), rehearsedAppend{}
 	}
 	devices, err := query(ctx, r.fwupdtool, "get-devices")
 	if err != nil {
-		return rehearsalFailed("%v", err), nil
+		return rehearsalFailed("%v", err), rehearsedAppend{}
 	}
 	i := slices.IndexFunc(devices, func(d fwupdDevice) bool { return d.DeviceID == r.deviceID })
 	if i < 0 {
-		return rehearsalFailed("fwupd reports no device %s", r.deviceID), nil
+		return rehearsalFailed("fwupd reports no device %s", r.deviceID), rehearsedAppend{}
 	}
 	variable, database := databaseVariables[devices[i].Plugin]
 	if !database {
-		return rehearsalRefused("fwupd's %s plugin updates %s, and a rehearsal covers only the Secure Boot databases", devices[i].Plugin, devices[i].Name), nil
+		return rehearsalRefused("fwupd's %s plugin updates %s, and a rehearsal covers only the Secure Boot databases", devices[i].Plugin, devices[i].Name), rehearsedAppend{}
 	}
 
 	cab, err := get(ctx, r.client, r.cabinetURL)
 	if err != nil {
-		return rehearsalFailed("downloading the cabinet: %v", err), nil
+		return rehearsalFailed("downloading the cabinet: %v", err), rehearsedAppend{}
 	}
 	if got := sum(cab); got != r.cabinetSHA256 {
-		return rehearsalFailed("the SHA-256 of the cabinet is %s, and the approval pins %s", got, r.cabinetSHA256), nil
+		return rehearsalFailed("the SHA-256 of the cabinet is %s, and the approval pins %s", got, r.cabinetSHA256), rehearsedAppend{}
 	}
 	cabPath := filepath.Join(r.workDir, "update.cab")
 	if err := os.WriteFile(cabPath, cab, 0o644); err != nil {
-		return rehearsalFailed("saving the cabinet: %v", err), nil
+		return rehearsalFailed("saving the cabinet: %v", err), rehearsedAppend{}
 	}
 
 	varsDir := filepath.Join(r.copyDir, "efi", "efivars")
 	before, err := readVariables(varsDir)
 	if err != nil {
-		return rehearsalFailed("reading the copy before the install: %v", err), nil
+		return rehearsalFailed("reading the copy before the install: %v", err), rehearsedAppend{}
 	}
 	_, stderr, installErr := r.fwupdtool(ctx, "install", "--assume-yes", "--no-reboot-check", cabPath, r.deviceID)
 	after, err := readVariables(varsDir)
 	if err != nil {
-		return rehearsalFailed("reading the copy after the install: %v", err), nil
+		return rehearsalFailed("reading the copy after the install: %v", err), rehearsedAppend{}
 	}
 	written, err := filesUnder(r.espDir)
 	if err != nil {
-		return rehearsalFailed("reading the ESP path: %v", err), nil
+		return rehearsalFailed("reading the ESP path: %v", err), rehearsedAppend{}
 	}
 
 	appended, refusal := judge(variable, before, after, written)
 	if installErr != nil && (appended == nil || !strings.Contains(lastLine(stderr), reloadFailure)) {
-		return rehearsalFailed("fwupdtool install: %s", lastLine(stderr)), nil
+		return rehearsalFailed("fwupdtool install: %s", lastLine(stderr)), rehearsedAppend{}
 	}
 	if refusal != "" {
-		return rehearsalRefused("%s", refusal), nil
+		return rehearsalRefused("%s", refusal), rehearsedAppend{}
 	}
 	free, err := r.free(filepath.Join(r.hostDir, "efi", "efivars"))
 	if err != nil {
-		return rehearsalFailed("reading the free space of the variable store: %v", err), nil
+		return rehearsalFailed("reading the free space of the variable store: %v", err), rehearsedAppend{}
 	}
 	result := RehearsalResult{Variable: variable, Bytes: int64(len(appended)), SHA256: sum(appended), Free: free}
 	if payload := int64(len(appended) - 4); payload > free {
 		result.Result = resultRefused
 		result.Message = fmt.Sprintf("the append to %s needs %d bytes, and the variable store has %d free", variable, payload, free)
-		return result, nil
+		return result, rehearsedAppend{}
 	}
 	result.Result = resultPassed
 	result.Message = fmt.Sprintf("the install appends %d bytes to %s, and the variable store has %d bytes free", len(appended), variable, free)
-	return result, appended
+	return result, rehearsedAppend{before: before[variable], appended: appended}
 }
 
 // judge checks the difference that an install made in the copy against

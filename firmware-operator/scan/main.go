@@ -29,6 +29,10 @@ const (
 	// way before it writes.
 	hostFirmware = "/host/firmware"
 	rehearsalDir = "/run/rehearsal"
+
+	// An apply reads its own annotations, which carry the operator's
+	// signal to write, from the downward API volume at signalDir.
+	signalDir = "/run/signal"
 )
 
 func main() {
@@ -71,14 +75,14 @@ func rehearseMain() {
 }
 
 // applyMain runs an apply (apply.go): a rehearsal like rehearseMain's,
-// and then the write to the machine's own variable.
+// the wait for the operator's signal (signal.go), and then the write to
+// the machine's own variable. apply bounds the rehearsal itself, and the
+// wait has no bound.
 func applyMain() {
-	ctx, cancel := context.WithTimeout(context.Background(), scanTimeout)
-	defer cancel()
-
 	a := applierFromEnv(os.Getenv)
 	a.rehearser, a.store = rehearserIn(a.rehearser), osVariableStore()
-	if err := emit(os.Stdout, a.apply(ctx)); err != nil {
+	a.signal = func(ctx context.Context) error { return awaitSignal(ctx, signalDir, inotifyWatch) }
+	if err := emit(os.Stdout, a.apply(context.Background(), os.Stdout)); err != nil {
 		fmt.Fprintln(os.Stderr, "writing the result:", err)
 		os.Exit(1)
 	}

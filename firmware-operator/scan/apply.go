@@ -2,15 +2,27 @@ package main
 
 // An apply writes an approved Secure Boot database update to the
 // machine's real variable, inside the reboot turn that the operator
-// asked for. It runs in a pod on the drained machine, which mounts
+// asked for. It runs in a pod on the machine, which mounts
 // /sys/firmware read-write.
 //
+// The pod starts when the operator asks for the turn, while the
+// cluster is whole, and runs in two phases. The drain of the turn can
+// evict the cluster's DNS, so the first phase, the prepare, does all the
+// work that needs the network. The second phase writes with no network,
+// and starts only when the operator sends the signal (signal.go), once
+// the machine is drained and its turn holds. The pod's variable store
+// is reachable only from the write, and the write runs only after the
+// wait for the signal returns, so nothing is written before the signal.
+//
 // The bytes the apply writes are the one append that the rehearsal
-// recorded, and only those. So the apply first runs the rehearsal
-// again, against a fresh copy in memory, and writes nothing unless the
-// rehearsal passes with the same SHA-256 that the operator recorded. A
-// different SHA-256 means the machine's variables changed since the
+// recorded, and only those. So the prepare runs the rehearsal again,
+// against a fresh copy in memory, and the apply writes nothing unless
+// the rehearsal passes with the same SHA-256 that the operator recorded.
+// A different SHA-256 means the machine's variables changed since the
 // rehearsal, and the record in status no longer describes the write.
+// The wait for the turn can be long, so before the write the apply
+// reads the variable again, and writes nothing unless it still holds
+// the bytes that the prepare's rehearsal extended.
 //
 // The firmware verifies the append's signature against KEK, or PK for
 // a KEK update, and merges the signed list into the stored one. So the
@@ -18,9 +30,11 @@ package main
 // verify changes nothing. A write cannot be undone.
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -49,6 +63,21 @@ type ApplyResult struct {
 	After    int64  `json:"after,omitempty"`
 }
 
+// phasePrepared is the phase of the progress line that the prepare
+// prints when it ends.
+const phasePrepared = "prepared"
+
+// ApplyProgress is a line of JSON that an apply prints before its
+// result, for a person who reads the pod's log. It has no result key,
+// so the operator, which takes the last line with a result as the
+// answer, never reads it as one.
+type ApplyProgress struct {
+	Phase    string `json:"phase"`
+	Message  string `json:"message"`
+	Variable string `json:"variable"`
+	SHA256   string `json:"sha256"`
+}
+
 func applyFailed(format string, args ...any) ApplyResult {
 	return ApplyResult{Result: resultFailed, Message: fmt.Sprintf(format, args...)}
 }
@@ -71,55 +100,100 @@ type variableStore struct {
 type applier struct {
 	rehearser
 	appendSHA256 string // APPEND_SHA256, the append the rehearsal recorded
-	store        variableStore
+	// signal returns nil once the operator sent the signal to write,
+	// and an error when the wait ended without it.
+	signal func(ctx context.Context) error
+	store  variableStore
 }
 
 func applierFromEnv(getenv func(string) string) applier {
 	return applier{rehearser: rehearserFromEnv(getenv), appendSHA256: getenv("APPEND_SHA256")}
 }
 
-// apply rehearses again, checks the append, and writes it. Every
-// outcome is an ApplyResult for the operator to read.
-func (a applier) apply(ctx context.Context) ApplyResult {
-	rehearsal, appended := a.rehearseAppend(ctx)
+// apply prepares, prints its progress line, waits for the signal, and
+// writes. Every outcome is an ApplyResult for the operator to read.
+// The prepare has the scan's time limit, because a working network
+// finishes it in seconds. The wait has none, because the turn can come
+// hours or days later, and the operator deletes the pod when the turn
+// is no longer wanted.
+func (a applier) apply(ctx context.Context, progress io.Writer) ApplyResult {
+	preparing, cancel := context.WithTimeout(ctx, scanTimeout)
+	p, failure, ready := a.prepare(preparing, a.appendSHA256)
+	cancel()
+	if !ready {
+		return failure
+	}
+	line := ApplyProgress{Phase: phasePrepared, Variable: p.variable, SHA256: a.appendSHA256,
+		Message: fmt.Sprintf("the rehearsal passed with the recorded append to %s; the apply waits for the operator's signal to write", p.variable)}
+	if err := emit(progress, line); err != nil {
+		return applyFailed("printing the progress line: %v, so nothing was written", err)
+	}
+	if err := a.signal(ctx); err != nil {
+		return applyFailed("waiting for the signal to write: %v, so nothing was written", err)
+	}
+	return p.write(a.store)
+}
+
+// prepared is a rehearsal that passed with the recorded append: the
+// variable, its file in the machine's store, the bytes the rehearsal
+// copied from it, and the append.
+type prepared struct {
+	variable string
+	path     string
+	before   []byte
+	appended []byte
+}
+
+// prepare rehearses again and checks the append. It is the rehearser's,
+// which holds no variable store, so it cannot write.
+func (r rehearser) prepare(ctx context.Context, appendSHA256 string) (prepared, ApplyResult, bool) {
+	rehearsal, edit := r.rehearseAppend(ctx)
 	if rehearsal.Result != resultPassed {
-		return applyFailed("the rehearsal before the write did not pass, so nothing was written: %s", rehearsal.Message)
+		return prepared{}, applyFailed("the rehearsal before the write did not pass, so nothing was written: %s", rehearsal.Message), false
 	}
-	if rehearsal.SHA256 != a.appendSHA256 {
-		return applyFailed("the append's SHA-256 is now %s, and the rehearsal recorded %s: the machine's variables changed since the rehearsal, so nothing was written",
-			rehearsal.SHA256, a.appendSHA256)
+	if rehearsal.SHA256 != appendSHA256 {
+		return prepared{}, applyFailed("the append's SHA-256 is now %s, and the rehearsal recorded %s: the machine's variables changed since the rehearsal, so nothing was written",
+			rehearsal.SHA256, appendSHA256), false
 	}
-	variable := rehearsal.Variable
-	path := filepath.Join(a.hostDir, "efi", "efivars", variable)
-	before, err := os.ReadFile(path)
+	return prepared{variable: rehearsal.Variable, path: filepath.Join(r.hostDir, "efi", "efivars", rehearsal.Variable),
+		before: edit.before, appended: edit.appended}, ApplyResult{}, true
+}
+
+// write checks that the variable still holds what the prepare
+// extended, and writes the append.
+func (p prepared) write(store variableStore) ApplyResult {
+	before, err := os.ReadFile(p.path)
 	if err != nil {
-		return applyFailed("reading %s before the write: %v", variable, err)
+		return applyFailed("reading %s before the write: %v", p.variable, err)
+	}
+	if !bytes.Equal(before, p.before) {
+		return applyFailed("the variable %s changed while the apply waited for its turn, so nothing was written", p.variable)
 	}
 
-	flags, err := a.store.flags(path)
+	flags, err := store.flags(p.path)
 	if err != nil {
-		return applyFailed("reading the flags of %s: %v", variable, err)
+		return applyFailed("reading the flags of %s: %v", p.variable, err)
 	}
 	immutable := flags&immutableFlag != 0
 	if immutable {
-		if err := a.store.setFlags(path, flags&^immutableFlag); err != nil {
-			return applyFailed("clearing the immutable flag of %s: %v", variable, err)
+		if err := store.setFlags(p.path, flags&^immutableFlag); err != nil {
+			return applyFailed("clearing the immutable flag of %s: %v", p.variable, err)
 		}
 	}
-	written := a.store.write(path, appended)
+	written := store.write(p.path, p.appended)
 	var restored error
 	if immutable {
-		restored = a.store.setFlags(path, flags)
+		restored = store.setFlags(p.path, flags)
 	}
 
 	var result ApplyResult
 	switch {
 	case errors.Is(written, syscall.EACCES):
-		result = ApplyResult{Result: resultRefused, Message: fmt.Sprintf("the firmware refused the append to %s: %v", variable, written)}
+		result = ApplyResult{Result: resultRefused, Message: fmt.Sprintf("the firmware refused the append to %s: %v", p.variable, written)}
 	case written != nil:
-		result = applyFailed("writing the append to %s: %v", variable, written)
+		result = applyFailed("writing the append to %s: %v", p.variable, written)
 	default:
-		result = a.written(path, variable, len(appended), int64(len(before)))
+		result = p.written(int64(len(before)))
 	}
 	if restored != nil {
 		result.Message += "; setting the immutable flag again failed: " + restored.Error()
@@ -129,15 +203,15 @@ func (a applier) apply(ctx context.Context) ApplyResult {
 
 // written answers the result of an append the firmware accepted, with
 // the variable's size before and after.
-func (a applier) written(path, variable string, length int, before int64) ApplyResult {
-	result := ApplyResult{Result: resultWritten, Variable: variable, SHA256: a.appendSHA256, Before: before}
-	after, err := os.ReadFile(path)
+func (p prepared) written(before int64) ApplyResult {
+	result := ApplyResult{Result: resultWritten, Variable: p.variable, SHA256: sum(p.appended), Before: before}
+	after, err := os.ReadFile(p.path)
 	if err != nil {
-		result.Message = fmt.Sprintf("wrote the %d-byte append to %s, and reading it back failed: %v", length, variable, err)
+		result.Message = fmt.Sprintf("wrote the %d-byte append to %s, and reading it back failed: %v", len(p.appended), p.variable, err)
 		return result
 	}
 	result.After = int64(len(after))
 	result.Message = fmt.Sprintf("wrote the %d-byte append to %s, which grew from %d to %d bytes; the firmware merges the signed list into the stored one",
-		length, variable, result.Before, result.After)
+		len(p.appended), p.variable, result.Before, result.After)
 	return result
 }

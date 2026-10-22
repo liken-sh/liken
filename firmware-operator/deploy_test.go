@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -161,6 +162,31 @@ func TestTheOperatorMayRequestATurn(t *testing.T) {
 		if !slices.Contains(verbs, any(want)) {
 			t.Errorf("the ClusterRole grants %v on disruptions, which lacks %s", verbs, want)
 		}
+	}
+}
+
+// The operator removes the hold on a machine it drained, so it must
+// keep running there. liken's drain skips a pod that tolerates the
+// cordon by its key, and the scheduler places it on a cordoned machine.
+func TestTheOperatorToleratesTheCordon(t *testing.T) {
+	tolerations, _ := dig(find(t, "operator.yaml", "Deployment"), "spec", "template", "spec", "tolerations").([]any)
+	want := map[string]any{"key": "node.kubernetes.io/unschedulable", "operator": "Exists", "effect": "NoSchedule"}
+	if !slices.ContainsFunc(tolerations, func(held any) bool { return reflect.DeepEqual(held, want) }) {
+		t.Errorf("the operator tolerates %v, want %v", tolerations, want)
+	}
+}
+
+// The Role grants the patch that sends an apply pod the signal to
+// write.
+func TestTheOperatorMaySignalAnApplyPod(t *testing.T) {
+	var verbs []any
+	for _, rule := range dig(find(t, "rbac.yaml", "Role"), "rules").([]any) {
+		if slices.Contains(dig(rule, "resources").([]any), any("pods")) {
+			verbs = append(verbs, dig(rule, "verbs").([]any)...)
+		}
+	}
+	if !slices.Contains(verbs, any("patch")) {
+		t.Errorf("the Role grants %v on pods, which lacks patch", verbs)
 	}
 }
 
