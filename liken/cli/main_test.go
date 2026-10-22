@@ -45,6 +45,8 @@ func TestRunChecksArgumentCounts(t *testing.T) {
 		{"stick without its inputs", []string{"stick", "-console", "ttyS0", "release-dir"}},
 		{"bundle without its artifacts", []string{"bundle", "vmlinuz"}},
 		{"serve with too many arguments", []string{"serve", "channel", "addr", "extra"}},
+		{"serve with firmware and too many arguments", []string{"serve", "-firmware", "fw", "channel", "addr", "extra"}},
+		{"serve with firmware and no channel", []string{"serve", "-firmware", "fw"}},
 		{"index without a source", []string{"index", "out"}},
 		{"index without an output directory", []string{"index", "-source", "https://example.com"}},
 	}

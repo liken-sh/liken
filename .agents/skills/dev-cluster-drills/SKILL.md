@@ -186,6 +186,48 @@ return the guest to the plain firmware, stop it, run
 `make -C dev-cluster reset-nvram NODE=node-5`, and start it with the
 default `FIRMWARE`.
 
+**A guest with capsule firmware** is for drills of
+`firmware-operator`'s capsule updates. Debian's OVMF has no firmware
+device that fwupd can update, so `FIRMWARE=capsule` boots OVMF that
+`dev-cluster/firmware/capsule/build.sh` builds from the same edk2
+release, with one test device. The device's version is the UEFI
+variable `LabFmpVersion`, which starts at 1, and the ESRT lists it
+under the GUID `b0792605-c842-408f-adf2-edfb07638e83`. The guest keeps
+its own `OVMF_VARS.fd`, so liken's boot entries carry over and the
+guest boots from its disk as before. Build the firmware once, which
+takes a few minutes, then stop the guest and start it on the new
+firmware:
+
+```bash
+dev-cluster/firmware/capsule/build.sh
+pgrep -x qemu-system-x86 -a | grep 'node-[5]' | awk '{print $1}'
+kill <pid>
+setsid make -C dev-cluster run NODE=node-5 FIRMWARE=capsule \
+  CONSOLE=file:guests/node-5/console.log </dev/null >/dev/null 2>&1 &
+```
+
+The build is DEBUG, and QEMU saves the firmware's debug log to
+`dev-cluster/guests/<node>/ovmf-debug.log`. FmpDxe writes there why it
+refused a capsule. The firmware takes a capsule only through fwupd's
+EFI updater and `BootNext`. It refuses a capsule that sets
+`PersistAcrossReset`, which most vendor capsules do, so only the lab's
+own capsules install on it. `firmware/capsule/build.sh` gives the
+reason.
+
+**The test catalog** offers versions 2 and 3 of the test device.
+`dev-cluster/firmware/capsule/catalog.sh` builds it, and `make serve`
+shares it beside the release channel. A `FirmwareCatalog` on the lab
+names `http://10.0.2.2:8017/firmware/firmware.xml.zst`, and the
+operator reads the jcat at the same URL with `.jcat` added. fwupd
+refuses a catalog that no key in `/etc/pki/fwupd-metadata` signs, with
+`signatures were required, but none supplied`. A lab key signs this
+catalog. `catalog.sh` makes it once in
+`dev-cluster/firmware/capsule/signing/`, which git ignores, and a scan
+pod needs the certificate `signing/lab-catalog.pem` in that directory.
+Each run of `catalog.sh` signs the capsules again, so each cabinet's
+SHA-256 changes, and a `Firmware` approval that pins the old SHA-256
+no longer matches.
+
 ## Run an image you built on the laptop
 
 The lab registry lets the guests pull an operator image that you built

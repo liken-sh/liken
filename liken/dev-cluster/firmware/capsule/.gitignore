@@ -1,0 +1,5 @@
+# The edk2 checkout, the build products, and the lab's catalog signing
+# key. signing/ holds a private key and never enters history.
+.cache/
+dist/
+signing/

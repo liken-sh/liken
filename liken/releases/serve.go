@@ -29,6 +29,12 @@ package releases
 // this terminal to see machines fetch: which release, which
 // artifact, how many bytes. A stalled or repeated download is
 // visible the moment it happens.
+//
+// The server can also share a directory of firmware files under
+// /firmware/: an fwupd catalog, its jcat, and the cabinets it names.
+// The lab's guests read the test catalog that
+// dev-cluster/firmware/capsule/catalog.sh builds from there, and the
+// same log shows each catalog read and cabinet download.
 
 import (
 	"fmt"
@@ -38,19 +44,28 @@ import (
 	"time"
 )
 
-// Serve exposes a channel directory the way a release server would
-// and blocks until the listener fails.
-func Serve(dir, addr string) error {
+// Serve exposes a channel directory the way a release server would,
+// and a firmware directory beside it when firmware is not empty. It
+// blocks until the listener fails.
+func Serve(dir, firmware, addr string) error {
 	fmt.Println(banner(dir, addr))
-	return http.ListenAndServe(addr, handler(dir))
+	if firmware != "" {
+		fmt.Printf("serving firmware from %s under /firmware/\n", firmware)
+	}
+	return http.ListenAndServe(addr, handler(dir, firmware))
 }
 
 // handler serves the published releases under /releases/, mirroring
-// the source URL the Cluster's spec declares, and logs one line for
-// each request. It is separate from Serve so the tests can run the
-// server against a throwaway directory.
-func handler(dir string) http.Handler {
-	files := http.StripPrefix("/releases/", http.FileServer(http.Dir(dir)))
+// the source URL the Cluster's spec declares, and the firmware
+// directory under /firmware/. It logs one line for each request. It
+// is separate from Serve so the tests can run the server against a
+// throwaway directory.
+func handler(dir, firmware string) http.Handler {
+	files := http.NewServeMux()
+	files.Handle("/releases/", http.StripPrefix("/releases/", http.FileServer(http.Dir(dir))))
+	if firmware != "" {
+		files.Handle("/firmware/", http.StripPrefix("/firmware/", http.FileServer(http.Dir(firmware))))
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		recorder := &responseRecorder{ResponseWriter: w, status: http.StatusOK}

@@ -90,6 +90,7 @@ var completionFlags = []completionFlag{
 	{name: "-source", takesValue: true},
 	{name: "-slot-size", takesValue: true},
 	{name: "-console", takesValue: true},
+	{name: "-firmware", takesValue: true},
 }
 
 // What the words before the cursor amount to: the positional

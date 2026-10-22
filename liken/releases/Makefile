@@ -172,9 +172,15 @@ release: build
 # stands in for the website. The dev cluster's guests reach it at
 # http://10.0.2.2:8017, the source URL their Cluster document
 # declares.
+#
+# The same server shares the lab's test firmware catalog under
+# /firmware/, so a FirmwareCatalog on the lab names
+# http://10.0.2.2:8017/firmware/firmware.xml.zst.
+# dev-cluster/firmware/capsule/catalog.sh builds it. Until that script
+# runs, the directory does not exist and /firmware/ answers 404.
 serve:
 	$(MAKE) -C ../cli
-	../cli/dist/liken serve dist
+	../cli/dist/liken serve -firmware ../dev-cluster/firmware/capsule/dist/catalog dist
 
 clean:
 	rm -rf build dist

@@ -12,9 +12,10 @@ repos:
       # Golden test fixtures are byte-exact by definition (a GRUB
       # environment block is exactly 1024 bytes, padded with '#', with
       # no final newline). So the whitespace fixers must leave them
-      # alone.
+      # alone. A patch is byte-exact too: the context line for an empty
+      # line is a single space, and git refuses a patch without it.
       - id: trailing-whitespace
-        exclude: /testdata/
+        exclude: /testdata/|\.patch$
       - id: end-of-file-fixer
         exclude: /testdata/
       - id: check-yaml

@@ -255,10 +255,12 @@ not need it.
 
 ## `liken serve`
 
-    liken serve <channel-dir> [address]
+    liken serve [-firmware dir] <channel-dir> [address]
 
-Shares a release channel over plain HTTP, and records each request in
-a log. The address defaults to `:8017`.
+Shares a release channel over plain HTTP under `/releases/`, and
+records each request in a log. The address defaults to `:8017`.
+`-firmware` also shares a directory of fwupd catalogs and cabinets
+under `/firmware/`.
 
 ## `liken index`
 

@@ -129,9 +129,11 @@ usage:
       component=version pairs record which upstreams shipped inside,
       since the date deliberately doesn't say.
 
-  liken serve <channel-dir> [address]
+  liken serve [-firmware dir] <channel-dir> [address]
       Share a release channel over plain HTTP so machines can
-      download from it. The address defaults to :8017.
+      download from it, under /releases/. The address defaults to
+      :8017. -firmware also shares a directory of fwupd catalogs and
+      cabinets, under /firmware/.
 
   liken index -source <url> <output-dir> < keys
       Render a channel's index: a front page listing every release, a
@@ -293,15 +295,20 @@ func run(args []string) error {
 		}
 		return releases.Index(*source, keys, fs.Arg(0), os.Stdout)
 	case "serve":
-		addr := ":8017"
-		switch len(args) {
-		case 2:
-		case 3:
-			addr = args[2]
-		default:
-			return fmt.Errorf("usage: liken serve <channel-dir> [address]")
+		fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+		firmware := fs.String("firmware", "", "a directory of firmware catalogs and cabinets to serve under /firmware/")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
 		}
-		return releases.Serve(args[1], addr)
+		addr := ":8017"
+		switch fs.NArg() {
+		case 1:
+		case 2:
+			addr = fs.Arg(1)
+		default:
+			return fmt.Errorf("usage: liken serve [-firmware dir] <channel-dir> [address]")
+		}
+		return releases.Serve(fs.Arg(0), *firmware, addr)
 	case "version":
 		fmt.Println(machine.Version)
 		return nil

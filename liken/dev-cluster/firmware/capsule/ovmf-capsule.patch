@@ -1,0 +1,459 @@
+diff --git a/OvmfPkg/Library/LabFmpDeviceLib/LabFmpDeviceLib.c b/OvmfPkg/Library/LabFmpDeviceLib/LabFmpDeviceLib.c
+new file mode 100644
+index 0000000..3dddad5
+--- /dev/null
++++ b/OvmfPkg/Library/LabFmpDeviceLib/LabFmpDeviceLib.c
+@@ -0,0 +1,326 @@
++/** @file
++  A test firmware device for FmpDxe.
++
++  The device has no hardware. Its firmware version is the UINT32 in the
++  non-volatile variable LabFmpVersion. The variable's GUID is
++  gEfiCallerIdGuid, the FILE_GUID of the FmpDxe that links this library,
++  which the platform DSC sets to the device's image type ID.
++  When the variable does not exist, the device reports version 1, so a
++  fresh variable store starts every guest at version 1.
++
++  A successful SetImage() writes the version that the FMP payload header of
++  the capsule carries. FmpDxe has already checked the capsule's PKCS7
++  signature and its lowest supported version before it calls this library,
++  so the library checks only that a payload is present.
++
++  The variable has runtime access so that a person can read the stored
++  version from the OS through efivarfs. That also lets the OS write it,
++  which is acceptable for a test device and is not acceptable for real
++  firmware.
++
++  SPDX-License-Identifier: BSD-2-Clause-Patent
++**/
++
++#include <PiDxe.h>
++#include <Guid/SystemResourceTable.h>
++#include <Protocol/FirmwareManagement.h>
++#include <Library/BaseLib.h>
++#include <Library/DebugLib.h>
++#include <Library/FmpDeviceLib.h>
++#include <Library/UefiRuntimeServicesTableLib.h>
++
++#define LAB_FMP_VERSION_VARIABLE  L"LabFmpVersion"
++#define LAB_FMP_INITIAL_VERSION   1
++
++//
++// FmpDxe refuses a capsule whose version is lower than this. Version 1 is
++// the version a fresh device reports, so any capsule from 1 up applies.
++//
++#define LAB_FMP_LOWEST_SUPPORTED_VERSION  1
++
++#define LAB_FMP_ATTRIBUTES  (IMAGE_ATTRIBUTE_IMAGE_UPDATABLE | \
++                             IMAGE_ATTRIBUTE_RESET_REQUIRED |  \
++                             IMAGE_ATTRIBUTE_AUTHENTICATION_REQUIRED | \
++                             IMAGE_ATTRIBUTE_IN_USE)
++
++EFI_STATUS
++EFIAPI
++RegisterFmpInstaller (
++  IN FMP_DEVICE_LIB_REGISTER_FMP_INSTALLER  Function
++  )
++{
++  //
++  // EFI_UNSUPPORTED makes FmpDxe install its one FMP instance on its own
++  // image handle, which is all a single test device needs.
++  //
++  return EFI_UNSUPPORTED;
++}
++
++EFI_STATUS
++EFIAPI
++RegisterFmpUninstaller (
++  IN FMP_DEVICE_LIB_REGISTER_FMP_UNINSTALLER  Function
++  )
++{
++  return EFI_UNSUPPORTED;
++}
++
++EFI_STATUS
++EFIAPI
++FmpDeviceSetContext (
++  IN EFI_HANDLE  Handle,
++  IN OUT VOID    **Context
++  )
++{
++  return EFI_UNSUPPORTED;
++}
++
++EFI_STATUS
++EFIAPI
++FmpDeviceGetSize (
++  OUT UINTN  *Size
++  )
++{
++  if (Size == NULL) {
++    return EFI_INVALID_PARAMETER;
++  }
++
++  *Size = sizeof (UINT32);
++  return EFI_SUCCESS;
++}
++
++EFI_STATUS
++EFIAPI
++FmpDeviceGetImageTypeIdGuidPtr (
++  OUT EFI_GUID  **Guid
++  )
++{
++  //
++  // FmpDxe then reads PcdFmpDeviceImageTypeIdGuid, which the platform DSC
++  // sets to LAB_FMP_GUID, the same GUID as FmpDxe's FILE_GUID.
++  //
++  return EFI_UNSUPPORTED;
++}
++
++EFI_STATUS
++EFIAPI
++FmpDeviceGetAttributes (
++  OUT UINT64  *Supported,
++  OUT UINT64  *Setting
++  )
++{
++  if ((Supported == NULL) || (Setting == NULL)) {
++    return EFI_INVALID_PARAMETER;
++  }
++
++  *Supported = LAB_FMP_ATTRIBUTES;
++  *Setting   = LAB_FMP_ATTRIBUTES;
++  return EFI_SUCCESS;
++}
++
++EFI_STATUS
++EFIAPI
++FmpDeviceGetLowestSupportedVersion (
++  OUT UINT32  *LowestSupportedVersion
++  )
++{
++  if (LowestSupportedVersion == NULL) {
++    return EFI_INVALID_PARAMETER;
++  }
++
++  *LowestSupportedVersion = LAB_FMP_LOWEST_SUPPORTED_VERSION;
++  return EFI_SUCCESS;
++}
++
++EFI_STATUS
++EFIAPI
++FmpDeviceGetVersionString (
++  OUT CHAR16  **VersionString
++  )
++{
++  if (VersionString == NULL) {
++    return EFI_INVALID_PARAMETER;
++  }
++
++  //
++  // FmpDxe builds the version string from the version number when the
++  // device does not give one.
++  //
++  *VersionString = NULL;
++  return EFI_UNSUPPORTED;
++}
++
++EFI_STATUS
++EFIAPI
++FmpDeviceGetVersion (
++  OUT UINT32  *Version
++  )
++{
++  EFI_STATUS  Status;
++  UINT32      Stored;
++  UINTN       Size;
++
++  if (Version == NULL) {
++    return EFI_INVALID_PARAMETER;
++  }
++
++  Size   = sizeof (Stored);
++  Status = gRT->GetVariable (
++                  LAB_FMP_VERSION_VARIABLE,
++                  &gEfiCallerIdGuid,
++                  NULL,
++                  &Size,
++                  &Stored
++                  );
++  if (EFI_ERROR (Status) || (Size != sizeof (Stored))) {
++    *Version = LAB_FMP_INITIAL_VERSION;
++  } else {
++    *Version = Stored;
++  }
++
++  return EFI_SUCCESS;
++}
++
++EFI_STATUS
++EFIAPI
++FmpDeviceGetHardwareInstance (
++  OUT UINT64  *HardwareInstance
++  )
++{
++  return EFI_UNSUPPORTED;
++}
++
++EFI_STATUS
++EFIAPI
++FmpDeviceGetImage (
++  OUT    VOID   *Image,
++  IN OUT UINTN  *ImageSize
++  )
++{
++  return EFI_UNSUPPORTED;
++}
++
++EFI_STATUS
++EFIAPI
++FmpDeviceCheckImage (
++  IN  CONST VOID  *Image,
++  IN  UINTN       ImageSize,
++  OUT UINT32      *ImageUpdatable
++  )
++{
++  UINT32  LastAttemptStatus;
++
++  return FmpDeviceCheckImageWithStatus (Image, ImageSize, ImageUpdatable, &LastAttemptStatus);
++}
++
++EFI_STATUS
++EFIAPI
++FmpDeviceCheckImageWithStatus (
++  IN  CONST VOID  *Image,
++  IN  UINTN       ImageSize,
++  OUT UINT32      *ImageUpdatable,
++  OUT UINT32      *LastAttemptStatus
++  )
++{
++  if ((ImageUpdatable == NULL) || (LastAttemptStatus == NULL)) {
++    return EFI_INVALID_PARAMETER;
++  }
++
++  if ((Image == NULL) || (ImageSize == 0)) {
++    *ImageUpdatable    = IMAGE_UPDATABLE_INVALID;
++    *LastAttemptStatus = LAST_ATTEMPT_STATUS_ERROR_INVALID_FORMAT;
++    return EFI_SUCCESS;
++  }
++
++  *ImageUpdatable    = IMAGE_UPDATABLE_VALID;
++  *LastAttemptStatus = LAST_ATTEMPT_STATUS_SUCCESS;
++  return EFI_SUCCESS;
++}
++
++EFI_STATUS
++EFIAPI
++FmpDeviceSetImage (
++  IN  CONST VOID                                     *Image,
++  IN  UINTN                                          ImageSize,
++  IN  CONST VOID                                     *VendorCode        OPTIONAL,
++  IN  EFI_FIRMWARE_MANAGEMENT_UPDATE_IMAGE_PROGRESS  Progress           OPTIONAL,
++  IN  UINT32                                         CapsuleFwVersion,
++  OUT CHAR16                                         **AbortReason
++  )
++{
++  UINT32  LastAttemptStatus;
++
++  return FmpDeviceSetImageWithStatus (
++           Image,
++           ImageSize,
++           VendorCode,
++           Progress,
++           CapsuleFwVersion,
++           AbortReason,
++           &LastAttemptStatus
++           );
++}
++
++EFI_STATUS
++EFIAPI
++FmpDeviceSetImageWithStatus (
++  IN  CONST VOID                                     *Image,
++  IN  UINTN                                          ImageSize,
++  IN  CONST VOID                                     *VendorCode        OPTIONAL,
++  IN  EFI_FIRMWARE_MANAGEMENT_UPDATE_IMAGE_PROGRESS  Progress           OPTIONAL,
++  IN  UINT32                                         CapsuleFwVersion,
++  OUT CHAR16                                         **AbortReason,
++  OUT UINT32                                         *LastAttemptStatus
++  )
++{
++  EFI_STATUS  Status;
++
++  if (LastAttemptStatus == NULL) {
++    return EFI_INVALID_PARAMETER;
++  }
++
++  if ((Image == NULL) || (ImageSize == 0)) {
++    *LastAttemptStatus = LAST_ATTEMPT_STATUS_ERROR_INVALID_FORMAT;
++    return EFI_ABORTED;
++  }
++
++  if (Progress != NULL) {
++    Progress (50);
++  }
++
++  Status = gRT->SetVariable (
++                  LAB_FMP_VERSION_VARIABLE,
++                  &gEfiCallerIdGuid,
++                  EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS,
++                  sizeof (CapsuleFwVersion),
++                  &CapsuleFwVersion
++                  );
++  if (EFI_ERROR (Status)) {
++    DEBUG ((DEBUG_ERROR, "LabFmpDeviceLib: storing version %u failed: %r\n", CapsuleFwVersion, Status));
++    *LastAttemptStatus = LAST_ATTEMPT_STATUS_ERROR_UNSUCCESSFUL;
++    return Status;
++  }
++
++  DEBUG ((DEBUG_INFO, "LabFmpDeviceLib: stored version %u from a %Lu byte payload\n", CapsuleFwVersion, (UINT64)ImageSize));
++
++  if (Progress != NULL) {
++    Progress (100);
++  }
++
++  *LastAttemptStatus = LAST_ATTEMPT_STATUS_SUCCESS;
++  return EFI_SUCCESS;
++}
++
++EFI_STATUS
++EFIAPI
++FmpDeviceLock (
++  VOID
++  )
++{
++  //
++  // The platform's CapsuleUpdatePolicyLib never asks for the lock, because
++  // fwupd's EFI updater calls UpdateCapsule() after the end of DXE, and a
++  // locked device would refuse that update.
++  //
++  return EFI_UNSUPPORTED;
++}
+diff --git a/OvmfPkg/Library/LabFmpDeviceLib/LabFmpDeviceLib.inf b/OvmfPkg/Library/LabFmpDeviceLib/LabFmpDeviceLib.inf
+new file mode 100644
+index 0000000..495a056
+--- /dev/null
++++ b/OvmfPkg/Library/LabFmpDeviceLib/LabFmpDeviceLib.inf
+@@ -0,0 +1,30 @@
++## @file
++#  A test firmware device for FmpDxe. The device has no hardware: its
++#  firmware version is one non-volatile UEFI variable, and a successful
++#  SetImage() stores the version that the capsule's FMP payload header
++#  carries. It lets a QEMU guest take a signed FMP capsule end to end,
++#  through the ESRT, fwupd, and UpdateCapsule(), without a real flash
++#  part to write.
++#
++#  SPDX-License-Identifier: BSD-2-Clause-Patent
++##
++
++[Defines]
++  INF_VERSION     = 0x00010005
++  BASE_NAME       = LabFmpDeviceLib
++  FILE_GUID       = 33ee3f86-b429-4520-a8cd-7d79ce79e1af
++  MODULE_TYPE     = DXE_DRIVER
++  VERSION_STRING  = 1.0
++  LIBRARY_CLASS   = FmpDeviceLib|DXE_DRIVER UEFI_DRIVER
++
++[Sources]
++  LabFmpDeviceLib.c
++
++[Packages]
++  MdePkg/MdePkg.dec
++  FmpDevicePkg/FmpDevicePkg.dec
++
++[LibraryClasses]
++  BaseLib
++  DebugLib
++  UefiRuntimeServicesTableLib
+diff --git a/OvmfPkg/OvmfPkgX64.dsc b/OvmfPkg/OvmfPkgX64.dsc
+--- a/OvmfPkg/OvmfPkgX64.dsc
++++ b/OvmfPkg/OvmfPkgX64.dsc
+@@ -37,6 +37,12 @@
+   DEFINE CC_MEASUREMENT_ENABLE   = TRUE
+   DEFINE DEBUG_TO_MEM            = FALSE
+ 
++  #
++  # The lab FMP test device (OvmfPkg/Library/LabFmpDeviceLib). This GUID is
++  # its FmpDxe FILE_GUID, its FMP image type ID, and its ESRT firmware class.
++  #
++  DEFINE LAB_FMP_GUID            = b0792605-c842-408f-adf2-edfb07638e83
++
+ !include OvmfPkg/Include/Dsc/OvmfTpmDefines.dsc.inc
+ 
+   #
+@@ -173,7 +179,8 @@
+   UefiBootManagerLib|MdeModulePkg/Library/UefiBootManagerLib/UefiBootManagerLib.inf
+   BootLogoLib|MdeModulePkg/Library/BootLogoLib/BootLogoLib.inf
+   FileExplorerLib|MdeModulePkg/Library/FileExplorerLib/FileExplorerLib.inf
+-  CapsuleLib|MdeModulePkg/Library/DxeCapsuleLibNull/DxeCapsuleLibNull.inf
++  CapsuleLib|MdeModulePkg/Library/DxeCapsuleLibFmp/DxeCapsuleLib.inf
++  DisplayUpdateProgressLib|MdeModulePkg/Library/DisplayUpdateProgressLibText/DisplayUpdateProgressLibText.inf
+   DxeServicesLib|MdePkg/Library/DxeServicesLib/DxeServicesLib.inf
+   DxeServicesTableLib|MdePkg/Library/DxeServicesTableLib/DxeServicesTableLib.inf
+   PeCoffGetEntryPointLib|MdePkg/Library/BasePeCoffGetEntryPointLib/BasePeCoffGetEntryPointLib.inf
+@@ -412,6 +419,7 @@
+   PciLib|OvmfPkg/Library/DxePciLibI440FxQ35/DxePciLibI440FxQ35.inf
+   QemuFwCfgS3Lib|OvmfPkg/Library/QemuFwCfgS3Lib/DxeQemuFwCfgS3LibFwCfg.inf
+   VariablePolicyLib|MdeModulePkg/Library/VariablePolicyLib/VariablePolicyLibRuntimeDxe.inf
++  CapsuleLib|MdeModulePkg/Library/DxeCapsuleLibFmp/DxeRuntimeCapsuleLib.inf
+ !if $(SMM_REQUIRE) == TRUE || $(QEMU_PV_VARS) == TRUE
+   MmUnblockMemoryLib|MdePkg/Library/MmUnblockMemoryLib/MmUnblockMemoryLibNull.inf
+ !endif
+@@ -584,6 +592,7 @@
+ 
+ [PcdsFixedAtBuild]
+   gEfiMdeModulePkgTokenSpaceGuid.PcdStatusCodeMemorySize|1
++  gEfiMdeModulePkgTokenSpaceGuid.PcdCapsuleFmpSupport|TRUE
+ !if $(SMM_REQUIRE) == FALSE
+   gEfiMdeModulePkgTokenSpaceGuid.PcdResetOnMemoryTypeInformationChange|FALSE
+ !endif
+@@ -959,6 +968,35 @@
+   MdeModulePkg/Universal/WatchdogTimerDxe/WatchdogTimer.inf
+   MdeModulePkg/Universal/MonotonicCounterRuntimeDxe/MonotonicCounterRuntimeDxe.inf
+   MdeModulePkg/Universal/CapsuleRuntimeDxe/CapsuleRuntimeDxe.inf
++  MdeModulePkg/Universal/EsrtFmpDxe/EsrtFmpDxe.inf
++  FmpDevicePkg/FmpDxe/FmpDxe.inf {
++    <Defines>
++      FILE_GUID = $(LAB_FMP_GUID)
++    <PcdsFixedAtBuild>
++      gFmpDevicePkgTokenSpaceGuid.PcdFmpDeviceImageIdName|L"liken lab test device"
++      #
++      # LAB_FMP_GUID again: the build does not expand a macro inside GUID().
++      #
++      gFmpDevicePkgTokenSpaceGuid.PcdFmpDeviceImageTypeIdGuid|{GUID("b0792605-c842-408f-adf2-edfb07638e83")}
++      #
++      # The edk2 test root certificate, which signs the lab's capsules.
++      #
++      !include BaseTools/Source/Python/Pkcs7Sign/TestRoot.cer.gFmpDevicePkgTokenSpaceGuid.PcdFmpDevicePkcs7CertBufferXdr.inc
++    <LibraryClasses>
++      FmpDeviceLib|OvmfPkg/Library/LabFmpDeviceLib/LabFmpDeviceLib.inf
++      FmpPayloadHeaderLib|FmpDevicePkg/Library/FmpPayloadHeaderLibV1/FmpPayloadHeaderLibV1.inf
++      FmpAuthenticationLib|SecurityPkg/Library/FmpAuthenticationLibPkcs7/FmpAuthenticationLibPkcs7.inf
++      FmpDependencyLib|FmpDevicePkg/Library/FmpDependencyLib/FmpDependencyLib.inf
++      FmpDependencyCheckLib|FmpDevicePkg/Library/FmpDependencyCheckLibNull/FmpDependencyCheckLibNull.inf
++      FmpDependencyDeviceLib|FmpDevicePkg/Library/FmpDependencyDeviceLibNull/FmpDependencyDeviceLibNull.inf
++      #
++      # fwupd's EFI updater calls UpdateCapsule() after the end of DXE. The
++      # null policy locks the device at the end of DXE and its FMP variables
++      # when FmpDxe starts, so FmpDxe would refuse that update. The RISC-V
++      # virt policy asks for no lock.
++      #
++      CapsuleUpdatePolicyLib|OvmfPkg/RiscVVirt/Feature/Capsule/Library/CapsuleUpdatePolicyLib/CapsuleUpdatePolicyLib.inf
++  }
+   MdeModulePkg/Universal/Console/ConPlatformDxe/ConPlatformDxe.inf
+   MdeModulePkg/Universal/Console/ConSplitterDxe/ConSplitterDxe.inf
+   MdeModulePkg/Universal/Console/GraphicsConsoleDxe/GraphicsConsoleDxe.inf {
+diff --git a/OvmfPkg/OvmfPkgX64.fdf b/OvmfPkg/OvmfPkgX64.fdf
+index 3d1d33e..c606705 100644
+--- a/OvmfPkg/OvmfPkgX64.fdf
++++ b/OvmfPkg/OvmfPkgX64.fdf
+@@ -224,6 +224,8 @@ INF  OvmfPkg/VirtioInputDxe/VirtioInput.inf
+ INF  MdeModulePkg/Universal/WatchdogTimerDxe/WatchdogTimer.inf
+ INF  MdeModulePkg/Universal/MonotonicCounterRuntimeDxe/MonotonicCounterRuntimeDxe.inf
+ INF  MdeModulePkg/Universal/CapsuleRuntimeDxe/CapsuleRuntimeDxe.inf
++INF  MdeModulePkg/Universal/EsrtFmpDxe/EsrtFmpDxe.inf
++INF  FILE_GUID = $(LAB_FMP_GUID) FmpDevicePkg/FmpDxe/FmpDxe.inf
+ INF  MdeModulePkg/Universal/Console/ConPlatformDxe/ConPlatformDxe.inf
+ INF  MdeModulePkg/Universal/Console/ConSplitterDxe/ConSplitterDxe.inf
+ INF  MdeModulePkg/Universal/Console/GraphicsConsoleDxe/GraphicsConsoleDxe.inf

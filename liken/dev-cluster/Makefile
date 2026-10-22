@@ -190,6 +190,17 @@ guests/$(NODE)/emmc.qcow2:
 # operating system cannot reach, so a write that a real board refuses
 # is refused here too. SMM needs QEMU's q35 machine. The variable store
 # is the node's own, and `make enroll-keys` enrolls the keys in it.
+#
+# FIRMWARE=capsule gives the guest firmware that fwupd can update, for
+# drills of firmware-operator's capsule updates. Debian's OVMF has no
+# firmware device to update, so firmware/capsule/build.sh builds OVMF
+# from the same edk2 release with capsule support and one test device,
+# whose version starts at 1. firmware/capsule/catalog.sh builds a
+# signed catalog that offers versions 2 and 3, and `make serve` shares
+# it. The guest keeps its own variable store, so liken's boot entries
+# carry over. The build is
+# DEBUG, and QEMU writes the firmware's debug log, which says why a
+# capsule was refused, to guests/<node>/ovmf-debug.log.
 OVMF_DIR := firmware/dist/$(shell cat firmware/VERSION)
 OVMF_CODE := $(OVMF_DIR)/OVMF_CODE_4M.fd
 OVMF_CODE_SECBOOT := $(OVMF_DIR)/OVMF_CODE_4M.secboot.fd
@@ -198,6 +209,11 @@ OVMF_VARS := $(OVMF_DIR)/OVMF_VARS_4M.fd
 ovmf: $(OVMF_CODE)
 $(OVMF_CODE) $(OVMF_CODE_SECBOOT) $(OVMF_VARS) &: firmware/VERSION firmware/fetch.sh
 	firmware/fetch.sh
+
+OVMF_CODE_CAPSULE := firmware/capsule/dist/OVMF_CODE_4M.fd
+$(OVMF_CODE_CAPSULE): firmware/capsule/build.sh firmware/capsule/builder.sh \
+		firmware/capsule/Dockerfile firmware/capsule/ovmf-capsule.patch
+	firmware/capsule/build.sh
 
 guests/$(NODE)/OVMF_VARS.fd: | $(OVMF_VARS)
 	mkdir -p guests/$(NODE)
@@ -211,10 +227,13 @@ FIRMWARE ?= uefi
 QEMU_FIRMWARE_uefi = -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=guests/$(NODE)/OVMF_VARS.fd
 QEMU_FIRMWARE_secureboot = -machine q35,smm=on -global driver=cfi.pflash01,property=secure,value=on \
 	-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE_SECBOOT) -drive if=pflash,format=raw,file=guests/$(NODE)/OVMF_VARS.fd
+QEMU_FIRMWARE_capsule = -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE_CAPSULE) -drive if=pflash,format=raw,file=guests/$(NODE)/OVMF_VARS.fd \
+	-debugcon file:guests/$(NODE)/ovmf-debug.log -global isa-debugcon.iobase=0x402
 QEMU_FIRMWARE_bios =
 QEMU_FIRMWARE = $(QEMU_FIRMWARE_$(FIRMWARE))
 FIRMWARE_DEPS_uefi := $(OVMF_CODE) guests/$(NODE)/OVMF_VARS.fd
 FIRMWARE_DEPS_secureboot := $(OVMF_CODE_SECBOOT) guests/$(NODE)/OVMF_VARS.fd
+FIRMWARE_DEPS_capsule := $(OVMF_CODE_CAPSULE) guests/$(NODE)/OVMF_VARS.fd
 FIRMWARE_DEPS_bios :=
 FIRMWARE_DEPS := $(FIRMWARE_DEPS_$(FIRMWARE))
 
@@ -263,6 +282,7 @@ enroll-keys: guests/$(NODE)/OVMF_VARS.fd $(DBX_SEED)
 # machine's own NVRAM entries choose the boot path there, and liken's
 # upgrade mechanics depend on those entries staying authoritative.
 QEMU_BOOTINDEX_uefi =
+QEMU_BOOTINDEX_capsule =
 QEMU_BOOTINDEX_bios = ,bootindex=1
 QEMU_BOOTINDEX = $(QEMU_BOOTINDEX_$(FIRMWARE))
 

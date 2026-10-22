@@ -25,7 +25,7 @@ import (
 func servedChannel(t *testing.T, version string) (string, string) {
 	t.Helper()
 	channel, _ := bundledRelease(t, version)
-	server := httptest.NewServer(handler(channel))
+	server := httptest.NewServer(handler(channel, ""))
 	t.Cleanup(server.Close)
 	return server.URL + "/releases", channel
 }
