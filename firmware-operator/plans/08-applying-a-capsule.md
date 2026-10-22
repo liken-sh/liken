@@ -22,11 +22,14 @@ loads, and a failure there has no slot to fall back to.
 ## The steps
 
 1. **Rehearse.** Plan 07.
-2. **Ask for a turn.** As in plan 06, with `exclusive: true` and no
-   wait: a capsule takes its own reboot under the turn's cordon, and
-   the turn's shared requests, such as a release, take the last one.
+2. **Ask for a turn.** As in plan 06, with `spec.hold`. The reboot that
+   hands `BootNext` over arms no release trial, so a release that
+   shares the turn takes a later reboot, and the capsule's reboot
+   carries no other release
+   ([milestone 33, as built](../../liken/plans/33-firmware-updates.md#as-built)).
 3. **Write.** After the drain, the apply pod runs `fwupdtool install`
-   against the real variable store and the ESP of the next boot. Unlike
+   against the real variable store and the ESP of the next boot, which
+   the pod mounts through `/run/liken/proven-esp`. Unlike
    a database update, the writes are several, and fwupd makes them in
    its own order, so the pod runs fwupd instead of replaying the
    rehearsal's record. It then compares what fwupd wrote with the
@@ -34,8 +37,8 @@ loads, and a failure there has no slot to fall back to.
    clears the hold with no handover, so `init` pins `BootNext` at the
    proven slot and the capsule does not apply. A failed step holds
    the rest of the turn until a person clears it.
-4. **Release the hold with the handover.** The operator clears `hold`
-   and tells the OS that it set `BootNext` for this reboot. The firmware boots the
+4. **Release the hold with the handover.** The operator removes `hold`
+   and sets `spec.keepBootNext` in one patch. The firmware boots the
    updater, applies the capsule, and resets. The next boot starts the
    proven slot, and `init` restores its own `BootNext`.
 5. **Prove.** The next scan reads the version from the ESRT through
@@ -46,7 +49,12 @@ loads, and a failure there has no slot to fall back to.
    the version decides.
 6. **Clean up.** A `Disruption` that waits for the machine's next
    turn removes the "Linux Firmware Updater" boot entry and the files
-   under `\EFI\fwupd` and `\EFI\UpdateCapsule` on the slot.
+   that fwupd wrote on the slot. fwupd writes its updater and the
+   capsule under `\EFI\<ID>`, where `<ID>` is the `ID` of the scan
+   image's `os-release`, and a capsule-on-disk under
+   `\EFI\UpdateCapsule`. After an update in NVRAM mode, fwupd's next
+   run deletes the capsule and its `fwupd-*` variable, and the entry
+   and the updater stay.
 
 ## Preconditions
 
@@ -57,10 +65,13 @@ for a database update before it asks for a turn:
   some capsules on battery.
 - The ESP's free space against the rehearsal's files.
 - No capsule pending on the machine from an earlier attempt.
+- The machine's `status.firmware.bootOrderKept` is `true`, and the
+  machine has a proven slot, so `/run/liken/proven-esp` exists.
 
 `init` refuses the handover when the machine has no way back, under
-milestone 33's rules, and the operator reads that refusal on the
-turn.
+milestone 33's rules, and prints why. The refusal is not reported on
+the `Disruption`, so the operator reads it from the next scan, which
+still offers the approved version.
 
 ## The risk the manual states
 
@@ -73,7 +84,10 @@ hardening tier signs `liken`'s boot chain.
 ## The proof
 
 Under OVMF built with `FmpDevicePkg` and `EsrtFmpDxe` first, with a
-test capsule. Then one real board update on a testbed machine that a
+test capsule. That firmware took a capsule through fwupd in a
+throwaway guest
+([milestone 33, the firmware under QEMU](../../liken/plans/33-firmware-updates.md#the-firmware-under-qemu)),
+and the lab fleet needs it as one more `FIRMWARE` choice. Then one real board update on a testbed machine that a
 catalog offers one, after plan 07's rehearsal of it.
 
 ## Open questions

@@ -34,6 +34,17 @@ same failed boot indefinitely.
 The proving watchdog runs inside `init`. It cannot interrupt a loop in
 which the kernel fails before starting `init`.
 
+## Detection, as built
+
+Since 2026-10-22, `init` reads at power-on, before it writes, whether
+the proven slot leads `BootOrder`, and reports it as
+`status.firmware.bootOrderKept`
+([milestone 33, as built](../33-firmware-updates.md#as-built)). Every
+shutdown asserts that order, so `false` is the mismatch this problem
+describes, with no record kept. Only the handover of `BootNext` to a
+`Disruption`'s requester reads it. Release trials still arm as before,
+so the policy decisions below remain open.
+
 ## Proposed safeguard
 
 Record the last asserted `BootOrder` on `machineState`. On the next boot,

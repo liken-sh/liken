@@ -265,7 +265,12 @@ requester needs them:
   on the firmware the steps before it installed. A capsule is
   exclusive, under milestone 33's rule of one firmware change per
   reboot. A failed step holds the rest of the turn until a person
-  clears it. `firmware-operator`'s plan 08 needs this.
+  clears it. `firmware-operator`'s plan 08 needs this. Set aside on
+  2026-10-22: a capsule's reboot hands `BootNext` to its requester and
+  arms no release trial
+  ([milestone 33, as built](33-firmware-updates.md#as-built)), so a
+  release that shares the turn takes a later reboot without this
+  field.
 - **A request that can wait.** A `dbx` update has no urgency, and it
   can join the next turn that its machine takes for a release. The
   requester can do this on its own: it watches the machine's

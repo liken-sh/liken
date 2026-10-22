@@ -30,18 +30,27 @@ scan image. No capsule was offered to liken-1 or stick-1 in the plan
 
 The rehearsal copies the ESP of the next boot beside the variables,
 and points `FWUPD_UEFI_ESP_PATH` at the copy. The ESP of the next boot
-is the proven slot, which `liken`'s
-[milestone 33](../../liken/plans/33-firmware-updates.md) lets a pod
-read. The check then allows exactly the capsule's writes and refuses
+is the proven slot's, which `liken`'s
+[milestone 33](../../liken/plans/33-firmware-updates.md) names with
+the link `/run/liken/proven-esp`. The check then allows exactly the capsule's writes and refuses
 everything else:
 
 - the creation of one boot entry, whose path names the updater on the
   ESP;
 - `BootNext`, naming that entry;
+- one `fwupd-*` variable under fwupd's vendor GUID
+  `0abba7dc-e516-4167-bbf5-4d9d1c739416`, which records the capsule's
+  path and status for the updater;
 - `BootOrder`, only when its old entries keep their order at its head;
 - `OsIndications`, only with the capsule-on-disk bit;
-- files under `\EFI\fwupd` and `\EFI\UpdateCapsule` on the ESP, and
-  nowhere else.
+- files under `\EFI\<ID>`, where `<ID>` is the `ID` of the scan
+  image's `os-release`, and under `\EFI\UpdateCapsule` on the ESP,
+  and nowhere else.
+
+Under OVMF, fwupd 2.1.1 wrote exactly these in NVRAM mode, and did not
+write `BootOrder`. In capsule-on-disk mode it wrote only the capsule
+under `\EFI\UpdateCapsule` and `OsIndications`
+([milestone 33, the firmware under QEMU](../../liken/plans/33-firmware-updates.md#the-firmware-under-qemu)).
 
 The record names each variable and file written, with its size and
 SHA-256, and the ESP's free space against the files' size.
@@ -62,7 +71,9 @@ edk2's `FmpDevicePkg` and `EsrtFmpDxe`.
 
 ## Open questions
 
-- Which machine has a capsule on LVFS. The proof waits on it.
+- Which machine has a capsule on LVFS. The lab's proof does not wait
+  on it: the OVMF build with a test device offers one, from a catalog
+  that the lab serves.
 - Whether to rehearse each capsule against the running slot's ESP
   when the proven slot is not the running one. A capsule's reboot
   arms no release trial (milestone 33), so the two are the same slot

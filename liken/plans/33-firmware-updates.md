@@ -1,7 +1,10 @@
 # Updating firmware that a machine and its devices keep
 
-Milestone 33. Proposed, except for one part that is built and drilled:
-the fallback that survives a firmware update. This milestone holds the
+Milestone 33. The fallback that survives a firmware update is built
+and drilled. The OS's capabilities for a capsule were built and
+drilled on the `lab` fleet on 2026-10-22, with changes to the design
+below ([As built](#as-built)). `firmware-operator`'s capsule work,
+its plans 07 and 08, is not built. This milestone holds the
 OS's part of updating firmware that a machine and its devices keep.
 `firmware-operator`, an add-on that ships apart from the OS, declares
 and runs the updates: its
@@ -270,6 +273,82 @@ turn Secure Boot on or reset its keys. That stops `liken`'s unsigned
 `vmlinuz` from loading, and the default-path loader is unsigned too,
 so no boot order repairs it. The fix is the signed releases and UKIs
 of the hardening tier.
+
+## As built
+
+Commits `8e6e1143` and `da35bad9` built the OS's capabilities on
+2026-10-22. Each part below differs from the design above, or settles
+what it left open.
+
+- **No exclusive request.** The handover reboot arms no release trial,
+  so a release that is staged during the turn stays staged, and
+  `machine-operator`'s own request reboots the machine again for its
+  trial. That gives a capsule a reboot of its own without
+  [milestone 88](88-disruptions.md)'s `spec.exclusive`, which stays
+  unbuilt. A machine spec or cluster document that is staged during
+  the turn still applies at the capsule's reboot, because `init`
+  applies the staged stores at every boot.
+- **The handover.** A `Disruption` carries `spec.keepBootNext`, which
+  the requester sets when it removes `spec.hold`. `machine-operator`
+  names the first such request, approved and not done, in
+  `RebootIntent.KeepBootNext` on every reboot that its gate lets
+  through in the turn. `init`'s `handOverOneShot`
+  (`init/handover.go`) replaces the assertion and the trial on that
+  reboot. It refuses, and pins the proven slot as usual, when the
+  store names no proven slot, when `bootOrderKept` is not true, when
+  `BootNext` names the slot that is not proven, or when the proven
+  slot holds no fallback loader after the heal. On a machine with no
+  proven slot the refusal removes `BootNext`, because no pin follows.
+  `init` prints each refusal. It is not reported on the `Disruption`,
+  because `init` decides on the way down, and the requester's next
+  scan finds that its update did not run.
+- **A boot order that survives a reset.** No record is kept. Every
+  shutdown asserts the proven slot at the head of `BootOrder`, so
+  `observeBootOrder` reads at power-on, before `init` writes, whether
+  the proven slot still leads. The answer is
+  `status.firmware.bootOrderKept`, and the handover requires `true`.
+  It does not change the policy for release trials, which
+  [firmware-bootorder-persistence](open-problems/firmware-bootorder-persistence.md)
+  still holds.
+- **The ESP of the next boot.** `init` keeps the link
+  `/run/liken/proven-esp` pointed at the proven slot's mountpoint, and
+  it removes `\EFI\UpdateCapsule` from the other slot, each time it
+  asserts the proven slot: at boot, at a promotion, and on the way
+  down.
+
+### The lab drills
+
+On release `2026.10.22-911` every machine of the `lab` fleet reported
+`bootOrderKept: true`, so OVMF keeps `BootOrder` through a reset. On
+`node-4` a person's request held the turn, and a privileged pod that
+tolerated the cordon wrote `BootNext` while the machine was held.
+
+| Drill | `BootNext` written | What happened |
+|---|---|---|
+| The handover | `Boot0007`, PXE | `init` left `BootNext`. The firmware tried PXE once, failed with no DHCP offer, and booted `Boot0003`, the proven slot B. |
+| The refusal | `Boot0002`, slot A, not proven | `init` refused, pinned slot B, and removed a file staged in slot A's `\EFI\UpdateCapsule`. The machine booted slot B. |
+| A staged release | `Boot0007`, after `2026.10.22-912` was staged on slot A | `init` left `BootNext` and armed no trial. The machine booted slot B on `-911`. Its own request then rebooted it into the trial of slot A, which was promoted. |
+
+The link named slot A's mountpoint while slot A was proven, and a pod's
+`hostPath` volume on the link mounted that slot's files.
+
+The first build, `2026.10.22-910`, showed `bootOrderKept` empty in
+status while the console printed it, because the facts tree had no
+file for the field. `da35bad9` added it.
+
+### The firmware under QEMU
+
+OVMF built with `DxeCapsuleLibFmp`, `EsrtFmpDxe`, and an `FmpDxe` test
+device took a signed capsule through fwupd 2.1.1 in a throwaway Ubuntu
+guest, not a `liken` machine, on 2026-10-22. The ESRT read 1, 2, and 3
+with last attempt status 0. In NVRAM mode, fwupd wrote one boot entry
+for its updater, `BootNext`, one `fwupd-*` variable under the vendor
+GUID `0abba7dc-e516-4167-bbf5-4d9d1c739416`, the updater, and the
+capsule, and it did not write `BootOrder`. In capsule-on-disk mode it
+wrote only `\EFI\UpdateCapsule` and `OsIndications`. fwupd's updater
+adds `PersistAcrossReset` to a capsule whose flags are 0, and OVMF
+refuses that flag, so the lab's capsules set an OEM flag. The build
+belongs to `firmware-operator`'s plans 07 and 08, which use it.
 
 ## The firmware version in Machine status
 
