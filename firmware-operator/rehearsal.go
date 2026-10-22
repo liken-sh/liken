@@ -10,7 +10,11 @@ package main
 // status.rehearsals holds one record for each pending machine, and the
 // Rehearsed condition sums them: True when the install passed on every
 // pending machine, False when it was refused or failed on one, and
-// Unknown while one waits. A record leaves when its machine is no
+// Unknown while one waits. A rehearsal that finds its jcat naming
+// another file than the machine's scan read answers CatalogMoved. That
+// is no failure: the operator reads the jcat again at once, and the new
+// file starts a new attempt, after a scan of it when it offers the
+// machine other releases (scans.go). A record leaves when its machine is no
 // longer pending, or when the approval changes, because a rehearsal
 // answers one release on one boot.
 
@@ -65,10 +69,11 @@ const reasonRehearsing = "Rehearsing"
 
 // The reasons of the Events that change no condition.
 const (
-	reasonRehearsalStarted = "RehearsalStarted"
-	reasonRehearsalPassed  = "RehearsalPassed"
-	reasonRehearsalRefused = "RehearsalRefused"
-	reasonRehearsalFailed  = "RehearsalFailed"
+	reasonRehearsalStarted      = "RehearsalStarted"
+	reasonRehearsalCatalogMoved = "RehearsalCatalogMoved"
+	reasonRehearsalPassed       = "RehearsalPassed"
+	reasonRehearsalRefused      = "RehearsalRefused"
+	reasonRehearsalFailed       = "RehearsalFailed"
 )
 
 // rehearsalEnd is the result of one finished rehearsal.
@@ -221,6 +226,8 @@ func rehearsalNotice(end rehearsalEnd) notice {
 	switch end.result.Result {
 	case resultPassed:
 		return notice{reason: reasonRehearsalPassed, message: about}
+	case resultCatalogMoved:
+		return notice{reason: reasonRehearsalCatalogMoved, message: about}
 	case resultRefused:
 		return notice{warning: true, reason: reasonRehearsalRefused, message: about}
 	}
@@ -229,17 +236,23 @@ func rehearsalNotice(end rehearsalEnd) notice {
 
 // rehearsed answers the Rehearsed condition over the pending machines'
 // records, and false when the approval waits for no machine. A refusal
-// outweighs a failure, and both outweigh a machine that waits.
+// outweighs a failure, and both outweigh a machine that waits. A
+// machine whose catalog moved waits for its next rehearsal, and the
+// message says why.
 func rehearsed(records []rehearsal, pending map[string]bool) (condition, bool) {
 	if len(pending) == 0 {
 		return condition{}, false
 	}
 	byResult := map[string][]string{}
+	var moved []string
 	for _, name := range sortedKeys(pending) {
 		r, held := rehearsalRecord(records, name)
 		switch {
 		case !held || r.Result == resultRunning:
 			byResult[resultRunning] = append(byResult[resultRunning], name)
+		case r.Result == resultCatalogMoved:
+			byResult[resultRunning] = append(byResult[resultRunning], name)
+			moved = append(moved, name+": "+r.Message)
 		default:
 			byResult[r.Result] = append(byResult[r.Result], name+": "+r.Message)
 		}
@@ -253,6 +266,9 @@ func rehearsed(records []rehearsal, pending map[string]bool) (condition, bool) {
 	case len(byResult[resultRunning]) > 0:
 		c.Status, c.Reason, c.Message = conditions.Unknown, reasonRehearsing,
 			"the approval waits for the rehearsal on "+strings.Join(byResult[resultRunning], ", ")
+		if len(moved) > 0 {
+			c.Message += "; " + strings.Join(moved, "; ")
+		}
 	default:
 		c.Status, c.Reason, c.Message = conditions.True, resultPassed,
 			"the install passed its rehearsal on "+strings.Join(sortedKeys(pending), ", ")
@@ -282,6 +298,9 @@ func (o *operator) rehearsalEnds(f *firmware, pods []pod, now time.Time) ([]rehe
 		if !decided {
 			due = earliest(due, deadline)
 			continue
+		}
+		if end.result.Result == resultCatalogMoved {
+			o.catalogMoved(end.attempt.catalog)
 		}
 		ends = append(ends, end)
 	}
@@ -336,6 +355,9 @@ func (o *operator) judgeRehearsal(p pod, now time.Time) (rehearsalEnd, bool, tim
 		end.result.Message = podFailure(p, "rehearsal", rehearsalContainer)
 	case result.Result == resultPassed || result.Result == resultRefused || result.Result == resultFailed:
 		end.result = result
+	case result.Result == resultCatalogMoved:
+		end.result = result
+		end.result.Message += "; the operator reads the jcat again, and the machine rehearses again against the new file"
 	default:
 		end.result.Message = fmt.Sprintf("the rehearsal answered the result %q, which the operator does not know", result.Result)
 	}

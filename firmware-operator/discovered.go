@@ -102,6 +102,45 @@ func (o *operator) applyScan(objects *[]firmware, s scanEntries) error {
 	return errors.Join(problems...)
 }
 
+// refileEntries moves the file of each machine's entries for a
+// FirmwareCatalog to the file of the machine's Scanned record. The
+// record moves to a new catalog file with no scan when the new file
+// offers the same releases for the machine's GUIDs (scans.go), and the
+// entries must name that file too: a rehearsal and an apply load the
+// file an entry names, and start only when it is the FirmwareCatalog's
+// current one. A scan writes its entries with its record's file, so
+// this changes only the entries of a record that moved. It reads the
+// records rather than the moves of this pass, so an operator that
+// stopped between the two writes moves the entries in its next pass.
+func (o *operator) refileEntries(objects []firmware, c *catalog) error {
+	files := map[string]string{}
+	for _, r := range c.Status.Machines {
+		if r.Result == resultScanned {
+			files[r.Machine] = r.File
+		}
+	}
+	behind := func(e machineEntry) bool {
+		return e.Catalog == c.Metadata.Name && files[e.Machine] != "" && e.File != files[e.Machine]
+	}
+	var problems []error
+	for index := range objects {
+		f := &objects[index]
+		if !discovered(f) || !slices.ContainsFunc(f.Status.Machines, behind) {
+			continue
+		}
+		problems = append(problems, o.settleEntries(f, func(held []machineEntry) []machineEntry {
+			next := slices.Clone(held)
+			for i := range next {
+				if behind(next[i]) {
+					next[i].File = files[next[i].Machine]
+				}
+			}
+			return next
+		}))
+	}
+	return errors.Join(problems...)
+}
+
 // replace answers the change that swaps the scan's machine's entries
 // for its FirmwareCatalog in an object for entries.
 func (s scanEntries) replace(entries []machineEntry) func([]machineEntry) []machineEntry {

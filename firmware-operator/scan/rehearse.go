@@ -58,10 +58,10 @@ const (
 // after the append that the difference shows.
 const reloadFailure = "SignatureListSize invalid"
 
-// The results of a rehearsal beside Failed: Passed is an install that
-// wrote one authenticated append to its device's own variable, with
-// room for it in the store, and Refused is an install that would write
-// anything else.
+// The results of a rehearsal beside Failed and CatalogMoved: Passed is
+// an install that wrote one authenticated append to its device's own
+// variable, with room for it in the store, and Refused is an install
+// that would write anything else.
 const (
 	resultPassed  = "Passed"
 	resultRefused = "Refused"
@@ -130,8 +130,11 @@ func (r rehearser) rehearseAppend(ctx context.Context) (RehearsalResult, rehears
 	if err := copyFirmware(r.hostDir, r.copyDir); err != nil {
 		return rehearsalFailed("copying the firmware tables: %v", err), rehearsedAppend{}
 	}
+	// A jcat that names another file than the scan read ends the
+	// rehearsal as CatalogMoved, as it ends a scan, so the operator reads
+	// the jcat again at once and the machine scans the new file.
 	if end := r.loadCatalog(ctx); end != nil {
-		return rehearsalFailed("%s", end.Message), rehearsedAppend{}
+		return RehearsalResult{Result: end.Result, Message: end.Message}, rehearsedAppend{}
 	}
 	devices, err := query(ctx, r.fwupdtool, "get-devices")
 	if err != nil {

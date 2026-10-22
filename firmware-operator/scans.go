@@ -12,7 +12,8 @@ package main
 // a flash, and a device number that changes on a replug does not count.
 // When only the file changed, and the new file offers the same releases
 // for the GUIDs the machine reported last, the operator records the new
-// file and scans nothing. Each attempt, a boot, a device set, and a
+// file and scans nothing, and moves the machine's entries in the
+// Firmware objects to the new file too (discovered.go). Each attempt, a boot, a device set, and a
 // file, runs once, so a failed scan waits for one of the three to
 // change.
 
@@ -78,7 +79,8 @@ func (o *operator) answerCatalog(ctx context.Context, c *catalog, rules *[]firmw
 	}
 	moved := slices.ContainsFunc(ends, func(end scanEnd) bool { return end.result == resultCatalogMoved })
 	next, err := o.schedule(ctx, c, moved, busy, w, now)
-	return earliest(due, next), errors.Join(append(problems, err)...)
+	problems = append(problems, err, o.refileEntries(*rules, c))
+	return earliest(due, next), errors.Join(problems...)
 }
 
 // recordEnds writes the end of each attempt to the FirmwareCatalog's status and

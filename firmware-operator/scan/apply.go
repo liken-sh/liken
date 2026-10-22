@@ -44,8 +44,9 @@ import (
 )
 
 // resultWritten is an apply whose append the firmware accepted. The
-// other results of an apply are Refused, the firmware's refusal, and
-// Failed, an apply that wrote nothing or could not finish.
+// other results of an apply are Refused, the firmware's refusal,
+// CatalogMoved, a prepare that found a catalog newer than the scan's,
+// and Failed, an apply that wrote nothing or could not finish.
 const resultWritten = "Written"
 
 // immutableFlag is FS_IMMUTABLE_FL of linux/fs.h. efivarfs sets it on
@@ -164,6 +165,9 @@ type prepared struct {
 // which holds no variable store, so it cannot write.
 func (r rehearser) prepare(ctx context.Context, appendSHA256 string) (prepared, ApplyResult, bool) {
 	rehearsal, edit := r.rehearseAppend(ctx)
+	if rehearsal.Result == resultCatalogMoved {
+		return prepared{}, ApplyResult{Result: resultCatalogMoved, Message: rehearsal.Message + ", so nothing was written"}, false
+	}
 	if rehearsal.Result != resultPassed {
 		return prepared{}, applyFailed("the rehearsal before the write did not pass, so nothing was written: %s", rehearsal.Message), false
 	}

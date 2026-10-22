@@ -37,8 +37,9 @@ operator scans a machine in three cases:
   device number that changes on a replug does not count.
 - The catalog named a new file, and that file offers other releases for
   the devices the machine reported. When the new file offers the same
-  releases, the operator records the new file for the machine and
-  scans nothing.
+  releases, the operator records the new file for the machine, in its
+  scan record and in its entries in the `Firmware` objects, and scans
+  nothing.
 
 A scan never starts on a timer. The operator reads the jcat once an
 hour (the `--catalog-interval` flag sets the time), because LVFS

@@ -7,6 +7,12 @@ package main
 // pod is Failed, and the machine leaves its turn with no reboot. After
 // the signal only the pod's own answer says whether it wrote, and every
 // other end is Uncertain (apply.go).
+//
+// A pod that answers CatalogMoved found its jcat naming another file
+// than the machine's scan read, and stopped in its prepare, so it wrote
+// nothing. That needs no person: the operator reads the jcat again at
+// once, drops the record, and the apply starts again on its own with
+// the new file.
 
 import (
 	"errors"
@@ -138,6 +144,12 @@ func (o *operator) applyEnds(f *firmware, pods []pod, now time.Time) ([]applySte
 			due = earliest(due, deadline)
 			continue
 		}
+		if result.Result == resultCatalogMoved {
+			if rh, rehearsed := rehearsalRecord(f.Status.Rehearsals, a.machine); rehearsed {
+				o.catalogMoved(rh.Catalog)
+			}
+			result.Message += "; the operator reads the jcat again, and the apply starts again"
+		}
 		r := applyRecord{Machine: a.machine, Boot: a.boot, Version: a.version, CabinetSHA256: a.cabinet, SHA256: a.sha256}
 		if held, found := applyRecordOf(f.Status.Applies, a.machine); found && a.is(held) {
 			r.Disruption = held.Disruption
@@ -252,7 +264,7 @@ func (o *operator) judgeUnsignalled(p pod) (applyResult, bool, time.Time, error)
 	switch {
 	case err != nil:
 		why = "the operator could not read the apply's log: " + err.Error()
-	case why == "" && answer.Result == resultFailed:
+	case why == "" && (answer.Result == resultFailed || answer.Result == resultCatalogMoved):
 		return answer, true, time.Time{}, nil
 	case why == "":
 		why = fmt.Sprintf("the apply answered the result %q", answer.Result)
@@ -262,7 +274,9 @@ func (o *operator) judgeUnsignalled(p pod) (applyResult, bool, time.Time, error)
 
 // answerOf reads the log of an apply pod that ended: the pod's own
 // answer, or why there is none. The progress line that the pod prints
-// before it waits has no result, so it is never the answer.
+// before it waits has no result, so it is never the answer. CatalogMoved
+// is an answer after the signal too, because a pod that the operator
+// started with the signal prepares after it.
 func answerOf(p pod, log string) (applyResult, string) {
 	result, last, found := parseResultLine[applyResult](log, func(r applyResult) string { return r.Result })
 	switch {
@@ -270,7 +284,7 @@ func answerOf(p pod, log string) (applyResult, string) {
 		return applyResult{}, "the apply wrote no result; its last line was: " + last
 	case !found:
 		return applyResult{}, podFailure(p, "apply", applyContainer)
-	case result.Result == resultWritten || result.Result == resultRefused || result.Result == resultFailed:
+	case result.Result == resultWritten || result.Result == resultRefused || result.Result == resultFailed || result.Result == resultCatalogMoved:
 		return result, ""
 	}
 	return applyResult{}, fmt.Sprintf("the apply answered the result %q, which the operator does not know", result.Result)

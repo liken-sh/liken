@@ -314,7 +314,6 @@ The rehearsal could not run:
 |---|---|
 | `the SHA-256 of the cabinet is ..., and the approval pins ...` | The cabinet at `spec.update.cabinet.url` is not the file you pinned. Check the URL and the SHA-256. |
 | `downloading the cabinet: ...` | The pod could not download the cabinet. The policy in `deploy/rehearsal.yaml` allows HTTPS on port 443 only. |
-| `the jcat now names ...` | The catalog moved since the machine's last scan. The scan of the new file starts a new rehearsal. |
 | `fwupd reports no device ...` | fwupd in the pod does not find the device that the scan reported. |
 | `copying the firmware tables: the machine has no UEFI variable store` | The machine booted in BIOS mode. |
 | `fwupdtool install: ...` | fwupd refused the install. The rest of the line is fwupd's reason. |
@@ -330,6 +329,16 @@ A pending machine waits for its rehearsal. Check each of these:
 - **The machine's last scan read an older catalog file.** The
   rehearsal loads the file that the scan read, so it waits for the scan
   of the current file.
+- **The rehearsal found the catalog moved.** The record's result is
+  `CatalogMoved`, and its message starts with `the jcat now names` and
+  the new file. LVFS published a new catalog after the machine's scan.
+  The operator reads the jcat again at once, with no wait for
+  `--catalog-interval`, and the machine rehearses again against the new
+  file. When the new file offers the machine other releases, the
+  machine is scanned against it first. When it offers the same
+  releases, the operator moves the machine's scan record and its
+  entries to the new file with no scan. This needs no action, and the
+  operator posts a `Normal` `RehearsalCatalogMoved`.
 - **The API server refuses the rehearsal pod.** The pod mounts a host
   path, which the `baseline` Pod Security level forbids. A cluster
   that labels `liken-system` with a level below `privileged` refuses
@@ -414,7 +423,11 @@ kubectl get disruptions -l firmware.liken.sh/firmware=<name>
 
 - **The machine has no record.** Its rehearsal has not passed on the
   boot it runs. See [Rehearsals](#rehearsals). The operator also asks
-  for no turn on a `liken` release that has no `Disruption` kind.
+  for no turn on a `liken` release that has no `Disruption` kind. An
+  apply pod that found the catalog moved also leaves no record: it
+  wrote nothing and asked for no turn, and the operator posts a
+  `Normal` `ApplyCatalogMoved`, reads the jcat again at once, and
+  starts the apply again with the new file.
 - **The record is `Waiting` with no `disruption`.** The apply pod
   prepares on the machine, and the operator asks for the turn when
   the pod is `Ready`:

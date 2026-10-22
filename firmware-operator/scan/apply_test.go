@@ -166,6 +166,23 @@ func TestAnApplyWritesNothingWhenTheVariablesChanged(t *testing.T) {
 	}
 }
 
+// A catalog that moved since the scan is the operator's to read again,
+// not a failure of the apply, so the prepare answers CatalogMoved. It
+// writes nothing, marks nothing, and does not wait for the signal.
+func TestAPrepareOfAMovedCatalogAnswersCatalogMoved(t *testing.T) {
+	a := newApplyRig(t)
+	a.rig.web[testCatalogURL+".jcat"] = jcatFor(t, "firmware-09139-stable.xml.zst", sum(testCatalog))
+
+	got := a.run()
+
+	if got.Result != resultCatalogMoved || got.Message != "the jcat now names firmware-09139-stable.xml.zst, so nothing was written" {
+		t.Errorf("got %+v, want CatalogMoved with the new file", got)
+	}
+	if isPrepared(a.marker) || a.waited != "" || len(a.efivars.calls) != 0 {
+		t.Errorf("the apply marked its prepare, waited, or touched the store with %q", a.efivars.calls)
+	}
+}
+
 // The kernel reports the firmware's EFI_SECURITY_VIOLATION as EACCES,
 // so a refused append is the firmware's answer, not a fault of the pod.
 func TestTheFirmwaresRefusalIsRefused(t *testing.T) {

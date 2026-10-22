@@ -97,23 +97,25 @@ const reasonApplying = "Applying"
 
 // The reasons of the Events that change no condition.
 const (
-	reasonApplyPreparing = "ApplyPreparing"
-	reasonApplyRequested = "ApplyRequested"
-	reasonApplyStarted   = "ApplyStarted"
-	reasonApplyWritten   = "ApplyWritten"
-	reasonApplyRefused   = "ApplyRefused"
-	reasonApplyFailed    = "ApplyFailed"
-	reasonApplyUncertain = "ApplyUncertain"
+	reasonApplyPreparing    = "ApplyPreparing"
+	reasonApplyCatalogMoved = "ApplyCatalogMoved"
+	reasonApplyRequested    = "ApplyRequested"
+	reasonApplyStarted      = "ApplyStarted"
+	reasonApplyWritten      = "ApplyWritten"
+	reasonApplyRefused      = "ApplyRefused"
+	reasonApplyFailed       = "ApplyFailed"
+	reasonApplyUncertain    = "ApplyUncertain"
 )
 
 // applyStep is one change of a machine's record that a pass decided
 // before its status write: the record after the change, the results of
 // the record it replaces, and its Event. A step with no from makes the
-// machine's first record.
+// machine's first record, and a step that drops removes the record.
 type applyStep struct {
 	record applyRecord
 	from   []string
 	notice notice
+	drop   bool
 }
 
 // applyResult is the line `scan apply` writes.
@@ -153,6 +155,11 @@ func step(r applyRecord, result, message string, from ...string) applyStep {
 		n.reason = reasonApplyRefused
 	case resultUncertain:
 		n.reason = reasonApplyUncertain
+	case resultCatalogMoved:
+		// The apply wrote nothing and the catalog is old, so the record
+		// leaves, and the apply starts again on its own once the
+		// operator has read the jcat.
+		return applyStep{record: r, from: from, notice: notice{reason: reasonApplyCatalogMoved, message: about}, drop: true}
 	}
 	return applyStep{record: r, from: from, notice: n}
 }
@@ -200,6 +207,12 @@ func (o *operator) startApply(f *firmware, machine string, w observed, catalogs 
 	}
 	c := catalogs[rh.Catalog]
 	if c == nil || c.Status.SHA256 == "" {
+		return nil, nil
+	}
+	// An earlier pod of the machine may still stop, and the same attempt
+	// has the same name, so a create would answer 409 for a pod that is
+	// about to go. The pass waits, and the pod's delete wakes it again.
+	if slices.ContainsFunc(w.applies[f.Metadata.Name], func(p pod) bool { return applyOf(p).machine == machine }) {
 		return nil, nil
 	}
 	r := applyRecord{Machine: machine, Boot: rh.Boot, Version: u.Version, CabinetSHA256: u.Cabinet.SHA256, SHA256: rh.Append.SHA256}
@@ -286,10 +299,14 @@ func composeApplies(f *firmware, pending map[string]bool, steps []applyStep, now
 		case s.from != nil && (!held || !attemptOfApply("", s.record).is(previous) || !slices.Contains(s.from, previous.Result)):
 			continue
 		}
+		notices = append(notices, s.notice)
+		if s.drop {
+			delete(records, s.record.Machine)
+			continue
+		}
 		next := s.record
 		next.Time = stamp(now)
 		records[next.Machine] = next
-		notices = append(notices, s.notice)
 	}
 	var out []applyRecord
 	for _, name := range sortedKeys(records) {

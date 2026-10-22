@@ -40,12 +40,25 @@ type discoverySettings struct {
 }
 
 // catalogCache is what the operator keeps of each FirmwareCatalog in memory:
-// whether it has read the jcat since it started, and the index of the
-// file. Both are caches. Losing them costs one read of the jcat and one
-// download of the file.
+// whether it has read the jcat since it started, whether a rehearsal or
+// an apply found the jcat naming another file since the last read, and
+// the index of the file. All three are caches. Losing them costs one
+// read of the jcat and one download of the file. A lost mark of a moved
+// jcat costs at most one interval, after which the timed read finds the
+// new file.
 type catalogCache struct {
 	read  bool
+	moved bool
 	index *catalogIndex
+}
+
+// catalogMoved marks a FirmwareCatalog's jcat for a read at once. A
+// scan that answers CatalogMoved reads it in the same pass, but a
+// rehearsal or an apply ends later in the pass, after the catalogs are
+// answered, so its mark waits for the next pass. The delete of the
+// finished pod wakes that pass.
+func (o *operator) catalogMoved(name string) {
+	o.cache(name).moved = true
 }
 
 // fetched is what one read of a jcat gives a FirmwareCatalog's status.
@@ -66,7 +79,8 @@ const maxFileSize = 64 << 20
 func (o *operator) refreshDue(c *catalog, moved bool, now time.Time) (bool, time.Time) {
 	next := parseTime(c.Status.Checked).Add(o.discovery.interval)
 	r := c.Status.ready()
-	due := moved || !o.cache(c.Metadata.Name).read || r.Status == "" || r.ObservedGeneration != c.Metadata.Generation || !now.Before(next)
+	cached := o.cache(c.Metadata.Name)
+	due := moved || cached.moved || !cached.read || r.Status == "" || r.ObservedGeneration != c.Metadata.Generation || !now.Before(next)
 	return due, next
 }
 
@@ -76,7 +90,7 @@ func (o *operator) refreshDue(c *catalog, moved bool, now time.Time) (bool, time
 func (o *operator) refresh(ctx context.Context, c *catalog, now time.Time) fetched {
 	out := fetched{file: c.Status.File, sha256: c.Status.SHA256, etag: c.Status.ETag, checked: stamp(now)}
 	cached := o.cache(c.Metadata.Name)
-	cached.read = true
+	cached.read, cached.moved = true, false
 	fail := func(reason string, err error) fetched {
 		out.ready = condition{Type: ready, Status: conditions.False, Reason: reason, Message: err.Error()}
 		return out

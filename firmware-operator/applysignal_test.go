@@ -357,3 +357,49 @@ func TestTheDeadlineCountsFromTheSignal(t *testing.T) {
 		}
 	})
 }
+
+// terminatePod plays the API server after a delete of a pod whose
+// containers still stop: the pod remains, with its deletion started.
+func (a *fakeAPI) terminatePod(t *testing.T, name string) {
+	t.Helper()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	next := clone(a.objects[uploadPodsPath][name])
+	if next == nil {
+		t.Fatalf("there is no pod %s", name)
+	}
+	next["metadata"].(map[string]any)["deletionTimestamp"] = time.Now().UTC().Format(time.RFC3339)
+	a.store(uploadPodsPath, next, "MODIFIED")
+}
+
+// An apply attempt keeps its pod's name, so a new apply of the same
+// attempt can meet the old pod while it stops. A create then answers
+// 409 for a pod that is about to go. The operator waits for the old
+// pod to go before it starts the new one.
+func TestANewApplyWaitsForTheOldPodToGo(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := preparingWorld(t)
+		old := w.onlyApply(t).Metadata.Name
+		w.api.terminatePod(t, old)
+		f := w.api.firmware(t, biosObjectName)
+		f.Spec.Update.Version, f.Spec.Update.Cabinet = "", nil
+		w.api.putFirmware(f)
+		w.settle()
+		approve(t, w, "0.0.4.2", biosCabinet, nil)
+		w.api.finishPod(t, w.onlyRehearsal(t).Metadata.Name, rehearsalContainer, podSucceeded, rehearsalLog(passed))
+		w.settle()
+		if records := w.api.firmware(t, biosObjectName).Status.Applies; len(records) != 0 {
+			t.Fatalf("status.applies = %+v while the old pod stops, want none", records)
+		}
+
+		w.api.deleteObject(uploadPodsPath, old)
+		w.settle()
+
+		if r := w.onlyApplyRecord(t); r.Result != resultWaiting {
+			t.Errorf("the record is %+v, want Waiting for the new pod", r)
+		}
+		if p := w.onlyApply(t); p.Metadata.DeletionTimestamp != "" {
+			t.Errorf("the apply pod is %+v, want a new one", p.Metadata)
+		}
+	})
+}

@@ -327,9 +327,11 @@ The operator posts an `Event` each time `Approved`, `Rehearsed`, or
 release shows in `kubectl describe firmware <name>` and in
 `kubectl get events --field-selector type=Warning`. It also posts
 `RehearsalStarted` when a rehearsal pod starts, `RehearsalPassed` when
-one passes, and a `Warning` `RehearsalRefused` or `RehearsalFailed`
-when one does not. It posts `ApplyPreparing` when it starts the apply
-pod, `ApplyRequested` when it asks for the machine's turn,
+one passes, `RehearsalCatalogMoved` when one finds that LVFS published
+a new catalog since the machine's scan, and a `Warning`
+`RehearsalRefused` or `RehearsalFailed` when one does not pass. It
+posts `ApplyPreparing` when it starts the apply pod,
+`ApplyCatalogMoved` when the pod finds a new catalog and starts again, `ApplyRequested` when it asks for the machine's turn,
 `ApplyStarted` when it sends the apply pod the signal to write,
 `ApplyWritten` when the firmware took the append, a `Warning`
 `ApplyRefused` or `ApplyFailed` when it did not, and a `Warning`

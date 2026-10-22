@@ -202,9 +202,6 @@ func TestARehearsalFails(t *testing.T) {
 		{"no cabinet", func(t *testing.T, r *rehearsalRig) { delete(r.web, testCabinetURL) },
 			"downloading the cabinet: " + testCabinetURL + " answered Not Found", false},
 		{"no device", func(t *testing.T, r *rehearsalRig) { r.deviceID = "0000" }, "fwupd reports no device 0000", false},
-		{"a moved catalog", func(t *testing.T, r *rehearsalRig) {
-			r.web[testCatalogURL+".jcat"] = jcatFor(t, "firmware-09139-stable.xml.zst", sum(testCatalog))
-		}, "the jcat now names firmware-09139-stable.xml.zst", false},
 		{"a BIOS boot", func(t *testing.T, r *rehearsalRig) { os.RemoveAll(filepath.Join(r.hostDir, "efi")) },
 			"copying the firmware tables: the machine has no UEFI variable store", false},
 		{"an install error", func(t *testing.T, r *rehearsalRig) {
@@ -229,6 +226,20 @@ func TestARehearsalFails(t *testing.T) {
 				t.Errorf("the rehearsal ran fwupdtool install: %v, want %v", r.installed(), c.installed)
 			}
 		})
+	}
+}
+
+// A jcat that names another file than the scan read means the
+// catalog moved since the scan. The rehearsal answers CatalogMoved, as
+// a scan does, so the operator reads the jcat again at once.
+func TestARehearsalOfAMovedCatalogAnswersCatalogMoved(t *testing.T) {
+	r := newRehearsalRig(t)
+	r.web[testCatalogURL+".jcat"] = jcatFor(t, "firmware-09139-stable.xml.zst", sum(testCatalog))
+
+	got := r.rehearse(context.Background())
+
+	if got.Result != resultCatalogMoved || got.Message != "the jcat now names firmware-09139-stable.xml.zst" || r.installed() {
+		t.Errorf("got %+v, and the install ran: %v; want CatalogMoved with the new file, and no install", got, r.installed())
 	}
 }
 
