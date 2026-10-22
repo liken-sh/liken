@@ -177,8 +177,11 @@ setsid make -C dev-cluster run NODE=node-5 FIRMWARE=secureboot \
   CONSOLE=file:guests/node-5/console.log </dev/null >/dev/null 2>&1 &
 ```
 
-The enrolled `dbx` holds one entry, so fwupd reads an old `dbx` and
-offers the current one. The console reads `Secure boot disabled`. To
+`enroll-keys` seeds `dbx` with Microsoft's signed update of
+2026-04-02 from its pinned LVFS cabinet, so fwupd reads version
+20260402 and offers the newer one, as on liken-1. A `dbx` that fwupd
+does not recognize reads no version, and no catalog release applies
+to it. The console reads `Secure boot disabled`. To
 return the guest to the plain firmware, stop it, run
 `make -C dev-cluster reset-nvram NODE=node-5`, and start it with the
 default `FIRMWARE`.

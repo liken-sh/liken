@@ -219,16 +219,33 @@ FIRMWARE_DEPS_bios :=
 FIRMWARE_DEPS := $(FIRMWARE_DEPS_$(FIRMWARE))
 
 # enroll-keys enrolls Microsoft's Secure Boot keys in a stopped node's
-# variable store: the PK, both KEKs, the db certificates, and a dbx of
-# one entry, so fwupd reads an old dbx and offers the current update.
-# It turns Secure Boot off, because liken's boot chain is not signed
-# and firmware with Secure Boot on refuses it, and liken-1 runs the
-# same way. virt-fw-vars is from the virt-firmware project on PyPI,
-# pinned here and run with uvx.
+# variable store: the PK, both KEKs, and the db certificates. It seeds
+# dbx with Microsoft's signed update of 2026-04-02, so fwupd reads a
+# dbx version it knows and offers the newer update, as it does on
+# liken-1. fwupd reports no version for a dbx it does not recognize,
+# and then no catalog release applies. It turns Secure Boot off,
+# because liken's boot chain is not signed and firmware with Secure
+# Boot on refuses it, and liken-1 runs the same way.
+#
+# The update comes from the LVFS cabinet that carries it, pinned by the
+# cabinet's SHA-256, which the LVFS also puts in the file's name.
+# virt-fw-vars is from the virt-firmware project on PyPI, pinned here
+# and run with uvx.
 VIRT_FIRMWARE := virt-firmware==26.10
-enroll-keys: guests/$(NODE)/OVMF_VARS.fd
+DBX_SEED_SHA256 := 9edea8bc287bf9bf4659856b28cf421f330eb2f658c163eab0a03512a98c0e78
+DBX_SEED_CAB := firmware/cache/$(DBX_SEED_SHA256)-DBXUpdate-20260402-x64.cab
+DBX_SEED := firmware/cache/DBXUpdate-20260402.x64.bin
+
+$(DBX_SEED):
+	mkdir -p firmware/cache
+	curl -fL --retry 3 -o $(DBX_SEED_CAB) https://fwupd.org/downloads/$(notdir $(DBX_SEED_CAB))
+	echo "$(DBX_SEED_SHA256)  $(DBX_SEED_CAB)" | sha256sum --check --quiet
+	cabextract -q -d firmware/cache -F $(notdir $@) $(DBX_SEED_CAB)
+
+enroll-keys: guests/$(NODE)/OVMF_VARS.fd $(DBX_SEED)
 	uvx --from $(VIRT_FIRMWARE) virt-fw-vars -i $< -o $<.enrolled \
-		--enroll-microsoft --microsoft-kek all --set-false SecureBootEnable
+		--enroll-microsoft --microsoft-kek all --set-false SecureBootEnable \
+		--set-dbx $(DBX_SEED)
 	mv $<.enrolled $<
 
 # Which disk the firmware boots. QEMU attaches the boot disk third,
