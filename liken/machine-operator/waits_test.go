@@ -359,7 +359,8 @@ func TestTheTrimKeepsEveryFieldThePodTypeReads(t *testing.T) {
 		"managedFields":[{"manager":"kubelet"}]},
 		"spec":{"nodeName":"node-1","containers":[{"name":"main","image":"mpv"}],
 		"volumes":[{"name":"plugins","hostPath":{"path":"/var/lib/kubelet/plugins","type":"Directory"}},{"name":"cache","emptyDir":{}}],
-		"resourceClaims":[{"name":"gpu","resourceClaimTemplateName":"render"}]},
+		"resourceClaims":[{"name":"gpu","resourceClaimTemplateName":"render"}],
+		"tolerations":[{"key":"node.kubernetes.io/unschedulable","operator":"Exists","effect":"NoSchedule"},{"operator":"Exists"}]},
 		"status":{"phase":"Running","podIP":"10.42.0.9","containerStatuses":[{"name":"main","image":"mpv:1","ready":true,"restartCount":3}]}}`
 	full := &unstructured.Unstructured{}
 	if err := full.UnmarshalJSON([]byte(raw)); err != nil {

@@ -206,8 +206,10 @@ func serviceHandler(wake func()) cache.ResourceEventHandler {
 // for each pod rather than tens of kilobytes. A field the trim drops
 // converts to its zero value, so the trim must keep every field the
 // code reads. Without the owner references, every DaemonSet pod looks
-// evictable, and without the mirror annotation, the drain evicts
-// mirror pods that the kubelet creates again.
+// evictable, without the mirror annotation, the drain evicts mirror
+// pods that the kubelet creates again, and without the tolerations, the
+// drain evicts a pod that tolerates the cordon, which comes straight
+// back.
 func trimPod(object *unstructured.Unstructured) {
 	kept := map[string]any{
 		"apiVersion": object.GetAPIVersion(),
@@ -236,6 +238,9 @@ func trimPod(object *unstructured.Unstructured) {
 	}
 	if claims, ok, _ := unstructured.NestedSlice(object.Object, "spec", "resourceClaims"); ok {
 		spec["resourceClaims"] = claims
+	}
+	if tolerations, ok, _ := unstructured.NestedSlice(object.Object, "spec", "tolerations"); ok {
+		spec["tolerations"] = tolerations
 	}
 	if volumes, ok, _ := unstructured.NestedSlice(object.Object, "spec", "volumes"); ok {
 		var kept []any
