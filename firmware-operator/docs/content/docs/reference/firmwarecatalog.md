@@ -13,6 +13,23 @@ toc: true
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="spec--url"></span>`url` | string | yes | The catalog's unversioned URL, such as `https://cdn.fwupd.org/downloads/firmware.xml.zst`. The jcat is at the same URL with `.jcat` added, and names the versioned file, such as `firmware-09138-stable.xml.zst`, in the same directory. `firmware-operator` and each scan pod read the versioned file, because a CDN can serve an older copy at the unversioned URL for hours. A mirror for a cluster with no route to the internet serves the same three files under its own URL. Pattern: `^https?://`. |
+| <span id="spec--trust"></span>`trust` | [object](#spectrust) | no | The signer of a catalog that the LVFS did not sign, such as a vendor's own catalog. fwupd refreshes only from a catalog whose jcat it verifies against a key it trusts, and the scan image trusts only the LVFS's keys. Each scan, rehearsal, and apply pod mounts the ConfigMap that this names, and copies each of its keys, a PEM certificate whose name ends in `.pem`, beside the LVFS's keys before it reads the catalog. Omit it for the LVFS. |
+
+### spec.trust
+
+The signer of a catalog that the LVFS did not sign, such as a vendor's own catalog. fwupd refreshes only from a catalog whose jcat it verifies against a key it trusts, and the scan image trusts only the LVFS's keys. Each scan, rehearsal, and apply pod mounts the ConfigMap that this names, and copies each of its keys, a PEM certificate whose name ends in `.pem`, beside the LVFS's keys before it reads the catalog. Omit it for the LVFS.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="spectrust--configmapref"></span>`configMapRef` | [object](#spectrustconfigmapref) | yes | The ConfigMap in `firmware-operator`'s namespace that holds the certificates. A pod whose ConfigMap is missing does not start, and its scan fails at its deadline. |
+
+#### spec.trust.configMapRef
+
+The ConfigMap in `firmware-operator`'s namespace that holds the certificates. A pod whose ConfigMap is missing does not start, and its scan fails at its deadline.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="spectrustconfigmapref--name"></span>`name` | string | yes |  |
 
 ## status
 

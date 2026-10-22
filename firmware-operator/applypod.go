@@ -170,7 +170,7 @@ func buildApplyPod(f *firmware, a applyAttempt, r rehearsal, c *catalog, image, 
 				APIVersion: firmwareAPIVersion, Kind: firmwareKind, Name: f.Metadata.Name, UID: f.Metadata.UID,
 			}},
 		},
-		Spec: podSpec{
+		Spec: withTrust(podSpec{
 			// The pod runs once. It tolerates every taint, so a taint
 			// on the machine does not stop it, and the cordon by its
 			// key, so the drain skips it.
@@ -223,7 +223,7 @@ func buildApplyPod(f *firmware, a applyAttempt, r rehearsal, c *catalog, image, 
 				Resources:                &resources{Requests: map[string]string{"cpu": "10m", "memory": "64Mi"}},
 				TerminationMessagePolicy: "FallbackToLogsOnError",
 			}},
-		},
+		}, c),
 	}
 	if !signal.IsZero() {
 		for key, value := range signalAnnotations(signal) {

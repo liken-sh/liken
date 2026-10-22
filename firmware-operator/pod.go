@@ -48,14 +48,21 @@ type podSpec struct {
 	Containers                    []container        `json:"containers"`
 }
 
-// volume is a host directory, a directory in memory, or the pod's own
-// fields. A rehearsal pod mounts the machine's /sys/firmware and keeps
-// its copy in memory, and an apply pod reads its own annotations.
+// volume is a host directory, a directory in memory, the pod's own
+// fields, or a ConfigMap. A rehearsal pod mounts the machine's
+// /sys/firmware and keeps its copy in memory, an apply pod reads its
+// own annotations, and a pod that loads a catalog with spec.trust
+// mounts the signer's certificate.
 type volume struct {
 	Name        string             `json:"name"`
 	HostPath    *hostPath          `json:"hostPath,omitempty"`
 	EmptyDir    *emptyDir          `json:"emptyDir,omitempty"`
 	DownwardAPI *downwardAPIVolume `json:"downwardAPI,omitempty"`
+	ConfigMap   *configMapVolume   `json:"configMap,omitempty"`
+}
+
+type configMapVolume struct {
+	Name string `json:"name"`
 }
 
 type downwardAPIVolume struct {

@@ -126,6 +126,8 @@ func newRig(t *testing.T) *rig {
 		fwupdtool:  r.tool.run,
 		remotesDir: remotes,
 		workDir:    t.TempDir(),
+		trustDir:   filepath.Join(t.TempDir(), "absent"),
+		pkiDir:     t.TempDir(),
 	}
 	return r
 }

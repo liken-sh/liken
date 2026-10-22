@@ -48,6 +48,10 @@ func TestCatalogCRDValidatesExamples(t *testing.T) {
 		{"a mirror over HTTP", map[string]any{"url": "http://mirror.local/firmware.xml.zst"}, false},
 		{"no URL", map[string]any{}, true},
 		{"a path", map[string]any{"url": "/downloads/firmware.xml.zst"}, true},
+		{"a catalog with its signer", map[string]any{"url": "http://10.0.2.2:8017/firmware/firmware.xml.zst",
+			"trust": map[string]any{"configMapRef": map[string]any{"name": "lab-catalog-signer"}}}, false},
+		{"a trust with no ConfigMap", map[string]any{"url": lvfsURL, "trust": map[string]any{}}, true},
+		{"a ConfigMap with no name", map[string]any{"url": lvfsURL, "trust": map[string]any{"configMapRef": map[string]any{"name": ""}}}, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

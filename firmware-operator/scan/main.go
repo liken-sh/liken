@@ -65,6 +65,8 @@ func main() {
 		mounter:    osMounter(),
 		fwupdtool:  execFwupdtool(workDir + "/esp"),
 		remotesDir: "/etc/fwupd/remotes.d",
+		trustDir:   trustDir,
+		pkiDir:     pkiDir,
 		workDir:    workDir + "/catalog",
 	}
 	if err := emit(os.Stdout, s.scan(ctx)); err != nil {
@@ -110,6 +112,8 @@ func rehearserIn(r rehearser) rehearser {
 		fwupdtool: execFwupdtool(rehearsalDir+"/esp",
 			"FWUPD_SYSFSFWDIR="+copyDir, "FWUPD_LOCALSTATEDIR="+rehearsalDir+"/var"),
 		remotesDir: "/etc/fwupd/remotes.d",
+		trustDir:   trustDir,
+		pkiDir:     pkiDir,
 		workDir:    rehearsalDir + "/catalog",
 	}
 	r.hostDir, r.copyDir, r.espDir, r.free = hostFirmware, copyDir, rehearsalDir+"/esp", freeBytes

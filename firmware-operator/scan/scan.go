@@ -37,6 +37,8 @@ type scanner struct {
 	fwupdtool  fwupdtool
 	remotesDir string // fwupd's remote configuration, /etc/fwupd/remotes.d
 	workDir    string // where the catalog files are saved for the refresh
+	trustDir   string // the catalog's certificates, when it has spec.trust (trust.go)
+	pkiDir     string // the keys fwupd trusts for metadata
 }
 
 func sum(data []byte) string {
@@ -101,6 +103,9 @@ func (s scanner) loadCatalog(ctx context.Context) *Result {
 
 	if err := configureRemotes(s.remotesDir, cfg.name, cfg.url); err != nil {
 		return end(failed(cfg.file, "writing the fwupd remote: %v", err))
+	}
+	if err := installTrust(s.trustDir, s.pkiDir, cfg.name); err != nil {
+		return end(failed(cfg.file, "installing the catalog's certificates from spec.trust: %v", err))
 	}
 	paths, err := s.save(item.file, fileData, jcatData)
 	if err != nil {

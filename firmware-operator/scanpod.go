@@ -119,7 +119,7 @@ func buildScanPod(c *catalog, a scanAttempt, sum, image, namespace string) pod {
 				APIVersion: firmwareAPIVersion, Kind: catalogKind, Name: c.Metadata.Name, UID: c.Metadata.UID,
 			}},
 		},
-		Spec: podSpec{
+		Spec: withTrust(podSpec{
 			// Each attempt runs once, so the pod runs once.
 			// activeDeadlineSeconds stops a scan that hangs, and counts
 			// from the pod's start; the operator also measures the same
@@ -161,6 +161,6 @@ func buildScanPod(c *catalog, a scanAttempt, sum, image, namespace string) pod {
 				// state too.
 				TerminationMessagePolicy: "FallbackToLogsOnError",
 			}},
-		},
+		}, c),
 	}
 }

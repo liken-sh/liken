@@ -97,6 +97,40 @@ hash of the device names in `devices`, and the `guids` of the updatable
 devices. The operator reads these after a restart, so a restart starts
 no second scan.
 
+## A catalog that the LVFS did not sign
+
+fwupd reads a catalog only when it can verify the catalog's jcat
+against a key that it trusts, and the scan image trusts only the
+LVFS's keys. A vendor's own catalog, or a test catalog, is signed by
+another key, so you give the operator the signer's certificate.
+Put the certificate in a `ConfigMap` in the operator's namespace, under
+a key whose name ends in `.pem`:
+
+```sh
+kubectl -n liken-system create configmap acme-catalog-signer --from-file=signer.pem
+```
+
+Then name the `ConfigMap` in the catalog's `spec.trust`:
+
+```yaml
+apiVersion: firmware.liken.sh/v1alpha1
+kind: FirmwareCatalog
+metadata:
+  name: acme
+spec:
+  url: https://firmware.acme.example/firmware.xml.zst
+  trust:
+    configMapRef:
+      name: acme-catalog-signer
+```
+
+Each scan, rehearsal, and apply pod for this catalog mounts the
+`ConfigMap` and copies its certificates beside the LVFS's keys before
+it reads the catalog. The certificates apply to that pod alone, so a
+catalog's signer is never trusted for another catalog's scan. A scan
+pod whose `ConfigMap` is missing does not start, and its record turns
+`Failed` at the scan's deadline.
+
 ## Read the discovered Firmware objects
 
 The operator keeps one `Firmware` for each catalog component that

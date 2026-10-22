@@ -62,6 +62,32 @@ spec:
                     copy at the unversioned URL for hours. A mirror for a
                     cluster with no route to the internet serves the same
                     three files under its own URL.
+                trust:
+                  type: object
+                  required: [configMapRef]
+                  description: >-
+                    The signer of a catalog that the LVFS did not sign,
+                    such as a vendor's own catalog. fwupd refreshes only
+                    from a catalog whose jcat it verifies against a key
+                    it trusts, and the scan image trusts only the LVFS's
+                    keys. Each scan, rehearsal, and apply pod mounts the
+                    ConfigMap that this names, and copies each of its
+                    keys, a PEM certificate whose name ends in `.pem`,
+                    beside the LVFS's keys before it reads the catalog.
+                    Omit it for the LVFS.
+                  properties:
+                    configMapRef:
+                      type: object
+                      required: [name]
+                      description: >-
+                        The ConfigMap in `firmware-operator`'s namespace
+                        that holds the certificates. A pod whose
+                        ConfigMap is missing does not start, and its scan
+                        fails at its deadline.
+                      properties:
+                        name:
+                          type: string
+                          minLength: 1
             status:
               type: object
               properties:

@@ -34,6 +34,9 @@ type catalogSpec struct {
 	// with .jcat added, and the versioned file is in the same
 	// directory, under the name the jcat gives.
 	URL string `json:"url"`
+	// Trust names the certificate of a catalog that the LVFS did not
+	// sign (catalogtrust.go).
+	Trust *catalogTrust `json:"trust,omitempty"`
 }
 
 type catalogStatus struct {

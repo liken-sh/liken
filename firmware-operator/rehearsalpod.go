@@ -119,7 +119,7 @@ func buildRehearsalPod(f *firmware, a rehearsalAttempt, c *catalog, cabinetURL, 
 				APIVersion: firmwareAPIVersion, Kind: firmwareKind, Name: f.Metadata.Name, UID: f.Metadata.UID,
 			}},
 		},
-		Spec: podSpec{
+		Spec: withTrust(podSpec{
 			// The pod runs once, and stops at the deadline, for the
 			// reasons of the scan pod (scanpod.go).
 			RestartPolicy:                 "Never",
@@ -160,6 +160,6 @@ func buildRehearsalPod(f *firmware, a rehearsalAttempt, c *catalog, cabinetURL, 
 				Resources:                &resources{Requests: map[string]string{"cpu": "10m", "memory": "64Mi"}},
 				TerminationMessagePolicy: "FallbackToLogsOnError",
 			}},
-		},
+		}, c),
 	}
 }
