@@ -4,8 +4,10 @@ Proposed on 2026-10-21. Built on 2026-10-22 and drilled on the lab's
 `node-5` under OVMF with Microsoft's keys
 ([As built](#as-built), [The lab drills](#the-lab-drills)). The real
 write ran on liken-1 on 2026-10-22
-([The write on liken-1](#the-write-on-liken-1)). A refusal by real
-firmware through the operator has not run. This plan writes an approved
+([The write on liken-1](#the-write-on-liken-1)). stick-1's firmware
+refused a `db` update of two payloads, which found that the apply
+wrote fwupd's separate writes as one, and took it after the fix
+([The db update on stick-1](#the-db-update-on-stick-1)). This plan writes an approved
 `dbx`, `db`, or `KEK` update to a machine, inside a reboot turn that
 the OS grants through a `Disruption`, and proves it from the next
 scan. It follows
@@ -325,3 +327,41 @@ The firmware merged the 17260-byte append into 124 new bytes, because
 most of its entries were already in `dbx`. liken-1 runs with Secure
 Boot off, as it did before the write. stick-1 had
 nothing to apply: 20260402 is the newest `dbx` for its `KEK` 2011.
+
+## The db update on stick-1
+
+On 2026-10-22 stick-1 took Microsoft's third-party `db` update,
+version 2023, which adds the 2023 UEFI CA and the 2023 option ROM CA.
+Its cabinet holds two signed payloads, of 4829 and 4840 bytes.
+
+The first attempt ran on `firmware-operator` `2026.10.22-004`. The
+rehearsal passed with one append of 19354 bytes, and the firmware
+refused the write with `permission denied`, which is
+`EFI_SECURITY_VIOLATION`. The turn released with no reboot, and `db`
+did not change. The 19354 bytes were four authenticated writes: fwupd
+wrote the two payloads, each with its 4 bytes of attributes, and then
+wrote both again. Their SHA-256 matched the rehearsal's record. fwupd
+writes each image of an archive in its own call
+(`fu_efi_x509_device_write_firmware`), so the firmware verifies each
+signature over its own payload. The rehearsal's copy is a plain file,
+which kept the bytes and lost the boundaries, and the apply wrote all
+four in one call. The firmware verified the first signature over every
+byte after it, and refused.
+
+Commit `e52d5a7f` splits the recorded bytes into authenticated writes
+by their format and writes each in its own call. On the development
+build `2026.10.22-004-dev-002-e52d5a7f` the approval was withdrawn and
+given again, and it went from the approval to `Installed` in 136
+seconds. The rehearsal reported 4 authenticated writes, the pod wrote
+them 3 seconds after the signal, and the first scan of the new boot
+read 2023.
+
+| | Before | After |
+|---|---|---|
+| `db` size | 3147 bytes | 6142 bytes |
+| `db` SHA-256 | `006e7a94dadd12b1...` | `0be479112e5377c2...` |
+| `SecureBoot`, `SetupMode` | 0, 0 | 0, 0 |
+
+The two payloads carry 1492 and 1503 bytes of signature lists, 2995
+in all, and `db` grew by exactly 2995 bytes. So the firmware stored
+each list once, and the second pair of writes added nothing.
