@@ -181,11 +181,7 @@ func (o *operator) requestTurn(f *firmware, machine string, w observed) (*applyS
 		rh.Boot != m.Status.Boot.Time || rh.Version != u.Version || rh.CabinetSHA256 != u.Cabinet.SHA256 {
 		return nil, nil
 	}
-	what := u.Component
-	if e, offered := offeredEntry(f.Status.Machines, machine, u); what == "" && offered {
-		what = e.Device
-	}
-	d := buildDisruption(f, machine, what)
+	d := buildDisruption(f, machine, updateSubject(f, machine))
 	if err := o.fileDisruption(d); err != nil {
 		return nil, fmt.Errorf("requesting the turn of %s: %w", machine, err)
 	}
@@ -437,14 +433,30 @@ func applyRecordOf(records []applyRecord, machine string) (applyRecord, bool) {
 	return records[i], true
 }
 
+// updateSubject names what an approval installs on a machine, for the
+// reason of its request: the catalog component, or the device.
+func updateSubject(f *firmware, machine string) string {
+	what := f.Spec.Update.Component
+	if e, offered := offeredEntry(f.Status.Machines, machine, f.Spec.Update); what == "" && offered {
+		what = e.Device
+	}
+	return what
+}
+
 // settleTurns brings each of a Firmware's requests in line with the
 // records that its status write left: a written or uncertain record's
 // request loses spec.hold, so the turn reboots the machine, and a
 // request that no live record names is deleted while it holds a turn or
-// after the turn ended. A request whose hold was removed and whose reboot has not
-// happened stays, so a written update gets its reboot even when the
-// record left first.
-func (o *operator) settleTurns(records []applyRecord, requests []disruption) error {
+// after the turn ended. A request whose hold was removed and whose
+// reboot has not happened stays, so a written update gets its reboot
+// even when the record left first.
+//
+// A person can delete the request while the apply pod writes, which
+// ends the turn with no reboot. The write takes effect only at a
+// reboot, so a written or uncertain record whose machine still runs the
+// boot of the write gets its request again, with no hold, and the turn
+// reboots the machine under the budgets like any other.
+func (o *operator) settleTurns(f *firmware, records []applyRecord, requests []disruption, fleet map[string]machine) error {
 	live := map[string]applyRecord{}
 	for _, r := range records {
 		if r.live() {
@@ -452,6 +464,21 @@ func (o *operator) settleTurns(records []applyRecord, requests []disruption) err
 		}
 	}
 	var problems []error
+	filed := map[string]bool{}
+	for _, d := range requests {
+		filed[d.Metadata.Name] = true
+	}
+	for _, r := range records {
+		m, known := fleet[r.Machine]
+		if !r.rebooting() || filed[r.Disruption] || !known || m.Status.Boot.Time != r.Boot {
+			continue
+		}
+		d := buildDisruption(f, r.Machine, updateSubject(f, r.Machine))
+		d.Spec.Hold = false
+		if err := o.fileDisruption(d); err != nil {
+			problems = append(problems, fmt.Errorf("asking again for the reboot of %s: %w", r.Machine, err))
+		}
+	}
 	for _, d := range requests {
 		r, named := live[d.Metadata.Name]
 		switch {

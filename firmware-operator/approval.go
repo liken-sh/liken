@@ -190,7 +190,7 @@ func (o *operator) answerUpdate(f *firmware, w observed, catalogs map[string]*ca
 	// The requests and the pods follow the records only once the records
 	// are written, so an operator that stops here finds each result in
 	// the status and does the rest again.
-	problems = append(problems, o.settleTurns(records, w.disruptions[f.Metadata.Name]))
+	problems = append(problems, o.settleTurns(f, records, w.disruptions[f.Metadata.Name], w.fleet))
 	for _, end := range ends {
 		if end.rehearsal != nil {
 			problems = append(problems, o.remove(*end.rehearsal))

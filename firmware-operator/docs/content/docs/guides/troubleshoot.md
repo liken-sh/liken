@@ -450,4 +450,8 @@ kubectl delete disruption <machine>.firmware-<name>
 ```
 
 If the apply pod is still running, wait for it to end first, so that
-its result is in the record.
+its result is in the record. When the pod writes, or ends without
+saying whether it wrote, after you deleted the request, the operator
+files the request again with no hold. The write takes effect only at a
+reboot, so the machine takes its turn again, under its budgets, and
+reboots.

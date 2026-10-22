@@ -339,6 +339,61 @@ func TestAnUncertainWriteRebootsTheMachine(t *testing.T) {
 	}
 }
 
+// A person who deletes the request while the apply pod runs ends the
+// turn before the write. A write that landed, or may have, takes effect
+// only at a reboot, so the operator asks for the machine's turn again,
+// with no hold, while the machine still runs the boot of the write.
+func TestADeletedRequestIsFiledAgainAfterAWrite(t *testing.T) {
+	cases := []struct {
+		name   string
+		result string
+		end    func(t *testing.T, w *world, name string)
+	}{
+		{"a written update", resultWritten, func(t *testing.T, w *world, name string) {
+			w.api.finishPod(t, name, applyContainer, podSucceeded, applyLog(writtenResult))
+		}},
+		{"an uncertain write", resultUncertain, func(t *testing.T, w *world, name string) {
+			w.api.deleteObject(uploadPodsPath, name)
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				w := heldWorld(t)
+				pod := w.onlyApply(t).Metadata.Name
+				w.api.deleteObject(disruptionsPath, turnName)
+				w.settle()
+				c.end(t, w, pod)
+				w.settle()
+
+				if r := w.onlyApplyRecord(t); r.Result != c.result {
+					t.Errorf("the record is %+v, want %s", r, c.result)
+				}
+				if !w.api.disruptionExists(turnName) {
+					t.Fatal("no request, want the machine's turn asked for again")
+				}
+				if d := w.api.disruption(t, turnName); d.Spec.Hold || d.Spec.Kind != "Reboot" {
+					t.Errorf("the request is %+v, want a Reboot with no hold", d.Spec)
+				}
+			})
+		})
+	}
+}
+
+// A machine that rebooted after the write needs no turn, even when its
+// request is gone before the scan of the new boot.
+func TestNoRequestIsFiledAgainAfterTheReboot(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := rebootedWorld(t, rebootingEnds[0].end)
+		w.api.deleteObject(disruptionsPath, turnName)
+		w.settle()
+
+		if w.api.disruptionExists(turnName) {
+			t.Error("a request after the reboot, want none")
+		}
+	})
+}
+
 // A machine-operator that does not hold a turn reboots the machine and
 // marks the request Complete, and a person can delete the request. The
 // operator then writes nothing, and does not ask again on its own.
