@@ -372,7 +372,9 @@ the machine's `KEK` holds, such as `microsoft-dbx-x64` instead of
 | `the machine left its turn before the hold took effect: the Disruption ... is gone ...` | Someone deleted the `Disruption` before the hold. Approve again. |
 | `the append's SHA-256 is now ..., and the rehearsal recorded ...` | Another writer changed the machine's variables after the rehearsal, such as another operating system or the firmware's setup menu. Nothing was written. Approve again to rehearse against the variables as they are now. |
 | `the rehearsal before the write did not pass, so nothing was written: ...` | The rehearsal in the apply pod failed or was refused. The rest of the message is the rehearsal's, and the [rehearsal tables](#rehearsals) explain it. |
-| `the apply pod ended before the signal to write, so nothing was written: ...` | The apply pod stopped while it waited for the machine's turn, such as at a reboot of the machine or when the kernel killed it for memory. The rest of the message gives its last line or the pod's reason. The pod writes only after the signal, so the operator deletes the `Disruption`, and the machine leaves its turn with no reboot. Approve again. |
+| `the apply pod ended before the signal to write, so nothing was written: ...` | The apply pod stopped while it prepared or waited for the machine's turn, such as at a reboot of the machine or when the kernel killed it for memory. The rest of the message gives its last line or the pod's reason. The pod writes only after the signal, so the operator deletes the `Disruption`, if it filed one, and the machine leaves its turn with no reboot. Approve again. |
+| `the apply pod is gone before it prepared, so nothing was written, and the operator asked for no turn` | Someone deleted the apply pod, or the machine's drain for another turn evicted it, before it was `Ready`. Approve again. |
+| `marking the prepare as done: ..., so nothing was written` | The apply pod could not create its marker file in `/run/apply`, so its readiness probe could never pass. The rest of the message gives the error. |
 | `the variable ... changed while the apply waited for its turn, so nothing was written` | Another writer changed the variable after the apply pod prepared and before the signal, such as another operating system or the firmware's setup menu. Approve again to rehearse against the variable as it is now. |
 | `waiting for the signal to write: ..., so nothing was written` | The apply pod could not watch its annotations. The rest of the message gives the error. |
 | `clearing the immutable flag of ...: operation not permitted` | The pod lacks `CAP_LINUX_IMMUTABLE`. A policy of your cluster that removes capabilities from pods in `liken-system` causes this. |
@@ -412,16 +414,19 @@ kubectl get disruptions -l firmware.liken.sh/firmware=<name>
 - **The machine has no record.** Its rehearsal has not passed on the
   boot it runs. See [Rehearsals](#rehearsals). The operator also asks
   for no turn on a `liken` release that has no `Disruption` kind.
-- **The record is `Waiting`.** The apply pod has prepared, or still
-  prepares, and the machine waits for its turn. The pod runs on the
-  machine before the drain:
+- **The record is `Waiting` with no `disruption`.** The apply pod
+  prepares on the machine, and the operator asks for the turn when
+  the pod is `Ready`:
   `kubectl -n liken-system get pods -l firmware.liken.sh/apply=true`.
-  Its log ends with a line whose `phase` is `prepared` once it waits.
-  The pod mounts a host path, which the `baseline` Pod Security level
-  forbids, so a cluster that labels `liken-system` with a level below
-  `privileged` refuses it. Look for the refusal in the operator's log.
-  An
-  `APPROVED` of `False` means the machine's `rebootPolicy` is `Manual`,
+  The pod's log ends with a line whose `phase` is `prepared` once it
+  waits. A pod that is not `Ready` still prepares. The prepare has 10
+  minutes, and a pod that does not finish it ends `Failed`. The pod mounts a
+  host path, which the `baseline` Pod Security level forbids, so a
+  cluster that labels `liken-system` with a level below `privileged`
+  refuses it. Look for the refusal in the operator's log.
+- **The record is `Waiting` with a `disruption`.** The pod has
+  prepared, and the machine waits for its turn. An `APPROVED` of
+  `False` means the machine's `rebootPolicy` is `Manual`,
   and the request waits for you:
   [Apply the update](../approve-an-update/#apply-the-update) gives the
   command that approves it. A `GRANTED` of `False` means a budget has

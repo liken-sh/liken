@@ -31,8 +31,11 @@ const (
 	rehearsalDir = "/run/rehearsal"
 
 	// An apply reads its own annotations, which carry the operator's
-	// signal to write, from the downward API volume at signalDir.
-	signalDir = "/run/signal"
+	// signal to write, from the downward API volume at signalDir. It
+	// marks its finished prepare with the file preparedMarker, in a
+	// directory in memory, which the pod's readiness probe reads.
+	signalDir      = "/run/signal"
+	preparedMarker = "/run/apply/prepared"
 )
 
 func main() {
@@ -42,6 +45,14 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "apply" {
 		applyMain()
+		return
+	}
+	// The readiness probe of an apply pod: exit 0 when the apply's
+	// prepare passed, and 1 while it runs or after it failed.
+	if len(os.Args) > 1 && os.Args[1] == "prepared" {
+		if !isPrepared(preparedMarker) {
+			os.Exit(1)
+		}
 		return
 	}
 
@@ -80,7 +91,7 @@ func rehearseMain() {
 // wait has no bound.
 func applyMain() {
 	a := applierFromEnv(os.Getenv)
-	a.rehearser, a.store = rehearserIn(a.rehearser), osVariableStore()
+	a.rehearser, a.store, a.marker = rehearserIn(a.rehearser), osVariableStore(), preparedMarker
 	a.signal = func(ctx context.Context) error { return awaitSignal(ctx, signalDir, inotifyWatch) }
 	if err := emit(os.Stdout, a.apply(context.Background(), os.Stdout)); err != nil {
 		fmt.Fprintln(os.Stderr, "writing the result:", err)

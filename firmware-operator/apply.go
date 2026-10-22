@@ -7,18 +7,21 @@ package main
 //
 //  1. The operator starts the apply pod (applypod.go), which prepares
 //     the write while the cluster is whole and then waits for the
-//     signal to write. The operator files a Disruption with spec.hold,
-//     and records the machine as Waiting.
-//  2. machine-operator drains the machine and sets Held. The operator
+//     signal to write, and records the machine as Waiting.
+//  2. The pod's prepare is done, and its readiness probe turns it
+//     Ready. The operator files a Disruption with spec.hold, and names
+//     it in the record. A pod that ends or is gone before then asks for
+//     no turn.
+//  3. machine-operator drains the machine and sets Held. The operator
 //     sends the apply pod the signal (applyfollow.go), and records
 //     Writing. A pod that is gone by then, such as one that a drain
 //     evicted, is started again with the signal.
-//  3. The pod ends. Written removes spec.hold, so the turn reboots the
+//  4. The pod ends. Written removes spec.hold, so the turn reboots the
 //     machine. Refused and Failed, which wrote nothing, delete the
 //     Disruption, so the machine leaves its turn without a reboot it does
 //     not need. Uncertain, an end that does not say whether the append
 //     was written, removes spec.hold too.
-//  4. The machine's next scan reads the approved version, the machine
+//  5. The machine's next scan reads the approved version, the machine
 //     is no longer pending, and Approved moves to Installed (approval.go).
 //
 // A pod that ends before the signal wrote nothing, so its record is
@@ -58,10 +61,12 @@ type applyRecord struct {
 	Version       string `json:"version"`
 	CabinetSHA256 string `json:"cabinetSHA256"`
 	SHA256        string `json:"sha256"`
-	Disruption    string `json:"disruption"`
-	Result        string `json:"result"`
-	Message       string `json:"message,omitempty"`
-	Time          string `json:"time"`
+	// Disruption is empty until the apply pod is Ready and the
+	// operator asked for the turn.
+	Disruption string `json:"disruption,omitempty"`
+	Result     string `json:"result"`
+	Message    string `json:"message,omitempty"`
+	Time       string `json:"time"`
 }
 
 // The results of an apply, beside resultRefused and resultFailed.
@@ -92,6 +97,7 @@ const reasonApplying = "Applying"
 
 // The reasons of the Events that change no condition.
 const (
+	reasonApplyPreparing = "ApplyPreparing"
 	reasonApplyRequested = "ApplyRequested"
 	reasonApplyStarted   = "ApplyStarted"
 	reasonApplyWritten   = "ApplyWritten"
@@ -136,6 +142,9 @@ func step(r applyRecord, result, message string, from ...string) applyStep {
 	switch result {
 	case resultWaiting:
 		n = notice{reason: reasonApplyRequested, message: about}
+		if r.Disruption == "" {
+			n.reason = reasonApplyPreparing
+		}
 	case resultWriting:
 		n = notice{reason: reasonApplyStarted, message: about}
 	case resultWritten:
@@ -149,10 +158,10 @@ func step(r applyRecord, result, message string, from ...string) applyStep {
 }
 
 // advanceApplies decides the steps of each pending machine that its
-// record and its turn allow: the apply pod and the request of a machine
-// whose rehearsal passed, the signal to a machine whose turn holds, and
-// the failure of a machine that left its turn or rebooted with the old
-// version.
+// record and its turn allow: the apply pod of a machine whose rehearsal
+// passed, the request of a machine whose apply pod is Ready, the signal
+// to a machine whose turn holds, and the failure of a machine that left
+// its turn or rebooted with the old version.
 func (o *operator) advanceApplies(f *firmware, pending map[string]bool, w observed, catalogs map[string]*catalog, now time.Time) ([]applyStep, error) {
 	var steps []applyStep
 	var problems []error
@@ -162,7 +171,7 @@ func (o *operator) advanceApplies(f *firmware, pending map[string]bool, w observ
 		r, held := currentApply(f, name)
 		switch {
 		case !held:
-			s, err = o.requestTurn(f, name, w, catalogs)
+			s, err = o.startApply(f, name, w, catalogs)
 		case r.Result == resultWaiting:
 			s, err = o.followTurn(f, r, w.applies[f.Metadata.Name], catalogs, now)
 		case r.rebooting():
@@ -176,13 +185,12 @@ func (o *operator) advanceApplies(f *firmware, pending map[string]bool, w observ
 	return steps, errors.Join(problems...)
 }
 
-// requestTurn starts the apply pod of a machine whose rehearsal passed
-// on the boot it runs now, and files the request for its turn. The pod
-// goes first, so it prepares before the drain can begin, and a pod that
-// cannot start files no request. A cluster with no Disruption kind has
-// no turn to ask for, and the machine waits, as it does while its
+// startApply starts the apply pod of a machine whose rehearsal passed
+// on the boot it runs now. The request for the turn waits until the pod
+// is Ready (applyfollow.go). A cluster with no Disruption kind has no
+// turn to ask for, and the machine waits, as it does while its
 // FirmwareCatalog has no current file for the pod to load.
-func (o *operator) requestTurn(f *firmware, machine string, w observed, catalogs map[string]*catalog) (*applyStep, error) {
+func (o *operator) startApply(f *firmware, machine string, w observed, catalogs map[string]*catalog) (*applyStep, error) {
 	u := f.Spec.Update
 	rh, rehearsed := rehearsalRecord(f.Status.Rehearsals, machine)
 	m, known := w.fleet[machine]
@@ -194,26 +202,25 @@ func (o *operator) requestTurn(f *firmware, machine string, w observed, catalogs
 	if c == nil || c.Status.SHA256 == "" {
 		return nil, nil
 	}
-	r := applyRecord{Machine: machine, Boot: rh.Boot, Version: u.Version, CabinetSHA256: u.Cabinet.SHA256,
-		SHA256: rh.Append.SHA256, Disruption: disruptionName(f.Metadata.Name, machine)}
+	r := applyRecord{Machine: machine, Boot: rh.Boot, Version: u.Version, CabinetSHA256: u.Cabinet.SHA256, SHA256: rh.Append.SHA256}
 	p := buildApplyPod(f, attemptOfApply(f.Metadata.Name, r), rh, c, o.discovery.scanImage, o.namespace, time.Time{})
 	if err := o.createApplyPod(p); err != nil {
 		return nil, fmt.Errorf("starting the apply on %s: %w", machine, err)
 	}
-	if err := o.fileDisruption(buildDisruption(f, machine, updateSubject(f, machine))); err != nil {
-		return nil, fmt.Errorf("requesting the turn of %s: %w", machine, err)
-	}
-	s := step(r, resultWaiting, fmt.Sprintf("the apply pod %s prepares the write, and the Disruption %s asks for the machine's reboot turn, which holds after the drain for the write",
-		p.Metadata.Name, r.Disruption))
+	s := step(r, resultWaiting, fmt.Sprintf("the apply pod %s prepares the write; the operator asks for the machine's reboot turn when the pod is Ready", p.Metadata.Name))
 	return &s, nil
 }
 
 // followTurn answers the step of a machine that waits for its turn:
-// the signal once machine-operator holds the turn, and a failure when
-// the turn ended with no hold. A machine-operator that does not
-// support spec.hold reboots the machine at once and marks the request
-// Complete, and the operator then writes nothing.
+// the request once the apply pod is Ready, the signal once
+// machine-operator holds the turn, and a failure when the turn ended
+// with no hold. A machine-operator that does not support spec.hold
+// reboots the machine at once and marks the request Complete, and the
+// operator then writes nothing.
 func (o *operator) followTurn(f *firmware, r applyRecord, pods []pod, catalogs map[string]*catalog, now time.Time) (*applyStep, error) {
+	if r.Disruption == "" {
+		return o.requestWhenReady(f, r, pods)
+	}
 	d, err := o.readDisruption(r.Disruption)
 	if err != nil {
 		return nil, fmt.Errorf("reading the Disruption %s: %w", r.Disruption, err)

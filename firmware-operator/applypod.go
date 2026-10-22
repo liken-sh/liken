@@ -3,10 +3,13 @@ package main
 // An apply is one bare pod on a machine that writes an approved Secure
 // Boot database update to the machine's real variable (scan/apply.go).
 // It runs the scan image as `scan apply`. The drain of the machine's
-// turn can evict the cluster's DNS, so the pod starts when the operator
-// asks for the turn, while the cluster is whole, and does all its
-// network work then: it loads the catalog, downloads the cabinet, and
-// rehearses the install again. Then it waits on the machine. When
+// turn can evict the cluster's DNS, so the pod starts when the
+// machine's rehearsal passes, while the cluster is whole, and does all
+// its network work then: it loads the catalog, downloads the cabinet,
+// and rehearses the install again. When that prepare is done, its
+// readiness probe turns the pod Ready, and only then does the operator
+// ask for the turn, because on a machine with little to drain the turn
+// can hold within a second. The pod waits on the machine. When
 // machine-operator holds the turn after the drain (disruption.go), the
 // operator sends the signal: it sets the pod's annotation
 // firmware.liken.sh/write to go. The pod reads its own annotations
@@ -55,6 +58,15 @@ const (
 	writeAtKey = "firmware.liken.sh/write-at"
 	writeGo    = "go"
 	signalPath = "/run/signal"
+)
+
+// The readiness probe of an apply pod runs `scan prepared`, which
+// reads the marker that `scan apply` creates in preparedPath when its
+// prepare passed. scanBinary is the program's path in the scan image
+// (scan/Dockerfile), because a probe names its whole command.
+const (
+	preparedPath = "/run/apply"
+	scanBinary   = "/usr/local/bin/scan"
 )
 
 // cordonTaint is the taint that a cordon sets on a node.
@@ -173,6 +185,8 @@ func buildApplyPod(f *firmware, a applyAttempt, r rehearsal, c *catalog, image, 
 				// The copy of the rehearsal before the write, as in the
 				// rehearsal pod.
 				{Name: "rehearsal", EmptyDir: &emptyDir{Medium: "Memory", SizeLimit: "64Mi"}},
+				// The marker of the finished prepare.
+				{Name: "prepared", EmptyDir: &emptyDir{Medium: "Memory", SizeLimit: "1Mi"}},
 				// The pod's own annotations, which carry the signal.
 				{Name: "signal", DownwardAPI: &downwardAPIVolume{Items: []downwardAPIFile{
 					{Path: "annotations", FieldRef: fieldRef{FieldPath: "metadata.annotations"}},
@@ -199,8 +213,13 @@ func buildApplyPod(f *firmware, a applyAttempt, r rehearsal, c *catalog, image, 
 				VolumeMounts: []volumeMount{
 					{Name: "host-firmware", MountPath: hostFirmwarePath},
 					{Name: "rehearsal", MountPath: rehearsalPath},
+					{Name: "prepared", MountPath: preparedPath},
 					{Name: "signal", MountPath: signalPath},
 				},
+				// The probe is how the operator learns that the prepare
+				// is done: the kubelet sets Ready, and the watch of the
+				// pods delivers it, so the operator reads no log.
+				ReadinessProbe:           &probe{Exec: &execAction{Command: []string{scanBinary, "prepared"}}, PeriodSeconds: 2},
 				Resources:                &resources{Requests: map[string]string{"cpu": "10m", "memory": "64Mi"}},
 				TerminationMessagePolicy: "FallbackToLogsOnError",
 			}},

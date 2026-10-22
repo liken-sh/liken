@@ -5,7 +5,9 @@
 # `scan rehearse`, in a pod that is not privileged, it runs an approved
 # install against a copy of the machine's firmware variables. As
 # `scan apply`, in a pod that is not privileged either, it rehearses
-# again and writes the rehearsed append to the machine's variable. The image
+# again, waits for the operator's signal, and writes the rehearsed append
+# to the machine's variable, and as `scan prepared` it is that pod's
+# readiness probe. The image
 # is Ubuntu, not scratch, because fwupd links dozens of libraries and
 # reads plugin and quirk data from the files of its package.
 

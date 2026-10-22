@@ -550,12 +550,13 @@ spec:
                   type: array
                   description: >-
                     One record for each machine that an approval waits
-                    for and that asked for its reboot turn, after its
-                    rehearsal passed on the boot it runs. The operator
-                    starts an apply pod on the machine, which rehearses
-                    the install again while the cluster is whole and
-                    then waits. It files a `Disruption` with
-                    `spec.hold`, so the turn stops after the drain. When
+                    for and whose rehearsal passed on the boot it runs.
+                    The operator starts an apply pod on the machine,
+                    which rehearses the install again while the cluster
+                    is whole and then waits. When that prepare is done,
+                    the pod's readiness probe turns it `Ready`, and the
+                    operator files a `Disruption` with `spec.hold`, so
+                    the turn stops after the drain. When
                     the turn holds, the operator sets the pod's
                     annotation `firmware.liken.sh/write` to `go`, and
                     the pod writes the recorded append to the real
@@ -570,7 +571,7 @@ spec:
                     machine rehearses and asks for its turn again.
                   items:
                     type: object
-                    required: [machine, boot, version, cabinetSHA256, sha256, disruption, result, time]
+                    required: [machine, boot, version, cabinetSHA256, sha256, result, time]
                     properties:
                       machine:
                         type: string
@@ -589,30 +590,30 @@ spec:
                         description: "The SHA-256 of the append that the rehearsal recorded, which is the only append the apply writes."
                       disruption:
                         type: string
-                        description: "The `Disruption` that asks for the machine's reboot turn."
+                        description: "The `Disruption` that asks for the machine's reboot turn. It is absent while the apply pod prepares, because the operator files the request only when the pod is `Ready`."
                       result:
                         type: string
                         enum: [Waiting, Writing, Written, Uncertain, Refused, Failed]
                         description: >-
-                          `Waiting` while the apply pod prepares and
-                          waits, until `machine-operator` drains the
-                          machine and holds its turn. `Writing` after
-                          the operator sent the apply pod the signal to
-                          write. `Written` when the firmware
-                          took the append; the machine then reboots, and
-                          the record stays until its next scan.
-                          `Uncertain` when the apply pod ended after
-                          the signal without saying whether it wrote: it
-                          is gone, it ran past its deadline, which
-                          counts from the signal, or it crashed. The
-                          machine
-                          reboots in its turn all the same, and its next
-                          scan reads what the firmware holds.
-                          `Refused` when the firmware refused the
-                          append, which changes nothing. `Failed` when
-                          the apply could not run, the apply pod ended
-                          before the signal, the variables changed since
-                          the rehearsal, the machine left its turn before
+                          `Waiting` while the apply pod prepares, and
+                          then while it waits for `machine-operator`
+                          to drain the machine and hold its turn.
+                          `Writing` after the operator sent the apply
+                          pod the signal to write. `Written` when the
+                          firmware took the append; the machine then
+                          reboots, and the record stays until its next
+                          scan. `Uncertain` when the apply pod ended
+                          after the signal without saying whether it
+                          wrote: it is gone, it ran past its deadline,
+                          which counts from the signal, or it crashed.
+                          The machine reboots in its turn all the
+                          same, and its next scan reads what the
+                          firmware holds. `Refused` when the firmware
+                          refused the append, which changes nothing.
+                          `Failed` when the apply could not run, the
+                          apply pod ended or was gone before the
+                          signal, the variables changed since the
+                          rehearsal, the machine left its turn before
                           the hold, or the machine still reads the old
                           version after its reboot.
                       message:

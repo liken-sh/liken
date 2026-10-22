@@ -78,6 +78,7 @@ func newApplyRig(t *testing.T) *applyRig {
 	efivars := &fakeStore{held: immutableFlag, merged: []byte{1, 2, 3, 4, 5, 6, 7, 8}}
 	a := &applyRig{rig: r, efivars: efivars, arrives: func() error { return nil }}
 	a.applier = applier{rehearser: r.rehearser, appendSHA256: sum(authAppend), store: efivars.store(),
+		marker: filepath.Join(t.TempDir(), "prepared"),
 		signal: func(context.Context) error {
 			a.waited = a.progress.String()
 			if err := a.arrives(); err != nil {
@@ -158,6 +159,9 @@ func TestAnApplyWritesNothingWhenTheVariablesChanged(t *testing.T) {
 			if len(a.efivars.calls) != 0 || !slices.Equal(a.machineDBX(t), dbxBefore) {
 				t.Errorf("the apply touched the machine's dbx with %q", a.efivars.calls)
 			}
+			if isPrepared(a.marker) {
+				t.Error("the marker of a finished prepare exists, want none after a prepare that failed")
+			}
 		})
 	}
 }
@@ -231,6 +235,9 @@ func TestAnApplyWaitsForTheSignalBeforeItTouchesTheStore(t *testing.T) {
 		if len(a.efivars.calls) != 0 {
 			t.Errorf("the store saw %q before the signal, want nothing", a.efivars.calls)
 		}
+		if !isPrepared(a.marker) {
+			t.Error("the apply waits with no marker of its finished prepare, want the marker for the readiness probe")
+		}
 		if !slices.Equal(a.machineDBX(t), dbxBefore) {
 			t.Error("the machine's dbx changed before the signal")
 		}
@@ -298,6 +305,35 @@ func TestAVariableThatChangedDuringTheWaitIsNotWritten(t *testing.T) {
 	}
 	if want := []string{"signal"}; !slices.Equal(a.efivars.calls, want) {
 		t.Errorf("the calls are %q, want only the signal", a.efivars.calls)
+	}
+}
+
+// The readiness probe runs `scan prepared`, which answers whether the
+// marker exists.
+func TestIsPreparedReadsTheMarker(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "prepared")
+	if isPrepared(marker) {
+		t.Error("isPrepared answers true with no marker")
+	}
+	writeFile(t, marker, nil)
+	if !isPrepared(marker) {
+		t.Error("isPrepared answers false with the marker")
+	}
+}
+
+// A marker that cannot be written leaves the pod unready for good, so
+// the apply ends before it waits, and the operator asks for no turn.
+func TestAnApplyThatCannotMarkItsPrepareWritesNothing(t *testing.T) {
+	a := newApplyRig(t)
+	a.marker = filepath.Join(t.TempDir(), "absent", "prepared")
+
+	got := a.run()
+
+	if got.Result != resultFailed || !strings.HasPrefix(got.Message, "marking the prepare as done: ") || !strings.HasSuffix(got.Message, ", so nothing was written") {
+		t.Errorf("got %+v, want Failed with nothing written", got)
+	}
+	if a.waited != "" || len(a.efivars.calls) != 0 {
+		t.Errorf("the apply waited or touched the store with %q", a.efivars.calls)
 	}
 }
 

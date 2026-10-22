@@ -188,39 +188,47 @@ A Secure Boot database update takes effect at the machine's next
 boot, and the operator writes it while no workload runs on the
 machine. `liken` gives both through the machine's reboot turn. So as
 soon as a machine's rehearsal passes on the boot it runs, the operator
-starts an apply pod on that machine and asks for its turn. It files a
-`Disruption` with `spec.hold`, which stops the turn after the drain
-and before the reboot. You approve nothing more: the approval of the
+starts an apply pod on that machine, and when the pod has prepared,
+it asks for the machine's turn. It files a `Disruption` with
+`spec.hold`, which stops the turn after the drain and before the
+reboot. You approve nothing more: the approval of the
 release is the approval of the write.
 
 The drain can evict pods that the cluster's network needs, such as
 its DNS. So the apply pod does all its network work when it starts,
-while the cluster is whole, and then waits on the machine. It writes
-only when the operator sends it the signal, after the drain, and the
-write needs no network.
+while the cluster is whole, and the operator asks for the turn only
+after that work is done. On a machine with little to drain, the turn
+can hold within a second of the request. The pod then waits on the
+machine. It writes only when the operator sends it the signal, after
+the drain, and the write needs no network.
 
 The steps on each machine:
 
-1. **The apply pod and the request.** The operator starts an apply
-   pod in `liken-system` on the machine. The pod loads the catalog,
+1. **The prepare.** The operator starts an apply pod in
+   `liken-system` on the machine, and the record in `status.applies`
+   reads `Waiting`, with no `disruption`. The pod loads the catalog,
    downloads the cabinet, runs the rehearsal again against a fresh
    copy, and checks that the append has the SHA-256 in the record. A
    different SHA-256 means the variables changed since the rehearsal,
    and the pod writes nothing. Then the pod prints a line with
-   `"phase":"prepared"` to its log, and waits, with no deadline. The
-   operator also creates the `Disruption`
-   `<machine>.firmware-<firmware>`, with the requester
+   `"phase":"prepared"` to its log, creates the marker file
+   `/run/apply/prepared`, and waits, with no deadline. Its readiness
+   probe, `scan prepared`, finds the marker, and the pod turns `Ready`.
+   A pod that ends or is gone before it is `Ready` wrote nothing: the
+   record reads `Failed`, and the operator asks for no turn.
+2. **The request.** When the pod is `Ready`, the operator creates the
+   `Disruption` `<machine>.firmware-<firmware>`, with the requester
    `firmware.liken.sh/firmware-operator`, the kind `Reboot`, and
-   `spec.hold: true`. The machine's `MachineDisruptionBudget`s decide
-   when it gets its turn, the same as for a release. The record in
-   `status.applies` reads `Waiting`.
-2. **The hold.** `machine-operator` drains the machine, and sets the
+   `spec.hold: true`, and names it in the record. The machine's
+   `MachineDisruptionBudget`s decide when it gets its turn, the same
+   as for a release. The record still reads `Waiting`.
+3. **The hold.** `machine-operator` drains the machine, and sets the
    `Disruption`'s `Held` condition to `True` instead of rebooting. A
    hold has no deadline. The apply pod and the operator's own pod each
    tolerate the cordon, `node.kubernetes.io/unschedulable`, by its key,
    and a `liken` drain that skips such a pod leaves both on the
    machine.
-3. **The write.** The operator sends the apply pod the signal: it sets
+4. **The write.** The operator sends the apply pod the signal: it sets
    the pod's annotation `firmware.liken.sh/write` to `go`, and
    `firmware.liken.sh/write-at` to the time. The record reads
    `Writing`. The pod reads its annotations through a downward API
@@ -234,13 +242,13 @@ The steps on each machine:
    new one that carries the signal. That pod prepares on the drained
    machine, so it needs the cluster's DNS there, and then writes at
    once.
-4. **The reboot.** When the write succeeds, the record reads
+5. **The reboot.** When the write succeeds, the record reads
    `Written`, and the operator removes `spec.hold`. The turn goes on,
    and `machine-operator` reboots the machine. When the firmware
    refuses the write, or the write fails, the operator deletes the
    `Disruption` instead, and the machine leaves its turn with no
    reboot.
-5. **The proof.** The machine's first scan after the reboot reports
+6. **The proof.** The machine's first scan after the reboot reports
    the device's version. When it reads the approved version, the
    machine is no longer pending, its record leaves, the operator
    deletes the `Disruption`, and `Approved` moves to `Installed` once
@@ -319,9 +327,9 @@ release shows in `kubectl describe firmware <name>` and in
 `kubectl get events --field-selector type=Warning`. It also posts
 `RehearsalStarted` when a rehearsal pod starts, `RehearsalPassed` when
 one passes, and a `Warning` `RehearsalRefused` or `RehearsalFailed`
-when one does not. It posts `ApplyRequested` when it asks for a
-machine's turn and starts the apply pod, `ApplyStarted` when it sends
-the apply pod the signal to write,
+when one does not. It posts `ApplyPreparing` when it starts the apply
+pod, `ApplyRequested` when it asks for the machine's turn,
+`ApplyStarted` when it sends the apply pod the signal to write,
 `ApplyWritten` when the firmware took the append, a `Warning`
 `ApplyRefused` or `ApplyFailed` when it did not, and a `Warning`
 `ApplyUncertain` when the pod ended without saying.

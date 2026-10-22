@@ -28,6 +28,36 @@ func (o *operator) createApplyPod(p pod) error {
 	return err
 }
 
+// requestWhenReady files the request for the turn of a machine whose
+// apply pod is Ready, which means its prepare is done. A pod that ended
+// is left to applyEnds, which fails the record. A pod that is gone
+// before it was Ready wrote nothing, and its machine needs no turn. The
+// pass asks the API server whether the pod is gone, because the watch
+// can lag a pod that the operator created a moment ago.
+func (o *operator) requestWhenReady(f *firmware, r applyRecord, pods []pod) (*applyStep, error) {
+	name := applyPodName(attemptOfApply(f.Metadata.Name, r))
+	if i := slices.IndexFunc(pods, func(p pod) bool { return p.Metadata.Name == name }); i >= 0 {
+		p := pods[i]
+		if p.Metadata.DeletionTimestamp != "" || p.over() || !p.ready() {
+			return nil, nil
+		}
+		d := buildDisruption(f, r.Machine, updateSubject(f, r.Machine))
+		if err := o.fileDisruption(d); err != nil {
+			return nil, fmt.Errorf("requesting the turn of %s: %w", r.Machine, err)
+		}
+		r.Disruption = d.Metadata.Name
+		s := step(r, resultWaiting, fmt.Sprintf("the apply pod %s prepared the write, and the Disruption %s asks for the machine's reboot turn, which holds after the drain for the write",
+			name, r.Disruption), resultWaiting)
+		return &s, nil
+	}
+	gone, err := o.podGone(name)
+	if err != nil || !gone {
+		return nil, err
+	}
+	s := step(r, resultFailed, "the apply pod is gone before it prepared, so nothing was written, and the operator asked for no turn", resultWaiting)
+	return &s, nil
+}
+
 // signal sends the apply pod of a machine whose turn holds the signal
 // to write, and answers the step to Writing. A pod that ended, or whose
 // deletion started, is left to applyEnds and to the next pass. A pod
@@ -108,8 +138,10 @@ func (o *operator) applyEnds(f *firmware, pods []pod, now time.Time) ([]applySte
 			due = earliest(due, deadline)
 			continue
 		}
-		r := applyRecord{Machine: a.machine, Boot: a.boot, Version: a.version, CabinetSHA256: a.cabinet, SHA256: a.sha256,
-			Disruption: disruptionName(a.firmware, a.machine)}
+		r := applyRecord{Machine: a.machine, Boot: a.boot, Version: a.version, CabinetSHA256: a.cabinet, SHA256: a.sha256}
+		if held, found := applyRecordOf(f.Status.Applies, a.machine); found && a.is(held) {
+			r.Disruption = held.Disruption
+		}
 		steps = append(steps, step(r, result.Result, result.Message, resultWaiting, resultWriting))
 		finished = append(finished, p)
 	}

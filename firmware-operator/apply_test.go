@@ -20,12 +20,22 @@ import (
 // turnName is the request for node-2's turn that the BIOS object files.
 var turnName = disruptionName(biosObjectName, "node-2")
 
-// rehearsedWorld is approvedWorld after node-2's rehearsal passed, so
-// the operator has asked for node-2's turn, and the apply pod prepares
-// on node-2.
-func rehearsedWorld(t *testing.T) *world {
+// preparingWorld is approvedWorld after node-2's rehearsal passed, so
+// the apply pod runs on node-2 and prepares.
+func preparingWorld(t *testing.T) *world {
 	w := approvedWorld(t)
 	w.api.finishPod(t, w.onlyRehearsal(t).Metadata.Name, rehearsalContainer, podSucceeded, rehearsalLog(passed))
+	w.settle()
+	w.api.runPod(t, w.onlyApply(t).Metadata.Name, false)
+	w.settle()
+	return w
+}
+
+// rehearsedWorld is preparingWorld after the apply pod prepared and
+// turned Ready, so the operator has asked for node-2's turn.
+func rehearsedWorld(t *testing.T) *world {
+	w := preparingWorld(t)
+	w.api.readyPod(t, w.onlyApply(t).Metadata.Name)
 	w.settle()
 	return w
 }
@@ -489,6 +499,8 @@ func TestARestartDuringTheWriteFollowsThePod(t *testing.T) {
 		w.settle()
 		approve(t, w, "0.0.4.2", biosCabinet, nil)
 		w.api.finishPod(t, w.onlyRehearsal(t).Metadata.Name, rehearsalContainer, podSucceeded, rehearsalLog(passed))
+		w.settle()
+		w.api.readyPod(t, w.onlyApply(t).Metadata.Name)
 		w.settle()
 		// The API server refuses every status write until the first
 		// operator stops, so its record stays Waiting after its pod.

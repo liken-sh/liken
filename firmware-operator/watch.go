@@ -62,7 +62,7 @@ func (o *operator) run(ctx context.Context, watcher dynamic.Interface) {
 	rehearsalPods := start(informer.Source{Resource: podsResource, Namespace: o.namespace, LabelSelector: rehearsalLabel + "=" + rehearsalLabelValue},
 		markHandler(signal, podMark))
 	applyPods := start(informer.Source{Resource: podsResource, Namespace: o.namespace, LabelSelector: applyLabel + "=" + applyLabelValue},
-		markHandler(signal, podMark))
+		markHandler(signal, applyPodMark))
 	machines := start(informer.Source{Resource: machinesResource}, markHandler(signal, machineMark))
 	catalogs := start(informer.Source{Resource: catalogsResource}, markHandler(signal, catalogMark))
 	// A liken release older than the Disruption kind serves no such
@@ -153,6 +153,13 @@ func catalogMark(item catalog) string {
 // pass: its phase, its placement, and the start of its deletion.
 func podMark(item pod) string {
 	return fmt.Sprint(item.Status.Phase, item.scheduled(), item.Metadata.DeletionTimestamp)
+}
+
+// applyPodMark is podMark and the apply pod's Ready condition, which
+// turns True when the pod's prepare is done, so the pass then asks for
+// the machine's turn.
+func applyPodMark(item pod) string {
+	return fmt.Sprint(podMark(item), item.ready())
 }
 
 // machineMark is the part of a Machine that a pass reads: the labels

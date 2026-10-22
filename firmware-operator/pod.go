@@ -119,7 +119,19 @@ type container struct {
 	SecurityContext          *securityContext `json:"securityContext,omitempty"`
 	Resources                *resources       `json:"resources,omitempty"`
 	VolumeMounts             []volumeMount    `json:"volumeMounts,omitempty"`
+	ReadinessProbe           *probe           `json:"readinessProbe,omitempty"`
 	TerminationMessagePolicy string           `json:"terminationMessagePolicy,omitempty"`
+}
+
+// probe is a command that the kubelet runs in the container. An apply
+// pod's readiness probe reports that its prepare is done.
+type probe struct {
+	Exec          *execAction `json:"exec,omitempty"`
+	PeriodSeconds int32       `json:"periodSeconds,omitempty"`
+}
+
+type execAction struct {
+	Command []string `json:"command"`
 }
 
 type envVar struct {
@@ -185,9 +197,15 @@ const (
 // scheduled reports whether the scheduler placed the pod on its node.
 // The scheduler places a pod only after it allocated the pod's claim,
 // so a scheduled pod's claim exists.
-func (p pod) scheduled() bool {
+func (p pod) scheduled() bool { return p.conditionTrue("PodScheduled") }
+
+// ready reports whether every container of the pod passed its readiness
+// probe.
+func (p pod) ready() bool { return p.conditionTrue("Ready") }
+
+func (p pod) conditionTrue(kind string) bool {
 	for _, c := range p.Status.Conditions {
-		if c.Type == "PodScheduled" {
+		if c.Type == kind {
 			return c.Status == "True"
 		}
 	}

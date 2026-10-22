@@ -5,12 +5,15 @@ package main
 // asked for. It runs in a pod on the machine, which mounts
 // /sys/firmware read-write.
 //
-// The pod starts when the operator asks for the turn, while the
-// cluster is whole, and runs in two phases. The drain of the turn can
-// evict the cluster's DNS, so the first phase, the prepare, does all the
-// work that needs the network. The second phase writes with no network,
-// and starts only when the operator sends the signal (signal.go), once
-// the machine is drained and its turn holds. The pod's variable store
+// The pod runs in two phases. The drain of the machine's turn can evict
+// the cluster's DNS, so the first phase, the prepare, does all the work
+// that needs the network, before the operator asks for the turn. When
+// the prepare passes, the apply creates a marker file, and the pod's
+// readiness probe runs `scan prepared`, which reads it. So the pod turns
+// Ready when the prepare is done, and the operator then asks for the
+// turn. The second phase writes with no network, and starts only when
+// the operator sends the signal (signal.go), once the machine is drained
+// and its turn holds. The pod's variable store
 // is reachable only from the write, and the write runs only after the
 // wait for the signal returns, so nothing is written before the signal.
 //
@@ -100,18 +103,28 @@ type variableStore struct {
 type applier struct {
 	rehearser
 	appendSHA256 string // APPEND_SHA256, the append the rehearsal recorded
+	// marker is the file that the apply creates when its prepare
+	// passed, which the readiness probe reads.
+	marker string
 	// signal returns nil once the operator sent the signal to write,
 	// and an error when the wait ended without it.
 	signal func(ctx context.Context) error
 	store  variableStore
 }
 
+// isPrepared reports whether an apply's prepare passed: whether its
+// marker exists. `scan prepared` answers it for the readiness probe.
+func isPrepared(marker string) bool {
+	_, err := os.Stat(marker)
+	return err == nil
+}
+
 func applierFromEnv(getenv func(string) string) applier {
 	return applier{rehearser: rehearserFromEnv(getenv), appendSHA256: getenv("APPEND_SHA256")}
 }
 
-// apply prepares, prints its progress line, waits for the signal, and
-// writes. Every outcome is an ApplyResult for the operator to read.
+// apply prepares, prints its progress line, marks the prepare as done,
+// waits for the signal, and writes. Every outcome is an ApplyResult for the operator to read.
 // The prepare has the scan's time limit, because a working network
 // finishes it in seconds. The wait has none, because the turn can come
 // hours or days later, and the operator deletes the pod when the turn
@@ -127,6 +140,9 @@ func (a applier) apply(ctx context.Context, progress io.Writer) ApplyResult {
 		Message: fmt.Sprintf("the rehearsal passed with the recorded append to %s; the apply waits for the operator's signal to write", p.variable)}
 	if err := emit(progress, line); err != nil {
 		return applyFailed("printing the progress line: %v, so nothing was written", err)
+	}
+	if err := os.WriteFile(a.marker, nil, 0o644); err != nil {
+		return applyFailed("marking the prepare as done: %v, so nothing was written", err)
 	}
 	if err := a.signal(ctx); err != nil {
 		return applyFailed("waiting for the signal to write: %v, so nothing was written", err)

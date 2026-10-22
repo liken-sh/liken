@@ -1,10 +1,11 @@
 package main
 
-// These tests follow the apply pod from the request to the signal to
-// write: the pod that starts and prepares while the cluster is whole,
-// the signal that the operator sends once machine-operator holds the
-// turn, a pod that ends or is evicted before the signal, and the
-// deadline that counts from the signal.
+// These tests follow the apply pod from its start to the signal to
+// write: the pod that prepares while the cluster is whole, the request
+// for the turn that waits until the pod is Ready, the signal that the
+// operator sends once machine-operator holds the turn, a pod that ends
+// or is evicted before the signal, and the deadline that counts from
+// the signal.
 
 import (
 	"slices"
@@ -31,14 +32,40 @@ func volumeNamed(t *testing.T, spec podSpec, name string) (volume, volumeMount) 
 	return spec.Volumes[v], spec.Containers[0].VolumeMounts[m]
 }
 
-// The apply pod starts when the operator asks for the turn, while the
-// cluster is whole, so the drain can evict DNS without stopping the
-// apply. It stays on the machine through the drain, which skips a pod
-// that tolerates the cordon by its key, and it reads the signal from
-// its own annotations with no credentials.
-func TestTheApplyPodStartsWithTheRequest(t *testing.T) {
+// runPod plays the kubelet, which starts the apply pod's container and
+// sets the pod's Ready condition from its readiness probe.
+func (a *fakeAPI) runPod(t *testing.T, name string, ready bool) {
+	t.Helper()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	next := clone(a.objects[uploadPodsPath][name])
+	if next == nil {
+		t.Fatalf("there is no pod %s", name)
+	}
+	readiness := map[bool]string{true: "True", false: "False"}[ready]
+	next["status"] = map[string]any{"phase": "Running", "conditions": []any{
+		map[string]any{"type": "PodScheduled", "status": "True"},
+		map[string]any{"type": "Ready", "status": readiness},
+	}}
+	a.store(uploadPodsPath, next, "MODIFIED")
+}
+
+// readyPod plays the kubelet once the apply pod's readiness probe
+// passed.
+func (a *fakeAPI) readyPod(t *testing.T, name string) {
+	t.Helper()
+	a.runPod(t, name, true)
+}
+
+// The apply pod starts when the rehearsal passes, while the cluster is
+// whole, so the drain can evict DNS without stopping the apply. Its
+// readiness probe turns it Ready when the prepare is done. It stays on
+// the machine through the drain, which skips a pod that tolerates the
+// cordon by its key, and it reads the signal from its own annotations
+// with no credentials.
+func TestTheApplyPodStartsWhenTheRehearsalPasses(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		w := rehearsedWorld(t)
+		w := preparingWorld(t)
 
 		p := w.onlyApply(t)
 		spec := p.Spec
@@ -51,6 +78,14 @@ func TestTheApplyPodStartsWithTheRequest(t *testing.T) {
 		}
 		if spec.ActiveDeadlineSeconds != nil || spec.AutomountServiceAccountToken == nil || *spec.AutomountServiceAccountToken {
 			t.Errorf("the pod has the deadline %v and the token %v, want neither", spec.ActiveDeadlineSeconds, spec.AutomountServiceAccountToken)
+		}
+		probe := spec.Containers[0].ReadinessProbe
+		if probe == nil || probe.Exec == nil || !slices.Equal(probe.Exec.Command, []string{"/usr/local/bin/scan", "prepared"}) || probe.PeriodSeconds != 2 {
+			t.Errorf("the readiness probe is %+v, want scan prepared every 2 seconds", probe)
+		}
+		marker, markerMount := volumeNamed(t, spec, "prepared")
+		if marker.EmptyDir == nil || marker.EmptyDir.Medium != "Memory" || markerMount.MountPath != "/run/apply" {
+			t.Errorf("the marker's volume is %+v at %s, want a directory in memory at /run/apply", marker, markerMount.MountPath)
 		}
 		signal, signalMount := volumeNamed(t, spec, "signal")
 		if signal.DownwardAPI == nil || len(signal.DownwardAPI.Items) != 1 ||
@@ -80,7 +115,90 @@ func TestTheApplyPodStartsWithTheRequest(t *testing.T) {
 		if r := w.onlyApplyRecord(t); r.Result != resultWaiting || !strings.Contains(r.Message, p.Metadata.Name) {
 			t.Errorf("the record is %+v, want Waiting with the pod's name", r)
 		}
+		if got := w.postedAbout(biosObjectName); !containsPosted(got, posted{"Normal", reasonApplyPreparing}) {
+			t.Errorf("the operator posted %v, want a Normal ApplyPreparing", got)
+		}
 	})
+}
+
+// A drain that starts before the prepare is done can evict the DNS that
+// the prepare needs, so the operator asks for no turn while the pod
+// prepares.
+func TestNoRequestBeforeThePodIsReady(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := preparingWorld(t)
+		time.Sleep(time.Hour)
+		synctest.Wait()
+
+		if got := w.api.created(disruptionsPath); got != 0 {
+			t.Errorf("the operator filed %d requests, want none before the pod is Ready", got)
+		}
+		if r := w.onlyApplyRecord(t); r.Result != resultWaiting || r.Disruption != "" {
+			t.Errorf("the record is %+v, want Waiting with no Disruption", r)
+		}
+	})
+}
+
+// The pod's Ready condition is the only change when the prepare ends,
+// so the watch wakes the pass for it, and the pass files the request.
+func TestAReadyPodFilesTheRequest(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := preparingWorld(t)
+		w.api.readyPod(t, w.onlyApply(t).Metadata.Name)
+		w.settle()
+
+		if !w.api.disruptionExists(turnName) {
+			t.Fatal("no request, want the machine's turn asked for")
+		}
+		if r := w.onlyApplyRecord(t); r.Result != resultWaiting || r.Disruption != turnName {
+			t.Errorf("the record is %+v, want Waiting for the turn of %s", r, turnName)
+		}
+		if got := w.postedAbout(biosObjectName); !containsPosted(got, posted{"Normal", reasonApplyRequested}) {
+			t.Errorf("the operator posted %v, want a Normal ApplyRequested", got)
+		}
+	})
+}
+
+// A pod that ends or is gone before it is Ready wrote nothing, and the
+// machine needs no turn.
+func TestAPodThatEndsBeforeItIsReadyAsksForNoTurn(t *testing.T) {
+	cases := []struct {
+		name    string
+		end     func(t *testing.T, w *world, name string)
+		message string
+	}{
+		{"a failed prepare", func(t *testing.T, w *world, name string) {
+			w.api.finishPod(t, name, applyContainer, podSucceeded, applyLog(applyResult{Result: resultFailed,
+				Message: "the rehearsal before the write did not pass, so nothing was written: downloading the cabinet: lookup cdn.fwupd.org: no such host"}))
+		}, "the rehearsal before the write did not pass, so nothing was written: downloading the cabinet: lookup cdn.fwupd.org: no such host"},
+		{"a crash", func(t *testing.T, w *world, name string) {
+			w.api.finishPod(t, name, applyContainer, podFailed, "panic: runtime error\n")
+		}, "the apply pod ended before the signal to write, so nothing was written: the apply wrote no result; its last line was: panic: runtime error"},
+		{"a deleted pod", func(t *testing.T, w *world, name string) {
+			w.api.deleteObject(uploadPodsPath, name)
+		}, "the apply pod is gone before it prepared, so nothing was written, and the operator asked for no turn"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				w := preparingWorld(t)
+				c.end(t, w, w.onlyApply(t).Metadata.Name)
+				w.settle()
+				time.Sleep(time.Hour)
+				synctest.Wait()
+
+				if r := w.onlyApplyRecord(t); r.Result != resultFailed || r.Message != c.message {
+					t.Errorf("the record is %+v, want Failed: %s", r, c.message)
+				}
+				if got := w.api.created(disruptionsPath); got != 0 || len(w.api.applies(t)) != 0 {
+					t.Errorf("the operator filed %d requests and left %d apply pods, want neither", got, len(w.api.applies(t)))
+				}
+				if ac, _ := appliedOf(t, w); ac.Status != conditions.False || ac.Reason != resultFailed {
+					t.Errorf("Applied is %+v, want False with the reason Failed", ac)
+				}
+			})
+		})
+	}
 }
 
 func TestNoSignalBeforeTheTurnHolds(t *testing.T) {
