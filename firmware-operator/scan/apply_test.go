@@ -25,6 +25,10 @@ type fakeStore struct {
 	// fail answers an error for the call of that name, and restore for
 	// the setFlags call that sets the immutable flag again.
 	fail map[string]error
+	// failWrite answers an error for the write of that number, counted
+	// from 1, after the firmware accepted the writes before it.
+	failWrite map[int]error
+	writes    int
 }
 
 func (s *fakeStore) store() variableStore {
@@ -47,6 +51,10 @@ func (s *fakeStore) store() variableStore {
 		write: func(path string, data []byte) error {
 			s.calls = append(s.calls, fmt.Sprintf("write %d", len(data)))
 			if err := s.fail["write"]; err != nil {
+				return err
+			}
+			s.writes++
+			if err := s.failWrite[s.writes]; err != nil {
 				return err
 			}
 			held, _ := os.ReadFile(path)
@@ -110,12 +118,70 @@ func TestAnApplyWritesTheRehearsedAppendInOneWrite(t *testing.T) {
 	got := a.run()
 
 	want := ApplyResult{Result: resultWritten, Variable: dbxFile, SHA256: sum(authAppend), Before: 68, After: 76,
-		Message: "wrote the 36-byte append to " + dbxFile + ", which grew from 68 to 76 bytes; the firmware merges the signed list into the stored one"}
+		Message: "wrote the 128-byte append to " + dbxFile + ", which grew from 68 to 76 bytes; the firmware merges the signed lists into the stored ones"}
 	if got != want {
 		t.Errorf("got  %+v\nwant %+v", got, want)
 	}
-	if want := []string{"signal", "flags", "setFlags 0x0", "write 36", "setFlags 0x10"}; !slices.Equal(a.efivars.calls, want) {
+	if want := []string{"signal", "flags", "setFlags 0x0", "write 128", "setFlags 0x10"}; !slices.Equal(a.efivars.calls, want) {
 		t.Errorf("the calls are %q, want the signal, the flag cleared, one write, and the flag restored: %q", a.efivars.calls, want)
+	}
+}
+
+// newTwoWriteApplyRig is an applyRig whose install appends two
+// authenticated writes, as a cabinet of two payloads does.
+func newTwoWriteApplyRig(t *testing.T) *applyRig {
+	t.Helper()
+	a := newApplyRig(t)
+	a.rig.tool.effects["install"] = func() {
+		a.rig.appendTo(t, dbxFile, authAppend)
+		a.rig.appendTo(t, dbxFile, secondAppend)
+	}
+	a.appendSHA256 = sum(append(bytes.Clone(authAppend), secondAppend...))
+	return a
+}
+
+// The firmware verifies each write's signature over that write's own
+// lists, so the apply writes each one in its own call.
+func TestAnApplyWritesEachAuthenticatedWriteInItsOwnCall(t *testing.T) {
+	a := newTwoWriteApplyRig(t)
+
+	got := a.run()
+
+	if got.Result != resultWritten || got.Message != "wrote the 304-byte append to "+dbxFile+" in 2 authenticated writes, which grew from 68 to 84 bytes; the firmware merges the signed lists into the stored ones" {
+		t.Errorf("got %+v, want Written in 2 writes", got)
+	}
+	if want := []string{"signal", "flags", "setFlags 0x0", "write 128", "write 176", "setFlags 0x10"}; !slices.Equal(a.efivars.calls, want) {
+		t.Errorf("the calls are %q, want each write in its own call: %q", a.efivars.calls, want)
+	}
+}
+
+// A write the firmware accepted cannot be undone, so a later write that
+// fails leaves a changed variable, which the machine's kernel enforces
+// only after a reboot.
+func TestAnApplyThatStopsAfterAnAcceptedWriteIsUncertain(t *testing.T) {
+	a := newTwoWriteApplyRig(t)
+	a.efivars.failWrite = map[int]error{2: syscall.EACCES}
+
+	got := a.run()
+
+	want := "the firmware accepted 1 of the 2 authenticated writes to " + dbxFile + ", and write 2 failed: permission denied; the variable changed, so the machine must reboot"
+	if got.Result != resultUncertain || got.Message != want {
+		t.Errorf("got %+v, want Uncertain: %s", got, want)
+	}
+	if last := a.efivars.calls[len(a.efivars.calls)-1]; last != "setFlags 0x10" {
+		t.Errorf("the last call is %q, want the immutable flag restored", last)
+	}
+}
+
+// A refusal of the first write changed nothing, however many follow it.
+func TestTheFirmwaresRefusalOfTheFirstWriteIsRefused(t *testing.T) {
+	a := newTwoWriteApplyRig(t)
+	a.efivars.failWrite = map[int]error{1: syscall.EACCES}
+
+	got := a.run()
+
+	if got.Result != resultRefused || slices.Contains(a.efivars.calls, "write 176") {
+		t.Errorf("got %+v after the calls %q, want Refused with no second write", got, a.efivars.calls)
 	}
 }
 
@@ -125,7 +191,7 @@ func TestAnApplyLeavesAVariableWithNoImmutableFlagAlone(t *testing.T) {
 
 	a.run()
 
-	if want := []string{"signal", "flags", "write 36"}; !slices.Equal(a.efivars.calls, want) {
+	if want := []string{"signal", "flags", "write 128"}; !slices.Equal(a.efivars.calls, want) {
 		t.Errorf("the calls are %q, want %q", a.efivars.calls, want)
 	}
 }
@@ -211,7 +277,7 @@ func TestAnApplyFails(t *testing.T) {
 		{"no capability to clear the flag", map[string]error{"setFlags": syscall.EPERM},
 			"clearing the immutable flag of " + dbxFile + ": operation not permitted", []string{"signal", "flags", "setFlags 0x0"}},
 		{"a write the kernel refuses", map[string]error{"write": syscall.EIO},
-			"writing the append to " + dbxFile + ": input/output error", []string{"signal", "flags", "setFlags 0x0", "write 36", "setFlags 0x10"}},
+			"writing the append to " + dbxFile + ": input/output error", []string{"signal", "flags", "setFlags 0x0", "write 128", "setFlags 0x10"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

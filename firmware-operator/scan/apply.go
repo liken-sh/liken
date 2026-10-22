@@ -17,8 +17,9 @@ package main
 // is reachable only from the write, and the write runs only after the
 // wait for the signal returns, so nothing is written before the signal.
 //
-// The bytes the apply writes are the one append that the rehearsal
-// recorded, and only those. So the prepare runs the rehearsal again,
+// The bytes the apply writes are the authenticated writes that the
+// rehearsal recorded, and only those, each in its own write call and in
+// the rehearsal's order (authwrites.go). So the prepare runs the rehearsal again,
 // against a fresh copy in memory, and the apply writes nothing unless
 // the rehearsal passes with the same SHA-256 that the operator recorded.
 // A different SHA-256 means the machine's variables changed since the
@@ -27,10 +28,14 @@ package main
 // reads the variable again, and writes nothing unless it still holds
 // the bytes that the prepare's rehearsal extended.
 //
-// The firmware verifies the append's signature against KEK, or PK for
-// a KEK update, and merges the signed list into the stored one. So the
-// variable grows by less than the append, and an append that does not
-// verify changes nothing. A write cannot be undone.
+// The firmware verifies each write's signature against KEK, or PK for
+// a KEK update, and merges the signed lists into the stored ones. So the
+// variable grows by less than the append, and a write that does not
+// verify changes nothing. A write cannot be undone, so when the
+// firmware refuses or fails a write after it accepted an earlier one,
+// the variable has changed, and the apply answers Uncertain: the
+// operator reboots the machine in its turn, and the next scan reads
+// what the firmware holds.
 
 import (
 	"bytes"
@@ -43,11 +48,16 @@ import (
 	"syscall"
 )
 
-// resultWritten is an apply whose append the firmware accepted. The
-// other results of an apply are Refused, the firmware's refusal,
-// CatalogMoved, a prepare that found a catalog newer than the scan's,
-// and Failed, an apply that wrote nothing or could not finish.
-const resultWritten = "Written"
+// The results of an apply: Written, an apply whose every write the
+// firmware accepted, and Uncertain, an apply whose writes the firmware
+// accepted only in part. The others are Refused, the firmware's refusal
+// of the first write, CatalogMoved, a prepare that found a catalog newer
+// than the scan's, and Failed, an apply that wrote nothing or could not
+// finish.
+const (
+	resultWritten   = "Written"
+	resultUncertain = "Uncertain"
+)
 
 // immutableFlag is FS_IMMUTABLE_FL of linux/fs.h. efivarfs sets it on
 // every variable except the few it knows are safe to remove, so that a
@@ -153,12 +163,12 @@ func (a applier) apply(ctx context.Context, progress io.Writer) ApplyResult {
 
 // prepared is a rehearsal that passed with the recorded append: the
 // variable, its file in the machine's store, the bytes the rehearsal
-// copied from it, and the append.
+// copied from it, and the authenticated writes of the append.
 type prepared struct {
 	variable string
 	path     string
 	before   []byte
-	appended []byte
+	writes   [][]byte
 }
 
 // prepare rehearses again and checks the append. It is the rehearser's,
@@ -176,11 +186,12 @@ func (r rehearser) prepare(ctx context.Context, appendSHA256 string) (prepared, 
 			rehearsal.SHA256, appendSHA256), false
 	}
 	return prepared{variable: rehearsal.Variable, path: filepath.Join(r.hostDir, "efi", "efivars", rehearsal.Variable),
-		before: edit.before, appended: edit.appended}, ApplyResult{}, true
+		before: edit.before, writes: edit.writes}, ApplyResult{}, true
 }
 
 // write checks that the variable still holds what the prepare
-// extended, and writes the append.
+// extended, and writes each authenticated write of the append. It
+// stops at the first write that does not land.
 func (p prepared) write(store variableStore) ApplyResult {
 	before, err := os.ReadFile(p.path)
 	if err != nil {
@@ -200,7 +211,13 @@ func (p prepared) write(store variableStore) ApplyResult {
 			return applyFailed("clearing the immutable flag of %s: %v", p.variable, err)
 		}
 	}
-	written := store.write(p.path, p.appended)
+	accepted, written := 0, error(nil)
+	for _, w := range p.writes {
+		if written = store.write(p.path, w); written != nil {
+			break
+		}
+		accepted++
+	}
 	var restored error
 	if immutable {
 		restored = store.setFlags(p.path, flags)
@@ -208,6 +225,9 @@ func (p prepared) write(store variableStore) ApplyResult {
 
 	var result ApplyResult
 	switch {
+	case written != nil && accepted > 0:
+		result = ApplyResult{Result: resultUncertain, Message: fmt.Sprintf("the firmware accepted %d of the %d authenticated writes to %s, and write %d failed: %v; the variable changed, so the machine must reboot",
+			accepted, len(p.writes), p.variable, accepted+1, written)}
 	case errors.Is(written, syscall.EACCES):
 		result = ApplyResult{Result: resultRefused, Message: fmt.Sprintf("the firmware refused the append to %s: %v", p.variable, written)}
 	case written != nil:
@@ -224,14 +244,19 @@ func (p prepared) write(store variableStore) ApplyResult {
 // written answers the result of an append the firmware accepted, with
 // the variable's size before and after.
 func (p prepared) written(before int64) ApplyResult {
-	result := ApplyResult{Result: resultWritten, Variable: p.variable, SHA256: sum(p.appended), Before: before}
+	appended := bytes.Join(p.writes, nil)
+	result := ApplyResult{Result: resultWritten, Variable: p.variable, SHA256: sum(appended), Before: before}
+	what := fmt.Sprintf("the %d-byte append to %s", len(appended), p.variable)
+	if len(p.writes) > 1 {
+		what += fmt.Sprintf(" in %d authenticated writes", len(p.writes))
+	}
 	after, err := os.ReadFile(p.path)
 	if err != nil {
-		result.Message = fmt.Sprintf("wrote the %d-byte append to %s, and reading it back failed: %v", len(p.appended), p.variable, err)
+		result.Message = fmt.Sprintf("wrote %s, and reading it back failed: %v", what, err)
 		return result
 	}
 	result.After = int64(len(after))
-	result.Message = fmt.Sprintf("wrote the %d-byte append to %s, which grew from %d to %d bytes; the firmware merges the signed list into the stored one",
-		len(p.appended), p.variable, result.Before, result.After)
+	result.Message = fmt.Sprintf("wrote %s, which grew from %d to %d bytes; the firmware merges the signed lists into the stored ones",
+		what, result.Before, result.After)
 	return result
 }

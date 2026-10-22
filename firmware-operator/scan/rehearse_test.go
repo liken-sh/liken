@@ -24,9 +24,9 @@ var (
 	// dbxBefore is a variable file as efivarfs shows it: the attributes
 	// of a stored dbx, then its signature lists.
 	dbxBefore = append([]byte{0x27, 0, 0, 0}, bytes.Repeat([]byte{0xaa}, 64)...)
-	// authAppend is what fwupd appends to the copy: the attributes of an
-	// authenticated append, then the signed payload.
-	authAppend = append([]byte{0x67, 0, 0, 0}, bytes.Repeat([]byte{0xbb}, 32)...)
+	// authAppend is what fwupd appends to the copy for a payload of one
+	// signature list: one authenticated write.
+	authAppend = authWrite(signatureList(0xbb, 1))
 )
 
 // rehearsalRig is a rehearser over a machine's /sys/firmware in a
@@ -88,7 +88,30 @@ func TestARehearsalPassesOneAuthenticatedAppend(t *testing.T) {
 
 	want := RehearsalResult{
 		Result: resultPassed, Variable: dbxFile, Bytes: int64(len(authAppend)), SHA256: sum(authAppend), Free: 65536,
-		Message: "the install appends 36 bytes to " + dbxFile + ", and the variable store has 65536 bytes free",
+		Message: "the install appends 128 bytes to " + dbxFile + ", and the variable store has 65536 bytes free",
+	}
+	if got != want {
+		t.Errorf("got  %+v\nwant %+v", got, want)
+	}
+}
+
+// secondAppend is a second payload of a cabinet, such as the option ROM
+// db beside the third-party db, which fwupd writes after the first.
+var secondAppend = authWrite(signatureList(0xcc, 2))
+
+func TestARehearsalPassesSeveralAuthenticatedWrites(t *testing.T) {
+	r := newRehearsalRig(t)
+	r.tool.effects["install"] = func() {
+		r.appendTo(t, dbxFile, authAppend)
+		r.appendTo(t, dbxFile, secondAppend)
+	}
+
+	got := r.rehearse(context.Background())
+
+	both := append(bytes.Clone(authAppend), secondAppend...)
+	want := RehearsalResult{
+		Result: resultPassed, Variable: dbxFile, Bytes: int64(len(both)), SHA256: sum(both), Free: 65536,
+		Message: "the install appends 304 bytes to " + dbxFile + " in 2 authenticated writes, and the variable store has 65536 bytes free",
 	}
 	if got != want {
 		t.Errorf("got  %+v\nwant %+v", got, want)
@@ -149,6 +172,9 @@ func TestARehearsalRefuses(t *testing.T) {
 		{"an append that is not authenticated", func(t *testing.T, r *rehearsalRig) {
 			r.appendTo(t, dbxFile, append([]byte{0x47, 0, 0, 0}, 1, 2, 3))
 		}, "the append to " + dbxFile + " has the attributes 0x47, which are not an authenticated append"},
+		{"an append that is not a sequence of authenticated writes", func(t *testing.T, r *rehearsalRig) {
+			r.appendTo(t, dbxFile, authAppend[:100])
+		}, "the append to " + dbxFile + " is not a sequence of authenticated writes: the signature list at byte 52 of write 1 states 76 bytes, and 48 remain"},
 		{"no change", func(*testing.T, *rehearsalRig) {}, "the install did not change " + dbxFile},
 	}
 	for _, c := range cases {
@@ -171,7 +197,7 @@ func TestARehearsalRefusesAnAppendTheStoreHasNoRoomFor(t *testing.T) {
 
 	got := r.rehearse(context.Background())
 
-	if got.Result != resultRefused || got.Message != "the append to "+dbxFile+" needs 32 bytes, and the variable store has 16 free" {
+	if got.Result != resultRefused || got.Message != "the append to "+dbxFile+" needs 124 bytes, and the variable store has 16 free" {
 		t.Errorf("got %+v, want Refused for the free space", got)
 	}
 }

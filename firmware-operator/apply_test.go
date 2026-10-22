@@ -274,6 +274,10 @@ func TestAnUncertainWriteRebootsTheMachine(t *testing.T) {
 		{"an answer the operator does not know", func(t *testing.T, w *world, name string) {
 			w.api.finishPod(t, name, applyContainer, podSucceeded, applyLog(applyResult{Result: "Maybe", Message: "?"}))
 		}, `the apply answered the result "Maybe", which the operator does not know`},
+		{"a firmware that accepted only some of the writes", func(t *testing.T, w *world, name string) {
+			w.api.finishPod(t, name, applyContainer, podSucceeded, applyLog(applyResult{Result: resultUncertain,
+				Message: "the firmware accepted 1 of the 2 authenticated writes to db, and write 2 failed: permission denied"}))
+		}, "the firmware accepted 1 of the 2 authenticated writes to db"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

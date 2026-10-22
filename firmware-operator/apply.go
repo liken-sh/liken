@@ -20,7 +20,8 @@ package main
 //     machine. Refused and Failed, which wrote nothing, delete the
 //     Disruption, so the machine leaves its turn without a reboot it does
 //     not need. Uncertain, an end that does not say whether the append
-//     was written, removes spec.hold too.
+//     was written, or an append that the firmware accepted only in
+//     part, removes spec.hold too.
 //  5. The machine's next scan reads the approved version, the machine
 //     is no longer pending, and Approved moves to Installed (approval.go).
 //

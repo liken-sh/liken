@@ -273,7 +273,8 @@ func (o *operator) judgeUnsignalled(p pod) (applyResult, bool, time.Time, error)
 }
 
 // answerOf reads the log of an apply pod that ended: the pod's own
-// answer, or why there is none. The progress line that the pod prints
+// answer, or why there is none. The pod answers Uncertain itself when
+// the firmware accepted some of its writes and not the rest. The progress line that the pod prints
 // before it waits has no result, so it is never the answer. CatalogMoved
 // is an answer after the signal too, because a pod that the operator
 // started with the signal prepares after it.
@@ -284,7 +285,7 @@ func answerOf(p pod, log string) (applyResult, string) {
 		return applyResult{}, "the apply wrote no result; its last line was: " + last
 	case !found:
 		return applyResult{}, podFailure(p, "apply", applyContainer)
-	case result.Result == resultWritten || result.Result == resultRefused || result.Result == resultFailed || result.Result == resultCatalogMoved:
+	case slices.Contains([]string{resultWritten, resultUncertain, resultRefused, resultFailed, resultCatalogMoved}, result.Result):
 		return result, ""
 	}
 	return applyResult{}, fmt.Sprintf("the apply answered the result %q, which the operator does not know", result.Result)

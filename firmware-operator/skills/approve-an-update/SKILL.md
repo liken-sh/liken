@@ -163,12 +163,15 @@ liken-1   Passed   the install appends 17260 bytes to dbx-d719b2cb-3d3a-4596-a3b
 ```
 
 A Secure Boot database update, such as a `dbx` update, passes when the
-install writes one authenticated append to its own variable and
-nothing else, and the variable store has room for it. The record's
-`append` gives the variable, the length of the write, and its SHA-256.
-The firmware verifies the append's signature and merges the new
-entries into the list at the write, so the variable grows by less than
-the append.
+install writes authenticated appends to its own variable and nothing
+else, and the variable store has room for them. fwupd writes one
+authenticated append for each payload in the cabinet. A `db` update of
+the third-party and option ROM certificates holds two, and the
+message then gives the number of writes. The record's `append` gives
+the variable, the length of all the writes together, and their
+SHA-256. The firmware verifies the signature of each write and merges
+its new entries into the list, so the variable grows by less than the
+append.
 
 The `Rehearsed` condition sums the records, and the `REHEARSED` column
 shows it:
@@ -176,7 +179,7 @@ shows it:
 | Status | Reason | Meaning |
 |---|---|---|
 | `True` | `Passed` | The install passed its rehearsal on every machine the approval waits for. |
-| `False` | `Refused` | The install would write more than one authenticated append, such as a boot variable or a file on the ESP, or the store has no room. A capsule update, such as a board's UEFI firmware, is refused for now. |
+| `False` | `Refused` | The install would write something other than authenticated appends to its own variable, such as a boot variable or a file on the ESP, or the store has no room. A capsule update, such as a board's UEFI firmware, is refused for now. |
 | `False` | `Failed` | A rehearsal could not run, such as a cabinet whose SHA-256 is not the one you pinned. |
 | `Unknown` | `Rehearsing` | A machine waits for its rehearsal. |
 
@@ -235,10 +238,11 @@ The steps on each machine:
    `Writing`. The pod reads its annotations through a downward API
    volume, so it needs no credentials. It reads the variable again,
    and writes nothing when the variable changed while the pod waited.
-   Then it writes the append to the machine's variable in one write,
-   and reads the variable back. The firmware verifies the append's
-   signature, and merges the new entries into the list, so the
-   variable grows by less than the append. When the apply pod is gone
+   Then it writes each authenticated write of the append to the
+   machine's variable, in fwupd's order and each in its own write
+   call, and reads the variable back. The firmware verifies each
+   write's signature over that write's own entries, and merges them
+   into the list, so the variable grows by less than the append. When the apply pod is gone
    at the hold, such as when a drain evicted it, the operator starts a
    new one that carries the signal. That pod prepares on the drained
    machine, so it needs the cluster's DNS there, and then writes at
@@ -283,9 +287,9 @@ shows it:
 | Status | Reason | Meaning |
 |---|---|---|
 | `True` | `Written` | The firmware took the update on every machine the approval waits for. Each machine applies it at its reboot. |
-| `False` | `Refused` | The firmware refused the append on a machine, and nothing changed there. |
+| `False` | `Refused` | The firmware refused the first write of the append on a machine, and nothing changed there. |
 | `False` | `Failed` | A write could not run, an apply pod ended before the signal to write, a machine left its turn before the hold, or a machine still reads the old version after its reboot. |
-| `Unknown` | `Uncertain` | The apply pod on a machine ended after the signal without saying whether it wrote. The machine reboots in its turn, and its next scan answers. |
+| `Unknown` | `Uncertain` | The apply pod on a machine ended after the signal without saying whether it wrote, or the firmware accepted some of the writes of an append and not the rest. The machine reboots in its turn, and its next scan answers. |
 | `Unknown` | `Applying` | A machine waits for its rehearsal, its turn, or its write. |
 
 An apply pod that ends before the signal wrote nothing, because the
@@ -294,7 +298,9 @@ operator deletes the `Disruption`, so the machine leaves its turn with
 no reboot. When the operator cannot tell whether an append was
 written, because the apply pod with the signal was deleted, ran past
 its deadline of 10 minutes from the signal, or crashed, it does not
-withdraw the turn. A write may have landed before the pod stopped,
+withdraw the turn. The same is true when the firmware accepted a write
+of the append and then refused or failed a later one, because the
+variable changed. A write may have landed before the pod stopped,
 and the kernel enforces it only after a reboot, so the machine reboots
 in the same turn. The next scan then reads the version: the approved
 one ends the record, and the old one makes it `Failed`.

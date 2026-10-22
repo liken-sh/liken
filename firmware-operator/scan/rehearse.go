@@ -9,9 +9,10 @@ package main
 // store takes none. The pod mounts /sys/firmware read-only, so a
 // rehearsal that goes wrong still cannot write the real store.
 //
-// A rehearsal covers the Secure Boot databases alone. Each of them is
-// one authenticated append to its own variable, which the firmware
-// verifies against KEK or PK and merges into the list. A capsule
+// A rehearsal covers the Secure Boot databases alone. An update of
+// each of them is one or more authenticated appends to its own
+// variable, which the firmware verifies against KEK or PK and merges
+// into the list (authwrites.go). A capsule
 // writes boot variables that liken's init owns, and waits for liken's
 // milestone 33.
 
@@ -59,8 +60,8 @@ const (
 const reloadFailure = "SignatureListSize invalid"
 
 // The results of a rehearsal beside Failed and CatalogMoved: Passed is
-// an install that wrote one authenticated append to its device's own
-// variable, with room for it in the store, and Refused is an install
+// an install that wrote authenticated appends to its device's own
+// variable, with room for them in the store, and Refused is an install
 // that would write anything else.
 const (
 	resultPassed  = "Passed"
@@ -68,8 +69,9 @@ const (
 )
 
 // RehearsalResult is the one line of JSON that a rehearsal prints.
-// Bytes and SHA256 describe the append as the write would write it: the
-// four attribute bytes and the authenticated payload.
+// Bytes and SHA256 describe the append as the apply writes it: each
+// authenticated write's four attribute bytes and payload, one write
+// after the other.
 type RehearsalResult struct {
 	Result   string `json:"result"`
 	Message  string `json:"message"`
@@ -116,10 +118,11 @@ func (r rehearser) rehearse(ctx context.Context) RehearsalResult {
 }
 
 // rehearsedAppend is the bytes of a passed rehearsal: the variable as
-// the rehearsal copied it, and the append that the install made to it.
+// the rehearsal copied it, and the authenticated writes that the
+// install appended to it, in order.
 type rehearsedAppend struct {
-	before   []byte
-	appended []byte
+	before []byte
+	writes [][]byte
 }
 
 // rehearseAppend is rehearse, and answers the bytes of a passed
@@ -176,8 +179,8 @@ func (r rehearser) rehearseAppend(ctx context.Context) (RehearsalResult, rehears
 		return rehearsalFailed("reading the ESP path: %v", err), rehearsedAppend{}
 	}
 
-	appended, refusal := judge(variable, before, after, written)
-	if installErr != nil && (appended == nil || !strings.Contains(lastLine(stderr), reloadFailure)) {
+	writes, refusal := judge(variable, before, after, written)
+	if installErr != nil && (writes == nil || !strings.Contains(lastLine(stderr), reloadFailure)) {
 		return rehearsalFailed("fwupdtool install: %s", lastLine(stderr)), rehearsedAppend{}
 	}
 	if refusal != "" {
@@ -187,22 +190,27 @@ func (r rehearser) rehearseAppend(ctx context.Context) (RehearsalResult, rehears
 	if err != nil {
 		return rehearsalFailed("reading the free space of the variable store: %v", err), rehearsedAppend{}
 	}
+	appended := bytes.Join(writes, nil)
 	result := RehearsalResult{Variable: variable, Bytes: int64(len(appended)), SHA256: sum(appended), Free: free}
-	if payload := int64(len(appended) - 4); payload > free {
+	if payload := int64(len(appended) - 4*len(writes)); payload > free {
 		result.Result = resultRefused
 		result.Message = fmt.Sprintf("the append to %s needs %d bytes, and the variable store has %d free", variable, payload, free)
 		return result, rehearsedAppend{}
 	}
 	result.Result = resultPassed
 	result.Message = fmt.Sprintf("the install appends %d bytes to %s, and the variable store has %d bytes free", len(appended), variable, free)
-	return result, rehearsedAppend{before: before[variable], appended: appended}
+	if len(writes) > 1 {
+		result.Message = fmt.Sprintf("the install appends %d bytes to %s in %d authenticated writes, and the variable store has %d bytes free",
+			len(appended), variable, len(writes), free)
+	}
+	return result, rehearsedAppend{before: before[variable], writes: writes}
 }
 
 // judge checks the difference that an install made in the copy against
-// what a Secure Boot database update may write: one authenticated
-// append to its own variable, and nothing else. It answers the append,
-// or a refusal that says what else the install wrote.
-func judge(variable string, before, after map[string][]byte, written []string) ([]byte, string) {
+// what a Secure Boot database update may write: authenticated appends
+// to its own variable, and nothing else. It answers the appends, or a
+// refusal that says what else the install wrote.
+func judge(variable string, before, after map[string][]byte, written []string) ([][]byte, string) {
 	if len(written) > 0 {
 		return nil, fmt.Sprintf("the install wrote %s under the ESP path", strings.Join(written, ", "))
 	}
@@ -233,7 +241,11 @@ func judge(variable string, before, after map[string][]byte, written []string) (
 	if attributes&attrAppendWrite == 0 || attributes&attrTimeBasedAuth == 0 {
 		return nil, fmt.Sprintf("the append to %s has the attributes 0x%x, which are not an authenticated append", variable, attributes)
 	}
-	return appended, ""
+	writes, err := splitWrites(appended)
+	if err != nil {
+		return nil, fmt.Sprintf("the append to %s is not a sequence of authenticated writes: %v", variable, err)
+	}
+	return writes, ""
 }
 
 func sortedNames(sets ...map[string][]byte) []string {

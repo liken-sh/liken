@@ -302,6 +302,7 @@ The install would write something that the operator does not apply:
 | `the install wrote ... under the ESP path` | The install stages a file on the ESP. |
 | `the install rewrote ... instead of appending to it` | The install replaces the list instead of appending to it. |
 | `the append to ... has the attributes ...` | The write is not an authenticated append, so the firmware would check no signature. |
+| `the append to ... is not a sequence of authenticated writes: ...` | The bytes that the install appended do not split into authenticated writes, each a header, a PKCS7 certificate, and signature lists. The apply writes each one in its own call, so it cannot write bytes it cannot split. The rest of the message names the first byte that is not part of a write. |
 | `the install did not change ...` | The device already holds the release's entries. |
 | `the append to ... needs ... bytes, and the variable store has ... free` | The machine's variable store is too full for the write. |
 
@@ -400,7 +401,8 @@ machine.
 ### Applied is Unknown with Uncertain
 
 The apply pod ended after the signal to write without saying whether
-it wrote. A write may have landed before it stopped, so the operator removes the hold, the
+it wrote, or the firmware accepted only some of the writes of the
+append. A write may have landed, so the operator removes the hold, the
 machine reboots in its turn, and the next scan reads the version. The
 record then ends, or turns `Failed` when the machine still reads the
 old version.
@@ -411,6 +413,7 @@ old version.
 | `the apply pod did not finish within 10m0s of the signal to write` | The pod hung after the signal, or a pod that the operator started at the hold never ran, such as an image that does not pull. Check `kubectl -n liken-system get events`. |
 | `the apply wrote no result; its last line was: ...` or `the apply pod wrote no log: ...` | The apply program crashed. The message holds its last line, or the pod's reason. |
 | `the apply answered the result ..., which the operator does not know` | The scan image and the operator are from different releases. Pin both to one tag. |
+| `the firmware accepted ... of the ... authenticated writes to ..., and write ... failed: ...` | The firmware took the first writes of the append and refused or failed the one the message names. `permission denied` is a signature that does not chain to `KEK`, as in [Applied is False with Refused](#applied-is-false-with-refused). The next scan reads which entries the variable holds. |
 
 ### Applied stays Unknown
 
