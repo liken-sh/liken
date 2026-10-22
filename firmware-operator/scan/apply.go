@@ -181,6 +181,9 @@ func (r rehearser) prepare(ctx context.Context, appendSHA256 string) (prepared, 
 	if rehearsal.Result != resultPassed {
 		return prepared{}, applyFailed("the rehearsal before the write did not pass, so nothing was written: %s", rehearsal.Message), false
 	}
+	if rehearsal.Writes != nil {
+		return prepared{}, applyFailed("the rehearsal passed a capsule, and an apply covers only the Secure Boot databases, so nothing was written"), false
+	}
 	if rehearsal.SHA256 != appendSHA256 {
 		return prepared{}, applyFailed("the append's SHA-256 is now %s, and the rehearsal recorded %s: the machine's variables changed since the rehearsal, so nothing was written",
 			rehearsal.SHA256, appendSHA256), false

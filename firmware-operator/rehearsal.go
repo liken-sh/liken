@@ -32,27 +32,47 @@ import (
 
 // rehearsal is one machine's record in status.rehearsals.
 type rehearsal struct {
-	Machine       string        `json:"machine"`
-	Boot          string        `json:"boot"`
-	DeviceID      string        `json:"deviceId"`
-	Version       string        `json:"version"`
-	CabinetSHA256 string        `json:"cabinetSHA256"`
-	Catalog       string        `json:"catalog"`
-	File          string        `json:"file"`
-	Result        string        `json:"result"`
-	Message       string        `json:"message,omitempty"`
-	Append        *variableEdit `json:"append,omitempty"`
-	Free          int64         `json:"free,omitempty"`
-	Time          string        `json:"time"`
+	Machine       string         `json:"machine"`
+	Boot          string         `json:"boot"`
+	DeviceID      string         `json:"deviceId"`
+	Version       string         `json:"version"`
+	CabinetSHA256 string         `json:"cabinetSHA256"`
+	Catalog       string         `json:"catalog"`
+	File          string         `json:"file"`
+	Result        string         `json:"result"`
+	Message       string         `json:"message,omitempty"`
+	Append        *variableEdit  `json:"append,omitempty"`
+	Capsule       *capsuleRecord `json:"capsule,omitempty"`
+	Free          int64          `json:"free,omitempty"`
+	Time          string         `json:"time"`
 }
 
-// variableEdit is the one authenticated append that a passed
-// rehearsal recorded: the variable, and the bytes the write writes,
-// which are the four attribute bytes and the signed payload.
+// variableEdit is the append that a passed rehearsal of a Secure Boot
+// database update recorded: the variable, and the bytes the apply
+// writes, which are each authenticated write's four attribute bytes
+// and its signed payload.
 type variableEdit struct {
 	Variable string `json:"variable"`
 	Bytes    int64  `json:"bytes"`
 	SHA256   string `json:"sha256"`
+}
+
+// capsuleRecord is what a passed rehearsal of a capsule recorded: each
+// variable and file that fwupd wrote to the copies, the bytes of the
+// files, the digest of the writes, and the free space of the ESP of the
+// machine's next boot.
+type capsuleRecord struct {
+	Writes  []capsuleWrite `json:"writes"`
+	Bytes   int64          `json:"bytes"`
+	SHA256  string         `json:"sha256"`
+	ESPFree int64          `json:"espFree"`
+}
+
+type capsuleWrite struct {
+	Kind   string `json:"kind"`
+	Name   string `json:"name"`
+	Bytes  int64  `json:"bytes"`
+	SHA256 string `json:"sha256"`
 }
 
 // The results of a rehearsal, beside resultRunning and resultFailed.
@@ -87,19 +107,24 @@ type rehearsalEnd struct {
 
 // rehearsalResult is the line `scan rehearse` writes.
 type rehearsalResult struct {
-	Result   string `json:"result"`
-	Message  string `json:"message"`
-	Variable string `json:"variable"`
-	Bytes    int64  `json:"bytes"`
-	SHA256   string `json:"sha256"`
-	Free     int64  `json:"free"`
+	Result   string         `json:"result"`
+	Message  string         `json:"message"`
+	Variable string         `json:"variable"`
+	Bytes    int64          `json:"bytes"`
+	SHA256   string         `json:"sha256"`
+	Free     int64          `json:"free"`
+	Writes   []capsuleWrite `json:"writes"`
+	ESPFree  int64          `json:"espFree"`
 }
 
 // recordOfRehearsal answers the record that a rehearsal's end writes.
 func recordOfRehearsal(a rehearsalAttempt, r rehearsalResult, now time.Time) rehearsal {
 	record := runningRecord(a, now)
 	record.Result, record.Message, record.Free = r.Result, r.Message, r.Free
-	if r.Result == resultPassed {
+	switch {
+	case r.Result == resultPassed && r.Writes != nil:
+		record.Capsule = &capsuleRecord{Writes: r.Writes, Bytes: r.Bytes, SHA256: r.SHA256, ESPFree: r.ESPFree}
+	case r.Result == resultPassed:
 		record.Append = &variableEdit{Variable: r.Variable, Bytes: r.Bytes, SHA256: r.SHA256}
 	}
 	return record
@@ -144,7 +169,7 @@ func (o *operator) startRehearsals(f *firmware, pending map[string]bool, w obser
 		if r, held := currentApply(f, name); held && r.live() {
 			continue
 		}
-		p := buildRehearsalPod(f, a, c, u.Cabinet.URL, o.discovery.scanImage, o.namespace)
+		p := buildRehearsalPod(f, a, c, u.Cabinet.URL, o.discovery.scanImage, o.namespace, m.hasNextESP())
 		err := o.client.RequestJSON(http.MethodPost, podsPathIn(o.namespace), mustJSON(p), nil)
 		if err != nil && !errors.Is(err, apiclient.ErrConflict) {
 			problems = append(problems, err)

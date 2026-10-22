@@ -24,7 +24,7 @@ func eachCatalogPod(c *catalog) map[string]pod {
 		Cabinet: &pinnedCabinet{URL: "http://cabinet", SHA256: "sum"}}}}
 	return map[string]pod{
 		"scan":      buildScanPod(c, scanAttempt{catalog: c.Metadata.Name, machine: "node-5"}, "sum", testScanImage, "liken-system"),
-		"rehearsal": buildRehearsalPod(f, rehearsalAttempt{firmware: "lab-fmp", machine: "node-5"}, c, "http://cabinet", testScanImage, "liken-system"),
+		"rehearsal": buildRehearsalPod(f, rehearsalAttempt{firmware: "lab-fmp", machine: "node-5"}, c, "http://cabinet", testScanImage, "liken-system", false),
 		"apply":     buildApplyPod(f, applyAttempt{firmware: "lab-fmp", machine: "node-5"}, rehearsal{}, c, testScanImage, "liken-system", time.Time{}),
 	}
 }

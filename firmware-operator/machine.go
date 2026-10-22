@@ -24,8 +24,16 @@ type machine struct {
 		Boot  struct {
 			Time string `json:"time,omitempty"`
 		} `json:"boot"`
+		Firmware struct {
+			BootOrderKept *bool `json:"bootOrderKept,omitempty"`
+		} `json:"firmware"`
 	} `json:"status"`
 }
+
+// hasNextESP reports whether the machine has an ESP for its next boot.
+// liken's init links one only on a machine whose store names a proven
+// slot, which is also when it reports status.firmware.bootOrderKept.
+func (m machine) hasNextESP() bool { return m.Status.Firmware.BootOrderKept != nil }
 
 // machineReady is the phase of a Machine whose every condition holds.
 const machineReady = "Ready"

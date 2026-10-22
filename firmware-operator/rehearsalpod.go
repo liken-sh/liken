@@ -44,6 +44,16 @@ const (
 const (
 	hostFirmwarePath = "/host/firmware"
 	rehearsalPath    = "/run/rehearsal"
+
+	// provenESPLink is the link that liken's init keeps to the ESP of
+	// the machine's next boot (liken's milestone 33). A rehearsal of a
+	// capsule copies its EFI directory, and an apply stages the capsule
+	// there.
+	provenESPLink = "/run/liken/proven-esp"
+	nextESPVolume = "next-esp"
+	// nextESPPath is where a pod mounts it. The scan program reads the
+	// same path (nextESPPath in scan/main.go).
+	nextESPPath = "/run/esp-next"
 )
 
 // rehearsalAttempt is one rehearsal of one approval on one machine's
@@ -91,10 +101,13 @@ func rehearsalOf(p pod) rehearsalAttempt {
 // buildRehearsalPod answers the pod of one attempt. c is the
 // FirmwareCatalog of the machine's last scan, whose file the
 // rehearsal reads, and cabinetURL is the approval's.
-func buildRehearsalPod(f *firmware, a rehearsalAttempt, c *catalog, cabinetURL, image, namespace string) pod {
+//
+// nextESP says that the machine has an ESP for its next boot, which the
+// pod mounts read-only for a capsule's rehearsal.
+func buildRehearsalPod(f *firmware, a rehearsalAttempt, c *catalog, cabinetURL, image, namespace string, nextESP bool) pod {
 	no := false
 	deadline, grace := int64(scanDeadline.Seconds()), int64(5)
-	return pod{
+	p := pod{
 		APIVersion: "v1",
 		Kind:       "Pod",
 		Metadata: objectMeta{
@@ -133,8 +146,11 @@ func buildRehearsalPod(f *firmware, a rehearsalAttempt, c *catalog, cabinetURL, 
 				{Name: "host-firmware", HostPath: &hostPath{Path: "/sys/firmware", Type: "Directory"}},
 				// The copy of the variable store is under a megabyte. The
 				// rest is the catalog, the cabinet, and fwupd's cache of
-				// the catalog.
-				{Name: "rehearsal", EmptyDir: &emptyDir{Medium: "Memory", SizeLimit: "64Mi"}},
+				// the catalog, and for a capsule the copy of the ESP's EFI
+				// directory and the capsule that fwupd stages there. A
+				// board's capsule is tens of megabytes, and the cabinet
+				// holds it once more.
+				{Name: "rehearsal", EmptyDir: &emptyDir{Medium: "Memory", SizeLimit: "256Mi"}},
 			},
 			Containers: []container{{
 				Name:  rehearsalContainer,
@@ -162,4 +178,10 @@ func buildRehearsalPod(f *firmware, a rehearsalAttempt, c *catalog, cabinetURL, 
 			}},
 		}, c),
 	}
+	if nextESP {
+		p.Spec.Volumes = append(p.Spec.Volumes, volume{Name: nextESPVolume, HostPath: &hostPath{Path: provenESPLink, Type: "Directory"}})
+		p.Spec.Containers[0].VolumeMounts = append(p.Spec.Containers[0].VolumeMounts,
+			volumeMount{Name: nextESPVolume, MountPath: nextESPPath, ReadOnly: true})
+	}
+	return p
 }

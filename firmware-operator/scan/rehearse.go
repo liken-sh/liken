@@ -9,12 +9,11 @@ package main
 // store takes none. The pod mounts /sys/firmware read-only, so a
 // rehearsal that goes wrong still cannot write the real store.
 //
-// A rehearsal covers the Secure Boot databases alone. An update of
-// each of them is one or more authenticated appends to its own
-// variable, which the firmware verifies against KEK or PK and merges
-// into the list (authwrites.go). A capsule
-// writes boot variables that liken's init owns, and waits for liken's
-// milestone 33.
+// A rehearsal covers the Secure Boot databases and UEFI capsules. An
+// update of each database is one or more authenticated appends to its
+// own variable, which the firmware verifies against KEK or PK and
+// merges into the list (authwrites.go). A capsule writes a boot entry,
+// BootNext, and files on the ESP of the next boot (capsule.go).
 
 import (
 	"bytes"
@@ -79,6 +78,11 @@ type RehearsalResult struct {
 	Bytes    int64  `json:"bytes,omitempty"`
 	SHA256   string `json:"sha256,omitempty"`
 	Free     int64  `json:"free,omitempty"`
+	// Writes are a capsule's variables and files, and ESPFree the
+	// free space of the ESP they go to. For a capsule, Bytes counts the
+	// files, and SHA256 is the digest of the writes (writesDigest).
+	Writes  []Write `json:"writes,omitempty"`
+	ESPFree int64   `json:"espFree,omitempty"`
 }
 
 func rehearsalFailed(format string, args ...any) RehearsalResult {
@@ -99,6 +103,7 @@ type rehearser struct {
 	hostDir       string // the machine's /sys/firmware, mounted read-only
 	copyDir       string // the copy that FWUPD_SYSFSFWDIR names
 	espDir        string // the directory that FWUPD_UEFI_ESP_PATH names
+	espSource     string // the ESP of the next boot, mounted read-only, when the machine has one
 	free          func(path string) (int64, error)
 }
 
@@ -147,21 +152,16 @@ func (r rehearser) rehearseAppend(ctx context.Context) (RehearsalResult, rehears
 	if i < 0 {
 		return rehearsalFailed("fwupd reports no device %s", r.deviceID), rehearsedAppend{}
 	}
+	if devices[i].Plugin == capsulePlugin {
+		return r.rehearseCapsule(ctx, devices[i]), rehearsedAppend{}
+	}
 	variable, database := databaseVariables[devices[i].Plugin]
 	if !database {
-		return rehearsalRefused("fwupd's %s plugin updates %s, and a rehearsal covers only the Secure Boot databases", devices[i].Plugin, devices[i].Name), rehearsedAppend{}
+		return rehearsalRefused("fwupd's %s plugin updates %s, and a rehearsal covers only the Secure Boot databases and UEFI capsules", devices[i].Plugin, devices[i].Name), rehearsedAppend{}
 	}
-
-	cab, err := get(ctx, r.client, r.cabinetURL)
-	if err != nil {
-		return rehearsalFailed("downloading the cabinet: %v", err), rehearsedAppend{}
-	}
-	if got := sum(cab); got != r.cabinetSHA256 {
-		return rehearsalFailed("the SHA-256 of the cabinet is %s, and the approval pins %s", got, r.cabinetSHA256), rehearsedAppend{}
-	}
-	cabPath := filepath.Join(r.workDir, "update.cab")
-	if err := os.WriteFile(cabPath, cab, 0o644); err != nil {
-		return rehearsalFailed("saving the cabinet: %v", err), rehearsedAppend{}
+	cabPath, end := r.fetchCabinet(ctx)
+	if end != nil {
+		return *end, rehearsedAppend{}
 	}
 
 	varsDir := filepath.Join(r.copyDir, "efi", "efivars")
@@ -204,6 +204,25 @@ func (r rehearser) rehearseAppend(ctx context.Context) (RehearsalResult, rehears
 			len(appended), variable, len(writes), free)
 	}
 	return result, rehearsedAppend{before: before[variable], writes: writes}
+}
+
+// fetchCabinet downloads the approved cabinet, checks it against the
+// approval's pin, and saves it for the install. A result other than nil
+// ends the rehearsal.
+func (r rehearser) fetchCabinet(ctx context.Context) (string, *RehearsalResult) {
+	end := func(result RehearsalResult) (string, *RehearsalResult) { return "", &result }
+	cab, err := get(ctx, r.client, r.cabinetURL)
+	if err != nil {
+		return end(rehearsalFailed("downloading the cabinet: %v", err))
+	}
+	if got := sum(cab); got != r.cabinetSHA256 {
+		return end(rehearsalFailed("the SHA-256 of the cabinet is %s, and the approval pins %s", got, r.cabinetSHA256))
+	}
+	cabPath := filepath.Join(r.workDir, "update.cab")
+	if err := os.WriteFile(cabPath, cab, 0o644); err != nil {
+		return end(rehearsalFailed("saving the cabinet: %v", err))
+	}
+	return cabPath, nil
 }
 
 // judge checks the difference that an install made in the copy against

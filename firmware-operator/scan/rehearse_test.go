@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -90,7 +91,7 @@ func TestARehearsalPassesOneAuthenticatedAppend(t *testing.T) {
 		Result: resultPassed, Variable: dbxFile, Bytes: int64(len(authAppend)), SHA256: sum(authAppend), Free: 65536,
 		Message: "the install appends 128 bytes to " + dbxFile + ", and the variable store has 65536 bytes free",
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got  %+v\nwant %+v", got, want)
 	}
 }
@@ -113,7 +114,7 @@ func TestARehearsalPassesSeveralAuthenticatedWrites(t *testing.T) {
 		Result: resultPassed, Variable: dbxFile, Bytes: int64(len(both)), SHA256: sum(both), Free: 65536,
 		Message: "the install appends 304 bytes to " + dbxFile + " in 2 authenticated writes, and the variable store has 65536 bytes free",
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got  %+v\nwant %+v", got, want)
 	}
 }
@@ -201,21 +202,6 @@ func TestARehearsalRefusesAnAppendTheStoreHasNoRoomFor(t *testing.T) {
 		t.Errorf("got %+v, want Refused for the free space", got)
 	}
 }
-
-func TestARehearsalRefusesACapsuleWithoutInstalling(t *testing.T) {
-	r := newRehearsalRig(t)
-	r.deviceID = capsuleID
-
-	got := r.rehearse(context.Background())
-
-	if got.Result != resultRefused || !strings.Contains(got.Message, "uefi_capsule") {
-		t.Errorf("got %+v, want Refused for the capsule", got)
-	}
-	if r.installed() {
-		t.Error("the rehearsal ran fwupdtool install")
-	}
-}
-
 func TestARehearsalFails(t *testing.T) {
 	cases := []struct {
 		name      string

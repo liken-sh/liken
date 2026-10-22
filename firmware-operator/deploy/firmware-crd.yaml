@@ -252,11 +252,14 @@ spec:
                       properties:
                         url:
                           type: string
-                          pattern: "^https://"
+                          pattern: "^https?://"
                           description: >-
                             Where the cabinet downloads from. The
                             approval does not compare it with the
-                            catalog's URL, so a mirror works.
+                            catalog's URL, so a mirror works. A mirror
+                            over HTTP works too, because each pod checks
+                            the cabinet against sha256 before it uses
+                            it.
                         sha256:
                           type: string
                           pattern: "^[0-9a-f]{64}$"
@@ -533,7 +536,7 @@ spec:
                       append:
                         type: object
                         required: [variable, bytes, sha256]
-                        description: "The one write that a passed rehearsal recorded."
+                        description: "The append that a passed rehearsal of a Secure Boot database update recorded."
                         properties:
                           variable:
                             type: string
@@ -541,10 +544,44 @@ spec:
                           bytes:
                             type: integer
                             format: int64
-                            description: "The length of the write: four bytes of attributes, then the signed payload."
+                            description: "The length of the append: for each authenticated write, four bytes of attributes, then the signed payload."
                           sha256:
                             type: string
-                            description: "The SHA-256 of the write's bytes, in hex."
+                            description: "The SHA-256 of the append's bytes, in hex."
+                      capsule:
+                        type: object
+                        required: [writes, bytes, sha256, espFree]
+                        description: "What a passed rehearsal of a UEFI capsule recorded: each variable and file that fwupd wrote to the copies of the machine's variables and of the ESP of its next boot."
+                        properties:
+                          writes:
+                            type: array
+                            x-kubernetes-list-type: atomic
+                            items:
+                              type: object
+                              required: [kind, name, bytes, sha256]
+                              properties:
+                                kind:
+                                  type: string
+                                  enum: [variable, file]
+                                name:
+                                  type: string
+                                  description: "The variable as efivarfs names its file, or the file's path on the ESP."
+                                bytes:
+                                  type: integer
+                                  format: int64
+                                sha256:
+                                  type: string
+                          bytes:
+                            type: integer
+                            format: int64
+                            description: "The bytes of the files that the capsule stages on the ESP."
+                          sha256:
+                            type: string
+                            description: "One SHA-256 over the writes, which the apply compares with what fwupd writes."
+                          espFree:
+                            type: integer
+                            format: int64
+                            description: "The free space of the ESP of the machine's next boot, in bytes."
                       free:
                         type: integer
                         format: int64

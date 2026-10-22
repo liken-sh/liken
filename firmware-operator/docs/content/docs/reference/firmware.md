@@ -63,7 +63,7 @@ The cabinet file of the approved release, copied from the release in `status.mac
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="specupdatecabinet--url"></span>`url` | string | yes | Where the cabinet downloads from. The approval does not compare it with the catalog's URL, so a mirror works. Pattern: `^https://`. |
+| <span id="specupdatecabinet--url"></span>`url` | string | yes | Where the cabinet downloads from. The approval does not compare it with the catalog's URL, so a mirror works. A mirror over HTTP works too, because each pod checks the cabinet against sha256 before it uses it. Pattern: `^https?://`. |
 | <span id="specupdatecabinet--sha256"></span>`sha256` | string | yes | The cabinet's SHA-256, in lowercase hex. It pins the file the way a digest pins an image: a catalog that offers the version in another cabinet does not match the approval. Pattern: `^[0-9a-f]{64}$`. |
 
 ## status
@@ -157,19 +157,40 @@ One record for each machine that an approval waits for, from the latest rehearsa
 | <span id="statusrehearsals--file"></span>`file` | string | yes | The catalog file the rehearsal loaded, which is the one the machine's entry names. |
 | <span id="statusrehearsals--result"></span>`result` | string | yes | `Running` while the rehearsal pod runs. `Passed` when the install wrote one authenticated append to its device's own variable, nothing else, and the variable store has room for it. `Refused` when the install would write anything else, or the store has no room. `Failed` when the rehearsal could not run, such as a cabinet whose SHA-256 is not the pinned one. `CatalogMoved` when the catalog's jcat names another file than the machine's scan read. That is no failure: the operator reads the jcat again at once, and the machine rehearses again against the new file, after a scan of it when it offers the machine other releases. One of: `Running`, `Passed`, `Refused`, `Failed`, `CatalogMoved`. |
 | <span id="statusrehearsals--message"></span>`message` | string | no | Why the rehearsal has its result. |
-| <span id="statusrehearsals--append"></span>`append` | [object](#statusrehearsalsappend) | no | The one write that a passed rehearsal recorded. |
+| <span id="statusrehearsals--append"></span>`append` | [object](#statusrehearsalsappend) | no | The append that a passed rehearsal of a Secure Boot database update recorded. |
+| <span id="statusrehearsals--capsule"></span>`capsule` | [object](#statusrehearsalscapsule) | no | What a passed rehearsal of a UEFI capsule recorded: each variable and file that fwupd wrote to the copies of the machine's variables and of the ESP of its next boot. |
 | <span id="statusrehearsals--free"></span>`free` | integer | no | The bytes free in the machine's variable store when the rehearsal ran. |
 | <span id="statusrehearsals--time"></span>`time` | string | yes | When the rehearsal got its result. |
 
 #### status.rehearsals[].append
 
-The one write that a passed rehearsal recorded.
+The append that a passed rehearsal of a Secure Boot database update recorded.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="statusrehearsalsappend--variable"></span>`variable` | string | yes | The variable, as efivarfs names its file, such as `dbx-d719b2cb-3d3a-4596-a3bc-dad00e67656f`. |
-| <span id="statusrehearsalsappend--bytes"></span>`bytes` | integer | yes | The length of the write: four bytes of attributes, then the signed payload. |
-| <span id="statusrehearsalsappend--sha256"></span>`sha256` | string | yes | The SHA-256 of the write's bytes, in hex. |
+| <span id="statusrehearsalsappend--bytes"></span>`bytes` | integer | yes | The length of the append: for each authenticated write, four bytes of attributes, then the signed payload. |
+| <span id="statusrehearsalsappend--sha256"></span>`sha256` | string | yes | The SHA-256 of the append's bytes, in hex. |
+
+#### status.rehearsals[].capsule
+
+What a passed rehearsal of a UEFI capsule recorded: each variable and file that fwupd wrote to the copies of the machine's variables and of the ESP of its next boot.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusrehearsalscapsule--writes"></span>`writes` | [\[\]object](#statusrehearsalscapsulewrites) | yes |  |
+| <span id="statusrehearsalscapsule--bytes"></span>`bytes` | integer | yes | The bytes of the files that the capsule stages on the ESP. |
+| <span id="statusrehearsalscapsule--sha256"></span>`sha256` | string | yes | One SHA-256 over the writes, which the apply compares with what fwupd writes. |
+| <span id="statusrehearsalscapsule--espfree"></span>`espFree` | integer | yes | The free space of the ESP of the machine's next boot, in bytes. |
+
+#### status.rehearsals[].capsule.writes[]
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusrehearsalscapsulewrites--kind"></span>`kind` | string | yes | One of: `variable`, `file`. |
+| <span id="statusrehearsalscapsulewrites--name"></span>`name` | string | yes | The variable as efivarfs names its file, or the file's path on the ESP. |
+| <span id="statusrehearsalscapsulewrites--bytes"></span>`bytes` | integer | yes |  |
+| <span id="statusrehearsalscapsulewrites--sha256"></span>`sha256` | string | yes |  |
 
 ### status.applies[]
 

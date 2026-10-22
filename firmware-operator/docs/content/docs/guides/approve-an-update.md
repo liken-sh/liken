@@ -172,13 +172,26 @@ SHA-256. The firmware verifies the signature of each write and merges
 its new entries into the list, so the variable grows by less than the
 append.
 
+A capsule, such as a board's UEFI firmware, passes when the install
+writes what fwupd stages for a capsule and nothing else: one boot entry
+for fwupd's updater, `BootNext` naming that entry, fwupd's own status
+variable, and the updater and the capsule under `\EFI\<ID>` on the
+ESP, where `<ID>` is the `ID` of the scan image's `os-release`. For
+capsule-on-disk, fwupd writes the capsule under `\EFI\UpdateCapsule`
+and one bit of `OsIndications` instead. The rehearsal copies the
+`\EFI` directory of the ESP that the machine's next boot reads, which
+`liken` links at `/run/liken/proven-esp`, and that ESP must have room
+for the files. The record's `capsule` lists each write with its size
+and SHA-256. A rehearsal cannot show whether the firmware accepts the
+capsule, because the firmware applies it before any kernel loads.
+
 The `Rehearsed` condition sums the records, and the `REHEARSED` column
 shows it:
 
 | Status | Reason | Meaning |
 |---|---|---|
 | `True` | `Passed` | The install passed its rehearsal on every machine the approval waits for. |
-| `False` | `Refused` | The install would write something other than authenticated appends to its own variable, such as a boot variable or a file on the ESP, or the store has no room. A capsule update, such as a board's UEFI firmware, is refused for now. |
+| `False` | `Refused` | A database update would write something other than authenticated appends to its own variable, such as a boot variable or a file on the ESP, or the store has no room. A capsule would write more than fwupd stages for one, or the ESP has no room. |
 | `False` | `Failed` | A rehearsal could not run, such as a cabinet whose SHA-256 is not the one you pinned. |
 | `Unknown` | `Rehearsing` | A machine waits for its rehearsal. |
 

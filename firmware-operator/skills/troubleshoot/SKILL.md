@@ -299,7 +299,16 @@ The install would write something that the operator does not apply:
 
 | Message | What it means |
 |---|---|
-| `fwupd's uefi_capsule plugin updates ...` | The release is a capsule, such as a board's UEFI firmware. A capsule writes boot variables and a file on the ESP, and `liken` does not apply capsules yet. |
+| `fwupd's ... plugin updates ..., and a rehearsal covers only the Secure Boot databases and UEFI capsules` | The device is one that fwupd writes directly, such as an SSD or a dock, and no copy can rehearse it. |
+| `the machine has no ESP for its next boot, ...` | The machine's store names no proven slot, so `liken` links no ESP for a capsule. A machine has a proven slot after its first upgrade. |
+| `the install created ..., which boots ..., not fwupd's updater` | The capsule's install created a boot entry for another program. |
+| `the install created ... boot entries, and a capsule needs one` | The install created more than the updater's entry. |
+| `the install set BootNext to ..., not to the updater's entry` | The install aimed the next boot at another entry. |
+| `the install changed BootOrder by more than adding the updater's entry at its end` | The install reordered the machine's boot entries. |
+| `the install set OsIndications to ..., which asks for more than capsule-on-disk` | The install asked the firmware for more than the capsule. |
+| `the install wrote ... on the ESP, where a capsule writes nothing` | The install wrote a file other than fwupd's updater and the capsule, such as a shim or a loader. |
+| `the install changed ..., which a capsule does not write` | The install changed a variable other than the boot entries, `BootNext`, `BootOrder`, `OsIndications`, and fwupd's own. |
+| `the capsule's files need ... bytes on the ESP, and it has ... free` | The ESP of the machine's next boot is too full for the updater and the capsule. |
 | `the install changed ..., which is not ...`, `the install created ...`, `the install removed ...` | The install writes a variable other than its device's own. |
 | `the install wrote ... under the ESP path` | The install stages a file on the ESP. |
 | `the install rewrote ... instead of appending to it` | The install replaces the list instead of appending to it. |

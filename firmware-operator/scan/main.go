@@ -29,6 +29,9 @@ const (
 	// way before it writes.
 	hostFirmware = "/host/firmware"
 	rehearsalDir = "/run/rehearsal"
+	// nextESPPath is where the operator mounts the ESP of the machine's
+	// next boot, when it has one (nextESPPath in rehearsalpod.go).
+	nextESPPath = "/run/esp-next"
 
 	// An apply reads its own annotations, which carry the operator's
 	// signal to write, from the downward API volume at signalDir. It
@@ -117,5 +120,6 @@ func rehearserIn(r rehearser) rehearser {
 		workDir:    rehearsalDir + "/catalog",
 	}
 	r.hostDir, r.copyDir, r.espDir, r.free = hostFirmware, copyDir, rehearsalDir+"/esp", freeBytes
+	r.espSource = nextESPPath
 	return r
 }
