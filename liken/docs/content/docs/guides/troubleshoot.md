@@ -244,6 +244,25 @@ component, remove the hold:
 `Held` turns `False` with the reason `Released`, and the machine
 reboots.
 
+## A reboot did not keep a component's BootNext
+
+A component that sets `spec.keepBootNext` on its request, such as
+`firmware-operator` for a UEFI capsule, expects the reboot to boot its
+own entry once. When its resource reports that the update did not run,
+read whether `init` kept `BootNext` for the reboot:
+
+    kubectl get machine <machine> -o jsonpath='{.status.firmware.bootOrderKept}'
+
+`init` keeps `BootNext` only when this reads `true`. `false` means the
+proven slot did not lead `BootOrder` at power-on: the firmware did not
+keep the order through the reset, or someone changed it in the
+firmware's menu. The boot after the component's would then follow an
+order that `init` does not control, so `init` refuses. An empty value
+means the machine has not proven a release yet: upgrade it once, and
+the next boot answers. The machine's console log names the request and
+the reason in a line that starts with
+`liken: system: refusing to leave BootNext`.
+
 ## A machine crashed
 
 The machine keeps a record of a kernel crash through the reboot. The

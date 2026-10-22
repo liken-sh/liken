@@ -25,6 +25,10 @@ type disruptions struct {
 	holding []disruption.Disruption
 	drained bool
 
+	// handover names the request whose requester set BootNext for this
+	// turn's reboot (handoverRequest), or is empty.
+	handover string
+
 	// events posts the drain's cordon about this Machine.
 	events machineEvents
 
@@ -55,6 +59,10 @@ type disruptions struct {
 // covers every restart, so no restart runs while one holds. Once a
 // request is Held the drain is over, and the gate drains no more,
 // because the requester's pod runs on the cordoned node.
+//
+// Every reboot the gate lets through carries the handover, because
+// whichever document's intent init reads first ends the boot, and the
+// requester's BootNext must survive that reboot (hold.go).
 func (d *disruptions) gate(r *reader, node *nodeObject, nodeErr error, t turn, now time.Time, conv convergence) convergence {
 	holding := t == turnGranted && len(d.holding) > 0
 	conv.requestRestart = conv.requestRestart && !d.rebooting && !holding
@@ -67,6 +75,9 @@ func (d *disruptions) gate(r *reader, node *nodeObject, nodeErr error, t turn, n
 			conv = holdForRequesters(conv, d.holding)
 		}
 		d.draining = d.draining || !conv.requestReboot
+	}
+	if conv.requestReboot && t == turnGranted {
+		conv.keepBootNext = d.handover
 	}
 	d.rebooting = d.rebooting || conv.requestReboot
 	return conv

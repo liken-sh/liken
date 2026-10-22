@@ -527,6 +527,15 @@ type FirmwareStatus struct {
 	// BootOrder is the firmware's standing preference list, with the
 	// first choice listed first.
 	BootOrder []string `json:"bootOrder,omitempty"`
+
+	// BootOrderKept reports whether the proven slot led BootOrder at
+	// power-on, before init wrote anything. Every shutdown puts the
+	// proven slot first, so false means the firmware did not keep that
+	// order through the reset, or a person changed it in the
+	// firmware's menu. It is absent when the boot could not tell, as
+	// on a machine that has never proven a release. A reboot hands
+	// BootNext to a Disruption's requester only when this is true.
+	BootOrderKept *bool `json:"bootOrderKept,omitempty"`
 }
 
 // StorageStatus lists every role liken defines, whether declared or

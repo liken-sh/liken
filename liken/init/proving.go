@@ -45,6 +45,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -348,9 +349,24 @@ func assertProvenSlotUnderLock(act bootActuator, stateRoot string) {
 // inside PID 1 on the way down, where a panic is recovered rather
 // than fatal; a panic that escaped with the lock held would leave
 // every later reboot blocked on it (firmwareWrites in actuator.go).
-func assertAndArmForReboot(act bootActuator, stateRoot, runningSlot string) {
+//
+// handover names the Disruption that set BootNext for this reboot, or
+// is empty. A handover that init accepts replaces both calls
+// (handover.go), and one that it refuses leaves the ordinary turn.
+func assertAndArmForReboot(act bootActuator, stateRoot, runningSlot, handover string) {
 	firmwareWrites.Lock()
 	defer firmwareWrites.Unlock()
+	if handover != "" {
+		err := handOverOneShot(act, stateRoot)
+		if err == nil {
+			fmt.Printf("liken: system: leaving BootNext as the Disruption %s set it for this reboot; a staged release waits for a later reboot\n", handover)
+			return
+		}
+		fmt.Fprintf(os.Stderr, "liken: system: refusing to leave BootNext to the Disruption %s: %v\n", handover, err)
+		if errors.Is(err, errNoProvenSlot) {
+			act.dropOneShot()
+		}
+	}
 	assertProvenSlot(act, stateRoot)
 	armProvingBoot(act, stateRoot, runningSlot)
 }

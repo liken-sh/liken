@@ -20,7 +20,7 @@ metadata:
     # the cluster serves (init/schemarevision.go). Raise it in the same
     # change that changes the schema below; a test holds the two
     # together.
-    liken.sh/schema-revision: "2"
+    liken.sh/schema-revision: "3"
 spec:
   group: liken.sh
   names:
@@ -107,6 +107,9 @@ spec:
                 # machine to hold.
                 - rule: "!has(self.hold) || !self.hold || self.kind == 'Reboot'"
                   message: spec.hold stops a reboot after its drain; a Restart has no drain to stop after
+                # A restart does not boot, so it has no BootNext to keep.
+                - rule: "!has(self.keepBootNext) || !self.keepBootNext || self.kind == 'Reboot'"
+                  message: spec.keepBootNext keeps BootNext for a reboot; a Restart does not boot
               properties:
                 machine:
                   type: string
@@ -171,6 +174,22 @@ spec:
                     is removed, the machine stays drained, and the
                     budgets that select it stay full. A person who
                     removes hold releases the turn.
+                keepBootNext:
+                  type: boolean
+                  description: >-
+                    Says that the requester set the firmware's BootNext
+                    for this request's reboot, such as fwupd's updater
+                    for a UEFI capsule. The requester sets BootNext
+                    while it holds the drained machine, and sets this
+                    field when it removes hold. On that reboot, init
+                    leaves BootNext as it finds it and arms no release
+                    trial, so the firmware boots the requester's entry
+                    once, and a staged release takes a later reboot.
+                    Init refuses, and aims BootNext at the proven slot
+                    as on any reboot, unless the machine's
+                    status.firmware.bootOrderKept is true, BootNext does
+                    not name the slot that is not proven, and the
+                    proven slot holds its fallback loader.
             status:
               type: object
               description: Where the request stands.

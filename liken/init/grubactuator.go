@@ -68,6 +68,14 @@ func (a grubActuator) fallbackLeads(slot string) bool {
 // assertProven brings the whole GRUB boot path into agreement with
 // the store. The environment block prefers the proven slot, and the
 // boot chain on disk matches the proven slot's own artifacts.
+// handOver refuses: GRUB's one-shot, try_slot, chooses between the two
+// slots and nothing else, so no requester has a boot to hand it to.
+func (a grubActuator) handOver(slot string) error { return errNoOneShot }
+
+// dropOneShot does nothing: try_slot is liken's own, and no requester
+// sets it.
+func (a grubActuator) dropOneShot() {}
+
 func (a grubActuator) assertProven(slot string) {
 	env, err := readGRUBEnv(a.envPath())
 	switch {

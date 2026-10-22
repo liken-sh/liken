@@ -53,6 +53,7 @@ func carryOutConvergence(conv convergence, store machine.ManifestStore, runDir, 
 		intent := &machine.RebootIntent{
 			Reason:       "applying the staged " + what,
 			ManifestHash: conv.hash,
+			KeepBootNext: conv.keepBootNext,
 			RequestedAt:  now,
 		}
 		if err := machine.WriteRebootIntent(runDir, intent); err != nil {

@@ -297,7 +297,8 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 		bootID = machine.BootID(facts.Boot)
 	}
 	disr := &disruptions{events: notes, out: out,
-		holding: holdingRequests(requests, m.Spec.RebootPolicyOrDefault(), bootID)}
+		holding:  holdingRequests(requests, m.Spec.RebootPolicyOrDefault(), bootID),
+		handover: handoverRequest(requests, m.Spec.RebootPolicyOrDefault(), bootID)}
 	machineStore := machine.MachineManifests(machine.MachineStateDir)
 	machineRejection, _ := machineStore.LoadRejection()
 	conv := disr.gate(r, node, nodeErr, t, now,

@@ -105,7 +105,7 @@ func TestHealBootEntriesWritesBothSlotsFromNothing(t *testing.T) {
 	installedDisk(t)
 	dir := fakeEFIVars(t, map[string][]byte{})
 
-	healBootEntries(dir, "node-1", "A")
+	healBootEntries(dir, "node-1", "A", true)
 
 	entryA, ok := findSlotEntry(dir, "A")
 	if !ok {
@@ -130,7 +130,7 @@ func TestHealBootEntriesLeadsWithTheProvenSlot(t *testing.T) {
 	installedDisk(t)
 	dir := fakeEFIVars(t, map[string][]byte{})
 
-	healBootEntries(dir, "node-1", "B")
+	healBootEntries(dir, "node-1", "B", true)
 
 	entryB, _ := findSlotEntry(dir, "B")
 	if order := readBootOrder(dir); len(order) == 0 || order[0] != entryB {
@@ -153,7 +153,7 @@ func TestHealBootEntriesKeepsTheFirmwaresOwnEntries(t *testing.T) {
 		"BootOrder": {0x00, 0x00},
 	})
 
-	healBootEntries(dir, "node-1", "A")
+	healBootEntries(dir, "node-1", "A", true)
 
 	order := readBootOrder(dir)
 	if len(order) != 3 || order[2] != 0 {
@@ -168,7 +168,7 @@ func TestHealBootEntriesWritesNothingWhenNothingDrifted(t *testing.T) {
 	fakeCmdline(t, "console=ttyS0 liken.machine=node-1\n")
 	installedDisk(t)
 	dir := fakeEFIVars(t, map[string][]byte{})
-	healBootEntries(dir, "node-1", "A")
+	healBootEntries(dir, "node-1", "A", true)
 	entryA, _ := findSlotEntry(dir, "A")
 	path := filepath.Join(dir, bootEntryID(entryA)+"-"+efiGlobalVariable)
 	before, err := os.Stat(path)
@@ -176,7 +176,7 @@ func TestHealBootEntriesWritesNothingWhenNothingDrifted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	healBootEntries(dir, "node-1", "A")
+	healBootEntries(dir, "node-1", "A", true)
 
 	after, err := os.Stat(path)
 	if err != nil {
@@ -193,10 +193,10 @@ func TestHealBootEntriesRewritesADriftedEntry(t *testing.T) {
 	fakeCmdline(t, "console=ttyS0 liken.machine=node-1\n")
 	installedDisk(t)
 	dir := fakeEFIVars(t, map[string][]byte{})
-	healBootEntries(dir, "node-2", "A")
+	healBootEntries(dir, "node-2", "A", true)
 	stale, _ := findSlotEntry(dir, "A")
 
-	healBootEntries(dir, "node-1", "A")
+	healBootEntries(dir, "node-1", "A", true)
 
 	current, ok := findSlotEntry(dir, "A")
 	if !ok || current != stale {
@@ -216,7 +216,7 @@ func TestHealBootEntriesRefusesAMachineWithNoSlots(t *testing.T) {
 	fakeMachine(t)
 	dir := fakeEFIVars(t, map[string][]byte{})
 
-	healBootEntries(dir, "node-1", "A")
+	healBootEntries(dir, "node-1", "A", true)
 
 	if _, ok := findSlotEntry(dir, "A"); ok {
 		t.Error("no partition carries a slot, so there is nothing correct to write")
@@ -228,7 +228,7 @@ func TestHealBootEntriesRefusesAnAnonymousMachine(t *testing.T) {
 	installedDisk(t)
 	dir := fakeEFIVars(t, map[string][]byte{})
 
-	healBootEntries(dir, "", "A")
+	healBootEntries(dir, "", "A", true)
 
 	if _, ok := findSlotEntry(dir, "A"); ok {
 		t.Error("an entry carries identity, so an anonymous entry would be wrong on every later boot")

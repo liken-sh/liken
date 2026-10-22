@@ -99,6 +99,20 @@ type bootActuator interface {
 	// while a machine runs, because a boot path that is damaged now
 	// would stop the next reboot from coming back.
 	assertProven(slot string)
+
+	// handOver is assertProven for a reboot whose one-shot belongs to
+	// a requester (handover.go): it asserts the given proven slot and
+	// leaves the one-shot as the requester set it. It answers an error,
+	// and leaves the one-shot alone, when the boot after the
+	// requester's might not come back to the proven slot. The caller
+	// then asserts the proven slot as on any reboot.
+	handOver(slot string) error
+
+	// dropOneShot removes a one-shot that a refused handover leaves on
+	// a machine whose store names no proven slot. On such a machine
+	// assertProven never runs, so nothing else takes the one shot back,
+	// and the requester's boot would run although init refused it.
+	dropOneShot()
 }
 
 // chooseBootActuator picks the firmware interface this machine uses.
@@ -110,7 +124,7 @@ type bootActuator interface {
 // interface is available.
 func chooseBootActuator() bootActuator {
 	if firmwareIsUEFI() {
-		return efiActuator{dir: efiVarsDir, machineName: bootParamValue("liken.machine")}
+		return efiActuator{dir: efiVarsDir, machineName: bootParamValue("liken.machine"), espLink: machine.ProvenESPLink}
 	}
 	grubDir := filepath.Join(roleMounts[machine.BootHomeRole].path, "grub")
 	if _, err := os.Stat(filepath.Join(grubDir, "grubenv")); err == nil {
@@ -138,5 +152,9 @@ func (noActuator) armTrial(slot string) (string, error) {
 func (noActuator) fallbackLeads(slot string) bool { return false }
 
 func (noActuator) assertProven(slot string) {}
+
+func (noActuator) handOver(slot string) error { return errNoOneShot }
+
+func (noActuator) dropOneShot() {}
 
 var errNoActuator = errors.New("this machine's firmware holds no boot variables, so init has no way to arm a one-shot trial")

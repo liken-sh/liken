@@ -157,6 +157,7 @@ type convergence struct {
 	manifest       []byte                     // the bytes to stage
 	hash           string                     // the bytes' identity
 	pending        *machine.PendingDisruption // the status.pending entry for this document, when one waits
+	keepBootNext   string                     // the request whose BootNext the reboot keeps (hold.go)
 }
 
 // The condition constructors for every convergence verdict. Three

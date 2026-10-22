@@ -53,6 +53,26 @@ func holdingRequests(requests []disruption.Disruption, policy machine.RebootPoli
 	return holding
 }
 
+// handoverRequest answers the request whose requester set BootNext for
+// the turn's reboot: one that asks to keep BootNext, no longer holds,
+// is approved, and is not done. Its requester set BootNext while it
+// held the drained machine, as firmware-operator does for a capsule,
+// and the reboot's intent names it so that init leaves BootNext alone
+// (init/handover.go). Two such requests name the same reboot, so the
+// first by name speaks for both.
+func handoverRequest(requests []disruption.Disruption, policy machine.RebootPolicy, bootID string) string {
+	var names []string
+	for _, d := range requests {
+		if d.Spec.KeepBootNext && !d.Spec.Hold && d.Approved(policy) && !d.Done(bootID) {
+			names = append(names, d.Metadata.Name)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return slices.Min(names)
+}
+
 // holdForRequesters withholds the reboot while a request holds the
 // turn, and reports the wait on the document's own condition.
 func holdForRequesters(conv convergence, holding []disruption.Disruption) convergence {

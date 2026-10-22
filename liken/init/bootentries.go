@@ -201,7 +201,10 @@ func consoleArgs() []string {
 // boot from external media or a direct-kernel lab boot has no name to
 // render. The ordering still runs, so such a boot leaves the machine's
 // fallback exactly as strong as it found it.
-func healBootEntries(dir, machineName, preferred string) {
+//
+// pinNext is false on a reboot that hands the one-shot to a requester
+// (handover.go), which leaves BootNext as the requester set it.
+func healBootEntries(dir, machineName, preferred string, pinNext bool) {
 	if machineName != "" {
 		writeSlotEntries(dir, machineName, preferred)
 	}
@@ -230,7 +233,7 @@ func healBootEntries(dir, machineName, preferred string) {
 	// when the preferred slot's own entry exists: leaders[0] is the
 	// other slot's entry when it does not, and a one-shot aimed there
 	// would boot the wrong half of the pair.
-	if havePreferred {
+	if havePreferred && pinNext {
 		assertBootNext(dir, preferredEntry, preferred)
 	}
 }

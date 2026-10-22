@@ -240,7 +240,12 @@ func main() {
 	// (proving.go). The actuator is the firmware dialect that these
 	// conversations use. main chooses the actuator once, for the
 	// whole boot (actuator.go).
+	//
+	// The observation of BootOrder comes first, because it must read
+	// the order that the firmware kept through the reset, before the
+	// settle below writes it again (handover.go).
 	actuator := chooseBootActuator()
+	bootOrderKept = observeBootOrder(actuator, machine.MachineStateDir)
 	trial := settleSystemRelease(actuator, machine.MachineStateDir, boot.Slot,
 		storage.MachineState.Backing == machine.BackingPartition, &boot)
 

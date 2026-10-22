@@ -155,6 +155,25 @@ reboot go ahead, remove the hold yourself:
 
     kubectl patch disruption <request> --type=json -p '[{"op":"remove","path":"/spec/hold"}]'
 
+Some work during a hold needs the reboot to go somewhere other than
+the proven slot, for one boot. A UEFI capsule is one: fwupd sets the
+firmware's `BootNext` to its updater, and the firmware applies the
+capsule from there and resets. Every other reboot aims `BootNext` at
+the proven slot, or at a release on trial, so the component asks to
+keep its own with `spec.keepBootNext` when it removes the hold. On
+that reboot `init` leaves `BootNext` alone and arms no trial, so a
+staged release waits for a later reboot. The boot after the
+component's comes from the head of `BootOrder`, with no one-shot to
+steer it, so `init` does this only when the machine's
+`status.firmware.bootOrderKept` is `true`: the proven slot led
+`BootOrder` when the machine powered on, which means the firmware
+kept the order through the last reset. Otherwise `init` aims
+`BootNext` at the proven slot as on any reboot, and prints why. The
+component then finds that its work did not take effect. `init` also
+keeps `/run/liken/proven-esp` pointed at the proven slot's ESP, which
+is the ESP that this reboot reads, so the component's pod can write
+its files there.
+
 The drain moves every pod except DaemonSet pods, static pods, and pods
 that tolerate the cordon's taint, `node.kubernetes.io/unschedulable`,
 by its key. Such a pod could be scheduled straight back onto the

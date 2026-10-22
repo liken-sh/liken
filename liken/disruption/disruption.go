@@ -105,6 +105,12 @@ type Owner struct {
 // change the machine while no workload runs there, and the change
 // takes effect at the next boot, such as a Secure Boot database update
 // (firmware-operator's plan 06).
+//
+// KeepBootNext says that the requester set BootNext for the turn's
+// reboot, such as fwupd's updater for a capsule. machine-operator
+// names the request in the reboot intent, and init leaves BootNext as
+// it finds it and arms no release trial, when the boot after the
+// requester's is sure to come back to the proven slot (milestone 33).
 type Spec struct {
 	Machine      string `json:"machine"`
 	Requester    string `json:"requester"`
@@ -113,6 +119,7 @@ type Spec struct {
 	Hash         string `json:"hash,omitempty"`
 	ApprovedHash string `json:"approvedHash,omitempty"`
 	Hold         bool   `json:"hold,omitempty"`
+	KeepBootNext bool   `json:"keepBootNext,omitempty"`
 }
 
 // Status reports the request.

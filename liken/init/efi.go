@@ -135,6 +135,29 @@ func writeEFIVar(dir, name string, payload []byte) error {
 	return nil
 }
 
+// removeEFIVar deletes one variable, which efivarfs passes to the
+// firmware as a SetVariable of no data. It clears the immutable flag
+// first, as writeEFIVar does. A variable that is already gone is not
+// an error.
+func removeEFIVar(dir, name string) error {
+	path := filepath.Join(dir, name+"-"+efiGlobalVariable)
+	if f, err := os.Open(path); err == nil {
+		flags, err := unix.IoctlGetInt(int(f.Fd()), unix.FS_IOC_GETFLAGS)
+		if err == nil && flags&fsImmutableFlag != 0 {
+			err = unix.IoctlSetPointerInt(int(f.Fd()), unix.FS_IOC_SETFLAGS, flags&^fsImmutableFlag)
+			if err != nil {
+				f.Close()
+				return fmt.Errorf("clearing the immutable flag on %s: %w", name, err)
+			}
+		}
+		f.Close()
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("removing %s: %w", name, err)
+	}
+	return nil
+}
+
 // listBootEntries reads every Boot#### variable, decodes it, and
 // keys the result by entry number. It skips entries that will not
 // decode; those belong to the firmware, and liken finds its own
@@ -255,6 +278,7 @@ func firmwareFacts(dir string) machine.FirmwareStatus {
 	for _, n := range order {
 		fw.BootOrder = append(fw.BootOrder, describeBootEntry(dir, n, ""))
 	}
+	fw.BootOrderKept = bootOrderKept
 	return fw
 }
 
@@ -307,5 +331,8 @@ func reportFirmware() {
 	}
 	for _, entry := range fw.BootOrder {
 		fmt.Printf("liken: firmware: boot order: %s\n", entry)
+	}
+	if fw.BootOrderKept != nil {
+		fmt.Printf("liken: firmware: the proven slot led the boot order at power-on: %t\n", *fw.BootOrderKept)
 	}
 }

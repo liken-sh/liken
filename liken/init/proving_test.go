@@ -178,7 +178,7 @@ func TestTheRebootPathLeavesBootNextOnTheTrial(t *testing.T) {
 	stagedRelease(t, root, "0.2.0", "B")
 	dir := slotFirmware(t, 0x0002, 0x0003)
 
-	assertAndArmForReboot(efiActuator{dir: dir}, root, "A")
+	assertAndArmForReboot(efiActuator{dir: dir}, root, "A", "")
 
 	next, err := readEFIVar(dir, "BootNext")
 	if err != nil || !slices.Equal(next, bootNextPayload(0x0003)) {
@@ -289,7 +289,7 @@ func TestTheRebootFirmwareStepReleasesTheLockOnAPanic(t *testing.T) {
 	root := t.TempDir()
 	provenRelease(t, root, "0.2.0", "B")
 
-	if panicOf(func() { assertAndArmForReboot(panickingActuator{}, root, "A") }) == nil {
+	if panicOf(func() { assertAndArmForReboot(panickingActuator{}, root, "A", "") }) == nil {
 		t.Fatal("the panic must reach the machine plane, which reports and restarts")
 	}
 

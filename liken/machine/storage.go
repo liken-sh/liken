@@ -211,6 +211,14 @@ func SystemSlotDir(slot string) string {
 	return systemSlotsDir + "/" + strings.ToLower(slot)
 }
 
+// ProvenESPLink names the ESP that a UEFI machine's next boot reads:
+// init points it at the proven slot's mountpoint at each boot and each
+// promotion. A pod that stages a firmware update for that boot, such
+// as firmware-operator's, mounts this path through a hostPath volume,
+// which follows the link when the pod starts. A machine whose store
+// names no proven slot has no link.
+const ProvenESPLink = "/run/liken/proven-esp"
+
 // InactiveSlot is the slot that a machine is not running from. A
 // downloaded release lands on this slot; that placement is the point
 // of the blue-green arrangement. InactiveSlot returns "" for a

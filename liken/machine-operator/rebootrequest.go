@@ -105,8 +105,9 @@ func carryOutRebootRequest(dir string, conv convergence, now time.Time, out *pas
 		return conv.condition
 	}
 	intent := &machine.RebootIntent{
-		Reason:      fmt.Sprintf("a reboot was requested for boot %.12s", conv.hash),
-		RequestedAt: now,
+		Reason:       fmt.Sprintf("a reboot was requested for boot %.12s", conv.hash),
+		KeepBootNext: conv.keepBootNext,
+		RequestedAt:  now,
 	}
 	if err := machine.WriteRebootIntent(dir, intent); err != nil {
 		out.fail("writing the requested reboot's intent", err)

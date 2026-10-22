@@ -33,7 +33,7 @@ metadata:
     # that use its fields (init/schemarevision.go). Raise it in the
     # same change that changes the schema below; a test holds the two
     # together.
-    liken.sh/schema-revision: "11"
+    liken.sh/schema-revision: "12"
 spec:
   group: liken.sh
   names:
@@ -1963,6 +1963,19 @@ spec:
                       items:
                         type: string
                         maxLength: 256
+                    bootOrderKept:
+                      type: boolean
+                      description: >-
+                        Whether the proven slot led BootOrder at
+                        power-on, before init wrote anything. Every
+                        shutdown puts the proven slot first, so false
+                        means the firmware did not keep that order
+                        through the reset, or a person changed it in
+                        the firmware's menu. It is absent when the boot
+                        could not tell, as on a machine that has never
+                        proven a release. A reboot leaves BootNext to a
+                        Disruption's requester, through
+                        spec.keepBootNext, only when this is true.
                 storage:
                   type: object
                   description: >-

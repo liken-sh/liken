@@ -37,9 +37,14 @@ const rebootIntentFile = "reboot-intent.yaml"
 // staged manifest the reboot is meant to apply. The presence of the
 // file is the trigger for the reboot. The content of the file only
 // adds detail to what init prints on the console.
+//
+// KeepBootNext names the Disruption whose requester set BootNext for
+// this reboot, from its spec.keepBootNext. Init then leaves BootNext
+// as it finds it, when it can do so safely (init/handover.go).
 type RebootIntent struct {
 	Reason       string    `json:"reason"`
 	ManifestHash string    `json:"manifestHash,omitempty"`
+	KeepBootNext string    `json:"keepBootNext,omitempty"`
 	RequestedAt  time.Time `json:"requestedAt"`
 }
 

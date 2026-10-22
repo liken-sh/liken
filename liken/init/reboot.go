@@ -202,7 +202,7 @@ func rebootMachine(intent machine.RebootIntent) {
 	// held across the shutdown below would outlive its holder if
 	// anything in that shutdown panicked.
 	assertAndArmForReboot(chooseBootActuator(), machine.MachineStateDir,
-		bootParamValue("liken.slot"))
+		bootParamValue("liken.slot"), intent.KeepBootNext)
 	// The machine plane stops only after every process ends. The
 	// reaper is one of its components, and it must collect exited
 	// processes until the very end.
