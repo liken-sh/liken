@@ -310,9 +310,12 @@ spec:
                     machine, and with `Failed` when a write could not
                     run, a machine left its turn before the hold, or a
                     machine still reads the old version after its
-                    reboot. It is `Unknown` with `Applying` while a
-                    machine waits for its rehearsal, its turn, or its
-                    write. The message names the machines.
+                    reboot. It is `Unknown` with `Uncertain` when the
+                    operator cannot tell whether a write landed, until
+                    the scan after the machine's reboot answers, and
+                    with `Applying` while a machine waits for its
+                    rehearsal, its turn, or its write. The message names
+                    the machines.
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   items:
@@ -584,13 +587,18 @@ spec:
                         description: "The `Disruption` that asks for the machine's reboot turn."
                       result:
                         type: string
-                        enum: [Waiting, Writing, Written, Refused, Failed]
+                        enum: [Waiting, Writing, Written, Uncertain, Refused, Failed]
                         description: >-
                           `Waiting` until `machine-operator` drains the
                           machine and holds its turn. `Writing` while the
                           apply pod runs. `Written` when the firmware
                           took the append; the machine then reboots, and
                           the record stays until its next scan.
+                          `Uncertain` when the apply pod ended without
+                          saying whether it wrote: it is gone, it ran
+                          past its deadline, or it crashed. The machine
+                          reboots in its turn all the same, and its next
+                          scan reads what the firmware holds.
                           `Refused` when the firmware refused the
                           append, which changes nothing. `Failed` when
                           the apply could not run, the variables changed

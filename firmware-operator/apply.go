@@ -10,8 +10,10 @@ package main
 //  2. machine-operator drains the machine and sets Held. The operator
 //     starts the apply pod (applypod.go), and records Writing.
 //  3. The pod ends. Written removes spec.hold, so the turn reboots the
-//     machine. Refused and Failed delete the Disruption, so the machine
-//     leaves its turn without a reboot it does not need.
+//     machine. Refused and Failed, which wrote nothing, delete the
+//     Disruption, so the machine leaves its turn without a reboot it does
+//     not need. Uncertain, an end that does not say whether the append
+//     was written, removes spec.hold too.
 //  4. The machine's next scan reads the approved version, the machine
 //     is no longer pending, and Approved moves to Installed (approval.go).
 //
@@ -22,6 +24,15 @@ package main
 // cannot be undone, so nothing here writes again on its own: a Refused
 // or Failed record stays until a person withdraws the approval and
 // approves it again, which removes the record.
+//
+// An apply pod that is gone, that ran past its deadline, that crashed,
+// or whose log does not answer may have written before it stopped. A
+// force-deleted pod's container can even outlive its API object. If
+// the operator withdrew the turn, the machine would run with variables
+// that its kernel does not enforce until a reboot nobody planned. So an
+// uncertain end reboots the machine inside its turn, the same as a
+// written one, and the next scan answers whether the firmware took the
+// append.
 
 import (
 	"errors"
@@ -50,15 +61,22 @@ type applyRecord struct {
 
 // The results of an apply, beside resultRefused and resultFailed.
 const (
-	resultWaiting = "Waiting"
-	resultWriting = "Writing"
-	resultWritten = "Written"
+	resultWaiting   = "Waiting"
+	resultWriting   = "Writing"
+	resultWritten   = "Written"
+	resultUncertain = "Uncertain"
 )
 
 // live reports whether a record holds the machine's turn, or a write
 // that waits for the machine's reboot.
 func (r applyRecord) live() bool {
-	return r.Result == resultWaiting || r.Result == resultWriting || r.Result == resultWritten
+	return r.Result == resultWaiting || r.Result == resultWriting || r.rebooting()
+}
+
+// rebooting reports whether a record's write, or the write it cannot
+// rule out, takes effect at the reboot of its turn.
+func (r applyRecord) rebooting() bool {
+	return r.Result == resultWritten || r.Result == resultUncertain
 }
 
 // appliedCondition is the condition of an approval's applies.
@@ -74,6 +92,7 @@ const (
 	reasonApplyWritten   = "ApplyWritten"
 	reasonApplyRefused   = "ApplyRefused"
 	reasonApplyFailed    = "ApplyFailed"
+	reasonApplyUncertain = "ApplyUncertain"
 )
 
 // applyStep is one change of a machine's record that a pass decided
@@ -118,6 +137,8 @@ func step(r applyRecord, result, message string, from ...string) applyStep {
 		n = notice{reason: reasonApplyWritten, message: about}
 	case resultRefused:
 		n.reason = reasonApplyRefused
+	case resultUncertain:
+		n.reason = reasonApplyUncertain
 	}
 	return applyStep{record: r, from: from, notice: n}
 }
@@ -138,7 +159,7 @@ func (o *operator) advanceApplies(f *firmware, pending map[string]bool, w observ
 			s, err = o.requestTurn(f, name, w)
 		case r.Result == resultWaiting:
 			s, err = o.followTurn(f, r, catalogs)
-		case r.Result == resultWritten:
+		case r.rebooting():
 			s = checkReboot(f, r, w)
 		}
 		if s != nil {
@@ -221,17 +242,21 @@ func (o *operator) startApply(f *firmware, r applyRecord, catalogs map[string]*c
 	return &s, nil
 }
 
-// checkReboot fails a written record when the machine booted again and
-// a scan of the new boot still offers the approved version, so the
-// firmware did not keep the append. A scan from before the reboot is
-// older than the record, and decides nothing.
+// checkReboot fails a written or uncertain record when the machine
+// booted again and a scan of the new boot still offers the approved
+// version, so the firmware does not hold the append. A scan from before
+// the reboot is older than the record, and decides nothing.
 func checkReboot(f *firmware, r applyRecord, w observed) *applyStep {
 	m, known := w.fleet[r.Machine]
 	e, offered := offeredEntry(f.Status.Machines, r.Machine, f.Spec.Update)
 	if !known || m.Status.Boot.Time == r.Boot || !offered || !parseTime(e.Time).After(parseTime(r.Time)) {
 		return nil
 	}
-	s := step(r, resultFailed, fmt.Sprintf("the machine rebooted after the write, and its next scan still reads version %s, not %s", e.Version, r.Version), resultWritten)
+	message := fmt.Sprintf("the machine rebooted after the write, and its next scan still reads version %s, not %s", e.Version, r.Version)
+	if r.Result == resultUncertain {
+		message = fmt.Sprintf("the machine rebooted, and its next scan still reads version %s, not %s, so the append was not written", e.Version, r.Version)
+	}
+	s := step(r, resultFailed, message, resultWritten, resultUncertain)
 	return &s
 }
 
@@ -275,17 +300,20 @@ func (o *operator) applyEnds(f *firmware, pods []pod, now time.Time) ([]applySte
 			continue
 		}
 		if gone {
-			steps = append(steps, step(r, resultFailed,
-				"the apply pod is gone, and the operator cannot tell whether it wrote; withdraw the approval and approve it again to try again", resultWriting))
+			steps = append(steps, step(r, resultUncertain,
+				"the apply pod is gone, and the operator cannot tell whether it wrote, so the machine reboots and its next scan reads what the firmware holds", resultWriting))
 		}
 	}
 	return steps, finished, due, errors.Join(problems...)
 }
 
 // judgeApply decides the result of an apply pod, the way
-// judgeRehearsal decides a rehearsal's.
+// judgeRehearsal decides a rehearsal's. Only the pod's own answer says
+// whether it wrote. Every other end, a deadline, a crash, a log that
+// does not answer, or an answer the operator does not know, is
+// Uncertain, because the pod may have written before it stopped.
 func (o *operator) judgeApply(p pod, now time.Time) (applyResult, bool, time.Time, error) {
-	failed := applyResult{Result: resultFailed}
+	uncertain := applyResult{Result: resultUncertain}
 	due := parseTime(p.Metadata.CreationTimestamp).Add(scanDeadline)
 	switch p.Status.Phase {
 	case podSucceeded, podFailed:
@@ -293,8 +321,8 @@ func (o *operator) judgeApply(p pod, now time.Time) (applyResult, bool, time.Tim
 		if now.Before(due) {
 			return applyResult{}, false, due, nil
 		}
-		failed.Message = fmt.Sprintf("the apply pod did not finish within %s of its creation", scanDeadline)
-		return failed, true, time.Time{}, nil
+		uncertain.Message = fmt.Sprintf("the apply pod did not finish within %s of its creation", scanDeadline)
+		return uncertain, true, time.Time{}, nil
 	}
 	log, err := o.readPodLog(p, applyContainer)
 	if errors.Is(err, apiclient.ErrNotFound) {
@@ -304,21 +332,21 @@ func (o *operator) judgeApply(p pod, now time.Time) (applyResult, bool, time.Tim
 		if now.Before(due) {
 			return applyResult{}, false, time.Time{}, fmt.Errorf("reading the log of the apply pod %s: %w", p.Metadata.Name, err)
 		}
-		failed.Message = "the operator could not read the apply's log: " + err.Error()
-		return failed, true, time.Time{}, nil
+		uncertain.Message = "the operator could not read the apply's log: " + err.Error()
+		return uncertain, true, time.Time{}, nil
 	}
 	result, last, found := parseResultLine[applyResult](log, func(r applyResult) string { return r.Result })
 	switch {
 	case !found && last != "":
-		failed.Message = "the apply wrote no result; its last line was: " + last
+		uncertain.Message = "the apply wrote no result; its last line was: " + last
 	case !found:
-		failed.Message = podFailure(p, "apply", applyContainer)
+		uncertain.Message = podFailure(p, "apply", applyContainer)
 	case result.Result == resultWritten || result.Result == resultRefused || result.Result == resultFailed:
 		return result, true, time.Time{}, nil
 	default:
-		failed.Message = fmt.Sprintf("the apply answered the result %q, which the operator does not know", result.Result)
+		uncertain.Message = fmt.Sprintf("the apply answered the result %q, which the operator does not know", result.Result)
 	}
-	return failed, true, time.Time{}, nil
+	return uncertain, true, time.Time{}, nil
 }
 
 // composeApplies answers the records of the pending machines after the
@@ -364,8 +392,9 @@ func composeApplies(f *firmware, pending map[string]bool, steps []applyStep, now
 
 // applied answers the Applied condition over the pending machines'
 // records, and false when no pending machine has asked for a turn. A
-// refusal outweighs a failure, and both outweigh a machine that waits
-// or writes. A pending machine with no record waits for its rehearsal.
+// refusal outweighs a failure, both outweigh an uncertain write, and
+// that outweighs a machine that waits or writes. A pending machine with
+// no record waits for its rehearsal.
 func applied(records []applyRecord, pending map[string]bool) (condition, bool) {
 	if len(pending) == 0 || len(records) == 0 {
 		return condition{}, false
@@ -388,6 +417,8 @@ func applied(records []applyRecord, pending map[string]bool) (condition, bool) {
 		c.Status, c.Reason, c.Message = conditions.False, resultRefused, strings.Join(byResult[resultRefused], "; ")
 	case len(byResult[resultFailed]) > 0:
 		c.Status, c.Reason, c.Message = conditions.False, resultFailed, strings.Join(byResult[resultFailed], "; ")
+	case len(byResult[resultUncertain]) > 0:
+		c.Status, c.Reason, c.Message = conditions.Unknown, resultUncertain, strings.Join(byResult[resultUncertain], "; ")
 	case len(byResult[reasonApplying]) > 0:
 		c.Status, c.Reason, c.Message = conditions.Unknown, reasonApplying,
 			"the approval waits for the write on "+strings.Join(byResult[reasonApplying], ", ")
@@ -407,10 +438,10 @@ func applyRecordOf(records []applyRecord, machine string) (applyRecord, bool) {
 }
 
 // settleTurns brings each of a Firmware's requests in line with the
-// records that its status write left: a written record's request loses
-// spec.hold, so the turn reboots the machine, and a request that no
-// live record names is deleted while it holds a turn or after the turn
-// ended. A request whose hold was removed and whose reboot has not
+// records that its status write left: a written or uncertain record's
+// request loses spec.hold, so the turn reboots the machine, and a
+// request that no live record names is deleted while it holds a turn or
+// after the turn ended. A request whose hold was removed and whose reboot has not
 // happened stays, so a written update gets its reboot even when the
 // record left first.
 func (o *operator) settleTurns(records []applyRecord, requests []disruption) error {
@@ -425,7 +456,7 @@ func (o *operator) settleTurns(records []applyRecord, requests []disruption) err
 		r, named := live[d.Metadata.Name]
 		switch {
 		case d.Metadata.DeletionTimestamp != "":
-		case named && r.Result == resultWritten && d.Spec.Hold:
+		case named && r.rebooting() && d.Spec.Hold:
 			problems = append(problems, o.releaseHold(d.Metadata.Name))
 		case !named && (d.Spec.Hold || d.complete()):
 			problems = append(problems, o.withdraw(d.Metadata.Name))

@@ -239,9 +239,9 @@ func TestAWrittenUpdateReleasesTheHold(t *testing.T) {
 	})
 }
 
-// A write that the firmware refused, or that failed, needs no reboot,
-// so the operator withdraws the turn, and writes nothing again on its
-// own.
+// A write that the firmware refused, or an apply that reports it wrote
+// nothing, needs no reboot, so the operator withdraws the turn, and
+// writes nothing again on its own.
 func TestARefusedOrFailedWriteWithdrawsTheTurn(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -257,15 +257,6 @@ func TestARefusedOrFailedWriteWithdrawsTheTurn(t *testing.T) {
 			w.api.finishPod(t, name, applyContainer, podSucceeded, applyLog(applyResult{Result: resultFailed,
 				Message: "the append's SHA-256 is now 0b1c, and the rehearsal recorded cf901743: the machine's variables changed since the rehearsal, so nothing was written"}))
 		}, resultFailed, reasonApplyFailed, "the append's SHA-256 is now 0b1c"},
-		{"a crash", func(t *testing.T, w *world, name string) {
-			w.api.finishPod(t, name, applyContainer, podFailed, "fwupdtool: loading\npanic: runtime error\n")
-		}, resultFailed, reasonApplyFailed, "the apply wrote no result; its last line was: panic: runtime error"},
-		{"a deleted pod", func(t *testing.T, w *world, name string) {
-			w.api.deleteObject(uploadPodsPath, name)
-		}, resultFailed, reasonApplyFailed, "the apply pod is gone"},
-		{"a pod that never finishes", func(t *testing.T, w *world, name string) {
-			time.Sleep(scanDeadline)
-		}, resultFailed, reasonApplyFailed, "the apply pod did not finish within 10m0s of its creation"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -287,6 +278,58 @@ func TestARefusedOrFailedWriteWithdrawsTheTurn(t *testing.T) {
 				}
 				if got := w.postedAbout(biosObjectName); !containsPosted(got, posted{"Warning", c.event}) {
 					t.Errorf("the operator posted %v, want a Warning %s", got, c.event)
+				}
+				if got := len(w.api.applies(t)); got != 0 {
+					t.Errorf("%d apply pods, want none started again", got)
+				}
+			})
+		})
+	}
+}
+
+// An apply whose end does not say whether it wrote may have written, so
+// the operator still releases the hold. The machine reboots in its
+// turn, and the next scan answers whether the firmware took the append,
+// instead of an unplanned boot later.
+func TestAnUncertainWriteRebootsTheMachine(t *testing.T) {
+	cases := []struct {
+		name    string
+		end     func(t *testing.T, w *world, name string)
+		message string
+	}{
+		{"a crash", func(t *testing.T, w *world, name string) {
+			w.api.finishPod(t, name, applyContainer, podFailed, "fwupdtool: loading\npanic: runtime error\n")
+		}, "the apply wrote no result; its last line was: panic: runtime error"},
+		{"a deleted pod", func(t *testing.T, w *world, name string) {
+			w.api.deleteObject(uploadPodsPath, name)
+		}, "the apply pod is gone"},
+		{"a pod that never finishes", func(t *testing.T, w *world, name string) {
+			time.Sleep(scanDeadline)
+		}, "the apply pod did not finish within 10m0s of its creation"},
+		{"an answer the operator does not know", func(t *testing.T, w *world, name string) {
+			w.api.finishPod(t, name, applyContainer, podSucceeded, applyLog(applyResult{Result: "Maybe", Message: "?"}))
+		}, `the apply answered the result "Maybe", which the operator does not know`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				w := heldWorld(t)
+				c.end(t, w, w.onlyApply(t).Metadata.Name)
+				w.settle()
+				time.Sleep(time.Hour)
+				synctest.Wait()
+
+				if r := w.onlyApplyRecord(t); r.Result != resultUncertain || !strings.HasPrefix(r.Message, c.message) {
+					t.Errorf("the record is %+v, want Uncertain with %q", r, c.message)
+				}
+				if !w.api.disruptionExists(turnName) || w.api.disruption(t, turnName).Spec.Hold {
+					t.Error("want the request kept with no hold, so the turn reboots the machine")
+				}
+				if ac, _ := appliedOf(t, w); ac.Status != conditions.Unknown || ac.Reason != resultUncertain {
+					t.Errorf("Applied is %+v, want Unknown with the reason Uncertain", ac)
+				}
+				if got := w.postedAbout(biosObjectName); !containsPosted(got, posted{"Warning", reasonApplyUncertain}) {
+					t.Errorf("the operator posted %v, want a Warning %s", got, reasonApplyUncertain)
 				}
 				if got := len(w.api.applies(t)); got != 0 {
 					t.Errorf("%d apply pods, want none started again", got)
@@ -328,12 +371,12 @@ func TestATurnThatEndsWithoutAHoldFails(t *testing.T) {
 	}
 }
 
-// writtenWorld is heldWorld after the firmware took the append, so the
-// operator released the hold, and machine-operator rebooted node-2 and
-// marked the request Complete. The scan of the new boot has started.
-func writtenWorld(t *testing.T) *world {
+// rebootedWorld is heldWorld after the apply pod ended as end has it,
+// and after machine-operator rebooted node-2 and marked the request
+// Complete. The scan of the new boot has started.
+func rebootedWorld(t *testing.T, end func(t *testing.T, w *world, name string)) *world {
 	w := heldWorld(t)
-	w.api.finishPod(t, w.onlyApply(t).Metadata.Name, applyContainer, podSucceeded, applyLog(writtenResult))
+	end(t, w, w.onlyApply(t).Metadata.Name)
 	w.settle()
 	w.api.putFleetMachine("node-2", machineReady, secondBoot)
 	w.api.completeTurn(t, turnName)
@@ -341,56 +384,83 @@ func writtenWorld(t *testing.T) *world {
 	return w
 }
 
-// While a written update waits for the scan of the new boot, the
-// machine rehearses nothing, because the apply has its append.
-func TestNoRehearsalStartsWhileAWriteWaitsForItsReboot(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		w := writtenWorld(t)
+// The two ends of an apply that reboot the machine: the firmware took
+// the append, or the operator cannot tell whether it did.
+var rebootingEnds = []struct {
+	name   string
+	result string
+	end    func(t *testing.T, w *world, name string)
+	failed string
+}{
+	{"a written update", resultWritten, func(t *testing.T, w *world, name string) {
+		w.api.finishPod(t, name, applyContainer, podSucceeded, applyLog(writtenResult))
+	}, "the machine rebooted after the write, and its next scan still reads version 0.0.3.5, not 0.0.4.2"},
+	{"an uncertain write", resultUncertain, func(t *testing.T, w *world, name string) {
+		w.api.deleteObject(uploadPodsPath, name)
+	}, "the machine rebooted, and its next scan still reads version 0.0.3.5, not 0.0.4.2, so the append was not written"},
+}
 
-		if got := len(w.api.rehearsals(t)); got != 0 {
-			t.Errorf("%d rehearsal pods after the reboot, want none", got)
-		}
-		if r := w.onlyApplyRecord(t); r.Result != resultWritten {
-			t.Errorf("the record is %+v, want Written until the scan", r)
-		}
-	})
+// While an apply waits for the scan of the new boot, the machine
+// rehearses nothing, because the apply has its append.
+func TestNoRehearsalStartsWhileAWriteWaitsForItsReboot(t *testing.T) {
+	for _, c := range rebootingEnds {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				w := rebootedWorld(t, c.end)
+
+				if got := len(w.api.rehearsals(t)); got != 0 {
+					t.Errorf("%d rehearsal pods after the reboot, want none", got)
+				}
+				if r := w.onlyApplyRecord(t); r.Result != c.result {
+					t.Errorf("the record is %+v, want %s until the scan", r, c.result)
+				}
+			})
+		})
+	}
 }
 
 func TestTheNextScanProvesTheWrite(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		w := writtenWorld(t)
-		w.api.finishScan(t, w.onlyScan(t).Metadata.Name, podSucceeded,
-			resultLog(scanned("firmware-09138-stable.xml.zst", systemFirmware("0.0.4.2"), secureBootDBX("2"))))
-		w.settle()
+	for _, c := range rebootingEnds {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				w := rebootedWorld(t, c.end)
+				w.api.finishScan(t, w.onlyScan(t).Metadata.Name, podSucceeded,
+					resultLog(scanned("firmware-09138-stable.xml.zst", systemFirmware("0.0.4.2"), secureBootDBX("2"))))
+				w.settle()
 
-		f := w.api.firmware(t, biosObjectName)
-		if c, _ := conditions.Find(f.Status.Conditions, approvedCondition); c.Reason != reasonInstalled {
-			t.Errorf("Approved is %+v, want the reason Installed", c)
-		}
-		if _, held := conditions.Find(f.Status.Conditions, appliedCondition); held || len(f.Status.Applies) != 0 {
-			t.Errorf("the status holds %+v and %v, want no apply once nothing is pending", f.Status.Applies, f.Status.Conditions)
-		}
-		if w.api.disruptionExists(turnName) {
-			t.Error("the completed request remains, want it deleted")
-		}
-	})
+				f := w.api.firmware(t, biosObjectName)
+				if c, _ := conditions.Find(f.Status.Conditions, approvedCondition); c.Reason != reasonInstalled {
+					t.Errorf("Approved is %+v, want the reason Installed", c)
+				}
+				if _, held := conditions.Find(f.Status.Conditions, appliedCondition); held || len(f.Status.Applies) != 0 {
+					t.Errorf("the status holds %+v and %v, want no apply once nothing is pending", f.Status.Applies, f.Status.Conditions)
+				}
+				if w.api.disruptionExists(turnName) {
+					t.Error("the completed request remains, want it deleted")
+				}
+			})
+		})
+	}
 }
 
 func TestAMachineThatStillReadsTheOldVersionAfterItsRebootFails(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		w := writtenWorld(t)
-		w.api.finishScan(t, w.onlyScan(t).Metadata.Name, podSucceeded,
-			resultLog(scanned("firmware-09138-stable.xml.zst", systemFirmware("0.0.3.5", "0.0.4.2"), secureBootDBX("2"))))
-		w.settle()
+	for _, c := range rebootingEnds {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				w := rebootedWorld(t, c.end)
+				w.api.finishScan(t, w.onlyScan(t).Metadata.Name, podSucceeded,
+					resultLog(scanned("firmware-09138-stable.xml.zst", systemFirmware("0.0.3.5", "0.0.4.2"), secureBootDBX("2"))))
+				w.settle()
 
-		want := "the machine rebooted after the write, and its next scan still reads version 0.0.3.5, not 0.0.4.2"
-		if r := w.onlyApplyRecord(t); r.Result != resultFailed || r.Message != want {
-			t.Errorf("the record is %+v, want Failed: %s", r, want)
-		}
-		if w.api.disruptionExists(turnName) {
-			t.Error("the request remains, want it deleted and no second turn")
-		}
-	})
+				if r := w.onlyApplyRecord(t); r.Result != resultFailed || r.Message != c.failed {
+					t.Errorf("the record is %+v, want Failed: %s", r, c.failed)
+				}
+				if w.api.disruptionExists(turnName) {
+					t.Error("the request remains, want it deleted and no second turn")
+				}
+			})
+		})
+	}
 }
 
 // An operator that stops after it created the apply pod, before the

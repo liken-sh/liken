@@ -375,15 +375,28 @@ the machine's `KEK` holds, such as `microsoft-dbx-x64` instead of
 | `clearing the immutable flag of ...: operation not permitted` | The pod lacks `CAP_LINUX_IMMUTABLE`. A policy of your cluster that removes capabilities from pods in `liken-system` causes this. |
 | `writing the append to ...: read-only file system` | The machine's `efivarfs` is mounted read-only, so the pod's read-write mount of `/sys/firmware` cannot write it. |
 | `writing the append to ...: ...` | The kernel refused the write for another reason, which the message gives. |
-| `the apply pod did not finish within 10m0s of its creation` | The pod never ran, such as an image that does not pull, or it hung. Check `kubectl -n liken-system get events`. |
-| `the apply wrote no result; its last line was: ...` or `the apply pod wrote no log: ...` | The apply program crashed. The message holds its last line, or the pod's reason. |
-| `the apply pod is gone, ...` | Someone deleted the apply pod before it ended. The operator cannot tell whether it wrote. The next scan after a reboot shows the version. |
 | `the FirmwareCatalog ... has no current file ...` | The `FirmwareCatalog` of the machine's scan was deleted or never read its jcat. See [A FirmwareCatalog is not Ready](#a-firmwarecatalog-is-not-ready). |
 | `the machine rebooted after the write, and its next scan still reads version ..., not ...` | The firmware took the write and did not keep it across the reboot. A firmware that resets Secure Boot to its defaults discards the appended entries. Check the firmware's Secure Boot settings before you approve again. |
+| `the machine rebooted, and its next scan still reads version ..., not ..., so the append was not written` | An uncertain apply, below, did not write. Approve again. |
 
 A failed or refused record deletes its `Disruption`, unless the
 operator already removed `spec.hold`. Then the turn still reboots the
 machine.
+
+### Applied is Unknown with Uncertain
+
+The apply pod ended without saying whether it wrote. A write may have
+landed before it stopped, so the operator removes the hold, the
+machine reboots in its turn, and the next scan reads the version. The
+record then ends, or turns `Failed` when the machine still reads the
+old version.
+
+| Message | What to check |
+|---|---|
+| `the apply pod is gone, ...` | Someone deleted the apply pod before it ended. |
+| `the apply pod did not finish within 10m0s of its creation` | The pod never ran, such as an image that does not pull, or it hung. Check `kubectl -n liken-system get events`. |
+| `the apply wrote no result; its last line was: ...` or `the apply pod wrote no log: ...` | The apply program crashed. The message holds its last line, or the pod's reason. |
+| `the apply answered the result ..., which the operator does not know` | The scan image and the operator are from different releases. Pin both to one tag. |
 
 ### Applied stays Unknown
 
@@ -410,8 +423,9 @@ kubectl get disruptions -l firmware.liken.sh/firmware=<name>
   The pod mounts a host path, which the `baseline` Pod Security level
   forbids, so a cluster that labels `liken-system` with a level below
   `privileged` refuses it. Look for the refusal in the operator's log.
-- **The record is `Written`.** The machine reboots, and its next scan
-  ends the record. A scan waits for the machine to be `Ready`.
+- **The record is `Written` or `Uncertain`.** The machine reboots, and
+  its next scan ends the record. A scan waits for the machine to be
+  `Ready`.
 
 ### A machine stays drained
 

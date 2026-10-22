@@ -255,7 +255,15 @@ shows it:
 | `True` | `Written` | The firmware took the update on every machine the approval waits for. Each machine applies it at its reboot. |
 | `False` | `Refused` | The firmware refused the append on a machine, and nothing changed there. |
 | `False` | `Failed` | A write could not run, a machine left its turn before the hold, or a machine still reads the old version after its reboot. |
+| `Unknown` | `Uncertain` | The apply pod on a machine ended without saying whether it wrote. The machine reboots in its turn, and its next scan answers. |
 | `Unknown` | `Applying` | A machine waits for its rehearsal, its turn, or its write. |
+
+When the operator cannot tell whether an append was written, because
+the apply pod was deleted, ran past its deadline, or crashed, it does
+not withdraw the turn. A write may have landed before the pod stopped,
+and the kernel enforces it only after a reboot, so the machine reboots
+in the same turn. The next scan then reads the version: the approved
+one ends the record, and the old one makes it `Failed`.
 
 The operator does not write again on its own after `Refused` or
 `Failed`. To try again, withdraw the approval and approve it again,
@@ -288,8 +296,9 @@ release shows in `kubectl describe firmware <name>` and in
 one passes, and a `Warning` `RehearsalRefused` or `RehearsalFailed`
 when one does not. It posts `ApplyRequested` when it asks for a
 machine's turn, `ApplyStarted` when the apply pod starts,
-`ApplyWritten` when the firmware took the append, and a `Warning`
-`ApplyRefused` or `ApplyFailed` when it did not.
+`ApplyWritten` when the firmware took the append, a `Warning`
+`ApplyRefused` or `ApplyFailed` when it did not, and a `Warning`
+`ApplyUncertain` when the pod ended without saying.
 
 ## Withdraw an approval
 
