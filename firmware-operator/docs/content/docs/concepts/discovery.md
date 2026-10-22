@@ -25,8 +25,10 @@ with no install, and
 [Approve a firmware update](/docs/guides/approve-an-update/) shows
 how. The operator then rehearses the install against a copy of each
 pending machine's firmware variables, and records what it would
-write. A later release applies an approved version one machine at a
-time.
+write. For a Secure Boot database update, it then writes that record
+in each machine's reboot turn, which `liken` grants under the
+machine's disruption budgets, and the next scan proves it. A capsule
+update is rehearsed and refused, and is not applied yet.
 
 ## A scan runs fwupd's default plugins
 

@@ -194,6 +194,13 @@ func (w *world) postedAboutCatalog(name string) []posted {
 // a USB port. It answers once the first scan has started.
 func discoveryWorld(t *testing.T) *world {
 	w := startWorld(t)
+	seedDiscovery(w)
+	return w
+}
+
+// seedDiscovery plays the steps of discoveryWorld on a world whose
+// operator runs.
+func seedDiscovery(w *world) {
 	w.lvfs.publish("firmware-09138-stable.xml.zst", frameworkBIOS("0.0.3.5", "0.0.4.2"), dbx("1", "2"))
 	// The machine's slice reaches the operator before the Machine and
 	// the FirmwareCatalog, the way it does on a cluster where the machine has
@@ -204,7 +211,6 @@ func discoveryWorld(t *testing.T) *world {
 	w.settle()
 	w.api.putCatalog("lvfs", lvfsURL)
 	w.settle()
-	return w
 }
 
 // The names of scannedWorld's discovered objects: the BIOS's catalog

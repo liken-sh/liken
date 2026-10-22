@@ -1,10 +1,11 @@
 # The operator's identity. It reads every Firmware, every FirmwareCatalog,
 # every slice that machine-operator publishes, and every Machine, and
 # writes the status of each Firmware and each FirmwareCatalog. It creates and
-# deletes the discovered Firmware objects. It creates, reads, and
-# deletes the upload pods and their claims and the scan pods in its own
-# namespace, reads each scan pod's log, and posts the Events about each
-# Firmware and each FirmwareCatalog.
+# deletes the discovered Firmware objects, and the Disruptions that ask
+# for a machine's reboot turn. It creates, reads, and deletes the upload
+# pods and their claims and the scan, rehearsal, and apply pods in its
+# own namespace, reads the log of each pod that reports a result, and
+# posts the Events about each Firmware and each FirmwareCatalog.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -12,7 +13,7 @@ metadata:
   name: firmware-operator
 ---
 # A ClusterRole for the cluster-scoped kinds: a Firmware, a FirmwareCatalog, a
-# ResourceSlice, and a Machine.
+# ResourceSlice, a Machine, and a Disruption.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -48,6 +49,19 @@ rules:
   - apiGroups: [liken.sh]
     resources: [machines]
     verbs: [get, list, watch]
+  # The requests for a machine's reboot turn that an approved database
+  # update files, with spec.hold. The watch selects the operator's own
+  # requests by the label firmware.liken.sh/firmware, which needs list
+  # and watch on every request. get reads a request the watch does not
+  # hold yet, and create files one. patch removes spec.hold after the
+  # write, so the turn reboots the machine, and delete withdraws a
+  # request whose write was refused or failed, or whose approval
+  # changed. liken's admission policy refuses a change to
+  # spec.approvedHash from any service account, and the operator never
+  # sends one.
+  - apiGroups: [liken.sh]
+    resources: [disruptions]
+    verbs: [get, list, watch, create, patch, delete]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -62,17 +76,18 @@ subjects:
     name: firmware-operator
     namespace: liken-system
 ---
-# The upload pods and their claims, and the scan pods, which run in
-# the operator's own namespace. The watches select the pods by the
-# labels firmware.liken.sh/upload and firmware.liken.sh/scan, and a
-# watch by label selector needs list and watch on every pod in the
-# namespace. get reads a pod after a create that met a conflict, checks
-# that a Running upload's or scan's pod still exists, and reads the
-# operator's own pod for the image the scan image is named from. delete
-# removes a pod after its result is in the status, and the garbage
-# collector deletes an upload pod's claim. The operator deletes only a
-# pod that carries one of the two labels. pods/log reads the result
-# line a scan pod writes.
+# The upload pods and their claims, and the scan, rehearsal, and apply
+# pods, which run in the operator's own namespace. The watches select
+# the pods by the labels firmware.liken.sh/upload,
+# firmware.liken.sh/scan, firmware.liken.sh/rehearsal, and
+# firmware.liken.sh/apply, and a watch by label selector needs list and
+# watch on every pod in the namespace. get reads a pod after a create
+# that met a conflict, checks that a running pod still exists, and
+# reads the operator's own pod for the image the scan image is named
+# from. delete removes a pod after its result is in the status, and the
+# garbage collector deletes an upload pod's claim. The operator deletes
+# only a pod that carries one of the four labels. pods/log reads the
+# result line that a scan, rehearsal, or apply pod writes.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:

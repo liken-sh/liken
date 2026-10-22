@@ -109,10 +109,10 @@ func machineList(machines map[string]bool) string {
 }
 
 // approveAll answers every update rule: its approval, and the
-// rehearsals of each machine the approval waits for (rehearsal.go). It
-// runs after the scans' entries are written, so it reads the entries
-// of this pass. It answers the earliest deadline of a rehearsal in
-// progress.
+// rehearsals and the applies of each machine the approval waits for
+// (rehearsal.go and apply.go). It runs after the scans' entries are
+// written, so it reads the entries of this pass. It answers the
+// earliest deadline of a rehearsal or an apply in progress.
 func (o *operator) approveAll(rules []firmware, w observed, catalogs map[string]*catalog, now time.Time) (time.Time, error) {
 	var next time.Time
 	var problems []error
@@ -128,22 +128,29 @@ func (o *operator) approveAll(rules []firmware, w observed, catalogs map[string]
 	return next, errors.Join(problems...)
 }
 
-// answerUpdate follows one rule's rehearsals, starts the ones its
-// pending machines need, and writes its approval, its rehearsals, and
-// their conditions in one status write. Then it posts the transitions
-// and deletes each finished rehearsal pod.
+// answerUpdate follows one rule's rehearsals and applies, starts the
+// ones its pending machines need, and writes its approval, its
+// rehearsals, its applies, and their conditions in one status write.
+// Then it posts the transitions, brings the requests for a reboot turn
+// in line with the records it wrote, and deletes each finished
+// rehearsal and apply pod.
 func (o *operator) answerUpdate(f *firmware, w observed, catalogs map[string]*catalog, now time.Time) (time.Time, error) {
 	ends, busy, due, err := o.rehearsalEnds(f, w.rehearsals[f.Metadata.Name], now)
 	problems := []error{err}
+	steps, finished, applyDue, err := o.applyEnds(f, w.applies[f.Metadata.Name], now)
+	due, problems = earliest(due, applyDue), append(problems, err)
 	var starts []rehearsalAttempt
 	if c, pending, holds := approval(f.Spec.Update, f.Spec.Machines, f.Status.Machines, w.machines); holds && c.Status == conditions.True {
 		started, err := o.startRehearsals(f, pending, w, catalogs, busy)
 		starts, problems = started, append(problems, err)
+		advanced, err := o.advanceApplies(f, pending, w, catalogs)
+		steps, problems = append(steps, advanced...), append(problems, err)
 	}
 
-	var approved, rehearsals condition
-	var approvedMoved, rehearsedMoved bool
-	var notices []notice
+	var approved, rehearsals, applies condition
+	var approvedMoved, rehearsedMoved, appliedMoved bool
+	var notices, applyNotices []notice
+	var records []applyRecord
 	written, err := informer.SettleStatus[firmware](o.client, o.firmwares.Versions, firmwarePath(f.Metadata.Name), f, func(held *firmware) bool {
 		next := held.Status
 		next.Conditions = slices.Clone(held.Status.Conditions)
@@ -152,10 +159,14 @@ func (o *operator) answerUpdate(f *firmware, w observed, catalogs map[string]*ca
 		approved, pending, holds = approval(held.Spec.Update, held.Spec.Machines, held.Status.Machines, w.machines)
 		next.Counts = counts{UpdateCounts: updateCounts(held.Status.Machines, len(pending))}
 		next.Rehearsals, notices = composeRehearsals(held, pending, ends, starts, now)
+		next.Applies, applyNotices = composeApplies(held, pending, steps, now)
+		records = next.Applies
 		approvedMoved = holdCondition(&next.Conditions, approvedCondition, approved, holds, held.Metadata.Generation, now)
-		var rehearsing bool
+		var rehearsing, applying bool
 		rehearsals, rehearsing = rehearsed(next.Rehearsals, pending)
 		rehearsedMoved = holdCondition(&next.Conditions, rehearsedCondition, rehearsals, rehearsing, held.Metadata.Generation, now)
+		applies, applying = applied(next.Applies, pending)
+		appliedMoved = holdCondition(&next.Conditions, appliedCondition, applies, applying, held.Metadata.Generation, now)
 		if len(next.Conditions) == 0 {
 			next.Conditions = nil
 		}
@@ -174,11 +185,19 @@ func (o *operator) answerUpdate(f *firmware, w observed, catalogs map[string]*ca
 	if written {
 		o.post(f, approved, nil, approvedMoved)
 		o.post(f, rehearsals, notices, rehearsedMoved)
+		o.post(f, applies, applyNotices, appliedMoved)
 	}
+	// The requests and the pods follow the records only once the records
+	// are written, so an operator that stops here finds each result in
+	// the status and does the rest again.
+	problems = append(problems, o.settleTurns(records, w.disruptions[f.Metadata.Name]))
 	for _, end := range ends {
 		if end.rehearsal != nil {
 			problems = append(problems, o.remove(*end.rehearsal))
 		}
+	}
+	for _, p := range finished {
+		problems = append(problems, o.remove(p))
 	}
 	return due, errors.Join(problems...)
 }

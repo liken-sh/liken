@@ -3,8 +3,8 @@ package main
 // These tests read the manifests in deploy/ for the facts the code
 // depends on: the environment the operator reads, the class an upload's
 // claim names, the policy that keeps an upload pod off the network, the
-// policy that lets a scan pod reach only DNS and HTTPS, and the lvfs
-// FirmwareCatalog.
+// policies that let a scan, rehearsal, or apply pod reach only DNS and
+// HTTPS, the grant on the Disruptions, and the lvfs FirmwareCatalog.
 
 import (
 	"fmt"
@@ -115,12 +115,13 @@ func TestTheUploadPodsHaveNoNetwork(t *testing.T) {
 	}
 }
 
-// The scan and rehearsal pods' policies each select every pod of their
-// kind, allow nothing in, and allow out only DNS and HTTPS.
-func TestTheScanAndRehearsalPodsReachOnlyDNSAndHTTPS(t *testing.T) {
+// The scan, rehearsal, and apply pods' policies each select every pod
+// of their kind, allow nothing in, and allow out only DNS and HTTPS.
+func TestTheScanRehearsalAndApplyPodsReachOnlyDNSAndHTTPS(t *testing.T) {
 	cases := []struct{ file, label, value string }{
 		{"scan.yaml", scanLabel, scanLabelValue},
 		{"rehearsal.yaml", rehearsalLabel, rehearsalLabelValue},
+		{"apply.yaml", applyLabel, applyLabelValue},
 	}
 	for _, c := range cases {
 		t.Run(c.file, func(t *testing.T) {
@@ -143,6 +144,23 @@ func TestTheScanAndRehearsalPodsReachOnlyDNSAndHTTPS(t *testing.T) {
 				t.Errorf("the policy allows out %v, want %v", ports, want)
 			}
 		})
+	}
+}
+
+// The ClusterRole grants each request the operator sends about a
+// Disruption: the watch, the read of one, the create, the patch that
+// removes spec.hold, and the delete.
+func TestTheOperatorMayRequestATurn(t *testing.T) {
+	var verbs []any
+	for _, rule := range dig(find(t, "rbac.yaml", "ClusterRole"), "rules").([]any) {
+		if slices.Contains(dig(rule, "resources").([]any), any("disruptions")) {
+			verbs = append(verbs, dig(rule, "verbs").([]any)...)
+		}
+	}
+	for _, want := range []string{"get", "list", "watch", "create", "patch", "delete"} {
+		if !slices.Contains(verbs, any(want)) {
+			t.Errorf("the ClusterRole grants %v on disruptions, which lacks %s", verbs, want)
+		}
 	}
 }
 

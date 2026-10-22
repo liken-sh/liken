@@ -34,11 +34,13 @@ The base holds these parts:
 - the `firmware-operator` `ServiceAccount` and its `ClusterRole`,
   which reads every `Firmware`, every `FirmwareCatalog`, every
   `ResourceSlice`, and every `Machine`, writes each `Firmware`'s and
-  each `FirmwareCatalog`'s status, and creates and deletes the discovered
-  `Firmware` objects;
+  each `FirmwareCatalog`'s status, creates and deletes the discovered
+  `Firmware` objects, and creates, patches, and deletes the
+  `Disruption`s that ask for a machine's reboot turn;
 - a `Role` in `liken-system`, which creates, reads, and deletes the
-  upload pods and their `ResourceClaim`s and the scan pods, and reads
-  the logs of the scan pods;
+  upload pods and their `ResourceClaim`s and the scan, rehearsal, and
+  apply pods, and reads the logs of the scan, rehearsal, and apply
+  pods;
 - a `Role` in `default`, which posts the `Event`s about each
   `Firmware` and each `FirmwareCatalog`;
 - a `Role` in `liken-system`, which creates, reads, and renews the
@@ -48,9 +50,10 @@ The base holds these parts:
   of `liken.sh` and which each upload's claim names;
 - the `NetworkPolicy` `firmware-upload` in `liken-system`, which
   denies all traffic in and out of the upload pods;
-- the `NetworkPolicy` `firmware-scan` in `liken-system`, which allows
-  the scan pods to send traffic only to DNS (port 53) and to TCP port
-  443, and allows no traffic in;
+- the `NetworkPolicy`s `firmware-scan`, `firmware-rehearsal`, and
+  `firmware-apply` in `liken-system`, which allow the scan, rehearsal,
+  and apply pods to send traffic only to DNS (port 53) and to TCP port
+  443, and allow no traffic in;
 - the `FirmwareCatalog` `lvfs`, which names the LVFS catalog at
   `https://cdn.fwupd.org/downloads/firmware.xml.zst`.
 
@@ -83,6 +86,8 @@ kubectl apply -n liken-system -f https://liken.sh/firmware/deploy/rbac.yaml
 kubectl apply -n liken-system -f https://liken.sh/firmware/deploy/operator.yaml
 kubectl apply -n liken-system -f https://liken.sh/firmware/deploy/upload.yaml
 kubectl apply -n liken-system -f https://liken.sh/firmware/deploy/scan.yaml
+kubectl apply -n liken-system -f https://liken.sh/firmware/deploy/rehearsal.yaml
+kubectl apply -n liken-system -f https://liken.sh/firmware/deploy/apply.yaml
 kubectl apply -f https://liken.sh/firmware/deploy/lvfs.yaml
 ```
 
@@ -150,15 +155,21 @@ that each `Firmware` names, so this entry does not change them.
 Delete the `Deployment` to stop the operator. Each `Firmware` and each
 `FirmwareCatalog` keeps its status, and a device that loaded keeps its firmware
 until it loses power. A bare chip that appears after that stays bare,
-and no machine is scanned.
+and no machine is scanned. A machine that waits in a turn the operator
+asked for stays drained, because the hold has no deadline, so first
+check that no `Firmware` reads `Unknown` in its `APPLIED` column, or
+release the machine by hand
+([A machine stays drained](https://liken.sh/firmware/docs/guides/troubleshoot/#a-machine-stays-drained)).
 
 ```sh
 kubectl -n liken-system delete deployment/firmware-operator
 ```
 
 Delete the base to remove the definitions too. That deletes every
-`Firmware` and every `FirmwareCatalog`, and with them every upload pod, claim,
-and scan pod that is still running.
+`Firmware` and every `FirmwareCatalog`, and with them every upload pod,
+claim, scan pod, rehearsal pod, and apply pod that is still running,
+and every `Disruption` that a `Firmware` filed. A machine whose turn a
+deleted `Disruption` held leaves the turn with no reboot.
 
 The operator creates its `Lease` itself, so the base does not hold it,
 and it stays after you delete the base. Delete it with

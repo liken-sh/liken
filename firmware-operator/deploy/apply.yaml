@@ -1,0 +1,31 @@
+# The network policy of every apply pod. An apply pod rehearses the
+# install again before it writes, so it reads the catalog's jcat, its
+# versioned file, and the approved cabinet over HTTPS, and needs DNS to
+# find their hosts. So the policy allows its egress to port 53 and to
+# TCP port 443, on any address, and allows nothing in. A cabinet or a
+# catalog on a mirror on another port needs a policy of its own beside
+# this one. A cluster with no network policy controller ignores it.
+#
+# An apply pod is not privileged. It mounts the machine's /sys/firmware
+# read-write and keeps only the capabilities DAC_READ_SEARCH and
+# LINUX_IMMUTABLE, but it mounts a host path, which the baseline Pod
+# Security level forbids. It runs in liken-system, which carries no Pod
+# Security label, so the API server admits it.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: firmware-apply
+spec:
+  podSelector:
+    matchLabels:
+      firmware.liken.sh/apply: "true"
+  policyTypes: [Ingress, Egress]
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+        - protocol: TCP
+          port: 443

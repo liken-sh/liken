@@ -71,7 +71,7 @@ func TestCRDPrinterColumns(t *testing.T) {
 	for _, column := range loadCRD(t, firmwareCRD).Spec.Versions[0].AdditionalPrinterColumns {
 		names = append(names, column.Name)
 	}
-	want := []string{"Valid", "Loaded", "Running", "Failed", "Conflict", "Machines", "Behind", "Version", "Approved", "Pending", "Rehearsed", "Age"}
+	want := []string{"Valid", "Loaded", "Running", "Failed", "Conflict", "Machines", "Behind", "Version", "Approved", "Pending", "Rehearsed", "Applied", "Age"}
 	if !slices.Equal(names, want) {
 		t.Errorf("printer columns %v, want %v", names, want)
 	}

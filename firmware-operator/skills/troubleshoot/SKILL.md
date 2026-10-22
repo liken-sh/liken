@@ -1,17 +1,19 @@
 ---
 name: troubleshoot
-description: "Find why a Firmware's upload failed or never started: a Failed entry and its message, a Conflict between two rules, a selector that does not compile or matches nothing, an upload pod that stays Pending, and a claimed device that stays Pending because its firmware is not loaded. Find why discovery found nothing: a FirmwareCatalog that is not Ready, a scan record that is Failed or CatalogMoved, a machine that is never scanned, and a discovered Firmware that keeps the entry of a machine that is off. Find why an approval's Approved condition is False: CabinetDiffers, NotOffered, or MachinesInvalid, and why the API server refuses an approval. Find why the Rehearsed condition is False with Refused or Failed, or stays Unknown, from the message of each record in status.rehearsals. Use when kubectl get firmware shows Failed or Conflict, when a bare chip gets no upload, when a pod that claims a camera does not start, when kubectl get firmwarecatalog shows Ready False, when a machine has no scan record, when kubectl get firmware shows Approved False, or when it shows Rehearsed False or Unknown."
+description: "Find why a Firmware's upload failed or never started: a Failed entry and its message, a Conflict between two rules, a selector that does not compile or matches nothing, an upload pod that stays Pending, and a claimed device that stays Pending because its firmware is not loaded. Find why discovery found nothing: a FirmwareCatalog that is not Ready, a scan record that is Failed or CatalogMoved, a machine that is never scanned, and a discovered Firmware that keeps the entry of a machine that is off. Find why an approval's Approved condition is False: CabinetDiffers, NotOffered, or MachinesInvalid, and why the API server refuses an approval. Find why the Rehearsed condition is False with Refused or Failed, or stays Unknown, from the message of each record in status.rehearsals. Find why the Applied condition is False with Refused or Failed, or stays Unknown, from the message of each record in status.applies and the Disruption that asks for the machine's turn, and release a machine that stays drained. Use when kubectl get firmware shows Failed or Conflict, when a bare chip gets no upload, when a pod that claims a camera does not start, when kubectl get firmwarecatalog shows Ready False, when a machine has no scan record, when kubectl get firmware shows Approved False, when it shows Rehearsed or Applied False or Unknown, or when a machine stays drained in a turn that the operator holds."
 ---
 
 This skill is the guide at https://liken.sh/firmware/docs/guides/troubleshoot/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
 
-# Troubleshoot uploads, scans, approvals, and rehearsals
+# Troubleshoot uploads, scans, approvals, rehearsals, and applies
 
 The first part of this guide covers uploads, the second part covers
 the scans that find updates ([Find firmware updates](https://liken.sh/firmware/docs/guides/find-updates/)),
 the third part covers approvals
-([Approve a firmware update](https://liken.sh/firmware/docs/guides/approve-an-update/)), and the fourth
-part covers the rehearsal of an approved install on each machine.
+([Approve a firmware update](https://liken.sh/firmware/docs/guides/approve-an-update/)), the fourth part
+covers the rehearsal of an approved install on each machine, and the
+fifth part covers the apply of the install in each machine's reboot
+turn.
 
 ## Uploads
 
@@ -332,3 +334,107 @@ A pending machine waits for its rehearsal. Check each of these:
   path, which the `baseline` Pod Security level forbids. A cluster
   that labels `liken-system` with a level below `privileged` refuses
   it. Look for the refusal in the operator's log.
+
+## Applies
+
+`kubectl get firmware` shows the `Applied` condition in the `APPLIED`
+column. The condition's message names each machine with its record's
+message, and `status.applies` holds the records:
+
+```sh
+kubectl get firmware <name> -o jsonpath='{range .status.applies[*]}{.machine}{"\t"}{.result}{"\t"}{.disruption}{"\t"}{.message}{"\n"}{end}'
+```
+
+The operator does not write again on its own after a record reads
+`Refused` or `Failed`. To try again, withdraw the approval and approve
+it again. The withdrawal removes the machine's rehearsal and its
+record, so the machine rehearses again, and asks for its turn again
+when the rehearsal passes.
+
+### Applied is False with Refused
+
+The message is `the firmware refused the append to <variable>:
+permission denied`. The kernel reports the firmware's refusal of an
+authenticated write as permission denied. The firmware checks the
+append's signature against `KEK`, or against `PK` for a `KEK` update,
+and refuses an append whose signer does not chain to one of them. A
+`KEK` that holds only an older Microsoft key, while the release is
+signed by a newer one, causes this. A refused append changes nothing,
+and the operator deletes the `Disruption`, so the machine leaves its
+turn with no reboot. Choose the release of the component whose signer
+the machine's `KEK` holds, such as `microsoft-dbx-x64` instead of
+`microsoft-dbx-x64-kek2023`.
+
+### Applied is False with Failed
+
+| Message | What to check |
+|---|---|
+| `the machine left its turn before the hold took effect: the Disruption ... is Complete ...` | The machine rebooted without holding its turn, so nothing was written. A `liken` release whose `Disruption` has no `spec.hold` does this. Upgrade the cluster, then approve again. |
+| `the machine left its turn before the hold took effect: the Disruption ... is gone ...` | Someone deleted the `Disruption` before the hold. Approve again. |
+| `the append's SHA-256 is now ..., and the rehearsal recorded ...` | Another writer changed the machine's variables after the rehearsal, such as another operating system or the firmware's setup menu. Nothing was written. Approve again to rehearse against the variables as they are now. |
+| `the rehearsal before the write did not pass, so nothing was written: ...` | The rehearsal in the apply pod failed or was refused. The rest of the message is the rehearsal's, and the [rehearsal tables](#rehearsals) explain it. |
+| `clearing the immutable flag of ...: operation not permitted` | The pod lacks `CAP_LINUX_IMMUTABLE`. A policy of your cluster that removes capabilities from pods in `liken-system` causes this. |
+| `writing the append to ...: read-only file system` | The machine's `efivarfs` is mounted read-only, so the pod's read-write mount of `/sys/firmware` cannot write it. |
+| `writing the append to ...: ...` | The kernel refused the write for another reason, which the message gives. |
+| `the apply pod did not finish within 10m0s of its creation` | The pod never ran, such as an image that does not pull, or it hung. Check `kubectl -n liken-system get events`. |
+| `the apply wrote no result; its last line was: ...` or `the apply pod wrote no log: ...` | The apply program crashed. The message holds its last line, or the pod's reason. |
+| `the apply pod is gone, ...` | Someone deleted the apply pod before it ended. The operator cannot tell whether it wrote. The next scan after a reboot shows the version. |
+| `the FirmwareCatalog ... has no current file ...` | The `FirmwareCatalog` of the machine's scan was deleted or never read its jcat. See [A FirmwareCatalog is not Ready](#a-firmwarecatalog-is-not-ready). |
+| `the machine rebooted after the write, and its next scan still reads version ..., not ...` | The firmware took the write and did not keep it across the reboot. A firmware that resets Secure Boot to its defaults discards the appended entries. Check the firmware's Secure Boot settings before you approve again. |
+
+A failed or refused record deletes its `Disruption`, unless the
+operator already removed `spec.hold`. Then the turn still reboots the
+machine.
+
+### Applied stays Unknown
+
+Find the machine's record and its `Disruption`:
+
+```sh
+kubectl get disruptions -l firmware.liken.sh/firmware=<name>
+```
+
+- **The machine has no record.** Its rehearsal has not passed on the
+  boot it runs. See [Rehearsals](#rehearsals). The operator also asks
+  for no turn on a `liken` release that has no `Disruption` kind.
+- **The record is `Waiting`.** The machine waits for its turn. An
+  `APPROVED` of `False` means the machine's `rebootPolicy` is `Manual`,
+  and the request waits for you:
+  [Apply the update](https://liken.sh/firmware/docs/guides/approve-an-update/#apply-the-update) gives the
+  command that approves it. A `GRANTED` of `False` means a budget has
+  no room, and the `Granted` condition's message names what the turn
+  waits for. Once the turn is granted, `machine-operator` drains the
+  machine and sets `HELD` to `True`.
+- **The record is `Writing`.** The apply pod runs on the drained
+  machine:
+  `kubectl -n liken-system get pods -l firmware.liken.sh/apply=true`.
+  The pod mounts a host path, which the `baseline` Pod Security level
+  forbids, so a cluster that labels `liken-system` with a level below
+  `privileged` refuses it. Look for the refusal in the operator's log.
+- **The record is `Written`.** The machine reboots, and its next scan
+  ends the record. A scan waits for the machine to be `Ready`.
+
+### A machine stays drained
+
+A machine whose `Disruption` reads `HELD` `True` is drained and waits
+for the operator, and a hold has no deadline. The operator removes the
+hold after a write, and deletes the `Disruption` after a refusal or a
+failure. A machine stays drained when the operator does not run, or
+does not lead. Check the operator first: see
+[Confirm that it leads](https://liken.sh/firmware/docs/guides/install/#confirm-that-it-leads).
+
+To release the machine yourself, remove the hold or delete the request.
+Removing the hold reboots the machine:
+
+```sh
+kubectl patch disruption <machine>.firmware-<name> --type merge -p '{"spec":{"hold":null}}'
+```
+
+Deleting the request ends the turn with no reboot:
+
+```sh
+kubectl delete disruption <machine>.firmware-<name>
+```
+
+If the apply pod is still running, wait for it to end first, so that
+its result is in the record.

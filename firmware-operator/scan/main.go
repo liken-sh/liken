@@ -24,7 +24,9 @@ const (
 
 	// A rehearsal reads the machine's /sys/firmware at hostFirmware,
 	// mounted read-only, and keeps its copy and its downloads in
-	// rehearsalDir, a directory in memory.
+	// rehearsalDir, a directory in memory. An apply mounts the same
+	// directory read-write at the same path, and rehearses the same
+	// way before it writes.
 	hostFirmware = "/host/firmware"
 	rehearsalDir = "/run/rehearsal"
 )
@@ -32,6 +34,10 @@ const (
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "rehearse" {
 		rehearseMain()
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "apply" {
+		applyMain()
 		return
 	}
 
@@ -52,15 +58,37 @@ func main() {
 	}
 }
 
-// rehearseMain runs a rehearsal (rehearse.go). fwupd reads the copy in
-// rehearsalDir and keeps its own state there too, so nothing of the
-// install reaches the machine.
+// rehearseMain runs a rehearsal (rehearse.go).
 func rehearseMain() {
 	ctx, cancel := context.WithTimeout(context.Background(), scanTimeout)
 	defer cancel()
 
+	r := rehearserIn(rehearserFromEnv(os.Getenv))
+	if err := emit(os.Stdout, r.rehearse(ctx)); err != nil {
+		fmt.Fprintln(os.Stderr, "writing the result:", err)
+		os.Exit(1)
+	}
+}
+
+// applyMain runs an apply (apply.go): a rehearsal like rehearseMain's,
+// and then the write to the machine's own variable.
+func applyMain() {
+	ctx, cancel := context.WithTimeout(context.Background(), scanTimeout)
+	defer cancel()
+
+	a := applierFromEnv(os.Getenv)
+	a.rehearser, a.store = rehearserIn(a.rehearser), osVariableStore()
+	if err := emit(os.Stdout, a.apply(ctx)); err != nil {
+		fmt.Fprintln(os.Stderr, "writing the result:", err)
+		os.Exit(1)
+	}
+}
+
+// rehearserIn completes a rehearser with the paths of its pod. fwupd
+// reads the copy in rehearsalDir and keeps its own state there too, so
+// nothing of the install reaches the machine.
+func rehearserIn(r rehearser) rehearser {
 	copyDir := rehearsalDir + "/fw"
-	r := rehearserFromEnv(os.Getenv)
 	r.scanner = scanner{
 		cfg:    configFromEnv(os.Getenv),
 		client: http.DefaultClient,
@@ -70,8 +98,5 @@ func rehearseMain() {
 		workDir:    rehearsalDir + "/catalog",
 	}
 	r.hostDir, r.copyDir, r.espDir, r.free = hostFirmware, copyDir, rehearsalDir+"/esp", freeBytes
-	if err := emit(os.Stdout, r.rehearse(ctx)); err != nil {
-		fmt.Fprintln(os.Stderr, "writing the result:", err)
-		os.Exit(1)
-	}
+	return r
 }

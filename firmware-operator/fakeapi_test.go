@@ -1,10 +1,10 @@
 package main
 
 // A fake API server that holds the Firmware and FirmwareCatalog objects, the
-// slices, the Machines, the upload and scan pods, and the upload pods'
-// claims, and serves the requests the operator sends: a list and a
-// watch of each collection, a status write, an object's create, read,
-// and delete, and a pod's log. It answers
+// slices, the Machines, the upload and scan pods, the upload pods'
+// claims, and the Disruptions, and serves the requests the operator
+// sends: a list and a watch of each collection, a status write, an
+// object's create, read, merge patch, and delete, and a pod's log. It answers
 // over the in-memory connections of apiservertest, so each test runs in
 // a synctest bubble on the fake clock. A test plays machine-operator
 // and the kubelet: it publishes a slice and finishes an upload pod.
@@ -38,12 +38,13 @@ var (
 // kinds names the apiVersion and kind of each collection's objects,
 // which a list and a bookmark carry.
 var kinds = map[string][2]string{
-	firmwaresPath:  {firmwareAPIVersion, firmwareKind},
-	catalogsPath:   {firmwareAPIVersion, catalogKind},
-	slicesPath:     {"resource.k8s.io/v1", "ResourceSlice"},
-	machinesPath:   {"liken.sh/v1alpha1", "Machine"},
-	uploadPodsPath: {"v1", "Pod"},
-	claimsPath:     {"resource.k8s.io/v1", "ResourceClaim"},
+	firmwaresPath:   {firmwareAPIVersion, firmwareKind},
+	catalogsPath:    {firmwareAPIVersion, catalogKind},
+	slicesPath:      {"resource.k8s.io/v1", "ResourceSlice"},
+	machinesPath:    {"liken.sh/v1alpha1", "Machine"},
+	uploadPodsPath:  {"v1", "Pod"},
+	claimsPath:      {"resource.k8s.io/v1", "ResourceClaim"},
+	disruptionsPath: {disruptionAPIVersion, disruptionKind},
 }
 
 type fakeEvent struct {
@@ -163,6 +164,8 @@ func (a *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			a.writeStatus(w, r, collection, name)
 		case r.Method == http.MethodDelete:
 			a.delete(w, collection, name)
+		case r.Method == http.MethodPatch:
+			a.patch(w, r, collection, name)
 		default:
 			a.get(w, collection, name)
 		}

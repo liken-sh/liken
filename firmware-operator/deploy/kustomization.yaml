@@ -1,7 +1,8 @@
 # The kustomize base for firmware-operator: the Firmware and FirmwareCatalog
 # resource definitions, the operator that runs the uploads and the
 # scans, the class and network policy of the upload pods, the network
-# policies of the scan and rehearsal pods, and the lvfs FirmwareCatalog.
+# policies of the scan, rehearsal, and apply pods, and the lvfs
+# FirmwareCatalog.
 #
 # The lvfs FirmwareCatalog is an object of a kind that this base defines. On
 # the first apply, kubectl sends the object before the API server
@@ -37,6 +38,7 @@ resources:
   - upload.yaml
   - scan.yaml
   - rehearsal.yaml
+  - apply.yaml
   - lvfs.yaml
 
 labels:

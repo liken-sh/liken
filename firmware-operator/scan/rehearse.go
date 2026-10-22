@@ -111,72 +111,81 @@ func rehearserFromEnv(getenv func(string) string) rehearser {
 // rehearse runs the steps in order and stops at the first that fails.
 // Every outcome is a RehearsalResult for the operator to read.
 func (r rehearser) rehearse(ctx context.Context) RehearsalResult {
+	result, _ := r.rehearseAppend(ctx)
+	return result
+}
+
+// rehearseAppend is rehearse, and answers the bytes of a passed
+// rehearsal's append too, which an apply writes (apply.go). The result
+// keeps only their length and SHA-256, so the bytes leave the pod
+// only in the write.
+func (r rehearser) rehearseAppend(ctx context.Context) (RehearsalResult, []byte) {
 	if err := copyFirmware(r.hostDir, r.copyDir); err != nil {
-		return rehearsalFailed("copying the firmware tables: %v", err)
+		return rehearsalFailed("copying the firmware tables: %v", err), nil
 	}
 	if end := r.loadCatalog(ctx); end != nil {
-		return rehearsalFailed("%s", end.Message)
+		return rehearsalFailed("%s", end.Message), nil
 	}
 	devices, err := query(ctx, r.fwupdtool, "get-devices")
 	if err != nil {
-		return rehearsalFailed("%v", err)
+		return rehearsalFailed("%v", err), nil
 	}
 	i := slices.IndexFunc(devices, func(d fwupdDevice) bool { return d.DeviceID == r.deviceID })
 	if i < 0 {
-		return rehearsalFailed("fwupd reports no device %s", r.deviceID)
+		return rehearsalFailed("fwupd reports no device %s", r.deviceID), nil
 	}
 	variable, database := databaseVariables[devices[i].Plugin]
 	if !database {
-		return rehearsalRefused("fwupd's %s plugin updates %s, and a rehearsal covers only the Secure Boot databases", devices[i].Plugin, devices[i].Name)
+		return rehearsalRefused("fwupd's %s plugin updates %s, and a rehearsal covers only the Secure Boot databases", devices[i].Plugin, devices[i].Name), nil
 	}
 
 	cab, err := get(ctx, r.client, r.cabinetURL)
 	if err != nil {
-		return rehearsalFailed("downloading the cabinet: %v", err)
+		return rehearsalFailed("downloading the cabinet: %v", err), nil
 	}
 	if got := sum(cab); got != r.cabinetSHA256 {
-		return rehearsalFailed("the SHA-256 of the cabinet is %s, and the approval pins %s", got, r.cabinetSHA256)
+		return rehearsalFailed("the SHA-256 of the cabinet is %s, and the approval pins %s", got, r.cabinetSHA256), nil
 	}
 	cabPath := filepath.Join(r.workDir, "update.cab")
 	if err := os.WriteFile(cabPath, cab, 0o644); err != nil {
-		return rehearsalFailed("saving the cabinet: %v", err)
+		return rehearsalFailed("saving the cabinet: %v", err), nil
 	}
 
 	varsDir := filepath.Join(r.copyDir, "efi", "efivars")
 	before, err := readVariables(varsDir)
 	if err != nil {
-		return rehearsalFailed("reading the copy before the install: %v", err)
+		return rehearsalFailed("reading the copy before the install: %v", err), nil
 	}
 	_, stderr, installErr := r.fwupdtool(ctx, "install", "--assume-yes", "--no-reboot-check", cabPath, r.deviceID)
 	after, err := readVariables(varsDir)
 	if err != nil {
-		return rehearsalFailed("reading the copy after the install: %v", err)
+		return rehearsalFailed("reading the copy after the install: %v", err), nil
 	}
 	written, err := filesUnder(r.espDir)
 	if err != nil {
-		return rehearsalFailed("reading the ESP path: %v", err)
+		return rehearsalFailed("reading the ESP path: %v", err), nil
 	}
 
 	appended, refusal := judge(variable, before, after, written)
 	if installErr != nil && (appended == nil || !strings.Contains(lastLine(stderr), reloadFailure)) {
-		return rehearsalFailed("fwupdtool install: %s", lastLine(stderr))
+		return rehearsalFailed("fwupdtool install: %s", lastLine(stderr)), nil
 	}
 	if refusal != "" {
-		return rehearsalRefused("%s", refusal)
+		return rehearsalRefused("%s", refusal), nil
 	}
 	free, err := r.free(filepath.Join(r.hostDir, "efi", "efivars"))
 	if err != nil {
-		return rehearsalFailed("reading the free space of the variable store: %v", err)
+		return rehearsalFailed("reading the free space of the variable store: %v", err), nil
 	}
 	result := RehearsalResult{Variable: variable, Bytes: int64(len(appended)), SHA256: sum(appended), Free: free}
 	if payload := int64(len(appended) - 4); payload > free {
 		result.Result = resultRefused
 		result.Message = fmt.Sprintf("the append to %s needs %d bytes, and the variable store has %d free", variable, payload, free)
-		return result
+		return result, nil
 	}
 	result.Result = resultPassed
 	result.Message = fmt.Sprintf("the install appends %d bytes to %s, and the variable store has %d bytes free", len(appended), variable, free)
-	return result
+	return result, appended
 }
 
 // judge checks the difference that an install made in the copy against

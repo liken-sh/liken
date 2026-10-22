@@ -1,7 +1,7 @@
 ---
 title: Approve a firmware update
 weight: 27
-description: "Approve one release of a firmware component that firmware-operator discovered, by setting spec.update.version and pinning the cabinet's URL and SHA-256 on its Firmware, and limit the approval to some machines with spec.machines. Read the Approved condition, its reasons Offered, Installed, CabinetDiffers, NotOffered, and MachinesInvalid, the Version, Approved, Pending, and Rehearsed columns, the rehearsal of the install on each machine in status.rehearsals and the Rehearsed condition, and the Events. Withdraw an approval. Use when a person wants a board's UEFI firmware, the Secure Boot revocation list, or another device to move to a newer release, or when an approval is False."
+description: "Approve one release of a firmware component that firmware-operator discovered, by setting spec.update.version and pinning the cabinet's URL and SHA-256 on its Firmware, and limit the approval to some machines with spec.machines. Read the Approved condition, its reasons Offered, Installed, CabinetDiffers, NotOffered, and MachinesInvalid, the Version, Approved, Pending, Rehearsed, and Applied columns, the rehearsal of the install on each machine in status.rehearsals and the Rehearsed condition, the apply of a Secure Boot database update in each machine's held reboot turn through a Disruption with spec.hold, status.applies and the Applied condition, the reboot, the proof by the next scan, and the Events. Withdraw an approval. Use when a person wants a board's UEFI firmware, the Secure Boot revocation list, or another device to move to a newer release, when an approval is False, or when a machine waits for its turn to write an update."
 ---
 
 # Approve a firmware update
@@ -9,9 +9,12 @@ description: "Approve one release of a firmware component that firmware-operator
 At the end of this guide, a discovered `Firmware` records which
 release you approve, pinned to its cabinet file, and its status shows
 which machines wait for it and exactly what the install would write
-on each one. `firmware-operator` installs nothing yet: it rehearses
-the install against a copy of each machine's firmware variables, and
-a later release applies it.
+on each one. `firmware-operator` rehearses the install against a copy
+of each machine's firmware variables. For a Secure Boot database
+update (`dbx`, `db`, or `KEK`), it then writes the update on each
+machine in the machine's reboot turn, and the next scan proves it. A
+written update cannot be undone. The operator applies no capsule
+update, such as a board's UEFI firmware, yet.
 
 You need a discovered `Firmware` whose `status.machines` lists a
 release. [Find firmware updates](../find-updates/) shows how to read
@@ -101,8 +104,8 @@ kubectl get firmware microsoft-dbx-x64-kek2023
 ```
 
 ```
-NAME                        VALID    LOADED   RUNNING   FAILED   CONFLICT   MACHINES   BEHIND   VERSION    APPROVED   PENDING   REHEARSED   AGE
-microsoft-dbx-x64-kek2023                                                   1          1        20260707   True       1         True        2d
+NAME                        VALID    LOADED   RUNNING   FAILED   CONFLICT   MACHINES   BEHIND   VERSION    APPROVED   PENDING   REHEARSED   APPLIED   AGE
+microsoft-dbx-x64-kek2023                                                   1          1        20260707   True       1         True        Unknown   2d
 ```
 
 `VERSION` is the version you approved. `APPROVED` is the `Approved`
@@ -179,23 +182,125 @@ shows it:
 The message names the machines and says why.
 [Troubleshoot](../troubleshoot/#rehearsals) covers each case.
 
+## Apply the update
+
+A Secure Boot database update takes effect at the machine's next
+boot, and the operator writes it while no workload runs on the
+machine. `liken` gives both through the machine's reboot turn. So as
+soon as a machine's rehearsal passes on the boot it runs, the operator
+asks for that machine's turn. It files a `Disruption` with
+`spec.hold`, which stops the turn after the drain and before the
+reboot. You approve nothing more: the approval of the release is the
+approval of the write.
+
+The steps on each machine:
+
+1. **The request.** The operator creates the `Disruption`
+   `<machine>.firmware-<firmware>`, with the requester
+   `firmware.liken.sh/firmware-operator`, the kind `Reboot`, and
+   `spec.hold: true`. The machine's `MachineDisruptionBudget`s decide
+   when it gets its turn, the same as for a release. The record in
+   `status.applies` reads `Waiting`.
+2. **The hold.** `machine-operator` drains the machine, and sets the
+   `Disruption`'s `Held` condition to `True` instead of rebooting. A
+   hold has no deadline.
+3. **The write.** The operator starts an apply pod in `liken-system`
+   on the drained machine, and the record reads `Writing`. The pod runs
+   the rehearsal again against a fresh copy, and checks that the append
+   has the SHA-256 in the record. Then it writes that append to the
+   machine's variable in one write, and reads the variable back. The
+   firmware verifies the append's signature, and merges the new entries
+   into the list, so the variable grows by less than the append. A
+   different SHA-256 means the variables changed since the rehearsal,
+   and the pod writes nothing.
+4. **The reboot.** When the write succeeds, the record reads
+   `Written`, and the operator removes `spec.hold`. The turn goes on,
+   and `machine-operator` reboots the machine. When the firmware
+   refuses the write, or the write fails, the operator deletes the
+   `Disruption` instead, and the machine leaves its turn with no
+   reboot.
+5. **The proof.** The machine's first scan after the reboot reports
+   the device's version. When it reads the approved version, the
+   machine is no longer pending, its record leaves, the operator
+   deletes the `Disruption`, and `Approved` moves to `Installed` once
+   no machine waits. When the scan still offers the approved version,
+   the record reads `Failed`.
+
+A machine whose `rebootPolicy` is `Manual`, the default, waits for
+you to approve each request for its turn. `liken approve-reboot`
+approves only `machine-operator`'s own request and a person's reboot
+request, so approve the operator's request with `kubectl`:
+
+```sh
+kubectl patch disruption liken-1.firmware-microsoft-dbx-x64-kek2023 --type merge \
+  -p "{\"spec\":{\"approvedHash\":\"$(kubectl get disruption liken-1.firmware-microsoft-dbx-x64-kek2023 -o jsonpath='{.spec.hash}')\"}}"
+```
+
+Read the turn and the records:
+
+```sh
+kubectl get disruptions -l firmware.liken.sh/firmware=microsoft-dbx-x64-kek2023
+kubectl get firmware microsoft-dbx-x64-kek2023 -o jsonpath='{range .status.applies[*]}{.machine}{"\t"}{.result}{"\t"}{.message}{"\n"}{end}'
+```
+
+```
+liken-1   Written   wrote the 17260-byte append to dbx-d719b2cb-3d3a-4596-a3bc-dad00e67656f, which grew from 21352 to 21476 bytes; the firmware merges the signed list into the stored one
+```
+
+The `Applied` condition sums the records, and the `APPLIED` column
+shows it:
+
+| Status | Reason | Meaning |
+|---|---|---|
+| `True` | `Written` | The firmware took the update on every machine the approval waits for. Each machine applies it at its reboot. |
+| `False` | `Refused` | The firmware refused the append on a machine, and nothing changed there. |
+| `False` | `Failed` | A write could not run, a machine left its turn before the hold, or a machine still reads the old version after its reboot. |
+| `Unknown` | `Applying` | A machine waits for its rehearsal, its turn, or its write. |
+
+The operator does not write again on its own after `Refused` or
+`Failed`. To try again, withdraw the approval and approve it again,
+which removes the records.
+[Troubleshoot](../troubleshoot/#applies) covers each case.
+
+The turn needs a `liken` release whose `Disruption` has
+`spec.hold`. On an older release, `machine-operator` reboots the
+machine without a hold, and the record reads `Failed` with
+`the machine left its turn before the hold took effect`. On a release
+with no `Disruption` kind, the operator asks for no turn, and the
+machines stay pending.
+
+### A written update cannot be undone
+
+A machine has one variable store, and the firmware keeps no earlier
+copy of `dbx`, `db`, or `KEK`. Withdrawing the approval after a write
+leaves the new entries in place. A firmware that resets Secure Boot to
+its defaults, from its setup menu or on its own, discards the appended
+entries, and the next scan then offers the release again.
+
 ## Read the Events
 
-The operator posts an `Event` each time `Approved` or `Rehearsed`
-changes, in the namespace `default`. A change to `True` is `Normal`,
-and a change to `False` is a `Warning`, so a withdrawn release shows in
-`kubectl describe firmware <name>` and in
+The operator posts an `Event` each time `Approved`, `Rehearsed`, or
+`Applied` changes, in the namespace `default`. A change to `True` is
+`Normal`, and a change to `False` is a `Warning`, so a withdrawn
+release shows in `kubectl describe firmware <name>` and in
 `kubectl get events --field-selector type=Warning`. It also posts
 `RehearsalStarted` when a rehearsal pod starts, `RehearsalPassed` when
 one passes, and a `Warning` `RehearsalRefused` or `RehearsalFailed`
-when one does not.
+when one does not. It posts `ApplyRequested` when it asks for a
+machine's turn, `ApplyStarted` when the apply pod starts,
+`ApplyWritten` when the firmware took the append, and a `Warning`
+`ApplyRefused` or `ApplyFailed` when it did not.
 
 ## Withdraw an approval
 
 Remove `version` and `cabinet` from `spec.update`, and `spec.machines`
-with them. The operator removes the `Approved` and `Rehearsed`
-conditions and the records in `status.rehearsals`, and `PENDING`
-returns to 0.
+with them. The operator removes the `Approved`, `Rehearsed`, and
+`Applied` conditions and the records in `status.rehearsals` and
+`status.applies`, and `PENDING` returns to 0. It deletes each
+`Disruption` that still holds a machine's turn, so the machine leaves
+its turn with no reboot. A machine whose update is already written
+keeps it, and a turn whose hold the operator already removed still
+reboots the machine.
 
 An approved `Firmware` is one you changed, so the operator never
 deletes it, even when its last entry leaves. Delete it yourself when

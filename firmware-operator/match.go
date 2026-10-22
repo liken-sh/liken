@@ -32,11 +32,16 @@ type observed struct {
 	// rehearsals holds the rehearsal pods by the Firmware that each one
 	// rehearses.
 	rehearsals map[string][]pod
+	// applies holds the apply pods, and disruptions the requests for a
+	// reboot turn, by the Firmware that each one applies.
+	applies     map[string][]pod
+	disruptions map[string][]disruption
 }
 
 func (o *operator) observe() observed {
 	w := observed{present: map[appearance]bool{}, machines: map[string]map[string]string{}, uploads: map[string][]pod{},
-		fleet: map[string]machine{}, deviceSets: map[string]string{}, scans: map[string][]pod{}, rehearsals: map[string][]pod{}}
+		fleet: map[string]machine{}, deviceSets: map[string]string{}, scans: map[string][]pod{}, rehearsals: map[string][]pod{},
+		applies: map[string][]pod{}, disruptions: map[string][]disruption{}}
 	names := map[string][]string{}
 	for _, slice := range informer.CachedList[resourceSlice](o.slices) {
 		for _, d := range devicesOf(slice) {
@@ -63,6 +68,14 @@ func (o *operator) observe() observed {
 	for _, p := range informer.CachedList[pod](o.rehearsalPods) {
 		a := rehearsalOf(p)
 		w.rehearsals[a.firmware] = append(w.rehearsals[a.firmware], p)
+	}
+	for _, p := range informer.CachedList[pod](o.applyPods) {
+		a := applyOf(p)
+		w.applies[a.firmware] = append(w.applies[a.firmware], p)
+	}
+	for _, d := range informer.CachedList[disruption](o.disruptions) {
+		rule := d.Metadata.Labels[disruptionLabel]
+		w.disruptions[rule] = append(w.disruptions[rule], d)
 	}
 	return w
 }

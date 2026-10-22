@@ -1,13 +1,14 @@
 package main
 
-// Seven watches wake the pass: one of every Firmware, one of every
+// Nine watches wake the pass: one of every Firmware, one of every
 // FirmwareCatalog, one of the ResourceSlices that machine-operator publishes,
-// one each of the upload, scan, and rehearsal pods in the operator's
-// namespace, and one of every Machine. All seven run on client-go's
+// one each of the upload, scan, rehearsal, and apply pods in the
+// operator's namespace, one of every Machine, and one of the
+// Disruptions that the operator filed. All nine run on client-go's
 // reflector, through the shared informer package. A handler only wakes
 // the pass, and the pass reads what it needs. The timers are clocks:
-// the deadline of an upload, a scan, or a rehearsal in progress, and
-// the wait after a pass that failed. The one timer that is not a clock
+// the deadline of an upload, a scan, a rehearsal, or an apply in
+// progress, and the wait after a pass that failed. The one timer that is not a clock
 // is the read of
 // each FirmwareCatalog's jcat once an interval, because LVFS publishes no feed
 // of its changes (catalogfetch.go).
@@ -18,6 +19,7 @@ import (
 	"os"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/cache"
@@ -27,11 +29,12 @@ import (
 )
 
 var (
-	firmwaresResource = schema.GroupVersionResource{Group: "firmware.liken.sh", Version: "v1alpha1", Resource: "firmwares"}
-	catalogsResource  = schema.GroupVersionResource{Group: "firmware.liken.sh", Version: "v1alpha1", Resource: "firmwarecatalogs"}
-	slicesResource    = schema.GroupVersionResource{Group: "resource.k8s.io", Version: "v1", Resource: "resourceslices"}
-	podsResource      = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
-	machinesResource  = schema.GroupVersionResource{Group: "liken.sh", Version: "v1alpha1", Resource: "machines"}
+	firmwaresResource   = schema.GroupVersionResource{Group: "firmware.liken.sh", Version: "v1alpha1", Resource: "firmwares"}
+	catalogsResource    = schema.GroupVersionResource{Group: "firmware.liken.sh", Version: "v1alpha1", Resource: "firmwarecatalogs"}
+	slicesResource      = schema.GroupVersionResource{Group: "resource.k8s.io", Version: "v1", Resource: "resourceslices"}
+	podsResource        = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+	machinesResource    = schema.GroupVersionResource{Group: "liken.sh", Version: "v1alpha1", Resource: "machines"}
+	disruptionsResource = schema.GroupVersionResource{Group: "liken.sh", Version: "v1alpha1", Resource: "disruptions"}
 )
 
 // retryDelay is the wait after a pass that failed, such as a status
@@ -58,11 +61,20 @@ func (o *operator) run(ctx context.Context, watcher dynamic.Interface) {
 		markHandler(signal, podMark))
 	rehearsalPods := start(informer.Source{Resource: podsResource, Namespace: o.namespace, LabelSelector: rehearsalLabel + "=" + rehearsalLabelValue},
 		markHandler(signal, podMark))
+	applyPods := start(informer.Source{Resource: podsResource, Namespace: o.namespace, LabelSelector: applyLabel + "=" + applyLabelValue},
+		markHandler(signal, podMark))
 	machines := start(informer.Source{Resource: machinesResource}, markHandler(signal, machineMark))
 	catalogs := start(informer.Source{Resource: catalogsResource}, markHandler(signal, catalogMark))
+	// A liken release older than the Disruption kind serves no such
+	// collection. The watch then holds an empty one, the operator runs
+	// as before with no turn to ask for, and the watch finds the kind
+	// once the cluster's release serves it.
+	disruptions := informer.Start(ctx, watcher, informer.Source{Resource: disruptionsResource, LabelSelector: disruptionLabel},
+		informer.Options{Handler: markHandler(signal, disruptionMark), Synced: signal, Absent: apierrors.IsNotFound})
 	o.firmwares = informer.Held{View: whole(firmwares), Versions: memo.New()}
 	o.catalogs = informer.Held{View: whole(catalogs), Versions: memo.New()}
 	o.slices, o.pods, o.scanPods, o.rehearsalPods, o.machines = slices.View(), pods.View(), scanPods.View(), rehearsalPods.View(), machines.View()
+	o.applyPods, o.disruptions = applyPods.View(), disruptions.View()
 
 	var deadline, retry <-chan time.Time
 	for {
@@ -76,7 +88,7 @@ func (o *operator) run(ctx context.Context, watcher dynamic.Interface) {
 		// wake that came with the stop is checked here and starts no
 		// pass.
 		if ctx.Err() != nil {
-			for _, watch := range []*informer.Collection{firmwares, slices, pods, scanPods, rehearsalPods, machines, catalogs} {
+			for _, watch := range []*informer.Collection{firmwares, slices, pods, scanPods, rehearsalPods, applyPods, machines, catalogs, disruptions} {
 				<-watch.Done()
 			}
 			return

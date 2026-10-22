@@ -36,7 +36,9 @@ type operator struct {
 	pods          informer.View
 	scanPods      informer.View
 	rehearsalPods informer.View
+	applyPods     informer.View
 	machines      informer.View
+	disruptions   informer.View
 
 	selectors *selectors
 
@@ -57,11 +59,13 @@ func newOperator(client *apiclient.Client, namespace string, recorder *events.Re
 // pass answers every Firmware and every FirmwareCatalog, and answers the
 // earliest time at which an upload or a scan in progress is due, or a
 // jcat read, or the zero time when none is. A pass before the watches
-// of the slices, the pods, and the Machines hold their first read does
-// nothing, because a pass that sees no pod for a device or a machine
-// starts one. The first read of each watch wakes another pass.
+// of the slices, the pods, the Machines, and the Disruptions hold their
+// first read does nothing, because a pass that sees no pod for a device
+// or a machine starts one, and a pass that sees no request for a
+// machine's turn files one. The first read of each watch wakes another pass.
 func (o *operator) pass(ctx context.Context) (time.Time, error) {
-	if !o.slices.Ready() || !o.pods.Ready() || !o.scanPods.Ready() || !o.rehearsalPods.Ready() || !o.machines.Ready() {
+	if !o.slices.Ready() || !o.pods.Ready() || !o.scanPods.Ready() || !o.rehearsalPods.Ready() || !o.applyPods.Ready() ||
+		!o.machines.Ready() || !o.disruptions.Ready() {
 		return time.Time{}, nil
 	}
 	rules, err := informer.List[firmware](o.client, o.firmwares, firmwaresPath, firmwarePath)

@@ -133,6 +133,12 @@ func (o *operator) startRehearsals(f *firmware, pending map[string]bool, w obser
 		if r, held := rehearsalRecord(f.Status.Rehearsals, name); held && a.is(r) {
 			continue
 		}
+		// A machine in its turn, or written and waiting for its reboot,
+		// rehearses nothing more: the apply already has the append it
+		// writes, and the next scan after the reboot ends the record.
+		if r, held := currentApply(f, name); held && r.live() {
+			continue
+		}
 		p := buildRehearsalPod(f, a, c, u.Cabinet.URL, o.discovery.scanImage, o.namespace)
 		err := o.client.RequestJSON(http.MethodPost, podsPathIn(o.namespace), mustJSON(p), nil)
 		if err != nil && !errors.Is(err, apiclient.ErrConflict) {

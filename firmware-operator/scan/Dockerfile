@@ -3,7 +3,9 @@
 # catalog, hands it to fwupdtool, and prints which firmware devices the
 # machine has and which releases the catalog offers for them. As
 # `scan rehearse`, in a pod that is not privileged, it runs an approved
-# install against a copy of the machine's firmware variables. The image
+# install against a copy of the machine's firmware variables. As
+# `scan apply`, in a pod that is not privileged either, it rehearses
+# again and writes the rehearsed append to the machine's variable. The image
 # is Ubuntu, not scratch, because fwupd links dozens of libraries and
 # reads plugin and quirk data from the files of its package.
 
