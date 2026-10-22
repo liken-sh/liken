@@ -10,7 +10,7 @@ updates with fwupd and the LVFS catalog,
 [plan 04](../../firmware-operator/plans/completed/04-approval.md) approves one,
 [plan 05](../../firmware-operator/plans/completed/05-rehearsal.md)
 rehearses it against a copy of the machine's variables, and plans
-[06](../../firmware-operator/plans/06-applying-a-database-update.md)
+[06](../../firmware-operator/plans/completed/06-applying-a-database-update.md)
 to [08](../../firmware-operator/plans/08-applying-a-capsule.md) apply
 it. The OS offers capabilities, and the add-on uses them: a reboot
 turn ([milestone 88](88-disruptions.md)), the

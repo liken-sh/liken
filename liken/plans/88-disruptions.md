@@ -5,7 +5,11 @@ and drilled on the `lab` fleet on 2026-10-21
 ([Release 1 as built](#release-1-as-built)), and so was release 2
 ([Release 2 as built](#release-2-as-built)). Both releases then
 rolled to liken-1 and stick-1 on the same day
-([On the testbed](#on-the-testbed)). Stage 2 is not built. Five
+([On the testbed](#on-the-testbed)). The first part of stage 2,
+`spec.hold`, and the policy that keeps `spec.approvedHash` from service
+accounts were built and drilled on the `lab` fleet on 2026-10-22
+([Stage 2: hold as built](#stage-2-hold-as-built)). The rest of stage 2
+is not built. Five
 reviews from different angles read an earlier draft on the same day,
 and this version answers them
 ([Considered and set aside](#considered-and-set-aside)).
@@ -32,7 +36,7 @@ The work has two stages. This milestone's first stage moves every
 reboot and restart that `liken` makes today onto `Disruption`s. The
 second opens `Disruption`s to other components: `firmware-operator`
 writes firmware inside a turn
-([its plan 06](../../firmware-operator/plans/06-applying-a-database-update.md)),
+([its plan 06](../../firmware-operator/plans/completed/06-applying-a-database-update.md)),
 and [milestone 34](34-gpu-add-ons.md)'s GPU add-ons can do the same.
 [Milestone 33](33-firmware-updates.md) holds the rest of the OS's part
 of firmware updates.
@@ -599,6 +603,46 @@ and stick-1 acted on the grant. On `-002` everywhere:
 
 After each boot of liken-1, `firmware-operator` loaded the QHY5L-II
 guide camera's firmware again with no request.
+
+## Stage 2: hold as built
+
+`spec.hold` follows [Stage 2: other requesters](#stage-2-other-requesters):
+no deadline, and the requester removes it. A request with `hold`
+stops its machine's turn once the drain is clear. `machine-operator`
+sets the request's `Held` condition to `True` with the reason
+`Drained`, and from then on drains no more, because the requester's
+pod runs on the cordoned node and a drain would evict it. While a
+request holds the turn, no restart runs, because the turn ends in a
+reboot that covers every restart. When `hold` is gone, `Held` turns
+`False` with `Released`, and the next pass reboots. A CEL rule refuses
+`hold` on a `Restart`, which has no drain. The CRD's schema revision
+is 2.
+
+A `ValidatingAdmissionPolicy`, `disruption-approvals.liken.sh`, refuses
+a service account's create or update that sets, changes, or removes
+`spec.approvedHash`. A requester needs update to remove its hold, and
+the policy keeps that permission from approving a reboot on a `Manual`
+machine.
+
+Drilled on the `lab` fleet at `2026.10.22-907`, on `node-4`:
+
+- Impersonating `liken-machine-operator`'s service account, a create
+  with `approvedHash` and updates that changed or removed it were
+  refused, and an update that changed only `reason` and `hold` went
+  through.
+- A held request cordoned `node-4` and went `Held` in the same second,
+  with nothing to drain. A pod that tolerated the cordon ran on the
+  node. A request filed during the hold joined the turn, and
+  `machine-operator`'s pod deleted during the hold came back and kept
+  the hold: after 75 seconds the boot, the cordon, and the pod were
+  unchanged. Removing `hold` rebooted `node-4` once, for both
+  requests, and the `Uncordoned` `Event` read `its reboot is
+  complete`.
+- Deleting a held request uncordoned `node-4` with no reboot and left
+  the ledger empty.
+
+`firmware-operator`'s plan 06 then ran its writes in held turns on
+`node-5`.
 
 ## Considered and set aside
 

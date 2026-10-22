@@ -3,7 +3,7 @@
 Proposed on 2026-10-21. Not built. This plan applies an approved
 board firmware update, a capsule, inside a reboot turn, and proves it
 from the next scan. It follows plans
-[06](06-applying-a-database-update.md), which applies a database
+[06](completed/06-applying-a-database-update.md), which applies a database
 update in a turn, and [07](07-rehearsing-a-capsule.md), which
 rehearses a capsule. It uses every capability that `liken`'s
 [milestone 33](../../liken/plans/33-firmware-updates.md) offers: the

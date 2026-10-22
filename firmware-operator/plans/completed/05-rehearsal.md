@@ -3,7 +3,7 @@
 Proposed on 2026-10-20. Step 1, the rehearsal, was built on
 2026-10-20, under [The rehearsal in the operator](#the-rehearsal-in-the-operator),
 and this plan closed on 2026-10-21 with it. Steps 2 to 4 were split
-into plans of their own: [plan 06](../06-applying-a-database-update.md)
+into plans of their own: [plan 06](06-applying-a-database-update.md)
 applies a Secure Boot database update,
 [plan 07](../07-rehearsing-a-capsule.md) rehearses a capsule, and
 [plan 08](../08-applying-a-capsule.md) applies one. The OS offers the
