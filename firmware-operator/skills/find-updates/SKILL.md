@@ -131,6 +131,27 @@ catalog's signer is never trusted for another catalog's scan. A scan
 pod whose `ConfigMap` is missing does not start, and its record turns
 `Failed` at the scan's deadline.
 
+The scan, rehearsal, and apply pods may reach HTTPS and DNS alone. A
+catalog served on another port, such as a mirror over HTTP, needs a
+`NetworkPolicy` of your own that lets the pods reach it. Policies add
+to each other, so yours only names the server:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: firmware-acme-catalog
+  namespace: liken-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/managed-by: firmware-operator
+  policyTypes: [Egress]
+  egress:
+    - to: [{ipBlock: {cidr: 192.0.2.10/32}}]
+      ports: [{protocol: TCP, port: 80}]
+```
+
 ## Read the discovered Firmware objects
 
 The operator keeps one `Firmware` for each catalog component that
@@ -238,11 +259,13 @@ The operator posts an `Event` for each step, in the namespace
 
 A scan reads the machine and changes nothing on it. The pod:
 
-- is privileged, because fwupd reads the SMBIOS tables, `efivarfs`,
-  `sysfs`, and device nodes, and it holds no device claim, because
-  fwupd reads many devices;
-- mounts `efivarfs` read-only, because fwupd's UEFI plugin reads the
-  firmware resource table of the machine from it;
+- is privileged, because fwupd reads `sysfs` and device nodes, and it
+  holds no device claim, because fwupd reads many devices;
+- mounts the machine's `/sys/firmware` read-only and gives fwupd a
+  copy of its variable store, firmware resource table, and SMBIOS
+  tables. fwupd's UEFI capsule plugin finds devices only in a variable
+  store that it could write, so the copy's store is a directory in
+  memory, and the machine's own is never writable from the scan;
 - gives fwupd an empty directory in place of the EFI system partition
   (ESP), so fwupd reads and writes no ESP;
 - runs only the `fwupdtool` commands `refresh`, `get-devices`, and

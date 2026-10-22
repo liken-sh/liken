@@ -1,6 +1,7 @@
 # 07, Rehearsing a capsule
 
-Proposed on 2026-10-21. Not built. This plan extends the rehearsal of
+Proposed on 2026-10-21. Built on 2026-10-22, and drilled with plan
+08 on the `lab` fleet ([As built](#as-built)). This plan extends the rehearsal of
 [plan 05](completed/05-rehearsal.md) from the Secure Boot databases to
 capsules, so a person who approves a board firmware update reads what
 the install would write before anything writes it. It writes nothing
@@ -81,3 +82,38 @@ edk2's `FmpDevicePkg` and `EsrtFmpDxe`.
 - Device updates through fwupd's other plugins, such as SSDs and
   docks. They write the device itself, and no copy can rehearse them.
   They need a plan of their own.
+
+## As built
+
+Commit `97f0709c` built the rehearsal, and the drill of plan 08 on the
+same day changed four parts of it.
+
+- **The copy of the ESP.** The rehearsal copies only the `\EFI`
+  directory of the ESP of the next boot, which the pod mounts
+  read-only from `/run/liken/proven-esp`. A slot's ESP also holds a
+  whole release, and fwupd writes only under `\EFI`. The pod mounts
+  the ESP only on a machine that reports
+  `status.firmware.bootOrderKept`, because only that machine has a
+  proven slot.
+- **The copy of the variable store.** fwupd 2.1.1 disables its
+  `uefi_capsule` plugin unless `efi/efivars` is a mount point that it
+  could write, or the firmware supports capsule-on-disk. The scan had
+  mounted `efivarfs` read-only, so on the lab's firmware, which has no
+  capsule-on-disk, no scan saw a capsule device. Every pod now copies
+  `/sys/firmware` to `/run/fw` and mounts a directory in memory at
+  `/run/fw/efi/efivars`. The scan no longer mounts `efivarfs`. fwupd
+  names a capsule device by the path of its ESRT entry, so every pod
+  copies to the same path, and the device keeps the ID that the scan
+  recorded. The copy also holds the files directly under `efi/`, such
+  as `fw_platform_size`, which the install reads.
+- **The updater.** The scan image holds fwupd-efi's updater from
+  Ubuntu's `fwupd-signed`, 1.55+1.7-1, which a capsule's install
+  copies to the ESP.
+- **The updater's partition.** fwupd reads the ESP's partition only
+  from udisks over D-Bus, so in a pod it writes a hard drive node of
+  zeros into the updater's boot entry and into its status variable. The
+  rehearsal and the apply copy the node of `liken`'s boot entry for the
+  ESP's partition into both (`scan/updaterentry.go`).
+
+The judge allows an updater entry from an earlier update that fwupd
+writes again, because fwupd keeps its entry after an update.

@@ -12,9 +12,10 @@ which machines wait for it and exactly what the install would write
 on each one. `firmware-operator` rehearses the install against a copy
 of each machine's firmware variables. For a Secure Boot database
 update (`dbx`, `db`, or `KEK`), it then writes the update on each
-machine in the machine's reboot turn, and the next scan proves it. A
-written update cannot be undone. The operator applies no capsule
-update, such as a board's UEFI firmware, yet.
+machine in the machine's reboot turn, and the next scan proves it.
+For a capsule, such as a board's UEFI firmware, it stages the capsule
+in the turn, and the reboot boots fwupd's updater once, which hands the
+capsule to the firmware. A written update cannot be undone.
 
 You need a discovered `Firmware` whose `status.machines` lists a
 release. [Find firmware updates](../find-updates/) shows how to read
@@ -336,6 +337,46 @@ copy of `dbx`, `db`, or `KEK`. Withdrawing the approval after a write
 leaves the new entries in place. A firmware that resets Secure Boot to
 its defaults, from its setup menu or on its own, discards the appended
 entries, and the next scan then offers the release again.
+
+### Apply a capsule
+
+A capsule applies in the same turn, with three differences.
+
+- **The machine must keep its boot order.** After fwupd's updater
+  hands the capsule to the firmware, the firmware resets and boots the
+  head of `BootOrder`, with no `BootNext` to steer it. `liken` lets a
+  reboot boot the updater only when the machine's
+  `status.firmware.bootOrderKept` is `true`, which means the proven
+  slot led `BootOrder` when the machine last powered on. On another
+  machine the record reads `Refused` before the operator asks for a
+  turn.
+- **fwupd writes the machine.** After the signal, the apply pod runs
+  fwupd's install on the machine's own variable store and on the ESP
+  that its next boot reads, which `liken` links at
+  `/run/liken/proven-esp`. Then it compares what fwupd wrote with the
+  rehearsal's record. The same writes read `Written`, and the operator
+  removes `spec.hold` and sets `spec.keepBootNext`, so the reboot
+  boots fwupd's updater once. Any other writes read `Uncertain`: the
+  operator removes `spec.hold` alone, the reboot boots the proven slot,
+  and the capsule does not run.
+- **The pod completes fwupd's entry.** fwupd reads the ESP's partition
+  through udisks, which a pod does not have, so the boot entry of its
+  updater and the status variable that tells the updater where the
+  capsule is name no partition. The pod copies the partition from
+  `liken`'s own boot entry for the same slot into both, in the
+  rehearsal and in the apply alike.
+
+The firmware applies the capsule before any kernel loads, so the
+next scan is the only proof: it reads the device's version from the
+firmware resource table. fwupd's updater entry and its files stay on
+the machine after the update, and a later capsule uses them again.
+
+A capsule changes firmware that runs before `liken` does. An update
+that turns Secure Boot on, or resets its keys, stops `liken`'s
+unsigned boot chain from loading, and no boot order repairs that. A
+firmware or an updater that stops during the update leaves the
+machine off the network until someone resets it: the record stays
+`Written`, and the machine reads `Lost`.
 
 ## Read the Events
 

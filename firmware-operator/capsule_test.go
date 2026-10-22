@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -55,4 +56,112 @@ func TestTheSchemaKeepsACapsulesRehearsal(t *testing.T) {
 	f.Status.Rehearsals = []rehearsal{recordOfRehearsal(rehearsalAttempt{machine: "node-5", boot: "2026-10-22T20:00:00Z"}, r, time.Unix(0, 0))}
 
 	assertTheSchemaKeeps(t, firmwareCRD, f)
+}
+
+// keepBootOrder sets what a Machine reports in
+// status.firmware.bootOrderKept, keeping the rest of its status.
+func (a *fakeAPI) keepBootOrder(name string, kept *bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	object := clone(a.objects[machinesPath][name])
+	status, _ := object["status"].(map[string]any)
+	if status == nil {
+		status = map[string]any{}
+	}
+	if kept == nil {
+		delete(status, "firmware")
+	} else {
+		status["firmware"] = map[string]any{"bootOrderKept": *kept}
+	}
+	object["status"] = status
+	a.store(machinesPath, object, "MODIFIED")
+}
+
+// passedCapsule is a rehearsal of the BIOS's capsule that passed.
+var passedCapsule = rehearsalResult{Result: resultPassed, Message: "the install stages a capsule with 3 variables and 2 files",
+	Bytes: 72135, SHA256: "ee", Free: 4096, ESPFree: 1 << 24,
+	Writes: []capsuleWrite{{Kind: "file", Name: "EFI/ubuntu/fwupdx64.efi", Bytes: 69176, SHA256: "aa"}}}
+
+// capsuleWorld is approvedWorld whose node-2 reports kept, after the
+// BIOS's capsule passed its rehearsal there.
+func capsuleWorld(t *testing.T, kept *bool) *world {
+	t.Helper()
+	w := approvedWorld(t)
+	w.api.keepBootOrder("node-2", kept)
+	w.settle()
+	w.api.finishPod(t, w.onlyRehearsal(t).Metadata.Name, rehearsalContainer, podSucceeded, rehearsalLog(passedCapsule))
+	w.settle()
+	return w
+}
+
+// The boot after a capsule's comes from the head of BootOrder, so a
+// capsule applies only on a machine whose firmware kept BootOrder
+// through its last reset.
+func TestACapsuleAppliesOnlyWhereTheFirmwareKeepsBootOrder(t *testing.T) {
+	no := false
+	for _, kept := range []*bool{nil, &no} {
+		synctest.Test(t, func(t *testing.T) {
+			w := capsuleWorld(t, kept)
+
+			if got := len(w.api.applies(t)); got != 0 {
+				t.Errorf("%d apply pods, want none", got)
+			}
+			if r := w.onlyApplyRecord(t); r.Result != resultRefused || !strings.Contains(r.Message, "bootOrderKept") {
+				t.Errorf("the record is %+v, want Refused for bootOrderKept", r)
+			}
+		})
+	}
+}
+
+// The apply pod of a capsule mounts the ESP of the next boot read-write,
+// because fwupd stages the updater and the capsule there.
+func TestACapsulesApplyPodMountsTheNextBootsESP(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		yes := true
+		w := capsuleWorld(t, &yes)
+
+		p := w.onlyApply(t)
+		v := slices.IndexFunc(p.Spec.Volumes, func(v volume) bool { return v.Name == nextESPVolume })
+		if v < 0 || p.Spec.Volumes[v].HostPath.Path != provenESPLink ||
+			!slices.Contains(p.Spec.Containers[0].VolumeMounts, volumeMount{Name: nextESPVolume, MountPath: nextESPPath}) {
+			t.Errorf("the apply pod's volumes are %+v, want the next boot's ESP mounted read-write", p.Spec.Volumes)
+		}
+		if r := w.onlyApplyRecord(t); !r.Capsule || r.SHA256 != "ee" {
+			t.Errorf("the record is %+v, want a capsule's with the rehearsal's digest", r)
+		}
+	})
+}
+
+// A staged capsule needs the reboot to boot fwupd's updater once, so
+// the operator removes the hold and asks to keep BootNext. A capsule
+// whose staging the pod could not confirm reboots with liken's own
+// BootNext, so the capsule does not run.
+func TestACapsulesTurnKeepsBootNextOnlyWhenItWasStaged(t *testing.T) {
+	cases := []struct {
+		name   string
+		result applyResult
+		keep   bool
+	}{
+		{"staged", applyResult{Result: resultWritten, Message: "staged the capsule"}, true},
+		{"uncertain", applyResult{Result: resultUncertain, Message: "fwupd wrote other bytes than the rehearsal"}, false},
+	}
+	for _, c := range cases {
+		synctest.Test(t, func(t *testing.T) {
+			yes := true
+			w := capsuleWorld(t, &yes)
+			w.api.runPod(t, w.onlyApply(t).Metadata.Name, false)
+			w.settle()
+			w.api.readyPod(t, w.onlyApply(t).Metadata.Name)
+			w.settle()
+			w.api.holdTurn(t, turnName)
+			w.settle()
+			w.api.finishPod(t, w.onlyApply(t).Metadata.Name, applyContainer, podSucceeded, applyLog(c.result))
+			w.settle()
+
+			d := w.api.disruption(t, turnName)
+			if d.Spec.Hold || d.Spec.KeepBootNext != c.keep {
+				t.Errorf("%s: the request is %+v, want no hold and keepBootNext %v", c.name, d.Spec, c.keep)
+			}
+		})
+	}
 }

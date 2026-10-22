@@ -120,14 +120,17 @@ func newRig(t *testing.T) *rig {
 		},
 	}
 	r.scanner = scanner{
-		cfg:        config{name: "lvfs", url: testCatalogURL, file: testFile, sha256: sum(testCatalog)},
-		client:     &http.Client{Transport: r.web},
-		mounter:    mounter{exists: func(string) bool { return false }},
-		fwupdtool:  r.tool.run,
-		remotesDir: remotes,
-		workDir:    t.TempDir(),
-		trustDir:   filepath.Join(t.TempDir(), "absent"),
-		pkiDir:     t.TempDir(),
+		cfg:    config{name: "lvfs", url: testCatalogURL, file: testFile, sha256: sum(testCatalog)},
+		client: &http.Client{Transport: r.web},
+		// A machine with no variable store, as a BIOS machine has,
+		// unless a test writes one.
+		firmwareHost: t.TempDir(),
+		firmwareCopy: filepath.Join(t.TempDir(), "fw"),
+		fwupdtool:    r.tool.run,
+		remotesDir:   remotes,
+		workDir:      t.TempDir(),
+		trustDir:     filepath.Join(t.TempDir(), "absent"),
+		pkiDir:       t.TempDir(),
 	}
 	return r
 }

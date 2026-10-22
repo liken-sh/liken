@@ -16,7 +16,7 @@ design.
 |---|---|---|---|
 | The kernel loads it from the image | i915 and wifi blobs | the OS image | `liken` [milestone 32](../liken/plans/completed/32-hardware-support-in-the-image.md), built |
 | The host uploads it each time a device appears | a QHY guide camera on a bare FX2 chip | `firmware-operator`, a `Firmware` with `upload` | `firmware-operator` [plan 01](../firmware-operator/plans/completed/01-uploads.md) |
-| The device keeps it across a power cycle | UEFI, a dock, an SSD | `firmware-operator`, a `Firmware` with `update` | `firmware-operator` plans [03](../firmware-operator/plans/completed/03-discovery.md) to [08](../firmware-operator/plans/08-applying-a-capsule.md), and `liken` milestones [33](../liken/plans/33-firmware-updates.md) and [88](../liken/plans/88-disruptions.md) for the capabilities they use |
+| The device keeps it across a power cycle | UEFI, a dock, an SSD | `firmware-operator`, a `Firmware` with `update` | `firmware-operator` plans [03](../firmware-operator/plans/completed/03-discovery.md) to [08](../firmware-operator/plans/completed/08-applying-a-capsule.md), and `liken` milestones [33](../liken/plans/33-firmware-updates.md) and [88](../liken/plans/88-disruptions.md) for the capabilities they use |
 
 ## The boundaries
 

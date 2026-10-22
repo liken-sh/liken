@@ -151,8 +151,11 @@ func (o *operator) applyEnds(f *firmware, pods []pod, now time.Time) ([]applySte
 			result.Message += "; the operator reads the jcat again, and the apply starts again"
 		}
 		r := applyRecord{Machine: a.machine, Boot: a.boot, Version: a.version, CabinetSHA256: a.cabinet, SHA256: a.sha256}
+		// A record that the pod's end cannot find is no capsule's, so
+		// its reboot keeps liken's own BootNext, and a capsule does not
+		// run unconfirmed.
 		if held, found := applyRecordOf(f.Status.Applies, a.machine); found && a.is(held) {
-			r.Disruption = held.Disruption
+			r.Disruption, r.Capsule = held.Disruption, held.Capsule
 		}
 		steps = append(steps, step(r, result.Result, result.Message, resultWaiting, resultWriting))
 		finished = append(finished, p)

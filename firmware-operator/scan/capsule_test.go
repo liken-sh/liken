@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -246,5 +247,200 @@ func TestLoadOptionPathReadsTheFile(t *testing.T) {
 	}
 	if _, ok := loadOptionPath(bytes.Repeat([]byte{0xff}, 3)); ok {
 		t.Error("a truncated option has no path")
+	}
+}
+
+// capsuleApplyRig is an applier on a capsuleRig's machine, which expects
+// the writes that an identical machine's rehearsal recorded. Its
+// installer plays fwupd on the machine itself: the real variable store
+// and the ESP of the next boot. The signal arrives at once.
+type capsuleApplyRig struct {
+	applier
+	rig      *capsuleRig
+	installs int
+	// install plays what fwupd writes on the machine.
+	install func(t *testing.T)
+	fail    error
+	efivars *fakeStore
+}
+
+func newCapsuleApplyRig(t *testing.T) *capsuleApplyRig {
+	t.Helper()
+	recorded := newCapsuleRig(t).rehearse(context.Background())
+	r := newCapsuleRig(t)
+	a := &capsuleApplyRig{rig: r}
+	a.install = func(t *testing.T) { a.nvramInstall(t) }
+	a.efivars = &fakeStore{}
+	a.applier = applier{rehearser: r.rehearser, appendSHA256: recorded.SHA256, store: a.efivars.store(),
+		marker: filepath.Join(t.TempDir(), "prepared"),
+		signal: func(context.Context) error { return nil },
+		installer: func(_ context.Context, args ...string) ([]byte, []byte, error) {
+			a.installs++
+			a.install(t)
+			if a.fail != nil {
+				return nil, []byte("fwupdtool: failed to write\n"), a.fail
+			}
+			return nil, nil, nil
+		}}
+	return a
+}
+
+func (a *capsuleApplyRig) variable(t *testing.T, name string, data []byte) {
+	writeFile(t, filepath.Join(a.rig.hostDir, "efi", "efivars", name), data)
+}
+
+func (a *capsuleApplyRig) file(t *testing.T, name string, data []byte) {
+	writeFile(t, filepath.Join(a.rig.esp, filepath.FromSlash(name)), data)
+}
+
+func (a *capsuleApplyRig) nvramInstall(t *testing.T) {
+	a.variable(t, updaterEntry, loadOption("Linux Firmware Updater", `\EFI\ubuntu\fwupdx64.efi`))
+	a.variable(t, bootNextFile, u16(7))
+	a.variable(t, statusVar, []byte{0x07, 0, 0, 0, 7, 0, 0, 0})
+	a.file(t, updaterFile, []byte("the updater"))
+	a.file(t, capsuleFile, []byte("the capsule"))
+}
+
+func (a *capsuleApplyRig) run() ApplyResult {
+	var progress bytes.Buffer
+	return a.apply(context.Background(), &progress)
+}
+
+func TestAnApplyStagesTheRehearsedCapsule(t *testing.T) {
+	a := newCapsuleApplyRig(t)
+
+	got := a.run()
+
+	if got.Result != resultWritten || got.Message != "staged the capsule with 3 variables and 2 files, as rehearsed; BootNext names Boot0007" {
+		t.Errorf("got %+v, want Written", got)
+	}
+	if held, _ := os.ReadFile(filepath.Join(a.rig.esp, capsuleFile)); string(held) != "the capsule" {
+		t.Errorf("the ESP holds %q, want the capsule", held)
+	}
+}
+
+// fwupd writes the machine itself, so the apply checks what it wrote
+// against the rehearsal afterward. Writes that differ, or a failure
+// after a write, leave a staged capsule nobody vouched for, so the
+// apply answers Uncertain: the turn reboots with liken's own BootNext,
+// and the capsule does not run.
+func TestAnApplyThatDivergesFromTheRehearsal(t *testing.T) {
+	cases := []struct {
+		name    string
+		install func(a *capsuleApplyRig, t *testing.T)
+		fail    error
+		result  string
+		message string
+	}{
+		{"another capsule", func(a *capsuleApplyRig, t *testing.T) {
+			a.nvramInstall(t)
+			a.file(t, capsuleFile, []byte("another capsule"))
+		}, nil, resultUncertain, "fwupd's writes differ from the rehearsal's"},
+		{"a shim", func(a *capsuleApplyRig, t *testing.T) {
+			a.nvramInstall(t)
+			a.file(t, "EFI/ubuntu/shimx64.efi", []byte("a shim"))
+		}, nil, resultUncertain, "the install wrote EFI/ubuntu/shimx64.efi on the ESP, where a capsule writes nothing"},
+		{"a failure after a write", func(a *capsuleApplyRig, t *testing.T) {
+			a.variable(t, updaterEntry, loadOption("Linux Firmware Updater", `\EFI\ubuntu\fwupdx64.efi`))
+		}, errExit2, resultUncertain, "fwupdtool install: fwupdtool: failed to write"},
+		{"a failure that wrote nothing", func(*capsuleApplyRig, *testing.T) {}, errExit2, resultFailed,
+			"fwupdtool install: fwupdtool: failed to write, and it wrote nothing"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a := newCapsuleApplyRig(t)
+			a.install = func(t *testing.T) { c.install(a, t) }
+			a.fail = c.fail
+
+			got := a.run()
+
+			if got.Result != c.result || !strings.Contains(got.Message, c.message) {
+				t.Errorf("got %+v, want %s with %q", got, c.result, c.message)
+			}
+		})
+	}
+}
+
+func TestACapsulesApplyInstallsOnlyAfterTheSignal(t *testing.T) {
+	a := newCapsuleApplyRig(t)
+	a.signal = func(context.Context) error {
+		if a.installs != 0 {
+			t.Error("fwupd installed on the machine before the signal")
+		}
+		return errors.New("the operator withdrew the turn")
+	}
+
+	got := a.run()
+
+	if got.Result != resultFailed || a.installs != 0 {
+		t.Errorf("got %+v after %d installs, want Failed with none", got, a.installs)
+	}
+}
+
+// fwupd's capsule install reads the files directly under efi/, such as
+// fw_platform_size, which says whether the firmware runs 64-bit code,
+// so the copy holds them beside the variables, the ESRT, and the DMI
+// tables.
+func TestTheCopyHoldsTheEFIDirectorysOwnFiles(t *testing.T) {
+	host, copy := t.TempDir(), filepath.Join(t.TempDir(), "fw")
+	writeFile(t, filepath.Join(host, "efi", "efivars", "BootOrder-"+efiGlobalGUID), []byte{7, 0, 0, 0})
+	writeFile(t, filepath.Join(host, "efi", "fw_platform_size"), []byte("64\n"))
+
+	if err := copyFirmware(host, copy); err != nil {
+		t.Fatal(err)
+	}
+
+	if held, err := os.ReadFile(filepath.Join(copy, "efi", "fw_platform_size")); err != nil || string(held) != "64\n" {
+		t.Errorf("the copy's fw_platform_size reads %q, %v", held, err)
+	}
+}
+
+// fwupd keeps its updater's entry after an update, and a later install
+// writes the same entry again and names it in BootNext.
+func TestARehearsalPassesACapsuleOverAnEarlierUpdatersEntry(t *testing.T) {
+	r := newCapsuleRig(t)
+	writeFile(t, filepath.Join(r.hostDir, "efi", "efivars", "Boot0008-"+efiGlobalGUID), loadOption("Linux Firmware Updater", `\EFI\ubuntu\fwupdx64.efi`))
+	r.tool.effects["install"] = func() {
+		r.variable(t, "Boot0008-"+efiGlobalGUID, loadOption("Linux Firmware Updater (again)", `\EFI\ubuntu\fwupdx64.efi`))
+		r.variable(t, bootNextFile, u16(8))
+		r.file(t, capsuleFile, []byte("the capsule"))
+	}
+
+	got := r.rehearse(context.Background())
+
+	if got.Result != resultPassed {
+		t.Errorf("got %+v, want Passed", got)
+	}
+}
+
+// fwupd's status variable from an earlier update carries efivarfs's
+// immutable flag, and fwupd cannot open it to write it again, so the
+// apply clears the flag on fwupd's own variables before the install.
+func TestAnApplyLetsFwupdWriteItsEarlierStatusVariable(t *testing.T) {
+	a := newCapsuleApplyRig(t)
+	a.variable(t, statusVar, []byte{0x07, 0, 0, 0, 3, 0, 0, 0})
+	a.efivars.held = immutableFlag
+	var flagsAtInstall []string
+	install := a.install
+	a.install = func(t *testing.T) { flagsAtInstall = slices.Clone(a.efivars.calls); install(t) }
+
+	a.run()
+
+	if !slices.Equal(flagsAtInstall, []string{"flags", "setFlags 0x0"}) {
+		t.Errorf("before the install the store saw %q, want the flag of fwupd's variable cleared", flagsAtInstall)
+	}
+}
+
+func TestAnApplyThatCannotReleaseFwupdsVariableWritesNothing(t *testing.T) {
+	for _, fail := range []map[string]error{{"flags": errors.New("no inode")}, {"setFlags": errors.New("not permitted")}} {
+		a := newCapsuleApplyRig(t)
+		a.variable(t, statusVar, []byte{0x07, 0, 0, 0, 3, 0, 0, 0})
+		a.efivars.held, a.efivars.fail = immutableFlag, fail
+
+		got := a.run()
+
+		if got.Result != resultFailed || a.installs != 0 {
+			t.Errorf("with %v got %+v after %d installs, want Failed before the install", fail, got, a.installs)
+		}
 	}
 }

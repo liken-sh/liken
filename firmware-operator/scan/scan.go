@@ -31,14 +31,21 @@ func configFromEnv(getenv func(string) string) config {
 // scanner holds what a scan touches outside the process, so that a test
 // substitutes each one.
 type scanner struct {
-	cfg        config
-	client     *http.Client
-	mounter    mounter
-	fwupdtool  fwupdtool
-	remotesDir string // fwupd's remote configuration, /etc/fwupd/remotes.d
-	workDir    string // where the catalog files are saved for the refresh
-	trustDir   string // the catalog's certificates, when it has spec.trust (trust.go)
-	pkiDir     string // the keys fwupd trusts for metadata
+	cfg    config
+	client *http.Client
+	// firmwareHost is the machine's /sys/firmware, mounted read-only,
+	// and firmwareCopy the copy that fwupd reads through
+	// FWUPD_SYSFSFWDIR, whose variable store the pod mounts in memory.
+	// fwupd's uefi_capsule plugin reads devices only from a variable
+	// store that is a writable mount point, and the copy is one, while
+	// the machine's store is never writable from the scan.
+	firmwareHost string
+	firmwareCopy string
+	fwupdtool    fwupdtool
+	remotesDir   string // fwupd's remote configuration, /etc/fwupd/remotes.d
+	workDir      string // where the catalog files are saved for the refresh
+	trustDir     string // the catalog's certificates, when it has spec.trust (trust.go)
+	pkiDir       string // the keys fwupd trusts for metadata
 }
 
 func sum(data []byte) string {
@@ -51,8 +58,8 @@ func sum(data []byte) string {
 // Result for the operator to read.
 func (s scanner) scan(ctx context.Context) Result {
 	cfg := s.cfg
-	if err := s.mounter.ensureEFIVars(); err != nil {
-		return failed(cfg.file, "%v", err)
+	if err := copyScanFirmware(s.firmwareHost, s.firmwareCopy); err != nil {
+		return failed(cfg.file, "copying the firmware tables: %v", err)
 	}
 	if end := s.loadCatalog(ctx); end != nil {
 		return *end
@@ -129,4 +136,15 @@ func (s scanner) save(file string, catalog, jcat []byte) ([]string, error) {
 		return nil, err
 	}
 	return paths, os.WriteFile(paths[1], jcat, 0o644)
+}
+
+// copyScanFirmware copies the machine's firmware tables for fwupd. A
+// machine that booted in BIOS mode has no variable store, and fwupd
+// then finds no UEFI devices, which is a valid answer, so it copies
+// nothing.
+func copyScanFirmware(host, copy string) error {
+	if _, err := os.Stat(filepath.Join(host, "efi", "efivars")); err != nil {
+		return nil
+	}
+	return copyFirmware(host, copy)
 }

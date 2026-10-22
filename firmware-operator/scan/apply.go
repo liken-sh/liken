@@ -109,6 +109,33 @@ type variableStore struct {
 	write func(path string, data []byte) error
 }
 
+// replace writes a whole variable, which efivarfs passes to the
+// firmware as one SetVariable that replaces it. It clears the immutable
+// flag for the write, and sets it again. The file is not truncated,
+// because efivarfs refuses a truncation, and each write call is a whole
+// variable.
+func (s variableStore) replace(path string, data []byte) error {
+	flags, err := s.flags(path)
+	if err != nil {
+		return err
+	}
+	if flags&immutableFlag != 0 {
+		if err := s.setFlags(path, flags&^immutableFlag); err != nil {
+			return err
+		}
+		defer s.setFlags(path, flags)
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	return err
+}
+
 // applier is a rehearser that writes what it rehearsed. Its hostDir is
 // the machine's /sys/firmware, mounted read-write.
 type applier struct {
@@ -121,6 +148,8 @@ type applier struct {
 	// and an error when the wait ended without it.
 	signal func(ctx context.Context) error
 	store  variableStore
+	// installer runs fwupdtool on the machine itself, for a capsule.
+	installer fwupdtool
 }
 
 // isPrepared reports whether an apply's prepare passed: whether its
@@ -149,6 +178,9 @@ func (a applier) apply(ctx context.Context, progress io.Writer) ApplyResult {
 	}
 	line := ApplyProgress{Phase: phasePrepared, Variable: p.variable, SHA256: a.appendSHA256,
 		Message: fmt.Sprintf("the rehearsal passed with the recorded append to %s; the apply waits for the operator's signal to write", p.variable)}
+	if p.capsule {
+		line.Message = "the rehearsal passed with the recorded writes of the capsule; the apply waits for the operator's signal to install it"
+	}
 	if err := emit(progress, line); err != nil {
 		return applyFailed("printing the progress line: %v, so nothing was written", err)
 	}
@@ -157,6 +189,9 @@ func (a applier) apply(ctx context.Context, progress io.Writer) ApplyResult {
 	}
 	if err := a.signal(ctx); err != nil {
 		return applyFailed("waiting for the signal to write: %v, so nothing was written", err)
+	}
+	if p.capsule {
+		return a.stageCapsule(ctx, p)
 	}
 	return p.write(a.store)
 }
@@ -169,6 +204,10 @@ type prepared struct {
 	path     string
 	before   []byte
 	writes   [][]byte
+	// capsule marks a capsule's prepare, whose apply installs cabinet
+	// with fwupd (stageCapsule).
+	capsule bool
+	cabinet string
 }
 
 // prepare rehearses again and checks the append. It is the rehearser's,
@@ -181,12 +220,12 @@ func (r rehearser) prepare(ctx context.Context, appendSHA256 string) (prepared, 
 	if rehearsal.Result != resultPassed {
 		return prepared{}, applyFailed("the rehearsal before the write did not pass, so nothing was written: %s", rehearsal.Message), false
 	}
-	if rehearsal.Writes != nil {
-		return prepared{}, applyFailed("the rehearsal passed a capsule, and an apply covers only the Secure Boot databases, so nothing was written"), false
-	}
 	if rehearsal.SHA256 != appendSHA256 {
 		return prepared{}, applyFailed("the append's SHA-256 is now %s, and the rehearsal recorded %s: the machine's variables changed since the rehearsal, so nothing was written",
 			rehearsal.SHA256, appendSHA256), false
+	}
+	if rehearsal.Writes != nil {
+		return prepared{capsule: true, cabinet: edit.cabinet}, ApplyResult{}, true
 	}
 	return prepared{variable: rehearsal.Variable, path: filepath.Join(r.hostDir, "efi", "efivars", rehearsal.Variable),
 		before: edit.before, writes: edit.writes}, ApplyResult{}, true

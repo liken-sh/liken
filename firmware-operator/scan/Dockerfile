@@ -39,6 +39,10 @@ COPY --from=notices go.sh /
 RUN CGO_ENABLED=0 sh /go.sh /notices ./scan
 
 FROM ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7
+# fwupd-signed holds fwupd-efi's updater, fwupdx64.efi, which a
+# capsule's install in NVRAM mode copies to the ESP: the firmware boots
+# it once, and it hands the capsule to the firmware.
+#
 # The date of the Ubuntu snapshot that fwupd installs from. A snapshot
 # gives the same fwupd to every build, so a change in what a scan finds
 # comes from the machine or the catalog and never from a new package. A
@@ -59,7 +63,7 @@ RUN echo 'Acquire::https::CAInfo "/etc/ssl/certs/ca-certificates.crt";' >/etc/ap
         'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg' \
         >/etc/apt/sources.list.d/snapshot.sources \
     && apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends fwupd \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends fwupd fwupd-signed \
     && rm -rf /var/lib/apt/lists/*
 # The image holds the files of Ubuntu packages, unmodified, and their
 # licenses require that each package's copyright file travel with it.

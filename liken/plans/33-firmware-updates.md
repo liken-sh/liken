@@ -3,8 +3,9 @@
 Milestone 33. The fallback that survives a firmware update is built
 and drilled. The OS's capabilities for a capsule were built and
 drilled on the `lab` fleet on 2026-10-22, with changes to the design
-below ([As built](#as-built)). `firmware-operator`'s capsule work,
-its plans 07 and 08, is not built. This milestone holds the
+below ([As built](#as-built)). `firmware-operator`'s plans 07 and 08
+used them on 2026-10-22 to roll a capsule across three machines of the
+`lab` fleet, on OVMF with a test device. No real board has taken one. This milestone holds the
 OS's part of updating firmware that a machine and its devices keep.
 `firmware-operator`, an add-on that ships apart from the OS, declares
 and runs the updates: its
@@ -14,7 +15,7 @@ updates with fwupd and the LVFS catalog,
 [plan 05](../../firmware-operator/plans/completed/05-rehearsal.md)
 rehearses it against a copy of the machine's variables, and plans
 [06](../../firmware-operator/plans/completed/06-applying-a-database-update.md)
-to [08](../../firmware-operator/plans/08-applying-a-capsule.md) apply
+to [08](../../firmware-operator/plans/completed/08-applying-a-capsule.md) apply
 it. The OS offers capabilities, and the add-on uses them: a reboot
 turn ([milestone 88](88-disruptions.md)), the
 one-shot boot of that turn's reboot, a boot order that survives a

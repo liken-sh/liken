@@ -56,3 +56,31 @@ func TestACatalogSignedByTheLVFSMountsNoTrust(t *testing.T) {
 		}
 	}
 }
+
+// fwupd's uefi_capsule plugin sees devices only when the variable store
+// it reads is a writable mount point, and it names a capsule device by
+// the path of its ESRT entry. Each pod gives fwupd a copy of the
+// machine's /sys/firmware at the same path, so a device has the same
+// ID in each, and mounts a directory in memory exactly where the
+// copy's efivars go.
+func TestEachPodMountsItsCopysVariableStore(t *testing.T) {
+	for name, p := range eachCatalogPod(trustedCatalog()) {
+		for volumeName, path := range map[string]string{firmwareCopyVolume: "/run/fw", copyVariablesVolume: "/run/fw/efi/efivars"} {
+			v := slices.IndexFunc(p.Spec.Volumes, func(v volume) bool { return v.Name == volumeName })
+			mounted := slices.Contains(p.Spec.Containers[0].VolumeMounts, volumeMount{Name: volumeName, MountPath: path})
+			if v < 0 || p.Spec.Volumes[v].EmptyDir == nil || p.Spec.Volumes[v].EmptyDir.Medium != "Memory" || !mounted {
+				t.Errorf("the %s pod's volumes are %+v and mounts %+v, want a directory in memory at %s",
+					name, p.Spec.Volumes, p.Spec.Containers[0].VolumeMounts, path)
+			}
+		}
+	}
+}
+
+// The scan reads the machine's firmware tables through a read-only
+// mount, and copies them.
+func TestTheScanPodReadsTheFirmwareReadOnly(t *testing.T) {
+	p := eachCatalogPod(trustedCatalog())["scan"]
+	if !slices.Contains(p.Spec.Containers[0].VolumeMounts, volumeMount{Name: "host-firmware", MountPath: hostFirmwarePath, ReadOnly: true, RecursiveReadOnly: "Enabled"}) {
+		t.Errorf("the scan pod mounts %+v, want /sys/firmware read-only at %s", p.Spec.Containers[0].VolumeMounts, hostFirmwarePath)
+	}
+}

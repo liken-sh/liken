@@ -172,14 +172,13 @@ func TestScanOutcomes(t *testing.T) {
 			"Failed", "saving the catalog",
 		},
 		{
-			"the mount fails", func(t *testing.T, r *rig) {
-				r.mounter = mounter{
-					exists: func(string) bool { return true },
-					mounts: func() (string, error) { return "", nil },
-					mount:  func(string) error { return os.ErrPermission },
-				}
+			"the firmware tables cannot be copied", func(t *testing.T, r *rig) {
+				writeFile(t, filepath.Join(r.firmwareHost, "efi", "efivars", "BootOrder-"+efiGlobalGUID), []byte{7, 0, 0, 0})
+				blocker := filepath.Join(t.TempDir(), "file")
+				writeFile(t, blocker, nil)
+				r.firmwareCopy = filepath.Join(blocker, "fw")
 			},
-			"Failed", "mounting efivarfs at /sys/firmware/efi/efivars: permission denied",
+			"Failed", "copying the firmware tables",
 		},
 	}
 	for _, tt := range tests {
@@ -219,5 +218,36 @@ func TestConfigFromEnv(t *testing.T) {
 	want := config{name: "lvfs", url: testCatalogURL, file: testFile, sha256: "abc"}
 	if got != want {
 		t.Errorf("got %+v, want %+v", got, want)
+	}
+}
+
+// fwupd reads a copy of the machine's firmware tables, whose variable
+// store the pod mounts in memory, so the uefi_capsule plugin finds a
+// writable store and the machine's own is never written.
+func TestAScanGivesFwupdACopyOfTheFirmwareTables(t *testing.T) {
+	r := newRig(t)
+	writeFile(t, filepath.Join(r.firmwareHost, "efi", "efivars", "BootOrder-"+efiGlobalGUID), []byte{7, 0, 0, 0, 2, 0})
+	writeFile(t, filepath.Join(r.firmwareHost, "efi", "esrt", "entries", "entry0", "fw_version"), []byte("1\n"))
+	var copied []byte
+	r.tool.effects = map[string]func(){"get-devices": func() {
+		copied, _ = os.ReadFile(filepath.Join(r.firmwareCopy, "efi", "esrt", "entries", "entry0", "fw_version"))
+	}}
+
+	got := r.scan(context.Background())
+
+	if got.Result != resultScanned || string(copied) != "1\n" {
+		t.Errorf("got %+v with the copy's ESRT reading %q, want Scanned over a copy of the tables", got, copied)
+	}
+}
+
+// A machine that booted in BIOS mode has no variable store, and fwupd
+// then finds no UEFI devices, which is a valid answer.
+func TestAScanOfABIOSMachineCopiesNothing(t *testing.T) {
+	r := newRig(t)
+
+	got := r.scan(context.Background())
+
+	if got.Result != resultScanned {
+		t.Errorf("got %+v, want Scanned", got)
 	}
 }

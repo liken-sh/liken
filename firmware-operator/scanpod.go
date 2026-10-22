@@ -142,6 +142,13 @@ func buildScanPod(c *catalog, a scanAttempt, sum, image, namespace string) pod {
 			// Service.
 			AutomountServiceAccountToken: &no,
 			EnableServiceLinks:           &no,
+			// fwupd reads a copy of the machine's firmware tables, for
+			// the reason that copyVariablesVolume gives, so the pod
+			// mounts the tables read-only and the copy's variable store
+			// in memory.
+			Volumes: append([]volume{
+				{Name: "host-firmware", HostPath: &hostPath{Path: "/sys/firmware", Type: "Directory"}},
+			}, firmwareCopyVolumes()...),
 			Containers: []container{{
 				Name:  scanContainer,
 				Image: image,
@@ -152,6 +159,9 @@ func buildScanPod(c *catalog, a scanAttempt, sum, image, namespace string) pod {
 					{Name: catalogSHA256Variable, Value: sum},
 				},
 				SecurityContext: &securityContext{Privileged: &yes},
+				VolumeMounts: append([]volumeMount{
+					{Name: "host-firmware", MountPath: hostFirmwarePath, ReadOnly: true, RecursiveReadOnly: "Enabled"},
+				}, firmwareCopyMounts()...),
 				// The scan's memory has not been measured, so the request
 				// is small and there is no limit: fwupd parses the whole
 				// catalog, and a limit set too low would kill every scan.

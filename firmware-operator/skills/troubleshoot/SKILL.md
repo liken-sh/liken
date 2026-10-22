@@ -385,6 +385,14 @@ turn with no reboot. Choose the release of the component whose signer
 the machine's `KEK` holds, such as `microsoft-dbx-x64` instead of
 `microsoft-dbx-x64-kek2023`.
 
+A capsule's record is also `Refused` with
+`the machine's status.firmware.bootOrderKept is not true, ...` when the
+machine's firmware did not keep `BootOrder` through its last reset, or
+when the machine has not proven a release yet. The operator asks for no
+turn. Read the machine's `status.firmware.bootOrderKept`, and see
+`liken`'s guide to a reboot that did not keep a component's
+`BootNext`.
+
 ### Applied is False with Failed
 
 | Message | What to check |
@@ -401,6 +409,7 @@ the machine's `KEK` holds, such as `microsoft-dbx-x64` instead of
 | `clearing the immutable flag of ...: operation not permitted` | The pod lacks `CAP_LINUX_IMMUTABLE`. A policy of your cluster that removes capabilities from pods in `liken-system` causes this. |
 | `writing the append to ...: read-only file system` | The machine's `efivarfs` is mounted read-only, so the pod's read-write mount of `/sys/firmware` cannot write it. |
 | `writing the append to ...: ...` | The kernel refused the write for another reason, which the message gives. |
+| `fwupdtool install: ..., and it wrote nothing` | fwupd refused a capsule's install on the machine, and changed nothing there. The rest of the line is fwupd's reason. |
 | `the FirmwareCatalog ... has no current file ...` | The `FirmwareCatalog` of the machine's scan was deleted or never read its jcat. See [A FirmwareCatalog is not Ready](#a-firmwarecatalog-is-not-ready). |
 | `the machine rebooted after the write, and its next scan still reads version ..., not ...` | The firmware took the write and did not keep it across the reboot. A firmware that resets Secure Boot to its defaults discards the appended entries. Check the firmware's Secure Boot settings before you approve again. |
 | `the machine rebooted, and its next scan still reads version ..., not ..., so the append was not written` | An uncertain apply, below, did not write. Approve again. |
@@ -424,6 +433,9 @@ old version.
 | `the apply pod did not finish within 10m0s of the signal to write` | The pod hung after the signal, or a pod that the operator started at the hold never ran, such as an image that does not pull. Check `kubectl -n liken-system get events`. |
 | `the apply wrote no result; its last line was: ...` or `the apply pod wrote no log: ...` | The apply program crashed. The message holds its last line, or the pod's reason. |
 | `the apply answered the result ..., which the operator does not know` | The scan image and the operator are from different releases. Pin both to one tag. |
+| `fwupd's writes differ from the rehearsal's: ...` | fwupd wrote other bytes to the machine than to the rehearsal's copies, such as a capsule file that changed. The reboot boots the proven slot, so the capsule does not run. Approve again to rehearse against the machine as it is now. |
+| `the install ... ; the reboot keeps liken's BootNext, so the capsule does not run` | fwupd wrote something on the machine that a capsule does not write. The message names it, as in the [rehearsal tables](#rehearsals). |
+| `fwupdtool install: ..., after it wrote to the machine; ...` | fwupd stopped with an error after it wrote. The reboot boots the proven slot. |
 | `the firmware accepted ... of the ... authenticated writes to ..., and write ... failed: ...` | The firmware took the first writes of the append and refused or failed the one the message names. `permission denied` is a signature that does not chain to `KEK`, as in [Applied is False with Refused](#applied-is-false-with-refused). The next scan reads which entries the variable holds. |
 
 ### Applied stays Unknown

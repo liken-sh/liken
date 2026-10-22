@@ -104,7 +104,10 @@ type rehearser struct {
 	copyDir       string // the copy that FWUPD_SYSFSFWDIR names
 	espDir        string // the directory that FWUPD_UEFI_ESP_PATH names
 	espSource     string // the ESP of the next boot, mounted read-only, when the machine has one
-	free          func(path string) (int64, error)
+	// partitionOf answers the partition mounted at a path, which the
+	// repair of the updater's entry needs (updaterentry.go).
+	partitionOf func(mount string) (partition, error)
+	free        func(path string) (int64, error)
 }
 
 func rehearserFromEnv(getenv func(string) string) rehearser {
@@ -125,9 +128,13 @@ func (r rehearser) rehearse(ctx context.Context) RehearsalResult {
 // rehearsedAppend is the bytes of a passed rehearsal: the variable as
 // the rehearsal copied it, and the authenticated writes that the
 // install appended to it, in order.
+//
+// For a capsule, cabinet is the cabinet the rehearsal saved, which an
+// apply installs.
 type rehearsedAppend struct {
-	before []byte
-	writes [][]byte
+	before  []byte
+	writes  [][]byte
+	cabinet string
 }
 
 // rehearseAppend is rehearse, and answers the bytes of a passed
@@ -153,7 +160,8 @@ func (r rehearser) rehearseAppend(ctx context.Context) (RehearsalResult, rehears
 		return rehearsalFailed("fwupd reports no device %s", r.deviceID), rehearsedAppend{}
 	}
 	if devices[i].Plugin == capsulePlugin {
-		return r.rehearseCapsule(ctx, devices[i]), rehearsedAppend{}
+		result, cabinet := r.rehearseCapsule(ctx, devices[i])
+		return result, rehearsedAppend{cabinet: cabinet}
 	}
 	variable, database := databaseVariables[devices[i].Plugin]
 	if !database {
@@ -291,6 +299,25 @@ func copyFirmware(host, copy string) error {
 	}
 	for _, tree := range []string{"efi/efivars", "efi/esrt", "dmi/tables"} {
 		if err := copyTree(filepath.Join(host, tree), filepath.Join(copy, tree)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	// fwupd's capsule install reads the files directly under efi/, such
+	// as fw_platform_size, which says whether the firmware runs 64-bit
+	// code.
+	entries, err := os.ReadDir(filepath.Join(host, "efi"))
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if !e.Type().IsRegular() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(host, "efi", e.Name()))
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(copy, "efi", e.Name()), data, 0o644); err != nil {
 			return err
 		}
 	}

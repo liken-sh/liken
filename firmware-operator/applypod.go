@@ -180,18 +180,18 @@ func buildApplyPod(f *firmware, a applyAttempt, r rehearsal, c *catalog, image, 
 			Tolerations:                   []toleration{{Operator: "Exists"}, {Key: cordonTaint, Operator: "Exists", Effect: "NoSchedule"}},
 			AutomountServiceAccountToken:  &no,
 			EnableServiceLinks:            &no,
-			Volumes: []volume{
+			Volumes: append([]volume{
 				{Name: "host-firmware", HostPath: &hostPath{Path: "/sys/firmware", Type: "Directory"}},
 				// The copy of the rehearsal before the write, as in the
 				// rehearsal pod.
-				{Name: "rehearsal", EmptyDir: &emptyDir{Medium: "Memory", SizeLimit: "64Mi"}},
+				{Name: "rehearsal", EmptyDir: &emptyDir{Medium: "Memory", SizeLimit: "256Mi"}},
 				// The marker of the finished prepare.
 				{Name: "prepared", EmptyDir: &emptyDir{Medium: "Memory", SizeLimit: "1Mi"}},
 				// The pod's own annotations, which carry the signal.
 				{Name: "signal", DownwardAPI: &downwardAPIVolume{Items: []downwardAPIFile{
 					{Path: "annotations", FieldRef: fieldRef{FieldPath: "metadata.annotations"}},
 				}}},
-			},
+			}, firmwareCopyVolumes()...),
 			Containers: []container{{
 				Name:  applyContainer,
 				Image: image,
@@ -210,12 +210,12 @@ func buildApplyPod(f *firmware, a applyAttempt, r rehearsal, c *catalog, image, 
 					AllowPrivilegeEscalation: &no,
 					Capabilities:             &capabilities{Drop: []string{"ALL"}, Add: []string{"DAC_READ_SEARCH", "LINUX_IMMUTABLE"}},
 				},
-				VolumeMounts: []volumeMount{
+				VolumeMounts: append([]volumeMount{
 					{Name: "host-firmware", MountPath: hostFirmwarePath},
 					{Name: "rehearsal", MountPath: rehearsalPath},
 					{Name: "prepared", MountPath: preparedPath},
 					{Name: "signal", MountPath: signalPath},
-				},
+				}, firmwareCopyMounts()...),
 				// The probe is how the operator learns that the prepare
 				// is done: the kubelet sets Ready, and the watch of the
 				// pods delivers it, so the operator reads no log.
@@ -224,6 +224,12 @@ func buildApplyPod(f *firmware, a applyAttempt, r rehearsal, c *catalog, image, 
 				TerminationMessagePolicy: "FallbackToLogsOnError",
 			}},
 		}, c),
+	}
+	// A capsule's apply stages fwupd's updater and the capsule on the
+	// ESP of the next boot, so it mounts that ESP read-write.
+	if r.Capsule != nil {
+		p.Spec.Volumes = append(p.Spec.Volumes, volume{Name: nextESPVolume, HostPath: &hostPath{Path: provenESPLink, Type: "Directory"}})
+		p.Spec.Containers[0].VolumeMounts = append(p.Spec.Containers[0].VolumeMounts, volumeMount{Name: nextESPVolume, MountPath: nextESPPath})
 	}
 	if !signal.IsZero() {
 		for key, value := range signalAnnotations(signal) {

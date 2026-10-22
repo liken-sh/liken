@@ -1,6 +1,9 @@
 # 08, Applying a capsule
 
-Proposed on 2026-10-21. Not built. This plan applies an approved
+Proposed on 2026-10-21. Built on 2026-10-22, and drilled on three
+machines of the `lab` fleet on OVMF with a test device
+([As built](#as-built), [The lab drill](#the-lab-drill)). No real
+board has taken a capsule through the operator. This plan applies an approved
 board firmware update, a capsule, inside a reboot turn, and proves it
 from the next scan. It follows plans
 [06](completed/06-applying-a-database-update.md), which applies a database
@@ -97,3 +100,57 @@ catalog offers one, after plan 07's rehearsal of it.
   but fwupd calls that path uncommon.
 - How long the firmware's update may take before the machine's
   `Ready` counts as late, and what the turn's deadline is for it.
+
+## As built
+
+- **The precondition.** The operator starts a capsule's apply only on
+  a machine whose `status.firmware.bootOrderKept` is `true`, and
+  records `Refused` on any other. The battery, the ESP's free space
+  beyond the rehearsal's check, and an earlier pending capsule are not
+  checked.
+- **The write.** The apply pod mounts the ESP of the next boot
+  read-write and runs fwupd on the machine's own variable store, with
+  no device ID, because the device's ID depends on the path of its
+  firmware tables. It repairs the updater's partition as the rehearsal
+  does (plan 07), and judges what fwupd wrote with the rehearsal's
+  rules. Writes whose digest is the rehearsal's read `Written`. Other
+  writes, and a failure after a write, read `Uncertain`. Before the
+  install it clears the immutable flag of fwupd's status variable from
+  an earlier update, which fwupd cannot open otherwise.
+- **The handover.** On `Written`, the operator removes `spec.hold` and
+  sets `spec.keepBootNext` in one patch. On `Uncertain`, it removes
+  `spec.hold` alone, so `init` aims `BootNext` at the proven slot, and
+  the capsule does not run.
+- **Not built.** The cleanup of step 6: fwupd's entry and its updater
+  stay, and a later capsule uses them again. The record of the
+  capsule's own status variable beside the version.
+
+## The lab drill
+
+On 2026-10-22, node-3, node-4, and node-5 of the `lab` fleet ran
+`liken` `2026.10.22-912` on OVMF built with an FMP test device
+(`dev-cluster/firmware/capsule/`), and a `FirmwareCatalog` with
+`spec.trust` offered versions 2 and 3 from the lab's server. The
+`default` budget allows one machine out at a time.
+
+The drill found six faults before the first capsule applied, each on a
+build that reached the lab: the scan's read-only `efivarfs`, the
+device's ID that changed with the copy's path, the missing files under
+`efi/`, the missing updater, the zeroed partition in the updater's
+entry, and the zeroed partition in its status variable. The first of
+the partition faults let the firmware boot fwupd's updater, which
+could not find the capsule, took a CPU exception, and stopped node-4
+until it was reset by hand.
+
+On build `cap-15`, version 2 rolled to the three machines in turn,
+and version 3 followed:
+
+| Release | node-5 | node-3 | node-4 |
+|---|---|---|---|
+| 2 | 22:08:44Z | 22:09:18Z | 22:09:51Z |
+| 3 | 22:11:20Z | 22:11:54Z | 22:10:48Z |
+
+Each time is the scan of the new boot that read the version. The
+firmware's log of each update boot reads `ValidateFmpCapsule - Success`
+and `SetTheImage() LastAttemptStatus: 0`. Each machine came back on its
+proven slot, and the approval read `Installed`.

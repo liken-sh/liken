@@ -65,9 +65,13 @@ type applyRecord struct {
 	// Disruption is empty until the apply pod is Ready and the
 	// operator asked for the turn.
 	Disruption string `json:"disruption,omitempty"`
-	Result     string `json:"result"`
-	Message    string `json:"message,omitempty"`
-	Time       string `json:"time"`
+	// Capsule marks the apply of a capsule, whose turn reboots with
+	// BootNext at fwupd's updater once the capsule is staged. SHA256 is
+	// then the digest of the rehearsal's writes.
+	Capsule bool   `json:"capsule,omitempty"`
+	Result  string `json:"result"`
+	Message string `json:"message,omitempty"`
+	Time    string `json:"time"`
 }
 
 // The results of an apply, beside resultRefused and resultFailed.
@@ -82,6 +86,14 @@ const (
 // that waits for the machine's reboot.
 func (r applyRecord) live() bool {
 	return r.Result == resultWaiting || r.Result == resultWriting || r.rebooting()
+}
+
+// keepsBootNext reports whether the record's reboot must boot fwupd's
+// updater: a capsule that the apply staged as rehearsed. An uncertain
+// capsule reboots with liken's own BootNext, so the capsule does not
+// run.
+func (r applyRecord) keepsBootNext() bool {
+	return r.Capsule && r.Result == resultWritten
 }
 
 // rebooting reports whether a record's write, or the write it cannot
@@ -202,7 +214,7 @@ func (o *operator) startApply(f *firmware, machine string, w observed, catalogs 
 	u := f.Spec.Update
 	rh, rehearsed := rehearsalRecord(f.Status.Rehearsals, machine)
 	m, known := w.fleet[machine]
-	if o.disruptions.Absent || !rehearsed || rh.Result != resultPassed || rh.Append == nil || !known ||
+	if o.disruptions.Absent || !rehearsed || rh.Result != resultPassed || (rh.Append == nil && rh.Capsule == nil) || !known ||
 		rh.Boot != m.Status.Boot.Time || rh.Version != u.Version || rh.CabinetSHA256 != u.Cabinet.SHA256 {
 		return nil, nil
 	}
@@ -216,7 +228,21 @@ func (o *operator) startApply(f *firmware, machine string, w observed, catalogs 
 	if slices.ContainsFunc(w.applies[f.Metadata.Name], func(p pod) bool { return applyOf(p).machine == machine }) {
 		return nil, nil
 	}
-	r := applyRecord{Machine: machine, Boot: rh.Boot, Version: u.Version, CabinetSHA256: u.Cabinet.SHA256, SHA256: rh.Append.SHA256}
+	r := applyRecord{Machine: machine, Boot: rh.Boot, Version: u.Version, CabinetSHA256: u.Cabinet.SHA256}
+	if rh.Capsule == nil {
+		r.SHA256 = rh.Append.SHA256
+	} else {
+		// The boot after the updater's comes from the head of BootOrder,
+		// with no one-shot to steer it, and liken's init hands BootNext
+		// to the updater only where the firmware kept BootOrder through
+		// its last reset. A capsule staged on any other machine would
+		// wait for a reboot that never runs it.
+		r.Capsule, r.SHA256 = true, rh.Capsule.SHA256
+		if kept := m.Status.Firmware.BootOrderKept; kept == nil || !*kept {
+			s := step(r, resultRefused, "the machine's status.firmware.bootOrderKept is not true, so liken would not keep BootNext for fwupd's updater at the capsule's reboot")
+			return &s, nil
+		}
+	}
 	p := buildApplyPod(f, attemptOfApply(f.Metadata.Name, r), rh, c, o.discovery.scanImage, o.namespace, time.Time{})
 	if err := o.createApplyPod(p); err != nil {
 		return nil, fmt.Errorf("starting the apply on %s: %w", machine, err)
@@ -404,7 +430,7 @@ func (o *operator) settleTurns(f *firmware, records []applyRecord, requests []di
 			continue
 		}
 		d := buildDisruption(f, r.Machine, updateSubject(f, r.Machine))
-		d.Spec.Hold = false
+		d.Spec.Hold, d.Spec.KeepBootNext = false, r.keepsBootNext()
 		if err := o.fileDisruption(d); err != nil {
 			problems = append(problems, fmt.Errorf("asking again for the reboot of %s: %w", r.Machine, err))
 		}
@@ -414,7 +440,7 @@ func (o *operator) settleTurns(f *firmware, records []applyRecord, requests []di
 		switch {
 		case d.Metadata.DeletionTimestamp != "":
 		case named && r.rebooting() && d.Spec.Hold:
-			problems = append(problems, o.releaseHold(d.Metadata.Name))
+			problems = append(problems, o.releaseHold(d.Metadata.Name, r.keepsBootNext()))
 		case !named && (d.Spec.Hold || d.complete()):
 			problems = append(problems, o.withdraw(d.Metadata.Name))
 		}

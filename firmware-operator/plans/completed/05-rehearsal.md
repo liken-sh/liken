@@ -5,8 +5,8 @@ Proposed on 2026-10-20. Step 1, the rehearsal, was built on
 and this plan closed on 2026-10-21 with it. Steps 2 to 4 were split
 into plans of their own: [plan 06](06-applying-a-database-update.md)
 applies a Secure Boot database update,
-[plan 07](../07-rehearsing-a-capsule.md) rehearses a capsule, and
-[plan 08](../08-applying-a-capsule.md) applies one. The OS offers the
+[plan 07](07-rehearsing-a-capsule.md) rehearses a capsule, and
+[plan 08](08-applying-a-capsule.md) applies one. The OS offers the
 reboot turn and the other capabilities they use, in `liken`'s
 [milestone 88](../../../liken/plans/88-disruptions.md)
 and [milestone 33](../../../liken/plans/33-firmware-updates.md). The

@@ -640,6 +640,9 @@ spec:
                       disruption:
                         type: string
                         description: "The `Disruption` that asks for the machine's reboot turn. It is absent while the apply pod prepares, because the operator files the request only when the pod is `Ready`."
+                      capsule:
+                        type: boolean
+                        description: "True for the apply of a capsule. Its `sha256` is then the digest of the rehearsal's writes, and its turn reboots with `BootNext` at fwupd's updater once the pod staged the capsule."
                       result:
                         type: string
                         enum: [Waiting, Writing, Written, Uncertain, Refused, Failed]

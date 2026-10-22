@@ -49,5 +49,5 @@ the API server with the CA of its `ServiceAccount`.
 | [04](completed/04-approval.md) | Built: `spec.update.version` and `spec.update.cabinet`, a person's approval of one release pinned to its cabinet, with the `Approved` condition and the count of pending machines |
 | [05](completed/05-rehearsal.md) | Built: a rehearsal of each approved install against a copy of the machine's firmware variables, with the `Rehearsed` condition |
 | [06](completed/06-applying-a-database-update.md) | Built: the write of a Secure Boot database update inside a reboot turn that the OS grants and holds, with the `Applied` condition |
-| [07](07-rehearsing-a-capsule.md) | Proposed: the rehearsal of a capsule, with the ESP of the next boot |
-| [08](08-applying-a-capsule.md) | Proposed: the write of a capsule inside a turn, with the one-shot boot that the OS hands over |
+| [07](completed/07-rehearsing-a-capsule.md) | Built: the rehearsal of a capsule against copies of the firmware tables and of the ESP of the next boot |
+| [08](completed/08-applying-a-capsule.md) | Built: the write of a capsule inside a turn, with the one-shot boot that the OS hands over, drilled on the `lab` fleet |

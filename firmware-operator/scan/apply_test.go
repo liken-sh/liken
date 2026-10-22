@@ -429,19 +429,3 @@ func TestAnApplierReadsItsEnvironment(t *testing.T) {
 		t.Errorf("the applier is %+v, want the append and the rehearsal's environment", a)
 	}
 }
-
-// An apply writes a capsule only once it can hand BootNext to the
-// updater (plan 08), so until then a capsule's apply writes nothing.
-func TestAnApplyOfACapsuleWritesNothing(t *testing.T) {
-	recorded := newCapsuleRig(t).rehearse(context.Background())
-	r := newCapsuleRig(t)
-	a := newApplyRig(t)
-	a.applier.rehearser = r.rehearser
-	a.appendSHA256 = recorded.SHA256
-
-	got := a.run()
-
-	if got.Result != resultFailed || !strings.Contains(got.Message, "covers only the Secure Boot databases") || len(a.efivars.calls) != 0 {
-		t.Errorf("got %+v after the calls %q, want Failed with no call to the store", got, a.efivars.calls)
-	}
-}

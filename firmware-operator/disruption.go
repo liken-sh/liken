@@ -74,6 +74,9 @@ type disruptionSpec struct {
 	Kind      string `json:"kind"`
 	Reason    string `json:"reason,omitempty"`
 	Hold      bool   `json:"hold,omitempty"`
+	// KeepBootNext asks liken's init to leave BootNext as fwupd set it
+	// at the turn's reboot (liken's milestone 33).
+	KeepBootNext bool `json:"keepBootNext,omitempty"`
 }
 
 type disruptionStatus struct {
@@ -159,10 +162,15 @@ func (o *operator) readDisruption(name string) (*disruption, error) {
 
 // releaseHold removes spec.hold, so the turn goes on to the reboot. A
 // merge patch with a null removes the field, and leaves the rest of
-// the spec, which machine-operator also writes, as it is.
-func (o *operator) releaseHold(name string) error {
-	return o.client.Request(http.MethodPatch, disruptionPath(name), "application/merge-patch+json",
-		[]byte(`{"spec":{"hold":null}}`), nil)
+// the spec, which machine-operator also writes, as it is. A capsule's
+// release sets spec.keepBootNext in the same patch, so no reboot can
+// run between the two.
+func (o *operator) releaseHold(name string, keepBootNext bool) error {
+	patch := `{"spec":{"hold":null}}`
+	if keepBootNext {
+		patch = `{"spec":{"hold":null,"keepBootNext":true}}`
+	}
+	return o.client.Request(http.MethodPatch, disruptionPath(name), "application/merge-patch+json", []byte(patch), nil)
 }
 
 // withdraw deletes a request. A 404 means it is already gone.

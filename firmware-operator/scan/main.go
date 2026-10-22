@@ -29,6 +29,13 @@ const (
 	// way before it writes.
 	hostFirmware = "/host/firmware"
 	rehearsalDir = "/run/rehearsal"
+	// firmwareCopy is where each pod copies the machine's firmware
+	// tables for fwupd. fwupd names a capsule device by the path of its
+	// ESRT entry, so the scan, the rehearsal, and the apply's prepare
+	// copy to the same path, and the device keeps the ID that the scan
+	// recorded (firmwareCopyPath in rehearsalpod.go).
+	firmwareCopy = "/run/fw"
+
 	// nextESPPath is where the operator mounts the ESP of the machine's
 	// next boot, when it has one (nextESPPath in rehearsalpod.go).
 	nextESPPath = "/run/esp-next"
@@ -63,14 +70,15 @@ func main() {
 	defer cancel()
 
 	s := scanner{
-		cfg:        configFromEnv(os.Getenv),
-		client:     http.DefaultClient,
-		mounter:    osMounter(),
-		fwupdtool:  execFwupdtool(workDir + "/esp"),
-		remotesDir: "/etc/fwupd/remotes.d",
-		trustDir:   trustDir,
-		pkiDir:     pkiDir,
-		workDir:    workDir + "/catalog",
+		cfg:          configFromEnv(os.Getenv),
+		client:       http.DefaultClient,
+		fwupdtool:    execFwupdtool(workDir+"/esp", "FWUPD_SYSFSFWDIR="+firmwareCopy),
+		firmwareHost: hostFirmware,
+		firmwareCopy: firmwareCopy,
+		remotesDir:   "/etc/fwupd/remotes.d",
+		trustDir:     trustDir,
+		pkiDir:       pkiDir,
+		workDir:      workDir + "/catalog",
 	}
 	if err := emit(os.Stdout, s.scan(ctx)); err != nil {
 		fmt.Fprintln(os.Stderr, "writing the result:", err)
@@ -97,6 +105,10 @@ func rehearseMain() {
 func applyMain() {
 	a := applierFromEnv(os.Getenv)
 	a.rehearser, a.store, a.marker = rehearserIn(a.rehearser), osVariableStore(), preparedMarker
+	// A capsule's install runs fwupd on the machine itself: its variable
+	// store through the read-write mount of /sys/firmware, and the ESP
+	// of its next boot. fwupd keeps its own state in the pod.
+	a.installer = execFwupdtool(nextESPPath, "FWUPD_SYSFSFWDIR="+hostFirmware, "FWUPD_LOCALSTATEDIR="+rehearsalDir+"/machine")
 	a.signal = func(ctx context.Context) error { return awaitSignal(ctx, signalDir, inotifyWatch) }
 	if err := emit(os.Stdout, a.apply(context.Background(), os.Stdout)); err != nil {
 		fmt.Fprintln(os.Stderr, "writing the result:", err)
@@ -108,7 +120,7 @@ func applyMain() {
 // reads the copy in rehearsalDir and keeps its own state there too, so
 // nothing of the install reaches the machine.
 func rehearserIn(r rehearser) rehearser {
-	copyDir := rehearsalDir + "/fw"
+	copyDir := firmwareCopy
 	r.scanner = scanner{
 		cfg:    configFromEnv(os.Getenv),
 		client: http.DefaultClient,
@@ -120,6 +132,6 @@ func rehearserIn(r rehearser) rehearser {
 		workDir:    rehearsalDir + "/catalog",
 	}
 	r.hostDir, r.copyDir, r.espDir, r.free = hostFirmware, copyDir, rehearsalDir+"/esp", freeBytes
-	r.espSource = nextESPPath
+	r.espSource, r.partitionOf = nextESPPath, mountedPartition
 	return r
 }

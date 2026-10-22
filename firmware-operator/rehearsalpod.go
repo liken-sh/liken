@@ -51,6 +51,22 @@ const (
 	// there.
 	provenESPLink = "/run/liken/proven-esp"
 	nextESPVolume = "next-esp"
+
+	// copyVariablesVolume is a directory in memory where a pod's copy
+	// of the variable store goes. fwupd's uefi_capsule plugin reads
+	// devices only from a variable store that is a writable mount
+	// point, and a copy in an ordinary directory is neither, so each
+	// pod that gives fwupd a copy mounts this volume where the copy's
+	// efivars go. The copy holds well under a megabyte.
+	copyVariablesVolume = "copy-efivars"
+
+	// firmwareCopyPath is where every pod copies the machine's firmware
+	// tables for fwupd (firmwareCopy in scan/main.go). fwupd names a
+	// capsule device by the path of its ESRT entry, so the scan, the
+	// rehearsal, and the apply's prepare must copy to the same path for
+	// the device to keep the ID that the scan recorded.
+	firmwareCopyPath   = "/run/fw"
+	firmwareCopyVolume = "firmware-copy"
 	// nextESPPath is where a pod mounts it. The scan program reads the
 	// same path (nextESPPath in scan/main.go).
 	nextESPPath = "/run/esp-next"
@@ -142,7 +158,7 @@ func buildRehearsalPod(f *firmware, a rehearsalAttempt, c *catalog, cabinetURL, 
 			Tolerations:                   []toleration{{Operator: "Exists"}},
 			AutomountServiceAccountToken:  &no,
 			EnableServiceLinks:            &no,
-			Volumes: []volume{
+			Volumes: append([]volume{
 				{Name: "host-firmware", HostPath: &hostPath{Path: "/sys/firmware", Type: "Directory"}},
 				// The copy of the variable store is under a megabyte. The
 				// rest is the catalog, the cabinet, and fwupd's cache of
@@ -151,7 +167,7 @@ func buildRehearsalPod(f *firmware, a rehearsalAttempt, c *catalog, cabinetURL, 
 				// board's capsule is tens of megabytes, and the cabinet
 				// holds it once more.
 				{Name: "rehearsal", EmptyDir: &emptyDir{Medium: "Memory", SizeLimit: "256Mi"}},
-			},
+			}, firmwareCopyVolumes()...),
 			Containers: []container{{
 				Name:  rehearsalContainer,
 				Image: image,
@@ -169,10 +185,10 @@ func buildRehearsalPod(f *firmware, a rehearsalAttempt, c *catalog, cabinetURL, 
 					AllowPrivilegeEscalation: &no,
 					Capabilities:             &capabilities{Drop: []string{"ALL"}, Add: []string{"DAC_READ_SEARCH"}},
 				},
-				VolumeMounts: []volumeMount{
+				VolumeMounts: append([]volumeMount{
 					{Name: "host-firmware", MountPath: hostFirmwarePath, ReadOnly: true, RecursiveReadOnly: "Enabled"},
 					{Name: "rehearsal", MountPath: rehearsalPath},
-				},
+				}, firmwareCopyMounts()...),
 				Resources:                &resources{Requests: map[string]string{"cpu": "10m", "memory": "64Mi"}},
 				TerminationMessagePolicy: "FallbackToLogsOnError",
 			}},
@@ -184,4 +200,21 @@ func buildRehearsalPod(f *firmware, a rehearsalAttempt, c *catalog, cabinetURL, 
 			volumeMount{Name: nextESPVolume, MountPath: nextESPPath, ReadOnly: true})
 	}
 	return p
+}
+
+// firmwareCopyVolumes are the two directories in memory that hold a
+// pod's copy of the firmware tables: the copy, and its variable store,
+// which fwupd reads only from a mount point of its own.
+func firmwareCopyVolumes() []volume {
+	return []volume{
+		{Name: firmwareCopyVolume, EmptyDir: &emptyDir{Medium: "Memory", SizeLimit: "16Mi"}},
+		{Name: copyVariablesVolume, EmptyDir: &emptyDir{Medium: "Memory", SizeLimit: "16Mi"}},
+	}
+}
+
+func firmwareCopyMounts() []volumeMount {
+	return []volumeMount{
+		{Name: firmwareCopyVolume, MountPath: firmwareCopyPath},
+		{Name: copyVariablesVolume, MountPath: firmwareCopyPath + "/efi/efivars"},
+	}
 }
