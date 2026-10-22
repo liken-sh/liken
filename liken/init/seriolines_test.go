@@ -105,8 +105,24 @@ func (a adapter) plug(t *testing.T) {
 
 // unplug removes everything plug built, the way the kernel removes a
 // device's entries when it leaves.
+//
+// It moves the tty's directory out of the tree instead of deleting it.
+// The code tells a tty that registers again from the old one by the
+// inode of this directory, and kernfs numbers its inodes in a cycle,
+// so a new registration never gets the old number back. ext4 hands a
+// freed inode to the next file at once, so a deleted directory would
+// make the replugged tty look like the old one, which no real
+// machine does. The directory stays in the test's temporary directory
+// until the test ends, and keeps its inode taken.
 func (a adapter) unplug(t *testing.T) {
 	t.Helper()
+	if a.tty != "" {
+		if _, err := os.Stat(a.ttyDir()); err == nil {
+			if err := os.Rename(a.ttyDir(), filepath.Join(t.TempDir(), a.tty)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	for _, path := range []string{
 		filepath.Join(sysfsRoot, "class", "tty", a.tty),
 		filepath.Join(sysfsRoot, "bus", "usb", "devices", a.port),
