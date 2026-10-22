@@ -644,6 +644,16 @@ Drilled on the `lab` fleet at `2026.10.22-907`, on `node-4`:
 `firmware-operator`'s plan 06 then ran its writes in held turns on
 `node-5`.
 
+On liken-1, whose follower carries a taint that most pods do not
+tolerate, a held turn evicted the requester's own operator, which
+could schedule nowhere else, so nothing could remove the hold. The
+drain now leaves a pod that tolerates `node.kubernetes.io/unschedulable`
+by its key, because such a pod can come straight back to the cordoned
+node. A blanket toleration with no key still moves. The first build of
+this read the tolerations from the drain's copy of the node's pods,
+which dropped them; `2026.10.22-909` keeps them, and a lab drill with
+every other node tainted kept the requester's pods on the held node.
+
 ## Considered and set aside
 
 - **One `Lease` for each unit of a budget.** A slot per `Lease` counts

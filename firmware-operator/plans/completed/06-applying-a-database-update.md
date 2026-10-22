@@ -232,3 +232,66 @@ next boot, and the variable store read on the laptop with
    state, filed the request again, and `node-5` rebooted and reached
    `Installed` 33 seconds later. The same race from a clean start
    ended the same way, with the same `dbx` bytes as run 1.
+
+## The prepare before the drain
+
+On 2026-10-22, `2026.10.22-001` and this operator ran on liken-1,
+whose follower, stick-1, carries a `NoSchedule` taint that most pods
+do not tolerate. The held turn drained liken-1 and evicted
+`firmware-operator` and CoreDNS, and neither could schedule on
+stick-1. The operator could not run to remove the hold, which left
+liken-1 drained with nothing to end it, and once a person let the
+operator back onto the node, the apply pod's rehearsal could not
+resolve the catalog's host. The record ended `Failed`, and nothing
+was written.
+
+A person chose to do the network work before the drain. As built:
+
+- **The apply pod prepares first.** It starts when the rehearsal
+  passes, while the cluster is whole: it downloads the catalog and
+  the cabinet, rehearses, and checks the append's SHA-256. Then it
+  writes a marker that an exec readiness probe reads, and waits on
+  the node. The operator files the `Disruption` only when the pod is
+  `Ready`, because a request filed with the pod showed, in a lab
+  drill, a turn held within a second while the prepare still needed
+  DNS.
+- **The signal is an annotation.** When the request is `Held`, the
+  operator annotates the pod, and the pod reads its own annotations
+  through a downward-API volume, with no credentials. It writes only
+  after the signal, and only if the variable has not changed since
+  the prepare. An end before the signal never wrote and is `Failed`;
+  the write deadline counts from the signal.
+- **The drain leaves what the hold needs.** `liken`'s drain no longer
+  evicts a pod that tolerates `node.kubernetes.io/unschedulable` by
+  its key, because such a pod can come straight back. The apply pod
+  and the operator's `Deployment` carry that toleration.
+- **A moved catalog is read at once.** LVFS published a new catalog
+  between a lab machine's scan and its rehearsal, and the rehearsal
+  refused the mismatch. A rehearsal and a prepare now answer
+  `CatalogMoved`, and the operator reads that catalog's jcat at once
+  instead of at its hourly read. When the new file offers a machine
+  the same releases, the machine's entries in the `Firmware` objects
+  move to it with the scan record, which they did not before, so no
+  rehearsal could start against the new file at all.
+
+The lab drills of the second round, on `node-5` as before, at
+`2026.10.22-909`:
+
+1. **The testbed's shape.** Every other node was tainted, and
+   `firmware-operator` and CoreDNS ran on `node-5`. When the turn
+   held, CoreDNS was evicted and stayed `Pending`, the operator and
+   the prepared apply pod stayed, and a `NetworkPolicy` cut all the
+   apply pods' egress. The write followed the signal within 3
+   seconds, and `node-5` reached `Installed` 29 seconds after the
+   hold. On `2026.10.22-908` the drain still evicted the operator,
+   again and again: the watch that the drain reads from dropped the
+   pods' tolerations, which `2026.10.22-909` keeps. On the operator
+   before the readiness gate, the run failed safe with the DNS error
+   above.
+2. **The operator killed at the hold.** One prepare, one request, one
+   signal, one write, and `Installed`.
+3. **A moved catalog.** An operator started on a stalled approval read
+   the new jcat within 2 seconds, moved the entry, rehearsed, wrote,
+   and reached `Installed` 43 seconds later.
+
+In each run the store's `dbx` read the same bytes afterward.
