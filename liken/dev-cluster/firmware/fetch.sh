@@ -28,7 +28,9 @@
 # Usage:
 #   dev-cluster/firmware/fetch.sh   fetch the version pinned in VERSION
 #
-# Results land in firmware/dist/<version>/, cached in firmware/cache/.
+# Results land in firmware/dist/<version>/, cached in firmware/cache/:
+# the plain build that every guest boots, its variable store, and the
+# build with SMM that FIRMWARE=secureboot boots (dev-cluster/Makefile).
 
 set -euo pipefail
 
@@ -65,5 +67,6 @@ rm -rf "$out"
 mkdir -p "$out"
 dpkg-deb --fsys-tarfile "$deb" |
     tar -x -m -C "$out" --strip-components=4 \
-        ./usr/share/OVMF/OVMF_CODE_4M.fd ./usr/share/OVMF/OVMF_VARS_4M.fd
+        ./usr/share/OVMF/OVMF_CODE_4M.fd ./usr/share/OVMF/OVMF_VARS_4M.fd \
+        ./usr/share/OVMF/OVMF_CODE_4M.secboot.fd
 echo "OVMF $version in $out"

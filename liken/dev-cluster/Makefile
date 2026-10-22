@@ -182,12 +182,21 @@ guests/$(NODE)/emmc.qcow2:
 # Everything the boot needs lives on the disk itself: the MBR's boot
 # code, GRUB's core image, and the environment block that GRUB reads
 # in place of variables.
+#
+# FIRMWARE=secureboot gives the guest the firmware of a board with
+# Microsoft's Secure Boot keys, for drills of firmware-operator's
+# database updates. It boots the build of OVMF with SMM, which checks
+# the signature of each authenticated variable write in code that the
+# operating system cannot reach, so a write that a real board refuses
+# is refused here too. SMM needs QEMU's q35 machine. The variable store
+# is the node's own, and `make enroll-keys` enrolls the keys in it.
 OVMF_DIR := firmware/dist/$(shell cat firmware/VERSION)
 OVMF_CODE := $(OVMF_DIR)/OVMF_CODE_4M.fd
+OVMF_CODE_SECBOOT := $(OVMF_DIR)/OVMF_CODE_4M.secboot.fd
 OVMF_VARS := $(OVMF_DIR)/OVMF_VARS_4M.fd
 
 ovmf: $(OVMF_CODE)
-$(OVMF_CODE) $(OVMF_VARS) &: firmware/VERSION firmware/fetch.sh
+$(OVMF_CODE) $(OVMF_CODE_SECBOOT) $(OVMF_VARS) &: firmware/VERSION firmware/fetch.sh
 	firmware/fetch.sh
 
 guests/$(NODE)/OVMF_VARS.fd: | $(OVMF_VARS)
@@ -200,11 +209,27 @@ guests/$(NODE)/OVMF_VARS.fd: | $(OVMF_VARS)
 # variable store created first.
 FIRMWARE ?= uefi
 QEMU_FIRMWARE_uefi = -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) -drive if=pflash,format=raw,file=guests/$(NODE)/OVMF_VARS.fd
+QEMU_FIRMWARE_secureboot = -machine q35,smm=on -global driver=cfi.pflash01,property=secure,value=on \
+	-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE_SECBOOT) -drive if=pflash,format=raw,file=guests/$(NODE)/OVMF_VARS.fd
 QEMU_FIRMWARE_bios =
 QEMU_FIRMWARE = $(QEMU_FIRMWARE_$(FIRMWARE))
 FIRMWARE_DEPS_uefi := $(OVMF_CODE) guests/$(NODE)/OVMF_VARS.fd
+FIRMWARE_DEPS_secureboot := $(OVMF_CODE_SECBOOT) guests/$(NODE)/OVMF_VARS.fd
 FIRMWARE_DEPS_bios :=
 FIRMWARE_DEPS := $(FIRMWARE_DEPS_$(FIRMWARE))
+
+# enroll-keys enrolls Microsoft's Secure Boot keys in a stopped node's
+# variable store: the PK, both KEKs, the db certificates, and a dbx of
+# one entry, so fwupd reads an old dbx and offers the current update.
+# It turns Secure Boot off, because liken's boot chain is not signed
+# and firmware with Secure Boot on refuses it, and liken-1 runs the
+# same way. virt-fw-vars is from the virt-firmware project on PyPI,
+# pinned here and run with uvx.
+VIRT_FIRMWARE := virt-firmware==26.10
+enroll-keys: guests/$(NODE)/OVMF_VARS.fd
+	uvx --from $(VIRT_FIRMWARE) virt-fw-vars -i $< -o $<.enrolled \
+		--enroll-microsoft --microsoft-kek all --set-false SecureBootEnable
+	mv $<.enrolled $<
 
 # Which disk the firmware boots. QEMU attaches the boot disk third,
 # so the data disks keep the /dev/vda and /dev/vdb device names that
@@ -784,7 +809,7 @@ smoke-emmc:
 		HOLD_DEADLINE=420 SMOKE_DEADLINE=420 \
 		./smoke.sh uefi emmc
 
-.PHONY: run run-once install install-stick storage registry registry-stop grow-pods grow-state reset-nvram smoke-uefi smoke-bios smoke-hardware smoke-emmc clean
+.PHONY: run run-once install install-stick storage registry registry-stop grow-pods grow-state reset-nvram enroll-keys smoke-uefi smoke-bios smoke-hardware smoke-emmc clean
 
 clean:
 	rm -rf guests

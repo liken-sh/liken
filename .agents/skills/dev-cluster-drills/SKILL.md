@@ -163,6 +163,26 @@ started with, even after make rebuilt the file. To deliver new code to
 such a guest, kill its QEMU process and start it again. A `BOOT=disk`
 guest does not have this problem, because it loads from its own slots.
 
+**A guest with Secure Boot keys** is for drills of
+`firmware-operator`'s database updates, which need a variable store
+that checks signatures the way a board does. Stop the guest, enroll
+Microsoft's keys in its store with Secure Boot off (liken's boot chain
+is not signed, and liken-1 runs the same way), and start it on the
+SMM build of OVMF, which `FIRMWARE=secureboot` selects with a `q35`
+machine:
+
+```bash
+make -C dev-cluster enroll-keys NODE=node-5
+setsid make -C dev-cluster run NODE=node-5 FIRMWARE=secureboot \
+  CONSOLE=file:guests/node-5/console.log </dev/null >/dev/null 2>&1 &
+```
+
+The enrolled `dbx` holds one entry, so fwupd reads an old `dbx` and
+offers the current one. The console reads `Secure boot disabled`. To
+return the guest to the plain firmware, stop it, run
+`make -C dev-cluster reset-nvram NODE=node-5`, and start it with the
+default `FIRMWARE`.
+
 ## Run an image you built on the laptop
 
 The lab registry lets the guests pull an operator image that you built
