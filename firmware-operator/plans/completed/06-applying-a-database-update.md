@@ -3,8 +3,9 @@
 Proposed on 2026-10-21. Built on 2026-10-22 and drilled on the lab's
 `node-5` under OVMF with Microsoft's keys
 ([As built](#as-built), [The lab drills](#the-lab-drills)). The real
-write on liken-1 or stick-1 has not run, and neither has a refusal by
-real firmware through the operator. This plan writes an approved
+write ran on liken-1 on 2026-10-22
+([The write on liken-1](#the-write-on-liken-1)). A refusal by real
+firmware through the operator has not run. This plan writes an approved
 `dbx`, `db`, or `KEK` update to a machine, inside a reboot turn that
 the OS grants through a `Disruption`, and proves it from the next
 scan. It follows
@@ -295,3 +296,32 @@ The lab drills of the second round, on `node-5` as before, at
    and reached `Installed` 43 seconds later.
 
 In each run the store's `dbx` read the same bytes afterward.
+
+## The write on liken-1
+
+On 2026-10-22 liken-1 took the `KEK` 2023 `dbx` update, 20260707,
+through the operator, on `liken` and `firmware-operator`
+`2026.10.22-004`. The earlier attempt on `2026.10.22-001` had failed
+safe, with the DNS error above, so the approval was withdrawn and
+given again. From the approval to `Installed` took 94 seconds:
+
+- The rehearsal passed 4 seconds after the approval. It recorded an
+  append of 17260 bytes and 67149 bytes free in the variable store.
+- The apply pod prepared before the cordon, and the operator filed the
+  held `Disruption` 4 seconds later, when the pod was `Ready`.
+- The drain left the operator and the apply pod, and the request was
+  `Held` 20 seconds after it was filed. The pod wrote 2 seconds after
+  the signal.
+- The operator removed the hold, liken-1 rebooted, and the first scan
+  of the new boot read 20260707.
+
+| | Before | After |
+|---|---|---|
+| `dbx` size | 21352 bytes | 21476 bytes |
+| `dbx` SHA-256 | `480fd968ed0de95a...` | `a87a88a3ec1a7cbe...` |
+| `SecureBoot`, `SetupMode` | 0, 0 | 0, 0 |
+
+The firmware merged the 17260-byte append into 124 new bytes, because
+most of its entries were already in `dbx`. liken-1 runs with Secure
+Boot off, as it did before the write. stick-1 had
+nothing to apply: 20260402 is the newest `dbx` for its `KEK` 2011.
