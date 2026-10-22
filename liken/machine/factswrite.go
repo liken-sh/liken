@@ -254,6 +254,7 @@ func (t FactsTree) WriteFirmware(f FirmwareStatus) error {
 		t.writeFact("firmware/bootCurrent", f.BootCurrent),
 		t.writeFact("firmware/bootNext", f.BootNext),
 		t.writeListFact("firmware/bootOrder", f.BootOrder),
+		t.writeFact("firmware/bootOrderKept", formatOptionalBool(f.BootOrderKept)),
 	))
 }
 

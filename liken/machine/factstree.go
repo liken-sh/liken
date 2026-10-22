@@ -392,6 +392,26 @@ func formatBool(b bool) string {
 	return ""
 }
 
+// formatOptionalBool renders a boolean that can be unknown. Both
+// answers have a file, so false survives the round trip, and an
+// unknown value leaves no file.
+func formatOptionalBool(b *bool) string {
+	if b == nil {
+		return ""
+	}
+	return strconv.FormatBool(*b)
+}
+
+// parseOptionalBool reads what formatOptionalBool wrote. Any other
+// content reads as unknown.
+func parseOptionalBool(s string) *bool {
+	b, err := strconv.ParseBool(s)
+	if err != nil {
+		return nil
+	}
+	return &b
+}
+
 // removeFile deletes a file that a fact no longer needs. A file that is
 // already gone is not an error, because the goal is only its absence.
 func removeFile(path string) error {

@@ -195,6 +195,9 @@ func everythingSet() *MachineStatus {
 		Firmware: FirmwareStatus{
 			Mode: FirmwareUEFI, BootCurrent: "Boot0001", BootNext: "Boot0002",
 			BootOrder: []string{"Boot0001", "Boot0002"},
+			// False, not absent: a firmware that lost the order is the
+			// answer a requester most needs to read.
+			BootOrderKept: new(bool),
 		},
 		Storage: storage,
 		Modules: []ModuleStatus{

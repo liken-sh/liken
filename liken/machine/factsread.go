@@ -470,6 +470,11 @@ func (t FactsTree) readFirmware() (FirmwareStatus, error) {
 	if f.BootOrder, err = t.readListFact("firmware/bootOrder"); err != nil {
 		return FirmwareStatus{}, err
 	}
+	kept, err := t.readFact("firmware/bootOrderKept")
+	if err != nil {
+		return FirmwareStatus{}, err
+	}
+	f.BootOrderKept = parseOptionalBool(kept)
 	return f, nil
 }
 
