@@ -69,6 +69,25 @@ the boot before it, which was a plain boot, so it reads `true` and
 does not refuse. Recording the power-on order, as the safeguard below
 proposes, would tell the two causes apart.
 
+## A second trial on liken-1
+
+Later on 2026-10-23 liken-1 took a trial of `2026.10.23-003` in the
+other direction, from the proven slot A, `Boot0001`, to the trial slot
+B, `Boot0003`. At power-on it read `bootOrderKept: true`: slot A still
+led `BootOrder`. `bootOrderKept` holds the power-on reading, and the
+facts that `init` publishes again after the promotion keep it.
+
+A firmware that moves the `BootNext` entry to the head of `BootOrder`
+would have put `Boot0003` first, so this reading rules out that cause
+on liken-1. The capsule risk of the section above rests on that cause,
+so it does not apply to this firmware.
+
+Both readings still fit a firmware that loses the order at a reset that
+follows a one-shot, and falls back to an order that `Boot0001` leads.
+That order looks kept when slot A is proven and lost when slot B is
+proven. The order at power-on, which `init` does not record, would
+show which entries the firmware put first.
+
 ## Proposed safeguard
 
 Record the last asserted `BootOrder` on `machineState`. On the next boot,
