@@ -195,3 +195,13 @@ agent exits before suspicion ends and stores them again. Storing every
 member as down when an agent leaves was set aside too, because an
 agent that the kernel kills for memory never runs that step, and the
 members already stored would stay.
+
+On `liken-1`, with library-operator `2026.10.23-003-dev-003-9bc3d874`,
+the rollout itself replaced the catalog pod and the media browser, and
+each new agent listed the other new agent as its only member. The
+17:40 `franchises` walk `Job`'s agent listed the same two live agents
+and no others. It logged `left the cluster: 2 of 2 members confirmed`
+253 ms after its SIGTERM at 17:40:24.522, and its peers dropped it
+under 1 ms and 169 ms after that SIGTERM. From their start through the
+end of the walk, neither peer logged a `could not write datagram`
+line or a failed sync.
