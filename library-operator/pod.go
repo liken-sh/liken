@@ -91,11 +91,10 @@ const agentExitWait = 60
 // use it too. The agent is a native sidecar, so it receives its SIGTERM
 // only after the pod's other containers exit, inside the same period.
 //
-// An agent at rest exits about 5 s after its SIGTERM, most of it spent
-// telling its peers that it leaves: a catalog pod on the testbed was
-// gone 6.2 s after kubectl delete. Over eight days on a home cluster,
-// 799 agents of library Jobs had a median of 5 s and a 95th percentile
-// of 10 s.
+// An agent at rest tells its peers that it leaves, and waits until each
+// peer confirms that it holds the agent as down, for at most 5 s. The
+// peers then stop dialing the pod as soon as it goes, instead of
+// declaring it down after more than 30 s of failed probes.
 //
 // The slow exits are agents that apply buffered changes, most often on
 // a restart in the middle of a first sync. Corrosion checks for SIGTERM
@@ -107,8 +106,8 @@ const agentExitWait = 60
 // 60 s, until its own wait or a grace period of 60 s ended it, and a
 // drill of that case exited after 61.3 s.
 //
-// 90 s covers the agent's own wait, which includes the 5 s it takes to
-// leave, the other containers' exit, and a margin for the one version
+// 90 s covers the agent's own wait, which includes the leave of up to
+// 5 s, the other containers' exit, and a margin for the one version
 // that is still being applied when the wait ends. A kill during a sync
 // loses no committed row, because SQLite rolls back an unfinished
 // transaction and the next start syncs the rest, but it discards the

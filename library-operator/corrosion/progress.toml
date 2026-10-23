@@ -40,15 +40,20 @@ addr = "0.0.0.0:8788"
 # mints.
 plaintext = true
 
-# How long, in seconds, an agent remembers a member that left. Foca
-# keeps announcing to a remembered member, and every announcement to a
-# pod that is gone is a QUIC connect attempt that ends in a five-second
-# timeout. A scan Job's agent leaves every hour and never returns under
-# the same identity, and the fork's default remembers it for two days.
-# Five minutes is longer than the thirty seconds foca takes to declare
-# a silent member down, so a member is never forgotten while it is
-# still suspect.
-remove_down_after_secs = 300
+# How long, in seconds, an agent remembers a member that is down. Foca
+# announces to up to three remembered members every 125 seconds, so
+# that a member that was cut off can join again, and every announcement
+# to a pod that is gone is a QUIC connect attempt that ends in a
+# five-second timeout. A scan Job's agent leaves every hour and never
+# returns under the same identity, and the fork's default remembers it
+# for two days.
+#
+# An agent that leaves waits until every member confirms that it holds
+# the agent as down, for at most five seconds, so after that wait no
+# member gossips the agent as alive. Thirty seconds is six times that
+# wait, and it is less than a quarter of the 125-second period, so most
+# members forget an agent that left before they announce to it.
+remove_down_after_secs = 30
 
 # The bootstrap list names `progress`, a short name with no namespace,
 # which the pod's own search path resolves to the `progress` `Service`

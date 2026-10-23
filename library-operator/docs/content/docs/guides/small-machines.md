@@ -116,8 +116,9 @@ the pod by its request. A `Job` tolerates no taint, so it does not run
 on a screen machine that carries the `media.liken.sh/player` taint.
 
 Every pod that runs an agent, except a screen pod, has a termination
-grace period of 90 seconds, three times the default. An agent at rest exits about five
-seconds after `SIGTERM`. An agent that applies a backlog of buffered
+grace period of 90 seconds, three times the default. An agent at rest
+tells its peers that it leaves, waits until each peer confirms, for at
+most five seconds, and exits. An agent that applies a backlog of buffered
 changes, most often on a restart in the middle of a first sync, keeps
 applying for up to 60 seconds before it exits, and the 90 seconds
 cover that wait and the pod's other containers.
