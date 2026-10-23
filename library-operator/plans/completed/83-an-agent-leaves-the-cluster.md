@@ -170,3 +170,28 @@ down by suspicion about 45 seconds later, with about five
 `could not write datagram` lines a minute for each. A leave does not
 reach an agent that is already gone, so this noise is outside this
 plan.
+
+## The members an agent stores
+
+The `liken-1` drill found a second source of dials to pods that are
+gone. Corrosion stores each agent's members in `__corro_members`, in
+the database on its claim, and an agent loads every member stored as
+alive when it starts. A walk `Job`'s agent runs for about 20 seconds,
+less than the 30 seconds that suspicion takes, so it loaded the dead
+agents of earlier `Job`s on its claim, gossiped them to its live peers
+as alive, and stored them as alive again for the next `Job`.
+
+The fork's release `2026.10.23-003` adds `gossip.restore_members`.
+When it is false, an agent deletes the stored members at start
+instead of loading them, so neither `foca` nor the bootstrap fallback
+reads them, and the bootstrap list finds the live peers. Both agent
+configurations in `corrosion/` set it to false. Its test in
+`corro-agent` stores a member with an address that no agent serves,
+restarts the agent, and checks that the agent holds the member only
+when the setting is true.
+
+Loading the stored members as suspect was set aside, because a `Job`'s
+agent exits before suspicion ends and stores them again. Storing every
+member as down when an agent leaves was set aside too, because an
+agent that the kernel kills for memory never runs that step, and the
+members already stored would stay.

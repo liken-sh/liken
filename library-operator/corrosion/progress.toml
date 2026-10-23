@@ -55,6 +55,17 @@ plaintext = true
 # members forget an agent that left before they announce to it.
 remove_down_after_secs = 30
 
+# Whether an agent loads the members it stored on its claim when it
+# starts. Every stored address belonged to a pod, and a pod's address
+# dies with it, so a stored member is most often a pod that is gone. A
+# scan Job's agent runs for less time than suspicion takes to declare a
+# silent member down, so with this on, each Job's agent loaded the dead
+# agents of earlier Jobs on its claim, gossiped them to its live peers
+# as alive, and stored them again for the next Job. Off, an agent
+# deletes the stored members at start, and the bootstrap list below
+# finds the live ones.
+restore_members = false
+
 # The bootstrap list names `progress`, a short name with no namespace,
 # which the pod's own search path resolves to the `progress` `Service`
 # in the pod's namespace. The operator creates that `Service` in every
