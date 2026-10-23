@@ -372,3 +372,30 @@ plans the release twice for that device: once as a member of the
 device's composite group, which holds the device itself, and once as
 the device. fwupd 2.1.1 ran both installs. The rehearsal now names
 only the cabinet, so a rehearsal of this cabinet records two writes.
+
+## The KEK and dbx updates on stick-1
+
+On 2026-10-23 stick-1 took its first KEK update. The LVFS offers
+Microsoft's KEK 2023 for each platform key it has a signed payload for,
+as `com.microsoft.kek.ami.d79ce11b.firmware` for stick-1's
+`DO NOT TRUST - AMI Test PK`. fwupd 2.1.1 never offered it, and fwupd
+2.1.6 on `firmware-operator` `2026.10.23-002` did. The approval took
+the rehearsal, the held write, and the reboot to `Installed` in 109
+seconds. The rehearsal recorded one authenticated write of 2769 bytes,
+the cabinet's 2765-byte payload with its attributes.
+
+With KEK 2023 stored, the next scan offered stick-1's `dbx` the
+`com.microsoft.dbx.x64-kek2023.firmware` release 20260707, which the
+existing approval of `microsoft-dbx-x64-kek2023` already covered. Its
+payload is signed by KEK 2023, so the firmware's acceptance of it also
+showed that the KEK write took effect. It went from the scan that
+offered it to `Installed` in 97 seconds.
+
+| | Before | After |
+|---|---|---|
+| `KEK` size | 1564 bytes | 3070 bytes |
+| `dbx` size | 23724 bytes | 23848 bytes |
+| `dbx` version | 20260402 | 20260707 |
+
+The `dbx` append carried 17260 bytes and `dbx` grew by 124, so the
+firmware stored only the entries that it did not hold already.
