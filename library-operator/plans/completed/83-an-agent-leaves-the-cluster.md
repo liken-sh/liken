@@ -7,8 +7,8 @@ change is in `liken`'s fork of Corrosion,
 [liken-sh/corrosion](https://github.com/liken-sh/corrosion), and in
 the agent configuration in `corrosion/`. Built on 2026-10-23, in the
 fork's release `2026.10.23-001`, which `corrosion/Dockerfile` pins.
-Drilled with agents on one workstation the same day. The drill on
-`liken-1` has not run.
+Drilled with agents on one workstation and on `liken-1` the same
+day.
 
 ## The problem
 
@@ -152,6 +152,21 @@ With the two commits and a watch of 150 seconds, each of the seven
 peers dialed the departed agent once at a retention of 300 seconds,
 and none did at 30 seconds.
 
-Not yet run: a drill on `liken-1` with a walk `Job`, which reads the
-`Job` agent's log for `left the cluster` and its peers' logs for
-`could not write datagram` after the `Job` ends.
+On `liken-1`, with library-operator
+`2026.10.23-003-dev-001-998def09`, a `franchises` walk `Job`'s agent
+received SIGTERM at 16:40:28.879 and logged
+`left the cluster: 2 of 4 members confirmed` five seconds later. Its
+two live peers, the catalog pod's agent and the media browser's agent
+on `stick-1`, dropped it at 16:40:28.880 and 16:40:29.017, and logged
+no `could not write datagram` line for its address. The baseline
+`Job` above drew 14 and 15.
+
+The two members that did not confirm were `Job` agents from earlier
+walks, gone for half an hour or more. The new `Job`'s agent listed
+them as members at its start, from the member table that Corrosion
+stores in the database on the claim, and gossiped them as alive. Both
+live peers took them back as members, probed them, and declared them
+down by suspicion about 45 seconds later, with about five
+`could not write datagram` lines a minute for each. A leave does not
+reach an agent that is already gone, so this noise is outside this
+plan.
