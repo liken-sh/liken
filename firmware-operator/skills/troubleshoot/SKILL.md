@@ -225,7 +225,10 @@ scan does not report the device, or when you delete the `Machine`.
 The operator deletes a discovered `Firmware` when no entry is left,
 unless someone changed its group or an apply on it waits for a turn or
 writes. An approval alone does not keep it: with no entry, no machine
-is offered the approved release. An object whose group someone changed
+is offered the approved release. The operator posts a `Deleted` `Event`
+about each object it deletes, and `kubectl get events -n default
+--field-selector involvedObject.name=<name>` shows it for an hour. An
+object whose group someone changed
 stays, and you delete it with `kubectl delete firmware <name>`. The operator then
 creates it again at the next scan that reports a device of its group.
 

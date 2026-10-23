@@ -285,7 +285,21 @@ func (o *operator) settleEntries(f *firmware, change func([]machineEntry) []mach
 	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	// The Event outlives the object by the hour the API server keeps
+	// it, so a person who finds an approval gone can read why.
+	o.recorder.Normal(f.reference(), reasonDeleted, deletedMessage(f))
+	return nil
+}
+
+// deletedMessage says why the operator deleted a discovered object.
+func deletedMessage(f *firmware) string {
+	if pristine(f) {
+		return "No machine reports a device that this object covers, so the operator deleted it."
+	}
+	return "No machine reports a device that this object covers, so its approval installs nothing. The operator deleted it."
 }
 
 func sortEntries(entries []machineEntry) {

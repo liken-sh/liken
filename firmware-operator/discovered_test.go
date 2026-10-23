@@ -41,6 +41,9 @@ func TestAnObjectWithNoEntryIsDeletedUnlessChanged(t *testing.T) {
 		if len(kept.Status.Machines) != 0 || updateCountsOf(t, &kept) != (UpdateCounts{}) {
 			t.Errorf("the changed object's status is %+v, want no entry and zero counts", kept.Status)
 		}
+		if containsPosted(w.postedAbout(dbxGUIDsName), posted{"Normal", reasonDeleted}) {
+			t.Errorf("the operator posted a Deleted Event about the changed object %s", dbxGUIDsName)
+		}
 	})
 }
 
@@ -60,6 +63,9 @@ func TestAnApprovedObjectWithNoEntryIsDeleted(t *testing.T) {
 			if held["metadata"].(map[string]any)["name"] == biosObjectName {
 				t.Errorf("the approved object %s remains with no entry", biosObjectName)
 			}
+		}
+		if !containsPosted(w.postedAbout(biosObjectName), posted{"Normal", reasonDeleted}) {
+			t.Errorf("the operator posted %v about %s, want a Deleted Event", w.postedAbout(biosObjectName), biosObjectName)
 		}
 	})
 }

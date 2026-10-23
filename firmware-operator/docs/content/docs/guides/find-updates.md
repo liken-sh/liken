@@ -257,6 +257,7 @@ The operator posts an `Event` for each step, in the namespace
 | `FirmwareCatalog` | `ScanFailed` | A scan failed. This is a `Warning`. |
 | `FirmwareCatalog` | `CatalogMoved` | A scan found another file in the jcat than the one it was given. |
 | `Firmware` | `Discovered` | The operator created the object for a new component or set of GUIDs. |
+| `Firmware` | `Deleted` | The operator deleted the object, because no entry is left and no person's change or apply keeps it. The `Event` stays for an hour after the object is gone. |
 | `Firmware` | `UpdateAvailable` | The newest release offered for a machine's device changed. |
 | `Firmware` | `ManyComponents` | A catalog offered one device releases of more than one component. The device's entry is in the object of the newest release's component, and the message names the others. This is a `Warning`. |
 

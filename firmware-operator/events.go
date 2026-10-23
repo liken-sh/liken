@@ -3,8 +3,8 @@ package main
 // The operator posts a Kubernetes Event about a Firmware for each
 // change of its Valid condition, and for each upload it starts and each
 // result, which change no condition. It posts one about a discovered
-// Firmware when it creates it and when a machine's newest offered
-// release changes, and one about a FirmwareCatalog for each change of its Ready
+// Firmware when it creates it, when a machine's newest offered
+// release changes, and when it deletes it, and one about a FirmwareCatalog for each change of its Ready
 // condition and for each scan it starts and each result. A Firmware and
 // a FirmwareCatalog are cluster-scoped, so their Events are in the namespace
 // default. A device that did not load
@@ -28,6 +28,7 @@ const (
 	reasonUploadFailed    = "UploadFailed"
 	reasonConflict        = "Conflict"
 	reasonDiscovered      = "Discovered"
+	reasonDeleted         = "Deleted"
 	reasonUpdateAvailable = "UpdateAvailable"
 	reasonScanStarted     = "ScanStarted"
 	reasonScanned         = "Scanned"
