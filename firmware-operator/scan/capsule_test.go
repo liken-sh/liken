@@ -23,8 +23,8 @@ var (
 	bootOrder    = "BootOrder-" + efiGlobalGUID
 	osIndication = "OsIndications-" + efiGlobalGUID
 	statusVar    = "fwupd-9c13b7f1-d618-5d68-be61-6b17881014a7-0-" + fwupdVendorGUID
-	updaterFile  = "EFI/ubuntu/fwupdx64.efi"
-	capsuleFile  = "EFI/ubuntu/fw/fwupd-9c13b7f1-d618-5d68-be61-6b17881014a7.cap"
+	updaterFile  = "EFI/debian/fwupdx64.efi"
+	capsuleFile  = "EFI/debian/fw/fwupd-9c13b7f1-d618-5d68-be61-6b17881014a7.cap"
 )
 
 // loadOption builds an EFI_LOAD_OPTION that boots one file, as
@@ -206,8 +206,8 @@ func TestARehearsalRefusesACapsuleThatWritesMore(t *testing.T) {
 		}, "the install wrote EFI/BOOT/BOOTX64.EFI on the ESP, where a capsule writes nothing"},
 		{"a shim", func(t *testing.T, r *capsuleRig) {
 			r.nvramInstall(t)
-			r.file(t, "EFI/ubuntu/shimx64.efi", []byte("a shim"))
-		}, "the install wrote EFI/ubuntu/shimx64.efi on the ESP, where a capsule writes nothing"},
+			r.file(t, "EFI/debian/shimx64.efi", []byte("a shim"))
+		}, "the install wrote EFI/debian/shimx64.efi on the ESP, where a capsule writes nothing"},
 		{"nothing", func(*testing.T, *capsuleRig) {}, "the install wrote nothing"},
 	}
 	for _, c := range cases {
@@ -352,8 +352,8 @@ func TestAnApplyThatDivergesFromTheRehearsal(t *testing.T) {
 		}, nil, resultUncertain, "fwupd's writes differ from the rehearsal's"},
 		{"a shim", func(a *capsuleApplyRig, t *testing.T) {
 			a.nvramInstall(t)
-			a.file(t, "EFI/ubuntu/shimx64.efi", []byte("a shim"))
-		}, nil, resultUncertain, "the install wrote EFI/ubuntu/shimx64.efi on the ESP, where a capsule writes nothing"},
+			a.file(t, "EFI/debian/shimx64.efi", []byte("a shim"))
+		}, nil, resultUncertain, "the install wrote EFI/debian/shimx64.efi on the ESP, where a capsule writes nothing"},
 		{"a failure after a write", func(a *capsuleApplyRig, t *testing.T) {
 			a.variable(t, updaterEntry, loadOption("Linux Firmware Updater", `\EFI\ubuntu\fwupdx64.efi`))
 		}, errExit2, resultUncertain, "fwupdtool install: fwupdtool: failed to write"},

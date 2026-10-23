@@ -12,7 +12,7 @@ import (
 // and no append, so the apply of a database update never takes it.
 func TestAPassedCapsuleRehearsalRecordsItsWrites(t *testing.T) {
 	writes := []capsuleWrite{
-		{Kind: "file", Name: "EFI/ubuntu/fwupdx64.efi", Bytes: 69176, SHA256: "aa"},
+		{Kind: "file", Name: "EFI/debian/fwupdx64.efi", Bytes: 69176, SHA256: "aa"},
 		{Kind: "variable", Name: "BootNext-8be4df61-93ca-11d2-aa0d-00e098032b8c", Bytes: 6, SHA256: "bb"},
 	}
 	r := rehearsalResult{Result: resultPassed, Message: "the install stages a capsule", Bytes: 69176, SHA256: "cc",
@@ -52,7 +52,7 @@ func TestTheSchemaKeepsACapsulesRehearsal(t *testing.T) {
 		Spec: firmwareSpec{Update: &update{Component: "sh.liken.lab.fmp.firmware", Version: "2",
 			Cabinet: &pinnedCabinet{URL: "http://10.0.2.2:8017/firmware/labfmp-v2.cab", SHA256: strings.Repeat("c", 64)}}}}
 	r := rehearsalResult{Result: resultPassed, Message: "the install stages a capsule", Bytes: 2959, SHA256: "dd",
-		Free: 4096, ESPFree: 1 << 20, Writes: []capsuleWrite{{Kind: "file", Name: "EFI/ubuntu/fwupdx64.efi", Bytes: 69176, SHA256: "aa"}}}
+		Free: 4096, ESPFree: 1 << 20, Writes: []capsuleWrite{{Kind: "file", Name: "EFI/debian/fwupdx64.efi", Bytes: 69176, SHA256: "aa"}}}
 	f.Status.Rehearsals = []rehearsal{recordOfRehearsal(rehearsalAttempt{machine: "node-5", boot: "2026-10-22T20:00:00Z"}, r, time.Unix(0, 0))}
 
 	assertTheSchemaKeeps(t, firmwareCRD, f)
@@ -80,7 +80,7 @@ func (a *fakeAPI) keepBootOrder(name string, kept *bool) {
 // passedCapsule is a rehearsal of the BIOS's capsule that passed.
 var passedCapsule = rehearsalResult{Result: resultPassed, Message: "the install stages a capsule with 3 variables and 2 files",
 	Bytes: 72135, SHA256: "ee", Free: 4096, ESPFree: 1 << 24,
-	Writes: []capsuleWrite{{Kind: "file", Name: "EFI/ubuntu/fwupdx64.efi", Bytes: 69176, SHA256: "aa"}}}
+	Writes: []capsuleWrite{{Kind: "file", Name: "EFI/debian/fwupdx64.efi", Bytes: 69176, SHA256: "aa"}}}
 
 // capsuleWorld is approvedWorld whose node-2 reports kept, after the
 // BIOS's capsule passed its rehearsal there.
