@@ -3,7 +3,7 @@ package main
 // These tests follow the discovered Firmware objects across scans: an
 // entry leaves when its machine's next scan omits the device or its
 // Machine is deleted, an object with no entry is deleted unless a
-// person changed its spec, a machine's newest offered release posts
+// person changed its group or an apply is under way, a machine's newest offered release posts
 // UpdateAvailable when it changes, and each device is an entry in the
 // object of its catalog component, or of its set of GUIDs when no
 // catalog offers it a release.
@@ -42,6 +42,67 @@ func TestAnObjectWithNoEntryIsDeletedUnlessChanged(t *testing.T) {
 			t.Errorf("the changed object's status is %+v, want no entry and zero counts", kept.Status)
 		}
 	})
+}
+
+// An approval whose release no machine is offered any longer installs
+// nothing, so its object goes with its last entry.
+func TestAnApprovedObjectWithNoEntryIsDeleted(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := scannedWorld(t)
+		approved := w.api.firmware(t, biosObjectName)
+		approved.Spec.Update.Version = "0.0.4.2"
+		approved.Spec.Update.Cabinet = &pinnedCabinet{URL: "https://fwupd.org/downloads/bios.cab", SHA256: "9c085d03"}
+		w.api.putFirmware(approved)
+		w.settle()
+		rescan(t, w, secureBootDBX("2"))
+
+		for _, held := range w.api.held(firmwaresPath) {
+			if held["metadata"].(map[string]any)["name"] == biosObjectName {
+				t.Errorf("the approved object %s remains with no entry", biosObjectName)
+			}
+		}
+	})
+}
+
+// retirable decides which discovered objects with no entry the operator
+// deletes: the ones nobody changed, and the ones whose only change is
+// an approval with no apply under way.
+func TestWhichObjectsWithNoEntryAreDeleted(t *testing.T) {
+	approval := func(edit func(*firmware)) *firmware {
+		f := &firmware{Spec: firmwareSpec{Update: &update{
+			Component: "work.frame.Laptop.RyzenAI300.BIOS.firmware", Version: "0.0.4.2",
+			Cabinet: &pinnedCabinet{URL: "https://cabinet", SHA256: "sum"}}}}
+		f.Metadata.Name, f.Metadata.Generation = biosObjectName, 2
+		edit(f)
+		return f
+	}
+	cases := []struct {
+		name string
+		f    *firmware
+		want bool
+	}{
+		{"a pristine object", approval(func(f *firmware) { f.Metadata.Generation = 1 }), true},
+		{"an approval", approval(func(*firmware) {}), true},
+		{"an approval under the long name", approval(func(f *firmware) { f.Metadata.Name = componentName(f.Spec.Update.Component) }), true},
+		{"a component a person changed", approval(func(f *firmware) { f.Spec.Update.Component = "com.example.other.firmware" }), false},
+		{"GUIDs a person added", approval(func(f *firmware) { f.Spec.Update.GUIDs = []string{meGUID} }), false},
+		{"an apply that waits for its turn", approval(func(f *firmware) {
+			f.Status.Applies = []applyRecord{{Machine: "node-2", Result: resultWaiting}}
+		}), false},
+		{"an apply that writes", approval(func(f *firmware) {
+			f.Status.Applies = []applyRecord{{Machine: "node-2", Result: resultWriting}}
+		}), false},
+		{"an apply that ended", approval(func(f *firmware) {
+			f.Status.Applies = []applyRecord{{Machine: "node-2", Result: resultWritten}}
+		}), true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := retirable(c.f); got != c.want {
+				t.Errorf("retirable = %t, want %t", got, c.want)
+			}
+		})
+	}
 }
 
 // A device that installs the newest release gets no offer, and keeps

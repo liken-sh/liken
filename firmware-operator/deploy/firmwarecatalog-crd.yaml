@@ -186,6 +186,13 @@ spec:
                       file:
                         type: string
                         description: "The catalog file the scan read."
+                      image:
+                        type: string
+                        description: >-
+                          The scan image that ran the scan. A new image
+                          can find devices and releases that the old one
+                          did not, so when `firmware-operator` runs
+                          another scan image, it scans the machine again.
                       releases:
                         type: string
                         description: >-

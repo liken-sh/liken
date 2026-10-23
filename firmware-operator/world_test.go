@@ -28,6 +28,9 @@ import (
 type world struct {
 	api  *fakeAPI
 	lvfs *fakeLVFS
+	// scanImage is the scan image of the next operator that runs, and
+	// testScanImage when it is empty.
+	scanImage string
 }
 
 // discovery answers the operator's settings for discovery, with the
@@ -36,7 +39,11 @@ func (w *world) discovery() discoverySettings {
 	if w.lvfs == nil {
 		w.lvfs = newFakeLVFS()
 	}
-	return discoverySettings{scanImage: testScanImage, interval: time.Hour, http: &http.Client{Transport: w.lvfs}}
+	image := w.scanImage
+	if image == "" {
+		image = testScanImage
+	}
+	return discoverySettings{scanImage: image, interval: time.Hour, http: &http.Client{Transport: w.lvfs}}
 }
 
 // testScanImage is the scan image of the test operator.

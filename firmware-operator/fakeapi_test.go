@@ -306,6 +306,13 @@ func (a *fakeAPI) delete(w http.ResponseWriter, collection, name string) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
+	// The API server keeps an object whose deletion already started
+	// until its kubelet or its finalizers end it, and a second delete
+	// changes nothing.
+	if started, _ := held["metadata"].(map[string]any)["deletionTimestamp"].(string); started != "" {
+		_, _ = fmt.Fprint(w, `{"kind":"Status","status":"Success"}`)
+		return
+	}
 	a.store(collection, held, "DELETED")
 	uid := held["metadata"].(map[string]any)["uid"]
 	for _, claim := range a.objects[claimsPath] {

@@ -20,7 +20,7 @@ func TestAMachineWithNoRecordGetsAScanPod(t *testing.T) {
 		spec, container := scan.Spec, scan.Spec.Containers[0]
 		c := w.api.catalog(t, "lvfs")
 		attempt := scanAttempt{catalog: "lvfs", machine: "node-2", boot: firstBoot, devices: deviceSetHash([]string{camera("1-3", 4).name()}),
-			file: "firmware-09138-stable.xml.zst"}
+			file: "firmware-09138-stable.xml.zst", image: testScanImage}
 		env := []envVar{
 			{catalogNameVariable, "lvfs"}, {catalogURLVariable, lvfsURL},
 			{catalogFileVariable, "firmware-09138-stable.xml.zst"}, {catalogSHA256Variable, c.Status.SHA256},

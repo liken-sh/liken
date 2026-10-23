@@ -30,6 +30,7 @@ const (
 	bootKey        = "firmware.liken.sh/boot"
 	devicesKey     = "firmware.liken.sh/devices"
 	fileKey        = "firmware.liken.sh/file"
+	imageKey       = "firmware.liken.sh/scan-image"
 	scanContainer  = "scan"
 )
 
@@ -51,22 +52,23 @@ const (
 const scanDeadline = 10 * time.Minute
 
 // scanAttempt is one scan of one machine against one FirmwareCatalog: the boot,
-// the device set, and the catalog file it ran with. Each attempt runs
-// once.
+// the device set, the catalog file, and the scan image it ran with.
+// Each attempt runs once.
 type scanAttempt struct {
 	catalog string
 	machine string
 	boot    string
 	devices string
 	file    string
+	image   string
 }
 
 func (a scanAttempt) is(r machineRecord) bool {
-	return r.Machine == a.machine && r.Boot == a.boot && r.Devices == a.devices && r.File == a.file
+	return r.Machine == a.machine && r.Boot == a.boot && r.Devices == a.devices && r.File == a.file && r.Image == a.image
 }
 
 func attemptOf(catalog string, r machineRecord) scanAttempt {
-	return scanAttempt{catalog: catalog, machine: r.Machine, boot: r.Boot, devices: r.Devices, file: r.File}
+	return scanAttempt{catalog: catalog, machine: r.Machine, boot: r.Boot, devices: r.Devices, file: r.File, image: r.Image}
 }
 
 // scanPodName answers the one name of an attempt. One name means a
@@ -76,7 +78,7 @@ func attemptOf(catalog string, r machineRecord) scanAttempt {
 // person who reads kubectl get pods, and ends in a hash of the whole
 // attempt.
 func scanPodName(a scanAttempt) string {
-	sum := sha256.Sum256([]byte(strings.Join([]string{a.catalog, a.machine, a.boot, a.devices, a.file}, "\x00")))
+	sum := sha256.Sum256([]byte(strings.Join([]string{a.catalog, a.machine, a.boot, a.devices, a.file, a.image}, "\x00")))
 	suffix := "-" + hex.EncodeToString(sum[:6])
 	prefix := a.catalog + "-" + a.machine
 	if len(prefix) > 63-len(suffix) {
@@ -88,12 +90,12 @@ func scanPodName(a scanAttempt) string {
 // scanOf answers the attempt that a scan pod's annotations record.
 func scanOf(p pod) scanAttempt {
 	notes := p.Metadata.Annotations
-	return scanAttempt{catalog: notes[catalogKey], machine: notes[machineKey], boot: notes[bootKey], devices: notes[devicesKey], file: notes[fileKey]}
+	return scanAttempt{catalog: notes[catalogKey], machine: notes[machineKey], boot: notes[bootKey], devices: notes[devicesKey], file: notes[fileKey], image: notes[imageKey]}
 }
 
-// buildScanPod answers the pod of one attempt, with the SHA-256 of the
-// attempt's file.
-func buildScanPod(c *catalog, a scanAttempt, sum, image, namespace string) pod {
+// buildScanPod answers the pod of one attempt, which runs the attempt's
+// scan image, with the SHA-256 of the attempt's file.
+func buildScanPod(c *catalog, a scanAttempt, sum, namespace string) pod {
 	no, yes := false, true
 	deadline, grace := int64(scanDeadline.Seconds()), int64(5)
 	return pod{
@@ -112,6 +114,7 @@ func buildScanPod(c *catalog, a scanAttempt, sum, image, namespace string) pod {
 				bootKey:    a.boot,
 				devicesKey: a.devices,
 				fileKey:    a.file,
+				imageKey:   a.image,
 			},
 			// A deleted FirmwareCatalog deletes its scan pods. A cluster-scoped
 			// owner may own a namespaced object.
@@ -151,7 +154,7 @@ func buildScanPod(c *catalog, a scanAttempt, sum, image, namespace string) pod {
 			}, firmwareCopyVolumes()...),
 			Containers: []container{{
 				Name:  scanContainer,
-				Image: image,
+				Image: a.image,
 				Env: []envVar{
 					{Name: catalogNameVariable, Value: c.Metadata.Name},
 					{Name: catalogURLVariable, Value: c.Spec.URL},

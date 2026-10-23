@@ -119,6 +119,39 @@ func TestANewFileWithTheSameReleasesScansNothing(t *testing.T) {
 	})
 }
 
+// A new scan image can find devices and releases that the old one did
+// not, so an operator that starts with another scan image scans each
+// machine again, with no boot and no new catalog file.
+func TestAnOperatorWithANewScanImageScansAgain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := &world{api: startFakeAPI(t)}
+		stopFirst := w.run(t)
+		w.lvfs.publish("firmware-09138-stable.xml.zst", frameworkBIOS("0.0.3.5", "0.0.4.2"))
+		w.api.publish("node-2", camera("1-3", 4))
+		w.settle()
+		w.api.putFleetMachine("node-2", machineReady, firstBoot)
+		w.settle()
+		w.api.putCatalog("lvfs", lvfsURL)
+		w.settle()
+		w.api.finishScan(t, w.onlyScan(t).Metadata.Name, podSucceeded,
+			resultLog(scanned("firmware-09138-stable.xml.zst", systemFirmware("0.0.3.5", "0.0.4.2"))))
+		w.settle()
+		stopFirst()
+		w.scanImage = "ghcr.io/liken-sh/firmware-operator-scan:next"
+		w.run(t)
+
+		if got := w.api.created(uploadPodsPath); got != 2 {
+			t.Fatalf("the operators created %d scan pods, want 2", got)
+		}
+		if image := w.onlyScan(t).Spec.Containers[0].Image; image != w.scanImage {
+			t.Errorf("the second scan runs %s, want %s", image, w.scanImage)
+		}
+		if r := w.record(t, "lvfs", "node-2"); r.Image != w.scanImage || r.Result != resultRunning {
+			t.Errorf("the record is %+v, want a Running scan with the new image", r)
+		}
+	})
+}
+
 // A restarted operator holds no index of the catalog, so it downloads
 // the file again before it compares releases, and still scans nothing
 // that the new file does not change.

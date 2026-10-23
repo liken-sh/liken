@@ -154,8 +154,9 @@ The operator reads the jcat again after an hour, when you edit the
 ### A scan record is Failed
 
 The record's `message` says why. A failed scan does not run again
-until the machine boots, its set of device names changes, or the
-catalog names a new file that offers other releases for its devices.
+until the machine boots, its set of device names changes, the catalog
+names a new file that offers other releases for its devices, or the
+operator runs another scan image.
 
 | Message | Cause and fix |
 |---|---|
@@ -220,9 +221,11 @@ stay at the version and the releases of its last scan. The `time` of
 each entry says when that was. An entry leaves when the machine's next
 scan does not report the device, or when you delete the `Machine`.
 
-The operator deletes a discovered `Firmware` when no entry is left and
-nobody edited its spec. An object whose spec someone edited stays, and
-you delete it with `kubectl delete firmware <name>`. The operator then
+The operator deletes a discovered `Firmware` when no entry is left,
+unless someone changed its group or an apply on it waits for a turn or
+writes. An approval alone does not keep it: with no entry, no machine
+is offered the approved release. An object whose group someone changed
+stays, and you delete it with `kubectl delete firmware <name>`. The operator then
 creates it again at the next scan that reports a device of its group.
 
 ## Approvals

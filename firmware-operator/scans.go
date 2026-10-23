@@ -172,12 +172,12 @@ func (o *operator) schedule(ctx context.Context, c *catalog, moved bool, busy ma
 			if m.Status.Phase != machineReady || busy[name] {
 				continue
 			}
-			a := scanAttempt{catalog: c.Metadata.Name, machine: name, boot: m.Status.Boot.Time, devices: w.deviceSets[name], file: file}
+			a := scanAttempt{catalog: c.Metadata.Name, machine: name, boot: m.Status.Boot.Time, devices: w.deviceSets[name], file: file, image: o.discovery.scanImage}
 			r, held := c.Status.record(name)
 			if held && a.is(r) {
 				continue
 			}
-			if held && r.Boot == a.boot && r.Devices == a.devices && r.Result == resultScanned && o.sameReleases(ctx, c, r, file, sum) {
+			if held && r.Boot == a.boot && r.Devices == a.devices && r.Image == a.image && r.Result == resultScanned && o.sameReleases(ctx, c, r, file, sum) {
 				refiles = append(refiles, refile{machine: name, from: r.File, to: file})
 				continue
 			}
@@ -209,7 +209,7 @@ func (o *operator) schedule(ctx context.Context, c *catalog, moved bool, busy ma
 				continue
 			}
 			records[a.machine] = machineRecord{
-				Machine: a.machine, Boot: a.boot, Devices: a.devices, File: a.file,
+				Machine: a.machine, Boot: a.boot, Devices: a.devices, File: a.file, Image: a.image,
 				GUIDs: previous.GUIDs, Releases: previous.Releases,
 				Result: resultRunning, Message: "the scan pod " + o.namespace + "/" + scanPodName(a) + " reads the machine's devices",
 				Time: stamp(now),
@@ -257,7 +257,7 @@ func (o *operator) sameReleases(ctx context.Context, c *catalog, r machineRecord
 // startScan creates the pod of one attempt. A pod that already exists
 // under the name answers 409, which means the attempt runs.
 func (o *operator) startScan(c *catalog, a scanAttempt, sum string) error {
-	scan := buildScanPod(c, a, sum, o.discovery.scanImage, o.namespace)
+	scan := buildScanPod(c, a, sum, o.namespace)
 	err := o.client.RequestJSON(http.MethodPost, podsPathIn(o.namespace), mustJSON(scan), nil)
 	if errors.Is(err, apiclient.ErrConflict) {
 		return nil

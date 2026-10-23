@@ -60,11 +60,31 @@ func discovered(f *firmware) bool {
 
 // pristine reports whether a person has left a discovered object's
 // spec as the operator created it. The operator writes the spec only in
-// the create, so any edit of the spec moves the generation past 1. Only
-// a pristine object with no entry is deleted: a person who approved a
-// version or changed the group keeps the object.
+// the create, so any edit of the spec moves the generation past 1.
 func pristine(f *firmware) bool {
 	return f.Metadata.Generation == 1
+}
+
+// retirable reports whether the operator deletes a discovered object
+// that is left with no entry. A pristine object goes. So does an object
+// whose only edit is an approval: its component is still the one its
+// name came from, and it names no GUIDs. With no entry, no machine is
+// offered the approved release, so the approval installs nothing. A
+// person who changed the group keeps the object. An apply that waits
+// for its turn or writes keeps it too, because the operator still has
+// to release that machine's hold.
+func retirable(f *firmware) bool {
+	if pristine(f) {
+		return true
+	}
+	u := f.Spec.Update
+	if u == nil || u.Component == "" || len(u.GUIDs) > 0 ||
+		!slices.Contains(groupNames(groupKey{component: u.Component}, scanDevice{}), f.Metadata.Name) {
+		return false
+	}
+	return !slices.ContainsFunc(f.Status.Applies, func(r applyRecord) bool {
+		return r.Result == resultWaiting || r.Result == resultWriting
+	})
 }
 
 // applyScan replaces a machine's entries for a FirmwareCatalog in every
@@ -228,7 +248,7 @@ func ownedBy(f *firmware, key groupKey) bool {
 }
 
 // settleEntries writes the entries that change gives a discovered
-// object, and deletes a pristine object that is left with none. change
+// object, and deletes a retirable object that is left with none. change
 // runs again on the API server's copy after a 409.
 func (o *operator) settleEntries(f *firmware, change func([]machineEntry) []machineEntry) error {
 	var notices []notice
@@ -258,7 +278,7 @@ func (o *operator) settleEntries(f *firmware, change func([]machineEntry) []mach
 	if written {
 		o.post(f, condition{}, notices, false)
 	}
-	if len(f.Status.Machines) > 0 || !pristine(f) {
+	if len(f.Status.Machines) > 0 || !retirable(f) {
 		return nil
 	}
 	err = o.client.RequestJSON(http.MethodDelete, firmwarePath(f.Metadata.Name), nil, nil)

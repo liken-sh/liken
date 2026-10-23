@@ -30,7 +30,7 @@ The operator then starts a scan on each machine that needs one. A scan
 is a short privileged pod in `liken-system` on that machine. It runs
 `fwupd` against the catalog file, and writes which firmware devices
 the machine has and which releases the catalog offers for each. The
-operator scans a machine in three cases:
+operator scans a machine in four cases:
 
 - The machine has no record yet, or it booted since its last scan. A
   version changes only across a reboot or a flash.
@@ -41,15 +41,19 @@ operator scans a machine in three cases:
   releases, the operator records the new file for the machine, in its
   scan record and in its entries in the `Firmware` objects, and scans
   nothing.
+- The operator runs another scan image than the one that ran the
+  machine's last scan. An upgrade of `firmware-operator` can bring a
+  newer `fwupd`, which can find devices and releases that the old one
+  did not, so each machine is scanned once with the new image.
 
 A scan never starts on a timer. The operator reads the jcat once an
 hour (the `--catalog-interval` flag sets the time), because LVFS
 publishes no feed of its changes. An unchanged jcat costs one small
 answer.
 
-Each combination of boot, device set, and catalog file runs once. A
-failed scan does not run again until one of the three changes. No
-command forces a scan. To scan a machine again, reboot it. To scan
+Each combination of boot, device set, catalog file, and scan image
+runs once. A failed scan does not run again until one of the four
+changes. No command forces a scan. To scan a machine again, reboot it. To scan
 every machine again, delete the `FirmwareCatalog` and apply it again: the new
 object has no records, so each `Ready` machine is scanned. The
 discovered `Firmware` objects stay, and the new scans replace their
@@ -234,9 +238,11 @@ does not report the device, or when its `Machine` is deleted. So a
 machine that is off keeps the entries of its last scan, and the `time`
 of each entry says how old they are.
 
-The operator deletes a discovered object when no entry is left and
-nobody edited its spec. It never deletes an object that someone
-changed.
+The operator deletes a discovered object when no entry is left. It
+keeps an object whose group someone changed, in `spec.update.component`
+or `spec.update.guids`, and an object with an apply that waits for its
+turn or writes. An approval alone does not keep the object, because
+with no entry no machine is offered the approved release.
 
 ## Read the Events
 

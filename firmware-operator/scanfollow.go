@@ -144,7 +144,7 @@ func (o *operator) endsOf(c *catalog, scans []pod, now time.Time) ([]scanEnd, ma
 // report.
 func recordOf(end scanEnd, previous machineRecord, releases string, now time.Time) machineRecord {
 	r := machineRecord{
-		Machine: end.attempt.machine, Boot: end.attempt.boot, Devices: end.attempt.devices, File: end.attempt.file,
+		Machine: end.attempt.machine, Boot: end.attempt.boot, Devices: end.attempt.devices, File: end.attempt.file, Image: end.attempt.image,
 		Result: end.result, Message: end.message, Time: stamp(now),
 		GUIDs: previous.GUIDs, Releases: previous.Releases,
 	}

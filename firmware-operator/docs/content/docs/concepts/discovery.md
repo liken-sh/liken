@@ -121,9 +121,9 @@ each scan pod when it refreshes, and refuses a catalog that fails.
 ## Scans follow events
 
 A scan starts when something that can change the answer changes: the
-machine booted, its devices changed, or the catalog offers other
-releases for its devices. A timer that scans again to look for a change
-would load the API server, and would read the devices of every machine
-for nothing. The only timer is the hourly read of the jcat, because
+machine booted, its devices changed, the catalog offers other
+releases for its devices, or the operator runs a new scan image. A
+timer that scans again to look for a change would load the API
+server, and would read the devices of every machine for nothing. The only timer is the hourly read of the jcat, because
 LVFS publishes no feed of its changes. That read costs one small
 answer when nothing changed.

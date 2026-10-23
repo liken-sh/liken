@@ -60,6 +60,10 @@ type machineRecord struct {
 	// slice (deviceSetHash).
 	Devices string `json:"devices"`
 	File    string `json:"file"`
+	// Image is the scan image that ran the scan. A new image can find
+	// devices and releases that the old one did not, so a record of
+	// another image is not current.
+	Image string `json:"image,omitempty"`
 	// Releases is a hash of the catalog's releases for GUIDs, in File
 	// (catalogIndex.releasesHash). Empty means the operator could not
 	// compute it, and a new file then scans the machine again.
