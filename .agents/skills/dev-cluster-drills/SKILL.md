@@ -541,6 +541,12 @@ applies sysctls live and reboots nothing.
 
 ## Clean up
 
+You may start the dev cluster, `make serve`, and the lab registry
+whenever a test needs them. When the testing ends, stop all three:
+kill each guest's QEMU and the `liken serve` process by PID, and run
+`docker stop liken-lab-registry`. Keep them up only when the person
+asked for that.
+
 Report what is still running when the drill ends: which guests, which
 `make serve`, whether `liken-lab-registry` runs, and which background
 tasks. A `liken serve` holds `:8017`, the lab registry holds `:5000`,
