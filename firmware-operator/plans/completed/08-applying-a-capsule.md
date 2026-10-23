@@ -180,3 +180,41 @@ earlier drill. Version 4 rolled to the three machines in turn:
 Each time is the scan of the new boot that read the version. Each
 machine came back on its proven slot, and the approval read
 `Installed`.
+
+## The drill on Debian's fwupd and on disk
+
+On 2026-10-23 the scan image moved to Debian 13 with fwupd 2.1.7 from
+its backports, and the operator began to scan each machine again when
+it runs a new scan image. The lab's three capsule machines ran
+version 4.
+
+Within 20 seconds of the new operator's start, it scanned all five
+machines against both catalogs, with no reboot, and every record
+named the new image.
+
+fwupd on Debian writes its updater and capsule under `\EFI\debian`.
+The first rehearsal staged 3 variables and 2 files, a new boot entry
+and updater beside the ones under `\EFI\ubuntu`. Version 5 rolled to
+the three machines in NVRAM mode, and version 6 followed:
+
+| Release | node-3 | node-4 | node-5 |
+|---|---|---|---|
+| 5 | 14:17:27Z | 14:16:45Z | 14:16:51Z |
+| 6 | 14:19:25Z | 14:19:52Z | 14:20:19Z |
+
+The lab firmware's patch had lost the capsule-on-disk part of the
+first spike, so a build with `CAPSULE_ON_DISK_ENABLE` made the same
+firmware as one without it. With the part restored, node-5 booted the
+on-disk build and took version 7 on disk: its rehearsal staged
+`\EFI\UpdateCapsule\fwupd-<guid>.cap` and `OsIndications`, the apply
+wrote the same, and the firmware's log read
+`capsule on disk: Success` and `LastAttemptStatus: 0`. node-3 and
+node-4 took version 7 in NVRAM mode in the same rollout.
+
+| Release | node-3 | node-4 | node-5 |
+|---|---|---|---|
+| 7 | 14:31:35Z | 14:32:02Z | 14:30:54Z |
+
+Each time is the scan of the new boot that read the version. Each
+machine came back on its proven slot with `bootOrderKept: true`, and
+the approval read `Installed`.

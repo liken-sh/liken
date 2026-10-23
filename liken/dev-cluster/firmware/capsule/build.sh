@@ -43,9 +43,14 @@
 #
 # Usage:
 #   dev-cluster/firmware/capsule/build.sh
+#   CAPSULE_ON_DISK=1 dev-cluster/firmware/capsule/build.sh
 #
 # Results land in firmware/capsule/dist/: OVMF_CODE_4M.fd and
-# OVMF_VARS_4M.fd. The edk2 checkout stays in firmware/capsule/.cache/.
+# OVMF_VARS_4M.fd. With CAPSULE_ON_DISK=1, the firmware also reads a
+# capsule that fwupd leaves in \EFI\UpdateCapsule on the ESP, and
+# advertises it in OsIndicationsSupported, so fwupd stages a capsule on
+# disk and not in NVRAM. That build lands in
+# firmware/capsule/dist/on-disk/. The edk2 checkout stays in firmware/capsule/.cache/.
 # The directory's name starts with a dot because the checkout holds Go
 # files of its own, and the go tool's ./... pattern skips a directory
 # whose name starts with a dot. Without it, `go vet ./...` and
@@ -65,6 +70,11 @@ edk2_commit="2970e5699ba6267f3384ffab20f96647578aebc8"
 edk2="$here/.cache/edk2"
 patch="$here/ovmf-capsule.patch"
 out="$here/dist"
+on_disk=FALSE
+if [ -n "${CAPSULE_ON_DISK:-}" ]; then
+    on_disk=TRUE
+    out="$here/dist/on-disk"
+fi
 
 builder="$("$here/builder.sh")"
 
@@ -94,7 +104,7 @@ fi
 # HOME points into the tree because the container has no home for the
 # calling user, and BaseTools writes its build configuration there.
 docker run --rm --user "$(id -u):$(id -g)" \
-    -e HOME=/edk2/Build/.home -v "$edk2:/edk2" -w /edk2 "$builder" \
+    -e HOME=/edk2/Build/.home -e ON_DISK="$on_disk" -v "$edk2:/edk2" -w /edk2 "$builder" \
     bash -euc '
         mkdir -p "$HOME"
         make -s -C BaseTools -j"$(nproc)" >/dev/null
@@ -103,7 +113,8 @@ docker run --rm --user "$(id -u):$(id -g)" \
         . ./edksetup.sh BaseTools >/dev/null
         set -u
         build -q -n "$(nproc)" -a X64 -t GCC -b DEBUG \
-            -p OvmfPkg/OvmfPkgX64.dsc -D FD_SIZE_4MB
+            -p OvmfPkg/OvmfPkgX64.dsc -D FD_SIZE_4MB \
+            -D CAPSULE_ON_DISK_ENABLE="$ON_DISK"
     '
 
 mkdir -p "$out"

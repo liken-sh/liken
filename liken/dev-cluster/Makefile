@@ -201,6 +201,11 @@ guests/$(NODE)/emmc.qcow2:
 # carry over. The build is
 # DEBUG, and QEMU writes the firmware's debug log, which says why a
 # capsule was refused, to guests/<node>/ovmf-debug.log.
+#
+# FIRMWARE=capsule-on-disk is the same firmware with capsule-on-disk
+# support. fwupd then stages a capsule as a file in \EFI\UpdateCapsule
+# and sets a bit in OsIndications, with no boot entry and no BootNext,
+# and the firmware reads the file at the next boot.
 OVMF_DIR := firmware/dist/$(shell cat firmware/VERSION)
 OVMF_CODE := $(OVMF_DIR)/OVMF_CODE_4M.fd
 OVMF_CODE_SECBOOT := $(OVMF_DIR)/OVMF_CODE_4M.secboot.fd
@@ -214,6 +219,11 @@ OVMF_CODE_CAPSULE := firmware/capsule/dist/OVMF_CODE_4M.fd
 $(OVMF_CODE_CAPSULE): firmware/capsule/build.sh firmware/capsule/builder.sh \
 		firmware/capsule/Dockerfile firmware/capsule/ovmf-capsule.patch
 	firmware/capsule/build.sh
+
+OVMF_CODE_ON_DISK := firmware/capsule/dist/on-disk/OVMF_CODE_4M.fd
+$(OVMF_CODE_ON_DISK): firmware/capsule/build.sh firmware/capsule/builder.sh \
+		firmware/capsule/Dockerfile firmware/capsule/ovmf-capsule.patch
+	CAPSULE_ON_DISK=1 firmware/capsule/build.sh
 
 guests/$(NODE)/OVMF_VARS.fd: | $(OVMF_VARS)
 	mkdir -p guests/$(NODE)
@@ -229,11 +239,14 @@ QEMU_FIRMWARE_secureboot = -machine q35,smm=on -global driver=cfi.pflash01,prope
 	-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE_SECBOOT) -drive if=pflash,format=raw,file=guests/$(NODE)/OVMF_VARS.fd
 QEMU_FIRMWARE_capsule = -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE_CAPSULE) -drive if=pflash,format=raw,file=guests/$(NODE)/OVMF_VARS.fd \
 	-debugcon file:guests/$(NODE)/ovmf-debug.log -global isa-debugcon.iobase=0x402
+QEMU_FIRMWARE_capsule-on-disk = -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE_ON_DISK) -drive if=pflash,format=raw,file=guests/$(NODE)/OVMF_VARS.fd \
+	-debugcon file:guests/$(NODE)/ovmf-debug.log -global isa-debugcon.iobase=0x402
 QEMU_FIRMWARE_bios =
 QEMU_FIRMWARE = $(QEMU_FIRMWARE_$(FIRMWARE))
 FIRMWARE_DEPS_uefi := $(OVMF_CODE) guests/$(NODE)/OVMF_VARS.fd
 FIRMWARE_DEPS_secureboot := $(OVMF_CODE_SECBOOT) guests/$(NODE)/OVMF_VARS.fd
 FIRMWARE_DEPS_capsule := $(OVMF_CODE_CAPSULE) guests/$(NODE)/OVMF_VARS.fd
+FIRMWARE_DEPS_capsule-on-disk := $(OVMF_CODE_ON_DISK) guests/$(NODE)/OVMF_VARS.fd
 FIRMWARE_DEPS_bios :=
 FIRMWARE_DEPS := $(FIRMWARE_DEPS_$(FIRMWARE))
 

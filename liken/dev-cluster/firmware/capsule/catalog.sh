@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 #
 # Build the lab's test firmware catalog: signed capsules that raise the
-# test device in the capsule firmware (build.sh) to versions 2 and 3,
-# an fwupd cabinet for each, and a catalog of both releases laid out
-# the way the LVFS publishes its own, signed by a lab key.
+# test device in the capsule firmware (build.sh) to each version that
+# VERSIONS names, 2 and 3 by default, an fwupd cabinet for each, and a
+# catalog of the releases laid out the way the LVFS publishes its own,
+# signed by a lab key.
 #
 # The catalog is what a FirmwareCatalog names in a drill of
 # firmware-operator on a lab guest under FIRMWARE=capsule, where the
@@ -44,6 +45,11 @@
 # catalog. Its default is the directory that `make serve` serves the
 # catalog under, as a guest reaches the laptop.
 #
+# VERSIONS lists the versions to build, separated by spaces. fwupd
+# offers only a version above the one a guest runs, so a guest that
+# already took version 3 needs a catalog with a higher one, such as
+# VERSIONS="2 3 4 5".
+#
 # Results land in firmware/capsule/dist/catalog/:
 #
 #   firmware.xml.zst          the catalog, under the unversioned name
@@ -53,8 +59,7 @@
 #   firmware-<serial>-lab.xml.zst
 #                             the same catalog under its versioned name,
 #                             which changes with every build
-#   lab-fmp-2.cab, lab-fmp-3.cab
-#                             the cabinets
+#   lab-fmp-<version>.cab     the cabinet of each version
 #
 # The certificate that verifies the catalog is signing/lab-catalog.pem.
 
@@ -71,7 +76,7 @@ if [ -z "${LIKEN_CAPSULE_BUILDER:-}" ]; then
     builder="$("$here/builder.sh")"
     exec docker run --rm --user "$(id -u):$(id -g)" \
         -e HOME=/tmp -e LIKEN_CAPSULE_BUILDER=1 -e LIKEN_CAPSULE_HOST="$here" \
-        -e BASE_URL="$base_url" \
+        -e BASE_URL="$base_url" -e VERSIONS="${VERSIONS:-2 3}" \
         -v "$here:/capsule" -w /capsule "$builder" /capsule/catalog.sh
 fi
 
@@ -81,7 +86,7 @@ fi
 # the device by it.
 guid="b0792605-c842-408f-adf2-edfb07638e83"
 component="sh.liken.lab.fmp.firmware"
-versions=(2 3)
+read -r -a versions <<<"${VERSIONS:-2 3}"
 
 # FmpDxe records each capsule's lowest supported version after an
 # update, and refuses a later capsule whose version is below it. 1

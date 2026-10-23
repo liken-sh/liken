@@ -366,10 +366,73 @@ index 0000000..495a056
 +  BaseLib
 +  DebugLib
 +  UefiRuntimeServicesTableLib
+diff --git a/OvmfPkg/Library/PlatformBootManagerLib/BdsPlatform.c b/OvmfPkg/Library/PlatformBootManagerLib/BdsPlatform.c
+index 3edb92f..fde1a1d 100644
+--- a/OvmfPkg/Library/PlatformBootManagerLib/BdsPlatform.c
++++ b/OvmfPkg/Library/PlatformBootManagerLib/BdsPlatform.c
+@@ -1675,6 +1675,25 @@ PlatformBootManagerAfterConsole (
+     EfiBootManagerRefreshAllBootOption ();
+   }
+ 
++  //
++  // An OS that delivers capsules on disk puts them in \EFI\UpdateCapsule
++  // on the ESP and sets EFI_OS_INDICATIONS_FILE_CAPSULE_DELIVERY_SUPPORTED
++  // in OsIndications. The ESP is reachable only after the connect sequence
++  // above. CoDRelocateCapsule() clears the flag, reads the files into
++  // memory, and passes them to UpdateCapsule(), which processes a capsule
++  // without PersistAcrossReset at once. The reset that follows a success
++  // starts the updated firmware, as a reset after a flash write would.
++  //
++  if (PcdGetBool (PcdCapsuleOnDiskSupport) && CoDCheckCapsuleOnDiskFlag ()) {
++    EFI_STATUS  CodStatus;
++
++    CodStatus = CoDRelocateCapsule (0);
++    DEBUG ((DEBUG_INFO, "%a: capsule on disk: %r\n", __func__, CodStatus));
++    if (!EFI_ERROR (CodStatus)) {
++      gRT->ResetSystem (EfiResetCold, EFI_SUCCESS, 0, NULL);
++    }
++  }
++
+   BOOLEAN        ShellEnabled;
+   RETURN_STATUS  RetStatus;
+ 
+diff --git a/OvmfPkg/Library/PlatformBootManagerLib/BdsPlatform.h b/OvmfPkg/Library/PlatformBootManagerLib/BdsPlatform.h
+index 1302f5c..3a9127f 100644
+--- a/OvmfPkg/Library/PlatformBootManagerLib/BdsPlatform.h
++++ b/OvmfPkg/Library/PlatformBootManagerLib/BdsPlatform.h
+@@ -43,6 +43,7 @@ Abstract:
+ #include <Library/QemuFwCfgLib.h>
+ #include <Library/QemuFwCfgS3Lib.h>
+ #include <Library/QemuBootOrderLib.h>
++#include <Library/CapsuleLib.h>
+ 
+ #include <Protocol/Decompress.h>
+ #include <Protocol/PciIo.h>
+diff --git a/OvmfPkg/Library/PlatformBootManagerLib/PlatformBootManagerLib.inf b/OvmfPkg/Library/PlatformBootManagerLib/PlatformBootManagerLib.inf
+index 9675eb0..5baeaae 100644
+--- a/OvmfPkg/Library/PlatformBootManagerLib/PlatformBootManagerLib.inf
++++ b/OvmfPkg/Library/PlatformBootManagerLib/PlatformBootManagerLib.inf
+@@ -58,6 +58,7 @@
+   XenPlatformLib
+   QemuFwCfgSimpleParserLib
+   PlatformBootManagerCommonLib
++  CapsuleLib
+ 
+ [Pcd]
+   gUefiOvmfPkgTokenSpaceGuid.PcdEmuVariableEvent
+@@ -65,6 +66,7 @@
+   gUefiOvmfPkgTokenSpaceGuid.PcdOvmfHostBridgePciDevId
+   gUefiOvmfPkgTokenSpaceGuid.PcdBootRestrictToFirmware
+   gEfiMdeModulePkgTokenSpaceGuid.PcdAcpiS3Enable
++  gEfiMdeModulePkgTokenSpaceGuid.PcdCapsuleOnDiskSupport
+   gEfiMdePkgTokenSpaceGuid.PcdPlatformBootTimeOut
+   gEfiMdePkgTokenSpaceGuid.PcdUartDefaultBaudRate         ## CONSUMES
+   gEfiMdePkgTokenSpaceGuid.PcdUartDefaultDataBits         ## CONSUMES
 diff --git a/OvmfPkg/OvmfPkgX64.dsc b/OvmfPkg/OvmfPkgX64.dsc
+index a12ea98..7408f7e 100644
 --- a/OvmfPkg/OvmfPkgX64.dsc
 +++ b/OvmfPkg/OvmfPkgX64.dsc
-@@ -37,6 +37,12 @@
+@@ -37,6 +37,19 @@
    DEFINE CC_MEASUREMENT_ENABLE   = TRUE
    DEFINE DEBUG_TO_MEM            = FALSE
  
@@ -379,10 +442,17 @@ diff --git a/OvmfPkg/OvmfPkgX64.dsc b/OvmfPkg/OvmfPkgX64.dsc
 +  #
 +  DEFINE LAB_FMP_GUID            = b0792605-c842-408f-adf2-edfb07638e83
 +
++  #
++  # TRUE advertises capsule-on-disk delivery in OsIndicationsSupported, so
++  # fwupd writes capsules to \EFI\UpdateCapsule instead of running its EFI
++  # updater, and PlatformBootManagerLib loads them from there.
++  #
++  DEFINE CAPSULE_ON_DISK_ENABLE  = FALSE
++
  !include OvmfPkg/Include/Dsc/OvmfTpmDefines.dsc.inc
  
    #
-@@ -173,7 +179,8 @@
+@@ -173,7 +186,8 @@
    UefiBootManagerLib|MdeModulePkg/Library/UefiBootManagerLib/UefiBootManagerLib.inf
    BootLogoLib|MdeModulePkg/Library/BootLogoLib/BootLogoLib.inf
    FileExplorerLib|MdeModulePkg/Library/FileExplorerLib/FileExplorerLib.inf
@@ -392,7 +462,7 @@ diff --git a/OvmfPkg/OvmfPkgX64.dsc b/OvmfPkg/OvmfPkgX64.dsc
    DxeServicesLib|MdePkg/Library/DxeServicesLib/DxeServicesLib.inf
    DxeServicesTableLib|MdePkg/Library/DxeServicesTableLib/DxeServicesTableLib.inf
    PeCoffGetEntryPointLib|MdePkg/Library/BasePeCoffGetEntryPointLib/BasePeCoffGetEntryPointLib.inf
-@@ -412,6 +419,7 @@
+@@ -412,6 +426,7 @@
    PciLib|OvmfPkg/Library/DxePciLibI440FxQ35/DxePciLibI440FxQ35.inf
    QemuFwCfgS3Lib|OvmfPkg/Library/QemuFwCfgS3Lib/DxeQemuFwCfgS3LibFwCfg.inf
    VariablePolicyLib|MdeModulePkg/Library/VariablePolicyLib/VariablePolicyLibRuntimeDxe.inf
@@ -400,15 +470,16 @@ diff --git a/OvmfPkg/OvmfPkgX64.dsc b/OvmfPkg/OvmfPkgX64.dsc
  !if $(SMM_REQUIRE) == TRUE || $(QEMU_PV_VARS) == TRUE
    MmUnblockMemoryLib|MdePkg/Library/MmUnblockMemoryLib/MmUnblockMemoryLibNull.inf
  !endif
-@@ -584,6 +592,7 @@
+@@ -584,6 +599,8 @@
  
  [PcdsFixedAtBuild]
    gEfiMdeModulePkgTokenSpaceGuid.PcdStatusCodeMemorySize|1
 +  gEfiMdeModulePkgTokenSpaceGuid.PcdCapsuleFmpSupport|TRUE
++  gEfiMdeModulePkgTokenSpaceGuid.PcdCapsuleOnDiskSupport|$(CAPSULE_ON_DISK_ENABLE)
  !if $(SMM_REQUIRE) == FALSE
    gEfiMdeModulePkgTokenSpaceGuid.PcdResetOnMemoryTypeInformationChange|FALSE
  !endif
-@@ -959,6 +968,35 @@
+@@ -959,6 +976,35 @@
    MdeModulePkg/Universal/WatchdogTimerDxe/WatchdogTimer.inf
    MdeModulePkg/Universal/MonotonicCounterRuntimeDxe/MonotonicCounterRuntimeDxe.inf
    MdeModulePkg/Universal/CapsuleRuntimeDxe/CapsuleRuntimeDxe.inf

@@ -208,11 +208,25 @@ setsid make -C dev-cluster run NODE=node-5 FIRMWARE=capsule \
 
 The build is DEBUG, and QEMU saves the firmware's debug log to
 `dev-cluster/guests/<node>/ovmf-debug.log`. FmpDxe writes there why it
-refused a capsule. The firmware takes a capsule only through fwupd's
+refused a capsule. This firmware takes a capsule only through fwupd's
 EFI updater and `BootNext`. It refuses a capsule that sets
 `PersistAcrossReset`, which most vendor capsules do, so only the lab's
 own capsules install on it. `firmware/capsule/build.sh` gives the
 reason.
+
+`FIRMWARE=capsule-on-disk` boots the same firmware with capsule-on-disk
+support, which `CAPSULE_ON_DISK=1 firmware/capsule/build.sh` builds
+into `firmware/capsule/dist/on-disk/`. fwupd then stages a capsule as
+a file in `\EFI\UpdateCapsule` and sets a bit in `OsIndications`, with
+no boot entry and no `BootNext`. The firmware's log reads
+`capsule on disk: Success` when it took the file. Run the two builds
+one after the other: they share one edk2 tree.
+
+A change to a file that a build reads, such as `build.sh` or the
+patch, makes the next `make run` of every capsule guest build the
+firmware again. Start one capsule guest, wait for its QEMU, and only
+then start the others, or the builds collide in the edk2 tree. The
+same holds for the OS image after a change under `liken/`.
 
 **The test catalog** offers versions 2 and 3 of the test device.
 `dev-cluster/firmware/capsule/catalog.sh` builds it, and `make serve`
@@ -226,7 +240,9 @@ catalog. `catalog.sh` makes it once in
 pod needs the certificate `signing/lab-catalog.pem` in that directory.
 Each run of `catalog.sh` signs the capsules again, so each cabinet's
 SHA-256 changes, and a `Firmware` approval that pins the old SHA-256
-no longer matches.
+no longer matches. fwupd offers only a version above the one a guest
+runs, so a guest that took version 3 needs a catalog with higher
+versions: `VERSIONS="4 5" dev-cluster/firmware/capsule/catalog.sh`.
 
 ## Run an image you built on the laptop
 
