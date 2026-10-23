@@ -581,7 +581,7 @@ func clusterLife(choice *manifestChoice, storage machine.StorageStatus, boot mac
 	// sets the firmware's boot preference to the newly proven slot
 	// (proving.go).
 	if trial != nil {
-		plane.start("the proving watch", provingWatch(actuator, *trial))
+		plane.start("the proving watch", provingWatch(actuator, *trial, machine.MachineStateDir, factsTree))
 	}
 	// Only a leader can report cluster state, because the admin
 	// kubeconfig is a control-plane artifact, and followers hold

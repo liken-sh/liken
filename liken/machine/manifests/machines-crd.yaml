@@ -1945,9 +1945,14 @@ spec:
                         in UEFI mode, or try_slot in GRUB's
                         environment block in BIOS mode. The boot
                         uses this entry one time and then clears it.
-                        A value here means that a proving boot waits
-                        and has not yet happened. This field is
-                        empty at every other time.
+                        In UEFI mode, `init` sets BootNext to the
+                        proven slot at each boot and after each
+                        promotion, and this field then ends in
+                        "pinned at the proven slot". A value that
+                        names another entry is a one-shot that has not
+                        run yet, such as a proving boot or the boot
+                        entry of a firmware update. The field is empty
+                        when no one-shot is armed.
                     bootOrder:
                       type: array
                       description: >-

@@ -33,6 +33,7 @@ package machine
 //	features/, registries/         the restart path
 //	runtime/                       the restart path
 //	network/                       the boot step, then the radio watch
+//	firmware/                      the boot step, then the proving watch
 //	everything else                the boot step that discovers it
 //
 // A boot step writes its subtree once, at the point where it discovers
@@ -68,6 +69,10 @@ package machine
 // record must land together, so each pair is one file that one rename
 // replaces. The rest of the tree writes once at boot, before the
 // operator exists, so those facts cannot tear and stay one file each.
+// firmware/ is written once more, after a promotion rewrites the boot
+// order. A pass that reads during that write can publish part of the
+// new order with part of the old, and the last rename wakes the next
+// pass, which publishes the order as the promotion left it.
 //
 // Rule 2 has one exception, boot/network, and the exception is what
 // the fact is for. A machine that declared no interface and a machine

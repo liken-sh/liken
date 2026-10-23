@@ -45,6 +45,30 @@ describes, with no record kept. Only the handover of `BootNext` to a
 `Disruption`'s requester reads it. Release trials still arm as before,
 so the policy decisions below remain open.
 
+## The first readings on liken-1
+
+On 2026-10-23 liken-1, the testbed's mini PC, read
+`bootOrderKept: false` after a release trial and `true` after a plain
+reboot. Before the trial's reset, `BootOrder` led with `Boot0003`, the
+proven slot B, and `BootNext` named `Boot0001`, the trial slot A. At
+power-on, slot B no longer led. Before the plain reboot, `BootNext`
+named the proven slot's entry, which already led `BootOrder`, and the
+order was kept. stick-1 read `true` after a trial of its own.
+
+The two readings fit a firmware that moves the entry it boots from
+`BootNext` to the head of `BootOrder`. They also fit a firmware that
+loses the order at a reset that follows a one-shot to another entry.
+`init` does not record the order it read at power-on, so the readings
+cannot tell the two apart.
+
+A firmware that moves the `BootNext` entry to the head matters for a
+capsule. fwupd's updater entry would lead `BootOrder` after the
+updater runs, so the boot after the update would start the updater
+again, not the proven slot. The handover reads `bootOrderKept` from
+the boot before it, which was a plain boot, so it reads `true` and
+does not refuse. Recording the power-on order, as the safeguard below
+proposes, would tell the two causes apart.
+
 ## Proposed safeguard
 
 Record the last asserted `BootOrder` on `machineState`. On the next boot,

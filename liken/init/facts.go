@@ -17,8 +17,9 @@ package main
 // fact. The long-lived components own the subtrees that change after
 // boot: the clock owns time/, the hardware watch owns
 // hardware/blockDevices/ and hardware/unclaimed/, the module loader
-// owns modules/ and boot/manifest, and the restart path owns
-// features/, registries/, and the boot/ manifest records it rewrites.
+// owns modules/ and boot/manifest, the restart path owns features/,
+// registries/, and the boot/ manifest records it rewrites, and the
+// proving watch writes firmware/ again after a promotion.
 // factstree.go documents the whole ownership map.
 //
 // The boot's write-once facts land together, in publishBootFacts,

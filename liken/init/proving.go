@@ -280,7 +280,7 @@ const provingPatience = 10 * time.Minute
 // (RejectedLastBoot) and prevents any reboot loop. The watchdog
 // covers a failure that the one-shot cannot detect: a kernel that
 // boots fine into a system that never serves.
-func provingWatch(act bootActuator, trial machine.SystemRelease) func(context.Context) error {
+func provingWatch(act bootActuator, trial machine.SystemRelease, stateRoot string, tree machine.FactsTree) func(context.Context) error {
 	return func(ctx context.Context) error {
 		deadline := time.After(provingPatience)
 		for {
@@ -294,7 +294,7 @@ func provingWatch(act bootActuator, trial machine.SystemRelease) func(context.Co
 				}) // never returns
 			case <-time.After(5 * time.Second):
 			}
-			store := machine.SystemReleases(machine.MachineStateDir)
+			store := machine.SystemReleases(stateRoot)
 			staged, err := store.LoadStaged()
 			if err != nil || staged != nil {
 				continue
@@ -318,7 +318,12 @@ func provingWatch(act bootActuator, trial machine.SystemRelease) func(context.Co
 				return nil
 			}
 			fmt.Printf("liken: system: release %s was promoted; asserting the proven slot from the store\n", record.Version)
-			assertProvenSlotUnderLock(act, machine.MachineStateDir)
+			assertProvenSlotUnderLock(act, stateRoot)
+			// The boot published the firmware's facts before this
+			// assertion rewrote BootOrder and BootNext. Without a
+			// second write, status.firmware reports the order that
+			// put the old slot first until the next boot.
+			tree.WriteFirmware(firmwareFacts(efiVarsDir))
 			return nil
 		}
 	}
