@@ -5,22 +5,26 @@ and drilled. The OS's capabilities for a capsule were built and
 drilled on the `lab` fleet on 2026-10-22, with changes to the design
 below ([As built](#as-built)). `firmware-operator`'s plans 07 and 08
 used them on 2026-10-22 to roll a capsule across three machines of the
-`lab` fleet, on OVMF with a test device. No real board has taken one. This milestone holds the
+`lab` fleet, on OVMF with a test device. The drill of a capsule on a
+real board has not run. The firmware version in `Machine` status was
+set aside on 2026-10-23
+([The firmware version in Machine status](#the-firmware-version-in-machine-status)).
+This milestone holds the
 OS's part of updating firmware that a machine and its devices keep.
 `firmware-operator`, an add-on that ships apart from the OS, declares
 and runs the updates: its
-[plan 03](../../firmware-operator/plans/completed/03-discovery.md) finds the
+[plan 03](../../../firmware-operator/plans/completed/03-discovery.md) finds the
 updates with fwupd and the LVFS catalog,
-[plan 04](../../firmware-operator/plans/completed/04-approval.md) approves one,
-[plan 05](../../firmware-operator/plans/completed/05-rehearsal.md)
+[plan 04](../../../firmware-operator/plans/completed/04-approval.md) approves one,
+[plan 05](../../../firmware-operator/plans/completed/05-rehearsal.md)
 rehearses it against a copy of the machine's variables, and plans
-[06](../../firmware-operator/plans/completed/06-applying-a-database-update.md)
-to [08](../../firmware-operator/plans/completed/08-applying-a-capsule.md) apply
+[06](../../../firmware-operator/plans/completed/06-applying-a-database-update.md)
+to [08](../../../firmware-operator/plans/completed/08-applying-a-capsule.md) apply
 it. The OS offers capabilities, and the add-on uses them: a reboot
 turn ([milestone 88](88-disruptions.md)), the
 one-shot boot of that turn's reboot, a boot order that survives a
 reset, and the ESP of the next boot. The add-on makes every write to
-the firmware itself. Root [plan 81](../../plans/81-firmware.md)
+the firmware itself. Root [plan 81](../../../plans/completed/81-firmware.md)
 records the boundary.
 
 ## Three kinds of firmware
@@ -36,7 +40,7 @@ machine changes when the image changes.
 none of its own, such as a camera on a bare USB microcontroller, each
 time the device appears. The bytes come from the vendor's container
 image, and a power cycle removes them. The OS's only part is the USB
-facts that [milestone 87](87-firmware-facts-a-machine-publishes.md)
+facts that [milestone 87](../87-firmware-facts-a-machine-publishes.md)
 publishes.
 
 This milestone is about the third kind: firmware that a device keeps
@@ -231,7 +235,7 @@ component reads that its update did not run.
 ### A boot order that survives a reset
 
 The open problem
-[firmware-bootorder-persistence](open-problems/firmware-bootorder-persistence.md)
+[firmware-bootorder-persistence](../open-problems/firmware-bootorder-persistence.md)
 records a firmware that reads a `BootOrder` write back correctly and
 loses it at the reset. On such a firmware, the one-shot is the only
 preference that survives, and a capsule's reboot consumes it. The boot
@@ -309,7 +313,7 @@ what it left open.
   the proven slot still leads. The answer is
   `status.firmware.bootOrderKept`, and the handover requires `true`.
   It does not change the policy for release trials, which
-  [firmware-bootorder-persistence](open-problems/firmware-bootorder-persistence.md)
+  [firmware-bootorder-persistence](../open-problems/firmware-bootorder-persistence.md)
   still holds.
 - **The ESP of the next boot.** `init` keeps the link
   `/run/liken/proven-esp` pointed at the proven slot's mountpoint, and
@@ -353,7 +357,7 @@ belongs to `firmware-operator`'s plans 07 and 08, which use it.
 
 ## The firmware version in Machine status
 
-[Milestone 65](../../plans/completed/65-prometheus-metrics.md) names
+[Milestone 65](../../../plans/completed/65-prometheus-metrics.md) names
 the metrics `liken_firmware_info` and `liken_firmware_update_pending`
 as waiting on a firmware version in `Machine` status. `FirmwareStatus`
 in `machine/status.go` carries the boot mode, `BootCurrent`,
@@ -363,6 +367,13 @@ board's firmware version and date under `/sys/class/dmi/id` as
 One new field, read from there and printed at boot by the console
 parity rule, closes that gap. `firmware-operator` does not need it,
 because its scan reads the version from fwupd.
+
+Set aside on 2026-10-23. Each `Firmware` object's status already
+records the version that fwupd reads from each machine, and the
+releases a catalog offers for it. A second copy of the board's
+version in `Machine` status would be a second source for the same
+fact, so the version stays on the `Firmware` objects that
+`firmware-operator` writes.
 
 ## What the lab can measure
 
@@ -393,7 +404,7 @@ overwrites fwupd's update. A deployment that runs fwupd now should do
 it with no release staged, and expect a capsule not to apply. A
 Secure Boot database update writes no boot variable, and stick-1 took
 one this way
-([plan 05](../../firmware-operator/plans/completed/05-rehearsal.md#the-real-write-on-stick-1)).
+([plan 05](../../../firmware-operator/plans/completed/05-rehearsal.md#the-real-write-on-stick-1)).
 
 An update that resets NVRAM no longer strands the machine, because the
 proven slot holds a loader that a firmware at its defaults finds. An

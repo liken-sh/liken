@@ -13,16 +13,16 @@ package main
 // about to publish, and observeDevices takes the very device list
 // that the ResourceSlice is about to carry.
 //
-// Three metrics from the plan's table are missing, because the
-// machine holds no fact for them yet:
+// Three metrics from the plan's table are missing:
 //
 //   - liken_upgrade_duration_seconds. Measuring an upgrade from
 //     staged to booted needs a staging time that survives the
 //     reboot, and the system release record carries no timestamp.
-//   - liken_firmware_info and liken_firmware_update_pending. Status
-//     reports the firmware's boot entries and nothing about its
-//     version. Reading a BIOS version, and updating one, is
-//     plans/33-firmware-updates.md.
+//   - liken_firmware_info and liken_firmware_update_pending. The
+//     firmware's version and the updates offered for it are status
+//     on the Firmware objects that firmware-operator writes, and
+//     Machine status reports only the firmware's boot entries. So
+//     these metrics are not this program's to export.
 
 import (
 	"fmt"

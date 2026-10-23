@@ -2,7 +2,7 @@
 
 This directory holds the design documents of `firmware-operator`, the
 add-on that loads and updates the firmware of the devices on `liken`
-machines. Root [plan 81](../../plans/81-firmware.md) records which
+machines. Root [plan 81](../../plans/completed/81-firmware.md) records which
 component owns each kind of firmware.
 
 Each `plans/` directory numbers its own plans. A new plan takes the
@@ -51,3 +51,4 @@ the API server with the CA of its `ServiceAccount`.
 | [06](completed/06-applying-a-database-update.md) | Built: the write of a Secure Boot database update inside a reboot turn that the OS grants and holds, with the `Applied` condition |
 | [07](completed/07-rehearsing-a-capsule.md) | Built: the rehearsal of a capsule against copies of the firmware tables and of the ESP of the next boot |
 | [08](completed/08-applying-a-capsule.md) | Built: the write of a capsule inside a turn, with the one-shot boot that the OS hands over, drilled on the `lab` fleet |
+| [09](09-cleaning-up-after-a-capsule.md) | Proposed: the record of the firmware's own result for a capsule, and the removal of fwupd's boot entry and updater after it |

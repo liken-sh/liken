@@ -147,7 +147,7 @@ fault.** The lab pins Debian's OVMF in `dev-cluster/firmware/`,
 because the host's edk2 2025.11 can read a kernel's leftover data as
 an IGVM memory map after a warm reset and loop forever in
 PciHostBridgeDxe, before systemd-boot runs. `firmware/fetch.sh` gives
-the mechanism, and `liken/plans/88-disruptions.md` records the
+the mechanism, and `liken/plans/completed/88-disruptions.md` records the
 evidence. If a guest hangs anyway, check that its QEMU reads
 `firmware/dist/<version>/OVMF_CODE_4M.fd`, then power-cycle it: kill
 its QEMU process and `make run` it again. To read a hung guest's

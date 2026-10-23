@@ -4,8 +4,10 @@ Proposed on 2026-10-19. Steps 1 to 3 of [Order](#order) were built on
 2026-10-19, except the report of missing kernel firmware, and the test
 cluster's guide camera loaded with no hand-run `Job` on 2026-10-20.
 Steps 4 to 6 were built on 2026-10-20. Release 1 of `liken`
-milestone 88, the first part of step 7, was built on 2026-10-21. The
-rest of steps 7 and 8 is not built.
+milestone 88, the first part of step 7, was built on 2026-10-21, and
+the rest of steps 7 and 8 on 2026-10-22. The report of missing kernel
+firmware stays in `liken`'s milestone 87, which is open. The drill of a
+capsule on a real board has not run.
 This plan records which component owns each part of firmware in
 `liken`. The component plans hold the
 design.
@@ -14,15 +16,15 @@ design.
 
 | Kind | Example | Owner | Plan |
 |---|---|---|---|
-| The kernel loads it from the image | i915 and wifi blobs | the OS image | `liken` [milestone 32](../liken/plans/completed/32-hardware-support-in-the-image.md), built |
-| The host uploads it each time a device appears | a QHY guide camera on a bare FX2 chip | `firmware-operator`, a `Firmware` with `upload` | `firmware-operator` [plan 01](../firmware-operator/plans/completed/01-uploads.md) |
-| The device keeps it across a power cycle | UEFI, a dock, an SSD | `firmware-operator`, a `Firmware` with `update` | `firmware-operator` plans [03](../firmware-operator/plans/completed/03-discovery.md) to [08](../firmware-operator/plans/completed/08-applying-a-capsule.md), and `liken` milestones [33](../liken/plans/33-firmware-updates.md) and [88](../liken/plans/88-disruptions.md) for the capabilities they use |
+| The kernel loads it from the image | i915 and wifi blobs | the OS image | `liken` [milestone 32](../../liken/plans/completed/32-hardware-support-in-the-image.md), built |
+| The host uploads it each time a device appears | a QHY guide camera on a bare FX2 chip | `firmware-operator`, a `Firmware` with `upload` | `firmware-operator` [plan 01](../../firmware-operator/plans/completed/01-uploads.md) |
+| The device keeps it across a power cycle | UEFI, a dock, an SSD | `firmware-operator`, a `Firmware` with `update` | `firmware-operator` plans [03](../../firmware-operator/plans/completed/03-discovery.md) to [08](../../firmware-operator/plans/completed/08-applying-a-capsule.md), and `liken` milestones [33](../../liken/plans/completed/33-firmware-updates.md) and [88](../../liken/plans/completed/88-disruptions.md) for the capabilities they use |
 
 ## The boundaries
 
 **The OS publishes facts and guards the boot chain.** It knows nothing
 about vendor firmware. `liken`'s
-[milestone 87](../liken/plans/87-firmware-facts-a-machine-publishes.md)
+[milestone 87](../../liken/plans/87-firmware-facts-a-machine-publishes.md)
 adds the USB bus and device numbers to each device in a machine's
 `ResourceSlice`, and reports in `status.hardware.missingFirmware` the
 files that the kernel requested and did not find. The OS offers
@@ -46,7 +48,7 @@ function of the OS.
 
 **A component that runs a device ships the device's `upload` rules**
 next to the image that holds the firmware bytes. observatory-operator
-[plan 23](../observatory-operator/plans/completed/23-firmware-before-the-driver.md)
+[plan 23](../../observatory-operator/plans/completed/23-firmware-before-the-driver.md)
 ships one for each rule in INDI's `85-qhyccd.rules`, in a
 kustomization of its own that a cluster applies when it runs
 `firmware-operator`.

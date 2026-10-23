@@ -8,8 +8,8 @@ applies a Secure Boot database update,
 [plan 07](07-rehearsing-a-capsule.md) rehearses a capsule, and
 [plan 08](08-applying-a-capsule.md) applies one. The OS offers the
 reboot turn and the other capabilities they use, in `liken`'s
-[milestone 88](../../../liken/plans/88-disruptions.md)
-and [milestone 33](../../../liken/plans/33-firmware-updates.md). The
+[milestone 88](../../../liken/plans/completed/88-disruptions.md)
+and [milestone 33](../../../liken/plans/completed/33-firmware-updates.md). The
 split also settled [Who makes the write](#questions-for-the-full-design):
 `firmware-operator`'s pod writes inside the turn, and `init` does not.
 
@@ -19,7 +19,7 @@ any machine writes, a rehearsal runs the install against a copy of
 the machine's firmware variables and records in status exactly what
 the install would write. The parts that write the boot chain stay in
 the OS, in `liken`'s
-[milestone 33](../../../liken/plans/33-firmware-updates.md), which also
+[milestone 33](../../../liken/plans/completed/33-firmware-updates.md), which also
 lists what the OS must build first. The rehearsal ran by hand on
 liken-1, under [The rehearsal on liken-1](#the-rehearsal-on-liken-1).
 Real writes ran on a lab guest under OVMF, under [The real writes

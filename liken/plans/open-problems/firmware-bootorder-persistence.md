@@ -39,7 +39,7 @@ which the kernel fails before starting `init`.
 Since 2026-10-22, `init` reads at power-on, before it writes, whether
 the proven slot leads `BootOrder`, and reports it as
 `status.firmware.bootOrderKept`
-([milestone 33, as built](../33-firmware-updates.md#as-built)). Every
+([milestone 33, as built](../completed/33-firmware-updates.md#as-built)). Every
 shutdown asserts that order, so `false` is the mismatch this problem
 describes, with no record kept. Only the handover of `BootNext` to a
 `Disruption`'s requester reads it. Release trials still arm as before,

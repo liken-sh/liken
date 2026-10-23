@@ -38,7 +38,7 @@ driver (milestone 11) publishes the devices.
 One part does not exist yet: a release that carries an artifact for
 one machine. The fetcher writes every artifact in the release document
 to every slot, and the bundle sums all artifacts against one
-fleet-wide slot size. [Milestone 33](33-firmware-updates.md) needs the
+fleet-wide slot size. [Milestone 33](completed/33-firmware-updates.md) needs the
 same artifact for fwupd, and its prerequisites section gives the
 proposed design. Both plans wait on this one prerequisite.
 

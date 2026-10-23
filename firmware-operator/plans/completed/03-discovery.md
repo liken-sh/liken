@@ -15,7 +15,7 @@ offers for it, and records both in the cluster. It installs nothing.
 [plan 05](05-rehearsal.md) applies an approved version, one
 machine at a time. The three plans replace the stub
 [plan 02](../rejected/02-updates.md). Root
-[plan 81](../../../plans/81-firmware.md) records which component owns
+[plan 81](../../../plans/completed/81-firmware.md) records which component owns
 each kind of firmware.
 
 ## The problem

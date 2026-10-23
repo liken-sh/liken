@@ -118,7 +118,7 @@ An update to the machine's own firmware, that is UEFI capsules, NIC
 NVRAM, and SSD firmware through fwupd and LVFS, is a different job.
 The items this milestone adds are inert bytes. fwupd is an agent that
 writes to the boot chain that liken owns. That work has its
-own milestone (plans/33-firmware-updates.md), and it waits until bare
+own milestone (plans/completed/33-firmware-updates.md), and it waits until bare
 metal exists.
 
 The TPM needs no blobs, and it belongs to the hardening tier. IPMI and

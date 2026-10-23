@@ -11,7 +11,7 @@ have not run. `firmware-operator`'s
 `Firmware` resource and the pods that write firmware into a device
 when it appears. This plan ships the `Firmware` objects for QHY
 cameras and the files they need in `indi-qhy`. The operator's own code
-does not change. Root [plan 81](../../../plans/81-firmware.md) records
+does not change. Root [plan 81](../../../plans/completed/81-firmware.md) records
 the boundary between the components.
 
 ## The problem

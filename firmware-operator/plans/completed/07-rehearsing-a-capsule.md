@@ -2,7 +2,7 @@
 
 Proposed on 2026-10-21. Built on 2026-10-22, and drilled with plan
 08 on the `lab` fleet ([As built](#as-built)). This plan extends the rehearsal of
-[plan 05](completed/05-rehearsal.md) from the Secure Boot databases to
+[plan 05](05-rehearsal.md) from the Secure Boot databases to
 capsules, so a person who approves a board firmware update reads what
 the install would write before anything writes it. It writes nothing
 real, and it needs nothing from the OS. [Plan
@@ -32,7 +32,7 @@ scan image. No capsule was offered to liken-1 or stick-1 in the plan
 The rehearsal copies the ESP of the next boot beside the variables,
 and points `FWUPD_UEFI_ESP_PATH` at the copy. The ESP of the next boot
 is the proven slot's, which `liken`'s
-[milestone 33](../../liken/plans/33-firmware-updates.md) names with
+[milestone 33](../../../liken/plans/completed/33-firmware-updates.md) names with
 the link `/run/liken/proven-esp`. The check then allows exactly the capsule's writes and refuses
 everything else:
 
@@ -51,7 +51,7 @@ everything else:
 Under OVMF, fwupd 2.1.1 wrote exactly these in NVRAM mode, and did not
 write `BootOrder`. In capsule-on-disk mode it wrote only the capsule
 under `\EFI\UpdateCapsule` and `OsIndications`
-([milestone 33, the firmware under QEMU](../../liken/plans/33-firmware-updates.md#the-firmware-under-qemu)).
+([milestone 33, the firmware under QEMU](../../../liken/plans/completed/33-firmware-updates.md#the-firmware-under-qemu)).
 
 The record names each variable and file written, with its size and
 SHA-256, and the ESP's free space against the files' size.

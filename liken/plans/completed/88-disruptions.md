@@ -9,7 +9,8 @@ rolled to liken-1 and stick-1 on the same day
 `spec.hold`, and the policy that keeps `spec.approvedHash` from service
 accounts were built and drilled on the `lab` fleet on 2026-10-22
 ([Stage 2: hold as built](#stage-2-hold-as-built)). The rest of stage 2
-is not built. Five
+was set aside on 2026-10-22
+([Stage 2: other requesters](#stage-2-other-requesters)). Five
 reviews from different angles read an earlier draft on the same day,
 and this version answers them
 ([Considered and set aside](#considered-and-set-aside)).
@@ -27,7 +28,7 @@ shares one drain and one reboot, including a request that arrives
 while the machine is still cordoned. A `Manual` machine's person
 approves one `Disruption`, and that approval cannot carry over to a
 later request. Turns are still granted through the ledger in
-`Cluster` status that [milestone 82](completed/82-the-cluster-records-each-reboot-turn.md)
+`Cluster` status that [milestone 82](82-the-cluster-records-each-reboot-turn.md)
 built, so the budget stays one compare-and-swap. The move takes two
 releases, and each one works beside machines on the release before
 it.
@@ -36,8 +37,8 @@ The work has two stages. This milestone's first stage moves every
 reboot and restart that `liken` makes today onto `Disruption`s. The
 second opens `Disruption`s to other components: `firmware-operator`
 writes firmware inside a turn
-([its plan 06](../../firmware-operator/plans/completed/06-applying-a-database-update.md)),
-and [milestone 34](34-gpu-add-ons.md)'s GPU add-ons can do the same.
+([its plan 06](../../../firmware-operator/plans/completed/06-applying-a-database-update.md)),
+and [milestone 34](../34-gpu-add-ons.md)'s GPU add-ons can do the same.
 [Milestone 33](33-firmware-updates.md) holds the rest of the OS's part
 of firmware updates.
 
@@ -275,7 +276,10 @@ requester needs them:
   can join the next turn that its machine takes for a release. The
   requester can do this on its own: it watches the machine's
   `Disruption`s and files its request when another one is pending, or
-  when its own deadline passes.
+  when its own deadline passes. Set aside on 2026-10-22:
+  `firmware-operator` files its request as soon as a rehearsal passes,
+  because an update that waits for a release can wait without bound
+  ([its plan 06, as built](../../../firmware-operator/plans/completed/06-applying-a-database-update.md#as-built)).
 - **Approval out of the requester's reach.** A component that can
   create a `Disruption` must not be able to set `spec.approvedHash` on
   a `Manual` machine. A `ValidatingAdmissionPolicy` limits that field
@@ -295,7 +299,7 @@ decide the order:
 - machine-operator's binary on each node is that node's release, from
   the node-local `installed` tag. Its pod template, its RBAC, and the
   CRDs come from the AddOn manifests that a leader's boot writes
-  ([system-pods-lag-the-booted-release](open-problems/system-pods-lag-the-booted-release.md)).
+  ([system-pods-lag-the-booted-release](../open-problems/system-pods-lag-the-booted-release.md)).
   So a follower can run the new binary before the cluster has the new
   CRDs or the RBAC to read them, and a rollback can leave a new binary
   with the old RBAC.

@@ -13,7 +13,7 @@ cycle, such as a board's UEFI, a dock, or an SSD. fwupd does the
 vendor-specific work. The operator also proposes updates from the LVFS
 catalog, and a person adopts each proposal. The parts that change the
 machine's boot chain stay in the OS, in `liken`'s
-[milestone 33](../../../liken/plans/33-firmware-updates.md), which also
+[milestone 33](../../../liken/plans/completed/33-firmware-updates.md), which also
 lists what the OS must build first.
 
 ## The declaration

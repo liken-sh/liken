@@ -14,12 +14,12 @@ and did not find, which was the open problem `missing-firmware-status`.
 ## The boundary
 
 The word "firmware" names three different jobs. Root
-[plan 81](../../plans/81-firmware.md) records the owner of each:
+[plan 81](../../plans/completed/81-firmware.md) records the owner of each:
 
 | | The kernel loads it | The host uploads it | The device keeps it |
 |---|---|---|---|
 | Example | i915 and wifi blobs | a QHY guide camera on a Cypress FX2 chip | UEFI, a dock, an SSD |
-| Owner | the OS image, [milestone 32](completed/32-hardware-support-in-the-image.md) | `firmware-operator`, its plan 01 | `firmware-operator`, its plan 02, with the OS parts in [milestone 33](33-firmware-updates.md) |
+| Owner | the OS image, [milestone 32](completed/32-hardware-support-in-the-image.md) | `firmware-operator`, its plan 01 | `firmware-operator`, its plan 02, with the OS parts in [milestone 33](completed/33-firmware-updates.md) |
 
 `firmware-operator` is an add-on. It ships apart from the OS, like
 display-operator, and a cluster that does not install it loses
@@ -144,3 +144,16 @@ cycle, because a warm reboot did not show the controller's request.
   new path to machine-operator, or machine-operator itself.
 - **Whether the install-time hardware report prints
   `missingFirmware`**, before the machine joins a cluster.
+
+## A possible direction: supplying the file
+
+This milestone only reports a missing file, and the fix is a release
+whose image ships it. A later design could let `firmware-operator`
+supply the file instead, as a second target of its `upload` action.
+The operator would read `missingFirmware`, copy the file from a vendor
+image into a directory that the kernel searches through
+`firmware_class.path`, and make the driver probe again. The OS would
+have to give each node a writable directory for that path, because the
+image is read-only. A driver that requests its firmware only once, at
+boot or when the device opens, may need a reboot before it reads the
+file. Nothing here is decided, and this milestone does not depend on it.

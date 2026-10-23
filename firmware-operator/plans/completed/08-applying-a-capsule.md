@@ -6,11 +6,11 @@ machines of the `lab` fleet on OVMF with a test device
 board has taken a capsule through the operator. This plan applies an approved
 board firmware update, a capsule, inside a reboot turn, and proves it
 from the next scan. It follows plans
-[06](completed/06-applying-a-database-update.md), which applies a database
+[06](06-applying-a-database-update.md), which applies a database
 update in a turn, and [07](07-rehearsing-a-capsule.md), which
 rehearses a capsule. It uses every capability that `liken`'s
-[milestone 33](../../liken/plans/33-firmware-updates.md) offers: the
-turn of [milestone 88](../../liken/plans/88-disruptions.md),
+[milestone 33](../../../liken/plans/completed/33-firmware-updates.md) offers: the
+turn of [milestone 88](../../../liken/plans/completed/88-disruptions.md),
 the one-shot boot of the turn's reboot, a boot order that survives a
 reset, and the ESP of the next boot.
 
@@ -29,7 +29,7 @@ loads, and a failure there has no slot to fall back to.
    hands `BootNext` over arms no release trial, so a release that
    shares the turn takes a later reboot, and the capsule's reboot
    carries no other release
-   ([milestone 33, as built](../../liken/plans/33-firmware-updates.md#as-built)).
+   ([milestone 33, as built](../../../liken/plans/completed/33-firmware-updates.md#as-built)).
 3. **Write.** After the drain, the apply pod runs `fwupdtool install`
    against the real variable store and the ESP of the next boot, which
    the pod mounts through `/run/liken/proven-esp`. Unlike
@@ -89,7 +89,7 @@ hardening tier signs `liken`'s boot chain.
 Under OVMF built with `FmpDevicePkg` and `EsrtFmpDxe` first, with a
 test capsule. That firmware took a capsule through fwupd in a
 throwaway guest
-([milestone 33, the firmware under QEMU](../../liken/plans/33-firmware-updates.md#the-firmware-under-qemu)),
+([milestone 33, the firmware under QEMU](../../../liken/plans/completed/33-firmware-updates.md#the-firmware-under-qemu)),
 and the lab fleet needs it as one more `FIRMWARE` choice. Then one real board update on a testbed machine that a
 catalog offers one, after plan 07's rehearsal of it.
 
@@ -124,6 +124,7 @@ catalog offers one, after plan 07's rehearsal of it.
 - **Not built.** The cleanup of step 6: fwupd's entry and its updater
   stay, and a later capsule uses them again. The record of the
   capsule's own status variable beside the version.
+  [Plan 09](../09-cleaning-up-after-a-capsule.md) holds both.
 
 ## The lab drill
 

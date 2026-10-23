@@ -13,11 +13,11 @@ the OS grants through a `Disruption`, and proves it from the next
 scan. It follows
 [plan 05](05-rehearsal.md), whose rehearsal records the one
 append that the update makes, and it needs `liken`'s
-[milestone 88](../../../liken/plans/88-disruptions.md)
+[milestone 88](../../../liken/plans/completed/88-disruptions.md)
 for the turn, in its second stage, which adds `spec.hold`. It needs
 nothing else from the OS, because a database
 update writes no variable that `init` reads or writes
-([milestone 33](../../../liken/plans/33-firmware-updates.md)). Capsules
+([milestone 33](../../../liken/plans/completed/33-firmware-updates.md)). Capsules
 follow in plans [07](07-rehearsing-a-capsule.md) and
 [08](08-applying-a-capsule.md).
 
