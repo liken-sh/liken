@@ -38,7 +38,14 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /scan ./scan
 COPY --from=notices go.sh /
 RUN CGO_ENABLED=0 sh /go.sh /notices ./scan
 
-FROM ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7
+# The image is Ubuntu 26.10, an interim release with nine months of
+# support, and not the 26.04 LTS, for its fwupd. A KEK release on the
+# LVFS names the machine's platform key as another device that must
+# be present. fwupd 2.1.6 checks each release's requirements again
+# after it has added every device. 26.04's fwupd 2.1.1 checks them once
+# when it adds the KEK device, before it adds the platform key's
+# device, so it never offers the KEK release.
+FROM ubuntu:26.10@sha256:93e29beff5257b2cdf1c024d831f6d2997e53655a653ff76a811fc9e6564a719
 # fwupd-signed holds fwupd-efi's updater, fwupdx64.efi, which a
 # capsule's install in NVRAM mode copies to the ESP: the firmware boots
 # it once, and it hands the capsule to the firmware.
@@ -47,7 +54,7 @@ FROM ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a
 # gives the same fwupd to every build, so a change in what a scan finds
 # comes from the machine or the catalog and never from a new package. A
 # new fwupd is a new date here.
-ENV SNAPSHOT=20261015
+ENV SNAPSHOT=20261022
 # snapshot.ubuntu.com answers only over HTTPS, and the Ubuntu image has
 # no CA bundle. The bundle is the one that the trust component pins for
 # every image of liken, with its notice. The scan program also reads it,
@@ -58,7 +65,7 @@ RUN echo 'Acquire::https::CAInfo "/etc/ssl/certs/ca-certificates.crt";' >/etc/ap
     && printf '%s\n' \
         'Types: deb' \
         "URIs: https://snapshot.ubuntu.com/ubuntu/${SNAPSHOT}T000000Z/" \
-        'Suites: resolute resolute-updates resolute-security' \
+        'Suites: stonking stonking-updates stonking-security' \
         'Components: main universe' \
         'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg' \
         >/etc/apt/sources.list.d/snapshot.sources \

@@ -129,12 +129,14 @@ func TestARehearsalWritesNothingOnTheMachine(t *testing.T) {
 	}
 }
 
-func TestARehearsalInstallsThePinnedCabinetOnItsDevice(t *testing.T) {
+// fwupdtool install with a device ID plans the release for that device
+// twice, so the rehearsal names only the cabinet.
+func TestARehearsalInstallsThePinnedCabinetOnce(t *testing.T) {
 	r := newRehearsalRig(t)
 
 	r.rehearse(context.Background())
 
-	want := []string{"install", "--assume-yes", "--no-reboot-check", filepath.Join(r.workDir, "update.cab"), dbxID}
+	want := []string{"install", "--assume-yes", "--no-reboot-check", filepath.Join(r.workDir, "update.cab")}
 	if got := r.tool.calls[len(r.tool.calls)-1]; !slices.Equal(got, want) {
 		t.Errorf("the last call is %q, want %q", got, want)
 	}

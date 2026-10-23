@@ -154,3 +154,29 @@ Each time is the scan of the new boot that read the version. The
 firmware's log of each update boot reads `ValidateFmpCapsule - Success`
 and `SetTheImage() LastAttemptStatus: 0`. Each machine came back on its
 proven slot, and the approval read `Installed`.
+
+## The drill on fwupd 2.1.6
+
+On 2026-10-23 the scan image moved from Ubuntu 26.04's fwupd 2.1.1 to
+Ubuntu 26.10's fwupd 2.1.6, because 2.1.1 never offered stick-1 the
+KEK release for its platform key. The lab catalog gained version 4,
+and the same three machines ran version 3.
+
+The first build failed every rehearsal with `Device ... does not
+currently allow updates`. The rehearsal named the device's ID, so
+fwupdtool planned the release twice for the device. The first install
+staged the capsule and hid the device until the next boot, and fwupd
+2.1.6 refuses an install on a hidden device (fwupd commit
+`d311af1d5`). With the cabinet alone, one install ran and passed.
+
+On the fixed build, each rehearsal staged 2 variables and 1 file:
+fwupd reused the updater's boot entry and `fwupdx64.efi` from the
+earlier drill. Version 4 rolled to the three machines in turn:
+
+| Release | node-3 | node-4 | node-5 |
+|---|---|---|---|
+| 4 | 13:24:46Z | 13:25:15Z | 13:25:45Z |
+
+Each time is the scan of the new boot that read the version. Each
+machine came back on its proven slot, and the approval read
+`Installed`.

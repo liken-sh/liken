@@ -177,7 +177,7 @@ func (r rehearser) rehearseAppend(ctx context.Context) (RehearsalResult, rehears
 	if err != nil {
 		return rehearsalFailed("reading the copy before the install: %v", err), rehearsedAppend{}
 	}
-	_, stderr, installErr := r.fwupdtool(ctx, "install", "--assume-yes", "--no-reboot-check", cabPath, r.deviceID)
+	stderr, installErr := r.install(ctx, cabPath)
 	after, err := readVariables(varsDir)
 	if err != nil {
 		return rehearsalFailed("reading the copy after the install: %v", err), rehearsedAppend{}
@@ -212,6 +212,20 @@ func (r rehearser) rehearseAppend(ctx context.Context) (RehearsalResult, rehears
 			len(appended), variable, len(writes), free)
 	}
 	return result, rehearsedAppend{before: before[variable], writes: writes}
+}
+
+// install runs fwupdtool install on the cabinet alone, with no device
+// ID. With a device ID, fwupdtool plans the release for the device
+// twice: once as a member of the device's composite group, which holds
+// the device itself, and once more as the device. fwupd then installs
+// a database update twice, and refuses the second install of a
+// capsule, because the first hides the device until the next boot.
+// With the cabinet alone, fwupd plans each device that the cabinet
+// matches once, and the judges refuse a write to anything but the
+// approved device's variable or capsule.
+func (r rehearser) install(ctx context.Context, cabPath string) ([]byte, error) {
+	_, stderr, err := r.fwupdtool(ctx, "install", "--assume-yes", "--no-reboot-check", cabPath)
+	return stderr, err
 }
 
 // fetchCabinet downloads the approved cabinet, checks it against the

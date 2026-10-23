@@ -9,9 +9,9 @@ package main
 // the capsule to the firmware at the next boot. In capsule-on-disk mode
 // it writes the capsule to \EFI\UpdateCapsule and sets a bit in
 // OsIndications, and the firmware reads the file itself. fwupd 2.1.1
-// wrote exactly these under OVMF (liken's milestone 33, the firmware
-// under QEMU), and with some firmware it adds the updater's entry to
-// the end of BootOrder.
+// and 2.1.6 wrote exactly these under OVMF (liken's milestone 33, the
+// firmware under QEMU), and with some firmware fwupd adds the updater's
+// entry to the end of BootOrder.
 //
 // A rehearsal runs the install against a copy of the variables and a
 // copy of the ESP's \EFI directory, and passes when the install wrote
@@ -99,7 +99,7 @@ func (r rehearser) rehearseCapsuleIn(ctx context.Context, device fwupdDevice) Re
 	if err != nil {
 		return rehearsalFailed("reading the ESP's copy before the install: %v", err)
 	}
-	_, stderr, installErr := r.fwupdtool(ctx, "install", "--assume-yes", "--no-reboot-check", cabPath, r.deviceID)
+	stderr, installErr := r.install(ctx, cabPath)
 	if installErr != nil {
 		return rehearsalFailed("fwupdtool install: %s", lastLine(stderr))
 	}

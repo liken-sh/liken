@@ -125,6 +125,20 @@ func TestARehearsalPassesACapsule(t *testing.T) {
 
 // The copy of the ESP holds its \EFI directory alone, which is where
 // fwupd looks and writes, so a rehearsal does not copy a release.
+// fwupdtool install with a device ID plans the release for that device
+// twice, and fwupd refuses the second install of a capsule, so the
+// rehearsal names only the cabinet, as the apply does.
+func TestACapsuleRehearsalInstallsThePinnedCabinetOnce(t *testing.T) {
+	r := newCapsuleRig(t)
+
+	r.rehearse(context.Background())
+
+	want := []string{"install", "--assume-yes", "--no-reboot-check", filepath.Join(r.workDir, "update.cab")}
+	if got := r.tool.calls[len(r.tool.calls)-1]; !slices.Equal(got, want) {
+		t.Errorf("the last call is %q, want %q", got, want)
+	}
+}
+
 func TestACapsuleRehearsalCopiesTheESPsEFIDirectory(t *testing.T) {
 	r := newCapsuleRig(t)
 

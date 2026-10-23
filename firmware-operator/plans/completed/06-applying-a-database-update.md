@@ -365,3 +365,10 @@ read 2023.
 The two payloads carry 1492 and 1503 bytes of signature lists, 2995
 in all, and `db` grew by exactly 2995 bytes. So the firmware stored
 each list once, and the second pair of writes added nothing.
+
+On 2026-10-23 the second pair had a cause. The rehearsal ran
+`fwupdtool install` with the device's ID, and with an ID fwupdtool
+plans the release twice for that device: once as a member of the
+device's composite group, which holds the device itself, and once as
+the device. fwupd 2.1.1 ran both installs. The rehearsal now names
+only the cabinet, so a rehearsal of this cabinet records two writes.
