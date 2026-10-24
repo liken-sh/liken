@@ -186,18 +186,16 @@ func TestServeWebhooksRunsUntilTheOperatorStops(t *testing.T) {
 		}
 		drain(answer.Body)
 		stop()
-		synctest.Wait()
 
 		if answer.StatusCode != http.StatusNoContent {
 			t.Errorf("status = %d, want %d", answer.StatusCode, http.StatusNoContent)
 		}
-		select {
-		case err := <-returned:
-			if err != nil {
-				t.Fatalf("err = %v, want a clean shutdown", err)
-			}
-		default:
-			t.Fatal("the webhook server did not stop with the operator")
+		// Shutdown can wait on its poll timer for the idle connection to
+		// close, so the test blocks on the return and the bubble's clock
+		// fires the timer. A server that never stops leaves the bubble
+		// deadlocked, which fails the test.
+		if err := <-returned; err != nil {
+			t.Fatalf("err = %v, want a clean shutdown", err)
 		}
 	})
 }

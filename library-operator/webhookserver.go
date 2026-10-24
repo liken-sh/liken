@@ -181,13 +181,21 @@ func parseWebhookPath(urlPath string) (namespace, name string, ok bool) {
 // it. A failure to listen ends the process, because an operator that
 // reports a webhook address nothing answers is worse than one that
 // refuses to start.
+//
+// Serve returns as soon as Shutdown closes the listener, while Shutdown
+// still waits for the open connections to finish. So a clean stop waits
+// for Shutdown too, and a request in flight completes before the
+// operator exits. Only Shutdown makes Serve return ErrServerClosed, so
+// that wait always ends.
 func (o *operator) serveWebhooks(stopped context.Context, address string) error {
 	server := &http.Server{
 		Addr:              address,
 		Handler:           o.webhookHandler(),
 		ReadHeaderTimeout: webhookHeaderTimeout,
 	}
+	shutdown := make(chan struct{})
 	go func() {
+		defer close(shutdown)
 		<-stopped.Done()
 		// The shutdown takes a context of its own, because the one that
 		// ended is the signal to shut down.
@@ -208,5 +216,6 @@ func (o *operator) serveWebhooks(stopped context.Context, address string) error 
 	if err := server.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
+	<-shutdown
 	return nil
 }
