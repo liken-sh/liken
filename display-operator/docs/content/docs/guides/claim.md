@@ -149,6 +149,13 @@ first holds, so it remains pending until the first releases it. Use a
 [`Layout`](/docs/guides/layout/) when two workloads must share one
 screen.
 
+A client that hands the compositor YUV video frames can state each
+frame's color encoding and range through
+`wp_color_representation_manager_v1`. The compositor applies the
+stated values when a display plane shows the frame and when the GL
+renderer draws it. A frame with no stated values converts as BT.709
+at limited range.
+
 ## Ask for a mode
 
 A claim can state the resolution its screen runs. The operator

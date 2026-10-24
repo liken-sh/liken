@@ -99,10 +99,14 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # Korean, for the reason the player image installs it: the text on both screens
 # is text a household writes, Source Sans 3 carries none of those characters,
 # and a face with no CJK draws a blank box for each one. The runtime below has
-# no package manager, so the file comes out of a Debian stage on the suite the
-# base is built from.
-FROM debian:trixie-slim AS fonts
-RUN apt-get update \
+# no package manager, so the file comes out of a Debian stage on the same
+# Debian image and the same snapshot date as the base. snapshot.sh comes from
+# the vulkan directory, the build context named builder, and SNAPSHOT is
+# vulkan's version.
+FROM debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84 AS fonts
+ARG SNAPSHOT
+COPY --from=builder snapshot.sh snapshot.sha256 /
+RUN sh /snapshot.sh "$SNAPSHOT" \
     && apt-get install -y --no-install-recommends fonts-droid-fallback \
     && rm -rf /var/lib/apt/lists/*
 

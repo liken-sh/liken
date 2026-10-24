@@ -130,12 +130,17 @@ a `revision`. Each one publishes under the tag `<version>-<revision>`.
 **A new snapshot.** All five move together, because a library that two
 bases hold must be the same file in both. The steps are in
 `vulkan/README.md`: check that the snapshot exists, write the sha256
-of its three `InRelease` files into `vulkan/snapshot.sha256`, read the
-digest of the newest `debian:trixie-slim`, set `version` to the date
+of its `InRelease` file into `vulkan/snapshot.sha256`, read the
+digest of the newest `debian:sid-slim`, set `version` to the date
 and `revision` to 1 in all five `package.toml` files, set the digest
-in every `FROM debian:trixie-slim` line, run `make workflows`, run
+in every `FROM debian:sid-slim` line, run `make workflows`, run
 `make images`, and run each image's smoke check. Compare the package
 versions with the old snapshot and report the ones that moved.
+The suite is sid, Debian unstable, so a new date can bring a new
+major release of Mesa, ffmpeg, mpv, or Weston. Read the upstream
+release notes of each major release that moved, as in step 3, and
+roll the dev builds to the `liken-1` testbed before any other
+cluster takes them. Root plan 82 gives the reasons for sid.
 `astrometry`, the plate solver, is not a base, but it installs from
 the same snapshot through `vulkan/snapshot.sh`, and
 `vulkan/snapshot.sha256` holds the checksums of one date. So it moves

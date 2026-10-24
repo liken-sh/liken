@@ -3,7 +3,7 @@
 name = "ffmpeg"
 # The date of the snapshot.debian.org archive that the build installs
 # from, as YYYYMMDD. Every base on Debian uses the same date.
-version = "20261019"
+version = "20261024"
 revision = 1
 license = "MIT"
 
@@ -11,7 +11,7 @@ license = "MIT"
 # Each one is a label of the image, sh.liken.upstream.<name>. A new
 # snapshot date updates them.
 [package.upstream]
-ffmpeg = "7:7.1.5-0+deb13u1"
+ffmpeg = "7:9.0.2-4"
 
 # shellcheck and the whitespace checks, from .pre-commit-config.yaml.
 [[jobs]]

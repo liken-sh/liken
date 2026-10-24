@@ -2,6 +2,4 @@
 # install from, by its name under /var/lib/apt/lists. snapshot.sh checks
 # them after apt-get update. A new snapshot date needs new lines here:
 # the names carry the date, so a date with no lines fails the build.
-0584fba32e13e0ab8285fb16c27adea1ec03a73669c18702821094fd6ca86675  snapshot.debian.org_archive_debian_20261019T000000Z_dists_trixie_InRelease
-3a2fe5a30311e1edcf3983be9a0d74f0e3c625c379ac34e386ae64ce7cb4841f  snapshot.debian.org_archive_debian_20261019T000000Z_dists_trixie-updates_InRelease
-a2adb375ee0ba03cf8b9c707ba780ddf37cd6d91b069c36fcd28e07466cfae5f  snapshot.debian.org_archive_debian-security_20261019T000000Z_dists_trixie-security_InRelease
+4da8d5c29c27fc2bac36ed560882b3a7579c28032bcfc070ec4ca009120e492c  snapshot.debian.org_archive_debian_20261024T000000Z_dists_sid_InRelease

@@ -5,10 +5,11 @@
 #
 # Debian puts every libweston backend in one package, so apt cannot
 # express what this image needs. Installing weston pulls FreeRDP,
-# neatvnc, GStreamer, PipeWire, libavcodec and flite, because
-# rdp-backend.so, vnc-backend.so and remoting-plugin.so are in the same
-# package as drm-backend.so. This script takes the four modules the
-# operator uses and omits the other eight.
+# neatvnc and PipeWire, because rdp-backend.so, vnc-backend.so and
+# pipewire-backend.so are in the same package as drm-backend.so. The
+# weston and libweston-16-0 packages hold seventeen modules. This
+# script takes the four modules the operator uses and omits the other
+# thirteen.
 #
 # Run it in a builder that has the packages installed. It writes a
 # rootfs to the first directory named on the command line, less every
@@ -64,9 +65,9 @@ seeds="
 /usr/bin/weston
 /usr/bin/wayland-info
 /usr/bin/ddcutil
-$lib/libweston-14/drm-backend.so
-$lib/libweston-14/headless-backend.so
-$lib/libweston-14/gl-renderer.so
+$lib/libweston-16/drm-backend.so
+$lib/libweston-16/headless-backend.so
+$lib/libweston-16/gl-renderer.so
 $lib/weston/ivi-shell.so
 $lib/libEGL_mesa.so.0
 $lib/gbm/dri_gbm.so

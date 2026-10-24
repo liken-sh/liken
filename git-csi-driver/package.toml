@@ -7,10 +7,12 @@ license = "MIT"
 prefix = "git"
 
 # The Event writer of the shared kubernetes module, the scripts that
-# put the license notices in the image, and the CA bundle that the
-# image copies.
+# put the license notices in the image, the CA bundle that the image
+# copies, and the vulkan directory. The closure installs git from the
+# Debian snapshot, with vulkan's snapshot.sh and vulkan's version as
+# the snapshot date.
 [depends]
-components = ["kubernetes", "notices", "trust"]
+components = ["kubernetes", "notices", "trust", "vulkan"]
 
 # gofmt, vet, a tidy check of go.mod, and one run of the tests that
 # checks for races and writes the coverage profile, then the coverage
@@ -47,5 +49,6 @@ deploy = "deploy"
 [[outputs.images]]
 name = "git-csi-driver"
 file = "Dockerfile"
-contexts = { kubernetes = "kubernetes", notices = "notices" }
+contexts = { builder = "vulkan", kubernetes = "kubernetes", notices = "notices" }
+versions = { SNAPSHOT = "vulkan" }
 smoke = "git-csi-driver/smoke/git-csi-driver.sh"

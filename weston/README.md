@@ -9,8 +9,7 @@ operator's pod runs this compositor.
 ## What the image holds
 
 Debian puts every libweston backend in one package, and installing
-`weston` pulls FreeRDP, neatvnc, GStreamer, PipeWire, libavcodec, and
-flite. `weston-closure.sh` takes the modules that the operator uses:
+`weston` pulls FreeRDP, neatvnc, and PipeWire. `weston-closure.sh` takes the modules that the operator uses:
 the DRM and headless backends, the GL renderer, the ivi-shell, the EGL
 and GBM loaders, and Mesa's DRI drivers. It collects them and every
 library they load, and then leaves out every file that the `vulkan`

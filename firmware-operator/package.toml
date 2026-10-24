@@ -13,7 +13,7 @@ name = "firmware-operator"
 license = "MIT"
 
 [depends]
-components = ["kubernetes", "notices", "trust"]
+components = ["kubernetes", "notices", "trust", "vulkan"]
 
 [docs]
 prefix = "firmware"
@@ -56,12 +56,14 @@ name = "firmware-operator"
 file = "Dockerfile"
 contexts = { kubernetes = "kubernetes", notices = "notices" }
 
-# The scan image holds fwupd from a dated Ubuntu snapshot and the scan
-# program that the operator runs in a privileged pod on each machine,
-# and as `scan rehearse` in an unprivileged pod that rehearses an
-# approved install. The snapshot is read over HTTPS, so the build takes
-# the trust component's CA bundle.
+# The scan image holds fwupd from the Debian snapshot of the base images
+# and the scan program that the operator runs in a privileged pod on
+# each machine, and as `scan rehearse` in an unprivileged pod that
+# rehearses an approved install. The build takes the vulkan directory
+# as the context builder, for snapshot.sh, and vulkan's version as the
+# snapshot date.
 [[outputs.images]]
 name = "firmware-operator-scan"
 file = "scan/Dockerfile"
-contexts = { kubernetes = "kubernetes", notices = "notices" }
+contexts = { builder = "vulkan", kubernetes = "kubernetes", notices = "notices" }
+versions = { SNAPSHOT = "vulkan" }

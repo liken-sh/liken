@@ -39,11 +39,15 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=${VERSION}" -o /a
 COPY --from=notices go.sh /
 RUN CGO_ENABLED=0 sh /go.sh /notices .
 
-# The suite is pinned because the closure script names pipewire 0.3,
-# spa 0.2, and wireplumber 0.5. A Debian that moves one of them fails
-# this build, which is the report that the module set needs reading
-# again.
-FROM debian:trixie-slim AS closure
+# The closure installs from the same Debian image and the same
+# snapshot date as the base images. The closure script names pipewire
+# 0.3, spa 0.2, and wireplumber 0.5, so a snapshot that moves one of
+# them fails this build. That failure is the report that the module
+# set needs reading again. snapshot.sh comes from the vulkan directory,
+# the build context named builder, and SNAPSHOT is vulkan's version.
+FROM debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84 AS closure
+ARG SNAPSHOT
+COPY --from=builder snapshot.sh snapshot.sha256 /
 # pipewire-bin provides the daemon, pw-dump, which is how the operator
 # reads the graph, and pw-cli's family. The daemon creates every sink,
 # from the node declarations the declare container writes before it
@@ -60,7 +64,8 @@ FROM debian:trixie-slim AS closure
 # pipes pw-record into. pw-record itself is pw-cat from pipewire-bin
 # above, and libopus is already here under the bluez5 codec plugin,
 # so opus-tools adds the encoder alone.
-RUN apt-get update \
+RUN sh /snapshot.sh "$SNAPSHOT" \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
         pipewire \
         pipewire-bin \

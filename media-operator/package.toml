@@ -61,6 +61,11 @@ deploy = "deploy"
 # Every image that builds from this module's go.mod takes the shared
 # kubernetes module as a build context, because go.mod replaces it with
 # ../kubernetes. The screen images build from the Rust workspace alone.
+#
+# The player and the screen images install a fallback font from the
+# Debian snapshot of the bases. So they take the vulkan directory as
+# the context builder, for snapshot.sh, and vulkan's version as the
+# snapshot date.
 [[outputs.images]]
 name = "media-operator"
 file = "Dockerfile"
@@ -70,21 +75,24 @@ contexts = { kubernetes = "kubernetes", notices = "notices" }
 [[outputs.images]]
 name = "media-operator-player"
 file = "Dockerfile.player"
-contexts = { brand = "brand", kubernetes = "kubernetes", notices = "notices" }
+contexts = { brand = "brand", builder = "vulkan", kubernetes = "kubernetes", notices = "notices" }
+versions = { SNAPSHOT = "vulkan" }
 smoke = "media-operator/smoke/media-operator-player.sh"
 
 [[outputs.images]]
 name = "media-operator-idle"
 file = "Dockerfile.screen"
 target = "idle"
-contexts = { brand = "brand", media-screen = "media-screen", notices = "notices" }
+contexts = { brand = "brand", builder = "vulkan", media-screen = "media-screen", notices = "notices" }
+versions = { SNAPSHOT = "vulkan" }
 smoke = "media-operator/smoke/media-operator-idle.sh"
 
 [[outputs.images]]
 name = "media-operator-display"
 file = "Dockerfile.screen"
 target = "display"
-contexts = { brand = "brand", media-screen = "media-screen", notices = "notices" }
+contexts = { brand = "brand", builder = "vulkan", media-screen = "media-screen", notices = "notices" }
+versions = { SNAPSHOT = "vulkan" }
 smoke = "media-operator/smoke/media-operator-display.sh"
 
 [[outputs.images]]

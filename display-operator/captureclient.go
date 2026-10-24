@@ -8,8 +8,12 @@ package main
 // wayland.go and adds the requests the watch never sends: wl_shm's
 // pool and buffer, and weston_capture_v1's create and capture.
 //
-// The protocol is weston-output-capture.xml from libweston-14-dev
-// 14.0.2-5, read 2026-09-16, at version 1 of both of its interfaces.
+// The protocol is weston-output-capture.xml from the weston 16.0.0 tag.
+// weston 16.0.0 serves both of its interfaces at version 2, and this
+// client binds version 1. Version 2 lets a source send several format
+// events and closes them with formats_done. To a version 1 client,
+// weston sends one format event and one size event, which is what
+// this client reads.
 
 import (
 	"errors"
@@ -65,16 +69,18 @@ const outputScaleEvent uint16 = 3
 // The framebuffer source "copies the contents of the final
 // framebuffer", "temporarily disables all use of hardware planes",
 // and "is always available", so a film on an overlay plane is
-// composited into the frame. writeback is "often not available" in
-// Weston 14, and blending omits the output's color transform.
+// composited into the frame. writeback is "often not available", and
+// blending exists only when color management is active on the output.
 //
 // Disabling the planes is what costs the compositor a pair of log
-// lines for every frame this API takes on stick-1. weston 14.0.2's
+// lines for every frame this API takes on stick-1. weston 16.0.0's
 // output-capture.c calls weston_output_disable_planes_incr() while a
-// capture is pending, compositor.c then skips assign_planes and puts
-// every view on the primary plane, and that repaint's atomic commit
-// comes back EINVAL from this chip: kms.c prints "atomic: couldn't
-// commit new state: Invalid argument". The second line,
+// capture is pending, and the DRM backend then builds a renderer-only
+// state, which draws every view into the primary plane
+// (backend-drm/state-propose.c). On stick-1 that repaint's atomic
+// commit came back EINVAL from this chip, with weston 14.0.2: kms.c
+// prints "atomic: couldn't commit new state: Invalid argument". The
+// commit has not been read again on stick-1 with weston 16.0.0. The second line,
 // "repaint-flush failed", prints strerror(errno) after the state has
 // been freed, so its errno is whatever the free path left and is not
 // a second cause. drm.c then calls

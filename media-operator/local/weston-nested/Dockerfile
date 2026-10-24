@@ -8,7 +8,7 @@
 # build the weston image of this checkout as the context weston, the
 # snapshot scripts as the context builder, and the snapshot date as
 # VERSION.
-FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS backend
+FROM debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84 AS backend
 ARG VERSION
 COPY --from=builder snapshot.sh snapshot.sha256 /
 RUN sh /snapshot.sh "$VERSION" \
@@ -17,8 +17,8 @@ RUN sh /snapshot.sh "$VERSION" \
     && rm -rf /var/lib/apt/lists/*
 
 FROM weston
-COPY --from=backend /usr/lib/x86_64-linux-gnu/libweston-14/wayland-backend.so \
-     /usr/lib/x86_64-linux-gnu/libweston-14/wayland-backend.so
+COPY --from=backend /usr/lib/x86_64-linux-gnu/libweston-16/wayland-backend.so \
+     /usr/lib/x86_64-linux-gnu/libweston-16/wayland-backend.so
 COPY --from=backend /usr/lib/x86_64-linux-gnu/libwayland-cursor.so.0 \
      /usr/lib/x86_64-linux-gnu/libwayland-egl.so.1 \
      /usr/lib/x86_64-linux-gnu/

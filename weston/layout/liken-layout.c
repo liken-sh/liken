@@ -1,7 +1,7 @@
 /*
  * liken-layout.so is the operator's ivi-shell controller. weston loads
  * it from the modules= list in [core], and it finds the shell through
- * ivi_layout_get_api. weston 14 has no ivi-module= key.
+ * ivi_layout_get_api. weston 16 has no ivi-module= key.
  *
  * The module is an executor. It creates one ivi layer and one black
  * background view per output, opens and closes one Wayland listening
@@ -289,20 +289,15 @@ apply_stack(struct output_layer *ol)
 	free(order);
 }
 
-static int
-background_label(struct weston_surface *surface, char *buffer, size_t len)
-{
-	(void)surface;
-	return snprintf(buffer, len, "liken-layout background");
-}
-
 /* The background covers the whole output and is opaque, so weston
- * repaints black where the operator placed nothing. */
+ * repaints black where the operator placed nothing. weston takes the
+ * label with the curtain's surface and frees it when the surface goes,
+ * so the label is a copy on the heap. */
 static void
 add_background(struct output_layer *ol)
 {
 	struct weston_curtain_params params = {
-		.get_label = background_label,
+		.label = strdup("liken-layout background"),
 		.r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f,
 		.pos = ol->output->pos,
 		.width = ol->output->width,
@@ -335,7 +330,12 @@ drop_background(struct output_layer *ol)
  * logical size, which makes the layer transform an identity. Surface
  * rectangles are then in the output's logical pixels, and ivi-layout
  * adds the output's position in global space itself
- * (ivi-layout.c, calc_surface_to_global_matrix_and_mask_to_weston_surface). */
+ * (ivi-layout.c, calc_surface_to_global_matrix_and_mask_to_weston_surface).
+ *
+ * weston repaints an output only after the shell marks it ready, and
+ * ivi-shell leaves that mark to its controller. So the layer marks the
+ * output ready once its background is up, at startup and for an output
+ * that a hotplug adds. Without the mark, the output stays dark. */
 static void
 add_output_layer(struct weston_output *output)
 {
@@ -361,6 +361,7 @@ add_output_layer(struct weston_output *output)
 	ivi->commit_changes();
 
 	add_background(ol);
+	ivi->screen_ready(output);
 }
 
 /* A curtain holds the size it was built with, so a resized output gets

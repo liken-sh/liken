@@ -108,13 +108,13 @@ target "vulkan" {
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
   args = {
-    VERSION = "20261019"
+    VERSION = "20261024"
   }
-  tags       = ["ghcr.io/liken-sh/vulkan:20261019-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache", "type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache-20261019-1"]
+  tags       = ["ghcr.io/liken-sh/vulkan:20261024-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache", "type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache-20261024-1"]
   cache-to = concat(
     CACHE_WRITE == "vulkan" ? ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "vulkan" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache-20261019-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "vulkan" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache-20261024-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -126,13 +126,13 @@ target "astrometry" {
     "builder" = "vulkan"
   }
   args = {
-    VERSION = "20261019"
+    VERSION = "20261024"
   }
-  tags       = ["ghcr.io/liken-sh/astrometry:20261019-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache", "type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache-20261019-1"]
+  tags       = ["ghcr.io/liken-sh/astrometry:20261024-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache", "type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache-20261024-1"]
   cache-to = concat(
     CACHE_WRITE == "astrometry" ? ["type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "astrometry" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache-20261019-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "astrometry" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache-20261024-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -483,13 +483,13 @@ target "weston" {
     "vulkan" = "target:vulkan"
   }
   args = {
-    VERSION = "20261019"
+    VERSION = "20261024"
   }
-  tags       = ["ghcr.io/liken-sh/weston:20261019-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache", "type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20261019-1"]
+  tags       = ["ghcr.io/liken-sh/weston:20261024-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache", "type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20261024-1"]
   cache-to = concat(
     CACHE_WRITE == "weston" ? ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "weston" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20261019-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "weston" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20261024-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -566,11 +566,13 @@ target "audio-operator" {
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
   contexts = {
+    "builder" = "vulkan"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
   }
   args = {
     VERSION = VERSION
+    SNAPSHOT = "20261024"
   }
   tags       = ["ghcr.io/liken-sh/audio-operator:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/audio-operator:buildcache"]
@@ -668,13 +670,13 @@ target "vaapi" {
     "vulkan" = "target:vulkan"
   }
   args = {
-    VERSION = "20261019"
+    VERSION = "20261024"
   }
-  tags       = ["ghcr.io/liken-sh/vaapi:20261019-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache", "type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache-20261019-1"]
+  tags       = ["ghcr.io/liken-sh/vaapi:20261024-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache", "type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache-20261024-1"]
   cache-to = concat(
     CACHE_WRITE == "vaapi" ? ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "vaapi" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache-20261019-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "vaapi" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache-20261024-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -687,13 +689,13 @@ target "ffmpeg" {
     "vaapi" = "target:vaapi"
   }
   args = {
-    VERSION = "20261019"
+    VERSION = "20261024"
   }
-  tags       = ["ghcr.io/liken-sh/ffmpeg:20261019-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache", "type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache-20261019-1"]
+  tags       = ["ghcr.io/liken-sh/ffmpeg:20261024-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache", "type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache-20261024-1"]
   cache-to = concat(
     CACHE_WRITE == "ffmpeg" ? ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "ffmpeg" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache-20261019-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "ffmpeg" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache-20261024-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -805,12 +807,14 @@ target "firmware-operator-scan" {
   dockerfile = "scan/Dockerfile"
   platforms  = ["linux/amd64"]
   contexts = {
+    "builder" = "vulkan"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
     "trust" = "target:trust"
   }
   args = {
     VERSION = VERSION
+    SNAPSHOT = "20261024"
   }
   tags       = ["ghcr.io/liken-sh/firmware-operator-scan:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/firmware-operator-scan:buildcache"]
@@ -822,12 +826,14 @@ target "git-csi-driver" {
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
   contexts = {
+    "builder" = "vulkan"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
     "trust" = "target:trust"
   }
   args = {
     VERSION = VERSION
+    SNAPSHOT = "20261024"
   }
   tags       = ["ghcr.io/liken-sh/git-csi-driver:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/git-csi-driver:buildcache"]
@@ -943,13 +949,13 @@ target "mpv" {
     "ffmpeg" = "target:ffmpeg"
   }
   args = {
-    VERSION = "20261019"
+    VERSION = "20261024"
   }
-  tags       = ["ghcr.io/liken-sh/mpv:20261019-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache", "type=registry,ref=ghcr.io/liken-sh/mpv:buildcache-20261019-1"]
+  tags       = ["ghcr.io/liken-sh/mpv:20261024-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache", "type=registry,ref=ghcr.io/liken-sh/mpv:buildcache-20261024-1"]
   cache-to = concat(
     CACHE_WRITE == "mpv" ? ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "mpv" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache-20261019-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "mpv" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache-20261024-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -975,12 +981,14 @@ target "media-operator-player" {
   platforms  = ["linux/amd64"]
   contexts = {
     "brand" = "brand"
+    "builder" = "vulkan"
     "kubernetes" = "kubernetes"
     "mpv" = "target:mpv"
     "notices" = "notices"
   }
   args = {
     VERSION = VERSION
+    SNAPSHOT = "20261024"
   }
   tags       = ["ghcr.io/liken-sh/media-operator-player:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/media-operator-player:buildcache"]
@@ -994,12 +1002,14 @@ target "media-operator-idle" {
   platforms  = ["linux/amd64"]
   contexts = {
     "brand" = "brand"
+    "builder" = "vulkan"
     "media-screen" = "media-screen"
     "notices" = "notices"
     "vulkan" = "target:vulkan"
   }
   args = {
     VERSION = VERSION
+    SNAPSHOT = "20261024"
   }
   tags       = ["ghcr.io/liken-sh/media-operator-idle:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/media-operator-idle:buildcache"]
@@ -1013,12 +1023,14 @@ target "media-operator-display" {
   platforms  = ["linux/amd64"]
   contexts = {
     "brand" = "brand"
+    "builder" = "vulkan"
     "media-screen" = "media-screen"
     "notices" = "notices"
     "vulkan" = "target:vulkan"
   }
   args = {
     VERSION = VERSION
+    SNAPSHOT = "20261024"
   }
   tags       = ["ghcr.io/liken-sh/media-operator-display:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/media-operator-display:buildcache"]

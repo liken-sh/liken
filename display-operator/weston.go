@@ -27,7 +27,7 @@ package main
 // writes the config, and the compositor role, which runs weston as its
 // child and starts it again after each restart the operator orders.
 //
-// The flags match what the lab machine runs today, weston 14.0.2 with
+// The flags are the ones weston 16.0.0 takes, with
 // LIBSEAT_BACKEND=noop. That backend opens the device path with a
 // plain open(), which is all a container can do, and the kernel hands
 // DRM master to the first process to open the card with no capability
@@ -131,7 +131,7 @@ func westonConfig(outputs []Output, modes map[string]string) string {
 # operator is the one program that tells it what to place.
 shell=ivi-shell.so
 
-# liken-layout.so is this operator's controller. weston 14 has no
+# liken-layout.so is this operator's controller. weston 16 has no
 # ivi-module= key: a controller is an ordinary module in this list,
 # loaded after the shell, and it finds the shell through
 # ivi_layout_get_api.
@@ -445,16 +445,14 @@ func westonArgv(card, configPath, socketName, logScopes string) []string {
 // client capture every output. The container log is readable only by
 // someone who can read the pod logs in the operator's namespace.
 //
-// The cost of a scope is the volume of the log. weston 14 already
-// subscribes its flight recorder, a 5 MiB ring buffer in memory, to
-// log and drm-backend, so it formats every drm-backend line whether
-// or not this variable is set. The variable adds the write to the
-// container log. Each atomic test and commit prints every property it
-// sets, so by a count of the weston 14 source one repaint writes
-// about a hundred lines. A film repaints on every frame, so at 24
-// frames a second the log grows by thousands of lines each second.
-// The DaemonSet sets the variable on every machine at once, so set it
-// while you read the plane decisions, and clear it after.
+// The cost of a scope is the volume of the log. weston 16 subscribes
+// its flight recorder, a 5 MiB ring buffer in memory, to log alone, so
+// weston formats no drm-backend line until this variable names the
+// scope. Then each atomic test and commit prints every property it
+// sets, so one repaint writes many lines. A film repaints on every
+// frame, so the log grows by many lines each second while a film
+// plays. The DaemonSet sets the variable on every machine at once, so
+// set it while you read the plane decisions, and clear it after.
 const westonLogScopesVariable = "WESTON_LOG_SCOPES"
 
 // loggerScopes builds the value of weston's --logger-scopes flag from

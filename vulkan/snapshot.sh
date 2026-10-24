@@ -13,7 +13,10 @@
 # there. One InRelease file covers every component of a suite, so the
 # checksums below cover an added component too.
 #
-# The archive and the security archive both come from the snapshot at
+# The suite is sid, Debian unstable, where every upload lands first, so
+# a new date brings the newest release of each package. sid has no
+# security suite: a fix arrives as an ordinary upload, and a build
+# takes it with the next date. The archive comes from the snapshot at
 # midnight UTC of that day. The Release files of an old snapshot are
 # past their Valid-Until date, so apt must not check it. apt still
 # checks every Release file against the Debian archive keys, and every
@@ -44,14 +47,7 @@ rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*
 cat >/etc/apt/sources.list.d/snapshot.sources <<EOF
 Types: deb
 URIs: http://snapshot.debian.org/archive/debian/$stamp/
-Suites: trixie trixie-updates
-Components: $components
-Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp
-Check-Valid-Until: no
-
-Types: deb
-URIs: http://snapshot.debian.org/archive/debian-security/$stamp/
-Suites: trixie-security
+Suites: sid
 Components: $components
 Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp
 Check-Valid-Until: no

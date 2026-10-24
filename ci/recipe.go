@@ -93,7 +93,7 @@ func Recipe(root string, components map[string]*Component, c *Component) (string
 			}
 			lines["remote "+remote.URL+" "+remote.Checksum] = true
 		}
-		target, err := newBakeTarget(root, c, image, producer)
+		target, err := newBakeTarget(root, c, image, producer, components)
 		if err != nil {
 			return "", err
 		}

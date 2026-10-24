@@ -41,10 +41,17 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}"
 COPY --from=notices go.sh /
 RUN CGO_ENABLED=0 sh /go.sh /notices .
 
-FROM debian:trixie-slim AS closure
+# The closure installs from the same Debian image and the same
+# snapshot date as the base images. snapshot.sh comes from the vulkan
+# directory, the build context named builder, and SNAPSHOT is vulkan's
+# version.
+FROM debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84 AS closure
+ARG SNAPSHOT
+COPY --from=builder snapshot.sh snapshot.sha256 /
 # git is the program the driver runs. openssh-client is the transport a
 # deploy key uses.
-RUN apt-get update \
+RUN sh /snapshot.sh "$SNAPSHOT" \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
         git \
         openssh-client \

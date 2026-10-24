@@ -79,3 +79,55 @@ func TestTheBakeFileNeedsEachDockerfile(t *testing.T) {
 		t.Error("the bake file rendered with no Dockerfile")
 	}
 }
+
+func versionsTree(t *testing.T, app string) string {
+	t.Helper()
+	return writeTree(t, map[string]string{
+		"base/package.toml":  "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 2\n[[outputs.images]]\nname = \"base\"\n",
+		"base/Dockerfile":    "FROM scratch\n",
+		"loose/package.toml": "[package]\nname = \"loose\"\n[[outputs.images]]\nname = \"loose\"\n",
+		"loose/Dockerfile":   "FROM scratch\n",
+		"app/package.toml":   app,
+		"app/Dockerfile":     "FROM debian AS closure\nARG SNAPSHOT\n",
+		"other/package.toml": "[package]\nname = \"other\"\nversion = \"20261001\"\nrevision = 1\n[[outputs.images]]\nname = \"other\"\n",
+		"other/Dockerfile":   "FROM scratch\n",
+	})
+}
+
+func TestTheBakeFilePassesAPinnedDependencysVersionAsABuildArgument(t *testing.T) {
+	root := versionsTree(t, "[package]\nname = \"app\"\n[depends]\ncomponents = [\"base\"]\n"+
+		"[[outputs.images]]\nname = \"app\"\nversions = { SNAPSHOT = \"base\" }\n")
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := Bake(root, components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "  args = {\n    VERSION = VERSION\n    SNAPSHOT = \"20260928\"\n  }\n"
+	if !strings.Contains(string(out), want) {
+		t.Errorf("the bake file lacks:\n%s\n\nin:\n%s", want, out)
+	}
+}
+
+func TestTheBakeFileRefusesAVersionArgument(t *testing.T) {
+	for name, versions := range map[string]string{
+		"an unknown component": `{ SNAPSHOT = "missing" }`,
+		"a tracked component":  `{ SNAPSHOT = "loose" }`,
+		"no dependency":        `{ SNAPSHOT = "other" }`,
+		"the name VERSION":     `{ VERSION = "base" }`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := versionsTree(t, "[package]\nname = \"app\"\n[depends]\ncomponents = [\"base\", \"loose\"]\n"+
+				"[[outputs.images]]\nname = \"app\"\nversions = "+versions+"\n")
+			components, err := LoadComponents(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Bake(root, components); err == nil {
+				t.Errorf("the bake file rendered with versions = %s", versions)
+			}
+		})
+	}
+}

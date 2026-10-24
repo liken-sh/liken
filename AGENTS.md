@@ -181,8 +181,8 @@ from its own directory at the same commit. No Dockerfile names a
 published tag of a base.
 
 The base images, `vulkan`, `vaapi`, `ffmpeg`, `mpv`, and `weston`, are
-pinned components: each states a version, the date of the Debian
-snapshot it installs from, and a revision, and publishes under the tag
+pinned components: each states a version, the date of the snapshot of
+Debian sid that it installs from, and a revision, and publishes under the tag
 `<version>-<revision>`. A change to a base's recipe needs a new
 revision, and so does each pinned component that builds on it. CI fails
 when a recipe changed with no new revision. Each base lists the

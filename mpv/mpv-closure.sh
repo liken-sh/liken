@@ -26,10 +26,10 @@ shift
 # are named in the configuration and loaded by no traced run; they are
 # tens of kilobytes each and are here so a path the trace missed does
 # not fail at the first play. libpulse opens libpulsecommon at process
-# start, whether or not --ao=pulse is selected, and its name carries
-# Debian's soname version the way weston-closure.sh names libweston 14:
-# a suite that bumps it fails this build, which is the report that the
-# list needs reading again.
+# start, whether or not --ao=pulse is selected. Its file name carries
+# the PulseAudio version, as the libweston directory in
+# weston-closure.sh does. A snapshot that changes the version fails
+# this build, which is the report that the list needs reading again.
 seeds="
 /usr/bin/mpv
 $lib/pipewire-0.3/libpipewire-module-adapter.so

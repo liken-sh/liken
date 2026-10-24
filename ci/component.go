@@ -133,6 +133,11 @@ type Image struct {
 	// Contexts are named build contexts, each a directory relative to
 	// the repository root, for a Dockerfile's COPY --from=<name>.
 	Contexts map[string]string `toml:"contexts"`
+	// Versions are build arguments that each take the version of a
+	// pinned component that this one depends on, by its name. A
+	// tracked image that installs from the Debian snapshot takes the
+	// date as vulkan's version, so the date is stated in one place.
+	Versions map[string]string `toml:"versions"`
 	// Aliases are more names for the same image, pushed with the same
 	// tags.
 	Aliases []string `toml:"aliases"`

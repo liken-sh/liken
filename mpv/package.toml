@@ -4,7 +4,7 @@
 name = "mpv"
 # The date of the snapshot.debian.org archive that the build installs
 # from, as YYYYMMDD. Every base on Debian uses the same date.
-version = "20261019"
+version = "20261024"
 revision = 1
 license = "MIT"
 
@@ -12,8 +12,8 @@ license = "MIT"
 # Each one is a label of the image, sh.liken.upstream.<name>. A new
 # snapshot date updates them.
 [package.upstream]
-mpv = "0.40.0-3+deb13u1"
-pipewire = "1.4.2-1"
+mpv = "0.41.0-2+b4"
+pipewire = "1.6.9-2"
 
 # shellcheck and the whitespace checks, from .pre-commit-config.yaml.
 [[jobs]]

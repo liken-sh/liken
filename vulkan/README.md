@@ -78,42 +78,49 @@ both, and a node holds it once.
 
 ## Bump the snapshot
 
+Every image of the repository that installs Debian packages into what
+it ships installs from one snapshot of sid, Debian unstable, on one
+date. Root [plan 82](../plans/completed/82-debian-sid.md) gives the reasons. sid
+moves every day, so a new date can bring a new major release of Mesa,
+ffmpeg, or Weston, and each bump is an upgrade to test.
+
 1. Pick the date. The snapshot at `YYYYMMDDT000000Z` is the newest one
    before midnight UTC of that day. Check that it exists:
 
-       curl -sI http://snapshot.debian.org/archive/debian/YYYYMMDDT000000Z/dists/trixie/Release
+       curl -sI http://snapshot.debian.org/archive/debian/YYYYMMDDT000000Z/dists/sid/Release
 
-2. Replace the lines of `snapshot.sha256` with the sha256 of the three
-   `InRelease` files of the date. Fetch each one over https, which
-   checks the host:
+2. Replace the checksum line of `snapshot.sha256` with the sha256 of
+   the date's `InRelease` file. Fetch it over https, which checks the
+   host:
 
-       for dist in debian/YYYYMMDDT000000Z/dists/trixie \
-           debian/YYYYMMDDT000000Z/dists/trixie-updates \
-           debian-security/YYYYMMDDT000000Z/dists/trixie-security; do
-         curl -sfL https://snapshot.debian.org/archive/$dist/InRelease | sha256sum
-       done
+       curl -sfL https://snapshot.debian.org/archive/debian/YYYYMMDDT000000Z/dists/sid/InRelease | sha256sum
 
-   Each line names the file as apt stores it under
-   `/var/lib/apt/lists`, as the lines there now do, with the new date.
-3. Read the digest of the newest `debian:trixie-slim`:
+   The line names the file as apt stores it under
+   `/var/lib/apt/lists`, as the line there now does, with the new date.
+3. Read the digest of the newest `debian:sid-slim`:
 
-       docker buildx imagetools inspect debian:trixie-slim
+       docker buildx imagetools inspect debian:sid-slim
 
 4. In all five bases, `vulkan`, `vaapi`, `ffmpeg`, `mpv`, and
    `weston`, set `version` to the date and `revision` to 1 in
-   `package.toml`, and set the digest in each `FROM debian:trixie-slim`
-   line of the `Dockerfile`. The nested compositor in
-   `media-operator/local/weston-nested/Dockerfile` names the digest
-   too.
-   `astrometry` installs from the same snapshot, because this
-   directory's `snapshot.sha256` holds the checksums of one date, so
-   set its `version`, `revision`, and digest the same way.
+   `package.toml`, and set the digest in each `FROM debian:sid-slim`
+   line of the `Dockerfile`. `astrometry` installs from the same
+   snapshot, because this directory's `snapshot.sha256` holds the
+   checksum of one date, so set its `version`, `revision`, and digest
+   the same way. Every other `FROM debian:sid-slim` line in the
+   repository names the same digest, so that each one installs the
+   glibc that the bases carry: find them with
+   `git grep -l 'debian:sid-slim@'`.
 5. Run `make workflows` at the top of the repository. The bake file
    carries each base's version and tag.
 6. Run `make images` at the top of the repository. It builds every
    image, each base and each consumer, for this machine's platform.
    Then run each image's smoke check, the script that its
    `package.toml` names under `smoke`, with the image's reference.
+7. Compare the package versions with the old snapshot. A soname that
+   changed, such as `libLLVM.so.22`, fails a closure script that names
+   the old one, and a new major release of a program can drop a flag
+   that a component passes it.
 
 The `bump-components` skill under `.agents/skills` holds the whole
 procedure, with the rule for a new revision.

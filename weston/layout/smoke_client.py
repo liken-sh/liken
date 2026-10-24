@@ -244,9 +244,9 @@ def screenshooter(wayland_display):
 
     The tool is itself a weston_capture_v1 client, so the socket it
     connects through decides whether it reads complete or failed.
-    weston 14.0.2's tool exits 0 either way, so the proof is the
-    stderr and the file, and that is why this runs it without
-    check=True."""
+    weston 16.0.0's tool exits 0 either way, and it writes a file
+    either way, so the proof is the stderr and the pixels in the file.
+    That is why this runs it without check=True."""
     return subprocess.run(
         ("docker", "exec", "-e", "XDG_RUNTIME_DIR=/run/liken",
          "-e", "WAYLAND_DISPLAY=%s" % wayland_display,
@@ -322,24 +322,11 @@ def main():
     assert output.split() == ["output", CONNECTOR, "1280", "720", "1"], output
     report("output: %s" % output)
 
-    # The two capture proofs, before any surface is placed: the socket
-    # the capture sidecar uses reads a frame, and a client on any
-    # other socket is refused.
+    # The socket the capture sidecar uses reads a frame before any
+    # surface is placed.
     frame = capture(wait=0)
     report("the capture socket: weston-screenshooter wrote %s at %dx%d"
            % (frame.name, frame.width, frame.height))
-
-    for stale in glob.glob(os.path.join(SHOTS, "*.png")):
-        os.remove(stale)
-    refused = screenshooter("wayland-0")
-    left = glob.glob(os.path.join(SHOTS, "*.png"))
-    report("wayland-0: weston-screenshooter wrote %d files and said: %s"
-           % (len(left), refused.stderr.strip().replace("\n", "; ")))
-    assert "unauthorized" in refused.stderr, (
-        "weston-screenshooter on wayland-0 did not say unauthorized: %s"
-        % refused.stderr.strip()
-    )
-    assert not left, "weston-screenshooter on wayland-0 wrote %s" % left
 
     control.expect_ok("listen %s %s" % (CLAIM_SOCKET, CONNECTOR))
     path = os.path.join(RUNTIME, CLAIM_SOCKET)
@@ -359,6 +346,26 @@ def main():
     frame = capture()
     assert_painted(frame, CLAIM_RECT, "the claim's surface")
     assert_nothing_outside(frame, [CLAIM_RECT])
+
+    # A client on any other socket is refused. The tool writes a file
+    # for a refused capture too, from a buffer that weston never
+    # filled, so the proof is weston's word in the stderr and a file
+    # with none of the surface that the capture socket just read.
+    for stale in glob.glob(os.path.join(SHOTS, "*.png")):
+        os.remove(stale)
+    refused = screenshooter("wayland-0")
+    leaked = [Frame(shot).painted_in(CLAIM_RECT)[0]
+              for shot in glob.glob(os.path.join(SHOTS, "*.png"))]
+    report("wayland-0: weston-screenshooter wrote %d files with %s pixels"
+           " of the claim's surface and said: %s"
+           % (len(leaked), leaked, refused.stderr.strip().replace("\n", "; ")))
+    assert "unauthorized" in refused.stderr, (
+        "weston-screenshooter on wayland-0 did not say unauthorized: %s"
+        % refused.stderr.strip()
+    )
+    assert not any(leaked), (
+        "weston-screenshooter on wayland-0 read %s pixels of the claim's surface"
+        % leaked)
 
     # A client on the shared socket belongs to no claim, and the module
     # reports it as wayland-0 whatever the client says about itself.

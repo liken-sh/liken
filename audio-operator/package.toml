@@ -3,8 +3,11 @@
 name = "audio-operator"
 license = "MIT"
 
+# The operator image's closure installs from the Debian snapshot, so it
+# takes the vulkan directory as the context builder, for snapshot.sh,
+# and vulkan's version as the snapshot date.
 [depends]
-components = ["kubernetes", "notices", "trust"]
+components = ["kubernetes", "notices", "trust", "vulkan"]
 
 [docs]
 prefix = "audio"
@@ -45,7 +48,8 @@ deploy = "deploy"
 name = "audio-operator"
 file = "Dockerfile"
 smoke = "audio-operator/smoke/audio-operator.sh"
-contexts = { kubernetes = "kubernetes", notices = "notices" }
+contexts = { builder = "vulkan", kubernetes = "kubernetes", notices = "notices" }
+versions = { SNAPSHOT = "vulkan" }
 
 # The CLI image carries the same version as the operator, so the base
 # binary pulls a CLI that never drifts from the operator it faces. It is

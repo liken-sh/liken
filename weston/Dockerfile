@@ -21,7 +21,7 @@
 
 # The shim needs no libudev to build, because its source declares the
 # two libudev types it names.
-FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS shim
+FROM debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84 AS shim
 ARG VERSION
 COPY --from=builder snapshot.sh snapshot.sha256 /
 RUN sh /snapshot.sh "$VERSION" \
@@ -36,28 +36,30 @@ RUN gcc -Wall -Wextra -Werror -shared -fPIC \
 # because it needs the compositor's development packages, which the
 # shim does not.
 #
-# ivi-layout-export.h is not in libweston-14-dev, so layout/ carries a
-# copy from the weston 14.0 tag. The .so links nothing: weston resolves
+# Debian installs ivi-layout-export.h in no package, so layout/ carries
+# a copy from the weston 16.0.0 tag. A new weston can add members in
+# the middle of the interface the header declares, so the copy changes
+# with weston. The .so links nothing: weston resolves
 # every libweston and libwayland symbol in it at dlopen, which is why
 # pkg-config gives only the include paths here.
-FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS layout
+FROM debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84 AS layout
 ARG VERSION
 COPY --from=builder snapshot.sh snapshot.sha256 /
 RUN sh /snapshot.sh "$VERSION" \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
         gcc libc6-dev pkg-config \
-        libweston-14-dev libwayland-dev libpixman-1-dev \
+        libweston-16-dev libwayland-dev libpixman-1-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY layout/liken-layout.c layout/ivi-layout-export.h /
 RUN gcc -Wall -Wextra -Werror -shared -fPIC \
-        $(pkg-config --cflags libweston-14 wayland-server pixman-1) \
+        $(pkg-config --cflags libweston-16 wayland-server pixman-1) \
         -o /liken-layout.so /liken-layout.c
 
-# weston-closure.sh names weston 14. A snapshot that moves weston to 15
-# fails this build, which is the report that the module set needs
-# reading again.
-FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS closure
+# weston-closure.sh names weston 16. A snapshot that moves weston to 17
+# fails this build, which is the report that the module set and the
+# copy of ivi-layout-export.h need reading again.
+FROM debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84 AS closure
 ARG VERSION
 COPY --from=builder snapshot.sh snapshot.sha256 /
 # libgl1-mesa-dri is what the GL renderer builds its EGL device from.

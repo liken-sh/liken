@@ -4,10 +4,13 @@
 # container that can start a second container, and the release image
 # has no shell and no test clients in it.
 #
-# The test builds a small image on the same Debian suite as the
-# release, with weston and its demo clients in it, starts weston
-# headless with the pixman renderer, then drives the control socket
-# from a Python client.
+# The test builds a small image from the same Debian image and the
+# same snapshot date as the release, with weston and its demo clients
+# in it, starts weston headless with the pixman renderer, then drives
+# the control socket from a Python client. The script reads the image
+# from the layout stage of weston/Dockerfile and the date from
+# weston/package.toml, so the module builds against the same libweston
+# as the one that ships.
 #
 # It asserts that a client on a per-claim socket is reported with that
 # socket's name and a client on the shared socket as wayland-0. It
@@ -44,17 +47,29 @@ trap cleanup EXIT
 docker rm -f "$weston_container" "$client_container" \
 	"$client_container-shared" "$client_container-again" >/dev/null 2>&1 || true
 
-echo "== building $image"
-docker build -q -t "$image" -f - "$here" >/dev/null <<'DOCKERFILE'
-FROM debian:trixie-slim
-RUN apt-get update \
+base=$(sed -n 's/^FROM \(debian:[^ ]*\) AS layout$/\1/p' "$here/../Dockerfile")
+snapshot=$(sed -n 's/^version = "\([0-9]*\)"$/\1/p' "$here/../package.toml")
+: "${base:?weston/Dockerfile names no debian image for the layout stage}"
+: "${snapshot:?weston/package.toml names no snapshot date}"
+
+echo "== building $image on $base at snapshot $snapshot"
+docker build -q -t "$image" -f - \
+	--build-arg BASE="$base" --build-arg VERSION="$snapshot" \
+	--build-context builder="$here/../../vulkan" \
+	"$here" >/dev/null <<'DOCKERFILE'
+ARG BASE
+FROM $BASE
+ARG VERSION
+COPY --from=builder snapshot.sh snapshot.sha256 /
+RUN sh /snapshot.sh "$VERSION" \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
-        weston libweston-14-dev gcc libc6-dev pkg-config \
+        weston libweston-16-dev gcc libc6-dev pkg-config \
         libwayland-dev libpixman-1-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY liken-layout.c ivi-layout-export.h /build/
 RUN gcc -Wall -Wextra -Werror -shared -fPIC \
-        $(pkg-config --cflags libweston-14 wayland-server pixman-1) \
+        $(pkg-config --cflags libweston-16 wayland-server pixman-1) \
         -o /usr/lib/x86_64-linux-gnu/weston/liken-layout.so /build/liken-layout.c
 DOCKERFILE
 

@@ -7,9 +7,10 @@
 #
 # Usage: inference-closure.sh <out> <base> <openvino archive> <deb>...
 #
-# Neither runtime is in Debian trixie, the snapshot the bases install
-# from, so both come from Intel's own release files, which the
-# Dockerfile fetches and checks by sha256. The script copies named
+# OpenVINO is not in Debian. sid, the suite the bases install from,
+# holds Intel's OpenCL runtime at an older release than the one the
+# Dockerfile names. So both runtimes come from Intel's own release
+# files, which the Dockerfile fetches and checks by sha256. The script copies named
 # files, not packages: the archive holds every plugin and frontend
 # OpenVINO builds, and the image needs four of them.
 #

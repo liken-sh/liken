@@ -38,55 +38,35 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /scan ./scan
 COPY --from=notices go.sh /
 RUN CGO_ENABLED=0 sh /go.sh /notices ./scan
 
-# fwupd comes from Debian 13's backports, which carry new upstream
-# releases of fwupd onto the stable release. fwupd publishes only its
-# source for Linux, so a distribution's package is the nearest one to
-# upstream. The scan needs fwupd 2.1.6 or later: a KEK release on the
-# LVFS names the machine's platform key as another device that must be
-# present, and fwupd 2.1.6 checks each release's requirements again
+# fwupd comes from sid, the Debian suite that the base images of
+# liken install from, at the same snapshot date. fwupd publishes only
+# its source for Linux, so a distribution's package is the nearest one
+# to upstream. The scan needs fwupd 2.1.6 or later: a KEK release on
+# the LVFS names the machine's platform key as another device that must
+# be present, and fwupd 2.1.6 checks each release's requirements again
 # after it has added every device. An older fwupd checks them once,
 # when it adds the KEK device, before the platform key's device exists,
-# so it never offers the KEK release. The image is the Debian image
-# that the base images of liken pin.
-FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
+# so it never offers the KEK release.
+#
+# A snapshot gives the same fwupd to every build, so a change in what a
+# scan finds comes from the machine or the catalog and never from a new
+# package. A new fwupd comes with a new snapshot date. snapshot.sh
+# comes from the vulkan directory, the build context named builder, and
+# SNAPSHOT is vulkan's version.
+FROM debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84
+ARG SNAPSHOT
+COPY --from=builder snapshot.sh snapshot.sha256 /
+# The scan program reads the CA bundle that the trust component pins
+# for every image of liken, to download the catalog.
+COPY --from=trust / /
 # fwupd-amd64-signed holds fwupd-efi's updater, fwupdx64.efi, which a
 # capsule's install in NVRAM mode copies to the ESP: the firmware boots
 # it once, and it hands the capsule to the firmware.
-#
-# The date of the snapshot.debian.org archive that fwupd installs from.
-# A snapshot gives the same fwupd to every build, so a change in what a
-# scan finds comes from the machine or the catalog and never from a new
-# package. A new fwupd is a new date here.
-ENV SNAPSHOT=20261019
-# The sources name https, with the CA bundle that the trust component
-# pins for every image of liken, so a host on the path cannot serve an
-# older InRelease file that Debian also signed. The Release files of an
-# old snapshot are past their Valid-Until date, so apt must not check
-# it. apt still checks every Release file against the Debian archive
-# keys. The scan program also reads the bundle, to download the
-# catalog.
-COPY --from=trust / /
-RUN echo 'Acquire::https::CAInfo "/etc/ssl/certs/ca-certificates.crt";' >/etc/apt/apt.conf.d/99snapshot-ca \
-    && rm -f /etc/apt/sources.list /etc/apt/sources.list.d/* \
-    && printf '%s\n' \
-        'Types: deb' \
-        "URIs: https://snapshot.debian.org/archive/debian/${SNAPSHOT}T000000Z/" \
-        'Suites: trixie trixie-updates trixie-backports' \
-        'Components: main' \
-        'Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp' \
-        'Check-Valid-Until: no' \
-        '' \
-        'Types: deb' \
-        "URIs: https://snapshot.debian.org/archive/debian-security/${SNAPSHOT}T000000Z/" \
-        'Suites: trixie-security' \
-        'Components: main' \
-        'Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp' \
-        'Check-Valid-Until: no' \
-        >/etc/apt/sources.list.d/snapshot.sources \
-    && apt-get update \
+RUN sh /snapshot.sh "$SNAPSHOT" \
+    && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        -t trixie-backports fwupd fwupd-amd64-signed \
-    && rm -rf /var/lib/apt/lists/*
+        fwupd fwupd-amd64-signed \
+    && rm -rf /var/lib/apt/lists/* /snapshot.sh /snapshot.sha256
 # The image holds the files of Debian packages, unmodified, and their
 # licenses require that each package's copyright file travel with it.
 # The Debian image keeps those files under /usr/share/doc. This list

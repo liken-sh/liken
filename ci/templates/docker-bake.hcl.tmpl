@@ -56,7 +56,8 @@ target "{% .Name %}" {
     "{% .Name %}" = "{% .Value %}"{% end %}
   }{% end %}
   args = {
-    VERSION = {% if .Pinned %}"{% .Version %}"{% else %}VERSION{% end %}
+    VERSION = {% if .Pinned %}"{% .Version %}"{% else %}VERSION{% end %}{% range .Args %}
+    {% .Name %} = "{% .Value %}"{% end %}
   }
   tags       = [{% range $i, $tag := .Tags %}{% if $i %}, {% end %}"{% $tag %}"{% end %}]
 {% if .Pinned %}  cache-from = ["type=registry,ref=ghcr.io/liken-sh/{% .Name %}:buildcache", "type=registry,ref=ghcr.io/liken-sh/{% .Name %}:buildcache-{% .Tag %}"]

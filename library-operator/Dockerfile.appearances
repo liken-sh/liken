@@ -77,7 +77,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # the runtime that the image loads. The builder is the same Debian image
 # as the bases', and the closure script checks that its glibc is the
 # base's.
-FROM debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a AS runtime
+FROM debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84 AS runtime
 
 # OpenVINO's runtime archive for Ubuntu 24.04, from Intel.
 ADD --checksum=sha256:772ce52d9b0aa375c77d391fccea71450d889c98b9af197bb8f05167a9dabd87 \

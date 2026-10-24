@@ -568,7 +568,7 @@ jobs:
       packages: write
 
   audio-operator:
-    needs: [plan, trust]
+    needs: [plan, trust, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['audio-operator'].check }}
     uses: ./.github/workflows/component-audio-operator.yaml
     with:
@@ -583,7 +583,7 @@ jobs:
       packages: write
 
   audio-operator-publish:
-    needs: [plan, audio-operator, kubernetes, notices, trust]
+    needs: [plan, audio-operator, kubernetes, notices, trust, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['audio-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-audio-operator.yaml
     with:
@@ -776,7 +776,7 @@ jobs:
       packages: write
 
   firmware-operator:
-    needs: [plan, trust]
+    needs: [plan, trust, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['firmware-operator'].check }}
     uses: ./.github/workflows/component-firmware-operator.yaml
     with:
@@ -791,7 +791,7 @@ jobs:
       packages: write
 
   firmware-operator-publish:
-    needs: [plan, firmware-operator, kubernetes, notices, trust]
+    needs: [plan, firmware-operator, kubernetes, notices, trust, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['firmware-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-firmware-operator.yaml
     with:
@@ -806,7 +806,7 @@ jobs:
       packages: write
 
   git-csi-driver:
-    needs: [plan, trust]
+    needs: [plan, trust, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['git-csi-driver'].check }}
     uses: ./.github/workflows/component-git-csi-driver.yaml
     with:
@@ -821,7 +821,7 @@ jobs:
       packages: write
 
   git-csi-driver-publish:
-    needs: [plan, git-csi-driver, kubernetes, notices, trust]
+    needs: [plan, git-csi-driver, kubernetes, notices, trust, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['git-csi-driver'].publish != 'none' }}
     uses: ./.github/workflows/component-git-csi-driver.yaml
     with:
