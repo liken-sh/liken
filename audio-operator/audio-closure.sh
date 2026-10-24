@@ -91,8 +91,11 @@ stdbuf=$(dpkg -L coreutils | grep '/libstdbuf\.so$')
 # The bluez5 plugin loads by name when the declare container
 # enables WirePlumber's Bluetooth monitor. The codec plugins beside
 # it are dlopened one at a time as bluez5/libspa-codec-bluez5-
-# <name>.so, so each one has to be named here to be offered. Every
-# one of them ships in libspa-0.2-bluetooth; none is an extra pack.
+# <name>.so, so the closure takes each one that libspa-0.2-bluetooth
+# ships, by the pattern below. The plugin refuses to start when a
+# codec it requires is missing, such as the HFP CVSD codec, and then
+# WirePlumber registers no endpoint with bluetoothd. A pattern keeps
+# a codec that a new PipeWire adds from going missing.
 seeds="
 /usr/bin/pipewire
 /usr/bin/wireplumber
@@ -123,14 +126,7 @@ $lib/spa-0.2/audiomixer/libspa-audiomixer.so
 $lib/spa-0.2/support/libspa-dbus.so
 $lib/spa-0.2/support/libspa-support.so
 $lib/spa-0.2/bluez5/libspa-bluez5.so
-$lib/spa-0.2/bluez5/libspa-codec-bluez5-aptx.so
-$lib/spa-0.2/bluez5/libspa-codec-bluez5-faststream.so
-$lib/spa-0.2/bluez5/libspa-codec-bluez5-g722.so
-$lib/spa-0.2/bluez5/libspa-codec-bluez5-lc3.so
-$lib/spa-0.2/bluez5/libspa-codec-bluez5-ldac.so
-$lib/spa-0.2/bluez5/libspa-codec-bluez5-opus-g.so
-$lib/spa-0.2/bluez5/libspa-codec-bluez5-opus.so
-$lib/spa-0.2/bluez5/libspa-codec-bluez5-sbc.so
+$lib/spa-0.2/bluez5/libspa-codec-bluez5-*.so
 $lib/wireplumber-0.5/libwireplumber-module-default-nodes-api.so
 $lib/wireplumber-0.5/libwireplumber-module-log-settings.so
 $lib/wireplumber-0.5/libwireplumber-module-lua-scripting.so
