@@ -1,8 +1,8 @@
 # 82, Every Debian closure on one sid snapshot
 
-Proposed and built on 2026-10-24. The drills on the `liken-1` testbed and
-on a home cluster ran on 2026-10-24, and [The drills](#the-drills) gives
-what they found.
+Proposed, built, and drilled on 2026-10-24. The dev builds passed the
+drills on the `liken-1` testbed and on a home cluster, and
+[The drills](#the-drills) gives what they found.
 
 `liken`'s images take their graphics and video stack from Debian
 packages, and each image installs from one dated snapshot of
