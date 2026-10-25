@@ -96,12 +96,15 @@ type EndpointMeta struct {
 // declares. Codec is a speaker's alone, and an ALSA endpoint ignores
 // it. Layout is an ALSA sink's alone, and an empty list is the same
 // as no list: either one leaves the layout to the hardware.
+// SharedClaims is the number of claims that can share the endpoint,
+// and its absence keeps the endpoint to one claim (shares.go).
 type SinkSpec struct {
-	Volume   *SinkVolume       `json:"volume,omitempty"`
-	Mute     *bool             `json:"mute,omitempty"`
-	Controls map[string]string `json:"controls,omitempty"`
-	Codec    *string           `json:"codec,omitempty"`
-	Layout   []string          `json:"layout,omitempty"`
+	Volume       *SinkVolume       `json:"volume,omitempty"`
+	Mute         *bool             `json:"mute,omitempty"`
+	Controls     map[string]string `json:"controls,omitempty"`
+	Codec        *string           `json:"codec,omitempty"`
+	Layout       []string          `json:"layout,omitempty"`
+	SharedClaims *int              `json:"sharedClaims,omitempty"`
 }
 
 // SinkVolume is a Sink's volume declaration, all in percent. Level is
@@ -118,9 +121,10 @@ type SinkVolume struct {
 // the codec: no capture endpoint this operator publishes is on a
 // radio.
 type SourceSpec struct {
-	Volume   *int              `json:"volume,omitempty"`
-	Mute     *bool             `json:"mute,omitempty"`
-	Controls map[string]string `json:"controls,omitempty"`
+	Volume       *int              `json:"volume,omitempty"`
+	Mute         *bool             `json:"mute,omitempty"`
+	Controls     map[string]string `json:"controls,omitempty"`
+	SharedClaims *int              `json:"sharedClaims,omitempty"`
 }
 
 // declaration is the part of a spec both kinds share, so that one
@@ -162,7 +166,7 @@ type EndpointStatus struct {
 	Layout         []string                     `json:"layout,omitempty"`
 	LayoutSource   string                       `json:"layoutSource,omitempty"`
 	Observed       *EndpointObserved            `json:"observed,omitempty"`
-	Claim          *EndpointClaim               `json:"claim,omitempty"`
+	Claims         []EndpointClaim              `json:"claims,omitempty"`
 	Conditions     []EndpointCondition          `json:"conditions,omitempty"`
 }
 
@@ -250,9 +254,10 @@ type EndpointObserved struct {
 	Controls map[string]string `json:"controls,omitempty"`
 }
 
-// EndpointClaim names the claim that holds the endpoint now. The DRA
-// plugin records it at prepare and drops it at unprepare, so the field
-// answers which workload has the speakers.
+// EndpointClaim names one claim that holds the endpoint now. The DRA
+// plugin records it at prepare and drops it at unprepare, so
+// status.claims answers which workloads have the speakers: one claim,
+// or several on an endpoint the cluster owner shares.
 type EndpointClaim struct {
 	Namespace string `json:"namespace,omitempty"`
 	Name      string `json:"name,omitempty"`

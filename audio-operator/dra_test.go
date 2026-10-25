@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -340,7 +341,7 @@ func specFiles(t *testing.T, dir string) []string {
 	return names
 }
 
-// The claim that holds an endpoint is what status.claim reports, so
+// The claims that hold an endpoint are what status.claims reports, so
 // the plugin records it at prepare and drops it at unprepare. The
 // record is the only place a claim's namespace and name arrive: the
 // file the prepare leaves behind carries the claim's UID alone.
@@ -354,13 +355,12 @@ func TestPreparedClaimsRecordWhoHoldsEachDevice(t *testing.T) {
 	if entry := prepare(t, plugin, "claim-1"); entry.Error != "" {
 		t.Fatalf("prepare failed: %s", entry.Error)
 	}
-	claim, held := plugin.claims.holder(testSinkName)
-	if !held || claim.Namespace != "media" || claim.Name != "kitchen" {
-		t.Fatalf("holder = %+v, %v", claim, held)
+	if got, want := plugin.claims.holders(testSinkName), []EndpointClaim{{Namespace: "media", Name: "kitchen"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("holders = %+v, want %+v", got, want)
 	}
 	// The other driver's device in the same claim is that driver's to
 	// record.
-	if _, held := plugin.claims.holder("card0-hdmi-a-1"); held {
+	if held := plugin.claims.holders("card0-hdmi-a-1"); len(held) != 0 {
 		t.Error("this driver recorded another driver's device")
 	}
 
@@ -369,7 +369,7 @@ func TestPreparedClaimsRecordWhoHoldsEachDevice(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if claim, held := plugin.claims.holder(testSinkName); held {
-		t.Errorf("the device is still held by %+v after unprepare", claim)
+	if held := plugin.claims.holders(testSinkName); len(held) != 0 {
+		t.Errorf("the device is still held by %+v after unprepare", held)
 	}
 }

@@ -1,6 +1,6 @@
 ---
 name: rest
-description: "Set endpoint volume, mute an output, close a microphone, set a sound card control, or state a sink's channel layout with kubectl, with no claim and no interruption to a playing pod. Use when a speaker needs a different default level, when another operator needs volume control, or when a multichannel stream plays in stereo."
+description: "Set endpoint volume, mute an output, close a microphone, set a sound card control, state a sink's channel layout, or let several claims share an endpoint, with kubectl, with no claim and no interruption to a playing pod. Use when a speaker needs a different default level, when another operator needs volume control, when a multichannel stream plays in stereo, or when two workloads must play through one speaker at once."
 ---
 
 This skill is the guide at https://liken.sh/audio/docs/guides/rest/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
@@ -39,7 +39,7 @@ that claim ends.
     kubectl get sources
 
 Each row is one endpoint: the node it is on, how it connects, the
-level and mute it was last read at, which claim holds it, and
+level and mute it was last read at, which claims hold it, and
 whether it is connected and ready. To see everything the operator
 reports about one, read the whole resource:
 
@@ -180,6 +180,34 @@ So a height speaker plays only what a receiver makes from the other
 channels, and Dolby Atmos and DTS:X do not reach the receiver. The
 [`Sink` reference](https://liken.sh/audio/docs/reference/sinks/#the-channel-layout) gives
 the layouts the operator selects and the reasons.
+
+<a id="share-an-endpoint-between-claims"></a>
+
+## 7. Share an endpoint between claims
+
+An endpoint allocates to one claim, so a second pod that claims the
+same speaker waits until the first one ends. PipeWire can mix several
+streams into one sink, and `spec.sharedClaims` lets that many claims
+hold the endpoint at once:
+
+    kubectl patch sink kitchen-pci-0000-00-1f-3-hdmi-0 --type merge \
+      -p '{"spec":{"sharedClaims":4}}'
+
+The count must be 2 or more. No limit of the hardware or of PipeWire
+sets it, so choose the number of workloads you expect to play at
+once. The operator publishes the device with a capacity of that many
+`claims`. A claim that asks for one of them shares the endpoint, as
+[Share an output with other claims](https://liken.sh/audio/docs/guides/claim/#share-an-output-with-other-claims)
+shows. A claim that asks for none still holds the endpoint alone, so
+the workloads you have already written keep exclusive use. The same
+field on a `Source` lets several claims record from one microphone.
+
+The count applies to the next allocation. Lower it or remove it, and
+the claims that hold the endpoint keep it, and a new claim waits until
+the endpoint has room under the new count:
+
+    kubectl patch sink kitchen-pci-0000-00-1f-3-hdmi-0 --type json \
+      -p '[{"op":"remove","path":"/spec/sharedClaims"}]'
 
 <a id="give-someone-else-the-remote"></a>
 

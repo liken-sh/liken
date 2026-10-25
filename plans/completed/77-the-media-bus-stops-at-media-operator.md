@@ -628,7 +628,7 @@ Proof: the suites pass, nothing names the owner topic, the seed, or
 ## Outside this plan
 
 * The `Sink` exclusivity open problem
-  (`audio-operator/plans/open-problems/a-sink-can-be-shared-and-this-one-is-not.md`)
+  (`audio-operator/plans/completed/13-shared-endpoints.md`)
   needs a rewrite with what this plan found. Until it is settled, the
   idle pod does not claim sinks, so a unit that has never run a `Play`
   has an empty `status.sinks`. Today a press between films on such a

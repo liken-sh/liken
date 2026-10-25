@@ -207,7 +207,7 @@ func TestEndpointGaugesReflectTheFactsOnePassReads(t *testing.T) {
 				Name:    "analog",
 				HasNode: true,
 				Node:    pwNode{Name: sinkNodeName(0, 0)},
-				Claim:   &EndpointClaim{Namespace: "media", Name: "kitchen"},
+				Claims:  []EndpointClaim{{Namespace: "media", Name: "kitchen"}},
 			},
 			connected: 1, ready: 1, claimed: 1,
 		},
@@ -305,7 +305,7 @@ func TestASweptEndpointReportsFalseOnEveryGauge(t *testing.T) {
 	err := control.reconcile(context.Background(), endpoint{facts: endpointFacts{
 		Name: testAnalogName, Direction: directionSink, Machine: "liken-1",
 		HasNode: true, Node: pwNode{Name: sinkNodeName(0, 0)},
-		Claim: &EndpointClaim{Namespace: "media", Name: "kitchen"},
+		Claims: []EndpointClaim{{Namespace: "media", Name: "kitchen"}},
 	}})
 	if err != nil {
 		t.Fatal(err)

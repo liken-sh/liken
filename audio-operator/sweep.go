@@ -93,7 +93,7 @@ func absentStatus(published EndpointStatus, now time.Time) EndpointStatus {
 	status := published
 	status.NodeName = ""
 	status.Format = nil
-	status.Claim = nil
+	status.Claims = nil
 	status.Conditions = setCondition(status.Conditions, condition(ConnectedCondition, false,
 		"EndpointAbsent", "this machine no longer publishes the endpoint", now))
 	status.Conditions = setCondition(status.Conditions, condition(ReadyCondition, false,

@@ -218,7 +218,7 @@ func TestPlannedWrites(t *testing.T) {
 			spec: declaration{Codec: pointerTo("aptx")},
 			facts: func() endpointFacts {
 				facts := speakerSink(50, "sbc")
-				facts.Claim = &EndpointClaim{Namespace: "media", Name: "kitchen"}
+				facts.Claims = []EndpointClaim{{Namespace: "media", Name: "kitchen"}}
 				return facts
 			}(),
 		},

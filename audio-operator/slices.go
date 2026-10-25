@@ -13,7 +13,8 @@ package main
 // upstream API that this program writes. The full ResourceSlice can
 // describe partitionable devices, shared counters, and per-device
 // node selection, and none of that changes what an output needs: a
-// name, its attributes, and taints when it cannot play.
+// name, its attributes, taints when it cannot play, and the claims
+// capacity when its resource lets several claims share it.
 //
 // One slice holds the whole inventory, so the pool protocol reduces
 // to a version counter: bump the generation on every change, and one
@@ -93,10 +94,22 @@ type ResourcePool struct {
 // to the publishing driver's domain, so a selector reads these as
 // device.attributes["audio.liken.sh"].connectionType. The pairing
 // attribute is the one exception: its own name includes the domain.
+//
+// AllowMultipleAllocations and Capacity are set together, and only on
+// an endpoint whose resource declares a share count (shares.go).
 type SliceDevice struct {
-	Name       string                     `json:"name"`
-	Attributes map[string]DeviceAttribute `json:"attributes,omitempty"`
-	Taints     []DeviceTaint              `json:"taints,omitempty"`
+	Name                     string                     `json:"name"`
+	Attributes               map[string]DeviceAttribute `json:"attributes,omitempty"`
+	Capacity                 map[string]DeviceCapacity  `json:"capacity,omitempty"`
+	AllowMultipleAllocations *bool                      `json:"allowMultipleAllocations,omitempty"`
+	Taints                   []DeviceTaint              `json:"taints,omitempty"`
+}
+
+// DeviceCapacity is one amount a device holds, as a quantity string.
+// The device carries no request policy, so a claim that asks for none
+// of the amount is charged all of it.
+type DeviceCapacity struct {
+	Value string `json:"value"`
 }
 
 // DeviceAttribute holds exactly one of four typed values. The API
@@ -162,6 +175,9 @@ func withoutTimeAdded(devices []SliceDevice) []SliceDevice {
 		}
 		if len(device.Attributes) == 0 {
 			out[i].Attributes = nil
+		}
+		if len(device.Capacity) == 0 {
+			out[i].Capacity = nil
 		}
 	}
 	return out

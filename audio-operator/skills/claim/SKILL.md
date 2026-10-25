@@ -1,6 +1,6 @@
 ---
 name: claim
-description: "Play one workload's sound through one physical output with a ResourceClaim and a Deployment. Use when a pod needs a speaker, the analog jack, a Bluetooth speaker with a chosen codec, or a microphone to record from."
+description: "Play one workload's sound through one physical output with a ResourceClaim and a Deployment, or share one output among several claims. Use when a pod needs a speaker, the analog jack, a Bluetooth speaker with a chosen codec, or a microphone to record from, or when two workloads must play through one speaker at once."
 ---
 
 This skill is the guide at https://liken.sh/audio/docs/guides/claim/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
@@ -227,8 +227,9 @@ Write the block in the claim when one workload needs a codec, and
 in the class when every workload through it does.
 
 The switch takes a second or two, and the pod's start waits for
-it. The speaker's sink arrives at unity volume on every prepare, so
-set loudness in your player's own stream volume. The speaker's own
+it. The speaker's sink arrives at unity volume on every prepare
+that finds no other claim on the speaker, so set loudness in your
+player's own stream volume. The speaker's own
 default level is declared on its `Sink`, as
 [Set endpoint volume and controls](https://liken.sh/audio/docs/guides/rest/) shows. A codec
 declared there is the default choice, and a claim's own parameter
@@ -277,11 +278,52 @@ client that does not must restart. The operator's own restart
 takes nothing away, because the daemons run in their own containers
 and keep playing through it.
 
-**A second claim on the same output parks.** Every device this
-operator publishes is exclusive, so the second pod waits `Pending`
-until the first releases the output.
-[Every published sink is exclusive, though PipeWire can share one](https://github.com/liken-sh/liken/blob/main/audio-operator/plans/open-problems/a-sink-can-be-shared-and-this-one-is-not.md)
-records that decision.
+**A second claim on the same output parks.** An output allocates to
+one claim, so the second pod waits `Pending` until the first
+releases the output. The exception is an output whose `Sink`
+declares `spec.sharedClaims`, which the next section covers.
+
+## Share an output with other claims
+
+A doorbell chime and a radio can play through one speaker at the
+same time, and PipeWire mixes the two streams. The output must allow
+it first: the cluster owner sets `spec.sharedClaims` on its `Sink`,
+as [Share an endpoint between claims](https://liken.sh/audio/docs/guides/rest/#share-an-endpoint-between-claims)
+shows. Then each claim that shares the output asks for one of its
+claims:
+
+    apiVersion: resource.k8s.io/v1
+    kind: ResourceClaim
+    metadata:
+      name: kitchen-chime
+      namespace: media
+    spec:
+      devices:
+        requests:
+          - name: output
+            exactly:
+              deviceClassName: audio-sink
+              selectors:
+                - cel:
+                    expression: |
+                      device.attributes["audio.liken.sh"].sink == "kitchen-pci-0000-00-1f-3-hdmi-0"
+              capacity:
+                requests:
+                  claims: "1"
+
+The scheduler allocates the output to each claim that asks for one,
+up to the count, and `kubectl get sinks` lists every claim in the
+`CLAIMS` column. A claim that does not ask for `claims` still takes
+the whole output: it waits until every share ends, and no share
+starts while it plays. So a claim written for an exclusive output
+keeps its meaning on a shared one.
+
+A share guarantees that its stream is mixed with the other shares'
+streams. It guarantees nothing about levels. The output's level is
+the one the `Sink` declares, and each share sets its own stream's
+volume. A share cannot state a codec, because a codec switch rebuilds
+a Bluetooth speaker's sink under every share. A claim that states one
+waits in `ContainerCreating`, and its events give the reason.
 
 To put sound and picture on one monitor, continue with
 [Pair sound with its screen](https://liken.sh/audio/docs/guides/pair/).

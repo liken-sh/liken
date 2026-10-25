@@ -94,6 +94,7 @@ The desired settings for the endpoint. Every field is optional. The operator wri
 | <span id="spec--mute"></span>`mute` | boolean | no | Whether the endpoint is silent. The operator applies this setting at the same layer as volume.level, and on the same terms. |
 | <span id="spec--controls"></span>`controls` | map[string]string | no | The card's own controls, keyed by the kernel's control name as status.capabilities lists them, such as Master Playback Volume. An integer control takes a number within its range. A boolean control takes on or off. An enumerated control takes one of its values. The operator writes a control only when spec states it. When two endpoints share one control, the last write wins because the hardware has one register. |
 | <span id="spec--layout"></span>`layout` | []string | no | The channel positions of an ALSA sink, in PCM slot order, in PipeWire's channel names, such as FL, FR, FC, LFE, RL, RR, SL, SR, RLC, RRC, TFL, TFR, NA for a slot that plays nothing, and AUX0 to AUX63. A 7.1 receiver on HDMI takes [FL, FR, RL, RR, FC, LFE, SL, SR], and a 5.1 one takes [FL, FR, RL, RR, FC, LFE]. When this field is absent, the operator selects the layout from the monitor's ELD on HDMI and DisplayPort, from the device's own channel map on USB, and declares no positions on the analog jack, whose streams then play in stereo. The operator declares the layout to PipeWire, and a change restarts PipeWire inside its container once no stream plays on the machine. The number of positions must be a channel count the device accepts, or PipeWire ignores the layout. The operator does not write the kernel's channel map, so on HDMI each slot reaches the speaker the kernel's standard allocation gives it, and a height position names a slot that the kernel routes elsewhere. A Bluetooth speaker ignores this field. |
+| <span id="spec--sharedclaims"></span>`sharedClaims` | integer | no | The number of claims that can hold the endpoint at the same time. When this field is absent, one claim holds the endpoint, and a second claim waits until the first ends. When it is set, the device in the ResourceSlice allows several allocations and carries a capacity named claims with this value. A claim whose request asks for claims: 1 shares the endpoint with the other claims that ask for one, up to this number, and PipeWire mixes their streams. A claim that asks for no claims capacity takes all of it and holds the endpoint alone, so it never shares with another claim. A change applies to the next allocation, and the claims that hold the endpoint keep it. The count is a policy: neither the hardware nor PipeWire limits how many streams one endpoint mixes. A shared claim cannot state a codec, because a codec switch rebuilds the sink under every claim that plays through it. |
 | <span id="spec--codec"></span>`codec` | string | no | The A2DP codec to apply when no claim allocates the Bluetooth speaker. The value must be one of status.bluetooth.codecs. A claim's codec parameter takes precedence while the claim allocates the speaker. A change here waits until the claim ends because switching codecs replaces the speaker's node and interrupts playback. The operator ignores this field on an ALSA endpoint. |
 
 ### spec.volume
@@ -126,7 +127,7 @@ What the hardware declares and what the operator last read. The operator owns ev
 | <span id="status--layout"></span>`layout` | []string | no | The channel positions the operator declares the sink's node with, in PCM slot order. Absent when layoutSource is ChannelMap, because PipeWire reads the positions from the device, and absent when it is None. While LayoutApplied is False with the reason Restarting, this is the layout PipeWire loads when its container starts again. |
 | <span id="status--layoutsource"></span>`layoutSource` | string | no | Where the layout came from. Spec is spec.layout. ELD is the monitor's speaker allocation, capped by the largest LPCM channel count it accepts. ChannelMap is the channel map a USB device describes. None is no positions, and a multichannel stream then plays in stereo. An HDMI sink keeps a layout from the ELD while its monitor is off. Absent on a Bluetooth speaker. One of: `Spec`, `ELD`, `ChannelMap`, `None`. |
 | <span id="status--observed"></span>`observed` | [object](#statusobserved) | no | The last value the operator read for each setting. The operator reads the card's control device for every event it receives. It reads PipeWire's graph for every change PipeWire reports. A change from a physical knob or a client therefore appears here without polling. |
-| <span id="status--claim"></span>`claim` | [object](#statusclaim) | no | The claim that currently allocates the endpoint. This field is absent when no claim allocates it. It identifies the workload that has the speakers. |
+| <span id="status--claims"></span>`claims` | [\[\]object](#statusclaims) | no | The claims that hold the endpoint now, sorted by namespace and name. It holds one claim, or up to spec.sharedClaims on a shared endpoint, and it is absent when no claim holds the endpoint. It identifies the workloads that have the speakers. The operator records a claim when the kubelet prepares it on this machine, so after an operator restart a claim shows again when the kubelet prepares it next. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports whether the endpoint can play now. It is true for a monitor on an HDMI slot, a plug in an analog jack, a connected speaker, and every USB endpoint. Ready reports whether PipeWire has a node for the endpoint. These two conditions expose the same facts as the device's no-monitor and no-sink taints, in a form a person can read. LayoutApplied, on a sink of a sound card, reports whether PipeWire runs the sink with the layout the operator selected. It is False with the reason AwaitingIdle while a new layout waits for every stream on the machine to end, and with the reason Restarting while PipeWire restarts in its container to load it. |
 
 ### status.session
@@ -227,14 +228,14 @@ The last value the operator read for each setting. The operator reads the card's
 | <span id="statusobserved--codec"></span>`codec` | string | no | The codec a Bluetooth speaker plays with now. |
 | <span id="statusobserved--controls"></span>`controls` | map[string]string | no | The value of every control in capabilities, in the same spelling spec.controls takes. A control with several channels reports the first channel's value. |
 
-### status.claim
+### status.claims[]
 
-The claim that currently allocates the endpoint. This field is absent when no claim allocates it. It identifies the workload that has the speakers.
+The claims that hold the endpoint now, sorted by namespace and name. It holds one claim, or up to spec.sharedClaims on a shared endpoint, and it is absent when no claim holds the endpoint. It identifies the workloads that have the speakers. The operator records a claim when the kubelet prepares it on this machine, so after an operator restart a claim shows again when the kubelet prepares it next.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="statusclaim--namespace"></span>`namespace` | string | no |  |
-| <span id="statusclaim--name"></span>`name` | string | no |  |
+| <span id="statusclaims--namespace"></span>`namespace` | string | no |  |
+| <span id="statusclaims--name"></span>`name` | string | no |  |
 
 ### status.conditions[]
 
@@ -337,7 +338,14 @@ present.
 holds the endpoint or not. `codec` waits for the claim to end,
 because a codec switch replaces the speaker's node and interrupts
 playback, and a claim's own `codec` parameter wins while it holds
-the speaker.
+the speaker. On a shared speaker, `codec` waits until every share
+ends.
+
+`sharedClaims` changes the device in the `ResourceSlice`, not the
+hardware: the operator writes the slice again, and the count applies
+to the next allocation.
+[Shared endpoints](/docs/reference/devices/#shared-endpoints) gives
+the fields the slice publishes.
 
 ## The volume asks
 

@@ -62,9 +62,9 @@ spec:
         - name: Mute
           type: boolean
           jsonPath: .status.observed.mute
-        - name: Claim
+        - name: Claims
           type: string
-          jsonPath: .status.claim.name
+          jsonPath: .status.claims[*].name
         - name: Connected
           type: string
           jsonPath: .status.conditions[?(@.type=="Connected")].status
@@ -153,6 +153,10 @@ spec:
                         AUX59, AUX60, AUX61, AUX62, AUX63
                       ]
                   description: "The channel positions of an ALSA sink, in PCM slot order, in PipeWire's channel names, such as FL, FR, FC, LFE, RL, RR, SL, SR, RLC, RRC, TFL, TFR, NA for a slot that plays nothing, and AUX0 to AUX63. A 7.1 receiver on HDMI takes [FL, FR, RL, RR, FC, LFE, SL, SR], and a 5.1 one takes [FL, FR, RL, RR, FC, LFE]. When this field is absent, the operator selects the layout from the monitor's ELD on HDMI and DisplayPort, from the device's own channel map on USB, and declares no positions on the analog jack, whose streams then play in stereo. The operator declares the layout to PipeWire, and a change restarts PipeWire inside its container once no stream plays on the machine. The number of positions must be a channel count the device accepts, or PipeWire ignores the layout. The operator does not write the kernel's channel map, so on HDMI each slot reaches the speaker the kernel's standard allocation gives it, and a height position names a slot that the kernel routes elsewhere. A Bluetooth speaker ignores this field."
+                sharedClaims:
+                  type: integer
+                  minimum: 2
+                  description: "The number of claims that can hold the endpoint at the same time. When this field is absent, one claim holds the endpoint, and a second claim waits until the first ends. When it is set, the device in the ResourceSlice allows several allocations and carries a capacity named claims with this value. A claim whose request asks for claims: 1 shares the endpoint with the other claims that ask for one, up to this number, and PipeWire mixes their streams. A claim that asks for no claims capacity takes all of it and holds the endpoint alone, so it never shares with another claim. A change applies to the next allocation, and the claims that hold the endpoint keep it. The count is a policy: neither the hardware nor PipeWire limits how many streams one endpoint mixes. A shared claim cannot state a codec, because a codec switch rebuilds the sink under every claim that plays through it."
                 codec:
                   type: string
                   description: "The A2DP codec to apply when no claim allocates the Bluetooth speaker. The value must be one of status.bluetooth.codecs. A claim's codec parameter takes precedence while the claim allocates the speaker. A change here waits until the claim ends because switching codecs replaces the speaker's node and interrupts playback. The operator ignores this field on an ALSA endpoint."
@@ -335,14 +339,16 @@ spec:
                       additionalProperties:
                         type: string
                       description: "The value of every control in capabilities, in the same spelling spec.controls takes. A control with several channels reports the first channel's value."
-                claim:
-                  type: object
-                  description: "The claim that currently allocates the endpoint. This field is absent when no claim allocates it. It identifies the workload that has the speakers."
-                  properties:
-                    namespace:
-                      type: string
-                    name:
-                      type: string
+                claims:
+                  type: array
+                  description: "The claims that hold the endpoint now, sorted by namespace and name. It holds one claim, or up to spec.sharedClaims on a shared endpoint, and it is absent when no claim holds the endpoint. It identifies the workloads that have the speakers. The operator records a claim when the kubelet prepares it on this machine, so after an operator restart a claim shows again when the kubelet prepares it next."
+                  items:
+                    type: object
+                    properties:
+                      namespace:
+                        type: string
+                      name:
+                        type: string
                 conditions:
                   type: array
                   description: "Connected reports whether the endpoint can play now. It is true for a monitor on an HDMI slot, a plug in an analog jack, a connected speaker, and every USB endpoint. Ready reports whether PipeWire has a node for the endpoint. These two conditions expose the same facts as the device's no-monitor and no-sink taints, in a form a person can read. LayoutApplied, on a sink of a sound card, reports whether PipeWire runs the sink with the layout the operator selected. It is False with the reason AwaitingIdle while a new layout waits for every stream on the machine to end, and with the reason Restarting while PipeWire restarts in its container to load it."
@@ -400,9 +406,9 @@ spec:
         - name: Mute
           type: boolean
           jsonPath: .status.observed.mute
-        - name: Claim
+        - name: Claims
           type: string
-          jsonPath: .status.claim.name
+          jsonPath: .status.claims[*].name
         - name: Connected
           type: string
           jsonPath: .status.conditions[?(@.type=="Connected")].status
@@ -435,6 +441,10 @@ spec:
                   additionalProperties:
                     type: string
                   description: "The card's own controls, keyed by the kernel's control name as status.capabilities lists them, such as Capture Volume or Input Source. An integer control takes a number within its range, a boolean control takes on or off, and an enumerated control takes one of its values. The operator writes a control only when it is stated here."
+                sharedClaims:
+                  type: integer
+                  minimum: 2
+                  description: "The number of claims that can hold the endpoint at the same time. When this field is absent, one claim holds the endpoint, and a second claim waits until the first ends. When it is set, the device in the ResourceSlice allows several allocations and carries a capacity named claims with this value. A claim whose request asks for claims: 1 shares the endpoint with the other claims that ask for one, up to this number, and each one records the same input. A claim that asks for no claims capacity takes all of it and holds the endpoint alone, so it never shares with another claim. A change applies to the next allocation, and the claims that hold the endpoint keep it. The count is a policy: neither the hardware nor PipeWire limits how many streams record from one endpoint."
             status:
               type: object
               description: "What the hardware declares and what the operator last read. The operator owns every field here."
@@ -541,14 +551,16 @@ spec:
                       additionalProperties:
                         type: string
                       description: "The value of every control in capabilities, in the same spelling spec.controls takes. A control with several channels reports the first channel's value."
-                claim:
-                  type: object
-                  description: "The claim that holds the endpoint now, and absent between holders."
-                  properties:
-                    namespace:
-                      type: string
-                    name:
-                      type: string
+                claims:
+                  type: array
+                  description: "The claims that hold the endpoint now, sorted by namespace and name. It holds one claim, or up to spec.sharedClaims on a shared endpoint, and it is absent when no claim holds the endpoint."
+                  items:
+                    type: object
+                    properties:
+                      namespace:
+                        type: string
+                      name:
+                        type: string
                 conditions:
                   type: array
                   description: "Connected reports that the endpoint can capture now: a plug in an analog jack, and always on USB. Ready reports that PipeWire holds a node for it."

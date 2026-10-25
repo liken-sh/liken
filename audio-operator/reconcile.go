@@ -134,6 +134,13 @@ type reconciler struct {
 	// It is nil in a test that reads the slice alone.
 	control *endpointControl
 
+	// readShares reads the share count each endpoint's resource
+	// declares, and lastShares is what the last read that succeeded
+	// answered (shares.go). readShares is nil in a test that shares
+	// nothing.
+	readShares func() (map[string]int, error)
+	lastShares map[string]int
+
 	// asks carries one wake for each burst of new volume asks on this
 	// machine's Sinks, and poke wakes a pass after an ask applied a
 	// level. applyAsks reports the level it wrote at once, and the pass
@@ -279,7 +286,7 @@ func (r *reconciler) reconcile(ctx context.Context) error {
 	refreshCDISpecs(r.endpoints, graph)
 
 	speakers := r.pairedSpeakers()
-	r.publish(ctx, sliceDevices(endpoints, speakers, graph))
+	r.publish(ctx, shareDevices(sliceDevices(endpoints, speakers, graph), r.shares()))
 
 	// The layouts come after the slice, because a layout change is a
 	// restart of PipeWire, and the slice of this pass describes the
@@ -388,9 +395,11 @@ func (r *reconciler) taintEverything() {
 	//
 	// The paired speakers stay in the list, tainted with the rest,
 	// because the sound server is what ended and the pairings did
-	// not.
+	// not. The shares stay too, from the last read, because a share
+	// count is the cluster owner's and the sound server did not
+	// change it.
 	endpoints, _ := nameEndpoints(r.nodeName, outputs)
-	devices := sliceDevices(endpoints, r.pairedSpeakers(), pwGraph{})
+	devices := shareDevices(sliceDevices(endpoints, r.pairedSpeakers(), pwGraph{}), r.lastShares)
 	if err := EnsureResourceSlice(r.client, r.nodeName, r.owner, devices); err != nil {
 		fmt.Fprintf(os.Stderr, "tainting the outputs on the way out: %v\n", err)
 	}

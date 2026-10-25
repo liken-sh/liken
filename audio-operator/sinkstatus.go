@@ -53,8 +53,8 @@ type endpointFacts struct {
 	Plugged bool
 	Sensed  bool
 
-	// The claim that holds the endpoint now, and nil between holders.
-	Claim *EndpointClaim
+	// The claims that hold the endpoint now, and none between holders.
+	Claims []EndpointClaim
 
 	// The channel layout the declaration holds for a card's sink, and
 	// whether PipeWire runs it. It is nil on a source, on a speaker,
@@ -173,7 +173,7 @@ func (f endpointFacts) status(published EndpointStatus, now time.Time) EndpointS
 	status := EndpointStatus{
 		Node:       f.Machine,
 		NodeName:   f.nodeName(),
-		Claim:      f.Claim,
+		Claims:     f.Claims,
 		Conditions: published.Conditions,
 	}
 	// An endpoint whose card lists no control for it carries no

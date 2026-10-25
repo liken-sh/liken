@@ -83,7 +83,7 @@ func TestSinkStatusOfAnHDMISlot(t *testing.T) {
 		HasNode:  true,
 		Controls: []control{iec958},
 		Values:   map[string]string{"IEC958 Playback Switch": controlOn},
-		Claim:    &EndpointClaim{Namespace: "media", Name: "kitchen"},
+		Claims:   []EndpointClaim{{Namespace: "media", Name: "kitchen"}},
 	}
 
 	want := EndpointStatus{
@@ -106,7 +106,7 @@ func TestSinkStatusOfAnHDMISlot(t *testing.T) {
 			Mute:     pointerTo(false),
 			Controls: map[string]string{"IEC958 Playback Switch": controlOn},
 		},
-		Claim: &EndpointClaim{Namespace: "media", Name: "kitchen"},
+		Claims: []EndpointClaim{{Namespace: "media", Name: "kitchen"}},
 		Conditions: []EndpointCondition{
 			connectedCondition(true, "MonitorPresent", "a monitor answers on this slot"),
 			readyCondition(true, "PipeWire holds the node "+sinkNodeName(0, 3)),

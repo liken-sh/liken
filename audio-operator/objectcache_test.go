@@ -202,19 +202,19 @@ func TestAListBeforeTheStoreIsReadyIsNeverReadOlder(t *testing.T) {
 	api.sinks[testSinkName] = &Sink{Metadata: EndpointMeta{Name: testSinkName, ResourceVersion: api.nextVersion()},
 		Status: sinkStatus(EndpointStatus{Node: "liken-1"})}
 	older := cacheOf(t, api).sinks.View
-	api.sinks[testSinkName].Status.Claim = &EndpointClaim{Namespace: "media", Name: "den"}
+	api.sinks[testSinkName].Status.Claims = []EndpointClaim{{Namespace: "media", Name: "den"}}
 	api.sinks[testSinkName].Metadata.ResourceVersion = api.nextVersion()
 	ready := false
 	control.cache.sinks = informer.Held{View: informer.View{Store: older.Store, Synced: func() bool { return ready }}, Versions: memo.New()}
 
 	listed, err := control.readSinks()
-	if err != nil || len(listed) != 1 || listed[0].Status.Claim == nil {
+	if err != nil || len(listed) != 1 || len(listed[0].Status.Claims) == 0 {
 		t.Fatalf("the list before the store is ready = %+v, %v; want the claim", listed, err)
 	}
 	ready = true
 	read, err := control.readSinks()
 
-	if err != nil || len(read) != 1 || read[0].Status.Claim == nil {
+	if err != nil || len(read) != 1 || len(read[0].Status.Claims) == 0 {
 		t.Errorf("the list from the ready store = %+v, %v; want the claim, not the store's older copy", read, err)
 	}
 }
@@ -231,8 +231,8 @@ func TestAReconcileFromAnOlderCopyReadsAgainAndLands(t *testing.T) {
 	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph(), nil); err != nil {
 		t.Fatalf("the pass failed: %v", err)
 	}
-	if claim := api.sinks[testAnalogName].Status.Claim; claim == nil || claim.Name != "den" {
-		t.Errorf("the analog sink's claim is %+v, want den", claim)
+	if claims := api.sinks[testAnalogName].Status.Claims; len(claims) != 1 || claims[0].Name != "den" {
+		t.Errorf("the analog sink's claims are %+v, want den", claims)
 	}
 }
 
@@ -298,7 +298,7 @@ func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 	if err := control.pass(ctx, labEndpoints(), nil, labGraph(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if claim := api.sinks[testAnalogName].Status.Claim; claim == nil {
+	if claims := api.sinks[testAnalogName].Status.Claims; len(claims) == 0 {
 		t.Fatal("the pass did not write the claim")
 	}
 
@@ -311,8 +311,8 @@ func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 	if got := reads(api); got != 1 {
 		t.Errorf("the pass sent %d reads, want 1, of the Sink it wrote: %v", got, api.requests)
 	}
-	if claim := api.sinks[testAnalogName].Status.Claim; claim != nil {
-		t.Errorf("the Sink still reports the released claim %+v", claim)
+	if claims := api.sinks[testAnalogName].Status.Claims; len(claims) != 0 {
+		t.Errorf("the Sink still reports the released claims %+v", claims)
 	}
 }
 

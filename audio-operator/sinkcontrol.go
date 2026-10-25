@@ -200,7 +200,7 @@ func (e *endpointControl) read(cards map[int]*mixer, endpoints []alsaEndpoint,
 			},
 			Node:    sink.sinkNode(),
 			HasNode: hasSink,
-			Claim:   e.holder(name),
+			Claims:  e.claims.holders(name),
 		}})
 	}
 	return readings
@@ -290,7 +290,7 @@ func (e *endpointControl) cardEndpoints(device *mixer, endpoints []alsaEndpoint,
 				Values:    e.controlValues(device, alsa.Name(), controls),
 				Plugged:   plugged,
 				Sensed:    sensed,
-				Claim:     e.holder(alsa.Name()),
+				Claims:    e.claims.holders(alsa.Name()),
 				Layout:    layout,
 			},
 		})
@@ -319,15 +319,6 @@ func (e *endpointControl) controlValues(device *mixer, name string, controls []c
 	}
 	e.report(name+" controls", failures)
 	return values
-}
-
-// holder answers which claim holds one endpoint now.
-func (e *endpointControl) holder(name string) *EndpointClaim {
-	claim, held := e.claims.holder(name)
-	if !held {
-		return nil
-	}
-	return &claim
 }
 
 // reconcile makes one endpoint's resource exist, writes the resting
@@ -407,7 +398,7 @@ func (e *endpointControl) reconcileSource(ctx context.Context, reading endpoint)
 func (e *endpointControl) recordEndpoint(reading endpoint) {
 	connected, _, _ := reading.facts.connected()
 	ready, _, _ := reading.facts.ready()
-	e.readings.endpoint(reading.facts.Name, connected, ready, reading.facts.Claim != nil)
+	e.readings.endpoint(reading.facts.Name, connected, ready, len(reading.facts.Claims) > 0)
 }
 
 // report prints one line for each run of passes that finds the same

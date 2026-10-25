@@ -49,7 +49,7 @@ func TestAStatusPatchTurnsThePublishedFactsIntoTheComposed(t *testing.T) {
 	published := EndpointStatus{
 		Node:     "liken-1",
 		NodeName: sinkNodeName(0, 0),
-		Claim:    &EndpointClaim{Namespace: "media", Name: "film"},
+		Claims:   []EndpointClaim{{Namespace: "media", Name: "film"}},
 		Observed: &EndpointObserved{Volume: pointerTo(40), Controls: map[string]string{
 			"Master Playback Volume": "64", "Auto-Mute Mode": "Enabled",
 		}},

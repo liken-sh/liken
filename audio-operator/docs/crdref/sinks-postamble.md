@@ -87,7 +87,14 @@ present.
 holds the endpoint or not. `codec` waits for the claim to end,
 because a codec switch replaces the speaker's node and interrupts
 playback, and a claim's own `codec` parameter wins while it holds
-the speaker.
+the speaker. On a shared speaker, `codec` waits until every share
+ends.
+
+`sharedClaims` changes the device in the `ResourceSlice`, not the
+hardware: the operator writes the slice again, and the count applies
+to the next allocation.
+[Shared endpoints](/docs/reference/devices/#shared-endpoints) gives
+the fields the slice publishes.
 
 ## The volume asks
 

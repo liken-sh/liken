@@ -10,7 +10,7 @@ package main
 // A merge patch and not a server-side apply, because the Sinks this
 // operator wrote with an update hold their status fields under that
 // update's manager. An apply removes a field only when no other manager
-// owns it, so a status.claim or a condition that an update wrote would
+// owns it, so a status.claims or a condition that an update wrote would
 // stay after the apply stopped stating it. A merge patch removes a
 // field by naming it.
 //

@@ -435,11 +435,60 @@ the consumer's own level. The endpoint's level is declared on its
 endpoint with no declaration rests at unity.
 
 A prepare on a Bluetooth speaker also writes unity on every
-channel of the sink it delivers, switch or no switch. A speaker
-allocates to one claim at a time, so any level a prepare finds is a
-leftover from an earlier tenant or a hand-run tool, never the
-arriving consumer's choice. The card's own outputs take no such
-write.
+channel of the sink it delivers, switch or no switch, when no other
+claim holds the speaker. Any level that prepare finds is a leftover
+from an earlier tenant or a hand-run tool, never the arriving
+consumer's choice. A prepare of a share that arrives while another
+claim holds the speaker writes no level, because the stream of that
+claim plays at the level the speaker holds now. The card's own
+outputs take no such write.
+
+## Shared endpoints
+
+A device allocates to one claim unless its `Sink` or `Source`
+declares `spec.sharedClaims`.
+[Share an endpoint between claims](/docs/guides/rest/#share-an-endpoint-between-claims)
+shows how to set it. A device whose resource declares the count
+publishes two more fields in the slice:
+
+    - name: kitchen-pci-0000-00-1f-3-hdmi-0
+      allowMultipleAllocations: true
+      capacity:
+        claims:
+          value: "4"
+
+The capacity has no `requestPolicy`. The scheduler charges a
+request that asks for none of a capacity all of it, so a claim
+written for an exclusive device takes the whole device and holds it
+alone. A request that asks for one claim shares the device with the
+other requests that asked for one, up to the count:
+
+    exactly:
+      deviceClassName: audio-sink
+      capacity:
+        requests:
+          claims: "1"
+
+The scheduler keeps the count, through Kubernetes' consumable
+capacity (the `DRAConsumableCapacity` feature gate, beta and on by
+default since Kubernetes 1.36). A request that asks for `claims`
+matches only a device that publishes the capacity, so a shared claim
+never lands on an exclusive device. Each allocation of a shared
+device carries its own `shareID` and `consumedCapacity` in the
+claim's status.
+
+The operator treats a claim as a share when the request that
+allocated the device asks for `claims`. A share cannot state a codec,
+from the claim or from its `DeviceClass`: a codec switch rebuilds the
+speaker's sink, and every share plays through that sink. The prepare
+fails with a message that says so, and the pod waits in
+`ContainerCreating`. The `Sink`'s `spec.codec` sets the codec while no
+claim holds the speaker.
+
+`status.claims` on the resource lists every claim that holds the
+device. A change to `spec.sharedClaims` writes the slice again and
+applies to the next allocation. The claims that hold the device
+keep it.
 
 ## The slice's lifetime
 

@@ -286,6 +286,9 @@ func operate() {
 	// about this machine's Sinks and Sources, with the pod's name as
 	// reportingInstance.
 	operator.control.recorder = events.New(ctx, client, operatorComponent, events.Options{})
+	// The share counts are a field of the same Sinks and Sources the
+	// controller reads, so the slice reads them from its stores.
+	operator.readShares = operator.control.sharedClaims
 
 	if err := operator.awaitPipeWire(ctx, pipewireReadyTimeout); err != nil {
 		fatal("waiting for PipeWire: %v", err)

@@ -265,7 +265,7 @@ func plannedCodec(spec declaration, facts endpointFacts) (string, string) {
 		return "", ""
 	}
 	codec := *spec.Codec
-	if facts.Speaker.Sink.Codec == codec || facts.Claim != nil {
+	if facts.Speaker.Sink.Codec == codec || len(facts.Claims) > 0 {
 		return "", ""
 	}
 	if _, offered := findCodec(facts.Speaker.Sink.Codecs, codec); !offered {

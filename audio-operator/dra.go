@@ -33,7 +33,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sync"
 
 	"google.golang.org/grpc"
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
@@ -237,6 +236,16 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 			return fail("the claim states the codec %s for %s, which is not a Bluetooth speaker",
 				codec, result.Device)
 		}
+		// A codec switch rebuilds the speaker's sink, and every claim
+		// that shares the speaker plays through that sink. So a share
+		// states no codec: the codec belongs to the speaker, and the
+		// Sink's spec.codec sets it while no claim holds the speaker.
+		shared := claimShares(allocated, result.Request)
+		if codec != "" && shared {
+			return fail("the claim shares %s and states the codec %s; a codec switch rebuilds the sink "+
+				"under every claim that shares the speaker, so a shared claim cannot state one",
+				result.Device, codec)
+		}
 		// A device with no node right now leaves no name to give the
 		// consumer. The pod waits in ContainerCreating, and the device's
 		// taints are what the scheduler and the eviction controller act
@@ -263,8 +272,13 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 			// The unity write is part of delivery, not codec switching.
 			// A claim with no codec and a claim that selects the codec
 			// already playing therefore receive the sink in the same state.
-			if err := p.deliverAtUnity(ctx, address, speakerSink); err != nil {
-				return fail("%v", err)
+			// A share that arrives while another claim holds the speaker
+			// plays into the level that claim's stream plays at, because a
+			// unity write then would change the level under that stream.
+			if !p.claims.heldByAnother(result.Device, claim.Uid) {
+				if err := p.deliverAtUnity(ctx, address, speakerSink); err != nil {
+					return fail("%v", err)
+				}
 			}
 		}
 		held = append(held, result.Device)
@@ -358,68 +372,6 @@ func (p *draPlugin) NodeUnprepareResources(ctx context.Context, req *drav1.NodeU
 	return resp, nil
 }
 
-// preparedClaims is which claim holds each device now.
-//
-// The record is in memory and nowhere else. A prepare call is where
-// the claim's namespace and name arrive, and the CDI file the prepare
-// leaves behind carries the claim's UID alone, which names no claim a
-// reader can ask the API server for. So the plugin keeps the pair,
-// the resource reports it, and a pod that started before this pod
-// shows no claim until the kubelet prepares its claim again.
-//
-// The kubelet's calls and the reconcile pass both reach it, which is
-// why it holds a lock.
-type preparedClaims struct {
-	mutex sync.RWMutex
-	// holders answers status.claim, keyed by the allocated device
-	// name. devices is the other direction, because an unprepare call
-	// carries the claim's UID and no device at all.
-	holders map[string]EndpointClaim
-	devices map[string][]string
-}
-
-// prepared records one claim's devices. A nil record takes the write
-// and drops it, so a plugin built without one needs no branch.
-func (p *preparedClaims) prepared(uid string, claim EndpointClaim, devices []string) {
-	if p == nil || len(devices) == 0 {
-		return
-	}
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
-	if p.holders == nil {
-		p.holders, p.devices = map[string]EndpointClaim{}, map[string][]string{}
-	}
-	for _, device := range devices {
-		p.holders[device] = claim
-	}
-	p.devices[uid] = devices
-}
-
-// released drops what one claim held.
-func (p *preparedClaims) released(uid string) {
-	if p == nil {
-		return
-	}
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
-	for _, device := range p.devices[uid] {
-		delete(p.holders, device)
-	}
-	delete(p.devices, uid)
-}
-
-// holder answers which claim holds one device, and nothing between
-// holders.
-func (p *preparedClaims) holder(device string) (EndpointClaim, bool) {
-	if p == nil {
-		return EndpointClaim{}, false
-	}
-	p.mutex.RLock()
-	defer p.mutex.RUnlock()
-	claim, held := p.holders[device]
-	return claim, held
-}
-
 // ResourceClaim holds the part of a claim that the driver reads:
 // which devices were allocated, from which driver's pools. This
 // operator never writes a claim. Workloads create them and the
@@ -430,6 +382,9 @@ type ResourceClaim struct {
 		Namespace string `json:"namespace"`
 		UID       string `json:"uid"`
 	} `json:"metadata"`
+	Spec struct {
+		Devices claimRequests `json:"devices"`
+	} `json:"spec"`
 	Status struct {
 		Allocation *struct {
 			// The driver reads the allocation's config and never the

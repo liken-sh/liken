@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -92,14 +93,14 @@ func TestPassCreatesAResourceForEveryEndpoint(t *testing.T) {
 	if analog.Node != "liken-1" || analog.NodeName != sinkNodeName(0, 0) {
 		t.Errorf("the analog sink's status = %+v", analog)
 	}
-	if analog.Claim != nil {
-		t.Errorf("the analog sink reports the claim %+v, and the claim holds the speaker", analog.Claim)
+	if len(analog.Claims) != 0 {
+		t.Errorf("the analog sink reports the claims %+v, and the claim holds the speaker", analog.Claims)
 	}
 	// The claim that holds the speaker is what answers which workload
 	// has it now.
 	speaker := api.sinks[testSpeakerName].Status
-	if speaker.Claim == nil || speaker.Claim.Name != "kitchen" || speaker.Claim.Namespace != "media" {
-		t.Errorf("the speaker's claim = %+v", speaker.Claim)
+	if want := []EndpointClaim{{Namespace: "media", Name: "kitchen"}}; !reflect.DeepEqual(speaker.Claims, want) {
+		t.Errorf("the speaker's claims = %+v, want %+v", speaker.Claims, want)
 	}
 	if speaker.Bluetooth == nil || speaker.Bluetooth.Peripheral != testSpeakerName {
 		t.Errorf("the speaker's bluetooth block = %+v", speaker.Bluetooth)

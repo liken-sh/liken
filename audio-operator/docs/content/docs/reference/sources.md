@@ -76,6 +76,7 @@ The settings you want for the endpoint. Every field is optional. The operator wr
 | <span id="spec--volume"></span>`volume` | integer | no | The gain PipeWire applies to what the endpoint captures, as a percent of unity, applied to every channel alike. It applies at once, under a claim or not. |
 | <span id="spec--mute"></span>`mute` | boolean | no | Whether the endpoint captures silence. It applies at once. A closed microphone is this field, on every Source, and kubectl get sources shows which ones are open. |
 | <span id="spec--controls"></span>`controls` | map[string]string | no | The card's own controls, keyed by the kernel's control name as status.capabilities lists them, such as Capture Volume or Input Source. An integer control takes a number within its range, a boolean control takes on or off, and an enumerated control takes one of its values. The operator writes a control only when it is stated here. |
+| <span id="spec--sharedclaims"></span>`sharedClaims` | integer | no | The number of claims that can hold the endpoint at the same time. When this field is absent, one claim holds the endpoint, and a second claim waits until the first ends. When it is set, the device in the ResourceSlice allows several allocations and carries a capacity named claims with this value. A claim whose request asks for claims: 1 shares the endpoint with the other claims that ask for one, up to this number, and each one records the same input. A claim that asks for no claims capacity takes all of it and holds the endpoint alone, so it never shares with another claim. A change applies to the next allocation, and the claims that hold the endpoint keep it. The count is a policy: neither the hardware nor PipeWire limits how many streams record from one endpoint. |
 
 ## status
 
@@ -92,7 +93,7 @@ What the hardware declares and what the operator last read. The operator owns ev
 | <span id="status--format"></span>`format` | [object](#statusformat) | no | The format the node runs at, from PipeWire's own Format parameter. Absent while the node is not running. |
 | <span id="status--capabilities"></span>`capabilities` | [map\[string\]object](#statuscapabilities) | no | The card's own controls that belong to this endpoint, keyed by the kernel's control name. A Capture control goes to the card's sources, and a jack control is not listed because it is read-only and feeds the Connected condition. |
 | <span id="status--observed"></span>`observed` | [object](#statusobserved) | no | The last value the operator read for each setting. The operator reads the card's control device on every event it delivers, and PipeWire's graph on every change it prints, so a change a person made with a knob or a client shows here without a poll. |
-| <span id="status--claim"></span>`claim` | [object](#statusclaim) | no | The claim that holds the endpoint now, and absent between holders. |
+| <span id="status--claims"></span>`claims` | [\[\]object](#statusclaims) | no | The claims that hold the endpoint now, sorted by namespace and name. It holds one claim, or up to spec.sharedClaims on a shared endpoint, and it is absent when no claim holds the endpoint. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports that the endpoint can capture now: a plug in an analog jack, and always on USB. Ready reports that PipeWire holds a node for it. |
 
 ### status.card
@@ -150,14 +151,14 @@ The last value the operator read for each setting. The operator reads the card's
 | <span id="statusobserved--mute"></span>`mute` | boolean | no | Whether the endpoint captures silence, on the same terms as volume. |
 | <span id="statusobserved--controls"></span>`controls` | map[string]string | no | The value of every control in capabilities, in the same spelling spec.controls takes. A control with several channels reports the first channel's value. |
 
-### status.claim
+### status.claims[]
 
-The claim that holds the endpoint now, and absent between holders.
+The claims that hold the endpoint now, sorted by namespace and name. It holds one claim, or up to spec.sharedClaims on a shared endpoint, and it is absent when no claim holds the endpoint.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="statusclaim--namespace"></span>`namespace` | string | no |  |
-| <span id="statusclaim--name"></span>`name` | string | no |  |
+| <span id="statusclaims--namespace"></span>`namespace` | string | no |  |
+| <span id="statusclaims--name"></span>`name` | string | no |  |
 
 ### status.conditions[]
 
