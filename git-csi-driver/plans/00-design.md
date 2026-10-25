@@ -336,8 +336,9 @@ without it reads the events.
 - Every failure the driver reports reaches the pod's events, the
   driver's log, and its metrics, which is the console-parity rule
   applied to a driver with no status object.
-- The driver builds on CSI spec 1.13. Kubernetes 1.36 vendors spec
-  1.9, and the two agree on the wire; the driver declares no capability
+- The driver builds on CSI spec 1.13. Kubernetes 1.37 vendors an
+  untagged commit of the spec from after 1.12.0, and the two agree on
+  the wire; the driver declares no capability
   the kubelet does not read.
 
 ## What exists elsewhere

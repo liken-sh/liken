@@ -324,8 +324,8 @@ and the graph that stage 1 built. Secure Boot needs this stage, and
 the release numbers in plan 69's "The split repositories" do not.
 
 6. **The spike.** Check that stagex's Go matches the Go version that
-   k3s `v1.36.4+k3s1` requires. Check that stagex ships the static
-   libseccomp, sqlite, and zlib that k3s links. Time a cold kernel
+   the k3s release in `liken/k3s/VERSION` requires. Check that stagex
+   ships the static libseccomp, sqlite, and zlib that k3s links. Time a cold kernel
    build and a buildroot build on a standard runner.
 7. **The channel components, with a data component.** Build `hwdata`
    and `trust` through the driver. These components have no compile
