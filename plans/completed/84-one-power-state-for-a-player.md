@@ -1,7 +1,7 @@
 # 84, One power state for a Player
 
-Proposed on 2026-10-25. Touches `media-operator`, `media-screen`,
-`equipment-operator`, and `display-operator`.
+Proposed and built on 2026-10-25. Touches `media-operator`,
+`media-screen`, `equipment-operator`, and `display-operator`.
 
 ## The problem
 
@@ -44,24 +44,35 @@ minutes after a power-off. A program also has no way to turn a
   of scope. The `Television` follows a `Player` through the `Receiver`
   session today.
 
-## Built before this plan
+## Built
 
-* A home press sends the TV Inactive Source before it claims the input,
-  because an Android TV ignores a second Active Source for the address
-  it already holds (`equipment-operator`).
-* A power press moves the panel desire with it, so the `Receiver`
-  session's `awake` flag turns false with the equipment
-  (`media-screen`). This plan moves that decision into
-  `media-operator`.
+* `spec.power` and `status.power` on the `Player`, the keys in
+  `media-operator`, power down and wake, `PowerApplied`, and a `Play`
+  that turns its `Player` on (`c6d93664`).
+* An `off` desire from before a turn-on no longer darkens the panel
+  (`10ca75fc`).
+* A home press sends the TV Inactive Source before it claims the input
+  (`01267889`), and no longer reads the TV's power first (`8ef0a424`).
+* For 10 s after a wake's first claim, the TV's own Set Stream Path
+  does not end the wake's guard, so the guard takes the input back from
+  a streaming player the TV switched to as it came on (`c5991148`).
 
-## Still open
+## Drills
 
-* Changes made outside `liken`, such as the TV's own remote, reach no
-  record when the TV announces nothing on HDMI-CEC.
-* A `home` ask on the `Player`'s `commands` topic does not switch the
-  TV or the receiver the way the remote's home key does.
-* `display-operator` turns a panel off over DDC/CI, and a TV behind a
-  receiver does not answer DDC/CI, so its panel only goes black.
-* A home press reads the TV's power first and sends nothing when the TV
-  does not answer. A press about 30 s after a wake got no answer while
-  the TV ran its own device discovery.
+* On `liken-1`, the single-monitor `Player` `lab-portable`: `kubectl`
+  off and on, a `Play` on a `Player` that is off, off during a film, an
+  operator restart while off, and remote keys sent over the bus. The
+  panel reported power off and on over DDC/CI each time. Three turn-ons
+  after `10ca75fc` applied no stray `backlight Off`.
+* On a home cluster, a `Player` with a receiver and a TV: the power key
+  stopped the film and put the TV and the receiver in standby, and a
+  home key woke both. The wake took 15 s while the TV booted, and the
+  TV switched to a streaming player during it, which led to
+  `8ef0a424` and `c5991148`. The drill has not run again on those two
+  builds.
+
+## Left open
+
+* `equipment-operator/plans/open-problems/a-tv-turned-off-by-its-own-remote-reaches-no-record.md`
+* `media-operator/plans/open-problems/the-home-ask-on-the-commands-topic-switches-no-equipment.md`
+* `display-operator/plans/open-problems/a-tv-behind-a-receiver-answers-no-ddc.md`
