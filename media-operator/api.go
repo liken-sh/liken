@@ -122,6 +122,13 @@ type PlayerStatus struct {
 	// first pass adopts the spec.
 	Power string `json:"power,omitempty"`
 
+	// PoweredOnAt is when this operator last applied a change of
+	// spec.power to On, as an RFC 3339 time with milliseconds. A panel
+	// desire the screen client stated before it is the client's word
+	// from before the Player turned off, and a pass waits for the next
+	// one (panelDesk.desireFor).
+	PoweredOnAt string `json:"poweredOnAt,omitempty"`
+
 	// Panel is what the screen's Display last observed. It is empty
 	// until a Display reports an observation.
 	Panel string `json:"panel,omitempty"`

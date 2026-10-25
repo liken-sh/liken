@@ -327,7 +327,9 @@ func (o *operator) reconcileReceiver(player *Player, standing bool, step powerSt
 }
 
 // awake reads the awake flag from spec.power and the panel desire. A
-// Player that is off is asleep whatever its client states. A unit with
+// Player that is off is asleep whatever its client states. An off
+// desire from before the Player's last turn-on is no statement
+// (panelDesk.desireFor). A unit with
 // no desire yet keeps the flag its session on this Receiver already
 // carries, because no desire is not a statement that the room is lit:
 // an operator that starts before the bus delivers the desire would
@@ -338,7 +340,7 @@ func (o *operator) awake(player *Player, receiver *Receiver) bool {
 	if specPower(player) == playerPowerOff {
 		return false
 	}
-	switch o.panels.stateFor(playerKey(player.Metadata.Namespace, player.Metadata.Name)) {
+	switch o.panels.desireFor(playerKey(player.Metadata.Namespace, player.Metadata.Name), player.Status.PoweredOnAt) {
 	case panelDesireOff:
 		return false
 	case "":

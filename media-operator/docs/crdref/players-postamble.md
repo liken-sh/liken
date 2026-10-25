@@ -34,7 +34,12 @@ publishes `wake` on the `power` topic. The idle screen wakes and states
 the `on` desire, the session's `awake` flag turns true, and the
 equipment operator wakes the TV and the receiver and selects the unit's
 input. A `Player` with no `Receiver`, such as a single monitor, does
-the same without the receiver.
+the same without the receiver. The `off` desire the idle screen stated when the `Player`
+turned off stays on the [`panel`](#panel) topic until the screen answers
+the wake. The operator records the turn-on in `status.poweredOnAt`, and
+it reads an `off` desire that arrived no later than that as no
+statement: the panel stays lit and the `awake` flag waits for the
+screen's next desire.
 
 The remote's keys move `spec.power` while the remote's
 [focus mark](/docs/reference/remotes/#focus-and-focuscycle) names this

@@ -1196,7 +1196,7 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 		standing := playerHasStandingPlay(player, plays)
 		desired.Receiver = o.reconcileReceiver(player, standing, power, &outcome)
 		matched[key] = desired.Receiver != nil
-		desired.Power, desired.Conditions = o.settlePower(player, plays, power, &outcome, desired.Conditions)
+		o.settlePower(player, plays, power, &outcome, &desired)
 		// The idle block is what a delegate reads to draw this
 		// unit's screen, so it goes on the status before the write.
 		desired.Idle = deriveIdleStatus(player, idle.Controller, o.busAddress, o.topicBase,

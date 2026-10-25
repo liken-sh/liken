@@ -359,7 +359,7 @@ type panelOverride struct {
 // before the client answers the wake with the on desire. outcome
 // records what a change of spec.power asked of the Display.
 func (o *operator) reconcilePanel(player *Player, key string, lookup *screens, mode string, step powerStep, outcome *powerOutcome) string {
-	desire := o.panels.stateFor(key)
+	desire := o.panels.desireFor(key, player.Status.PoweredOnAt)
 	switch {
 	case step.want == playerPowerOff:
 		desire, mode = panelDesireOff, offModePower

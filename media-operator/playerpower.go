@@ -123,22 +123,31 @@ func (o *powerOutcome) condition(want string) PlayerCondition {
 // state as it is.
 //
 // A pass that changes nothing carries the condition the status holds.
-func (o *operator) settlePower(player *Player, plays []Play, step powerStep, outcome *powerOutcome, list []PlayerCondition) (string, []PlayerCondition) {
+//
+// The pass that turns the Player on records the moment in
+// status.poweredOnAt, before it publishes the wake, so every desire the
+// client states in answer arrives after it. Every other pass carries the
+// moment forward.
+func (o *operator) settlePower(player *Player, plays []Play, step powerStep, outcome *powerOutcome, desired *PlayerStatus) {
+	desired.Power = step.want
+	desired.PoweredOnAt = player.Status.PoweredOnAt
 	if !step.moving {
 		if held, holds := heldCondition(player.Status.Conditions, powerAppliedCondition); holds {
-			list = append(list, held)
+			desired.Conditions = append(desired.Conditions, held)
 		}
-		return step.want, list
+		return
+	}
+	if step.turningOn() {
+		desired.PoweredOnAt = o.now().UTC().Format(askTimeLayout)
 	}
 	o.announcePower(player, plays, step, outcome)
 	condition := composeCondition(player, outcome.condition(step.want))
-	list = append(list, condition)
+	desired.Conditions = append(desired.Conditions, condition)
 	key := playerKey(player.Metadata.Namespace, player.Metadata.Name)
 	logLine(o.log, "player %s: spec.power %s, was %s: %s", key, step.want, player.Status.Power, condition.Message)
 	if outcome.reason != "" {
-		return player.Status.Power, list
+		desired.Power = player.Status.Power
 	}
-	return step.want, list
 }
 
 // composeCondition sets one condition over the ones the status holds,

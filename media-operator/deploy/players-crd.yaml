@@ -395,6 +395,12 @@ spec:
                   description: >-
                     The spec.power the media operator last applied to the
                     Player's hardware.
+                poweredOnAt:
+                  type: string
+                  format: date-time
+                  description: >-
+                    When the media operator last applied a change of
+                    spec.power to On.
                 panel:
                   type: string
                   description: >-

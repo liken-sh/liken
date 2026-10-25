@@ -150,6 +150,7 @@ What plays on this Player now, written only by the media operator. It is derived
 | <span id="status--activity"></span>`activity` | string | no | Whether the Player performs a run now. Playing is a Play running on it, Starting is a Play whose pod has not begun, and Idle is no Play at all. One of: `Playing`, `Starting`, `Idle`. |
 | <span id="status--play"></span>`play` | string | no | The name of the Play on this Player, in the same namespace. Empty while the Player is Idle. |
 | <span id="status--power"></span>`power` | string | no | The spec.power the media operator last applied to the Player's hardware. One of: `On`, `Off`. |
+| <span id="status--poweredonat"></span>`poweredOnAt` | string | no | When the media operator last applied a change of spec.power to On. |
 | <span id="status--panel"></span>`panel` | string | no | What the screen's Display last observed: On, BacklightOff, or Off. Empty until a Display reports an observation for the unit's screen. |
 | <span id="status--receiver"></span>`receiver` | [object](#statusreceiver) | no | The receiver that this unit's video goes into, matched from the machine the unit draws on and the monitor id of its screen. Absent for a unit that plays straight into its panel. |
 | <span id="status--screen"></span>`screen` | [object](#statusscreen) | no | The last screen the idle claim resolved to. The operator keeps it while the panel is away, so it can still read the screen's Display and say why the idle pod waits. Absent until the claim has resolved once. |
@@ -269,7 +270,12 @@ publishes `wake` on the `power` topic. The idle screen wakes and states
 the `on` desire, the session's `awake` flag turns true, and the
 equipment operator wakes the TV and the receiver and selects the unit's
 input. A `Player` with no `Receiver`, such as a single monitor, does
-the same without the receiver.
+the same without the receiver. The `off` desire the idle screen stated when the `Player`
+turned off stays on the [`panel`](#panel) topic until the screen answers
+the wake. The operator records the turn-on in `status.poweredOnAt`, and
+it reads an `off` desire that arrived no later than that as no
+statement: the panel stays lit and the `awake` flag waits for the
+screen's next desire.
 
 The remote's keys move `spec.power` while the remote's
 [focus mark](/docs/reference/remotes/#focus-and-focuscycle) names this

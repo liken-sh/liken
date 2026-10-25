@@ -6,7 +6,10 @@ package main
 // it publishes its desire for the panel, and the pass turns the desk's
 // newest desire into an override on the screen's Display.
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 // The two desires an idle screen client states. They are the values on
 // the panel topic, not the states the Player status carries.
@@ -40,15 +43,21 @@ func panelFromDisplay(observed DisplayObserved) string {
 
 // panelDesk holds the newest state per unit under one mutex, because
 // the bus handler runs on the bus reader's goroutine and the loop
-// runs on its own.
+// runs on its own. It also holds when each desire arrived, so a pass
+// can tell a desire the client stated before the Player last turned on
+// from one it stated since (desireFor).
 type panelDesk struct {
-	mutex sync.Mutex
-	state map[string]string
-	wake  chan<- struct{}
+	mutex   sync.Mutex
+	state   map[string]string
+	arrived map[string]time.Time
+	wake    chan<- struct{}
+	// now is the clock the arrival times read. It is a field so a test
+	// orders a desire against a turn-on with no wait.
+	now func() time.Time
 }
 
 func newPanelDesk(wake chan<- struct{}) *panelDesk {
-	return &panelDesk{state: map[string]string{}, wake: wake}
+	return &panelDesk{state: map[string]string{}, arrived: map[string]time.Time{}, wake: wake, now: time.Now}
 }
 
 // playerKey is the one key shape for a unit, the same namespace and
@@ -59,17 +68,46 @@ func playerKey(namespace, name string) string {
 
 // setState folds one desire. A desire that changed is a write
 // the next pass owes the screen's Display, so it wakes the loop at
-// once. A repeat of the desire already held wakes nothing, because
-// the retained topic delivers the same message again on every
-// reconnect.
+// once. A repeat of the desire already held wakes nothing and keeps
+// the time the desire first arrived, because the retained topic
+// delivers the same message again on every reconnect.
 func (p *panelDesk) setState(key, state string) {
 	p.mutex.Lock()
 	previous, had := p.state[key]
 	p.state[key] = state
+	moved := !had || previous != state
+	if moved {
+		p.arrived[key] = p.now()
+	}
 	p.mutex.Unlock()
-	if !had || previous != state {
+	if moved {
 		poke(p.wake)
 	}
+}
+
+// desireFor is one unit's panel desire as a pass acts on it. An off
+// desire that arrived no later than the Player's last turn-on is the
+// word the client stated when the Player turned off, and the retained
+// topic holds it until the client answers the wake with on. A pass
+// that acted on it would darken the panel it just lit, so the desire
+// reads as no statement until the client states the next one. The
+// turn-on time is the Player's status.poweredOnAt, at millisecond
+// precision, so the arrival is compared at the same precision.
+func (p *panelDesk) desireFor(key, poweredOnAt string) string {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	desire := p.state[key]
+	if desire != panelDesireOff || poweredOnAt == "" {
+		return desire
+	}
+	turnedOn, err := time.Parse(askTimeLayout, poweredOnAt)
+	if err != nil {
+		return desire
+	}
+	if !p.arrived[key].Truncate(time.Millisecond).After(turnedOn) {
+		return ""
+	}
+	return desire
 }
 
 // stateFor is one unit's panel desire, empty for a unit no
@@ -90,6 +128,7 @@ func (p *panelDesk) retain(live map[string]bool) {
 	for key := range p.state {
 		if !live[key] {
 			delete(p.state, key)
+			delete(p.arrived, key)
 		}
 	}
 }
