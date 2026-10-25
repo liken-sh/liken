@@ -295,7 +295,12 @@ input, because the player claimed Active Source as the room woke. A
 second Active Source, sent once the room was on, switched the receiver
 to the machine. The adapter claims the input for a person and never
 against one. A person who picks another input on the receiver or in
-the TV's source menu ends the guard at once.
+the TV's source menu ends the guard at once. The exception is the 10
+seconds after the wake's first claim. A TV that has just come on can
+switch to another input by itself, or because a streaming player that
+woke with it asked, and it sends the same message its source menu
+sends. In that window the guard goes on, and it takes the input back
+from the player.
 
 `kubectl get televisions -o wide` shows the wake:
 

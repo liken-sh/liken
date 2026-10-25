@@ -56,6 +56,14 @@ const (
 	cecWakeFresh    = 2 * time.Minute
 )
 
+// cecBootGrace is the window after a wake's first claim in which a Set
+// Stream Path from the TV is no person's choice (claimSource). A TV that
+// has just come on can switch inputs by itself, or because a streaming
+// player that woke with it asked it to, and it sends the same message
+// its source menu sends. A person cannot open the menu and pick an input
+// that soon after the TV comes on.
+const cecBootGrace = 10 * time.Second
+
 // wakeTimeLayout is the form of status.session.wokeAt: RFC 3339 with
 // milliseconds, so two wakes in one second are two times. The node
 // workload reads it only as a name for one wake.

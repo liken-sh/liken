@@ -96,7 +96,11 @@ func (n *cecNode) announceSource(own cec.LogicalAddress, physical cec.PhysicalAd
 // for 0.0.0.0; and through the TV's power button, which sends Standby.
 // Any other move of the route, such as a switch's Routing Information,
 // neither ends the guard nor asks for a claim: only another source's
-// Active Source is a claim to take back.
+// Active Source is a claim to take back. A Set Stream Path from the TV
+// in the cecBootGrace after the first claim is no person's choice
+// either: the TV sends it when it switches by itself as it comes on, or
+// when a streaming player that woke with it asks, so the guard goes on
+// and takes the input back from that player's Active Source.
 //
 // A wake that answers the TV's own Set Stream Path for the Display
 // (cecnode_pick.go) sends Active Source alone, in its first claim and in
@@ -159,10 +163,10 @@ func (n *cecNode) claimSource(ctx context.Context, job *wakeJob, own cec.Logical
 		case <-n.sources:
 		}
 		route, holder := n.guardView()
-		if route.leadsTo(physical) || (!route.chosen && route.by != cec.OpActiveSource) {
+		switch guardMove(route, holder, physical, time.Since(began)) {
+		case moveNone:
 			continue
-		}
-		if route.chosen {
+		case moveChosen:
 			return chosenVerdict(n.machine, claim, physical, display, sends, route, time.Since(began))
 		}
 		if machine, other := job.others[holder]; other {
@@ -182,11 +186,11 @@ func (n *cecNode) claimSource(ctx context.Context, job *wakeJob, own cec.Logical
 			return stopped()
 		case <-time.After(cecWakeSettle):
 		}
-		route, _ = n.guardView()
-		if route.leadsTo(physical) || (!route.chosen && route.by != cec.OpActiveSource) {
+		route, holder = n.guardView()
+		switch guardMove(route, holder, physical, time.Since(began)) {
+		case moveNone:
 			continue
-		}
-		if route.chosen {
+		case moveChosen:
 			return chosenVerdict(n.machine, claim, physical, display, sends, route, time.Since(began))
 		}
 		if ended := send(); ended != nil {
@@ -194,6 +198,44 @@ func (n *cecNode) claimSource(ctx context.Context, job *wakeJob, own cec.Logical
 		}
 	}
 	return sourceVerdict(n.machine, claim, physical, display, n.currentSource(), sends, taken, takenBy, takenAfter)
+}
+
+// guardMovement is what one move of the route means to a wake's guard.
+type guardMovement int
+
+const (
+	// moveNone asks nothing: the route leads to the Display, or moved
+	// by a message that claims nothing.
+	moveNone guardMovement = iota
+	// moveChosen is a person's choice of another source, which ends the
+	// guard.
+	moveChosen
+	// moveClaimed is another source's Active Source, which the guard
+	// takes back.
+	moveClaimed
+)
+
+// guardMove reads one move of the route, since time after the wake's
+// first claim. A Set Stream Path from the TV in the cecBootGrace is the
+// TV that switches as it comes on, by itself or for a streaming player,
+// so it ends nothing. The player's Active Source that follows keeps the
+// route the TV chose (noteSource), so in that window the holder of the
+// last Active Source decides: another source holds the input, and the
+// guard takes it back.
+func guardMove(route routeState, holder, physical cec.PhysicalAddress, since time.Duration) guardMovement {
+	if route.chosen && route.by == cec.OpSetStreamPath && since < cecBootGrace {
+		if holder == physical || holder == cec.InvalidPhysicalAddress {
+			return moveNone
+		}
+		return moveClaimed
+	}
+	switch {
+	case route.leadsTo(physical) || (!route.chosen && route.by != cec.OpActiveSource):
+		return moveNone
+	case route.chosen:
+		return moveChosen
+	}
+	return moveClaimed
 }
 
 // claimWords names what each claim of one wake sends: Image View On

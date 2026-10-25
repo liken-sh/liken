@@ -10,6 +10,7 @@ package main
 import (
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/liken-sh/equipment-operator/cec"
 )
@@ -17,17 +18,18 @@ import (
 func TestAPersonsChoiceEndsTheGuard(t *testing.T) {
 	cases := []struct {
 		name   string
+		after  time.Duration
 		choice []cec.Message
 	}{
-		{"the TV picks the player's input in its menu", []cec.Message{
+		{"the TV picks the player's input in its menu", cecBootGrace, []cec.Message{
 			cec.NewMessage(cec.AddressTV, cec.AddressBroadcast, cec.OpSetStreamPath, 0x15, 0x00),
 			cec.ActiveSource(8, 0x1500),
 		}},
-		{"a person switches the receiver's front panel", []cec.Message{
+		{"a person switches the receiver's front panel", 0, []cec.Message{
 			cec.NewMessage(5, cec.AddressBroadcast, cec.OpRoutingChange, 0x13, 0x00, 0x15, 0x00),
 			cec.ActiveSource(8, 0x1500),
 		}},
-		{"the TV switches to its own tuner or apps", []cec.Message{
+		{"the TV switches to its own tuner or apps", 0, []cec.Message{
 			cec.ActiveSource(cec.AddressTV, 0x0000),
 		}},
 	}
@@ -40,6 +42,7 @@ func TestAPersonsChoiceEndsTheGuard(t *testing.T) {
 				session := wokeNow()
 				api := awakeRoom(t, wire, session)
 				api.waitUntil(t, "the wake's Active Source", func() bool { return len(claimsOf(wire)) == 1 })
+				time.Sleep(c.after)
 
 				for _, message := range c.choice {
 					wire.Send(message)
@@ -53,6 +56,28 @@ func TestAPersonsChoiceEndsTheGuard(t *testing.T) {
 			})
 		})
 	}
+}
+
+// A TV that has just come on can switch to another input by itself, or
+// because a streaming player that woke with it asked, and it sends the
+// same Set Stream Path its menu sends. In the window after the wake's
+// first claim, that Set Stream Path is no person's choice, so the guard
+// goes on and takes the input back from the player's Active Source.
+func TestASetStreamPathWhileTheTVBootsKeepsTheGuard(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		wire := roomWithTV(televisionTV(cec.PowerOn))
+		session := wokeNow()
+		api := awakeRoom(t, wire, session)
+		api.waitUntil(t, "the wake's Active Source", func() bool { return len(claimsOf(wire)) == 1 })
+
+		wire.Send(cec.NewMessage(cec.AddressTV, cec.AddressBroadcast, cec.OpSetStreamPath, 0x15, 0x00))
+		wire.Send(cec.ActiveSource(8, 0x1500))
+
+		television := wokeWith(t, api, session)
+		mustMatch(t, conditionOf(television.Status.Conditions, conditionWakeApplied).Reason, reasonConfirmed)
+		mustDeepEqual(t, claimsOf(wire), []string{"4->f 82 13 00", "4->f 82 13 00"})
+	})
 }
 
 // A Set Stream Path for the Display itself is no choice of another
