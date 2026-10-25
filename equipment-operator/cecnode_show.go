@@ -11,8 +11,12 @@ package main
 // before every Active Source the adapter sends (claimInput). A TV on an
 // internal app switches on Image View On followed by Active Source, the
 // sequence One Touch Play sends, and not on a bare Active Source. The
-// TV must report On first, or ToOn on its way there, because Image View
-// On wakes a TV, and a home press does not wake a room that is off.
+// press reads no power first. A session that holds the room awake
+// belongs to a Player that is on, because a home press on a Player that
+// is off turns it on and the wake claims the input. So Image View On
+// may wake the TV: a person who presses home on a Player that is on
+// wants its picture. A read would only add a way to fail, because a TV
+// that is still booting does not answer it.
 //
 // Inactive Source for the Display goes before the pair. An Android TV
 // records the last Active Source it heard and switches only when a new
@@ -92,18 +96,6 @@ func (n *cecNode) passShow(bus *CECBus, television *Television) {
 		fmt.Fprintf(n.log, "%s; the wake in progress claims the input, so the adapter on %s sends nothing more for the ask\n", asks, n.machine)
 		return
 	}
-	power, err := n.askPower(own)
-	if err != nil {
-		return
-	}
-	if power != cec.PowerOn && power != cec.PowerToOn {
-		reported := "did not answer Give Device Power Status"
-		if power != cec.PowerUnknown {
-			reported = "reported " + power.String()
-		}
-		fmt.Fprintf(n.log, "%s; the TV %s, so the adapter on %s sent nothing, because a home press does not wake a room that is off\n", asks, reported, n.machine)
-		return
-	}
 	if failed, err := n.reclaimInput(own, physical); err != nil {
 		if cec.IsGone(err) {
 			n.fail(err)
@@ -112,7 +104,7 @@ func (n *cecNode) passShow(bus *CECBus, television *Television) {
 		fmt.Fprintf(os.Stderr, "%s; the adapter on %s could not send %s: %v\n", asks, n.machine, failed, err)
 		return
 	}
-	fmt.Fprintf(n.log, "%s; the TV reported %s, so the adapter on %s sent Inactive Source, Image View On, and Active Source for %s\n", asks, power, n.machine, physical)
+	fmt.Fprintf(n.log, "%s; the adapter on %s sent Inactive Source, Image View On, and Active Source for %s\n", asks, n.machine, physical)
 }
 
 // reclaimInput sends the TV Inactive Source for the Display and then

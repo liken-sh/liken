@@ -321,9 +321,11 @@ The other reasons:
 
 A press of the home key of the room remote writes
 `status.session.inputAsk` with the action `show`. The adapter then
-claims the TV's input for the `Display` the same way, when the TV
-reports On or `ToOn`, and the receiver selects the session's input if
-it is on. The ask wakes no TV that is off. Before the claim, the
+claims the TV's input for the `Display` the same way, and the receiver
+selects the session's input if it is on. The adapter reads no power
+first: a press on a `Player` that is off turns the `Player` on, so a
+press that reaches the TV belongs to a `Player` that is on, and Image
+View On may wake a TV in standby. Before the claim, the
 adapter sends the TV Inactive Source for the `Display`. An Android TV
 records the last Active Source it heard and ignores another one for
 the same address, so a TV that recorded the wake's Active Source while

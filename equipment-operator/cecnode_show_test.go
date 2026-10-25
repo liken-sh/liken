@@ -25,7 +25,11 @@ func shownNow(session *TelevisionSession) *TelevisionSession {
 // A TV on its own apps is On and on another input. Image View On goes
 // out first even then, because a TV on an internal app switches on
 // Image View On and Active Source together, the order One Touch Play
-// sends, and not on a bare Active Source.
+// sends, and not on a bare Active Source. The press reads no power
+// first: a session that is awake belongs to a Player that is on, so a
+// TV in standby, or one too busy booting to answer, gets the same
+// sequence, and Image View On wakes it. A session that is asleep gets
+// nothing.
 func TestAShowSendsImageViewOnAndActiveSource(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -35,7 +39,7 @@ func TestAShowSendsImageViewOnAndActiveSource(t *testing.T) {
 		claims  int
 	}{
 		{"a TV that is on", cec.PowerOn, true, 2, 2},
-		{"a TV that is off", cec.PowerStandby, true, 1, 1},
+		{"a TV in standby", cec.PowerStandby, true, 2, 2},
 		{"a session that is asleep", cec.PowerOn, false, 1, 1},
 	}
 	t.Parallel()
@@ -159,7 +163,7 @@ func TestAShowWritesALine(t *testing.T) {
 		api.waitUntil(t, "the line", func() bool { return len(linesWith(log, "asked to show")) == 1 })
 		mustDeepEqual(t, linesWith(log, "asked to show"), []string{
 			"Television lounge: Player media/den asked to show Display acm-0001-receiver at " + shown.ShowAt +
-				"; the TV reported On, so the adapter on node-1 sent Inactive Source, Image View On, and Active Source for 1.3.0.0",
+				"; the adapter on node-1 sent Inactive Source, Image View On, and Active Source for 1.3.0.0",
 		})
 	})
 }
