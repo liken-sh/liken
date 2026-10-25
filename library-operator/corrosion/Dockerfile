@@ -6,12 +6,12 @@
 #
 # The binary comes from liken's fork of Corrosion,
 # https://github.com/liken-sh/corrosion, which publishes upstream plus
-# a short stack of upstream-bound changes as one image. This file
-# pins that image by digest, so every agent in a cluster runs the
-# same bytes, and a move to a newer Corrosion is a change to this
-# line that a release carries. The fork's liken/README.md lists what
-# its stack holds at each release.
-FROM ghcr.io/liken-sh/corrosion:2026.10.23-003@sha256:60b550a1c6a005940e76062a95b07cca93dc01ab5f2e93274828124f55db4f6e
+# a short stack of upstream-bound changes as one image. The corrosion
+# entry of toolchains/images.toml pins that image by digest, so every
+# agent in a cluster runs the same bytes, and a move to a newer
+# Corrosion is a change to that entry that a release carries. The
+# fork's liken/README.md lists what its stack holds at each release.
+FROM corrosion
 
 # The configurations and the schemas arrive in the image because the
 # pod has no shell to render a file and no `ConfigMap` for the sidecar.

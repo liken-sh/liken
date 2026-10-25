@@ -12,7 +12,7 @@
 # newest build of each package, so only a snapshot builds the same
 # files again. VERSION, the date in package.toml, names every snapshot.
 
-FROM ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7 AS builder
+FROM ubuntu AS builder
 ARG VERSION
 # The snapshot services answer only over HTTPS, and the Ubuntu image
 # has no CA bundle. The bundle is the one that the trust component pins
@@ -40,7 +40,7 @@ RUN sh /check-lists.sh /images
 
 # The shim that stands in for a driver in another pod. It is static, so
 # it needs nothing from the closure.
-FROM golang:1.27.3-bookworm@sha256:5c3e9b43cfd3bb95c7937462e29d87ada57b481a96fa23ad0eb61778d7a00110 AS shim
+FROM golang AS shim
 WORKDIR /src
 COPY shim/go.mod shim/*.go ./
 RUN CGO_ENABLED=0 go build -trimpath -ldflags=-s -o /indi-shim .

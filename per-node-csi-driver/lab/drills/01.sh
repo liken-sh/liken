@@ -9,7 +9,7 @@ KUBECTL="$LAB/kubectl"
 
 # The writer image is one the lab already pulled, so no drill waits on
 # a registry.
-IMAGE="${IMAGE:-debian:12-slim}"
+IMAGE="${IMAGE:-debian:sid-slim}"
 NAMESPACE=drill-01
 HANDLE=drill-01-store
 

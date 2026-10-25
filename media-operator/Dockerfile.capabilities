@@ -3,7 +3,7 @@
 # agent queries each render node's driver through libva, so it needs
 # both libraries and the driver, and none of ffmpeg.
 
-FROM golang:1.27.3-bookworm AS build
+FROM golang AS build
 # proxy.golang.org sometimes drops a module download partway through
 # the stream. With the default comma, `go` tries the origin only when
 # the proxy answers 404 or 410, so a dropped stream fails the build.
@@ -41,7 +41,7 @@ RUN CGO_ENABLED=0 sh /go.sh /notices ./capabilities
 # programs load, so neither stub is there. The two files come from the
 # Debian image that every base on Debian builds from, by the same
 # digest, so they are the stubs of the glibc release the base carries.
-FROM debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84 AS glibc
+FROM debian AS glibc
 
 # The bake file at the top of the repository gives this build the vaapi
 # image of the same commit as the named context vaapi.

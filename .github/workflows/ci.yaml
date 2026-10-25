@@ -239,6 +239,7 @@ jobs:
           extra-args: >-
             --all-files
             --skip workflows
+            --skip toolchains/
             --skip vulkan/
             --skip astrometry/
             --skip kubernetes/
@@ -266,10 +267,11 @@ jobs:
             --skip people-operator/
             --skip per-node-csi-driver/
 
-  # The graph job proves that the generated workflows are current, and
-  # that each package.toml names every component its code uses. A
-  # dependency that package.toml leaves out fails silently: the
-  # component would not rebuild when the dependency changes.
+  # The graph job proves that the generated workflows are current, that
+  # each pin that several files share names one version, and that each
+  # package.toml names every component its code uses. A dependency that
+  # package.toml leaves out fails silently: the component would not
+  # rebuild when the dependency changes.
   graph:
     runs-on: ubuntu-26.04
     timeout-minutes: 15
@@ -315,6 +317,10 @@ jobs:
         working-directory: ci
         run: go run . generate -root .. -check
 
+      - name: check that each shared pin names one version
+        working-directory: ci
+        run: go run . pins -root ..
+
       - name: check each package.toml against the code
         working-directory: ci
         run: go run . deps -root ..
@@ -328,6 +334,20 @@ jobs:
             ~/go/pkg/mod/cache/download/**/*.mod
             ~/go/pkg/mod/cache/download/**/*.ziphash
           key: ${{ steps.go-modules.outputs.cache-primary-key }}
+
+  toolchains:
+    needs: [plan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['toolchains'].check }}
+    uses: ./.github/workflows/component-toolchains.yaml
+    with:
+      stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['toolchains'].dryrun }}
+      version: ${{ fromJSON(needs.plan.outputs.components)['toolchains'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['toolchains'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['toolchains'].jobs) }}
+    permissions:
+      contents: read
+      packages: write
 
   vulkan:
     needs: [plan]
@@ -345,7 +365,7 @@ jobs:
       packages: write
 
   vulkan-publish:
-    needs: [plan, vulkan]
+    needs: [plan, vulkan, toolchains]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['vulkan'].publish != 'none' }}
     uses: ./.github/workflows/component-vulkan.yaml
     with:
@@ -375,7 +395,7 @@ jobs:
       packages: write
 
   astrometry-publish:
-    needs: [plan, astrometry, vulkan]
+    needs: [plan, astrometry, toolchains, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['astrometry'].publish != 'none' }}
     uses: ./.github/workflows/component-astrometry.yaml
     with:
@@ -463,7 +483,7 @@ jobs:
       packages: write
 
   indi-publish:
-    needs: [plan, indi, trust]
+    needs: [plan, indi, toolchains, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['indi'].publish != 'none' }}
     uses: ./.github/workflows/component-indi.yaml
     with:
@@ -493,7 +513,7 @@ jobs:
       packages: write
 
   weston-publish:
-    needs: [plan, weston, vulkan]
+    needs: [plan, weston, toolchains, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['weston'].publish != 'none' }}
     uses: ./.github/workflows/component-weston.yaml
     with:
@@ -523,7 +543,7 @@ jobs:
       packages: write
 
   observatory-operator-publish:
-    needs: [plan, observatory-operator, indi, kubernetes, notices, trust, vulkan, weston]
+    needs: [plan, observatory-operator, indi, kubernetes, notices, toolchains, trust, vulkan, weston]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['observatory-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-observatory-operator.yaml
     with:
@@ -553,7 +573,7 @@ jobs:
       packages: write
 
   astrophotography-operator-publish:
-    needs: [plan, astrophotography-operator, astrometry, indi, kubernetes, notices, observatory-operator, trust, vulkan, weston]
+    needs: [plan, astrophotography-operator, astrometry, indi, kubernetes, notices, observatory-operator, toolchains, trust, vulkan, weston]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['astrophotography-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-astrophotography-operator.yaml
     with:
@@ -583,7 +603,7 @@ jobs:
       packages: write
 
   audio-operator-publish:
-    needs: [plan, audio-operator, kubernetes, notices, trust, vulkan]
+    needs: [plan, audio-operator, kubernetes, notices, toolchains, trust, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['audio-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-audio-operator.yaml
     with:
@@ -613,7 +633,7 @@ jobs:
       packages: write
 
   bluetooth-operator-publish:
-    needs: [plan, bluetooth-operator, kubernetes, notices, trust]
+    needs: [plan, bluetooth-operator, kubernetes, notices, toolchains, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['bluetooth-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-bluetooth-operator.yaml
     with:
@@ -671,7 +691,7 @@ jobs:
       packages: write
 
   vaapi-publish:
-    needs: [plan, vaapi, vulkan]
+    needs: [plan, vaapi, toolchains, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['vaapi'].publish != 'none' }}
     uses: ./.github/workflows/component-vaapi.yaml
     with:
@@ -701,7 +721,7 @@ jobs:
       packages: write
 
   ffmpeg-publish:
-    needs: [plan, ffmpeg, vaapi, vulkan]
+    needs: [plan, ffmpeg, toolchains, vaapi, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['ffmpeg'].publish != 'none' }}
     uses: ./.github/workflows/component-ffmpeg.yaml
     with:
@@ -731,7 +751,7 @@ jobs:
       packages: write
 
   display-operator-publish:
-    needs: [plan, display-operator, ffmpeg, kubernetes, notices, trust, vaapi, vulkan, weston]
+    needs: [plan, display-operator, ffmpeg, kubernetes, notices, toolchains, trust, vaapi, vulkan, weston]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['display-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-display-operator.yaml
     with:
@@ -761,7 +781,7 @@ jobs:
       packages: write
 
   equipment-operator-publish:
-    needs: [plan, equipment-operator, kubernetes, notices]
+    needs: [plan, equipment-operator, kubernetes, notices, toolchains]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['equipment-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-equipment-operator.yaml
     with:
@@ -791,7 +811,7 @@ jobs:
       packages: write
 
   firmware-operator-publish:
-    needs: [plan, firmware-operator, kubernetes, notices, trust, vulkan]
+    needs: [plan, firmware-operator, kubernetes, notices, toolchains, trust, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['firmware-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-firmware-operator.yaml
     with:
@@ -821,7 +841,7 @@ jobs:
       packages: write
 
   git-csi-driver-publish:
-    needs: [plan, git-csi-driver, kubernetes, notices, trust, vulkan]
+    needs: [plan, git-csi-driver, kubernetes, notices, toolchains, trust, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['git-csi-driver'].publish != 'none' }}
     uses: ./.github/workflows/component-git-csi-driver.yaml
     with:
@@ -865,7 +885,7 @@ jobs:
       packages: write
 
   library-operator-publish:
-    needs: [plan, library-operator, brand, ffmpeg, kubernetes, media-screen, notices, trust, vaapi, vulkan]
+    needs: [plan, library-operator, brand, ffmpeg, kubernetes, media-screen, notices, toolchains, trust, vaapi, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['library-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-library-operator.yaml
     with:
@@ -894,7 +914,7 @@ jobs:
       packages: write
 
   liken-publish:
-    needs: [plan, liken, brand, kubernetes, trust]
+    needs: [plan, liken, brand, kubernetes, toolchains, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['liken'].publish != 'none' }}
     uses: ./.github/workflows/component-liken.yaml
     with:
@@ -925,7 +945,7 @@ jobs:
       packages: write
 
   mpv-publish:
-    needs: [plan, mpv, ffmpeg, vaapi, vulkan]
+    needs: [plan, mpv, ffmpeg, toolchains, vaapi, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['mpv'].publish != 'none' }}
     uses: ./.github/workflows/component-mpv.yaml
     with:
@@ -955,7 +975,7 @@ jobs:
       packages: write
 
   media-operator-publish:
-    needs: [plan, media-operator, brand, ffmpeg, kubernetes, media-screen, mpv, notices, trust, vaapi, vulkan]
+    needs: [plan, media-operator, brand, ffmpeg, kubernetes, media-screen, mpv, notices, toolchains, trust, vaapi, vulkan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['media-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-media-operator.yaml
     with:
@@ -985,7 +1005,7 @@ jobs:
       packages: write
 
   people-operator-publish:
-    needs: [plan, people-operator, kubernetes, notices, trust]
+    needs: [plan, people-operator, kubernetes, notices, toolchains, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['people-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-people-operator.yaml
     with:
@@ -1015,7 +1035,7 @@ jobs:
       packages: write
 
   per-node-csi-driver-publish:
-    needs: [plan, per-node-csi-driver, kubernetes, notices]
+    needs: [plan, per-node-csi-driver, kubernetes, notices, toolchains]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].publish != 'none' }}
     uses: ./.github/workflows/component-per-node-csi-driver.yaml
     with:
@@ -1048,7 +1068,7 @@ jobs:
   # check jobs. So it waits for the plan and each component's checks,
   # and not for the publish jobs, and it deploys while they run.
   site:
-    needs: [plan, vulkan, astrometry, kubernetes, notices, trust, indi, weston, observatory-operator, astrophotography-operator, audio-operator, bluetooth-operator, brand, ci, vaapi, ffmpeg, display-operator, equipment-operator, firmware-operator, git-csi-driver, media-screen, library-operator, liken, mpv, media-operator, people-operator, per-node-csi-driver]
+    needs: [plan, toolchains, vulkan, astrometry, kubernetes, notices, trust, indi, weston, observatory-operator, astrophotography-operator, audio-operator, bluetooth-operator, brand, ci, vaapi, ffmpeg, display-operator, equipment-operator, firmware-operator, git-csi-driver, media-screen, library-operator, liken, mpv, media-operator, people-operator, per-node-csi-driver]
     if: ${{ !failure() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH == 'true' && needs.plan.outputs.site == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 20
@@ -1313,7 +1333,7 @@ jobs:
   # component and its version at this tag, whether this tag published
   # it or an earlier one did.
   record:
-    needs: [plan, vulkan, vulkan-publish, astrometry, astrometry-publish, kubernetes, notices, trust, trust-publish, indi, indi-publish, weston, weston-publish, observatory-operator, observatory-operator-publish, astrophotography-operator, astrophotography-operator-publish, audio-operator, audio-operator-publish, bluetooth-operator, bluetooth-operator-publish, brand, ci, vaapi, vaapi-publish, ffmpeg, ffmpeg-publish, display-operator, display-operator-publish, equipment-operator, equipment-operator-publish, firmware-operator, firmware-operator-publish, git-csi-driver, git-csi-driver-publish, media-screen, library-operator, library-operator-publish, liken, liken-publish, mpv, mpv-publish, media-operator, media-operator-publish, people-operator, people-operator-publish, per-node-csi-driver, per-node-csi-driver-publish]
+    needs: [plan, toolchains, vulkan, vulkan-publish, astrometry, astrometry-publish, kubernetes, notices, trust, trust-publish, indi, indi-publish, weston, weston-publish, observatory-operator, observatory-operator-publish, astrophotography-operator, astrophotography-operator-publish, audio-operator, audio-operator-publish, bluetooth-operator, bluetooth-operator-publish, brand, ci, vaapi, vaapi-publish, ffmpeg, ffmpeg-publish, display-operator, display-operator-publish, equipment-operator, equipment-operator-publish, firmware-operator, firmware-operator-publish, git-csi-driver, git-csi-driver-publish, media-screen, library-operator, library-operator-publish, liken, liken-publish, mpv, mpv-publish, media-operator, media-operator-publish, people-operator, people-operator-publish, per-node-csi-driver, per-node-csi-driver-publish]
     if: ${{ !cancelled() && github.ref_type == 'tag' && vars.PUBLISH == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10

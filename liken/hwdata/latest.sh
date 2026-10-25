@@ -9,6 +9,11 @@
 # from git for the same reason it does in the other domains here: no
 # token, no rate limit.
 #
+# `liken` takes the file as the hwdata project tags it, and no package
+# repository stands between, so the pin has no channel and both
+# channel columns print `-`. Under the rule in root plan 83 it follows
+# the newest tag of the project.
+#
 # Nothing upstream signs or checksums this file, so a bump computes
 # the digest from its own download. That pins the bytes for every
 # later rebuild. It proves nothing about where they came from, which
@@ -31,7 +36,7 @@ latest="$(git ls-remote --tags --refs "$repository" |
     grep -E '^v[0-9]+\.[0-9]+$' |
     sort -V | tail -1)" || latest=""
 
-printf '%s\t%s\t%s\t%s\n' hwdata "$pinned" "${latest:-?}" \
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' hwdata "$pinned" "${latest:-?}" - - - \
     "newest tag; the file ships from the tagged tree"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
@@ -46,7 +51,7 @@ printf '%s\t%s\t%s\t%s\n' hwdata "$pinned" "${latest:-?}" \
 }
 
 url="https://raw.githubusercontent.com/vcrhonek/hwdata/$latest/pci.ids"
-digest="$(curl -fsSL --retry 3 "$url" | sha256sum | cut -d' ' -f1)"
+digest="$(curl -fsSL --retry 3 --max-time 300 "$url" | sha256sum | cut -d' ' -f1)"
 
 echo "$latest" >"$here/VERSION"
 sed -i "s|^digest=\".*\"|digest=\"$digest\"|" "$here/fetch.sh"

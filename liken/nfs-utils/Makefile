@@ -17,7 +17,7 @@
 # the VERSION file beside this Makefile, never from a caller.
 override VERSION := $(strip $(file <VERSION))
 
-dist/$(VERSION)/mount.nfs: VERSION fetch.sh
+dist/$(VERSION)/mount.nfs: VERSION fetch.sh ../../toolchains/images.toml
 	./fetch.sh
 
 .PHONY: all clean

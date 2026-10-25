@@ -11,7 +11,7 @@
 # is Debian, not scratch, because fwupd links dozens of libraries and
 # reads plugin and quirk data from the files of its package.
 
-FROM golang:1.27.3-bookworm AS build
+FROM golang AS build
 # proxy.golang.org sometimes drops a module download partway through
 # the stream. With the default comma, `go` tries the origin only when
 # the proxy answers 404 or 410, so a dropped stream fails the build.
@@ -53,7 +53,7 @@ RUN CGO_ENABLED=0 sh /go.sh /notices ./scan
 # package. A new fwupd comes with a new snapshot date. snapshot.sh
 # comes from the vulkan directory, the build context named builder, and
 # SNAPSHOT is vulkan's version.
-FROM debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84
+FROM debian
 ARG SNAPSHOT
 COPY --from=builder snapshot.sh snapshot.sha256 /
 # The scan program reads the CA bundle that the trust component pins

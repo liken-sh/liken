@@ -131,3 +131,74 @@ func TestTheBakeFileRefusesAVersionArgument(t *testing.T) {
 		})
 	}
 }
+
+// toolchainImages is an images.toml with one build image and one run
+// image.
+const toolchainImages = "[build]\ngolang = \"golang:1.27.3-bookworm@sha256:aaa\"\n[run]\ncurl = \"curlimages/curl:8.22.0\"\n"
+
+func toolchainTree(t *testing.T, files map[string]string) string {
+	t.Helper()
+	tree := map[string]string{
+		"toolchains/package.toml": "[package]\nname = \"toolchains\"\n",
+		"toolchains/images.toml":  toolchainImages,
+		"app/Dockerfile":          "FROM --platform=$BUILDPLATFORM golang AS build\nFROM scratch\nCOPY --from=build /app /app\n",
+	}
+	for name, text := range files {
+		tree[name] = text
+	}
+	return writeTree(t, tree)
+}
+
+func TestTheBakeFileResolvesAToolchainImageToItsDigest(t *testing.T) {
+	root := toolchainTree(t, map[string]string{
+		"app/package.toml": "[package]\nname = \"app\"\n[depends]\ncomponents = [\"toolchains\"]\n[[outputs.images]]\nname = \"app\"\ncontexts = { brand = \"brand\" }\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := Bake(root, components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "  contexts = {\n    \"brand\" = \"brand\"\n    \"golang\" = \"docker-image://golang:1.27.3-bookworm@sha256:aaa\"\n  }\n"
+	if !strings.Contains(string(out), want) {
+		t.Errorf("the bake file lacks:\n%s\n\nin:\n%s", want, out)
+	}
+}
+
+func TestTheBakeFileRefusesAToolchainImage(t *testing.T) {
+	cases := map[string]struct {
+		files map[string]string
+		wants string
+	}{
+		"with no dependency on toolchains": {map[string]string{
+			"app/package.toml": "[package]\nname = \"app\"\n[[outputs.images]]\nname = \"app\"\n",
+		}, "app does not depend on toolchains"},
+		"with no digest": {map[string]string{
+			"toolchains/images.toml": "[build]\ngolang = \"golang:1.27.3-bookworm\"\n",
+			"app/package.toml":       "[package]\nname = \"app\"\n[depends]\ncomponents = [\"toolchains\"]\n[[outputs.images]]\nname = \"app\"\n",
+		}, "golang names no digest"},
+		"with the name of an image of the repository": {map[string]string{
+			"app/package.toml":    "[package]\nname = \"app\"\n[depends]\ncomponents = [\"toolchains\"]\n[[outputs.images]]\nname = \"app\"\n",
+			"golang/package.toml": "[package]\nname = \"golang\"\n[[outputs.images]]\nname = \"golang\"\n",
+			"golang/Dockerfile":   "FROM scratch\n",
+		}, "golang is both an image of the component golang and an entry of toolchains/images.toml"},
+		"with an unknown table": {map[string]string{
+			"toolchains/images.toml": toolchainImages + "[other]\nx = \"y\"\n",
+			"app/package.toml":       "[package]\nname = \"app\"\n[depends]\ncomponents = [\"toolchains\"]\n[[outputs.images]]\nname = \"app\"\n",
+		}, "unknown keys: other"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := toolchainTree(t, c.files)
+			components, err := LoadComponents(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Bake(root, components); err == nil || !strings.Contains(err.Error(), c.wants) {
+				t.Errorf("got %v, want an error with %q", err, c.wants)
+			}
+		})
+	}
+}

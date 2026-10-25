@@ -8,6 +8,7 @@
 #   make docs       build every manual into dist/docs/, for a preview
 #   make preview    build them, then serve dist/docs/ at localhost
 #   make site       build the site that liken.sh serves, into dist/docs/
+#   make versions   report every pin against its upstream
 
 # The generator reads each component's package.toml and writes the
 # root workflow, one workflow for each component, and the bake file
@@ -16,6 +17,14 @@
 .PHONY: workflows
 workflows:
 	cd ci && go run . generate -root ..
+
+# Every pin in the repository against what its upstream offers now.
+# versions.sh finds each component's latest.sh and sets the state of
+# each row. Root plan 83 gives the rule that the states check. The
+# target reaches the network, so no build depends on it.
+.PHONY: versions
+versions:
+	@./versions.sh
 
 # Every image of the repository, through the bake file, into the local
 # Docker daemon, each tagged the way the bake file names it. The Docker

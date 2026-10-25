@@ -38,7 +38,8 @@
 # every sub-make that they reach. This domain's version comes from
 # the VERSION file beside this Makefile, and never from a caller.
 override VERSION := $(strip $(file <VERSION))
-BASE := cache/$(VERSION)/debian-13-genericcloud-amd64-$(VERSION).qcow2
+# fetch.sh names the image for its suite, and links base.qcow2 to it.
+BASE := cache/$(VERSION)/base.qcow2
 
 # MACs continue the lab's scheme (52:54:00 is QEMU's prefix, and
 # 4c:4b/4c reads as "LK"). The machines take 01 to 05, and the

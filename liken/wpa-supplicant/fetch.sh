@@ -63,7 +63,18 @@ version="$(cat "$here/VERSION")"
 # domain.
 # The digest pins the tarball that wpa-supplicant/VERSION names.
 # Building another version means moving both together.
-builder="docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8" # 3.22
+#
+# The builder is the `alpine` entry in toolchains/images.toml, a tag
+# and a digest. Each static build in the OS, and `bluetoothd`, builds
+# in that image, and one entry keeps them all on one toolchain. The
+# table names Docker Hub's short form, and podman needs the registry
+# in full, so the read adds it.
+builder="$(sed -n '/^\[build\]/,/^\[/ s|^alpine = "\(.*\)"$|docker.io/library/\1|p' \
+    "$here/../../toolchains/images.toml")"
+[[ -n "$builder" ]] || {
+    echo "fetch.sh: toolchains/images.toml names no alpine image" >&2
+    exit 1
+}
 wpasupplicant_sha256="08e23937e16d0155e55cab2b51f51fbe10d80a1aa91c4e15442645059b737ef6"
 
 cache="$here/cache/$version"

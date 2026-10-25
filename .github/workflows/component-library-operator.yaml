@@ -526,9 +526,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - uses: fluxcd/flux2/action@v2.9.5
+      - uses: fluxcd/flux2/action@v2.9.6
         with:
-          version: 2.9.5
+          version: 2.9.6
 
       # Each image builds again through docker-bake.hcl, and pushes. An
       # image that ran in the images job above builds from the layers that

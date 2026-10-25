@@ -5,7 +5,7 @@ name = "display-operator"
 license = "MIT"
 
 [depends]
-components = ["ffmpeg", "kubernetes", "notices", "trust", "weston"]
+components = ["ffmpeg", "kubernetes", "notices", "toolchains", "trust", "weston"]
 
 [docs]
 prefix = "display"

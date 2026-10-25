@@ -8,6 +8,11 @@
 # the same namespace (v2.9.0-rc.1), so the filter keeps only the three
 # numbers.
 #
+# `liken` takes the release binaries as the Flux project publishes
+# them, and no package repository stands between, so the pin has no
+# channel and both channel columns print `-`. Under the rule in root
+# plan 83 it follows the newest release of Flux.
+#
 # This pin carries no digest. Each Flux release publishes a checksums
 # file, and flux/fetch.sh reads it on every fetch, so a bump here is
 # one line in VERSION.
@@ -29,7 +34,7 @@ latest="$(git ls-remote --tags --refs "$repository" |
     grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' |
     sort -V | tail -1)" || latest=""
 
-printf '%s\t%s\t%s\t%s\n' flux "$pinned" "${latest:-?}" \
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' flux "$pinned" "${latest:-?}" - - - \
     "newest release tag, no release candidates"
 
 [[ "${1:-}" == "--bump" ]] || exit 0

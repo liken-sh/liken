@@ -1,0 +1,14 @@
+# The outside images that liken builds from and runs, in images.toml:
+# the Go and Rust toolchains, the Debian, Ubuntu, and Alpine images, and
+# the other images that a Dockerfile, a manifest, a guide, or a test
+# names. Each component whose Dockerfile names one of these images
+# depends on this one, so a change to images.toml releases it. It
+# publishes nothing of its own.
+[package]
+name = "toolchains"
+license = "MIT"
+
+# shellcheck and the whitespace checks, from .pre-commit-config.yaml.
+[[jobs]]
+name = "prek"
+toolchain = "prek"

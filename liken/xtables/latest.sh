@@ -21,6 +21,11 @@
 # source mirror pins that version by name. So the bump ends by
 # re-pinning the licensing domain, which is where that name lives.
 #
+# This pin follows another pin, k3s, so it has no channel of its own,
+# and both channel columns print `-`. Under the rule in root plan 83
+# it is current when it matches the k3s-root release that the pinned
+# k3s names.
+#
 # Usage:
 #   xtables/latest.sh          report the pin and the release k3s bundles
 #   xtables/latest.sh --bump   write the release k3s bundles into VERSION
@@ -33,12 +38,12 @@ pinned="$(cat "$here/VERSION")"
 
 # The tag carries a +, which a URL path must escape.
 k3s="$(cat "$here/../k3s/VERSION")"
-latest="$(curl -fsS --retry 3 \
+latest="$(curl -fsS --retry 3 --max-time 60 \
     "https://raw.githubusercontent.com/k3s-io/k3s/${k3s/+/%2B}/scripts/version.sh" |
     sed -n 's/^VERSION_ROOT="\(v[0-9.]*\)"$/\1/p')" || latest=""
 
-printf '%s\t%s\t%s\t%s\n' xtables "$pinned" "${latest:-?}" \
-    "k3s-root, the recipe k3s $k3s builds its own userland from"
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' xtables "$pinned" "${latest:-?}" - - - \
+    "follows k3s $k3s: the k3s-root release it builds its userland from"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 

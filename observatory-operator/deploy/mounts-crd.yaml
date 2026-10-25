@@ -407,7 +407,7 @@ spec:
                             maxLength: 512
                             description: >-
                               The container image, used as written, such
-                              as `busybox:1.37`.
+                              as `busybox:1.37.0`.
                           command:
                             type: array
                             maxItems: 32
@@ -626,7 +626,7 @@ spec:
                             maxLength: 512
                             description: >-
                               The container image, used as written, such
-                              as `busybox:1.37`.
+                              as `busybox:1.37.0`.
                           command:
                             type: array
                             maxItems: 32
@@ -911,7 +911,7 @@ spec:
                                   maxLength: 512
                                   description: >-
                                     The container image, used as
-                                    written, such as `busybox:1.37`.
+                                    written, such as `busybox:1.37.0`.
                                 command:
                                   type: array
                                   maxItems: 32

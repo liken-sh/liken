@@ -12,7 +12,7 @@
 # date as the other images on Debian. snapshot.sh and closure.sh come
 # from the vulkan directory, the build context named builder.
 
-FROM debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84 AS closure
+FROM debian AS closure
 ARG VERSION
 COPY --from=builder snapshot.sh snapshot.sha256 /
 RUN sh /snapshot.sh "$VERSION" \

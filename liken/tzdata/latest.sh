@@ -5,8 +5,11 @@
 # IANA serves the current release name, and nothing else, at one path.
 # Comparing two short strings costs one request and needs no token.
 #
-# The second pin is the image the zone files compile in. Two other
-# domains pin the same image, and a bump here does not touch them.
+# `liken` builds the zone files from IANA's source, so the pin has no
+# channel, and both channel columns print `-`. Under the rule in root
+# plan 83, the pin follows the release that IANA names as current.
+# The image that the build runs in is the `alpine` entry in
+# toolchains/images.toml, and toolchains/latest.sh reports it.
 #
 # A bump writes the digests from bytes whose signature verified first.
 # That ordering is the whole reason this domain pins a signing key: a
@@ -15,9 +18,8 @@
 # fetch.sh checks both again on every build.
 #
 # Usage:
-#   tzdata/latest.sh                report both pins
-#   tzdata/latest.sh --bump         move the database
-#   tzdata/latest.sh --bump alpine  move the builder image
+#   tzdata/latest.sh          report the pin
+#   tzdata/latest.sh --bump   move the database
 
 set -euo pipefail
 
@@ -26,56 +28,15 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 releases="https://data.iana.org/time-zones/releases"
 
 pinned="$(cat "$here/VERSION")"
-# The builder pin is an image reference, and the digest is the part
-# of it that moves. The tag beside it is a comment, because a fetch
-# that named the tag would not be pinned at all.
-pinned_builder="$(sed -n 's|^builder=".*@\(sha256:[^"]*\)".*|\1|p' "$here/fetch.sh")"
-builder_tag="$(sed -n 's|^builder=.*# \(.*\)$|\1|p' "$here/fetch.sh")"
-
-image_digest() {
-    local token
-    token="$(curl -fsS --retry 3 \
-        "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/alpine:pull" |
-        sed 's/.*"token":"//;s/".*//')"
-    curl -fsSI --retry 3 -H "Authorization: Bearer $token" \
-        -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json" \
-        "https://registry-1.docker.io/v2/library/alpine/manifests/$1" |
-        grep -i '^docker-content-digest:' | tr -d '\r' | awk '{ print $2 }'
-}
-
-latest="$(curl -fsS --retry 3 https://data.iana.org/time-zones/tzdb/version |
+latest="$(curl -fsS --retry 3 --max-time 60 https://data.iana.org/time-zones/tzdb/version |
     tr -d '[:space:]')" || latest=""
-latest_builder="$(image_digest "$builder_tag")" || latest_builder=""
-
-short() { echo "${1#sha256:}" | cut -c1-12; }
-
-printf '%s\t%s\t%s\t%s\n' tzdata "$pinned" "${latest:-?}" \
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' tzdata "$pinned" "${latest:-?}" - - - \
     "the release IANA names as current"
-printf '%s\t%s\t%s\t%s\n' '  alpine' \
-    "$(short "$pinned_builder")" "$(short "${latest_builder:-?}")" \
-    "the $builder_tag builder; open-iscsi, nfs-utils, and wpa-supplicant pin it too"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
-if [[ "${2:-tzdata}" == "alpine" ]]; then
-    [[ -n "$latest_builder" ]] || {
-        echo "latest.sh: the registry did not answer" >&2
-        exit 1
-    }
-    [[ "$latest_builder" != "$pinned_builder" ]] || {
-        echo "the $builder_tag builder is current"
-        exit 0
-    }
-    sed -i "s|^builder=\".*\"|builder=\"docker.io/library/alpine@$latest_builder\"|" \
-        "$here/fetch.sh"
-    echo "alpine: $(short "$pinned_builder") -> $(short "$latest_builder")"
-    echo "open-iscsi, nfs-utils, and wpa-supplicant pin the same image; run their --bump alpine too"
-    echo "next: make -C .. tzdata"
-    exit 0
-fi
-
 [[ "${2:-tzdata}" == "tzdata" ]] || {
-    echo "latest.sh: no pin named ${2}; try alpine" >&2
+    echo "latest.sh: this domain has one pin, tzdata" >&2
     exit 1
 }
 [[ -n "$latest" ]] || {
@@ -102,7 +63,7 @@ mkdir -p "$cache"
 gpg --dearmor <"$here/tz.asc" >"$cache/tz.gpg"
 for name in "tzcode$latest.tar.gz" "tzdata$latest.tar.gz"; do
     for file in "$name" "$name.asc"; do
-        curl -fsSL --retry 3 -o "$cache/$file" "$releases/$file"
+        curl -fsSL --retry 3 --max-time 300 -o "$cache/$file" "$releases/$file"
     done
     gpgv --keyring "$cache/tz.gpg" "$cache/$name.asc" "$cache/$name"
 done

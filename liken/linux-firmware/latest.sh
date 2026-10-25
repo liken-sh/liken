@@ -13,6 +13,11 @@
 # repository: this tarball is the largest thing liken fetches, and a
 # bump that had to hash it would download it twice.
 #
+# `liken` takes each tarball as its project releases it, and no
+# package repository stands between, so the pins have no channel and
+# the channel columns print `-`. Under the rule in root plan 83 each
+# pin follows the newest release of its project.
+#
 # The second pin, wireless-regdb, publishes the same way, in the same
 # archive, with its own clearsigned sums file. The two releases are
 # cut on separate schedules, so each one bumps on its own.
@@ -38,19 +43,19 @@ pinned="$(cat "$here/VERSION")"
 # firmware release and nothing else.
 regdb_pinned="$(sed -n 's|^regdb_version="\(.*\)"$|\1|p' "$here/fetch.sh")"
 
-latest="$(curl -fsS --retry 3 "$archive/" |
+latest="$(curl -fsS --retry 3 --max-time 60 "$archive/" |
     grep -oE 'linux-firmware-[0-9]{8}\.tar\.xz' |
     sed -e 's|^linux-firmware-||' -e 's|\.tar\.xz$||' |
     sort | tail -1)" || latest=""
-regdb_latest="$(curl -fsS --retry 3 "$regdb_archive/" |
+regdb_latest="$(curl -fsS --retry 3 --max-time 60 "$regdb_archive/" |
     grep -oE 'wireless-regdb-[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.tar\.xz' |
     sed -e 's|^wireless-regdb-||' -e 's|\.tar\.xz$||' |
     sort | tail -1)" || regdb_latest=""
 
-printf '%s\t%s\t%s\t%s\n' linux-firmware "$pinned" "${latest:-?}" \
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' linux-firmware "$pinned" "${latest:-?}" - - - \
     "newest release tarball on kernel.org"
-printf '%s\t%s\t%s\t%s\n' '  wireless-regdb' "$regdb_pinned" \
-    "${regdb_latest:-?}" "regulatory.db, which cfg80211 declares"
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' '  wireless-regdb' "$regdb_pinned" \
+    "${regdb_latest:-?}" - - - "regulatory.db, which cfg80211 declares"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
@@ -58,7 +63,7 @@ printf '%s\t%s\t%s\t%s\n' '  wireless-regdb' "$regdb_pinned" \
 # among the signature's own text. Matching the exact filename picks
 # the one line that matters.
 sums_digest() {
-    curl -fsSL --retry 3 "$1/sha256sums.asc" |
+    curl -fsSL --retry 3 --max-time 60 "$1/sha256sums.asc" |
         awk -v t="$2" '$2 == t { print $1 }'
 }
 

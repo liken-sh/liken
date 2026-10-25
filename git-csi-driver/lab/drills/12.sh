@@ -23,7 +23,7 @@ HOST_FORGE="${HOST_FORGE:-git://127.0.0.1:9418/hello.git}"
 OTHER_FORGE="git://10.0.2.2:9418/other.git"
 
 # The image the lab already pulled, for the reader and the poster.
-IMAGE="${IMAGE:-debian:12-slim}"
+IMAGE="${IMAGE:-debian:sid-slim}"
 DRIVER_NAMESPACE="${DRIVER_NAMESPACE:-liken-system}"
 NAMESPACE=drill-12
 # The Service in front of the controller's listener, on port 80.
@@ -274,7 +274,7 @@ signature() {
 	openssl dgst -sha256 -hmac "$key" "$file" | awk '{print $NF}'
 }
 
-# poster_script runs inside the pod. debian:12-slim carries no curl,
+# poster_script runs inside the pod. debian:sid-slim carries no curl,
 # and bash opens a socket on /dev/tcp, so the raw HTTP/1.1 request
 # needs no image pull and no package install.
 poster_script="$(

@@ -19,7 +19,7 @@ metadata:
 spec:
   containers:
     - name: reader
-      image: debian:12-slim
+      image: debian:sid-slim
       command: ["sleep", "infinity"]
       volumeMounts:
         - name: data

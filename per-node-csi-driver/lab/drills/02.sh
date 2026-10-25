@@ -9,7 +9,7 @@ set -euo pipefail
 LAB="$(cd "$(dirname "$0")/.." && pwd)"
 KUBECTL="$LAB/kubectl"
 
-IMAGE="${IMAGE:-debian:12-slim}"
+IMAGE="${IMAGE:-debian:sid-slim}"
 NAMESPACE=drill-02
 HANDLE=drill-02-store
 

@@ -13,7 +13,7 @@ override VERSION := $(strip $(file <VERSION))
 # UTC stands for the whole tree. zic writes all 604 files in one run,
 # so any one of them shows the run finished. UTC is the one name that
 # no tz release will rename.
-dist/$(VERSION)/zoneinfo/UTC: VERSION DIGESTS tz.asc fetch.sh
+dist/$(VERSION)/zoneinfo/UTC: VERSION DIGESTS tz.asc fetch.sh ../../toolchains/images.toml
 	./fetch.sh
 
 .PHONY: all clean

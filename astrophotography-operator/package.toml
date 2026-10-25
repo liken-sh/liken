@@ -11,9 +11,10 @@ license = "MIT"
 # the tests hold the Target's FITS keywords to that operator's CRDs.
 # The image builds against the shared kubernetes module, and ships the
 # license notices that notices/ collects. The worker image builds on
-# the astrometry image of the same commit.
+# the astrometry image of the same commit. The Go image comes from
+# toolchains.
 [depends]
-components = ["astrometry", "kubernetes", "notices", "observatory-operator"]
+components = ["astrometry", "kubernetes", "notices", "observatory-operator", "toolchains"]
 
 [docs]
 prefix = "astrophotography"

@@ -62,7 +62,18 @@ version="$(cat "$here/VERSION")"
 # Every input is pinned by hash, the same discipline as every vendored
 # domain. The nfs-utils pin matches nfs-utils/VERSION. To build any
 # other version, update both.
-builder="docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8" # 3.22
+#
+# The builder is the `alpine` entry in toolchains/images.toml, a tag
+# and a digest. Each static build in the OS, and `bluetoothd`, builds
+# in that image, and one entry keeps them all on one toolchain. The
+# table names Docker Hub's short form, and podman needs the registry
+# in full, so the read adds it.
+builder="$(sed -n '/^\[build\]/,/^\[/ s|^alpine = "\(.*\)"$|docker.io/library/\1|p' \
+    "$here/../../toolchains/images.toml")"
+[[ -n "$builder" ]] || {
+    echo "fetch.sh: toolchains/images.toml names no alpine image" >&2
+    exit 1
+}
 nfsutils_sha256="7dbc05eb8b32828b322872b759a62cb3979cb4118f344dd8616813d1390e84e0"
 libtirpc_version="1.3.8"
 libtirpc_sha256="8839959bfcc7a0f4c609d8e4f53f1c67ae33de23775ec35beb39ff15adf11920"

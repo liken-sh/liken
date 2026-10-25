@@ -73,10 +73,21 @@ done
 version="$(cat "$here/VERSION")"
 
 # Every input is pinned by hash: the builder by image digest, each
-# source by the sha256 of its tarball. A bump to any of them is a
+# source by the sha256 of its tarball. A bump to a source is a
 # reviewable diff on this file. The open-iscsi pin matches the version
 # in open-iscsi/VERSION. To build any other version, update both.
-builder="docker.io/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8" # 3.22
+#
+# The builder is the `alpine` entry in toolchains/images.toml, a tag
+# and a digest. Each static build in the OS, and `bluetoothd`, builds
+# in that image, and one entry keeps them all on one toolchain. The
+# table names Docker Hub's short form, and podman needs the registry
+# in full, so the read adds it.
+builder="$(sed -n '/^\[build\]/,/^\[/ s|^alpine = "\(.*\)"$|docker.io/library/\1|p' \
+    "$here/../../toolchains/images.toml")"
+[[ -n "$builder" ]] || {
+    echo "fetch.sh: toolchains/images.toml names no alpine image" >&2
+    exit 1
+}
 openiscsi_sha256="1c3a8ad7d86e57d247a08c013f5055ef695b3a07ed760d1aea7d90b9f9011602"
 kmod_version="34"
 kmod_sha256="12e7884484151fbd432b6a520170ea185c159f4393c7a2c2a886ab820313149a"

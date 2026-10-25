@@ -35,8 +35,9 @@ OS's tags before `2026.08.18-002` carry a `v` prefix.
 `corrosion`, outside this repository, uses the same CalVer scheme with
 its own tags. `make -C liken release` on its `liken` branch tags the
 next serial of the day and publishes `ghcr.io/liken-sh/corrosion` at
-that tag. `library-operator/corrosion/Dockerfile` pins that image by
-tag and digest.
+that tag. The `corrosion` entry of `toolchains/images.toml` pins that
+image by tag and digest, and `library-operator/corrosion/Dockerfile`
+names it bare.
 
 ## What a tag releases
 

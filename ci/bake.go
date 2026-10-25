@@ -38,6 +38,9 @@ type bakeTarget struct {
 // image. A Dockerfile that builds on another image of the repository
 // names it bare, as in FROM mpv, and the target maps that name to the
 // other image's target, so the build uses the image of the same commit.
+// A Dockerfile names an outside image of toolchains/images.toml bare
+// too, as in FROM golang, and the target maps that name to the
+// reference and its digest, so each outside image is written once.
 func Bake(root string, components map[string]*Component) ([]byte, error) {
 	producer := ImageProducers(components)
 	var targets []bakeTarget
@@ -69,6 +72,11 @@ func newBakeTarget(root string, c *Component, image Image, producer map[string]s
 	for _, base := range parsed.Bases(image, producer) {
 		contexts[base] = "target:" + base
 	}
+	tools, err := toolchainContexts(root, c, image, parsed, producer)
+	if err != nil {
+		return bakeTarget{}, err
+	}
+	maps.Copy(contexts, tools)
 	t := bakeTarget{
 		Name:       image.Name,
 		Context:    context,

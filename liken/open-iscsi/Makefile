@@ -22,7 +22,7 @@ DIST ?= dist/$(OPENISCSI_VERSION)
 
 all: $(DIST)/iscsid-image.tar
 
-dist/$(OPENISCSI_VERSION)/iscsid dist/$(OPENISCSI_VERSION)/iscsiadm &: VERSION fetch.sh
+dist/$(OPENISCSI_VERSION)/iscsid dist/$(OPENISCSI_VERSION)/iscsiadm &: VERSION fetch.sh ../../toolchains/images.toml
 	./fetch.sh
 
 $(DIST)/iscsid-image.tar: dist/$(OPENISCSI_VERSION)/iscsid ../image/oci.sh $(LIKEN_VERSION_STAMP)

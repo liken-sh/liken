@@ -1,0 +1,37 @@
+# The outside images that liken builds from and runs, each named once.
+#
+# Every copy of an image reference drifts on its own, so each image
+# that more than one file names has one entry here, and the other
+# files name it by its key. Root plan 83 gives the rule each entry
+# follows: the newest release, from the newest channel its registry
+# offers. toolchains/latest.sh reports each entry against that rule.
+
+# The images that a Dockerfile starts from or copies from. A
+# Dockerfile names one bare, as in `FROM golang AS build`, and ci/
+# writes the reference into the bake target's contexts. Each one
+# carries a digest, because a tag moves and the recipe of a pinned
+# component must not.
+[build]
+golang = "golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5"
+rust = "rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e"
+# The builder of the static binaries in the OS domains and in
+# bluetoothd. The four OS fetch.sh scripts read this line too.
+alpine = "alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"
+# The digest moves with the snapshot date in vulkan/package.toml,
+# because the image and the snapshot must come from the same day.
+debian = "debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84"
+ubuntu = "ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
+distroless = "gcr.io/distroless/static:nonroot@sha256:18f4cc26c9ffa7f20a359298be7deadac5c607c8e03a02b8119f1a5fc2f82c99"
+oras = "ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179"
+corrosion = "ghcr.io/liken-sh/corrosion:2026.10.23-003@sha256:60b550a1c6a005940e76062a95b07cca93dc01ab5f2e93274828124f55db4f6e"
+
+# The images that a manifest, a guide, a skill, or a test names by
+# tag. A check in ci/ fails when one of those files names an image
+# from this table at another tag.
+[run]
+eclipse-mosquitto = "eclipse-mosquitto:2.0.22"
+csi-node-driver-registrar = "registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.17.0"
+csi-provisioner = "registry.k8s.io/sig-storage/csi-provisioner:v6.3.0"
+csi-resizer = "registry.k8s.io/sig-storage/csi-resizer:v2.2.1"
+curl = "curlimages/curl:8.22.0"
+busybox = "busybox:1.37.0"

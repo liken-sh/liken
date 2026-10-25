@@ -44,7 +44,7 @@
 #     first and BlueZ links against the libdbus-1.a that build
 #     installs.
 
-FROM alpine:3.22 AS daemons
+FROM alpine AS daemons
 
 ARG BLUEZ_VERSION=5.87
 ARG BLUEZ_SHA256=26bdcf2cebd7310c6f598850606b037ef0c515fe6608ebc54d22c50c4c32b35f
@@ -224,7 +224,7 @@ RUN set -eux; \
 # start-rescan is the command of the pod's rescan container, and it
 # works around a kernel bug that leaves the passive scan off after a
 # failed connection (bluetoothd/rescan/main.go).
-FROM golang:1.27.3-bookworm AS entrypoint
+FROM golang AS entrypoint
 # proxy.golang.org sometimes drops a module download partway through
 # the stream. With the default comma, `go` tries the origin only when
 # the proxy answers 404 or 410, so a dropped stream fails the build.

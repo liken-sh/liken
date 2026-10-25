@@ -10,9 +10,10 @@ license = "MIT"
 # is the weston image at the tag that weston/package.toml pins, so a
 # bump of either runs these tests again. The images build against the
 # shared kubernetes module, and ship the license notices that notices/
-# collects. The CLI's image carries the CA bundle that trust pins.
+# collects. The CLI's image carries the CA bundle that trust pins. The
+# Go and distroless images come from toolchains.
 [depends]
-components = ["indi", "kubernetes", "notices", "trust", "weston"]
+components = ["indi", "kubernetes", "notices", "toolchains", "trust", "weston"]
 
 [docs]
 prefix = "observatory"

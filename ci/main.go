@@ -8,6 +8,7 @@
 //	go run ./ci generate [-check]   write the workflows and the bake file, or check them
 //	go run ./ci plan                decide what this workflow run does
 //	go run ./ci deps                check each [depends] against the code
+//	go run ./ci pins                check that each shared pin names one version
 //	go run ./ci publish ...         push one component's outputs
 //	go run ./ci record -tag T       write the GitHub release for a tag
 //	go run ./ci sites               list each manual's directory and prefix
@@ -60,7 +61,7 @@ type World struct {
 func (w World) run(args []string) error {
 	stdout := w.Stdout
 	if len(args) == 0 {
-		return fmt.Errorf("name a command: generate, plan, deps, publish, record, sites, reports, or profile")
+		return fmt.Errorf("name a command: generate, plan, deps, pins, publish, record, sites, reports, or profile")
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	root := flags.String("root", ".", "the repository root")
@@ -85,6 +86,8 @@ func (w World) run(args []string) error {
 		return w.plan(*root, components)
 	case "deps":
 		return deps(*root, components, stdout)
+	case "pins":
+		return pins(*root, stdout)
 	case "publish":
 		c, ok := components[*component]
 		if !ok {
@@ -163,6 +166,21 @@ func deps(root string, components map[string]*Component, stdout io.Writer) error
 		return fmt.Errorf("%d undeclared uses", len(findings))
 	}
 	fmt.Fprintln(stdout, "every package.toml names what its component uses")
+	return nil
+}
+
+func pins(root string, stdout io.Writer) error {
+	findings, err := checkPins(root)
+	if err != nil {
+		return err
+	}
+	for _, f := range findings {
+		fmt.Fprintln(stdout, f)
+	}
+	if len(findings) > 0 {
+		return fmt.Errorf("%d pins drift; give each copy the newest version", len(findings))
+	}
+	fmt.Fprintln(stdout, "every shared pin names one version")
 	return nil
 }
 

@@ -121,7 +121,7 @@ out="$here/dist/sources"
 channel="https://releases.liken.sh"
 
 published() {
-    curl -fsI --retry 3 "$channel/sources/$1/$2" >/dev/null 2>&1
+    curl -fsI --retry 3 --max-time 60 "$channel/sources/$1/$2" >/dev/null 2>&1
 }
 
 # repin_one <component>/<version> <filename> <sha256> <url>: what
@@ -136,7 +136,7 @@ repin_one() {
     mkdir -p "$cache/$dir"
     if [[ ! -f "$cache/$dir/$file" ]]; then
         echo "fetching $dir/$file"
-        curl -fsSL --retry 5 --retry-delay 5 "$url" -o "$cache/$dir/$file.partial" || {
+        curl -fsSL --retry 5 --retry-delay 5 --max-time 1800 "$url" -o "$cache/$dir/$file.partial" || {
             echo "sources.sh: $url does not resolve" >&2
             echo "sources.sh: this URL carries a version in its name, so the" >&2
             echo "bump changed the name; edit the entry in this file by hand" >&2
@@ -179,7 +179,7 @@ mirror() {
     mkdir -p "$cache/$dir" "$out/$dir"
     if [[ ! -f "$cache/$dir/$file" ]]; then
         echo "mirroring $dir/$file"
-        curl -fsSL --retry 5 --retry-delay 5 "$url" -o "$cache/$dir/$file.partial"
+        curl -fsSL --retry 5 --retry-delay 5 --max-time 1800 "$url" -o "$cache/$dir/$file.partial"
         mv "$cache/$dir/$file.partial" "$cache/$dir/$file"
     fi
     echo "$sha  $cache/$dir/$file" | sha256sum --check --quiet || {
@@ -245,24 +245,13 @@ mirror "xtables/$xtables_version" "buildroot-2025.02.14.tar.gz" \
     "8133a06142f6eb0177726b54a948b46289ebe48f9cbcaac5403cffd1a3cc9f36" \
     "https://github.com/buildroot/buildroot/archive/refs/tags/2025.02.14.tar.gz"
 
-# mke2fs: the e2fsprogs tarball that gokrazy's recipe builds (the .gz
-# variant that their Dockerfile names), plus glibc, which that recipe
-# links in statically from its debian:bullseye toolchain. The GNU
-# release tarball takes the place of Debian's patched package,
-# because the recipe does not pin a package revision. NOTICES.md
-# records that fidelity note.
-# Tracks e2fsprogs/VERSION and the gokrazy commit in its fetch.sh.
-mirror "e2fsprogs/$e2fsprogs_version" "e2fsprogs-$e2fsprogs_version.tar.gz" \
-    "0d2e0bf80935c3392b73a60dbff82d8a6ef7ea88b806c2eea964b6837d3fd6c2" \
-    "https://mirrors.edge.kernel.org/pub/linux/kernel/people/tytso/e2fsprogs/v$e2fsprogs_version/e2fsprogs-$e2fsprogs_version.tar.gz"
-mirror "e2fsprogs/$e2fsprogs_version" "glibc-2.31.tar.xz" \
-    "9246fe44f68feeec8c666bb87973d590ce0137cca145df014c72ec95be9ffd17" \
-    "https://ftp.gnu.org/gnu/libc/glibc-2.31.tar.xz"
-
-# The iSCSI and NFS clients are built from source by their own
-# domains, so their tarballs are already fetched and verified against
-# those domains' pins. The --sources-only flag downloads the sources
-# without running the container builds.
+# mke2fs, the iSCSI client, and the NFS client are built from source
+# by their own domains, so their tarballs are already fetched and
+# verified against those domains' pins. The --sources-only flag
+# downloads the sources without running the container builds.
+prefetch "$here/../e2fsprogs/fetch.sh" --sources-only
+place "e2fsprogs/$e2fsprogs_version" "e2fsprogs-$e2fsprogs_version.tar.gz" \
+    "$here/../e2fsprogs/cache/$e2fsprogs_version/e2fsprogs-$e2fsprogs_version.tar.gz"
 prefetch "$here/../open-iscsi/fetch.sh" --sources-only
 for tarball in "$here/../open-iscsi/cache/$openiscsi_version"/*.tar.*; do
     place "open-iscsi/$openiscsi_version" "$(basename "$tarball")" "$tarball"
@@ -281,23 +270,30 @@ for tarball in "$here/../wpa-supplicant/cache/$wpasupplicant_version"/*.tar.*; d
     place "wpa-supplicant/$wpasupplicant_version" "$(basename "$tarball")" "$tarball"
 done
 
-# These are the static libraries that those three builds link from
-# their pinned alpine container: musl (every binary's libc) and
-# util-linux (libblkid and libmount). Alpine patches its packages
-# lightly. These upstream tarballs match the packaged versions, and
-# NOTICES.md names the container digest for anyone who wants to audit
-# the exact bytes.
+# These are the static libraries that those builds link from the
+# alpine image: musl (every binary's libc) and util-linux (libblkid
+# and libmount, in the iSCSI and NFS clients). Alpine patches its
+# packages lightly. These upstream tarballs match the packaged
+# versions, and toolchains/images.toml names the image digest for
+# anyone who wants to audit the exact bytes.
 # libnl is the third library: LGPL-2.1, linked into the wireless
 # supplicant, and the only way a program speaks nl80211.
-# Tracks the builder pin in open-iscsi/fetch.sh, nfs-utils/fetch.sh,
-# and wpa-supplicant/fetch.sh.
-mirror "toolchain/alpine-3.22" "musl-1.2.5.tar.gz" \
+# Tracks the `alpine` entry in toolchains/images.toml, and the path
+# names the image's tag, so a new Alpine release gets its own
+# directory.
+alpine_tag="$(sed -n '/^\[build\]/,/^\[/ s|^alpine = "alpine:\([^@"]*\).*"$|\1|p' \
+    "$here/../../toolchains/images.toml")"
+[[ -n "$alpine_tag" ]] || {
+    echo "sources.sh: toolchains/images.toml names no alpine image" >&2
+    exit 1
+}
+mirror "toolchain/alpine-$alpine_tag" "musl-1.2.5.tar.gz" \
     "a9a118bbe84d8764da0ea0d28b3ab3fae8477fc7e4085d90102b8596fc7c75e4" \
     "https://musl.libc.org/releases/musl-1.2.5.tar.gz"
-mirror "toolchain/alpine-3.22" "util-linux-2.41.6.tar.xz" \
+mirror "toolchain/alpine-$alpine_tag" "util-linux-2.41.6.tar.xz" \
     "e596083744e746be7d2823b62b43f4418dd7bf56303b4dc09e6fe8112fe3d7ed" \
     "https://www.kernel.org/pub/linux/utils/util-linux/v2.41/util-linux-2.41.6.tar.xz"
-mirror "toolchain/alpine-3.22" "libnl-3.11.0.tar.gz" \
+mirror "toolchain/alpine-$alpine_tag" "libnl-3.11.0.tar.gz" \
     "2a56e1edefa3e68a7c00879496736fdbf62fc94ed3232c0baba127ecfa76874d" \
     "https://github.com/thom311/libnl/releases/download/libnl3_11_0/libnl-3.11.0.tar.gz"
 

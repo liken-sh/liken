@@ -5,7 +5,7 @@
 # is the least there is to attack. It verifies the API server with the
 # CA in its ServiceAccount's token volume, not with the bundle.
 
-FROM golang:1.27.3-bookworm AS build
+FROM golang AS build
 # proxy.golang.org sometimes drops a module download partway through
 # the stream. With the default comma, `go` tries the origin only when
 # the proxy answers 404 or 410, so a dropped stream fails the build.

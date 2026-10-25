@@ -86,9 +86,9 @@
 #                                 above: k3s bundles a busybox mount
 #                                 that never runs a helper
 #   /sbin/mke2fs                  makes ext4 filesystems on the disks
-#                                 init claims. Static, vendored from
-#                                 gokrazy's reproducible e2fsprogs
-#                                 build (see e2fsprogs/fetch.sh). It
+#                                 init claims. Static, built from
+#                                 the e2fsprogs release against musl
+#                                 (see e2fsprogs/fetch.sh). It
 #                                 carries its own built-in default
 #                                 profile, so the system ships no
 #                                 mke2fs.conf

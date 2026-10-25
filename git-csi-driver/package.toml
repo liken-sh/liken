@@ -10,9 +10,9 @@ prefix = "git"
 # put the license notices in the image, the CA bundle that the image
 # copies, and the vulkan directory. The closure installs git from the
 # Debian snapshot, with vulkan's snapshot.sh and vulkan's version as
-# the snapshot date.
+# the snapshot date. The Go and Debian images come from toolchains.
 [depends]
-components = ["kubernetes", "notices", "trust", "vulkan"]
+components = ["kubernetes", "notices", "toolchains", "trust", "vulkan"]
 
 # gofmt, vet, a tidy check of go.mod, and one run of the tests that
 # checks for races and writes the coverage profile, then the coverage

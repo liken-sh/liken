@@ -181,10 +181,11 @@ func (c *Component) Packages() []string {
 }
 
 // skipDirs are directories that never hold a component: build output,
-// dependencies, and test fixtures.
+// dependencies, download caches, and test fixtures.
 var skipDirs = map[string]bool{
 	".git": true, "dist": true, "target": true, "node_modules": true,
 	"testdata": true, "build": true, "public": true, "resources": true,
+	".cache": true,
 }
 
 // LoadComponents finds every package.toml under root and reads it.
@@ -384,8 +385,12 @@ func validateGraph(components map[string]*Component) error {
 			}
 			// A pinned component's recipe covers the tag of each
 			// dependency. A tracked component has no tag until a
-			// release gives it one, so it cannot be in a recipe.
-			if c.Pinned() && !other.Pinned() {
+			// release gives it one, so it cannot be in a recipe. A
+			// component that publishes nothing has no tag to cover,
+			// and the recipe hashes what a build reads from it
+			// directly: the files of a named context, and the
+			// reference that toolchains/images.toml gives a bare name.
+			if c.Pinned() && !other.Pinned() && other.HasOutputs() {
 				return fmt.Errorf("%s is pinned and depends on %s, which is not; a pinned component depends only on pinned components", c.Name(), dep)
 			}
 		}

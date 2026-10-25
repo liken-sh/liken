@@ -100,7 +100,7 @@ spec:
   - {name: OBSERVER, value: Simulated Observer}
   activation:
   - job:
-      image: busybox:1.37
+      image: busybox:1.37.0
       command: [sh, -c, 'env | grep -E "^(LIKEN|INDI)_" | sort']
 ---
 # The devices that no telescope owns run on the observatory's own INDI

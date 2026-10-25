@@ -23,11 +23,21 @@ import (
 //go:embed templates/*.tmpl
 var templateFiles embed.FS
 
+// prekVersion is the prek that every prek job and the repository job
+// run, so a hook behaves the same in each.
+const prekVersion = "0.5.2"
+
+// fluxVersionFile holds the flux release that the OS ships. The
+// publish job pushes each deploy artifact with the same flux CLI, so
+// the artifact's format is the one that the cluster's flux reads.
+const fluxVersionFile = "liken/flux/VERSION"
+
 var templates = template.Must(template.New("").
 	Delims("{%", "%}").
 	Funcs(template.FuncMap{
-		"join":  strings.Join,
-		"lines": func(s string) []string { return strings.Split(strings.TrimSpace(s), "\n") },
+		"prekVersion": func() string { return prekVersion },
+		"join":        strings.Join,
+		"lines":       func(s string) []string { return strings.Split(strings.TrimSpace(s), "\n") },
 		"goCache": func(mod, sum, family string, build bool) goCache {
 			return goCache{Mod: mod, Keys: []string{sum}, Family: family, Build: build, SavesModules: !build}
 		},
@@ -78,6 +88,13 @@ func Workflows(root string, components map[string]*Component) (map[string][]byte
 		data, err := componentData(root, c)
 		if err != nil {
 			return nil, err
+		}
+		if c.Outputs.Deploy != "" {
+			flux, err := os.ReadFile(filepath.Join(root, fluxVersionFile))
+			if err != nil {
+				return nil, fmt.Errorf("%s publishes a deploy artifact with the flux CLI, whose version is in %s: %w", c.Name(), fluxVersionFile, err)
+			}
+			data["Flux"] = strings.TrimPrefix(strings.TrimSpace(string(flux)), "v")
 		}
 		out, err := render("component.yaml.tmpl", data)
 		if err != nil {

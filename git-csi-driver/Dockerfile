@@ -3,7 +3,7 @@
 # they open into a tree the final stage copies whole. What the driver
 # never runs is not in the image.
 
-FROM golang:1.27.3-bookworm AS build
+FROM golang AS build
 # proxy.golang.org sometimes drops a module download partway through
 # the stream. With the default comma, `go` tries the origin only when
 # the proxy answers 404 or 410, so a dropped stream fails the build.
@@ -45,7 +45,7 @@ RUN CGO_ENABLED=0 sh /go.sh /notices .
 # snapshot date as the base images. snapshot.sh comes from the vulkan
 # directory, the build context named builder, and SNAPSHOT is vulkan's
 # version.
-FROM debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84 AS closure
+FROM debian AS closure
 ARG SNAPSHOT
 COPY --from=builder snapshot.sh snapshot.sha256 /
 # git is the program the driver runs. openssh-client is the transport a

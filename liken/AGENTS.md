@@ -160,8 +160,10 @@ version.
 ## Version pins
 
 Every domain that vendors something pins it by version, and by digest
-when its upstream publishes no checksum of its own. `make versions` asks
-every upstream what it has now and prints the answer beside each pin.
+when its upstream publishes no checksum of its own. `make versions` at
+the top of the repository asks every upstream what it has now and
+prints the answer beside each pin, for every component. Root plan 83
+gives the rule that the report checks.
 
 Each pin belongs to a domain, so the `latest.sh` beside that domain's
 `fetch.sh` holds the address of its upstream. Run it alone and it reports

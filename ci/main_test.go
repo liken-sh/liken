@@ -66,6 +66,8 @@ func newWorld(t *testing.T, fake *fakeRegistry) *world {
 func TestGenerateWritesTheWorkflowsAndCheckFindsThemCurrent(t *testing.T) {
 	r := planFixture(t)
 	os.MkdirAll(filepath.Join(r.git.Dir, ".github/workflows"), 0o755)
+	os.MkdirAll(filepath.Join(r.git.Dir, "liken/flux"), 0o755)
+	os.WriteFile(filepath.Join(r.git.Dir, fluxVersionFile), []byte("v2.9.7\n"), 0o644)
 	w := newWorld(t, &fakeRegistry{})
 	if err := w.run([]string{"generate", "-root", r.git.Dir, "-check"}); err == nil {
 		t.Fatal("the check passed before the workflows existed")

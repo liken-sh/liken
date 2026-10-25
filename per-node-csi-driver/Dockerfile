@@ -1,7 +1,7 @@
 # The image is the binary alone on scratch. The driver runs no other
 # program, so nothing else is in it.
 
-FROM golang:1.27.3-bookworm AS build
+FROM golang AS build
 # proxy.golang.org sometimes drops a module download partway through
 # the stream. With the default comma, `go` tries the origin only when
 # the proxy answers 404 or 410, so a dropped stream fails the build.

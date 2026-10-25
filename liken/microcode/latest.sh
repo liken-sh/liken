@@ -12,6 +12,11 @@
 # keeps those in order behind their date, so the newest tag wins
 # either way.
 #
+# `liken` takes Intel's data files as Intel releases them, and no
+# package repository stands between, so the pin has no channel and
+# both channel columns print `-`. Under the rule in root plan 83 it
+# follows Intel's newest release.
+#
 # Nothing upstream checksums the GitHub source archive, so a bump
 # computes the digest from its own download.
 #
@@ -32,7 +37,7 @@ latest="$(git ls-remote --tags --refs "$repository" |
     grep -E '^[0-9]{8}' |
     sort -V | tail -1)" || latest=""
 
-printf '%s\t%s\t%s\t%s\n' microcode "$pinned" "${latest:-?}" \
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' microcode "$pinned" "${latest:-?}" - - - \
     "Intel's data files; the AMD blobs follow linux-firmware"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
@@ -47,7 +52,7 @@ printf '%s\t%s\t%s\t%s\n' microcode "$pinned" "${latest:-?}" \
 }
 
 url="$repository/archive/refs/tags/microcode-$latest.tar.gz"
-digest="$(curl -fsSL --retry 3 "$url" | sha256sum | cut -d' ' -f1)"
+digest="$(curl -fsSL --retry 3 --max-time 300 "$url" | sha256sum | cut -d' ' -f1)"
 
 echo "$latest" >"$here/VERSION"
 sed -i "s|^digest=\".*\"|digest=\"$digest\"|" "$here/fetch.sh"

@@ -7,7 +7,7 @@
 # these hooks to the files that no component owns, and to the inputs of
 # the generated workflows: a component's own exclusions, such as its
 # test data, stay in force.
-files: ^(\.agents/|\.github/|liken\.sh/|plans/|[^/]+$|ci/templates/|[^/]+/package\.toml$|.*/Dockerfile[^/]*$)
+files: ^(\.agents/|\.github/|liken\.sh/|plans/|[^/]+$|ci/templates/|[^/]+/package\.toml$|.*/Dockerfile[^/]*$|toolchains/images\.toml$|liken/flux/VERSION$)
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -18,15 +18,24 @@ repos:
         args: [--allow-multiple-documents]
       - id: check-merge-conflict
       - id: check-added-large-files
+  # shellcheck-py wraps a prebuilt shellcheck binary, so the hook
+  # works on a machine with no shellcheck installed. At this level it
+  # checks versions.sh and the scripts of liken.sh.
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
   - repo: local
     hooks:
       - id: workflows
         name: generated workflows are current
         # The workflows in .github/workflows/ and docker-bake.hcl come
         # from each component's package.toml, the FROM lines of its
-        # Dockerfiles, and the templates in ci/templates/. A change to
-        # any of them without `make workflows` fails here.
+        # Dockerfiles, the images in toolchains/images.toml, the flux
+        # version in liken/flux/VERSION, and the templates in
+        # ci/templates/. A change to any of them without
+        # `make workflows` fails here.
         entry: bash -c 'cd ci && go run . generate -root .. -check'
         language: system
-        files: ^ci/templates/|/package\.toml$|^\.github/workflows/|^docker-bake\.hcl$|/Dockerfile[^/]*$
+        files: ^ci/templates/|/package\.toml$|^\.github/workflows/|^docker-bake\.hcl$|/Dockerfile[^/]*$|^toolchains/images\.toml$|^liken/flux/VERSION$
         pass_filenames: false

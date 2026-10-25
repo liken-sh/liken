@@ -446,7 +446,7 @@ spec:
   tolerations: [{operator: Exists}]
   containers:
     - name: drill
-      image: busybox:1.37
+      image: busybox:1.37.0
       command: ["sh", "-c", "sleep infinity"]
       securityContext: {privileged: true}
       volumeMounts:
@@ -477,7 +477,7 @@ Each field is required for a reason:
   `/run/liken/operator/` is the operator's writable channel to init.
 
 The lab's guests reach the internet through their uplink NIC, so the
-`busybox:1.37` pull works with no registry mirror.
+`busybox:1.37.0` pull works with no registry mirror.
 
 **Enabling a feature on an installed machine takes a live Cluster
 patch,** not an edit to `dev-cluster/cluster.yaml`. The seed manifests

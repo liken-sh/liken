@@ -11,9 +11,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// fluxTree is a repository that holds only the flux version, which the
+// publish job of a component with a deploy artifact reads.
+func fluxTree(t *testing.T) string {
+	t.Helper()
+	return writeTree(t, map[string]string{"liken/flux/VERSION": "v2.9.7\n"})
+}
+
 func TestTheWorkflowsAreWrittenAndChecked(t *testing.T) {
 	components := graphFixture(t)
-	root := t.TempDir()
+	root := fluxTree(t)
 	if err := os.MkdirAll(filepath.Join(root, ".github/workflows"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +71,7 @@ func workflowJobs(t *testing.T, data []byte) map[string]map[string]any {
 }
 
 func TestTheRootWorkflowCallsEachComponentAfterItsDependencies(t *testing.T) {
-	files, err := Workflows("", graphFixture(t))
+	files, err := Workflows(fluxTree(t), graphFixture(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,6 +134,7 @@ name = "app-cli"
 file = "Dockerfile.cli"
 platforms = ["linux/amd64", "linux/arm64"]
 `,
+		"liken/flux/VERSION": "v2.9.7\n",
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
@@ -154,7 +162,7 @@ platforms = ["linux/amd64", "linux/arm64"]
 		"include: ${{ fromJSON(inputs.images) }}",
 		"targets: ${{ matrix.image }}",
 		"BRANCH_CACHE=${{ matrix.image }}",
-		"fluxcd/flux2/action@v2.9.5",
+		"fluxcd/flux2/action@v2.9.7\n        with:\n          version: 2.9.7\n",
 		"go run . publish -root .. -component app",
 	} {
 		if !strings.Contains(text, want) {
@@ -240,7 +248,7 @@ func TestTheSiteTakesCoverageOnlyFromAJobThatRan(t *testing.T) {
 // Hugo build cache that the docs jobs save, saves its own on main, and
 // builds the manuals in parallel.
 func TestTheSiteSharesTheHugoBuildCacheAndBuildsInParallel(t *testing.T) {
-	files, err := Workflows("", graphFixture(t))
+	files, err := Workflows(fluxTree(t), graphFixture(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -482,10 +490,11 @@ func TestOnlyAPrekJobSkipsHooks(t *testing.T) {
 // closure, so it never publishes on a dependency that failed.
 func TestTheChecksWaitForTheBasesAndThePublishWaitsForTheClosure(t *testing.T) {
 	root := writeTree(t, map[string]string{
-		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\n",
-		"lib/package.toml":  "[package]\nname = \"lib\"\n",
-		"app/package.toml":  "[package]\nname = \"app\"\n[depends]\ncomponents = [\"base\", \"lib\"]\n[outputs]\ndeploy = \"deploy\"\n",
-		"top/package.toml":  "[package]\nname = \"top\"\n[depends]\ncomponents = [\"app\"]\n[outputs]\ndeploy = \"deploy\"\n",
+		"base/package.toml":  "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\n",
+		"lib/package.toml":   "[package]\nname = \"lib\"\n",
+		"app/package.toml":   "[package]\nname = \"app\"\n[depends]\ncomponents = [\"base\", \"lib\"]\n[outputs]\ndeploy = \"deploy\"\n",
+		"top/package.toml":   "[package]\nname = \"top\"\n[depends]\ncomponents = [\"app\"]\n[outputs]\ndeploy = \"deploy\"\n",
+		"liken/flux/VERSION": "v2.9.7\n",
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
@@ -530,8 +539,9 @@ func TestTheChecksWaitForTheBasesAndThePublishWaitsForTheClosure(t *testing.T) {
 // publishes too.
 func TestTheSiteWaitsForTheChecksAndTheRecordForThePublishes(t *testing.T) {
 	root := writeTree(t, map[string]string{
-		"lib/package.toml": "[package]\nname = \"lib\"\n",
-		"app/package.toml": "[package]\nname = \"app\"\n[depends]\ncomponents = [\"lib\"]\n[outputs]\ndeploy = \"deploy\"\n",
+		"lib/package.toml":   "[package]\nname = \"lib\"\n",
+		"app/package.toml":   "[package]\nname = \"app\"\n[depends]\ncomponents = [\"lib\"]\n[outputs]\ndeploy = \"deploy\"\n",
+		"liken/flux/VERSION": "v2.9.7\n",
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
@@ -558,7 +568,7 @@ func TestTheSiteWaitsForTheChecksAndTheRecordForThePublishes(t *testing.T) {
 // when the command line has a `--skip`, and the repository job skips
 // each component's directory, so the hook's skip is an argument too.
 func TestTheRepositoryJobSkipsTheWorkflowsHook(t *testing.T) {
-	files, err := Workflows("", graphFixture(t))
+	files, err := Workflows(fluxTree(t), graphFixture(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -577,8 +587,9 @@ func TestTheRepositoryJobSkipsTheWorkflowsHook(t *testing.T) {
 // nothing.
 func TestTheCheckStageRunsADryRunOfThePublish(t *testing.T) {
 	root := writeTree(t, map[string]string{
-		"app/package.toml": "[package]\nname = \"app\"\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"app\"\n",
-		"os/package.toml":  "[package]\nname = \"os\"\n[[jobs]]\nname = \"build\"\ntoolchain = \"os\"\nrun = \"make all\"\n[outputs]\nchannel = true\n",
+		"app/package.toml":   "[package]\nname = \"app\"\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"app\"\n",
+		"os/package.toml":    "[package]\nname = \"os\"\n[[jobs]]\nname = \"build\"\ntoolchain = \"os\"\nrun = \"make all\"\n[outputs]\nchannel = true\n",
+		"liken/flux/VERSION": "v2.9.7\n",
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
@@ -627,6 +638,7 @@ func TestThePublishJobSetsUpOnlyWhatTheOutputsNeed(t *testing.T) {
 		"operator/package.toml": "[package]\nname = \"operator\"\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"operator\"\n",
 		"crd/package.toml":      "[package]\nname = \"crd\"\n[outputs]\ndeploy = \"deploy\"\n",
 		"base/package.toml":     "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\n",
+		"liken/flux/VERSION":    "v2.9.7\n",
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
@@ -637,8 +649,8 @@ func TestThePublishJobSetsUpOnlyWhatTheOutputsNeed(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := map[string][]string{
-		"operator": {"docker/setup-buildx-action@v3", "docker/login-action@v3", "fluxcd/flux2/action@v2.9.5"},
-		"crd":      {"docker/login-action@v3", "fluxcd/flux2/action@v2.9.5"},
+		"operator": {"docker/setup-buildx-action@v3", "docker/login-action@v3", "fluxcd/flux2/action@v2.9.7"},
+		"crd":      {"docker/login-action@v3", "fluxcd/flux2/action@v2.9.7"},
 		"base":     {"docker/setup-buildx-action@v3", "docker/login-action@v3"},
 	}
 	for name, want := range cases {

@@ -10,6 +10,10 @@
 # so there is no fetch script and no digest to write by hand. The tag
 # list comes from git: no token, no rate limit.
 #
+# The Go module proxy serves each Hugo release as its tag names it, so
+# the pin has no channel, and both channel columns print `-`. Under
+# the rule in root plan 83 it follows the newest Hugo release.
+#
 # Usage:
 #   docs/latest.sh          report the pin and the newest release
 #   docs/latest.sh --bump   move the tool dependency to the newest release
@@ -32,7 +36,7 @@ latest="$(git ls-remote --tags --refs "$repository" |
     grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' |
     sort -V | tail -1)" || latest=""
 
-printf '%s\t%s\t%s\t%s\n' hugo "$pinned" "${latest:-?}" \
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' hugo "$pinned" "${latest:-?}" - - - \
     "the website's build tool"
 
 [[ "${1:-}" == "--bump" ]] || exit 0

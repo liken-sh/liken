@@ -19,7 +19,7 @@ require (
 	github.com/liken-sh/liken/kubernetes v0.0.0
 	github.com/prometheus/client_golang v1.24.1
 	github.com/spf13/pflag v1.0.9
-	golang.org/x/sys v0.47.0
+	golang.org/x/sys v0.48.0
 	google.golang.org/grpc v1.83.2
 	// The CLI plugin reaches the cluster through client-go and the
 	// standard kube flags. The operator's and display-api's watches

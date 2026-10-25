@@ -511,7 +511,7 @@ spec:
     - operator: Exists
   containers:
     - name: cec
-      image: debian:trixie-slim
+      image: debian:sid-slim
       command: ["sh", "-c", "apt-get update -qq && apt-get install -qq -y v4l-utils && exec sleep infinity"]
       securityContext:
         capabilities:

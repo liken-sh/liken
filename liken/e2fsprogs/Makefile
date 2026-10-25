@@ -1,6 +1,7 @@
-# The e2fsprogs domain: the filesystem-creation userspace, vendored
-# like the kernel, k3s, and xtables. One pinned version, one static
-# binary, fetched and verified by fetch.sh (documented there).
+# The e2fsprogs domain: the filesystem-creation userspace. One pinned
+# version, one static binary, built from the release tarball by
+# fetch.sh (documented there) in the alpine image that
+# toolchains/images.toml names.
 # override keeps this pin authoritative even under a release build.
 # `make release VERSION=<stamp>` passes VERSION on the command line,
 # and command-line variables silently replace plain assignments in
@@ -8,7 +9,7 @@
 # the VERSION file beside this Makefile, never from a caller.
 override VERSION := $(strip $(file <VERSION))
 
-dist/$(VERSION)/mke2fs: VERSION fetch.sh
+dist/$(VERSION)/mke2fs: VERSION fetch.sh ../../toolchains/images.toml
 	./fetch.sh
 
 .PHONY: all clean

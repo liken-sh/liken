@@ -16,7 +16,7 @@
 # installs the same packages every time, and a new date or a new digest
 # is a change to the recipe, which needs a new revision. The upgrade
 # brings the packages of the image itself to the same date.
-FROM debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84 AS closure
+FROM debian AS closure
 ARG VERSION
 COPY snapshot.sh snapshot.sha256 /
 # mesa-vulkan-drivers and libvulkan1 are the drivers and the loader.

@@ -143,7 +143,7 @@ jobs:{% range .Jobs %}
         env:
           SKIP: {% join .Skip "," %}{% end %}
         with:
-          prek-version: 0.5.2
+          prek-version: {% prekVersion %}
           extra-args: --all-files {% .Component %}/{% else %}{% $lines := lines .Run %}{% if eq (len $lines) 1 %}
 
       - run: {% .Run %}{% else %}
@@ -299,9 +299,9 @@ jobs:{% range .Jobs %}
           username: ${{ github.actor }}
           password: ${{ github.token }}{% if .Deploy %}
 
-      - uses: fluxcd/flux2/action@v2.9.5
+      - uses: fluxcd/flux2/action@v{% .Flux %}
         with:
-          version: 2.9.5{% end %}
+          version: {% .Flux %}{% end %}
 
 {% if .Images %}      # Each image builds again through docker-bake.hcl, and pushes. An
       # image that ran in the images job above builds from the layers that

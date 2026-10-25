@@ -21,7 +21,7 @@
 
 # The shim needs no libudev to build, because its source declares the
 # two libudev types it names.
-FROM debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84 AS shim
+FROM debian AS shim
 ARG VERSION
 COPY --from=builder snapshot.sh snapshot.sha256 /
 RUN sh /snapshot.sh "$VERSION" \
@@ -42,7 +42,7 @@ RUN gcc -Wall -Wextra -Werror -shared -fPIC \
 # with weston. The .so links nothing: weston resolves
 # every libweston and libwayland symbol in it at dlopen, which is why
 # pkg-config gives only the include paths here.
-FROM debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84 AS layout
+FROM debian AS layout
 ARG VERSION
 COPY --from=builder snapshot.sh snapshot.sha256 /
 RUN sh /snapshot.sh "$VERSION" \
@@ -59,7 +59,7 @@ RUN gcc -Wall -Wextra -Werror -shared -fPIC \
 # weston-closure.sh names weston 16. A snapshot that moves weston to 17
 # fails this build, which is the report that the module set and the
 # copy of ivi-layout-export.h need reading again.
-FROM debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84 AS closure
+FROM debian AS closure
 ARG VERSION
 COPY --from=builder snapshot.sh snapshot.sha256 /
 # libgl1-mesa-dri is what the GL renderer builds its EGL device from.

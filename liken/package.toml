@@ -1,11 +1,13 @@
 # The OS. Its version is the repository's release tag, and it publishes
-# to the release channel at releases.liken.sh, not to a registry.
+# to the release channel at releases.liken.sh, not to a registry. The
+# fetch.sh scripts of its domains read the alpine builder from
+# toolchains.
 [package]
 name = "liken"
 license = "MIT"
 
 [depends]
-components = ["brand", "kubernetes", "trust"]
+components = ["brand", "kubernetes", "toolchains", "trust"]
 
 [docs]
 # liken's manual is the root of the site.

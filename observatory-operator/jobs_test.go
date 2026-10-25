@@ -21,7 +21,7 @@ const exampleJob = "observatory-lab-activation-a799431dd4"
 
 // exampleJobDone is the record of the example's job in the Activation
 // step.
-const exampleJobDone = "Observatory lab job: busybox:1.37 Done: Job " + exampleJob + " succeeded"
+const exampleJobDone = "Observatory lab job: busybox:1.37.0 Done: Job " + exampleJob + " succeeded"
 
 // jobNamed answers the Job whose name begins with prefix.
 func jobNamed(t *testing.T, w *world, prefix string) job {
@@ -50,7 +50,7 @@ func mountWithAJob(w *world) {
 	w.amend(observatory.MountKind, "east", func(spec map[string]any) {
 		spec["activation"] = []any{
 			map[string]any{"state": "Unparked"},
-			map[string]any{"timeout": "2m", "job": map[string]any{"image": "curlimages/curl:8.10.1", "args": []any{"http://relay.local/1/on"},
+			map[string]any{"timeout": "2m", "job": map[string]any{"image": "curlimages/curl:8.22.0", "args": []any{"http://relay.local/1/on"},
 				"env": []any{map[string]any{"name": "RELAY", "value": "1"}, map[string]any{"name": "LIKEN_TRIGGER", "value": "mine"}}}},
 		}
 	})
@@ -119,7 +119,7 @@ func TestAJobRunsOnceAndRestricted(t *testing.T) {
 			{"allowPrivilegeEscalation", fmt.Sprint(security.AllowPrivilegeEscalation), "false"},
 			{"capabilities.drop", fmt.Sprint(security.Capabilities.Drop), "[ALL]"},
 			{"seccompProfile.type", security.SeccompProfile.Type, "RuntimeDefault"},
-			{"image", pod.Containers[0].Image, "busybox:1.37"},
+			{"image", pod.Containers[0].Image, "busybox:1.37.0"},
 			{"terminationMessagePolicy", pod.Containers[0].TerminationMessagePolicy, "FallbackToLogsOnError"},
 			{"the pod's managed-by label", j.Spec.Template.Metadata.Labels[labelManagedBy], ""},
 		}
@@ -141,7 +141,7 @@ func TestAFailedJobFailsTheStepAndARetryRunsItAgain(t *testing.T) {
 		w.api.failJobs("BackoffLimitExceeded", "Job has reached the specified backoff limit")
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		r := w.phase("east-tonight", observatory.ReservationFailed, 10*time.Minute)
-		want := "Failed: Observatory lab: job: busybox:1.37: Job " + exampleJob + " failed: BackoffLimitExceeded: Job has reached the specified backoff limit"
+		want := "Failed: Observatory lab: job: busybox:1.37.0: Job " + exampleJob + " failed: BackoffLimitExceeded: Job has reached the specified backoff limit"
 		if got := stepOf(r, observatory.StepActivation).Summary; got != want {
 			t.Errorf("Activation = %q, want %q", got, want)
 		}
@@ -187,7 +187,7 @@ func TestAFailedJobSaysWhy(t *testing.T) {
 				}
 				w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 				r := w.phase("east-tonight", observatory.ReservationFailed, 10*time.Minute)
-				want := "Failed: Observatory lab: job: busybox:1.37: Job " + exampleJob + " failed: " + c.why
+				want := "Failed: Observatory lab: job: busybox:1.37.0: Job " + exampleJob + " failed: " + c.why
 				if got := stepOf(r, observatory.StepActivation).Summary; got != want {
 					t.Errorf("Activation = %q\nwant %q", got, want)
 				}
@@ -259,7 +259,7 @@ func TestAJobOfADeviceWhoseTrainIsDeletedNamesItsServer(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.amend(observatory.DustCapKind, "east", func(spec map[string]any) {
-			spec["deactivation"] = []any{map[string]any{"job": map[string]any{"image": "busybox:1.37", "args": []any{"true"}}}}
+			spec["deactivation"] = []any{map[string]any{"job": map[string]any{"image": "busybox:1.37.0", "args": []any{"true"}}}}
 		})
 		readyOf(w)
 		w.deleteDuringAbort(named{observatory.OpticalTrainKind, "east-imaging"})

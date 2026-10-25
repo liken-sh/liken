@@ -95,11 +95,21 @@ func TestAPinnedComponentPublishesUnderItsVersionAndRevision(t *testing.T) {
 func TestAPinnedComponentDependsOnlyOnPinnedComponents(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"a/package.toml": "[package]\nname = \"a\"\nversion = \"20260928\"\nrevision = 1\n[depends]\ncomponents = [\"b\"]\n" + pinnedImage,
-		"b/package.toml": "[package]\nname = \"b\"\n",
+		"b/package.toml": "[package]\nname = \"b\"\n[outputs]\ndeploy = \"deploy\"\n",
 	})
 	_, err := LoadComponents(root)
 	if err == nil || !strings.Contains(err.Error(), "a pinned component depends only on pinned components") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestAPinnedComponentMayDependOnAComponentThatPublishesNothing(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"a/package.toml":          "[package]\nname = \"a\"\nversion = \"20260928\"\nrevision = 1\n[depends]\ncomponents = [\"toolchains\"]\n" + pinnedImage,
+		"toolchains/package.toml": "[package]\nname = \"toolchains\"\n",
+	})
+	if _, err := LoadComponents(root); err != nil {
+		t.Fatal(err)
 	}
 }
 

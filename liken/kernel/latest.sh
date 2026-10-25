@@ -3,6 +3,15 @@
 # Report what this domain pins, and what Canonical's mainline archive
 # has now.
 #
+# The pin is a kernel release, and the bytes are Canonical's mainline
+# build of it: unmodified upstream source, packaged as debs. The
+# channel is `mainline`, the one archive this domain reads, so both
+# channel columns print it. Under the rule in root plan 83, a pin
+# from a repository follows the newest release in that repository.
+# Canonical builds each release some days after kernel.org tags it,
+# so this pin lags kernel.org, and the rule accepts that lag until
+# the kernel builds from source.
+#
 # The archive builds every upstream tag, and that includes release
 # candidates: v7.2-rc5 sits in the same index as v7.1.5. liken boots
 # releases, so this script drops every name with an -rc suffix and
@@ -34,14 +43,15 @@ pinned="$(cat "$here/VERSION")"
 # Sorting needs the trailing slash gone: '.' sorts before '/', so
 # "7.1.2/" would come out below "7.1/" and the newest release would
 # be whichever one happened to be shortest.
-latest="$(curl -fsS --retry 3 "$index" |
+latest="$(curl -fsS --retry 3 --max-time 60 "$index" |
     grep -oE 'href="v[0-9][^"]*/"' |
     sed -e 's|href="v||' -e 's|/"$||' |
     grep -vE 'rc' |
     sort -V | tail -1)" || latest=""
 
-printf '%s\t%s\t%s\t%s\n' kernel "$pinned" "${latest:-?}" \
-    "Ubuntu mainline, newest build with no -rc"
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' kernel "$pinned" "${latest:-?}" \
+    mainline mainline - \
+    "Canonical's mainline builds, which lag kernel.org"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 

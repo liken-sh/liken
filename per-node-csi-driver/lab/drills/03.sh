@@ -7,7 +7,7 @@ set -euo pipefail
 LAB="$(cd "$(dirname "$0")/.." && pwd)"
 KUBECTL="$LAB/kubectl"
 
-IMAGE="${IMAGE:-debian:12-slim}"
+IMAGE="${IMAGE:-debian:sid-slim}"
 NAMESPACE=drill-03
 VOLUME=drill-03-store
 # A handle with a / in it. One path element under the store can never

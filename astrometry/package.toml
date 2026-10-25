@@ -7,7 +7,7 @@ name = "astrometry"
 # from, as YYYYMMDD. Every image on Debian uses the same date, because
 # vulkan/snapshot.sha256 holds the checksums of one date.
 version = "20261024"
-revision = 1
+revision = 2
 license = "MIT"
 
 # The upstream releases that the snapshot holds, as Debian names them.
@@ -24,9 +24,9 @@ toolchain = "prek"
 
 # The build takes the vulkan directory as the context builder, for the
 # scripts that every image on Debian uses. The image does not build on
-# vulkan.
+# vulkan. Its Debian image comes from toolchains.
 [depends]
-components = ["vulkan"]
+components = ["toolchains", "vulkan"]
 
 [[outputs.images]]
 name = "astrometry"

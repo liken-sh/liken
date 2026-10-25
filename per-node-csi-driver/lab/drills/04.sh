@@ -8,7 +8,7 @@ set -euo pipefail
 LAB="$(cd "$(dirname "$0")/.." && pwd)"
 KUBECTL="$LAB/kubectl"
 
-IMAGE="${IMAGE:-debian:12-slim}"
+IMAGE="${IMAGE:-debian:sid-slim}"
 NAMESPACE=drill-04
 HANDLE=drill-04-store
 STORE=/host/var/lib/liken/pod-storage/per-node

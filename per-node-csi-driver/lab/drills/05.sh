@@ -8,7 +8,7 @@ set -euo pipefail
 LAB="$(cd "$(dirname "$0")/.." && pwd)"
 KUBECTL="$LAB/kubectl"
 
-IMAGE="${IMAGE:-debian:12-slim}"
+IMAGE="${IMAGE:-debian:sid-slim}"
 NODE="${NODE:-node-1}"
 DRIVER_NAMESPACE="${DRIVER_NAMESPACE:-liken-system}"
 NAMESPACE=drill-05

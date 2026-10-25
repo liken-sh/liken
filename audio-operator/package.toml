@@ -5,9 +5,10 @@ license = "MIT"
 
 # The operator image's closure installs from the Debian snapshot, so it
 # takes the vulkan directory as the context builder, for snapshot.sh,
-# and vulkan's version as the snapshot date.
+# and vulkan's version as the snapshot date. The Go and Debian images
+# come from toolchains.
 [depends]
-components = ["kubernetes", "notices", "trust", "vulkan"]
+components = ["kubernetes", "notices", "toolchains", "trust", "vulkan"]
 
 [docs]
 prefix = "audio"

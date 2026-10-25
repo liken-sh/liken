@@ -392,7 +392,7 @@ one binary each, so `kubectl exec` has nothing to run. `kubectl debug`
 gives a shell on the node itself, with the host's process table and
 the host's filesystem mounted at `/host`:
 
-    kubectl debug node/<name> -it --profile=sysadmin --image=busybox:1.37
+    kubectl debug node/<name> -it --profile=sysadmin --image=busybox:1.37.0
 
 The pod runs privileged in the host's PID namespace, so `ps` lists
 every process on the machine and `kill` can signal them. Delete the

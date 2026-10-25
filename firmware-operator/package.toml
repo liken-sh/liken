@@ -13,7 +13,7 @@ name = "firmware-operator"
 license = "MIT"
 
 [depends]
-components = ["kubernetes", "notices", "trust", "vulkan"]
+components = ["kubernetes", "notices", "toolchains", "trust", "vulkan"]
 
 [docs]
 prefix = "firmware"

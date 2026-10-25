@@ -4,9 +4,10 @@ name = "per-node-csi-driver"
 license = "MIT"
 
 # The Event writer of the shared kubernetes module, and the scripts
-# that put the license notices in the image.
+# that put the license notices in the image. The Go image comes from
+# toolchains.
 [depends]
-components = ["kubernetes", "notices"]
+components = ["kubernetes", "notices", "toolchains"]
 
 [docs]
 prefix = "per-node"

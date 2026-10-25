@@ -15,20 +15,33 @@
 # first boot, with no installer and no interaction (see seed/ and the
 # Makefile).
 #
-# The pin is a dated build (storage/VERSION). Debian publishes each
-# cloud image build into an immutable directory, named by date and
-# serial, with checksums stored beside it. Because of this, the fetch
-# verifies the image against the SHA512SUMS file published in the
-# same directory. This is the same approach that trust/fetch.sh
-# takes, where the pin is the snapshot and the checksum travels with
-# it.
+# The pin is a dated build (storage/VERSION) of one Debian suite (the
+# suite below). Debian publishes each cloud image build into its own
+# directory, named by date and serial, with checksums stored beside
+# it. Because of this, the fetch verifies the image against the
+# SHA512SUMS file published in the same directory. This is the same
+# approach that trust/fetch.sh takes, where the pin is the snapshot
+# and the checksum travels with it.
+#
+# The two suites publish under different paths and names. A release
+# such as trixie keeps each build in images/cloud/trixie/<build>/, as
+# debian-13-genericcloud-amd64-<build>.qcow2, for the life of the
+# release. sid has no release builds, only daily ones, in
+# images/cloud/sid/daily/<build>/, as
+# debian-sid-genericcloud-amd64-daily-<build>.qcow2. Debian deletes a
+# daily build after about four months, so a sid pin must move before
+# then, or this fetch fails.
 #
 # Usage:
-#   fetch.sh                fetch the build pinned in storage/VERSION
-#   fetch.sh 20260706-2531  fetch a specific build instead
+#   fetch.sh                      fetch the build pinned in
+#                                 storage/VERSION, from the suite below
+#   fetch.sh 20260706-2531        fetch another build of that suite
+#   fetch.sh 20261023-2640 sid    fetch a build of another suite
 #
-# The image lands in storage/cache/<version>/, where the Makefile
-# uses it read-only as the backing file for the guest's root disk.
+# The image lands in storage/cache/<version>/, and base.qcow2 beside
+# it names the image. The Makefile uses base.qcow2 read-only as the
+# backing file for the guest's root disk, so it needs no knowledge of
+# the suite's naming.
 
 set -euo pipefail
 
@@ -41,14 +54,32 @@ for tool in curl sha512sum; do
     }
 done
 
+# The suite that the pin in VERSION comes from. latest.sh reads this
+# line, and its --bump writes it.
+suite="trixie"
+
 version="${1:-$(cat "$here/VERSION")}"
-image="debian-13-genericcloud-amd64-$version.qcow2"
-url="https://cloud.debian.org/images/cloud/trixie/$version"
+suite="${2:-$suite}"
+images="https://cloud.debian.org/images/cloud"
+case "$suite" in
+trixie)
+    image="debian-13-genericcloud-amd64-$version.qcow2"
+    url="$images/trixie/$version"
+    ;;
+sid)
+    image="debian-sid-genericcloud-amd64-daily-$version.qcow2"
+    url="$images/sid/daily/$version"
+    ;;
+*)
+    echo "fetch.sh: no image naming known for the suite $suite" >&2
+    exit 1
+    ;;
+esac
 
 cache="$here/cache/$version"
 mkdir -p "$cache"
 
-digest="$(curl -fsSL "$url/SHA512SUMS" | awk -v img="$image" '$2 == img { print $1 }')"
+digest="$(curl -fsSL --retry 3 --max-time 60 "$url/SHA512SUMS" | awk -v img="$image" '$2 == img { print $1 }')"
 if [[ -z "$digest" ]]; then
     echo "fetch.sh: no checksum for $image published at $url/SHA512SUMS" >&2
     exit 1
@@ -60,10 +91,11 @@ if ! sha512sum --check --status <<<"$digest  $cache/$image" >/dev/null 2>&1; the
     # partway through. -C - resumes each retry from the bytes already
     # on disk, so repeated breaks still converge on a complete file.
     # The checksum below decides whether the assembled bytes are good.
-    curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
+    curl -fL --retry 5 --retry-all-errors --retry-delay 5 --max-time 1800 -C - \
         --progress-bar -o "$cache/$image" "$url/$image"
     sha512sum --check --quiet <<<"$digest  $cache/$image"
 fi
+ln -sfn "$image" "$cache/base.qcow2"
 
 echo "Debian cloud image $version:"
 qemu-img info "$cache/$image" | sed -n '1,4p'

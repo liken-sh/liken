@@ -53,6 +53,12 @@ LINUXFIRMWARE_DIST := linux-firmware/dist/$(LINUXFIRMWARE_VERSION)
 MICROCODE_VERSION := $(strip $(file <microcode/VERSION))
 MICROCODE_DIST := microcode/dist/$(MICROCODE_VERSION)
 
+# The builds that compile static binaries run in the alpine image that
+# toolchains/images.toml names. The table holds every outside image,
+# so a change to any entry rebuilds these domains, which is slower
+# than needed but never stale.
+ALPINE_PIN := ../toolchains/images.toml
+
 all: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity image
 
 # The version is part of the artifact's name. So a pin bump changes
@@ -96,7 +102,7 @@ hwdata: $(HWDATA_DIST)/pci.ids
 # The timezone database, compiled from IANA's rules so that a CronJob
 # can name the zone its schedule means. See tzdata/fetch.sh.
 $(TZDATA_DIST)/zoneinfo/UTC: tzdata/VERSION tzdata/DIGESTS tzdata/tz.asc \
-		tzdata/fetch.sh
+		tzdata/fetch.sh $(ALPINE_PIN)
 	$(MAKE) -C tzdata
 
 tzdata: $(TZDATA_DIST)/zoneinfo/UTC
@@ -122,9 +128,9 @@ $(MICROCODE_DIST)/microcode.cpio: microcode/VERSION microcode/fetch.sh \
 microcode: $(MICROCODE_DIST)/microcode.cpio
 
 # mke2fs is the program that init runs to make a filesystem on a
-# claimed disk. It is a static binary, and the build vendors it. See
-# e2fsprogs/fetch.sh.
-$(E2FSPROGS_DIST)/mke2fs: e2fsprogs/VERSION e2fsprogs/fetch.sh
+# claimed disk. It is a static binary, built from pinned source inside
+# a container, like the iSCSI initiator below. See e2fsprogs/fetch.sh.
+$(E2FSPROGS_DIST)/mke2fs: e2fsprogs/VERSION e2fsprogs/fetch.sh $(ALPINE_PIN)
 	$(MAKE) -C e2fsprogs
 
 e2fsprogs: $(E2FSPROGS_DIST)/mke2fs
@@ -140,7 +146,7 @@ e2fsprogs: $(E2FSPROGS_DIST)/mke2fs
 # the pin. The image tar also includes the liken version, so only the
 # tar goes stale when the version changes.
 $(OPENISCSI_DIST)/iscsid $(OPENISCSI_DIST)/iscsiadm &: \
-		open-iscsi/VERSION open-iscsi/fetch.sh
+		open-iscsi/VERSION open-iscsi/fetch.sh $(ALPINE_PIN)
 	$(MAKE) -C open-iscsi
 
 $(OPENISCSI_DIST)/iscsid-image.tar: $(OPENISCSI_DIST)/iscsid \
@@ -153,7 +159,7 @@ open-iscsi: $(OPENISCSI_DIST)/iscsid-image.tar
 # mount.nfs, built from pinned source inside a pinned container. See
 # nfs-utils/fetch.sh. This build has no daemon and no OCI image, on
 # purpose, because NFSv4 needs neither.
-$(NFSUTILS_DIST)/mount.nfs: nfs-utils/VERSION nfs-utils/fetch.sh
+$(NFSUTILS_DIST)/mount.nfs: nfs-utils/VERSION nfs-utils/fetch.sh $(ALPINE_PIN)
 	$(MAKE) -C nfs-utils
 
 nfs-utils: $(NFSUTILS_DIST)/mount.nfs
@@ -164,7 +170,7 @@ nfs-utils: $(NFSUTILS_DIST)/mount.nfs
 # prerequisite because the feature list decides what the binary
 # contains.
 $(WPASUPPLICANT_DIST)/wpa_supplicant: wpa-supplicant/VERSION \
-		wpa-supplicant/build.config wpa-supplicant/fetch.sh
+		wpa-supplicant/build.config wpa-supplicant/fetch.sh $(ALPINE_PIN)
 	$(MAKE) -C wpa-supplicant
 
 wpa-supplicant: $(WPASUPPLICANT_DIST)/wpa_supplicant
@@ -774,30 +780,11 @@ test-docs:
 		|| { git status --short -- skills; exit 1; }
 	$(MAKE) -C docs build
 
-# Every domain that vendors something says what it pins and what its
-# upstream has now. The domains are listed in build order, so the
-# table reads in the order a release is assembled, and the last three
-# are the pins that belong to no build: the source mirror's own, the
-# lab's storage guest, and the lab's UEFI firmware.
-#
-# Each latest.sh prints tab-separated rows and no formatting, so the
-# rule adds the verdict and the alignment here, once, instead of in
-# every domain. A domain that pins more than one thing prints a row
-# for each, and indents the name of a pin that hangs off another,
-# because which pin owns which is the domain's own knowledge.
-#
-# This target reaches the network, so it is not part of any build.
-VERSION_DOMAINS := kernel k3s xtables ../trust e2fsprogs open-iscsi \
-	nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware \
-	microcode flux docs licensing dev-cluster/storage dev-cluster/firmware
-
+# The pin report covers the whole repository, so it lives in the
+# Makefile at the top. This target runs it from here too, because the
+# OS holds most of the pins.
 versions:
-	@{ printf 'COMPONENT\tPINNED\tLATEST\tSTATE\tNOTE\n'; \
-	   for domain in $(VERSION_DOMAINS); do \
-	       $$domain/latest.sh | awk -F'\t' -v OFS='\t' \
-	           '{ state = ($$3 == "?") ? "unknown" : ($$2 == $$3 ? "current" : "behind"); \
-	              print $$1, $$2, $$3, state, $$4 }'; \
-	   done; } | column -t -s "$$(printf '\t')"
+	@$(MAKE) --no-print-directory -C .. versions
 
 # Cleaning includes the dev cluster's disks. If the build removed
 # every domain's artifacts but left the machine state behind, the

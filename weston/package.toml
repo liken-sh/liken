@@ -6,7 +6,7 @@ name = "weston"
 # The date of the snapshot.debian.org archive that the build installs
 # from, as YYYYMMDD. Every base on Debian uses the same date.
 version = "20261024"
-revision = 1
+revision = 2
 license = "MIT"
 
 # The upstream releases that the snapshot holds, as Debian names them.
@@ -23,9 +23,9 @@ toolchain = "prek"
 
 # The image builds on vulkan, and the build takes the vulkan directory
 # as the context builder, for the scripts that every base on Debian
-# uses.
+# uses. Its Debian image comes from toolchains.
 [depends]
-components = ["vulkan"]
+components = ["toolchains", "vulkan"]
 
 [[outputs.images]]
 name = "weston"

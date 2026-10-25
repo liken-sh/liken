@@ -58,17 +58,15 @@ everything else in k3s-root's userland.
 
 License: GPL-2.0 (the program), with LGPL-2.0 (libext2fs), BSD-3
 (libuuid), and MIT-style (libet/libss) libraries built in. Copyright
-Theodore Ts'o and others. The static link also carries glibc,
-LGPL-2.1, copyright the Free Software Foundation.
+Theodore Ts'o and others. The static link also carries musl (MIT,
+copyright Rich Felker and contributors).
 
-This binary is vendored from gokrazy's reproducible build of the
-upstream e2fsprogs release. The e2fsprogs domain's fetch script names
-the exact recipe and commit used. `sources/e2fsprogs/` mirrors the
-e2fsprogs tarball and glibc 2.31, the version in the recipe's
-debian:bullseye toolchain. One fidelity note: the recipe links
-Debian's glibc package, which carries Debian patches on top of the
-GNU release mirrored here. The recipe itself names the toolchain
-image for anyone who wants to rebuild the exact bytes.
+This repository's own recipe (`e2fsprogs/fetch.sh`) builds this
+binary from the upstream e2fsprogs release tarball, which it checks
+against the maintainer's sums file on kernel.org. Sources are
+mirrored under `sources/e2fsprogs/`, and musl's under
+`sources/toolchain/`. The recipe builds in the alpine image that
+`toolchains/images.toml` pins by digest.
 
 ## The iSCSI initiator (`/sbin/iscsid`, `/sbin/iscsiadm`)
 

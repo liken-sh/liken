@@ -5,7 +5,7 @@ name = "people-operator"
 license = "MIT"
 
 [depends]
-components = ["kubernetes", "notices", "trust"]
+components = ["kubernetes", "notices", "toolchains", "trust"]
 
 [docs]
 prefix = "people"

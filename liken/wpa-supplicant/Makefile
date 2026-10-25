@@ -11,7 +11,7 @@
 # the VERSION file beside this Makefile, never from a caller.
 override VERSION := $(strip $(file <VERSION))
 
-dist/$(VERSION)/wpa_supplicant: VERSION build.config fetch.sh
+dist/$(VERSION)/wpa_supplicant: VERSION build.config fetch.sh ../../toolchains/images.toml
 	./fetch.sh
 
 .PHONY: all clean

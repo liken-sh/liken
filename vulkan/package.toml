@@ -6,7 +6,7 @@ name = "vulkan"
 # The date of the snapshot.debian.org archive that the build installs
 # from, as YYYYMMDD. Every base on Debian uses the same date.
 version = "20261024"
-revision = 1
+revision = 2
 license = "MIT"
 
 # The upstream releases that the snapshot holds, as Debian names them.
@@ -20,6 +20,10 @@ vulkan-loader = "1.4.363.0-1"
 [[jobs]]
 name = "prek"
 toolchain = "prek"
+
+# Its Debian image comes from toolchains.
+[depends]
+components = ["toolchains"]
 
 [[outputs.images]]
 name = "vulkan"

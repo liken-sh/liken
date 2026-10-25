@@ -331,7 +331,7 @@ smoke:
 		'  restartPolicy: Never' \
 		'  containers:' \
 		'    - name: store-check' \
-		'      image: debian:12-slim' \
+		'      image: debian:sid-slim' \
 		'      command: ["sh", "-c", "sleep infinity"]' \
 		'      securityContext: {privileged: true}' \
 		'      volumeMounts:' \

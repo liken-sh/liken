@@ -161,6 +161,35 @@ is a shallow fork of superfly/corrosion: its `main` mirrors upstream and
 takes no commits, and its own work is on the `liken` branch. Treat
 `liken` as `corrosion`'s main branch in any process that names one.
 
+## Every pin stays current
+
+`liken` takes the newest release of everything it builds with and
+ships, because a pin that stays on an old line collects faults that
+upstream already fixed. The bases stayed on Debian stable, and Weston
+fell two major versions behind and drew the wrong colors. So a pin is
+current when it matches the newest upstream release that is not a
+pre-release, with no soak time:
+
+- A pin that `liken` builds from source follows the newest release of
+  the upstream project.
+- A pin that `liken` takes from a package repository, a registry, or
+  a channel server follows the newest channel that the repository
+  offers to install as a whole, and the newest package in that
+  channel: Debian sid, Alpine `edge`, Ubuntu's development series,
+  and k3s's `latest` channel. A PPA counts as its own repository,
+  and its newest channel is the newest series it publishes.
+- A pin that must stay back is a hold, and its report row states the
+  reason. A comment alone does not count.
+
+Every pin has a `latest.sh` beside it, and `make versions` at the top
+of the repository runs all of them and prints one table. A pin that
+several components share has one owner: `toolchains/images.toml`
+names each outside image once, and checks in `ci/` fail when two
+copies of a Go version, a Rust version, a Go module, a crate, or an
+image tag disagree. The `bump-components` skill under
+`.agents/skills` holds the row format and the procedure, and root
+plan 83 holds the reasons.
+
 ## Releases and development builds
 
 One CalVer tag releases every component whose outputs changed since its

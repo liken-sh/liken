@@ -1,6 +1,6 @@
 ---
 name: bump-components
-description: Bump the vendored component pins — the make versions report, each domain's latest.sh --bump, the changelog research, and a final report of what changes and what to watch — and the pinned base images, their Debian snapshot and their revisions. Use when I say /bump-components or ask to bump, update, or refresh the component pins or the base images.
+description: Bump every pin that is behind the newest upstream release, under the rule in root plan 83 - the top-level make versions report, each latest.sh --bump, the changelog research, and a final report of what changes and what to watch - including the toolchains, the pinned base images, their Debian snapshot and their revisions. Use when I say /bump-components or ask to bump, update, or refresh the component pins or the base images.
 ---
 
 Bump every vendored pin that is behind, read the changelogs, and
@@ -14,16 +14,56 @@ research or stop after a step, it wins over the defaults below.
 **Core principle: the bumps are cheap working-tree edits. The value
 is the research. Nothing here commits, builds, or releases.**
 
-Run the commands of steps 1 to 4 from `liken/`, where the domains and
-`make versions` are. The paths in those steps are relative to
-`liken/`. Step 5 works at the top of the repository.
+A pin is current when it matches the newest upstream release that is
+not a pre-release. A pin built from source follows the newest
+upstream release. A pin from a package repository, a registry, or a
+channel server follows the newest channel that the repository offers
+to install as a whole (Debian sid, Alpine `edge`, Ubuntu's
+development series, k3s `latest`, the newest series a PPA publishes)
+and the newest package in it. Root plan 83 gives the reasons.
+
+Run `make versions` at the top of the repository. The commands of
+steps 2 to 4 run from `liken/`, and their paths are relative to
+`liken/`. Steps 5 and later work at the top of the repository.
 
 ## 1. Pull the report
 
-Run `make versions`. It reaches every upstream, so give it a couple
-of minutes. Collect the rows whose state is `behind`. An indented row
-is a sub-pin that hangs off the domain above it; it needs its own
-named bump in step 2.
+Run `make versions` at the top of the repository. `versions.sh` finds
+every `latest.sh` in the tree, runs them in parallel, and prints one
+table. It reaches every upstream, so give it a minute or two. Collect
+the rows whose state is `behind` or `wrong channel`. An indented row
+is a sub-pin that hangs off the row above it; it needs its own named
+bump.
+
+Each `latest.sh` prints tab-separated rows of seven columns: name,
+pinned, latest, channel, newest channel, hold, and note.
+
+- `channel` is the suite, series, release, or channel that the pin
+  reads, and `newest channel` is the newest one its repository
+  offers. A pin built from source, or one that follows another pin,
+  prints `-` in both.
+- `hold` is `-`, or the reason the pin stays back. A hold needs a
+  reason a reader can check, and it lives in the row, never in a
+  comment alone.
+- `latest` is `?` when the upstream did not answer.
+
+The state is `held` when the row has a hold, `unknown` when an
+upstream did not answer, `wrong channel` when the two channels
+differ, `behind` when pinned and latest differ, and `current`
+otherwise. A new `latest.sh` opens with a header that says what it
+pins, where the bytes come from, which channel it reads, and why.
+
+The report has these sources:
+
+| Script | Pins |
+|---|---|
+| `liken/<domain>/latest.sh` | the OS domains, steps 2 to 4 |
+| `toolchains/latest.sh` | each image in `toolchains/images.toml`, Go and Rust, each Go module and crate that is behind |
+| `vulkan/latest.sh` | the Debian snapshot of the bases and `astrometry`, step 5 |
+| `indi/latest.sh` | the snapshots of Ubuntu and the two PPAs, step 5a |
+| `trust/latest.sh` | the CA bundle, step 5b |
+| `ci/latest.sh` | the GitHub Actions, prek, and the hook revisions |
+| `liken.sh/latest.sh` | Flatcar and the Terraform providers |
 
 ## 2. Bump
 
@@ -36,9 +76,13 @@ in one background task. These rules matter:
    --repin`, which retries launchpad every time.
 2. A sub-pin needs a named bump, for example
    `nfs-utils/latest.sh --bump libtirpc` or
-   `linux-firmware/latest.sh --bump wireless-regdb`. The alpine builder is one
-   image pinned by three domains; when it moves, run `--bump alpine`
-   in `open-iscsi`, `nfs-utils`, and `tzdata`.
+   `linux-firmware/latest.sh --bump wireless-regdb`. The alpine
+   builder of the static builds is the `alpine` entry in
+   `toolchains/images.toml`, and `../toolchains/latest.sh --bump
+   alpine` moves it for `open-iscsi`, `nfs-utils`, `tzdata`,
+   `wpa-supplicant`, `e2fsprogs`, and `bluetoothd` at once.
+   `licensing/latest.sh` reads `musl`, `util-linux`, and `libnl`
+   from the same Alpine branch, so those rows follow the builder.
 3. Bump `k3s` before `xtables`. The xtables pin follows the k3s-root
    release that the pinned k3s names as `VERSION_ROOT`, so
    `xtables/latest.sh` reads `k3s/VERSION` and reports xtables as
@@ -99,8 +143,14 @@ the notes live:
   INTEL-SA advisories and the updated platforms.
 * flux: the flux2 release notes, plus the changelog of each
   controller the release bumped.
-* trust, alpine, hugo, storage: routine refreshes; no research
-  unless the version jump looks unusual.
+* e2fsprogs: the release notes at
+  e2fsprogs.sourceforge.net. Only `mke2fs` ships.
+* trust, hugo: no research unless the version jump looks unusual.
+* alpine, storage: a new Alpine release or a move to `edge` can
+  drop a static library or change a default that a build from
+  source depends on, so build every domain that uses the builder.
+  The lab's storage guest runs sid's daily cloud image, which
+  Debian deletes after about four months.
 
 Note each release's age. A firmware or microcode release that is
 days old has no field history, and the smoke drills plus the first
@@ -108,9 +158,10 @@ metal boot are its first real test.
 
 ## 4. Verify
 
-1. `make versions` again: every row must read `current`.
+1. `make versions` again: every row must read `current` or `held`.
 2. `git diff --stat`: the change is `VERSION` files, `fetch.sh`
-   digests, and `licensing/sources.sh`, nothing else.
+   digests, `licensing/sources.sh`, and `toolchains/images.toml`,
+   nothing else.
 3. `make all`: changelogs do not show configure or toolchain
    breakage, and a bump that does not build is not done. The
    domains that compile from source on the musl builder break the
@@ -122,19 +173,22 @@ metal boot are its first real test.
 ## 5. The base images
 
 The base images, `vulkan`, `vaapi`, `ffmpeg`, `mpv`, and `weston`, are
-pinned components at the top of the repository. `make versions` does
-not report them. Each one's `package.toml` states a `version`, the date
+pinned components at the top of the repository. `vulkan/latest.sh`
+reports their snapshot date and each `[package.upstream]` entry
+against the newest snapshot of sid. Each one's `package.toml` states a `version`, the date
 of the snapshot.debian.org archive it installs from as `YYYYMMDD`, and
 a `revision`. Each one publishes under the tag `<version>-<revision>`.
 
 **A new snapshot.** All five move together, because a library that two
-bases hold must be the same file in both. The steps are in
-`vulkan/README.md`: check that the snapshot exists, write the sha256
-of its `InRelease` file into `vulkan/snapshot.sha256`, read the
-digest of the newest `debian:sid-slim`, set `version` to the date
-and `revision` to 1 in all five `package.toml` files, set the digest
-in every `FROM debian:sid-slim` line, run `make workflows`, run
-`make images`, and run each image's smoke check. Compare the package
+bases hold must be the same file in both. `vulkan/latest.sh --bump`
+writes the date, revision 1, and the `[package.upstream]` entries
+into every `package.toml` that installs from the snapshot, the sha256
+of the snapshot's `InRelease` file into `vulkan/snapshot.sha256`, and
+the digest of the newest `debian:sid-slim` into the `debian` entry of
+`toolchains/images.toml`. `vulkan/README.md` gives the same steps by
+hand. Then run `make workflows`, run `make images`, and run each
+image's smoke check. The report shows the snapshot as `behind` on
+every day after a bump, because sid takes uploads every day. Compare the package
 versions with the old snapshot and report the ones that moved.
 The suite is sid, Debian unstable, so a new date can bring a new
 major release of Mesa, ffmpeg, mpv, or Weston. Read the upstream
@@ -184,8 +238,7 @@ change to them needs no revision.
 `trust` at the top of the repository pins the CA bundle that every part
 of `liken` trusts: the OS build reads its `VERSION` through
 `trust/fetch.sh`, and every image that verifies TLS copies the bundle
-from the `trust` image. `make versions` reports it as the domain
-`../trust`. Its `--bump` writes the new date into `VERSION`, the image's
+from the `trust` image. `make versions` reports it as `trust`. Its `--bump` writes the new date into `VERSION`, the image's
 version and `[package.upstream]` into `package.toml`, and the snapshot
 and its published checksum into the `Dockerfile`. Then run
 `make workflows` at the top of the repository and raise the revision of
@@ -204,9 +257,13 @@ dated snapshots of all three, and it moves on its own schedule. Its
 states the `indi-bin`, `indi-3rdparty-drivers`, `gsc`, and `phd2`
 package versions that the date installs. Its smoke checks fail when the image holds other versions.
 
-Bump it only when asked, or for a security fix in `indiserver`. Set the
-date and revision 1, update `[package.upstream]` from the snapshot's
-`Packages` index, and run `make workflows`. Compare the license file of
+`indi/latest.sh` reports the snapshot date, the four package
+versions, and the newest Ubuntu series that both PPAs publish. When a
+PPA publishes a newer series, the row reads `wrong channel`, and the
+move to that series is a hand edit of `indi/snapshot.sh` and the
+`ubuntu` entry of `toolchains/images.toml`. `indi/latest.sh --bump`
+sets the date and revision 1 and updates `[package.upstream]` from
+the snapshot's `Packages` index. Then run `make workflows`. Compare the license file of
 each SDK directory in indi-3rdparty, at the commit that the PPA built
 from, with `indi/sdk-licenses/`, and copy each new or changed one; the
 section "The notices" in `indi/README.md` holds the steps. Build every target in
@@ -227,6 +284,32 @@ tests fail until it runs. Then run `make -C observatory-operator
 schema crosscheck`; `observatory-operator/AGENTS.md` gives the steps.
 Report each new line of `observatory-operator/schema/disagreements.txt`.
 CI builds the 17 images only when this tag is new.
+
+## 5c. The toolchains
+
+`toolchains/images.toml` names each outside image once. A Dockerfile
+names an image from its `[build]` table bare, as in `FROM golang`,
+and `ci/` writes the reference and its digest into the bake target.
+Manifests, guides, skills, and tests name a `[run]` image at its tag.
+`toolchains/latest.sh --bump <key>` writes the newest tag of an image
+and, for a `[build]` image, its digest. `--bump go` and `--bump
+rustc` move the toolchain image and every `go.mod` or
+`rust-toolchain.toml`. `--bump go:<module>` and `--bump
+crate:<name>` move every copy of one dependency. The k8s.io modules
+follow the k3s release in `liken/k3s/VERSION`, so they move after
+k3s does.
+
+A new reference in `[build]` changes the recipe of each pinned
+component whose Dockerfile names that key, so each one needs a new
+revision, and the cascade in step 5 applies. Run `make workflows`
+after every bump of `images.toml`. `cd ci && go run . pins -root ..`
+fails when two copies of a Go version, a Rust version, a module, a
+crate, a hook revision, or an image tag disagree; CI runs it on every
+push.
+
+`ci/latest.sh --bump` moves one GitHub Action, prek, or one hook
+revision. A major version of an action can change its inputs, so read
+its release notes before you take it.
 
 ## 6. Report
 

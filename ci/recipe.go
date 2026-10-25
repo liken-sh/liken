@@ -38,6 +38,11 @@ var recipeFormat = "1"
 // every pinned component above it, and each one needs a new revision
 // too.
 //
+// A dependency that publishes nothing, such as toolchains, has no tag.
+// The recipe covers what a build reads from it: the reference with its
+// digest that toolchains/images.toml gives each bare name that a
+// Dockerfile names, and not the entries that no Dockerfile here reads.
+//
 // Recipe refuses what it cannot pin. An image outside the repository
 // must be named by its digest, because a tag can move to other bytes
 // with no change to the tree. A file from the network needs a
@@ -72,8 +77,22 @@ func Recipe(root string, components map[string]*Component, c *Component) (string
 		if err := parsed.SnapshotFirst(); err != nil {
 			return "", fmt.Errorf("%s: %s: %w", c.Name(), file, err)
 		}
+		target, err := newBakeTarget(root, c, image, producer, components)
+		if err != nil {
+			return "", err
+		}
+		resolved := map[string]string{}
+		for _, context := range target.Contexts {
+			if reference, ok := strings.CutPrefix(context.Value, "docker-image://"); ok {
+				resolved[context.Name] = reference
+			}
+		}
 		for _, name := range append(slices.Clone(parsed.From), parsed.Sources...) {
 			if _, dir := image.Contexts[name]; dir || name == "scratch" {
+				continue
+			}
+			if reference, ok := resolved[name]; ok {
+				lines["image "+reference] = true
 				continue
 			}
 			if owner, ok := producer[name]; ok {
@@ -93,10 +112,6 @@ func Recipe(root string, components map[string]*Component, c *Component) (string
 			}
 			lines["remote "+remote.URL+" "+remote.Checksum] = true
 		}
-		target, err := newBakeTarget(root, c, image, producer, components)
-		if err != nil {
-			return "", err
-		}
 		lines["bake "+target.settings()] = true
 		context := path.Join(c.Dir, image.Context)
 		if err := hashContext(root, context, ignoreFile(root, context, file), add); err != nil {
@@ -112,7 +127,9 @@ func Recipe(root string, components map[string]*Component, c *Component) (string
 		}
 	}
 	for _, dep := range c.Depends.Components {
-		lines["depends "+dep+" "+components[dep].PinnedTag()] = true
+		if components[dep].HasOutputs() {
+			lines["depends "+dep+" "+components[dep].PinnedTag()] = true
+		}
 	}
 	sorted := slices.Sorted(func(yield func(string) bool) {
 		for line := range lines {

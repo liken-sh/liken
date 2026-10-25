@@ -5,7 +5,7 @@
 # image carries no shell, no libc, and no tools, which is the least
 # there is to attack.
 
-FROM golang:1.27.3-bookworm AS build
+FROM golang AS build
 # proxy.golang.org sometimes drops a module download partway through
 # the stream. With the default comma, `go` tries the origin only when
 # the proxy answers 404 or 410, so a dropped stream fails the build.

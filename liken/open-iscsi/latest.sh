@@ -1,28 +1,26 @@
 #!/usr/bin/env bash
 #
-# Report what this domain pins, and what its four upstreams have now.
+# Report what this domain pins, and what its three upstreams have now.
 #
-# This domain builds from source inside a pinned container, so it
-# carries four pins: the iSCSI tools themselves, the two static
-# libraries the build links, and the image it all builds in. Each one
-# is a version and a digest in fetch.sh, except the image, which is
-# only a digest, because a tag moves and a digest does not.
+# This domain builds from source inside a container, so it carries
+# three pins: the iSCSI tools themselves and the two static libraries
+# the build links. Each one is a version and a digest in fetch.sh.
 #
-# The image row compares the pinned digest against whatever the tag
-# resolves to today. Alpine rebuilds a release tag when a package in
-# it gets a fix, so this row moving is normal and means the base got
-# a rebuild, not that a new Alpine came out. Two other domains pin the
-# same image, and a bump here does not touch them.
+# `liken` builds this domain from source, so its pins have no channel,
+# and both channel columns print `-`. Under the rule in root plan 83,
+# each pin follows the newest release of its upstream project. The
+# image that the build runs in is the `alpine` entry in
+# toolchains/images.toml, and toolchains/latest.sh reports it.
 #
 # Nothing upstream checksums a GitHub source archive, so those bumps
 # compute the digest from their own download. kernel.org publishes a
 # sums file, so the kmod bump reads its digest from there.
 #
 # Usage:
-#   open-iscsi/latest.sh                report all four pins
+#   open-iscsi/latest.sh                report all three pins
 #   open-iscsi/latest.sh --bump         move the iSCSI tools
-#   open-iscsi/latest.sh --bump kmod    move one of the other three
-#                                       (kmod, libeconf, alpine)
+#   open-iscsi/latest.sh --bump kmod    move one of the other two
+#                                       (kmod, libeconf)
 
 set -euo pipefail
 
@@ -35,12 +33,6 @@ pin_of() { sed -n "s|^$1=\"\([^\"]*\)\".*|\1|p" "$here/fetch.sh"; }
 pinned="$(cat "$here/VERSION")"
 pinned_kmod="$(pin_of kmod_version)"
 pinned_libeconf="$(pin_of libeconf_version)"
-# The builder pin is an image reference, and the digest is the part
-# of it that moves. The tag beside it is a comment, because a fetch
-# that named the tag would not be pinned at all.
-pinned_builder="$(sed -n 's|^builder=".*@\(sha256:[^"]*\)".*|\1|p' "$here/fetch.sh")"
-builder_tag="$(sed -n 's|^builder=.*# \(.*\)$|\1|p' "$here/fetch.sh")"
-
 newest_tag() {
     git ls-remote --tags --refs "$1" |
         sed "s|.*refs/tags/$2||" |
@@ -48,40 +40,17 @@ newest_tag() {
         sort -V | tail -1
 }
 
-# A registry names an image by digest, and a tag is a label on top of
-# one. Reading the tag's digest takes an anonymous pull token and one
-# HEAD request, which keeps this report free of a docker daemon.
-image_digest() {
-    local token
-    token="$(curl -fsS --retry 3 \
-        "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/alpine:pull" |
-        sed 's/.*"token":"//;s/".*//')"
-    curl -fsSI --retry 3 -H "Authorization: Bearer $token" \
-        -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json" \
-        "https://registry-1.docker.io/v2/library/alpine/manifests/$1" |
-        grep -i '^docker-content-digest:' | tr -d '\r' | awk '{ print $2 }'
-}
-
 latest="$(newest_tag https://github.com/open-iscsi/open-iscsi '' '^[0-9]+\.[0-9]+\.[0-9]+$')" || latest=""
-latest_kmod="$(curl -fsS --retry 3 https://www.kernel.org/pub/linux/utils/kernel/kmod/ |
+latest_kmod="$(curl -fsS --retry 3 --max-time 60 https://www.kernel.org/pub/linux/utils/kernel/kmod/ |
     grep -oE 'kmod-[0-9]+\.tar\.xz' | sed -e 's|kmod-||' -e 's|\.tar\.xz||' |
     sort -V | tail -1)" || latest_kmod=""
 latest_libeconf="$(newest_tag https://github.com/openSUSE/libeconf v '^[0-9]+\.[0-9]+\.[0-9]+$')" || latest_libeconf=""
-latest_builder="$(image_digest "$builder_tag")" || latest_builder=""
-
-# The digest is 71 characters and the table has to stay readable, so
-# the rows carry enough of it to tell two apart.
-short() { echo "${1#sha256:}" | cut -c1-12; }
-
-printf '%s\t%s\t%s\t%s\n' open-iscsi "$pinned" "${latest:-?}" \
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' open-iscsi "$pinned" "${latest:-?}" - - - \
     "newest release tag"
-printf '%s\t%s\t%s\t%s\n' '  kmod' "$pinned_kmod" "${latest_kmod:-?}" \
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' '  kmod' "$pinned_kmod" "${latest_kmod:-?}" - - - \
     "libkmod, linked static"
-printf '%s\t%s\t%s\t%s\n' '  libeconf' "$pinned_libeconf" "${latest_libeconf:-?}" \
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' '  libeconf' "$pinned_libeconf" "${latest_libeconf:-?}" - - - \
     "libeconf, linked static"
-printf '%s\t%s\t%s\t%s\n' '  alpine' \
-    "$(short "$pinned_builder")" "$(short "${latest_builder:-?}")" \
-    "the $builder_tag builder; nfs-utils, tzdata, and wpa-supplicant pin it too"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
@@ -90,7 +59,7 @@ printf '%s\t%s\t%s\t%s\n' '  alpine' \
 # digest came from.
 repin() {
     local version_var="$1" digest_var="$2" value="$3" url="$4" digest
-    digest="$(curl -fsSL --retry 3 "$url" | sha256sum | cut -d' ' -f1)"
+    digest="$(curl -fsSL --retry 3 --max-time 300 "$url" | sha256sum | cut -d' ' -f1)"
     # The domain's own version lives in VERSION, not in fetch.sh, so
     # that call passes no variable name for it.
     if [[ -n "$version_var" ]]; then
@@ -126,7 +95,7 @@ kmod)
     }
     # kernel.org signs one sums file per directory, so this digest
     # comes from upstream and not from the download.
-    digest="$(curl -fsSL --retry 3 https://www.kernel.org/pub/linux/utils/kernel/kmod/sha256sums.asc |
+    digest="$(curl -fsSL --retry 3 --max-time 60 https://www.kernel.org/pub/linux/utils/kernel/kmod/sha256sums.asc |
         awk -v t="kmod-$latest_kmod.tar.xz" '$2 == t { print $1 }')"
     [[ -n "$digest" ]] || {
         echo "latest.sh: no kmod-$latest_kmod.tar.xz in kernel.org's sums file" >&2
@@ -153,22 +122,8 @@ libeconf)
     echo "libeconf: $pinned_libeconf -> $latest_libeconf"
     echo "the digest came from this download; nothing upstream signs it"
     ;;
-alpine)
-    [[ -n "$latest_builder" ]] || {
-        echo "latest.sh: the registry did not answer" >&2
-        exit 1
-    }
-    [[ "$latest_builder" != "$pinned_builder" ]] || {
-        echo "the $builder_tag builder is current"
-        exit 0
-    }
-    sed -i "s|^builder=\".*\"|builder=\"docker.io/library/alpine@$latest_builder\"|" \
-        "$here/fetch.sh"
-    echo "alpine: $(short "$pinned_builder") -> $(short "$latest_builder")"
-    echo "nfs-utils, tzdata, and wpa-supplicant pin the same image; run their --bump alpine too"
-    ;;
 *)
-    echo "latest.sh: no pin named ${2}; try kmod, libeconf, or alpine" >&2
+    echo "latest.sh: no pin named ${2}; try kmod or libeconf" >&2
     exit 1
     ;;
 esac

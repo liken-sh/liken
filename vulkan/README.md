@@ -101,16 +101,15 @@ ffmpeg, or Weston, and each bump is an upgrade to test.
 
        docker buildx imagetools inspect debian:sid-slim
 
-4. In all five bases, `vulkan`, `vaapi`, `ffmpeg`, `mpv`, and
-   `weston`, set `version` to the date and `revision` to 1 in
-   `package.toml`, and set the digest in each `FROM debian:sid-slim`
-   line of the `Dockerfile`. `astrometry` installs from the same
-   snapshot, because this directory's `snapshot.sha256` holds the
-   checksum of one date, so set its `version`, `revision`, and digest
-   the same way. Every other `FROM debian:sid-slim` line in the
-   repository names the same digest, so that each one installs the
-   glibc that the bases carry: find them with
-   `git grep -l 'debian:sid-slim@'`.
+4. Set the digest in the `debian` entry of `toolchains/images.toml`.
+   Every Dockerfile in the repository names that image bare, as
+   `FROM debian`, and the bake file gives each one the same digest, so
+   that each one installs the glibc that the bases carry. In all five
+   bases, `vulkan`, `vaapi`, `ffmpeg`, `mpv`, and `weston`, set
+   `version` to the date and `revision` to 1 in `package.toml`.
+   `astrometry` installs from the same snapshot, because this
+   directory's `snapshot.sha256` holds the checksum of one date, so
+   set its `version` and `revision` the same way.
 5. Run `make workflows` at the top of the repository. The bake file
    carries each base's version and tag.
 6. Run `make images` at the top of the repository. It builds every

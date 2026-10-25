@@ -179,3 +179,28 @@ func TestARecipeRefusesWhatItCannotPin(t *testing.T) {
 		})
 	}
 }
+
+func TestTheRecipeCoversTheDigestOfEachToolchainImageItReads(t *testing.T) {
+	cases := []struct {
+		name    string
+		images  string
+		changes bool
+	}{
+		{"the digest of an image it reads", "[build]\ngolang = \"golang:1.27.3-bookworm@sha256:bbb\"\n[run]\ncurl = \"curlimages/curl:8.22.0\"\n", true},
+		{"an image it does not read", toolchainImages + "rust = \"rust:1.98.1-bookworm@sha256:ccc\"\n", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := toolchainTree(t, map[string]string{
+				"app/package.toml": "[package]\nname = \"app\"\nversion = \"20260928\"\nrevision = 1\n[depends]\ncomponents = [\"toolchains\"]\n[[outputs.images]]\nname = \"app\"\n",
+			})
+			before := recipeOf(t, root, "app")
+			if err := os.WriteFile(filepath.Join(root, "toolchains/images.toml"), []byte(c.images), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if after := recipeOf(t, root, "app"); (after != before) != c.changes {
+				t.Errorf("before %s, after %s", before, after)
+			}
+		})
+	}
+}

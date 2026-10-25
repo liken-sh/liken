@@ -130,7 +130,7 @@ func TestTheEndOfAnActivityIsNoAnswer(t *testing.T) {
 		time.Sleep(time.Minute)
 		w.amend(observatory.MountKind, "east", func(spec map[string]any) {
 			spec["deactivation"] = []any{map[string]any{"state": "Parked"},
-				map[string]any{"timeout": "1h", "job": map[string]any{"image": "busybox:1.37", "args": []any{"true"}}}}
+				map[string]any{"timeout": "1h", "job": map[string]any{"image": "busybox:1.37.0", "args": []any{"true"}}}}
 		})
 		night("east-again")
 		w.api.holdJobs()

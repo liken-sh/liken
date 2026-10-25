@@ -15,7 +15,7 @@ HOST_FORGE="$LAB/forge/hello.git"
 
 # The reader image is one the lab already pulled, so no drill waits on
 # a registry.
-IMAGE="${IMAGE:-debian:12-slim}"
+IMAGE="${IMAGE:-debian:sid-slim}"
 DRIVER_NAMESPACE="${DRIVER_NAMESPACE:-liken-system}"
 PULL="${PULL:-15s}"
 
