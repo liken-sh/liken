@@ -629,11 +629,11 @@ spec:
                           description: |-
                             The topic a power press on this unit publishes
                             an ask on while the unit's status topic states
-                            the power mode room: toggle for KEY_POWER and
-                            KEY_POWER2, off for KEY_SLEEP, and on for
-                            KEY_WAKEUP, the names the kernel gives a TV
-                            remote's Power Off Function and Power On
-                            Function. The media operator writes each ask
+                            the power mode room: off for a press that
+                            turns the Player off, and on for KEY_WAKEUP,
+                            the name the kernel gives a TV remote's Power
+                            On Function, on a Player that is already on.
+                            The media operator writes each ask
                             into the Receiver's session, and the equipment
                             operator turns the room off or on. The media
                             operator also publishes wake here when a

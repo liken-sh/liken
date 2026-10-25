@@ -26,15 +26,18 @@ fn a_power_ask_during_a_play_publishes_nothing_and_draws_nothing() {
 }
 
 #[test]
-fn a_held_power_ask_publishes_the_toggle_when_the_unit_is_idle() {
+fn a_held_power_ask_turns_the_player_off_when_the_unit_is_idle() {
     let now = Instant::now();
     let mut screen = playing(&powered(), now);
     screen.deliver(COMMANDS, POWER_ASK, false, now);
 
     let effects = screen.deliver(STATUS, &status("Idle"), false, now);
 
-    assert_eq!(moments(effects.clone()), [drew_status(Activity::Idle)]);
-    assert_eq!(publishes(effects), only_the_toggle());
+    assert_eq!(
+        moments(effects.clone()),
+        [drew_status(Activity::Idle), Moment::Sleep]
+    );
+    assert_eq!(publishes(effects), turned_off());
 }
 
 #[test]
@@ -67,7 +70,7 @@ fn a_status_that_still_plays_leaves_the_ask_held() {
     assert!(publishes(effects).is_empty());
 
     let effects = screen.deliver(STATUS, &status("Idle"), false, now);
-    assert_eq!(publishes(effects), only_the_toggle());
+    assert_eq!(publishes(effects), turned_off());
 }
 
 #[test]
@@ -90,7 +93,7 @@ fn a_power_ask_while_the_unit_is_idle_is_answered_at_once() {
 
     let effects = screen.deliver(COMMANDS, POWER_ASK, false, now);
 
-    assert_eq!(publishes(effects), only_the_toggle());
+    assert_eq!(publishes(effects), turned_off());
 }
 
 #[test]
@@ -125,13 +128,13 @@ fn a_tick_before_the_deadline_keeps_the_ask_held() {
     screen.tick(now + Duration::from_secs(9));
     let effects = screen.deliver(STATUS, &status("Idle"), false, now);
 
-    assert_eq!(publishes(effects), only_the_toggle());
+    assert_eq!(publishes(effects), turned_off());
 }
 
-// The quiet window arms once the unit is idle, so the clock wakes at the
-// earlier of the two deadlines.
+// While the unit plays, the ask's deadline is the only one. The answer
+// turns the Player off, and a dark Player arms no window.
 #[test]
-fn the_next_deadline_is_the_earlier_of_the_ask_and_the_quiet_window() {
+fn the_ask_holds_the_only_deadline_and_a_power_off_arms_none() {
     let now = Instant::now();
     let wiring = Wiring {
         fade_after: Duration::from_secs(5),
@@ -145,8 +148,8 @@ fn the_next_deadline_is_the_earlier_of_the_ask_and_the_quiet_window() {
     screen.deliver(COMMANDS, POWER_ASK, false, now);
     let effects = screen.deliver(STATUS, &status("Idle"), false, now);
 
-    assert_eq!(publishes(effects), only_the_toggle());
-    assert_eq!(screen.next_deadline(), Some(now + Duration::from_secs(5)));
+    assert_eq!(publishes(effects), turned_off());
+    assert_eq!(screen.next_deadline(), None);
 }
 
 #[test]
@@ -158,7 +161,7 @@ fn a_held_power_ask_writes_a_line_for_the_hold_and_for_the_answer() {
                 "{COMMANDS} asked for power while the player plays, held until it is Idle for at most 10 s"
             ),
             format!(
-                "{COMMANDS} asked for power and the player is Idle, so published the toggle to {POWER}"
+                "{COMMANDS} asked for power and the player is Idle, so published off to {POWER}, published panel desire off to {PANEL}"
             ),
         ),
         (
@@ -205,8 +208,7 @@ fn a_dropped_power_ask_writes_one_line_that_says_so() {
 const POWER_OFF_ASK: &[u8] = br#"{"action":"power-off"}"#;
 
 // A Power Off Function keeps the room off when repeated (HDMI-CEC 1.3a, CEC
-// 13.13.3), so the held ask publishes off and never the toggle, which would
-// turn a room with its TV already off back on.
+// 13.13.3), so the held ask publishes off and never the toggle.
 #[test]
 fn a_held_power_off_ask_publishes_off_when_the_unit_is_idle() {
     let now = Instant::now();
@@ -215,14 +217,7 @@ fn a_held_power_off_ask_publishes_off_when_the_unit_is_idle() {
 
     let effects = screen.deliver(STATUS, &status("Idle"), false, now);
 
-    assert_eq!(
-        publishes(effects),
-        [Publish {
-            topic: POWER.into(),
-            payload: br#"{"action":"off"}"#.to_vec(),
-            retained: false,
-        }]
-    );
+    assert_eq!(publishes(effects), turned_off());
     assert_eq!(
         screen.take_lines(),
         [
@@ -230,7 +225,7 @@ fn a_held_power_off_ask_publishes_off_when_the_unit_is_idle() {
                 "{COMMANDS} asked for power-off while the player plays, held until it is Idle for at most 10 s"
             ),
             format!(
-                "{COMMANDS} asked for power-off and the player is Idle, so published off to {POWER}"
+                "{COMMANDS} asked for power-off and the player is Idle, so published off to {POWER}, published panel desire off to {PANEL}"
             ),
         ]
     );

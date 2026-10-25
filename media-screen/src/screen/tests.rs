@@ -574,31 +574,7 @@ fn a_back_press_reaches_the_client_and_leaves_the_shade_up() {
 }
 
 // The power press, for a unit whose screen is wired through a Receiver.
-
-#[test]
-fn a_power_press_publishes_the_toggle_and_reaches_no_client() {
-    let now = Instant::now();
-    for name in keys::TOGGLE {
-        let mut screen = idling(&powered(), now);
-
-        let effects = screen.deliver(SOFA_EVENTS, &key(name, 1), false, now);
-
-        assert!(moments(effects.clone()).is_empty(), "{name}");
-        assert_eq!(publishes(effects), only_the_toggle(), "{name}");
-    }
-}
-
-#[test]
-fn a_power_repeat_publishes_no_toggle() {
-    let now = Instant::now();
-    let mut screen = idling(&powered(), now);
-
-    assert!(
-        screen
-            .deliver(SOFA_EVENTS, &key("KEY_POWER", 2), false, now)
-            .is_empty()
-    );
-}
+// power_press.rs holds the presses that turn the Player off and on.
 
 #[test]
 fn a_power_press_on_a_unit_with_no_receiver_reaches_the_client() {
@@ -615,75 +591,28 @@ fn a_power_press_on_a_unit_with_no_receiver_reaches_the_client() {
     }
 }
 
-/// The toggle a power press publishes, and nothing beside it.
-fn only_the_toggle() -> Vec<Publish> {
-    vec![Publish {
+/// One ask on the power topic, not retained.
+fn power_ask(action: &str) -> Publish {
+    Publish {
         topic: POWER.into(),
-        payload: br#"{"action":"toggle"}"#.to_vec(),
+        payload: format!(r#"{{"action":"{action}"}}"#).into_bytes(),
         retained: false,
-    }]
-}
-
-// The equipment operator reads the toggle and decides whether the room goes
-// off or on. A shade that woke on the same press would state the on desire,
-// the session would turn awake, and that wake would cancel the standby the
-// press asked for. So the shade and the desire stand as they were.
-#[test]
-fn a_power_press_on_a_sleeping_screen_publishes_only_the_toggle() {
-    let now = Instant::now();
-    for desire in [crate::panel::ON, crate::panel::OFF] {
-        for name in keys::POWER {
-            let mut screen = idling(&powered(), now);
-            screen.asleep = true;
-            screen.desire = Some(desire);
-
-            let effects = screen.deliver(SOFA_EVENTS, &key(name, 1), false, now);
-
-            assert!(moments(effects.clone()).is_empty(), "{name} {desire}");
-            assert_eq!(publishes(effects).len(), 1, "{name} {desire}");
-            assert!(screen.asleep, "{name} {desire}");
-            assert_eq!(screen.desire, Some(desire), "{name} {desire}");
-        }
     }
 }
 
-#[test]
-fn a_power_press_states_no_desire_when_none_was_read() {
-    let now = Instant::now();
-    let mut screen = idling(&powered(), now);
-    screen.desire = None;
-
-    let effects = screen.deliver(SOFA_EVENTS, &key("KEY_POWER", 1), false, now);
-
-    assert_eq!(publishes(effects), only_the_toggle());
-    assert_eq!(screen.desire, None);
+/// The panel desire a fold publishes, retained.
+fn desire(desire: &'static str) -> Publish {
+    Publish {
+        topic: PANEL.into(),
+        payload: crate::panel::Desire { desire }.payload(),
+        retained: true,
+    }
 }
 
-// A power press that turns the room on leaves the screen asleep, and the
-// next press wakes it the way any press wakes a sleeping screen.
-#[test]
-fn the_press_after_a_power_press_wakes_a_sleeping_screen() {
-    let now = Instant::now();
-    let mut screen = idling(&powered(), now);
-    screen.asleep = true;
-    screen.desire = Some(crate::panel::OFF);
-    screen.deliver(SOFA_EVENTS, &key("KEY_POWER", 1), false, now);
-
-    let effects = screen.deliver(SOFA_EVENTS, &key("KEY_ENTER", 1), false, now);
-
-    assert_eq!(moments(effects.clone()), [Moment::Wake]);
-    assert_eq!(
-        publishes(effects),
-        [Publish {
-            topic: PANEL.into(),
-            payload: crate::panel::Desire {
-                desire: crate::panel::ON
-            }
-            .payload(),
-            retained: true,
-        }]
-    );
-    assert!(!screen.asleep);
+/// What a power press on a lit Player publishes: the off ask, then the off
+/// desire.
+fn turned_off() -> Vec<Publish> {
+    vec![power_ask("off"), desire(crate::panel::OFF)]
 }
 
 #[test]
@@ -1192,3 +1121,4 @@ mod panel;
 mod power_ask;
 mod power_keys;
 mod power_mode;
+mod power_press;

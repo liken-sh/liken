@@ -229,9 +229,10 @@ ask as a press of the home key. It publishes `power` when a person
 presses power during a film, also just before the `Play` ends. The
 client holds that ask until this `Player`'s status reads `Idle`, and
 then answers it as a power press between films: in the power mode
-`room`, it publishes the toggle on the power topic, and in the mode
-`screen`, it lowers the shade. The toggle waits for `Idle`
-so that the equipment operator reads the room after the film ended. A
+`room`, it turns the `Player` off or on as the [`power`](#power) topic
+describes, and in the mode `screen`, it lowers the shade. The answer
+waits for `Idle` so that the equipment operator reads the room after
+the film ended. A
 client that reads no `Idle` within 10 seconds drops the ask. The
 sidecar publishes `power-off` in place of `power` for `KEY_SLEEP`, the
 name the kernel gives a TV remote's Power Off Function, and the client
@@ -255,16 +256,37 @@ the same when a `Receiver` is wired or removed. The
 use: `room` while a `Receiver` is wired, and `screen` while none is.
 Each message is an ask, so none is retained.
 
-The idle screen client publishes a power press between films here,
-in the power mode `room`.
+The idle screen client answers a power press between films in the
+power mode `room`. The panel desire on the [`panel`](#panel) topic is
+the `Player`'s power, so the client moves it with the press. The
+`Receiver` session's `awake` flag follows the desire, so it turns false
+when the equipment turns off, and the next press of any key wakes the
+`Player` again.
+
+* A press of `KEY_POWER` or `KEY_POWER2` on a `Player` whose desire is
+  `on`, and every press of `KEY_SLEEP`, publishes `off` here, lowers
+  the shade, and states the `off` desire.
+* A press of `KEY_POWER`, `KEY_POWER2`, or `KEY_WAKEUP` on a `Player`
+  whose desire is `off` wakes the screen and states the `on` desire.
+  The `awake` flag that turns true wakes the TV and the receiver, so the
+  client publishes no ask beside it.
+* A press of `KEY_WAKEUP` on a `Player` whose desire is already `on`
+  publishes `on` here, for equipment that a person turned off another
+  way.
+* A press of `KEY_POWER` or `KEY_POWER2` before the client has read a
+  desire publishes the toggle here, and changes no desire.
+
 The operator writes each ask into the `Receiver`'s
 `status.session.powerAsk`, and the equipment operator answers it:
 
-| Message | Key | What the equipment operator does |
-|---|---|---|
-| `{"action": "toggle"}` | `KEY_POWER`, `KEY_POWER2` | Turns a room that is on off, and a room that is off on. |
-| `{"action": "off"}` | `KEY_SLEEP` | Turns a room that is on off, and leaves a room that is off as it is. |
-| `{"action": "on"}` | `KEY_WAKEUP` | Turns a room that is off on, and leaves a room that is on as it is. |
+| Message | What the equipment operator does |
+|---|---|
+| `{"action": "off"}` | Turns a room that is on off, and leaves a room that is off as it is. |
+| `{"action": "on"}` | Turns a room that is off on, and leaves a room that is on as it is. |
+| `{"action": "toggle"}` | Turns a room that is on off, and a room that is off on. It reads the TV's power to decide. |
+
+To make a controller's power button turn the `Player` off and never
+on, map it to `KEY_SLEEP` with a `Keymap` row.
 
 The kernel's `rc-cec` keymap gives a TV remote's Power Off Function
 and Power On Function the names `KEY_SLEEP` and `KEY_WAKEUP`.

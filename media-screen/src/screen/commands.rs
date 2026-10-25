@@ -102,7 +102,7 @@ impl Screen {
             }
             ask @ (POWER | POWER_OFF) if self.idle => {
                 let mut effects = Vec::new();
-                self.answer_power_ask(ask_key(ask), &mut effects);
+                self.answer_power_ask(ask_key(ask), now, &mut effects);
                 effects
             }
             ask @ (POWER | POWER_OFF) => {
@@ -122,11 +122,15 @@ impl Screen {
     }
 
     /// Answer a power ask the way a press of its key answers while the unit
-    /// is idle. In the room mode, the key's ask goes out on the power topic,
-    /// and the shade and the panel desire stand, for the reason the press's
-    /// power branch gives. In the screen mode, the client reads the ask as a
-    /// press of the key and lowers its shade.
-    pub(super) fn answer_power_ask(&mut self, key: &'static str, effects: &mut Vec<Effect>) {
+    /// is idle. In the room mode, the ask turns the Player off or on
+    /// (power.rs). In the screen mode, the client reads the ask as a press
+    /// of the key and lowers its shade.
+    pub(super) fn answer_power_ask(
+        &mut self,
+        key: &'static str,
+        now: Instant,
+        effects: &mut Vec<Effect>,
+    ) {
         let ask = if key == keys::POWER_OFF {
             POWER_OFF
         } else {
@@ -143,16 +147,8 @@ impl Screen {
             effects.push(Effect::Moment(Moment::Press(key.into())));
             return;
         }
-        let what = if action == "toggle" {
-            "the toggle".to_string()
-        } else {
-            action.to_string()
-        };
-        self.lines.push(format!(
-            "{asked}, so published {what} to {}",
-            self.power_topic
-        ));
-        effects.push(Effect::Publish(self.power_publish(action)));
+        let turned = self.turn_power(action, now, effects);
+        self.lines.push(format!("{asked}, so {turned}"));
     }
 
     /// Drop a held power ask whose deadline passed. The deadline is a clock,

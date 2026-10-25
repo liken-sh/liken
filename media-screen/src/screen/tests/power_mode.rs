@@ -30,9 +30,9 @@ fn to_the_client() -> (Vec<Moment>, Vec<Publish>) {
     (vec![Moment::Press("KEY_POWER".into())], Vec::new())
 }
 
-/// A power press that publishes the toggle and reaches no client.
+/// A power press that turns the lit Player off and reaches no client.
 fn to_the_room() -> (Vec<Moment>, Vec<Publish>) {
-    (Vec::new(), only_the_toggle())
+    (vec![Moment::Sleep], turned_off())
 }
 
 #[test]
@@ -120,7 +120,7 @@ fn a_held_power_ask_is_answered_in_the_mode_the_idle_status_states() {
             vec![Moment::Press(keys::POWER_PRESS.into())],
             Vec::new(),
         ),
-        ("screen", "room", Vec::new(), only_the_toggle()),
+        ("screen", "room", vec![Moment::Sleep], turned_off()),
     ];
     for (playing, idle, want_moments, want_publishes) in cases {
         let mut screen = focused(&powered());

@@ -219,7 +219,7 @@ The bus facts a delegate's client reads. With the two windows above, this block 
 | <span id="statusidlebus--volumetopic"></span>`volumeTopic` | string | no | The retained topic that carries the unit's level, as {"level": 0.63, "muted": false}, where the level is the fraction of the device's max. The media operator is its only writer. The client draws the indicator for each live message and publishes no level. A volume key reaches the media operator from the controller's events topic, and a client that asks for a step publishes on this topic plus /commands. Empty means the unit has no sinks: the client subscribes to no level and draws none. |
 | <span id="statusidlebus--commandstopic"></span>`commandsTopic` | string | no | The topic the playback pod publishes play-next on when a person takes the up-next offer on the scrubber. The client that wrote the Play reads that ask and starts the next work. When a Play ends, the client's own surface is on the screen again and the retained status is the cue, so nothing is published here for it. The pod also publishes home when a person presses home during a film, just before the Play ends, and the client reads that ask as a press of the home key. |
 | <span id="statusidlebus--paneltopic"></span>`panelTopic` | string | no | The retained topic on which a client publishes whether it wants the panel on or off. The client holds no API credentials, so the operator reads the desire here and overrides the screen's Display. |
-| <span id="statusidlebus--powertopic"></span>`powerTopic` | string | no | The topic a power press on this unit publishes an ask on while the unit's status topic states the power mode room: toggle for KEY_POWER and KEY_POWER2, off for KEY_SLEEP, and on for KEY_WAKEUP, the names the kernel gives a TV remote's Power Off Function and Power On Function. The media operator writes each ask into the Receiver's session, and the equipment operator turns the room off or on. The media operator also publishes wake here when a person picks the unit's input in the TV's source menu while the screen sleeps, and sleep when the TV goes to standby, and the client wakes or sleeps the screen. Every unit carries the topic, wired through a Receiver or not, so a delegate's pod stays the same when a Receiver is wired or removed. In the power mode screen, a power press reaches the client, which lowers the shade. |
+| <span id="statusidlebus--powertopic"></span>`powerTopic` | string | no | The topic a power press on this unit publishes an ask on while the unit's status topic states the power mode room: off for a press that turns the Player off, and on for KEY_WAKEUP, the name the kernel gives a TV remote's Power On Function, on a Player that is already on. The media operator writes each ask into the Receiver's session, and the equipment operator turns the room off or on. The media operator also publishes wake here when a person picks the unit's input in the TV's source menu while the screen sleeps, and sleep when the TV goes to standby, and the client wakes or sleeps the screen. Every unit carries the topic, wired through a Receiver or not, so a delegate's pod stays the same when a Receiver is wired or removed. In the power mode screen, a power press reaches the client, which lowers the shade. |
 | <span id="statusidlebus--remotes"></span>`remotes` | [\[\]object](#statusidlebusremotes) | no | The unit's controllers, one entry each, in spec.remotes order. That position is the index a focus moment carries, and it is the order the status topic lists the parts in. A unit with no controllers lists none. |
 
 #### status.idle.bus.remotes[]
@@ -462,9 +462,10 @@ ask as a press of the home key. It publishes `power` when a person
 presses power during a film, also just before the `Play` ends. The
 client holds that ask until this `Player`'s status reads `Idle`, and
 then answers it as a power press between films: in the power mode
-`room`, it publishes the toggle on the power topic, and in the mode
-`screen`, it lowers the shade. The toggle waits for `Idle`
-so that the equipment operator reads the room after the film ended. A
+`room`, it turns the `Player` off or on as the [`power`](#power) topic
+describes, and in the mode `screen`, it lowers the shade. The answer
+waits for `Idle` so that the equipment operator reads the room after
+the film ended. A
 client that reads no `Idle` within 10 seconds drops the ask. The
 sidecar publishes `power-off` in place of `power` for `KEY_SLEEP`, the
 name the kernel gives a TV remote's Power Off Function, and the client
@@ -488,16 +489,37 @@ the same when a `Receiver` is wired or removed. The
 use: `room` while a `Receiver` is wired, and `screen` while none is.
 Each message is an ask, so none is retained.
 
-The idle screen client publishes a power press between films here,
-in the power mode `room`.
+The idle screen client answers a power press between films in the
+power mode `room`. The panel desire on the [`panel`](#panel) topic is
+the `Player`'s power, so the client moves it with the press. The
+`Receiver` session's `awake` flag follows the desire, so it turns false
+when the equipment turns off, and the next press of any key wakes the
+`Player` again.
+
+* A press of `KEY_POWER` or `KEY_POWER2` on a `Player` whose desire is
+  `on`, and every press of `KEY_SLEEP`, publishes `off` here, lowers
+  the shade, and states the `off` desire.
+* A press of `KEY_POWER`, `KEY_POWER2`, or `KEY_WAKEUP` on a `Player`
+  whose desire is `off` wakes the screen and states the `on` desire.
+  The `awake` flag that turns true wakes the TV and the receiver, so the
+  client publishes no ask beside it.
+* A press of `KEY_WAKEUP` on a `Player` whose desire is already `on`
+  publishes `on` here, for equipment that a person turned off another
+  way.
+* A press of `KEY_POWER` or `KEY_POWER2` before the client has read a
+  desire publishes the toggle here, and changes no desire.
+
 The operator writes each ask into the `Receiver`'s
 `status.session.powerAsk`, and the equipment operator answers it:
 
-| Message | Key | What the equipment operator does |
-|---|---|---|
-| `{"action": "toggle"}` | `KEY_POWER`, `KEY_POWER2` | Turns a room that is on off, and a room that is off on. |
-| `{"action": "off"}` | `KEY_SLEEP` | Turns a room that is on off, and leaves a room that is off as it is. |
-| `{"action": "on"}` | `KEY_WAKEUP` | Turns a room that is off on, and leaves a room that is on as it is. |
+| Message | What the equipment operator does |
+|---|---|
+| `{"action": "off"}` | Turns a room that is on off, and leaves a room that is off as it is. |
+| `{"action": "on"}` | Turns a room that is off on, and leaves a room that is on as it is. |
+| `{"action": "toggle"}` | Turns a room that is on off, and a room that is off on. It reads the TV's power to decide. |
+
+To make a controller's power button turn the `Player` off and never
+on, map it to `KEY_SLEEP` with a `Keymap` row.
 
 The kernel's `rc-cec` keymap gives a TV remote's Power Off Function
 and Power On Function the names `KEY_SLEEP` and `KEY_WAKEUP`.

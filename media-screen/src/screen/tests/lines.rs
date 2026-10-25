@@ -36,7 +36,9 @@ fn a_press_writes_one_line_that_says_what_it_did() {
         (
             powered(),
             "KEY_POWER",
-            format!("KEY_POWER from remote house/sofa: power, published the toggle to {POWER}"),
+            format!(
+                "KEY_POWER from remote house/sofa: power, published off to {POWER}, published panel desire off to {PANEL}"
+            ),
         ),
     ];
     for (wiring, name, want) in cases {

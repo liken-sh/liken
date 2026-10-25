@@ -7,34 +7,22 @@
 
 use super::*;
 
-/// One ask on the power topic, not retained.
-fn power_ask(action: &str) -> Publish {
-    Publish {
-        topic: POWER.into(),
-        payload: format!(r#"{{"action":"{action}"}}"#).into_bytes(),
-        retained: false,
-    }
-}
-
-/// The panel desire a fold publishes, retained.
-fn desire(desire: &'static str) -> Publish {
-    Publish {
-        topic: PANEL.into(),
-        payload: crate::panel::Desire { desire }.payload(),
-        retained: true,
-    }
-}
-
+// On a lit Player, the Power Off Function turns it off, and the Power On
+// Function asks on for equipment that someone turned off another way.
 #[test]
-fn a_power_off_press_publishes_off_and_a_power_on_press_publishes_on() {
+fn a_power_off_press_turns_a_lit_player_off_and_a_power_on_press_asks_on() {
     let now = Instant::now();
-    for (name, action) in [(keys::POWER_OFF, "off"), (keys::POWER_ON, "on")] {
+    let cases = [
+        (keys::POWER_OFF, vec![Moment::Sleep], turned_off()),
+        (keys::POWER_ON, Vec::new(), vec![power_ask("on")]),
+    ];
+    for (name, want_moments, want_publishes) in cases {
         let mut screen = idling(&powered(), now);
 
         let effects = screen.deliver(SOFA_EVENTS, &key(name, 1), false, now);
 
-        assert!(moments(effects.clone()).is_empty(), "{name}");
-        assert_eq!(publishes(effects), [power_ask(action)], "{name}");
+        assert_eq!(moments(effects.clone()), want_moments, "{name}");
+        assert_eq!(publishes(effects), want_publishes, "{name}");
     }
 }
 

@@ -181,8 +181,8 @@ Set these variables on your container. Each value comes from
   `{"action": "power"}` there when a person presses power during a
   film, just before the `Play` ends. The client holds that message
   until the status reads `Idle`, and then answers it as a power press:
-  the toggle on `bus.powerTopic` in the power mode `room`, and the
-  shade in the power mode `screen`. The client drops the message when
+  it turns the `Player` off or on in the power mode `room`, and lowers
+  the shade in the power mode `screen`. The client drops the message when
   no `Idle` arrives within 10 seconds. It publishes `{"action": "power-off"}`
   in place of `power` for `KEY_SLEEP`, and the client answers it as a
   press of `KEY_SLEEP`: `off` on `bus.powerTopic` in the mode `room`,
@@ -197,15 +197,22 @@ Set these variables on your container. Each value comes from
   power press goes, and a `Receiver` that is wired or removed changes
   that field and nothing else. Read the field at each press, not at
   startup:
-  * `room`: the unit's screen is wired through a `Receiver`. A power
-    press between films publishes `{"action": "toggle"}` on this
-    topic, not retained. The media operator writes the ask into the
-    `Receiver`, and the equipment operator turns the room off or on.
-    `KEY_SLEEP` and
-    `KEY_WAKEUP`, the names the kernel gives a TV remote's Power Off
-    Function and Power On Function, publish `{"action": "off"}` and
-    `{"action": "on"}`, which leave a room already off or on as it
-    is. The media operator also publishes `{"action": "wake"}` on the
+  * `room`: the unit's screen is wired through a `Receiver`. The
+    panel desire is the `Player`'s power, so a power press between
+    films moves the desire with the ask it publishes on this topic,
+    not retained. A press on a `Player` whose desire is `on`
+    publishes `{"action": "off"}`, lowers the shade, and states the
+    `off` desire. A press on a `Player` whose desire is `off` wakes
+    the screen and states the `on` desire, and publishes no ask,
+    because the `Receiver` session's `awake` flag that turns true
+    wakes the equipment. `KEY_SLEEP` and `KEY_WAKEUP`, the names the
+    kernel gives a TV remote's Power Off Function and Power On
+    Function, always turn the `Player` off and on, and `KEY_WAKEUP`
+    on a `Player` that is already on publishes `{"action": "on"}`. A
+    press before the client has read a desire publishes
+    `{"action": "toggle"}`. The media operator writes each ask into
+    the `Receiver`, and the equipment operator turns the room off or
+    on. The media operator also publishes `{"action": "wake"}` on the
     topic when a person picks the unit's input in the TV's source
     menu while the screen sleeps, and `{"action": "sleep"}` when the
     TV goes to standby. The client wakes the screen and states the

@@ -30,6 +30,10 @@ const WAKE: &str = "wake";
 /// The ask to lower the shade and turn the panel off.
 const SLEEP: &str = "sleep";
 
+/// The power asks that name the state they want.
+const OFF: &str = "off";
+const ON: &str = "on";
+
 /// The one field of the power topic this crate reads.
 #[derive(Deserialize)]
 struct Ask {
@@ -106,5 +110,62 @@ impl Screen {
             ));
         }
         effects
+    }
+
+    /// Turn the Player off or on for a power key, or for a power ask the
+    /// playback pod held until the unit was idle. The panel desire is the
+    /// Player's power, so it moves with the ask: the Receiver session's
+    /// awake flag follows the desire, and a desire that stood on after a
+    /// power-off would leave the session awake with its equipment off,
+    /// where no press could wake it again until the off window ran.
+    ///
+    /// Off publishes the off ask first, so the equipment operator reads the
+    /// standby before the awake flag turns false, then lowers the shade and
+    /// states the off desire. On wakes the screen and states the on desire,
+    /// and the awake flag that turns true wakes the TV and the receiver. A
+    /// Player that was already lit flips no flag, so on publishes the on
+    /// ask for equipment that someone turned off another way. The toggle
+    /// turns a lit Player off and a dark one on. A client that read no
+    /// desire does not know which, so it publishes the toggle and the
+    /// equipment operator decides from the TV's power.
+    ///
+    /// The answer is the end of the line that the caller writes.
+    pub(super) fn turn_power(
+        &mut self,
+        action: &'static str,
+        now: Instant,
+        effects: &mut Vec<Effect>,
+    ) -> String {
+        let off = match (action, self.desire) {
+            (OFF, _) => true,
+            (ON, _) => false,
+            (_, Some(desire)) => desire == panel::ON,
+            (_, None) => {
+                effects.push(Effect::Publish(self.power_publish(action)));
+                return format!("published the toggle to {}", self.power_topic);
+            }
+        };
+        if off {
+            effects.push(Effect::Publish(self.power_publish(OFF)));
+            let moment = (!self.asleep).then_some(Moment::Sleep);
+            self.asleep = true;
+            self.shade(moment, effects);
+            let desire = self.desire(panel::OFF, effects);
+            self.rearm(now);
+            return format!("published off to {}{desire}", self.power_topic);
+        }
+        let lit = self.desire == Some(panel::ON);
+        let moment = self.asleep.then_some(Moment::Wake);
+        self.asleep = false;
+        self.rearm(now);
+        let mut desire = self.shade(moment, effects);
+        if desire.is_empty() {
+            desire = self.desire(panel::ON, effects);
+        }
+        if lit {
+            effects.push(Effect::Publish(self.power_publish(ON)));
+            return format!("published on to {}{desire}", self.power_topic);
+        }
+        format!("woke the screen{desire}")
     }
 }

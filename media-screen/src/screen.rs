@@ -449,7 +449,7 @@ impl Screen {
         if self.idle
             && let Some((_, key)) = self.power_ask.take()
         {
-            self.answer_power_ask(key, &mut effects);
+            self.answer_power_ask(key, now, &mut effects);
         }
         effects
     }
@@ -522,6 +522,7 @@ impl Screen {
         let down = press.down();
 
         let mut moment = None;
+        let mut early = Vec::new();
         let mut forwarded = None;
         let mut publish = None;
         let mut line = None;
@@ -541,40 +542,21 @@ impl Screen {
         } else if let Some(action) =
             keys::power_action(&press.key).filter(|_| self.idle && self.room_power())
         {
-            // A room with a receiver answers the power key itself, so the
-            // key never reaches the client and the shade never operates:
-            // power turns the equipment, and nothing else. Only the
-            // equipment operator knows whether the press turns the room off
-            // or on, because it reads the TV's power. A wake here would
-            // state the on desire, the session would turn awake, and the
-            // equipment operator would wake the TV and the receiver and
-            // cancel the standby the same press asked for. So the press
-            // leaves the shade and the desire as they were. A press that
-            // turns the room on wakes the TV through the equipment
-            // operator, and the next press wakes this screen the way any
-            // press does. A held key that repeated would flip the equipment
-            // on and off under the hand, so only the press publishes. In the
-            // screen mode the press falls through to the ordinary rules
-            // below, and the client lowers its shade.
-            //
-            // The two deterministic power functions of a TV remote publish
-            // off and on in place of the toggle (keys::POWER_OFF), and the
-            // equipment operator leaves a room that is already off or on
-            // as it is.
+            // A unit with a receiver answers the power key itself, so the
+            // key never reaches the client: power turns the Player and its
+            // equipment off or on (power.rs). A held key that repeated
+            // would flip the equipment on and off under the hand, so only
+            // the press acts. In the screen mode the press falls through to
+            // the ordinary rules below, and the client lowers its shade.
             power = true;
             if press.down() {
-                publish = Some(self.power_publish(action));
-                line = Some(if action == POWER_TOGGLE {
-                    format!(
-                        "{trigger}: power, published the toggle to {}",
-                        self.power_topic
-                    )
+                let pressed = if action == POWER_TOGGLE {
+                    "power".to_string()
                 } else {
-                    format!(
-                        "{trigger}: power {action}, published {action} to {}",
-                        self.power_topic
-                    )
-                });
+                    format!("power {action}")
+                };
+                let turned = self.turn_power(action, now, &mut early);
+                line = Some(format!("{trigger}: {pressed}, {turned}"));
             }
         } else if self.asleep && press.key == keys::POWER_OFF {
             // A Power Off Function keeps a device in standby when repeated
@@ -603,7 +585,7 @@ impl Screen {
         }
 
         self.rearm(now);
-        let mut effects = Vec::new();
+        let mut effects = early;
         let mut desire = self.shade(moment, &mut effects);
         // A client that read no desire does not know whether the panel is
         // dark. A press is a person in the room, so it states the on desire.
