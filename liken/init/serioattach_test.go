@@ -244,6 +244,18 @@ func waitDone(t *testing.T, h *serioHolder) {
 	}
 }
 
+// waitNudge waits for the holder's nudge. The holder closes done
+// before it sends the nudge, so a test that has seen done can still
+// reach the channel before the send.
+func waitNudge(t *testing.T, nudge <-chan struct{}, msg string) {
+	t.Helper()
+	select {
+	case <-nudge:
+	case <-time.After(5 * time.Second):
+		t.Error(msg)
+	}
+}
+
 func TestAHolderReadsOnAThreadThatBlocksSignals(t *testing.T) {
 	line := &fakeLine{release: make(chan struct{})}
 	h, nudge := startHolder(t, line, nil)
@@ -262,11 +274,7 @@ func TestAHolderReadsOnAThreadThatBlocksSignals(t *testing.T) {
 	if h.endErr != nil || !line.closed {
 		t.Errorf("endErr %v, closed %v", h.endErr, line.closed)
 	}
-	select {
-	case <-nudge:
-	default:
-		t.Error("an ended holder must wake the walk")
-	}
+	waitNudge(t, nudge, "an ended holder must wake the walk")
 }
 
 func TestAHolderReportsARefusedAttach(t *testing.T) {
@@ -276,11 +284,7 @@ func TestAHolderReportsARefusedAttach(t *testing.T) {
 	if h.attachErr == nil || h.attachErr.Error() != "TIOCSETD: operation not permitted" {
 		t.Errorf("attachErr = %v", h.attachErr)
 	}
-	select {
-	case <-nudge:
-	default:
-		t.Error("a refused holder must wake the walk")
-	}
+	waitNudge(t, nudge, "a refused holder must wake the walk")
 }
 
 // A panic in the holder's goroutine is outside the machine plane's
