@@ -6,9 +6,10 @@
 # same Debian snapshot, with two libraries the image's closure does not
 # carry. The bake target in docker-bake.hcl beside this file gives the
 # build the weston image of this checkout as the context weston, the
-# snapshot scripts as the context builder, and the snapshot date as
-# VERSION.
-FROM debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84 AS backend
+# snapshot scripts as the context builder, the Debian image of
+# toolchains/images.toml as the context debian, and the snapshot date
+# as VERSION.
+FROM debian AS backend
 ARG VERSION
 COPY --from=builder snapshot.sh snapshot.sha256 /
 RUN sh /snapshot.sh "$VERSION" \

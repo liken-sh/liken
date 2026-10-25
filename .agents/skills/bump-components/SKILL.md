@@ -58,6 +58,7 @@ The report has these sources:
 | Script | Pins |
 |---|---|
 | `liken/<domain>/latest.sh` | the OS domains, steps 2 to 4 |
+| `liken/dev-cluster/firmware/capsule/latest.sh` | edk2, the Ubuntu image, and the Ubuntu snapshot of the lab's capsule firmware builder; it has no `--bump`, because each move changes the compiler that builds the firmware, so edit `build.sh` or the `Dockerfile` by hand and boot the lab with `FIRMWARE=capsule` |
 | `toolchains/latest.sh` | each image in `toolchains/images.toml`, Go and Rust, each Go module and crate that is behind |
 | `vulkan/latest.sh` | the Debian snapshot of the bases and `astrometry`, step 5 |
 | `indi/latest.sh` | the snapshots of Ubuntu and the two PPAs, step 5a |

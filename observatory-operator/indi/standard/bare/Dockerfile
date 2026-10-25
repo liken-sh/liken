@@ -7,7 +7,7 @@
 # The image runs on a workstation only, to capture the drivers, and is
 # never published. It keeps the compiler and the headers, because it
 # is thrown away after the capture.
-FROM ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7
+FROM ubuntu
 ARG VERSION
 COPY --from=trust / /
 COPY --from=indi mutlaqja.asc pch.asc /etc/apt/trusted.gpg.d/

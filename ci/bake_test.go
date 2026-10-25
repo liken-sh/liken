@@ -167,6 +167,29 @@ func TestTheBakeFileResolvesAToolchainImageToItsDigest(t *testing.T) {
 	}
 }
 
+func TestTheBakeFileGivesOverlaysEveryToolchainImage(t *testing.T) {
+	root := toolchainTree(t, map[string]string{
+		"app/package.toml": "[package]\nname = \"app\"\n[depends]\ncomponents = [\"toolchains\"]\n[[outputs.images]]\nname = \"app\"\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := Bake(root, components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "target \"toolchains\" {\n  contexts = {\n    \"golang\" = \"docker-image://golang:1.27.3-bookworm@sha256:aaa\"\n  }\n}\n"
+	if !strings.Contains(string(out), want) {
+		t.Errorf("the bake file lacks:\n%s\n\nin:\n%s", want, out)
+	}
+	_, group, _ := strings.Cut(string(out), "group \"default\" {")
+	group, _, _ = strings.Cut(group, "}")
+	if strings.Contains(group, "\"toolchains\"") {
+		t.Errorf("the default group builds the toolchains target:\n%s", group)
+	}
+}
+
 func TestTheBakeFileRefusesAToolchainImage(t *testing.T) {
 	cases := map[string]struct {
 		files map[string]string

@@ -53,7 +53,15 @@ func Bake(root string, components map[string]*Component) ([]byte, error) {
 			targets = append(targets, t)
 		}
 	}
-	return render("docker-bake.hcl.tmpl", map[string]any{"Targets": targets})
+	tools, err := readToolchains(root)
+	if err != nil {
+		return nil, err
+	}
+	var toolchains []bakeContext
+	for _, name := range slices.Sorted(maps.Keys(tools.Build)) {
+		toolchains = append(toolchains, bakeContext{name, "docker-image://" + tools.Build[name]})
+	}
+	return render("docker-bake.hcl.tmpl", map[string]any{"Targets": targets, "Toolchains": toolchains})
 }
 
 func newBakeTarget(root string, c *Component, image Image, producer map[string]string, components map[string]*Component) (bakeTarget, error) {

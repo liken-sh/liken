@@ -41,6 +41,25 @@ variable "BRANCH_CACHE" {
   default = ""
 }
 
+# The toolchains target maps the bare name of each build image in
+# toolchains/images.toml to its reference and digest. No image builds
+# from it, and it is in no group. A bake file beside a Dockerfile whose
+# image is never published adds its target with
+# inherits = ["toolchains"], so that Dockerfile names its outside
+# images bare too, and a bump of images.toml reaches it.
+target "toolchains" {
+  contexts = {
+    "alpine" = "docker-image://alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"
+    "corrosion" = "docker-image://ghcr.io/liken-sh/corrosion:2026.10.23-003@sha256:60b550a1c6a005940e76062a95b07cca93dc01ab5f2e93274828124f55db4f6e"
+    "debian" = "docker-image://debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84"
+    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:18f4cc26c9ffa7f20a359298be7deadac5c607c8e03a02b8119f1a5fc2f82c99"
+    "golang" = "docker-image://golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5"
+    "oras" = "docker-image://ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179"
+    "rust" = "docker-image://rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e"
+    "ubuntu" = "docker-image://ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
+  }
+}
+
 group "default" {
   targets = [
     "vulkan",

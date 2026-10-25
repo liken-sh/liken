@@ -7,7 +7,9 @@
 #     -f observatory-operator/indi/standard/bare/docker-bake.hcl indi-bare --load
 #
 # The trust context is the trust target of the same commit, as it is
-# for the indi images.
+# for the indi images. The target inherits toolchains, the target that
+# maps each outside image of toolchains/images.toml, so the Dockerfile
+# names ubuntu bare and builds on the same Ubuntu image as indi.
 
 # INDI_SNAPSHOT is the date of the snapshots in indi/package.toml.
 variable "INDI_SNAPSHOT" {
@@ -15,6 +17,7 @@ variable "INDI_SNAPSHOT" {
 }
 
 target "indi-bare" {
+  inherits   = ["toolchains"]
   context    = "observatory-operator/indi/standard/bare"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]

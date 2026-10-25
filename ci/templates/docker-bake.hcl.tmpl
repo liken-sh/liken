@@ -41,6 +41,18 @@ variable "BRANCH_CACHE" {
   default = ""
 }
 
+# The toolchains target maps the bare name of each build image in
+# toolchains/images.toml to its reference and digest. No image builds
+# from it, and it is in no group. A bake file beside a Dockerfile whose
+# image is never published adds its target with
+# inherits = ["toolchains"], so that Dockerfile names its outside
+# images bare too, and a bump of images.toml reaches it.{% if .Toolchains %}
+target "toolchains" {
+  contexts = {{% range .Toolchains %}
+    "{% .Name %}" = "{% .Value %}"{% end %}
+  }
+}{% end %}
+
 group "default" {
   targets = [{% range .Targets %}
     "{% .Name %}",{% end %}
