@@ -36,7 +36,6 @@ import (
 	"sync"
 
 	"google.golang.org/grpc"
-	healthv1alpha1 "k8s.io/kubelet/pkg/apis/dra-health/v1alpha1"
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
 	regv1 "k8s.io/kubelet/pkg/apis/pluginregistration/v1"
 
@@ -111,6 +110,9 @@ func (r *draRegistrar) GetInfo(ctx context.Context, req *regv1.InfoRequest) (*re
 		// These strings name gRPC services, not semantic versions. The
 		// kubelet picks the newest version it also supports, and this
 		// driver serves exactly the v1 API.
+		// The list names no health service, so the kubelet opens no
+		// device-health stream. This operator reports health through
+		// the device taints, which evict a pod when an output goes silent.
 		SupportedVersions: []string{drav1.DRAPluginService},
 	}, nil
 }
@@ -141,7 +143,6 @@ func serveDRAPlugin(ctx context.Context, client *apiclient.Client, endpoints *en
 	}
 	pluginServer := grpc.NewServer()
 	drav1.RegisterDRAPluginServer(pluginServer, newDRAPlugin(client, endpoints, claims, feed))
-	healthv1alpha1.RegisterDRAResourceHealthServer(pluginServer, &draHealth{})
 
 	registrationSocket := filepath.Join(draRegistryDir, DriverName+"-reg.sock")
 	_ = os.Remove(registrationSocket)
@@ -417,22 +418,6 @@ func (p *preparedClaims) holder(device string) (EndpointClaim, bool) {
 	defer p.mutex.RUnlock()
 	claim, held := p.holders[device]
 	return claim, held
-}
-
-// draHealth is the device-health stream. The driver keeps it open and
-// sends nothing on it. The service is optional in the DRA protocol,
-// and the kubelet does not treat it that way in practice. An
-// unregistered service produces an Unimplemented error and a retry
-// in the kubelet's log every few seconds, with no end. This operator
-// reports health through the device taints instead, which is the
-// mechanism that evicts a pod when an output goes silent.
-type draHealth struct {
-	healthv1alpha1.UnimplementedDRAResourceHealthServer
-}
-
-func (h *draHealth) NodeWatchResources(req *healthv1alpha1.NodeWatchResourcesRequest, stream grpc.ServerStreamingServer[healthv1alpha1.NodeWatchResourcesResponse]) error {
-	<-stream.Context().Done()
-	return nil
 }
 
 // ResourceClaim holds the part of a claim that the driver reads:

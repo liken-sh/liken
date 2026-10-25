@@ -8,7 +8,6 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	healthv1alpha1 "k8s.io/kubelet/pkg/apis/dra-health/v1alpha1"
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
 	regv1 "k8s.io/kubelet/pkg/apis/pluginregistration/v1"
 )
@@ -111,23 +110,6 @@ func TestTheRegistrarAnswersEitherRegistrationStatus(t *testing.T) {
 		}
 	}
 }
-
-// The health stream stays open and sends nothing until the kubelet
-// closes it.
-func TestTheHealthStreamEndsWhenTheKubeletClosesIt(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if err := (draHealth{}).NodeWatchResources(nil, closedStream{ctx: ctx}); err != nil {
-		t.Errorf("err = %v", err)
-	}
-}
-
-type closedStream struct {
-	grpc.ServerStreamingServer[healthv1alpha1.NodeWatchResourcesResponse]
-	ctx context.Context
-}
-
-func (s closedStream) Context() context.Context { return s.ctx }
 
 func TestAPluginDirectoryThatCannotBeMadeFailsTheServe(t *testing.T) {
 	saved := draPluginDir

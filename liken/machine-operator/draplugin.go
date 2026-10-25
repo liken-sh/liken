@@ -43,7 +43,6 @@ import (
 	"sync"
 
 	"google.golang.org/grpc"
-	healthv1alpha1 "k8s.io/kubelet/pkg/apis/dra-health/v1alpha1"
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
 	regv1 "k8s.io/kubelet/pkg/apis/pluginregistration/v1"
 
@@ -85,7 +84,11 @@ func (r *draRegistrar) GetInfo(ctx context.Context, req *regv1.InfoRequest) (*re
 		// kubelet picks the newest version that it also supports.
 		// liken serves exactly the v1 API. The Kubernetes version
 		// liken ships is never older than its own OS components, so
-		// there is no version gap to bridge with a beta shim.
+		// there is no version gap to bridge with a beta shim. The list
+		// names no health service, so the kubelet opens no
+		// device-health stream, because liken makes no health claims
+		// about devices yet. A driver that reports health serves
+		// dra-health/v1 and adds its service name here.
 		SupportedVersions: []string{drav1.DRAPluginService},
 	}, nil
 }
@@ -116,7 +119,6 @@ func serveDRAPlugin(ctx context.Context, client *apiclient.Client) error {
 	}
 	pluginServer := grpc.NewServer()
 	drav1.RegisterDRAPluginServer(pluginServer, &draPlugin{client: client})
-	healthv1alpha1.RegisterDRAResourceHealthServer(pluginServer, &draHealth{})
 
 	registrationSocket := filepath.Join(draRegistryDir, kubernetes.DriverName+"-reg.sock")
 	_ = os.Remove(registrationSocket)
@@ -259,24 +261,6 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 		}
 	}
 	return &drav1.NodePrepareResourceResponse{Devices: devices}
-}
-
-// draHealth is the device-health stream. The driver keeps it open
-// and sends nothing on it. The service is optional in the DRA
-// protocol, but the kubelet does not treat it that way in practice:
-// an unregistered service produces an Unimplemented error and a
-// retry every few seconds, forever, in the k3s log. Accepting the
-// stream and reporting nothing states the truth, because liken
-// makes no health claims about devices yet. This is the same stream
-// that real health reports will use once the uevent watcher starts
-// feeding it (see the plan doc's device-health note).
-type draHealth struct {
-	healthv1alpha1.UnimplementedDRAResourceHealthServer
-}
-
-func (h *draHealth) NodeWatchResources(req *healthv1alpha1.NodeWatchResourcesRequest, stream grpc.ServerStreamingServer[healthv1alpha1.NodeWatchResourcesResponse]) error {
-	<-stream.Context().Done()
-	return nil
 }
 
 // NodeUnprepareResources gives each claim's hardware back to the

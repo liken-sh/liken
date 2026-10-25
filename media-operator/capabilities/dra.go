@@ -25,7 +25,6 @@ import (
 	"path/filepath"
 
 	"google.golang.org/grpc"
-	healthv1alpha1 "k8s.io/kubelet/pkg/apis/dra-health/v1alpha1"
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
 	regv1 "k8s.io/kubelet/pkg/apis/pluginregistration/v1"
 )
@@ -75,7 +74,9 @@ func (r *draRegistrar) GetInfo(ctx context.Context, req *regv1.InfoRequest) (*re
 		Name:     DriverName,
 		Endpoint: r.endpoint,
 		// The strings name gRPC services, not versions. This driver
-		// serves the v1 API.
+		// serves the v1 API. The list names no health service, so the
+		// kubelet opens no device-health stream: a statement about a GPU
+		// has no health of its own.
 		SupportedVersions: []string{drav1.DRAPluginService},
 	}, nil
 }
@@ -85,20 +86,6 @@ func (r *draRegistrar) NotifyRegistrationStatus(ctx context.Context, status *reg
 		fmt.Fprintf(os.Stderr, "dra: the kubelet rejected the plugin registration: %s\n", status.Error)
 	}
 	return &regv1.RegistrationStatusResponse{}, nil
-}
-
-// draHealth is the device-health stream. The service is optional in
-// the protocol, but a kubelet that finds it unregistered logs an
-// Unimplemented error and retries every few seconds. The driver keeps
-// the stream open and sends nothing, because a statement about a GPU
-// has no health of its own.
-type draHealth struct {
-	healthv1alpha1.UnimplementedDRAResourceHealthServer
-}
-
-func (draHealth) NodeWatchResources(req *healthv1alpha1.NodeWatchResourcesRequest, stream grpc.ServerStreamingServer[healthv1alpha1.NodeWatchResourcesResponse]) error {
-	<-stream.Context().Done()
-	return nil
 }
 
 // serveDRAPlugin starts both servers and returns when the context ends
@@ -119,7 +106,6 @@ func serveDRAPlugin(ctx context.Context) error {
 	}
 	pluginServer := grpc.NewServer()
 	drav1.RegisterDRAPluginServer(pluginServer, draPlugin{})
-	healthv1alpha1.RegisterDRAResourceHealthServer(pluginServer, draHealth{})
 
 	registrationSocket := filepath.Join(draRegistryDir, DriverName+"-reg.sock")
 	_ = os.Remove(registrationSocket)
