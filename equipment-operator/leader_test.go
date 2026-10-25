@@ -301,7 +301,10 @@ func TestAWaitingCopyDoesNothingUntilItLeads(t *testing.T) {
 		mustMatch(t, binds.Load(), 0)
 
 		old.StepDown()
-		time.Sleep(2 * election.RetryPeriod)
+		// client-go retries the acquire after a jittered wait of up to
+		// (1 + JitterFactor) retry periods, 2.2 of them, so the new copy
+		// has taken the Lease only after that long.
+		time.Sleep(3 * election.RetryPeriod)
 		synctest.Wait()
 		api.mutex.Lock()
 		lists := api.lists
