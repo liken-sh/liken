@@ -70,7 +70,14 @@ takes a raw YAML URL as a resource:
 
     apiVersion: kustomize.config.k8s.io/v1beta1
     kind: Kustomization
-    namespace: liken-system
+    transformers:
+      - |-
+        apiVersion: builtin
+        kind: NamespaceTransformer
+        metadata:
+          name: liken-system
+          namespace: liken-system
+        unsetOnly: true
     resources:
       - https://liken.sh/media/deploy/players-crd.yaml
       - https://liken.sh/media/deploy/plays-crd.yaml
@@ -82,6 +89,11 @@ takes a raw YAML URL as a resource:
       - https://liken.sh/media/deploy/api.yaml
       - https://liken.sh/media/deploy/bus.yaml
       - https://liken.sh/media/deploy/capabilities.yaml
+
+The transformer sets `liken-system` only on the objects that state no
+namespace, so the binding in `api.yaml` stays in `kube-system`. A
+top-level `namespace:` field would move it, and the API couldn't read
+the client certificate authority.
 
 A clone works too: `kubectl apply -k media-operator/deploy/` from the
 repository applies the same files through
@@ -119,6 +131,11 @@ The same build publishes the manifests as the OCI artifact
 `oci://ghcr.io/liken-sh/media-operator-deploy:<version>`, with each
 image of the operator set to that version. A Flux `OCIRepository`
 can pull that artifact by the version, with no sha.
+
+A Flux `Kustomization` that applies the base must not set
+`targetNamespace`. Flux sets that namespace on every object, the way a
+top-level `namespace:` field does, so it moves the `RoleBinding` out of `kube-system`.
+The API then can't read the client certificate authority.
 
 ## What the install runs
 

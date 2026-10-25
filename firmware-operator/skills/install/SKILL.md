@@ -27,6 +27,13 @@ resources:
   - https://github.com/liken-sh/liken//firmware-operator/deploy?ref=<ref>
 ```
 
+A Flux `Kustomization` that applies the base must not set
+`targetNamespace`. Flux sets that namespace on every object, the way a
+top-level `namespace:` field does, so it moves the `Role` and `RoleBinding` that post `Event`s out of `default`.
+The `Firmware` and `FirmwareCatalog` objects are cluster-scoped,
+so their `Event`s go to `default`, and the API server then refuses
+every one with a 403.
+
 The base holds these parts:
 
 - the `Firmware` and `FirmwareCatalog` resource definitions, which are

@@ -369,6 +369,11 @@ The same build publishes the manifests as the OCI artifact
 image of the operator set to that version. A Flux `OCIRepository`
 can pull that artifact by the version, with no sha.
 
+A Flux `Kustomization` that applies the base must not set
+`targetNamespace`. Flux sets that namespace on every object, the way a
+top-level `namespace:` field does, so it moves the `RoleBinding` out of `kube-system`.
+The API then can't read the client certificate authority.
+
 ## Remove the operator
 
 Delete the manifests. Then delete the slice on each node that
