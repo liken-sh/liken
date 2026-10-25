@@ -321,6 +321,10 @@ jobs:
         working-directory: ci
         run: go run . pins -root ..
 
+      - name: check that a namespace override moves no deploy object
+        working-directory: ci
+        run: go run . namespaces -root ..
+
       - name: check each package.toml against the code
         working-directory: ci
         run: go run . deps -root ..

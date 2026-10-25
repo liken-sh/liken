@@ -26,13 +26,6 @@ resources:
   - https://github.com/liken-sh/liken//firmware-operator/deploy?ref=<ref>
 ```
 
-A Flux `Kustomization` that applies the base must not set
-`targetNamespace`. Flux sets that namespace on every object, the way a
-top-level `namespace:` field does, so it moves the `Role` and `RoleBinding` that post `Event`s out of `default`.
-The `Firmware` and `FirmwareCatalog` objects are cluster-scoped,
-so their `Event`s go to `default`, and the API server then refuses
-every one with a 403.
-
 The base holds these parts:
 
 - the `Firmware` and `FirmwareCatalog` resource definitions, which are
@@ -41,15 +34,15 @@ The base holds these parts:
   which reads every `Firmware`, every `FirmwareCatalog`, every
   `ResourceSlice`, and every `Machine`, writes each `Firmware`'s and
   each `FirmwareCatalog`'s status, creates and deletes the discovered
-  `Firmware` objects, and creates, patches, and deletes the
-  `Disruption`s that ask for a machine's reboot turn;
+  `Firmware` objects, creates, patches, and deletes the
+  `Disruption`s that ask for a machine's reboot turn, and posts the
+  `Event`s about each `Firmware` and each `FirmwareCatalog` in
+  `default`;
 - a `Role` in `liken-system`, which creates, reads, and deletes the
   upload pods and their `ResourceClaim`s and the scan, rehearsal, and
   apply pods, patches the annotation that sends an apply pod the
   signal to write, and reads the logs of the scan, rehearsal, and
   apply pods;
-- a `Role` in `default`, which posts the `Event`s about each
-  `Firmware` and each `FirmwareCatalog`;
 - a `Role` in `liken-system`, which creates, reads, and renews the
   `Lease` named `firmware-operator`;
 - the `firmware-operator` `Deployment`, with one replica, whose pod

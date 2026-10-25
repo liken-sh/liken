@@ -60,6 +60,12 @@ the install needs no clone:
       -f https://liken.sh/media/deploy/bus.yaml \
       -f https://liken.sh/media/deploy/capabilities.yaml
 
+`api.yaml` binds one `Role` in `kube-system`, which `-n` would
+refuse, so that binding is in a file of its own. Apply it with no
+`-n`:
+
+    kubectl apply -f https://liken.sh/media/deploy/api-authentication.yaml
+
 The `-n` flag places the `ServiceAccounts`, the three `Deployments`,
 the `DaemonSet`, and the `Services` in `liken-system`, the namespace
 every `liken` cluster has. The CRDs, the `DeviceClasses`, and the
@@ -87,11 +93,13 @@ takes a raw YAML URL as a resource:
       - https://liken.sh/media/deploy/rbac.yaml
       - https://liken.sh/media/deploy/operator.yaml
       - https://liken.sh/media/deploy/api.yaml
+      - https://liken.sh/media/deploy/api-authentication.yaml
       - https://liken.sh/media/deploy/bus.yaml
       - https://liken.sh/media/deploy/capabilities.yaml
 
 The transformer sets `liken-system` only on the objects that state no
-namespace, so the binding in `api.yaml` stays in `kube-system`. A
+namespace, so the binding in `api-authentication.yaml` stays in
+`kube-system`. A
 top-level `namespace:` field would move it, and the API couldn't read
 the client certificate authority.
 
@@ -134,8 +142,10 @@ can pull that artifact by the version, with no sha.
 
 A Flux `Kustomization` that applies the base must not set
 `targetNamespace`. Flux sets that namespace on every object, the way a
-top-level `namespace:` field does, so it moves the `RoleBinding` out of `kube-system`.
-The API then can't read the client certificate authority.
+top-level `namespace:` field does, and the `RoleBinding` in
+`api-authentication.yaml` must stay in `kube-system`, where the
+built-in `Role` it binds lives. Moved out of it, the binding names no
+`Role`, and the API can't read the client certificate authority.
 
 ## What the install runs
 
@@ -364,6 +374,7 @@ itself:
       -f https://liken.sh/media/deploy/api.yaml \
       -f https://liken.sh/media/deploy/bus.yaml \
       -f https://liken.sh/media/deploy/capabilities.yaml
+    kubectl delete -f https://liken.sh/media/deploy/api-authentication.yaml
 
 **Deleting a CRD deletes every resource of that kind.** Delete the
 five `*-crd.yaml` files only when every player, play, remote,

@@ -168,29 +168,6 @@ subjects:
     namespace: liken-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: media-api-authentication-reader
-  # The API server publishes the cluster's client certificate
-  # authority in the ConfigMap extension-apiserver-authentication in
-  # kube-system, and the API reads it to verify a caller's client
-  # certificate. extension-apiserver-authentication-reader is the
-  # built-in Role that grants get, list, and watch on that one object,
-  # and it is the Role every extension API server binds for the same
-  # read. The API lists the object and watches it from the list's
-  # resourceVersion, so a rotated authority reaches the next handshake
-  # with no restart.
-  namespace: kube-system
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: extension-apiserver-authentication-reader
-subjects:
-  - kind: ServiceAccount
-    name: media-api
-    namespace: liken-system
----
-apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: media-api

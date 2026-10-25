@@ -24,21 +24,13 @@ resources:
   - https://github.com/liken-sh/liken//people-operator/deploy?ref=<ref>
 ```
 
-A Flux `Kustomization` that applies the base must not set
-`targetNamespace`. Flux sets that namespace on every object, the way a
-top-level `namespace:` field does, so it moves the `Role` and `RoleBinding` that post `Event`s out of `default`.
-A `Person` is cluster-scoped, so its `Event`s go to `default`, and
-the API server then refuses every one with a 403.
-
-The base holds five parts:
+The base holds four parts:
 
 - the `Person` resource definition, which is cluster-scoped;
 - the `people-operator` `ServiceAccount` and its `ClusterRole`, which
-  reads every `Person`, writes each `Person`'s status, and starts,
+  reads every `Person`, writes each `Person`'s status, starts,
   reads, and deletes the pods that read a picture from NFS or a
-  claim;
-- a `Role` in `default`, which posts the `Event`s about each
-  `Person`;
+  claim, and posts the `Event`s about each `Person` in `default`;
 - a `Role` in `liken-system`, which creates, reads, and renews the
   `Lease` named `people-operator`;
 - the `people-operator` `Deployment`, with one replica.

@@ -69,13 +69,6 @@ version:
       - name: ghcr.io/liken-sh/equipment-operator
         newTag: <version>
 
-A Flux `Kustomization` that applies the base must not set
-`targetNamespace`. Flux sets that namespace on every object, the way a
-top-level `namespace:` field does, so it moves the `Role` and `RoleBinding` that post `Event`s out of `default`.
-The `Receiver`, `CECBus`, and `Television` objects are
-cluster-scoped, so their `Event`s go to `default`, and the API server
-then refuses every one with a 403.
-
 ## Keep the pods off nodes with no CEC adapter
 
 The `DaemonSet` makes a pod on every node. On a node with no

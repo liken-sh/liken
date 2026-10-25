@@ -41,6 +41,7 @@ resources:
   - rbac.yaml
   - operator.yaml
   - api.yaml
+  - api-authentication.yaml
   - bus.yaml
   - capabilities.yaml
 

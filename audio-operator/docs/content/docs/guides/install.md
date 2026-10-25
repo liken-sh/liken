@@ -371,8 +371,10 @@ can pull that artifact by the version, with no sha.
 
 A Flux `Kustomization` that applies the base must not set
 `targetNamespace`. Flux sets that namespace on every object, the way a
-top-level `namespace:` field does, so it moves the `RoleBinding` out of `kube-system`.
-The API then can't read the client certificate authority.
+top-level `namespace:` field does, and the `RoleBinding` in
+`api-authentication.yaml` must stay in `kube-system`, where the
+built-in `Role` it binds lives. Moved out of it, the binding names no
+`Role`, and the API can't read the client certificate authority.
 
 ## Remove the operator
 

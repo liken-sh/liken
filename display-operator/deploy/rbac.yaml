@@ -92,6 +92,16 @@ rules:
   - apiGroups: [authentication.k8s.io]
     resources: [tokenreviews]
     verbs: [create]
+  # The Events about the Displays (displayevents.go, reasons.go): a
+  # condition that changed, a write the panel did not confirm, a mode
+  # change, a compositor the operator ended. A Display is cluster-scoped, and the API server takes an Event about a
+  # cluster-scoped object only in default or kube-system, so the Events go
+  # to default. The ClusterRole grants them, so a namespace override of the
+  # install moves no grant away from default. patch counts a repeat on the
+  # Event it repeats.
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -101,37 +111,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: display-operator
-subjects:
-  - kind: ServiceAccount
-    name: display-operator
-    namespace: liken-system
----
-# The Events about the Displays (displayevents.go, reasons.go): a
-# condition that changed, a write the panel did not confirm, a mode
-# change, a compositor the operator ended. A Display is cluster-scoped,
-# and the API server accepts an Event about a cluster-scoped object only
-# in default or kube-system, so the grant is a Role in default and
-# nowhere else. The create writes a new Event, and the patch adds a
-# repeat within 10 minutes to the count of the Event it wrote.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: display-operator-events
-  namespace: default
-rules:
-  - apiGroups: [""]
-    resources: [events]
-    verbs: [create, patch]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: display-operator-events
-  namespace: default
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: display-operator-events
 subjects:
   - kind: ServiceAccount
     name: display-operator

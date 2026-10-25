@@ -147,6 +147,15 @@ rules:
     resources: [clusterrolebindings]
     resourceNames: [cluster-reconciler-flux-system, crd-controller-flux-system, liken-engine-planter]
     verbs: [delete]
+  # The Events about the Machines and the Cluster (events.go). Both
+  # kinds are cluster-scoped, and the API server accepts an Event about a cluster-scoped object only
+  # in default or kube-system, so the operator posts every Event in
+  # default. The ClusterRole grants it, so the manifests bind nothing in
+  # default. create writes a new Event, and patch raises the count of a
+  # repeat within ten minutes.
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -191,36 +200,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: liken-cluster-operator-leases
-subjects:
-  - kind: ServiceAccount
-    name: liken-cluster-operator
-    namespace: liken-system
----
-# The Events about the Machines and the Cluster (events.go). Both
-# kinds are cluster-scoped, and the API server accepts an Event about
-# a cluster-scoped object only in default or kube-system, so the
-# operator posts every Event in default. A namespaced Role grants it
-# there and nowhere else. create writes a new Event, and patch raises
-# the count of a repeat within ten minutes.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: liken-cluster-operator-events
-  namespace: default
-rules:
-  - apiGroups: [""]
-    resources: [events]
-    verbs: [create, patch]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: liken-cluster-operator-events
-  namespace: default
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: liken-cluster-operator-events
 subjects:
   - kind: ServiceAccount
     name: liken-cluster-operator

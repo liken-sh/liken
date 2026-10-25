@@ -9,6 +9,7 @@
 //	go run ./ci plan                decide what this workflow run does
 //	go run ./ci deps                check each [depends] against the code
 //	go run ./ci pins                check that each shared pin names one version
+//	go run ./ci namespaces          check that a namespace override moves no deploy object
 //	go run ./ci publish ...         push one component's outputs
 //	go run ./ci record -tag T       write the GitHub release for a tag
 //	go run ./ci sites               list each manual's directory and prefix
@@ -61,7 +62,7 @@ type World struct {
 func (w World) run(args []string) error {
 	stdout := w.Stdout
 	if len(args) == 0 {
-		return fmt.Errorf("name a command: generate, plan, deps, pins, publish, record, sites, reports, or profile")
+		return fmt.Errorf("name a command: generate, plan, deps, pins, namespaces, publish, record, sites, reports, or profile")
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	root := flags.String("root", ".", "the repository root")
@@ -88,6 +89,8 @@ func (w World) run(args []string) error {
 		return deps(*root, components, stdout)
 	case "pins":
 		return pins(*root, stdout)
+	case "namespaces":
+		return namespaces(*root, stdout)
 	case "publish":
 		c, ok := components[*component]
 		if !ok {
@@ -181,6 +184,21 @@ func pins(root string, stdout io.Writer) error {
 		return fmt.Errorf("%d pins drift; give each copy the newest version", len(findings))
 	}
 	fmt.Fprintln(stdout, "every shared pin names one version")
+	return nil
+}
+
+func namespaces(root string, stdout io.Writer) error {
+	findings, err := checkNamespaces(root)
+	if err != nil {
+		return err
+	}
+	for _, f := range findings {
+		fmt.Fprintln(stdout, f)
+	}
+	if len(findings) > 0 {
+		return fmt.Errorf("%d deploy objects would move under a namespace override", len(findings))
+	}
+	fmt.Fprintln(stdout, "no deploy object moves under a namespace override")
 	return nil
 }
 

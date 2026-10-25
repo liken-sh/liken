@@ -25,13 +25,13 @@ func TestTheDeploymentRunsInLikenSystem(t *testing.T) {
 		t.Fatal(err)
 	}
 	var base struct {
-		Namespace string   `json:"namespace"`
-		Resources []string `json:"resources"`
+		Transformers []string `json:"transformers"`
+		Resources    []string `json:"resources"`
 	}
 	if err := yaml.Unmarshal(raw, &base); err != nil {
 		t.Fatal(err)
 	}
-	if base.Namespace != "liken-system" || slices.Contains(base.Resources, "namespace.yaml") {
+	if !setsLikenSystem(t, base.Transformers) || slices.Contains(base.Resources, "namespace.yaml") {
 		t.Errorf("base = %+v, want liken-system and no namespace of its own", base)
 	}
 }
@@ -229,4 +229,27 @@ func TestTheClusterRoleGrantsWhatTheOperatorSends(t *testing.T) {
 			t.Errorf("the ClusterRole does not grant %s on %s in the group %q", n.verb, n.resource, n.group)
 		}
 	}
+}
+
+// setsLikenSystem answers whether one of a base's transformers sets the
+// namespace liken-system on every object that states none, the way every
+// base of the repository sets it.
+func setsLikenSystem(t *testing.T, transformers []string) bool {
+	t.Helper()
+	for _, raw := range transformers {
+		var transformer struct {
+			Kind     string `json:"kind"`
+			Metadata struct {
+				Namespace string `json:"namespace"`
+			} `json:"metadata"`
+			UnsetOnly bool `json:"unsetOnly"`
+		}
+		if err := yaml.Unmarshal([]byte(raw), &transformer); err != nil {
+			t.Fatal(err)
+		}
+		if transformer.Kind == "NamespaceTransformer" && transformer.Metadata.Namespace == "liken-system" && transformer.UnsetOnly {
+			return true
+		}
+	}
+	return false
 }

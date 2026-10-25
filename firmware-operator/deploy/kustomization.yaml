@@ -18,7 +18,7 @@ kind: Kustomization
 
 # The namespace is set with a transformer, not with the top-level
 # namespace field, because unsetOnly keeps an object that states its
-# own namespace where it belongs: the Events Role in default. The CRDs,
+# own namespace where it belongs. The CRDs,
 # the DeviceClass, and the FirmwareCatalog are cluster-scoped, and the API
 # server ignores a namespace on them.
 transformers:
