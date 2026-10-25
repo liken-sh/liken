@@ -77,3 +77,8 @@ turn the `Player` off and never on.
   DDC/CI write. A TV behind a receiver does not answer DDC/CI, so the
   `off` desire there only draws a black picture, and the HDMI signal
   continues.
+* **A home press while the TV boots.** A home press reads the TV's
+  power first and sends nothing when the TV does not answer. On a home
+  cluster, a press about 30 s after a wake got no answer while the TV
+  ran its own device discovery, so that press switched nothing, and
+  the next one worked.
