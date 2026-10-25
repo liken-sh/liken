@@ -116,11 +116,11 @@ shape.
 | `plays/{namespace}/{name}/commands` | any program | the playback pod | no | [one named command](/docs/reference/plays/#commands) |
 | `plays/{namespace}/{name}/status` | the playback pod; the operator clears it | the operator | yes | [the run's report](/docs/reference/plays/#status-1) |
 | `plays/{namespace}/{name}/availability` | the playback pod and its Last Will; the operator clears it | the operator | yes | [`online` or `offline`, and the pod's UID](/docs/reference/plays/#availability) |
-| `players/{namespace}/{name}/status` | the operator | the idle pod, or a delegate's client | yes | [the unit's name, activity, `Play`, parts, and power mode](/docs/reference/players/#status-1) |
+| `players/{namespace}/{name}/status` | the operator | the idle pod, or a delegate's client | yes | [the unit's name, activity, `Play`, and parts](/docs/reference/players/#status-1) |
 | `players/{namespace}/{name}/volume` | the operator | the playback pod, the idle pod or a delegate's client, and the operator | yes | [the level, the muted flag, and who draws the indicator](/docs/reference/players/#volume) |
 | `players/{namespace}/{name}/volume/commands` | any program that is not a remote | the operator | no | [an ask for a step or a mute](/docs/reference/players/#volumecommands) |
 | `players/{namespace}/{name}/panel` | the idle pod, or a delegate's client; the operator clears it | the operator | yes | [the panel desire](/docs/reference/players/#panel) |
-| `players/{namespace}/{name}/power` | the idle pod or a delegate's client, and the operator | the operator, and the idle pod or a delegate's client | no | [an ask for the room's power, or for the screen](/docs/reference/players/#power) |
+| `players/{namespace}/{name}/power` | the operator | the idle pod, or a delegate's client | no | [a wake or a sleep for the screen](/docs/reference/players/#power) |
 | `players/{namespace}/{name}/commands` | the playback pod | the idle pod, or a delegate's client | no | [the ask for the next work, or for home](/docs/reference/players/#commands) |
 | `remotes/{namespace}/{name}/events` | the `Remote`'s pod | the playback pod, the idle pod or a delegate's client, and the operator | no | [one key event](/docs/reference/remotes/#events) |
 | `remotes/{namespace}/{name}/keys` | the operator | the `Remote`'s pod | yes | [the compiled key table](/docs/reference/remotes/#keys) |
@@ -134,11 +134,7 @@ publishes `play-next` when a person takes the up-next offer on the
 scrubber, and the client that wrote the `Play` reads it and creates
 the next `Play`. It publishes `home` when a person presses home during
 a film, just before the `Play` ends, and the client under the film
-reads that ask as a press of the home key. It publishes `power` the
-same way when a person presses power during a film, and `power-off`
-when a person presses a TV remote's Power Off Function. The client
-holds that ask until the `Player`'s status reads `Idle`, and then
-answers it the way it answers the same press between films.
+reads that ask as a press of the home key.
 
 "The playback pod" in this table is its command sidecar, the one
 container that connects to the bus. "The idle pod" is the idle screen
@@ -149,7 +145,7 @@ reads and writes the same `players` and `remotes` topics from
 
 ## What the operator reads
 
-The operator subscribes to eleven filters, one per retained or event
+The operator subscribes to ten filters, one per retained or event
 kind it folds into a status or a decision:
 
 | Filter | What the operator does with it |
@@ -158,18 +154,17 @@ kind it folds into a status or a decision:
 | `plays/+/+/availability` | gates a retained report on a live sidecar, from the run's current pod only |
 | `remotes/+/+/focus` | reads its own marks back after a restart, and publishes again only a mark a restarted broker lost |
 | `remotes/+/+/focus/cycle` | advances the mark to the next bound `Player` |
-| `remotes/+/+/events` | moves the level for a volume key, and asks the unit's `Receiver` for the unit's input |
+| `remotes/+/+/events` | moves the `Player`'s `spec.power` for a power key and for any key on a `Player` that is off, moves the level for a volume key, and asks the unit's `Receiver` for the unit's input |
 | `remotes/+/+/availability` | gates the declared codes on a live pod |
 | `remotes/+/+/codes` | subtracts the key table and reports `status.unbound` |
 | `players/+/+/panel` | overrides the screen's `Display` from the desire |
 | `players/+/+/volume` | reads its own levels back, so after a restart it publishes no level the broker already holds |
 | `players/+/+/volume/commands` | moves the level the same as a volume key |
-| `players/+/+/power` | writes each power ask into the unit's `Receiver` |
 
 Most presses never pass through the operator. A key event travels
 from the `Remote`'s pod to the playback pod or the idle client
 directly, gated on the retained focus mark, so a controller keeps
-working while the operator is down. The volume keys, the power asks,
-and the input asks are the exceptions, because a device operator
-acts on them through the `Receiver` or the `Sink`. They do nothing
+working while the operator is down. The volume keys, the power keys,
+and the input asks are the exceptions, because the operator acts on
+them through the `Player`, the `Receiver`, or the `Sink`. They do nothing
 while no operator holds the lease.

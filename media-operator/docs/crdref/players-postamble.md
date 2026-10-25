@@ -1,3 +1,82 @@
+## Turning a Player off and on
+
+`spec.power` turns the `Player` and its equipment off and on. It is
+`On` or `Off`, and an absent field is `On`. `media-operator` writes it
+for a remote's power key and for a `Play` that starts on a `Player`
+that is off, and you can write it with `kubectl`:
+
+    kubectl patch player studio --type merge -p '{"spec":{"power":"Off"}}'
+    kubectl patch player studio --type merge -p '{"spec":{"power":"On"}}'
+
+The last write wins, whichever wrote it. The operator writes the field
+by server-side apply under the field manager `media-operator-power`,
+which owns `spec.power` alone, so a GitOps copy of the `Player` that
+leaves the field out never takes it back.
+
+When `spec.power` turns `Off`, the operator:
+
+* writes the action `off` into the `Receiver`'s
+  `status.session.powerAsk`, and the equipment operator puts the
+  receiver and the TV behind it in standby;
+* applies the override `{power: Off}` to the screen's `Display`,
+  whatever the idle screen's `offMode`;
+* publishes `sleep` on the [`power`](#power) topic, and the idle
+  screen lowers its shade;
+* publishes `stop` on the commands topic of each `Play` that stands on
+  the unit, and the run ends the way the remote's stop key ends it.
+
+While the `Player` is `Off`, the `Receiver` session's `awake` flag
+stays false and the override stays on the `Display`, whatever the idle
+screen states.
+
+When `spec.power` turns `On`, the operator lifts the override and
+publishes `wake` on the `power` topic. The idle screen wakes and states
+the `on` desire, the session's `awake` flag turns true, and the
+equipment operator wakes the TV and the receiver and selects the unit's
+input. A `Player` with no `Receiver`, such as a single monitor, does
+the same without the receiver.
+
+The remote's keys move `spec.power` while the remote's
+[focus mark](/docs/reference/remotes/#focus-and-focuscycle) names this
+`Player`. Each acts on the press, never on a repeat:
+
+| Key | What it does |
+|---|---|
+| `KEY_POWER`, `KEY_POWER2` | Turns a `Player` that is on off, and one that is off on. |
+| `KEY_SLEEP` | Turns the `Player` off, and leaves one that is off as it is. |
+| `KEY_WAKEUP` | Turns the `Player` on, and leaves one that is on as it is. |
+| any other key | Turns a `Player` that is off on, and does nothing else. |
+
+A `Play` that starts on a `Player` that is off turns it on first. The
+operator writes `On` with the same apply a key press sends, before it
+wakes the `Receiver` session and creates the playback pod, and the
+next pass runs the change to `On` as above. When the API server refuses
+the apply, the `Play` still starts, and the equipment stays asleep
+until `spec.power` turns `On`.
+
+The kernel's `rc-cec` keymap gives a TV remote's Power Off Function
+and Power On Function the names `KEY_SLEEP` and `KEY_WAKEUP`.
+HDMI-CEC 1.3a, CEC 13.13.3, says each one puts the device in the
+state it names and keeps it there when a person presses it again, so
+neither is a toggle. To make a controller's power button turn the
+`Player` off and never on, map it to `KEY_SLEEP` with a `Keymap` row.
+
+The idle timers are a softer off. After `fadeAfterSeconds` the screen
+draws a shade, and after `offAfterSeconds` the panel goes dark with the
+`offMode` override and the session's `awake` flag turns false. The
+equipment operator then hands the TV's input back and leaves the TV on.
+`spec.power` stays `On` through the timers, and the next key lights
+the screen again.
+
+`status.power` holds the value the operator last applied, and the
+operator acts when `spec.power` differs from it, so a change made while
+the operator was down takes effect when it starts. A `Player` whose
+status holds no value adopts its `spec.power` and asks the hardware for
+nothing. The `PowerApplied` condition says what the last change asked
+of which hardware. It is `False` with the reason `ReceiverAskFailed`
+or `DisplayWriteFailed` when a write failed, and each pass asks for
+the value `spec.power` holds until every write lands.
+
 ## Events
 
 The operator and `media-api` post Kubernetes `Event`s on the `Player`.
@@ -12,6 +91,8 @@ hold the facts after that.
 | `Superseded`, `Retired` | Normal | The operator deleted one of the unit's `Play`s. The message names the `Play`, and the [Plays](/docs/reference/plays/) page gives each reason. |
 | `ReceiverWriteFailed` | Warning | Writing the session on the unit's `Receiver` failed. Each pass writes it again, and posts nothing more until it lands. |
 | `ReceiverWriteRecovered` | Normal | The session write landed after one or more failures. |
+| `Applied` | Normal | `spec.power` changed, and every write it needed landed. The message names what the operator asked of which hardware. |
+| `ReceiverAskFailed`, `DisplayWriteFailed` | Warning | A write that a change of `spec.power` needed failed. Each pass asks again until it lands. |
 | `Captured` | Normal | `media-api` returned bytes of the unit. The message names the caller, the aspect, and the media type. The same caller who takes the same capture again within ten minutes adds to the count of one `Event`. |
 
 ## On the bus
@@ -22,19 +103,18 @@ every topic follows and lists every writer and reader of each.
 
 | Topic | Writer | Retained | Carries |
 |---|---|---|---|
-| `players/{namespace}/{name}/status` | the operator | yes | the unit's name, activity, parts, and power mode |
+| `players/{namespace}/{name}/status` | the operator | yes | the unit's name, activity, and parts |
 | `players/{namespace}/{name}/volume` | the operator | yes | the listening level |
 | `players/{namespace}/{name}/volume/commands` | any program that is not a remote | no | an ask for a step or a mute |
 | `players/{namespace}/{name}/panel` | the idle pod | yes | the panel desire |
 | `players/{namespace}/{name}/commands` | the playback pod | no | a command for the idle pod |
-| `players/{namespace}/{name}/power` | the idle pod and the operator | no | an ask for the room's power, or for the screen |
+| `players/{namespace}/{name}/power` | the operator | no | a wake or a sleep for the screen |
 
 ### `status`
 
 What a screen would show about one unit: its name, what it is
 doing, the `Play` it runs, and its parts with the link and the
-battery level of each. It also states where a power press goes.
-The operator is the only writer, so an idle pod that just started
+battery level of each. The operator is the only writer, so an idle pod that just started
 draws the live state the broker already holds, with no request to
 the operator. The operator republishes only when the payload changes,
 and it clears the topic with an empty payload when the `Player` is
@@ -51,8 +131,7 @@ deleted.
         {"name": "Built-in Speakers", "kind": "sink"},
         {"name": "Studio Controller", "kind": "remote", "connected": true,
          "battery": 62, "focused": true}
-      ],
-      "power": "room"
+      ]
     }
 
 `activity` is the same word the Kubernetes status carries. `play` is
@@ -66,37 +145,6 @@ reports, from 0 to 100, and a device that reports none omits the key.
 [focus mark](/docs/reference/remotes/#focus-and-focuscycle) names
 this `Player`, and the idle screen draws a small hexagon beside that
 controller in its parts list. Every other component omits the key.
-
-`power` is `room` while the unit's screen is wired through a
-`Receiver`: a power press is then an ask on the
-[`power`](#power) topic, and the equipment operator turns the room
-off or on. It is `screen` while the screen is wired to no
-`Receiver`: the client handles a power press itself and lowers its
-shade, and it ignores `wake` and `sleep` on the `power` topic. A
-client reads the field at each press, so a `Receiver` that is wired
-or removed changes where the next press goes with no pod restart.
-The operator omits the field for a unit it has not matched against
-the `Receiver`s yet: after the operator starts or the `Player` is
-created, until the operator's first pass reaches the unit. That pass
-can take seconds on a busy API server. A client keeps the mode it last
-read through such a message. A client that has read no mode treats a
-non-empty power topic as `room`, the rule an operator that predates
-the field follows.
-
-The field reads `screen` for a wired unit while the unit's idle claim
-is unallocated and its screen does not resolve, for example after a
-restart that finds the claim with no allocation. It reads `room` again
-from the pass after the claim is allocated. A short gap in a screen
-that already resolved keeps `room` for up to 90 seconds.
-
-A client that draws the idle screen must read this field to decide
-where a power press goes. The power topic in
-`status.idle.bus.powerTopic` is set for every unit, so a client that
-reads the topic's presence as the sign of a `Receiver` treats every
-unit as `room`. Upgrade `library-operator` together with this
-operator, because an older media browser follows that rule. When this
-operator is upgraded, the idle pod of each unit with no `Receiver` is
-replaced once, because its environment gains the power topic.
 
 `play.displayAlive` is the run's
 [`DisplayAlive` condition](/docs/reference/plays/#statusconditions)
@@ -225,87 +273,39 @@ its `request` is the `Play`'s own `spec.next.request`, byte for byte.
 The client that wrote the `Play` reads that ask and creates the next
 `Play`. The same sidecar publishes `home` when a person presses home
 during a film, just before the `Play` ends, and the client reads that
-ask as a press of the home key. It publishes `power` when a person
-presses power during a film, also just before the `Play` ends. The
-client holds that ask until this `Player`'s status reads `Idle`, and
-then answers it as a power press between films: in the power mode
-`room`, it turns the `Player` off or on as the [`power`](#power) topic
-describes, and in the mode `screen`, it lowers the shade. The answer
-waits for `Idle` so that the equipment operator reads the room after
-the film ended. A
-client that reads no `Idle` within 10 seconds drops the ask. The
-sidecar publishes `power-off` in place of `power` for `KEY_SLEEP`, the
-name the kernel gives a TV remote's Power Off Function, and the client
-answers it the way it answers a press of `KEY_SLEEP`: `off` on the
-power topic in the mode `room`, or the shade in the mode `screen`.
+ask as a press of the home key. A power key during a film reaches the
+operator and not the sidecar, and the operator stops the run when the
+`Player` turns off ([Turning a Player off and on](#turning-a-player-off-and-on)).
 
 | Message | Writer | What it says |
 |---|---|---|
 | `{"action": "play-next", "request": {...}}` | the playback pod | A person took the up-next offer. `request` is the `Play`'s `spec.next.request`. |
 | `{"action": "home"}` | the playback pod | A person pressed home during a film. The `Play` ends after it, and the client reads the ask as a press of the home key. |
-| `{"action": "power"}` | the playback pod | A person pressed power during a film. The `Play` ends after it, and the client answers the ask as a power press once the status reads `Idle`. |
-| `{"action": "power-off"}` | the playback pod | A person pressed a TV remote's Power Off Function during a film. The `Play` ends after it, and the client answers the ask as a press of `KEY_SLEEP` once the status reads `Idle`. |
 
 ### `power`
 
-The room's power, for a unit whose screen is wired through a
-`Receiver`. The operator names the topic in
-`status.idle.bus.powerTopic` for every unit, so a delegate's pod stays
-the same when a `Receiver` is wired or removed. The
-[`status`](#status) topic's `power` field says whether the topic is in
-use: `room` while a `Receiver` is wired, and `screen` while none is.
-Each message is an ask, so none is retained.
+The asks the operator publishes for the unit's screen. Each message is
+an ask, so none is retained. The operator names the topic in
+`status.idle.bus.powerTopic` for every unit, and the screen client is
+its one reader. A client publishes nothing here, and it handles no
+power key: the operator reads `KEY_POWER`, `KEY_POWER2`, `KEY_SLEEP`,
+and `KEY_WAKEUP` from the remote's own `events` topic and moves
+`spec.power` ([Turning a Player off and on](#turning-a-player-off-and-on)).
 
-The idle screen client answers a power press between films in the
-power mode `room`. The panel desire on the [`panel`](#panel) topic is
-the `Player`'s power, so the client moves it with the press. The
-`Receiver` session's `awake` flag follows the desire, so it turns false
-when the equipment turns off, and the next press of any key wakes the
-`Player` again.
-
-* A press of `KEY_POWER` or `KEY_POWER2` on a `Player` whose desire is
-  `on`, and every press of `KEY_SLEEP`, publishes `off` here, lowers
-  the shade, and states the `off` desire.
-* A press of `KEY_POWER`, `KEY_POWER2`, or `KEY_WAKEUP` on a `Player`
-  whose desire is `off` wakes the screen and states the `on` desire.
-  The `awake` flag that turns true wakes the TV and the receiver, so the
-  client publishes no ask beside it.
-* A press of `KEY_WAKEUP` on a `Player` whose desire is already `on`
-  publishes `on` here, for equipment that a person turned off another
-  way.
-* A press of `KEY_POWER` or `KEY_POWER2` before the client has read a
-  desire publishes the toggle here, and changes no desire.
-
-The operator writes each ask into the `Receiver`'s
-`status.session.powerAsk`, and the equipment operator answers it:
-
-| Message | What the equipment operator does |
-|---|---|
-| `{"action": "off"}` | Turns a room that is on off, and leaves a room that is off as it is. |
-| `{"action": "on"}` | Turns a room that is off on, and leaves a room that is on as it is. |
-| `{"action": "toggle"}` | Turns a room that is on off, and a room that is off on. It reads the TV's power to decide. |
-
-To make a controller's power button turn the `Player` off and never
-on, map it to `KEY_SLEEP` with a `Keymap` row.
-
-The kernel's `rc-cec` keymap gives a TV remote's Power Off Function
-and Power On Function the names `KEY_SLEEP` and `KEY_WAKEUP`.
-HDMI-CEC 1.3a, CEC 13.13.3, says each one puts the device in the
-state it names and keeps it there when a person presses it again, so
-neither is a toggle.
-
-The operator publishes two asks for the screen here, when the room's
+The operator publishes `sleep` when `spec.power` turns `Off`, and
+`wake` when it turns `On`. It also relays the two asks when the room's
 TV speaks over HDMI-CEC. The equipment operator's CEC node workload
 writes each ask into the `Television`'s `status.screenAsk`, and the
 operator relays each new one once. It relays nothing for an ask that
 the `Television` already held when the operator started, and nothing
-for a unit whose screen is wired through no `Receiver`. A client in
-the power mode `screen` ignores both asks.
+for a unit whose screen is wired through no `Receiver`.
 
 | Message | When | What the client does |
 |---|---|---|
-| `{"action": "wake"}` | A person picked this unit's input in the TV's source menu while the screen sleeps. | Wakes the screen and states the `on` desire, the way a press on a sleeping screen does. |
-| `{"action": "sleep"}` | The TV went to standby while the screen is awake. | Brings the shade down and states the `off` desire at once, while the unit plays nothing. A film goes on. |
+| `{"action": "wake"}` | `spec.power` turned `On`, or a person picked this unit's input in the TV's source menu while the screen sleeps. | Wakes the screen and states the `on` desire, the way a press on a sleeping screen does. |
+| `{"action": "sleep"}` | `spec.power` turned `Off`, or the TV went to standby while the screen is awake. | Brings the shade down and states the `off` desire at once, while the unit plays nothing. A film goes on. |
 
-Each program ignores the actions it does not answer, so a client that
-reads its own ask come back changes nothing.
+A client that drops a `sleep` during a film leaves no hardware on: the
+operator stops the `Play` on the same change, and the panel and the
+equipment follow `spec.power` whatever the client states. A client
+ignores every other action.

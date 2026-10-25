@@ -39,7 +39,9 @@ spec:
       storage: true
       # The status subresource splits spec and status into two write
       # paths. People declare the spec; only the operator writes
-      # status. The API server enforces the split.
+      # status. The API server enforces the split. The one spec field the
+      # operator writes is spec.power, for a remote's power key, under a
+      # field manager that owns that field alone.
       subresources:
         status: {}
       additionalPrinterColumns:
@@ -361,6 +363,13 @@ spec:
                         brightness zero, which still answers DDC. Power off
                         stops some panels from answering DDC at all; use it
                         only for a panel that you have seen wake from it.
+                power:
+                  type: string
+                  enum: ["On", "Off"]
+                  description: >-
+                    Whether the Player is on. Off turns its panel, TV, and
+                    receiver off and stops its Play, and a Play that starts
+                    sets On; omit it for On.
             status:
               type: object
               description: >-
@@ -380,6 +389,12 @@ spec:
                   description: >-
                     The name of the Play on this Player, in the same
                     namespace. Empty while the Player is Idle.
+                power:
+                  type: string
+                  enum: ["On", "Off"]
+                  description: >-
+                    The spec.power the media operator last applied to the
+                    Player's hardware.
                 panel:
                   type: string
                   description: >-
@@ -462,8 +477,8 @@ spec:
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [type]
                   description: >-
-                    The unit's conditions. There is one, Screen, and it is
-                    absent until the idle claim has resolved once. True with
+                    The unit's conditions, Screen and PowerApplied. Screen
+                    is absent until the idle claim has resolved once. True with
                     reason Present means the screen's Display reports a panel
                     on its connector. False with reason PanelAway means the
                     Display reports no panel there: the monitor shows another
@@ -476,13 +491,17 @@ spec:
                     with reason NotReported means the Display carries no
                     Connected condition. The message is the Display's own, and
                     lastTransitionTime moves only when the status does.
+                    PowerApplied, absent until spec.power first changes, says
+                    what the last change asked of the hardware: True with
+                    reason Applied, or False with reason ReceiverAskFailed or
+                    DisplayWriteFailed.
                   items:
                     type: object
                     required: [type, status]
                     properties:
                       type:
                         type: string
-                        description: The condition's name, Screen.
+                        description: The condition's name, Screen or PowerApplied.
                       status:
                         type: string
                         enum: ["True", "False", "Unknown"]
@@ -492,12 +511,14 @@ spec:
                         description: >-
                           One word for the status: Present, PanelAway,
                           NoDisplay, NotReported, or the Display's own
-                          reason.
+                          reason for Screen; Applied, ReceiverAskFailed,
+                          or DisplayWriteFailed for PowerApplied.
                       message:
                         type: string
                         description: >-
-                          The Display's message for the condition, which
-                          names the connector.
+                          For Screen, the Display's message, which names
+                          the connector. For PowerApplied, what the
+                          operator asked of which hardware.
                       lastTransitionTime:
                         type: string
                         format: date-time

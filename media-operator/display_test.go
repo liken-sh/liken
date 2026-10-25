@@ -371,7 +371,7 @@ func TestThePlayerBusStatusCarriesTheDisplayCondition(t *testing.T) {
 	plays := []Play{*play}
 
 	got := derivePlayerBusStatus(housePlayer(), PlayerStatus{Activity: playerPlaying, Play: "movie"},
-		plays, newPeripheralDesk(), newFocusDesk(nil), newEnsureDesk())
+		plays, newPeripheralDesk(), newFocusDesk(nil))
 
 	if got.Play == nil || got.Play.DisplayAlive == nil {
 		t.Fatalf("the unit's status carries no display mark: %+v", got)
@@ -396,7 +396,7 @@ func TestThePlayerBusStatusMarksAnAliveDisplay(t *testing.T) {
 	}
 
 	got := derivePlayerBusStatus(housePlayer(), PlayerStatus{Activity: playerPlaying, Play: "movie"},
-		[]Play{*play}, newPeripheralDesk(), newFocusDesk(nil), newEnsureDesk())
+		[]Play{*play}, newPeripheralDesk(), newFocusDesk(nil))
 
 	if got.Play == nil || got.Play.DisplayAlive == nil {
 		t.Fatalf("the unit's status carries no display mark: %+v", got)

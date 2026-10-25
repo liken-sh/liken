@@ -204,7 +204,7 @@ func TestTheCycleKeyWithNoFocusTopicSaysWhy(t *testing.T) {
 	})
 }
 
-func TestTheHomeAndPowerKeysLogTheAskAndTheEnding(t *testing.T) {
+func TestTheHomeKeyLogsTheAskAndTheEnding(t *testing.T) {
 	cases := []struct {
 		name   string
 		key    string
@@ -222,18 +222,6 @@ func TestTheHomeAndPowerKeysLogTheAskAndTheEnding(t *testing.T) {
 			name: "home on a pod that read no player",
 			key:  "KEY_HOMEPAGE",
 			want: "command: KEY_HOMEPAGE from remote house/sofa: home, with no player commands topic to ask on, so the run ends",
-		},
-		{
-			name:   "power on a pod that read its player",
-			key:    "KEY_POWER",
-			player: keyTestPlayer,
-			want: "command: KEY_POWER from remote house/sofa: power, published the power ask to " +
-				playerCommandsTopic(defaultTopicBase, keyTestPlayNS, keyTestPlayer) + ", so the run ends",
-		},
-		{
-			name: "power on a pod that read no player",
-			key:  "KEY_POWER",
-			want: "command: KEY_POWER from remote house/sofa: power, with no player commands topic to ask on, so the run ends",
 		},
 	}
 	for _, each := range cases {

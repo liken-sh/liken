@@ -333,13 +333,17 @@ func (s *screens) screenOf(result DeviceRequestAllocationResult) (screen, bool) 
 }
 
 // panelOverride is what this operator last wrote for one unit: the
-// desire it applied, and the monitor it applied it to. The monitor is
-// held because a deleted Player takes its idle claim with it, and the
-// claim was the only path from the unit to its screen. The lift a
-// dark panel is still owed goes to the remembered monitor.
+// desire it applied, the override block that desire became, and the
+// monitor it applied it to. The block is held beside the desire because
+// one desire becomes two blocks: the off desire of the idle timers
+// takes the off mode, and a Player that is off takes the power block.
+// The monitor is held because a deleted Player takes its idle claim
+// with it, and the claim was the only path from the unit to its screen.
+// The lift a dark panel is still owed goes to the remembered monitor.
 type panelOverride struct {
-	desire  string
-	monitor string
+	desire   string
+	override *DisplayOverride
+	monitor  string
 }
 
 // reconcilePanel settles one unit's panel and answers the
@@ -347,8 +351,21 @@ type panelOverride struct {
 // override is this operator's write, and the observed state is the
 // display-operator's. A unit whose screen carries no Display keeps
 // its panel lit: there is no second writer to fall back to.
-func (o *operator) reconcilePanel(player *Player, key string, lookup *screens, mode string) string {
+//
+// spec.power decides before the client does. A Player that is off holds
+// its panel powered off whatever the client states, so a client that
+// stopped, or one that held the shade up under a film, leaves no panel
+// lit. The pass that turns a Player on lifts the override at once,
+// before the client answers the wake with the on desire. outcome
+// records what a change of spec.power asked of the Display.
+func (o *operator) reconcilePanel(player *Player, key string, lookup *screens, mode string, step powerStep, outcome *powerOutcome) string {
 	desire := o.panels.stateFor(key)
+	switch {
+	case step.want == playerPowerOff:
+		desire, mode = panelDesireOff, offModePower
+	case step.turningOn():
+		desire = panelDesireOn
+	}
 	if desire == "" {
 		return ""
 	}
@@ -367,11 +384,30 @@ func (o *operator) reconcilePanel(player *Player, key string, lookup *screens, m
 	display, err := lookup.displayFor(monitor)
 	if err != nil {
 		o.panelFault(key, fmt.Sprintf("reading display %s: %v", monitor, err))
+		if step.moving {
+			outcome.fail(powerReasonDisplayWriteFailed, fmt.Sprintf("reading display %s failed: %v", monitor, err))
+		}
 		return ""
 	}
-	if o.panelOverrides[key].desire != desire {
-		if !o.writeOverride(key, desire, monitor, overrideFor(desire, mode), display) {
+	want := overrideFor(desire, mode)
+	if held, tracked := o.panelOverrides[key]; !tracked || !sameOverride(held.override, want) {
+		cause := "the idle screen asked for panel " + desire
+		if step.want == playerPowerOff || step.turningOn() {
+			cause = "spec.power is " + step.want
+		}
+		if err := o.writeOverride(key, cause, desire, monitor, want, display); err != nil {
+			if step.moving {
+				outcome.fail(powerReasonDisplayWriteFailed, fmt.Sprintf("applying %s to display %s failed: %v",
+					describeOverride(want), monitor, err))
+			}
 			return panelFromDisplay(display.Status.Observed)
+		}
+	}
+	if step.moving {
+		if want == nil {
+			outcome.ask("lifted the override on display %s", monitor)
+		} else {
+			outcome.ask("applied %s to display %s", describeOverride(want), monitor)
 		}
 	}
 	delete(o.panelFaults, key)
@@ -382,19 +418,19 @@ func (o *operator) reconcilePanel(player *Player, key string, lookup *screens, m
 // asks for, and records the desire. It reads the override the Display
 // carries first, and writes only when that override differs, so an
 // operator that restarts adopts the override its earlier run wrote and
-// the panel sees no second write. It answers whether the Display now
-// carries the override.
-func (o *operator) writeOverride(key, desire, monitor string, want *DisplayOverride, display *Display) bool {
+// the panel sees no second write. It answers the error of a write the
+// API server refused.
+func (o *operator) writeOverride(key, cause, desire, monitor string, want *DisplayOverride, display *Display) error {
 	if !sameOverride(display.Spec.Override, want) {
 		if err := ApplyDisplayOverride(o.client, monitor, want); err != nil {
 			o.panelFault(key, fmt.Sprintf("overriding display %s: %v", monitor, err))
-			return false
+			return err
 		}
-		logLine(o.log, "player %s: the idle screen asked for panel %s, applied %s to display %s",
-			key, desire, describeOverride(want), monitor)
+		logLine(o.log, "player %s: %s, applied %s to display %s",
+			key, cause, describeOverride(want), monitor)
 	}
-	o.panelOverrides[key] = panelOverride{desire: desire, monitor: monitor}
-	return true
+	o.panelOverrides[key] = panelOverride{desire: desire, override: want, monitor: monitor}
+	return nil
 }
 
 // sameOverride compares two override blocks, each value without regard
@@ -503,7 +539,7 @@ func (o *operator) retainPanels(live map[string]bool) {
 		if live[key] {
 			continue
 		}
-		if override.desire == panelDesireOff {
+		if override.override != nil {
 			// A Display that is gone carries no override, so the
 			// lift it refuses has already landed. Every other failure
 			// keeps the entry, because the block still stands.

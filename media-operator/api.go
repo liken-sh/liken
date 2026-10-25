@@ -116,6 +116,12 @@ type PlayerStatus struct {
 	Activity string `json:"activity,omitempty"`
 	Play     string `json:"play,omitempty"`
 
+	// Power is the spec.power this operator last applied to the unit's
+	// hardware. A pass acts when spec.power differs from it, so the
+	// record survives a restart of the operator. It is empty until the
+	// first pass adopts the spec.
+	Power string `json:"power,omitempty"`
+
 	// Panel is what the screen's Display last observed. It is empty
 	// until a Display reports an observation.
 	Panel string `json:"panel,omitempty"`
@@ -148,8 +154,9 @@ type PlayerStatus struct {
 	Sinks []PlayerSinkStatus `json:"sinks,omitempty"`
 
 	// Conditions carries the Screen condition, which reads the
-	// remembered Display's Connected condition for the unit. It is
-	// empty until the claim has resolved once.
+	// remembered Display's Connected condition for the unit, and the
+	// PowerApplied condition, which says what the last change of
+	// spec.power asked of the hardware.
 	Conditions []PlayerCondition `json:"conditions,omitempty"`
 }
 
@@ -234,13 +241,9 @@ type PlayerIdleBus struct {
 	StatusTopic string `json:"statusTopic"`
 	VolumeTopic string `json:"volumeTopic,omitempty"`
 
-	// PowerTopic is the topic a power press on this unit publishes an ask
-	// on, toggle, on, or off, while the unit's status topic states the
-	// power mode room. Every unit carries it, so wiring or removing a
-	// Receiver leaves a delegate's pod as it is. This operator publishes
-	// wake and sleep there for the screen of a unit wired through a
-	// Receiver. In the mode screen, a power press reaches the client,
-	// which lowers the shade.
+	// PowerTopic is the topic this operator publishes wake and sleep on
+	// for the unit's screen: when spec.power changes, and when a TV asks
+	// for the screen over HDMI-CEC (screenask.go).
 	PowerTopic string `json:"powerTopic,omitempty"`
 
 	CommandsTopic string             `json:"commandsTopic"`
@@ -309,6 +312,11 @@ type PlayerSpec struct {
 	// by field over the default MediaPreferences, so a Player states
 	// only what differs from the household.
 	Idle *IdlePolicy `json:"idle,omitempty"`
+
+	// Power is On or Off, and an absent field is On. A remote's power
+	// keys and kubectl write the same field, and this operator turns
+	// the unit's hardware to follow it (playerpower.go).
+	Power string `json:"power,omitempty"`
 }
 
 // IdlePolicy is what the idle screen does while nothing plays. The same

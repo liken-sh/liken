@@ -6,13 +6,12 @@
 /// One kernel key name as the browser key it is. Several names reach one
 /// key, because remotes differ in the name they send for OK and for back.
 /// Select is enter and back is escape, so a press from a remote takes the
-/// path the keyboard and the script take. The three power names are the
-/// ones the kernel gives a remote's power button, and a remote sends one
-/// of them. Home has two names, because the `rc-cec` keymap sends
+/// path the keyboard and the script take. The power keys carry no word:
+/// `media-operator` answers them, and the screen crate never hands them to
+/// a client. Home has two names, because the `rc-cec` keymap sends
 /// `KEY_WWW` for a TV remote's Internet button and some remotes send it
 /// for their home button. Home pops to the home page, people raises the
-/// person picker and answers it, search opens the search wall, power asks
-/// for the shade, and a letter or a digit is the character itself, which
+/// person picker and answers it, search opens the search wall, and a letter or a digit is the character itself, which
 /// is the word a typed key gives on a local run.
 pub fn key_of(name: &str) -> Option<&'static str> {
     match name {
@@ -27,7 +26,6 @@ pub fn key_of(name: &str) -> Option<&'static str> {
         // which is the key a remote binds to the person picker.
         "KEY_ADDRESSBOOK" => Some("people"),
         "KEY_SEARCH" => Some("search"),
-        "KEY_POWER" | "KEY_SLEEP" | "KEY_POWER2" => Some("power"),
         "KEY_BACKSPACE" => Some("backspace"),
         "KEY_SPACE" => Some(" "),
         _ => typed(name),
@@ -66,7 +64,7 @@ mod tests {
 
     // Every name that carries a word of its own, so a binding that
     // changes shows up in one place.
-    const BOUND: [(&str, &str); 20] = [
+    const BOUND: [(&str, &str); 17] = [
         ("KEY_UP", "up"),
         ("KEY_DOWN", "down"),
         ("KEY_LEFT", "left"),
@@ -82,9 +80,6 @@ mod tests {
         ("KEY_WWW", "home"),
         ("KEY_ADDRESSBOOK", "people"),
         ("KEY_SEARCH", "search"),
-        ("KEY_POWER", "power"),
-        ("KEY_SLEEP", "power"),
-        ("KEY_POWER2", "power"),
         ("KEY_BACKSPACE", "backspace"),
         ("KEY_SPACE", " "),
     ];

@@ -1,11 +1,6 @@
 //! The commands topic: the asks the playback pod's command sidecar
 //! publishes for the client under the film. The up-next ask and the home
-//! ask pass to the client at once. The power ask waits for the unit's
-//! `Idle` status, because the equipment operator decides off or on from
-//! the room it reads, and a toggle that went out while the `Play` still
-//! ran would reach the room before the ending did.
-
-use std::time::{Duration, Instant};
+//! ask pass to the client at once.
 
 use serde::Deserialize;
 
@@ -20,33 +15,6 @@ const PLAY_NEXT: &str = "play-next";
 /// film. The client reads it as a press of the home key, just before the
 /// `Play` ends.
 const HOME: &str = "home";
-
-/// The ask the same sidecar publishes when a person presses power during a
-/// film, just before the `Play` ends.
-const POWER: &str = "power";
-
-/// The ask the same sidecar publishes when a TV remote's Power Off Function
-/// reaches it during a film, just before the `Play` ends. It is answered as
-/// a press of [`keys::POWER_OFF`], so a room already off stays off.
-const POWER_OFF: &str = "power-off";
-
-/// The key each held power ask is answered as.
-fn ask_key(ask: &str) -> &'static str {
-    if ask == POWER_OFF {
-        keys::POWER_OFF
-    } else {
-        keys::POWER_PRESS
-    }
-}
-
-/// How long a power ask waits for the unit's `Idle` status. The sidecar
-/// publishes the ending just after the ask, and the operator publishes
-/// `Idle` when it reads the ending, so the wait is normally short. An ask
-/// that outlives this deadline has no ending behind it, for example
-/// because the sidecar stopped before it published one. It is dropped,
-/// because a toggle long after the press would turn the room off or on
-/// with no person behind it.
-const POWER_ASK_WAIT: Duration = Duration::from_secs(10);
 
 /// The two fields of the commands topic this crate reads. The request is
 /// whatever object the writer of the `Play` put there, so it is kept as a
@@ -75,10 +43,7 @@ impl Screen {
     ///
     /// A home ask reaches the client as a press of the home key, so the
     /// client binds one name for home.
-    ///
-    /// A power ask while the unit plays is held until the status reads
-    /// `Idle`, and a power ask while the unit is idle is answered at once.
-    pub(super) fn on_command(&mut self, payload: &[u8], now: Instant) -> Vec<Effect> {
+    pub(super) fn on_command(&mut self, payload: &[u8]) -> Vec<Effect> {
         let Some(command) = crate::object::<Command>(payload) else {
             return Vec::new();
         };
@@ -100,77 +65,7 @@ impl Screen {
                 ));
                 vec![Effect::Moment(Moment::Press(keys::HOME.into()))]
             }
-            ask @ (POWER | POWER_OFF) if self.idle => {
-                let mut effects = Vec::new();
-                self.answer_power_ask(ask_key(ask), now, &mut effects);
-                effects
-            }
-            ask @ (POWER | POWER_OFF) => {
-                // A second ask while one waits restarts the deadline and
-                // is still one ask, so the room toggles once. The later
-                // ask names the key it is answered as.
-                self.power_ask = Some((now + POWER_ASK_WAIT, ask_key(ask)));
-                self.lines.push(format!(
-                    "{} asked for {ask} while the player plays, held until it is Idle for at most {} s",
-                    self.commands_topic,
-                    POWER_ASK_WAIT.as_secs()
-                ));
-                Vec::new()
-            }
             _ => Vec::new(),
         }
-    }
-
-    /// Answer a power ask the way a press of its key answers while the unit
-    /// is idle. In the room mode, the ask turns the Player off or on
-    /// (power.rs). In the screen mode, the client reads the ask as a press
-    /// of the key and lowers its shade.
-    pub(super) fn answer_power_ask(
-        &mut self,
-        key: &'static str,
-        now: Instant,
-        effects: &mut Vec<Effect>,
-    ) {
-        let ask = if key == keys::POWER_OFF {
-            POWER_OFF
-        } else {
-            POWER
-        };
-        let asked = format!(
-            "{} asked for {ask} and the player is Idle",
-            self.commands_topic
-        );
-        let action = keys::power_action(key).unwrap_or("toggle");
-        if !self.room_power() {
-            self.lines
-                .push(format!("{asked}, so passed to the client as {key}"));
-            effects.push(Effect::Moment(Moment::Press(key.into())));
-            return;
-        }
-        let turned = self.turn_power(action, now, effects);
-        self.lines.push(format!("{asked}, so {turned}"));
-    }
-
-    /// Drop a held power ask whose deadline passed. The deadline is a clock,
-    /// not a poll: the reader's clock thread wakes at
-    /// [`Screen::next_deadline`], and no status is read again.
-    pub(super) fn expire_power_ask(&mut self, now: Instant) {
-        let Some((at, key)) = self.power_ask else {
-            return;
-        };
-        if now < at {
-            return;
-        }
-        self.power_ask = None;
-        let ask = if key == keys::POWER_OFF {
-            POWER_OFF
-        } else {
-            POWER
-        };
-        self.lines.push(format!(
-            "{} asked for {ask}, and no Idle status arrived within {} s, so the ask is dropped",
-            self.commands_topic,
-            POWER_ASK_WAIT.as_secs()
-        ));
     }
 }

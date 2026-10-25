@@ -27,7 +27,7 @@ fn pressed(presses: &[&str]) -> Vec<String> {
     lines.take()
 }
 
-const PRESSES: [(&[&str], &str); 11] = [
+const PRESSES: [(&[&str], &str); 10] = [
     (&["right"], "press right: moved focus"),
     (
         &["enter"],
@@ -60,10 +60,6 @@ const PRESSES: [(&[&str], &str); 11] = [
     (
         &["q", "z"],
         "press a character: search input, and the field holds 2 characters",
-    ),
-    (
-        &["power"],
-        "press power: changed nothing, because this run has no bus to ask for the shade",
     ),
     (
         &["people"],
@@ -122,28 +118,6 @@ fn a_press_from_a_remote_names_the_word_and_the_kernel_name() {
 
         assert_eq!(*lines.borrow(), [line], "{name}");
     }
-}
-
-#[test]
-fn power_over_a_bus_asks_for_the_shade_and_the_shade_confirms() {
-    let (mut browser, bus) = on_bus(3, Vec::new());
-    let lines = kept(&mut browser);
-    browser.key("power");
-    bus.inbound
-        .lock()
-        .expect("no test panics with the lock")
-        .extend([Moment::Sleep, Moment::Wake]);
-
-    browser.pump(0.0);
-
-    assert_eq!(
-        *lines.borrow(),
-        [
-            "press power: asked for the shade",
-            "the shade is down",
-            "the shade is up",
-        ]
-    );
 }
 
 #[test]

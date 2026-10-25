@@ -8,9 +8,8 @@ package main
 // that followed the claim through that gap would lift the session on
 // the equipment, and the pass after the gap would apply it again, so
 // the room would turn off and on each time a screen pod is replaced.
-// The unit's status would also state the screen power mode during the
-// gap, and a power press then would lower the shade instead of turning
-// the room. So the pass keeps the last screen a unit resolved for
+// A press during the gap would also ask no input of the Receiver, and a
+// Television's ask for the screen would not be relayed. So the pass keeps the last screen a unit resolved for
 // screenGapBound, and matches the Receivers against that screen.
 //
 // The pass matches the held screen against the Receivers it reads now,

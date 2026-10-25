@@ -84,6 +84,11 @@ type fakeCluster struct {
 	// stands and runs on.
 	podDeleteFails bool
 
+	// Every apply of spec.power this operator sent, and a switch that
+	// makes the API server refuse the next ones.
+	playerApplies    []playerApplied
+	playerApplyFails bool
+
 	// applyFails is a Display the API server refuses to write,
 	// the failure a pass answers by leaving the panel where it stands
 	// and trying again.
@@ -115,6 +120,15 @@ type displayApplied struct {
 	name     string
 	override *DisplayOverride
 	manager  string
+}
+
+// One apply of a Player's spec the operator made: the fields of the
+// spec it stated, as JSON, the field manager, and whether it forced
+// the fields away from another manager.
+type playerApplied struct {
+	fields  string
+	manager string
+	force   bool
 }
 
 // One session apply the operator made on a Sink.
@@ -226,6 +240,8 @@ func (f *fakeCluster) handler(t *testing.T) http.Handler {
 			answer(w, f.remotes[name])
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/plays/"):
 			f.patchPlay(w, r, name)
+		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/players/"):
+			f.applyPlayer(w, r, name)
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/sinks/") && name == "status":
 			f.applySinkSession(w, r, path.Base(path.Dir(r.URL.Path)))
 		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/receivers/") && name == "status":
@@ -343,6 +359,39 @@ func (f *fakeCluster) patchPodLabels(w http.ResponseWriter, r *http.Request, nam
 	for key, value := range patch.Metadata.Labels {
 		held.Metadata.Labels[key] = value
 	}
+	_ = json.NewEncoder(w).Encode(held)
+}
+
+// applyPlayer folds one server-side apply of spec.power onto a Player.
+// The API server would refuse to create a Player from the apply alone,
+// because the schema needs a display or a sink, so an absent Player is a
+// 404 here. An accepted apply moves the version on.
+func (f *fakeCluster) applyPlayer(w http.ResponseWriter, r *http.Request, name string) {
+	var applied struct {
+		Spec json.RawMessage `json:"spec"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&applied)
+	f.playerApplies = append(f.playerApplies, playerApplied{
+		fields:  string(applied.Spec),
+		manager: r.URL.Query().Get("fieldManager"),
+		force:   r.URL.Query().Get("force") == "true",
+	})
+	held, standing := f.players[name]
+	switch {
+	case f.playerApplyFails:
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	case !standing:
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	var spec struct {
+		Power string `json:"power"`
+	}
+	_ = json.Unmarshal(applied.Spec, &spec)
+	held.Spec.Power = spec.Power
+	version, _ := strconv.Atoi(held.Metadata.ResourceVersion)
+	held.Metadata.ResourceVersion = strconv.Itoa(version + 1)
 	_ = json.NewEncoder(w).Encode(held)
 }
 
@@ -551,14 +600,14 @@ func TestAPassWritesThePlayerStatusFromItsRunningPlay(t *testing.T) {
 	media.pass()
 
 	got := cluster.players["theater"].Status
-	want := PlayerStatus{Activity: playerPlaying, Play: "movie"}
+	want := PlayerStatus{Activity: playerPlaying, Play: "movie", Power: playerPowerOn}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("player status = %+v, want %+v", got, want)
 	}
 }
 
 // A Player no Play names reads Idle, and the pass writes it, so an idle
-// unit is not blank in kubectl.
+// unit is not blank in kubectl. The pass adopts the Player's power too.
 func TestAPassMarksAPlayerWithNoPlayIdle(t *testing.T) {
 	cluster := newFakeCluster()
 	cluster.players["theater"] = housePlayer()
@@ -567,7 +616,7 @@ func TestAPassMarksAPlayerWithNoPlayIdle(t *testing.T) {
 	media.pass()
 
 	got := cluster.players["theater"].Status
-	want := PlayerStatus{Activity: playerIdle}
+	want := PlayerStatus{Activity: playerIdle, Power: playerPowerOn}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("player status = %+v, want %+v", got, want)
 	}

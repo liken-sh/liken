@@ -360,18 +360,11 @@ func (c *commander) handle(topic string, payload []byte) {
 // line, because the press already wrote one and the release writes the
 // count.
 func (c *commander) apply(trigger string, command mediaCommand, quiet bool) {
-	// A home or a power command publishes the ask on the Player's
-	// commands topic and then runs the ending path. A stop runs the
-	// ending path alone.
+	// A home command publishes the ask on the Player's commands topic
+	// and then runs the ending path. A stop runs the ending path alone.
 	switch command.Action {
 	case actionHome:
 		c.home(trigger)
-		return
-	case actionPower:
-		c.power(trigger)
-		return
-	case actionPowerOff:
-		c.powerOff(trigger)
 		return
 	case actionStop:
 		c.stop(trigger)

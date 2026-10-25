@@ -307,11 +307,9 @@ func buildIdlePod(
 	container.Env = append(container.Env,
 		EnvVar{Name: playerCommandsTopicVariable, Value: playerCommandsTopic(topicBase, namespace, name)},
 		EnvVar{Name: playerPanelTopicVariable, Value: playerPanelTopic(topicBase, namespace, name)})
-	// The power topic reaches every client, wired through a Receiver or
-	// not, so wiring or removing a Receiver leaves the pod's spec as it
-	// is and the pod is not replaced. The retained status states the
-	// power mode, and the client reads it at each press: room publishes
-	// the ask on this topic, and screen lowers the client's shade.
+	// The power topic carries this operator's wake and sleep for the
+	// screen, and every unit's spec.power reaches its screen, wired
+	// through a Receiver or not.
 	container.Env = append(container.Env,
 		EnvVar{Name: playerPowerTopicVariable, Value: playerPowerTopic(topicBase, namespace, name)})
 	// The two remote lists stay index-aligned, so the client pairs

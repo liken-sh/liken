@@ -348,7 +348,6 @@ mod tests {
             activity: Activity::Idle,
             play: None,
             components,
-            power: None,
         }
     }
 
@@ -371,7 +370,6 @@ mod tests {
                 activity: Activity::Starting,
                 play: None,
                 components: vec![component("A remote", "remote", Some(true))],
-                power: None,
             }),
             1.0,
         );

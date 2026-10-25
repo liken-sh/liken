@@ -1,151 +1,96 @@
-// The deterministic power keys and the equipment operator's asks for the
-// screen. A TV remote's Power Off Function and Power On Function (HDMI-CEC
-// 1.3a, CEC 13.13.3) name the state they want, and a second press leaves
-// the room in that state, so they publish off and on and not the toggle.
-// The equipment operator publishes wake and sleep on the same power topic
-// when the TV picks this unit's input or goes to standby.
+// The power keys. `media-operator` reads them off the controller's events
+// topic and changes the `Player`'s `spec.power`, so a screen client neither
+// acts on them nor hands them to the client, in any state: awake, asleep,
+// idle, or playing.
 
 use super::*;
 
-// On a lit Player, the Power Off Function turns it off, and the Power On
-// Function asks on for equipment that someone turned off another way.
 #[test]
-fn a_power_off_press_turns_a_lit_player_off_and_a_power_on_press_asks_on() {
+fn a_power_key_reaches_no_client_and_moves_nothing() {
     let now = Instant::now();
     let cases = [
-        (keys::POWER_OFF, vec![Moment::Sleep], turned_off()),
-        (keys::POWER_ON, Vec::new(), vec![power_ask("on")]),
+        (false, Some(crate::panel::ON)),
+        (true, Some(crate::panel::OFF)),
     ];
-    for (name, want_moments, want_publishes) in cases {
-        let mut screen = idling(&powered(), now);
+    for name in keys::POWER {
+        for (asleep, desire) in cases {
+            let mut screen = idling(&wiring(), now);
+            screen.asleep = asleep;
+            screen.desire = desire;
 
-        let effects = screen.deliver(SOFA_EVENTS, &key(name, 1), false, now);
+            let effects = screen.deliver(SOFA_EVENTS, &key(name, 1), false, now);
 
-        assert_eq!(moments(effects.clone()), want_moments, "{name}");
-        assert_eq!(publishes(effects), want_publishes, "{name}");
+            assert!(effects.is_empty(), "{name} asleep {asleep}");
+            assert_eq!(screen.asleep, asleep, "{name}");
+            assert_eq!(screen.desire, desire, "{name}");
+        }
+    }
+}
+
+// A power press restarts no window, because it is not a person at this
+// screen: the operator decides what it does to the Player.
+#[test]
+fn a_power_key_does_not_restart_the_quiet_window() {
+    let wiring = Wiring {
+        fade_after: Duration::from_secs(600),
+        ..wiring()
+    };
+    let now = Instant::now();
+    let mut screen = idling(&wiring, now);
+    let armed = screen.next_deadline();
+
+    screen.deliver(
+        SOFA_EVENTS,
+        &key("KEY_POWER", 1),
+        false,
+        now + Duration::from_secs(60),
+    );
+
+    assert_eq!(screen.next_deadline(), armed);
+}
+
+#[test]
+fn a_power_key_during_a_play_reaches_nothing() {
+    let now = Instant::now();
+    let mut screen = focused(&wiring());
+    screen.deliver(STATUS, &status("Playing"), true, now);
+
+    for name in keys::POWER {
+        assert!(
+            screen
+                .deliver(SOFA_EVENTS, &key(name, 1), false, now)
+                .is_empty(),
+            "{name}"
+        );
     }
 }
 
 #[test]
-fn a_power_off_press_leaves_a_sleeping_unit_with_no_receiver_asleep() {
+fn a_power_key_says_who_answers_it() {
     let now = Instant::now();
     let mut screen = idling(&wiring(), now);
-    screen.asleep = true;
 
-    let effects = screen.deliver(SOFA_EVENTS, &key(keys::POWER_OFF, 1), false, now);
+    screen.deliver(SOFA_EVENTS, &key("KEY_POWER", 1), false, now);
+    screen.deliver(SOFA_EVENTS, &key("KEY_POWER", 2), false, now);
+    screen.deliver(SOFA_EVENTS, &key("KEY_POWER", 0), false, now);
 
-    assert!(effects.is_empty());
-    assert!(screen.asleep);
-}
-
-#[test]
-fn a_power_on_press_wakes_a_sleeping_unit_with_no_receiver() {
-    let now = Instant::now();
-    let mut screen = idling(&wiring(), now);
-    screen.asleep = true;
-
-    let effects = screen.deliver(SOFA_EVENTS, &key(keys::POWER_ON, 1), false, now);
-
-    assert_eq!(moments(effects), [Moment::Wake]);
-    assert!(!screen.asleep);
-}
-
-#[test]
-fn a_unit_with_a_receiver_subscribes_to_its_power_topic() {
-    assert!(
-        Screen::new(&powered())
-            .filters()
-            .contains(&POWER.to_string())
-    );
-    assert!(
-        !Screen::new(&wiring())
-            .filters()
-            .contains(&POWER.to_string())
-    );
-}
-
-#[test]
-fn a_wake_ask_wakes_a_sleeping_screen_and_asks_for_the_panel() {
-    let now = Instant::now();
-    let mut screen = idling(&powered(), now);
-    screen.asleep = true;
-    screen.desire = Some(crate::panel::OFF);
-
-    let effects = screen.deliver(POWER, br#"{"action":"wake"}"#, false, now);
-
-    assert_eq!(moments(effects.clone()), [Moment::Wake]);
-    assert_eq!(publishes(effects), [desire(crate::panel::ON)]);
-    assert!(!screen.asleep);
     assert_eq!(
         screen.take_lines(),
-        [format!(
-            "{POWER} asked to wake the screen, published panel desire on to {PANEL}"
-        )]
+        [
+            "KEY_POWER from remote house/sofa left to media-operator, which turns the player off and on"
+        ]
     );
 }
 
+// The commands topic carries no power ask, so a writer that publishes one
+// there moves nothing here.
 #[test]
-fn a_wake_ask_on_an_awake_screen_changes_nothing() {
+fn a_power_ask_on_the_commands_topic_moves_nothing() {
     let now = Instant::now();
-    let mut screen = idling(&powered(), now);
+    for payload in [&br#"{"action":"power"}"#[..], br#"{"action":"power-off"}"#] {
+        let mut screen = idling(&wiring(), now);
 
-    assert!(
-        screen
-            .deliver(POWER, br#"{"action":"wake"}"#, false, now)
-            .is_empty()
-    );
-}
-
-#[test]
-fn a_sleep_ask_brings_the_shade_down_and_turns_the_panel_off() {
-    let now = Instant::now();
-    let mut screen = idling(&powered(), now);
-
-    let effects = screen.deliver(POWER, br#"{"action":"sleep"}"#, false, now);
-
-    assert_eq!(moments(effects.clone()), [Moment::Sleep]);
-    assert_eq!(publishes(effects), [desire(crate::panel::OFF)]);
-    assert!(screen.asleep);
-    assert_eq!(screen.next_deadline(), None);
-    assert_eq!(
-        screen.take_lines(),
-        [format!(
-            "{POWER} asked the screen to sleep, so the shade is down, published panel desire off to {PANEL}"
-        )]
-    );
-}
-
-// A film that plays goes on. The screen sleeps only while nothing plays,
-// the same rule the quiet window follows.
-#[test]
-fn a_sleep_ask_during_a_play_changes_nothing() {
-    let now = Instant::now();
-    let mut screen = focused(&powered());
-    screen.deliver(STATUS, &status("Playing"), true, now);
-
-    assert!(
-        screen
-            .deliver(POWER, br#"{"action":"sleep"}"#, false, now)
-            .is_empty()
-    );
-    assert!(!screen.asleep);
-}
-
-// The screen's own asks come back on the topic it publishes them on, and
-// each one is the equipment operator's to answer.
-#[test]
-fn the_screens_own_power_ask_coming_back_changes_nothing() {
-    let now = Instant::now();
-    for action in ["toggle", "on", "off"] {
-        let mut screen = idling(&powered(), now);
-        screen.asleep = true;
-        let payload = format!(r#"{{"action":"{action}"}}"#);
-
-        assert!(
-            screen
-                .deliver(POWER, payload.as_bytes(), false, now)
-                .is_empty(),
-            "{action}"
-        );
+        assert!(screen.deliver(COMMANDS, payload, false, now).is_empty());
+        assert!(screen.take_lines().is_empty());
     }
 }

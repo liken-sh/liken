@@ -38,9 +38,6 @@ func TestEachBoundKeyBecomesItsCommand(t *testing.T) {
 		{key: "KEY_EXIT", want: mediaCommand{Action: actionBack}},
 		{key: "KEY_HOMEPAGE", want: mediaCommand{Action: actionHome}},
 		{key: "KEY_WWW", want: mediaCommand{Action: actionHome}},
-		{key: "KEY_POWER", want: mediaCommand{Action: actionPower}},
-		{key: "KEY_POWER2", want: mediaCommand{Action: actionPower}},
-		{key: "KEY_SLEEP", want: mediaCommand{Action: actionPowerOff}},
 		{key: "KEY_CYCLEWINDOWS", want: mediaCommand{Action: actionCycleFocus}},
 	}
 
@@ -71,7 +68,6 @@ func TestTheHeldKindsActOnARepeat(t *testing.T) {
 		{key: "KEY_BACK"},
 		{key: "KEY_INFO"},
 		{key: "KEY_HOMEPAGE"},
-		{key: "KEY_POWER"},
 		{key: "KEY_CYCLEWINDOWS"},
 	}
 
@@ -98,6 +94,12 @@ func TestAReleaseAndAnUnboundKeyDoNothing(t *testing.T) {
 		{name: "volume down", event: keyEvent{Key: "KEY_VOLUMEDOWN", Value: 2}},
 		{name: "mute", event: keyEvent{Key: "KEY_MUTE", Value: 1}},
 		{name: "unmute", event: keyEvent{Key: "KEY_UNMUTE", Value: 1}},
+		// The power keys are the operator's, which turns the Player off
+		// and stops the run.
+		{name: "power", event: keyEvent{Key: "KEY_POWER", Value: 1}},
+		{name: "the second power", event: keyEvent{Key: "KEY_POWER2", Value: 1}},
+		{name: "power off", event: keyEvent{Key: "KEY_SLEEP", Value: 1}},
+		{name: "power on", event: keyEvent{Key: "KEY_WAKEUP", Value: 1}},
 	}
 
 	for _, each := range cases {

@@ -173,8 +173,7 @@ type operator struct {
 
 	// ensure is the desk for each unit's Receiver. The pass fills it from
 	// the Receivers, and the bus reader reads it when a controller press
-	// asks the unit's receiver for the unit's input, and when a power ask
-	// arrives on the unit's power topic.
+	// asks the unit's receiver for the unit's input.
 	ensure *ensureDesk
 
 	// sessions composes and sends every write of a Receiver's
@@ -787,11 +786,16 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 		o.focus.requestCycle(controllerKey(namespace, name))
 		return
 	}
-	// A press on a controller asks the unit's receiver for the unit's
-	// input, in the receiver's own generic vocabulary. A repeat or a
-	// release is dropped inside, so one held control asks once. A volume
-	// key moves the unit's level on a press and on each repeat.
+	// A press on a controller can move the unit's spec.power first, and
+	// a press that turns the unit on does nothing else. Every other press
+	// asks the unit's receiver for the unit's input, in the receiver's
+	// own generic vocabulary. A repeat or a release is dropped inside, so
+	// one held control asks once. A volume key moves the unit's level on
+	// a press and on each repeat.
 	if namespace, name, ok := parseRemoteEventsTopic(o.topicBase, topic); ok {
+		if o.pressPower(namespace, name, payload) {
+			return
+		}
 		o.ensureInput(namespace, name, payload)
 		o.pressVolume(namespace, name, payload)
 		return
@@ -849,11 +853,6 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 	}
 	if namespace, name, ok := parsePlayerVolumeCommandsTopic(o.topicBase, topic); ok {
 		o.commandVolume(namespace, name, payload)
-		return
-	}
-	if namespace, name, ok := parsePlayerPowerTopic(o.topicBase, topic); ok {
-		o.askPower(namespace, name, payload)
-		return
 	}
 }
 
@@ -1171,6 +1170,10 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 			desired.Sinks = o.reconcileSinks(player, desired.Play)
 		}
 		idle := resolveIdle(player.Spec.Idle, defaultIdle, o.idleImage)
+		// The Player's power decides the panel and the session below, and
+		// a pass that changes it asks the hardware once (playerpower.go).
+		power := powerStepFor(player)
+		var outcome powerOutcome
 		// The panel state is what the screen's Display last
 		// observed, so the status reports the hardware and not what
 		// the media layer asked for.
@@ -1185,14 +1188,15 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 			}
 		} else {
 			drawn[key] = true
-			desired.Panel = o.reconcilePanel(player, key, lookup, idle.OffMode)
+			desired.Panel = o.reconcilePanel(player, key, lookup, idle.OffMode, power, &outcome)
 		}
 		// The equipment the unit's cable lands on, and the session it holds
 		// there. The session stands for as long as the unit matches an input,
 		// and its active flag follows the standing run.
 		standing := playerHasStandingPlay(player, plays)
-		desired.Receiver = o.reconcileReceiver(player, standing)
+		desired.Receiver = o.reconcileReceiver(player, standing, power, &outcome)
 		matched[key] = desired.Receiver != nil
+		desired.Power, desired.Conditions = o.settlePower(player, plays, power, &outcome, desired.Conditions)
 		// The idle block is what a delegate reads to draw this
 		// unit's screen, so it goes on the status before the write.
 		desired.Idle = deriveIdleStatus(player, idle.Controller, o.busAddress, o.topicBase,
@@ -1217,12 +1221,20 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 			fmt.Fprintf(os.Stderr, "writing player %s/%s status: %v\n",
 				player.Metadata.Namespace, player.Metadata.Name, err)
 		}
-		// Screen is the one condition. Unknown means no Display reports
-		// the remembered monitor, which a person fixes, so it is a
-		// Warning. False is a panel on another input or asleep, the park
-		// the CRD describes as by design, so it is Normal.
+		// For Screen, Unknown means no Display reports the remembered
+		// monitor, which a person fixes, so it is a Warning. False is a
+		// panel on another input or asleep, the park the CRD describes as
+		// by design, so it is Normal. For PowerApplied, False is a write
+		// that failed, which a person may need to look at.
 		for _, condition := range moved {
-			o.recorder.Transition(playerRef(player), condition, conditions.Unknown)
+			bad := conditions.Unknown
+			if condition.Type == powerAppliedCondition {
+				bad = conditions.False
+			}
+			o.recorder.Transition(playerRef(player), condition, bad)
+		}
+		if err == nil {
+			o.postPowerChange(player, desired, power, moved)
 		}
 		if err := o.reconcileIdle(player, timeZone, defaultIdle); err != nil {
 			fmt.Fprintf(os.Stderr, "reconciling idle for player %s/%s: %v\n",
@@ -1274,7 +1286,7 @@ func (o *operator) publishPlayerStatus(player *Player, plays []Play) (string, Pl
 	var desired PlayerStatus
 	was, moved, err := o.playerStatuses.publishDerived(o.bus, topic, func() ([]byte, string, error) {
 		desired = derivePlayerStatus(player, plays, o.reports)
-		status := derivePlayerBusStatus(player, desired, plays, o.peripherals, o.focus, o.ensure)
+		status := derivePlayerBusStatus(player, desired, plays, o.peripherals, o.focus)
 		payload, err := json.Marshal(status)
 		return payload, status.Activity, err
 	})
@@ -1662,7 +1674,8 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 		}
 		// The session goes on the unit's Receiver before the pod exists, so
 		// the equipment is awake and on the right input by the time mpv draws
-		// its first frame.
+		// its first frame. A Player that is off turns on first.
+		o.turnOnForPlay(play, player)
 		o.applyReceiverSession(player)
 		pod, err := o.createPodAtStash(play, claim, resolved, prefs, remotes)
 		switch {

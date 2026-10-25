@@ -291,26 +291,13 @@ func playerPanelTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/" + playerPanelKind
 }
 
-// playerPowerTopic carries the ask a power press on a unit whose screen
-// is wired through a Receiver publishes, not retained, because an ask
-// is an event and not a state: toggle, or on and off for a TV remote's
-// deterministic power functions. This operator reads it and writes the
-// ask into the Receiver's session (roompower.go). It also publishes wake
-// and sleep on it for the screen, when the TV asks for the Player's
-// screen over HDMI-CEC (screenask.go).
+// playerPowerTopic carries the wake and sleep this operator publishes
+// for a unit's screen, not retained, because an ask is an event and not
+// a state. It publishes them when the Player's spec.power changes
+// (playerpower.go), and when the TV asks for the Player's screen over
+// HDMI-CEC (screenask.go). The screen client is the topic's one reader.
 func playerPowerTopic(base, namespace, name string) string {
 	return base + "/players/" + namespace + "/" + name + "/" + playerPowerKind
-}
-
-// playerPowerFilter is the operator's one subscription that reaches
-// every unit's power topic.
-func playerPowerFilter(base string) string {
-	return base + "/players/+/+/" + playerPowerKind
-}
-
-// parsePlayerPowerTopic maps a power topic back to the Player it names.
-func parsePlayerPowerTopic(base, topic string) (namespace, name string, ok bool) {
-	return parsePlayerTopic(base, topic, playerPowerKind)
 }
 
 // playerPanelFilter is the operator's one subscription that reaches
@@ -410,7 +397,6 @@ func busFilters(base string) []string {
 		playerPanelFilter(base),
 		playerVolumeFilter(base),
 		playerVolumeCommandsFilter(base),
-		playerPowerFilter(base),
 	}
 }
 

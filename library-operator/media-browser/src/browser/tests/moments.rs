@@ -131,27 +131,6 @@ fn backspace_at_the_home_page_is_back_too() {
     assert_eq!(showing_home(&browser).focus, 0);
 }
 
-// The power key is the shade. The crate decides and the moment comes
-// back, so the press itself moves nothing on the screen.
-#[test]
-fn the_power_key_asks_for_the_shade() {
-    let (mut browser, bus) = on_bus(3, Vec::new());
-    browser.key("enter");
-
-    assert!(!browser.key("power"));
-
-    assert_eq!(bus.sleeps.load(Ordering::SeqCst), 1);
-    assert!(!browser.asleep());
-    assert!(!browser.stack.is_empty());
-}
-
-#[test]
-fn the_power_key_with_no_bus_asks_no_one() {
-    let mut browser = browser(3);
-
-    assert!(!browser.key("power"));
-}
-
 #[test]
 fn back_below_the_top_climbs_and_asks_for_nothing() {
     let (mut browser, bus) = on_bus(3, Vec::new());

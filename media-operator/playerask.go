@@ -1,10 +1,9 @@
 package main
 
-// The asks a run makes of the client under it as the run ends. Home and
-// power each end the film, and each has a meaning the playback pod cannot
-// act on: the client's home page, and the room's power. So the pod asks
-// on the Player's commands topic, and the client that draws the screen
-// between films answers.
+// The ask a run makes of the client under it as the run ends. Home ends
+// the film and has a meaning the playback pod cannot act on: the
+// client's home page. So the pod asks on the Player's commands topic,
+// and the client that draws the screen between films answers.
 
 import (
 	"encoding/json"

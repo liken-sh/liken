@@ -6,14 +6,15 @@ package main
 // that session that follows a standing Play, and the lift when the unit
 // stops matching or goes away.
 //
-// The session also carries an awake flag, which follows the panel
-// desire and not the Play, so the power key at the idle screen reaches
-// the equipment too.
+// The session also carries an awake flag, which follows spec.power and
+// the panel desire and not the Play, so a Player that is off, and the
+// idle timers that darken the panel, reach the equipment too.
 
 import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
@@ -86,10 +87,11 @@ type ReceiverInput struct {
 // nothing plays, and the equipment operator reads Active to tell a
 // playing room from an idle one.
 //
-// Awake says whether the unit's panel is up. It follows the panel
-// desire the idle client publishes: the off desire is a dark room, and
-// the on desire is a room that is awake. A unit with no desire yet
-// keeps the flag its session already carries.
+// Awake says whether the unit's panel is up. It is false while the
+// Player's spec.power is Off, and otherwise follows the panel desire the
+// idle client publishes: the off desire is a dark room, and the on
+// desire is a room that is awake. A unit with no desire yet keeps the
+// flag its session already carries.
 //
 // The three asks are events. The equipment operator acts on an ask
 // once for each new time in its at field, and it does not act on an
@@ -268,26 +270,51 @@ type receiverSession struct {
 // applies the session on every pass the unit matches an input. The
 // session is active only while a Play stands on the unit.
 //
-// The awake flag comes from the panel desk on every pass, so a wake or
-// sleep press at the idle screen reaches the equipment as the same
-// session with one flag changed.
-func (o *operator) reconcileReceiver(player *Player, standing bool) *PlayerReceiverStatus {
+// The awake flag comes from spec.power and the panel desk on every pass,
+// so a change of either reaches the equipment as the same session with
+// one flag changed.
+//
+// The pass that turns the Player off asks the Receiver for off before
+// it applies the session whose awake flag is false, so the equipment
+// operator puts the room in standby before it reads the room asleep.
+// A session this run has not applied or adopted yet takes no ask, so
+// on the first pass after a start the ask follows the session. outcome
+// records what a change of spec.power asked of the Receiver.
+func (o *operator) reconcileReceiver(player *Player, standing bool, step powerStep, outcome *powerOutcome) *PlayerReceiverStatus {
 	receiver, input, matched := o.matchReceiver(player)
 	key := playerKey(player.Metadata.Namespace, player.Metadata.Name)
 	if !matched {
 		// A failed read of the Receivers says nothing about the wiring,
 		// so the unit keeps the entry the last pass left on the ensure
-		// desk. Recording it as unwired would state the screen power mode
-		// for every unit and drop a Television's ask for one pass.
+		// desk. Recording it as unwired would drop every input ask and
+		// every Television's ask for the unit for one pass.
 		if !o.receiverLookup().failed {
 			o.ensure.set(key, unitReceiver{})
 		}
 		return nil
 	}
+	name := receiver.Metadata.Name
+	asked := false
+	var askErr error
+	if step.turningOff() {
+		askErr = o.askReceiverPower(name, receiverPowerOff)
+		asked = !errors.Is(askErr, errNoSession)
+	}
 	o.applySession(player, receiver, input, standing, o.awake(player, receiver))
+	if step.turningOff() && !asked {
+		askErr = o.askReceiverPower(name, receiverPowerOff)
+	}
+	switch {
+	case step.turningOff() && askErr != nil:
+		outcome.fail(powerReasonReceiverAskFailed,
+			fmt.Sprintf("writing powerAsk %s on receiver %s failed: %v", receiverPowerOff, name, askErr))
+	case step.turningOff():
+		outcome.ask("asked receiver %s for %s", name, receiverPowerOff)
+	}
 	// A unit that matches a receiver keeps the receiver on the ensure
 	// desk, so a press on its controller asks that receiver for the
-	// unit's input, and a power ask on its power topic reaches it.
+	// unit's input, and a Television's ask for the unit's screen is
+	// relayed.
 	o.ensure.set(key, unitReceiver{
 		name:          receiver.Metadata.Name,
 		inputSelected: receiverCondition(receiver, receiverInputSelectedCondition) == conditionTrue,
@@ -299,14 +326,18 @@ func (o *operator) reconcileReceiver(player *Player, standing bool) *PlayerRecei
 	}
 }
 
-// awake reads the awake flag from the panel desire. A unit with no
-// desire yet keeps the flag its session on this Receiver already
+// awake reads the awake flag from spec.power and the panel desire. A
+// Player that is off is asleep whatever its client states. A unit with
+// no desire yet keeps the flag its session on this Receiver already
 // carries, because no desire is not a statement that the room is lit:
 // an operator that starts before the bus delivers the desire would
 // otherwise power the equipment on in a dark room. A unit with no
 // desire and no session there is awake, the flag a new session starts
 // with.
 func (o *operator) awake(player *Player, receiver *Receiver) bool {
+	if specPower(player) == playerPowerOff {
+		return false
+	}
 	switch o.panels.stateFor(playerKey(player.Metadata.Namespace, player.Metadata.Name)) {
 	case panelDesireOff:
 		return false
@@ -336,13 +367,24 @@ func (o *operator) matchReceiver(player *Player) (*Receiver, string, bool) {
 // mpv draws.
 //
 // A Play that starts wakes the room, so the creating pass applies an
-// awake session, and the next pass reads the panel desire.
+// awake session, and the next pass reads the panel desire. The pass
+// turns a Player that is off on first (turnOnForPlay). A Player whose
+// apply the API server refused is still off, so its session stays
+// asleep.
 func (o *operator) applyReceiverSession(player *Player) {
 	receiver, input, matched := o.matchReceiver(player)
 	if !matched {
 		return
 	}
-	o.applySession(player, receiver, input, true, true)
+	o.applySession(player, receiver, input, true, specPower(player) == playerPowerOn)
+}
+
+// askReceiverPower writes one powerAsk on a Receiver, beside the
+// session this operator holds there.
+func (o *operator) askReceiverPower(receiver, action string) error {
+	return o.sessions.ask(o.client, receiver, func(asks *receiverAsks) {
+		asks.power = &ReceiverAction{Action: action, At: nextAskTime(previousAt(asks.power), time.Now())}
+	})
 }
 
 // applySession writes status.session under this operator's field

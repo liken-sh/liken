@@ -326,22 +326,23 @@ value. Waking the screen also triggers those commands through
 a reboot does not by itself power the receiver on, and an operator
 restart sends nothing for the sessions it finds.
 
-The remote's power button turns the whole room on or off. The
-`media-operator` writes a `powerAsk` into the session. When
-the session's input names a `Display` that a `Television` lists, the
-TV's power decides what the press does: a TV that is on means the press
-turns the room off, and a TV in standby means the press turns the room
-on. The CEC node workload asks the TV for its power at each press,
-because no timer asks the TV between presses, and a TV that a person
-turned off with its own remote may say nothing on the wire. The press
-waits up to 3 seconds for that answer, and it decides from the
-`Television`'s `status.power` when none arrives. With no `Television`,
-the receiver's power decides. A
-press that turns the room off asks the TV for standby over CEC and puts
-the receiver in standby. A WiiM has no standby command, so it stays on,
-and its log line says so. A press that turns the room on wakes the TV,
-shows the machine's input, and turns the receiver on. Only the power
-button turns the TV off. A `Play` that ends, a screen that goes idle,
+The remote's power button turns the whole room on or off.
+`media-operator` sets the `Player`'s `spec.power`, and when the
+`Player` turns off it writes a `powerAsk` of `off` into the session.
+When the session's input names a `Display` that a `Television` lists,
+the TV's power decides whether the ask moves the room: a TV that is on
+means the room is on, and a TV in standby means it is off already. The
+CEC node workload asks the TV for its power at each ask, because no
+timer asks the TV between asks, and a TV that a person turned off with
+its own remote may say nothing on the wire. The ask waits up to 3
+seconds for that answer, and it decides from the `Television`'s
+`status.power` when none arrives. With no `Television`, the receiver's
+power decides. An ask that turns the room off asks the TV for standby
+over CEC and puts the receiver in standby. A WiiM has no standby
+command, so it stays on, and its log line says so. When the `Player`
+turns on, its screen wakes, the session's `awake` flag turns true, and
+the room wakes the TV, shows the machine's input, and turns the
+receiver on. Only a `Player` that turns off turns the TV off. A `Play` that ends, a screen that goes idle,
 and an operator restart leave the TV as it is, because the TV can show
 another input, such as a streaming player, while the room's player is
 idle.

@@ -7,7 +7,7 @@ weight: 10
 
 A room is a `Player` and the equipment it plays through: an A/V
 receiver, a TV, or both. When a `Player` starts playing, wakes its
-screen, or gets a press of a volume or power key, `media-operator`
+screen, turns off, or gets a press of a volume key, `media-operator`
 writes a session into the status of the `Receiver` that the `Player`
 plays through. `equipment-operator` reads the session and sends the
 receiver its commands. It also finds the `Television` that shows the

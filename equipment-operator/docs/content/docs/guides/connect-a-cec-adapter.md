@@ -329,7 +329,8 @@ the same address, so a TV that recorded the wake's Active Source while
 it booted, and then opened its own home screen, switches only after
 Inactive Source clears that record. A TV that already shows the
 `Player` can leave it for a moment before the claim brings it back. A press of any other key,
-except a power key, writes the action `ensure` while the `Receiver`'s
+except a power key and a press that turns a `Player` that is off on,
+writes the action `ensure` while the `Receiver`'s
 `InputSelected` condition is not `True`. An `ensure` asks a receiver
 that is on for the session's input, and sends the TV nothing.
 
@@ -352,27 +353,34 @@ they find when they start, and send nothing for them.
 ## Turn the room off with the power button
 
 The room remote's power button turns the whole room on or off, the
-TV included. A power ask in `status.session.powerAsk` names the
-action `toggle`, `on`, or `off`. A `toggle` always moves the room. An
-`on` moves it only when the room is off, and an `off` only when the
-room is on. An ask that moves nothing sends nothing and writes one
-log line that says so. At each press, the adapter asks the TV for its power,
-because no timer asks the TV between presses. The press waits up to 3
-seconds for the answer, and it decides from `status.power` when no
-answer arrives. A TV that reports On or ToOn means the room is on, so
-the press turns the room off. A TV in Standby or ToStandby means the
-room is off, so the press wakes the room as above. With no
-`Television`, or a TV that reports no power, the receiver's power
-decides.
+TV included. `media-operator` reads the press and sets the `Player`'s
+`spec.power`, which `kubectl` can also set
+([Turning a Player off and on](https://liken.sh/media/docs/reference/players/#turning-a-player-off-and-on)).
+When the `Player` turns off, `media-operator` writes the action `off`
+into `status.session.powerAsk`. When the `Player` turns on, its screen
+wakes, the session's `awake` flag turns true, and the room wakes as
+above.
 
-A press that turns the room off writes `status.session.standbyAt` on
+A power ask names the action `toggle`, `on`, or `off`. `media-operator`
+writes `off`, and another writer of the session can write the other
+two. A `toggle` always moves the room. An `on` moves it only when the
+room is off, and an `off` only when the room is on. An ask that moves
+nothing sends nothing and writes one log line that says so. At each
+ask, the adapter asks the TV for its power, because no timer asks the
+TV between asks. The ask waits up to 3 seconds for the answer, and it
+decides from `status.power` when no answer arrives. A TV that reports
+On or ToOn means the room is on, and a TV in Standby or ToStandby means
+the room is off. With no `Television`, or a TV that reports no power,
+the receiver's power decides.
+
+An ask that turns the room off writes `status.session.standbyAt` on
 the `Television`. The adapter sends the TV Standby, reads the power
 back, and writes the `StandbyApplied` condition. The receiver goes to
 standby too, when it has a standby command. A WiiM has none, so it
 stays on, and its log line says so.
 
-Only the power button turns the TV off. A Play that ends, a screen
-that goes idle, and an operator restart leave the TV as it is. The TV
+Only a `Player` that turns off turns the TV off. A Play that ends, a
+screen that goes idle, and an operator restart leave the TV as it is. The TV
 can show another input, such as a streaming player, while the room's
 `Player` is idle.
 

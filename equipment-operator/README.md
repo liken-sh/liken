@@ -24,8 +24,8 @@ spec:
 
 `media-operator` writes the `Player`'s session into `status.session`
 while the `Player` has a screen on the receiver. The session names the
-input, and it carries an ask for each press of a volume, power, or home
-key: `volumeAsk`, `powerAsk`, and `inputAsk`. The operator applies each
+input, and it carries an ask for each press of a volume or home key and
+for a `Player` that turns off: `volumeAsk`, `inputAsk`, and `powerAsk`. The operator applies each
 ask once and reports the volume the receiver reaches in
 `status.zones.main`. It connects to no message bus.
 

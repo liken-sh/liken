@@ -33,7 +33,6 @@ func TestTopicBuildersExtendTheBase(t *testing.T) {
 		{name: "player volume commands", got: playerVolumeCommandsTopic(base, "house", "theater"), want: "liken/media/players/house/theater/volume/commands"},
 		{name: "player volume commands filter", got: playerVolumeCommandsFilter(base), want: "liken/media/players/+/+/volume/commands"},
 		{name: "player power", got: playerPowerTopic(base, "house", "theater"), want: "liken/media/players/house/theater/power"},
-		{name: "player power filter", got: playerPowerFilter(base), want: "liken/media/players/+/+/power"},
 		{name: "keys", got: remoteKeysTopic(base, "house", "sofa"), want: "liken/media/remotes/house/sofa/keys"},
 		{name: "status filter", got: playStatusFilter(base), want: "liken/media/plays/+/+/status"},
 		{name: "availability filter", got: playAvailabilityFilter(base), want: "liken/media/plays/+/+/availability"},
@@ -268,18 +267,9 @@ func TestParsePlayerVolumeCommandsTopicNamesThePlayer(t *testing.T) {
 	}
 }
 
-// The power topic maps back to the unit whose room it turns.
-func TestParsePlayerPowerTopicNamesThePlayer(t *testing.T) {
-	base := defaultTopicBase
-	namespace, player, ok := parsePlayerPowerTopic(base, playerPowerTopic(base, "house", "theater"))
-	mustMatch(t, ok, true)
-	mustMatch(t, namespace+"/"+player, "house/theater")
-	_, _, ok = parsePlayerPowerTopic(base, playerPanelTopic(base, "house", "theater"))
-	mustMatch(t, ok, false)
-}
-
-// The operator reads its own levels back, the volume asks, and the
-// power asks, so its filter list carries all three beside the rest.
+// The operator reads its own levels back and the volume asks, so its
+// filter list carries both beside the rest. It reads nothing on the power
+// topic, which carries only its own wake and sleep for the screen.
 func TestTheOperatorSubscribesToEveryFilterItReads(t *testing.T) {
 	base := defaultTopicBase
 	want := []string{
@@ -293,7 +283,6 @@ func TestTheOperatorSubscribesToEveryFilterItReads(t *testing.T) {
 		"liken/media/players/+/+/panel",
 		"liken/media/players/+/+/volume",
 		"liken/media/players/+/+/volume/commands",
-		"liken/media/players/+/+/power",
 	}
 	mustMatchAll(t, busFilters(base), want)
 }

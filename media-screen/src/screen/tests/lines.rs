@@ -33,13 +33,6 @@ fn a_press_writes_one_line_that_says_what_it_did() {
                 "KEY_CYCLEWINDOWS from remote house/sofa: cycle focus, published the cycle request to {SOFA_FOCUS}/cycle"
             ),
         ),
-        (
-            powered(),
-            "KEY_POWER",
-            format!(
-                "KEY_POWER from remote house/sofa: power, published off to {POWER}, published panel desire off to {PANEL}"
-            ),
-        ),
     ];
     for (wiring, name, want) in cases {
         let now = Instant::now();

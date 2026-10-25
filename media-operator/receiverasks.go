@@ -36,8 +36,9 @@ type VolumeAsk struct {
 }
 
 // ReceiverAction is a power ask or an input ask: the action, and the
-// time the ask was made. A power ask is toggle, on, or off. An input
-// ask is ensure or show.
+// time the ask was made. A power ask is off, which this operator writes
+// when a Player turns off (playerpower.go). An input ask is ensure or
+// show.
 type ReceiverAction struct {
 	Action string `json:"action"`
 	At     string `json:"at"`

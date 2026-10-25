@@ -21,7 +21,7 @@ impl Press {
     }
 
     /// Whether this event is the control going down, which is the edge the
-    /// cycle key and a power key ask on.
+    /// cycle key asks on.
     pub fn down(&self) -> bool {
         self.value == 1
     }

@@ -290,8 +290,6 @@ direction: seconds for `seek`, and chapters for `chapter`.
 | `info` | shows the file name and position for a few seconds |
 | `up`, `down`, `left`, `right`, `select`, `back` | drive the on-screen display |
 | `home` | asks the unit's client for its home page, then ends the run |
-| `power` | asks the unit's client to do what power does between films, then ends the run |
-| `power-off` | asks the unit's client to turn the room off, then ends the run |
 
 Two parts of the on-screen display answer these actions. When an item
 names an `appearances` file and the on-screen display is up, playing
@@ -303,11 +301,13 @@ post-credits scene, the display offers a skip control, and `select`
 takes it. A skip to a post-credits scene takes `select` only while the
 on-screen display is up. The display never skips on its own.
 
-`play`, `hold`, `stop`, and `power-off` set the state they name, so a
-second one changes nothing. The playback pod binds them to the names
-the kernel's `rc-cec` keymap gives a TV remote's deterministic
-functions (HDMI-CEC 1.3a, CEC 13.13.3): `KEY_PLAYCD`, `KEY_PAUSECD`,
-`KEY_STOPCD`, and `KEY_SLEEP`. The keymap also gives the Pause-Play
+`play`, `hold`, and `stop` set the state they name, so a second one
+changes nothing. The playback pod binds them to the names the kernel's
+`rc-cec` keymap gives a TV remote's deterministic functions (HDMI-CEC
+1.3a, CEC 13.13.3): `KEY_PLAYCD`, `KEY_PAUSECD`, and `KEY_STOPCD`. The
+playback pod binds no power key. The operator reads the power keys
+and turns the `Player` off, which publishes `stop` here
+([Turning a Player off and on](/docs/reference/players/#turning-a-player-off-and-on)). The keymap also gives the Pause-Play
 Function the name `KEY_PLAYPAUSE`, which a Bluetooth remote's play
 button sends too, so it stays a toggle. A `Keymap` row on the
 `Remote` that holds the CEC adapter's input device can name the

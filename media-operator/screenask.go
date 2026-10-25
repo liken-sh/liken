@@ -39,10 +39,22 @@ type TelevisionScreenAsk struct {
 	Cause  string `json:"cause,omitempty"`
 }
 
+// The two actions the power topic carries for a unit's screen: wake
+// lifts the shade and asks for the panel, and sleep lowers the shade.
+const (
+	screenWake  = "wake"
+	screenSleep = "sleep"
+)
+
 // The power topic's actions for each screen ask.
 var screenActions = map[string]string{
-	"Wake":  "wake",
-	"Sleep": "sleep",
+	"Wake":  screenWake,
+	"Sleep": screenSleep,
+}
+
+// powerMessage is the payload the power topic carries.
+type powerMessage struct {
+	Action string `json:"action"`
 }
 
 // screenAsks is what the pass holds about the asks it relayed. listed
@@ -87,10 +99,10 @@ func (o *operator) relayScreenAsks() {
 
 // relayScreenAsk publishes one ask on its Player's power topic, not
 // retained, because an ask is an event and not a state. The ask goes
-// only to a unit whose screen is wired through a Receiver. Every unit
-// has a power topic, and a client in the screen mode handles power
-// itself, so a late ask for a unit whose Receiver was removed must not
-// wake or lower that screen.
+// only to a unit whose screen is wired through a Receiver, because the
+// TV speaks for a screen only through the Receiver's session. A late
+// ask for a unit whose Receiver was removed is about equipment the unit
+// no longer plays through, so it must not wake or lower that screen.
 func (o *operator) relayScreenAsk(television string, ask TelevisionScreenAsk) {
 	action, known := screenActions[ask.Screen]
 	namespace, name, named := strings.Cut(ask.Player, "/")

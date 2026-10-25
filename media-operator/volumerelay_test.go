@@ -291,44 +291,6 @@ func TestAPassPublishesNoLevelTheBrokerHolds(t *testing.T) {
 	})
 }
 
-// A power ask on the unit's power topic goes into the session's
-// powerAsk. The wake and sleep this operator publishes there for the
-// screen are not power asks, and a unit with no Receiver has no room to
-// turn.
-func TestAPowerAskReachesTheReceiver(t *testing.T) {
-	cases := []struct {
-		name    string
-		payload string
-		shape   func(*operator)
-		want    string
-	}{
-		{name: "toggle", payload: `{"action":"toggle"}`, want: "toggle"},
-		{name: "on", payload: `{"action":"on"}`, want: "on"},
-		{name: "off", payload: `{"action":"off"}`, want: "off"},
-		{name: "a wake for the screen", payload: `{"action":"wake"}`, want: "none"},
-		{name: "a sleep for the screen", payload: `{"action":"sleep"}`, want: "none"},
-		{name: "no receiver", payload: `{"action":"toggle"}`, want: "none", shape: func(media *operator) {
-			media.ensure.set(playerKey("house", "theater"), unitReceiver{})
-		}},
-	}
-	for _, each := range cases {
-		t.Run(each.name, func(t *testing.T) {
-			media, cluster := askOperator(t)
-			if each.shape != nil {
-				each.shape(media)
-			}
-
-			media.handleBusMessage(playerPowerTopic(defaultTopicBase, "house", "theater"), []byte(each.payload))
-
-			got := "none"
-			if len(cluster.sessions) == 1 {
-				got = cluster.sessions[0].session.PowerAsk.Action
-			}
-			mustMatch(t, got, each.want)
-		})
-	}
-}
-
 // screenAskOn is a Television whose node workload asked for the house
 // theater's screen at the given time.
 func screenAskOn(at, screen string) *Television {

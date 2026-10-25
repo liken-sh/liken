@@ -187,10 +187,8 @@ const (
 	// overrides the screen's Display.
 	playerPanelTopicVariable = "MEDIA_PLAYER_PANEL_TOPIC"
 
-	// The topic the idle client publishes a power toggle on, set only
-	// for a unit whose screen is wired through a Receiver. A unit with
-	// none carries no variable, so its client forwards the power key and
-	// keeps the shade the way it always has.
+	// The topic the idle client reads this operator's wake and sleep
+	// on, set for every unit.
 	playerPowerTopicVariable = "MEDIA_PLAYER_POWER_TOPIC"
 
 	// The unit's volume topic, on the playback pod's command sidecar and

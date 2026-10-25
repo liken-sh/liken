@@ -15,7 +15,7 @@ pub mod press;
 use std::time::{Duration, Instant};
 
 use crate::panel;
-use crate::status::{Activity, Power, Status};
+use crate::status::{Activity, Status};
 use crate::volume::Volume;
 use crate::wiring::{Remote, Wiring};
 
@@ -23,12 +23,6 @@ use crate::wiring::{Remote, Wiring};
 /// same path `media-operator`'s `remoteFocusCycleTopic` builds, so a client
 /// needs no second topic list.
 const CYCLE_SUFFIX: &str = "/cycle";
-
-/// The action a power press on a unit whose screen is wired through a
-/// Receiver publishes on the power topic for a toggle. The equipment
-/// operator answers it by flipping the room's power and selecting the
-/// input.
-const POWER_TOGGLE: &str = "toggle";
 
 /// One thing the client draws.
 ///
@@ -138,15 +132,9 @@ pub struct Screen {
     volume_topic: String,
     commands_topic: String,
     panel_topic: String,
-    /// The topic a power press publishes its ask on in the room mode. A
-    /// current operator sets it for every unit, and an operator that
-    /// predates the power mode sets it only for a unit with a `Receiver`.
+    /// The topic `media-operator` publishes wake and sleep on for this
+    /// unit's screen.
     power_topic: String,
-    /// The power mode the last status that stated one named, or `None`
-    /// while no status stated one. [`Screen::room_power`] reads it at each
-    /// press, so a `Receiver` that is wired or removed while the client runs
-    /// moves the next press.
-    power: Option<Power>,
     /// The unit's controllers, in `spec.remotes` order, so a controller's
     /// index in this list is the index a focus moment carries.
     remotes: Vec<Remote>,
@@ -179,10 +167,6 @@ pub struct Screen {
     desire: Option<&'static str>,
     /// The armed window and the moment it runs out.
     deadline: Option<(Instant, Window)>,
-    /// The moment a power ask that waits for `Idle` is dropped, and the key
-    /// the ask is answered as, or `None` while no ask waits. [`commands`]
-    /// holds the rule.
-    power_ask: Option<(Instant, &'static str)>,
     /// The lines the folds since the last [`Screen::take_lines`] wrote, one
     /// per operation a person caused: a press and what it did or why it did
     /// nothing, a window that brought the shade down, a panel desire. A
@@ -200,7 +184,6 @@ impl Screen {
             commands_topic: wiring.commands_topic.clone(),
             panel_topic: wiring.panel_topic.clone(),
             power_topic: wiring.power_topic.clone(),
-            power: None,
             marks: vec![Mark::default(); wiring.remotes.len()],
             remotes: wiring.remotes.clone(),
             client_topics: Vec::new(),
@@ -213,7 +196,6 @@ impl Screen {
             // dark room keeps the room dark.
             desire: None,
             deadline: None,
-            power_ask: None,
             lines: Vec::new(),
         }
     }
@@ -269,14 +251,10 @@ impl Screen {
         filters
     }
 
-    /// The earlier of the moment the armed window runs out and the moment a
-    /// held power ask is dropped, and nothing while neither is armed.
+    /// The moment the armed window runs out, and nothing while no window is
+    /// armed.
     pub fn next_deadline(&self) -> Option<Instant> {
-        let window = self.deadline.map(|(at, _)| at);
-        match (window, self.power_ask.map(|(at, _)| at)) {
-            (Some(window), Some(ask)) => Some(window.min(ask)),
-            (window, ask) => window.or(ask),
-        }
+        self.deadline.map(|(at, _)| at)
     }
 
     /// Fold one message from any subscription, and the topic says which
@@ -313,7 +291,7 @@ impl Screen {
             return self.on_focus(index, payload, now);
         }
         if !self.commands_topic.is_empty() && topic == self.commands_topic {
-            return self.on_command(payload, now);
+            return self.on_command(payload);
         }
         if !self.panel_topic.is_empty() && topic == self.panel_topic {
             return self.on_panel(payload, retained, now);
@@ -335,10 +313,8 @@ impl Screen {
 
     /// The armed window running out: the quiet window brings the shade down
     /// and starts the off window, and the off window states the off desire
-    /// and arms nothing. A held power ask whose deadline passed is dropped
-    /// first.
+    /// and arms nothing.
     pub fn tick(&mut self, now: Instant) -> Vec<Effect> {
-        self.expire_power_ask(now);
         let Some((at, window)) = self.deadline else {
             return Vec::new();
         };
@@ -415,8 +391,7 @@ impl Screen {
     /// Fold one status. `Idle` is the only activity the timer arms in, so a
     /// status that leaves `Idle` disarms it. The same status lifts the shade
     /// if the screen sleeps, so a `Play` started from another room shows its
-    /// film and not a black screen. A status that moves the unit into `Idle`
-    /// answers a held power ask, after the client draws the status.
+    /// film and not a black screen.
     ///
     /// The operator republishes the status on any change to the payload, a
     /// controller's `Connected` flap included, so only a status that moved
@@ -428,12 +403,6 @@ impl Screen {
             return Vec::new();
         };
         let idle = status.activity == Activity::Idle;
-        // The mode is read before the activity is compared, because the
-        // operator republishes the status when only the mode moves, and a
-        // held power ask below is answered in the mode this status states.
-        if let Some(power) = status.power {
-            self.power = Some(power);
-        }
         let mut effects = vec![Effect::Moment(Moment::Status(status))];
         if idle == self.idle {
             return effects;
@@ -446,11 +415,6 @@ impl Screen {
         }
         self.rearm(now);
         self.shade(moment, &mut effects);
-        if self.idle
-            && let Some((_, key)) = self.power_ask.take()
-        {
-            self.answer_power_ask(key, now, &mut effects);
-        }
         effects
     }
 
@@ -477,14 +441,16 @@ impl Screen {
         vec![Effect::Moment(Moment::Sleep)]
     }
 
-    /// Fold one key event. The checks run in this order. The cycle key
-    /// asks the operator to move the mark and does nothing else. A power
-    /// key, in the room mode, reaches the equipment and never the client:
-    /// it publishes the toggle and nothing else, and the shade and the
-    /// panel desire stand as they were. A sleeping screen wakes on any
-    /// other press, so a person gets the screen back with whatever control
-    /// they touched, and that press does nothing else. Every other key, while the unit plays
-    /// nothing, reaches the client. Every press restarts the quiet window.
+    /// Fold one key event. The checks run in this order. A power key is
+    /// `media-operator`'s: the operator turns the `Player` off or on through
+    /// its `spec.power`, and then publishes sleep or wake on the power topic
+    /// (power.rs). So a power key moves nothing here and never reaches the
+    /// client, in any state. The cycle key asks the operator to move the
+    /// mark and does nothing else. A sleeping screen wakes on any other
+    /// press, so a person gets the screen back with whatever control they
+    /// touched, and that press does nothing else. Every other key, while
+    /// the unit plays nothing, reaches the client. Every press but a power
+    /// press restarts the quiet window.
     ///
     /// A press acts only while the remote's mark names this `Player`. A pad
     /// pointed at another room touches nothing here, not the shade and not
@@ -519,14 +485,20 @@ impl Screen {
         if !press.edge() {
             return Vec::new();
         }
+        if keys::power(&press.key) {
+            if press.down() {
+                self.lines.push(format!(
+                    "{trigger} left to media-operator, which turns the player off and on"
+                ));
+            }
+            return Vec::new();
+        }
         let down = press.down();
 
         let mut moment = None;
-        let mut early = Vec::new();
         let mut forwarded = None;
         let mut publish = None;
         let mut line = None;
-        let mut power = false;
         if self.idle && press.down() && press.key == keys::CYCLE {
             publish = self.cycle(index);
             if publish.is_some() {
@@ -539,36 +511,6 @@ impl Screen {
                 ),
                 None => format!("{trigger} ignored, because the remote has no focus topic"),
             });
-        } else if let Some(action) =
-            keys::power_action(&press.key).filter(|_| self.idle && self.room_power())
-        {
-            // A unit with a receiver answers the power key itself, so the
-            // key never reaches the client: power turns the Player and its
-            // equipment off or on (power.rs). A held key that repeated
-            // would flip the equipment on and off under the hand, so only
-            // the press acts. In the screen mode the press falls through to
-            // the ordinary rules below, and the client lowers its shade.
-            power = true;
-            if press.down() {
-                let pressed = if action == POWER_TOGGLE {
-                    "power".to_string()
-                } else {
-                    format!("power {action}")
-                };
-                let turned = self.turn_power(action, now, &mut early);
-                line = Some(format!("{trigger}: {pressed}, {turned}"));
-            }
-        } else if self.asleep && press.key == keys::POWER_OFF {
-            // A Power Off Function keeps a device in standby when repeated
-            // (HDMI-CEC 1.3a, CEC 13.13.3), so on a unit with no Receiver it
-            // leaves a sleeping screen asleep, where every other key wakes
-            // it.
-            power = true;
-            if press.down() {
-                line = Some(format!(
-                    "{trigger} ignored, because the screen is already asleep"
-                ));
-            }
         } else if self.asleep {
             self.asleep = false;
             moment = Some(Moment::Wake);
@@ -585,12 +527,11 @@ impl Screen {
         }
 
         self.rearm(now);
-        let mut effects = early;
+        let mut effects = Vec::new();
         let mut desire = self.shade(moment, &mut effects);
         // A client that read no desire does not know whether the panel is
         // dark. A press is a person in the room, so it states the on desire.
-        // A power press states none, for the reason its branch gives.
-        if self.desire.is_none() && down && !power {
+        if self.desire.is_none() && down {
             desire = self.desire(panel::ON, &mut effects);
         }
         if let Some(line) = line {
@@ -664,27 +605,6 @@ impl Screen {
             payload: Vec::new(),
             retained: false,
         })
-    }
-
-    /// Whether a power press is an ask for the room, read at the press and at
-    /// the answer to a held power ask. The room mode needs the power topic to
-    /// publish on. A client that read no mode follows the rule of an operator
-    /// that predates the field, which set the topic only for a unit with a
-    /// `Receiver`.
-    fn room_power(&self) -> bool {
-        !self.power_topic.is_empty() && self.power != Some(Power::Screen)
-    }
-
-    /// The ask a power press publishes on a unit whose screen is wired
-    /// through a Receiver: toggle, on, or off, not retained, because an ask
-    /// is an event and not a state. A power ask the playback pod held until
-    /// `Idle` publishes the same ask.
-    fn power_publish(&self, action: &str) -> Publish {
-        Publish {
-            topic: self.power_topic.clone(),
-            payload: format!(r#"{{"action":"{action}"}}"#).into_bytes(),
-            retained: false,
-        }
     }
 
     /// Add one fold's shade moment. A wake also states the on desire, which

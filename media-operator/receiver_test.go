@@ -6,7 +6,6 @@ package main
 // and the lift.
 
 import (
-	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -155,7 +154,7 @@ func TestAFailedReceiversReadKeepsTheUnitWired(t *testing.T) {
 	cluster.fails[receiversPath] = true
 	runPlayers(media, []Player{*housePlayer()}, nil)
 
-	mustMatch(t, publishedPower(t, media), powerRoom)
+	mustMatch(t, wiredReceiver(media), "den-receiver")
 	held, wired := media.ensure.receiverFor(playerKey("house", "theater"))
 	mustMatch(t, wired, true)
 	mustMatch(t, held.name, "den-receiver")
@@ -272,18 +271,16 @@ func TestAUnitWiredToNoReceiverReportsNoBlock(t *testing.T) {
 	}
 }
 
-// Every unit's idle bus carries the power topic, and the retained status
-// states the power mode: room with a Receiver, so a power press is an
-// ask on that topic, and screen without one, so the client lowers its
-// shade. The pod and the delegate's template stay the same either way.
-func TestTheStatusStatesThePowerModeAndTheBusAlwaysCarriesTheTopic(t *testing.T) {
+// Every unit's idle bus carries the power topic, wired through a
+// Receiver or not, because spec.power reaches every unit's screen.
+func TestTheBusAlwaysCarriesThePowerTopic(t *testing.T) {
 	cases := []struct {
 		name    string
 		cluster func() *fakeCluster
 		want    string
 	}{
-		{name: "a unit wired through a receiver", cluster: receiverCluster, want: powerRoom},
-		{name: "a unit straight into a panel", cluster: screenCluster, want: powerScreen},
+		{name: "a unit wired through a receiver", cluster: receiverCluster, want: "den-receiver"},
+		{name: "a unit straight into a panel", cluster: screenCluster, want: "none"},
 	}
 	for _, each := range cases {
 		t.Run(each.name, func(t *testing.T) {
@@ -295,23 +292,19 @@ func TestTheStatusStatesThePowerModeAndTheBusAlwaysCarriesTheTopic(t *testing.T)
 
 			mustMatch(t, cluster.players["theater"].Status.Idle.Bus.PowerTopic,
 				playerPowerTopic(defaultTopicBase, "house", "theater"))
-			mustMatch(t, publishedPower(t, media), each.want)
+			mustMatch(t, wiredReceiver(media), each.want)
 		})
 	}
 }
 
-// publishedPower reads the power mode off the house unit's status, as
-// the operator last published it, or the word none for a status that
-// states no mode.
-func publishedPower(t *testing.T, media *operator) string {
-	t.Helper()
-	payload := media.playerStatuses.payloadFor(playerStatusTopic(defaultTopicBase, "house", "theater"))
-	var status playerBusStatus
-	mustSucceed(t, json.Unmarshal([]byte(payload), &status))
-	if status.Power == "" {
+// wiredReceiver reads the Receiver the ensure desk holds for the house
+// unit, which a press asks for the unit's input, or the word none.
+func wiredReceiver(media *operator) string {
+	held, wired := media.ensure.receiverFor(playerKey("house", "theater"))
+	if !wired {
 		return "none"
 	}
-	return status.Power
+	return held.name
 }
 
 // runPlayers runs one pass over the units, with the two lookups dropped

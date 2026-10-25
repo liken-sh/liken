@@ -115,9 +115,10 @@ impl<S: Source, A: Art> Browser<S, A> {
     // it is behind, so back to it draws the page a person left at once.
     //
     // At the home page there is nowhere to climb, so back is home: focus
-    // returns to the banner. The shade is the power key's, because a
+    // returns to the banner. Back never asks for the shade, because a
     // person backing out of a deep page would otherwise darken the
-    // screen one press past where they meant to stop.
+    // screen one press past where they meant to stop. The quiet window
+    // brings the shade down, and media-operator answers the power key.
     pub(super) fn back(&mut self) {
         self.on_strip = false;
         if self.stack.pop().is_some() {
@@ -127,20 +128,6 @@ impl<S: Source, A: Art> Browser<S, A> {
             return;
         }
         self.home();
-    }
-
-    // Ask the crate for the shade. Only the crate decides, because it
-    // alone knows whether the unit plays something, and the moment comes
-    // back to the browser the way a quiet window's does. A browser with no
-    // bus has no shade to ask for.
-    pub(super) fn rest(&mut self) {
-        match &self.bus {
-            Some(bus) => {
-                bus.sleep();
-                self.did("asked for the shade");
-            }
-            None => self.did("changed nothing, because this run has no bus to ask for the shade"),
-        }
     }
 
     // Push the search wall over the screen the person is on, so back

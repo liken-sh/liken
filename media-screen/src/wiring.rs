@@ -53,11 +53,9 @@ pub const COMMANDS_TOPIC: &str = "MEDIA_PLAYER_COMMANDS_TOPIC";
 /// parses no topic.
 pub const PANEL_TOPIC: &str = "MEDIA_PLAYER_PANEL_TOPIC";
 
-/// The topic a power press publishes its ask on while the unit's status
-/// states the room mode. A current operator sets it for every unit, so
-/// wiring or removing a `Receiver` leaves the pod as it is. An operator that
-/// predates the power mode sets it only for a unit with a `Receiver`, and a
-/// client that read no mode treats an empty value as the screen mode.
+/// The topic `media-operator` publishes wake and sleep on for the unit's
+/// screen, when the `Player`'s `spec.power` changes or a TV asks for the
+/// screen over HDMI-CEC.
 pub const POWER_TOPIC: &str = "MEDIA_PLAYER_POWER_TOPIC";
 
 /// The two lists of the unit's controllers, newline-joined and aligned by
@@ -96,8 +94,8 @@ pub struct Wiring {
     pub volume_topic: String,
     pub commands_topic: String,
     pub panel_topic: String,
-    /// The topic a power press publishes its ask on in the room mode. Empty
-    /// keeps every power press on the client.
+    /// The topic the operator's wake and sleep arrive on. Empty subscribes
+    /// to none.
     pub power_topic: String,
     /// The controllers in `spec.remotes` order.
     pub remotes: Vec<Remote>,

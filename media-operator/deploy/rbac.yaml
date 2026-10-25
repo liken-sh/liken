@@ -57,9 +57,12 @@ rules:
   # Players are watched, so the pass reads each one from memory and an
   # edited Player wakes the pass. The get verb reads a Player again when
   # a status write meets a conflict.
+  # The patch verb is the server-side apply of spec.power, the one spec
+  # field the operator writes, when a remote's power key turns a Player
+  # off or on.
   - apiGroups: [media.liken.sh]
     resources: [players]
-    verbs: [get, list, watch]
+    verbs: [get, list, watch, patch]
   # Only the status half, the same subresource split the plays use:
   # the operator writes what plays on a player, never the equipment
   # a person declared.

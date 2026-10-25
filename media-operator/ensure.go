@@ -12,8 +12,9 @@ package main
 // press. So the operator writes an ensure only while the Receiver's
 // InputSelected condition is not True: the room already shows the unit
 // while it is True, and the equipment would answer the ask with nothing.
-// Nothing here wakes the room, either; the power key is the one that
-// does that, and it asks for no input.
+// Nothing here wakes the room, either. A press that turns the Player on
+// wakes it (powerkeys.go), and that wake selects the input, so such a
+// press asks for no input here.
 //
 // A home press asks for more. A TV that shows its own apps is on
 // another input, and the receiver's input alone does not bring the
@@ -38,42 +39,13 @@ import (
 // under, the same two the playback pod binds to home in keybindings.go.
 var homeKeys = []string{"KEY_HOMEPAGE", "KEY_WWW"}
 
-// powerKeys are the three names a controller's power button reaches
-// the bus under, the same three the idle screen answers as the room's
-// toggle. This operator reads that toggle on the unit's power topic and
-// writes it into the Receiver's powerAsk (roompower.go), and the
-// equipment operator turns the room off or on. An input ask sent with
-// it would make the receiver select the unit's input and power on
-// again, while the toggle puts the room to standby. The playback pod's table binds
-// the same names to power. The Rust crate media-screen holds a copy of
-// this list as POWER in media-screen/src/screen/keys.rs, because a Go
-// list cannot reach it: a change to one changes both.
-var powerKeys = []string{"KEY_POWER", "KEY_POWER2", powerOffKey}
-
-// powerOffKey and powerOnKey are the names the kernel's rc-cec keymap
-// gives a TV remote's Power Off Function and Power On Function. Each
-// names the state it wants (HDMI-CEC 1.3a, CEC 13.13.3), so the idle
-// screen publishes off and on for them in place of the toggle, and the
-// playback pod asks for off. The Rust crate media-screen names them
-// POWER_OFF and POWER_ON in the same file as POWER. Power on asks the
-// room for on, which selects the unit's input, so it is exempt from
-// the ensure as well.
-const (
-	powerOffKey = "KEY_SLEEP"
-	powerOnKey  = "KEY_WAKEUP"
-)
-
 // ensureDesk maps each unit to the Receiver its cable lands on. The
 // pass fills it from the Receivers and the bus reader reads it for a
-// press and for a power ask, so it carries a mutex of its own rather
-// than the pass's.
+// press, so it carries a mutex of its own rather than the pass's.
 //
-// A unit the pass placed with no Receiver keeps an entry with no name.
-// That entry separates a unit the pass found unwired from one the pass
-// has not reached yet: every unit after a start, until the first pass
-// reaches it, which can take seconds on a busy API server. The status a
-// screen client reads states the power mode only for a placed unit
-// (powerFor).
+// A unit the pass placed with no Receiver keeps an entry with no name,
+// and receiverFor answers none for it, the same as for a unit the pass
+// has not reached yet.
 type ensureDesk struct {
 	mutex     sync.Mutex
 	receivers map[string]unitReceiver
@@ -86,15 +58,6 @@ type unitReceiver struct {
 	name          string
 	inputSelected bool
 }
-
-// The two power modes the unit's retained status states. With a
-// Receiver, a power press is an ask on the power topic for the room's
-// equipment (roompower.go). With none, the screen client handles the
-// press itself and lowers its shade.
-const (
-	powerRoom   = "room"
-	powerScreen = "screen"
-)
 
 func newEnsureDesk() *ensureDesk {
 	return &ensureDesk{receivers: map[string]unitReceiver{}}
@@ -115,27 +78,6 @@ func (e *ensureDesk) receiverFor(player string) (unitReceiver, bool) {
 	defer e.mutex.Unlock()
 	receiver, placed := e.receivers[player]
 	return receiver, placed && receiver.name != ""
-}
-
-// powerFor answers the power mode of one unit, from the same entry
-// askPower reads, so the mode a screen client acts on and the ask this
-// operator accepts agree. A unit the pass has not placed answers the
-// empty string, and the status then carries no mode. A screen client
-// keeps the mode it last read, so an operator that restarts does not
-// state screen for a wired unit before its first pass reads the
-// Receivers. A wired unit whose screen does not resolve still reads
-// screen until it does (screengap.go).
-func (e *ensureDesk) powerFor(player string) string {
-	e.mutex.Lock()
-	defer e.mutex.Unlock()
-	receiver, placed := e.receivers[player]
-	switch {
-	case !placed:
-		return ""
-	case receiver.name == "":
-		return powerScreen
-	}
-	return powerRoom
 }
 
 // retain drops every unit outside the live set, so a deleted Player
@@ -177,15 +119,17 @@ func (o *operator) focusedUnit(namespace, controller string) (string, string) {
 // generic ask. The press asks only while its controller's mark names a
 // unit wired to a receiver, so a controller pointed at another room, or
 // at a unit with no equipment, asks nothing. A power press asks nothing
-// either. The key is the name the standing pod publishes after the
-// Keymap's fold, so a button a Keymap maps to a power key is exempt too,
-// and a power button a Keymap maps to another key is not. A home press
+// either: an input ask beside a power-off would make the receiver
+// select the input and power on again. The key is the name the standing
+// pod publishes after the Keymap's fold, so a button a Keymap maps to a
+// power key is exempt too, and a power button a Keymap maps to another
+// key is not. A home press
 // asks for a show in place of the ensure. An ask the operator writes
 // earns a line, and a press that asks nothing writes none, because the
 // pod the press reached writes its own.
 func (o *operator) ensureInput(namespace, controller string, payload []byte) {
 	key, pressed := pressOf(payload)
-	if !pressed || slices.Contains(powerKeys, key) || key == powerOnKey {
+	if !pressed || powerKey(key) {
 		return
 	}
 	player, unit := o.focusedUnit(namespace, controller)
