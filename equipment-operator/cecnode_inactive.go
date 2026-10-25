@@ -10,7 +10,9 @@ package main
 // person picks another input. A room that goes to
 // standby gets Standby from the power press instead (cecnode_standby.go),
 // and a route that a person moved to another source is that source's,
-// so neither sends Inactive Source.
+// so neither sends Inactive Source. A home press sends Inactive Source
+// too, right before it claims the input again, for a different reason
+// that cecnode_show.go gives.
 
 import (
 	"fmt"

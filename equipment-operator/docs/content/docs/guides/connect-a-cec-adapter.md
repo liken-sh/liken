@@ -322,7 +322,13 @@ A press of the home key of the room remote writes
 `status.session.inputAsk` with the action `show`. The adapter then
 claims the TV's input for the `Display` the same way, when the TV
 reports On or `ToOn`, and the receiver selects the session's input if
-it is on. The ask wakes no TV that is off. A press of any other key,
+it is on. The ask wakes no TV that is off. Before the claim, the
+adapter sends the TV Inactive Source for the `Display`. An Android TV
+records the last Active Source it heard and ignores another one for
+the same address, so a TV that recorded the wake's Active Source while
+it booted, and then opened its own home screen, switches only after
+Inactive Source clears that record. A TV that already shows the
+`Player` can leave it for a moment before the claim brings it back. A press of any other key,
 except a power key, writes the action `ensure` while the `Receiver`'s
 `InputSelected` condition is not `True`. An `ensure` asks a receiver
 that is on for the session's input, and sends the TV nothing.

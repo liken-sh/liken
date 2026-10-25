@@ -1,8 +1,8 @@
 package main
 
 // The node workload's part of a home press: a new status.session.showAt
-// on a TV that reports On gets Image View On and then Active Source
-// for the session's Display, once. A TV that is off gets nothing, so a
+// on a TV that reports On gets Inactive Source, Image View On, and then
+// Active Source for the session's Display, once. A TV that is off gets nothing, so a
 // home press wakes no room. cecnode_wake_test.go holds the wake
 // fixtures.
 
@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/equipment-operator/cec"
+	"github.com/liken-sh/equipment-operator/cec/cectest"
 )
 
 // shownNow is a session after its wake with a home press's showAt.
@@ -59,6 +60,38 @@ func TestAShowSendsImageViewOnAndActiveSource(t *testing.T) {
 			})
 		})
 	}
+}
+
+// An Android TV that already records the Display as the active source
+// ignores another Active Source for it, even while it shows its own
+// home screen. Inactive Source first clears that record, so the Active
+// Source after it switches the TV.
+func TestAShowWithdrawsTheSourceBeforeItClaimsTheInput(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		wire := roomWithTV(televisionTV(cec.PowerOn))
+		session := wokeNow()
+		api := awakeRoom(t, wire, session)
+		wokeWith(t, api, session)
+		before := len(wire.Sent())
+
+		api.putTelevision(waking(shownNow(session)))
+		api.waitUntil(t, "the show", func() bool { return len(claimsOf(wire)) == 2 })
+
+		mustDeepEqual(t, routingSentAfter(wire, before), []string{"4->0 9d 13 00", "4->0 04", "4->f 82 13 00"})
+	})
+}
+
+// routingSentAfter is what the adapter sent after the first skip
+// messages, except polls and power reads.
+func routingSentAfter(wire *cectest.Bus, skip int) []string {
+	var sent []string
+	for _, message := range wire.Sent()[skip:] {
+		if opcode, _ := message.Opcode(); !message.IsPoll() && opcode != cec.OpGiveDevicePowerStatus {
+			sent = append(sent, message.String())
+		}
+	}
+	return sent
 }
 
 // Each showAt is one ask: a later pass sends nothing more for it.
@@ -126,7 +159,7 @@ func TestAShowWritesALine(t *testing.T) {
 		api.waitUntil(t, "the line", func() bool { return len(linesWith(log, "asked to show")) == 1 })
 		mustDeepEqual(t, linesWith(log, "asked to show"), []string{
 			"Television lounge: Player media/den asked to show Display acm-0001-receiver at " + shown.ShowAt +
-				"; the TV reported On, so the adapter on node-1 sent Image View On and Active Source for 1.3.0.0",
+				"; the TV reported On, so the adapter on node-1 sent Inactive Source, Image View On, and Active Source for 1.3.0.0",
 		})
 	})
 }

@@ -4,8 +4,8 @@ package main
 // apps is on another input, and the receiver's input alone does not
 // bring the Player back. So a home press writes a new
 // status.session.showAt (television_show.go), and the adapter that
-// speaks for the session's Display sends the TV Image View On and then
-// Active Source for that Display.
+// speaks for the session's Display sends the TV Inactive Source, Image
+// View On, and then Active Source for that Display.
 //
 // Image View On goes first even when the TV reports On, as it does
 // before every Active Source the adapter sends (claimInput). A TV on an
@@ -13,6 +13,18 @@ package main
 // sequence One Touch Play sends, and not on a bare Active Source. The
 // TV must report On first, or ToOn on its way there, because Image View
 // On wakes a TV, and a home press does not wake a room that is off.
+//
+// Inactive Source for the Display goes before the pair. An Android TV
+// records the last Active Source it heard and switches only when a new
+// one names another address. A TV that hears the wake's Active Source
+// while it boots can record the Display and still open its own home
+// screen, and after that it ignores every Active Source for the
+// Display. Inactive Source clears the record, so the Active Source that
+// follows is a change. The TV announces no change of its own input, so
+// the adapter cannot tell this state from a TV that shows the Display,
+// and it sends Inactive Source on every home press. A TV that already
+// shows the Display can leave it for a moment before the pair brings it
+// back.
 //
 // A home press sends Image View On and not Text View On. HDMI-CEC 1.3a,
 // CEC 13.1.2, says Text View On also removes the menus the TV shows,
@@ -92,7 +104,7 @@ func (n *cecNode) passShow(bus *CECBus, television *Television) {
 		fmt.Fprintf(n.log, "%s; the TV %s, so the adapter on %s sent nothing, because a home press does not wake a room that is off\n", asks, reported, n.machine)
 		return
 	}
-	if failed, err := n.claimInput(own, physical); err != nil {
+	if failed, err := n.reclaimInput(own, physical); err != nil {
 		if cec.IsGone(err) {
 			n.fail(err)
 			return
@@ -100,5 +112,15 @@ func (n *cecNode) passShow(bus *CECBus, television *Television) {
 		fmt.Fprintf(os.Stderr, "%s; the adapter on %s could not send %s: %v\n", asks, n.machine, failed, err)
 		return
 	}
-	fmt.Fprintf(n.log, "%s; the TV reported %s, so the adapter on %s sent Image View On and Active Source for %s\n", asks, power, n.machine, physical)
+	fmt.Fprintf(n.log, "%s; the TV reported %s, so the adapter on %s sent Inactive Source, Image View On, and Active Source for %s\n", asks, power, n.machine, physical)
+}
+
+// reclaimInput sends the TV Inactive Source for the Display and then
+// claims the input with Image View On and Active Source. It answers the
+// message it could not send.
+func (n *cecNode) reclaimInput(own cec.LogicalAddress, physical cec.PhysicalAddress) (string, error) {
+	if _, err := n.device.Transmit(cec.InactiveSource(own, physical), 0, 0); err != nil {
+		return "Inactive Source for " + physical.String(), err
+	}
+	return n.claimInput(own, physical)
 }
