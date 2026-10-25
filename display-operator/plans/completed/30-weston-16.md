@@ -1,7 +1,10 @@
 # Weston 16
 
-Plan 30. Proposed and built on 2026-10-24. Steps 2 and 3 of
-[How it is proved](#how-it-is-proved) have not run.
+Plan 30. Proposed, built, and drilled on 2026-10-24. Root
+[plan 82](../../../plans/completed/82-debian-sid.md#the-drills) gives
+what the drills on `liken-1` and on a home cluster found. `liken-1`
+composites every frame with the GL renderer, so only the home cluster
+exercised the plane path.
 
 display-operator runs the compositor from the weston image, and that
 image takes Weston from the Debian snapshot that every base installs

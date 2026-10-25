@@ -1,7 +1,8 @@
 # 82, Every Debian closure on one sid snapshot
 
 Proposed and built on 2026-10-24. The drills on the `liken-1` testbed and
-on the house cluster, steps 4 and 5 of [Order](#order), have not run.
+on a home cluster ran on 2026-10-24, and [The drills](#the-drills) gives
+what they found.
 
 `liken`'s images take their graphics and video stack from Debian
 packages, and each image installs from one dated snapshot of
@@ -113,3 +114,32 @@ that names the suite. The manuals of `display-operator` and
    start, each component's pods run, and a Player plays.
 5. The dev builds on the house cluster, for the drill of the
    subtitles.
+
+## The drills
+
+On 2026-10-24 the dev builds ran on `liken-1` and then on a home
+cluster.
+
+- On `liken-1`, Weston 16.0.0 started on Mesa 26.2.5 and logged `color
+  representation: yes`. The media browser drew, and `lab-portable`
+  played a film with English subtitles. With the `drm-backend` scope
+  on, every commit set `COLOR_ENCODING` to BT.709 and `COLOR_RANGE` to
+  limited, where Weston 14 set neither. `stick-1` composited every
+  frame with the GL renderer, so the testbed did not show the plane
+  path.
+- On `liken-1`, `audio-operator` on `stick-1` failed its WirePlumber
+  startup probe. PipeWire 1.6's bluez5 plugin refuses to start without
+  its HFP CVSD codec, and the closure named only the codecs of
+  PipeWire 1.4. The closure now takes every bluez5 codec plugin.
+- On the home cluster, a film whose picture had shifted color with
+  each subtitle line earlier that day played with no shift.
+- On the home cluster, the OSD's scrims drew as flat bands. Mesa 26
+  lists 10-bit swapchain formats first, and the display took
+  `ABGR2101010`, whose alpha has 2 bits. The display image now makes
+  Mesa list `B8G8R8A8_UNORM` first, and Weston's scene dump on
+  `liken-1` showed the display's surface as `ARGB8888`. The open
+  problem "the display cannot choose its surface format" in
+  `media-operator` holds the rest.
+- A display clip, a Player recording, and an audio tap each produced
+  a file with picture or sound on the home cluster. No plate solve and
+  no firmware scan ran on the new builds.
