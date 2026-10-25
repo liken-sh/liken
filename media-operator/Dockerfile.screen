@@ -203,13 +203,27 @@ COPY --from=build-display /notices /
 # toolkit opens by name at run time is not covered by this.
 RUN ["/lib64/ld-linux-x86-64.so.2", "--list", "/media-display"]
 
-# The display draws over the film, so the compositor blends it by its
-# alpha, and the scrims fade through every alpha level. iced_wgpu takes
-# the first format the swapchain lists, and Mesa's Wayland swapchain lists
-# 10-bit formats first, whose alpha has 2 bits. A scrim on one of them
-# draws as two flat bands. This driconf option, which Mesa reads from the
-# environment, lists B8G8R8A8_UNORM first, so the display renders with 8
-# bits of alpha.
+# The display draws over the film, and the compositor blends it into the
+# frame by its alpha. The scrims fade from 0.796 to clear, so the display
+# needs a surface format whose alpha has enough levels to fade smoothly.
+#
+# iced_wgpu 0.14 takes the first format without sRGB that the swapchain
+# lists, and it gives the program no way to choose another. Mesa's Wayland
+# swapchain lists its 10-bit formats first, such as A2B10G10R10, and their
+# alpha has 2 bits: clear, a third, two thirds, and opaque. On that format
+# each scrim draws as two flat bands. No drawing in the display can make a
+# smooth fade from four levels, and a dithered alpha shows as grain.
+#
+# vk_wsi_force_bgra8_unorm_first is a driconf option of Mesa's Vulkan
+# swapchain, and Mesa reads each driconf option from the environment by
+# its own name. It moves B8G8R8A8_UNORM to the head of the list, so the
+# display renders with 8 bits for each channel and for alpha. It applies
+# to this image alone: the idle screen and the media browser draw opaque
+# frames and keep the format they choose. The option is specific to Mesa,
+# and it chooses 8-bit color on a GPU that also offers a 16-bit format
+# with full alpha. The open problem "the display cannot choose its
+# surface format" in media-operator/plans/open-problems holds the fix
+# that chooses from the list instead.
 ENV vk_wsi_force_bgra8_unorm_first=true
 
 # The binary is the container's own process, so the kubelet sends it the
