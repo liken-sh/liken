@@ -111,9 +111,17 @@ func TestAnEventAfterTheSignalEndsTheWait(t *testing.T) {
 
 	f.changes <- struct{}{}
 	annotations(t, dir, "firmware.liken.sh/write=\"go\"")
-	f.changes <- struct{}{}
+	// The wait reads the file after each event, so its read for the
+	// first event can see the signal written just after it and end
+	// before the second event. Either end is the signal.
+	var err error
+	select {
+	case f.changes <- struct{}{}:
+		err = <-done
+	case err = <-done:
+	}
 
-	if err := <-done; err != nil {
+	if err != nil {
 		t.Errorf("awaitSignal = %v, want the signal", err)
 	}
 }
