@@ -2,9 +2,20 @@
 
 Plan 13. Built on 2026-10-25. It closes the open problem "Every
 published sink is exclusive, though PipeWire can share one". The drill
-on the `liken-1` testbed has not run yet: two shared claims on one
-speaker, an exclusive claim that waits for both, and a shared claim
-that states a codec.
+ran on the `liken-1` testbed on 2026-10-25, on release
+`2026.10.25-001` with k3s v1.37.1, against the analog `Sink` of
+`stick-1` with `sharedClaims: 3`. The slice device published
+`allowMultipleAllocations` and a capacity of 3 `claims` within
+seconds of the patch. Two claims that requested `claims: "1"` were
+allocated the device with separate share IDs, and PipeWire linked
+both streams into the sink. An exclusive claim stayed `Pending`
+while they played, then started and consumed all 3. A share stayed
+`Pending` while the exclusive claim played. Removing the count
+removed both fields from the slice. The drill also showed that the
+`CLAIMS` printer column prints only the first claim, and the guide
+now says so. The Bluetooth speaker was disconnected, so the drill
+did not run the skipped unity write or the refusal of a share that
+states a codec; the unit tests cover both.
 
 A cluster owner can let several claims hold one endpoint at the same
 time, with `spec.sharedClaims` on its `Sink` or `Source`. PipeWire
