@@ -62,6 +62,9 @@ spec:
         - name: Mute
           type: boolean
           jsonPath: .status.observed.mute
+        # A printer column prints the first value that its path finds,
+        # so a shared endpoint shows its first claim here, and
+        # status.claims lists every claim.
         - name: Claims
           type: string
           jsonPath: .status.claims[*].name
@@ -406,6 +409,9 @@ spec:
         - name: Mute
           type: boolean
           jsonPath: .status.observed.mute
+        # A printer column prints the first value that its path finds,
+        # so a shared endpoint shows its first claim here, and
+        # status.claims lists every claim.
         - name: Claims
           type: string
           jsonPath: .status.claims[*].name

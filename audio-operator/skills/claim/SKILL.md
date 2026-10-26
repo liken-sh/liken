@@ -312,8 +312,15 @@ claims:
                   claims: "1"
 
 The scheduler allocates the output to each claim that asks for one,
-up to the count, and `kubectl get sinks` lists every claim in the
-`CLAIMS` column. A claim that does not ask for `claims` still takes
+up to the count. `status.claims` on the `Sink` lists every claim that
+holds it:
+
+    kubectl get sink kitchen-pci-0000-00-1f-3-hdmi-0 \
+      -o jsonpath='{.status.claims[*].name}'
+
+The `CLAIMS` column of `kubectl get sinks` shows only the first of
+them, because a printer column prints the first value that its path
+finds. A claim that does not ask for `claims` still takes
 the whole output: it waits until every share ends, and no share
 starts while it plays. So a claim written for an exclusive output
 keeps its meaning on a shared one.
