@@ -55,8 +55,20 @@ impl<S: Source, A: Art> Browser<S, A> {
                 // no film will ever cover the page. The press enters no
                 // lights. They answer the `Player`'s status alone, so a
                 // `Play` this browser never asked for dims the page too.
+                // The line under the mark is read here, once, so a press
+                // on a page and an offer taken off the player's display
+                // name the work that starts the same way. An offer taken
+                // over a state that still stands under the film renames
+                // that state and keeps its clock, because a state entered
+                // again would run the page's departure a second time while
+                // the film fades into it.
                 if self.request_play(&library, &selection, start, next.as_deref()) {
-                    self.loading = Some(loading::Loading::entered(self.clock));
+                    let page = self.stack.last().unwrap_or(&self.home);
+                    let line = loading::line(page, &mut self.source, &library, &selection);
+                    match self.loading.as_mut().filter(|state| !state.leaving()) {
+                        Some(state) => state.rename(line),
+                        None => self.loading = Some(loading::Loading::entered(self.clock, line)),
+                    }
                 }
             }
             // A mark enters no state on the screen. The progress store

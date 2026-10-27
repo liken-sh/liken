@@ -1019,7 +1019,7 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         self.ask();
         self.time = clock::now();
         self.minute = Some(at + clock::seconds_to_next_minute());
-        if self.loading.is_some_and(|state| state.done(at)) {
+        if self.loading.as_ref().is_some_and(|state| state.done(at)) {
             self.loading = None;
         }
         if self.lights.is_some_and(|state| state.done(at)) {
@@ -1038,7 +1038,7 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
             return Space::new().width(Length::Fill).height(Length::Fill).into();
         };
 
-        let curtain = self.loading.map(|state| state.curtain(self.clock));
+        let curtain = self.loading.as_ref().map(|state| state.curtain(self.clock));
         let screen = self
             .top()
             .view(&self.store, &self.faces, curtain, !self.on_strip);

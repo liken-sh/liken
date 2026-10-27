@@ -38,10 +38,14 @@ fn play_on_a_movie_page_enters_the_state_in_the_same_frame() {
 
     browser.key("enter");
 
-    assert_eq!(browser.loading.map(|state| state.away(PRESS)), Some(0.0));
+    assert_eq!(
+        browser.loading.as_ref().map(|state| state.away(PRESS)),
+        Some(0.0)
+    );
     assert_eq!(
         browser
             .loading
+            .as_ref()
             .map(|state| state.away(PRESS + look::DEPARTURE)),
         Some(1.0)
     );
@@ -81,7 +85,7 @@ fn the_film_holds_the_state_under_it() {
 
     assert!(browser.asleep());
     assert!(browser.loading.is_some());
-    assert!(!browser.loading.expect("the state holds").leaving());
+    assert!(!browser.loading.as_ref().expect("the state holds").leaving());
 }
 
 #[test]
@@ -94,7 +98,13 @@ fn the_wake_after_the_film_returns_the_page() {
     *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Wake];
     browser.pump(PRESS + 300.0);
 
-    assert!(browser.loading.expect("the state is leaving").leaving());
+    assert!(
+        browser
+            .loading
+            .as_ref()
+            .expect("the state is leaving")
+            .leaving()
+    );
     browser.tick(PRESS + 300.0 + look::RETURN);
     assert!(browser.loading.is_none());
     assert!(matches!(browser.top(), screens::Screen::Movie(_)));
@@ -117,13 +127,26 @@ fn the_films_end_marks_the_return_and_the_next_frame_starts_it() {
 
     assert!(browser.returning);
     assert!(!browser.covered());
-    assert!(!browser.loading.expect("the state holds").leaving());
+    assert!(!browser.loading.as_ref().expect("the state holds").leaving());
 
     browser.tick(PRESS + 7.0);
 
     assert!(!browser.returning);
-    assert!(browser.loading.expect("the state is leaving").leaving());
-    assert_eq!(browser.loading.expect("the state").away(PRESS + 7.0), 1.0);
+    assert!(
+        browser
+            .loading
+            .as_ref()
+            .expect("the state is leaving")
+            .leaving()
+    );
+    assert_eq!(
+        browser
+            .loading
+            .as_ref()
+            .expect("the state")
+            .away(PRESS + 7.0),
+        1.0
+    );
     browser.tick(PRESS + 7.0 + look::RETURN);
     assert!(browser.loading.is_none());
 }
@@ -142,7 +165,13 @@ fn a_play_that_never_played_returns_the_page() {
     browser.pump(PRESS + 5.0);
     browser.tick(PRESS + 7.0);
 
-    assert!(browser.loading.expect("the state is leaving").leaving());
+    assert!(
+        browser
+            .loading
+            .as_ref()
+            .expect("the state is leaving")
+            .leaving()
+    );
     browser.tick(PRESS + 7.0 + look::RETURN);
     assert!(browser.loading.is_none());
 }
@@ -367,7 +396,13 @@ fn back_during_the_state_returns_the_page_and_cancels_nothing() {
 
     browser.key("escape");
 
-    assert!(browser.loading.expect("the state is leaving").leaving());
+    assert!(
+        browser
+            .loading
+            .as_ref()
+            .expect("the state is leaving")
+            .leaving()
+    );
     assert_eq!(
         bus.published.lock().expect("no test panics").len(),
         published
@@ -417,13 +452,19 @@ fn the_return_after_a_home_press_ends_the_state_over_the_home_page() {
         vec![Moment::Press("KEY_HOMEPAGE".into())];
     browser.pump(PRESS + 2.0);
 
-    assert!(!browser.loading.expect("the state holds").leaving());
+    assert!(!browser.loading.as_ref().expect("the state holds").leaving());
 
     *bus.inbound.lock().expect("no test panics with the lock") = vec![status(Activity::Idle)];
     browser.pump(PRESS + 3.0);
     browser.tick(PRESS + 3.0);
 
-    assert!(browser.loading.expect("the state is leaving").leaving());
+    assert!(
+        browser
+            .loading
+            .as_ref()
+            .expect("the state is leaving")
+            .leaving()
+    );
     browser.tick(PRESS + 3.0 + look::RETURN);
     assert!(browser.loading.is_none());
     assert!(matches!(browser.top(), screens::Screen::Home(_)));
@@ -485,7 +526,7 @@ fn a_playing_status_covers_the_browser_and_holds_the_state() {
 
     assert!(browser.covered());
     assert!(browser.loading.is_some());
-    assert!(!browser.loading.expect("the state holds").leaving());
+    assert!(!browser.loading.as_ref().expect("the state holds").leaving());
 }
 
 // A Play that is starting has not covered anything yet, so the page and
@@ -528,7 +569,13 @@ fn the_films_end_uncovers_the_browser_and_asks_for_the_frame_that_returns() {
     assert!(!browser.covered());
     assert_eq!(browser.next_frame(PRESS + 5.0), Some(PRESS + 5.0));
     browser.tick(PRESS + 5.0);
-    assert!(browser.loading.expect("the state is leaving").leaving());
+    assert!(
+        browser
+            .loading
+            .as_ref()
+            .expect("the state is leaving")
+            .leaving()
+    );
 }
 
 #[test]
@@ -576,7 +623,8 @@ fn the_lights_draw_over_the_home_page() {
 
     assert!(matches!(browser.top(), screens::Screen::Home(_)));
     assert!(browser.lights.is_some());
-    let curtain = crate::screens::loading::Loading::entered(PRESS).curtain(PRESS);
+    let state = crate::screens::loading::Loading::entered(PRESS, String::new());
+    let curtain = state.curtain(PRESS);
     assert!(browser.top().front(&browser.store, curtain).is_none());
     let _ = browser.view();
 }

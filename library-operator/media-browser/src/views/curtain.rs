@@ -1,6 +1,7 @@
 // The layers a page draws over itself while the loading state runs: the
 // item's own backdrop again over everything the page drew, and over that
-// the pool of shade, the mark, and the logo on its way to the centre.
+// the pool of shade, the mark, the logo on its way to the centre, and the
+// line under the mark that names the work where the logo names another.
 //
 // The backdrop is drawn a second time rather than the page being faded
 // out block by block, because inside one layer the renderer draws every
@@ -20,7 +21,7 @@ use iced_winit::core::{Color, Point, Rectangle, Theme, Vector, mouse};
 
 use liken_iced::mark;
 
-use super::{Tone, area, extent, label, paint};
+use super::{Tone, area, extent, label, paint, text};
 use crate::art::{Art, Image};
 use crate::look;
 
@@ -45,6 +46,16 @@ const GAP: f32 = 0.05;
 // item has no logo.
 const NAME: f32 = 0.7;
 
+// The line under the mark that names the work: the space between the
+// foot of the mark's box and the top of the line, as a share of the
+// height, and the width the line is cut to with an ellipsis, as a share of
+// the width. The gap is smaller than the one over the mark, because the
+// line belongs to the mark and the logo's foot does not. The pulse swells
+// each tile about its own centre by up to a tenth, so the bottom tiles
+// reach a few pixels past the box and the gap stays clear of them.
+const LINE_GAP: f32 = 0.03;
+const LINE_WIDTH: f32 = 0.5;
+
 // The pool of shade under the logo and the mark, so both read over a
 // bright backdrop: its centre and its two radii as shares of the frame,
 // how dark it is at the centre, and how many rings it is built from.
@@ -62,11 +73,14 @@ const POOL_RINGS: u32 = 48;
 
 /// The loading state as one frame draws it.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Curtain {
+pub struct Curtain<'a> {
     /// How far the page has gone, from 0 whole to 1 fully away.
     pub away: f32,
     /// The clock the mark pulses on, in seconds.
     pub phase: f64,
+    /// The work that starts, in the words drawn under the mark, and empty
+    /// where the logo or the centred name already names it.
+    pub line: &'a str,
 }
 
 /// What the curtain reads off the page under it: the box that page draws
@@ -93,7 +107,7 @@ pub struct Layer<'a, A> {
     /// The page under this layer, which says where its logo sits now.
     pub head: &'a dyn Head,
     /// What this frame draws.
-    pub curtain: Curtain,
+    pub curtain: Curtain<'a>,
 }
 
 impl<A> Clone for Layer<'_, A> {
@@ -105,7 +119,8 @@ impl<A> Clone for Layer<'_, A> {
 impl<A> Copy for Layer<'_, A> {}
 
 // The layer over the art: the pool of shade, the mark, the logo on its way
-// to the centre, and the name where the item has no logo. The pool and the
+// to the centre, the name where the item has no logo, and the line under
+// the mark that names the work that starts. The pool and the
 // mark are meshes and the logo is an image, so the logo draws over both,
 // and the mark sits under the logo where the two never overlap.
 pub struct Front<'a, A>(pub Layer<'a, A>);
@@ -200,20 +215,28 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Front<'_, A> {
         // out there, at the state's own share, while the logo slides past
         // it to the centre. It swells at the state's own energy, so it is
         // at full swing while the state holds and it stills over the exit.
-        let box_ = mark::bounds();
-        let span = bounds.width * SPAN;
-        let height = span * box_.height / box_.width;
+        let at = mark_box(bounds);
         let logo = layer.logo(store, bounds);
         mark::draw(
             &mut frame,
-            Point::new(
-                bounds.center_x(),
-                layer.centre(bounds) + bounds.height * GAP + height / 2.0,
-            ),
-            span,
+            at.center(),
+            at.width,
             f64::from(away),
             layer.curtain.phase,
             away,
+        );
+
+        // The line fades with the mark, because the two are one block
+        // under the logo and both leave with the state.
+        text::centered(
+            &mut frame,
+            layer.curtain.line,
+            line_band(bounds),
+            look::FACTS,
+            Color {
+                a: away,
+                ..look::text()
+            },
         );
 
         // The logo draws whole, and not at the state's opacity, because
@@ -247,7 +270,7 @@ impl<A: Art> Layer<'_, A> {
 
     // Where the foot of the logo, or the base line of the name, sits.
     fn centre(&self, bounds: Rectangle) -> f32 {
-        bounds.y + bounds.height * LOGO_FOOT
+        centre(bounds)
     }
 
     // The logo and the box it draws in at this point of the motion, and
@@ -283,6 +306,38 @@ impl<A: Art> Layer<'_, A> {
         let from = area(page.x, page.y, from.0, from.1);
         Some((image, between(from, to, self.away())))
     }
+}
+
+// Where the foot of the logo, or the base line of the name, sits.
+fn centre(bounds: Rectangle) -> f32 {
+    bounds.y + bounds.height * LOGO_FOOT
+}
+
+// The box the mark draws in: centred across the frame, a gap under the
+// logo's foot, at the mark's own ratio.
+fn mark_box(bounds: Rectangle) -> Rectangle {
+    let shape = mark::bounds();
+    let span = bounds.width * SPAN;
+    let height = span * shape.height / shape.width;
+    area(
+        bounds.center_x() - span / 2.0,
+        centre(bounds) + bounds.height * GAP,
+        span,
+        height,
+    )
+}
+
+// The band the line that names the work draws in: one line tall, a gap
+// under the mark's box, centred across the frame.
+fn line_band(bounds: Rectangle) -> Rectangle {
+    let mark = mark_box(bounds);
+    let width = bounds.width * LINE_WIDTH;
+    area(
+        bounds.center_x() - width / 2.0,
+        mark.y + mark.height + bounds.height * LINE_GAP,
+        width,
+        text::height(1, look::FACTS),
+    )
 }
 
 // The pool of shade, at this share of its full depth.
@@ -426,6 +481,21 @@ mod tests {
     fn the_decode_is_the_centre_box_of_the_frame() {
         let bounds = area(0.0, 0.0, 1920.0, 1080.0);
         assert_eq!(logo_decode(bounds), (652, 280));
+    }
+
+    // At 1920 by 1080 the mark is 230 px wide and its box ends at 854 px,
+    // so the line starts 32 px under it and sits inside the pool, whose
+    // edge is 994 px down.
+    #[test]
+    fn the_line_draws_a_gap_under_the_mark_inside_the_pool() {
+        let bounds = area(0.0, 0.0, 1920.0, 1080.0);
+        let mark = mark_box(bounds);
+        let band = line_band(bounds);
+
+        assert_eq!(band.x, 480.0);
+        assert_eq!(band.width, 960.0);
+        assert!((band.y - (mark.y + mark.height + 32.4)).abs() < 1e-3);
+        assert!(band.y + band.height < bounds.height * (POOL_CENTRE + POOL_HEIGHT));
     }
 
     #[test]

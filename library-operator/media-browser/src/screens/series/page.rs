@@ -423,7 +423,7 @@ impl Series {
     pub fn view<'a, A: Art>(
         &'a self,
         store: &'a RefCell<A>,
-        curtain: Option<Curtain>,
+        curtain: Option<Curtain<'a>>,
         held: bool,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         layers::Page {
@@ -446,7 +446,7 @@ impl Series {
     pub fn front<'a, A: Art>(
         &'a self,
         store: &'a RefCell<A>,
-        curtain: Curtain,
+        curtain: Curtain<'a>,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         layers::front(self.curtain(store, curtain))
     }
@@ -454,7 +454,7 @@ impl Series {
     // The loading state's layer for this page. Both the departing art
     // under the dim and the logo over it are drawn from it, so the two
     // read the same title, art, and clock.
-    fn curtain<'a, A: Art>(&'a self, store: &'a RefCell<A>, curtain: Curtain) -> Layer<'a, A> {
+    fn curtain<'a, A: Art>(&'a self, store: &'a RefCell<A>, curtain: Curtain<'a>) -> Layer<'a, A> {
         Layer {
             library: &self.library,
             art: &self.backdrop,

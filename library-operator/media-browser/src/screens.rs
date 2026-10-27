@@ -284,7 +284,7 @@ impl Screen {
         &'a self,
         store: &'a RefCell<A>,
         faces: &'a Faces,
-        curtain: Option<Curtain>,
+        curtain: Option<Curtain<'a>>,
         held: bool,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         match self {
@@ -304,7 +304,7 @@ impl Screen {
     pub fn front<'a, A: Art>(
         &'a self,
         store: &'a RefCell<A>,
-        curtain: Curtain,
+        curtain: Curtain<'a>,
     ) -> Option<Element<'a, Infallible, Theme, Renderer>> {
         match self {
             Self::Movie(screen) => Some(screen.front(store, curtain)),
@@ -388,6 +388,13 @@ impl InFranchise {
     }
 }
 
+/// An episode as a card of the continue-watching row, the up-next offer,
+/// and the loading state name it: the episode number in two digits, as
+/// every still spells it, and the title, `E06 · Delusion`.
+pub fn episode_caption(episode: i64, title: &str) -> String {
+    format!("E{episode:02} · {title}")
+}
+
 impl Item {
     /// One slot as an item, with both caption lines built once here, at
     /// the read, and not on every frame.
@@ -419,7 +426,7 @@ impl Item {
         let caption = slot
             .episode
             .as_ref()
-            .map(|place| format!("E{:02} · {}", place.episode, slot.title));
+            .map(|place| episode_caption(place.episode, &slot.title));
         let mut item = Self::spelled(slot, Spelling::Facts);
         if let Some(caption) = caption {
             item.fitted = caption.clone();
