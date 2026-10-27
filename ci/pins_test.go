@@ -48,6 +48,9 @@ func pinsTree(t *testing.T, changes map[string]string) string {
 		"ci/dockerfile_test.go":              "package main\n\nconst f = \"FROM debian:trixie-slim\"\n",
 		"a/docs/variables.md":                "Write `debian:${VERSION}` or `golang:<tag>`.\n",
 		"toolchains/.pre-commit-config.yaml": "repos:\n  - repo: meta\n    hooks:\n      - id: check-hooks-apply\n",
+		"a/layout/liken-thing-v1.xml":        "<protocol name=\"liken_thing_v1\"/>\n",
+		"b/src/liken-thing-v1.xml":           "<protocol name=\"liken_thing_v1\"/>\n",
+		"b/src/other-v1.xml":                 "<protocol name=\"other_v1\"/>\n",
 	}
 	for name, text := range changes {
 		tree[name] = text
@@ -99,6 +102,8 @@ func TestADriftedPinIsFound(t *testing.T) {
 			"a/probe_test.go:3 names curlimages/curl:8.5.0"},
 		"an image in a Rust file": {"a/src/lib.rs", "const IMAGE: &str = \"eclipse-mosquitto:2\";\n",
 			"a/src/lib.rs:1 names eclipse-mosquitto:2,"},
+		"a copy of a protocol": {"b/src/liken-thing-v1.xml", "<protocol name=\"liken_thing_v1\" version=\"2\"/>\n",
+			"the Wayland protocol liken-thing-v1.xml has 2 versions:"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

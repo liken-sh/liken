@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -28,7 +30,12 @@ import (
 //   - each hook repository has one revision across every
 //     .pre-commit-config.yaml;
 //   - each image of images.toml that a manifest, a guide, a skill, a
-//     Makefile, or a test names has the tag of its entry.
+//     Makefile, or a test names has the tag of its entry;
+//   - each copy of a Wayland protocol that liken defines, such as
+//     liken-arrangement-v1.xml, holds the same bytes. The compositor
+//     module and each client build from their own directory, so each
+//     keeps a copy, and a client built from a drifted copy sends
+//     requests that the compositor does not read the same way.
 //
 // The plans keep the versions of their day, so the check reads none of
 // them. Neither does it read test data, a cache, or another checkout.
@@ -43,7 +50,7 @@ func checkPins(root string) ([]string, error) {
 	}
 	goVersion := strings.SplitN(parseImageRef(tools.Build["golang"]).Tag, "-", 2)[0]
 	rustVersion := strings.SplitN(parseImageRef(tools.Build["rust"]).Tag, "-", 2)[0]
-	modules, crates, hooks := versions{}, versions{}, versions{}
+	modules, crates, hooks, protocols := versions{}, versions{}, versions{}, versions{}
 	var findings []string
 	for _, file := range files {
 		data, err := os.ReadFile(filepath.Join(root, file))
@@ -64,6 +71,8 @@ func checkPins(root string) ([]string, error) {
 			err = readCargo(file, data, crates)
 		case name == ".pre-commit-config.yaml":
 			err = readHooks(file, data, hooks)
+		case isProtocol(name):
+			protocols.add(name, contentDigest(data), file)
 		}
 		if err != nil {
 			return nil, err
@@ -76,6 +85,7 @@ func checkPins(root string) ([]string, error) {
 	findings = append(findings, modules.drift("the Go module")...)
 	findings = append(findings, crates.drift("the crate")...)
 	findings = append(findings, hooks.drift("the hook repository")...)
+	findings = append(findings, protocols.drift("the Wayland protocol")...)
 	return findings, nil
 }
 
@@ -96,12 +106,30 @@ func pinFiles(root string) ([]string, error) {
 			continue
 		}
 		switch name := path.Base(file); {
-		case name == "go.mod", name == "rust-toolchain.toml", name == "Cargo.toml", name == ".pre-commit-config.yaml", namesImages(file):
+		case name == "go.mod", name == "rust-toolchain.toml", name == "Cargo.toml", name == ".pre-commit-config.yaml", isProtocol(name), namesImages(file):
 			files = append(files, file)
 		}
 	}
 	slices.Sort(files)
 	return slices.Compact(files), nil
+}
+
+// isProtocol is true for the file of a Wayland protocol that liken
+// defines: liken-<name>-v<N>.xml, the form wayland-scanner reads.
+func isProtocol(name string) bool {
+	stem, ok := strings.CutSuffix(name, ".xml")
+	if !ok || !strings.HasPrefix(stem, "liken-") {
+		return false
+	}
+	i := strings.LastIndex(stem, "-v")
+	return i > 0 && i+2 < len(stem) && strings.Trim(stem[i+2:], "0123456789") == ""
+}
+
+// contentDigest names a file's bytes in a finding: the first twelve
+// hex digits of their SHA-256, enough to tell two copies apart.
+func contentDigest(data []byte) string {
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])[:12]
 }
 
 // namesImages is true for a file whose image references the check
