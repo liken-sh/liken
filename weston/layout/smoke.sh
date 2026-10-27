@@ -4,13 +4,12 @@
 # container that can start a second container, and the release image
 # has no shell and no test clients in it.
 #
-# The test builds a small image from the same Debian image and the
-# same snapshot date as the release, with weston and its demo clients
-# in it, starts weston headless with the pixman renderer, then drives
-# the control socket from a Python client. The script reads the image
-# from the layout stage of weston/Dockerfile and the date from
-# weston/package.toml, so the module builds against the same libweston
-# as the one that ships.
+# The test builds a small image with smoke-image.sh, from the same
+# Debian image and the same snapshot date as the release, with weston
+# and its demo clients in it, starts weston headless with the pixman
+# renderer, then drives the control socket from a Python client. The
+# module builds against the same libweston as the one that ships.
+# LIKEN_SMOKE_CFLAGS passes extra compiler flags to the module's build.
 #
 # It asserts that a client on a per-claim socket is reported with that
 # socket's name and a client on the shared socket as wayland-0. It
@@ -25,8 +24,16 @@
 # socket reads complete, and that a client on wayland-0 reads failed
 # with weston's own word, unauthorized.
 #
+# With the argument arrange, the script runs arrange_smoke.py against
+# the same compositor instead. That test asserts the
+# liken_arrangement_v1 protocol: its header says what.
+#
 # weston runs with no --debug, because --debug installs
 # screenshot_allow_all, which would admit the wayland-0 client.
+#
+# With LIKEN_SMOKE_CFLAGS=-fsanitize=address, the module and the drill
+# build with AddressSanitizer, weston runs with its runtime preloaded,
+# and the test fails when the sanitizer reports an error in weston's log.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -35,43 +42,29 @@ weston_container=liken-layout-smoke-weston
 client_container=liken-layout-smoke-client
 work=$(mktemp -d)
 
+case "${1:-}" in
+"") driver=smoke_client.py ;;
+arrange) driver=arrange_smoke.py ;;
+*) echo "usage: smoke.sh [arrange]" >&2; exit 2 ;;
+esac
+
+# Every container the tests start has a name that begins with
+# liken-layout-smoke-.
+remove_containers() {
+	docker ps -aq --filter name=liken-layout-smoke- | xargs -r docker rm -f >/dev/null 2>&1 || true
+}
+
 # shellcheck disable=SC2329  # the EXIT trap below is the only caller.
 cleanup() {
-	docker rm -f "$weston_container" "$client_container" \
-		"$client_container-shared" "$client_container-again" \
-		>/dev/null 2>&1 || true
+	remove_containers
 	rm -rf "$work"
 }
 trap cleanup EXIT
 
-docker rm -f "$weston_container" "$client_container" \
-	"$client_container-shared" "$client_container-again" >/dev/null 2>&1 || true
+remove_containers
 
-base=$(sed -n 's/^FROM \(debian:[^ ]*\) AS layout$/\1/p' "$here/../Dockerfile")
-snapshot=$(sed -n 's/^version = "\([0-9]*\)"$/\1/p' "$here/../package.toml")
-: "${base:?weston/Dockerfile names no debian image for the layout stage}"
-: "${snapshot:?weston/package.toml names no snapshot date}"
-
-echo "== building $image on $base at snapshot $snapshot"
-docker build -q -t "$image" -f - \
-	--build-arg BASE="$base" --build-arg VERSION="$snapshot" \
-	--build-context builder="$here/../../vulkan" \
-	"$here" >/dev/null <<'DOCKERFILE'
-ARG BASE
-FROM $BASE
-ARG VERSION
-COPY --from=builder snapshot.sh snapshot.sha256 /
-RUN sh /snapshot.sh "$VERSION" \
-    && apt-get upgrade -y \
-    && apt-get install -y --no-install-recommends \
-        weston libweston-16-dev gcc libc6-dev pkg-config \
-        libwayland-dev libpixman-1-dev \
-    && rm -rf /var/lib/apt/lists/*
-COPY liken-layout.c ivi-layout-export.h /build/
-RUN gcc -Wall -Wextra -Werror -shared -fPIC \
-        $(pkg-config --cflags libweston-16 wayland-server pixman-1) \
-        -o /usr/lib/x86_64-linux-gnu/weston/liken-layout.so /build/liken-layout.c
-DOCKERFILE
+# shellcheck disable=SC2086  # the flags are several words or none.
+bash "$here/smoke-image.sh" "$image" ${LIKEN_SMOKE_CFLAGS:-}
 
 # The compositor runs as the developer's own uid, so the sockets and
 # the screenshot it writes are readable from the host.
@@ -88,8 +81,20 @@ name=headless
 mode=1280x720
 INI
 
+# A module built with a sanitizer needs the sanitizer's runtime loaded
+# before it, and weston is not built with one, so the runtime is
+# preloaded. Leak checks are off: weston frees little at exit.
+sanitizer=()
+case "${LIKEN_SMOKE_CFLAGS:-}" in
+*sanitize=address*)
+	asan=$(docker run --rm "$image" sed -n 's/^LIKEN_ASAN=//p' /etc/liken-asan)
+	sanitizer=(-e "LD_PRELOAD=$asan" -e ASAN_OPTIONS=detect_leaks=0)
+	;;
+esac
+
 echo "== starting weston"
 docker run -d --name "$weston_container" \
+	"${sanitizer[@]}" \
 	--user "$(id -u):$(id -g)" \
 	-v "$work/run:/run/liken" \
 	-v "$work/control:/run/control" \
@@ -106,11 +111,16 @@ docker run -d --name "$weston_container" \
 echo "== driving the control socket"
 set +e
 WORK=$work IMAGE=$image WESTON=$weston_container CLIENT=$client_container \
-	python3 "$here/smoke_client.py"
+	python3 -B "$here/$driver"
 status=$?
 set -e
 
 echo "== weston log"
 docker logs "$weston_container" 2>&1 | sed 's/^/  /'
+
+if docker logs "$weston_container" 2>&1 | grep -q 'ERROR: AddressSanitizer'; then
+	echo "   FAIL: AddressSanitizer reported an error in weston"
+	status=1
+fi
 
 exit $status

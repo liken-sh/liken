@@ -1,19 +1,21 @@
-# The vulkan image plus the Weston compositor, every library it loads,
-# and liken's two modules for it: the hotplug shim and the layout
-# controller.
+# The vulkan image plus the Weston compositor, built from its release,
+# every library it loads, and liken's two modules for it: the hotplug
+# shim and the layout controller.
 [package]
 name = "weston"
 # The date of the snapshot.debian.org archive that the build installs
 # from, as YYYYMMDD. Every base on Debian uses the same date.
 version = "20261024"
-revision = 2
+revision = 3
 license = "MIT"
 
-# The upstream releases that the snapshot holds, as Debian names them.
-# Each one is a label of the image, sh.liken.upstream.<name>. A new
-# snapshot date updates them.
+# The upstream releases that the image holds. Each one is a label of
+# the image, sh.liken.upstream.<name>. weston is the release that the
+# Dockerfile builds from its tarball, and latest.sh beside this file
+# moves it. mesa is the version that the snapshot holds, as Debian
+# names it, and a new snapshot date updates it.
 [package.upstream]
-weston = "16.0.0-1"
+weston = "16.0.2"
 mesa = "26.2.5-1"
 
 # shellcheck and the whitespace checks, from .pre-commit-config.yaml.

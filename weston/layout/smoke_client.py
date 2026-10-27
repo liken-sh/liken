@@ -405,20 +405,21 @@ def main():
     # A hide with a fade leaves the surface on the screen while the
     # fade runs, which is how a surface that is still alive leaves a
     # region. The headless backend repaints on its own timer, so the
-    # fade progresses with no frame from the client, and the
-    # screenshot below lands inside the fade because the capture takes
-    # a moment of its own.
+    # fade progresses with no frame from the client. The fade eases in
+    # on a smoothstep curve, so its first tenth hardly dims the
+    # surface: the screenshot waits until about a third of the fade is
+    # past, and the capture's own delay keeps it short of the end.
     started = time.monotonic()
-    control.expect_ok("hide %s fade 600" % shared_id)
+    control.expect_ok("hide %s fade 1500" % shared_id)
     control.expect_ok("commit")
 
-    frame = capture(wait=0)
+    frame = capture(wait=max(0, started + 0.5 - time.monotonic()))
     report("the fade started %d ms before this frame was read"
            % (1000 * (time.monotonic() - started)))
     assert_fading(frame, SHARED_RECT, "the fading surface", opaque)
 
-    # The second frame is read once the fade's 600 ms are past.
-    frame = capture(wait=max(0, started + 0.8 - time.monotonic()))
+    # The second frame is read once the fade's 1500 ms are past.
+    frame = capture(wait=max(0, started + 1.8 - time.monotonic()))
     assert_black(frame, SHARED_RECT, "the surface the fade took off")
 
     control.expect_ok("close %s" % CLAIM_SOCKET)

@@ -12,3 +12,8 @@ smoke/
 # workstation, outside the image.
 layout/smoke.sh
 layout/smoke_client.py
+layout/smoke-image.sh
+layout/arrange_smoke.py
+# The pin's report and the keys its bump checks a release against.
+latest.sh
+signing-keys.asc

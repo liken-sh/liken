@@ -1,0 +1,227 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="liken_arrangement_v1">
+  <copyright>
+    Copyright 2026 the liken authors.
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice (including the next
+    paragraph) shall be included in all copies or substantial portions of the
+    Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+  </copyright>
+
+  <description summary="arrange a claim's own surfaces inside its region">
+    A screen has two owners. The Layout that a Display names owns the
+    screen: display-operator gives each claim a region of it, and no
+    workload can move a region. Inside its region, a claim's surfaces
+    belong to one arranger: the first client of the claim that asks for
+    this protocol. The arranger states where each of the claim's
+    surfaces shows, how opaque it is, and in what order they stack, and
+    the compositor tweens every surface from where it shows to where the
+    arrangement puts it, on each repaint of the output. A video player
+    can so be made of several surfaces, from several programs, and move
+    between arrangements with one request.
+
+    liken-layout.so, the compositor module that display-operator ships,
+    offers this protocol. Only a client that arrived on a claim's socket
+    may arrange, and an arrangement acts only on surfaces of that claim.
+    It never moves a surface outside the region, and never scales one
+    above the region's size. The arranger's own surfaces are surfaces of
+    the claim like any other, and an arrangement may place them.
+  </description>
+
+  <interface name="liken_arranger_manager_v1" version="1">
+    <description summary="hands out the arranger of a claim">
+      The global. The compositor advertises it on every socket. A client
+      that did not arrive on a claim's socket gets an arranger that
+      sends refused.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the manager">
+        An arranger that the manager created stays.
+      </description>
+    </request>
+
+    <request name="get_arranger">
+      <description summary="ask to arrange the caller's claim">
+        Creates an arranger object. The compositor answers with granted
+        when the claim has no arranger, and with refused when it has one
+        or when the caller is on no claim.
+      </description>
+      <arg name="id" type="new_id" interface="liken_arranger_v1"/>
+    </request>
+  </interface>
+
+  <interface name="liken_arranger_v1" version="1">
+    <description summary="the one client that arranges a claim's region">
+      An arrangement is a list of entries, built with entry and applied
+      with commit. Each entry names the surfaces of the claim whose xdg
+      app_id matches, and states their rectangle, opacity, fit, and
+      delay. The order of the entries is the stacking order, first at
+      the bottom. A surface that no entry names keeps the default: it
+      fills the region, shows fully opaque, and stacks below every
+      named surface in the order the surfaces arrived. Before the first
+      commit, every surface has the default, and the claim's surfaces
+      keep the stacking order that the operator gave them. An
+      arrangement with no entries keeps that order too.
+
+      A rectangle is in logical pixels of the region, with the region's
+      top-left corner at 0,0. The region event states its size.
+
+      When the arranger is destroyed, or its client disconnects, every
+      surface of the claim tweens back to the default over 400
+      milliseconds, and the claim has no arranger until a client asks
+      again.
+    </description>
+
+    <enum name="error">
+      <entry name="invalid_rect" value="0"
+             summary="the rectangle is empty or reaches outside the region"/>
+      <entry name="invalid_opacity" value="1"
+             summary="the opacity is below 0 or above 1"/>
+      <entry name="invalid_duration" value="2"
+             summary="a duration or delay is above 10000 milliseconds"/>
+      <entry name="duplicate_entry" value="3"
+             summary="two entries of one arrangement name the same app_id"/>
+      <entry name="not_granted" value="4"
+             summary="an entry or commit before granted, or after refused"/>
+      <entry name="invalid_enum" value="5"
+             summary="a fit or a curve that the enum does not name"/>
+    </enum>
+
+    <enum name="refusal">
+      <entry name="not_a_claim" value="0"
+             summary="the client did not arrive on a claim's socket"/>
+      <entry name="busy" value="1"
+             summary="another client arranges the claim"/>
+    </enum>
+
+    <enum name="fit">
+      <entry name="scale" value="0">
+        <description summary="scale the surface, never resize it">
+          The compositor scales the surface's content into the
+          rectangle and never sends its client a configure. This fits
+          video, whose client should not reallocate while it plays. When
+          the surface's own content is a single solid colour and it has
+          subsurfaces, as a video player's backdrop does, the surface
+          keeps filling the region at its stacking position and the
+          rectangle applies to its subsurfaces.
+        </description>
+      </entry>
+      <entry name="resize" value="1">
+        <description summary="scale during the tween, then resize">
+          The compositor scales the surface during the tween, then sends
+          its client one configure at the rectangle's size when the
+          entry lands, and stops scaling when the client commits a
+          buffer of that size. This fits a panel of text, which should
+          redraw at its new size to stay sharp.
+        </description>
+      </entry>
+    </enum>
+
+    <enum name="curve">
+      <entry name="smoothstep" value="0" summary="3t^2 - 2t^3"/>
+      <entry name="ease_out" value="1" summary="1 - (1 - t)^3, for arrivals"/>
+      <entry name="ease_in" value="2" summary="t^3, for exits"/>
+      <entry name="linear" value="3" summary="t"/>
+    </enum>
+
+    <request name="destroy" type="destructor">
+      <description summary="give up the claim's region">
+        Every surface of the claim tweens back to the default.
+      </description>
+    </request>
+
+    <request name="entry">
+      <description summary="add one entry to the pending arrangement">
+        Entries accumulate until commit. The surfaces that app_id names
+        begin their tween delay_ms milliseconds after the commit and end
+        it with the arrangement's duration after that, so an
+        arrangement can stagger its entries.
+      </description>
+      <arg name="app_id" type="string"/>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+      <arg name="opacity" type="fixed"/>
+      <arg name="fit" type="uint" enum="fit"/>
+      <arg name="delay_ms" type="uint"/>
+    </request>
+
+    <request name="commit">
+      <description summary="apply the pending arrangement">
+        The pending entries become the arrangement, and the pending list
+        is emptied. Every surface of the claim tweens from where it
+        shows now, including a surface partway through an earlier
+        tween, to where the new arrangement puts it. A duration of zero
+        moves them at once. The compositor reports name to
+        display-operator, which shows it in the Display's status. serial
+        comes back in landed.
+      </description>
+      <arg name="serial" type="uint"/>
+      <arg name="name" type="string"/>
+      <arg name="duration_ms" type="uint"/>
+      <arg name="curve" type="uint" enum="curve"/>
+    </request>
+
+    <event name="refused">
+      <description summary="the arranger arranges nothing">
+        Sent once, right after get_arranger, in place of granted.
+      </description>
+      <arg name="reason" type="uint" enum="refusal"/>
+    </event>
+
+    <event name="granted">
+      <description summary="the client arranges the claim">
+        Sent once, right after get_arranger. A region event follows.
+      </description>
+    </event>
+
+    <event name="region">
+      <description summary="the size of the claim's region">
+        Sent after granted, and again whenever the operator places the
+        region at another size. The size is 0 by 0 while the operator
+        has placed no surface of the claim, and the compositor then
+        checks no rectangle against it. The arrangement keeps its pixel
+        rectangles, so the arranger commits again when the size matters
+        to it.
+      </description>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+    </event>
+
+    <event name="surfaces">
+      <description summary="how many surfaces of the claim have an app_id">
+        Sent after granted for every app_id the claim's surfaces carry,
+        and again whenever that count changes. A count of zero means the
+        last surface with that app_id is gone.
+      </description>
+      <arg name="app_id" type="string"/>
+      <arg name="count" type="uint"/>
+    </event>
+
+    <event name="landed">
+      <description summary="an arrangement reached its end">
+        Every entry of the commit with this serial finished its tween in
+        the frame the compositor just posted. A commit that a later
+        commit replaced sends no landed.
+      </description>
+      <arg name="serial" type="uint"/>
+    </event>
+  </interface>
+</protocol>

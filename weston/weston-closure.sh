@@ -3,15 +3,13 @@
 # programs into one directory tree, so that the image ships that tree
 # and nothing else.
 #
-# Debian puts every libweston backend in one package, so apt cannot
-# express what this image needs. Installing weston pulls FreeRDP,
-# neatvnc and PipeWire, because rdp-backend.so, vnc-backend.so and
-# pipewire-backend.so are in the same package as drm-backend.so. The
-# weston and libweston-16-0 packages hold seventeen modules. This
-# script takes the four modules the operator uses and omits the other
-# thirteen.
+# The Dockerfile builds weston from its release with only the modules
+# the operator uses, and installs the libraries and the programs
+# around it from Debian packages. Those packages hold whole driver
+# sets and tool sets, so apt cannot express what this image needs, and
+# the closure takes the files that the seeds below load.
 #
-# Run it in a builder that has the packages installed. It writes a
+# Run it in a builder that has weston and the packages installed. It writes a
 # rootfs to the first directory named on the command line, less every
 # file the second directory already holds. The second is the tree of
 # the vulkan image, which the weston image builds FROM, so the two
@@ -87,8 +85,10 @@ $lib/dri/swrast_dri.so
 $lib/dri/kms_swrast_dri.so
 "
 
-# The data files. Every one is read by name at runtime, so nothing in
-# the library graph points at them either.
+# The data files. Every one but the first is read by name at runtime,
+# so nothing in the library graph points at them either. The first is
+# weston's license, which the build installs, because no Debian package
+# brings weston's copyright file.
 #
 # glvnd refuses to load a vendor it has no JSON for. mesa reads
 # drirc for the per-application workarounds it applies. xkbcommon
@@ -99,6 +99,7 @@ $lib/dri/kms_swrast_dri.so
 # device is there to apply one to, and it says "failed to find data
 # files" at every start without it.
 data="
+/usr/share/doc/weston
 /usr/share/glvnd/egl_vendor.d/50_mesa.json
 /usr/share/drirc.d/00-mesa-defaults.conf
 /usr/share/X11/xkb

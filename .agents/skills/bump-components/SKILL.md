@@ -210,6 +210,20 @@ registry learns what a tag holds: each one becomes the image label
 version that the snapshot installs. Read the versions from the
 snapshot's `Packages` indexes, or with `dpkg-query -W` in the builder.
 
+The `weston` entry of `weston/package.toml` is the exception. The
+weston image builds Weston from the upstream release, so
+`weston/latest.sh` reports and bumps that entry, and the snapshot
+holds no package that the image installs under that name.
+`vulkan/latest.sh` does not know this yet: its `--bump` writes sid's
+Weston package version over the entry, and its report shows the entry
+against sid. In the commit of the next snapshot bump, change
+`upstreams()` in `vulkan/latest.sh` to skip the `weston` entry of the
+`weston` image, and restore the entry to the version that
+`weston/latest.sh` reports. The change belongs in that commit because
+`vulkan/latest.sh` is in the vulkan image's build context, so an edit
+on any other day changes the recipe of every base, and a new snapshot
+resets every revision anyway.
+
 **A new revision.** CI hashes each base's recipe: its `package.toml`,
 its `Dockerfile`, every file in its build context, the digest of each
 image outside the repository that it starts from, and the tag of each

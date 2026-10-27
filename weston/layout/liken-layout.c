@@ -25,7 +25,33 @@
  * request and one reply per line.
  * plans/completed/17-a-layout-for-every-screen.md states it, and
  * plans/completed/18-a-surface-leaves-with-a-fade.md states the
- * transition a hide carries.
+ * transition a hide carries. motion.c runs every transition, and
+ * arrangement.c serves liken_arrangement_v1 on the claims' sockets.
+ *
+ * Four lines report the arrangements to the operator, beside the
+ * output and surface lines. An app_id or a name goes out with each
+ * space and control character as an underscore, so every line splits
+ * at spaces.
+ *
+ *   surface-app-id <surface-id> <app_id>
+ *                  the xdg app_id of a surface, when the module first
+ *                  reads one and whenever it changes
+ *   arranger <socket-name> <pid>
+ *                  a client of the claim on that socket was granted the
+ *                  arrangement; the pid is the client's, from its
+ *                  socket's credentials, so 0 or another namespace's pid
+ *                  when the client is in another PID namespace
+ *   arranger-gone <socket-name> <reason>
+ *                  that claim's arranger went, and its surfaces tween
+ *                  back to the default; the reason is released when
+ *                  the client destroyed its arranger, and disconnected
+ *                  when the client went away without destroying it
+ *   arrangement <socket-name> <serial> <name>
+ *                  the arranger committed an arrangement
+ *
+ * A new connection gets the current state again: a surface-app-id line
+ * after each surface line, an arranger line for each claim that has
+ * one, and its last arrangement line.
  */
 #define _GNU_SOURCE
 
@@ -41,15 +67,11 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <libweston/desktop.h>
 #include <libweston/libweston.h>
 #include <libweston/shell-utils.h>
 
-#include "ivi-layout-export.h"
-
-/* A connector name and a socket name are both short. 64 bytes holds
- * "wayland-" plus a claim UID, which is the longest name the operator
- * sends. */
-#define NAME_LEN 64
+#include "liken-layout.h"
 
 /* The most surfaces one order request may name. A screen holds a
  * handful of surfaces, and the cap keeps the request on the stack. */
@@ -66,29 +88,6 @@
  * XDG_RUNTIME_DIR, because CDI delivers that directory to consumer
  * pods and the capture socket must never be delivered. */
 #define CAPTURE_SOCKET_PATH "/etc/weston/wayland-capture"
-
-/* The name the capture socket's clients report as, which is the one
- * name the authority below admits. */
-#define CAPTURE_SOCKET "wayland-capture"
-
-/* The socket every pod prepared before per-claim sockets still holds
- * in WAYLAND_DISPLAY. A surface on it belongs to no claim. */
-#define SHARED_SOCKET "wayland-0"
-
-/* One ivi layer per output, the size of the output. Every surface on
- * the output goes in this layer, and the layer's render order is the
- * stacking order. */
-struct output_layer {
-	struct weston_output *output;
-	struct ivi_layout_layer *layer;
-	/* The black view under every surface on this output. weston
-	 * composes only the views it holds and clears nothing, so a
-	 * region no surface covers would keep the pixels of the frame
-	 * before it. ivi-shell ships no background of its own. */
-	struct weston_curtain *background;
-	struct wl_list stack; /* struct layout_surface::stack_link, bottom first */
-	struct wl_list link;
-};
 
 struct listening_socket {
 	char name[NAME_LEN];
@@ -113,27 +112,17 @@ struct client_origin {
 	struct wl_list link;
 };
 
-struct layout_surface {
-	struct ivi_layout_surface *ivisurf;
-	uint32_t id;
-	char socket_name[NAME_LEN];
-	int32_t width, height;
-	struct output_layer *placed;
-	struct wl_list stack_link;
-	struct wl_list link;
-};
-
-static const struct ivi_layout_interface *ivi;
-static struct weston_compositor *compositor;
+const struct ivi_layout_interface *ivi;
+struct weston_compositor *compositor;
 
 /* Every output's background view goes in this one weston layer, below
  * the layer ivi-layout composes its own views in. */
 static struct weston_layer background_layer;
 
-static struct wl_list output_layers;
+struct wl_list output_layers;
 static struct wl_list listening_sockets;
 static struct wl_list client_origins;
-static struct wl_list layout_surfaces;
+struct wl_list layout_surfaces;
 
 /* Surface ids are unique for the compositor's life, so an id the
  * operator holds never names a later surface. */
@@ -177,7 +166,7 @@ drop_connection(void)
  * is not reading, and the connection closes. The operator replays the
  * whole layout on its next connection, so a dropped line costs one
  * reconnect and no state. */
-static void
+void
 send_line(const char *format, ...)
 {
 	char line[LINE_LEN];
@@ -259,7 +248,7 @@ output_layer_of(struct weston_output *output)
 	return NULL;
 }
 
-static struct output_layer *
+struct output_layer *
 output_layer_named(const char *connector)
 {
 	struct output_layer *ol;
@@ -273,20 +262,30 @@ output_layer_named(const char *connector)
 /* The render order is the whole stack, bottom first, because
  * layer_set_render_order replaces the layer's contents. A surface the
  * operator moved to another output leaves this layer the same way. */
-static void
+void
 apply_stack(struct output_layer *ol)
 {
 	struct ivi_layout_surface **order;
-	struct layout_surface *s;
-	int count = 0;
+	struct layout_surface **stack, *s;
+	int count = 0, i;
 
 	order = calloc(wl_list_length(&ol->stack) + 1, sizeof *order);
-	if (!order)
+	stack = calloc(wl_list_length(&ol->stack) + 1, sizeof *stack);
+	if (!order || !stack) {
+		free(order);
+		free(stack);
 		return;
+	}
 	wl_list_for_each(s, &ol->stack, stack_link)
-		order[count++] = s->ivisurf;
+		stack[count++] = s;
+	/* A claim's arrangement reorders the claim's surfaces inside the
+	 * places that the operator's stack gives them. */
+	arrangement_order(stack, count);
+	for (i = 0; i < count; i++)
+		order[i] = stack[i]->ivisurf;
 	ivi->layer_set_render_order(ol->layer, order, count);
 	free(order);
+	free(stack);
 }
 
 /* The background covers the whole output and is opaque, so weston
@@ -356,9 +355,10 @@ add_output_layer(struct weston_output *output)
 	wl_list_init(&ol->stack);
 	wl_list_insert(&output_layers, &ol->link);
 
+	motion_output_added(ol);
 	ivi->screen_add_layer(output, ol->layer);
 	ivi->layer_set_visibility(ol->layer, true);
-	ivi->commit_changes();
+	layout_commit();
 
 	add_background(ol);
 	ivi->screen_ready(output);
@@ -373,7 +373,7 @@ resize_output_layer(struct output_layer *ol)
 					ol->output->width, ol->output->height);
 	ivi->layer_set_destination_rectangle(ol->layer, 0, 0,
 					     ol->output->width, ol->output->height);
-	ivi->commit_changes();
+	layout_commit();
 
 	drop_background(ol);
 	add_background(ol);
@@ -390,6 +390,7 @@ drop_output_layer(struct weston_output *output)
 
 	if (!ol)
 		return;
+	motion_output_dropped(ol);
 	wl_list_for_each_safe(s, next, &ol->stack, stack_link) {
 		wl_list_remove(&s->stack_link);
 		wl_list_init(&s->stack_link);
@@ -400,7 +401,7 @@ drop_output_layer(struct weston_output *output)
 	ivi->layer_destroy(ol->layer);
 	wl_list_remove(&ol->link);
 	free(ol);
-	ivi->commit_changes();
+	layout_commit();
 }
 
 /* The operator computes pixels from the size the compositor lays out
@@ -727,19 +728,33 @@ on_client_created(struct wl_listener *listener, void *data)
 	wl_list_insert(&client_origins, &co->link);
 }
 
-static const char *
-origin_of_surface(struct weston_surface *ws)
+const char *
+origin_of_client(struct wl_client *client)
 {
 	struct client_origin *co;
-	struct wl_client *client;
 
-	if (!ws->resource)
-		return SHARED_SOCKET;
-	client = wl_resource_get_client(ws->resource);
 	wl_list_for_each(co, &client_origins, link)
 		if (co->client == client)
 			return co->socket_name;
 	return SHARED_SOCKET;
+}
+
+static const char *
+origin_of_surface(struct weston_surface *ws)
+{
+	if (!ws->resource)
+		return SHARED_SOCKET;
+	return origin_of_client(wl_resource_get_client(ws->resource));
+}
+
+/* The output a claim's socket was opened for, or NULL for wayland-0 and
+ * a name the operator never opened. */
+const char *
+connector_of_socket(const char *socket_name)
+{
+	struct listening_socket *ls = socket_named(socket_name);
+
+	return ls && ls->connector[0] ? ls->connector : NULL;
 }
 
 /* The capture door */
@@ -824,6 +839,7 @@ add_surface(struct ivi_layout_surface *ivisurf, struct weston_surface *ws)
 		 origin_of_surface(ws));
 	wl_list_init(&s->stack_link);
 	wl_list_insert(&layout_surfaces, &s->link);
+	motion_surface_added(s);
 
 	weston_log("liken-layout: surface %u arrived on %s at %dx%d\n",
 		   s->id, s->socket_name, s->width, s->height);
@@ -835,6 +851,44 @@ send_surface(struct layout_surface *s)
 {
 	send_line("surface %u %s %d %d\n", s->id, s->socket_name,
 		  s->width, s->height);
+}
+
+static void
+send_app_id(struct layout_surface *s)
+{
+	char word[APP_ID_LEN];
+
+	if (!s->app_id[0])
+		return;
+	control_word(word, sizeof word, s->app_id);
+	send_line("surface-app-id %u %s\n", s->id, word);
+}
+
+/* A client sets its app_id when it likes, and libweston-desktop
+ * signals no change of it, so the module reads it at each commit of
+ * the surface. The operator shows it beside the surface, and an
+ * arrangement names surfaces by it. */
+static void
+read_app_id(struct layout_surface *s)
+{
+	struct weston_surface *ws = ivi->surface_get_weston_surface(s->ivisurf);
+	struct weston_desktop_surface *dsurface =
+		ws ? weston_surface_get_desktop_surface(ws) : NULL;
+	const char *app_id = dsurface ? weston_desktop_surface_get_app_id(dsurface) : NULL;
+
+	if (!app_id)
+		app_id = "";
+	if (strncmp(s->app_id, app_id, sizeof s->app_id - 1) == 0)
+		return;
+	snprintf(s->app_id, sizeof s->app_id, "%s", app_id);
+	send_app_id(s);
+	arrangement_surfaces_changed(s->socket_name);
+}
+
+void
+surface_committed(struct layout_surface *s)
+{
+	read_app_id(s);
 }
 
 /* Plain xdg-shell clients arrive on the desktop configure signal and
@@ -860,6 +914,7 @@ on_configure(struct wl_listener *listener, void *data)
 		if (!s)
 			return;
 		send_surface(s);
+		read_app_id(s);
 	} else if (s->width != ws->width || s->height != ws->height) {
 		s->width = ws->width;
 		s->height = ws->height;
@@ -867,7 +922,7 @@ on_configure(struct wl_listener *listener, void *data)
 	}
 
 	ivi->surface_set_source_rectangle(ivisurf, 0, 0, ws->width, ws->height);
-	ivi->commit_changes();
+	layout_commit();
 }
 
 static void
@@ -875,11 +930,13 @@ on_remove(struct wl_listener *listener, void *data)
 {
 	struct layout_surface *s = surface_of(data);
 	struct output_layer *ol;
+	char socket[NAME_LEN];
 
 	(void)listener;
 	if (!s)
 		return;
 	ol = s->placed;
+	motion_surface_removed(s);
 	if (ol) {
 		wl_list_remove(&s->stack_link);
 		s->placed = NULL;
@@ -887,42 +944,30 @@ on_remove(struct wl_listener *listener, void *data)
 	send_line("surface-gone %u\n", s->id);
 	weston_log("liken-layout: surface %u on %s is gone\n",
 		   s->id, s->socket_name);
+	snprintf(socket, sizeof socket, "%s", s->socket_name);
 	wl_list_remove(&s->link);
 	free(s);
+	arrangement_surfaces_changed(socket);
 
 	if (ol) {
 		apply_stack(ol);
-		ivi->commit_changes();
+		layout_commit();
 	}
 }
 
 /* Placement */
 
+/* A fade or a move of zero milliseconds is a request the module
+ * refuses, as plan 17 states the protocol: the operator sends none for
+ * a change at once. */
 static bool
-parse_transition(const char *word, uint32_t ms, enum ivi_layout_transition_type *out)
+parse_transition(const char *word, uint32_t ms)
 {
 	if (!word)
 		return false;
-	if (strcmp(word, "none") == 0) {
-		/* A commit resets the type to none, but a place that
-		 * follows a hide with no commit between would otherwise
-		 * inherit the earlier type. */
-		*out = IVI_LAYOUT_TRANSITION_NONE;
+	if (strcmp(word, "none") == 0)
 		return true;
-	}
-	/* ivi-layout divides the elapsed time by the duration to get a
-	 * transition's progress, so a fade or a move of zero
-	 * milliseconds is a request the module refuses rather than
-	 * passes on. */
-	if (strcmp(word, "fade") == 0 && ms > 0) {
-		*out = IVI_LAYOUT_TRANSITION_VIEW_FADE_ONLY;
-		return true;
-	}
-	if (strcmp(word, "move") == 0 && ms > 0) {
-		*out = IVI_LAYOUT_TRANSITION_VIEW_DEST_RECT_ONLY;
-		return true;
-	}
-	return false;
+	return (strcmp(word, "fade") == 0 || strcmp(word, "move") == 0) && ms > 0;
 }
 
 static void
@@ -932,7 +977,6 @@ do_place(uint32_t seq, char **save)
 	int32_t x, y, w, h;
 	const char *connector;
 	const char *word;
-	enum ivi_layout_transition_type transition;
 	struct layout_surface *s;
 	struct output_layer *ol;
 
@@ -954,7 +998,7 @@ do_place(uint32_t seq, char **save)
 	}
 	word = strtok_r(NULL, " ", save);
 	if (!parse_u32(strtok_r(NULL, " ", save), &ms) ||
-	    !parse_transition(word, ms, &transition)) {
+	    !parse_transition(word, ms)) {
 		reply_error(seq, "place takes none, fade or move and a duration");
 		return;
 	}
@@ -971,9 +1015,13 @@ do_place(uint32_t seq, char **save)
 	}
 
 	/* A surface new to this output goes on top of it. The operator
-	 * states the stacking order with a following order request. */
+	 * states the stacking order with a following order request. The
+	 * engine's transform leaves the view on the old output, because
+	 * ivi-layout makes the surface a new view on this one and keeps
+	 * the old view to reuse if the surface comes back. */
 	if (s->placed != ol) {
 		if (s->placed) {
+			motion_surface_left(s);
 			wl_list_remove(&s->stack_link);
 			apply_stack(s->placed);
 		}
@@ -982,7 +1030,10 @@ do_place(uint32_t seq, char **save)
 		apply_stack(ol);
 	}
 
-	ivi->surface_set_transition(s->ivisurf, transition, ms);
+	/* The region changes at the commit with no ivi-layout transition,
+	 * so a move sends the client its one configure at the start, and
+	 * the engine glides the view from where it showed. */
+	motion_place(s, ol, word, ms);
 	ivi->surface_set_destination_rectangle(s->ivisurf, x, y, w, h);
 	ivi->surface_set_visibility(s->ivisurf, true);
 	reply_ok(seq);
@@ -993,7 +1044,6 @@ do_hide(uint32_t seq, char **save)
 {
 	uint32_t id, ms;
 	const char *word;
-	enum ivi_layout_transition_type transition;
 	struct layout_surface *s;
 
 	if (!parse_u32(strtok_r(NULL, " ", save), &id)) {
@@ -1004,8 +1054,7 @@ do_hide(uint32_t seq, char **save)
 	/* A hide takes no move: the surface is leaving the screen, and
 	 * there is no rectangle to glide it to. */
 	if (!parse_u32(strtok_r(NULL, " ", save), &ms) ||
-	    !parse_transition(word, ms, &transition) ||
-	    transition == IVI_LAYOUT_TRANSITION_VIEW_DEST_RECT_ONLY) {
+	    !parse_transition(word, ms) || strcmp(word, "move") == 0) {
 		reply_error(seq, "hide takes none or fade and a duration");
 		return;
 	}
@@ -1014,14 +1063,12 @@ do_hide(uint32_t seq, char **save)
 		reply_error(seq, "no such surface");
 		return;
 	}
-	/* ivi-layout reads the transition type on the commit that changes
-	 * the visibility, and runs ivi_layout_transition_visibility_off
-	 * for a fade, so the type is set before the change. The client
-	 * keeps drawing through the fade: the compositor animates a
-	 * surface it still holds, and a client that exits takes its
-	 * surface with it. */
-	ivi->surface_set_transition(s->ivisurf, transition, ms);
-	ivi->surface_set_visibility(s->ivisurf, false);
+	/* A fade keeps the surface visible to ivi-layout until the engine
+	 * ends the fade and hides it. The client keeps drawing through the
+	 * fade: the compositor animates a surface it still holds, and a
+	 * client that exits takes its surface with it. */
+	if (motion_hide(s, word, ms))
+		ivi->surface_set_visibility(s->ivisurf, false);
 	reply_ok(seq);
 }
 
@@ -1090,8 +1137,11 @@ send_state(void)
 
 	wl_list_for_each(ol, &output_layers, link)
 		send_output(ol->output);
-	wl_list_for_each(s, &layout_surfaces, link)
+	wl_list_for_each(s, &layout_surfaces, link) {
 		send_surface(s);
+		send_app_id(s);
+	}
+	arrangement_send_state();
 }
 
 static void
@@ -1144,7 +1194,7 @@ handle_line(char *line)
 	else if (strcmp(verb, "order") == 0)
 		do_order(seq, &save);
 	else if (strcmp(verb, "commit") == 0) {
-		ivi->commit_changes();
+		layout_commit();
 		reply_ok(seq);
 	} else
 		reply_error(seq, "unknown request word");
@@ -1294,6 +1344,11 @@ wet_module_init(struct weston_compositor *ec, int *argc, char *argv[])
 	wl_list_init(&listening_sockets);
 	wl_list_init(&client_origins);
 	wl_list_init(&layout_surfaces);
+
+	/* Every commit reads the claims' arrangements, and the first one
+	 * comes with the first output below. */
+	if (!arrangement_init())
+		weston_log("liken-layout: no liken_arrangement_v1 global, so no claim can arrange its surfaces\n");
 
 	wl_list_for_each(output, &ec->output_list, link)
 		add_output_layer(output);

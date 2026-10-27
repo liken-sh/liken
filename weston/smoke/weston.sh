@@ -36,8 +36,12 @@ set -euo pipefail
 image=$1
 
 # The image must hold the notices of the third-party software in it,
-# as notices/check.sh describes.
-"$(dirname "$0")/../../notices/check.sh" "$image"
+# as notices/check.sh describes. weston comes from its release, not
+# from a Debian package, so its license is named here.
+"$(dirname "$0")/../../notices/check.sh" "$image" usr/share/doc/weston/COPYING
+
+# The compositor must be the release that the Dockerfile pins.
+version=$(sed -n 's/^ARG WESTON_VERSION=//p' "$(dirname "$0")/../Dockerfile")
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -53,3 +57,4 @@ cat "$work/weston.log"
 grep -q "Using GL renderer" "$work/weston.log"
 grep -q "Registered plugin API 'ivi_layout_api_v1'" "$work/weston.log"
 grep -q "liken-layout: the control socket is /etc/weston/layout.sock" "$work/weston.log"
+grep -q "weston $version$" "$work/weston.log"
