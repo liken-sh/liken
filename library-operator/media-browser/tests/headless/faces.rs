@@ -89,7 +89,10 @@ fn the_picker_draws_the_picture_of_a_person_who_has_one() {
 // person in the room. The run names the audience, so no picker goes up,
 // and the progress store holds a play of theirs, so the home page draws
 // the row. The strip's circle is at a place the layout names. The row's
-// heading is under the band, so a red circle there is the heading's.
+// heading is under the band, so a red circle there is the heading's. The
+// row comes from the reader's thread, which lands later than the strip's
+// picture on a runner that renders on the CPU, so the capture waits longer
+// than the strip alone needs.
 #[test]
 fn the_strip_and_the_rows_heading_draw_the_picture_of_a_person_in_the_room() {
     let dir = workspace("room-faces");
@@ -118,7 +121,7 @@ fn the_strip_and_the_rows_heading_draw_the_picture_of_a_person_in_the_room() {
             "--capture",
             &text(&frames),
             "--capture-at",
-            "1.5",
+            "3.0",
             "--size",
             "1920x1080",
             "--quit-after",
@@ -127,7 +130,7 @@ fn the_strip_and_the_rows_heading_draw_the_picture_of_a_person_in_the_room() {
     );
 
     assert_eq!(run.exit, "0", "{}", run.log);
-    let path = frames.join("001.50.png");
+    let path = frames.join("003.00.png");
     drawn(&path, &run);
     let pixels = image::open(&path)
         .unwrap_or_else(|error| panic!("{}: {error}\n{}", path.display(), run.log))
