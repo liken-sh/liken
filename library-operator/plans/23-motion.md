@@ -1,6 +1,8 @@
 # Animation in the media browser
 
-Plan 23. This is a stub for a later agent to design. It adds animation to
+Plan 23. This is a stub for a later agent to design. It is step 4 of
+[root plan 85](../../plans/85-motion.md), which sets the rules and the
+durations that every surface shares. It adds animation to
 the media browser: the focus outline slides, pages open, and walls
 scroll smoothly. It draws no frame that the machine does not need.
 

@@ -9,6 +9,8 @@ questions for the design. [Plan 53](completed/53-up-next.md) built the
 built the card that `upnext.lua` draws from it.
 [Plan 62](completed/62-intro-and-credits-marks.md) moved the card's
 rise to the start of the credits where the catalog has credits marks.
+[Root plan 85](../../plans/85-motion.md) adds the compositor motion that
+the redesign of the card uses, so the film can step back at the credits.
 
 ## The problems
 
