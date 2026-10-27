@@ -26,7 +26,10 @@ pub enum Anchor {
     TopLeft,
     /// `\an9`, the top-right column.
     TopRight,
-    /// `\an4`, the strip's cells, which hang beside their heading.
+    /// `\an6`, the up-next chip's label, centred on its panel's middle row.
+    Right,
+    /// `\an4`, the strip's cells, which hang beside their heading, and the
+    /// skip control's label, centred on its box's middle row.
     Left,
     /// `\an5`, the image counter, centred on its row.
     Centre,
@@ -319,14 +322,20 @@ impl<'a> Brush<'a> {
     /// hiding it.
     // The panel fades with everything else.
     pub fn panel(&mut self, shape: Rectangle) {
-        let (outline, radius) = shape::outside_rounded(shape, PANEL_RADIUS, PANEL_BORDER);
+        self.panel_rounded(shape, PANEL_RADIUS);
+    }
+
+    /// The panel at another corner radius, for a button that rounds at half
+    /// its height.
+    pub fn panel_rounded(&mut self, shape: Rectangle, corner: f32) {
+        let (outline, radius) = shape::outside_rounded(shape, corner, PANEL_BORDER);
         self.paint(
             &shape::rounded(outline, radius),
             Paint::Stroke(PANEL_BORDER),
             theme::at(theme::color::fill(), theme::alpha::OPAQUE),
         );
         self.paint(
-            &shape::rounded(shape, PANEL_RADIUS),
+            &shape::rounded(shape, corner),
             Paint::Fill,
             theme::at(theme::color::SHADOW, theme::alpha::PANEL),
         );
@@ -401,12 +410,12 @@ impl<'a> Brush<'a> {
             },
             align_x: match line.anchor {
                 Anchor::TopLeft | Anchor::Left => text::Alignment::Left,
-                Anchor::TopRight => text::Alignment::Right,
+                Anchor::TopRight | Anchor::Right => text::Alignment::Right,
                 Anchor::Centre | Anchor::BottomCentre => text::Alignment::Center,
             },
             align_y: match line.anchor {
                 Anchor::TopLeft | Anchor::TopRight => Vertical::Top,
-                Anchor::Left | Anchor::Centre => Vertical::Center,
+                Anchor::Left | Anchor::Right | Anchor::Centre => Vertical::Center,
                 Anchor::BottomCentre => Vertical::Bottom,
             },
             shaping: Shaping::Advanced,

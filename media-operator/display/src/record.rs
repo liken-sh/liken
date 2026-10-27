@@ -172,6 +172,7 @@ pub fn describe(command: &Command) -> Option<String> {
     match words.as_slice() {
         ["script-message", ..] => None,
         [.., "cycle", "pause"] => Some("pause or resume".into()),
+        [.., "set", "pause", "yes"] => Some("pause".into()),
         ["seek", ..] => Some(format!("seek to {}", clock(number(1).unwrap_or(0.0)))),
         ["add", "chapter", _] => Some(format!("chapter {:+}", number(2).unwrap_or(0.0))),
         ["playlist-prev"] => Some("the previous item".into()),
@@ -217,6 +218,10 @@ mod tests {
             (
                 vec![json!("no-osd"), json!("cycle"), json!("pause")],
                 Some("pause or resume"),
+            ),
+            (
+                vec![json!("no-osd"), json!("set"), json!("pause"), json!("yes")],
+                Some("pause"),
             ),
             (
                 vec![json!("seek"), json!(1205.5), json!("absolute+exact")],

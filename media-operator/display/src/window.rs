@@ -14,6 +14,11 @@ use iced::{Color, Element, Length, Rectangle, Renderer, Size, Subscription, Task
 use jiff::Zoned;
 use tokio::sync::{broadcast, watch};
 
+mod arranging;
+mod detaching;
+
+use crate::arranger::link::{self, Link};
+use crate::arranger::{self as arrangement, Arranger};
 use crate::art::{self, Answer, Art, Job};
 use crate::canvas::{Brush, Canvas, Scrims};
 use crate::cast::{Cast, Spans};
@@ -70,6 +75,13 @@ pub enum Message {
     HideRow(u64),
     /// One decode came back from the blocking pool.
     Art(Answer),
+    /// The arranger's binding started on the window's connection, or could
+    /// not start.
+    Attached(Result<Link, String>),
+    /// One event of the arranger.
+    Arranger(arrangement::Event),
+    /// The compositor asked the window to close.
+    Close,
 }
 
 /// One hide window: how long it waits, how many have been armed, and which one
@@ -107,6 +119,11 @@ impl Idle {
         }
     }
 
+    /// Cancel the window that stands, so its expiry takes nothing down.
+    fn cancel(&mut self) {
+        self.armed = None;
+    }
+
     /// Whether this window is the one that stands, which takes it down.
     fn expired(&mut self, at: u64) -> bool {
         if self.armed != Some(at) {
@@ -136,6 +153,16 @@ pub struct Display {
     volume: Volume,
     cast: Cast,
     art: Art,
+    /// What the compositor granted and where the film stands, and the
+    /// binding that carries each arrangement to the compositor.
+    arranger: Arranger,
+    link: Option<Link>,
+    /// Whether mpv's socket closed. The display then draws nothing for the
+    /// rest of its life, which `detaching` explains.
+    detached: bool,
+    /// The arrangements this display committed, which a test reads back.
+    #[cfg(test)]
+    committed: Vec<arrangement::Commit>,
     /// The hide windows the display, the card, and the row wait out, each on
     /// its own clock and none reading another's.
     idle: Idle,
@@ -200,6 +227,11 @@ impl Display {
             volume: Volume::default(),
             cast: Cast::default(),
             art: Art::default(),
+            arranger: Arranger::default(),
+            link: None,
+            detached: false,
+            #[cfg(test)]
+            committed: Vec::new(),
             idle: Idle::new(theme::IDLE_HIDE),
             card: Idle::new(theme::CARD_HIDE),
             row: Idle::new(theme::IDLE_HIDE),
@@ -219,6 +251,7 @@ impl Display {
     /// display draws now.
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.step(message);
+        self.follow_offer();
         let jobs = self.sync_art();
         let _ = self.watching.send(Watching {
             canvas: self.canvas,
@@ -233,10 +266,11 @@ impl Display {
             Message::Mpv(ipc::Event::Property { name, value }) => {
                 return self.on_property(&name, &value);
             }
-            Message::Mpv(ipc::Event::Detached) => {}
+            Message::Mpv(ipc::Event::Detached) => self.on_detached(),
             Message::Tick => {
                 self.focus.fade_mut().step();
                 self.upnext.fade_mut().step();
+                self.upnext.column_mut().step();
                 self.skip.fade_mut().step();
                 self.volume.fade_mut().step();
                 self.redraw();
@@ -281,6 +315,9 @@ impl Display {
                 }
                 return decode(jobs);
             }
+            Message::Attached(link) => self.on_attached(link),
+            Message::Arranger(event) => return self.on_arranger(event),
+            Message::Close => return self.on_close(),
         }
         Task::none()
     }
@@ -354,7 +391,9 @@ impl Display {
         let mut focus = self.focus;
         if let Some(action) = crate::focus::Action::from_word(word) {
             let repeat = words.get(1).is_some_and(|second| second == record::REPEAT);
+            let (stepped, waited) = (self.upnext.stepped_back(), self.upnext.waiting());
             let commands = focus.nav(action, &mut self.parts());
+            self.after_press(action == crate::focus::Action::Back, stepped, waited);
             let pressed = self.record.press(word, repeat, commands, &self.wire.notes);
             self.say(pressed.ended);
             for line in pressed.lines {
@@ -420,6 +459,7 @@ impl Display {
                 .upnext
                 .on_percent(self.percent(), &self.film, self.rise());
             if rose {
+                self.on_rise();
                 self.redraw();
             }
             self.follow_marks();
@@ -489,6 +529,7 @@ impl Display {
     /// configured, the item, the file mpv plays, and the scan in flight.
     fn sync_art(&mut self) -> Vec<Job> {
         let (canvas, preview) = (self.canvas, self.previewing());
+        self.art.frame_next(self.upnext.art_box());
         let portraits = match self.cast_showing() {
             true => self.cast.portraits(&self.film),
             false => Vec::new(),
@@ -664,7 +705,7 @@ impl Display {
             let limit = self
                 .upnext
                 .showing_card()
-                .then(|| upnext::card_x(&canvas) - crate::cast::CARD_CLEAR);
+                .then(|| self.upnext.left(&canvas) - crate::cast::CARD_CLEAR);
             self.cast.draw(
                 brush,
                 &self.film,
@@ -718,15 +759,15 @@ impl Display {
             );
             self.strip.draw_chooser(brush, &self.film);
         }
-        // The card shows itself when the playhead crosses the rise, and it
-        // stays for the whole wait, both with the OSD down. So it draws
-        // outside the OSD block on a fade of its own.
-        self.upnext.draw_outside(
-            brush,
-            self.focus.visible(),
-            self.focus.card_takes_select(&self.upnext, &self.skip),
-            &self.bridge(&canvas),
-        );
+        // The card shows itself with the OSD down when the playhead crosses
+        // the rise, and a taken card fades out over the hand-off with the OSD
+        // up or down. So it draws outside the OSD block on a fade of its own.
+        // The column beside a stepped-back film draws over the OSD as well,
+        // so it draws focused when the OSD's focus stands on the offer.
+        let focused = self.focus.card_takes_select(&self.upnext, &self.skip)
+            || (self.upnext.stepped_back() && self.focus.focused_stop() == Some(Stop::Next));
+        self.upnext
+            .draw_outside(brush, self.focus.visible(), focused, &self.bridge(&canvas));
         // The skip control stays over the bare video for the whole span, on a
         // fade of its own, for the same reason.
         self.skip.draw_outside(brush, self.focus.visible());
@@ -782,6 +823,7 @@ impl Display {
                 }
                 _ => None,
             }),
+            iced::window::close_requests().map(|_| Message::Close),
         ];
         if self.fading() {
             running.push(iced::time::every(theme::FADE_TICK).map(|_| Message::Tick));
@@ -789,19 +831,46 @@ impl Display {
         // A paused film pushes no position, and the display stands open for
         // as long as the pause lasts, so the reading and the end time follow
         // a tick of their own while it is up.
-        if self.focus.visible() {
+        if self.focus.visible() && !self.detached {
             running.push(iced::time::every(MINUTE).map(|_| Message::Minute));
         }
         Subscription::batch(running)
     }
 
-    /// Whether any of the four fades is moving: the display's own, the
-    /// up-next card's, the skip control's, and the volume row's.
+    /// Whether one layer draws anything. A frame with nothing in it is what
+    /// the display draws between summons: the film below shows through
+    /// every pixel of the window. The up-next card, the skip control, and
+    /// the volume row come and go on clocks of their own, so the layer above
+    /// draws for them with the display down. The cover is the one picture
+    /// that holds the frame with the OSD down, so the layer under the OSD
+    /// draws for it as well. Once mpv detaches, neither layer draws.
+    fn draws(&self, part: Part) -> bool {
+        if self.detached {
+            return false;
+        }
+        let fade = self.focus.fade().value();
+        let visible = self.focus.visible();
+        match part {
+            Part::Below => fade > 0.0 || self.art.cover().is_some(),
+            Part::Above => {
+                fade > 0.0
+                    || self.upnext.draws_outside(visible)
+                    || self.skip.draws_outside(visible)
+                    || self.volume.showing()
+            }
+        }
+    }
+
+    /// Whether any of the five fades is moving: the display's own, the
+    /// up-next card's and its column's, the skip control's, and the volume
+    /// row's. Once mpv detaches nothing draws, so nothing ticks.
     fn fading(&self) -> bool {
-        self.focus.fade().running()
-            || self.upnext.fade().running()
-            || self.skip.fade().running()
-            || self.volume.fade().running()
+        !self.detached
+            && (self.focus.fade().running()
+                || self.upnext.fade().running()
+                || self.upnext.column().running()
+                || self.skip.fade().running()
+                || self.volume.fade().running())
     }
 }
 
@@ -971,32 +1040,10 @@ impl canvas::Program<Message> for Layer<'_> {
         // item asks for the box the screen really takes.
         let canvas = self.display.canvas;
 
-        // A frame with nothing in it is what the display draws between
-        // summons: the film below shows through every pixel of the window.
-        // The up-next card, the skip control, and the volume row come and go
-        // on clocks of their own, so the layer above draws for them with the
-        // display down. The
-        // cover is the one picture that holds the frame with the OSD down, so
-        // the layer under the OSD draws for it as well.
-        let fade = self.display.focus.fade().value();
-        let draws = match self.part {
-            Part::Below => fade > 0.0 || self.display.art.cover().is_some(),
-            Part::Above => {
-                fade > 0.0
-                    || self
-                        .display
-                        .upnext
-                        .draws_outside(self.display.focus.visible())
-                    || self
-                        .display
-                        .skip
-                        .draws_outside(self.display.focus.visible())
-                    || self.display.volume.showing()
-            }
-        };
-        if !draws {
+        if !self.display.draws(self.part) {
             return Vec::new();
         }
+        let fade = self.display.focus.fade().value();
 
         let (cache, now) = match self.part {
             Part::Below => (&self.display.below, Some(clock::now())),
@@ -1027,14 +1074,29 @@ pub fn run(ipc: Ipc) -> iced::Result {
         // it. The compositor's shell gives the keyboard to the surface a
         // click lands on, so without this the scrim takes every click
         // and the player never gets a key.
+        //
+        // The arranger binds on the window's own connection, from winit's
+        // thread, and its events reach the frame loop through a channel.
         move || {
+            let (sender, events) = tokio::sync::mpsc::unbounded_channel();
+            let events = iced::futures::stream::unfold(events, |mut events| async move {
+                events.recv().await.map(|event| (event, events))
+            });
             (
                 Display::new(ipc.clone()),
-                iced::window::oldest().and_then(|id| {
-                    iced::window::enable_mouse_passthrough(id)
-                        .chain(iced::window::size(id).map(Message::Resized))
-                        .chain(iced::window::scale_factor(id).map(Message::Rescaled))
-                }),
+                Task::batch([
+                    iced::window::oldest().and_then(|id| {
+                        iced::window::enable_mouse_passthrough(id)
+                            .chain(iced::window::size(id).map(Message::Resized))
+                            .chain(iced::window::scale_factor(id).map(Message::Rescaled))
+                    }),
+                    iced::window::oldest().and_then(move |id| {
+                        let sender = sender.clone();
+                        iced::window::run(id, move |window| link::attach(window, sender))
+                            .map(Message::Attached)
+                    }),
+                    Task::run(events, Message::Arranger),
+                ]),
             )
         },
         Display::update,
@@ -1047,13 +1109,11 @@ pub fn run(ipc: Ipc) -> iced::Result {
         background_color: Color::TRANSPARENT,
         text_color: theme::color::text(),
     })
-    .window(iced::window::Settings {
-        size: Size::new(theme::CANVAS_WIDTH, theme::CANVAS_HEIGHT),
-        decorations: false,
-        transparent: true,
-        resizable: false,
-        ..Default::default()
-    })
+    .window(settings())
+    // A close request reaches the frame loop as Message::Close, which closes
+    // the arranger's link before the toolkit exits, so the link's thread
+    // never reads a connection winit has closed.
+    .exit_on_close_request(false)
     // The brand's two faces come out of the binary, not out of whatever
     // the image has installed, so every liken display draws the same
     // face.
@@ -1070,16 +1130,41 @@ pub fn run(ipc: Ipc) -> iced::Result {
     .run()
 }
 
+/// The window: the canvas's size, no decorations, and a transparent ground.
+/// Its app_id names it to the compositor, so an arrangement places the
+/// display's surface apart from mpv's.
+fn settings() -> iced::window::Settings {
+    iced::window::Settings {
+        size: Size::new(theme::CANVAS_WIDTH, theme::CANVAS_HEIGHT),
+        decorations: false,
+        transparent: true,
+        resizable: false,
+        platform_specific: iced::window::settings::PlatformSpecific {
+            application_id: arrangement::OVERLAY.to_string(),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
 
-    fn message(word: &str) -> Message {
+    #[test]
+    fn the_window_carries_the_overlay_app_id() {
+        assert_eq!(
+            settings().platform_specific.application_id,
+            "liken-media-overlay"
+        );
+    }
+
+    pub(super) fn message(word: &str) -> Message {
         Message::Mpv(ipc::Event::Message(vec![word.to_string()]))
     }
 
-    fn property(name: &str, value: serde_json::Value) -> Message {
+    pub(super) fn property(name: &str, value: serde_json::Value) -> Message {
         Message::Mpv(ipc::Event::Property {
             name: name.to_string(),
             value,
@@ -1092,7 +1177,7 @@ mod tests {
 
     /// One display over a film with a length, chapters, and two audio tracks,
     /// with a reader on the socket so the commands it sends can be read back.
-    fn display() -> (Display, broadcast::Receiver<String>) {
+    pub(super) fn display() -> (Display, broadcast::Receiver<String>) {
         let mut display = Display::new(Ipc::default());
         let commands = display.wire.commands.subscribe();
         for (name, value) in [
@@ -1117,13 +1202,13 @@ mod tests {
     }
 
     /// Run every fade to wherever it is going, the way the tick does.
-    fn settle(display: &mut Display) {
+    pub(super) fn settle(display: &mut Display) {
         while display.fading() {
             let _ = display.update(Message::Tick);
         }
     }
 
-    fn sent(commands: &mut broadcast::Receiver<String>) -> Vec<String> {
+    pub(super) fn sent(commands: &mut broadcast::Receiver<String>) -> Vec<String> {
         let mut lines = Vec::new();
         while let Ok(line) = commands.try_recv() {
             lines.push(line.trim_end().to_string());
@@ -1612,11 +1697,11 @@ mod tests {
     }
 
     /// The block the sidecar sends for the work that follows this one.
-    const OFFER: &str = r#"{"reason":"Next in Harbor Lights",
+    pub(super) const OFFER: &str = r#"{"reason":"Next in Harbor Lights",
         "title":"E05 \u00b7 The Long Tide",
         "detail":"Harbor Lights \u00b7 S02 \u00b7 45 min"}"#;
 
-    fn block(word: &str, text: &str) -> Message {
+    pub(super) fn block(word: &str, text: &str) -> Message {
         Message::Mpv(ipc::Event::Message(vec![
             word.to_string(),
             text.to_string(),
@@ -1672,6 +1757,13 @@ mod tests {
         assert!(display.upnext.draws_outside(false));
     }
 
+    /// The lines a take sends mpv: the ask for the next work, and the pause
+    /// that stops the credits' sound.
+    pub(super) const TAKE: [&str; 2] = [
+        "{\"command\":[\"script-message\",\"liken-next\"],\"request_id\":0}",
+        "{\"command\":[\"no-osd\",\"set\",\"pause\",\"yes\"],\"request_id\":1000}",
+    ];
+
     /// A select on the card asks the sidecar for the next work, and the wait
     /// deadens every press but back.
     #[tokio::test]
@@ -1684,10 +1776,7 @@ mod tests {
         assert!(sent(&mut commands).is_empty());
 
         let _ = display.update(message("select"));
-        assert_eq!(
-            sent(&mut commands),
-            vec!["{\"command\":[\"script-message\",\"liken-next\"],\"request_id\":0}"]
-        );
+        assert_eq!(sent(&mut commands), TAKE);
         assert!(display.upnext.waiting());
 
         let _ = display.update(message("select"));
@@ -1709,12 +1798,14 @@ mod tests {
         settle(&mut display);
 
         let _ = display.update(message("select"));
-        assert_eq!(
-            sent(&mut commands),
-            vec!["{\"command\":[\"script-message\",\"liken-next\"],\"request_id\":0}"]
-        );
+        assert_eq!(sent(&mut commands), TAKE);
         assert!(display.upnext.waiting());
         assert!(!display.focus.visible());
+
+        assert!(display.fading(), "the card fades out on the hand-off");
+        settle(&mut display);
+        assert!(!display.upnext.draws_outside(false));
+        assert!(display.committed.is_empty(), "no arranger, no hand-off");
     }
 
     /// Once the card's hide window runs out, a select at the bare video
@@ -1974,7 +2065,7 @@ mod tests {
 
     /// One offer that carries a picture, 800 by 400, which the card's own box
     /// is narrower than.
-    fn offer_with_art() -> String {
+    pub(super) fn offer_with_art() -> String {
         format!(
             r#"{{"title":"E05 · The Long Tide","art":"{}"}}"#,
             picture("next", 800, 400)
@@ -2110,14 +2201,5 @@ mod tests {
         // the end time draw.
         let _ = display.update(Message::Minute);
         assert!(display.focus.visible());
-    }
-
-    /// A socket that closes moves nothing, and the reader dials again.
-    #[tokio::test]
-    async fn a_socket_that_closes_moves_nothing() {
-        let (mut display, _) = display();
-        let _ = display.update(Message::Mpv(ipc::Event::Detached));
-        assert!(!display.focus.visible());
-        assert_eq!(display.focus.fade().value(), 0.0);
     }
 }

@@ -2011,6 +2011,9 @@ dependencies = [
  "tiny-skia",
  "tokio",
  "ureq",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-scanner",
 ]
 
 [[package]]

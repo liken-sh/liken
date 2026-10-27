@@ -332,6 +332,23 @@ spec:
                     OSD down, the risen card shows focused, and select
                     takes it, unless a skip control is up beside it. Then
                     select does what it does for the skip control alone.
+                    On a screen whose compositor offers the
+                    liken_arrangement_v1 protocol, a film or an episode
+                    steps back when its card rises: the compositor scales
+                    the film into a frame on the left half of the screen
+                    over 900 milliseconds, and the display then draws the
+                    next work in the right half in place of the card. The
+                    column stays until a press or the end of the file.
+                    back with the OSD down returns the film to the whole
+                    screen over 600 milliseconds and leaves it playing,
+                    and the next back ends the run. A select on the
+                    column fades the column out over 300 milliseconds, and
+                    the compositor fades the film out in its frame over
+                    the same time. A screen without the protocol
+                    shows the card as above, and a select on it fades the
+                    card out over 300 milliseconds. Either select also
+                    pauses the film, so its sound stops at the press, and
+                    the display draws nothing once mpv exits.
                     A select on the offer publishes the request below on
                     the Player's commands topic, where the program that
                     wrote the Play reads it back and creates the next

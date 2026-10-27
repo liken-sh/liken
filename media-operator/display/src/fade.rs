@@ -7,6 +7,8 @@
 //! the frame loop steps the fades and arms the windows, because the loop owns
 //! the timer.
 
+use std::time::Duration;
+
 use crate::theme;
 
 /// What the hide window does after a change. A summon arms one, a dismiss
@@ -67,6 +69,16 @@ impl Clock {
 pub struct Fade {
     value: f32,
     target: f32,
+    exit: Option<Exit>,
+}
+
+/// An exit in progress: the factor it left from, and how many of its ticks
+/// have run.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Exit {
+    from: f32,
+    tick: u32,
+    ticks: u32,
 }
 
 impl Fade {
@@ -92,11 +104,42 @@ impl Fade {
     /// dropping the display and raising it again.
     pub fn to(&mut self, target: f32) {
         self.target = target;
+        self.exit = None;
+    }
+
+    /// Fall to clear over `over` on the ease-in curve, t³, from where the
+    /// factor stands. The hand-off of a taken offer leaves this way, at the
+    /// same length and on the same curve as the compositor's fade of the
+    /// film, so the two reach black together.
+    pub fn exit(&mut self, over: Duration) {
+        self.target = 0.0;
+        let ticks = (over.as_secs_f32() / theme::FADE_TICK.as_secs_f32()).round() as u32;
+        self.exit = (self.value > 0.0).then_some(Exit {
+            from: self.value,
+            tick: 0,
+            ticks: ticks.max(1),
+        });
+    }
+
+    /// Put the factor at its target at once. An element that will not draw
+    /// while it moves takes this, so no tick redraws the frame for it.
+    pub fn finish(&mut self) {
+        self.value = self.target;
+        self.exit = None;
     }
 
     /// Step the factor toward its target on one tick, at the in rate on the
-    /// way up and the out rate on the way down.
+    /// way up and the out rate on the way down, or along the exit's curve.
     pub fn step(&mut self) {
+        if let Some(exit) = self.exit.as_mut() {
+            exit.tick += 1;
+            let done = exit.tick as f32 / exit.ticks as f32;
+            self.value = exit.from * (1.0 - done.powi(3));
+            if exit.tick >= exit.ticks {
+                self.finish();
+            }
+            return;
+        }
         let rate = if self.target > self.value {
             theme::FADE_IN
         } else {
@@ -170,6 +213,77 @@ mod tests {
 
         assert_eq!(ticks_to(&mut fade, 1.0), 11);
         assert_eq!(fade.value(), 1.0);
+    }
+
+    #[test]
+    fn a_finish_puts_the_factor_at_its_target_and_runs_no_tick() {
+        let mut fade = Fade::default();
+        fade.to(1.0);
+        fade.finish();
+        assert_eq!(fade.value(), 1.0);
+        assert!(!fade.running());
+    }
+
+    /// An exit over 300 ms takes 18 ticks, and it falls slowly at first and
+    /// fast at the end, as the compositor's `ease_in` curve does.
+    #[test]
+    fn an_exit_eases_in_and_takes_eighteen_ticks() {
+        let mut fade = Fade::default();
+        ticks_to(&mut fade, 1.0);
+        fade.exit(Duration::from_millis(300));
+
+        let mut values = Vec::new();
+        while fade.running() {
+            fade.step();
+            values.push(fade.value());
+        }
+        assert_eq!(values.len(), 18);
+        assert_eq!(fade.value(), 0.0);
+        let drops: Vec<f32> = std::iter::once(1.0)
+            .chain(values.iter().copied())
+            .collect::<Vec<_>>()
+            .windows(2)
+            .map(|pair| pair[0] - pair[1])
+            .collect();
+        assert!(drops.windows(2).all(|pair| pair[1] > pair[0]));
+        assert!((values[8] - (1.0 - 0.125)).abs() < 1e-6, "{values:?}");
+    }
+
+    /// An exit starts from where the factor stands, so an element half
+    /// faded leaves from half.
+    #[test]
+    fn an_exit_falls_from_where_the_factor_stands() {
+        let mut fade = Fade::default();
+        fade.to(1.0);
+        for _ in 0..10 {
+            fade.step();
+        }
+        let standing = fade.value();
+        fade.exit(Duration::from_millis(300));
+        fade.step();
+        assert!(fade.value() < standing);
+        assert!(fade.value() > standing * 0.99);
+    }
+
+    /// An element already clear has nothing to exit, so no tick runs.
+    #[test]
+    fn an_exit_from_clear_runs_no_tick() {
+        let mut fade = Fade::default();
+        fade.exit(Duration::from_millis(300));
+        assert!(!fade.running());
+    }
+
+    /// A new target during an exit takes the ordinary rates from where the
+    /// factor stands.
+    #[test]
+    fn a_target_during_an_exit_ends_the_exit() {
+        let mut fade = Fade::default();
+        ticks_to(&mut fade, 1.0);
+        fade.exit(Duration::from_millis(300));
+        for _ in 0..9 {
+            fade.step();
+        }
+        assert_eq!(ticks_to(&mut fade, 1.0), 3);
     }
 
     #[test]

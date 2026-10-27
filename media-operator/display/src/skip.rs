@@ -25,7 +25,7 @@ use crate::fade::{Clock, Fade, Hide};
 use crate::ipc::Command;
 use crate::marks::{Jump, Kind};
 use crate::theme;
-use crate::upnext::{CARD_ALPHA, CARD_R, CHIP_H, CHIP_PAD_X, CHIP_PAD_Y, CHIP_Y};
+use crate::upnext::{CARD_ALPHA, CHIP_H, CHIP_PAD_X, CHIP_PAD_Y, CHIP_R, CHIP_Y};
 
 /// The span the control offers to leave, and its own fade.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -160,11 +160,13 @@ fn pill_box(kind: Kind) -> Rectangle {
     )
 }
 
+/// The label stands on the box's middle row, so the pad above the caps and
+/// below them match, and the two cannot drift apart.
 fn pill_line(kind: Kind) -> Line {
     Line::new(
         label(kind),
-        Point::new(theme::MARGIN_X, CHIP_Y),
-        Anchor::TopLeft,
+        Point::new(theme::MARGIN_X, pill_box(kind).center().y),
+        Anchor::Left,
         theme::type_scale::TINY,
         theme::color::text(),
     )
@@ -172,13 +174,13 @@ fn pill_line(kind: Kind) -> Line {
 
 /// The control is a button over the film, so it always draws on a fill. The
 /// unfocused fill is the unfocused card's, and the focused one is the panel
-/// every focused control takes.
+/// every focused control takes, both rounded at the button's half height.
 fn pill(brush: &mut Brush<'_>, kind: Kind, focused: bool) {
     let shape = pill_box(kind);
     if focused {
-        brush.panel(shape);
+        brush.panel_rounded(shape, CHIP_R);
     } else {
-        brush.rounded(shape, CARD_R, theme::at(theme::color::SHADOW, CARD_ALPHA));
+        brush.rounded(shape, CHIP_R, theme::at(theme::color::SHADOW, CARD_ALPHA));
     }
     brush.text(pill_line(kind));
 }
@@ -322,13 +324,15 @@ mod tests {
         for (kind, words) in cases {
             let line = pill_line(kind);
             assert_eq!(line.content, words);
-            assert_eq!(line.at, Point::new(96.0, 806.0));
-            assert_eq!(line.anchor, Anchor::TopLeft);
+            assert_eq!(line.at, Point::new(96.0, 823.0));
+            assert_eq!(line.anchor, Anchor::Left);
             assert_eq!(line.size, theme::type_scale::TINY);
 
             let shape = pill_box(kind);
             assert_eq!(shape.x, 74.0);
             assert_eq!(shape.y, 800.0);
+            assert_eq!(shape.height, 46.0);
+            assert_eq!(shape.center().y, line.at.y, "the label centres in the box");
             assert!(shape.y + shape.height <= 846.0);
             let room = measure(words, theme::type_scale::TINY) + 44.0;
             assert!((shape.width - room).abs() < 0.01);

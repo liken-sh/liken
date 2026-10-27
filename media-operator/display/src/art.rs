@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use iced::Point;
+use iced::{Point, Size};
 
 use crate::canvas::Canvas;
 use crate::film::Film;
@@ -223,6 +223,10 @@ pub struct Art {
     /// no cover ends the asking instead of starting it again.
     answered: Option<Key>,
     next: Slot,
+    /// The canvas box the offer's picture draws in, which the display sets
+    /// from the offer: the card's box, or the larger column's while the film
+    /// stands back. Nothing is the card's box.
+    next_box: Option<Size>,
     /// The offer's art reference while an offer with a picture stands, so an
     /// answer for an offer that no longer stands is dropped.
     offer: Option<String>,
@@ -256,6 +260,13 @@ impl Art {
     /// The playing track's cover art, the one picture a music screen carries.
     pub fn cover(&self) -> Option<&Bitmap> {
         self.cover.bitmap.as_ref()
+    }
+
+    /// Set the canvas box the offer's picture draws in. A new box asks for
+    /// the picture again at its size, and the old picture draws until the
+    /// new one arrives.
+    pub fn frame_next(&mut self, size: Size) {
+        self.next_box = Some(size);
     }
 
     /// The offer's picture, which the up-next card draws in its own art box.
@@ -435,10 +446,10 @@ impl Art {
     /// screen, once per size. The picture fits inside the box and keeps its
     /// ratio, so a poster comes back letterboxed.
     fn next_request(&mut self, canvas: &Canvas) -> Option<Job> {
-        let (width, height) = pixel_box(
-            pixels(crate::upnext::CARD_W, canvas),
-            pixels(crate::upnext::ART_H, canvas),
-        )?;
+        let frame = self
+            .next_box
+            .unwrap_or(Size::new(crate::upnext::CARD_W, crate::upnext::ART_H));
+        let (width, height) = pixel_box(pixels(frame.width, canvas), pixels(frame.height, canvas))?;
         let asked = matches!(
             (self.offer.as_deref(), &self.next.want),
             (Some(reference), Some(Key::Picture(had, wide, high)))
@@ -1062,6 +1073,29 @@ mod tests {
                 (Kind::Next, 880, 496),
             ]
         );
+    }
+
+    /// The column beside a stepped-back film draws the offer's picture
+    /// larger than the card does, so the decode asks again at the column's
+    /// box, and once more at the card's when the film returns.
+    #[test]
+    fn the_offers_picture_follows_the_box_it_draws_in() {
+        let mut art = Art::default();
+        let item = block("{}");
+        let offer = Some("/art/next.jpg");
+        let _ = art.sync(&item, &film(), &canvas(), None, offer, &[]);
+
+        art.frame_next(Size::new(704.0, 396.0));
+        let column = art.sync(&item, &film(), &canvas(), None, offer, &[]);
+        assert_eq!(boxes(&column), [(Kind::Next, 704, 396)]);
+        assert!(
+            art.sync(&item, &film(), &canvas(), None, offer, &[])
+                .is_empty()
+        );
+
+        art.frame_next(Size::new(440.0, 248.0));
+        let card = art.sync(&item, &film(), &canvas(), None, offer, &[]);
+        assert_eq!(boxes(&card), [(Kind::Next, 440, 248)]);
     }
 
     /// The logo sits at the title's own corner, in canvas units, so a larger

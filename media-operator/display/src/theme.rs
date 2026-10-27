@@ -104,6 +104,12 @@ pub const FADE_OUT: Duration = Duration::from_millis(600);
 /// each step.
 pub const FADE_TICK: Duration = Duration::from_nanos(16_666_667);
 
+/// A select that takes the up-next offer fades the offer out over this
+/// time. It is shorter than `FADE_OUT`, because the press asks for the next
+/// work and mpv quits soon after, so the screen must be clear by then. The
+/// compositor fades the film out inside its frame over the same time.
+pub const HAND_OFF: Duration = Duration::from_millis(300);
+
 /// An element the display summons for one action leaves this many seconds
 /// after the last one. The OSD and the volume indicator wait out the same
 /// window, each on its own timer.

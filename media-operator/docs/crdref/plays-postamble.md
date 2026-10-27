@@ -125,6 +125,18 @@ post-credits scene, the display offers a skip control, and `select`
 takes it. A skip to a post-credits scene takes `select` only while the
 on-screen display is up. The display never skips on its own.
 
+`back` has one meaning for each state, tried in order. It closes an
+open chooser, cancels a scan's preview, and hides the on-screen
+display. With the display hidden and the film stepped back beside the
+up-next column ([`next`](#spec--next)), it returns the film to the
+whole screen and the film plays on. At the bare video it ends the run,
+the way `stop` does. So over a stepped-back film, the first `back`
+keeps watching and the second one leaves.
+
+The display finds the film's window by its xdg app_id when it asks the
+compositor for the step back. mpv's window carries `liken-media-video`
+and the display's own window carries `liken-media-overlay`.
+
 `play`, `hold`, and `stop` set the state they name, so a second one
 changes nothing. The playback pod binds them to the names the kernel's
 `rc-cec` keymap gives a TV remote's deterministic functions (HDMI-CEC

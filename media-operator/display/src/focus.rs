@@ -267,6 +267,11 @@ impl Focus {
             self.first_pause = false;
             return;
         }
+        // A taken offer pauses mpv, and the OSD stays down for that pause,
+        // because the screen is handing off to the next Play.
+        if paused && parts.upnext.waiting() {
+            return;
+        }
         if paused {
             self.raise(parts, &[Stop::Cast, Stop::Next, Stop::Skip]);
             self.clock.ask(Hide::Cancel);
@@ -352,8 +357,7 @@ impl Focus {
                 // starts before a press starts it. A card the rise raised takes
                 // one press.
                 if parts.upnext.showing_card() {
-                    parts.upnext.take();
-                    return vec![next()];
+                    return self.take_offer(parts);
                 }
                 parts.upnext.expand();
                 return Vec::new();
@@ -380,8 +384,7 @@ impl Focus {
         // The risen card alone over the bare video draws focused, so the
         // select takes the offer and the display stays down.
         if self.card_takes_select(parts.upnext, parts.skip) {
-            parts.upnext.take();
-            return vec![next()];
+            return self.take_offer(parts);
         }
         // Toggle mpv's pause. The pause observer summons the display, so a
         // pause from select needs no separate summon. The no-osd prefix
@@ -390,11 +393,21 @@ impl Focus {
         vec![vec![json!("no-osd"), json!("cycle"), json!("pause")]]
     }
 
+    /// A select took the offer. The offer fades out, and the press asks the
+    /// command sidecar for the next work and pauses mpv in the same breath,
+    /// so the credits' sound stops at the press instead of playing on under
+    /// the fade while the next Play starts.
+    fn take_offer(&self, parts: &mut Parts<'_>) -> Vec<Command> {
+        parts.upnext.take(self.clock.fade().value());
+        vec![next(), hold()]
+    }
+
     /// back has one meaning per state, tried in order. An open chooser closes.
     /// Else a fine scan cancels its preview. Else the visible display
-    /// dismisses. Else, at the bare video, back asks the command sidecar to end
-    /// the run, and the sidecar quits mpv with code 0, so the pod ends as the
-    /// Completed a finished film gives, not an Error.
+    /// dismisses. Else a film stepped back at the credits returns to the
+    /// whole screen. Else, at the bare video, back asks the command sidecar
+    /// to end the run, and the sidecar quits mpv with code 0, so the pod ends
+    /// as the Completed a finished film gives, not an Error.
     pub fn nav(&mut self, action: Action, parts: &mut Parts<'_>) -> Vec<Command> {
         // The offer is taken and the next Play is starting, so the display
         // routes every press to nothing. back still ends the run, on the same
@@ -415,6 +428,11 @@ impl Focus {
                 parts.scrubber.cancel();
             } else if self.summoned {
                 self.dismiss(parts);
+            } else if parts.upnext.stepped_back() {
+                // The film stands back beside the next work. back keeps
+                // watching: the film returns to the whole screen and plays
+                // on, and the next back ends the run.
+                parts.upnext.restore();
             } else {
                 return vec![exit()];
             }
@@ -458,6 +476,13 @@ fn exit() -> Command {
 
 fn next() -> Command {
     vec![json!("script-message"), json!(NEXT)]
+}
+
+/// Pause, as a set and not a toggle, so a film the person already paused
+/// stays paused. The no-osd prefix keeps mpv's own pause indicator off the
+/// screen.
+fn hold() -> Command {
+    vec![json!("no-osd"), json!("set"), json!("pause"), json!("yes")]
 }
 
 #[cfg(test)]
@@ -538,7 +563,7 @@ mod tests {
         fn take(&mut self) {
             self.offer();
             self.upnext.expand();
-            self.upnext.take();
+            self.upnext.take(0.0);
         }
 
         fn parts(&mut self) -> Parts<'_> {
@@ -599,8 +624,13 @@ mod tests {
         vec![vec![json!("seek"), json!(1250.0), json!("absolute+exact")]]
     }
 
+    /// The two commands a take sends: the ask for the next work, and the
+    /// pause that stops the credits' sound.
     fn ask() -> Vec<Command> {
-        vec![vec![json!("script-message"), json!("liken-next")]]
+        vec![
+            vec![json!("script-message"), json!("liken-next")],
+            vec![json!("no-osd"), json!("set"), json!("pause"), json!("yes")],
+        ]
     }
 
     fn pause_toggle() -> Vec<Command> {
@@ -809,6 +839,57 @@ mod tests {
             display.press(Action::Back),
             vec![vec![json!("script-message"), json!("liken-exit")]]
         );
+    }
+
+    /// The film stepped back at the rise. The first back at the bare video
+    /// returns it and leaves it playing, and the next back ends the run.
+    #[test]
+    fn back_over_the_stepped_back_film_returns_it_first() {
+        let mut display = Display::new("{}");
+        display.rise();
+        display.upnext.step_back();
+
+        assert!(display.press(Action::Back).is_empty());
+        assert!(!display.upnext.stepped_back());
+        assert!(!display.focus.visible());
+
+        assert_eq!(
+            display.press(Action::Back),
+            vec![vec![json!("script-message"), json!("liken-exit")]]
+        );
+    }
+
+    /// With the display up, back dismisses it first, as it does over a film
+    /// at the default, and the film stays back until the next back.
+    #[test]
+    fn back_dismisses_the_display_before_it_returns_the_film() {
+        let mut display = Display::new("{}");
+        display.rise();
+        display.upnext.step_back();
+        display.summon();
+
+        assert!(display.press(Action::Back).is_empty());
+        assert!(!display.focus.visible());
+        assert!(display.upnext.stepped_back());
+
+        assert!(display.press(Action::Back).is_empty());
+        assert!(!display.upnext.stepped_back());
+    }
+
+    /// A taken offer keeps the film where it stands, and back still ends the
+    /// run, because a person must be able to leave.
+    #[test]
+    fn back_after_a_take_ends_the_run_with_the_film_back() {
+        let mut display = Display::new("{}");
+        display.rise();
+        display.upnext.step_back();
+        assert_eq!(display.press(Action::Select), ask());
+
+        assert_eq!(
+            display.press(Action::Back),
+            vec![vec![json!("script-message"), json!("liken-exit")]]
+        );
+        assert!(display.upnext.stepped_back());
     }
 
     /// While the display waits on the next Play it routes every press to
@@ -1039,6 +1120,19 @@ mod tests {
         assert_eq!(display.focus.focused_stop(), Some(Stop::Next));
         display.press(Action::Down);
         assert_eq!(display.focus.focused_stop(), Some(Stop::Fine));
+    }
+
+    /// The pause a take sends raises no OSD over the hand-off.
+    #[test]
+    fn the_pause_a_take_sends_raises_no_osd() {
+        let mut display = Display::new("{}");
+        display.pause(false);
+        display.rise();
+        assert_eq!(display.press(Action::Select), ask());
+
+        display.pause(true);
+        assert!(!display.focus.visible());
+        assert_eq!(display.focus.fade().value(), 0.0);
     }
 
     /// The waiting gate ends the run from a hidden display as well.

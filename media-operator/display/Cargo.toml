@@ -75,6 +75,16 @@ image = { version = "=0.25.10", default-features = false, features = [
 # track. It reads the ID3, MP4, FLAC, Vorbis, and APE families.
 lofty = "=0.25.2"
 serde_json = { workspace = true }
+# The display binds liken_arrangement_v1 on the Wayland connection winit
+# opened for its window, because the compositor tells clients apart by
+# connection. wayland-backend wraps winit's wl_display, wayland-client gives
+# the binding its own event queue on it, and wayland-scanner generates the
+# protocol's client code from the XML at build time. winit already builds
+# these versions with the system library, so the build adds no crate to
+# the link.
+wayland-backend = { version = "=0.3.17", features = ["client_system"] }
+wayland-client = "=0.31.15"
+wayland-scanner = "=0.31.11"
 # The display needs tokio for one unix socket, newline-delimited JSON, and
 # a reconnect loop with a timeout on every wait.
 tokio = { version = "=1.48.0", default-features = false, features = [

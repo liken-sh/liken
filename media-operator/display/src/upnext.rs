@@ -3,8 +3,10 @@
 //! This module draws the block as a chip while the film plays, and as a card
 //! near the end of it. Focus routes a select on it.
 
-use iced::{Color, Point, Rectangle, Size};
+use iced::{Point, Rectangle, Size};
 use serde_json::Value;
+
+mod column;
 
 use crate::canvas::{Anchor, Brush, Canvas, Line, clip, measure};
 use crate::fade::{Clock, Fade, Hide};
@@ -31,10 +33,16 @@ const DETAIL_H: f32 = 42.0;
 const CARD_H: f32 = ART_H + PAD_Y + REASON_PITCH + TITLE_PITCH + DETAIL_H + PAD_Y;
 
 /// The chip's row, above the right end of the bar and above the time label.
-pub(crate) const CHIP_Y: f32 = 806.0;
-pub(crate) const CHIP_H: f32 = 34.0;
+/// `CHIP_Y` is the top of the label's line box, and `CHIP_H` is that line
+/// box, so the box around the label spans 800 to 846 and its pad is the same
+/// above and below the line. The skip control takes the same metrics.
+pub(crate) const CHIP_Y: f32 = 809.0;
+pub(crate) const CHIP_H: f32 = theme::type_scale::TINY;
 pub(crate) const CHIP_PAD_X: f32 = 22.0;
-pub(crate) const CHIP_PAD_Y: f32 = 6.0;
+pub(crate) const CHIP_PAD_Y: f32 = 9.0;
+/// A button rounds at half its height, so its ends are round and it reads
+/// apart from a panel, which rounds at `CARD_R`.
+pub(crate) const CHIP_R: f32 = (CHIP_H + 2.0 * CHIP_PAD_Y) / 2.0;
 
 /// The two amounts of a work that may remain when the card rises: a share
 /// of its length, and a number of seconds. The rule takes whichever leaves
@@ -66,15 +74,9 @@ pub(crate) fn series_rise(duration: f64) -> f64 {
     duration - (duration * SERIES_RISE_PERCENT / 100.0).min(SERIES_RISE_SECONDS)
 }
 
-/// The card draws at this fraction of its alpha while it waits for the next
-/// work to start.
-const WAIT_FADE: f32 = 0.6;
-
-/// The words the chip and the waiting card draw. The block carries the three
-/// lines of the card and nothing for these two states, so they are spelled
-/// here.
+/// The words the chip draws before the title. The block carries the three
+/// lines of the card and nothing for the chip, so they are spelled here.
 const CHIP_WORD: &str = "UP NEXT";
-const WAIT_WORD: &str = "Starting";
 
 // The seam the decode fills. The card asks for the offer's picture where
 // it draws the art plate, the decode answers with the size it draws at, and
@@ -134,6 +136,13 @@ pub struct UpNext {
     /// The last playlist position mpv reported. A change of item clears the
     /// offer, and the first report is not a change.
     at_item: Option<i64>,
+    /// Whether the film stands stepped back, so the offer draws as the
+    /// column beside it instead of the corner card.
+    stepped: bool,
+    /// The column's own fade. It rises when the film lands in its frame,
+    /// because the display draws no frame while the compositor moves the
+    /// film.
+    column: Fade,
 }
 
 impl UpNext {
@@ -212,6 +221,80 @@ impl UpNext {
         true
     }
 
+    /// The film steps back at the rise, so the offer draws as the column
+    /// beside it. The column waits for the landing, and the corner card's
+    /// hide window is cancelled, because the column stays until a press or
+    /// the end of the file.
+    pub fn step_back(&mut self) {
+        self.stepped = true;
+        self.column = Fade::default();
+        self.clock.ask(Hide::Cancel);
+        // The card's own fade would tick, and redraw the frame, while the
+        // compositor moves the film. The column draws in its place, so the
+        // card's fade stands at its end at once.
+        self.clock.fade_mut().finish();
+    }
+
+    /// The film reached its frame, so the column fades in. A taken offer
+    /// has left, so its column does not come back.
+    pub fn landed(&mut self) {
+        if self.stepped && !self.waiting {
+            self.column.to(1.0);
+        }
+    }
+
+    /// back returned the film to the whole region, so the column and the
+    /// card leave at once, before the film moves. The offer stays in the
+    /// OSD, and the card does not rise again.
+    pub fn restore(&mut self) {
+        self.stepped = false;
+        self.column = Fade::default();
+        self.clock = Clock::default();
+        self.clock.ask(Hide::Cancel);
+    }
+
+    /// The compositor put the film back on its own, because the connection
+    /// failed or the arranger was refused. The offer falls back to the corner
+    /// card for its usual window.
+    pub fn fall_back(&mut self) {
+        self.stepped = false;
+        self.column = Fade::default();
+        if self.risen && !self.waiting {
+            self.clock.show(Hide::Arm);
+        }
+    }
+
+    pub fn stepped_back(&self) -> bool {
+        self.stepped
+    }
+
+    /// The column's fade, which the frame loop steps while it is moving.
+    pub fn column(&self) -> &Fade {
+        &self.column
+    }
+
+    pub fn column_mut(&mut self) -> &mut Fade {
+        &mut self.column
+    }
+
+    /// The box the offer's picture draws in: the column's while the film
+    /// stands back, and the card's otherwise. The decode asks at this box.
+    pub fn art_box(&self) -> Size {
+        match self.stepped {
+            true => column::ART,
+            false => Size::new(CARD_W, ART_H),
+        }
+    }
+
+    /// The left edge of what the offer draws on the right, which the cast row
+    /// ends short of.
+    pub fn left(&self, canvas: &Canvas) -> f32 {
+        match self.stepped {
+            true => column::left(canvas),
+            false => card_x(canvas),
+        }
+    }
+
     /// The stop is present only while the Play carries an offer.
     pub fn available(&self) -> bool {
         self.offer.is_some()
@@ -244,15 +327,35 @@ impl UpNext {
         self.expanded = false;
     }
 
-    /// take records that focus broadcast the ask. The card then waits for the
-    /// operator to end this Play and start the next one. Nothing here ends the
-    /// wait: the film ends, or a back press ends the run.
-    pub fn take(&mut self) {
+    /// take records that focus broadcast the ask, and hands the screen off:
+    /// the offer fades out over `theme::HAND_OFF` on the ease-in curve, the
+    /// column beside a stepped-back film or the corner card. The display
+    /// then waits for the operator to end this Play and start the next one,
+    /// and nothing here ends the wait: mpv quits, or a back press ends the
+    /// run.
+    ///
+    /// `osd` is the OSD's fade. A card the OSD drew leaves the OSD at the
+    /// press and fades on its own clock, from the alpha it stood at, so it
+    /// does not vanish at once.
+    pub fn take(&mut self, osd: f32) {
         if self.offer.is_none() {
             return;
         }
         self.waiting = true;
         self.clock.ask(Hide::Cancel);
+        let card = self.clock.fade_mut();
+        if self.stepped {
+            // The step back stood the card's fade at full under the column.
+            // It stays clear, so a compositor that returns the film during
+            // the wait shows no card.
+            card.to(0.0);
+            card.finish();
+            self.column.exit(theme::HAND_OFF);
+            return;
+        }
+        card.to(card.value().max(osd));
+        card.finish();
+        card.exit(theme::HAND_OFF);
     }
 
     /// A new offer, or the loss of one, drops every state the last one had.
@@ -262,6 +365,8 @@ impl UpNext {
         self.waiting = false;
         self.clock = Clock::default();
         self.clock.ask(Hide::Cancel);
+        self.stepped = false;
+        self.column = Fade::default();
     }
 
     /// The label the chip reads: the two words and the offer's own title.
@@ -283,11 +388,13 @@ impl UpNext {
         )
     }
 
+    /// The label stands on the panel's middle row, so the pad above the
+    /// caps and below them match, and the two cannot drift apart.
     fn chip_line(&self, canvas: &Canvas, focused: bool) -> Line {
         Line::new(
             self.label(),
-            Point::new(canvas.right(), CHIP_Y),
-            Anchor::TopRight,
+            Point::new(canvas.right(), self.chip_panel(canvas).center().y),
+            Anchor::Right,
             theme::type_scale::TINY,
             if focused {
                 theme::color::text()
@@ -314,9 +421,7 @@ impl UpNext {
     }
 
     /// The card's three lines, each clipped to the width inside the pad.
-    /// detail is the third line, because the wait replaces it with a word of
-    /// its own.
-    fn card_lines(&self, canvas: &Canvas, detail: Option<&str>, detail_color: Color) -> Vec<Line> {
+    fn card_lines(&self, canvas: &Canvas) -> Vec<Line> {
         let Some(offer) = self.offer.as_ref() else {
             return Vec::new();
         };
@@ -344,13 +449,13 @@ impl UpNext {
             ));
         }
         y += TITLE_PITCH;
-        if let Some(detail) = detail {
+        if let Some(detail) = offer.detail.as_deref() {
             lines.push(Line::new(
                 clip(detail, theme::type_scale::SMALL, room),
                 Point::new(x, y),
                 Anchor::TopLeft,
                 theme::type_scale::SMALL,
-                detail_color,
+                theme::color::muted(),
             ));
         }
         lines
@@ -372,20 +477,13 @@ impl UpNext {
     fn chip(&self, brush: &mut Brush<'_>, focused: bool) {
         let canvas = brush.canvas();
         if focused {
-            brush.panel(self.chip_panel(&canvas));
+            brush.panel_rounded(self.chip_panel(&canvas), CHIP_R);
         }
         brush.text(self.chip_line(&canvas, focused));
     }
 
     /// The card: the art over the three lines the block spells.
-    fn card(
-        &self,
-        brush: &mut Brush<'_>,
-        focused: bool,
-        detail: Option<&str>,
-        detail_color: Color,
-        art: &dyn Art,
-    ) {
+    fn card(&self, brush: &mut Brush<'_>, focused: bool, art: &dyn Art) {
         let canvas = brush.canvas();
         let box_ = self.card_box(&canvas);
         if focused {
@@ -400,20 +498,20 @@ impl UpNext {
         if let Some(size) = art.next() {
             art.draw(brush, self.art_bounds(&canvas, size));
         }
-        for line in self.card_lines(&canvas, detail, detail_color) {
+        for line in self.card_lines(&canvas) {
             brush.text(line);
         }
     }
 
     /// Draw the offer as part of the OSD, the chip before the rise and the
-    /// card after it, at the OSD's own fade. The waiting card is not part of
-    /// the OSD, so it does not fade out with it.
+    /// card after it, at the OSD's own fade. A taken offer fades on its own
+    /// clock outside the OSD, so the OSD draws nothing of it.
     pub fn draw(&self, brush: &mut Brush<'_>, focused: bool, art: &dyn Art) {
-        if self.offer.is_none() || self.waiting {
+        if self.offer.is_none() || self.waiting || self.stepped {
             return;
         }
         if self.showing_card() {
-            self.card(brush, focused, self.detail(), theme::color::muted(), art);
+            self.card(brush, focused, art);
         } else {
             self.chip(brush, focused);
         }
@@ -427,11 +525,12 @@ impl UpNext {
     }
 
     /// Draw what the offer draws over the bare video, on a clock of its own:
-    /// the risen card for its few seconds, and the dimmed card for the whole
-    /// wait. Once the card fades, nothing remains of it, because a mark at the
+    /// the risen card for its few seconds, and a taken card while it fades
+    /// out. Once the card fades, nothing remains of it, because a mark at the
     /// screen edge would draw over the film for the rest of it. Before the
     /// rise, a hidden OSD draws nothing for the offer. `focused` draws the
-    /// risen card in the focus panel, for the times a select takes it.
+    /// risen card in the focus panel, for the times a select takes it. A
+    /// taken card keeps the panel the press left it in while it fades.
     pub fn draw_outside(
         &self,
         brush: &mut Brush<'_>,
@@ -442,18 +541,13 @@ impl UpNext {
         if !self.draws_outside(osd_visible) {
             return;
         }
-        let (fade, detail, color, focused) = if self.waiting {
-            (WAIT_FADE, Some(WAIT_WORD), theme::color::fill(), false)
-        } else {
-            (
-                self.fade().value(),
-                self.detail(),
-                theme::color::muted(),
-                focused,
-            )
-        };
-        brush.at_fade(fade, |brush| {
-            self.card(brush, focused, detail, color, art);
+        if self.stepped {
+            self.draw_column(brush, focused, art);
+            return;
+        }
+        let focused = focused || self.waiting;
+        brush.at_fade(self.fade().value(), |brush| {
+            self.card(brush, focused, art);
         });
     }
 
@@ -463,16 +557,25 @@ impl UpNext {
         if self.offer.is_none() {
             return false;
         }
+        if self.stepped {
+            return self.column.value() > 0.0;
+        }
         if self.waiting {
-            return true;
+            return self.fade().value() > 0.0;
         }
         !osd_visible && self.risen && self.fade().value() > 0.0
     }
 
-    fn detail(&self) -> Option<&str> {
-        self.offer
-            .as_ref()
-            .and_then(|offer| offer.detail.as_deref())
+    /// The column beside the stepped-back film, on its own fade, over the
+    /// bare video and over the OSD alike. A taken column keeps the panel the
+    /// press left it in while it fades.
+    fn draw_column(&self, brush: &mut Brush<'_>, focused: bool, art: &dyn Art) {
+        let Some(offer) = self.offer.as_ref() else {
+            return;
+        };
+        brush.at_fade(self.column.value(), |brush| {
+            column::draw(brush, offer, focused || self.waiting, art);
+        });
     }
 }
 
@@ -525,11 +628,7 @@ mod tests {
         let upnext = UpNext::default();
         assert!(!upnext.available());
         assert!(!upnext.draws_outside(false));
-        assert!(
-            upnext
-                .card_lines(&canvas(), None, theme::color::muted())
-                .is_empty()
-        );
+        assert!(upnext.card_lines(&canvas()).is_empty());
     }
 
     #[test]
@@ -582,8 +681,8 @@ mod tests {
 
         let line = upnext.chip_line(&canvas(), false);
         assert_eq!(line.content, "UP NEXT  E05 \u{b7} The Long Tide");
-        assert_eq!(line.at, Point::new(RIGHT, 806.0));
-        assert_eq!(line.anchor, Anchor::TopRight);
+        assert_eq!(line.at, Point::new(RIGHT, 823.0));
+        assert_eq!(line.anchor, Anchor::Right);
         assert_eq!(line.size, theme::type_scale::TINY);
         assert_eq!(line.color, theme::color::muted());
     }
@@ -615,6 +714,19 @@ mod tests {
         assert!((panel.x - (RIGHT + 22.0 - panel.width)).abs() < 0.01);
         assert_eq!(panel.y, 800.0);
         assert_eq!(panel.height, 46.0);
+        assert_eq!(
+            panel.center().y,
+            upnext.chip_line(&canvas(), false).at.y,
+            "the label centres in the panel"
+        );
+    }
+
+    /// A button rounds at half its height, so its ends are round and it
+    /// reads apart from a panel.
+    #[test]
+    fn the_buttons_round_at_half_their_height() {
+        assert_eq!(CHIP_R, 23.0);
+        assert_eq!(CHIP_H, theme::type_scale::TINY);
     }
 
     /// A longer title moves the panel's left edge out by the width of what it
@@ -770,7 +882,7 @@ mod tests {
     #[test]
     fn the_card_stacks_its_three_lines_under_the_art() {
         let upnext = risen();
-        let lines = upnext.card_lines(&canvas(), upnext.detail(), theme::color::muted());
+        let lines = upnext.card_lines(&canvas());
 
         assert_eq!(lines.len(), 3);
         assert_eq!(lines[0].content, "NEXT IN HARBOR LIGHTS \u{b7} S02");
@@ -798,7 +910,7 @@ mod tests {
     fn a_line_the_block_leaves_out_draws_nothing() {
         let mut upnext = UpNext::default();
         upnext.receive(r#"{"title":"E05"}"#);
-        let lines = upnext.card_lines(&canvas(), upnext.detail(), theme::color::muted());
+        let lines = upnext.card_lines(&canvas());
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].at.y, 684.0);
     }
@@ -882,36 +994,58 @@ mod tests {
         assert!(!upnext.draws_outside(false));
     }
 
-    /// The waiting card draws over the video whether or not the OSD is up, and
-    /// it draws nothing inside the OSD.
-    #[test]
-    fn the_waiting_card_draws_outside_the_osd_alone() {
-        let mut upnext = risen();
-        upnext.take();
-
-        assert!(upnext.waiting());
-        assert!(upnext.draws_outside(false));
-        assert!(upnext.draws_outside(true));
-        assert_eq!(upnext.take_hide(), Hide::Cancel);
+    /// Run the card's and the column's fades to their ends, and count the
+    /// ticks that took.
+    fn ticks(upnext: &mut UpNext) -> usize {
+        let mut ticks = 0;
+        while upnext.fade().running() || upnext.column().running() {
+            upnext.fade_mut().step();
+            upnext.column_mut().step();
+            ticks += 1;
+            assert!(ticks < 1000, "the offer never stopped moving");
+        }
+        ticks
     }
 
-    /// The wait replaces the third line with a word of its own, in the accent.
+    /// A take fades the corner card out over the hand-off, 18 ticks, with
+    /// the OSD up or down, and then the offer draws nothing.
     #[test]
-    fn the_waiting_card_reads_starting_and_drops_the_detail() {
+    fn a_take_fades_the_corner_card_out() {
         let mut upnext = risen();
-        upnext.take();
+        settle(&mut upnext);
+        upnext.take(0.0);
 
-        let lines = upnext.card_lines(&canvas(), Some(WAIT_WORD), theme::color::fill());
-        assert_eq!(lines[2].content, "Starting");
-        assert_eq!(lines[2].color, theme::color::fill());
-        assert_eq!(lines[1].content, "E05 \u{b7} The Long Tide");
+        assert!(upnext.waiting());
+        assert_eq!(upnext.take_hide(), Hide::Cancel);
+        assert!(upnext.draws_outside(false));
+        assert!(upnext.draws_outside(true));
+        assert_eq!(ticks(&mut upnext), 18);
+        assert!(!upnext.draws_outside(false));
+        assert!(!upnext.draws_outside(true));
+    }
+
+    /// A card the OSD drew leaves the OSD at the press and fades out from
+    /// the OSD's own alpha, so it does not vanish at once.
+    #[test]
+    fn a_take_inside_the_osd_fades_from_the_osds_alpha() {
+        let mut upnext = UpNext::default();
+        upnext.receive(OFFER);
+        upnext.expand();
+        assert_eq!(upnext.fade().value(), 0.0);
+
+        upnext.take(1.0);
+        assert!(upnext.draws_outside(true));
+        upnext.fade_mut().step();
+        assert!(upnext.fade().value() > 0.99);
+        assert_eq!(ticks(&mut upnext), 17);
+        assert!(!upnext.draws_outside(true));
     }
 
     /// take on a display with no offer records no wait.
     #[test]
     fn a_take_with_no_offer_records_no_wait() {
         let mut upnext = UpNext::default();
-        upnext.take();
+        upnext.take(1.0);
         assert!(!upnext.waiting());
     }
 
@@ -939,17 +1073,14 @@ mod tests {
     fn a_replay_replaces_the_offer_and_its_state() {
         let mut upnext = risen();
         upnext.expand();
-        upnext.take();
+        upnext.take(0.0);
 
         upnext.receive(r#"{"title":"E06 The Turning"}"#);
         assert!(upnext.available());
         assert!(!upnext.showing_card());
         assert!(!upnext.waiting());
         assert_eq!(upnext.fade().value(), 0.0);
-        assert_eq!(
-            upnext.card_lines(&canvas(), None, theme::color::muted())[0].content,
-            "E06 The Turning"
-        );
+        assert_eq!(upnext.card_lines(&canvas())[0].content, "E06 The Turning");
     }
 
     /// The first playlist report names the item already playing, so it is not
@@ -1006,5 +1137,164 @@ mod tests {
             wide.width() - theme::MARGIN_X
         );
         assert_eq!(upnext.chip_line(&wide, false).at.x, wide.width() - 96.0);
+    }
+
+    /// A risen card whose film stepped back, with every fade at its end.
+    fn stepped() -> UpNext {
+        let mut upnext = risen();
+        upnext.step_back();
+        settle(&mut upnext);
+        upnext
+    }
+
+    fn settle(upnext: &mut UpNext) {
+        while upnext.fade().running() || upnext.column().running() {
+            upnext.fade_mut().step();
+            upnext.column_mut().step();
+        }
+    }
+
+    /// The column stays until a press or the end of the file, so the step
+    /// back cancels the window the rise armed.
+    #[test]
+    fn the_step_back_cancels_the_cards_window() {
+        let mut upnext = risen();
+        upnext.step_back();
+        assert_eq!(upnext.take_hide(), Hide::Cancel);
+    }
+
+    /// Nothing ticks while the compositor moves the film, so the display
+    /// draws no frame then.
+    #[test]
+    fn nothing_on_the_offer_moves_while_the_film_steps_back() {
+        let mut upnext = risen();
+        upnext.step_back();
+        assert!(!upnext.fade().running());
+        assert!(!upnext.column().running());
+    }
+
+    /// The display draws no frame while the film moves, so the column draws
+    /// nothing until the film lands, with the OSD up or down.
+    #[test]
+    fn the_column_waits_for_the_landing() {
+        let mut upnext = stepped();
+        assert!(!upnext.draws_outside(false));
+        assert!(!upnext.draws_outside(true));
+
+        upnext.landed();
+        settle(&mut upnext);
+        assert!(upnext.draws_outside(false));
+        assert!(upnext.draws_outside(true));
+    }
+
+    /// The column stands where the card's select goes, so a select at the
+    /// bare video still takes the offer.
+    #[test]
+    fn the_column_takes_select_at_the_bare_video() {
+        let mut upnext = stepped();
+        upnext.landed();
+        settle(&mut upnext);
+        assert!(upnext.risen_outside(false));
+    }
+
+    #[test]
+    fn the_landing_of_a_film_at_the_default_shows_no_column() {
+        let mut upnext = risen();
+        upnext.landed();
+        settle(&mut upnext);
+        assert_eq!(upnext.column().value(), 0.0);
+    }
+
+    /// back returns the film and takes the column and the card down at
+    /// once, and the offer stays in the OSD.
+    #[test]
+    fn a_restore_takes_the_column_and_the_card_down_at_once() {
+        let mut upnext = stepped();
+        upnext.landed();
+        settle(&mut upnext);
+
+        upnext.restore();
+        assert!(!upnext.stepped_back());
+        assert!(!upnext.draws_outside(false));
+        assert!(!upnext.risen_outside(false));
+        assert!(upnext.available());
+        assert!(upnext.showing_card());
+    }
+
+    /// The compositor returned the film on its own, so the corner card
+    /// shows for its usual window.
+    #[test]
+    fn a_fall_back_shows_the_corner_card_for_its_window() {
+        let mut upnext = stepped();
+        upnext.take_hide();
+        upnext.fall_back();
+        assert!(!upnext.stepped_back());
+        assert_eq!(upnext.take_hide(), Hide::Arm);
+        settle(&mut upnext);
+        assert!(upnext.draws_outside(false));
+    }
+
+    #[test]
+    fn the_art_box_follows_the_step_back() {
+        let mut upnext = risen();
+        assert_eq!(upnext.art_box(), Size::new(440.0, 248.0));
+        assert_eq!(upnext.left(&canvas()), CARD_X);
+        upnext.step_back();
+        assert_eq!(upnext.art_box(), Size::new(704.0, 396.0));
+        assert_eq!(upnext.left(&canvas()), 1120.0);
+    }
+
+    /// A take on the column fades the column out over the hand-off, and the
+    /// corner card stays clear under it, so nothing draws once it ends.
+    #[test]
+    fn a_take_fades_the_column_out() {
+        let mut upnext = stepped();
+        upnext.landed();
+        settle(&mut upnext);
+        upnext.take(1.0);
+
+        assert!(upnext.waiting());
+        assert!(upnext.stepped_back(), "the film stays in its frame");
+        assert_eq!(upnext.fade().value(), 0.0);
+        assert!(upnext.draws_outside(false));
+        assert_eq!(ticks(&mut upnext), 18);
+        assert!(!upnext.draws_outside(false));
+        assert!(!upnext.draws_outside(true));
+    }
+
+    /// The compositor that returns the film during the wait brings no
+    /// corner card back.
+    #[test]
+    fn a_fall_back_during_the_wait_brings_no_card_back() {
+        let mut upnext = stepped();
+        upnext.landed();
+        settle(&mut upnext);
+        upnext.take(1.0);
+        upnext.take_hide();
+
+        upnext.fall_back();
+        assert_eq!(upnext.take_hide(), Hide::Keep);
+        settle(&mut upnext);
+        assert!(!upnext.draws_outside(false));
+        assert!(!upnext.draws_outside(true));
+    }
+
+    /// A take before the film lands leaves the column clear when the
+    /// landing comes.
+    #[test]
+    fn a_landing_during_the_wait_shows_no_column() {
+        let mut upnext = stepped();
+        upnext.take(0.0);
+        upnext.landed();
+        settle(&mut upnext);
+        assert_eq!(upnext.column().value(), 0.0);
+        assert!(!upnext.draws_outside(false));
+    }
+
+    #[test]
+    fn a_new_offer_drops_the_step_back() {
+        let mut upnext = stepped();
+        upnext.receive(OFFER);
+        assert!(!upnext.stepped_back());
     }
 }

@@ -37,6 +37,12 @@ const compositorLostExit = 7
 // crate carries the same family for the idle screen.
 const overlayFont = "Source Sans 3"
 
+// videoAppID is the xdg app_id of mpv's window. The display tells the
+// compositor where each surface of the claim shows by app_id, and the
+// display's own window carries liken-media-overlay, so the two surfaces
+// of one playback pod move apart.
+const videoAppID = "liken-media-video"
+
 // runPlayer builds mpv's argument vector and execs mpv, so mpv becomes
 // the container's process. On any failure it writes the reason to
 // stderr and exits nonzero, which the kubelet reads as a pod that
@@ -121,6 +127,11 @@ func playerArgv(items []string, blocks []json.RawMessage) ([]string, error) {
 		// compositorLostExit says. memory:// is mpv's inline file, so the
 		// shim writes no file to a root filesystem it may not write to.
 		"--input-conf=memory://CLOSE_WIN quit " + strconv.Itoa(compositorLostExit),
+		// The display arranges the claim's surfaces through the compositor,
+		// and an arrangement names a surface by its xdg app_id. So mpv's
+		// window carries the name the display steps back at the credits.
+		// display/src/arranger.rs names the same value.
+		"--wayland-app-id=" + videoAppID,
 	}
 	// --quiet is the default because mpv prints its status line about
 	// eight times a second, this process's stdout is the pod log on the
