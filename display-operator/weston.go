@@ -27,7 +27,7 @@ package main
 // writes the config, and the compositor role, which runs weston as its
 // child and starts it again after each restart the operator orders.
 //
-// The flags are the ones weston 16.0.0 takes, with
+// The flags are the ones weston 16.0.2 takes, with
 // LIBSEAT_BACKEND=noop. That backend opens the device path with a
 // plain open(), which is all a container can do, and the kernel hands
 // DRM master to the first process to open the card with no capability

@@ -78,7 +78,7 @@ const outputGeometryLeader = 5
 const outputModeCurrent = 0x1
 
 // The interface the watch binds, and the version whose name
-// event carries the connector's own name. Weston 16.0.0 advertises
+// event carries the connector's own name. Weston 16.0.2 advertises
 // version 4. A compositor that advertises less is bound at what it
 // offers and its outputs are tracked with no name, because the heal
 // decision reads no name; only the mode readback loses.

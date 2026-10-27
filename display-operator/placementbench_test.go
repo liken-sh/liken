@@ -20,6 +20,7 @@ import (
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/conditions"
+	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 )
 
 // The claims of the drills below. A surface id carries the first
@@ -77,6 +78,11 @@ type placementFixture struct {
 	// requests is every request the API server received, as the
 	// method and the path.
 	requests []string
+	// events holds the Events a recorder posts. The pass has no
+	// recorder until a test gives it one (arrangers_test.go).
+	events eventstest.Events
+	// seen is the Event lines posted() already answered.
+	seen []string
 
 	ids     int
 	version int
@@ -115,7 +121,7 @@ func newPlacementBench(t *testing.T, refuse map[string]string, wired ...wiredScr
 		refuse:    map[string]int{},
 	}
 	fixture.module = newFakeModule(t, moduleScript{greeting: greeting, refuse: refuse})
-	fixture.client = testClient(t, fixture.handler())
+	fixture.client = testClient(t, fixture.events.Around(fixture.handler()))
 	fixture.link = servedLayoutLink(t, fixture.module)
 	fixture.pass = newPlacementPass(fixture.client, "liken-1", filepath.Join(t.TempDir(), socketName),
 		fixture.link, newClaimIndex(fixture.client), fixture.outputs)

@@ -71,7 +71,8 @@ const (
 )
 
 // layoutLineLimit bounds one line off the socket. Every message in
-// this protocol is a verb and a few numbers, so a line longer than
+// this protocol is a verb, a few numbers, and at most one name, such
+// as an app_id or the name of an arrangement, so a line longer than
 // this is a corrupt stream, and the bound keeps it from allocating
 // whatever the bytes happen to say.
 const layoutLineLimit = 4096
@@ -134,6 +135,13 @@ type layoutLink struct {
 	waiting  map[int]chan layoutReply
 	outputs  map[string]layoutOutput
 	surfaces map[int]layoutSurface
+	// Arrangers is what the module reported about each claim's
+	// arranger, keyed by the claim's socket (arrangerstore.go).
+	arrangers map[string]layoutArranger
+	// Departures is the reason each claim's arranger last left, keyed
+	// by the claim's socket, until a client of the claim is granted
+	// again (arrangerstore.go).
+	departures map[string]string
 	// Generation counts the connections this link has opened. A reader
 	// that remembers what it sent compares it with the generation it
 	// sent on, because a new connection is a new compositor: the
@@ -153,6 +161,8 @@ func newLayoutLink(socketPath string) *layoutLink {
 		waiting:    map[int]chan layoutReply{},
 		outputs:    map[string]layoutOutput{},
 		surfaces:   map[int]layoutSurface{},
+		arrangers:  map[string]layoutArranger{},
+		departures: map[string]string{},
 	}
 }
 
@@ -508,6 +518,8 @@ func (l *layoutLink) opened() {
 	l.mu.Lock()
 	l.outputs = map[string]layoutOutput{}
 	l.surfaces = map[int]layoutSurface{}
+	l.arrangers = map[string]layoutArranger{}
+	l.departures = map[string]string{}
 	l.sequence = helloSequence
 	l.generation++
 	l.mu.Unlock()

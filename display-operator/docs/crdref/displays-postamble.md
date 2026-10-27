@@ -175,6 +175,47 @@ panels, and a polling loop would relight the screens the override
 layer darkened. For those panels, `observed` stays what the
 operator last saw.
 
+## Arrangers
+
+A screen has two owners. The `Layout` that `spec.layout` names owns
+the screen, and gives each claim a region of it. Inside a region, one
+client of the claim can place the claim's own windows, through the
+`liken_arrangement_v1` Wayland protocol. That client is the claim's
+arranger. The [arrangement reference](/docs/reference/arrangement/)
+describes the protocol for the author of a workload.
+
+`status.arrangers` lists each claim on the screen that has an
+arranger, with the region that shows the claim and the name of the
+arrangement it committed last. Each window in `status.surfaces`
+carries the `appID` an arrangement names it by.
+`duplicateAppIDs` lists each app_id that two or more of the claim's
+windows carry, because one entry of an arrangement moves all of
+them:
+
+```yaml
+status:
+  surfaces:
+    - id: film-cla-4
+      claim: living-room/film
+      appID: liken-film
+      region: main
+    - id: film-cla-5
+      claim: living-room/film
+      appID: liken-display
+      region: main
+  arrangers:
+    - claim: living-room/film
+      region: main
+      pods: [living-room/player-0]
+      arrangement: credits
+```
+
+The arranger is a process in one of the pods that hold the claim.
+The compositor reads a client's pid from the socket, and the kernel
+reports pid 0 for a client in another pod's pid namespace, so
+`status.arrangers` names the pods and states no pid or container for
+a workload's arranger.
+
 ## One writer per wire
 
 The operator is the one process that writes a panel's i2c wire for
@@ -224,3 +265,13 @@ and `kubectl describe` shows it once, with the count.
 | `CompositorKilled` | Warning | The compositor answered nothing for 10 seconds, and the operator ended it. The compositor's container starts it again. The `Event` is on every `Display` of the node. |
 | `PanelStandbyFailed` | Warning | The panel did not take the standby after its last claim ended, and stays on. The operator does not try again. |
 | `Captured` | Normal | A capture through the API returned bytes. The message names the subject, the aspect, and the media type. |
+| `ArrangerGranted` | Normal | A client of a claim became the claim's arranger, and is new in `status.arrangers`. The message names the claim, the pods that hold it, and the region. |
+| `ArrangerLost` | Warning | A claim's arranger disconnected while a pod that holds the claim still runs and is not being deleted. A client that crashed looks like this. The claim's windows return to fill the region. |
+| `ArrangerReleased` | Normal | A claim's arranger destroyed its arranger object and gave the region up, or disconnected after the pods that held the claim were gone or being deleted. |
+
+An arranger that commits a new arrangement posts no `Event`. A
+commit follows a key press, so `status.arrangers` shows the name of
+the last one and nothing more. The compositor's restart ends every
+arranger, and the pass that reads the new compositor posts no
+`ArrangerLost` for them, because `CompositorServing` or
+`CompositorKilled` already reports the restart.

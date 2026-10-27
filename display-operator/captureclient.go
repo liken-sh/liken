@@ -8,8 +8,8 @@ package main
 // wayland.go and adds the requests the watch never sends: wl_shm's
 // pool and buffer, and weston_capture_v1's create and capture.
 //
-// The protocol is weston-output-capture.xml from the weston 16.0.0 tag.
-// weston 16.0.0 serves both of its interfaces at version 2, and this
+// The protocol is weston-output-capture.xml from the weston 16.0.2 tag.
+// weston 16.0.2 serves both of its interfaces at version 2, and this
 // client binds version 1. Version 2 lets a source send several format
 // events and closes them with formats_done. To a version 1 client,
 // weston sends one format event and one size event, which is what
@@ -72,29 +72,21 @@ const outputScaleEvent uint16 = 3
 // composited into the frame. writeback is "often not available", and
 // blending exists only when color management is active on the output.
 //
-// Disabling the planes is what costs the compositor a pair of log
-// lines for every frame this API takes on stick-1. weston 16.0.0's
-// output-capture.c calls weston_output_disable_planes_incr() while a
-// capture is pending, and the DRM backend then builds a renderer-only
-// state, which draws every view into the primary plane
-// (backend-drm/state-propose.c). On stick-1 that repaint's atomic
-// commit came back EINVAL from this chip, with weston 14.0.2: kms.c
-// prints "atomic: couldn't commit new state: Invalid argument". The
-// commit has not been read again on stick-1 with weston 16.0.0. The second line,
-// "repaint-flush failed", prints strerror(errno) after the state has
-// been freed, so its errno is whatever the free path left and is not
-// a second cause. drm.c then calls
-// weston_output_schedule_repaint_reset, which drops the output out
-// of the repaint loop until the next capture or client commit
-// schedules another one.
+// Disabling the planes makes the DRM backend build a renderer-only
+// state while a capture is pending: output-capture.c calls
+// weston_output_disable_planes_incr(), and the backend draws every view
+// into the primary plane (backend-drm/state-propose.c). No solid view
+// then covers the output from a plane of its own, so weston writes its
+// default CRTC BACKGROUND_COLOR, which is opaque black from weston
+// 16.0.1. i915 refuses every atomic commit that writes 0 there, which
+// is the value earlier releases wrote, and root plan 85 holds that
+// evidence. The weston image builds from a release with the opaque
+// default for that reason.
 //
-// The captured frames are correct, because the renderer composed
-// them before the commit, and the drill read 1,334 correct frames
-// against 1,334 failed commits. What the kernel objects to is not in
-// weston's log, and whether the panel's own scanout lags during a
-// clip was not measured. The one avoidance a client holds is to take
-// the next capture only after the previous one retired, which the
-// protocol already requires and this client already does.
+// The captured frames come from the renderer, which composes them
+// before the commit. The one avoidance a client holds is to take the
+// next capture only after the previous one retired, which the protocol
+// already requires and this client already does.
 const captureSourceFramebuffer uint32 = 1
 
 // The four DRM fourccs weston's GL renderer reports, as the format

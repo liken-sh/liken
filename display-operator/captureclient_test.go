@@ -71,7 +71,7 @@ type captureAnswer struct {
 	seed    byte
 }
 
-// The fixture is the server half of weston 16.0.0's capture protocol
+// The fixture is the server half of weston 16.0.2's capture protocol
 // on a Unix socket: the registry, wl_shm, weston_capture_v1, and the
 // outputs, with scripted answers to each capture request.
 type captureWeston struct {

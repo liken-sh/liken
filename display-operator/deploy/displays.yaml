@@ -299,6 +299,9 @@ spec:
                       region:
                         type: string
                         description: "The region that shows the window. Empty for a window no region took, which is not on the screen."
+                      appID:
+                        type: string
+                        description: "The xdg app_id the program set on the window, and empty until it sets one. An arranger names the windows of its claim by app_id."
                 layout:
                   type: object
                   description: "The arrangement the screen is drawn to, and what each region shows."
@@ -320,9 +323,43 @@ spec:
                           surface:
                             type: string
                             description: "The id of the window on top of the region, the newest of the claim it shows, or the word empty when no window matched it."
+                arrangers:
+                  type: array
+                  description: "The arranger of each claim on this screen that has one. An arranger is the one client of a claim that the compositor lets place the claim's windows inside the claim's region, through the liken_arrangement_v1 Wayland protocol. The Layout still decides where the region is. A claim with no arranger is not listed, and its windows fill its region. The list changes when a claim gains or loses its arranger and when an arranger commits an arrangement under a new name."
+                  # The operator writes the whole of this list from
+                  # what the compositor reports, ordered by claim.
+                  x-kubernetes-list-type: atomic
+                  items:
+                    type: object
+                    required: [claim]
+                    properties:
+                      claim:
+                        type: string
+                        description: "The ResourceClaim whose socket the arranger connected through, as namespace/name."
+                      region:
+                        type: string
+                        description: "The region that shows the claim's windows. Empty while no region shows them."
+                      pods:
+                        type: array
+                        description: "The pods that hold the claim, each as namespace/name. The arranger is a process in one of them. The compositor cannot name the container, because it reads the client's pid from the socket, and the kernel reports pid 0 for a client in another pod's pid namespace."
+                        items:
+                          type: string
+                        x-kubernetes-list-type: atomic
+                      pid:
+                        type: integer
+                        description: "The arranger's pid in the compositor's pid namespace. Absent for a client in another pod, which is every workload."
+                      arrangement:
+                        type: string
+                        description: "The name of the arrangement the arranger committed last. Absent before its first commit. The compositor replaces each character that is not printable with an underscore, and reports an empty name as a hyphen."
+                      duplicateAppIDs:
+                        type: array
+                        description: "Each app_id that two or more of the claim's windows carry. An arrangement places every window whose app_id an entry names, so these windows always move together."
+                        items:
+                          type: string
+                        x-kubernetes-list-type: atomic
                 conditions:
                   type: array
-                  description: "Connected reports the panel on its connector. status.surfaces and status.layout are empty while it is False, because the compositor shows no window on a connector with no panel. Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. LayoutResolved is False with the reason LayoutNotFound while spec.layout names a Layout the cluster does not hold, and the screen shows the default arrangement until it does. CompositorServing reports the compositor behind the screen. It is False with the reason Down while the compositor's socket refuses the connect, and with the reason Hung while the socket accepts and the compositor answers nothing; the message is the socket's own words. status.surfaces and status.layout are empty for as long as it is False. PhysicalAddressCurrent is True with the reason ReadFromEDID while the connector's current EDID serves status.physicalAddress. It is False with the reason Retained while the connector serves no EDID for this monitor or serves no valid address, and status.physicalAddress then holds the last valid address; the message names the time the connector stopped serving it. It is False with the reason Ambiguous while two connected connectors on this node serve this monitor with different addresses; the message names both connectors and both addresses, and status.physicalAddress keeps the value it held before they disagreed. The condition is absent while the monitor has never served a valid address."
+                  description: "Connected reports the panel on its connector. status.surfaces, status.layout, and status.arrangers are empty while it is False, because the compositor shows no window on a connector with no panel. Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. LayoutResolved is False with the reason LayoutNotFound while spec.layout names a Layout the cluster does not hold, and the screen shows the default arrangement until it does. CompositorServing reports the compositor behind the screen. It is False with the reason Down while the compositor's socket refuses the connect, and with the reason Hung while the socket accepts and the compositor answers nothing; the message is the socket's own words. status.surfaces, status.layout, and status.arrangers are empty for as long as it is False. PhysicalAddressCurrent is True with the reason ReadFromEDID while the connector's current EDID serves status.physicalAddress. It is False with the reason Retained while the connector serves no EDID for this monitor or serves no valid address, and status.physicalAddress then holds the last valid address; the message names the time the connector stopped serving it. It is False with the reason Ambiguous while two connected connectors on this node serve this monitor with different addresses; the message names both connectors and both addresses, and status.physicalAddress keeps the value it held before they disagreed. The condition is absent while the monitor has never served a valid address."
                   items:
                     type: object
                     required: [type, status, reason, lastTransitionTime]

@@ -112,7 +112,8 @@ What the operator read and what it last wrote. The operator owns every field her
 | <span id="status--written"></span>`written` | [\[\]object](#statuswritten) | no | How many times the operator wrote each declared value in the current metadata.generation, with the panel confirming each write. The first write sets the value, and each later write puts it back after the panel moved away from it. The operator writes a value back at most three times in one generation, and then records it in status.unconfirmed. |
 | <span id="status--surfaces"></span>`surfaces` | [\[\]object](#statussurfaces) | no | Every window the compositor holds on this screen, in arrival order, whether or not a region shows it. A window with no region is running but is not displayed. Read this field first when a program draws nothing visible. An ID lasts only for the compositor that assigned it. A compositor restart ends every window, and programs reconnect under new IDs. |
 | <span id="status--layout"></span>`layout` | [object](#statuslayout) | no | The arrangement the screen is drawn to, and what each region shows. |
-| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports the panel on its connector. status.surfaces and status.layout are empty while it is False, because the compositor shows no window on a connector with no panel. Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. LayoutResolved is False with the reason LayoutNotFound while spec.layout names a Layout the cluster does not hold, and the screen shows the default arrangement until it does. CompositorServing reports the compositor behind the screen. It is False with the reason Down while the compositor's socket refuses the connect, and with the reason Hung while the socket accepts and the compositor answers nothing; the message is the socket's own words. status.surfaces and status.layout are empty for as long as it is False. PhysicalAddressCurrent is True with the reason ReadFromEDID while the connector's current EDID serves status.physicalAddress. It is False with the reason Retained while the connector serves no EDID for this monitor or serves no valid address, and status.physicalAddress then holds the last valid address; the message names the time the connector stopped serving it. It is False with the reason Ambiguous while two connected connectors on this node serve this monitor with different addresses; the message names both connectors and both addresses, and status.physicalAddress keeps the value it held before they disagreed. The condition is absent while the monitor has never served a valid address. |
+| <span id="status--arrangers"></span>`arrangers` | [\[\]object](#statusarrangers) | no | The arranger of each claim on this screen that has one. An arranger is the one client of a claim that the compositor lets place the claim's windows inside the claim's region, through the liken_arrangement_v1 Wayland protocol. The Layout still decides where the region is. A claim with no arranger is not listed, and its windows fill its region. The list changes when a claim gains or loses its arranger and when an arranger commits an arrangement under a new name. |
+| <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports the panel on its connector. status.surfaces, status.layout, and status.arrangers are empty while it is False, because the compositor shows no window on a connector with no panel. Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. LayoutResolved is False with the reason LayoutNotFound while spec.layout names a Layout the cluster does not hold, and the screen shows the default arrangement until it does. CompositorServing reports the compositor behind the screen. It is False with the reason Down while the compositor's socket refuses the connect, and with the reason Hung while the socket accepts and the compositor answers nothing; the message is the socket's own words. status.surfaces, status.layout, and status.arrangers are empty for as long as it is False. PhysicalAddressCurrent is True with the reason ReadFromEDID while the connector's current EDID serves status.physicalAddress. It is False with the reason Retained while the connector serves no EDID for this monitor or serves no valid address, and status.physicalAddress then holds the last valid address; the message names the time the connector stopped serving it. It is False with the reason Ambiguous while two connected connectors on this node serve this monitor with different addresses; the message names both connectors and both addresses, and status.physicalAddress keeps the value it held before they disagreed. The condition is absent while the monitor has never served a valid address. |
 
 ### status.mode
 
@@ -183,6 +184,7 @@ Every window the compositor holds on this screen, in arrival order, whether or n
 | <span id="statussurfaces--labels"></span>`labels` | map[string]string | no | The labels every holder of the claim carries with the same value. These are the labels a region's selector reads. When one pod holds the claim they are that pod's labels. |
 | <span id="statussurfaces--size"></span>`size` | [object](#statussurfacessize) | no | The size the program last drew, in pixels. A window in a region draws at the region's size, so a size that does not match its region is a program that ignored the compositor's request and is scaled to fit. |
 | <span id="statussurfaces--region"></span>`region` | string | no | The region that shows the window. Empty for a window no region took, which is not on the screen. |
+| <span id="statussurfaces--appid"></span>`appID` | string | no | The xdg app_id the program set on the window, and empty until it sets one. An arranger names the windows of its claim by app_id. |
 
 #### status.surfaces[].size
 
@@ -211,9 +213,22 @@ Each region in stacking order, with the window on top of it.
 | <span id="statuslayoutregions--name"></span>`name` | string | yes | The region's name, as the Layout states it. |
 | <span id="statuslayoutregions--surface"></span>`surface` | string | no | The id of the window on top of the region, the newest of the claim it shows, or the word empty when no window matched it. |
 
+### status.arrangers[]
+
+The arranger of each claim on this screen that has one. An arranger is the one client of a claim that the compositor lets place the claim's windows inside the claim's region, through the liken_arrangement_v1 Wayland protocol. The Layout still decides where the region is. A claim with no arranger is not listed, and its windows fill its region. The list changes when a claim gains or loses its arranger and when an arranger commits an arrangement under a new name.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusarrangers--claim"></span>`claim` | string | yes | The ResourceClaim whose socket the arranger connected through, as namespace/name. |
+| <span id="statusarrangers--region"></span>`region` | string | no | The region that shows the claim's windows. Empty while no region shows them. |
+| <span id="statusarrangers--pods"></span>`pods` | []string | no | The pods that hold the claim, each as namespace/name. The arranger is a process in one of them. The compositor cannot name the container, because it reads the client's pid from the socket, and the kernel reports pid 0 for a client in another pod's pid namespace. |
+| <span id="statusarrangers--pid"></span>`pid` | integer | no | The arranger's pid in the compositor's pid namespace. Absent for a client in another pod, which is every workload. |
+| <span id="statusarrangers--arrangement"></span>`arrangement` | string | no | The name of the arrangement the arranger committed last. Absent before its first commit. The compositor replaces each character that is not printable with an underscore, and reports an empty name as a hyphen. |
+| <span id="statusarrangers--duplicateappids"></span>`duplicateAppIDs` | []string | no | Each app_id that two or more of the claim's windows carry. An arrangement places every window whose app_id an entry names, so these windows always move together. |
+
 ### status.conditions[]
 
-Connected reports the panel on its connector. status.surfaces and status.layout are empty while it is False, because the compositor shows no window on a connector with no panel. Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. LayoutResolved is False with the reason LayoutNotFound while spec.layout names a Layout the cluster does not hold, and the screen shows the default arrangement until it does. CompositorServing reports the compositor behind the screen. It is False with the reason Down while the compositor's socket refuses the connect, and with the reason Hung while the socket accepts and the compositor answers nothing; the message is the socket's own words. status.surfaces and status.layout are empty for as long as it is False. PhysicalAddressCurrent is True with the reason ReadFromEDID while the connector's current EDID serves status.physicalAddress. It is False with the reason Retained while the connector serves no EDID for this monitor or serves no valid address, and status.physicalAddress then holds the last valid address; the message names the time the connector stopped serving it. It is False with the reason Ambiguous while two connected connectors on this node serve this monitor with different addresses; the message names both connectors and both addresses, and status.physicalAddress keeps the value it held before they disagreed. The condition is absent while the monitor has never served a valid address.
+Connected reports the panel on its connector. status.surfaces, status.layout, and status.arrangers are empty while it is False, because the compositor shows no window on a connector with no panel. Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. LayoutResolved is False with the reason LayoutNotFound while spec.layout names a Layout the cluster does not hold, and the screen shows the default arrangement until it does. CompositorServing reports the compositor behind the screen. It is False with the reason Down while the compositor's socket refuses the connect, and with the reason Hung while the socket accepts and the compositor answers nothing; the message is the socket's own words. status.surfaces, status.layout, and status.arrangers are empty for as long as it is False. PhysicalAddressCurrent is True with the reason ReadFromEDID while the connector's current EDID serves status.physicalAddress. It is False with the reason Retained while the connector serves no EDID for this monitor or serves no valid address, and status.physicalAddress then holds the last valid address; the message names the time the connector stopped serving it. It is False with the reason Ambiguous while two connected connectors on this node serve this monitor with different addresses; the message names both connectors and both addresses, and status.physicalAddress keeps the value it held before they disagreed. The condition is absent while the monitor has never served a valid address.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -400,6 +415,47 @@ panels, and a polling loop would relight the screens the override
 layer darkened. For those panels, `observed` stays what the
 operator last saw.
 
+## Arrangers
+
+A screen has two owners. The `Layout` that `spec.layout` names owns
+the screen, and gives each claim a region of it. Inside a region, one
+client of the claim can place the claim's own windows, through the
+`liken_arrangement_v1` Wayland protocol. That client is the claim's
+arranger. The [arrangement reference](/docs/reference/arrangement/)
+describes the protocol for the author of a workload.
+
+`status.arrangers` lists each claim on the screen that has an
+arranger, with the region that shows the claim and the name of the
+arrangement it committed last. Each window in `status.surfaces`
+carries the `appID` an arrangement names it by.
+`duplicateAppIDs` lists each app_id that two or more of the claim's
+windows carry, because one entry of an arrangement moves all of
+them:
+
+```yaml
+status:
+  surfaces:
+    - id: film-cla-4
+      claim: living-room/film
+      appID: liken-film
+      region: main
+    - id: film-cla-5
+      claim: living-room/film
+      appID: liken-display
+      region: main
+  arrangers:
+    - claim: living-room/film
+      region: main
+      pods: [living-room/player-0]
+      arrangement: credits
+```
+
+The arranger is a process in one of the pods that hold the claim.
+The compositor reads a client's pid from the socket, and the kernel
+reports pid 0 for a client in another pod's pid namespace, so
+`status.arrangers` names the pods and states no pid or container for
+a workload's arranger.
+
 ## One writer per wire
 
 The operator is the one process that writes a panel's i2c wire for
@@ -449,3 +505,13 @@ and `kubectl describe` shows it once, with the count.
 | `CompositorKilled` | Warning | The compositor answered nothing for 10 seconds, and the operator ended it. The compositor's container starts it again. The `Event` is on every `Display` of the node. |
 | `PanelStandbyFailed` | Warning | The panel did not take the standby after its last claim ended, and stays on. The operator does not try again. |
 | `Captured` | Normal | A capture through the API returned bytes. The message names the subject, the aspect, and the media type. |
+| `ArrangerGranted` | Normal | A client of a claim became the claim's arranger, and is new in `status.arrangers`. The message names the claim, the pods that hold it, and the region. |
+| `ArrangerLost` | Warning | A claim's arranger disconnected while a pod that holds the claim still runs and is not being deleted. A client that crashed looks like this. The claim's windows return to fill the region. |
+| `ArrangerReleased` | Normal | A claim's arranger destroyed its arranger object and gave the region up, or disconnected after the pods that held the claim were gone or being deleted. |
+
+An arranger that commits a new arrangement posts no `Event`. A
+commit follows a key press, so `status.arrangers` shows the name of
+the last one and nothing more. The compositor's restart ends every
+arranger, and the pass that reads the new compositor posts no
+`ArrangerLost` for them, because `CompositorServing` or
+`CompositorKilled` already reports the restart.

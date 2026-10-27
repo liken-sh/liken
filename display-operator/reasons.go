@@ -87,12 +87,23 @@ const (
 // PanelStandbyFailed is a panel that did not take the standby that
 // follows the release of its last claim. The operator does not try
 // again, so the panel stays on until a person or a claim turns it off.
+//
+// ArrangerGranted is a client of a claim that the compositor granted
+// the claim's arranger: from then on it places the claim's surfaces
+// inside the claim's region. ArrangerLost is an arranger whose client
+// disconnected while a pod that holds its claim still runs, which is
+// how a crashed client looks, and the claim's surfaces return to fill
+// the region. ArrangerReleased is an arranger that gave the region up
+// on purpose, or whose client disconnected with its pods.
 const (
 	CapturedReason           = "Captured"
 	CompositorKilledReason   = "CompositorKilled"
 	ModeChangedReason        = "ModeChanged"
 	WriteUnconfirmedReason   = "WriteUnconfirmed"
 	PanelStandbyFailedReason = "PanelStandbyFailed"
+	ArrangerGrantedReason    = "ArrangerGranted"
+	ArrangerLostReason       = "ArrangerLost"
+	ArrangerReleasedReason   = "ArrangerReleased"
 )
 
 // badStatus answers the status of a condition that makes its Event a

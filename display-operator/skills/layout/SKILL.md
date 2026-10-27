@@ -153,6 +153,7 @@ program that does not redraw at that size is scaled to fit.
 Every window the compositor holds is in `surfaces`. Each entry has
 the claim the window arrived through, the pods that hold that claim,
 their labels, the window's current size, and the region it is in. A
+window whose program sets an xdg app_id also carries it as `appID`. A
 window that matches no region is listed with no `region`, which is
 the first thing to read when a program is running and not on the
 screen. A region that shows nothing reads `surface: empty`.
@@ -175,6 +176,17 @@ makes pods fills a screen, and the `Layout` only says where.
 It does not fill a region with two windows. A second window from a
 matching pod stays off the screen until the first is gone.
 
-It does not move a window a program is drawing. A program never
-receives its rectangle, and it cannot ask for another one. Move the
-region in the `Layout` and every screen that names it follows.
+It does not let a program move its region. A program never receives
+its region's place on the screen, and it cannot ask for another one.
+Move the region in the `Layout` and every screen that names it
+follows.
+
+It does not arrange the windows inside a region. One client of the
+claim can do that: it becomes the claim's arranger through the
+`liken_arrangement_v1` Wayland protocol, and places the claim's own
+windows inside the region, such as a film that steps back into a
+frame while a panel slides in beside it. The arranger never moves a
+window outside the region. The
+[arrangement reference](https://liken.sh/display/docs/reference/arrangement/) describes the
+protocol, and `status.arrangers` on the `Display` shows which claim
+has an arranger.

@@ -110,6 +110,11 @@ type placementPass struct {
 	// nothing at all.
 	placed  map[int]placedSurface
 	ordered map[string][]int
+	// Reconnected is true for the one pass that first reads a new
+	// connection to the module. Every arranger went with the old
+	// compositor, so that pass posts no Event for the arrangers it no
+	// longer finds (announceArrangers).
+	reconnected bool
 	// Unswept is true while a Display on this node whose monitor is
 	// off the wire can carry a status that no longer holds. A screen's
 	// report writes only the Displays of lit outputs, so a Display
@@ -195,7 +200,8 @@ func (p *placementPass) pass() error {
 	// A new connection is a new compositor: every surface and every id
 	// went with the old one, so the memo goes and this pass states
 	// every placement again.
-	if state.Generation != p.generation {
+	p.reconnected = state.Generation != p.generation
+	if p.reconnected {
 		p.generation = state.Generation
 		p.forget()
 	}
@@ -230,7 +236,7 @@ func (p *placementPass) pass() error {
 		}
 		on := surfacesOn(held)
 		p.metrics.recordSurfaces(connector, len(on))
-		sent, err := p.screen(state.Outputs[connector], on, outputs, live)
+		sent, err := p.screen(state.Outputs[connector], held, outputs, live)
 		stated = stated || sent
 		if err != nil {
 			failures = append(failures, fmt.Errorf("%s: %w", connector, err))
@@ -274,6 +280,7 @@ func (p *placementPass) dark(live compositorLiveness) error {
 		status := published
 		status.Surfaces = nil
 		status.Layout = nil
+		status.Arrangers = nil
 		status.Conditions = setCondition(status.Conditions, p.serving(live))
 		return status
 	})
@@ -284,6 +291,8 @@ func (p *placementPass) dark(live compositorLiveness) error {
 // screen unresolved, and the pass leaves such a screen as it is.
 type screenSurfaces struct {
 	on         []screenSurface
+	arrangers  []screenArranger
+	departures map[string]string
 	unresolved bool
 }
 
@@ -347,6 +356,7 @@ func (p *placementPass) resolve(state layoutState, sockets map[string]preparedSo
 		screens[connector].on = append(screens[connector].on, on)
 		screens[connector].unresolved = screens[connector].unresolved || unresolved
 	}
+	failures = append(failures, resolveArrangers(state, sockets, connectors, holders, screens)...)
 	for _, screen := range screens {
 		slices.SortFunc(screen.on, func(a, b screenSurface) int {
 			return cmp.Compare(a.ID, b.ID)
@@ -358,8 +368,9 @@ func (p *placementPass) resolve(state layoutState, sockets map[string]preparedSo
 // screen decides the layout of one screen, states what changed to the
 // module, and writes the status. It answers whether anything reached
 // the module, which is what earns the commit.
-func (p *placementPass) screen(output layoutOutput, on []screenSurface, outputs []Output,
+func (p *placementPass) screen(output layoutOutput, held *screenSurfaces, outputs []Output,
 	live compositorLiveness) (bool, error) {
+	on := surfacesOn(held)
 	display, err := p.display(output.Connector, outputs)
 	if err != nil {
 		return false, err
@@ -381,7 +392,7 @@ func (p *placementPass) screen(output layoutOutput, on []screenSurface, outputs 
 		return stated, failure
 	}
 	return stated, errors.Join(failure,
-		p.report(display, on, decision, layoutName(named, layout), resolved, p.serving(live)))
+		p.report(display, held, decision, layoutName(named, layout), resolved, p.serving(live)))
 }
 
 // The resource of the panel on one connector, and nothing at all for
@@ -503,104 +514,6 @@ func (p *placementPass) send(output layoutOutput, decision screenPlacement, ids 
 		}
 	}
 	return stated, errors.Join(failures...)
-}
-
-// report writes what one screen shows. The write happens only where
-// the status this pass computed differs from the published one, so a
-// steady screen writes nothing.
-//
-// The Display controller writes the same status from its own loop,
-// and the two write different fields of it: this pass writes the
-// surfaces, the layout, and the LayoutResolved condition, and the
-// controller writes the panel's own facts. Each starts from the
-// status it read, so neither drops what the other wrote. A write the
-// two raced is refused with a conflict, and this pass reads the
-// Display again and composes its fields onto the fresh status.
-func (p *placementPass) report(display *Display, on []screenSurface, decision screenPlacement,
-	name string, resolved, serving DisplayCondition) error {
-	compose := func(published DisplayStatus) (DisplayStatus, bool) {
-		status := published
-		status.Surfaces = surfaceStatus(on, decision)
-		status.Layout = &DisplayLayout{Name: name, Regions: regionStatus(decision)}
-		status.Conditions = setCondition(status.Conditions, resolved)
-		status.Conditions = setCondition(status.Conditions, serving)
-		return status, true
-	}
-	err := p.displays.settleStatus(display, compose)
-	if errors.Is(err, apiclient.ErrNotFound) {
-		// A Display somebody deleted is the Display controller's to
-		// create again, and this pass reports the screen after that.
-		return nil
-	}
-	return err
-}
-
-func (p *placementPass) condition(met bool, reason, message string) DisplayCondition {
-	return p.stated(LayoutResolvedCondition, met, reason, message)
-}
-
-// serving is the condition that reports the compositor. Its message is
-// the socket's own words for the failure, so a person reads the cause
-// from the resource.
-func (p *placementPass) serving(live compositorLiveness) DisplayCondition {
-	return p.stated(CompositorServingCondition, live.serving, live.reason, live.detail)
-}
-
-func (p *placementPass) stated(kind string, met bool, reason, message string) DisplayCondition {
-	status := conditionFalse
-	if met {
-		status = conditionTrue
-	}
-	return DisplayCondition{
-		Type:               kind,
-		Status:             status,
-		Reason:             reason,
-		Message:            message,
-		LastTransitionTime: p.now().UTC().Truncate(time.Second),
-	}
-}
-
-// Every surface on the screen, whether or not a region took it. A
-// surface with no region is a program that is running and not on the
-// screen, which is the first thing to read when a program draws
-// nothing a person can see.
-func surfaceStatus(on []screenSurface, decision screenPlacement) []DisplaySurface {
-	regions := map[string]string{}
-	for _, place := range decision.placed {
-		regions[place.surface] = place.region
-	}
-	var surfaces []DisplaySurface
-	for _, surface := range on {
-		surfaces = append(surfaces, DisplaySurface{
-			ID:     surface.id,
-			Claim:  surface.claim,
-			Pods:   surface.pods,
-			Labels: surface.labels,
-			Size:   &SurfaceSize{Width: surface.Width, Height: surface.Height},
-			Region: regions[surface.id],
-		})
-	}
-	return surfaces
-}
-
-// Each region in stacking order, with the surface it shows or the
-// word empty.
-func regionStatus(decision screenPlacement) []DisplayRegion {
-	var regions []DisplayRegion
-	for _, region := range decision.regions {
-		regions = append(regions, DisplayRegion{Name: region.name, Surface: region.surface})
-	}
-	return regions
-}
-
-// The name status reports: the Layout in force, or the word default
-// for a screen that names none and for a name that resolved to
-// nothing.
-func layoutName(named string, layout *LayoutSpec) string {
-	if layout == nil {
-		return defaultLayoutName
-	}
-	return named
 }
 
 // The decision's own input: the surfaces of one screen, each with the

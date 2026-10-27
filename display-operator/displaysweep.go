@@ -35,6 +35,7 @@ func (p *placementPass) sweep(live compositorLiveness) error {
 		if _, wired := slices.BinarySearch(p.wired, name); !wired {
 			status.Surfaces = nil
 			status.Layout = nil
+			status.Arrangers = nil
 		}
 		status.Conditions = setCondition(status.Conditions, p.serving(live))
 		return status

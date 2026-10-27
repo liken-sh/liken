@@ -56,6 +56,10 @@ type layoutSurface struct {
 	Socket string
 	Width  int
 	Height int
+	// AppID is the xdg app_id the client set on the surface, and
+	// empty until it sets one. An arrangement names surfaces by it
+	// (arrangerstore.go).
+	AppID string
 }
 
 // layoutState is one reading of the store. Serving says whether the
@@ -67,6 +71,12 @@ type layoutState struct {
 	Reason   string
 	Outputs  map[string]layoutOutput
 	Surfaces map[int]layoutSurface
+	// Arrangers holds the arranger of each claim that has one, by the
+	// name of the claim's socket.
+	Arrangers map[string]layoutArranger
+	// Departures holds why each claim's arranger last left, released
+	// or disconnected, by the claim's socket.
+	Departures map[string]string
 	// Generation names the connection this reading came from. A reader
 	// that remembers what it sent to the module re-sends all of it when
 	// the generation moves, because the module holds nothing of its own
@@ -88,6 +98,8 @@ func (l *layoutLink) state() layoutState {
 		Reason:     l.reason,
 		Outputs:    maps.Clone(l.outputs),
 		Surfaces:   maps.Clone(l.surfaces),
+		Arrangers:  maps.Clone(l.arrangers),
+		Departures: maps.Clone(l.departures),
 		Generation: l.generation,
 	}
 }
@@ -109,6 +121,9 @@ func (l *layoutLink) event(text string) {
 // the socket the surface arrived on is its identity, and a size
 // carries none.
 func (l *layoutLink) remember(text string) bool {
+	if read, arranging := l.rememberArrangement(text); arranging {
+		return read
+	}
 	fields := strings.Fields(text)
 	if len(fields) == 0 {
 		return false

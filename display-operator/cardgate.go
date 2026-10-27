@@ -29,7 +29,7 @@ package main
 // The gate runs no timer. The watch opens it, and every pass that
 // reads the card runs the check.
 //
-// One window stays open. Weston 16.0.0 closes the card before it
+// One window stays open. Weston 16.0.2 closes the card before it
 // closes its client connections on its way out
 // (weston_compositor_destroy runs before wl_display_destroy in
 // frontend/main.c), so the watch stays live for a short time after
@@ -177,7 +177,7 @@ var errNothingToRestart = errors.New("the reported compositor needs no restart")
 //
 // It ends only the pid in the report, and only while that pid runs
 // and this operator has not ended it before, for any reason. Weston
-// 16.0.0 closes the card before it closes its client connections
+// 16.0.2 closes the card before it closes its client connections
 // (weston_compositor_destroy runs before wl_display_destroy in
 // frontend/main.c), so a compositor on its way out still holds a
 // live connection after the card has no master. A read in that time

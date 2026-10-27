@@ -156,8 +156,11 @@ type DisplayStatus struct {
 	Written []DisplayWritten `json:"written,omitempty"`
 	// Every surface the compositor holds on this screen, in the order
 	// they arrived, and the layout they were drawn to.
-	Surfaces   []DisplaySurface   `json:"surfaces,omitempty"`
-	Layout     *DisplayLayout     `json:"layout,omitempty"`
+	Surfaces []DisplaySurface `json:"surfaces,omitempty"`
+	Layout   *DisplayLayout   `json:"layout,omitempty"`
+	// The client that arranges each claim's surfaces inside its
+	// region, for each claim that has one (arrangers.go).
+	Arrangers  []DisplayArranger  `json:"arrangers,omitempty"`
 	Conditions []DisplayCondition `json:"conditions,omitempty"`
 }
 
@@ -177,6 +180,9 @@ type DisplaySurface struct {
 	Labels map[string]string `json:"labels,omitempty"`
 	Size   *SurfaceSize      `json:"size,omitempty"`
 	Region string            `json:"region,omitempty"`
+	// The xdg app_id the program set on the window, which is what an
+	// arrangement names it by.
+	AppID string `json:"appID,omitempty"`
 }
 
 // The surface's current buffer size in pixels, as the compositor
