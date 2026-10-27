@@ -79,12 +79,16 @@ func listedRun(report *libraryReport) libraryRun {
 // The worker step of one Library's pass. It starts at most one worker per
 // heavy fact. A worker whose GPU claim template does not exist starts no Job,
 // because its pods would stay Pending until the Job's deadline. The template's
-// create wakes a pass, and that pass starts the worker.
+// create wakes a pass, and that pass starts the worker. Before it decides,
+// the step applies the Library's block to the worker of the fact that runs.
 func (o *operator) runFactWorkers(ctx context.Context, library *Library, report *libraryReport, jobs []Job,
 	templates gpuClaimTemplates, now time.Time) error {
 	namespace, name := library.Metadata.Namespace, library.Metadata.Name
 	listed := listedRun(report)
 	for _, worker := range factWorkers {
+		if err := o.editRunningWorkers(ctx, library, worker, jobs); err != nil {
+			return err
+		}
 		if templates.missing(worker.fact) {
 			continue
 		}
@@ -108,6 +112,70 @@ func (o *operator) runFactWorkers(ctx context.Context, library *Library, report 
 		}
 	}
 	return nil
+}
+
+// editRunningWorkers applies the Library's block for the fact to each worker
+// of the fact that runs, so an edit of the Library changes the list that runs
+// and does not wait for the next list. A finished worker starts no pod, so it
+// stays as it ran.
+//
+// A Library that turned the fact off deletes the worker, and the pods with
+// it, so turning a fact off stops a worker that runs away. The videos it did
+// not reach stay in the gap, and the list after the fact is turned on again
+// holds them. Otherwise the worker takes the Library's parallelism, which is
+// the one field of the block that a running Job can take. The pod template of
+// a Job cannot change, so a new GPU claim template reaches only the next
+// worker.
+func (o *operator) editRunningWorkers(ctx context.Context, library *Library, worker factWorker, jobs []Job) error {
+	namespace, name := library.Metadata.Namespace, library.Metadata.Name
+	for _, job := range jobsOf(jobs, namespace, name, worker.fact) {
+		if job.finished() {
+			continue
+		}
+		if !worker.enabled(library) {
+			if err := o.deleteJob(ctx, namespace, job.Metadata.Name); err != nil {
+				return fmt.Errorf("deleting the %s worker %s: %w", worker.fact, job.Metadata.Name, err)
+			}
+			o.logf("library %s/%s: deleted the %s worker %s, because the Library turned %s off",
+				namespace, name, worker.fact, job.Metadata.Name, worker.fact)
+			continue
+		}
+		if err := o.resizeWorker(ctx, library, worker, &job); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// resizeWorker sets one running worker to the parallelism the Library asks
+// for, and sends nothing where the worker runs at it already.
+func (o *operator) resizeWorker(ctx context.Context, library *Library, worker factWorker, job *Job) error {
+	if job.Spec.Parallelism == nil || job.Spec.Completions == nil {
+		return nil
+	}
+	running := *job.Spec.Parallelism
+	asked := workerParallelism(library, worker, int(*job.Spec.Completions))
+	if running == asked {
+		return nil
+	}
+	err := o.patchJobParallelism(ctx, job, asked)
+	if errors.Is(err, apiclient.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("changing the parallelism of the %s worker %s: %w", worker.fact, job.Metadata.Name, err)
+	}
+	o.logf("library %s/%s: changed the %s worker %s from %d to %d videos at once, because the Library asks for %d",
+		job.Metadata.Namespace, library.Metadata.Name, worker.fact, job.Metadata.Name, running, asked,
+		worker.parallelism(library))
+	return nil
+}
+
+// How many videos at once a worker of the fact runs on a list of count
+// videos: the Library's parallelism, and never more than the list, so no pod
+// starts with nothing to do.
+func workerParallelism(library *Library, worker factWorker, count int) int32 {
+	return int32(min(worker.parallelism(library), count))
 }
 
 // The images every Job of this operator runs.
@@ -137,7 +205,7 @@ func buildFactWorkerJob(library *Library, worker factWorker, images jobImages, b
 	backoff, ttl := int32(scanBackoffLimit), int32(scanJobTTL)
 	deadline := int64(factWorkerDeadline / time.Second)
 	completions := int32(count)
-	parallelism := int32(min(worker.parallelism(library), count))
+	parallelism := workerParallelism(library, worker, count)
 	return &Job{
 		APIVersion: batchAPIVersion,
 		Kind:       "Job",

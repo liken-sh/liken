@@ -225,15 +225,18 @@ rules:
   # schedule, for a request, or for a webhook's folders, and a Job that
   # fills gaps between walks. A Job runs the sweep of a departing
   # Library. The watch is cluster-scoped for the reason the pods are,
-  # and every pass reads the Jobs from it. The delete verb covers four
+  # and every pass reads the Jobs from it. The delete verb covers five
   # deletes: a worker Job that succeeded more than the grace
   # ago, a cleanup Job that failed and is stood again on a backoff, the
-  # retirement of a cleanup Job when its library is released, and a
+  # retirement of a cleanup Job when its library is released, a
   # Jellyfin backfill Job that failed or that a Catalog no longer asks
-  # for. A Job is never updated: it runs once as it was created.
+  # for, and a running trickplay or appearances worker whose Library
+  # turned the fact off. The patch verb sets the parallelism of a running trickplay or
+  # appearances worker to the one its Library asks for. No other field of
+  # a Job is changed after the create.
   - apiGroups: [batch]
     resources: [jobs]
-    verbs: [get, list, watch, create, delete]
+    verbs: [get, list, watch, create, patch, delete]
   # The CronJob an earlier release ran each Library's walk from, which
   # the operator deletes by name. The operator creates none.
   - apiGroups: [batch]

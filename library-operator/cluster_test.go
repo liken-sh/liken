@@ -509,8 +509,8 @@ func seedStorageClass(cluster *fakeCluster, name, provisioner string) {
 }
 
 // ServeJob answers a Job the way the API server does: a create stores
-// what the body carries, a delete removes it, and anything else reads
-// it by name.
+// what the body carries, a merge patch of the parallelism changes it, a
+// delete removes it, and anything else reads it by name.
 func (f *fakeCluster) serveJob(w http.ResponseWriter, r *http.Request, key string) {
 	switch r.Method {
 	case http.MethodPost:
@@ -524,6 +524,21 @@ func (f *fakeCluster) serveJob(w http.ResponseWriter, r *http.Request, key strin
 		created.Metadata.ResourceVersion = "1"
 		f.jobs[created.Metadata.Namespace+"/"+created.Metadata.Name] = &created
 		_ = json.NewEncoder(w).Encode(created)
+	case http.MethodPatch:
+		held := f.jobs[key]
+		if held == nil {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var patch struct {
+			Spec struct {
+				Parallelism *int32 `json:"parallelism"`
+			} `json:"spec"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&patch)
+		held.Spec.Parallelism = patch.Spec.Parallelism
+		held.Metadata.ResourceVersion = nextVersion(held.Metadata.ResourceVersion)
+		_ = json.NewEncoder(w).Encode(held)
 	case http.MethodDelete:
 		if _, held := f.jobs[key]; !held {
 			w.WriteHeader(http.StatusNotFound)

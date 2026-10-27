@@ -404,6 +404,18 @@ leaves the other indexes alone. The 24-hour deadline is for the whole
 `Job`. The worker counts as running until every index has ended, so
 the next worker waits for the last pod.
 
+When you change the parallelism while a worker runs, the operator
+sets the running `Job` to the new value, and the `Job` controller
+starts or stops pods to match it. The value is never more than the
+videos of the worker's list. A change of `gpuResourceClaimTemplate`
+does not reach a running worker, because a `Job`'s pod template cannot
+change. The next worker uses the new template.
+
+To stop a worker, turn its fact off with `enabled: false`. The operator
+deletes the running worker `Job` and its pods. The videos the worker
+did not reach stay in the gap, and the list after you turn the fact on
+again holds them.
+
 Two pods can work two episodes of one season at once, and each writes
 the season folder's ledger. Each write reads the ledger again just
 before it replaces the file, and applies the pod's own entry to what

@@ -197,6 +197,33 @@ func (o *operator) createJob(ctx context.Context, job *Job) (*Job, error) {
 	})
 }
 
+// PatchJobParallelism sets how many pods of a Job run at once, with a merge
+// patch of that one field. Parallelism is one of the few fields of a running
+// Job that the API server lets a client change, and the Job controller
+// starts or stops pods to match it.
+func PatchJobParallelism(ctx context.Context, c *apiclient.Client, namespace, name string, parallelism int32) (*Job, error) {
+	body, err := json.Marshal(map[string]any{"spec": map[string]any{"parallelism": parallelism}})
+	if err != nil {
+		return nil, err
+	}
+	patched := &Job{}
+	path := jobsPath(namespace) + "/" + name
+	if err := c.WithContext(ctx).Request(http.MethodPatch, path, mergePatchType, body, patched); err != nil {
+		return nil, err
+	}
+	return patched, nil
+}
+
+// patchJobParallelism changes one worker Job's parallelism and notes the
+// version the API server answered, so the next pass does not read the old
+// parallelism from its list and send the patch again.
+func (o *operator) patchJobParallelism(ctx context.Context, job *Job, parallelism int32) error {
+	_, err := memo.Written(o.versions.jobs, memo.Key(&job.Metadata), func() (*Job, error) {
+		return PatchJobParallelism(ctx, o.client, job.Metadata.Namespace, job.Metadata.Name, parallelism)
+	})
+	return err
+}
+
 // deleteJob deletes one worker Job and notes that the operator holds no
 // copy of it, so the next pass reads it from the API server, and leaves
 // it out, while the watch's store still holds it.
