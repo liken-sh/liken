@@ -19,9 +19,12 @@ const trickplayContainerName = factTrickplay
 
 // How much memory this container may take, and the share of a core it asks
 // for. Both are above the scanner's, because ffmpeg decodes a video where
-// every other container reads rows and files.
+// every other container reads rows and files. ffmpeg starts one decoder
+// thread for each core of the node, and each thread holds frames, so the
+// peak grows with the node's core count and with the frame size. The limit
+// leaves room for a 4K file on a node with many cores.
 const (
-	trickplayMemoryLimit = "512Mi"
+	trickplayMemoryLimit = "768Mi"
 	trickplayCPURequest  = "500m"
 )
 

@@ -89,7 +89,9 @@ that fills gaps runs only the phases with work, and requests less.
 
 The trickplay worker, when enabled, is a pod of its own with one
 container and no agent. It requests `32Mi` of memory and `500m` of CPU,
-and its limit is `512Mi`. It runs beside the `Library`'s `Job`, so a
+and its limit is `768Mi`, because `ffmpeg` starts one decoder thread for
+each core of the node, and a 4K file decoded on a node with many cores
+needs more than `512Mi`. It runs beside the `Library`'s `Job`, so a
 node that takes both holds the sum of the two. The appearances worker
 is a pod of the same kind. It requests `32Mi` of memory and one core
 of CPU, and its limit is `1536Mi`, because the largest measured run held
