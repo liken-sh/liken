@@ -84,18 +84,32 @@ var answers = map[Opcode]bool{
 // It answers one request itself: Give Device Power Status, with the
 // power the caller states, because the kernel does not answer it.
 //
+// audioSystem says whether the bus has an audio system, a device at
+// logical address 5. The node workload sends System Audio Mode Request
+// only on such a bus, so only there does it support System Audio
+// Control. HDMI-CEC 1.3a, CEC Table 25, says a device that sends the
+// request shall not Feature Abort Set System Audio Mode or System Audio
+// Mode Status, and CEC Table 24 says a device that takes Set System
+// Audio Mode shall be able to send the request, which a follower on a
+// bus with no audio system never does. So on that bus a directed Set
+// System Audio Mode or System Audio Mode Status gets a Feature Abort.
+// A broadcast gets none, because a follower ignores a broadcast it
+// does not support (CEC 12.3).
+//
 // A message from the unregistered address gets no answer. An answer
 // to address 15 would be a broadcast, and a Feature Abort and a Report
 // Power Status are directed messages.
-func Answer(message Message, own LogicalAddress, power PowerStatus) (Message, bool) {
+func Answer(message Message, own LogicalAddress, power PowerStatus, audioSystem bool) (Message, bool) {
 	if message.IsBroadcast() || message.IsPoll() || message.To != own || message.From == own ||
 		message.From == AddressUnregistered {
 		return Message{}, false
 	}
 	opcode, _ := message.Opcode()
+	systemAudio := opcode == OpSetSystemAudioMode || opcode == OpSystemAudioModeStatus
 	switch {
 	case opcode == OpGiveDevicePowerStatus:
 		return ReportPowerStatus(own, message.From, power), true
+	case systemAudio && !audioSystem:
 	case answers[opcode]:
 		return Message{}, false
 	}

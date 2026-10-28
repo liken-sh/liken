@@ -225,6 +225,10 @@ type cecNode struct {
 	// accepted yet (cecnode_screen.go).
 	picked    *streamPick
 	screenAsk *screenAskRecord
+	// audioAnswers takes the receiver's answers to a System Audio Mode
+	// Request while one waits, and is nil otherwise
+	// (cecnode_systemaudio.go).
+	audioAnswers chan cec.Message
 }
 
 // newCECNode reads the adapter's capabilities, which every later

@@ -52,7 +52,10 @@ finds the devices on the bus. For each TV it finds, the operator
 creates a `Television`. From then on, the adapter wakes the TV and
 switches it to the machine when the room wakes, puts it in standby
 when the room turns off, and passes the TV remote's key presses to
-the `Player`.
+the `Player`. When the machine's picture passes through a receiver on
+the bus, the wake also asks the receiver for System Audio Mode. The TV
+then mutes its own speakers and sends its remote's volume keys to the
+receiver, so the TV remote sets the volume the room hears.
 
 The adapter scans the bus once when it joins, and after that sends
 nothing on a timer. It asks a device questions only when that device

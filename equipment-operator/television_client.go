@@ -8,15 +8,14 @@ package main
 // the node workload that sends the bus's commands, which writes
 // powerGeneration and the PowerApplied condition; and the node workload
 // that speaks for the session's Display, which writes wokeAt and the
-// WakeApplied condition under one manager, and standbyAt and the
-// StandbyApplied condition under another. The node workload that sends
-// the bus's commands writes powerRead under a manager of its own, and
-// the node workload that speaks for the session's Display writes
-// screenAsk under another. The conditions are a map
-// keyed by type, so each writer's apply leaves the other writers'
-// conditions in place. Discovery
-// creates its Television with a create, so it writes no spec field
-// after that.
+// WakeApplied and SystemAudioApplied conditions under one manager, and
+// standbyAt and the StandbyApplied condition under another. The node
+// workload that sends the bus's commands writes powerRead under a
+// manager of its own, and the node workload that speaks for the
+// session's Display writes screenAsk under another. The conditions are
+// a map keyed by type, so each writer's apply leaves the other writers'
+// conditions in place. Discovery creates its Television with a create,
+// so it writes no spec field after that.
 
 import (
 	"context"
@@ -153,10 +152,13 @@ func cecWakeFieldManager(machine string) string {
 }
 
 // ApplyTelevisionWake writes what the node workload's wake did: the
-// status.session.wokeAt it ran and the WakeApplied condition. The body
-// states the object's uid for the same reason ApplyTelevisionPower
-// does.
-func ApplyTelevisionWake(c *Client, television *Television, machine, wokeAt string, condition Condition) error {
+// status.session.wokeAt it ran, the WakeApplied condition, and the
+// SystemAudioApplied condition of a wake that sent System Audio Mode
+// Request. An apply removes each condition its manager owns and does
+// not state, so a wake that sends no request removes the
+// SystemAudioApplied of an earlier wake. The body states the object's
+// uid for the same reason ApplyTelevisionPower does.
+func ApplyTelevisionWake(c *Client, television *Television, machine, wokeAt string, conditions ...Condition) error {
 	type status struct {
 		WokeAt     string      `json:"wokeAt"`
 		Conditions []Condition `json:"conditions"`
@@ -166,7 +168,7 @@ func ApplyTelevisionWake(c *Client, television *Television, machine, wokeAt stri
 		Kind       string     `json:"kind"`
 		Metadata   ObjectMeta `json:"metadata"`
 		Status     status     `json:"status"`
-	}{Status: status{WokeAt: wokeAt, Conditions: []Condition{condition}}}
+	}{Status: status{WokeAt: wokeAt, Conditions: conditions}}
 	body.APIVersion, body.Kind, body.Metadata = televisionApply(television.Metadata.Name)
 	body.Metadata.UID = television.Metadata.UID
 	return applyTelevision(c, television.Metadata.Name, televisionPath(television.Metadata.Name)+"/status", cecWakeFieldManager(machine), body)

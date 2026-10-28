@@ -123,4 +123,10 @@ type CECDevice struct {
 	Vendor          string `json:"vendor,omitempty"`
 	CECVersion      string `json:"cecVersion,omitempty"`
 	Power           string `json:"power,omitempty"`
+	// SystemAudioMode is the System Audio Mode the audio system last
+	// stated, On or Off, and SystemAudioModeAt is when the adapter read
+	// or heard it. The join scan reads it once, and each broadcast Set
+	// System Audio Mode sets it after that.
+	SystemAudioMode   string `json:"systemAudioMode,omitempty"`
+	SystemAudioModeAt string `json:"systemAudioModeAt,omitempty"`
 }

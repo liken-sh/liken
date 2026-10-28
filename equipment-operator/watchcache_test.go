@@ -246,6 +246,10 @@ func TestTheCECBusPassReadsTheStores(t *testing.T) {
 				mustSucceed(t, controller.pass())
 				delivered(t, controller.buses, api.client.versions.cecBuses)
 				delivered(t, controller.televisions, api.client.versions.televisions)
+				// The first pass writes the Receiver's status.cec, so the
+				// pass after it reads the Receiver from the store only once
+				// the write's own event has arrived.
+				delivered(t, controller.receivers, api.client.versions.receivers)
 				before := map[string]int{}
 				for path := range c.reads {
 					before[path] = api.readsUnder(path)

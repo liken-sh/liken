@@ -3,8 +3,16 @@
 Proposed on 2026-10-06, and revised on 2026-10-28 to send the request
 on every wake through a receiver, with no field in the spec. Replaces
 the CEC part of
-[plan 13](rejected/13-every-setting-a-receiver-exposes.md#cec), and
-builds phase 4 of [plan 09](completed/09-cec.md). Not built.
+[plan 13](../rejected/13-every-setting-a-receiver-exposes.md#cec), and
+builds phase 4 of [plan 09](09-cec.md). Built on 2026-10-28, both
+phases, and tested against `cectest` and the fake API server. The
+`vivid` test of the volume keys has not run, and none of the six
+drills in "How it will be proved" has run. The build adds
+`systemAudioModeAt` to each `CECDevice` of an adapter's entry, so the
+`Deployment` has the time to write in `status.cec`, and it sends the
+request only when the wake's guard ends with the `Display`'s Active
+Source, so the request never switches the receiver away from a source
+that a person or another device chose.
 
 ## The problem
 
@@ -32,7 +40,7 @@ The bus does not report the mode, and the operator never asks for it:
 ## System Audio Mode is not a setting
 
 A setting is a value the operator converges to
-([plan 14](14-one-settings-model-for-every-receiver.md)). System Audio
+([plan 14](../14-one-settings-model-for-every-receiver.md)). System Audio
 Mode is a state that the TV, the receiver, and the person all change,
 and a request for it changes more than the mode:
 

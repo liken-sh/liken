@@ -570,10 +570,11 @@ func (n *cecNode) heard(message cec.Message) {
 		return
 	}
 	n.arrived(message, after, held)
+	n.noteSystemAudio(message, own)
 	n.followRoute(message, own)
 	n.answerRouting(message, after, own)
 	n.sleepOnStandby(message, after, own)
-	reply, answers := cec.Answer(message, own, n.ownPower())
+	reply, answers := cec.Answer(message, own, n.ownPower(), n.directory.Holds(cec.AddressAudioSystem))
 	if !answers {
 		return
 	}
@@ -601,6 +602,10 @@ func devicesOf(peers []cec.Peer) []CECDevice {
 		}
 		if peer.Physical != cec.InvalidPhysicalAddress {
 			device.PhysicalAddress = peer.Physical.String()
+		}
+		if peer.SystemAudioMode != cec.SystemAudioUnknown {
+			device.SystemAudioMode = peer.SystemAudioMode.String()
+			device.SystemAudioModeAt = timestamp(peer.SystemAudioModeAt)
 		}
 		devices = append(devices, device)
 	}

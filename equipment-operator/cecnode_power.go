@@ -221,6 +221,9 @@ type powerResult struct {
 	stopped bool
 	// log is the outcome as the node workload's log states it.
 	log string
+	// audio is what a wake's System Audio Mode Request did, and nil for
+	// a wake that sent none (cecnode_systemaudio.go).
+	audio *audioResult
 }
 
 // commandNames are the words a message states for each command, in

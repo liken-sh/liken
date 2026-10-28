@@ -204,6 +204,16 @@ func TestTheDevicesMergeAcrossAdapters(t *testing.T) {
 			scannedEntry("node-1", 4, tvDevice),
 			reportedAt(scannedEntry("node-2", 8, receiverDevice), derivedAt.Add(-2*time.Minute)),
 		}, []CECDevice{tvDevice}},
+		// The System Audio Mode carries the time an adapter read or heard
+		// it, so the newer report wins whichever adapter made it.
+		{"the newer System Audio Mode wins", []CECAdapterStatus{
+			scannedEntry("node-1", 4, CECDevice{PhysicalAddress: "1.0.0.0", LogicalAddress: 5, SystemAudioMode: "On", SystemAudioModeAt: "2026-09-26T11:00:00Z"}),
+			scannedEntry("node-2", 8, CECDevice{PhysicalAddress: "1.0.0.0", LogicalAddress: 5, SystemAudioMode: "Off", SystemAudioModeAt: "2026-09-26T11:30:00Z"}),
+		}, []CECDevice{{PhysicalAddress: "1.0.0.0", LogicalAddress: 5, SystemAudioMode: "Off", SystemAudioModeAt: "2026-09-26T11:30:00Z"}}},
+		{"an older System Audio Mode loses", []CECAdapterStatus{
+			scannedEntry("node-1", 4, CECDevice{PhysicalAddress: "1.0.0.0", LogicalAddress: 5, SystemAudioMode: "On", SystemAudioModeAt: "2026-09-26T11:30:00Z"}),
+			scannedEntry("node-2", 8, CECDevice{PhysicalAddress: "1.0.0.0", LogicalAddress: 5, SystemAudioMode: "Off", SystemAudioModeAt: "2026-09-26T11:00:00Z"}),
+		}, []CECDevice{{PhysicalAddress: "1.0.0.0", LogicalAddress: 5, SystemAudioMode: "On", SystemAudioModeAt: "2026-09-26T11:30:00Z"}}},
 		{"devices with no address keep logical order after the tree", []CECAdapterStatus{
 			scannedEntry("node-1", 4, receiverDevice, CECDevice{LogicalAddress: 9}, tvDevice, CECDevice{LogicalAddress: 1}),
 		}, []CECDevice{tvDevice, receiverDevice, {LogicalAddress: 1}, {LogicalAddress: 9}}},

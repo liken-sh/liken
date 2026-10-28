@@ -354,6 +354,12 @@ another input, the status records that input. The operator selects the
 configured input again only when `active` or `awake` changes from false
 to true. If the person turns the volume knob, the status reports the
 new volume, and `media-operator` steps the next press from that level.
+The TV's remote can change the volume too: while the receiver's System
+Audio Mode is on, the TV sends its remote's volume keys to the
+receiver over HDMI-CEC. The receiver holds one volume, so
+`status.zones` shows volume changes that `liken` did not make. The
+[CEC guide](https://liken.sh/equipment/docs/guides/connect-a-cec-adapter/#let-the-tv-remote-set-the-receivers-volume)
+says when the mode is on.
 
 ## Read what happened to a receiver
 
@@ -362,7 +368,9 @@ Each change of a `Receiver`'s `Reachable`, `SettingsConfirmed`, or
 condition's reason and message. A receiver that stops answering posts
 `Unreachable`, a Warning, and posts `Connected` when it answers again.
 A declared setting that the receiver does not confirm after 3 sends
-posts `NotConfirmed`, a Warning. A `Receiver` is cluster-scoped, so its
+posts `NotConfirmed`, a Warning. A `Receiver` with a `status.cec`
+posts `SystemAudioModeOn` or `SystemAudioModeOff`, both Normal, each
+time its System Audio Mode changes. A `Receiver` is cluster-scoped, so its
 Events are in the `default` namespace, and `kubectl events` finds them
 only with `-n default` or `-A`:
 

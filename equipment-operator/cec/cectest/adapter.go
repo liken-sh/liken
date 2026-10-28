@@ -390,9 +390,15 @@ func (a *Adapter) transmit(raw *cec.KernelMsg) error {
 			time.Sleep(peer.Slow)
 			a.bus.mutex.Lock()
 		}
-		if aborted {
+		switch {
+		case aborted && raw.Reply != 0:
 			raw.RxStatus = cec.RxStatusFeatureAbort | cec.RxStatusOK
 			return nil
+		case aborted:
+			// A transmit that waits for no reply returns before the
+			// answer, so the Feature Abort arrives as a received message,
+			// which the kernel passes to a follower.
+			replies = append(replies, cec.FeatureAbort(peer.Logical, message.From, cec.Opcode(message.Body[0]), cec.AbortUnrecognizedOpcode))
 		}
 		if ok {
 			replies = append(replies, reply)
@@ -400,7 +406,11 @@ func (a *Adapter) transmit(raw *cec.KernelMsg) error {
 	}
 	for _, reply := range replies {
 		// The kernel hands the awaited reply to the transmit that asked
-		// for it, and every other adapter on the wire hears it too.
+		// for it, and every other adapter on the wire hears it too. An
+		// answer the transmit did not wait for reaches the asker too.
+		if raw.Reply == 0 && reply.To == message.From {
+			a.hear(reply)
+		}
 		a.bus.carry(reply, a)
 		if raw.Reply != 0 && reply.From == message.To && reply.Body[0] == raw.Reply {
 			raw.RxStatus = cec.RxStatusOK

@@ -25,10 +25,43 @@ func TestAFollowerAnswersWhatTheKernelLeavesToIt(t *testing.T) {
 		{"a poll", cec.Poll(0, own), nil},
 		{"another device's message", cec.GiveDevicePowerStatus(0, 5), nil},
 		{"its own message", cec.GiveDevicePowerStatus(own, own), nil},
+		{"a late Set System Audio Mode", cec.SetSystemAudioMode(5, own, cec.SystemAudioOn), nil},
+		{"a late System Audio Mode Status", cec.SystemAudioModeStatus(5, own, cec.SystemAudioOff), nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, answers := cec.Answer(c.message, own, cec.PowerOn)
+			got, answers := cec.Answer(c.message, own, cec.PowerOn, true)
+			switch {
+			case c.want == nil && answers:
+				t.Errorf("answered %v, want no answer", got)
+			case c.want != nil && (!answers || got.String() != c.want.String()):
+				t.Errorf("answered %v (%v), want %v", got, answers, *c.want)
+			}
+		})
+	}
+}
+
+// A follower on a bus with no audio system never sends System Audio
+// Mode Request, so it does not support System Audio Control: a directed
+// Set System Audio Mode or System Audio Mode Status gets a Feature
+// Abort, and a broadcast gets nothing (HDMI-CEC 1.3a, CEC 12.3).
+func TestAFollowerWithNoAudioSystemAbortsSystemAudio(t *testing.T) {
+	const own = cec.LogicalAddress(4)
+	cases := []struct {
+		name    string
+		message cec.Message
+		want    *cec.Message
+	}{
+		{"a directed Set System Audio Mode", cec.SetSystemAudioMode(0, own, cec.SystemAudioOn),
+			ptr(cec.FeatureAbort(own, 0, cec.OpSetSystemAudioMode, cec.AbortUnrecognizedOpcode))},
+		{"a directed System Audio Mode Status", cec.SystemAudioModeStatus(0, own, cec.SystemAudioOff),
+			ptr(cec.FeatureAbort(own, 0, cec.OpSystemAudioModeStatus, cec.AbortUnrecognizedOpcode))},
+		{"a broadcast Set System Audio Mode", cec.SetSystemAudioMode(0, cec.AddressBroadcast, cec.SystemAudioOn), nil},
+		{"another answer", cec.ReportPowerStatus(0, own, cec.PowerOn), nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, answers := cec.Answer(c.message, own, cec.PowerOn, false)
 			switch {
 			case c.want == nil && answers:
 				t.Errorf("answered %v, want no answer", got)

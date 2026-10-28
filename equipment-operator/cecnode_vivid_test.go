@@ -107,7 +107,7 @@ func playTV(t *testing.T, tv *cec.Device) {
 	go func() {
 		defer close(done)
 		_ = cec.Read(ctx, tv, func(message cec.Message) {
-			if reply, answers := cec.Answer(message, cec.AddressTV, cec.PowerStandby); answers {
+			if reply, answers := cec.Answer(message, cec.AddressTV, cec.PowerStandby, true); answers {
 				_, _ = tv.Transmit(reply, 0, 0)
 			}
 		}, func(cec.Event) {})
@@ -211,7 +211,7 @@ func playWakingTV(t *testing.T, tv *cec.Device) func() []cec.Message {
 				move(cec.PowerToStandby, cec.PowerStandby)
 				return
 			}
-			if reply, answers := cec.Answer(message, cec.AddressTV, current()); answers {
+			if reply, answers := cec.Answer(message, cec.AddressTV, current(), true); answers {
 				_, _ = tv.Transmit(reply, 0, 0)
 			}
 		}, func(cec.Event) {})

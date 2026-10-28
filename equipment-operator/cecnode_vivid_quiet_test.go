@@ -29,7 +29,7 @@ func playCountingTV(t *testing.T, tv *cec.Device) func() int {
 			mutex.Lock()
 			heard++
 			mutex.Unlock()
-			if reply, answers := cec.Answer(message, cec.AddressTV, cec.PowerStandby); answers {
+			if reply, answers := cec.Answer(message, cec.AddressTV, cec.PowerStandby, true); answers {
 				_, _ = tv.Transmit(reply, 0, 0)
 			}
 		}, func(cec.Event) {})

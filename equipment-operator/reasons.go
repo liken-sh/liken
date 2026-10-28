@@ -24,6 +24,15 @@ const (
 	reasonNoInputReported      = "NoInputReported"
 )
 
+// The Events of a change of the System Audio Mode in a Receiver's
+// status.cec. Each is Normal, because the receiver turns the mode off
+// before standby and a person turns it off by picking the TV's
+// speakers, so Off is an ordinary state (receiver_cec.go).
+const (
+	reasonSystemAudioModeOn  = "SystemAudioModeOn"
+	reasonSystemAudioModeOff = "SystemAudioModeOff"
+)
+
 // The CECBus conditions and their reasons.
 const (
 	conditionAddressKnown = "AddressKnown"
@@ -47,13 +56,14 @@ const (
 
 // The Television conditions and their reasons. The Deployment writes
 // Reachable and InCharge; the node workloads write PowerApplied,
-// WakeApplied, and StandbyApplied.
+// WakeApplied, SystemAudioApplied, and StandbyApplied.
 const (
-	conditionReachable      = "Reachable"
-	conditionInCharge       = "InCharge"
-	conditionPowerApplied   = "PowerApplied"
-	conditionWakeApplied    = "WakeApplied"
-	conditionStandbyApplied = "StandbyApplied"
+	conditionReachable          = "Reachable"
+	conditionInCharge           = "InCharge"
+	conditionPowerApplied       = "PowerApplied"
+	conditionWakeApplied        = "WakeApplied"
+	conditionSystemAudioApplied = "SystemAudioApplied"
+	conditionStandbyApplied     = "StandbyApplied"
 
 	reasonInCharge        = "InCharge"
 	reasonAnotherInCharge = "AnotherInCharge"

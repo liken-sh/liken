@@ -10,6 +10,7 @@ package cec_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -84,7 +85,7 @@ func follow(t *testing.T, device *cec.Device, claim cec.Claim, power cec.PowerSt
 	go func() {
 		defer close(done)
 		_ = cec.Read(ctx, device, func(message cec.Message) {
-			if reply, answers := cec.Answer(message, own, power); answers {
+			if reply, answers := cec.Answer(message, own, power, true); answers {
 				_, _ = device.Transmit(reply, 0, 0)
 			}
 		}, func(cec.Event) {})
@@ -177,6 +178,37 @@ func TestVividAMonitorHearsTheBus(t *testing.T) {
 	t.Logf("the monitor heard %+v", directory.Peers())
 	if !heard() {
 		t.Errorf("the monitor did not hear the player's Active Source")
+	}
+}
+
+// The volume keys reach an audio system through the kernel's CEC core
+// as a press and a release. The second output plays the audio system.
+func TestVividTheAudioSystemHearsTheVolumeKeys(t *testing.T) {
+	bus := openVivid(t)
+	follow(t, bus.tv, cec.Claim{Type: cec.TypeTV, OSDName: "TV"}, cec.PowerOn)
+	audio := bus.outputs[1]
+	mustSucceed(t, audio.Follow())
+	mustSucceed(t, audio.Release())
+	mustSucceed(t, audio.Claim(cec.Claim{Type: cec.TypeAudioSystem, OSDName: "AVR"}))
+	own := follow(t, bus.outputs[0], cec.Claim{OSDName: "node-1", Passthrough: true}, cec.PowerOn)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	var heard []string
+	go func() {
+		_, _ = cec.PressVolumeKey(bus.outputs[0], own, cec.KeyVolumeDown)
+	}()
+
+	_ = cec.Read(ctx, audio, func(message cec.Message) {
+		if message.From == own {
+			heard = append(heard, fmt.Sprintf("% x", message.Body))
+		}
+		if len(heard) == 2 {
+			cancel()
+		}
+	}, func(cec.Event) {})
+
+	if strings.Join(heard, ", ") != "44 42, 45" {
+		t.Errorf("the audio system heard %v, want a press of Volume Down and a release", heard)
 	}
 }
 

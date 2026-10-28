@@ -73,9 +73,11 @@ const (
 
 	// The system audio family. A device asks the audio system for
 	// System Audio Mode with System Audio Mode Request, and the audio
-	// system turns the mode on or off with Set System Audio Mode. In the
-	// mode, the audio system plays the sound and the TV mutes its own
-	// speakers.
+	// system turns the mode on or off with Set System Audio Mode. Give
+	// System Audio Mode Status asks the audio system for the mode, and
+	// System Audio Mode Status answers it. In the mode, the TV mutes its
+	// own speakers and sends its remote's volume keys to the audio
+	// system. audio.go holds the messages of the feature.
 	OpSystemAudioModeRequest Opcode = 0x70
 
 	// The answers from other families that can arrive at a follower

@@ -89,11 +89,8 @@ func physicalAt(operands []byte, at int) PhysicalAddress {
 
 // audioMode names the operand of Set System Audio Mode.
 func audioMode(status byte) string {
-	switch status {
-	case 0:
-		return "Off"
-	case 1:
-		return "On"
+	if mode := audioModeOf(status); mode != SystemAudioUnknown {
+		return mode.String()
 	}
 	return fmt.Sprintf("0x%02x, which CEC does not define", status)
 }

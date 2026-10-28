@@ -295,8 +295,14 @@ func mergeDevices(spec CECBusSpec, entries reports) []CECDevice {
 }
 
 // fillDevice keeps each fact the first report states and takes the
-// facts it lacks from the second.
+// facts it lacks from the second. The System Audio Mode is the one
+// fact with a time, so the report that read or heard it last wins: an
+// adapter that did not hear the receiver's last broadcast still holds
+// the mode from before it.
 func fillDevice(first, second CECDevice) CECDevice {
+	if second.SystemAudioMode != "" && second.SystemAudioModeAt > first.SystemAudioModeAt {
+		first.SystemAudioMode, first.SystemAudioModeAt = second.SystemAudioMode, second.SystemAudioModeAt
+	}
 	fill := func(held *string, other string) {
 		if *held == "" {
 			*held = other

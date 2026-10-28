@@ -19,6 +19,10 @@ package main
 // person moves through the TV or a switch ends the guard at once
 // (cecnode_source.go).
 //
+// When the session's Display passes through a receiver, the wake then
+// asks the receiver for System Audio Mode, once, after the guard
+// (cecnode_systemaudio.go).
+//
 // The node workload acts only on a wake it sees arrive. A wokeAt that
 // is already in the status when the node workload starts is what it
 // finds, not a change it observed, so it sends nothing for it.
@@ -112,11 +116,21 @@ type wakeJob struct {
 	claimed atomic.Bool
 }
 
-// wakeRecord is one write of the wake's status: the started mark or
-// the result.
+// wakeRecord is one write of a wake's or a standby's status: the
+// started mark or the result. audio is the SystemAudioApplied of a
+// wake that sent System Audio Mode Request, and nil otherwise.
 type wakeRecord struct {
 	television Television
 	condition  Condition
+	audio      *Condition
+}
+
+// conditions are the conditions the record's write states.
+func (r *wakeRecord) conditions() []Condition {
+	if r.audio == nil {
+		return []Condition{r.condition}
+	}
+	return []Condition{r.condition, *r.audio}
 }
 
 func wakeKeyOf(television *Television) commandKey {
@@ -184,7 +198,7 @@ func (n *cecNode) passWake(bus *CECBus, television *Television) {
 	case n.now().Sub(seenAt) > cecWakeFresh:
 		message := fmt.Sprintf("the adapter on %s first saw the wake %s ago, which is more than %s, so it sent nothing", n.machine, elapsed(n.now().Sub(seenAt)), elapsed(cecWakeFresh))
 		fmt.Fprintf(n.log, "%s; %s\n", asks, message)
-		n.record(television, verdict{ConditionFalse, reasonTooLate, message})
+		n.record(television, verdict{ConditionFalse, reasonTooLate, message}, nil)
 	case powerPending:
 		n.mutex.Lock()
 		logged := n.woken.waiting == key
@@ -305,12 +319,20 @@ func (n *cecNode) settle(key commandKey) {
 	n.mutex.Unlock()
 }
 
-// record settles a wake and writes its result.
-func (n *cecNode) record(television *Television, result verdict) {
-	condition := stampCondition(conditionWakeApplied, result, television.Metadata.Generation, television.Status.Conditions, n.now())
+// record settles a wake and writes its result. audio is the verdict of
+// the wake's System Audio Mode Request, and nil for a wake that sent
+// none, whose write then removes the SystemAudioApplied of an earlier
+// wake.
+func (n *cecNode) record(television *Television, result verdict, audio *verdict) {
+	written := &wakeRecord{television: *television,
+		condition: stampCondition(conditionWakeApplied, result, television.Metadata.Generation, television.Status.Conditions, n.now())}
+	if audio != nil {
+		stamped := stampCondition(conditionSystemAudioApplied, *audio, television.Metadata.Generation, television.Status.Conditions, n.now())
+		written.audio = &stamped
+	}
 	n.mutex.Lock()
 	n.woken.done = wakeKeyOf(television)
-	n.woken.unwritten = &wakeRecord{television: *television, condition: condition}
+	n.woken.unwritten = written
 	n.mutex.Unlock()
 	n.writeWake()
 }
@@ -328,24 +350,34 @@ func (n *cecNode) supersede(job *wakeJob, television *Television) {
 	message := fmt.Sprintf("generation %d of spec.power asks %s, so the wake stopped, and the adapter on %s sends nothing more for it",
 		television.Metadata.Generation, television.Spec.Power, n.machine)
 	fmt.Fprintf(n.log, "%s; %s\n", wakeWords(&job.television), message)
-	n.record(&job.television, verdict{ConditionFalse, reasonSuperseded, message})
+	n.record(&job.television, verdict{ConditionFalse, reasonSuperseded, message}, nil)
 }
 
 // wakeTV writes the started mark, runs the wake, and records the
 // result. A mark the API server refuses sends nothing, and the next
 // pass tries the wake again, because without the mark a restart would
 // not know the wake had begun.
+//
+// The mark states the SystemAudioApplied of the last wake again, as
+// the Television holds it, so the condition stays while the wake runs
+// and this machine's field manager takes it over from another
+// machine's: the result's write then removes it when this wake sends
+// no request.
 func (n *cecNode) wakeTV(ctx context.Context, job *wakeJob, own cec.LogicalAddress, physical cec.PhysicalAddress) {
 	asks := wakeWords(&job.television)
 	mark := stampCondition(conditionWakeApplied, verdict{ConditionUnknown, reasonWaking,
 		fmt.Sprintf("the adapter on %s started the wake", n.machine)}, job.television.Metadata.Generation, job.television.Status.Conditions, n.now())
-	if err := ApplyTelevisionWake(n.client, &job.television, n.machine, job.television.Status.Session.WokeAt, mark); err != nil {
+	marked := []Condition{mark}
+	if kept := conditionOf(job.television.Status.Conditions, conditionSystemAudioApplied); kept.Type != "" {
+		marked = append(marked, kept)
+	}
+	if err := ApplyTelevisionWake(n.client, &job.television, n.machine, job.television.Status.Session.WokeAt, marked...); err != nil {
 		fmt.Fprintf(os.Stderr, "writing the started mark of Television %s's wake: %v\n", job.television.Metadata.Name, err)
 		n.retryLater()
 		return
 	}
 	n.postTelevision(&job.television, mark)
-	job.television.Status.Conditions = []Condition{mark}
+	job.television.Status.Conditions = marked
 	fmt.Fprintf(n.log, "%s; the adapter on %s starts the wake\n", asks, n.machine)
 	result := n.runWake(ctx, job, own, physical)
 	if result.stopped && job.superseded.Load() {
@@ -355,7 +387,12 @@ func (n *cecNode) wakeTV(ctx context.Context, job *wakeJob, own cec.LogicalAddre
 	if result.stopped {
 		result.verdict = verdict{ConditionFalse, reasonStopped, result.log}
 	}
-	n.record(&job.television, result.verdict)
+	var audio *verdict
+	if result.audio != nil && !result.audio.stopped {
+		fmt.Fprintf(n.log, "%s; %s\n", asks, result.audio.log)
+		audio = &result.audio.verdict
+	}
+	n.record(&job.television, result.verdict, audio)
 }
 
 // writeWake writes a result the API server has not accepted yet. A
@@ -368,7 +405,7 @@ func (n *cecNode) writeWake() {
 	if record == nil {
 		return
 	}
-	err := ApplyTelevisionWake(n.client, &record.television, n.machine, record.television.Status.Session.WokeAt, record.condition)
+	err := ApplyTelevisionWake(n.client, &record.television, n.machine, record.television.Status.Session.WokeAt, record.conditions()...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "writing the wake of Television %s: %v\n", record.television.Metadata.Name, err)
 		n.retryLater()
@@ -383,14 +420,17 @@ func (n *cecNode) writeWake() {
 		// A pass and the work that made the record can write it at
 		// once, so only the writer that settles it posts its Event.
 		if settled && err == nil {
-			n.postTelevision(&record.television, record.condition)
+			for _, condition := range record.conditions() {
+				n.postTelevision(&record.television, condition)
+			}
 		}
 	}
 }
 
 // runWake wakes the TV the way spec.power wakes it, then sends Image
-// View On and Active Source, guards the claim, and reads the TV's power
-// once more at the end of the guard.
+// View On and Active Source, guards the claim, reads the TV's power
+// once more at the end of the guard, and sends a receiver on the
+// Display's path System Audio Mode Request.
 func (n *cecNode) runWake(ctx context.Context, job *wakeJob, own cec.LogicalAddress, physical cec.PhysicalAddress) powerResult {
 	session := job.television.Status.Session
 	began := time.Now()
@@ -428,6 +468,17 @@ func (n *cecNode) runWake(ctx context.Context, job *wakeJob, own cec.LogicalAddr
 		words := fmt.Sprintf("at the end of the guard the TV %s", reported)
 		result.verdict = verdict{ConditionFalse, reasonUnconfirmed, result.verdict.message + "; " + words}
 		result.log += "; " + words
+	}
+	// The request goes out after the guard, so the TV's own traffic as
+	// it comes on is over: a TV can send its own request then, which can
+	// move the receiver to the TV's sound input. It goes out only when
+	// the Display holds the input at the end of the guard, because the
+	// request switches the receiver to the Display's input, and the
+	// adapter never takes the input from a person or from a source the
+	// guard left alone.
+	if via := viaOf(&job.television, session.Display); via != nil && claim.verdict.reason == reasonConfirmed {
+		audio := n.requestSystemAudio(ctx, own, physical, session.Display, via)
+		result.audio = &audio
 	}
 	result.log += fmt.Sprintf("; the wake ended after %s", elapsed(time.Since(began)))
 	return result

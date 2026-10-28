@@ -155,7 +155,7 @@ func TestCRDSchema(t *testing.T) {
 
 	t.Run("the status holds what the operator reads back", func(t *testing.T) {
 		status := schema.Properties["status"]
-		for _, name := range []string{"zones", "denon", "conditions"} {
+		for _, name := range []string{"zones", "denon", "cec", "conditions"} {
 			if _, held := status.Properties[name]; !held {
 				t.Errorf("status has no property %s", name)
 			}
@@ -553,6 +553,37 @@ func TestCRDValidatesExamples(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			errs := validateReceiver(t, c.receiver)
+			if got := len(errs) > 0; got != c.wantErr {
+				t.Errorf("got errors %v, want an error: %v", errs, c.wantErr)
+			}
+		})
+	}
+}
+
+// The status.cec the Deployment writes passes the schema, and a mode
+// that is not On or Off does not.
+func TestTheReceiversCECStatusValidates(t *testing.T) {
+	t.Parallel()
+	withCEC := func(mode string) map[string]any {
+		object := receiver(denonSpec())
+		object["status"] = map[string]any{"cec": map[string]any{
+			"bus": "den", "logicalAddress": int64(5), "physicalAddress": "1.0.0.0", "osdName": "AVR",
+			"vendor": "0005cd", "cecVersion": "1.4", "systemAudioMode": mode, "systemAudioModeAt": "2026-10-06T18:04:07Z",
+		}}
+		return object
+	}
+	cases := []struct {
+		name    string
+		mode    string
+		wantErr bool
+	}{
+		{"the mode On", "On", false},
+		{"the mode Off", "Off", false},
+		{"a mode CEC does not define", "Standby", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			errs := validateReceiver(t, withCEC(c.mode))
 			if got := len(errs) > 0; got != c.wantErr {
 				t.Errorf("got errors %v, want an error: %v", errs, c.wantErr)
 			}

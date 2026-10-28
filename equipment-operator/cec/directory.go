@@ -10,12 +10,13 @@ package cec
 import (
 	"slices"
 	"sync"
+	"time"
 )
 
 // A Peer is one other device on the bus, as far as the adapter knows
 // it. A fact the device has not stated yet holds its unknown value:
 // InvalidPhysicalAddress, an empty name, VendorUnknown,
-// VersionUnknown, or PowerUnknown.
+// VersionUnknown, PowerUnknown, or SystemAudioUnknown.
 type Peer struct {
 	Logical  LogicalAddress
 	Physical PhysicalAddress
@@ -26,6 +27,12 @@ type Peer struct {
 	Vendor  VendorID
 	Version Version
 	Power   PowerStatus
+	// SystemAudioMode is the System Audio Mode the device last stated,
+	// in a broadcast Set System Audio Mode or a System Audio Mode
+	// Status, and SystemAudioModeAt is when the adapter heard or read
+	// it. Only the audio system states the mode.
+	SystemAudioMode   SystemAudioMode
+	SystemAudioModeAt time.Time
 }
 
 func newPeer(address LogicalAddress) *Peer {
@@ -115,7 +122,7 @@ func (d *Directory) Hear(message Message) (before, after Peer, changed bool) {
 		before = *newPeer(message.From)
 	}
 	peer := d.peer(message.From)
-	learn(peer, message)
+	learn(peer, message, time.Now())
 	if opcode, _ := message.Opcode(); opcode == OpReportPowerStatus && !message.IsPoll() {
 		delete(d.missed, message.From)
 	}
@@ -193,8 +200,16 @@ func (d *Directory) Lookup(address LogicalAddress) Peer {
 	return *newPeer(address)
 }
 
-// learn reads the one fact a message states about its sender.
-func learn(peer *Peer, message Message) {
+// learn reads the one fact a message states about its sender, at the
+// time the adapter heard it.
+//
+// Only a broadcast Set System Audio Mode states the mode. The audio
+// system directs its first [On] after a request to the TV, and stops
+// there when the TV answers with a Feature Abort (HDMI-CEC 1.3a, CEC
+// 13.15.2), so a directed [On] that a monitor hears can be a mode that
+// never started. A System Audio Mode Status answers a question, and
+// states the mode whoever asked.
+func learn(peer *Peer, message Message, now time.Time) {
 	opcode, _ := message.Opcode()
 	operands := message.Operands()
 	switch {
@@ -214,6 +229,10 @@ func learn(peer *Peer, message Message) {
 		peer.Version = Version(operands[0])
 	case opcode == OpReportPowerStatus && len(operands) >= 1:
 		peer.Power = PowerStatus(operands[0])
+	case (opcode == OpSetSystemAudioMode && message.IsBroadcast() || opcode == OpSystemAudioModeStatus) && len(operands) >= 1:
+		if mode := audioModeOf(operands[0]); mode != SystemAudioUnknown {
+			peer.SystemAudioMode, peer.SystemAudioModeAt = mode, now
+		}
 	}
 }
 

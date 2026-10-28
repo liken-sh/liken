@@ -249,8 +249,8 @@ number. Each later plan has its own number in this directory:
 - [16](16-the-wiims-settings.md), the WiiM's settings. Not built.
 - [17](17-the-denons-inputs-zones-and-web-setup.md), the Denon's
   inputs, zones, and web setup. Not built.
-- [18](18-system-audio-mode-on-the-wake.md), System Audio Mode on the
-  wake. Not built.
+- [18](completed/18-system-audio-mode-on-the-wake.md), System Audio
+  Mode on the wake.
 
 [Plan 77](../../plans/completed/77-the-media-bus-stops-at-media-operator.md),
 at the top of the repository, moved the level, power, and input asks

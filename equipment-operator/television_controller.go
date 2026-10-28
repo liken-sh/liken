@@ -25,8 +25,8 @@ import (
 // arrives, and can lack a Television the pass created, so the read
 // replaces such a copy with the API server's and reads the created
 // Television, and a pass does not create a Television again or write a
-// status again (objectcache.go). This loop writes no Display and no
-// Receiver.
+// status again (objectcache.go). This loop writes no Display, and of
+// a Receiver it writes status.cec alone (receiver_cec.go).
 func (c *cecBusController) passTelevisions(buses []CECBus) {
 	televisions, err := readTelevisions(c.client, c.televisions)
 	if err != nil {
@@ -62,6 +62,7 @@ func (c *cecBusController) passTelevisions(buses []CECBus) {
 			c.recorder.Normal(reference("CECBus", bus.Metadata), reasonTelevisionDeleted, fmt.Sprintf("deleted the discovered Television %s: %s", name, why))
 		}
 	}
+	derivedOf := map[string]televisionDerived{}
 	for index := range televisions.Items {
 		television := &televisions.Items[index]
 		if slices.Contains(prune, television.Metadata.Name) {
@@ -72,6 +73,7 @@ func (c *cecBusController) passTelevisions(buses []CECBus) {
 			inCharge = chosen.Metadata.Name
 		}
 		derived := deriveTelevision(television, inCharge, byName[television.bus()], displays.Items, receivers.Items, c.now())
+		derivedOf[television.Metadata.Name] = derived
 		if televisionUnchanged(television.Status, derived) {
 			continue
 		}
@@ -81,6 +83,7 @@ func (c *cecBusController) passTelevisions(buses []CECBus) {
 		}
 		postTransitions(c.recorder, reference("Television", television.Metadata), television.Status.Conditions, []Condition{derived.reachable, derived.inCharge})
 	}
+	c.passReceiverCEC(receivers.Items, receiverBuses(televisions.Items, derivedOf), byName)
 }
 
 // createDiscoveredTelevision creates the Television discovery makes for

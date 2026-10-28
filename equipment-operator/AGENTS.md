@@ -121,6 +121,16 @@ Path in `cecnode_answer.go`. A home press writes a `show` in the
 sends a TV that is on Image View On and Active Source in
 `cecnode_show.go`.
 
+When the session's `Display` has a `via` in the `Television`'s
+`status.displays`, the wake ends with one System Audio Mode Request
+to the receiver for the `Display`'s physical address, after the guard,
+in `cecnode_systemaudio.go`, and writes the `SystemAudioApplied`
+condition beside `WakeApplied`. The join scan reads the receiver's
+System Audio Mode, and each broadcast Set System Audio Mode sets it in
+the entry's `devices`. The `Deployment` writes the mode and the
+receiver's CEC identity in the `Receiver`'s `status.cec`, on the
+`Receiver` that is the `via`, in `receiver_cec.go`.
+
 The bus can also ask for the Player's screen. The TV's Set Stream Path
 for the `Display` of a session that sleeps asks it to wake, and a
 Standby while the session holds the room awake asks it to sleep. The

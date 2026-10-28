@@ -12,7 +12,8 @@ package main
 // apply replaces powerRead, and a node workload's screen apply replaces
 // screenAsk. No apply touches a field another manager owns.
 // The conditions are a map keyed by type, so each apply leaves the
-// other writer's conditions in place.
+// other writer's conditions in place, and removes a condition its own
+// manager wrote before and no longer states.
 
 import (
 	"encoding/json"
@@ -113,7 +114,8 @@ func (a *cecAPI) store(television Television) {
 	a.uids++
 	television.Metadata.UID = fmt.Sprintf("uid-%d", a.uids)
 	television.Metadata.Generation = 1
-	television.Status = TelevisionStatus{Session: television.Status.Session}
+	delete(a.owners, television.Metadata.Name)
+	television.Status = TelevisionStatus{Session: television.Status.Session, Displays: television.Status.Displays}
 	a.televisions[television.Metadata.Name] = &television
 }
 
@@ -185,18 +187,18 @@ func (a *cecAPI) serveTelevision(w http.ResponseWriter, r *http.Request, rest st
 	case node:
 		a.powerWrites++
 		television.Status.PowerGeneration = body.Status.PowerGeneration
-		television.Status.Conditions = mergeConditions(television.Status.Conditions, body.Status.Conditions)
+		a.applyConditions(television, manager, body.Status.Conditions)
 	case waking:
 		a.wakeWrites++
 		television.Status.WokeAt = body.Status.WokeAt
-		television.Status.Conditions = mergeConditions(television.Status.Conditions, body.Status.Conditions)
+		a.applyConditions(television, manager, body.Status.Conditions)
 	case reading:
 		television.Status.PowerRead = body.Status.PowerRead
 	case screening:
 		television.Status.ScreenAsk = body.Status.ScreenAsk
 	case standing:
 		television.Status.StandbyAt = body.Status.StandbyAt
-		television.Status.Conditions = mergeConditions(television.Status.Conditions, body.Status.Conditions)
+		a.applyConditions(television, manager, body.Status.Conditions)
 	default:
 		a.derivedWrites++
 		television.Status.CEC = body.Status.CEC
@@ -204,7 +206,7 @@ func (a *cecAPI) serveTelevision(w http.ResponseWriter, r *http.Request, rest st
 		television.Status.ActiveSource = body.Status.ActiveSource
 		television.Status.ActiveDisplay = body.Status.ActiveDisplay
 		television.Status.Displays = body.Status.Displays
-		television.Status.Conditions = mergeConditions(television.Status.Conditions, body.Status.Conditions)
+		a.applyConditions(television, manager, body.Status.Conditions)
 	}
 	a.changed()
 	if r.Method == http.MethodDelete {
@@ -215,9 +217,10 @@ func (a *cecAPI) serveTelevision(w http.ResponseWriter, r *http.Request, rest st
 }
 
 // applyReceiverStatus takes the operator's status apply on a Receiver,
-// and answers the Receiver as it stands.
+// and answers the Receiver as it stands. The Deployment's status.cec
+// apply replaces status.cec alone, under a field manager of its own.
 func (a *cecAPI) applyReceiverStatus(w http.ResponseWriter, r *http.Request, name string) {
-	var body receiverStatusApply
+	var body Receiver
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
@@ -226,10 +229,36 @@ func (a *cecAPI) applyReceiverStatus(w http.ResponseWriter, r *http.Request, nam
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	receiver.Status.ReceiverStatus = body.Status
+	if r.URL.Query().Get("fieldManager") == receiverCECFieldManager {
+		a.receiverCECWrites++
+		receiver.Status.CEC = body.Status.CEC
+	} else {
+		receiver.Status.ReceiverStatus = body.Status.ReceiverStatus
+	}
 	a.receivers[name] = receiver
 	a.changed()
 	a.serveStored(w, receiversPath, name)
+}
+
+// applyConditions merges one manager's conditions the way server-side
+// apply merges a map list: it removes each condition the manager owns
+// and no longer states, replaces each condition of a type it states,
+// keeps the others, and makes the manager the owner of each type it
+// states, as force does. The caller holds the mutex.
+func (a *cecAPI) applyConditions(television *Television, manager string, applied []Condition) {
+	name := television.Metadata.Name
+	if a.owners[name] == nil {
+		a.owners[name] = map[string]string{}
+	}
+	owned := a.owners[name]
+	kept := slices.DeleteFunc(slices.Clone(television.Status.Conditions), func(condition Condition) bool {
+		stated := slices.ContainsFunc(applied, func(other Condition) bool { return other.Type == condition.Type })
+		return owned[condition.Type] == manager && !stated
+	})
+	for _, condition := range applied {
+		owned[condition.Type] = manager
+	}
+	television.Status.Conditions = mergeConditions(kept, applied)
 }
 
 // mergeConditions replaces each condition of the same type and keeps
@@ -273,6 +302,9 @@ func (a *cecAPI) putTelevision(television Television) {
 	}
 	if television.Status.ScreenAsk != nil {
 		held.Status.ScreenAsk = television.Status.ScreenAsk
+	}
+	if television.Status.Displays != nil {
+		held.Status.Displays = television.Status.Displays
 	}
 	for key, value := range television.Metadata.Labels {
 		if held.Metadata.Labels == nil {

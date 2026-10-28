@@ -32,6 +32,10 @@ type cecAPI struct {
 	displays    map[string]*Display
 	televisions map[string]*Television
 	receivers   map[string]Receiver
+	// owners names the field manager of each condition of each
+	// Television, by name and type, so an apply removes the conditions
+	// its manager owns and no longer states.
+	owners map[string]map[string]string
 	// deletedTelevisions names each Television a writer deleted, and the
 	// two counts are the Television status writes of the Deployment and
 	// of the node workloads.
@@ -46,7 +50,10 @@ type cecAPI struct {
 	powerWrites   int
 	wakeWrites    int
 	sessionWrites int
-	version       int
+	// receiverCECWrites counts the Deployment's status.cec writes on a
+	// Receiver.
+	receiverCECWrites int
+	version           int
 	// moved closes at each change of an object, and a new channel takes
 	// its place, so a test that waits for an object's state wakes at each
 	// change and not on a timer.
@@ -132,7 +139,7 @@ func startCECAPI(t *testing.T) *cecAPI {
 	t.Helper()
 	api := &cecAPI{
 		buses: map[string]*CECBus{}, displays: map[string]*Display{},
-		televisions: map[string]*Television{}, receivers: map[string]Receiver{},
+		televisions: map[string]*Television{}, receivers: map[string]Receiver{}, owners: map[string]map[string]string{},
 		events: &eventstest.Events{},
 	}
 	api.client = testAPIClient(t, api.events.Around(http.HandlerFunc(api.handle)))

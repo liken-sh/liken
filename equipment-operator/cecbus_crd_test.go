@@ -123,7 +123,10 @@ func TestAWrittenStatusValidates(t *testing.T) {
 			"physicalAddress": "1.3.0.0", "logicalAddress": int64(4), "osdName": "node-1", "reportedAt": "2026-09-26T12:00:00Z",
 			"devices": []any{map[string]any{"logicalAddress": int64(0), "physicalAddress": "0.0.0.0", "type": "TV", "osdName": "TV", "vendor": "00e091", "cecVersion": "1.4", "power": "Standby"}},
 		}},
-		"devices": []any{map[string]any{"logicalAddress": int64(0), "physicalAddress": "0.0.0.0", "type": "TV"}},
+		"devices": []any{
+			map[string]any{"logicalAddress": int64(0), "physicalAddress": "0.0.0.0", "type": "TV"},
+			map[string]any{"logicalAddress": int64(5), "physicalAddress": "1.0.0.0", "type": "AudioSystem", "systemAudioMode": "On", "systemAudioModeAt": "2026-09-26T12:00:00Z"},
+		},
 		"conditions": []any{map[string]any{
 			"type": "Joined", "status": "True", "observedGeneration": int64(1), "reason": "Joined",
 			"message": "every adapter holds a logical address", "lastTransitionTime": "2026-09-26T12:00:00Z",

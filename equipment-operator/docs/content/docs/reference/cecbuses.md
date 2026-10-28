@@ -36,7 +36,7 @@ What the adapters report and what the operator derives from their reports.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="status--adapters"></span>`adapters` | [\[\]object](#statusadapters) | no | One entry for each adapter, written by the node workload on that adapter's machine under its own field manager. Only the entries of machines the spec names count. |
-| <span id="status--devices"></span>`devices` | [\[\]object](#statusdevices) | no | Every device on the wire, merged from the adapters' reports by physical address, in tree order: the TV first, then each device after the device it is connected to. When two adapters report one fact differently, the adapter first in spec.adapters wins. |
+| <span id="status--devices"></span>`devices` | [\[\]object](#statusdevices) | no | Every device on the wire, merged from the adapters' reports by physical address, in tree order: the TV first, then each device after the device it is connected to. When two adapters report one fact differently, the adapter first in spec.adapters wins, except for the System Audio Mode, where the adapter that read or heard it last wins. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | AddressKnown: every adapter in Control announces its Display's physical address. Joined: every adapter in Control holds a logical address. Coherent: the adapters see each other on the bus, each at the physical address it announces, and an adapter that does not is on a different wire than the spec states. Scanned: every adapter in Control finished the scan it runs when it joins, which only Control achieves; a bus where an adapter finds no device says that the HDMI cable at the adapter's output may not carry the CEC wire. An adapter whose entry is stale makes each condition Unknown with the reason Stale, and an adapter whose node workload stopped makes each condition False with the reason Stopped. Coherent compares only adapters that finished a scan, by their physical addresses, because every adapter of a bus announces the same OSD name. |
 
 ### status.adapters[]
@@ -70,10 +70,12 @@ The devices this adapter found. In Control the adapter scans the bus once when i
 | <span id="statusadaptersdevices--vendor"></span>`vendor` | string | no | The device's IEEE OUI, as six hex digits. |
 | <span id="statusadaptersdevices--cecversion"></span>`cecVersion` | string | no | The CEC version the device reports: 1.3a, 1.4, or 2.0. |
 | <span id="statusadaptersdevices--power"></span>`power` | string | no | The power status the device last reported: On, Standby, ToOn, or ToStandby. |
+| <span id="statusadaptersdevices--systemaudiomode"></span>`systemAudioMode` | string | no | The System Audio Mode the audio system last stated, which only the device at logical address 5 states. While it is On, the TV mutes its own speakers and sends its remote's volume keys to the audio system (HDMI-CEC 1.3a, CEC 13.15.2). In Control the adapter asks the audio system once in the scan it runs when it joins, after its other questions to that device, and each broadcast Set System Audio Mode sets it after that, such as the Off the audio system broadcasts before standby. The adapter reads it once more after the System Audio Mode Request of a wake that no broadcast On answered. A directed Set System Audio Mode does not set it, because the audio system directs its first On to the TV and stops there when the TV refuses it. Absent until the audio system states it. One of: `On`, `Off`. |
+| <span id="statusadaptersdevices--systemaudiomodeat"></span>`systemAudioModeAt` | string | no | When the adapter last read or heard systemAudioMode. |
 
 ### status.devices[]
 
-Every device on the wire, merged from the adapters' reports by physical address, in tree order: the TV first, then each device after the device it is connected to. When two adapters report one fact differently, the adapter first in spec.adapters wins.
+Every device on the wire, merged from the adapters' reports by physical address, in tree order: the TV first, then each device after the device it is connected to. When two adapters report one fact differently, the adapter first in spec.adapters wins, except for the System Audio Mode, where the adapter that read or heard it last wins.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -84,6 +86,8 @@ Every device on the wire, merged from the adapters' reports by physical address,
 | <span id="statusdevices--vendor"></span>`vendor` | string | no | The device's IEEE OUI, as six hex digits. |
 | <span id="statusdevices--cecversion"></span>`cecVersion` | string | no | The CEC version the device reports: 1.3a, 1.4, or 2.0. |
 | <span id="statusdevices--power"></span>`power` | string | no | The power status the device last reported: On, Standby, ToOn, or ToStandby. |
+| <span id="statusdevices--systemaudiomode"></span>`systemAudioMode` | string | no | The System Audio Mode the audio system last stated, which only the device at logical address 5 states. While it is On, the TV mutes its own speakers and sends its remote's volume keys to the audio system (HDMI-CEC 1.3a, CEC 13.15.2). In Control the adapter asks the audio system once in the scan it runs when it joins, after its other questions to that device, and each broadcast Set System Audio Mode sets it after that, such as the Off the audio system broadcasts before standby. The adapter reads it once more after the System Audio Mode Request of a wake that no broadcast On answered. A directed Set System Audio Mode does not set it, because the audio system directs its first On to the TV and stops there when the TV refuses it. Absent until the audio system states it. One of: `On`, `Off`. |
+| <span id="statusdevices--systemaudiomodeat"></span>`systemAudioModeAt` | string | no | When an adapter last read or heard systemAudioMode. |
 
 ### status.conditions[]
 

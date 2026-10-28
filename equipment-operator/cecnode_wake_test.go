@@ -71,10 +71,11 @@ func streamer(grabs int, after time.Duration) cectest.Peer {
 // wokeWith waits until the node workload recorded the result of a
 // session's wake. A wake starts within cecWakeFresh of when the node
 // workload saw it, or records that it is too late, and ends at the end
-// of its guard.
+// of its guard, or after its System Audio Mode Request and the read
+// that can follow it.
 func wokeWith(t *testing.T, api *cecAPI, session *TelevisionSession) Television {
 	t.Helper()
-	return api.waitForTelevisionWithin(t, "lounge", cecWakeFresh+cecWakeGuard, func(television Television) bool {
+	return api.waitForTelevisionWithin(t, "lounge", cecWakeFresh+cecWakeGuard+cecSystemAudioWait+testTimeout, func(television Television) bool {
 		return television.Status.WokeAt == session.WokeAt && conditionOf(television.Status.Conditions, conditionWakeApplied).Reason != reasonWaking
 	})
 }

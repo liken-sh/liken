@@ -61,6 +61,20 @@ type Peer struct {
 	// asking transmit waits that long, and the rest of the bus goes on
 	// meanwhile, so a test can act while a question waits.
 	Slow time.Duration
+	// SystemAudio makes the peer an audio system that implements System
+	// Audio Control (HDMI-CEC 1.3a, CEC 13.15.2). It answers Give System
+	// Audio Mode Status with AudioMode, takes the volume keys, and
+	// answers System Audio Mode Request the way AudioReply says, after
+	// AudioAfter. AudioInput is the physical address of the last
+	// request, which is the input the request switched the peer to. A
+	// peer without SystemAudio answers every System Audio message with a
+	// Feature Abort, as a device of HDMI 1.3 or earlier does (CEC
+	// 13.15.3).
+	SystemAudio bool
+	AudioMode   cec.SystemAudioMode
+	AudioInput  cec.PhysicalAddress
+	AudioReply  AudioReply
+	AudioAfter  time.Duration
 
 	// towards is the state a transition ends in, and remaining is how
 	// many power questions the transition still answers. old is the
@@ -70,6 +84,31 @@ type Peer struct {
 	old       cec.PowerStatus
 	lagging   int
 }
+
+// AudioReply is how an audio system peer answers System Audio Mode
+// Request with an operand.
+type AudioReply int
+
+const (
+	// AudioBroadcast turns the mode on and broadcasts Set System Audio
+	// Mode [On], as the audio system does after a TV that takes the
+	// feature.
+	AudioBroadcast AudioReply = iota
+	// AudioToTV turns the mode on and directs Set System Audio Mode [On]
+	// to the TV alone, as the audio system's first [On] after a request
+	// from a device other than the TV is. An adapter in Control does not
+	// hear it.
+	AudioToTV
+	// AudioRefusedByTV directs Set System Audio Mode [On] to the TV, which
+	// answers with a Feature Abort, so the audio system goes no further
+	// and the mode stays as it was.
+	AudioRefusedByTV
+	// AudioSilent acknowledges each System Audio message and answers
+	// none, as an audio system with its HDMI control off does.
+	AudioSilent
+	// AudioAbort answers the request with a Feature Abort.
+	AudioAbort
+)
 
 // Bus is one CEC wire.
 type Bus struct {
@@ -184,7 +223,63 @@ func (p Peer) answer(request cec.Message) (reply cec.Message, aborted bool, ok b
 		// Feature Abort.
 		return cec.Message{}, false, false
 	}
+	if p.SystemAudio {
+		switch {
+		case !systemAudio[opcode]:
+		case p.AudioReply == AudioSilent:
+			return cec.Message{}, false, false
+		case opcode == cec.OpGiveSystemAudioModeState:
+			return cec.SystemAudioModeStatus(p.Logical, request.From, p.AudioMode), false, true
+		case opcode == cec.OpSystemAudioModeRequest && p.AudioReply == AudioAbort:
+			return cec.Message{}, true, false
+		default:
+			// The request's answer is the Set System Audio Mode that
+			// requested schedules, and a volume key has none.
+			return cec.Message{}, false, false
+		}
+	}
 	return cec.Message{}, true, false
+}
+
+// systemAudio are the System Audio messages an audio system peer takes.
+var systemAudio = map[cec.Opcode]bool{
+	cec.OpGiveSystemAudioModeState: true,
+	cec.OpSystemAudioModeRequest:   true,
+	cec.OpUserControlPressed:       true,
+	cec.OpUserControlReleased:      true,
+}
+
+// requested applies a System Audio Mode Request to an audio system
+// peer and schedules its Set System Audio Mode. A request with a
+// physical address wakes the peer, switches it to that input, and turns
+// the mode on; one with no operand turns the mode off and broadcasts
+// [Off], as CEC 13.15.2 asks. The statement goes out later and on its
+// own goroutine, as a device's own message does. The caller holds the
+// mutex.
+func (b *Bus) requested(message cec.Message) {
+	peer, held := b.peers[message.To]
+	if !held || !peer.SystemAudio || message.IsBroadcast() || peer.AudioReply == AudioSilent || peer.AudioReply == AudioAbort {
+		return
+	}
+	operands := message.Operands()
+	statement := cec.SetSystemAudioMode(peer.Logical, cec.AddressBroadcast, cec.SystemAudioOff)
+	switch {
+	case len(operands) < 2:
+		peer.AudioMode = cec.SystemAudioOff
+	case peer.AudioReply == AudioRefusedByTV:
+		peer.Power = cec.PowerOn
+		peer.AudioInput = cec.PhysicalAddress(operands[0])<<8 | cec.PhysicalAddress(operands[1])
+		statement = cec.SetSystemAudioMode(peer.Logical, cec.AddressTV, cec.SystemAudioOn)
+	default:
+		peer.Power, peer.AudioMode = cec.PowerOn, cec.SystemAudioOn
+		peer.AudioInput = cec.PhysicalAddress(operands[0])<<8 | cec.PhysicalAddress(operands[1])
+		statement = cec.SetSystemAudioMode(peer.Logical, cec.AddressBroadcast, cec.SystemAudioOn)
+		if peer.AudioReply == AudioToTV {
+			statement.To = cec.AddressTV
+		}
+	}
+	b.peers[message.To] = peer
+	time.AfterFunc(peer.AudioAfter, func() { b.Send(statement) })
 }
 
 // obey applies a power command to the peers it reaches. Image View On
@@ -199,6 +294,9 @@ func (b *Bus) obey(message cec.Message) {
 		return
 	case opcode == cec.OpActiveSource:
 		b.grab(message)
+		return
+	case opcode == cec.OpSystemAudioModeRequest:
+		b.requested(message)
 		return
 	case opcode == cec.OpImageViewOn || opcode == cec.OpTextViewOn:
 		want = cec.PowerOn

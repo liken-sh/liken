@@ -8,7 +8,11 @@ package cec
 // with no device leaves the acknowledge bit unset. Then the scan asks
 // each device that answered for its physical address, its OSD name,
 // its vendor, its CEC version, and its power status. cec-ctl
-// --show-topology does the same.
+// --show-topology does the same. The scan also asks the audio system
+// for System Audio Mode, last of its questions to that device:
+// HDMI-CEC 1.3a, CEC 13.15.2, asks the same of a source that
+// implements the feature when it joins the bus, and the answer is the
+// baseline that the broadcasts of Set System Audio Mode keep current.
 
 import (
 	"time"
@@ -102,6 +106,11 @@ func Scan(device *Device, directory *Directory, own LogicalAddress, tvPower Powe
 			}
 			if result.Reply != nil {
 				directory.Observe(*result.Reply)
+			}
+		}
+		if address == AddressAudioSystem {
+			if _, _, err := ReadSystemAudioMode(device, directory, own); err != nil {
+				return report, err
 			}
 		}
 	}

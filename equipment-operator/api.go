@@ -333,6 +333,8 @@ type ReceiverStatus struct {
 // manager. The media operator writes Session, under its own field
 // manager. The operator applies a ReceiverStatus, which has no Session
 // field, so its apply never states the session and never removes it.
+// The Deployment's CECBus loop writes CEC the same way, under a field
+// manager of its own.
 //
 // SettingsGeneration and PowerGeneration are the records an earlier
 // operator wrote, keyed on metadata.generation. The operator reads them
@@ -342,9 +344,12 @@ type ReceiverStatus struct {
 // declared settings, so the operator adopts the blocks it finds.
 type ReceiverStoredStatus struct {
 	ReceiverStatus
-	Session            *ReceiverSession `json:"session,omitempty"`
-	SettingsGeneration int64            `json:"settingsGeneration,omitempty"`
-	PowerGeneration    int64            `json:"powerGeneration,omitempty"`
+	Session *ReceiverSession `json:"session,omitempty"`
+	// CEC is the receiver as the audio system of a CECBus
+	// (receiver_cec.go).
+	CEC                *ReceiverCECStatus `json:"cec,omitempty"`
+	SettingsGeneration int64              `json:"settingsGeneration,omitempty"`
+	PowerGeneration    int64              `json:"powerGeneration,omitempty"`
 }
 
 // ZoneStatus is one zone in the receiver's own units. Volume and

@@ -1,6 +1,6 @@
 ---
 name: connect-a-cec-adapter
-description: "Connect a USB-CEC adapter to a liken machine and to a room's HDMI tree, take its CECBus from Listen to Control, adopt the Television, and let the room's Player wake the TV and turn it off. Use when a TV must wake with a Player, when a TV remote must drive a Player, or when a CECBus or a Television reports a fault."
+description: "Connect a USB-CEC adapter to a liken machine and to a room's HDMI tree, take its CECBus from Listen to Control, adopt the Television, and let the room's Player wake the TV and turn it off. Use when a TV must wake with a Player, when a TV remote must drive a Player or set the receiver's volume, or when a CECBus or a Television reports a fault."
 ---
 
 This skill is the guide at https://liken.sh/equipment/docs/guides/connect-a-cec-adapter/, emitted for agents. Before the first command, run `kubectl config current-context` and confirm that it names the cluster the person means.
@@ -13,7 +13,7 @@ answers HDMI-CEC messages for the machine. A `Play`, or a press of the
 room remote's power button, wakes the TV and switches it to the
 machine. The power
 button also turns the TV off, and the TV's own remote drives the
-`Player`.
+`Player` and sets the receiver's volume.
 
 The room in this guide has a TV, an AV receiver on one of the TV's
 inputs, and the machine `node-1` on one of the receiver's inputs. The
@@ -288,6 +288,9 @@ one wake:
    again, at most twice for one wake.
 4. At the end of the guard, it reads the TV's power again and writes
    the `WakeApplied` condition.
+5. When the `Display` has a `via`, it asks that receiver for System
+   Audio Mode and writes the `SystemAudioApplied` condition. The next
+   section describes this step.
 
 The guard exists because another source can take the input after a
 wake. In the first drill, the receiver woke on a streaming player's
@@ -357,6 +360,93 @@ guide describes.
 
 An operator restart wakes nothing. Both workloads adopt the sessions
 they find when they start, and send nothing for them.
+
+## Let the TV remote set the receiver's volume
+
+While a receiver's System Audio Mode is on, the TV mutes its own
+speakers and sends the volume keys of its remote to the receiver
+(HDMI-CEC 1.3a, CEC 13.15.2). While it is off, the TV remote changes
+the TV's own volume, which you do not hear when the sound plays on the
+receiver. A receiver that `liken` turns on over the network comes up
+with the mode off. So a wake through a receiver ends with a request
+for the mode.
+
+The adapter sends System Audio Mode Request when the session's
+`Display` has a `via` in the `Television`'s `status.displays`, and
+never otherwise. You turn nothing on. The request goes out once for
+each wake, after the guard, and only when the last Active Source on
+the bus is the `Display`'s. It carries the `Display`'s physical
+address, so the receiver also switches to the input for that address,
+and it can wake the receiver. The adapter sends no request on a
+timer, for a home press, or after a person picked another input, and
+it never asks for the TV's own sound. When you pick the TV's speakers
+in its menu after the wake, the TV ends the mode, and the operator
+sends nothing to change it back.
+
+Before you rely on the request, check two settings on the receiver:
+
+* HDMI control (CEC) is on. A receiver with HDMI control off does not
+  answer, and `liken` never turns the setting on.
+* The receiver's own CEC input for the `Display`'s physical address
+  is the input that the `Receiver`'s `spec.inputs` selects. The
+  receiver maps the address through its own table, and a receiver
+  whose table names another input switches the room away from the
+  `Display`.
+
+A receiver that is connected to the TV by an optical cable alone is
+not on the CEC bus, because an optical cable carries no CEC. The
+`Display` then has no `via`, and the wake sends no request. The TV's
+own sound-output setting sends its sound to the receiver.
+
+After the request, the adapter waits 5 seconds for the receiver to
+broadcast Set System Audio Mode On. The receiver directs its first On
+to the TV, so the adapter can miss it. With no broadcast, the adapter
+asks the receiver once with Give System Audio Mode Status.
+`SystemAudioApplied` on the `Television` states the result:
+
+* `Confirmed`, `True`: the receiver broadcast On after the request, or
+  answered On.
+* `Unconfirmed`, `False`: the receiver answered Off, or did not
+  answer. A TV that does not take System Audio Mode refuses the
+  receiver's On, and the receiver stays Off. A receiver with HDMI
+  control off does not answer.
+* `Refused`, `False`: the receiver refused the request with a Feature
+  Abort, or the adapter could not send it.
+
+The condition is absent after a wake whose `Display` has no `via`,
+and after a wake that sent no request.
+
+The `Receiver` that is the `via` reports the receiver as the bus sees
+it in `status.cec`:
+
+    kubectl get receiver living-room -o jsonpath='{.status.cec}' | jq
+
+```json
+{
+  "bus": "living-room",
+  "logicalAddress": 5,
+  "physicalAddress": "1.0.0.0",
+  "osdName": "AVR",
+  "vendor": "0005cd",
+  "cecVersion": "1.4",
+  "systemAudioMode": "On",
+  "systemAudioModeAt": "2026-10-06T18:04:07Z"
+}
+```
+
+The adapter reads the mode once when it joins the bus, and each
+broadcast of the mode changes it after that, such as the Off that a
+receiver broadcasts before it goes to standby. `systemAudioModeAt` is
+when an adapter last read or heard it. Each change of the mode posts
+`SystemAudioModeOn` or `SystemAudioModeOff` on the `Receiver`. Both
+are Normal, because the receiver turns the mode off before standby,
+and a person turns it off by picking the TV's speakers.
+
+While the mode is on, the TV sends its remote's volume keys to the
+receiver over CEC, and the `liken` remote sets the volume over the
+network. The receiver holds one volume, and the `Receiver`'s
+`status.zones` reports it, so the status shows volume changes that
+`liken` did not make.
 
 ## Turn the room off with the power button
 
@@ -474,7 +564,9 @@ order, and stop at the first one that is wrong:
    TV answers, and what it reports.
 5. The `Television`'s `status.session`, `status.wokeAt`, and
    `WakeApplied`: the session reached the TV, the adapter ran the
-   wake, and what the bus reported at the end of it.
+   wake, and what the bus reported at the end of it. When the TV
+   woke and its remote's volume keys still change the TV's own volume,
+   read `SystemAudioApplied` and the `Receiver`'s `status.cec`.
 
 A `Television` with no `status.session` gets no wake. Check that the
 `Receiver`'s input names the same `Display` as the `CECBus`'s
@@ -490,7 +582,8 @@ a person may need to act on is a Warning: `NotReported`, `Refused`,
 `NoBus`, `NotFound`, `NoPowerStatus`, `Unconfirmed`, `SourceTaken`,
 and `TooLate`. Every other reason is Normal. When discovery creates or
 deletes a `Television`, the operator posts `TelevisionCreated` or
-`TelevisionDeleted` on its `CECBus`. A `CECBus` and a `Television`
+`TelevisionDeleted` on its `CECBus`. A change of the System Audio Mode
+posts `SystemAudioModeOn` or `SystemAudioModeOff` on the `Receiver`. A `CECBus` and a `Television`
 are cluster-scoped, so their Events are in the `default` namespace,
 and `kubectl events` finds them only with `-n default` or `-A`:
 

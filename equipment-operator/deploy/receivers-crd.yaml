@@ -591,6 +591,39 @@ spec:
                           type: string
                           format: date-time
                           description: "When the ask was made, as an RFC 3339 time with milliseconds. A new value is a new ask."
+                cec:
+                  type: object
+                  required: [bus, logicalAddress]
+                  description: "The receiver as the audio system of a CECBus, from the device at logical address 5 in the bus's merged status.devices. The operator writes it on the Receiver that is the via of a Display in a Television's status.displays: the bus has an audio system above the Display in the HDMI tree, and an input of this Receiver names the Display's machine and monitor. It is absent for a Receiver that is no such via, such as one that a Display reaches by an optical cable alone, which carries no CEC. It carries no power and no volume, because the network block reports both, and the bus's power for the receiver is the power at the scan. While systemAudioMode is On, the TV sends its remote's volume keys to the receiver over CEC, so status.zones shows volume changes that liken did not make. Each change of systemAudioMode to a value posts a Normal Event, SystemAudioModeOn or SystemAudioModeOff, because the receiver turns the mode off before standby and a person turns it off by picking the TV's speakers."
+                  properties:
+                    bus:
+                      type: string
+                      description: "The CECBus the receiver is the audio system of."
+                    logicalAddress:
+                      type: integer
+                      minimum: 0
+                      maximum: 15
+                      description: "The receiver's logical address, which is 5 for an audio system."
+                    physicalAddress:
+                      type: string
+                      description: "The receiver's place in the HDMI tree, in the dotted form 1.0.0.0."
+                    osdName:
+                      type: string
+                      description: "The name the receiver reports on the bus, at most 14 characters."
+                    vendor:
+                      type: string
+                      description: "The receiver's IEEE OUI on the bus, as six hex digits."
+                    cecVersion:
+                      type: string
+                      description: "The CEC version the receiver reports: 1.3a, 1.4, or 2.0."
+                    systemAudioMode:
+                      type: string
+                      enum: ["On", "Off"]
+                      description: "The System Audio Mode the receiver last stated. While it is On, the TV mutes its own speakers and sends its remote's volume keys to the receiver (HDMI-CEC 1.3a, CEC 13.15.2). A wake through this receiver asks for On, and the receiver broadcasts Off before standby. Absent while no adapter holds a value."
+                    systemAudioModeAt:
+                      type: string
+                      format: date-time
+                      description: "When an adapter of the bus last read or heard systemAudioMode."
                 settledPower:
                   type: string
                   enum: ["On", Standby, "Off"]

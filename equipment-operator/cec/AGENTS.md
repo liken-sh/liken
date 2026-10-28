@@ -40,7 +40,7 @@ gives the design.
 ## The message families
 
 `message.go` groups the opcodes by family, and each group's comment
-says who sends it and what answers it. The package uses four:
+says who sends it and what answers it. The package uses five:
 
 - **Identity.** Give Physical Address, Give OSD Name, Give Device
   Vendor ID, and Get CEC Version, with their reports. A scan asks each
@@ -74,6 +74,24 @@ says who sends it and what answers it. The package uses four:
 - **Remote control.** User Control Pressed and Released. The kernel
   turns them into key events on the adapter's input device when the
   claim sets passthrough, and this package never reads them.
+- **System Audio Control.** System Audio Mode Request, Set System
+  Audio Mode, Give System Audio Mode Status, and System Audio Mode
+  Status, in `audio.go`. A scan asks the audio system at logical
+  address 5 for the mode after its other questions to that device,
+  and the directory sets the mode from each broadcast Set System Audio
+  Mode and each System Audio Mode Status. The node workload sends the
+  request in a wake whose Display passes through a receiver, with the
+  Display's physical address. HDMI-CEC 1.3a, CEC Table 25, says a
+  device that sends the request shall be able to send the volume keys,
+  so `PressVolumeKey` sends User Control Pressed for Volume Up, Volume
+  Down, or Mute and then User Control Released to the audio system.
+  Nothing in the operator calls it, because the network block sets the
+  volume. `Answer` sends a Feature Abort for a directed Set System
+  Audio Mode or System Audio Mode Status only on a bus with no audio
+  system, where the adapter never sends the request. A `cectest` peer
+  with `SystemAudio` set is an audio system that broadcasts its [On],
+  directs it to the TV alone, answers nothing, or answers the request
+  with a Feature Abort.
 
 ## What the kernel does and what this package does
 

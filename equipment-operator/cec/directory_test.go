@@ -47,6 +47,24 @@ func TestTheDirectoryLearnsOneFactFromEachMessage(t *testing.T) {
 		{"a short operand is ignored", cec.NewMessage(0, 15, cec.OpReportPhysicalAddr, 0x10), func(p cec.Peer) bool {
 			return p.Physical == cec.InvalidPhysicalAddress
 		}},
+		{"a broadcast Set System Audio Mode", cec.SetSystemAudioMode(5, 15, cec.SystemAudioOn), func(p cec.Peer) bool {
+			return p.SystemAudioMode == cec.SystemAudioOn && !p.SystemAudioModeAt.IsZero()
+		}},
+		{"a broadcast Set System Audio Mode Off", cec.SetSystemAudioMode(5, 15, cec.SystemAudioOff), func(p cec.Peer) bool {
+			return p.SystemAudioMode == cec.SystemAudioOff
+		}},
+		// The audio system directs its first [On] to the TV, and stops when
+		// the TV answers it with a Feature Abort, so a directed [On] does
+		// not show that the mode started.
+		{"a Set System Audio Mode to the TV", cec.SetSystemAudioMode(5, 0, cec.SystemAudioOn), func(p cec.Peer) bool {
+			return p.SystemAudioMode == cec.SystemAudioUnknown && p.SystemAudioModeAt.IsZero()
+		}},
+		{"a System Audio Mode Status", cec.SystemAudioModeStatus(5, 4, cec.SystemAudioOn), func(p cec.Peer) bool {
+			return p.SystemAudioMode == cec.SystemAudioOn
+		}},
+		{"a mode CEC does not define", cec.NewMessage(5, 15, cec.OpSetSystemAudioMode, 7), func(p cec.Peer) bool {
+			return p.SystemAudioMode == cec.SystemAudioUnknown
+		}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
