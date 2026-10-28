@@ -284,13 +284,16 @@ fn the_wake_reaches_the_source() {
     assert!(browser.source.woken);
 }
 
+// A browser nobody has pressed rests from its first second, so the next
+// frame it asks for is the start of the outline's first breath, and after
+// it the clock's.
 #[test]
-fn a_still_browser_schedules_the_clocks_frame_alone() {
+fn a_still_browser_schedules_the_breath_and_the_clocks_frame_alone() {
     let mut browser = browser(3);
-    browser.tick(4.2);
+    browser.tick(STILL);
     browser.minute = Some(MINUTE);
 
-    assert_eq!(browser.next_frame(4.2), Some(MINUTE));
+    assert_eq!(browser.next_frame(STILL), Some(look::BREATH_DELAY));
 }
 
 #[test]

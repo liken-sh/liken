@@ -2,9 +2,9 @@
 // right-aligned. It draws the circles of the room, a magnifying glass at
 // the clock's left, then the clock. On a search wall the glass
 // expands into the text field, which draws leftward from the clock with
-// the glass inside its left end. The focus mark goes on whichever of the
-// strip's two targets holds focus: the glass, or the field it expanded
-// into, or the circles. It is the browser's layer and not a screen's, so
+// the glass inside its left end. The browser's focus outline goes around
+// whichever of the strip's two targets holds focus: the glass, or the
+// field it expanded into, or the circles. It is the browser's layer and not a screen's, so
 // every screen carries it in the same place and an up press that moves
 // nothing on any screen reaches it.
 
@@ -20,7 +20,7 @@ use crate::audience::faces::{Face, Faces};
 use crate::clock::Time;
 use crate::look;
 use crate::views::field::{self, TextField};
-use crate::views::{area, mark, text};
+use crate::views::{area, text};
 
 /// The space between two parts of the strip: the circles, the glass or
 /// the field, and the reading are this far apart. It is not a screen
@@ -192,6 +192,22 @@ fn disc(frame: &mut canvas::Frame<Renderer>, at: Rectangle, letter: &str, fill: 
 }
 
 impl Strip<'_> {
+    /// The box the focus mark goes around in a frame this wide, or nothing
+    /// while the strip does not hold the browser's focus: the glass alone,
+    /// the field the glass expanded into, or the row of circles. The strip
+    /// draws no mark of its own; the browser's outline goes around this
+    /// box.
+    pub fn focused(&self, width: f32) -> Option<Rectangle> {
+        match (self.focus?, self.field) {
+            (Target::Glass, Some(_)) => Some(field::bounds(width)),
+            (Target::Glass, None) => Some(glass_at(width)),
+            (Target::Circles, None) if !self.viewers.is_empty() => {
+                Some(circles_at(width, self.viewers.len()))
+            }
+            (Target::Circles, _) => None,
+        }
+    }
+
     /// What the circle at this index of the row draws.
     pub fn face(&self, index: usize) -> Face<'_> {
         let viewer = self.viewers.get(index).cloned().unwrap_or_default();
@@ -211,23 +227,16 @@ impl canvas::Program<Infallible, Theme, Renderer> for Strip<'_> {
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        // The mark goes around whichever of the two the strip is: the
-        // icon alone, or the field the icon expanded into.
-        let marked = match self.field {
+        match self.field {
             Some(field) => {
-                let box_of = field::bounds(bounds.width);
                 field::draw(&mut frame, bounds.width, field);
-                glass(&mut frame, field::icon(box_of), look::muted());
-                box_of
+                glass(
+                    &mut frame,
+                    field::icon(field::bounds(bounds.width)),
+                    look::muted(),
+                );
             }
-            None => {
-                let at = glass_at(bounds.width);
-                glass(&mut frame, at, look::muted());
-                at
-            }
-        };
-        if self.focus == Some(Target::Glass) {
-            mark(&mut frame, marked);
+            None => glass(&mut frame, glass_at(bounds.width), look::muted()),
         }
         // The field draws leftward from the clock over the same band, so
         // the circles stand down while a search wall is on top.
@@ -245,9 +254,6 @@ impl canvas::Program<Infallible, Theme, Renderer> for Strip<'_> {
                     fill,
                 );
             }
-            if self.focus == Some(Target::Circles) {
-                mark(&mut frame, circles_at(bounds.width, count));
-            }
         }
         reading(&mut frame, bounds, self.time);
         vec![frame.into_geometry()]
@@ -261,6 +267,36 @@ mod tests {
     use crate::views::clock::{right, room};
 
     const WIDTH: f32 = 1920.0;
+
+    // The strip with focus on this target, over a search field or not,
+    // with this many people in the room.
+    fn focused_on(target: Target, field: Option<&TextField>, people: usize) -> Option<Rectangle> {
+        let faces = Faces::default();
+        let strip = Strip {
+            time: Time::default(),
+            field,
+            focus: Some(target),
+            viewers: vec![Viewer::nobody(); people],
+            asking: false,
+            faces: &faces,
+        };
+        strip.focused(WIDTH)
+    }
+
+    #[test]
+    fn the_outline_goes_around_the_target_that_holds_focus() {
+        let field = TextField::default();
+        let cases = [
+            (Target::Glass, None, 2, Some(glass_at(WIDTH))),
+            (Target::Glass, Some(&field), 2, Some(field::bounds(WIDTH))),
+            (Target::Circles, None, 2, Some(circles_at(WIDTH, 2))),
+            (Target::Circles, None, 0, None),
+            (Target::Circles, Some(&field), 2, None),
+        ];
+        for (target, field, people, around) in cases {
+            assert_eq!(focused_on(target, field, people), around, "{target:?}");
+        }
+    }
 
     #[test]
     fn the_icon_stands_a_margin_to_the_left_of_the_clock() {

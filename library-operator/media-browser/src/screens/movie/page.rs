@@ -182,7 +182,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
         );
 
         if let (Some(set), Some(block)) = (&movie.set, blocks.strip) {
-            strip::draw(
+            strip::draw_marked(
                 &mut frame,
                 store,
                 &strip::Strip {
@@ -205,6 +205,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                         region.width,
                         strip::height(card::LINES),
                     ),
+                    scroll: None,
                 },
             );
         }
@@ -216,7 +217,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
             .zip(&blocks.franchises)
             .enumerate()
         {
-            strip::draw(
+            strip::draw_marked(
                 &mut frame,
                 store,
                 &strip::Strip {
@@ -244,6 +245,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                         region.width,
                         strip::height(card::LINES),
                     ),
+                    scroll: None,
                 },
             );
         }

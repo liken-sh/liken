@@ -8,6 +8,9 @@
 //
 // A jump rail of rotated bars at the left of a long wall is one more.
 //
+// The focus outline, which the browser draws as a layer of its own over
+// the screen that holds focus, is one more.
+//
 // The bar and the status line under a page's playback row, with the marks
 // that change the status, are one more.
 //
@@ -42,6 +45,7 @@ pub mod header;
 pub mod icon;
 pub mod keyboard;
 pub mod layers;
+pub mod outline;
 pub mod people;
 pub mod progress;
 pub mod rail;
@@ -330,14 +334,22 @@ pub fn underlined(slot: Rectangle) -> Rectangle {
 }
 
 // The one mark focus takes everywhere on this screen: a stroke of the
-// accent outside the chosen slot.
+// accent outside the chosen slot. A screen whose focus the browser's
+// outline follows draws none of its own; the screens the outline does not
+// follow yet stroke their mark here, at rest.
 pub(crate) fn mark(frame: &mut canvas::Frame<Renderer>, slot: Rectangle) {
-    let around = marked(slot);
+    stroke(frame, marked(slot), look::mark());
+}
+
+// The focus stroke along this rectangle, in this color: the stroke a
+// screen's own mark draws, and the one the browser's outline draws as it
+// travels and breathes.
+pub(crate) fn stroke(frame: &mut canvas::Frame<Renderer>, around: Rectangle, color: Color) {
     frame.stroke_rectangle(
         around.position(),
         extent(around),
         canvas::Stroke::default()
-            .with_color(look::mark())
+            .with_color(color)
             .with_width(look::MARK),
     );
 }

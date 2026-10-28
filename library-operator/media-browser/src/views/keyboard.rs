@@ -1,13 +1,13 @@
 // The grid of letters a remote with no keyboard types on. Every cell is
 // a browser word, so a pick off the grid and a press on a physical
-// keyboard reach the field by one path. The grid draws the way a wall
-// does: rounded cells, and the focus mark on the one that holds focus.
+// keyboard reach the field by one path. The grid draws rounded cells, and
+// the browser's focus outline goes around the one that holds focus.
 
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::{Point, Rectangle};
 
-use super::{area, mark, rounded, text};
+use super::{area, rounded, text};
 use crate::focus;
 use crate::look;
 
@@ -135,8 +135,16 @@ pub fn shown(word: &str) -> &str {
     }
 }
 
+impl Keyboard {
+    /// The box of the cell that holds focus, in a grid whose first cell's
+    /// corner is `at`, which the browser's focus outline goes around.
+    pub fn focused(&self, at: Point) -> Rectangle {
+        cell(at, self.focus)
+    }
+}
+
 /// Draw the grid with its first cell's corner at `at`.
-pub fn draw(frame: &mut canvas::Frame<Renderer>, at: Point, keyboard: &Keyboard) {
+pub fn draw(frame: &mut canvas::Frame<Renderer>, at: Point) {
     for (index, word) in CELLS.iter().enumerate() {
         let bounds = cell(at, index);
         frame.fill(&rounded(bounds, RADIUS), look::slot());
@@ -147,9 +155,6 @@ pub fn draw(frame: &mut canvas::Frame<Renderer>, at: Point, keyboard: &Keyboard)
             look::CONTROL,
             look::text(),
         );
-        if index == keyboard.focus {
-            mark(frame, bounds);
-        }
     }
 }
 

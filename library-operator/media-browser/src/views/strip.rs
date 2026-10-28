@@ -3,7 +3,9 @@
 // nothing grows or crops to a ratio it does not have. A "see all" slot
 // may end the row. A set strip on a movie page marks the film the page is
 // about and dims its siblings. The row scrolls so the focused slot stays
-// in view.
+// in view. The strip draws no focus mark: it answers the box the mark goes
+// around, and the screen draws the mark, or the browser's outline follows
+// it.
 
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
@@ -12,7 +14,7 @@ use iced_winit::core::text::Alignment;
 use iced_winit::core::{Color, Point, Rectangle};
 
 use super::{
-    Card, Tone, area, artwork, card, clock, label, mark, mosaic, progress, text, underline, wall,
+    Card, Tone, area, artwork, card, clock, label, mosaic, progress, text, underline, wall,
 };
 use crate::art::Art;
 use crate::audience::Viewer;
@@ -182,6 +184,10 @@ pub struct Strip<'a, T> {
     pub room: Option<Room<'a>>,
     /// The part of the frame the strip draws in.
     pub region: Rectangle,
+    /// How far the row has scrolled as this frame draws it, where the
+    /// screen eases the row toward `scrolled`'s answer, and nothing to
+    /// draw the row at that answer.
+    pub scroll: Option<f32>,
 }
 
 /// The people a strip draws after its heading.
@@ -235,6 +241,29 @@ pub fn anchor<T>(strip: &Strip<'_, T>) -> Option<usize> {
     strip.focus.or(strip.kept).or(strip.current)
 }
 
+/// How far the row scrolls to rest with its anchor in view.
+pub fn scrolled<T: Card>(strip: &Strip<'_, T>) -> f32 {
+    let slots = placed(strip.members, strip.last.is_some());
+    offset(&slots, anchor(strip), strip.region.width)
+}
+
+/// The box the focus mark goes around on this strip at rest: the heading
+/// where it holds focus, the circles of the room where they do, or the
+/// focused slot after the row's scroll lands. Nothing where the strip
+/// holds no focus.
+pub fn focused<T: Card>(strip: &Strip<'_, T>) -> Option<Rectangle> {
+    if strip.headed {
+        return Some(heading_box(strip.region, strip.heading));
+    }
+    if let Some(room) = strip.room.as_ref().filter(|room| room.circled) {
+        return (!room.viewers.is_empty())
+            .then(|| circles_box(strip.region, strip.heading, room.viewers.len()));
+    }
+    let slots = placed(strip.members, strip.last.is_some());
+    let index = strip.focus.filter(|index| *index < slots.len())?;
+    Some(slot(strip.region, &slots, scrolled(strip), index))
+}
+
 /// The slot of one index in frame space, after the scroll.
 pub fn slot(strip_region: Rectangle, slots: &[(f32, f32)], offset: f32, index: usize) -> Rectangle {
     let (x, width) = slots[index];
@@ -254,9 +283,6 @@ pub fn draw<T: Card, A: Art>(
     strip: &Strip<'_, T>,
 ) {
     headed(frame, strip.region, strip.heading);
-    if strip.headed {
-        mark(frame, heading_box(strip.region, strip.heading));
-    }
     if let Some(room) = strip.room.as_ref().filter(|room| !room.viewers.is_empty()) {
         let row = circles_box(strip.region, strip.heading, room.viewers.len());
         for (index, viewer) in room.viewers.iter().enumerate() {
@@ -267,13 +293,10 @@ pub fn draw<T: Card, A: Art>(
                 room.faces,
             );
         }
-        if room.circled {
-            mark(frame, row);
-        }
     }
 
     let slots = placed(strip.members, strip.last.is_some());
-    let offset = offset(&slots, anchor(strip), strip.region.width);
+    let offset = strip.scroll.unwrap_or_else(|| scrolled(strip));
     let right = strip.region.x + strip.region.width;
 
     for index in 0..slots.len() {
@@ -281,7 +304,6 @@ pub fn draw<T: Card, A: Art>(
         if slot.x + slot.width < strip.region.x || slot.x > right {
             continue;
         }
-        let focused = strip.focus == Some(index);
         match strip.members.get(index) {
             // A shelf draws the mosaic of its own posters, and every other
             // slot draws the one art the member names.
@@ -327,9 +349,19 @@ pub fn draw<T: Card, A: Art>(
         if strip.current == Some(index) {
             underline(frame, slot);
         }
-        if focused {
-            mark(frame, slot);
-        }
+    }
+}
+
+/// Draw the strip and stroke its own focus mark at rest, for a screen
+/// whose focus the browser's outline does not follow yet.
+pub fn draw_marked<T: Card, A: Art>(
+    frame: &mut canvas::Frame<Renderer>,
+    store: &mut A,
+    strip: &Strip<'_, T>,
+) {
+    draw(frame, store, strip);
+    if let Some(at) = focused(strip) {
+        super::mark(frame, at);
     }
 }
 
@@ -464,7 +496,39 @@ mod tests {
             lines: 1,
             headed: false,
             region: area(0.0, 0.0, 1000.0, height(1)),
+            scroll: None,
         }
+    }
+
+    #[test]
+    fn the_mark_goes_around_the_focused_slot_where_the_scroll_lands() {
+        let members = [
+            Member(wall::POSTER),
+            Member(wall::POSTER),
+            Member(wall::POSTER),
+            Member(wall::POSTER),
+            Member(wall::POSTER),
+            Member(wall::POSTER),
+        ];
+        let mut row = strip(&members, None, Some(4));
+        let slots = placed(&members, false);
+        let landed = scrolled(&row);
+        assert!(landed > 0.0);
+        assert_eq!(focused(&row), Some(slot(row.region, &slots, landed, 4)));
+
+        // A row drawn part way through its scroll still marks where the
+        // scroll lands, so the outline travels to the slot's last place.
+        row.scroll = Some(0.0);
+        assert_eq!(focused(&row), Some(slot(row.region, &slots, landed, 4)));
+    }
+
+    #[test]
+    fn the_mark_goes_around_the_heading_where_the_heading_holds_focus() {
+        let members = mixed();
+        let mut row = strip(&members, None, None);
+        assert_eq!(focused(&row), None);
+        row.headed = true;
+        assert_eq!(focused(&row), Some(heading_box(row.region, row.heading)));
     }
 
     #[test]

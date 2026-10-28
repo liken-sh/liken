@@ -17,8 +17,12 @@ use super::slots::Slots;
 use crate::art::Art;
 use crate::catalog::{Query, Source};
 use crate::focus;
-use crate::views::{area, band, card, clip_marked, screen, wall};
+use crate::motion::Glide;
+use crate::views::{area, band, clip_marked, screen, wall};
 
+// The motion module: where the focus outline goes on a wall, and how far
+// the wall has scrolled while it eases to rest.
+mod motion;
 // The progress module: the bars the wall's film slots draw, read per
 // library the slots span.
 pub(crate) mod progress;
@@ -60,6 +64,9 @@ pub struct Wall {
     // draws the same bars again without the browser, which is where the
     // audience is held.
     people: Vec<String>,
+    // How far the grid has scrolled down, as it eases to the place that
+    // keeps the slot the wall stands at in view.
+    scroll: Glide,
 }
 
 impl Wall {
@@ -72,6 +79,7 @@ impl Wall {
             bars: Vec::new(),
             focus: Focus::Slots,
             people: Vec::new(),
+            scroll: Glide::still(0.0),
         };
         wall.headed();
         wall.railed();
@@ -276,24 +284,28 @@ impl Wall {
     /// A search wall showing its grid draws a third layer over the band,
     /// because a layer draws every fill before every text and the band
     /// paints its own ground.
+    ///
+    /// `at` is the second the frame draws, which the scroll eases on.
     pub fn view<'a, A: Art>(
         &'a self,
         store: &'a RefCell<A>,
         held: bool,
+        at: f64,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         let grid = canvas(Program {
             wall: self,
             store,
             held,
+            at,
         })
         .width(Length::Fill)
         .height(Length::Fill)
         .into();
         let band = band::layer(&self.heading, "");
         let mut layers = vec![grid, band];
-        if let Some(keyboard) = self.grid() {
+        if self.grid().is_some() {
             layers.push(
-                canvas(Typing { keyboard })
+                canvas(Typing)
                     .width(Length::Fill)
                     .height(Length::Fill)
                     .into(),
@@ -312,6 +324,8 @@ struct Program<'a, A> {
     store: &'a RefCell<A>,
     // Whether the wall holds focus, or the browser's strip over it does.
     held: bool,
+    // The second this frame draws, which the scroll eases on.
+    at: f64,
 }
 
 impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Program<'_, A> {
@@ -326,28 +340,29 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Program<'_, A> {
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let shown = self.wall;
         // The rail takes its lane off the right of the region, and the
-        // slots keep the rest.
-        let whole = region(bounds, self.wall.under_band());
-        let region = rail::beside(whole, &self.wall.bars);
-        self.wall.slots.draw_at(
+        // slots keep the rest. Neither draws the focus mark: the browser's
+        // outline goes around the box `Wall::marked` answers.
+        let whole = region(bounds, shown.under_band());
+        let (grid, settled) = shown.slotted(bounds);
+        wall::draw(
             &mut frame,
             &mut *self.store.borrow_mut(),
-            region,
-            self.wall.standing(),
-            self.wall.marks(self.held),
-            card::LINES,
+            &wall::Grid {
+                offset: shown.scroll.toward(settled, self.at),
+                ..grid
+            },
         );
-        // The clip reaches past the region by the gap and the whole focus
-        // stroke, so the mark on the first bar and on the button draws
-        // whole.
+        // The clip reaches past the region by the gap and the outline's
+        // whole stroke, so a bar's fill at the region's edge draws whole.
         frame.with_clip(clip_marked(whole), |frame| {
             rail::draw(
                 frame,
                 whole,
-                &self.wall.bars,
-                &self.wall.slots.query,
-                self.wall.marked_cell(self.held),
+                &shown.bars,
+                &shown.slots.query,
+                shown.marked_cell(self.held),
             );
         });
         vec![frame.into_geometry()]

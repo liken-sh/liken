@@ -21,7 +21,16 @@ impl<S: Source, A: Art> Browser<S, A> {
         // may have left a description, and this press did not do that.
         self.did = None;
         let typed = self.typed();
+        // Whatever moved without a press lands first, so the motion this
+        // press starts runs from what the glass shows.
+        self.follow(None);
+        let pages = self.pages;
+        let pace = self.pace.press(self.clock);
         let changed = self.act(name);
+        // A press that stays on one page moves focus and the scrolls on
+        // its pace; a press that changed the page lands on the new one.
+        let rests = self.follow((self.pages == pages).then_some(pace));
+        self.breath.press(self.clock, rests);
         let did = self.did.take().unwrap_or_else(|| match self.typed() {
             Some(length) if self.typed() != typed => format!(
                 "search input, and the field holds {}",

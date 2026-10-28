@@ -25,6 +25,7 @@ use crate::clock;
 use crate::harness::{Screen, Waker};
 use crate::log::Log;
 use crate::look;
+use crate::motion::{Breath, Outline, Pace};
 use crate::screens::upnext::{self, Next};
 use crate::screens::{self, Step, home, lights, loading, volume};
 use crate::views;
@@ -36,6 +37,8 @@ mod lines;
 mod marks;
 // The `Person` list as it changes under a running browser.
 mod people;
+// The focus outline: where it goes, how it travels, and how it breathes.
+mod outline;
 // One press and the line it prints.
 mod press;
 mod reader;
@@ -175,6 +178,19 @@ pub struct Browser<S: Source, A: Art> {
     // What the press in flight did, which its line reports. The handlers
     // set it, and the press takes it when it ends.
     did: Option<String>,
+    // The focus outline in motion and the focus it moves to, or nothing
+    // while no layer answers where focus is.
+    outline: Option<(Outline, outline::Target)>,
+    // The second of the last press, which shortens every motion while a
+    // key is held.
+    pace: Pace,
+    // When focus came to rest, which the outline's breath and the frames
+    // of every motion run from.
+    breath: Breath,
+    // How many times the page on top changed. A move of focus travels only
+    // inside one page, so the outline compares this count before and after
+    // a press.
+    pages: u64,
 }
 
 // How long focus stands still before the browser asks the store for the
@@ -233,6 +249,10 @@ impl<S: Source, A: Art> Browser<S, A> {
             minute: None,
             log: Log::default(),
             did: None,
+            outline: None,
+            pace: Pace::default(),
+            breath: Breath::default(),
+            pages: 0,
         }
     }
 
@@ -578,6 +598,14 @@ impl<S: Source, A: Art> Browser<S, A> {
                 }
                 if self.activity == Activity::Idle && status.activity != Activity::Idle {
                     self.lights = Some(lights::Lights::entered(self.clock));
+                }
+                // A film that plays has started the work the curtain's line
+                // named, so the line clears, and an offer taken at the
+                // credits names the next work on its own request.
+                if status.activity == Activity::Playing
+                    && let Some(state) = &mut self.loading
+                {
+                    state.played();
                 }
                 self.activity = status.activity;
                 self.refresh.cover(status.activity == Activity::Playing);
@@ -1029,6 +1057,10 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
             self.rest = None;
             self.prefetch();
         }
+        // Anything that moved focus or a scroll since the last frame without
+        // a press, such as a re-read or the picker the ask raised, lands
+        // where it is now.
+        self.follow(None);
     }
 
     fn view(&self) -> Element<'_, Self::Message, Theme, Renderer> {
@@ -1039,9 +1071,28 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         };
 
         let curtain = self.loading.as_ref().map(|state| state.curtain(self.clock));
-        let screen = self
-            .top()
-            .view(&self.store, &self.faces, curtain, !self.on_strip);
+        let screen = self.top().view(
+            &self.store,
+            &self.faces,
+            curtain,
+            !self.on_strip,
+            self.clock,
+        );
+        // The outline draws over the layer that holds focus and under every
+        // layer over that one, so the dim of the room covers an outline on
+        // the page, and the picker covers the page's outline.
+        let drawn = self.drawn();
+        let outlined = |layer: outline::Layer| {
+            drawn.filter(|drawn| drawn.layer == layer).map(|drawn| {
+                canvas(views::outline::Outline {
+                    around: drawn.around,
+                    color: drawn.color,
+                })
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+            })
+        };
 
         // The dim of the room is the frame's layer and not a page's, so
         // the home page, a wall, and a title's page all go down the same
@@ -1051,6 +1102,7 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         // over the dim, so the room goes down while the logo keeps the
         // brightness it pulses at.
         let mut layers = vec![screen];
+        layers.extend(outlined(outline::Layer::Screen));
         let level = self.lights.map_or(1.0, |state| state.level(self.clock));
         if level < 1.0 {
             layers.push(views::layers::dim(level));
@@ -1068,6 +1120,7 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
                 .height(Length::Fill)
                 .into(),
         );
+        layers.extend(outlined(outline::Layer::Strip));
         if let Some(picker) = self.picker_layer() {
             layers.push(
                 canvas(picker)
@@ -1076,6 +1129,7 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
                     .into(),
             );
         }
+        layers.extend(outlined(outline::Layer::Picker));
         if let Some(row) = self.level.row(self.clock) {
             layers.push(canvas(row).width(Length::Fill).height(Length::Fill).into());
         }
@@ -1089,15 +1143,18 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
     // source wakes the loop itself, so an idle browser schedules nothing
     // and the loop waits on events.
     //
-    // Four things schedule a frame: the end of a rest; every frame of
+    // Five things schedule a frame: the end of a rest; every frame of
     // the loading state and of the lights beside it, which answer now on
     // every ask so the mark pulses and the room dims at the loop's own
     // floor rate; the volume row, which asks for a frame through each of
     // its fades and names the second it starts to leave through the hold
-    // between them; and the clock, which asks for the second the minute
-    // turns. No read waits for a second of its own: a change wakes the
-    // loop and is read on that pass. Nothing under a film schedules a
-    // frame, because those frames would draw a black shade nobody sees.
+    // between them; the focus outline, which asks for every frame of a
+    // motion, a breath, and a breath's release, and names the second the
+    // next breath starts between them; and the clock, which asks for the
+    // second the minute turns. No read waits for a second of its own: a
+    // change wakes the loop and is read on that pass. Nothing under a film
+    // schedules a frame, because those frames would draw a black shade
+    // nobody sees.
     fn covered(&self) -> bool {
         self.refresh.covered()
     }
@@ -1108,7 +1165,8 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         let lights = (drawing && self.lights.is_some()).then_some(at);
         let level = drawing.then(|| self.level.next_frame(at)).flatten();
         let minute = drawing.then_some(self.minute).flatten();
-        [loading, lights, level, minute, self.rest]
+        let outline = self.outline_frame(at);
+        [loading, lights, level, outline, minute, self.rest]
             .into_iter()
             .flatten()
             .min_by(f64::total_cmp)

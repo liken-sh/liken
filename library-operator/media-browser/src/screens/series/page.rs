@@ -25,7 +25,7 @@ use crate::views::curtain::{Curtain, Head, Layer};
 use crate::views::layers;
 use crate::views::stack::Stack;
 use crate::views::{
-    area, buttons, card, curtain, divider, header, people, rail, ratings, strip, text, wall,
+    area, buttons, card, curtain, divider, header, mark, people, rail, ratings, strip, text, wall,
     watch as line,
 };
 
@@ -142,7 +142,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                 .zip(&layout.franchises)
                 .enumerate()
             {
-                strip::draw(
+                strip::draw_marked(
                     frame,
                     store,
                     &strip::Strip {
@@ -172,6 +172,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                             region.width - 2.0 * inset,
                             layout::strip_height(),
                         ),
+                        scroll: None,
                     },
                 );
             }
@@ -225,17 +226,15 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
         });
 
         frame.with_clip(layout::rail_clip(whole), |frame| {
-            rail::draw_at(
-                frame,
-                whole,
-                &series.bars,
-                match focus {
-                    Some(Focus::Rail(bar)) => Some(bar),
-                    _ => None,
-                },
-                rail::Side::Right,
-                rail::Fit::Fitted,
-            );
+            let focus = match focus {
+                Some(Focus::Rail(bar)) => Some(bar),
+                _ => None,
+            };
+            let (side, fit) = (rail::Side::Right, rail::Fit::Fitted);
+            rail::draw_at(frame, whole, &series.bars, focus, side, fit);
+            if let Some(bar) = rail::focused(whole, &series.bars, focus, side, fit) {
+                mark(frame, bar);
+            }
         });
 
         vec![frame.into_geometry()]

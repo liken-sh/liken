@@ -12,6 +12,7 @@ pub mod harness;
 pub mod log;
 pub mod look;
 pub mod metrics;
+pub mod motion;
 pub mod sample;
 pub mod screens;
 pub mod views;

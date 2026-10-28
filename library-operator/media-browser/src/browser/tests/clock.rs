@@ -17,10 +17,10 @@ fn the_tick_reads_the_minute_the_wall_clock_turns_on() {
 #[test]
 fn the_browser_asks_for_a_frame_when_the_minute_turns() {
     let mut browser = browser(3);
-    browser.tick(1.0);
-    browser.minute = Some(MINUTE);
+    browser.tick(STILL);
+    browser.minute = Some(TURN);
 
-    assert_eq!(browser.next_frame(1.0), Some(MINUTE));
+    assert_eq!(browser.next_frame(STILL), Some(TURN));
 }
 
 #[test]

@@ -66,7 +66,7 @@ impl<S: Source, A: Art> Browser<S, A> {
                     let page = self.stack.last().unwrap_or(&self.home);
                     let line = loading::line(page, &mut self.source, &library, &selection);
                     match self.loading.as_mut().filter(|state| !state.leaving()) {
-                        Some(state) => state.rename(line),
+                        Some(state) => state.rename(line, self.clock),
                         None => self.loading = Some(loading::Loading::entered(self.clock, line)),
                     }
                 }
@@ -106,6 +106,7 @@ impl<S: Source, A: Art> Browser<S, A> {
         screen.volume(&*self.store.borrow());
         self.stack.push(screen);
         self.on_strip = false;
+        self.pages += 1;
     }
 
     // Ask the store for the backdrop of the page under the focused item,
@@ -134,6 +135,7 @@ impl<S: Source, A: Art> Browser<S, A> {
     pub(super) fn back(&mut self) {
         self.on_strip = false;
         if self.stack.pop().is_some() {
+            self.pages += 1;
             self.reread_top();
             let top = lines::screen(self.top());
             self.did(format!("went back to {top}"));
@@ -168,6 +170,7 @@ impl<S: Source, A: Art> Browser<S, A> {
             return;
         }
         self.stack.clear();
+        self.pages += 1;
         self.refresh_home();
         self.did("went to the home page");
     }

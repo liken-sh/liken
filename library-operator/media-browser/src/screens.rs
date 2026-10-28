@@ -26,7 +26,7 @@ use std::cell::RefCell;
 use std::convert::Infallible;
 
 use iced_wgpu::Renderer;
-use iced_winit::core::{Element, Theme};
+use iced_winit::core::{Element, Rectangle, Theme};
 
 use self::series::seasons_of;
 use crate::art::Art;
@@ -280,20 +280,50 @@ impl Screen {
     /// `held` is whether the screen holds focus. The browser's strip
     /// takes focus off the screen under it, and a screen that drew its
     /// own mark then would put two marks on the glass.
+    ///
+    /// `at` is the second the frame draws, which a scroll eases on.
     pub fn view<'a, A: Art>(
         &'a self,
         store: &'a RefCell<A>,
         faces: &'a Faces,
         curtain: Option<Curtain<'a>>,
         held: bool,
+        at: f64,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         match self {
-            Self::Home(screen) => screen.view(store, faces, held),
-            Self::Wall(screen) => screen.view(store, held),
+            Self::Home(screen) => screen.view(store, faces, held, at),
+            Self::Wall(screen) => screen.view(store, held, at),
             Self::Movie(screen) => screen.view(store, curtain, held),
             Self::Series(screen) => screen.view(store, curtain, held),
             Self::Person(screen) => screen.view(store, held),
             Self::Franchise(screen) => screen.view(store, faces, held),
+        }
+    }
+
+    /// The rectangle the browser's focus outline goes to on this screen at
+    /// these bounds, at the place every scroll comes to rest. The home page
+    /// and a wall answer it and draw no mark of their own. A title's page,
+    /// a person's page, and a franchise's page answer nothing: they stroke
+    /// their own mark at rest, and the outline does not travel on them.
+    pub fn marked(&self, bounds: Rectangle) -> Option<Rectangle> {
+        match self {
+            Self::Home(screen) => screen.marked(bounds),
+            Self::Wall(screen) => screen.marked(bounds),
+            Self::Movie(_) | Self::Series(_) | Self::Person(_) | Self::Franchise(_) => None,
+        }
+    }
+
+    /// Follow the places this screen's scrolls go to at these bounds: ease
+    /// there on the pace of a press, or snap there where nothing pressed.
+    /// The answer is the second the last scroll comes to rest, and a
+    /// screen that eases no scroll answers that it rested long ago.
+    pub fn follow(&mut self, bounds: Rectangle, at: f64, pace: Option<f64>) -> f64 {
+        match self {
+            Self::Home(screen) => screen.follow(bounds, at, pace),
+            Self::Wall(screen) => screen.follow(bounds, at, pace),
+            Self::Movie(_) | Self::Series(_) | Self::Person(_) | Self::Franchise(_) => {
+                f64::NEG_INFINITY
+            }
         }
     }
 

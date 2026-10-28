@@ -10,7 +10,7 @@ use iced_winit::core::Rectangle;
 use crate::catalog::{GenreSort, Query, Sort};
 use crate::look;
 use crate::screens::{Item, facts};
-use crate::views::{area, mark, rail, rounded, text, wall};
+use crate::views::{area, rail, rounded, text, wall};
 
 use crate::views::rail::Bar;
 
@@ -90,7 +90,7 @@ fn drawn(bars: &[Jump]) -> Vec<Bar> {
 }
 
 /// Draw the rail at the right of the region: the sort button over
-/// the bars, with the mark on the cell that holds focus.
+/// the bars, with the focused bar on the lighter ground.
 pub fn draw(
     frame: &mut canvas::Frame<Renderer>,
     region: Rectangle,
@@ -102,7 +102,7 @@ pub fn draw(
         return;
     }
     if let Some(word) = query.sort_word() {
-        pressed(frame, button(region, query), word, focus == Some(0));
+        pressed(frame, button(region, query), word);
     }
     rail::draw_at(
         frame,
@@ -114,18 +114,36 @@ pub fn draw(
     );
 }
 
+/// The box the focus mark goes around where this cell of the rail holds
+/// focus: the sort button, or one bar. The rail draws no mark of its own;
+/// the browser's outline goes around this box.
+pub fn focused(region: Rectangle, bars: &[Jump], query: &Query, cell: usize) -> Option<Rectangle> {
+    match barred_at(cell, query) {
+        Some(bar) => rail::focused(
+            under_button(region, query),
+            &drawn(bars),
+            Some(bar),
+            rail::Side::Right,
+            rail::Fit::Fitted,
+        ),
+        None => Some(sort_box(button(region, query))),
+    }
+}
+
 // The sort button in its own cell, on the lighter ground with full ink,
 // so it reads as a control and not as one more bar.
-fn pressed(frame: &mut canvas::Frame<Renderer>, cell: Rectangle, word: &str, focused: bool) {
-    let bounds = rail::fitted(cell, &[Bar::default()], rail::Side::Right)
-        .pop()
-        .unwrap_or(cell);
+fn pressed(frame: &mut canvas::Frame<Renderer>, cell: Rectangle, word: &str) {
+    let bounds = sort_box(cell);
     frame.fill(&rounded(bounds, ROUND), look::track());
     let shown = text::cut(word, look::HEADING, bounds.height);
     text::downward(frame, &shown, bounds, look::HEADING, look::text());
-    if focused {
-        mark(frame, bounds);
-    }
+}
+
+// The button's own box inside its cell: one bar of the rail's width.
+fn sort_box(cell: Rectangle) -> Rectangle {
+    rail::fitted(cell, &[Bar::default()], rail::Side::Right)
+        .pop()
+        .unwrap_or(cell)
 }
 
 // The radius the button is drawn with, the same as a bar's.

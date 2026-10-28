@@ -8,6 +8,9 @@
 pub mod banner;
 mod layers;
 mod layout;
+// The motion of the page: where the focus outline goes, and how far the
+// page and each row have scrolled while they ease to rest.
+mod motion;
 mod page;
 mod recent;
 pub(crate) mod resume;
@@ -32,6 +35,7 @@ use crate::audience::Viewer;
 use crate::audience::faces::Faces;
 use crate::catalog::Source;
 use crate::catalog::draw::Date;
+use crate::motion::Glide;
 use crate::views::{area, band};
 
 // The band's heading on the home page is the word "Home" and not the
@@ -92,6 +96,14 @@ pub struct Home {
     pub people: Vec<String>,
     // Those people as the continue-watching row's heading draws them.
     pub viewers: Vec<Viewer>,
+    // How far the page has scrolled down, as it eases to the place that
+    // keeps the focused row in view.
+    scroll: Glide,
+    // The row that holds focus, by its index, and how far it has scrolled
+    // across as it eases to the place that keeps its focused slot in view.
+    // Every other strip keeps in view the slot focus left on it, so only
+    // the row that holds focus ever scrolls on a press.
+    slide: (usize, Glide),
 }
 
 impl Home {
@@ -105,6 +117,8 @@ impl Home {
             focus: 0,
             people: Vec::new(),
             viewers: Vec::new(),
+            scroll: Glide::still(0.0),
+            slide: (0, Glide::still(0.0)),
         };
         home.apply(read(source, Date::today(), people, viewers));
         home
@@ -319,21 +333,29 @@ impl Home {
     /// take a layer of their own under the banner's indicators and mark.
     /// The band needs a layer of its own so a row that scrolled up under
     /// it never shows through.
+    ///
+    /// `at` is the second the frame draws, which the scrolls ease on.
     pub fn view<'a, A: Art>(
         &'a self,
         store: &'a RefCell<A>,
         faces: &'a Faces,
         held: bool,
+        at: f64,
     ) -> Element<'a, Infallible, Theme, Renderer> {
-        let ground = canvas(Ground { home: self, store })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into();
+        let ground = canvas(Ground {
+            home: self,
+            store,
+            at,
+        })
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into();
         let front = canvas(Program {
             home: self,
             store,
             faces,
             held,
+            at,
         })
         .width(Length::Fill)
         .height(Length::Fill)
@@ -345,8 +367,8 @@ impl Home {
             .into()
     }
 
-    // The layout and the scroll at these bounds, which both layers draw
-    // from.
+    // The layout and the scroll at these bounds where the scroll comes to
+    // rest, and the clip both layers draw inside.
     fn placed(&self, bounds: Rectangle) -> (Layout, f32, Rectangle) {
         let layout = Layout::of(self, bounds.height);
         let viewport = bounds.height - band::HEIGHT;

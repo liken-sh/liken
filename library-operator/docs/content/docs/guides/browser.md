@@ -96,6 +96,13 @@ attached to the screen's machine.
 | search | open the search wall with the on-screen keyboard |
 | a letter or a digit | open the search wall with that character typed |
 
+A green outline marks focus. On the home page, on a wall, on the
+strip, and on the person picker, the outline travels to the next card
+on each press, and the row scrolls under it on the same press. While
+focus rests, the outline brightens slowly every few seconds, so you
+can find it from the couch. A title's page, a person's page, and a
+franchise page draw the outline in place without the motion.
+
 Up from the top of any wall puts focus on the strip, the row across
 the top that holds the clock and the search glass. Right from the last
 column of a long wall puts focus on the rail. The rail is the bars at

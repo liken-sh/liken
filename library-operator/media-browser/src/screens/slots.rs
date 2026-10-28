@@ -128,36 +128,20 @@ impl Slots {
         marked: bool,
         lines: usize,
     ) {
-        self.draw_at(frame, store, region, self.focus, marked, lines);
-    }
-
-    /// The same drawing, with the grid standing at the slot the caller
-    /// names instead of the focus. A wall whose rail holds focus stands
-    /// at the slot a select on the focused bar lands on, so the wall
-    /// follows the bar.
-    pub fn draw_at<A: Art>(
-        &self,
-        frame: &mut canvas::Frame<Renderer>,
-        store: &mut A,
-        region: Rectangle,
-        standing: usize,
-        marked: bool,
-        lines: usize,
-    ) {
         let cells = wall::lined(region.width, wall::POSTER, wall::COLUMNS, lines);
         wall::draw(
             frame,
             store,
             &wall::Grid {
                 items: &self.items,
-                focus: Some(standing),
+                focus: Some(self.focus),
                 marked,
                 library: "",
                 ratio: wall::POSTER,
                 columns: wall::COLUMNS,
                 lines,
                 offset: wall::scrolled(
-                    standing,
+                    self.focus,
                     self.items.len(),
                     wall::COLUMNS,
                     &cells,

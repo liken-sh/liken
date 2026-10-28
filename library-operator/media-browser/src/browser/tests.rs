@@ -19,6 +19,7 @@ mod live;
 mod loading;
 mod marks;
 mod moments;
+mod outline;
 mod pages;
 mod paging;
 mod people;
@@ -69,6 +70,15 @@ const AUDIENCE_TOPIC: &str = "liken/library/players/house/den/audience";
 // wall clock, and no test may depend on it, so a case that measures a
 // schedule states the second itself, past every other second it names.
 const MINUTE: f64 = 600.0;
+
+// A minute that turns after a press's motion ends and before the focus
+// outline's first breath, so a case that reads which frame a resting
+// browser asks for next reads the rest or the clock and not the breath.
+const TURN: f64 = 2.0;
+
+// A second after every motion a press at zero starts, and before the minute
+// above turns.
+const STILL: f64 = 1.0;
 
 // The set the first movies of the fake library belong to, and how many
 // of them: four, because a drawn strip of fewer holds nothing.

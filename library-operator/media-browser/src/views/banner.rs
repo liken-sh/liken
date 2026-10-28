@@ -2,15 +2,15 @@
 // draws under every image of that layer, so the scrim over the backdrop
 // needs the backdrop on a layer of its own. This module holds the
 // frame's geometry, the backdrop under it, and the scrim, the head, the
-// facts, the genres, the scores, the tagline, the indicators, and the
-// mark over it.
+// facts, the genres, the scores, the tagline, and the indicators over
+// it. The focus outline around the frame is the browser's own layer.
 
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::{Point, Rectangle};
 
 use super::stack::Stack;
-use super::{Tone, area, extent, header, layers, mark, paint, ratings, text};
+use super::{Tone, area, extent, header, layers, paint, ratings, text};
 use crate::art::Art;
 use crate::look;
 
@@ -102,7 +102,7 @@ pub fn backdrop<A: Art>(
 }
 
 /// One banner to draw over its backdrop: the current title's words, the
-/// count, the current index, the focus, and the frame.
+/// count, the current index, and the frame.
 pub struct Banner<'a> {
     /// The library the art paths resolve against.
     pub library: &'a str,
@@ -124,14 +124,11 @@ pub struct Banner<'a> {
     pub count: usize,
     /// The index of the title the frame shows.
     pub current: usize,
-    /// Whether the banner holds focus.
-    pub focused: bool,
     /// The frame in the page's space.
     pub region: Rectangle,
 }
 
-/// The over layer: the head, the facts, the tagline, the indicators, and
-/// the mark while focused.
+/// The over layer: the head, the facts, the tagline, and the indicators.
 pub fn draw<A: Art>(frame: &mut canvas::Frame<Renderer>, store: &mut A, banner: &Banner<'_>) {
     let region = banner.region;
 
@@ -210,10 +207,6 @@ pub fn draw<A: Art>(frame: &mut canvas::Frame<Renderer>, store: &mut A, banner: 
             false => look::faint(),
         };
         frame.fill_rectangle(bar.position(), extent(bar), color);
-    }
-
-    if banner.focused {
-        mark(frame, region);
     }
 }
 

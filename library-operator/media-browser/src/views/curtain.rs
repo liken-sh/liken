@@ -81,6 +81,9 @@ pub struct Curtain<'a> {
     /// The work that starts, in the words drawn under the mark, and empty
     /// where the logo or the centred name already names it.
     pub line: &'a str,
+    /// How far the line has faded in, from 0 to 1. It fades in from the
+    /// second its words were set and leaves with the mark.
+    pub named: f32,
 }
 
 /// What the curtain reads off the page under it: the box that page draws
@@ -226,15 +229,17 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Front<'_, A> {
             away,
         );
 
-        // The line fades with the mark, because the two are one block
-        // under the logo and both leave with the state.
+        // The line leaves with the mark, because the two are one block
+        // under the logo. It fades in from the second its words were set,
+        // which is the press's own second for a press, and the second the
+        // request lands for an offer taken off the player's display.
         text::centered(
             &mut frame,
             layer.curtain.line,
             line_band(bounds),
             look::FACTS,
             Color {
-                a: away,
+                a: layer.curtain.named.clamp(0.0, 1.0),
                 ..look::text()
             },
         );

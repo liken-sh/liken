@@ -1,7 +1,9 @@
 // The two canvas layers the home page draws its rows on: the under layer
 // with the banner's backdrop, and the middle layer with the rows. Each
-// layer reads the layout and the scroll from `Home::placed`, so both agree
-// on where every row stands.
+// layer reads the layout and the scroll from `Home::drawn`, so both agree
+// on where every row stands while the page scrolls. Neither draws the
+// focus mark: the browser's outline goes around the box `Home::marked`
+// answers.
 
 use std::cell::RefCell;
 use std::convert::Infallible;
@@ -10,9 +12,10 @@ use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::{Rectangle, Theme, mouse};
 
-use super::{Block, Home, Last};
+use super::{Block, Home, Last, Strip};
 use crate::art::Art;
 use crate::audience::faces::Faces;
+use crate::screens::Item;
 use crate::views::{self, band, strip};
 
 // The under layer: the banner's backdrop and its scrim, clipped under
@@ -20,6 +23,8 @@ use crate::views::{self, band, strip};
 pub(super) struct Ground<'a, A> {
     pub(super) home: &'a Home,
     pub(super) store: &'a RefCell<A>,
+    // The second this frame draws, which the scroll eases on.
+    pub(super) at: f64,
 }
 
 impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Ground<'_, A> {
@@ -35,7 +40,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Ground<'_, A> {
     ) -> Vec<canvas::Geometry<Renderer>> {
         let home = self.home;
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let (layout, offset, clip) = home.placed(bounds);
+        let (layout, offset, clip) = home.drawn(bounds, self.at);
         frame.with_clip(clip, |frame| {
             let store = &mut *self.store.borrow_mut();
             for (index, block) in home.blocks.iter().enumerate() {
@@ -63,6 +68,8 @@ pub(super) struct Program<'a, A> {
     pub(super) faces: &'a Faces,
     // Whether the page holds focus, or the browser's strip over it does.
     pub(super) held: bool,
+    // The second this frame draws, which the scrolls ease on.
+    pub(super) at: f64,
 }
 
 impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Program<'_, A> {
@@ -78,7 +85,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Program<'_, A> {
     ) -> Vec<canvas::Geometry<Renderer>> {
         let home = self.home;
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let (layout, offset, clip) = home.placed(bounds);
+        let (layout, offset, clip) = home.drawn(bounds, self.at);
         frame.with_clip(clip, |frame| {
             let store = &mut *self.store.borrow_mut();
             for (index, block) in home.blocks.iter().enumerate() {
@@ -107,35 +114,47 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Program<'_, A> {
                                 tagline: &title.tagline,
                                 count: banner.titles.len(),
                                 current: banner.focus,
-                                focused,
                                 region,
                             },
                         );
                     }
-                    Block::Strip(strip) => strip::draw(
-                        frame,
-                        store,
-                        &strip::Strip {
-                            headed: false,
-                            room: Some(strip::Room {
-                                viewers: &strip.viewers,
-                                faces: self.faces,
-                                circled: focused && strip.rung,
-                            }),
-                            members: &strip.items,
-                            current: None,
-                            focus: (focused && !strip.rung).then_some(strip.focus),
-                            kept: Some(strip.focus),
-                            heading: &strip.heading,
-                            library: "",
-                            last: strip.last.as_ref().map(Last::view),
-                            lines: strip.lines,
-                            region,
-                        },
-                    ),
+                    Block::Strip(row) => {
+                        let mut view = viewed(row, region, focused, self.faces);
+                        view.scroll = Some(home.slid(index, strip::scrolled(&view), self.at));
+                        strip::draw(frame, store, &view);
+                    }
                 }
             }
         });
         vec![frame.into_geometry()]
+    }
+}
+
+/// One strip of the page as the strip primitive draws it in this region,
+/// with focus on it where `focused`. The faces are the room's, which the
+/// continue-watching row's heading draws.
+pub(super) fn viewed<'a>(
+    row: &'a Strip,
+    region: Rectangle,
+    focused: bool,
+    faces: &'a Faces,
+) -> strip::Strip<'a, Item> {
+    strip::Strip {
+        headed: false,
+        room: Some(strip::Room {
+            viewers: &row.viewers,
+            faces,
+            circled: focused && row.rung,
+        }),
+        members: &row.items,
+        current: None,
+        focus: (focused && !row.rung).then_some(row.focus),
+        kept: Some(row.focus),
+        heading: &row.heading,
+        library: "",
+        last: row.last.as_ref().map(Last::view),
+        lines: row.lines,
+        region,
+        scroll: None,
     }
 }

@@ -334,7 +334,7 @@ fn a_rest_on_a_title_asks_for_its_backdrop_and_on_a_library_for_nothing() {
     browser.tick(0.0);
     browser.key("right");
     browser.minute = Some(MINUTE);
-    assert_eq!(browser.next_frame(0.0), Some(REST));
+    assert_eq!(browser.next_frame(look::FOLLOW), Some(REST));
     browser.tick(REST);
     assert!(browser.store.get_mut().asked.contains(&(
         SERIALS.into(),
@@ -345,8 +345,8 @@ fn a_rest_on_a_title_asks_for_its_backdrop_and_on_a_library_for_nothing() {
 
     browser.key("down");
     browser.key("down");
-    browser.minute = Some(MINUTE);
-    assert_eq!(browser.next_frame(REST), Some(MINUTE));
+    browser.minute = Some(TURN);
+    assert_eq!(browser.next_frame(STILL), Some(TURN));
 }
 
 #[test]
@@ -370,11 +370,11 @@ fn a_rest_on_see_all_and_on_the_strip_asks_for_nothing() {
     for _ in 0..3 {
         browser.key("right");
     }
-    browser.minute = Some(MINUTE);
-    assert_eq!(browser.next_frame(0.0), Some(MINUTE));
+    browser.minute = Some(TURN);
+    assert_eq!(browser.next_frame(STILL), Some(TURN));
     browser.key("up");
     browser.key("up");
-    assert_eq!(browser.next_frame(0.0), Some(MINUTE));
+    assert_eq!(browser.next_frame(STILL), Some(TURN));
 }
 
 #[test]
@@ -630,12 +630,12 @@ fn a_select_on_a_genre_opens_the_genres_page() {
 fn a_rest_on_a_genre_asks_for_the_clocks_frame_alone() {
     let mut browser = on_strips(3);
     browser.tick(0.0);
-    browser.minute = Some(MINUTE);
+    browser.minute = Some(TURN);
     for _ in 0..3 {
         browser.key("down");
     }
 
-    assert_eq!(browser.next_frame(REST), Some(MINUTE));
+    assert_eq!(browser.next_frame(STILL), Some(TURN));
 }
 
 #[test]

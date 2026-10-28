@@ -10,7 +10,7 @@ use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::{Color, Rectangle};
 
-use super::{area, mark, rounded, text};
+use super::{area, rounded, text};
 use crate::look;
 
 /// One stretch of rows: the words on it, the first and the last row it covers,
@@ -198,10 +198,20 @@ pub fn draw_at(
         }
         frame.fill(&rounded(bounds, ROUND), ink(focus == Some(index)));
         written(frame, bounds, region, &held.label);
-        if focus == Some(index) {
-            mark(frame, bounds);
-        }
     }
+}
+
+/// The box of the bar that holds focus, which the focus mark goes around,
+/// or nothing while the wall beside the rail holds focus. The rail draws
+/// no mark of its own.
+pub fn focused(
+    region: Rectangle,
+    bars: &[Bar],
+    focus: Option<usize>,
+    side: Side,
+    fit: Fit,
+) -> Option<Rectangle> {
+    boxes(region, bars, side, fit).get(focus?).copied()
 }
 
 // The fill under a bar's words. A rail draws over a page's art, so the

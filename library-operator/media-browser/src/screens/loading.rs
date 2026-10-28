@@ -1,8 +1,8 @@
 // The state a page is in between the select that asks for a film and the
 // film that covers the page. It is a pure function of the clock: the second
 // it was entered, and the second the exit began. The line it names the work
-// by is read once, where the state is entered, so no frame reads the
-// catalog.
+// by is read once, where the state is entered or a request names the next
+// work, so no frame reads the catalog.
 
 use super::{Screen, episode_caption};
 use crate::catalog::{Selection, Source};
@@ -17,8 +17,11 @@ pub struct Loading {
     // The exit, once it has begun.
     left: Option<Exit>,
     // The work that starts, in the words the curtain draws under the mark,
-    // and empty where the page's logo names that work already.
+    // and empty where the page's logo names that work already or the work
+    // it named has started to play.
     line: String,
+    // The second the line's words were set, which the line fades in from.
+    named: f64,
 }
 
 // The exit: the second it ends, and how far away the page stood when it
@@ -37,12 +40,25 @@ impl Loading {
             entered: at,
             left: None,
             line,
+            named: at,
         }
     }
 
-    /// Name another work under the mark, on the same clock.
-    pub fn rename(&mut self, line: String) {
+    /// Name another work under the mark at this second, on the same clock.
+    /// The new words fade in from this second.
+    pub fn rename(&mut self, line: String, at: f64) {
         self.line = line;
+        self.named = at;
+    }
+
+    /// The film covers the page and plays, so the work the line named has
+    /// started, and the line clears. The state can show again before the
+    /// film's last frame: a person who takes the up-next offer ends the
+    /// film before the request that names the next work reaches the
+    /// browser. The line then names nothing until that request lands, so
+    /// the name of the work that ended never draws.
+    pub fn played(&mut self) {
+        self.line.clear();
     }
 
     /// Start the exit at this second. A state that is already leaving keeps
@@ -79,12 +95,17 @@ impl Loading {
         matches!(self.left, Some(exit) if at >= exit.until)
     }
 
-    /// What one frame draws at this second.
+    /// What one frame draws at this second. The line fades in over the
+    /// departure's length from the second its words were set, so the line
+    /// of a press fades in with the mark, and leaves with the mark.
     pub fn curtain(&self, at: f64) -> Curtain<'_> {
+        let away = self.away(at);
+        let named = look::eased(look::share(at - self.named, look::DEPARTURE));
         Curtain {
-            away: self.away(at),
+            away,
             phase: at,
             line: &self.line,
+            named: named.min(away),
         }
     }
 }

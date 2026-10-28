@@ -13,7 +13,7 @@ use iced_winit::core::{Point, Rectangle, Theme, mouse};
 use crate::audience::faces::{Face, Faces};
 use crate::audience::{Person, Viewer};
 use crate::look;
-use crate::views::{area, extent, mark, text};
+use crate::views::{area, extent, text};
 
 // The unit's name and parts at the bottom left of the picker.
 pub mod identity;
@@ -308,6 +308,16 @@ pub struct Layer<'a> {
 }
 
 impl Layer<'_> {
+    /// The box the focus mark goes around at these bounds: the focused
+    /// tile, or the link under the row. The picker draws no mark of its
+    /// own; the browser's outline goes around this box, over the picker.
+    pub fn focused(&self, bounds: Rectangle) -> Rectangle {
+        match self.picker.focus() {
+            Focus::Tile(index) => tile(bounds, self.picker.tiles(), index),
+            Focus::Link => link(bounds, self.picker.word()),
+        }
+    }
+
     // The name under one tile: the person's display name.
     fn caption(&self, index: usize) -> &str {
         self.people
@@ -382,17 +392,16 @@ impl canvas::Program<Infallible, Theme, Renderer> for Layer<'_> {
                 ),
             }
             text::centered(&mut frame, caption, name(at), look::CAPTION, look::text());
-            if self.picker.focus() == Focus::Tile(index) {
-                mark(&mut frame, at);
-            }
         }
 
         let word = self.picker.word();
-        let link = link(bounds, word);
-        text::shown(&mut frame, word, word_at(link), look::CAPTION, look::text());
-        if self.picker.focus() == Focus::Link {
-            mark(&mut frame, link);
-        }
+        text::shown(
+            &mut frame,
+            word,
+            word_at(link(bounds, word)),
+            look::CAPTION,
+            look::text(),
+        );
 
         vec![frame.into_geometry()]
     }

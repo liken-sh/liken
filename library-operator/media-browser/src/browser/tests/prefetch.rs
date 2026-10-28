@@ -15,9 +15,9 @@ fn a_rest_on_a_wall_asks_for_the_backdrop_at_page_size() {
     let mut browser = resting(3);
 
     browser.tick(REST);
-    browser.minute = Some(MINUTE);
+    browser.minute = Some(TURN);
 
-    assert_eq!(browser.next_frame(REST), Some(MINUTE));
+    assert_eq!(browser.next_frame(REST), Some(TURN));
     assert!(browser.store.get_mut().asked.contains(&(
         "screening/films".into(),
         "movies:1.backdrop.jpg".into(),
@@ -64,8 +64,8 @@ fn a_page_schedules_no_rest() {
 fn the_band_schedules_no_rest() {
     let mut browser = resting(3);
     browser.key("up");
-    browser.minute = Some(MINUTE);
-    assert_eq!(browser.next_frame(1.0), Some(MINUTE));
+    browser.minute = Some(TURN);
+    assert_eq!(browser.next_frame(STILL), Some(TURN));
 }
 
 #[test]

@@ -255,6 +255,19 @@ pub fn draw<T: Card, A: Art>(
     }
 }
 
+/// The slot the focus mark goes around at this grid's scroll, or nothing
+/// where focus is elsewhere on the screen. The wall draws the mark only
+/// while `marked`; a screen whose focus the browser's outline follows
+/// draws none and hands the outline this box.
+pub fn focused<T>(grid: &Grid<'_, T>) -> Option<Rectangle> {
+    let index = grid.focus.filter(|index| *index < grid.items.len())?;
+    let cells = lined(grid.region.width, grid.ratio, grid.columns, grid.lines);
+    Some(placed(
+        slot(&cells, index, grid.offset, grid.columns),
+        grid.region,
+    ))
+}
+
 // One line centered in its band and clipped to it, so a long title never
 // runs off the screen or over the row below.
 // The strip draws its captions through this too, so the two read as

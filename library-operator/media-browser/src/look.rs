@@ -176,6 +176,84 @@ pub const LIGHTS_DOWN: f64 = 1.2;
 /// most of the way up as the last of the film goes. Tuned by eye.
 pub const LIGHTS_UP: f64 = 0.3;
 
+/// How long the leading edge of the focus outline takes to reach the slot
+/// focus moved to, in seconds. The leading edge is the one on the side the
+/// press points to: the right edge on a right press, the bottom edge on a
+/// down press. It is short, because from a couch the eye follows the press
+/// to the next slot at once, and an outline that arrives late reads as a
+/// slow remote.
+pub const LEAD: f64 = 0.13;
+
+/// How long the trailing edge of the focus outline takes to leave the slot
+/// focus moved from, in seconds. It is longer than `LEAD`, so for a moment
+/// the outline spans both slots and then closes behind the press, and the
+/// eye reads which way focus went.
+pub const FOLLOW: f64 = 0.24;
+
+/// How long a row or a wall takes to scroll to the place a press moves it
+/// to, in seconds. It sits between `LEAD` and `FOLLOW`, so the row lands
+/// while the outline closes on the slot and the two read as one motion.
+pub const SCROLL: f64 = 0.2;
+
+/// The shortest share of its length a motion runs at while a key is held.
+/// A remote repeats a held key faster than `FOLLOW`, so each length then
+/// shrinks to the time between two presses and the outline never falls
+/// behind the remote. It stops at a third, because a motion shorter than
+/// that is a jump of a frame or two.
+pub const HELD_FLOOR: f64 = 1.0 / 3.0;
+
+/// How long focus rests after the last motion ends before the outline
+/// starts to breathe, in seconds. A person who reads a card for this long
+/// has stopped pressing, and the breath shows where focus is without a
+/// press.
+pub const BREATH_DELAY: f64 = 3.0;
+
+/// How long one breath of the outline takes, in seconds: from the mark's
+/// color up to the breath's peak and back. It is slow, so the change reads
+/// as light and not as a blink.
+pub const BREATH: f64 = 3.6;
+
+/// How often a breath starts while focus rests, in seconds. The outline
+/// stays still for the rest of each period, so a resting screen draws
+/// frames for about a third of the time.
+pub const BREATH_EVERY: f64 = 10.0;
+
+/// How long the outline takes to return from a breath to the mark's color
+/// when a press arrives, in seconds. It is short, so the press is what the
+/// eye sees and not the end of the breath.
+pub const BREATH_RELEASE: f64 = 0.15;
+
+/// How far the breath's peak lifts the accent toward the text color. The
+/// full accent is only a little brighter than the mark, which is the accent
+/// at 0.75 opacity, so a breath that stopped at the accent would change the
+/// stroke too little to see from a couch. Halfway to the text color keeps
+/// the hue green and makes the change easy to see.
+pub const BREATH_LIFT: f32 = 0.5;
+
+/// The color of the focus outline at the top of a breath: the accent,
+/// opaque, lifted toward the text color by `BREATH_LIFT`.
+pub fn breath_peak() -> Color {
+    mixed(accent(), text(), BREATH_LIFT)
+}
+
+/// The color of the focus outline at this point of a breath, from 0 at the
+/// mark's color to 1 at the breath's peak. Only the color changes.
+pub fn breathed(level: f32) -> Color {
+    mixed(mark(), breath_peak(), level.clamp(0.0, 1.0))
+}
+
+// The color this share of the way from one color to another, opacity
+// included.
+fn mixed(from: Color, to: Color, share: f32) -> Color {
+    let at = |a: f32, b: f32| a + (b - a) * share;
+    Color {
+        r: at(from.r, to.r),
+        g: at(from.g, to.g),
+        b: at(from.b, to.b),
+        a: at(from.a, to.a),
+    }
+}
+
 /// How far into a length of time this many seconds is, from 0 to 1.
 /// Every motion of the look runs on a share of its own length, so the
 /// frame it draws is a function of the clock and never of the frame
@@ -248,6 +326,34 @@ mod tests {
         const { assert!(LIGHTS_FLOOR < 1.0) };
         const { assert!(LIGHTS_UP < LIGHTS_DOWN) };
         const { assert!(LIGHTS_UP < RETURN) };
+    }
+
+    #[test]
+    fn the_outline_leads_with_one_edge_and_the_row_lands_between_the_two() {
+        const { assert!(LEAD < SCROLL) };
+        const { assert!(SCROLL < FOLLOW) };
+        const { assert!(HELD_FLOOR > 0.0) };
+        const { assert!(HELD_FLOOR < 1.0) };
+    }
+
+    #[test]
+    fn a_breath_ends_before_the_next_one_starts() {
+        const { assert!(BREATH < BREATH_EVERY) };
+        const { assert!(BREATH_RELEASE < BREATH) };
+    }
+
+    #[test]
+    fn a_breath_runs_from_the_marks_color_to_its_peak() {
+        assert_eq!(breathed(0.0), mark());
+        assert_eq!(breathed(1.0), breath_peak());
+        assert_eq!(breathed(2.0), breath_peak());
+    }
+
+    #[test]
+    fn the_peak_is_opaque_and_brighter_than_the_accent_in_every_channel() {
+        let (peak, accent) = (breath_peak(), accent());
+        assert_eq!(peak.a, 1.0);
+        assert!(peak.r > accent.r && peak.g > accent.g && peak.b > accent.b);
     }
 
     #[test]

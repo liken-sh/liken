@@ -148,12 +148,11 @@ impl Wall {
 }
 
 // The search wall's own layer over the band: the grid, while it is
-// shown. The field draws in the browser's strip.
-pub(super) struct Typing<'a> {
-    pub(super) keyboard: &'a Keyboard,
-}
+// shown. The field draws in the browser's strip, and the focus outline
+// around the focused cell is the browser's layer.
+pub(super) struct Typing;
 
-impl canvas::Program<Infallible, Theme, Renderer> for Typing<'_> {
+impl canvas::Program<Infallible, Theme, Renderer> for Typing {
     type State = ();
 
     fn draw(
@@ -165,7 +164,7 @@ impl canvas::Program<Infallible, Theme, Renderer> for Typing<'_> {
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        keyboard::draw(&mut frame, grid_at(bounds.width), self.keyboard);
+        keyboard::draw(&mut frame, grid_at(bounds.width));
         vec![frame.into_geometry()]
     }
 }

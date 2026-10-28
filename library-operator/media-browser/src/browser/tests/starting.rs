@@ -146,3 +146,71 @@ fn the_offer_taken_over_a_standing_state_keeps_its_clock() {
     assert_eq!(state.curtain(later).away, 1.0);
     assert_eq!(state.curtain(later).line, "E02 · Segment 2");
 }
+
+// The person takes the offer at the credits, and the film's surface goes
+// before the request that names the next episode reaches the browser. The
+// state that stood under the film shows again in that gap, and it must not
+// name the episode that just ended. The line waits for the request, and
+// the name it carries fades in over the departure's length from the second
+// it lands, the way the mark faded in under the first one.
+#[test]
+fn the_offer_taken_never_draws_the_name_of_the_episode_that_ended() {
+    let (mut browser, bus) = on_a_series();
+    browser.key("enter");
+    let fold = |browser: &mut Browser<Fake, NoArt>, moment: Moment, at: f64| {
+        *bus.inbound.lock().expect("no test panics with the lock") = vec![moment];
+        browser.pump(at);
+    };
+    let played = PRESS + 1.0;
+    fold(&mut browser, status(Activity::Playing), played);
+    let uncovered = played + 600.0;
+    fold(&mut browser, status(Activity::Starting), uncovered);
+
+    let state = browser.loading.as_ref().expect("the state still stands");
+    assert_eq!(state.curtain(uncovered).line, "");
+
+    let named = uncovered + 0.1;
+    let offer = serde_json::json!({
+        "library": SERIALS,
+        "selection": {"episode": {"series": SERIAL, "season": 1, "episode": 2}},
+    });
+    fold(
+        &mut browser,
+        Moment::PlayNext(offer.to_string().into_bytes()),
+        named,
+    );
+
+    let state = browser.loading.as_ref().expect("the state still stands");
+    let cases = [
+        (named, 0.0),
+        (named + look::DEPARTURE / 2.0, 0.5),
+        (named + look::DEPARTURE, 1.0),
+    ];
+    for (at, shown) in cases {
+        let curtain = state.curtain(at);
+        assert_eq!(curtain.line, "E02 · Segment 2");
+        assert_eq!(curtain.named, shown, "{at}");
+    }
+}
+
+// The line of the first press fades in with the mark, from the second the
+// press entered the state.
+#[test]
+fn the_line_of_a_press_fades_in_with_the_mark() {
+    let (mut browser, _bus) = on_a_series();
+
+    browser.key("enter");
+
+    let state = browser
+        .loading
+        .as_ref()
+        .expect("the press entered the state");
+    for at in [
+        PRESS,
+        PRESS + look::DEPARTURE / 2.0,
+        PRESS + look::DEPARTURE,
+    ] {
+        let curtain = state.curtain(at);
+        assert_eq!(curtain.named, curtain.away, "{at}");
+    }
+}
