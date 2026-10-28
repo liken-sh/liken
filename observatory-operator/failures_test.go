@@ -249,11 +249,11 @@ func TestAStopEndsARefusedWriteAtOnce(t *testing.T) {
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
 		w.api.refuse(1000)
-		tries := w.api.creates(claimsCollection)
+		tries := w.api.creates(templatesCollection)
 		w.api.deleteNamed(podsCollection, "east-focuser")
 		time.Sleep(5 * time.Second)
 		synctest.Wait()
-		if w.api.creates(claimsCollection) == tries {
+		if w.api.creates(templatesCollection) == tries {
 			t.Fatal("the runner did not create the claim again")
 		}
 		stopped := time.Now()

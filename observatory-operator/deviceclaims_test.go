@@ -38,7 +38,7 @@ func TestAReleaseDeletesTheClaimOfAPodThatIsTerminating(t *testing.T) {
 		w.releasePod("east-dustcap")
 		w.gone(observatory.ReservationKind, "east-tonight", 10*time.Minute)
 
-		if claims := w.api.names(claimsCollection); len(claims) != 0 {
+		if claims := w.api.names(templatesCollection); len(claims) != 0 {
 			t.Errorf("claims after the release = %v", claims)
 		}
 	})

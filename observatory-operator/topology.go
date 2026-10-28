@@ -14,7 +14,7 @@ import (
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
-// ensure creates a pod and its Service and claim, or replaces a
+// ensure creates a pod and its Service and claim template, or replaces a
 // running pod whose spec or server differs from the one built now
 // (current). A pod that
 // stops must be gone before the new one of the same name can be
@@ -22,14 +22,14 @@ import (
 // and the step's deadline bounds the tries. created reports whether
 // the API server created the pod, so a Ready reservation's runner can
 // record an Event for each pod that it creates.
-func (o *operator) ensure(ctx context.Context, report func(string), built *pod, svc *service, claim *resourceClaim) (created bool, err error) {
+func (o *operator) ensure(ctx context.Context, report func(string), built *pod, svc *service, template *claimTemplate) (created bool, err error) {
 	name := built.Metadata.Name
 	err = o.waitFor(ctx, report, func(t *tree) (bool, string, error) {
-		if claim != nil {
-			// A claim's spec cannot change, and one that exists is the
+		if template != nil {
+			// A template's spec cannot change, and one that exists is the
 			// one the operator created. The create answers 409 then.
-			if err := o.send(ctx, report, fmt.Sprintf("creating ResourceClaim %s", name), func() error {
-				return o.create("/apis/resource.k8s.io/v1/namespaces/"+o.namespace+"/resourceclaims", claim)
+			if err := o.send(ctx, report, fmt.Sprintf("creating ResourceClaimTemplate %s", name), func() error {
+				return o.create("/apis/resource.k8s.io/v1/namespaces/"+o.namespace+"/resourceclaimtemplates", template)
 			}); err != nil {
 				return false, "", err
 			}
@@ -89,13 +89,13 @@ func (o *operator) ensureServer(ctx context.Context, report func(string), ref se
 
 // startDevices gives each device that runs a driver the finalizer,
 // with each device that it serves, creates its pod, its Service, and
-// its claim, and answers the devices whose pod it created. A served
+// its claim template, and answers the devices whose pod it created. A served
 // device has no pod of its own.
 func (o *operator) startDevices(ctx context.Context, report func(string), ref serverRef, devices []*device) ([]*device, error) {
 	t := o.snapshot()
 	var started []*device
 	for _, d := range driverDevices(devices) {
-		built, svc, claim, err := devicePod(o.namespace, ref, d, t.guides(ref, d), t.outbox(ref, d))
+		built, svc, template, err := devicePod(o.namespace, ref, d, t.guides(ref, d), t.outbox(ref, d))
 		if err != nil {
 			o.fault(d, err)
 			return started, fmt.Errorf("%s %s: %w", d.kind.Name, d.name(), err)
@@ -106,7 +106,7 @@ func (o *operator) startDevices(ctx context.Context, report func(string), ref se
 		if err := o.holdServed(ctx, report, t, d); err != nil {
 			return started, err
 		}
-		created, err := o.ensure(ctx, report, built, svc, claim)
+		created, err := o.ensure(ctx, report, built, svc, template)
 		if created {
 			started = append(started, d)
 		}
@@ -248,7 +248,7 @@ func (t *tree) podNames(selected func(labels map[string]string) bool) []string {
 }
 
 // deleteSelected sends the deletes of the pods, the Services, the
-// ConfigMaps, and the claims that select returns true for
+// ConfigMaps, and the claim templates that select returns true for
 // (selectedObjects), and does not wait for them.
 func (o *operator) deleteSelected(ctx context.Context, report func(string), t *tree, selected func(labels map[string]string) bool) error {
 	for _, object := range t.selectedObjects(o.namespace, selected) {
@@ -264,20 +264,21 @@ func (o *operator) deleteSelected(ctx context.Context, report func(string), t *t
 type selectedObject struct{ what, path string }
 
 // selectedObjects answers the objects that select returns true for, in
-// a fixed order: each pod by name with its claim, then the Services,
-// each device's with its claim, then the ConfigMaps. A device's pod,
-// Service, and claim share one name and one set of labels. The
-// operator watches no claims, so a claim is found by its pod or by its
-// Service: a pod that is terminating already needs no second delete,
-// but a pod that an eviction deleted before a release still leaves its
-// Service, and so its claim, to delete.
+// a fixed order: each pod by name with its claim template, then the
+// Services, each device's with its claim template, then the ConfigMaps.
+// A device's pod, Service, and claim template share one name and one
+// set of labels. The claim that the pod made from the template ends
+// with the pod. The operator watches no templates, so a template is
+// found by its pod or by its Service: a pod that is terminating already
+// needs no second delete, but a pod that an eviction deleted before a
+// release still leaves its Service, and so its template, to delete.
 func (t *tree) selectedObjects(namespace string, selected func(labels map[string]string) bool) []selectedObject {
 	var out []selectedObject
 	claimed := map[string]bool{}
 	claim := func(name string) {
 		if !claimed[name] {
 			claimed[name] = true
-			out = append(out, selectedObject{"ResourceClaim " + name, claimPath(namespace, name)})
+			out = append(out, selectedObject{"ResourceClaimTemplate " + name, templatePath(namespace, name)})
 		}
 	}
 	for _, name := range t.podNames(selected) {

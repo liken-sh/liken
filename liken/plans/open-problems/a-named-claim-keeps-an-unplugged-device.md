@@ -37,7 +37,8 @@ person or GitOps owns, and that option was rejected.
   pod, or that allocates the claim again. Whether the device-taint
   enhancement (KEP 5055) names this case was not checked.
 - The workload moves its claim into a `ResourceClaimTemplate`, which
-  milestone 89 already repairs. `observatory-operator`'s device claims
-  are named, and
-  [a replugged USB device](../../../observatory-operator/plans/open-problems/a-replugged-usb-device.md)
-  holds that case.
+  milestone 89 already repairs. `observatory-operator` makes each
+  device's claim from a template, for this reason. The reader pod of a
+  `Remote` in `media-operator` still holds a named claim, because a
+  sleeping Bluetooth controller keeps its allocation through a named
+  claim when only the reader pod is replaced.

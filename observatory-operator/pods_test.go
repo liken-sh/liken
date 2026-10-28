@@ -179,23 +179,23 @@ func TestEveryObjectHasItsOwnerAndTheOperatorsLabels(t *testing.T) {
 	}
 }
 
-// A device on real hardware names a claim, and its pod uses a
-// ResourceClaim made from it.
-func TestADeviceWithAClaimGetsAResourceClaim(t *testing.T) {
+// A device on real hardware names a claim, and its pod makes its own
+// ResourceClaim from a template of it, so the claim ends with the pod.
+func TestADeviceWithAClaimGetsAResourceClaimTemplate(t *testing.T) {
 	t.Parallel()
 	camera := simulator(observatory.CameraKind, "east-main", "indi_asi_ccd")
 	camera.object.Spec.Claim = json.RawMessage(`{"devices":{"requests":[{"name":"camera","exactly":{"deviceClassName":"usb.liken.sh"}}]}}`)
-	p, _, claim, err := devicePod("observatory", serverRef{observatory.TelescopeKind, "east"}, camera, false, "")
+	p, _, template, err := devicePod("observatory", serverRef{observatory.TelescopeKind, "east"}, camera, false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if claim == nil || claim.Metadata.Name != "east-main-camera" || claim.Kind != "ResourceClaim" {
-		t.Fatalf("claim = %+v", claim)
+	if template == nil || template.Metadata.Name != "east-main-camera" || template.Kind != "ResourceClaimTemplate" {
+		t.Fatalf("template = %+v", template)
 	}
-	if mustJSON(claim.Spec) != `{"devices":{"requests":[{"exactly":{"deviceClassName":"usb.liken.sh"},"name":"camera"}]}}` {
-		t.Errorf("claim spec = %s", mustJSON(claim.Spec))
+	if mustJSON(template.Spec) != `{"spec":{"devices":{"requests":[{"exactly":{"deviceClassName":"usb.liken.sh"},"name":"camera"}]}}}` {
+		t.Errorf("template spec = %s", mustJSON(template.Spec))
 	}
-	if len(p.Spec.ResourceClaims) != 1 || p.Spec.ResourceClaims[0].ResourceClaimName != "east-main-camera" ||
+	if len(p.Spec.ResourceClaims) != 1 || p.Spec.ResourceClaims[0].ResourceClaimTemplateName != "east-main-camera" ||
 		p.Spec.Containers[0].Resources == nil || p.Spec.Containers[0].Resources.Claims[0].Name != p.Spec.ResourceClaims[0].Name {
 		t.Errorf("the pod does not use the claim: %s", mustJSON(p.Spec))
 	}

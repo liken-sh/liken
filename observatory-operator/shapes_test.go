@@ -165,9 +165,9 @@ func TestAFinalizerOfAGoneReservationIsRemoved(t *testing.T) {
 	})
 }
 
-// claimsCollection is where the operator creates each device's
-// ResourceClaim.
-const claimsCollection = "/apis/resource.k8s.io/v1/namespaces/" + testNamespace + "/resourceclaims"
+// templatesCollection is where the operator creates each device's
+// ResourceClaimTemplate.
+const templatesCollection = "/apis/resource.k8s.io/v1/namespaces/" + testNamespace + "/resourceclaimtemplates"
 
 // claimFocuser gives the east focuser a claim, as a focuser on real
 // hardware states one.
@@ -178,16 +178,16 @@ func (w *world) claimFocuser() {
 	})
 }
 
-// A device on real hardware states a claim, and its ResourceClaim lives
-// as long as its pod.
-func TestAClaimLivesAsLongAsItsDevicesPod(t *testing.T) {
+// A device on real hardware states a claim, and its
+// ResourceClaimTemplate lives as long as the reservation.
+func TestAClaimTemplateLivesAsLongAsTheReservation(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.claimFocuser()
 		w.reserve("east-tonight", map[string]any{"telescope": "east", "holder": "desktop"})
 		w.phase("east-tonight", observatory.ReservationReady, 10*time.Minute)
-		if names := w.api.names(claimsCollection); !slices.Equal(names, []string{"east-focuser"}) {
+		if names := w.api.names(templatesCollection); !slices.Equal(names, []string{"east-focuser"}) {
 			t.Errorf("claims = %v", names)
 		}
 		w.api.deleteNamed(kindCollection(observatory.ReservationKind), "east-tonight")
@@ -195,7 +195,7 @@ func TestAClaimLivesAsLongAsItsDevicesPod(t *testing.T) {
 			_, ok := w.reservation("east-tonight")
 			return !ok
 		})
-		if names := w.api.names(claimsCollection); len(names) != 0 {
+		if names := w.api.names(templatesCollection); len(names) != 0 {
 			t.Errorf("claims after the release: %v", names)
 		}
 	})

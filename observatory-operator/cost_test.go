@@ -130,7 +130,7 @@ func TestReadingsCreateNothing(t *testing.T) {
 		time.Sleep(2 * statusWindow)
 		synctest.Wait()
 		creates := func() int {
-			return w.api.creates(claimsCollection) + w.api.creates(podsCollection) + w.api.creates(servicesCollection)
+			return w.api.creates(templatesCollection) + w.api.creates(podsCollection) + w.api.creates(servicesCollection)
 		}
 		before := creates()
 		w.indi.stream(10 * time.Second)

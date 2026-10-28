@@ -67,8 +67,8 @@ func TestADeviceDeletedDuringASessionRunsItsDeactivationAndGoes(t *testing.T) {
 		if n := startedRuns(w.api, observatory.DustCapKind, "east", observatory.TriggerDeactivation); n != 1 {
 			t.Errorf("the deactivation started %d times, want once", n)
 		}
-		if slices.Contains(w.api.names(podsCollection), "east-dustcap") || slices.Contains(w.api.names(claimsCollection), "east-dustcap") {
-			t.Errorf("pods = %v, claims = %v, want neither to hold east-dustcap", w.api.names(podsCollection), w.api.names(claimsCollection))
+		if slices.Contains(w.api.names(podsCollection), "east-dustcap") || slices.Contains(w.api.names(templatesCollection), "east-dustcap") {
+			t.Errorf("pods = %v, claims = %v, want neither to hold east-dustcap", w.api.names(podsCollection), w.api.names(templatesCollection))
 		}
 		deleted := "Normal PodDeleted: Deleted pod east-dustcap, because the DustCap was deleted while Reservation east-tonight is Ready."
 		if got := typedEvents(w.api, observatory.DustCapKind, "east"); !slices.Contains(got, deleted) {

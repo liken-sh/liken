@@ -231,9 +231,11 @@ spec:
                   description: >-
                     A `ResourceClaimSpec` of the `resource.k8s.io` API,
                     for real hardware. The operator creates a
-                    `ResourceClaim` from it for the device's pod. The
-                    API server validates it when the operator creates
-                    the claim. Optional. A simulator needs no claim.
+                    `ResourceClaimTemplate` from it, and each of the
+                    device's pods makes its own `ResourceClaim` from the
+                    template. The API server validates it when the
+                    operator creates the template. Optional. A simulator
+                    needs no claim.
                   x-kubernetes-preserve-unknown-fields: true
                 outputLabels:
                   type: array

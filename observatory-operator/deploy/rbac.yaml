@@ -110,9 +110,11 @@ rules:
   - apiGroups: [""]
     resources: [persistentvolumeclaims]
     verbs: [get]
-  # The claim of a device on real hardware, made from its spec.claim.
+  # The claim template of a device on real hardware, made from its
+  # spec.claim. Each pod makes its own claim from the template, and the
+  # claim ends with the pod, so the operator writes no claims.
   - apiGroups: [resource.k8s.io]
-    resources: [resourceclaims]
+    resources: [resourceclaimtemplates]
     verbs: [create, delete]
   # The Job of each job action. The watch selects the Jobs by the
   # operator's label, and a run that runs again deletes the Job of the

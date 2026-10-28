@@ -1,7 +1,7 @@
 package main
 
 // The writes of objects other than a status: the creates and deletes of
-// pods, Services, ConfigMaps, and ResourceClaims, the finalizer of a
+// pods, Services, ConfigMaps, and ResourceClaimTemplates, the finalizer of a
 // Reservation, and the annotation that asks for a retry. finalizers.go
 // holds the finalizer of every other resource.
 
@@ -29,8 +29,8 @@ func configMapPath(namespace, name string) string {
 	return "/api/v1/namespaces/" + namespace + "/configmaps/" + name
 }
 
-func claimPath(namespace, name string) string {
-	return "/apis/resource.k8s.io/v1/namespaces/" + namespace + "/resourceclaims/" + name
+func templatePath(namespace, name string) string {
+	return "/apis/resource.k8s.io/v1/namespaces/" + namespace + "/resourceclaimtemplates/" + name
 }
 
 func objectPath(kind observatory.Kind, namespace, name string) string {

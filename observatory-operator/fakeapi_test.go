@@ -90,9 +90,9 @@ func (a *fakeAPI) refuse(count int) {
 }
 
 // refused answers whether the server refuses this write to a pod, a
-// Service, or a ResourceClaim. The caller holds a.mu.
+// Service, or a ResourceClaimTemplate. The caller holds a.mu.
 func (a *fakeAPI) refused(w http.ResponseWriter, collection string) bool {
-	if a.refusals == 0 || !slices.Contains([]string{"pods", "services", "resourceclaims"}, plural(collection)) {
+	if a.refusals == 0 || !slices.Contains([]string{"pods", "services", "resourceclaimtemplates"}, plural(collection)) {
 		return false
 	}
 	a.refusals--
@@ -104,10 +104,10 @@ func (a *fakeAPI) refused(w http.ResponseWriter, collection string) bool {
 // of its path.
 var fakeKinds = func() map[string][2]string {
 	out := map[string][2]string{
-		"pods":           {"v1", "Pod"},
-		"services":       {"v1", "Service"},
-		"resourceclaims": {"resource.k8s.io/v1", "ResourceClaim"},
-		"jobs":           {"batch/v1", "Job"},
+		"pods":                   {"v1", "Pod"},
+		"services":               {"v1", "Service"},
+		"resourceclaimtemplates": {"resource.k8s.io/v1", "ResourceClaimTemplate"},
+		"jobs":                   {"batch/v1", "Job"},
 	}
 	for _, kind := range observatory.Kinds {
 		out[kind.Plural] = [2]string{observatory.APIVersion, kind.Name}

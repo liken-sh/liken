@@ -30,11 +30,12 @@ type DeviceSpec struct {
 	Device *ServedBy `json:"device,omitempty"`
 	Power  *Power    `json:"power,omitempty"`
 	// Claim is a ResourceClaimSpec, as resource.k8s.io states it. The
-	// operator creates a ResourceClaim from it for the device's pod. A
+	// operator creates a ResourceClaimTemplate from it, and each of the
+	// device's pods makes its own ResourceClaim from the template. A
 	// simulator needs no claim. The field stays raw JSON, so the
 	// package does not import k8s.io/api for one struct, and the API
-	// server's own schema for ResourceClaim validates it when the
-	// operator creates the claim.
+	// server's own schema for ResourceClaimTemplate validates it when
+	// the operator creates the template.
 	Claim json.RawMessage `json:"claim,omitempty"`
 }
 

@@ -1,8 +1,9 @@
 package main
 
 // The Kubernetes objects that the operator creates and reads: the pods
-// and Services of the topology, the ResourceClaim of a device on real
-// hardware, the ConfigMap of a guider, and the Events of a Reservation. Each type holds only the
+// and Services of the topology, the ResourceClaimTemplate of a device
+// on real hardware, the ConfigMap of a guider, and the Events of a
+// Reservation. Each type holds only the
 // fields the operator writes or reads, in the wire format of the
 // Kubernetes API, the way the other operators of the repository write
 // theirs. A generated client would bring k8s.io/api for a few structs.
@@ -176,10 +177,11 @@ type resourceName struct {
 	Name string `json:"name"`
 }
 
-// podClaim names a ResourceClaim that the pod's containers use.
+// podClaim names the ResourceClaimTemplate that the pod makes its
+// ResourceClaim from.
 type podClaim struct {
-	Name              string `json:"name"`
-	ResourceClaimName string `json:"resourceClaimName"`
+	Name                      string `json:"name"`
+	ResourceClaimTemplateName string `json:"resourceClaimTemplateName"`
 }
 
 type podStatus struct {
@@ -308,12 +310,16 @@ type jobCondition struct {
 	Message string `json:"message,omitempty"`
 }
 
-// resourceClaim is a ResourceClaim of resource.k8s.io/v1. Its spec is
-// the device's spec.claim, as the person wrote it, and the API server
-// validates it.
-type resourceClaim struct {
-	APIVersion string `json:"apiVersion"`
-	Kind       string `json:"kind"`
-	Metadata   meta   `json:"metadata"`
-	Spec       any    `json:"spec"`
+// claimTemplate is a ResourceClaimTemplate of resource.k8s.io/v1. The
+// spec of the claims it makes is the device's spec.claim, as the person
+// wrote it, and the API server validates it.
+type claimTemplate struct {
+	APIVersion string            `json:"apiVersion"`
+	Kind       string            `json:"kind"`
+	Metadata   meta              `json:"metadata"`
+	Spec       claimTemplateSpec `json:"spec"`
+}
+
+type claimTemplateSpec struct {
+	Spec any `json:"spec"`
 }

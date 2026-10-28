@@ -36,8 +36,8 @@ func TestADeviceDeletedWhileReadyStopsOnTheRunningServer(t *testing.T) {
 		time.Sleep(2 * statusWindow)
 		synctest.Wait()
 
-		if slices.Contains(w.api.names(servicesCollection), "east-focuser") || slices.Contains(w.api.names(claimsCollection), "east-focuser") {
-			t.Errorf("services %v, claims %v", w.api.names(servicesCollection), w.api.names(claimsCollection))
+		if slices.Contains(w.api.names(servicesCollection), "east-focuser") || slices.Contains(w.api.names(templatesCollection), "east-focuser") {
+			t.Errorf("services %v, claims %v", w.api.names(servicesCollection), w.api.names(templatesCollection))
 		}
 		after, _ := w.api.object(podsCollection, "east-telescope")
 		if podUID(before) != podUID(after) || slices.Contains(links(after), "east-focuser") {

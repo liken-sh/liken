@@ -372,7 +372,7 @@ that fails or times out posts a `ProcedureFailed` Warning, and the
 delete goes on. A device that is not connected skips its actions.
 Then the operator stops the device's driver on the running server and
 posts a `DriverStopped` Event on the `Telescope` or the `Observatory`.
-It deletes the device's pod, its `Service`, and its `ResourceClaim`,
+It deletes the device's pod, its `Service`, and its `ResourceClaimTemplate`,
 and switches off the output that the device's `spec.power` names,
 unless another device that a running server runs names the same
 output. The `PodDeleted` Event on the device says whether the output
@@ -439,7 +439,8 @@ kubectl patch dustcap east -n observatory --type=merge -p '{"metadata":{"finaliz
 ```
 
 That skips the device's `deactivation`. Kubernetes then deletes its
-pod, its `Service`, and its `ResourceClaim` by garbage collection,
+pod, its `Service`, its `ResourceClaimTemplate`, and the pod's
+`ResourceClaim` by garbage collection,
 before the operator stops its driver on the running server. The same
 patch on a held `Telescope` lets it go at once, and Kubernetes deletes
 its server's pod and `Service`. The reservation runs on until it

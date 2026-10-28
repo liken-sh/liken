@@ -41,7 +41,7 @@ names and the tree.
 Each device's parent field is optional. A device with no parent is on
 the shelf: its spec describes it in full, with its driver, image,
 power, and claim, but it is installed nowhere. The operator creates
-no pod, no `Service`, and no `ResourceClaim` for it, because a claim
+no pod, no `Service`, and no `ResourceClaimTemplate` for it, because a claim
 would reserve the hardware. A `Switch` or a `Receiver` names at most
 one of `telescope` and `observatory`. To install a device, set its
 parent field.

@@ -54,6 +54,14 @@ const (
 )
 
 // claimName is the pod-local name of a device's ResourceClaim.
+//
+// The pod makes the claim from a ResourceClaimTemplate, so the claim
+// belongs to the pod and ends with it. When a person moves a device's
+// cable to another port or another machine, liken taints the unplugged
+// device and Kubernetes evicts the pod. The operator creates the pod
+// again, and the new pod's new claim is allocated wherever the device is
+// now. A named claim outlives its pods and keeps the allocation of the
+// old port, so every new pod would fail on the device that is gone.
 const claimName = "device"
 
 // restricted is the security context of every container: user 1000,
@@ -78,11 +86,11 @@ func boolPointer(b bool) *bool    { return &b }
 func int64Pointer(i int64) *int64 { return &i }
 
 // devicePod answers the pod, the Service, and, for a device with
-// spec.claim, the ResourceClaim of one device on one server. guides is
+// spec.claim, the ResourceClaimTemplate of one device on one server. guides is
 // true for a camera that a Guider guides with (placement.go), and
 // outbox names the claim that the pod mounts at /outbox, or "" for
 // none (outbox.go).
-func devicePod(namespace string, server serverRef, d *device, guides bool, outbox string) (*pod, *service, *resourceClaim, error) {
+func devicePod(namespace string, server serverRef, d *device, guides bool, outbox string) (*pod, *service, *claimTemplate, error) {
 	name, err := objectName(d.kind, d.name())
 	if err != nil {
 		return nil, nil, nil, err
@@ -125,21 +133,21 @@ func devicePod(namespace string, server serverRef, d *device, guides bool, outbo
 	if outbox != "" {
 		mountOutbox(p, outbox)
 	}
-	var claim *resourceClaim
+	var template *claimTemplate
 	if len(d.object.Spec.Claim) > 0 {
 		var spec any
 		if err := json.Unmarshal(d.object.Spec.Claim, &spec); err != nil {
 			return nil, nil, nil, fmt.Errorf("spec.claim of the %s %s: %w", d.kind.Name, d.name(), err)
 		}
-		claim = &resourceClaim{
-			APIVersion: "resource.k8s.io/v1", Kind: "ResourceClaim",
+		template = &claimTemplate{
+			APIVersion: "resource.k8s.io/v1", Kind: "ResourceClaimTemplate",
 			Metadata: meta{Name: name, Namespace: namespace, Labels: podLabels, OwnerReferences: owners},
-			Spec:     spec,
+			Spec:     claimTemplateSpec{Spec: spec},
 		}
-		p.Spec.ResourceClaims = []podClaim{{Name: claimName, ResourceClaimName: name}}
+		p.Spec.ResourceClaims = []podClaim{{Name: claimName, ResourceClaimTemplateName: name}}
 		p.Spec.Containers[0].Resources = &resources{Claims: []resourceName{{Name: claimName}}}
 	}
-	return stamped(p), serviceFor(namespace, name, podLabels, owners, "driver", devicePort), claim, nil
+	return stamped(p), serviceFor(namespace, name, podLabels, owners, "driver", devicePort), template, nil
 }
 
 // serverPod answers the pod and the Service of one INDI server, with

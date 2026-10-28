@@ -149,9 +149,11 @@ stops the whole allocation.
 
 ## 4. Claim the device
 
-A device's `spec.claim` is a `ResourceClaimSpec`. The operator creates
-a `ResourceClaim` from it when the reservation starts the device's
-pod, and deletes the claim when the pod stops:
+A device's `spec.claim` is a `ResourceClaimSpec`. When the reservation
+starts the device's pod, the operator creates a `ResourceClaimTemplate`
+from it, and the pod makes its own `ResourceClaim` from the template.
+The claim ends with the pod, and the operator deletes the template when
+the reservation releases the device:
 
 ```yaml
 apiVersion: observatory.liken.sh/v1alpha1
@@ -170,7 +172,7 @@ spec:
             deviceClassName: east-mount-cable
 ```
 
-The operator creates no claim for a device on the shelf, or for a
+The operator creates no template for a device on the shelf, or for a
 device whose telescope has no active reservation. So equipment that
 you describe stays free for other uses until you reserve it.
 
@@ -216,10 +218,13 @@ driver's `DEVICE_PORT` property from KStars, and then run the failed
 step again as [Troubleshoot](/docs/guides/troubleshoot/#run-a-failed-step-again)
 describes.
 
-When you unplug a cable and plug it into the same port, the claim
-names the device's new nodes, and the pod receives them when its
-container starts again. The tty can then have another number, such as
-`/dev/ttyUSB1` in place of `/dev/ttyUSB0`, so check the port again. A
-device's claim is a named claim, so a cable moved to another port
-needs a new claim: delete the device's pod and its claim, and create
-the claim again.
+When you unplug a cable, `liken` taints the device
+`liken.sh/unplugged`, and Kubernetes evicts the device's pod, as the
+[device reference](https://liken.sh/docs/reference/devices/#an-unplugged-device-evicts-its-pods)
+describes. While the reservation is `Ready`, the operator creates the
+pod again, and the new pod's claim is allocated wherever the device is
+when you plug it in again: the same port, another port, or another
+machine. Until then the pod stays `Pending`. The tty can then have
+another number, such as `/dev/ttyUSB1` in place of `/dev/ttyUSB0`, so
+check the port again. The eviction needs `liken` 2026.10.28-003 or
+later.

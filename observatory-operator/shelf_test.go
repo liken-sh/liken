@@ -38,7 +38,7 @@ func TestADeviceOnTheShelfGetsNothing(t *testing.T) {
 				t.Errorf("the operator created a pod or a Service %s for a device on the shelf", name)
 			}
 		}
-		if names := w.api.names(claimsCollection); len(names) != 0 {
+		if names := w.api.names(templatesCollection); len(names) != 0 {
 			t.Errorf("claims = %v, want none", names)
 		}
 
