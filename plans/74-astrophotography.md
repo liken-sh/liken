@@ -3,8 +3,8 @@
 Open. Mode 1 is built: `observatory-operator` plans 01 to 17 built it,
 and drilled it with the INDI simulators on the test clusters from
 2026-10-05 to 2026-10-12. Mode 2, `astrophotography-operator`, is
-built through its plans 01, 02, and 03 and the horizon filter of its
-plan 04, and released in `2026.10.13-001`. Its scheduler's score,
+built through its plans 01, 02, 03, and 08 and the horizon filter of
+its plan 04, and released in `2026.10.13-001`. Its scheduler's score,
 reservations on demand, grading, and calibration frames are not
 built. This plan holds the idea, the two components, and the contract
 between them. Each component's own plans hold its design and the tests

@@ -21,6 +21,8 @@ as a Wayland client through a shared runtime directory, with
   `wl_output`, and `weston_capture_v1`, and no `wl_seat`.
 - weston 14.0.1 declares `struct weston_seat fake_seat` in
   `libweston/backend-headless/headless.c` and never initializes it.
+  The `weston` image now builds weston 16.0.2 from its release, and
+  nobody has checked whether 16 still advertises no seat.
   The frontend parses a `--no-input` option for the headless backend,
   and `headless.c` never reads it.
 - At startup GTK logs `gdk_seat_get_keyboard: assertion 'GDK_IS_SEAT

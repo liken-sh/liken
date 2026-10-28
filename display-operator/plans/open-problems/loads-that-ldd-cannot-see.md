@@ -61,16 +61,18 @@ not through the card's name. A missing `iris_dri.so` link passes every
 check the build runs and fails on the one machine that has an Intel
 card in it.
 
-## Why the Debian suite is pinned
+## Why the weston version is in the paths
 
-The `Dockerfile` pins the `debian:trixie-slim` image by its digest,
-and apt installs from the snapshot.debian.org date that
+The `Dockerfile` builds weston from its release tarball at
+`WESTON_VERSION`, on the `debian:sid-slim` image that
+`toolchains/images.toml` pins by its digest, and apt installs the
+libraries around it from the snapshot.debian.org date that
 `weston/package.toml` states as its version. `weston-closure.sh` names
-weston 14 in the path of each backend and renderer it copies, so a
-snapshot that moves weston to 15 fails the build. That failure is intended: it tells
-the maintainer to check the module set again against the new
-release. The cost is that a distribution upgrade is a manual step,
-and the project accepts that cost.
+weston 16 in the path of each backend and renderer it copies
+(`libweston-16/`), so a bump to weston 17 fails the build. That failure
+is intended: it tells the maintainer to check the module set again
+against the new release. The cost is that a major weston bump edits
+the closure by hand, and the project accepts that cost.
 
 ## Possible fixes
 

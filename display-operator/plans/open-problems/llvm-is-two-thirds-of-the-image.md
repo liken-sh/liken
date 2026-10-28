@@ -26,6 +26,11 @@ libllvm19 1:19.1.7-3+b1, and weston 14.0.2-1. The rebuilt tree is
 234,348,772 bytes, which is 1,872 bytes over the size plan 01 records
 for the published image.
 
+The bases now install from a snapshot of Debian sid, with mesa
+26.2.5-1, and the `weston` image builds weston 16.0.2 from its release.
+Nobody has measured the closure again since that change, so every byte
+count in this document is from the trixie build above.
+
 | Bytes | File | Why it is there |
 | --- | --- | --- |
 | 129,673,080 | `libLLVM.so.19.1` | `libgallium` names it as `DT_NEEDED` |
@@ -103,10 +108,10 @@ Debian's build needs LLVM. `-Dglx=disabled` and
 
 ## What building mesa costs
 
-Today `weston/Dockerfile` builds the closure from Debian packages at
-the snapshot date that `weston/package.toml` states: `weston`,
-`libgl1-mesa-dri`, `wayland-utils`, and `ddcutil`, on the `vulkan`
-base, which installs `mesa-vulkan-drivers` and its own
+Today `weston/Dockerfile` builds weston from its release and the rest
+of the closure from Debian packages at the snapshot date that
+`weston/package.toml` states: `libgl1-mesa-dri`, `wayland-utils`, and
+`ddcutil`, on the `vulkan` base, which installs `mesa-vulkan-drivers` and its own
 `libgl1-mesa-dri`. A narrow mesa turns the closure stage into a source
 build, and four costs follow from that.
 
@@ -125,7 +130,7 @@ kind, and it could use the same toolchain.
   modules. A mesa build replaces the `apt-get install`, and neither its duration nor a cache strategy for it
   has been measured.
 * **A mesa version to maintain.** The snapshot date already fixes
-  weston at 14 and mesa at the version in that snapshot. A source
+  mesa at the version in that snapshot. A source
   build replaces the mesa half of that pin with a tag this repository
   chooses, and this repository then
   has to follow mesa's security updates itself. Debian issued
@@ -251,8 +256,8 @@ two, so it is a worse trade for CI time and a better one for coverage.
   `-Dvulkan-drivers=`, `-Dglx=disabled` and `-Dplatforms=wayland`.
 * Whether weston's headless backend starts the GL renderer on
   `softpipe`, and how long it takes to draw one frame.
-* Whether mesa built from source loads beside Debian's weston, libdrm
-  and libwayland.
+* Whether mesa built from source loads beside the weston that the
+  image builds and Debian's libdrm and libwayland.
 * How long a mesa build adds to the release workflow, cold and cached.
 * The size of `libLLVM` built for X86 alone with Z3 off.
 * What the image size costs today. A node pulls it once and both images

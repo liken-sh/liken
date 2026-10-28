@@ -33,7 +33,7 @@ title, so every row of the chooser reads `ENG`, `ENG`, `SPA`, and a
 viewer cannot tell a forced track from a full one, or SDH from plain.
 
 The display parses five fields of each `track-list` entry: `id`,
-`type`, `title`, `lang`, and `selected`. mpv 0.40, which the `mpv` base
+`type`, `title`, `lang`, and `selected`. mpv 0.41, which the `mpv` base
 image holds, carries more, and these fields could tell two tracks of
 one language apart:
 

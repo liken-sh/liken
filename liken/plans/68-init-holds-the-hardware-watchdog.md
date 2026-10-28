@@ -23,7 +23,7 @@ went up by one when the person cut the power.
 
 The machine boots with `panic=10` and `kernel.panic_on_oops=1`, so a
 panic or an oops reboots it in ten seconds. A lockup is neither. The
-vendored kernel (7.2.0) builds both lockup detectors, but it builds
+vendored kernel (7.2.6) builds both lockup detectors, but it builds
 them with `CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC=0` and without
 `CONFIG_BOOTPARAM_HARDLOCKUP_PANIC`. A detector that fires prints a
 warning and the machine keeps its hang.

@@ -1,7 +1,7 @@
 # An arranger inside each region
 
 Plan 31. Proposed and built on 2026-10-27. It is step 1 and step 2 of
-[root plan 85](../../../plans/85-motion.md), motion on the screen, for
+[root plan 85](../../../plans/completed/85-motion.md), motion on the screen, for
 this operator: the animation engine in the layout module, the
 arrangement protocol, the arranger in the `Display`'s status, and
 weston built from its upstream release. Root plan 85 holds the

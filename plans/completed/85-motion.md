@@ -1,7 +1,24 @@
 # 85, Motion on the screen
 
-Proposed on 2026-10-27. Touches `weston`, `display-operator`, `media-operator`,
+Proposed on 2026-10-27, and built through step 3 on 2026-10-27.
+Touches `weston`, `display-operator`, `media-operator`,
 `library-operator`, and `brand`.
+
+Steps 1 and 2 are built by
+[display-operator plan 31](../../display-operator/plans/completed/31-an-arranger-inside-each-region.md),
+and the step-back of step 3 by
+[media-operator plan 44](../../media-operator/plans/completed/44-the-display-arranges-its-claim.md).
+The rest continues in the component plans.
+[library-operator plan 84](../../library-operator/plans/84-a-larger-up-next-card.md)
+holds the card's timing and content from step 3.
+[library-operator plan 23](../../library-operator/plans/23-motion.md)
+holds step 4, and with it the part of step 6 that is not written:
+`brand/motion.md` states the rules of the mark and the focus outline,
+and not yet the durations and curves that every surface shares. Step
+5 waits for a workload that needs a moving `Layout` region, and the
+open problem
+[a layout region does not move](../../display-operator/plans/open-problems/a-layout-region-does-not-move.md)
+holds it.
 
 ## The problem
 
@@ -14,14 +31,14 @@ instant change as a glitch and a smooth one as the system answering
 them.
 
 The up-next card shows the cost. The design for
-[library-operator plan 84](../library-operator/plans/84-a-larger-up-next-card.md)
+[library-operator plan 84](../../library-operator/plans/84-a-larger-up-next-card.md)
 has the film step back into a frame at the credits while the next work
 takes the right half of the screen. No component can do that smoothly
 today. When mpv moves its own picture, the move lands only on the
 film's frames, so a 24 fps film moves in 24 uneven steps a second. Each
 step also rebuilds a full-screen buffer in mpv 0.41, and on `liken-1`
 the player container ran out of memory after about 165 steps.
-[library-operator plan 23](../library-operator/plans/23-motion.md),
+[library-operator plan 23](../../library-operator/plans/23-motion.md),
 motion in the browser, waits on the same missing piece: nobody has
 measured whether a machine keeps its frame rate while something moves.
 

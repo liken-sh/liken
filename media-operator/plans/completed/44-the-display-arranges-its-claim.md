@@ -1,7 +1,7 @@
 # 44, The display arranges its claim
 
 Built on 2026-10-27. This is step 3 of
-[root plan 85](../../../plans/85-motion.md), motion on the screen. The
+[root plan 85](../../../plans/completed/85-motion.md), motion on the screen. The
 display binds `liken_arrangement_v1` on its own Wayland connection,
 and when the up-next card rises for a film or an episode, it asks the
 compositor to step the film back into a frame on the left half of the

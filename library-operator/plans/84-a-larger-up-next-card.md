@@ -5,12 +5,20 @@ card that a `Player` draws near the end of a work. It is a stub: it
 states the problems and the shape of the contract, and leaves the open
 questions for the design. [Plan 53](completed/53-up-next.md) built the
 `next` block that the browser writes, and
-[media-operator plan 28](https://github.com/liken-sh/media-operator/blob/main/plans/completed/28-up-next.md)
+[media-operator plan 28](../../media-operator/plans/completed/28-up-next.md)
 built the card that `upnext.lua` draws from it.
 [Plan 62](completed/62-intro-and-credits-marks.md) moved the card's
 rise to the start of the credits where the catalog has credits marks.
-[Root plan 85](../../plans/85-motion.md) adds the compositor motion that
+[Root plan 85](../../plans/completed/85-motion.md) adds the compositor motion that
 the redesign of the card uses, so the film can step back at the credits.
+
+Status on 2026-10-28: the dismissal is built.
+[media-operator plan 44](../../media-operator/plans/completed/44-the-display-arranges-its-claim.md)
+(d3287df8) made a select on the card fade the film and the card's
+column out over 300 ms and pause mpv, and the display draws nothing
+once mpv's socket closes, so the browser's loading curtain shows until
+the next `Play` draws. The card's timing, the runtime, and the end time
+are not built.
 
 ## The problems
 
