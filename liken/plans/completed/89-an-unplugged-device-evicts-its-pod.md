@@ -1,7 +1,10 @@
 # 89. An unplugged device evicts its pod
 
-Milestone 89. Proposed and built on 2026-10-28. The drills on liken-1
-have not run. When someone unplugs a
+Milestone 89. Proposed and built on 2026-10-28. The first drill on
+liken-1 found that a named claim loops, so the taint reaches only a
+claim that a pod owns, and
+[a named claim keeps an unplugged device](../open-problems/a-named-claim-keeps-an-unplugged-device.md)
+holds the rest. The other drills have not run. When someone unplugs a
 USB device that a claim holds, the pod that holds the claim stays in
 `CrashLoopBackOff` until a person deletes it, even after the device is
 plugged into another port or another machine. This milestone taints
@@ -51,12 +54,13 @@ The eviction is the repair:
 1. Someone unplugs the device. The uevent wakes the pass, and the pass
    marks the claim's CDI spec, writes `device-absent` into it as it did
    before, and publishes the device's name with the taint.
-2. The taint-eviction controller deletes the pod.
-3. `kube-controller-manager` clears the claim's allocation.
-4. The pod's controller creates a new pod. The scheduler allocates the
-   claim to a device that matches its selector, on any machine.
-5. The kubelet unprepares the old claim, and the taint leaves the
-   slice with it.
+2. The taint-eviction controller deletes the pod, and the garbage
+   collector deletes the claim that the pod owns.
+3. The pod's controller creates a new pod with a new claim. The
+   scheduler allocates the claim to a device that matches its
+   selector, on any machine.
+4. The kubelet unprepares the old claim, and the unprepare wakes the
+   pass that drops the taint from the slice.
 
 A device that a pod uses through libusb, such as a UPS under Network
 UPS Tools, is absent from the slice while the program holds it,
@@ -149,6 +153,8 @@ the pod.
 
 ## What this does not repair
 
+- A named `ResourceClaim`, which outlives its pods
+  ([a named claim keeps an unplugged device](../open-problems/a-named-claim-keeps-an-unplugged-device.md)).
 - A device that moved while its machine was off, as above.
 - A bare pod with no controller is evicted and nothing creates it
   again. The person who made it creates it again.
@@ -194,6 +200,23 @@ the pod.
   one device would otherwise evict its pod.
 - One `Event` marks the unplug. The taint leaves with the unprepare,
   which is the kubelet's action and posts no `Event` of its own.
+- Only a claim that a pod owns gets the unit record, so only its
+  device is tainted. On liken-1, a named claim on a moved Z-Wave dongle
+  looped: each pod that the `ReplicaSet` created reserved the claim
+  before the evicted pod released it, so the allocation never cleared,
+  and the taint posted 1,630 evictions in three minutes. The open
+  problem holds the evidence.
+- An unprepare wakes the reconcile pass. The drill showed the taint
+  staying in the slice after the claim ended, because no event woke
+  the pass that drops it.
+- The entry of a device that is gone keeps no attributes. Kubernetes
+  1.37.1 evaluates a class's selectors before a device's taints, so a
+  class that reads an attribute with no `has()` guard errors on that
+  entry during the moment between the end of the allocation and the
+  unprepare, and the scheduler tries again at the next slice write. An
+  entry with attributes would instead match a claim that tolerates the
+  taint with `allocationMode: All`, and that claim's pod could not
+  prepare a device that is gone.
 
 ## The manual
 
@@ -214,8 +237,8 @@ The commit that builds this updates:
 ## Drills
 
 On liken-1, with spare USB dongles, each drill starts with a
-`Deployment` whose pod holds a named `ResourceClaim` that selects the
-dongle by `serial`:
+`Deployment` whose pod holds a claim from a `ResourceClaimTemplate`
+that selects the dongle by `serial`:
 
 1. Move the dongle to another port. The pod is evicted, and the new
    pod runs with the dongle.

@@ -25,9 +25,10 @@ import (
 // which devices were allocated from which driver's pools.
 type ResourceClaim struct {
 	Metadata struct {
-		Name      string `json:"name"`
-		Namespace string `json:"namespace"`
-		UID       string `json:"uid"`
+		Name            string           `json:"name"`
+		Namespace       string           `json:"namespace"`
+		UID             string           `json:"uid"`
+		OwnerReferences []OwnerReference `json:"ownerReferences,omitempty"`
 	} `json:"metadata"`
 	Status struct {
 		Allocation *struct {
@@ -36,6 +37,18 @@ type ResourceClaim struct {
 			} `json:"devices"`
 		} `json:"allocation"`
 	} `json:"status"`
+}
+
+// PodOwned answers whether a pod owns the claim, as a pod owns the
+// claim that a ResourceClaimTemplate makes for it. Such a claim ends
+// with its pod, and the pod that replaces it gets a new claim.
+func (c *ResourceClaim) PodOwned() bool {
+	for _, owner := range c.Metadata.OwnerReferences {
+		if owner.Kind == "Pod" {
+			return true
+		}
+	}
+	return false
 }
 
 // AllocatedDevice is one allocation result. The scheduler chose

@@ -64,6 +64,10 @@ type loop struct {
 	uevents <-chan struct{}
 	hosts   <-chan struct{}
 
+	// released is the DRA plugin's wake after an unprepare. A nil
+	// channel is a plugin that sends none.
+	released <-chan struct{}
+
 	// live is the busy mark that the renewal timer reads
 	// (liveness.go). Nil renews no lease.
 	live *liveness
@@ -101,7 +105,7 @@ func (l *loop) run(ctx context.Context, current *machine.Machine) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	machineWakes := make(chan struct{}, 1)
-	stopped := make(chan error, 2)
+	stopped := make(chan error, 3)
 	if l.uevents != nil {
 		go func() {
 			stopped <- relayStopped("the uevent listener", relay(ctx, l.uevents, machineWakes, settleEvents))
@@ -109,6 +113,11 @@ func (l *loop) run(ctx context.Context, current *machine.Machine) error {
 	}
 	if l.hosts != nil {
 		go func() { stopped <- relayStopped("the hosts watch", relay(ctx, l.hosts, machineWakes, settleEvents)) }()
+	}
+	if l.released != nil {
+		go func() {
+			stopped <- relayStopped("the DRA plugin's unprepare", relay(ctx, l.released, machineWakes, settleEvents))
+		}()
 	}
 
 	// The lease renews once before the first pass, with the owner from

@@ -334,7 +334,13 @@ the claim. A pod that a `Deployment`, a `DaemonSet`, or another
 controller owns comes back as a new pod, and its claim is allocated to
 a device that matches it, on any machine. If the new pod stays
 `Pending`, no device matches: plug the device in again. A pod that no
-controller owns does not come back; create it again. The
+controller owns does not come back; create it again.
+
+A pod whose named `ResourceClaim` holds an unplugged device is not
+evicted. Its container fails to start, and its events name
+`/dev/liken.sh/device-absent`. Delete the pods that use the claim,
+then delete the claim and create it again. The new claim is allocated
+to the device where it is now. The
 [device reference](https://liken.sh/docs/reference/devices/#an-unplugged-device-evicts-its-pods)
 gives the rules.
 

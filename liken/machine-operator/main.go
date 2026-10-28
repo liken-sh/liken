@@ -127,8 +127,11 @@ func main() {
 	bootFacts, _ := factsTree.Read()
 	setDeclaredSerio(serioInEffect(m.Spec.Serio, bootFacts))
 	setPlatformProtection(protectionOf(bootFacts))
+	// An unprepare wakes the loop, so the slice drops the taint of a
+	// claim that ended (unplugged.go).
+	released := make(chan struct{}, 1)
 	go func() {
-		if err := serveDRAPlugin(context.Background(), client); err != nil {
+		if err := serveDRAPlugin(context.Background(), client, released); err != nil {
 			fmt.Fprintf(os.Stderr, "the DRA plugin is not serving: %v\n", err)
 		}
 	}()
@@ -227,6 +230,7 @@ func main() {
 		wakes:     wakes,
 		uevents:   uevents,
 		hosts:     hosts,
+		released:  released,
 		live:      live,
 		watchFactsTree: func(ctx context.Context) (*factsWatch, error) {
 			w, err := machine.WatchFactsTree(ctx, machine.FactsDir)

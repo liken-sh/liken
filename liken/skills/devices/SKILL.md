@@ -351,8 +351,10 @@ Then give each pod its own claim:
               resourceClaimTemplateName: zigbee
 
 When you unplug the adapter, `liken` taints it, and Kubernetes evicts
-the pod. The pod's controller creates a new pod, and its claim takes
-the adapter wherever you plug it in: another port, or another machine.
+the pod. The pod's controller creates a new pod, and its new claim
+takes the adapter wherever you plug it in: another port, or another
+machine. This repair needs the template. A named `ResourceClaim` keeps
+its allocation on the old port, and you repair it by hand.
 The [device reference](https://liken.sh/docs/reference/devices/#an-unplugged-device-evicts-its-pods)
 gives the rules, and the toleration for a program that follows its
 hardware by itself.

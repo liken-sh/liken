@@ -83,9 +83,18 @@ type unitRecord struct {
 // allocated device. Only a USB or a PCI device gets a unit record,
 // because only those have an address under /sys/bus that leaves with
 // the hardware. A device on the board cannot be unplugged.
-func deviceAnnotations(namespace, name string, d hardware.Device) map[string]string {
+//
+// Only a claim that a pod owns gets the record, because only such a
+// claim is allocated again after the eviction. A named claim outlives
+// its pods. When its pod is evicted, the pod's controller creates the
+// next pod at once, and that pod reserves the claim before the evicted
+// pod releases it. The claim never has no pod, so the controller
+// manager never clears its allocation, and the taint evicts each new
+// pod in turn. A named claim on an unplugged device keeps
+// device-absent, and a person repairs it.
+func deviceAnnotations(namespace, name string, podOwned bool, d hardware.Device) map[string]string {
 	annotations := map[string]string{claimAnnotation: namespace + "/" + name}
-	if d.Bus != "usb" && d.Bus != "pci" {
+	if !podOwned || d.Bus != "usb" && d.Bus != "pci" {
 		return annotations
 	}
 	raw, err := json.Marshal(unitRecord{

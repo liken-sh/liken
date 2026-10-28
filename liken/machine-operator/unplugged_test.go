@@ -31,6 +31,10 @@ func unplug(t *testing.T) {
 	}
 }
 
+// podOwner is the owner of a claim that a ResourceClaimTemplate made
+// for its pod.
+var podOwner = []map[string]any{{"apiVersion": "v1", "kind": "Pod", "name": "stick-0", "uid": "pod-1"}}
+
 func TestAnUnpluggedDeviceIsTainted(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -42,6 +46,7 @@ func TestAnUnpluggedDeviceIsTainted(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			fixture := newDRAFixture(t)
+			fixture.owner = podOwner
 			fixture.enumerate(t, 4)
 			prepared(t, fixture)
 
@@ -82,6 +87,7 @@ func TestAPresentDeviceIsNotTainted(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			fixture := newDRAFixture(t)
+			fixture.owner = podOwner
 			fixture.enumerate(t, 4)
 			prepared(t, fixture)
 
@@ -97,6 +103,7 @@ func TestAPresentDeviceIsNotTainted(t *testing.T) {
 
 func TestASpecWithNoUnitRecordIsNotTainted(t *testing.T) {
 	fixture := newDRAFixture(t)
+	fixture.owner = podOwner
 	fixture.enumerate(t, 4)
 	prepared(t, fixture)
 	forgetUnits(t, fixture, "claim-1")
@@ -137,6 +144,7 @@ func forgetUnits(t *testing.T, fixture *draFixture, claimUID string) {
 // start receives the current nodes.
 func TestTheTaintStaysWhenTheDeviceReturns(t *testing.T) {
 	fixture := newDRAFixture(t)
+	fixture.owner = podOwner
 	fixture.enumerate(t, 4)
 	prepared(t, fixture)
 	stick := filepath.Join(draSysfsRoot, "bus", "usb", "devices", "2-1:1.0")
@@ -164,6 +172,7 @@ func TestTheTaintStaysWhenTheDeviceReturns(t *testing.T) {
 
 func TestUnprepareEndsTheTaint(t *testing.T) {
 	fixture := newDRAFixture(t)
+	fixture.owner = podOwner
 	fixture.enumerate(t, 4)
 	prepared(t, fixture)
 	unplug(t)
@@ -179,6 +188,7 @@ func TestUnprepareEndsTheTaint(t *testing.T) {
 func TestAnUnplugPostsOneEvent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newDRAFixture(t)
+		fixture.owner = podOwner
 		fixture.enumerate(t, 4)
 		prepared(t, fixture)
 		_, recorder, recorded := recordingClient(t, http.NotFoundHandler())
@@ -228,4 +238,41 @@ func sameSliceDevices(a, b []kubernetes.SliceDevice) bool {
 		return string(out)
 	}
 	return raw(a) == raw(b)
+}
+
+// A named claim outlives its pods, and a controller's next pod reserves
+// it before the evicted pod releases it, so the claim is never
+// allocated again and every new pod is evicted in turn. Only a claim
+// that a pod owns is tainted.
+func TestTheDeviceOfANamedClaimIsNotTainted(t *testing.T) {
+	fixture := newDRAFixture(t)
+	fixture.enumerate(t, 4)
+	prepared(t, fixture)
+
+	unplug(t)
+	refreshCDISpecs(draSysfsRoot, nil, machineEvents{})
+
+	if names := unpluggedDevices(); len(names) != 0 {
+		t.Errorf("unplugged = %v, want none for a named claim", names)
+	}
+	if paths := specPaths(t, fixture, "claim-1"); !slices.Equal(paths, []string{deviceAbsentNode}) {
+		t.Errorf("paths = %v, want the absent node alone", paths)
+	}
+}
+
+// An unprepare ends the claim's taint, and the slice drops it only on
+// the next pass, so the unprepare wakes the pass.
+func TestUnprepareWakesThePass(t *testing.T) {
+	fixture := newDRAFixture(t)
+	fixture.owner = podOwner
+	fixture.enumerate(t, 4)
+	prepared(t, fixture)
+
+	unprepared(t, fixture, "claim-1")
+
+	select {
+	case <-fixture.released:
+	default:
+		t.Error("the unprepare sent no wake")
+	}
 }

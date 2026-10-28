@@ -33,6 +33,14 @@ type draFixture struct {
 	plugin    *draPlugin
 	cdi       string
 	allocated string
+
+	// owner is the claim's owner references. A claim from a
+	// ResourceClaimTemplate is owned by its pod, and a named claim has
+	// no owner.
+	owner []map[string]any
+
+	// released receives the plugin's wake after an unprepare.
+	released chan struct{}
 }
 
 func newDRAFixture(t *testing.T) *draFixture {
@@ -81,7 +89,7 @@ func newDRAFixture(t *testing.T) *draFixture {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"metadata": map[string]any{"name": "stick", "namespace": "media", "uid": "claim-1"},
+			"metadata": map[string]any{"name": "stick", "namespace": "media", "uid": "claim-1", "ownerReferences": fixture.owner},
 			"status": map[string]any{
 				"allocation": map[string]any{
 					"devices": map[string]any{
@@ -107,7 +115,8 @@ func newDRAFixture(t *testing.T) *draFixture {
 	t.Cleanup(func() { draSysfsRoot, cdiDir = origSysfs, origCDI })
 	protecting(t, noRoles)
 
-	fixture.plugin = &draPlugin{client: apiclient.New(apiservertest.Host, server.Client(), credentials)}
+	fixture.released = make(chan struct{}, 1)
+	fixture.plugin = &draPlugin{client: apiclient.New(apiservertest.Host, server.Client(), credentials), released: fixture.released}
 	fixture.cdi = cdi
 	return fixture
 }
@@ -596,7 +605,7 @@ func TestServeAnswersOnBothSockets(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- serveDRAPlugin(ctx, fixture.plugin.client) }()
+	go func() { done <- serveDRAPlugin(ctx, fixture.plugin.client, nil) }()
 	t.Cleanup(func() {
 		cancel()
 		if err := <-done; err != nil {

@@ -486,9 +486,9 @@ USB port, the devices return with the same names, and the container
 starts at its next retry with no new allocation. After a long
 absence, that retry can come up to 5 minutes after the adapter
 returns. A published name follows the USB port, so an adapter moved
-to another port is a different device. The eviction gives its
-claimant a new pod, and the new pod's claim is allocated the adapter
-in its new port.
+to another port is a different device. When a pod owns the claim, the
+eviction gives its claimant a new pod, and the new pod's claim is
+allocated the adapter in its new port.
 
 ## An unplugged device evicts its pods
 
@@ -496,12 +496,24 @@ Kubernetes allocates a claim once, and does not allocate it again
 while a pod holds it. A published name follows the USB port, so a claim
 on a device that moves to another port, or to another machine, still
 names the old port. So when a device that a prepared claim holds is
-unplugged, the node taints the device `liken.sh/unplugged` with the
-effect `NoExecute`. Kubernetes evicts every pod that holds the claim,
-and clears the claim's allocation when the last of those pods is gone.
-The pod's controller, such as a `Deployment` or a `DaemonSet`, creates
-a new pod, and the scheduler allocates its claim to a device that
-matches the claim, on any machine.
+unplugged, and a pod owns the claim, the node taints the device
+`liken.sh/unplugged` with the effect `NoExecute`. Kubernetes evicts the
+pod, and deletes its claim with it. The pod's controller, such as a
+`Deployment` or a `DaemonSet`, creates a new pod with a new claim, and
+the scheduler allocates that claim to a device that matches it, on any
+machine.
+
+A pod owns the claim that a `ResourceClaimTemplate` makes for it, and
+the claim that an operator makes for each pod. A named
+`ResourceClaim` that you create yourself does not get the taint. It
+outlives its pods, so the controller's next pod would reserve it while
+the evicted pod still held it, Kubernetes would never allocate it
+again, and the taint would evict each new pod in turn. While its device
+is gone, a named claim's container fails to start on the absent node.
+To repair it, delete the pods and the claim, and create the claim
+again. Use a template to have the repair happen on its own, as
+[the devices guide](/docs/guides/devices/#5-give-one-pod-a-device-alone)
+shows.
 
 The node treats a device as unplugged when its directory leaves
 `/sys/bus`, or when another enumeration takes its address: another
@@ -514,7 +526,9 @@ slice publishes its name with the taint and no attributes, so no new
 claim matches it.
 
 The node posts a `DeviceUnplugged` `Event` on its `Machine` when it
-taints a device. The message names the device and the claim.
+taints a device. The message names the device and the claim. When the
+kubelet unprepares the claim, the node publishes its slice again
+without the taint.
 
 A pod that no controller owns is evicted and nothing creates it again.
 
@@ -552,8 +566,8 @@ off, delete the pod.
   [guide](/docs/guides/devices/) has examples to start from.
 * Devices have no capacity. If a device fails, it disappears from the
   slice at the next pass. This stops new allocations. A device that a
-  prepared claim holds takes the `liken.sh/unplugged` taint, which
-  evicts the claim's pods
+  prepared claim owned by a pod holds takes the `liken.sh/unplugged`
+  taint, which evicts the pod
   ([An unplugged device evicts its pods](#an-unplugged-device-evicts-its-pods)).
 * `liken` does not keep a claim across a reboot. The claim is a
   Kubernetes object, and Kubernetes reschedules the pod that holds it

@@ -59,3 +59,24 @@ func TestGetResourceClaimToleratesAnUnallocatedClaim(t *testing.T) {
 		t.Errorf("allocation = %+v, want nil before the scheduler allocates", claim.Status.Allocation)
 	}
 }
+
+func TestAClaimIsPodOwnedWhenAPodOwnsIt(t *testing.T) {
+	cases := []struct {
+		name   string
+		owners []OwnerReference
+		want   bool
+	}{
+		{"a named claim", nil, false},
+		{"a template's claim", []OwnerReference{{APIVersion: "v1", Kind: "Pod", Name: "zigbee-0"}}, true},
+		{"a claim another object owns", []OwnerReference{{APIVersion: "observatory.liken.sh/v1", Kind: "Device", Name: "mount"}}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var claim ResourceClaim
+			claim.Metadata.OwnerReferences = c.owners
+			if got := claim.PodOwned(); got != c.want {
+				t.Errorf("PodOwned() = %v, want %v", got, c.want)
+			}
+		})
+	}
+}

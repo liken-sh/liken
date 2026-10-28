@@ -64,9 +64,15 @@ var (
 // draPlugin answers the kubelet's DRA calls. The API client is its
 // only state. It derives everything else again on each call, from
 // the claim and from sysfs.
+//
+// released wakes the reconcile pass after an unprepare. The slice
+// taints the device of a claim whose unit was unplugged until the
+// claim ends, so the pass must publish again when it does
+// (unplugged.go). A nil channel wakes nothing.
 type draPlugin struct {
 	drav1.UnimplementedDRAPluginServer
-	client *apiclient.Client
+	client   *apiclient.Client
+	released chan<- struct{}
 }
 
 // draRegistrar answers the kubelet's plugin-watcher handshake.
@@ -107,7 +113,7 @@ func (r *draRegistrar) NotifyRegistrationStatus(ctx context.Context, status *reg
 // sees the registration. The function removes stale sockets from a
 // previous operator first. A bind to an orphaned socket file fails
 // even when nothing is listening on it.
-func serveDRAPlugin(ctx context.Context, client *apiclient.Client) error {
+func serveDRAPlugin(ctx context.Context, client *apiclient.Client, released chan<- struct{}) error {
 	if err := os.MkdirAll(draPluginDir, 0o755); err != nil {
 		return err
 	}
@@ -118,7 +124,7 @@ func serveDRAPlugin(ctx context.Context, client *apiclient.Client) error {
 		return fmt.Errorf("the plugin socket: %w", err)
 	}
 	pluginServer := grpc.NewServer()
-	drav1.RegisterDRAPluginServer(pluginServer, &draPlugin{client: client})
+	drav1.RegisterDRAPluginServer(pluginServer, &draPlugin{client: client, released: released})
 
 	registrationSocket := filepath.Join(draRegistryDir, kubernetes.DriverName+"-reg.sock")
 	_ = os.Remove(registrationSocket)
@@ -247,7 +253,7 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 		unit, _ := resolveHardware(result.Device, byName)
 		specDevices = append(specDevices, cdiDevice{
 			Name:           name,
-			Annotations:    deviceAnnotations(claim.Namespace, claim.Name, unit),
+			Annotations:    deviceAnnotations(claim.Namespace, claim.Name, allocated.PodOwned(), unit),
 			ContainerEdits: cdiEdits{DeviceNodes: nodes},
 		})
 		devices = append(devices, &drav1.Device{
@@ -290,6 +296,12 @@ func (p *draPlugin) NodeUnprepareResources(ctx context.Context, req *drav1.NodeU
 			continue
 		}
 		resp.Claims[claim.Uid] = &drav1.NodeUnprepareResourceResponse{}
+	}
+	if p.released != nil {
+		select {
+		case p.released <- struct{}{}:
+		default:
+		}
 	}
 	return resp, nil
 }
