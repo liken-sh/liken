@@ -46,6 +46,20 @@ with `liken.sh/unplugged` only when a pod owns its claim
 and the reader's claim is a named claim that the `Remote` owns, so no
 eviction needs a second toleration.
 
+The claim stays named on purpose. When only the reader pod changes,
+such as a release with a new sidecar image, a sleeping Bluetooth
+controller keeps its allocation, and the new pod runs at once. A claim
+made from a `ResourceClaimTemplate` would end with the old pod, and
+the new pod would stay `Pending` until the controller next connects.
+The cost falls on a remote that `liken` publishes, such as the input
+device of a USB-CEC adapter: when its cable moves to another port or
+another machine, the named claim keeps the old port, and a person
+deletes the claim and the pod
+([a named claim keeps an unplugged device](../../liken/plans/open-problems/a-named-claim-keeps-an-unplugged-device.md)).
+The exit rule of this plan restarts the reader, and the restart does
+not move the claim. A design for such a remote decides whether its
+claim comes from a template, apart from a Bluetooth controller's.
+
 ## A relay node that answers `ENODEV` for a while
 
 The comment on `nodePollDelay` states a case the rule must not catch:
