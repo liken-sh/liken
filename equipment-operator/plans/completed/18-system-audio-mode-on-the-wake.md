@@ -6,8 +6,10 @@ the CEC part of
 [plan 13](../rejected/13-every-setting-a-receiver-exposes.md#cec), and
 builds phase 4 of [plan 09](09-cec.md). Built on 2026-10-28, both
 phases, and tested against `cectest` and the fake API server. The
-`vivid` test of the volume keys has not run, and none of the six
-drills in "How it will be proved" has run. The build adds
+`vivid` test of the volume keys has not run. A wake on a home cluster
+with an AVR-X1700H and release 2026.10.28-004 ran on 2026-10-28, and
+"What the first wake on hardware found" records it. Drills 2, 4, 5,
+and 6 have not run, and drills 1 and 3 ran in part. The build adds
 `systemAudioModeAt` to each `CECDevice` of an adapter's entry, so the
 `Deployment` has the time to write in `status.cec`, and it sends the
 request only when the wake's guard ends with the `Display`'s Active
@@ -303,12 +305,42 @@ so no tool checks this duty.
 2. The volume keys in `cec/`, the request in the wake, and
    `SystemAudioApplied`.
 
+## What the first wake on hardware found
+
+On 2026-10-28, release 2026.10.28-004 ran on a home cluster with an
+AVR-X1700H between the `liken` machine and the TV. The receiver was
+at physical address 1.0.0.0, and the `Display` behind it at 1.2.0.0.
+
+* The join scan read the mode as Off from the receiver, and
+  `status.cec` on the `Receiver` showed it.
+* A wake from the `liken` remote sent System Audio Mode Request for
+  1.2.0.0 after the 31 s guard. The receiver broadcast Set System
+  Audio Mode [On] 90 ms later, and `SystemAudioApplied` was `True`
+  with the reason `Confirmed`. The receiver reported no other input
+  after the request.
+* The TV muted its own speakers, the sound played on the receiver,
+  and the TV remote's volume keys changed the receiver's volume. A
+  person at the TV observed each of these.
+* As the TV came on, the receiver broadcast [On] twice before the
+  adapter sent anything. That was the TV's own request, which drill 1
+  expected, and the wake did not count it.
+* In one wake, the TV sent Set Stream Path to another source on the
+  receiver 11 s into the guard, and the receiver reported that
+  source's input. The guard ended without a claim, and that wake sent
+  no request, as the build intends.
+* The remote's power button put the TV and the receiver in standby,
+  and the receiver broadcast [Off] just before it, as CEC 13.15.2
+  requires.
+
+This is one session with one receiver and one TV. The 20 minutes of
+Routing Changes that drill 3 counts were not counted.
+
 ## How it will be proved
 
 The fakes in `cec/cectest` and `kubernetes/apiservertest` prove each
 path, and `vivid` proves the messages against the kernel. Six drills
-run on a home cluster with an AVR-X1700H, then a WiiM Amp. None has
-run.
+run on a home cluster with an AVR-X1700H, then a WiiM Amp. Drills 1
+and 3 ran in part on 2026-10-28, as the section above records.
 
 1. In `Listen`, record each System Audio message, its sender, and
    whether it is directed or broadcast: when the TV's speaker menu
