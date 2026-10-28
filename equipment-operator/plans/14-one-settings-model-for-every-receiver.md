@@ -49,9 +49,10 @@ in that brand's block. Each plan names the families it builds, and
 The protocol block stays, because the connection differs by brand,
 and so do the features no other brand shares. Exactly one network
 block is required, as the CEL rule `exists_one` requires today
-(`deploy/receivers-crd.yaml:80`). `cec:`
-([plan 18](18-system-audio-mode-on-the-wake.md)) is not a network
-block and may sit beside one.
+(`deploy/receivers-crd.yaml:80`). System Audio Mode
+([plan 18](18-system-audio-mode-on-the-wake.md)) needs no block in the
+spec, because the wake sends its request whenever a receiver is on the
+`Display`'s HDMI path.
 
 ```yaml
 spec:
