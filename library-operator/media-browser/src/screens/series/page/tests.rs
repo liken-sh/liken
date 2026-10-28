@@ -1,5 +1,7 @@
+use super::header::buttons_left;
 use super::*;
 use crate::screens::movie::row::Button;
+use crate::views::buttons;
 
 // An episode's widest row, with a start to resume and a trailer, fits in
 // the room the header leaves beside its text column at 1920 by 1080.

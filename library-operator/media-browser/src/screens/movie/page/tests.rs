@@ -104,6 +104,8 @@ fn crowded(focus: Focus) -> Movie {
             current: 0,
         }),
         focus,
+        scroll: crate::motion::Glide::still(0.0),
+        rows: crate::motion::Rows::default(),
     }
 }
 

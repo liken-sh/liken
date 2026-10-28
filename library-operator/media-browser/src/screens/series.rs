@@ -7,6 +7,10 @@
 
 mod episode;
 mod layout;
+// The motion of the page: where the focus outline goes, and how far the
+// wall and each row under its seasons have scrolled while they ease to
+// rest.
+mod motion;
 mod moves;
 mod page;
 mod pickup;
@@ -19,6 +23,7 @@ use super::{InFranchise, Step, facts, foot, stripes};
 use crate::catalog::draw::Date;
 use crate::catalog::{Progress, SeriesDetails, Source};
 use crate::focus::Run;
+use crate::motion::{Glide, Rows};
 use crate::views::{Card, rail, ratings};
 
 /// How many stills a row of the episode wall holds. A still is wider
@@ -204,6 +209,12 @@ pub struct Series {
     pub via: Option<InFranchise>,
     /// Where focus is.
     pub focus: Focus,
+    // How far the wall has scrolled down, as it eases to the place that
+    // keeps the focused still or row in view.
+    scroll: Glide,
+    // How far each row under the seasons has scrolled across, as it eases
+    // to the place that keeps its anchor in view.
+    rows: Rows,
 }
 
 impl Series {
@@ -274,6 +285,8 @@ impl Series {
             arrived: false,
             via: None,
             focus: Focus::Still(0),
+            scroll: Glide::still(0.0),
+            rows: Rows::default(),
         })
     }
 
@@ -300,6 +313,8 @@ impl Series {
         fresh.arrived = self.arrived;
         fresh.entered = self.entered.min(fresh.stills.len().saturating_sub(1));
         fresh.via = self.via.clone();
+        fresh.scroll = self.scroll;
+        fresh.rows = std::mem::take(&mut self.rows);
         let focus = self.focus;
         *self = fresh;
         self.focus = self.hold(focus);

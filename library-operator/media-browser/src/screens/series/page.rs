@@ -16,18 +16,22 @@ use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::{Element, Point, Rectangle, Theme, mouse};
 
+use super::super::Item;
 use super::super::franchise::strips::Place;
+use super::super::stripes::Face;
 use super::layout::{self, Layout};
-use super::{COLUMNS, Focus, Series, row, seasons, watch};
+use super::{COLUMNS, Focus, Series, Still, seasons};
 use crate::art::Art;
 use crate::look;
+use crate::views::across::Across;
 use crate::views::curtain::{Curtain, Head, Layer};
 use crate::views::layers;
-use crate::views::stack::Stack;
-use crate::views::{
-    area, buttons, card, curtain, divider, header, mark, people, rail, ratings, strip, text, wall,
-    watch as line,
-};
+use crate::views::{area, card, divider, people, rail, strip, text, wall};
+
+// The header: its blocks, and where its button row and status line stand.
+mod header;
+
+pub(super) use header::{row_at, status_line, under};
 
 // The share of the width the column of text takes. The column ends inside
 // the part of the scrim that holds its full shade, so every line reads
@@ -45,6 +49,8 @@ pub struct Page<'a, A> {
     pub lifted: bool,
     /// Whether the page holds focus, or the browser's strip over it does.
     pub held: bool,
+    /// The second this frame draws, which the scrolls ease on.
+    pub at: f64,
 }
 
 impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
@@ -60,71 +66,40 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
     ) -> Vec<canvas::Geometry<Renderer>> {
         let series = self.series;
         // The page's focus while the page holds it, and none while the
-        // browser's strip does, so one mark draws on the glass.
+        // browser's strip does, so a focused bar, mark, or member draws as
+        // focused only while the outline is on the page.
         let focus = self.held.then_some(series.focus);
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let store = &mut *self.store.borrow_mut();
 
         self.header(&mut frame, store, bounds, layout::header(bounds), focus);
 
-        // The rail takes the right edge of the region, and the wall keeps
-        // the rest.
-        let whole = layout::region(bounds);
-        let region = rail::beside_at(whole, &series.bars, rail::Side::Right);
-        let cells = wall::lined(region.width, wall::STILL, COLUMNS, card::LINES);
-        let inset = (cells.width - cells.poster_width) / 2.0;
+        let wall = placed(series, bounds);
+        let Placed {
+            whole,
+            region,
+            inset,
+            ..
+        } = wall;
+        let bands = &wall.layout.bands;
         let width = region.width - 2.0 * inset;
-        let layout = Layout::of(
-            &series.seasons,
-            cells,
-            series.franchises.bands().len(),
-            series.stripes.bands().len(),
-            series.foot.height(width),
-        );
-        let offset = layout.scroll(seasons::standing(series), &series.seasons, region.height);
+        let offset = series.scroll.toward(wall.offset, self.at);
 
         // The stills draw under the band a held divider keeps, and the
         // dividers over their own clip, because the renderer draws every
         // image of a layer over every fill of it, and a still that reached
-        // the band would cross the divider's rule. The band stands over the
-        // stills' own region, so it counts as content the wall has
-        // scrolled past.
-        let stills = layout::stills(region);
-        let scrolled = offset + (stills.y - region.y);
-        frame.with_clip(stills, |frame| {
-            for (season, band) in series.seasons.iter().zip(&layout.bands) {
-                if !band.shows(offset, region.height) {
-                    continue;
+        // the band would cross the divider's rule.
+        frame.with_clip(layout::stills(region), |frame| {
+            for (season, band) in bands.iter().enumerate() {
+                if band.shows(offset, region.height) {
+                    wall::draw(frame, store, &stills(series, &wall, season, offset, focus));
                 }
-                let run = season.run;
-                wall::draw(
-                    frame,
-                    store,
-                    &wall::Grid {
-                        items: &series.stills[run.first..run.first + run.count],
-                        focus: match focus {
-                            Some(Focus::Still(index))
-                                if index >= run.first && index < run.first + run.count =>
-                            {
-                                Some(index - run.first)
-                            }
-                            _ => None,
-                        },
-                        marked: true,
-                        library: &series.library,
-                        ratio: wall::STILL,
-                        columns: COLUMNS,
-                        lines: card::LINES,
-                        region: stills,
-                        offset: scrolled - band.rows_top,
-                    },
-                );
             }
         });
 
         let dividers = area(region.x + inset, region.y, width, region.height);
         frame.with_clip(region, |frame| {
-            for (season, band) in series.seasons.iter().zip(&layout.bands) {
+            for (season, band) in series.seasons.iter().zip(bands) {
                 if !band.shows(offset, region.height) {
                     continue;
                 }
@@ -135,77 +110,14 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                 );
             }
 
-            for (index, (band, top)) in series
-                .franchises
-                .bands()
-                .iter()
-                .zip(&layout.franchises)
-                .enumerate()
-            {
-                strip::draw_marked(
-                    frame,
-                    store,
-                    &strip::Strip {
-                        room: None,
-                        members: &band.members,
-                        current: band.current,
-                        kept: None,
-                        focus: match focus {
-                            Some(Focus::Franchise(strip, Place::Member(member)))
-                                if strip == index =>
-                            {
-                                Some(member)
-                            }
-                            _ => None,
-                        },
-                        heading: &band.heading,
-                        library: &series.library,
-                        last: None,
-                        lines: card::LINES,
-                        headed: matches!(
-                            focus,
-                            Some(Focus::Franchise(strip, Place::Heading)) if strip == index
-                        ),
-                        region: area(
-                            region.x + inset,
-                            region.y + top - offset,
-                            region.width - 2.0 * inset,
-                            layout::strip_height(),
-                        ),
-                        scroll: None,
-                    },
-                );
+            // Each row draws at the scroll its own ease has reached at
+            // this second, toward the place this frame's focus rests it at.
+            for (index, row) in rows(series, &wall, offset, focus).into_iter().enumerate() {
+                let scroll = series.rows.at(index, row.scrolled(), self.at);
+                row.at(scroll).draw(frame, store);
             }
 
-            for (index, (band, top)) in series
-                .stripes
-                .bands()
-                .iter()
-                .zip(&layout.stripes)
-                .enumerate()
-            {
-                people::draw(
-                    frame,
-                    store,
-                    &people::Stripe {
-                        people: &band.faces,
-                        focus: match focus {
-                            Some(Focus::Stripe(stripe, slot)) if stripe == index => Some(slot),
-                            _ => None,
-                        },
-                        heading: band.heading,
-                        library: &series.library,
-                        region: area(
-                            region.x + inset,
-                            region.y + top - offset,
-                            region.width - 2.0 * inset,
-                            people::HEIGHT,
-                        ),
-                    },
-                );
-            }
-
-            let mut at = Point::new(region.x + inset, region.y + layout.foot - offset);
+            let mut at = Point::new(region.x + inset, region.y + wall.layout.foot - offset);
             for row in series.foot.rows() {
                 at.y += row.lead;
                 let color = match row.faint {
@@ -230,21 +142,148 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                 Some(Focus::Rail(bar)) => Some(bar),
                 _ => None,
             };
-            let (side, fit) = (rail::Side::Right, rail::Fit::Fitted);
-            rail::draw_at(frame, whole, &series.bars, focus, side, fit);
-            if let Some(bar) = rail::focused(whole, &series.bars, focus, side, fit) {
-                mark(frame, bar);
-            }
+            rail::draw_at(frame, whole, &series.bars, focus, RAIL.0, RAIL.1);
         });
 
         vec![frame.into_geometry()]
     }
 }
 
-// The left edge of the button row: one gap past the right edge of the
-// header's text column, in the room beside the column.
-fn buttons_left(region: Rectangle, column: f32) -> f32 {
-    region.x + column + layout::GAP
+/// The side the seasons rail stands at, and how its bars fit the region.
+pub(super) const RAIL: (rail::Side, rail::Fit<'static>) = (rail::Side::Right, rail::Fit::Fitted);
+
+/// The wall's measures at these bounds: the region the rail and the wall
+/// share, the region the wall keeps beside the rail, how far the rows
+/// under the stills stand in from the region's edges, the layout of the
+/// seasons and the rows, and how far the wall scrolls to rest with focus
+/// in view.
+pub(super) struct Placed {
+    pub(super) whole: Rectangle,
+    pub(super) region: Rectangle,
+    inset: f32,
+    layout: Layout,
+    pub(super) offset: f32,
+}
+
+/// The wall of this series at these bounds, at rest.
+pub(super) fn placed(series: &Series, bounds: Rectangle) -> Placed {
+    // The rail takes the right edge of the region, and the wall keeps
+    // the rest.
+    let whole = layout::region(bounds);
+    let region = rail::beside_at(whole, &series.bars, RAIL.0);
+    let cells = wall::lined(region.width, wall::STILL, COLUMNS, card::LINES);
+    let inset = (cells.width - cells.poster_width) / 2.0;
+    let layout = Layout::of(
+        &series.seasons,
+        cells,
+        series.franchises.bands().len(),
+        series.stripes.bands().len(),
+        series.foot.height(region.width - 2.0 * inset),
+    );
+    let offset = layout.scroll(seasons::standing(series), &series.seasons, region.height);
+    Placed {
+        whole,
+        region,
+        inset,
+        layout,
+        offset,
+    }
+}
+
+/// The grid of one season's stills at this scroll down of the wall, with
+/// focus where `focus` puts it. The band a held divider keeps stands over
+/// the stills' own region, so it counts as content the wall has scrolled
+/// past.
+pub(super) fn stills<'a>(
+    series: &'a Series,
+    wall: &Placed,
+    season: usize,
+    offset: f32,
+    focus: Option<Focus>,
+) -> wall::Grid<'a, Still> {
+    let run = series.seasons[season].run;
+    let band = wall.layout.bands[season];
+    let region = layout::stills(wall.region);
+    wall::Grid {
+        items: &series.stills[run.first..run.first + run.count],
+        focus: match focus {
+            Some(Focus::Still(index)) if index >= run.first && index < run.first + run.count => {
+                Some(index - run.first)
+            }
+            _ => None,
+        },
+        library: &series.library,
+        ratio: wall::STILL,
+        columns: COLUMNS,
+        lines: card::LINES,
+        offset: offset + (region.y - wall.region.y) - band.rows_top,
+        region,
+    }
+}
+
+/// The rows the wall scrolls across, in the page's order: the franchise
+/// strips, then the stripes of people, at this scroll down and with focus
+/// where `focus` puts it.
+pub(super) fn rows<'a>(
+    series: &'a Series,
+    wall: &Placed,
+    offset: f32,
+    focus: Option<Focus>,
+) -> Vec<Across<'a, Item, Face>> {
+    let Placed { region, inset, .. } = *wall;
+    let place = |top: f32, height: f32| {
+        area(
+            region.x + inset,
+            region.y + top - offset,
+            region.width - 2.0 * inset,
+            height,
+        )
+    };
+    let mut rows = Vec::new();
+    let franchises = series
+        .franchises
+        .bands()
+        .iter()
+        .zip(&wall.layout.franchises);
+    for (index, (band, top)) in franchises.enumerate() {
+        rows.push(Across::Strip(strip::Strip {
+            room: None,
+            members: &band.members,
+            current: band.current,
+            kept: None,
+            focus: match focus {
+                Some(Focus::Franchise(strip, Place::Member(member))) if strip == index => {
+                    Some(member)
+                }
+                _ => None,
+            },
+            heading: &band.heading,
+            library: &series.library,
+            last: None,
+            lines: card::LINES,
+            headed: matches!(
+                focus,
+                Some(Focus::Franchise(strip, Place::Heading)) if strip == index
+            ),
+            region: place(*top, layout::strip_height()),
+            scroll: None,
+        }));
+    }
+    let stripes = series.stripes.bands().iter().zip(&wall.layout.stripes);
+    for (index, (band, top)) in stripes.enumerate() {
+        rows.push(Across::Stripe(people::Stripe {
+            people: &band.faces,
+            focus: match focus {
+                Some(Focus::Stripe(stripe, slot)) if stripe == index => Some(slot),
+                _ => None,
+            },
+            heading: band.heading,
+            library: &series.library,
+            region: place(*top, people::HEIGHT),
+            scroll: None,
+        }));
+    }
+    rows
 }
 
 /// The box the series' logo draws in at these bounds, which is where the
@@ -259,158 +298,6 @@ pub fn head(bounds: Rectangle) -> Rectangle {
     )
 }
 
-impl<A: Art> Page<'_, A> {
-    // The header's blocks, from the logo down to the plot. Every block is
-    // cut to its own lines, so a long title, a long line, or a long plot
-    // never pushes the header past its fixed height. The focused
-    // episode's line and plot stand in the place the series' plot takes on
-    // a series whose episodes have not landed, and while a stripe holds
-    // focus.
-    fn header(
-        &self,
-        frame: &mut canvas::Frame<Renderer>,
-        store: &mut A,
-        bounds: Rectangle,
-        region: Rectangle,
-        focus: Option<Focus>,
-    ) {
-        let series = self.series;
-        // The column is a share of the whole frame's width, and not of the
-        // content region's, so it ends inside the scrim's full shade.
-        let column = bounds.width * COLUMN;
-        let mut stack = Stack::new(Point::new(region.x, region.y + layout::TOP), layout::GAP);
-
-        let title = area(stack.at().x, stack.at().y, column, layout::LOGO_HEIGHT);
-        frame.with_clip(title, |frame| {
-            header::title(
-                frame,
-                store,
-                &header::Title {
-                    library: &series.library,
-                    logo: &series.logo,
-                    name: &series.title,
-                    at: stack.at(),
-                    logo_box: (layout::LOGO_WIDTH, layout::LOGO_HEIGHT),
-                    decode: curtain::logo_decode(bounds),
-                    width: column,
-                    size: look::HEAD_TITLE,
-                    lifted: self.lifted,
-                },
-            );
-        });
-        stack.add(layout::LOGO_HEIGHT);
-
-        // The facts line is one line, cut with an ellipsis where a long
-        // list of genres runs past the column, so it never ends on a comma.
-        let taken = text::block(
-            frame,
-            &text::measured_cut(&series.facts, look::FACTS, column),
-            stack.at(),
-            look::FACTS,
-            look::muted(),
-            column,
-            1,
-        );
-        stack.add(taken);
-
-        let taken = ratings::draw(frame, &series.ratings, stack.at());
-        stack.add(taken);
-
-        let (line, aired, plot) = match series.focused() {
-            Some(still) => (
-                still.facts.as_str(),
-                still.aired.as_str(),
-                still.plot.as_str(),
-            ),
-            None => ("", "", series.plot.as_str()),
-        };
-        // The episode's name is cut to one line with an ellipsis, and the
-        // runtime and the air date take a line of their own under it, so
-        // a long name never pushes the date out of the header.
-        text::block(
-            frame,
-            &text::cut(line, look::FACTS, column),
-            stack.at(),
-            look::FACTS,
-            look::text(),
-            column,
-            1,
-        );
-        stack.add(text::height(1, look::FACTS));
-        text::block(
-            frame,
-            aired,
-            stack.at(),
-            look::FACTS,
-            look::muted(),
-            column,
-            1,
-        );
-        stack.add(text::height(1, look::FACTS));
-        text::block(
-            frame,
-            plot,
-            stack.at(),
-            look::PLOT,
-            look::text(),
-            column,
-            layout::PLOT_LINES,
-        );
-        // The series' own row draws beside the text column, level with the
-        // top of the plot, so the header keeps the height it has on a
-        // series that holds no trailer.
-        let opened = series.opened();
-        let beside = Point::new(
-            buttons_left(region, column),
-            match opened {
-                Some(_) => region.y + layout::episode_row(),
-                None => stack.at().y,
-            },
-        );
-        // Every block under the ratings adds the height it is cut to, and
-        // not the lines one episode's text filled, so the plot and the
-        // button row keep their place whatever holds focus.
-        stack.add(text::height(layout::PLOT_LINES, look::PLOT));
-
-        let words = row::Button::drawn(&series.buttons());
-        // An episode's own row draws in the same place, over the series'
-        // row, while it holds focus.
-        buttons::draw(
-            frame,
-            &words,
-            beside,
-            match focus {
-                Some(Focus::Buttons(index) | Focus::Episode(_, index)) => Some(index),
-                _ => None,
-            },
-        );
-        let Some(still) = opened else {
-            return;
-        };
-        // The status line draws over the backdrop, past the scrim's full
-        // shade, so its status draws over a halo. The bar is as wide as the
-        // text column where the header has the room.
-        let status = still.status();
-        let marks = watch::Mark::drawn(&series.marks());
-        line::draw(
-            frame,
-            &line::Line {
-                share: watch::share(still.progress.as_ref()),
-                status: &status.words,
-                finished: status.finished,
-                marks: &marks,
-                focus: match focus {
-                    Some(Focus::EpisodeMark(_, index)) => Some(index),
-                    _ => None,
-                },
-                halo: true,
-            },
-            Point::new(beside.x, beside.y + buttons::HEIGHT),
-            column.min(region.x + region.width - beside.x),
-        );
-    }
-}
-
 // The page as the browser draws it: the backdrop, this front layer, and the
 // loading state's layer over both.
 impl Series {
@@ -418,12 +305,13 @@ impl Series {
     /// header and the wall over both, and the departing art of the
     /// loading state over all three while that state runs. The dim of the
     /// room and the curtain's front are the frame's own layers over this
-    /// one.
+    /// one. `at` is the second the frame draws, which the scrolls ease on.
     pub fn view<'a, A: Art>(
         &'a self,
         store: &'a RefCell<A>,
         curtain: Option<Curtain<'a>>,
         held: bool,
+        at: f64,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         layers::Page {
             library: &self.library,
@@ -435,6 +323,7 @@ impl Series {
                 store,
                 lifted: curtain.is_some(),
                 held,
+                at,
             },
             over: curtain.map(|curtain| self.curtain(store, curtain)),
         }

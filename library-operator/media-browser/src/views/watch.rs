@@ -2,8 +2,9 @@
 // under it the status line, which holds the status of the work and the
 // marks that change it. At rest the marks are quiet, a thin outline and
 // muted words, so they read as bookkeeping beside the status and not as
-// more ways to play. A focused mark takes a playback button's fill, full
-// ink, and the focus stroke. While a mark holds focus, the bar is twice as
+// more ways to play. A focused mark takes a playback button's fill and
+// full ink, and the browser's focus outline goes around it. While a mark
+// holds focus, the bar is twice as
 // tall and the status takes full ink, so the person sees the progress the
 // mark will change.
 
@@ -14,7 +15,7 @@ use iced_winit::core::text::Alignment;
 use iced_winit::core::{Color, Point, Rectangle};
 
 use super::icon::{self, Icon};
-use super::{area, clock, extent, label, mark, progress, text};
+use super::{area, clock, extent, label, progress, text};
 use crate::look;
 
 /// The space between the foot of the playback row and the top of the bar,
@@ -128,6 +129,24 @@ pub fn marks(band: Rectangle, status: f32, widths: &[f32]) -> Vec<Rectangle> {
         .collect()
 }
 
+/// The box of the mark that holds focus on the line under a playback row
+/// whose foot is at `at`, which the focus outline goes around, or nothing
+/// while focus is elsewhere.
+pub fn focused(line: &Line, at: Point) -> Option<Rectangle> {
+    let index = line.focus?;
+    shapes(line, band(at)).get(index).copied()
+}
+
+// The box of every mark on the line, after its status.
+fn shapes(line: &Line, band: Rectangle) -> Vec<Rectangle> {
+    let widths: Vec<f32> = line
+        .marks
+        .iter()
+        .map(|(_, words)| mark_width(words))
+        .collect();
+    marks(band, status_width(line.status, line.finished), &widths)
+}
+
 /// Draw the line under a playback row whose foot is at `at`, with a bar
 /// this wide.
 pub fn draw(frame: &mut canvas::Frame<Renderer>, line: &Line, at: Point, width: f32) {
@@ -178,18 +197,7 @@ pub fn draw(frame: &mut canvas::Frame<Renderer>, line: &Line, at: Point, width: 
     }
     frame.fill_text(status(words_at, ink));
 
-    let widths: Vec<f32> = line
-        .marks
-        .iter()
-        .map(|(_, words)| mark_width(words))
-        .collect();
-    let status = status_width(line.status, line.finished);
-    for (index, ((glyph, words), shape)) in line
-        .marks
-        .iter()
-        .zip(marks(band, status, &widths))
-        .enumerate()
-    {
+    for (index, ((glyph, words), shape)) in line.marks.iter().zip(shapes(line, band)).enumerate() {
         let focused = line.focus == Some(index);
         one_mark(frame, *glyph, words, shape, focused);
     }
@@ -206,7 +214,7 @@ fn track_color(held: bool) -> Color {
 
 // One mark in its box. At rest it is a translucent plate with a thin
 // outline and muted words. Focused, it is a playback button: the button's
-// fill, full ink, and the focus stroke outside it.
+// fill and full ink.
 fn one_mark(
     frame: &mut canvas::Frame<Renderer>,
     glyph: Icon,
@@ -261,9 +269,6 @@ fn one_mark(
         Vertical::Center,
         f32::INFINITY,
     ));
-    if focused {
-        mark(frame, shape);
-    }
 }
 
 #[cfg(test)]
@@ -302,6 +307,28 @@ mod tests {
         assert_eq!(shapes[1].width, 200.0);
         assert_eq!(shapes[0].y, band(AT).y);
         assert_eq!(shapes[0].height, MARK_HEIGHT);
+    }
+
+    #[test]
+    fn the_outline_goes_around_the_mark_that_holds_focus() {
+        let marks = [
+            (Icon::Check, "Mark watched"),
+            (Icon::Undo, "Clear progress"),
+        ];
+        let mut line = Line {
+            share: 0.5,
+            status: "Half watched",
+            finished: false,
+            marks: &marks,
+            focus: Some(1),
+            halo: false,
+        };
+        let widths = [mark_width("Mark watched"), mark_width("Clear progress")];
+        let shapes = super::marks(band(AT), status_width("Half watched", false), &widths);
+        assert_eq!(focused(&line, AT), Some(shapes[1]));
+
+        line.focus = None;
+        assert_eq!(focused(&line, AT), None);
     }
 
     #[test]

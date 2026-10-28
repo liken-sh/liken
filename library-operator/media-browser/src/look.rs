@@ -182,18 +182,18 @@ pub const LIGHTS_UP: f64 = 0.3;
 /// down press. It is short, because from a couch the eye follows the press
 /// to the next slot at once, and an outline that arrives late reads as a
 /// slow remote.
-pub const LEAD: f64 = 0.13;
+pub const LEAD: f64 = 0.07;
 
 /// How long the trailing edge of the focus outline takes to leave the slot
 /// focus moved from, in seconds. It is longer than `LEAD`, so for a moment
 /// the outline spans both slots and then closes behind the press, and the
 /// eye reads which way focus went.
-pub const FOLLOW: f64 = 0.24;
+pub const FOLLOW: f64 = 0.13;
 
 /// How long a row or a wall takes to scroll to the place a press moves it
 /// to, in seconds. It sits between `LEAD` and `FOLLOW`, so the row lands
 /// while the outline closes on the slot and the two read as one motion.
-pub const SCROLL: f64 = 0.2;
+pub const SCROLL: f64 = 0.11;
 
 /// The shortest share of its length a motion runs at while a key is held.
 /// A remote repeats a held key faster than `FOLLOW`, so each length then
@@ -221,7 +221,7 @@ pub const BREATH_EVERY: f64 = 10.0;
 /// How long the outline takes to return from a breath to the mark's color
 /// when a press arrives, in seconds. It is short, so the press is what the
 /// eye sees and not the end of the breath.
-pub const BREATH_RELEASE: f64 = 0.15;
+pub const BREATH_RELEASE: f64 = 0.08;
 
 /// How far the breath's peak lifts the accent toward the text color. The
 /// full accent is only a little brighter than the mark, which is the accent

@@ -16,7 +16,7 @@ use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::{Color, Rectangle};
 
-use super::{Card, Tone, area, artwork, card, mark, progress, scroll, text};
+use super::{Card, Tone, area, artwork, card, progress, scroll, text};
 use crate::art::Art;
 use crate::look;
 
@@ -165,9 +165,6 @@ pub struct Grid<'a, T> {
     /// The focused item's index, or nothing where focus is elsewhere on
     /// the screen.
     pub focus: Option<usize>,
-    /// Whether the focused slot carries the mark. It does not while the
-    /// band above holds focus.
-    pub marked: bool,
     /// The library the art paths resolve against.
     pub library: &'a str,
     /// The height of a slot as a share of its width.
@@ -219,9 +216,6 @@ pub fn draw<T: Card, A: Art>(
         );
         progress::draw(frame, item, slot);
         let focused = Some(index) == grid.focus;
-        if focused && grid.marked {
-            mark(frame, slot);
-        }
         // A card's lines clip to their own bands, and a band's clip does
         // not inherit the wall's, so a line whose band has left the region
         // draws nothing at all, instead of over what stands above the
@@ -255,10 +249,9 @@ pub fn draw<T: Card, A: Art>(
     }
 }
 
-/// The slot the focus mark goes around at this grid's scroll, or nothing
-/// where focus is elsewhere on the screen. The wall draws the mark only
-/// while `marked`; a screen whose focus the browser's outline follows
-/// draws none and hands the outline this box.
+/// The slot the focus outline goes around at this grid's scroll, or
+/// nothing where focus is elsewhere on the screen. The wall draws no mark
+/// of its own.
 pub fn focused<T>(grid: &Grid<'_, T>) -> Option<Rectangle> {
     let index = grid.focus.filter(|index| *index < grid.items.len())?;
     let cells = lined(grid.region.width, grid.ratio, grid.columns, grid.lines);

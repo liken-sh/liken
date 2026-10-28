@@ -504,7 +504,13 @@ fn the_loop_draws_the_state_and_goes_quiet_after_it() {
     browser.tick(PRESS + 5.0 + look::RETURN);
     browser.minute = Some(MINUTE);
 
-    assert_eq!(browser.next_frame(PRESS + 6.0), Some(MINUTE));
+    // Between two breaths of the outline around the page's focus, the
+    // next frame the loop asks for is the start of the next breath.
+    let between = PRESS + look::BREATH_DELAY + look::BREATH + 1.0;
+    assert_eq!(
+        browser.next_frame(between),
+        Some(PRESS + look::BREATH_DELAY + look::BREATH_EVERY)
+    );
 }
 
 // A state held under a film would draw a black frame sixty times a

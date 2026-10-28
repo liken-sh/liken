@@ -270,8 +270,10 @@ fn the_shade_takes_the_outline_off_the_glass() {
     assert_eq!(browser.drawn(), None);
 }
 
+// A title's page answers where its focus is like every other screen, so
+// the outline goes around the focused button and breathes there.
 #[test]
-fn a_title_page_strokes_its_own_mark_and_draws_no_outline() {
+fn a_title_page_draws_the_outline_around_its_focus() {
     let mut browser = on_the_libraries();
     press(&mut browser, "enter", PRESS);
     press(&mut browser, "enter", PRESS + 1.0);
@@ -279,6 +281,50 @@ fn a_title_page_strokes_its_own_mark_and_draws_no_outline() {
     browser.tick(PRESS + 2.0);
     browser.minute = Some(MINUTE);
 
-    assert_eq!(browser.drawn(), None);
-    assert_eq!(browser.next_frame(PRESS + 2.0), Some(MINUTE));
+    let drawn = browser.drawn().expect("the page's focus has an outline");
+    assert_eq!(drawn.layer, crate::browser::outline::Layer::Screen);
+    assert_eq!(drawn.around, resting(&browser));
+    assert_eq!(
+        browser.next_frame(PRESS + 2.0),
+        Some(PRESS + 1.0 + look::BREATH_DELAY)
+    );
 }
+
+// The browser on the home page under the person picker, which it raises
+// at once because nobody in the room of two has said who is watching.
+fn on_the_picker() -> Browser<Fake, NoArt> {
+    let (browser, _bus) = playing(vec![one_item()]);
+    let mut browser = browser.with_audience(
+        ["first", "second"]
+            .iter()
+            .map(|name| crate::audience::Person {
+                name: (*name).to_string(),
+                display_name: (*name).to_string(),
+                thumbnail: None,
+            })
+            .collect(),
+        Vec::new(),
+    );
+    browser.tick(0.0);
+    assert!(browser.picker.is_some(), "nobody has said who is watching");
+    browser
+}
+
+#[test]
+fn a_press_on_the_picker_moves_the_outline_to_the_next_tile() {
+    let mut browser = on_the_picker();
+    let from = drawn_at(&mut browser, PRESS);
+    press(&mut browser, "right", PRESS);
+    let to = resting(&browser);
+    assert!(to.x > from.x, "{from:?} {to:?}");
+
+    let part = drawn_at(&mut browser, PRESS + look::LEAD * 0.75);
+    assert!(
+        part.x < to.x && part.x + part.width > from.x + from.width,
+        "{part:?}"
+    );
+    assert_eq!(drawn_at(&mut browser, PRESS + look::FOLLOW), to);
+}
+
+// The outline on the pages a wall or a strip opens.
+mod pages;

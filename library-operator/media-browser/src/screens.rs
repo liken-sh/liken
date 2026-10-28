@@ -278,8 +278,9 @@ impl Screen {
     /// franchise page draw in the circles of the room.
     ///
     /// `held` is whether the screen holds focus. The browser's strip
-    /// takes focus off the screen under it, and a screen that drew its
-    /// own mark then would put two marks on the glass.
+    /// takes focus off the screen under it, and the outline goes to the
+    /// strip, so a screen then draws nothing as focused, such as the
+    /// fill of a focused bar or the taller bar under a focused mark.
     ///
     /// `at` is the second the frame draws, which a scroll eases on.
     pub fn view<'a, A: Art>(
@@ -293,23 +294,27 @@ impl Screen {
         match self {
             Self::Home(screen) => screen.view(store, faces, held, at),
             Self::Wall(screen) => screen.view(store, held, at),
-            Self::Movie(screen) => screen.view(store, curtain, held),
-            Self::Series(screen) => screen.view(store, curtain, held),
-            Self::Person(screen) => screen.view(store, held),
-            Self::Franchise(screen) => screen.view(store, faces, held),
+            Self::Movie(screen) => screen.view(store, curtain, held, at),
+            Self::Series(screen) => screen.view(store, curtain, held, at),
+            Self::Person(screen) => screen.view(store, at),
+            Self::Franchise(screen) => screen.view(store, faces, at),
         }
     }
 
     /// The rectangle the browser's focus outline goes to on this screen at
-    /// these bounds, at the place every scroll comes to rest. The home page
-    /// and a wall answer it and draw no mark of their own. A title's page,
-    /// a person's page, and a franchise's page answer nothing: they stroke
-    /// their own mark at rest, and the outline does not travel on them.
+    /// these bounds, at the place every scroll comes to rest. Every screen
+    /// answers it and draws no focus mark of its own, so one outline
+    /// travels from the focus a press left to the focus it reached.
+    /// Nothing where the screen holds nothing to focus, such as a wall
+    /// with no slots.
     pub fn marked(&self, bounds: Rectangle) -> Option<Rectangle> {
         match self {
             Self::Home(screen) => screen.marked(bounds),
             Self::Wall(screen) => screen.marked(bounds),
-            Self::Movie(_) | Self::Series(_) | Self::Person(_) | Self::Franchise(_) => None,
+            Self::Movie(screen) => screen.marked(bounds),
+            Self::Series(screen) => screen.marked(bounds),
+            Self::Person(screen) => screen.marked(bounds),
+            Self::Franchise(screen) => screen.marked(bounds),
         }
     }
 
@@ -321,9 +326,10 @@ impl Screen {
         match self {
             Self::Home(screen) => screen.follow(bounds, at, pace),
             Self::Wall(screen) => screen.follow(bounds, at, pace),
-            Self::Movie(_) | Self::Series(_) | Self::Person(_) | Self::Franchise(_) => {
-                f64::NEG_INFINITY
-            }
+            Self::Movie(screen) => screen.follow(bounds, at, pace),
+            Self::Series(screen) => screen.follow(bounds, at, pace),
+            Self::Person(screen) => screen.follow(bounds, at, pace),
+            Self::Franchise(screen) => screen.follow(bounds, at, pace),
         }
     }
 

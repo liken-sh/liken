@@ -31,7 +31,6 @@ impl Wall {
         let grid = wall::Grid {
             items: &self.slots.items,
             focus: Some(standing),
-            marked: false,
             library: "",
             ratio: wall::POSTER,
             columns: wall::COLUMNS,

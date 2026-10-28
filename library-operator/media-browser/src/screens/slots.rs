@@ -2,20 +2,17 @@
 // library wall and a person's works were two copies of one grid, and the
 // home page's walls would have been a third. This module holds the query,
 // the answer's name, the items, the focus, the arrows and select over
-// them, the prefetch under focus, and the drawing into a region.
+// them, the prefetch under focus, and the grid they draw as in a region.
 // The select and the prefetch over one item are functions of their own
 // here, because the home page's strips open the same pages a wall
 // does.
 
 use std::ops::Range;
 
-use iced_wgpu::Renderer;
-use iced_widget::canvas;
 use iced_winit::core::Rectangle;
 
 use super::wall::Wall;
 use super::{Item, Screen, Step, credits, franchise, movie, person, series};
-use crate::art::Art;
 use crate::catalog::search::PEOPLE;
 use crate::catalog::{Counts, Query, Source};
 use crate::focus;
@@ -117,39 +114,28 @@ impl Slots {
         backdrop(self.items.get(self.focus)?, source)
     }
 
-    /// Draw the grid of these slots in the region, scrolled so the focused
-    /// row stays in view, with the mark on the focused slot only while
-    /// `marked`, and `lines` caption lines under each slot.
-    pub fn draw<A: Art>(
-        &self,
-        frame: &mut canvas::Frame<Renderer>,
-        store: &mut A,
-        region: Rectangle,
-        marked: bool,
-        lines: usize,
-    ) {
+    /// The grid of these slots in the region, scrolled to rest with the
+    /// focused row in view, with `lines` caption lines under each slot.
+    /// The grid draws no focus mark: the browser's outline goes around the
+    /// box `wall::focused` answers for it.
+    pub fn grid(&self, region: Rectangle, lines: usize) -> wall::Grid<'_, Item> {
         let cells = wall::lined(region.width, wall::POSTER, wall::COLUMNS, lines);
-        wall::draw(
-            frame,
-            store,
-            &wall::Grid {
-                items: &self.items,
-                focus: Some(self.focus),
-                marked,
-                library: "",
-                ratio: wall::POSTER,
-                columns: wall::COLUMNS,
-                lines,
-                offset: wall::scrolled(
-                    self.focus,
-                    self.items.len(),
-                    wall::COLUMNS,
-                    &cells,
-                    region.height,
-                ),
-                region,
-            },
-        );
+        wall::Grid {
+            items: &self.items,
+            focus: Some(self.focus),
+            library: "",
+            ratio: wall::POSTER,
+            columns: wall::COLUMNS,
+            lines,
+            offset: wall::scrolled(
+                self.focus,
+                self.items.len(),
+                wall::COLUMNS,
+                &cells,
+                region.height,
+            ),
+            region,
+        }
     }
 }
 

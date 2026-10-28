@@ -7,6 +7,10 @@
 // from the wall, as it was when the wall played it on select. That button
 // is Resume where the audience is in the middle of the film.
 
+// The motion of the page: where the focus outline goes, and how far the
+// page and each row under its playback row have scrolled while they ease
+// to rest.
+mod motion;
 mod page;
 pub mod row;
 pub mod watch;
@@ -26,6 +30,7 @@ use crate::catalog::draw::Date;
 use crate::catalog::progress::thread;
 use crate::catalog::{MovieDetails, MovieSet, Progress, Query, Selection, Slot, Source};
 use crate::focus;
+use crate::motion::{Glide, Rows};
 use crate::views::curtain::{Curtain, Head, Layer};
 use crate::views::{layers, ratings};
 
@@ -148,6 +153,12 @@ pub struct Movie {
     pub progress: Option<Progress>,
     /// Where focus is.
     pub focus: Focus,
+    // How far the page has scrolled down, as it eases to the place that
+    // keeps the focused block in view.
+    scroll: Glide,
+    // How far each row under the playback row has scrolled across, as it
+    // eases to the place that keeps its anchor in view.
+    rows: Rows,
 }
 
 impl Movie {
@@ -177,6 +188,8 @@ impl Movie {
             via: None,
             progress: None,
             focus: Focus::Buttons(0),
+            scroll: Glide::still(0.0),
+            rows: Rows::default(),
         })
     }
 
@@ -190,6 +203,8 @@ impl Movie {
         };
         fresh.progress = self.progress.clone();
         fresh.via = self.via.clone();
+        fresh.scroll = self.scroll;
+        fresh.rows = std::mem::take(&mut self.rows);
         let focus = self.focus;
         *self = fresh;
         self.focus = self.hold(focus);
@@ -259,12 +274,14 @@ impl Movie {
     /// The view: the backdrop, the scrim over it, the page over both, and
     /// the departing art of the loading state over all three while that
     /// state runs. The dim of the room and the curtain's front are the
-    /// frame's own layers over this one.
+    /// frame's own layers over this one. `at` is the second the frame
+    /// draws, which the scrolls ease on.
     pub fn view<'a, A: Art>(
         &'a self,
         store: &'a RefCell<A>,
         curtain: Option<Curtain<'a>>,
         held: bool,
+        at: f64,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         layers::Page {
             library: &self.library,
@@ -276,6 +293,7 @@ impl Movie {
                 store,
                 lifted: curtain.is_some(),
                 held,
+                at,
             },
             over: curtain.map(|curtain| self.curtain(store, curtain)),
         }

@@ -177,7 +177,12 @@ mod tests {
                 true,
                 Some(FIRST + look::BREATH_EVERY),
             ),
-            (released, peak + 0.1, true, Some(peak + 0.1)),
+            (
+                released,
+                peak + look::BREATH_RELEASE / 2.0,
+                true,
+                Some(peak + look::BREATH_RELEASE / 2.0),
+            ),
         ];
         for (breath, at, breathes, next) in cases {
             assert_eq!(breath.next_frame(at, breathes), next, "{at}");

@@ -10,8 +10,10 @@ mod breath;
 mod glide;
 mod outline;
 mod pace;
+mod rows;
 
 pub use breath::Breath;
 pub use glide::Glide;
 pub use outline::Outline;
 pub use pace::Pace;
+pub use rows::Rows;

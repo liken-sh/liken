@@ -3,9 +3,8 @@
 // nothing grows or crops to a ratio it does not have. A "see all" slot
 // may end the row. A set strip on a movie page marks the film the page is
 // about and dims its siblings. The row scrolls so the focused slot stays
-// in view. The strip draws no focus mark: it answers the box the mark goes
-// around, and the screen draws the mark, or the browser's outline follows
-// it.
+// in view. The strip draws no focus mark: it answers the box the
+// browser's focus outline goes around.
 
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
@@ -349,19 +348,6 @@ pub fn draw<T: Card, A: Art>(
         if strip.current == Some(index) {
             underline(frame, slot);
         }
-    }
-}
-
-/// Draw the strip and stroke its own focus mark at rest, for a screen
-/// whose focus the browser's outline does not follow yet.
-pub fn draw_marked<T: Card, A: Art>(
-    frame: &mut canvas::Frame<Renderer>,
-    store: &mut A,
-    strip: &Strip<'_, T>,
-) {
-    draw(frame, store, strip);
-    if let Some(at) = focused(strip) {
-        super::mark(frame, at);
     }
 }
 

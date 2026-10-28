@@ -15,13 +15,16 @@ mod card;
 mod circles;
 pub mod leaves;
 mod metro;
+// The motion of the page: where the focus outline goes, and how far the
+// wall has scrolled while it eases to rest.
+mod motion;
 mod page;
 pub mod progress;
 mod runs;
 pub mod strips;
 mod wall;
 
-use std::cell::{self, RefCell};
+use std::cell::RefCell;
 use std::convert::Infallible;
 
 use iced_wgpu::Renderer;
@@ -34,6 +37,7 @@ use crate::audience::faces::Faces;
 use crate::catalog::Source;
 use crate::catalog::draw::Date;
 use crate::catalog::franchise::Entry;
+use crate::motion::Glide;
 use crate::views::band;
 
 pub use metro::Run;
@@ -84,10 +88,11 @@ pub struct Franchise {
     placed: bool,
     /// The row focus is on.
     pub focus: usize,
-    /// How far the wall stood scrolled at the last frame. The scroll
-    /// moves only when focus leaves the view, so the last position is
-    /// part of the page, and the frame that draws it writes it here.
-    pub scrolled: cell::Cell<f32>,
+    // How far the wall has scrolled down, as it eases to the place that
+    // keeps the focused row in view. The scroll moves only when focus
+    // leaves the view, so the place it last came to rest is part of the
+    // page, and the next place is measured from it.
+    scroll: Glide,
 }
 
 impl Franchise {
@@ -154,7 +159,7 @@ impl Franchise {
             marks: progress::Marks::default(),
             placed: false,
             focus: 0,
-            scrolled: cell::Cell::new(0.0),
+            scroll: Glide::still(0.0),
         };
         Some(page)
     }
@@ -167,12 +172,12 @@ impl Franchise {
             return;
         };
         let focus = self.focus;
-        let scrolled = self.scrolled.get();
+        let scroll = self.scroll;
         let marks = std::mem::take(&mut self.marks);
         let placed = self.placed;
         *self = fresh;
         self.focus = self.hold(focus);
-        self.scrolled.set(scrolled);
+        self.scroll = scroll;
         self.marks = marks;
         self.placed = placed;
     }
@@ -207,26 +212,30 @@ impl Franchise {
     }
 
     /// The view: the wall, the headings that have left their own tops as
-    /// a layer over it, and the band as a layer over both.
+    /// a layer over it, and the band as a layer over both. `at` is the
+    /// second the frame draws, which the wall's scroll eases on.
     pub fn view<'a, A: Art>(
         &'a self,
         store: &'a RefCell<A>,
         faces: &'a Faces,
-        held: bool,
+        at: f64,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         let wall = canvas(page::Page {
             franchise: self,
             store,
             faces,
-            held,
+            at,
         })
         .width(Length::Fill)
         .height(Length::Fill)
         .into();
-        let held = canvas(page::Held { franchise: self })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into();
+        let held = canvas(page::Held {
+            franchise: self,
+            at,
+        })
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into();
         let band = band::layer(&self.title, &self.caption);
         iced_widget::Stack::with_children(vec![wall, held, band])
             .width(Length::Fill)

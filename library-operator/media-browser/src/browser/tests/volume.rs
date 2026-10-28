@@ -110,23 +110,20 @@ fn a_descent_under_the_row_leaves_it_where_it_stands() {
     assert!(browser.level.row(PRESS + 1.0).is_some());
 }
 
-// The browser stands on a title's page, whose focus the outline does not
-// follow, so no breath of the outline asks for frames beside the row's.
+// The row's own share of the loop's schedule. Every screen draws the
+// focus outline, whose breath asks for frames of its own, so the case
+// reads the row's answer and not the loop's.
 #[test]
 fn the_row_asks_the_loop_for_its_frames() {
-    let (mut browser, bus) = on_bus(3, Vec::new());
-    browser.key("enter");
-    browser.key("enter");
-    let _ = showing_page(&browser);
-    *bus.inbound.lock().expect("no test panics with the lock") = vec![moment(level(), true)];
+    let (mut browser, _bus) = on_bus(3, vec![moment(level(), true)]);
     browser.pump(PRESS);
 
     // The fade in draws every frame it covers, the hold names the second
     // the row starts to leave, and a row that has left asks for nothing.
-    assert_eq!(browser.next_frame(PRESS + 0.1), Some(PRESS + 0.1));
-    assert_eq!(browser.next_frame(PRESS + 1.0), Some(PRESS + 4.0));
-    assert_eq!(browser.next_frame(PRESS + 4.3), Some(PRESS + 4.3));
-    assert_eq!(browser.next_frame(PRESS + 4.7), None);
+    assert_eq!(browser.level.next_frame(PRESS + 0.1), Some(PRESS + 0.1));
+    assert_eq!(browser.level.next_frame(PRESS + 1.0), Some(PRESS + 4.0));
+    assert_eq!(browser.level.next_frame(PRESS + 4.3), Some(PRESS + 4.3));
+    assert_eq!(browser.level.next_frame(PRESS + 4.7), None);
 }
 
 #[test]

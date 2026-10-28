@@ -11,6 +11,9 @@
 // The focus outline, which the browser draws as a layer of its own over
 // the screen that holds focus, is one more.
 //
+// A row a title's page scrolls across, a strip of posters or a stripe of
+// headshots, is one more, so the page eases both kinds the same way.
+//
 // The bar and the status line under a page's playback row, with the marks
 // that change the status, are one more.
 //
@@ -33,6 +36,7 @@
 // the person did not choose dims by the image's own opacity, and a
 // backdrop is a layer of its own under everything a screen draws.
 
+pub mod across;
 pub mod band;
 pub mod banner;
 pub mod buttons;
@@ -333,17 +337,9 @@ pub fn underlined(slot: Rectangle) -> Rectangle {
     )
 }
 
-// The one mark focus takes everywhere on this screen: a stroke of the
-// accent outside the chosen slot. A screen whose focus the browser's
-// outline follows draws none of its own; the screens the outline does not
-// follow yet stroke their mark here, at rest.
-pub(crate) fn mark(frame: &mut canvas::Frame<Renderer>, slot: Rectangle) {
-    stroke(frame, marked(slot), look::mark());
-}
-
-// The focus stroke along this rectangle, in this color: the stroke a
-// screen's own mark draws, and the one the browser's outline draws as it
-// travels and breathes.
+// The focus stroke along this rectangle, in this color: the one mark
+// focus takes everywhere, which the browser's outline draws as it travels
+// and breathes. No screen strokes a mark of its own.
 pub(crate) fn stroke(frame: &mut canvas::Frame<Renderer>, around: Rectangle, color: Color) {
     frame.stroke_rectangle(
         around.position(),

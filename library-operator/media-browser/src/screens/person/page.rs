@@ -32,8 +32,8 @@ const GAP: f32 = 12.0;
 // The lines the biography is cut to.
 const BIOGRAPHY_LINES: usize = 4;
 
-// The lines under each work: the card's own two.
-const LINES: usize = card::LINES;
+/// The lines under each work: the card's own two.
+pub const LINES: usize = card::LINES;
 
 /// The width of the headshot: the height at the wall's poster
 /// ratio.
@@ -64,8 +64,8 @@ pub struct Page<'a, A> {
     pub person: &'a Person,
     /// The store the headshot and the posters come from.
     pub store: &'a RefCell<A>,
-    /// Whether the page holds focus, or the browser's strip over it does.
-    pub held: bool,
+    /// The second this frame draws, which the wall's scroll eases on.
+    pub at: f64,
 }
 
 impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
@@ -100,9 +100,10 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
         }
 
         let region = region(bounds);
-        // The clip reaches up into the space over the first row, so the
-        // mark of a focused slot there draws whole and the head stays
-        // clear.
+        // The clip reaches up into the space over the first row, the room
+        // the focus outline keeps there, so the head stays clear. The
+        // wall draws no mark: the browser's outline goes around the box
+        // `Person::marked` answers.
         let clip = area(
             region.x,
             region.y - wall::HEAD,
@@ -110,7 +111,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
             region.height + wall::HEAD,
         );
         frame.with_clip(clip, |frame| {
-            person.works.draw(frame, store, region, self.held, LINES);
+            wall::draw(frame, store, &person.drawn(bounds, self.at));
         });
 
         vec![frame.into_geometry()]

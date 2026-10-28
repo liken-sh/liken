@@ -11,10 +11,13 @@ use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::{Point, Rectangle, Theme, mouse};
 
+use super::super::Item;
 use super::super::franchise::strips::Place;
+use super::super::stripes::Face;
 use super::{Focus, Movie, row, watch};
 use crate::art::Art;
 use crate::look;
+use crate::views::across::Across;
 use crate::views::stack::{self, Stack};
 use crate::views::{
     area, buttons, card, curtain, header, people, ratings, screen, strip, text, watch as line,
@@ -55,10 +58,119 @@ const STRIPE_LEAD: f32 = 16.0;
 /// The box the movie's logo draws in at these bounds, scroll included,
 /// which is where the loading state starts the logo's move.
 pub fn head(movie: &Movie, bounds: Rectangle) -> Rectangle {
-    let blocks = Blocks::of(movie, bounds);
-    let offset = blocks.scroll(movie, bounds.height);
+    let (blocks, offset) = placed(movie, bounds);
     let at = blocks.title.at(offset);
     area(at.x, at.y, LOGO_WIDTH, LOGO_HEIGHT)
+}
+
+/// Every block of the page at these bounds, and how far the page scrolls
+/// down to rest with the focused block in view.
+pub(super) fn placed(movie: &Movie, bounds: Rectangle) -> (Blocks, f32) {
+    let blocks = Blocks::of(movie, bounds);
+    let offset = blocks.scroll(movie, bounds.height);
+    (blocks, offset)
+}
+
+/// The foot of the playback row that starts at `at`, where the status
+/// line under it starts.
+pub(super) fn under(at: Point) -> Point {
+    Point::new(at.x, at.y + buttons::HEIGHT)
+}
+
+/// The status line under the playback row, with the bar the width of
+/// the text column, so the bar ends where the plot's lines end on every
+/// row and the status never runs past the scrim's full shade. `focus` is
+/// the mark that holds focus.
+pub(super) fn status_line<'a>(
+    movie: &Movie,
+    status: &'a watch::Status,
+    marks: &'a [(crate::views::icon::Icon, &'static str)],
+    focus: Option<usize>,
+) -> line::Line<'a> {
+    line::Line {
+        share: watch::share(movie.progress.as_ref()),
+        status: &status.words,
+        finished: status.finished,
+        marks,
+        focus,
+        halo: false,
+    }
+}
+
+/// The rows the page scrolls across, in the page's order: the set strip,
+/// the franchise strips, and the stripes of people, at this scroll down
+/// and with focus where `focus` puts it. Each row answers the scroll it
+/// rests at, and draws at the scroll it is given.
+pub(super) fn rows<'a>(
+    movie: &'a Movie,
+    blocks: &Blocks,
+    bounds: Rectangle,
+    offset: f32,
+    focus: Option<Focus>,
+) -> Vec<Across<'a, Item, Face>> {
+    let region = screen::region(bounds);
+    let place =
+        |block: &Block, height: f32| area(region.x, block.top - offset, region.width, height);
+    let mut rows = Vec::new();
+    if let (Some(set), Some(block)) = (&movie.set, &blocks.strip) {
+        rows.push(Across::Strip(strip::Strip {
+            room: None,
+            members: &set.members,
+            current: Some(set.current),
+            kept: None,
+            focus: match focus {
+                Some(Focus::Strip(index)) => Some(index),
+                _ => None,
+            },
+            heading: &set.heading,
+            library: &movie.library,
+            last: None,
+            lines: card::LINES,
+            headed: false,
+            region: place(block, strip::height(card::LINES)),
+            scroll: None,
+        }));
+    }
+    let franchises = movie.franchises.bands().iter().zip(&blocks.franchises);
+    for (index, (band, block)) in franchises.enumerate() {
+        rows.push(Across::Strip(strip::Strip {
+            room: None,
+            members: &band.members,
+            current: band.current,
+            kept: None,
+            focus: match focus {
+                Some(Focus::Franchise(strip, Place::Member(member))) if strip == index => {
+                    Some(member)
+                }
+                _ => None,
+            },
+            heading: &band.heading,
+            library: &movie.library,
+            last: None,
+            lines: card::LINES,
+            headed: matches!(
+                focus,
+                Some(Focus::Franchise(strip, Place::Heading)) if strip == index
+            ),
+            region: place(block, strip::height(card::LINES)),
+            scroll: None,
+        }));
+    }
+    let stripes = movie.stripes.bands().iter().zip(&blocks.stripes);
+    for (index, (band, block)) in stripes.enumerate() {
+        rows.push(Across::Stripe(people::Stripe {
+            people: &band.faces,
+            focus: match focus {
+                Some(Focus::Stripe(stripe, slot)) if stripe == index => Some(slot),
+                _ => None,
+            },
+            heading: band.heading,
+            library: &movie.library,
+            region: place(block, people::HEIGHT),
+            scroll: None,
+        }));
+    }
+    rows
 }
 
 /// The page's front layer as one canvas.
@@ -72,6 +184,8 @@ pub struct Page<'a, A> {
     pub lifted: bool,
     /// Whether the page holds focus, or the browser's strip over it does.
     pub held: bool,
+    /// The second this frame draws, which the scrolls ease on.
+    pub at: f64,
 }
 
 impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
@@ -91,8 +205,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
 
         let region = screen::region(bounds);
         let column = column(bounds);
-        let blocks = Blocks::of(movie, bounds);
-        let offset = blocks.scroll(movie, bounds.height);
+        let (blocks, offset) = movie.drawn(bounds, self.at);
 
         header::title(
             &mut frame,
@@ -145,132 +258,34 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
         );
 
         // The page's focus while the page holds it, and none while the
-        // browser's strip does, so one mark draws on the glass.
+        // browser's strip does, so a focused mark and a focused member
+        // draw as focused only while the outline is on the page.
         let focus = self.held.then_some(movie.focus);
 
         let words = row::Button::drawn(&movie.buttons());
         let at = blocks.buttons.at(offset);
-        buttons::draw(
-            &mut frame,
-            &words,
-            at,
-            match focus {
-                Some(Focus::Buttons(index)) => Some(index),
-                _ => None,
-            },
-        );
-        // The status line under the row, with its bar the width of the
-        // text column, so the bar ends where the plot's lines end on every
-        // row and the status never runs past the scrim's full shade.
+        buttons::draw(&mut frame, &words, at);
         let status = movie.status();
         let marks = watch::Mark::drawn(&movie.marks());
+        let marked = match focus {
+            Some(Focus::Marks(index)) => Some(index),
+            _ => None,
+        };
         line::draw(
             &mut frame,
-            &line::Line {
-                share: watch::share(movie.progress.as_ref()),
-                status: &status.words,
-                finished: status.finished,
-                marks: &marks,
-                focus: match focus {
-                    Some(Focus::Marks(index)) => Some(index),
-                    _ => None,
-                },
-                halo: false,
-            },
-            Point::new(at.x, at.y + buttons::HEIGHT),
+            &status_line(movie, &status, &marks, marked),
+            under(at),
             column,
         );
 
-        if let (Some(set), Some(block)) = (&movie.set, blocks.strip) {
-            strip::draw_marked(
-                &mut frame,
-                store,
-                &strip::Strip {
-                    room: None,
-                    members: &set.members,
-                    current: Some(set.current),
-                    kept: None,
-                    focus: match focus {
-                        Some(Focus::Strip(index)) => Some(index),
-                        _ => None,
-                    },
-                    heading: &set.heading,
-                    library: &movie.library,
-                    last: None,
-                    lines: card::LINES,
-                    headed: false,
-                    region: area(
-                        region.x,
-                        block.top - offset,
-                        region.width,
-                        strip::height(card::LINES),
-                    ),
-                    scroll: None,
-                },
-            );
-        }
-
-        for (index, (band, block)) in movie
-            .franchises
-            .bands()
-            .iter()
-            .zip(&blocks.franchises)
+        // Each row draws at the scroll its own ease has reached at this
+        // second, toward the place this frame's focus rests it at.
+        for (index, row) in rows(movie, &blocks, bounds, offset, focus)
+            .into_iter()
             .enumerate()
         {
-            strip::draw_marked(
-                &mut frame,
-                store,
-                &strip::Strip {
-                    room: None,
-                    members: &band.members,
-                    current: band.current,
-                    kept: None,
-                    focus: match focus {
-                        Some(Focus::Franchise(strip, Place::Member(member))) if strip == index => {
-                            Some(member)
-                        }
-                        _ => None,
-                    },
-                    heading: &band.heading,
-                    library: &movie.library,
-                    last: None,
-                    lines: card::LINES,
-                    headed: matches!(
-                        focus,
-                        Some(Focus::Franchise(strip, Place::Heading)) if strip == index
-                    ),
-                    region: area(
-                        region.x,
-                        block.top - offset,
-                        region.width,
-                        strip::height(card::LINES),
-                    ),
-                    scroll: None,
-                },
-            );
-        }
-
-        for (index, (band, block)) in movie
-            .stripes
-            .bands()
-            .iter()
-            .zip(&blocks.stripes)
-            .enumerate()
-        {
-            people::draw(
-                &mut frame,
-                store,
-                &people::Stripe {
-                    people: &band.faces,
-                    focus: match focus {
-                        Some(Focus::Stripe(stripe, slot)) if stripe == index => Some(slot),
-                        _ => None,
-                    },
-                    heading: band.heading,
-                    library: &movie.library,
-                    region: area(region.x, block.top - offset, region.width, people::HEIGHT),
-                },
-            );
+            let scroll = movie.rows.at(index, row.scrolled(), self.at);
+            row.at(scroll).draw(&mut frame, store);
         }
 
         let mut at = Point::new(region.x, blocks.foot.top - offset);
@@ -300,7 +315,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
 // One block of the page: where it starts in the stack's own space, and
 // how tall it is.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Block {
+pub(super) struct Block {
     left: f32,
     top: f32,
     height: f32,
@@ -308,7 +323,7 @@ struct Block {
 
 impl Block {
     // Where the block draws at this scroll.
-    fn at(&self, offset: f32) -> Point {
+    pub(super) fn at(&self, offset: f32) -> Point {
         Point::new(self.left, self.top - offset)
     }
 
@@ -325,13 +340,13 @@ impl Block {
 // no logo takes the height of its title text. A movie with a logo takes
 // the box the logo draws in, so the blocks under it stand still while the
 // decode lands.
-struct Blocks {
+pub(super) struct Blocks {
     title: Block,
     facts: Block,
     ratings: Block,
     tagline: Block,
     plot: Block,
-    buttons: Block,
+    pub(super) buttons: Block,
     strip: Option<Block>,
     franchises: Vec<Block>,
     stripes: Vec<Block>,

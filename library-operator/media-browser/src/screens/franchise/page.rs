@@ -31,7 +31,7 @@ use crate::catalog::franchise::Standing;
 use crate::look;
 use crate::views::clock::strip;
 use crate::views::{
-    REACH, Tone, area, artwork, band, divider, extent, mark, progress, rounded, screen, text,
+    REACH, Tone, area, artwork, band, divider, extent, progress, rounded, screen, text,
     wall as still,
 };
 
@@ -74,8 +74,8 @@ pub struct Page<'a, A> {
     pub store: &'a RefCell<A>,
     /// The faces the circles of the room draw.
     pub faces: &'a Faces,
-    /// Whether the page holds focus, or the browser's strip over it does.
-    pub held: bool,
+    /// The second this frame draws, which the wall's scroll eases on.
+    pub at: f64,
 }
 
 impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
@@ -90,11 +90,6 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
         let page = self.franchise;
-        // The page's focus while the page holds it, and none while the
-        // browser's strip does, so one mark draws on the glass. The scroll
-        // still follows the page's own focus, so the strip never moves the
-        // wall under it.
-        let focus = self.held.then_some(page.focus);
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let store = &mut *self.store.borrow_mut();
 
@@ -111,7 +106,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
             down,
             headings,
             held,
-        } = layout(page, bounds);
+        } = layout(page, bounds, self.at);
 
         frame.with_clip(region, |frame| {
             times(
@@ -148,9 +143,6 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                             page.marks.bar(index),
                         ),
                         false => thin(frame, &row.cell, bounds),
-                    }
-                    if focus == Some(index) {
-                        mark(frame, bounds);
                     }
                 }
             });
@@ -192,6 +184,8 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
 pub struct Held<'a> {
     /// The franchise the page is about.
     pub franchise: &'a Franchise,
+    /// The second this frame draws, which the wall's scroll eases on.
+    pub at: f64,
 }
 
 impl canvas::Program<Infallible, Theme, Renderer> for Held<'_> {
@@ -212,7 +206,7 @@ impl canvas::Program<Infallible, Theme, Renderer> for Held<'_> {
             cards,
             held,
             ..
-        } = layout(page, bounds);
+        } = layout(page, bounds, self.at);
         // The space between the band over the page and the wall is
         // painted here, over the wall, because the renderer clips a line
         // of text as a whole and a row's words that cross the top of the
@@ -222,8 +216,8 @@ impl canvas::Program<Infallible, Theme, Renderer> for Held<'_> {
         // The line stands in the cards' column, where the headings in
         // the flow stand, so it reads as one of them held still, and the
         // strip and the time labels beside it run on up to the top. Its
-        // ground reaches the focus mark's room to the left, so the mark
-        // of a row under it is covered whole. The ground takes a clip of
+        // ground reaches as far left as the rows' clip does, so nothing a
+        // row draws shows beside it. The ground takes a clip of
         // its own, and never the wall's region, because the renderer
         // folds a clip with the bounds of an earlier one into that
         // earlier layer, and the ground would then draw under the rows'
@@ -256,33 +250,63 @@ struct Layout {
     held: Option<String>,
 }
 
-// The layout of the page in this frame: the lane measures the time
-// column, the strip, and the cards, and centers the cards where nothing
-// stands at the left; the tops lay the rows and their headings out; the
-// scroll follows focus; and the headings stand where the scroll puts
-// them.
-fn layout(page: &Franchise, bounds: Rectangle) -> Layout {
+/// The measures of the page at rest: the region the wall scrolls in, the
+/// lane beside the time column, the height of a card's art, the top of
+/// every row, and how far the wall scrolls to keep focus in view.
+pub(super) struct Placed {
+    region: Rectangle,
+    pub(super) lane: wall::Lane,
+    art: f32,
+    pub(super) tops: Vec<f32>,
+    pub(super) settled: f32,
+}
+
+/// The page at rest at these bounds: the lane measures the time column,
+/// the strip, and the cards, and centers the cards where nothing stands
+/// at the left; the tops lay the rows and their headings out; and the
+/// scroll follows focus from where the wall last came to rest, because
+/// the wall moves only when focus leaves the view.
+pub(super) fn placed(page: &Franchise, bounds: Rectangle) -> Placed {
     let region = region(bounds);
+    let lane = wall::Lane::of(region, &page.runs, page.time, circles::width(&page.marks));
+    let art = wall::art_height(region.height - wall::HEAD);
+    let tops = wall::tops(&page.rows, &page.headings, art, wall::HEAD);
+    let settled = wall::scroll(
+        page.scroll.to(),
+        page.focus,
+        &page.headings,
+        &tops,
+        region.height,
+    );
+    Placed {
+        region,
+        lane,
+        art,
+        tops,
+        settled,
+    }
+}
+
+// The layout of the page in this frame: the page at rest, with the scroll
+// as this second draws it, and the headings and the held line where that
+// scroll puts them. Both canvases draw from it, so the two agree on every
+// frame.
+fn layout(page: &Franchise, bounds: Rectangle, at: f64) -> Layout {
+    let Placed {
+        region,
+        lane,
+        art,
+        tops,
+        settled,
+    } = placed(page, bounds);
     let wall::Lane {
         wall,
         columned,
         strip,
         people,
         cards,
-    } = wall::Lane::of(region, &page.runs, page.time, circles::width(&page.marks));
-    let art = wall::art_height(region.height - wall::HEAD);
-    let tops = wall::tops(&page.rows, &page.headings, art, wall::HEAD);
-    // Both canvases read the scroll the last frame left and write the
-    // one they draw with, and the second finds the first's answer
-    // already settled, so the two agree.
-    let down = wall::scroll(
-        page.scrolled.get(),
-        page.focus,
-        &page.headings,
-        &tops,
-        region.height,
-    );
-    page.scrolled.set(down);
+    } = lane;
+    let down = page.scroll.toward(settled, at);
     let headings = wall::heading_boxes(cards, &page.headings, &tops, down);
     let held = wall::crumb(&page.headings, &tops, down);
     Layout {

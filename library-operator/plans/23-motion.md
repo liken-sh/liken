@@ -27,6 +27,12 @@ page, and the franchise page do not move yet: each strokes its own mark
 at rest, as before. The page backdrop's fade is not built. The
 decisions and the lengths are in "The focus outline" below.
 
+Status on 2026-10-28: the outline travels and breathes on every screen.
+The movie page, the series page, the person page, and the franchise
+page answer `Screen::marked` and `Screen::follow` like the home page
+and the walls, every scroll on them eases, and no screen strokes a mark
+of its own. The page backdrop's fade is not built.
+
 ## The focus outline
 
 When a press moves focus, the outline's four edges move from where the
@@ -44,15 +50,21 @@ lights:
 
 | Constant | Length | Reason |
 |---|---|---|
-| `LEAD` | 130 ms | From a couch the eye follows a press to the next slot at once, and an outline that arrives late reads as a slow remote. |
-| `FOLLOW` | 240 ms | Longer than the lead, so the eye reads which way focus went. |
-| `SCROLL` | 200 ms | Between the two, so the row lands while the outline closes on the slot. |
+| `LEAD` | 70 ms | From a couch the eye follows a press to the next slot at once, and an outline that arrives late reads as a slow remote. |
+| `FOLLOW` | 130 ms | Longer than the lead, so the eye reads which way focus went. |
+| `SCROLL` | 110 ms | Between the two, so the row lands while the outline closes on the slot. |
 | `HELD_FLOOR` | a third | The shortest share of its length a motion runs at while a key is held. |
 | `BREATH_DELAY` | 3 s | The rest after the last motion before the first breath. |
 | `BREATH` | 3.6 s | One breath, up to the breath's peak and back. |
 | `BREATH_LIFT` | half | How far the peak lifts the accent toward the text color. On `liken-1` on 2026-10-27, a breath that stopped at the full accent brightened the stroke on the glass by about 11 percent, which did not show in a recording. |
 | `BREATH_EVERY` | 10 s | A breath starts this often while focus rests. |
-| `BREATH_RELEASE` | 150 ms | A press returns a breath to the mark's color this fast. |
+| `BREATH_RELEASE` | 80 ms | A press returns a breath to the mark's color this fast. |
+
+The four lengths of a press started at 130, 240, 200, and 150 ms. On a
+home TV on 2026-10-28 the glide looked right but felt slower than the
+browser had felt with no motion, so each of the four is now about 1.8
+times as fast. The breath's own lengths did not change, because a
+breath is not an answer to a press.
 
 A row's scroll across and a wall's or the home page's scroll down ease
 from their drawn value to the new one over `SCROLL`. The scroll rules
@@ -96,11 +108,13 @@ outline asks for no frame.
 
 The views stay stateless draws. A screen answers where its focus is at
 rest, through `Screen::marked`, from the same geometry functions its
-draw uses (`strip::focused`, `wall::focused`, `rail::focused`, and the
-keyboard grid's cell). The strip over every screen and the picker answer
-the same way. The browser holds one `motion::Outline`, four
-`motion::Glide` values, and retargets it on each press, after the screen
-took the press. It draws the outline as a layer of its own, over the
+draw uses (`strip::focused`, `wall::focused`, `rail::focused`,
+`people::focused` for a stripe's headshot, `buttons::button` for a
+playback button, `watch::focused` for a mark on the status line, a
+franchise row's `cell_box`, and the keyboard grid's cell). The strip
+over every screen and the picker answer the same way. The browser
+holds one `motion::Outline`, four `motion::Glide` values, and retargets
+it on each press, after the screen took the press. It draws the outline as a layer of its own, over the
 layer that holds focus and under every layer over that one, so the dim
 of the room covers an outline on the page and the picker covers the
 page's outline. A screen the outline follows draws no mark of its own.
@@ -108,7 +122,16 @@ page's outline. A screen the outline follows draws no mark of its own.
 Each screen holds its own scroll as a `Glide`, because only the screen
 knows where its rows rest. The home page holds one for the page and one
 for the row that holds focus, because every other strip keeps in view
-the slot focus left on it and never scrolls on a press. A wall holds one.
+the slot focus left on it and never scrolls on a press. A wall, a
+person's wall of works, and a franchise's wall each hold one. A movie
+page and a series page hold one for the page and a `motion::Rows`, one
+`Glide` for each strip and stripe under the playback row or the
+seasons. A row there scrolls back to the slot it keeps when focus
+leaves it, so a press that moves focus from one row to the next eases
+both. The header of a series page never scrolls, so a press between
+the wall and the header's button row moves the outline and no scroll.
+A franchise's wall moves only when focus leaves the view, so its next
+rest is measured from the place its `Glide` last went to.
 `Screen::follow` moves each scroll to where the screen now rests, on
 the press's pace or at once, and the draw reads the eased value with
 the frame's clock. A drawn value whose rest moved without a follow,
@@ -120,12 +143,7 @@ second the last motion ends (`motion::Breath`), which the breath and
 
 ### What does not move yet
 
-The movie page, the series page, the person page, and the franchise
-page stroke their own mark at rest through `views::mark`, and their
-scrolls jump. Their marks do not breathe. Each needs a `marked` answer
-from its page layout and a `follow` for its scroll before the outline
-can take it. The page backdrop's fade over the wall that opened it is
-not built.
+The page backdrop's fade over the wall that opened it is not built.
 
 ## The curtain's line
 

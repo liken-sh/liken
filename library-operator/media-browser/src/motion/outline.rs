@@ -16,6 +16,11 @@ pub struct Outline {
     top: Glide,
     right: Glide,
     bottom: Glide,
+    // The rectangle the outline moves to, as it was given. The browser
+    // compares it with where focus is now to tell a press from a resize,
+    // and a rectangle rebuilt from the edges can differ from the one
+    // given in the last bits of its width, which would read as a move.
+    to: Rectangle,
 }
 
 impl Outline {
@@ -26,22 +31,22 @@ impl Outline {
             top: Glide::still(around.y),
             right: Glide::still(around.x + around.width),
             bottom: Glide::still(around.y + around.height),
+            to: around,
         }
     }
 
     /// The rectangle the outline moves to, which is where it rests once
     /// the motion ends.
     pub fn to(&self) -> Rectangle {
-        edges(
-            self.left.to(),
-            self.top.to(),
-            self.right.to(),
-            self.bottom.to(),
-        )
+        self.to
     }
 
-    /// The rectangle the outline draws at this second.
+    /// The rectangle the outline draws at this second, which is the one it
+    /// was sent to once every edge has arrived.
     pub fn at(&self, clock: f64) -> Rectangle {
+        if clock >= self.ends() {
+            return self.to;
+        }
         edges(
             self.left.at(clock),
             self.top.at(clock),
@@ -73,6 +78,7 @@ impl Outline {
         self.right.go(to.x + to.width, clock, right);
         self.top.go(to.y, clock, top);
         self.bottom.go(to.y + to.height, clock, bottom);
+        self.to = to;
     }
 }
 
@@ -172,6 +178,25 @@ mod tests {
         outline.travel(slot(400.0, 0.0), 0.1, 1.0);
         assert_eq!(outline.at(0.1), drawn);
         assert_eq!(outline.at(0.1 + look::FOLLOW), slot(400.0, 0.0));
+    }
+
+    // A slot whose left edge and width are no sum of powers of two, as a
+    // wall of six columns places them. Its right edge, less its left
+    // edge, is not its width in the last bits of a float.
+    fn uneven() -> Rectangle {
+        Rectangle {
+            x: 385.89044,
+            y: 406.0,
+            width: 260.54794,
+            height: 384.8219,
+        }
+    }
+
+    #[test]
+    fn the_outline_moves_to_the_very_rectangle_it_was_sent_to() {
+        assert_eq!(Outline::still(uneven()).to(), uneven());
+        assert_eq!(moved(uneven()).to(), uneven());
+        assert_eq!(moved(uneven()).at(look::FOLLOW), uneven());
     }
 
     #[test]

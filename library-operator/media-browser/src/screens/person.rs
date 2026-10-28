@@ -4,6 +4,9 @@
 // that wall, so a select opens a title's page, which carries stripes of
 // its own.
 
+// The motion of the page: where the focus outline goes, and how far the
+// wall of works has scrolled while it eases to rest.
+mod motion;
 mod page;
 
 use std::cell::RefCell;
@@ -16,6 +19,7 @@ use super::slots::Slots;
 use super::{Step, facts};
 use crate::art::Art;
 use crate::catalog::{self, Query, Source};
+use crate::motion::Glide;
 use crate::views::wall;
 
 // The file every contributor entry holds their headshot in, and
@@ -58,6 +62,9 @@ pub struct Person {
     /// The person's works as the slots of a `Person` query, drawn through
     /// the same code path as the library wall, with the focus inside it.
     pub works: Slots,
+    // How far the wall of works has scrolled down, as it eases to the
+    // place that keeps the focused work in view.
+    scroll: Glide,
 }
 
 impl Person {
@@ -83,6 +90,7 @@ impl Person {
             biography_library: entry.biography_library,
             biography: String::new(),
             works,
+            scroll: Glide::still(0.0),
         })
     }
 
@@ -94,8 +102,10 @@ impl Person {
             return;
         };
         let focus = self.works.focus;
+        let scroll = self.scroll;
         *self = fresh;
         self.works.focus = focus.min(self.works.items.len().saturating_sub(1));
+        self.scroll = scroll;
     }
 
     /// Read the biography off the library's volume. It is a file
@@ -131,16 +141,17 @@ impl Person {
         self.works.resting(source)
     }
 
-    /// The view: the head and the wall of works, on one canvas.
+    /// The view: the head and the wall of works, on one canvas. `at` is
+    /// the second the frame draws, which the wall's scroll eases on.
     pub fn view<'a, A: Art>(
         &'a self,
         store: &'a RefCell<A>,
-        held: bool,
+        at: f64,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         iced_widget::canvas(page::Page {
             person: self,
             store,
-            held,
+            at,
         })
         .width(Length::Fill)
         .height(Length::Fill)

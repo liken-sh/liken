@@ -753,8 +753,8 @@ pub fn cell_box(
 }
 
 /// The part of the frame the strip and the rows draw in. It reaches the
-/// focus stroke's own width past the strip, the cards, and the first
-/// row, so the mark of a focused row is whole wherever the row is.
+/// focus outline's width past the strip and the cards, the room the page
+/// keeps for the outline beside every row.
 pub fn clipped(columned: Rectangle) -> Rectangle {
     area(
         columned.x - REACH,

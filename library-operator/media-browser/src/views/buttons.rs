@@ -1,7 +1,8 @@
 // The button row a page draws under its text. A button is a box with a
 // glyph and one word in it, drawn in the proportions the status line's
-// marks take at their smaller size. The focused one carries the mark
-// focus takes everywhere on this screen.
+// marks take at their smaller size. The row draws no focus mark: the
+// browser's outline goes around the box `button` answers for the button
+// that holds focus.
 
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
@@ -10,7 +11,7 @@ use iced_winit::core::text::Alignment;
 use iced_winit::core::{Point, Rectangle};
 
 use super::icon::{self, Icon};
-use super::{area, extent, label, mark, text};
+use super::{area, extent, label, text};
 use crate::look;
 
 /// The height of a button.
@@ -46,18 +47,11 @@ fn content(bounds: Rectangle) -> (Rectangle, Point) {
     (glyph, words)
 }
 
-/// Draw the row of buttons, each a glyph and its word. `focus` names the
-/// button that holds focus, or nothing while another row of the page
-/// holds it. The glyph and the word take the full ink whether or not the
-/// button holds focus, because every button of the row plays something.
-/// The answer is the row's height, so the caller stacks the next block
-/// under it.
-pub fn draw(
-    frame: &mut canvas::Frame<Renderer>,
-    row: &[(Icon, &str)],
-    at: Point,
-    focus: Option<usize>,
-) -> f32 {
+/// Draw the row of buttons, each a glyph and its word. The glyph and the
+/// word take the full ink whether or not the button holds focus, because
+/// every button of the row plays something. The answer is the row's
+/// height, so the caller stacks the next block under it.
+pub fn draw(frame: &mut canvas::Frame<Renderer>, row: &[(Icon, &str)], at: Point) -> f32 {
     let names: Vec<&str> = row.iter().map(|(_, name)| *name).collect();
     for (index, (glyph, name)) in row.iter().enumerate() {
         let bounds = button(&names, index, at);
@@ -73,9 +67,6 @@ pub fn draw(
             Vertical::Center,
             f32::INFINITY,
         ));
-        if focus == Some(index) {
-            mark(frame, bounds);
-        }
     }
     HEIGHT
 }

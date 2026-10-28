@@ -56,8 +56,8 @@ fn a_press_before_the_rest_moves_the_ask_to_the_item_it_lands_on() {
 fn a_page_schedules_no_rest() {
     let mut browser = resting(3);
     browser.key("enter");
-    browser.minute = Some(MINUTE);
-    assert_eq!(browser.next_frame(1.0), Some(MINUTE));
+    browser.minute = Some(TURN);
+    assert_eq!(browser.next_frame(STILL), Some(TURN));
 }
 
 #[test]

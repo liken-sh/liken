@@ -1,7 +1,8 @@
 // The stripe: one heading over a scrolled row of headshots, each with a
 // name and a part under it. A title's page draws one stripe per part at
 // its end, and the stripe is built the way the set strip is, so the two
-// read as parts of one page.
+// read as parts of one page. The stripe draws no focus mark: it answers
+// the box the browser's outline goes around.
 
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
@@ -9,7 +10,7 @@ use iced_winit::core::alignment::Vertical;
 use iced_winit::core::text::Alignment;
 use iced_winit::core::{Point, Rectangle};
 
-use super::{Card, Tone, area, artwork, label, mark, scroll, text, wall};
+use super::{Card, Tone, area, artwork, label, scroll, text, wall};
 use crate::art::Art;
 use crate::look;
 
@@ -57,10 +58,14 @@ pub fn row(region: Rectangle) -> Rectangle {
 /// The headshot of one index, in frame space after the scroll
 /// that keeps the focused slot in view.
 pub fn slot(region: Rectangle, count: usize, focus: Option<usize>, index: usize) -> Rectangle {
-    let row = row(region);
+    placed(region, offset(region, count, focus), index)
+}
+
+// The headshot of one index, in frame space after this scroll.
+fn placed(region: Rectangle, offset: f32, index: usize) -> Rectangle {
     area(
-        region.x + index as f32 * pitch() - offset(region, count, focus),
-        row.y,
+        region.x + index as f32 * pitch() - offset,
+        row(region).y,
         headshot_width(),
         HEADSHOT,
     )
@@ -86,6 +91,22 @@ pub struct Stripe<'a, T> {
     pub library: &'a str,
     /// The part of the frame the stripe draws in.
     pub region: Rectangle,
+    /// How far the row has scrolled as this frame draws it, where the
+    /// page eases the row toward `scrolled`'s answer, and nothing to draw
+    /// the row at that answer.
+    pub scroll: Option<f32>,
+}
+
+/// How far the row scrolls to rest with its focused headshot in view.
+pub fn scrolled<T>(stripe: &Stripe<'_, T>) -> f32 {
+    offset(stripe.region, stripe.people.len(), stripe.focus)
+}
+
+/// The headshot the focus outline goes around, where the row's scroll
+/// comes to rest, or nothing while another row of the page holds focus.
+pub fn focused<T>(stripe: &Stripe<'_, T>) -> Option<Rectangle> {
+    let index = stripe.focus.filter(|index| *index < stripe.people.len())?;
+    Some(placed(stripe.region, scrolled(stripe), index))
 }
 
 /// Draw the stripe. Only the headshots inside the region become
@@ -106,12 +127,12 @@ pub fn draw<T: Card, A: Art>(
     ));
 
     let count = stripe.people.len();
-    let offset = offset(stripe.region, count, stripe.focus);
+    let offset = stripe.scroll.unwrap_or_else(|| scrolled(stripe));
     let range = scroll::visible(offset, stripe.region.width, pitch(), count, 1);
 
     for index in range {
         let person = &stripe.people[index];
-        let slot = slot(stripe.region, count, stripe.focus, index);
+        let slot = placed(stripe.region, offset, index);
         artwork(
             frame,
             store,
@@ -121,9 +142,6 @@ pub fn draw<T: Card, A: Art>(
             person.name(),
             Tone::Full,
         );
-        if stripe.focus == Some(index) {
-            mark(frame, slot);
-        }
         let name = captioned(slot);
         text::centered(frame, person.name(), name, look::FACE, look::text());
         // The second line draws the way a card's does, small, faint, and
@@ -214,6 +232,37 @@ mod tests {
     #[test]
     fn a_stripe_with_no_focus_starts_at_its_first_slot() {
         assert_eq!(slot(region(), 60, None, 0).x, region().x);
+    }
+
+    // A stripe of sixty people with focus on the last of them, which
+    // scrolls the row to its end.
+    fn at_the_end(people: &[()]) -> Stripe<'_, ()> {
+        Stripe {
+            people,
+            focus: Some(people.len() - 1),
+            heading: "Cast",
+            library: "",
+            region: region(),
+            scroll: None,
+        }
+    }
+
+    #[test]
+    fn the_outline_goes_around_the_focused_headshot_where_the_scroll_lands() {
+        let people = [(); 60];
+        let mut stripe = at_the_end(&people);
+        let landed = slot(region(), 60, Some(59), 59);
+        assert_eq!(focused(&stripe), Some(landed));
+
+        // A row drawn part way through its scroll still answers the place
+        // the scroll lands, so the outline travels to the headshot's last
+        // place.
+        stripe.scroll = Some(0.0);
+        assert_eq!(focused(&stripe), Some(landed));
+        assert_eq!(scrolled(&stripe), region().x + 59.0 * pitch() - landed.x);
+
+        stripe.focus = None;
+        assert_eq!(focused(&stripe), None);
     }
 
     #[test]

@@ -4,8 +4,8 @@
 // under it scroll to rest on the same press. While focus rests, the
 // outline breathes. The browser holds the outline, because only the
 // browser knows which layer holds focus and when the page under it
-// changed; a screen answers where its focus is and draws no mark of its
-// own.
+// changed; every screen, from the home page to a title's page, answers
+// where its focus is and draws no mark of its own.
 //
 // A press that changes the page, such as opening a title or going back,
 // is not a move across one page, so the outline lands on the new page's
@@ -65,8 +65,7 @@ impl<S: Source, A: Art> Browser<S, A> {
 
     // Where focus is now, at rest: the focused tile or link of the picker
     // while it is up, the strip's target while the strip holds focus, and
-    // the screen's own answer otherwise. Nothing under the shade, and
-    // nothing on a screen that strokes its own mark.
+    // the screen's own answer otherwise. Nothing under the shade.
     pub(super) fn target(&self) -> Option<Target> {
         if self.asleep() {
             return None;
