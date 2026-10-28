@@ -1,6 +1,15 @@
 # 83. A USB device is named for its unit
 
-Milestone 83. Proposed 2026-10-10. Not built. A claim that selects a
+Milestone 83. Proposed 2026-10-10. Rejected on 2026-10-28 without a
+build, for
+[milestone 89](../89-an-unplugged-device-evicts-its-pod.md), which
+evicts the pod whose device was unplugged so that Kubernetes allocates
+its claim again. A review against Kubernetes 1.37.1 found that the
+eviction also covers a move to another machine, which this design did
+not, and that it needs no resolution of old port names on an upgrade
+and has no limit on a rollback. The design below is kept as the record.
+
+A claim that selects a
 USB device by its `serial` attribute stays allocated to the device's
 old port after someone moves the cable to a different port. The
 workload then fails, and nothing in the cluster repairs it. This
@@ -10,9 +19,9 @@ port on the same machine.
 
 ## The failure
 
-The [device reference](../docs/content/docs/reference/devices.md)
+The [device reference](../../docs/content/docs/reference/devices.md)
 names each device by its bus address (`deviceName` in
-[`dra.go`](../machine-operator/dra.go)). For USB, the address is the
+[`dra.go`](../../machine-operator/dra.go)). For USB, the address is the
 port path, so a UPS whose interface address is `1-4:1.0` is
 `usb-1-4-1-0`. The reference says that a claim which must select one
 physical unit selects on `serial`.
@@ -71,7 +80,7 @@ the same pod, with the same prepared claim. The scheduler never
 evaluates the pod again, so the pod stays in `CrashLoopBackOff`. While
 the claim's port is empty, its CDI spec names
 `/dev/liken.sh/device-absent` (`refreshCDISpec` in
-[`cdi.go`](../machine-operator/cdi.go)), so a restarted container
+[`cdi.go`](../../machine-operator/cdi.go)), so a restarted container
 fails to start rather than receive whatever device took the old
 node's name.
 
@@ -183,14 +192,14 @@ A device can be absent from the slice while a claim holds it. Network
 UPS Tools detaches `usbhid` from a UPS and claims the interface
 through libusb. The interface then has no driver, so it leaves the
 slice until unprepare binds the driver again
-([`rebinding.go`](../machine-operator/rebinding.go)). The same home
+([`rebinding.go`](../../machine-operator/rebinding.go)). The same home
 cluster showed this on 2026-10-10: three UPS claims were allocated to
 devices that no slice listed, and all three UPS pods were running and
 reported `OL`.
 
 So the name table is built from discovery, including interfaces with
 no driver. The serial is on the USB device above the interface
-(`parentAttr` in [`sysfs.go`](../hardware/sysfs.go)), so a driverless
+(`parentAttr` in [`sysfs.go`](../../hardware/sysfs.go)), so a driverless
 interface can still compute its name. The rebind on unprepare reads
 the allocated name from the claim's CDI spec file and resolves it to
 an interface address through the same table. It must not parse a port
@@ -248,7 +257,7 @@ fixed by the board, and a PCI function rarely reports a serial.
 The commit that builds this updates:
 
 - the device names section of the
-  [device reference](../docs/content/docs/reference/devices.md);
+  [device reference](../../docs/content/docs/reference/devices.md);
 - the `troubleshoot` skill and guide, with the repair for a move to
   another machine and for a claim allocated before the upgrade;
 - the rollback guide, with the limit above;

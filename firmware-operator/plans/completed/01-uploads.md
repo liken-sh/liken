@@ -246,7 +246,7 @@ the device, and the `Machine`'s status belongs to the OS.
 ## Plan 83 and a device that changes its identity
 
 `liken`'s
-[milestone 83](../../../liken/plans/83-a-usb-device-is-named-for-its-unit.md)
+[milestone 83](../../../liken/plans/rejected/83-a-usb-device-is-named-for-its-unit.md)
 names a USB device by its vendor, product, and serial in place of its
 port. An upload changes the product, and on some chips the vendor too,
 so the loaded device gets a different name from the bare chip. That is
@@ -260,6 +260,13 @@ vendor, product, and serial, so it takes the same name. The claim that
 the camera's pod holds is then valid again, and the CDI rewrite that
 milestone 83 relies on for a replug delivers the new node. This is a
 prediction, not a measurement.
+
+Milestone 83 was rejected on 2026-10-28 for
+[milestone 89](../../../liken/plans/89-an-unplugged-device-evicts-its-pod.md),
+which keeps port names and evicts the pod whose device is unplugged.
+Under milestone 89, the power cycle evicts the camera's pod, and its
+controller creates a new pod that is allocated the loaded camera after
+the operator uploads again.
 
 ## What other components do
 

@@ -19,10 +19,13 @@ that starts then fails instead of opening another device's node.
 A container's device nodes are set when it starts, so the running
 container does not receive the new node.
 
-A device moved to a different port is a separate failure: the claim's
-allocation stays on the old port.
-[Milestone 83](../../../liken/plans/83-a-usb-device-is-named-for-its-unit.md)
-proposes to name a USB device for its unit instead, and is not built.
+[Milestone 89](../../../liken/plans/89-an-unplugged-device-evicts-its-pod.md)
+proposes the restart for every device that a claim holds: while a
+prepared claim's device is unplugged, `machine-operator` taints the
+device `NoExecute`, so Kubernetes evicts the pod and the pod's
+controller creates it again with the current nodes. It also covers a
+device moved to a different port or machine, where the claim's
+allocation stays on the old port today. It is not built.
 
 ## What `observatory-operator` lacks
 
