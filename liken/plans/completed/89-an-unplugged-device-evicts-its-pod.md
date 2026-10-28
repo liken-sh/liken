@@ -4,7 +4,33 @@ Milestone 89. Proposed and built on 2026-10-28. The first drill on
 liken-1 found that a named claim loops, so the taint reaches only a
 claim that a pod owns, and
 [a named claim keeps an unplugged device](../open-problems/a-named-claim-keeps-an-unplugged-device.md)
-holds the rest. The other drills have not run. When someone unplugs a
+holds the rest. Drill 5, a device held through libusb, has not run.
+
+The drills ran on liken-1 and stick-1 on 2026-10-28 with lab release
+2026.10.28-902, with a `Deployment` whose pod claimed a Silicon Labs
+HubZ Z-Wave controller from a `ResourceClaimTemplate` by its serial.
+Each unplug posted one `DeviceUnplugged` `Event`, evicted the pod once,
+and the `ReplicaSet` created one pod:
+
+1. Moved from port 1-5 to port 1-7 on stick-1: the new pod's claim was
+   allocated `usb-1-7`, and the pod ran about 30 seconds after the
+   move, most of it the old pod's grace period.
+2. Moved from stick-1 to liken-1: the new pod ran on liken-1 with
+   `usb-1-3`.
+3. Unplugged and plugged into the same port on liken-1: the new pod
+   received the new device number.
+4. Unplugged for good: the new pod stayed `Pending`, and no slice kept
+   the tainted entry after the unprepare.
+6. The internal CSCTEK USB audio adapter on liken-1, deauthorized
+   through its sysfs `authorized` file and authorized again: the
+   device was tainted, and `audio-operator`'s pod kept its UID and its
+   restart counts, its HDMI sinks stayed `Ready`, and the USB sink came
+   back `Ready` in the same pod.
+7. A QHY5-II camera unplugged and plugged in again: its bare chip was
+   tainted under the upload pod's claim, the pod was not evicted, and
+   the `Firmware` recorded `Loaded`.
+
+No device was tainted across three reboots into the lab releases. When someone unplugs a
 USB device that a claim holds, the pod that holds the claim stays in
 `CrashLoopBackOff` until a person deletes it, even after the device is
 plugged into another port or another machine. This milestone taints
