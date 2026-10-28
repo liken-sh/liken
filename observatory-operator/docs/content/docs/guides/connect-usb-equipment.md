@@ -215,3 +215,12 @@ configuration from one reservation to the next. Today, set the
 driver's `DEVICE_PORT` property from KStars, and then run the failed
 step again as [Troubleshoot](/docs/guides/troubleshoot/#run-a-failed-step-again)
 describes.
+
+When you unplug a cable that a device's claim holds, `liken` taints
+the device, and Kubernetes evicts the device's pod. The operator
+creates the pod again, and the new pod's claim takes the device where
+you plug it in, with the nodes of that enumeration. The tty can then
+have another number, such as `/dev/ttyUSB1` in place of
+`/dev/ttyUSB0`, so check the port again. `liken`'s
+[device reference](https://liken.sh/docs/reference/devices/#an-unplugged-device-evicts-its-pods)
+gives the rules.

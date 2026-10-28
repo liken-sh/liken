@@ -244,8 +244,10 @@ func (p *draPlugin) prepareClaim(claim *drav1.Claim) *drav1.NodePrepareResourceR
 		}
 		nodes := deviceNodes(published.Nodes)
 		name := claim.Uid + "-" + result.Device
+		unit, _ := resolveHardware(result.Device, byName)
 		specDevices = append(specDevices, cdiDevice{
 			Name:           name,
+			Annotations:    deviceAnnotations(claim.Namespace, claim.Name, unit),
 			ContainerEdits: cdiEdits{DeviceNodes: nodes},
 		})
 		devices = append(devices, &drav1.Device{

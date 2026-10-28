@@ -2,7 +2,7 @@
 
 Milestone 83. Proposed 2026-10-10. Rejected on 2026-10-28 without a
 build, for
-[milestone 89](../89-an-unplugged-device-evicts-its-pod.md), which
+[milestone 89](../completed/89-an-unplugged-device-evicts-its-pod.md), which
 evicts the pod whose device was unplugged so that Kubernetes allocates
 its claim again. A review against Kubernetes 1.37.1 found that the
 eviction also covers a move to another machine, which this design did

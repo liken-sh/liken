@@ -94,6 +94,11 @@ func publishDeviceInventory(r *reader, node *nodeObject, facts *machine.MachineS
 	// the count comes from this pass's one sysfs walk and never from
 	// a second one (metrics.go).
 	mm.observeDevices(devices)
+	// A device that a prepared claim held when it was unplugged is
+	// published with a taint that evicts the claim's pods
+	// (unplugged.go). The metric counts the hardware, so it counts
+	// before these entries join.
+	devices = taintUnplugged(devices, unpluggedDevices())
 
 	owner := kubernetes.OwnerReference{
 		APIVersion: "v1",

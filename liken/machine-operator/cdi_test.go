@@ -69,7 +69,7 @@ func TestRefreshFollowsADeviceThatEnumeratedAgain(t *testing.T) {
 	prepared(t, fixture)
 
 	fixture.enumerate(t, 9)
-	refreshCDISpecs(draSysfsRoot, nil)
+	refreshCDISpecs(draSysfsRoot, nil, machineEvents{})
 
 	paths := specPaths(t, fixture, "claim-1")
 	slices.Sort(paths)
@@ -85,11 +85,11 @@ func TestARefreshRecordsTheSpecsItRewrites(t *testing.T) {
 	fixture.enumerate(t, 4)
 	prepared(t, fixture)
 	current := &passOutcome{}
-	refreshCDISpecs(draSysfsRoot, current)
+	refreshCDISpecs(draSysfsRoot, current, machineEvents{})
 
 	fixture.enumerate(t, 9)
 	rewritten := &passOutcome{}
-	refreshCDISpecs(draSysfsRoot, rewritten)
+	refreshCDISpecs(draSysfsRoot, rewritten, machineEvents{})
 
 	if len(current.writes) != 0 || len(rewritten.writes) != 1 {
 		t.Errorf("writes: %q for a current spec and %q after a re-enumeration, want none and one", current.writes, rewritten.writes)
@@ -107,7 +107,7 @@ func TestACorruptSpecIsALastingFailure(t *testing.T) {
 	}
 	out := &passOutcome{}
 
-	refreshCDISpecs(draSysfsRoot, out)
+	refreshCDISpecs(draSysfsRoot, out, machineEvents{})
 
 	if got := failureKinds(out); !slices.Equal(got, []failureKind{lasting}) {
 		t.Errorf("kinds = %v, want one lasting failure", got)
@@ -126,7 +126,7 @@ func TestRefreshLeavesASpecThatStillMatchesAlone(t *testing.T) {
 	if err := os.Chtimes(path, written, written); err != nil {
 		t.Fatal(err)
 	}
-	refreshCDISpecs(draSysfsRoot, nil)
+	refreshCDISpecs(draSysfsRoot, nil, machineEvents{})
 
 	info, err := os.Stat(path)
 	if err != nil {
@@ -153,7 +153,7 @@ func TestRefreshNamesAnAbsentNodeForHardwareThatLeft(t *testing.T) {
 	if err := os.Rename(filepath.Join(usb, "2-1:1.0"), filepath.Join(usb, "2-2:1.0")); err != nil {
 		t.Fatal(err)
 	}
-	refreshCDISpecs(draSysfsRoot, nil)
+	refreshCDISpecs(draSysfsRoot, nil, machineEvents{})
 
 	if paths := specPaths(t, fixture, "claim-1"); !slices.Equal(paths, []string{deviceAbsentNode}) {
 		t.Errorf("paths = %v, want the absent node alone", paths)
@@ -170,11 +170,11 @@ func TestRefreshRestoresTheNodesOfHardwareThatReturned(t *testing.T) {
 	if err := os.Rename(stick, aside); err != nil {
 		t.Fatal(err)
 	}
-	refreshCDISpecs(draSysfsRoot, nil)
+	refreshCDISpecs(draSysfsRoot, nil, machineEvents{})
 	if err := os.Rename(aside, stick); err != nil {
 		t.Fatal(err)
 	}
-	refreshCDISpecs(draSysfsRoot, nil)
+	refreshCDISpecs(draSysfsRoot, nil, machineEvents{})
 
 	paths := specPaths(t, fixture, "claim-1")
 	slices.Sort(paths)
@@ -202,7 +202,7 @@ func TestRefreshDeliversTheBusNodeAloneAfterADriverDetach(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(stick, "host0")); err != nil {
 		t.Fatal(err)
 	}
-	refreshCDISpecs(draSysfsRoot, nil)
+	refreshCDISpecs(draSysfsRoot, nil, machineEvents{})
 
 	paths := specPaths(t, fixture, "claim-1")
 	if !slices.Equal(paths, []string{"/dev/bus/usb/002/004"}) {
@@ -221,7 +221,7 @@ func TestRefreshDeliversUHIDAfterTheModuleLoads(t *testing.T) {
 	prepared(t, fixture)
 
 	miscDevice(t, draSysfsRoot, "uhid", 239)
-	refreshCDISpecs(draSysfsRoot, nil)
+	refreshCDISpecs(draSysfsRoot, nil, machineEvents{})
 
 	paths := specPaths(t, fixture, "claim-1")
 	slices.Sort(paths)
@@ -241,7 +241,7 @@ func TestRefreshIgnoresFilesItDidNotWrite(t *testing.T) {
 	if err := os.WriteFile(foreign, []byte("{}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	refreshCDISpecs(draSysfsRoot, nil)
+	refreshCDISpecs(draSysfsRoot, nil, machineEvents{})
 
 	raw, err := os.ReadFile(foreign)
 	if err != nil {
@@ -259,7 +259,7 @@ func TestTheRefreshWithNoDirectoryDoesNothing(t *testing.T) {
 	cdiDir = filepath.Join(t.TempDir(), "absent")
 	out := &passOutcome{}
 
-	refreshCDISpecs(t.TempDir(), out)
+	refreshCDISpecs(t.TempDir(), out, machineEvents{})
 
 	if out.failureCount() != 0 || len(out.writes) != 0 {
 		t.Errorf("the refresh recorded %+v", out)
@@ -280,7 +280,7 @@ func TestTheRefreshReportsASpecItCannotRead(t *testing.T) {
 	}
 	out := &passOutcome{}
 
-	refreshCDISpecs(t.TempDir(), out)
+	refreshCDISpecs(t.TempDir(), out, machineEvents{})
 
 	after, _ := os.ReadFile(cdiSpecPath("claim-2"))
 	if out.failureCount() != 1 || string(after) != string(raw) {

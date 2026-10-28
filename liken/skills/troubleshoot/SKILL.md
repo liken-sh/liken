@@ -326,6 +326,18 @@ another boot.
 [Give a workload a device](https://liken.sh/docs/guides/devices/#when-a-claim-does-not-schedule)
 gives the checks, in order.
 
+## A pod with a device claim was evicted
+
+A pod whose claim held a device that was unplugged is evicted, and its
+`Machine` shows a `DeviceUnplugged` event that names the device and
+the claim. A pod that a `Deployment`, a `DaemonSet`, or another
+controller owns comes back as a new pod, and its claim is allocated to
+a device that matches it, on any machine. If the new pod stays
+`Pending`, no device matches: plug the device in again. A pod that no
+controller owns does not come back; create it again. The
+[device reference](https://liken.sh/docs/reference/devices/#an-unplugged-device-evicts-its-pods)
+gives the rules.
+
 ## The recent history of a machine or the cluster
 
 The operators post a Kubernetes `Event` for each change of a
@@ -365,6 +377,7 @@ starts with the condition's name. The other events are these:
 | `Uncordoned` | `Machine` | `Normal` | The operator returned the `Node` to the scheduler after the reboot, or after the request went away during the drain. The message says which. |
 | `Roamed` | `Machine` | `Normal` | A radio moved from one access point of its network to another. The message names both, with the channel and the band of each. |
 | `Associated` | `Machine` | `Normal` | A radio associated with an access point: at boot, or again after it lost one. The message names the access point and the reason for the loss. |
+| `DeviceUnplugged` | `Machine` | `Warning` | A device that a prepared claim held was unplugged, or enumerated again at its address. The machine taints it `liken.sh/unplugged`, and Kubernetes evicts the claim's pods. The message names the device and the claim. The [device reference](https://liken.sh/docs/reference/devices/#an-unplugged-device-evicts-its-pods) says what follows. |
 | `BackstopRepaired` | `Machine` | `Warning` | A pass that no event started changed the machine. The message names each step that wrote. The operator missed a wake, which is a bug in `liken`: report it with the message. The machine is correct again. |
 | `RebootTurnGranted` | `Machine` | `Normal` | The cluster granted the machine a reboot turn. |
 | `RebootTurnReclaimed` | `Machine` | `Normal` | The machine no longer needs its turn, and the turn returns to the budgets. |

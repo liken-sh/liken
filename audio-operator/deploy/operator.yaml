@@ -13,7 +13,7 @@
 apiVersion: resource.k8s.io/v1
 kind: ResourceClaimTemplate
 metadata:
-  name: sound-card
+  name: every-sound-card
 spec:
   spec:
     devices:
@@ -27,6 +27,15 @@ spec:
             # cards. A consumer's own claim selects the card and output by
             # attribute.
             allocationMode: All
+            # machine-operator taints a card that was unplugged while
+            # this claim held it, and the taint evicts the pods that do
+            # not tolerate it. PipeWire follows the cards by itself, so
+            # an unplugged USB card must not restart the sound of every
+            # other card on the node.
+            tolerations:
+              - key: liken.sh/unplugged
+                operator: Exists
+                effect: NoExecute
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -421,7 +430,7 @@ spec:
               readOnly: true
       resourceClaims:
         - name: controller
-          resourceClaimTemplateName: sound-card
+          resourceClaimTemplateName: every-sound-card
       volumes:
         # DirectoryOrCreate on all four, because a node that has never
         # run this operator or any DRA driver has none of these paths.

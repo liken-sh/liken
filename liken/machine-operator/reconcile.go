@@ -255,16 +255,17 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 	serio := serioInEffect(m.Spec.Serio, facts)
 	setDeclaredSerio(serio)
 	setPlatformProtection(protectionOf(facts))
-	if nodeErr == nil {
-		_ = publishDeviceInventory(r, node, facts, serio, mm)
-	}
-
 	// The claims the kubelet already prepared get the same treatment,
 	// because a device that enumerates again moves the nodes a claim
 	// delivers (cdi.go). This runs without a Node, because a prepared
 	// claim is a file on this machine, and containerd reads that file at
-	// every container creation.
-	refreshCDISpecs(draSysfsRoot, out)
+	// every container creation. It runs before the slice is published,
+	// because it marks the claims whose device was unplugged, and the
+	// slice taints those devices in the same pass (unplugged.go).
+	refreshCDISpecs(draSysfsRoot, out, notes)
+	if nodeErr == nil {
+		_ = publishDeviceInventory(r, node, facts, serio, mm)
+	}
 
 	// Convergence checks whether the cluster's copy of each document
 	// matches what this boot actuated. If not, it stages the

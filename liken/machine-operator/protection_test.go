@@ -173,11 +173,11 @@ func TestRefreshWithholdsAPreparedDiskUntilTheRolesAreKnown(t *testing.T) {
 	prepared(t, fixture)
 
 	protecting(t, protectionOf(nil))
-	refreshCDISpecs(draSysfsRoot, nil)
+	refreshCDISpecs(draSysfsRoot, nil, machineEvents{})
 	withheld := specPaths(t, fixture, "claim-1")
 
 	setPlatformProtection(protectionOf(memoryBacked()))
-	refreshCDISpecs(draSysfsRoot, nil)
+	refreshCDISpecs(draSysfsRoot, nil, machineEvents{})
 	restored := specPaths(t, fixture, "claim-1")
 	slices.Sort(restored)
 

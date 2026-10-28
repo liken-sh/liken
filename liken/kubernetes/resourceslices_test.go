@@ -288,3 +288,31 @@ func TestWroteWaitsForTheAnswerOfAWriteInFlight(t *testing.T) {
 		}
 	})
 }
+
+// The API server fills in timeAdded on every taint it stores, and this
+// writer never sets it. A slice that holds a taint is unchanged when
+// only that timestamp differs, so a steady machine with an unplugged
+// device sends no write on each pass.
+func TestEnsureLeavesASliceAloneWhenOnlyATaintsTimeDiffers(t *testing.T) {
+	stored := testDevices()
+	stored[0].Taints = []DeviceTaint{{Key: "liken.sh/unplugged", Effect: "NoExecute", TimeAdded: "2026-10-28T12:00:00Z"}}
+	fixture := &slicePublishFixture{existing: &ResourceSlice{
+		Metadata: ResourceSliceMeta{Name: "node-1-liken.sh", ResourceVersion: "7"},
+		Spec: ResourceSliceSpec{
+			Driver:   "liken.sh",
+			NodeName: "node-1",
+			Pool:     ResourcePool{Name: "node-1", Generation: 3, ResourceSliceCount: 1},
+			Devices:  stored,
+		},
+	}}
+	client := testClient(t, fixture.handler(t))
+
+	desired := testDevices()
+	desired[0].Taints = []DeviceTaint{{Key: "liken.sh/unplugged", Effect: "NoExecute"}}
+	if err := EnsureResourceSlice(client, "node-1", testOwner(), desired); err != nil {
+		t.Fatal(err)
+	}
+	if fixture.created != nil || fixture.updated != nil {
+		t.Errorf("a taint's stored time must not cause a write: %v", fixture.requests)
+	}
+}

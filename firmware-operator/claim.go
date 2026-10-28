@@ -8,6 +8,14 @@ package main
 // appearance, so a claim that the scheduler did not allocate before a
 // replug cannot take the next appearance.
 //
+// The upload makes the chip enumerate again with its loaded IDs, so
+// the device the claim holds leaves the bus while the pod runs.
+// machine-operator taints such a device liken.sh/unplugged with the
+// effect NoExecute, which evicts the pods that do not tolerate it. The
+// upload pod is a bare pod that the operator does not run again, and an
+// eviction would record a failure for an upload that worked, so the
+// claim tolerates the taint.
+//
 // The claim's owner is its pod, so the garbage collector deletes the
 // claim with the pod. That needs the pod's UID, so the operator creates
 // the pod first. The pod stays unscheduled until its claim exists.
@@ -41,9 +49,20 @@ type deviceRequest struct {
 }
 
 type exactRequest struct {
-	DeviceClassName string           `json:"deviceClassName"`
-	Selectors       []deviceSelector `json:"selectors"`
+	DeviceClassName string             `json:"deviceClassName"`
+	Selectors       []deviceSelector   `json:"selectors"`
+	Tolerations     []deviceToleration `json:"tolerations,omitempty"`
 }
+
+type deviceToleration struct {
+	Key      string `json:"key"`
+	Operator string `json:"operator"`
+	Effect   string `json:"effect"`
+}
+
+// unpluggedTaint is the taint that machine-operator puts on a device
+// that a prepared claim held when it left the bus.
+const unpluggedTaint = "liken.sh/unplugged"
 
 type deviceSelector struct {
 	CEL struct {
@@ -81,8 +100,12 @@ func buildUploadClaim(upload pod) resourceClaim {
 	selector := deviceSelector{}
 	selector.CEL.Expression = claimSelector(a)
 	claim.Spec.Devices.Requests = []deviceRequest{{
-		Name:    uploadClaim,
-		Exactly: exactRequest{DeviceClassName: uploadClass, Selectors: []deviceSelector{selector}},
+		Name: uploadClaim,
+		Exactly: exactRequest{
+			DeviceClassName: uploadClass,
+			Selectors:       []deviceSelector{selector},
+			Tolerations:     []deviceToleration{{Key: unpluggedTaint, Operator: "Exists", Effect: "NoExecute"}},
+		},
 	}}
 	return claim
 }

@@ -54,6 +54,11 @@ const (
 	reasonRoamed        = "Roamed"
 	reasonAssociated    = "Associated"
 
+	// reasonDeviceUnplugged marks a device that a prepared claim held
+	// when it was unplugged. The slice taints it, and the taint evicts
+	// the claim's pods (unplugged.go).
+	reasonDeviceUnplugged = "DeviceUnplugged"
+
 	// reasonBackstopRepaired marks a write by a pass that only the
 	// backstop started, which names a wake the code does not send
 	// (backstop.go).

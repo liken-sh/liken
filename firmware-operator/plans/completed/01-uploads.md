@@ -262,7 +262,7 @@ milestone 83 relies on for a replug delivers the new node. This is a
 prediction, not a measurement.
 
 Milestone 83 was rejected on 2026-10-28 for
-[milestone 89](../../../liken/plans/89-an-unplugged-device-evicts-its-pod.md),
+[milestone 89](../../../liken/plans/completed/89-an-unplugged-device-evicts-its-pod.md),
 which keeps port names and evicts the pod whose device is unplugged.
 Under milestone 89, the power cycle evicts the camera's pod, and its
 controller creates a new pod that is allocated the loaded camera after

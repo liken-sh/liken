@@ -1,20 +1,21 @@
 # 89. An unplugged device evicts its pod
 
-Milestone 89. Proposed 2026-10-28. Not built. When someone unplugs a
+Milestone 89. Proposed and built on 2026-10-28. The drills on liken-1
+have not run. When someone unplugs a
 USB device that a claim holds, the pod that holds the claim stays in
 `CrashLoopBackOff` until a person deletes it, even after the device is
 plugged into another port or another machine. This milestone taints
 such a device with a `NoExecute` taint. Kubernetes then evicts the
 pod, the claim's allocation clears, and the replacement pod receives a
 new allocation by the claim's selector, wherever the device is now.
-It replaces [milestone 83](rejected/83-a-usb-device-is-named-for-its-unit.md),
+It replaces [milestone 83](../rejected/83-a-usb-device-is-named-for-its-unit.md),
 which renamed USB devices for their unit and covered only a move on the
 same machine.
 
 ## The failure
 
 `machine-operator` names a USB device by its port (`deviceName` in
-[`dra.go`](../machine-operator/dra.go)), so a UPS on interface
+[`dra.go`](../../machine-operator/dra.go)), so a UPS on interface
 `1-4:1.0` is `usb-1-4-1-0`. A claim selects it by its `serial`. The
 scheduler writes the name into the claim's allocation once and does
 not allocate the claim again while a pod reserves it
@@ -25,7 +26,7 @@ When someone moves the cable to another port, the slice publishes the
 device as `usb-1-1-1-0`, and the allocation still names
 `usb-1-4-1-0`. The refresh writes `/dev/liken.sh/device-absent` into
 the claim's CDI spec (`refreshCDISpec` in
-[`cdi.go`](../machine-operator/cdi.go)), so the container fails to
+[`cdi.go`](../../machine-operator/cdi.go)), so the container fails to
 start. The kubelet prepares a claim only when it creates a pod sandbox,
 not when it restarts a container, so the pod never receives the device.
 
@@ -48,8 +49,8 @@ whose claim holds a device with an untolerated `NoExecute` taint.
 The eviction is the repair:
 
 1. Someone unplugs the device. The uevent wakes the pass, and the pass
-   publishes the device's name with the taint and writes
-   `device-absent` into the claim's spec, as it does today.
+   marks the claim's CDI spec, writes `device-absent` into it as it did
+   before, and publishes the device's name with the taint.
 2. The taint-eviction controller deletes the pod.
 3. `kube-controller-manager` clears the claim's allocation.
 4. The pod's controller creates a new pod. The scheduler allocates the
@@ -66,58 +67,89 @@ The rule reads discovery, not the slice.
 `bluetooth-operator` already repairs a disconnected controller this
 way (`disconnectedTaint` in `bluetooth-operator/devices.go`).
 
-### The taint stays until unprepare
+### When a device has left
 
-A device that returns to the same port keeps the taint, and the claim's
-spec keeps `device-absent`, until the kubelet unprepares the claim.
-Two failures require this:
+prepare writes, beside each allocated device's nodes in the claim's CDI
+spec, the unit it resolved: its bus and sysfs address, its vendor,
+product, and serial, and its bus and device numbers. Only a USB or a
+PCI device gets the record, because only those have a directory under
+`/sys/bus` that leaves with the hardware.
 
-- A container that kept running holds the device nodes of the old
-  enumeration. A USB serial adapter can come back as `/dev/ttyUSB1` in
-  place of `/dev/ttyUSB0`. Only a new container receives the new
-  nodes, and the eviction makes one. This is the restart that
-  [a replugged USB device](../../observatory-operator/plans/open-problems/a-replugged-usb-device.md)
-  in `observatory-operator` asks for.
-- A port name belongs to the port, so a different unit in the old port
-  takes the old name. Today the refresh writes that unit's nodes into
-  the claim's spec, and the claim receives a device that its selector
-  may not match. A claim whose device has gone receives no device
-  again.
+The refresh marks a device as unplugged when its directory is gone, or
+when the device at that address reports another vendor, product,
+serial, or device number. A new device number in the same port is a
+new enumeration, and a container that kept running holds the nodes of
+the old one. A value that the walk could not read counts as unchanged,
+because a walk that misses one attribute must not evict a pod. A spec
+that an older operator wrote has no record and is never marked; the
+kubelet prepares it again at the next boot.
 
-A reseat in the same port therefore costs one pod restart. A consumer
-that prefers to wait can tolerate `liken.sh/unplugged` with
-`tolerationSeconds` in its claim's request. The toleration delays the
-eviction and does not prevent it.
+The mark stays until the kubelet unprepares the claim, even when the
+device comes back to its port, because a container that kept running
+still holds the old nodes. This is the restart that
+[a replugged USB device](../../../observatory-operator/plans/open-problems/a-replugged-usb-device.md)
+in `observatory-operator` asked for. The refresh still writes the
+device's current nodes into the spec, exactly as it did before, so a
+pod that tolerates the taint receives them at its next container
+start.
 
 ### What the pass reads
 
-The tainted entry carries the device's name and no attributes, so no
-`DeviceClass` selector and no new claim matches it. `NoExecute` also
-keeps the scheduler from allocating it.
+The tainted entry of a device that is gone carries the device's name
+and no attributes, so no `DeviceClass` selector and no new claim
+matches it. A device that came back keeps its attributes and takes the
+taint. `NoExecute` also keeps the scheduler from allocating either.
 
-The pass must know which allocated devices are gone after a restart
-of `machine-operator`, so the answer comes from the CDI spec files and
-not from memory. Each file is one claim that the kubelet prepared on
-this machine (`cdi.go`), and the files are on tmpfs, so they last one
-boot. The first time the refresh finds a claim's device gone, it writes
-an annotation, `liken.sh/unplugged`, into that claim's file. Each pass
-taints every device name that an annotated file names. The record
-needs no new watch and no new RBAC.
+The record is in the CDI spec files, not in memory, so it survives a
+restart of `machine-operator`. Each file is one claim that the kubelet
+prepared on this machine (`cdi.go`), and the files are on tmpfs, so
+they last one boot. The mark is the annotation `liken.sh/unplugged` on
+the CDI device. The record needs no new watch and no new RBAC. The
+refresh runs before the slice is published, so the pass that marks a
+claim taints its device.
 
-After a reboot the kubelet prepares each claim again. Today a prepare
-whose device is gone fails, and the kubelet retries it, so the pod
-stays in `ContainerCreating` and never reaches the eviction. So a
-prepare whose device is gone writes the claim's file with
-`device-absent` and the annotation, and returns success. The container
-then fails to start on `device-absent`, the next pass taints the
-device, and the pod is evicted.
+The operator posts one `DeviceUnplugged` `Event` on its `Machine` when
+it marks a claim, under root plan 78, with the device's name and the
+claim's namespace and name.
 
-The operator posts an `Event` on its `Machine` when it taints a device
-and when the taint leaves, under root plan 78, with the claim's
-namespace and name.
+### Who tolerates the taint
+
+Three workloads in this repository hold a USB device through
+`liken.sh`, and their programs follow the hardware in different ways:
+
+- `audio-operator`'s pod claims every sound card of its node with
+  `allocationMode: All`. Without a toleration, an unplugged USB card
+  would restart PipeWire, and a film that plays over HDMI on the same
+  machine would lose its sound for the restart. Its claim tolerates the
+  taint. A `ResourceClaimTemplate`'s spec cannot change, so the
+  template takes the new name `every-sound-card`, and the install guide
+  says how to delete the old `sound-card`.
+- `firmware-operator`'s upload makes the bare chip enumerate again with
+  its loaded IDs, which is an unplug by the rule above. The upload pod
+  is a bare pod that the operator does not run again, and an eviction
+  would record a failure for an upload that worked. Its claim
+  tolerates the taint.
+- `bluetooth-operator` does not tolerate it. A radio that enumerates
+  again has already dropped every connection, and the new pod restores
+  the bonds from their `Secret`s, so the restart costs a few seconds.
+
+`equipment-operator`'s CEC pod, `observatory-operator`'s device pods,
+and the GPU claims of `display-operator`, `media-operator`, and
+`library-operator` take the eviction. The GPU claims hold PCI devices,
+which do not leave while the machine runs.
+
+### A claim prepared after a reboot
+
+The kubelet can prepare a claim before its USB device has enumerated,
+so a device that is missing at prepare is not an unplug. Prepare fails
+as it did before, the kubelet retries it, and the pod waits in
+`ContainerCreating` until the device appears. A device that moved
+while the machine was off leaves its pod waiting, and a person deletes
+the pod.
 
 ## What this does not repair
 
+- A device that moved while its machine was off, as above.
 - A bare pod with no controller is evicted and nothing creates it
   again. The person who made it creates it again.
 - A claim that selects a port with `address` follows the port, as it
@@ -147,29 +179,37 @@ namespace and name.
   is the upstream setting for the same delay, and it belongs to the
   workload that knows how long it can wait.
 
-## Questions for the build
+## Changes during the build
 
-- What `firmware-operator`'s upload does when a chip enumerates again
-  with its loaded product ID, if the upload pod holds a claim on the
-  bare chip. The bare chip's device goes away while the claim holds it.
-  The upload pod should finish before the taint evicts it.
-- Whether a device's interfaces each carry the taint, or only the
-  interface that the claim names. The claim names one device, so only
-  that device needs it.
+- The spec keeps writing the device's current nodes after a return,
+  instead of `device-absent` until unprepare. A survey of the
+  workloads found that a tolerating pod would otherwise never start a
+  container again after a replug.
+- A prepare whose device is missing fails as before, instead of
+  writing a marked spec. A device that has not enumerated yet at boot
+  is missing too, and a marked spec would evict its pod at every
+  reboot.
+- The refresh decides an unplug from the unit record and the sysfs
+  directory, instead of from the walk alone. A walk that cannot read
+  one device would otherwise evict its pod.
+- One `Event` marks the unplug. The taint leaves with the unprepare,
+  which is the kubelet's action and posts no `Event` of its own.
 
 ## The manual
 
 The commit that builds this updates:
 
 - the USB sections of the
-  [device reference](../docs/content/docs/reference/devices.md), which
+  [device reference](../../docs/content/docs/reference/devices.md), which
   now say that a returning device's nodes reach the next container
   start, with the eviction and the toleration;
 - the `troubleshoot` skill and guide, with the `Event` and the taint;
 - the devices guide and skill, with a claim that tolerates
   `liken.sh/unplugged`;
 - `observatory-operator`'s `connect-usb-equipment` guide and skill,
-  with the restart after a replug.
+  with the restart after a replug;
+- `audio-operator`'s install guide and skill, with the toleration and
+  the renamed template.
 
 ## Drills
 
@@ -187,5 +227,8 @@ dongle by `serial`:
    `Pending`, and the `Machine` shows the `Event`.
 5. Run a pod that holds a dongle through libusb. Nothing is tainted
    while it runs.
-6. Reboot a machine whose claim's dongle was moved while it was off.
-   The pod is evicted and allocated again.
+6. Unplug a USB sound card on a machine that plays over HDMI. The
+   `audio-operator` pod keeps running, and the HDMI sound does not
+   stop.
+7. Load a QHY camera's firmware with `firmware-operator`. The upload
+   pod succeeds, and the `Firmware` records the load.

@@ -119,6 +119,23 @@ type SliceDevice struct {
 	Name                     string                     `json:"name"`
 	Attributes               map[string]DeviceAttribute `json:"attributes,omitempty"`
 	AllowMultipleAllocations *bool                      `json:"allowMultipleAllocations,omitempty"`
+	Taints                   []DeviceTaint              `json:"taints,omitempty"`
+}
+
+// DeviceTaint keeps new claims off a device. A taint with the effect
+// NoExecute also makes the taint-eviction controller delete each pod
+// whose claim holds the device, unless the claim's request tolerates
+// it. The machine operator taints a device that a prepared claim holds
+// after the device was unplugged (cdi.go in the machine operator).
+//
+// TimeAdded is a field the API server fills in on write. The writer
+// never sets it, and reads it back only so that the comparison can
+// ignore it (sameDevices).
+type DeviceTaint struct {
+	Key       string `json:"key"`
+	Value     string `json:"value,omitempty"`
+	Effect    string `json:"effect"`
+	TimeAdded string `json:"timeAdded,omitempty"`
 }
 
 // DeviceAttribute holds exactly one of four typed values. The API
@@ -255,7 +272,7 @@ func (w *SliceWriter) Write(c *apiclient.Client, nodeName string, current *Resou
 		w.sent = nil
 		return c.RequestJSON(http.MethodDelete, path, nil, nil)
 	}
-	if reflect.DeepEqual(current.Spec.Devices, devices) || w.holds(current, devices) {
+	if sameDevices(current.Spec.Devices, devices) || w.holds(current, devices) {
 		return nil
 	}
 
@@ -275,6 +292,33 @@ func (w *SliceWriter) Write(c *apiclient.Client, nodeName string, current *Resou
 // write sent the devices desired now.
 func (w *SliceWriter) holds(current *ResourceSlice, devices []SliceDevice) bool {
 	return w.own.Wrote(current.Metadata.ResourceVersion) && reflect.DeepEqual(w.sent, devices)
+}
+
+// sameDevices answers whether the stored devices already say what the
+// writer would write. It ignores TimeAdded, which the API server fills
+// in on every taint it stores. A plain comparison would read the stored
+// time against an empty one and write the slice on every pass, and each
+// slice write wakes every pod in the cluster that waits on an
+// allocation.
+func sameDevices(stored, desired []SliceDevice) bool {
+	return reflect.DeepEqual(withoutTimeAdded(stored), withoutTimeAdded(desired))
+}
+
+// withoutTimeAdded copies the devices with every taint's time cleared,
+// and leaves the caller's taints unchanged.
+func withoutTimeAdded(devices []SliceDevice) []SliceDevice {
+	out := slices.Clone(devices)
+	for i, device := range out {
+		if len(device.Taints) == 0 {
+			out[i].Taints = nil
+			continue
+		}
+		out[i].Taints = slices.Clone(device.Taints)
+		for j := range out[i].Taints {
+			out[i].Taints[j].TimeAdded = ""
+		}
+	}
+	return out
 }
 
 // send writes the slice and remembers the version the API server

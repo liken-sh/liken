@@ -70,8 +70,9 @@ type cdiSpec struct {
 }
 
 type cdiDevice struct {
-	Name           string   `json:"name"`
-	ContainerEdits cdiEdits `json:"containerEdits"`
+	Name           string            `json:"name"`
+	Annotations    map[string]string `json:"annotations,omitempty"`
+	ContainerEdits cdiEdits          `json:"containerEdits"`
 }
 
 type cdiEdits struct {
@@ -191,7 +192,7 @@ func cdiSpecPath(claimUID string) string {
 // injects the nodes at container creation, and a node that moves
 // under a running container stays wrong until the pod restarts. What
 // it prevents is a stale file that every later pod would receive.
-func refreshCDISpecs(sysRoot string, out *passOutcome) {
+func refreshCDISpecs(sysRoot string, out *passOutcome, notes machineEvents) {
 	entries, err := os.ReadDir(cdiDir)
 	if err != nil {
 		// No directory means no claim has been prepared on this boot.
@@ -209,7 +210,7 @@ func refreshCDISpecs(sysRoot string, out *passOutcome) {
 				byName[deviceName(d)] = d
 			}
 		}
-		if err := refreshCDISpec(sysRoot, claimUID, byName, out); err != nil {
+		if err := refreshCDISpec(sysRoot, claimUID, byName, out, notes); err != nil {
 			fmt.Fprintf(os.Stderr, "device inventory: refreshing claim %s: %v\n", claimUID, err)
 			out.fail("refreshing the CDI specification of claim "+claimUID, err)
 		}
@@ -248,9 +249,12 @@ func refreshCDISpecs(sysRoot string, out *passOutcome) {
 // never restart: the runtime injects the spec's nodes at every
 // container creation, and a stat on the deleted node fails it.
 //
+// A device whose unit left its address takes the unplugged mark, once,
+// and posts one Event (unplugged.go).
+//
 // A spec that does not decode is wrapped in fs.ErrInvalid: nothing but
 // a new prepare replaces it, so the pass's outcome retries it slowly.
-func refreshCDISpec(sysRoot, claimUID string, byName map[string]hardware.Device, out *passOutcome) error {
+func refreshCDISpec(sysRoot, claimUID string, byName map[string]hardware.Device, out *passOutcome, notes machineEvents) error {
 	cdiWrites.Lock()
 	defer cdiWrites.Unlock()
 
@@ -275,6 +279,10 @@ func refreshCDISpec(sysRoot, claimUID string, byName map[string]hardware.Device,
 		allocated, ok := strings.CutPrefix(device.Name, claimUID+"-")
 		if !ok {
 			continue
+		}
+		if markUnplugged(&spec.Devices[i], sysRoot, byName) {
+			notes.warning(reasonDeviceUnplugged, unpluggedMessage(allocated, spec.Devices[i]))
+			changed = true
 		}
 		serio := declaredSerio()
 		published, err := resolveAllocated(allocated, sysRoot, byName, serio, currentProtection())

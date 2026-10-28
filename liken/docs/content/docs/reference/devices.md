@@ -329,10 +329,12 @@ While the hardware is unplugged, the pass writes a node that does not
 exist into the claim's specification instead. The old node would be
 unsafe, because the kernel gives its name to the next device that
 arrives: another USB disk becomes `/dev/sda`. A container that starts
-while the hardware is away fails to start, and the kubelet retries it
-under its restart backoff. When the hardware returns to the same
-port, the next pass writes its nodes back, and the container starts at
-its next retry.
+while the hardware is away fails to start. The unplug also taints the
+device, and the taint evicts the claim's pods, as
+[An unplugged device evicts its pods](#an-unplugged-device-evicts-its-pods)
+describes. When the hardware returns to the same port, the next pass
+writes its nodes back, so a pod that tolerates the taint starts its
+next container with them.
 
 usbfs has no interface boundary. If a device has more than one
 interface with a driver, each interface publishes as its own device,
@@ -464,12 +466,14 @@ the same way. The adapter's other interfaces keep their own devices
 without the usbfs node: the Pulse-Eight's HID interface still
 publishes its `hidraw` and input nodes.
 
-An unplug removes both devices from the slice. A pod that holds them
-keeps file descriptors for nodes that are gone, and Kubernetes does
-not evict it. A program that holds one of these claims must end when
-a read or an `ioctl` returns `ENODEV`. The kubelet then restarts the
-container, and the new container receives the nodes that the claim's
-CDI specification names at that moment.
+An unplug taints both devices, and the taint evicts the pods that
+hold them, as
+[An unplugged device evicts its pods](#an-unplugged-device-evicts-its-pods)
+describes. A pod that tolerates the taint keeps file descriptors for
+nodes that are gone. A program that holds one of these claims must
+end when a read or an `ioctl` returns `ENODEV`. The kubelet then
+restarts the container, and the new container receives the nodes that
+the claim's CDI specification names at that moment.
 
 While a device is absent, its claim's specification names a node that
 does not exist, so a container cannot start. The old nodes would be
@@ -482,8 +486,60 @@ USB port, the devices return with the same names, and the container
 starts at its next retry with no new allocation. After a long
 absence, that retry can come up to 5 minutes after the adapter
 returns. A published name follows the USB port, so an adapter moved
-to another port is a different device, and its claimant needs a new
-pod.
+to another port is a different device. The eviction gives its
+claimant a new pod, and the new pod's claim is allocated the adapter
+in its new port.
+
+## An unplugged device evicts its pods
+
+Kubernetes allocates a claim once, and does not allocate it again
+while a pod holds it. A published name follows the USB port, so a claim
+on a device that moves to another port, or to another machine, still
+names the old port. So when a device that a prepared claim holds is
+unplugged, the node taints the device `liken.sh/unplugged` with the
+effect `NoExecute`. Kubernetes evicts every pod that holds the claim,
+and clears the claim's allocation when the last of those pods is gone.
+The pod's controller, such as a `Deployment` or a `DaemonSet`, creates
+a new pod, and the scheduler allocates its claim to a device that
+matches the claim, on any machine.
+
+The node treats a device as unplugged when its directory leaves
+`/sys/bus`, or when another enumeration takes its address: another
+unit, or the same unit with a new device number. A program that
+detaches a kernel driver leaves the device in place, so it is not an
+unplug. A device that comes back to its port keeps the taint until the
+kubelet unprepares the claim, because a container that kept running
+holds the nodes of the old enumeration. While the device is gone, the
+slice publishes its name with the taint and no attributes, so no new
+claim matches it.
+
+The node posts a `DeviceUnplugged` `Event` on its `Machine` when it
+taints a device. The message names the device and the claim.
+
+A pod that no controller owns is evicted and nothing creates it again.
+
+A program that follows its hardware by itself tolerates the taint in
+its claim's request, and keeps running:
+
+    exactly:
+      deviceClassName: sound-card
+      allocationMode: All
+      tolerations:
+        - key: liken.sh/unplugged
+          operator: Exists
+          effect: NoExecute
+
+`audio-operator` tolerates it, because PipeWire serves every sound
+card of a node, and `firmware-operator`'s upload tolerates it, because
+the upload makes the chip enumerate again. A toleration with
+`tolerationSeconds` delays the eviction by that many seconds.
+
+A claim that the kubelet prepares again after a reboot is a different
+case. The kubelet can prepare a claim before its USB device has
+enumerated, so a device that is missing then is not an unplug. Prepare
+fails, the kubelet retries it, and the pod waits in `ContainerCreating`
+until the device appears. If the device moved while the machine was
+off, delete the pod.
 
 ## Limits
 
@@ -494,10 +550,11 @@ pod.
 * `liken` supplies no DeviceClasses. A DeviceClass states what a
   deployment needs, so each deployment writes its own. The
   [guide](/docs/guides/devices/) has examples to start from.
-* Devices have no capacity and no taints at this time. If a device
-  fails, it disappears from the slice at the next pass. This stops
-  new allocations, but it does not change an allocation that is in
-  use.
+* Devices have no capacity. If a device fails, it disappears from the
+  slice at the next pass. This stops new allocations. A device that a
+  prepared claim holds takes the `liken.sh/unplugged` taint, which
+  evicts the claim's pods
+  ([An unplugged device evicts its pods](#an-unplugged-device-evicts-its-pods)).
 * `liken` does not keep a claim across a reboot. The claim is a
   Kubernetes object, and Kubernetes reschedules the pod that holds it
   together with the claim.

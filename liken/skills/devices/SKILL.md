@@ -350,6 +350,13 @@ Then give each pod its own claim:
             - name: adapter
               resourceClaimTemplateName: zigbee
 
+When you unplug the adapter, `liken` taints it, and Kubernetes evicts
+the pod. The pod's controller creates a new pod, and its claim takes
+the adapter wherever you plug it in: another port, or another machine.
+The [device reference](https://liken.sh/docs/reference/devices/#an-unplugged-device-evicts-its-pods)
+gives the rules, and the toleration for a program that follows its
+hardware by itself.
+
 A template makes one claim for each pod, and the device allocates to
 one claim, so only one pod holds the adapter. A rolling update waits
 until the old pod releases the adapter. This is correct for hardware

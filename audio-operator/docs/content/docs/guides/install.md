@@ -150,6 +150,20 @@ The `-n` flag places the `ServiceAccount` and the `DaemonSet` in
 only works there. `DeviceClass` is cluster-scoped, so the flag
 leaves it alone.
 
+Each pod claims every sound card on its node through the
+`ResourceClaimTemplate` `every-sound-card`. The claim tolerates
+`liken.sh/unplugged`, the taint that `liken` puts on a device that a
+claim held when it was unplugged. So when you unplug one USB card,
+PipeWire keeps playing on the other cards, and the pod does not
+restart.
+
+A template's spec cannot change, so an install from before the
+toleration has a template named `sound-card` that no pod uses after
+you apply. A `Kustomization` with pruning deletes it. After a plain
+`kubectl apply`, delete it yourself:
+
+    kubectl delete -n liken-system resourceclaimtemplate sound-card
+
 For GitOps, put your specific classes in a file of your own and
 point a `Kustomization` at it and at the served URLs. `kustomize`
 takes a raw YAML URL as a resource:
