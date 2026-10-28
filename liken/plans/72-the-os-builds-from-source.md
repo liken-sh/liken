@@ -50,6 +50,11 @@ Three problems follow from this:
   Debian inside gokrazy's `mke2fs` build. Each `fetch.sh` handles its
   source in a different way.
 
+Note, 2026-10-28: since 2026-10-25, `e2fsprogs/fetch.sh` builds
+`mke2fs` from the kernel.org release tarball in the `alpine` image,
+like `open-iscsi` and `nfs-utils`. So `mke2fs` can be rebuilt and
+compared, and Debian is no longer one of the distros of the build.
+
 ## The claim
 
 When this milestone is done, the project can make this claim, and
@@ -345,7 +350,7 @@ the release numbers in plan 69's "The split repositories" do not.
 12. **The data components.** Move `linux-firmware`, `microcode`, and
     the flux seed to the driver, as components that verify and copy.
 13. **The old tree.** Write the `README.md` in `sources/` and remove
-    the old upload step from the release workflow.
+    the old upload of `sources/` from `releases/publish.sh`.
 
 ## Failures and what the design does about them
 

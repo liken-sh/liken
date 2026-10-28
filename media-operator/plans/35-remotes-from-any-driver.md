@@ -40,10 +40,11 @@ that comes back on the same USB port brings the new node to the next
 container, with no new allocation.
 
 The reader's claim keeps its toleration of
-`bluetooth.liken.sh/disconnected`. `liken` publishes no taint for a
-CEC input device, so no eviction needs a second toleration. If `liken`
-adds a device taint later, a toleration derived from the
-`DeviceClass`'s driver is the change to make then.
+`bluetooth.liken.sh/disconnected`. `liken` taints an unplugged device
+with `liken.sh/unplugged` only when a pod owns its claim
+([milestone 89](../../liken/plans/completed/89-an-unplugged-device-evicts-its-pod.md)),
+and the reader's claim is a named claim that the `Remote` owns, so no
+eviction needs a second toleration.
 
 ## A relay node that answers `ENODEV` for a while
 
@@ -83,8 +84,8 @@ are open, and the build picks the one that holds:
   reader that reads a Bluetooth remote. Since root plan 77,
   equipment-operator also holds no broker connection.
 * **A toleration for each driver's disconnected taint.** `liken`
-  publishes no taint for a CEC input device, so the toleration would
-  guard against nothing.
+  taints no device of the reader's named claim, so the toleration
+  would guard against nothing.
 * **Reopening the node inside the container.** A running container
   never receives a node that appears after it starts, so there is
   nothing to reopen. The restart is how the reader receives the new

@@ -301,8 +301,7 @@ describe it as one.
 Whether a restore can read directly from S3 is an open question. That
 milestone should answer it when it starts.
 
-**A `liken snapshot` command.** Milestone 45 gives the CLI a cluster
-client. Once it exists, a command that takes an on-demand snapshot
+**A `liken snapshot` command.** Milestone 45 gave the CLI a cluster
+client, so a command that takes an on-demand snapshot
 before a risky change is a small addition, and it would remove the
-need for an operator to carry the k3s binary. It waits for
-milestone 45.
+need for an operator to carry the k3s binary.

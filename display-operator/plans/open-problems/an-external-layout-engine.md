@@ -1,10 +1,14 @@
 # An external layout engine
 
-Plan 17 decides every placement in one function inside the operator:
-the surfaces on a screen and their pods' labels and the `Layout` go
-in, and a rectangle and a stacking position for each surface come
-out. The executor in the compositor module commits whatever the
-function returns and makes no placement decisions of its own.
+Plan 17 decides every region in one function inside the operator,
+`placeSurfaces` in `display-operator/placement.go`: the surfaces on a
+screen and their pods' labels and the `Layout` go in, and a rectangle
+and a stacking position for each surface come out. The executor in the
+compositor module commits whatever the function returns. Inside a
+claim's region, the claim's arranger places its own surfaces through
+`liken_arrangement_v1`
+([plan 31](../completed/31-an-arranger-inside-each-region.md)), and the
+function does not decide those.
 
 That function is where a different engine would go: one that puts
 the camera with motion in the big region, one that follows a
@@ -31,4 +35,4 @@ trips through the API server, a few hundred milliseconds, where the
 in-process function takes one pass of the loop. That delay is not
 visible when a film starts or a camera appears. It is visible in
 anything that follows a person's input on a remote, so that kind of
-layout belongs inside one client.
+layout belongs inside one client, which is what an arranger is.

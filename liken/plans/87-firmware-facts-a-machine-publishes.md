@@ -19,7 +19,7 @@ The word "firmware" names three different jobs. Root
 | | The kernel loads it | The host uploads it | The device keeps it |
 |---|---|---|---|
 | Example | i915 and wifi blobs | a QHY guide camera on a Cypress FX2 chip | UEFI, a dock, an SSD |
-| Owner | the OS image, [milestone 32](completed/32-hardware-support-in-the-image.md) | `firmware-operator`, its plan 01 | `firmware-operator`, its plan 02, with the OS parts in [milestone 33](completed/33-firmware-updates.md) |
+| Owner | the OS image, [milestone 32](completed/32-hardware-support-in-the-image.md) | `firmware-operator`, its plan 01 | `firmware-operator`, its plans 03 to 08, with the OS parts in [milestone 33](completed/33-firmware-updates.md) |
 
 `firmware-operator` is an add-on. It ships apart from the OS, like
 display-operator, and a cluster that does not install it loses

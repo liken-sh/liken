@@ -6,7 +6,8 @@ states the problems and the shape of the contract, and leaves the open
 questions for the design. [Plan 53](completed/53-up-next.md) built the
 `next` block that the browser writes, and
 [media-operator plan 28](../../media-operator/plans/completed/28-up-next.md)
-built the card that `upnext.lua` draws from it.
+built the card, which `media-operator/display/src/upnext.rs` draws
+from it.
 [Plan 62](completed/62-intro-and-credits-marks.md) moved the card's
 rise to the start of the credits where the catalog has credits marks.
 [Root plan 85](../../plans/completed/85-motion.md) adds the compositor motion that

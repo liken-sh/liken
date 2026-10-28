@@ -560,8 +560,7 @@ address. A restart of the operator pod stopped bluetoothd, which runs
 as a sidecar, so the whole pod ended. The new pod's init container
 wrote the bond tree from the `Secret` objects into a new `emptyDir`.
 The next press reconnected the remote 27 s after the restart, and the
-kernel created its HID devices, the same as on a good reconnect
-([a-connected-controller-can-have-no-input.md](../open-problems/a-connected-controller-can-have-no-input.md)).
+kernel created its HID devices, the same as on a good reconnect.
 So the snapshot of that bond held a correct `AddressType` and its key.
 
 This is one success on one device. The remote had reconnected on that

@@ -15,7 +15,7 @@ plugins do, and a test holds its list of kinds to the operator's.
 
 `plans/00-design.md` is the design, and the `plans/` directory holds the
 plans that build it. Code exists only where a plan calls for it. [Root
-plan 74](../plans/74-astrophotography.md) records the contract between
+plan 74](../plans/completed/74-astrophotography.md) records the contract between
 this component and `astrophotography-operator`.
 
 The manual at https://liken.sh/observatory/ is the description of

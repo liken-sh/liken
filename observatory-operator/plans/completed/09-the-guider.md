@@ -505,5 +505,5 @@ connection after the probe closes it, and logs each failed write as a
 - The event server: `src/event_server.cpp` in `OpenPHDGuiding/phd2`
 - The command line: `src/phd.cpp`, and the profile: `src/phdconfig.cpp`
 - The INDI backends: `src/cam_indi.cpp` and `src/scope_indi.cpp`
-- [Root plan 74](../../../plans/74-astrophotography.md): the two
+- [Root plan 74](../../../plans/completed/74-astrophotography.md): the two
   components and the contract between them

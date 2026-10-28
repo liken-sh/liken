@@ -246,7 +246,9 @@ plane's wait group, which counts the goroutine that called it. Every
 watchdog reboot waits the full ten-second shutdown timeout and then
 prints that the proving watch did not stop. The watch should signal
 the reboot and return, so the plane can stop it like any other
-component. `provingWatch` has no test today and gets one here.
+component. `provingWatch` has a test of its promotion path
+(`init/provingwatch_test.go`) and none of its watchdog reboot, which
+gets one here.
 
 Note, 2026-10-10: this path also skips `stopK3s`, so `superviseK3s`
 starts k3s again during the ten-second shutdown, and the new k3s keeps

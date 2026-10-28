@@ -15,10 +15,10 @@ alone. Each later brand would add a third shape, and a person who
 changes receivers would rewrite the spec.
 
 The code repeats itself too. `setSettings` and `setWiimSettings` are
-near copies (`reconcile.go:413-437`, `485-505`), and each driver
+near copies (`reconcile.go:415-439`, `487-507`), and each driver
 writes its own `ConfirmedBy` and `Pending` by hand
 (`denon/settings.go:65-157`, `wiim/settings.go:63-116`). The send
-budget (`send_budget.go:170-205`) and `status.settledSettings`
+budget (`spend` in `send_budget.go`) and `status.settledSettings`
 (`settled.go:75`) already work on any block.
 
 The tiers exist in the code, but nothing names them. A field the
@@ -298,7 +298,7 @@ does not name the row's tier. `TestTheAPIServerWouldAcceptTheCRD`
    transport, that answers from a real device's transcript in
    `testdata/` (the `testing` skill; `denon/testdata/avr-x1700h.txt`).
 4. The block in the CRD, the `exists_one` rule, `startDriver`
-   (`reconcile.go:915-935`), and `declaredBlocks` (`settled.go:61`).
+   (`reconcile.go:921-943`), and `declaredBlocks` (`settled.go:61`).
 5. A row for each common field the protocol reaches, at the tier its
    documents give.
 

@@ -1,14 +1,22 @@
 # 74, Astrophotography on a `liken` cluster
 
-Open. Mode 1 is built: `observatory-operator` plans 01 to 17 built it,
-and drilled it with the INDI simulators on the test clusters from
-2026-10-05 to 2026-10-12. Mode 2, `astrophotography-operator`, is
-built through its plans 01, 02, 03, and 08 and the horizon filter of
-its plan 04, and released in `2026.10.13-001`. Its scheduler's score,
-reservations on demand, grading, and calibration frames are not
-built. This plan holds the idea, the two components, and the contract
-between them. Each component's own plans hold its design and the tests
-behind it.
+Built, and closed on 2026-10-28. Mode 1 is built: `observatory-operator`
+plans 01 to 17 built it, and drilled it with the INDI simulators on the
+test clusters from 2026-10-05 to 2026-10-12. Mode 2,
+`astrophotography-operator`, is built through its plans 01, 02, 03, and
+08 and the horizon filter of its plan 04, and released in
+`2026.10.13-001`. The parts of mode 2 that are not built continue in
+the plans of `astrophotography-operator`: the scheduler's score in
+[plan 04](../../astrophotography-operator/plans/04-the-scheduler.md),
+reservations on demand in
+[plan 05](../../astrophotography-operator/plans/05-reservations-on-demand.md),
+grading in
+[plan 06](../../astrophotography-operator/plans/06-grading-policies.md),
+and calibration frames in
+[plan 07](../../astrophotography-operator/plans/07-calibration-frames.md).
+This plan holds the idea, the two components, and the contract between
+them. Each component's own plans hold its design and the tests behind
+it.
 
 ## The idea
 
@@ -52,13 +60,13 @@ one direction, the same way library-operator depends on media-operator.
   It is named for the observatory, not the telescope, because it also
   controls the devices that several telescopes share: a dome, a weather
   station, and a roof. [Its
-  design](../observatory-operator/plans/00-design.md) holds the
+  design](../../observatory-operator/plans/00-design.md) holds the
   topology, the resources, and the images.
 - **`astrophotography-operator`** drives imaging. It owns `Target`,
   the scheduler, solving, grading, and the frames from the moment they
   are written until they reach the archive. It depends on
   `observatory-operator`, and `observatory-operator` does not depend
-  on it. [Its design](../astrophotography-operator/plans/00-design.md)
+  on it. [Its design](../../astrophotography-operator/plans/00-design.md)
   states what is in and out of its scope, and lists its plans in the
   order they build.
 
@@ -115,7 +123,7 @@ the mount, and any client that reaches port 4400 can command PHD2. The
 cluster owner chooses both the path from outside the cluster and the
 `NetworkPolicy`, because a policy that the operator wrote would block
 the path the owner chose. `observatory-operator` [plan
-10](../observatory-operator/plans/completed/10-access-from-a-desktop.md)
+10](../../observatory-operator/plans/completed/10-access-from-a-desktop.md)
 records the decision, and the operator's manual names the labels and
 ports that the owner's objects select.
 

@@ -122,7 +122,7 @@ the policy from the same object and the same watch as the wake.
 ### The request
 
 The node workload sends the request in `runWake`
-(`cecnode_wake.go:386`), from the adapter that speaks for the session's
+(`cecnode_wake.go:394`), from the adapter that speaks for the session's
 `Display`:
 
 * once for each `wokeAt`, after the wake's first Active Source;

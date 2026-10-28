@@ -19,6 +19,8 @@ The cluster-scoped permissions include:
 | `machines` | get, list, watch, create |
 | `machines/status` | update |
 | `clusters` | get, list, watch, create |
+| `disruptions` | get, list, watch, create, update, delete |
+| `disruptions/status` | update |
 | `nodes` | get, list, watch, delete, patch |
 | `resourceslices` | get, list, watch, create, update, delete |
 | `resourceclaims` | get |
@@ -26,9 +28,10 @@ The cluster-scoped permissions include:
 | `pods/eviction` | create |
 | `poddisruptionbudgets` | list, watch |
 | `services`, `helmcharts` | list, watch |
+| `events` | create, patch |
 
 Separate namespaced roles permit get, create, and update on any `Lease`
-in `liken-system`, create and patch on `Event`s in `default`, and get,
+in `liken-system`, and get,
 list, and watch on the single `registry-credentials` `Secret`. The secret rule has `resourceNames`; the node, status, slice, and lease
 rules do not. There is no lease-delete permission.
 

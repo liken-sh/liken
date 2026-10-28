@@ -141,8 +141,8 @@ kind, and it could use the same toolchain.
   some options. The build stage needs a list of build dependencies
   that the `apt-get install` lines do not install today.
 * **Libraries from two sources in the tree.** The closure would ship
-  mesa from source and weston from Debian, and weston links against Debian's libdrm and
-  libwayland. Whether mesa built from source loads correctly beside
+  mesa and weston from source, and both link against Debian's libdrm
+  and libwayland. Whether mesa built from source loads correctly beside
   those is unverified.
 
 ## The release check runs on llvmpipe

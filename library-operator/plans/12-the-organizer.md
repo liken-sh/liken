@@ -8,8 +8,8 @@ naming convention.
 
 Radarr and Sonarr organize the lab's volume today. They rename and move
 files into `Title [Year]` folders, season folders, and episode names, by
-conventions set in their configuration. The scanners read those
-conventions from the `Library` settings blocks. A cluster that replaces
+conventions set in their configuration. The scanners expect the same
+conventions, and no field of a `Library` states them. A cluster that replaces
 those tools, or that receives files another way, has nothing that puts a
 file where the convention says it goes.
 

@@ -68,7 +68,7 @@ it has no builder for any of the messages this plan sends.
 The node workload records one active-source address. `noteSource`
 (`equipment-operator/cecnode_source.go:25`) sets it when the adapter
 hears an `<Active Source>` (`cecnode_adapter.go:548-551`) and when the
-adapter sends one itself (`announceSource`, `cecnode_source.go:73`).
+adapter sends one itself (`announceSource`, `cecnode_source.go:69`).
 `noteSource` also records the route, and an `<Active Source>` for
 `0.0.0.0` is a route that a person chose. `claimInput`
 (`cecnode_source.go:58`) is the one place that sends `<Active Source>`
@@ -81,15 +81,17 @@ The `Player` status reads `Idle` between films
 (`media-operator/playerstatus.go`). The playback sidecar maps key names
 to commands in `playbackKeys` (`media-operator/keybindings.go`). Its
 `actionPause` toggles, and `KEY_PLAYPAUSE`, `KEY_PLAY`, and
-`KEY_PAUSE` bind to it (`keybindings.go:58-60`). `KEY_PLAYCD`,
+`KEY_PAUSE` bind to it (`keybindings.go:55-57`). `KEY_PLAYCD`,
 `KEY_PAUSECD`, and `KEY_STOPCD`, the names `rc-cec` gives a TV
 remote's Play Function, Pause, and Stop Function, bind to `actionPlay`,
-`actionHold`, and `actionStop` (`keybindings.go:62-64`). Play and hold
+`actionHold`, and `actionStop` (`keybindings.go:59-61`). Play and hold
 set the state they name, so a second press changes nothing
 (`media-operator/input.go`). Stop ends the run and asks the screen
-under it nothing (`media-operator/stop.go`). Home and power also end a
-run, and each sends an ask to the screen under it
-(`media-operator/home.go`, `media-operator/power.go`).
+under it nothing (`media-operator/stop.go`). Home also ends a run and
+sends an ask to the screen under it (`media-operator/home.go`). A power
+key writes the `Player`'s `spec.power` (`media-operator/powerkeys.go`),
+and on Off the operator stops each standing `Play` and puts the screen
+and the receiver in standby (`media-operator/playerpower.go`).
 
 `MediaPreferences` holds `audioLanguages`, `subtitleLanguages`,
 `subtitles`, and `timeZone`, with the idle screen policy

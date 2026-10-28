@@ -13,7 +13,7 @@ person states what they want, such as sixty five-minute frames of M42
 through each of three filters, and the operator fits that work into
 the nights the sky allows, and delivers each frame, fully labeled, to
 the person's archive. This is mode 2 of [root plan
-74](../../plans/74-astrophotography.md).
+74](../../plans/completed/74-astrophotography.md).
 
 ## What it does
 

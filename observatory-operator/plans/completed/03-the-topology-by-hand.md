@@ -237,5 +237,5 @@ was not tested on the cluster.
 - A driver chooses descriptor passing for BLOBs in `is_unix_io()` in
   `libs/indibase/indidriverio.c`. A pipe makes it send base64, which is
   why the listener needs `pipes`.
-- [Root plan 74](../../../plans/74-astrophotography.md): the two
+- [Root plan 74](../../../plans/completed/74-astrophotography.md): the two
   components and the contract between them

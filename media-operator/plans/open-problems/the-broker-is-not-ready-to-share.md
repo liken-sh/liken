@@ -17,12 +17,16 @@ Root
 [plan 77](../../../plans/completed/77-the-media-bus-stops-at-media-operator.md)
 made the bus part of the media domain. `media-operator`, the pods it
 starts (the remote readers, the playback sidecars, and the idle
-screen clients), and library-operator's screens connect to it. No
-device operator does: equipment-operator lost its MQTT client, and the
+screen clients), and library-operator's screens connect to it.
+`library-operator` connects too, with its catalog pods, its fact
+workers, its Jellyfin pod, and its backfill. They read the broker's
+address from `LIBRARY_BUS_ADDRESS`
+(`library-operator/deploy/operator.yaml`) and write the library topics
+under `liken/library` on the same broker. No device operator connects: equipment-operator lost its MQTT client, and the
 volume, power, input, and screen asks reach the `Receiver` and the
 `Television` as status fields that `media-operator` writes. So the
 set of clients that a credential or an ACL must cover is smaller than
-it was, and every one of them is a media component.
+it was, and every one of them is a media or a library component.
 
 ## Why a home wants a shared broker
 

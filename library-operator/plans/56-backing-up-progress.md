@@ -17,8 +17,9 @@ current. Sync fills gaps in no fixed order, and nothing in the file
 says "every row the cluster has is here". A backup taken a minute
 after the sidecar starts can be missing a week of rows.
 
-A scan `Job` has the same problem for one run, and `confirmer.go`
-solves it. The `confirmer` container in a catalog pod reads
+A scan `Job` has the same problem for one run, and the `confirmer`
+container solves it (`confirmer.go`, with its reads in
+`confirmations.go`). The `confirmer` container in a catalog pod reads
 `crsql_db_versions` and `__corro_bookkeeping_gaps` on its own copy. It
 confirms a run only after that copy holds every version of the writing
 agent up to the version the run names. A backup needs the same test

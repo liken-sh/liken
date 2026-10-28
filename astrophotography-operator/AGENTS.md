@@ -6,7 +6,7 @@ manifests that run it. `plans/00-design.md` is the design, and the `plans/`
 directory holds the plans that build it. Code exists only where a plan
 calls for it. This component depends on `observatory-operator`, and
 `observatory-operator` does not depend on it. [Root plan
-74](../plans/74-astrophotography.md) records the contract between the
+74](../plans/completed/74-astrophotography.md) records the contract between the
 two components, and [plan 08](plans/completed/08-the-component-and-the-first-session.md)
 gives the order in which the pieces of plans 01, 02, and 03 build.
 

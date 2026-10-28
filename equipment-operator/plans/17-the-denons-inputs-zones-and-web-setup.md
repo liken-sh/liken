@@ -75,7 +75,7 @@ port 10443, then `AppCommand`, then port 1256 for a read.
 The setup web interface sends no authentication challenge. It serves a
 self-signed certificate [S7] `avcon/setupapi.py:73-79`, so the driver
 does not verify it, the same way the WiiM driver reaches its device
-(`wiim/client.go:139`).
+(`wiim/client.go:156`).
 
 **Its capability document.** Every element of a `get_config` answer
 carries `display`: `1` is hidden, `2` is shown but not editable, and `3`

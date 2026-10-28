@@ -7,9 +7,9 @@ it is installed. No stick is involved.
 
 ## The problem
 
-Every machine today starts from a stick. The CLI composes one per
-machine, a person brings it to the hardware, and the firmware boots
-it. That works, and since milestone 36 the stick shows the operator
+Every machine today starts from a stick. The CLI composes one stick
+for the whole deployment, with a boot menu that lists every machine, a
+person brings it to the hardware, and the firmware boots it. That works, and since milestone 36 the stick shows the operator
 the hardware it found. But carrying media does not scale past a
 handful of machines, and a machine in a rack far from the sticks
 needs a person to bring the media. The cluster already contains everything that is on

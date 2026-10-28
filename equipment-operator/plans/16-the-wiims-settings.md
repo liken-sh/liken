@@ -17,14 +17,14 @@ faults keep the WiiM from the tier rules that plan 14 states.
 `Pending` treats a nil observed value as a field the device does not
 report, and sends it once for each change of the spec
 (`wiim/settings.go:105-116`). The controller passes it the value of
-`Client.Settings()` (`reconcile.go:491`). That function builds every
+`Client.Settings()` (`reconcile.go:493`). That function builds every
 field from the stored snapshot with a pointer builder
 (`wiim/settings.go:151-163`), so no field is ever nil. A read that the
 amp does not answer leaves the snapshot's zero value in place:
 `Client.read` returns before the parser runs when the body is
-`unknown command`, `Failed`, or empty (`wiim/client.go:464-480`). So on
+`unknown command`, `Failed`, or empty (`wiim/client.go:486-502`). So on
 a model with no `LED_SWITCH_GET`, the snapshot holds `led: false`
-(`wiim/client.go:752-757`, `wiim/state.go:294-298`), and a declared
+(`wiim/client.go:774-779`, `wiim/state.go:294-298`), and a declared
 `led: true` differs from it. The operator sends the command, compares
 again, and sends it again until the send budget stops it at 3
 (`send_budget.go:27`). The field is then named in `SettingsConfirmed`
@@ -33,15 +33,15 @@ of the sent-once path passes because it builds a nil observed value by
 hand (`wiim/settings_pending_test.go:35-49`); the client never does.
 
 **Every setting is read again every 10 seconds.** One poll is 27 GET
-requests (`wiim/client.go:29-42`), and it reads the output mode, the
+requests (`wiim/client.go:30-43`), and it reads the output mode, the
 subwoofer, the SPDIF switch delay, the equalizer, the power-mode times,
 the presets, the static address, the Bluetooth pairings, the light,
-the buttons, and CEC (`wiim/client.go:556-767`). The UPnP events carry
+the buttons, and CEC (`wiim/client.go:578-789`). The UPnP events carry
 only the volume, the mute, and the transport state
 (`wiim/events.go:431-497`). The root `AGENTS.md` section "Keep state
 current with events" calls a timer that reads state again to find a
 change a defect. The poll also runs before the subscriptions open
-(`wiim/client.go:185-196`), which is the reverse of the order that
+(`wiim/client.go:207-218`), which is the reverse of the order that
 section requires.
 
 **The common families have no WiiM rows.** Plan 14 moves `name` and
@@ -57,23 +57,23 @@ already tells the reader (`deploy/receivers-crd.yaml:274`).
 
 The code path:
 
-1. `Client.read` (`wiim/client.go:464-475`) records, for each read
+1. `Client.read` (`wiim/client.go:486-497`) records, for each read
    command, whether the last answer was a value. A body that `isMiss`
-   matches (`wiim/client.go:477-480`) records "no value". A transport
+   matches (`wiim/client.go:499-502`) records "no value". A transport
    error records nothing and keeps the earlier answer, because one
    missed request is not the model's answer (the same reason as
-   `pollFailures`, `wiim/client.go:45-49`).
+   `pollFailures`, `wiim/client.go:46-50`).
 2. `Client.Settings()` (`wiim/settings.go:151-163`) returns nil for a
    field whose read command has no value: `getChannelBalance` for
-   `Balance` (`wiim/client.go:593`), `LED_SWITCH_GET` for `LED`
-   (`wiim/client.go:753`), and `Button_Enable_GET` for `Buttons`
-   (`wiim/client.go:758`). `Name` comes from `getStatusEx`, which a
-   poll cannot miss (`wiim/client.go:484-496`).
+   `Balance` (`wiim/client.go:615`), `LED_SWITCH_GET` for `LED`
+   (`wiim/client.go:775`), and `Button_Enable_GET` for `Buttons`
+   (`wiim/client.go:780`). `Name` comes from `getStatusEx`, which a
+   poll cannot miss (`wiim/client.go:506-518`).
 3. `Pending` and `ConfirmedBy` (`wiim/settings.go:63-116`) and
-   `setWiimSettings` (`reconcile.go:485-505`) already handle a nil
+   `setWiimSettings` (`reconcile.go:487-507`) already handle a nil
    field. They do not change.
 
-The test: `startFakeWiim` (`wiim_settings_test.go:37-85`) gains a
+The test: `startFakeWiim` (`wiim_settings_test.go:36-84`) gains a
 variant that answers `unknown command` to `LED_SWITCH_GET`. A declared
 `led: true` is sent once, `SettingsConfirmed` does not name it, and a
 restart against the same `status.settledSettings` sends nothing.
@@ -280,7 +280,7 @@ Notes on the rows:
   `network` has setters, and leaving them out is a choice.
 * `{"status":"Failed"}` does not always mean the model lacks a field.
 * The status already reports most of these families
-  (`wiim/client.go:556-767`). Only the spec held two.
+  (`wiim/client.go:578-789`). Only the spec held two.
 * Plan 13 said `reboot` fails on an Amp. `pywiim` reboots an Amp
   with `StartRebootTime:1`
   ([`api/diagnostics.py`](https://github.com/mjcumming/pywiim/blob/main/pywiim/api/diagnostics.py)).

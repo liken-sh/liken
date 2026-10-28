@@ -38,9 +38,11 @@ driver (milestone 11) publishes the devices.
 One part does not exist yet: a release that carries an artifact for
 one machine. The fetcher writes every artifact in the release document
 to every slot, and the bundle sums all artifacts against one
-fleet-wide slot size. [Milestone 33](completed/33-firmware-updates.md) needs the
-same artifact for fwupd, and its prerequisites section gives the
-proposed design. Both plans wait on this one prerequisite.
+fleet-wide slot size. [Milestone 33](completed/33-firmware-updates.md) once
+needed the same artifact for fwupd, and its prerequisites section gives
+the proposed design. Milestone 33 set it aside when `firmware-operator`
+ran fwupd as a container image, so this plan is the only one that
+waits on it.
 
 ## What the NVIDIA add-on would hold
 
