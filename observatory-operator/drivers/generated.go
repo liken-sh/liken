@@ -6,7 +6,7 @@ package drivers
 const Tag = "20261005-9"
 
 // WestonTag is the tag of the weston image, <version>-<revision> from weston/package.toml.
-const WestonTag = "20261024-2"
+const WestonTag = "20261024-3"
 
 // families maps each third-party driver to the family of the image
 // that holds it, and to "" when no image holds it.
