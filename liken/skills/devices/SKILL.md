@@ -308,11 +308,17 @@ Select the device by its identity:
         - cel:
             expression: |
               device.driver == "liken.sh" &&
+              has(device.attributes["liken.sh"].vendor) &&
+              has(device.attributes["liken.sh"].product) &&
               device.attributes["liken.sh"].vendor == "10c4" &&
               device.attributes["liken.sh"].product == "ea60"
 
-Add `device.attributes["liken.sh"].serial == "..."` when a machine has
-two adapters of the same model and you must select one of them. The
+A device on the board, such as a laptop's brightness keys, has no
+`vendor` or `product`, and a selector that reads an attribute a device
+does not have aborts the allocation, so guard each read with `has()`.
+Add `has(device.attributes["liken.sh"].serial) &&
+device.attributes["liken.sh"].serial == "..."` when a machine has two
+adapters of the same model and you must select one of them. The
 name of the device follows the port, not the unit, so a replacement
 adapter in the same port has the same name.
 
