@@ -18,8 +18,11 @@ Status on 2026-10-28: the dismissal is built.
 (d3287df8) made a select on the card fade the film and the card's
 column out over 300 ms and pause mpv, and the display draws nothing
 once mpv's socket closes, so the browser's loading curtain shows until
-the next `Play` draws. The card's timing, the runtime, and the end time
-are not built.
+the next `Play` draws.
+
+Status later on 2026-10-28: the timing, the runtime, and the end time
+are built, in the three commits that "The decisions" names. The drill
+on `liken-1` is in "How the work is proved".
 
 ## The problems
 
@@ -65,17 +68,50 @@ replaces it with a loading state that the next `Play`'s screen
 continues. The display must still route every press except back to
 nothing until the next `Play` starts, as it does now.
 
-## Open questions
+## The decisions
 
-* Which works raise the card at the wrong time, and which rule raised
-  it on each.
-* Whether the end time counts from the press or from the end of the
-  current work. A press starts the next work at once, so the press is
-  the likely answer.
-* Whether a film's `detail` should drop its runtime text when the card
-  draws the runtime from the number.
-* Whether the dismissed card should leave a loading mark on the screen
-  until the next `Play` draws, and which component draws it.
+These decisions were made with the maintainer on 2026-10-28, and they
+answer the open questions that the stub listed.
+
+**The timing uses every clue, and errs earlier.** No case of a late or
+early rise was recorded. The maintainer judged that an early rise costs
+little now that the film steps back at the rise, and that a late rise
+is the larger annoyance. So `library-operator` derives one credits
+start and one intro for each main video from every clue it has, and
+writes them as marks with the source `estimate` beside the providers'
+marks (07f43beb). The estimate runs in the close container of every
+library Job. The clues are in two tiers. The exact tier is the
+providers' marks, a chapter whose title names the credits or the intro,
+and the start of a `preview` span. The inferred tier is the median
+credits length or intro of the series' other episodes, and the stretches
+with no dialogue in a text subtitle file beside the video. The inferred
+tier counts only where the exact tier has nothing, and the earliest clue
+in a tier wins. The display, the skip control, and both watched rules
+read credits and intro marks of any source, so the card and the watched
+line still agree. The estimate is computed in `library-operator`, and
+not in the display, for that reason: an earlier rise that the watched
+rule did not know would leave the work the person just finished in the
+continue-watching row.
+
+**The time rule moves earlier, inside the watched line.** A work with no
+mark of any kind raises the card at the smaller of 4% or 240 s before
+its end for a film, and the smaller of 2.5% or 120 s for an episode
+(4cb45f8e). Both amounts stay under the watched rule's 5% and 300 s, so
+the card never rises before the work counts as watched, and the watched
+rule did not change.
+
+**The end time counts from now.** A select on the card starts the next
+work at once, so the time that matters is when the next work ends if it
+starts now. The browser adds `remaining_seconds` to the `next` block:
+the next work's duration less the position a play of it resumes from.
+`library-operator` copies it to the `Play` as `remainingSeconds`, and
+the display draws "Ends at 10:42 pm" under the detail line, on the card
+and on the stepped-back column, in the screen's clock format
+(4cb45f8e, f07dd24b). The line changes when the wall minute turns.
+
+**The detail line keeps its runtime.** The detail line already held the
+runtime as text for an episode and for a film. It stays, and the new line
+adds only the end time.
 
 ## How the work is proved
 
