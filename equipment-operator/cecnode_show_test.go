@@ -1,10 +1,10 @@
 package main
 
 // The node workload's part of a home press: a new status.session.showAt
-// on a TV that reports On gets Inactive Source, Image View On, and then
-// Active Source for the session's Display, once. A TV that is off gets nothing, so a
-// home press wakes no room. cecnode_wake_test.go holds the wake
-// fixtures.
+// in a session that holds the room awake gets Image View On and then
+// Active Source for the session's Display, once. A session that is
+// asleep gets nothing, so a home press wakes no room.
+// cecnode_wake_test.go holds the wake fixtures.
 
 import (
 	"testing"
@@ -66,11 +66,11 @@ func TestAShowSendsImageViewOnAndActiveSource(t *testing.T) {
 	}
 }
 
-// An Android TV that already records the Display as the active source
-// ignores another Active Source for it, even while it shows its own
-// home screen. Inactive Source first clears that record, so the Active
-// Source after it switches the TV.
-func TestAShowWithdrawsTheSourceBeforeItClaimsTheInput(t *testing.T) {
+// A home press claims the input with the same pair as every other
+// claim, Image View On and then Active Source, and sends no Inactive
+// Source. Inactive Source tells the TV that the Display has no picture,
+// and a TV can act on that before the Active Source arrives.
+func TestAShowSendsOnlyTheClaim(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		wire := roomWithTV(televisionTV(cec.PowerOn))
@@ -82,7 +82,8 @@ func TestAShowWithdrawsTheSourceBeforeItClaimsTheInput(t *testing.T) {
 		api.putTelevision(waking(shownNow(session)))
 		api.waitUntil(t, "the show", func() bool { return len(claimsOf(wire)) == 2 })
 
-		mustDeepEqual(t, routingSentAfter(wire, before), []string{"4->0 9d 13 00", "4->0 04", "4->f 82 13 00"})
+		mustDeepEqual(t, routingSentAfter(wire, before), []string{"4->0 04", "4->f 82 13 00"})
+		mustMatch(t, sentOf(wire, cec.OpInactiveSource), 0)
 	})
 }
 
@@ -163,7 +164,7 @@ func TestAShowWritesALine(t *testing.T) {
 		api.waitUntil(t, "the line", func() bool { return len(linesWith(log, "asked to show")) == 1 })
 		mustDeepEqual(t, linesWith(log, "asked to show"), []string{
 			"Television lounge: Player media/den asked to show Display acm-0001-receiver at " + shown.ShowAt +
-				"; the adapter on node-1 sent Inactive Source, Image View On, and Active Source for 1.3.0.0",
+				"; the adapter on node-1 sent Image View On and Active Source for 1.3.0.0",
 		})
 	})
 }

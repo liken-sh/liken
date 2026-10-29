@@ -332,16 +332,10 @@ claims the TV's input for the `Display` the same way, and the receiver
 selects the session's input if it is on. The adapter reads no power
 first: a press on a `Player` that is off turns the `Player` on, so a
 press that reaches the TV belongs to a `Player` that is on, and Image
-View On may wake a TV in standby. Before the claim, the
-adapter sends the TV Inactive Source for the `Display`. An Android TV
-records the last Active Source it heard and ignores another one for
-the same address, so a TV that recorded the wake's Active Source while
-it booted, and then opened its own home screen, switches only after
-Inactive Source clears that record. A TV that already shows the
-`Player` can leave it for a moment before the claim brings it back. A press of any other key,
-except a power key and a press that turns a `Player` that is off on,
-writes the action `ensure` while the `Receiver`'s
-`InputSelected` condition is not `True`. An `ensure` asks a receiver
+View On may wake a TV in standby. A press of any other key, except a
+power key and a press that turns a `Player` that is off on, writes the
+action `ensure` while the `Receiver`'s `InputSelected` condition is
+not `True`. An `ensure` asks a receiver
 that is on for the session's input, and sends the TV nothing.
 
 While a session holds the room awake, the adapter also answers two
