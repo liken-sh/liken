@@ -52,7 +52,7 @@ func (e *enricher) contributorFact(ctx context.Context, fact string) error {
 // work. One person the provider refuses records an error attempt, and the run
 // carries on to the next.
 func (e *enricher) contributorGap(ctx context.Context, fact string, client *tmdbClient) error {
-	gaps, err := e.catalog.contributorGaps(ctx, e.library, fact, time.Now().UTC(), e.refresh[fact])
+	gaps, err := e.catalog.contributorGaps(ctx, e.library, fact, time.Now().UTC(), e.refresh.of(fact))
 	if err != nil {
 		return err
 	}
@@ -366,9 +366,9 @@ func (e *enricher) recordContributor(folder, fact, provider, result, wrote strin
 // only in the ids gap, for an entry the ids fact finds the TMDb id of by the
 // IMDb id.
 func (c *Catalog) contributorGaps(ctx context.Context, library, fact string,
-	now, refresh time.Time) ([]contributorGap, error) {
+	now time.Time, reopen reopenTime) ([]contributorGap, error) {
 	var gaps []contributorGap
-	err := c.stream(ctx, gapQueries[fact], gapParams(fact, library, now, refresh), func(cells []any) error {
+	err := c.stream(ctx, gapQueries[fact], gapParams(fact, library, now, reopen), func(cells []any) error {
 		if len(cells) < 3 {
 			return nil
 		}

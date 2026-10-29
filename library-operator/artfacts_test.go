@@ -71,7 +71,7 @@ func artGapsOf(t *testing.T, catalog *Catalog, fact string) []artGap {
 // fact.
 func artGapsRefreshed(t *testing.T, catalog *Catalog, fact string, refresh time.Time) []artGap {
 	t.Helper()
-	gaps, err := catalog.artGaps(t.Context(), artLibrary, fact, time.Now().UTC(), refresh)
+	gaps, err := catalog.artGaps(t.Context(), artLibrary, fact, time.Now().UTC(), reopenTime{refresh: refresh})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestTheGapCountsHoldEveryArtFact(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	seedArtMovie(t, catalog, "Some Film (2014)")
 
-	counts, err := catalog.gapCounts(t.Context(), artLibrary, time.Now().UTC(), nil)
+	counts, err := catalog.gapCounts(t.Context(), artLibrary, time.Now().UTC(), reopenTimes{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -487,7 +487,7 @@ func TestAnAttemptBeforeTheAirDateStandsOnlyUntilIt(t *testing.T) {
 			}
 
 			gaps, err := catalog.artGaps(t.Context(), artLibrary, factEpisodeThumb,
-				dayOf(t, test.today), time.Time{})
+				dayOf(t, test.today), reopenTime{})
 
 			if err != nil {
 				t.Fatal(err)
@@ -534,7 +534,7 @@ func TestATitleArtAttemptBeforeTheReleaseStandsOnlyUntilIt(t *testing.T) {
 			}
 
 			gaps, err := catalog.artGaps(t.Context(), artLibrary, factPoster,
-				dayOf(t, test.today), time.Time{})
+				dayOf(t, test.today), reopenTime{})
 
 			if err != nil {
 				t.Fatal(err)
@@ -577,7 +577,7 @@ func TestASeasonArtAttemptBeforeTheFirstEpisodeStandsOnlyUntilIt(t *testing.T) {
 			}
 
 			gaps, err := catalog.artGaps(t.Context(), artLibrary, factSeasonPoster,
-				dayOf(t, test.today), time.Time{})
+				dayOf(t, test.today), reopenTime{})
 
 			if err != nil {
 				t.Fatal(err)

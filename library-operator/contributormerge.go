@@ -56,7 +56,7 @@ type mergeCounts struct {
 // work. One group that fails records an error attempt, and the run goes on.
 func (e *enricher) mergeContributors(ctx context.Context) error {
 	paths, err := e.catalog.queryStrings(ctx, gapQueries[factContributorMerge],
-		gapParams(factContributorMerge, e.library, time.Now().UTC(), time.Time{}))
+		gapParams(factContributorMerge, e.library, time.Now().UTC(), reopenTime{}))
 	if err != nil {
 		return fmt.Errorf("reading the %s gap of %s: %w", factContributorMerge, e.library, err)
 	}

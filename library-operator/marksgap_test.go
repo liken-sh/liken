@@ -99,7 +99,7 @@ func TestAMarksAttemptHoldsForAWindowThatFollowsTheRelease(t *testing.T) {
 			seedMarksAttempt(t, catalog, test.releases, test.result, now.Add(-test.ago))
 
 			paths, err := catalog.queryStrings(t.Context(), gapQueries[factMarks],
-				gapParams(factMarks, marksLibrary, now, time.Time{}))
+				gapParams(factMarks, marksLibrary, now, reopenTime{}))
 
 			if err != nil {
 				t.Fatal(err)
@@ -119,12 +119,43 @@ func TestTheReporterCountsTheMarksGapWithItsWindows(t *testing.T) {
 	seedMarksAttempt(t, catalog, []string{now.Add(-72 * time.Hour).Format(time.DateOnly)},
 		attemptNothing, now.Add(-48*time.Hour))
 
-	counts, err := catalog.gapCounts(t.Context(), marksLibrary, now, nil)
+	counts, err := catalog.gapCounts(t.Context(), marksLibrary, now, reopenTimes{})
 
 	if err != nil {
 		t.Fatal(err)
 	}
 	if counts[factMarks] != 1 {
 		t.Errorf("the marks gap counts %d, want the one new episode", counts[factMarks])
+	}
+}
+
+// A retry reopens a marks miss inside its window and leaves a found attempt
+// inside its window closed, because the marks gap reads its own window.
+func TestARetryReopensAMarksMissInsideItsWindow(t *testing.T) {
+	now := time.Now().UTC()
+	attempted := now.Add(-12 * time.Hour)
+	cases := []struct {
+		name   string
+		result string
+		gap    bool
+	}{
+		{name: "a miss before the retry", result: attemptNothing, gap: true},
+		{name: "a found attempt before the retry", result: attemptFound},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			seedMarksAttempt(t, catalog, []string{""}, test.result, attempted)
+
+			paths, err := catalog.queryStrings(t.Context(), gapQueries[factMarks],
+				gapParams(factMarks, marksLibrary, now, reopenTime{retry: attempted.Add(time.Minute)}))
+
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := slices.Contains(paths, marksGapPath); got != test.gap {
+				t.Errorf("the gap holds %v, want the file in it: %v", paths, test.gap)
+			}
+		})
 	}
 }

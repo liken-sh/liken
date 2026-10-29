@@ -72,9 +72,9 @@ The reporter reads its local agent and publishes one retained report
 per `Library` on the bus. It rebuilds the report whenever the catalog
 changes, at most once a second. These reports supply a `Library`'s
 counts, gaps, and runs. The reporter counts each gap with the
-`Library`'s `spec.refresh` times, which the operator publishes on the bus,
-so an edit of `spec.refresh` changes the gaps with no restart of the
-catalog pod. The reporter has no Kubernetes credential.
+`Library`'s `spec.refresh` and `spec.retry` times, which the operator
+publishes on the bus, so an edit of either field changes the gaps with no
+restart of the catalog pod. The reporter has no Kubernetes credential.
 The operator alone writes status.
 
 All durable replicas mount the same claim, named `<catalog>-catalog`

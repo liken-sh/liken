@@ -270,7 +270,7 @@ func TestEachContributorFactReadsItsOwnGap(t *testing.T) {
 
 		for _, fact := range contributorFactNames {
 			gaps, err := catalog.contributorGaps(t.Context(), contributorLibrary, fact,
-				time.Now().UTC(), time.Time{})
+				time.Now().UTC(), reopenTime{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -301,7 +301,7 @@ func TestEveryAttemptKindGatesTheContributorGap(t *testing.T) {
 				}
 
 				gaps, err := catalog.contributorGaps(t.Context(), contributorLibrary,
-					factContributorHeadshot, now, time.Time{})
+					factContributorHeadshot, now, reopenTime{})
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -165,7 +165,7 @@ func TestTheMarksGapHoldsTheMainVideosOfIdentifiedWorks(t *testing.T) {
 			}
 
 			paths, err := catalog.queryStrings(t.Context(), gapQueries[factMarks],
-				gapParams(factMarks, marksLibrary, time.Now().UTC(), time.Time{}))
+				gapParams(factMarks, marksLibrary, time.Now().UTC(), reopenTime{}))
 
 			if err != nil {
 				t.Fatal(err)

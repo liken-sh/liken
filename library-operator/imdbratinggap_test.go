@@ -16,7 +16,7 @@ import (
 // the gap of the house/movies library with the scope the test names.
 func ratingGap(t *testing.T, catalog *Catalog, scope ratingGapScope) []string {
 	t.Helper()
-	params := gapParams(factRatingIMDb, "house/movies", testNow, time.Time{})
+	params := gapParams(factRatingIMDb, "house/movies", testNow, reopenTime{})
 	copy(params[len(params)-2:], imdbRatingGapParams(scope))
 	ids, err := catalog.queryStrings(t.Context(), gapQueries[factRatingIMDb], params)
 	if err != nil {
@@ -92,7 +92,7 @@ func seedNFORatedMovie(t *testing.T, catalog *Catalog) {
 func reportedRatingGap(t *testing.T, catalog *Catalog) []string {
 	t.Helper()
 	ids, err := catalog.queryStrings(t.Context(), gapQueries[factRatingIMDb],
-		gapParams(factRatingIMDb, "house/movies", testNow, time.Time{}))
+		gapParams(factRatingIMDb, "house/movies", testNow, reopenTime{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +341,7 @@ func TestTheReporterCountsTheEpisodesOfTheRatingGap(t *testing.T) {
 			seedGapEpisodes(t, catalog)
 			agent.queriesLeft = one.refused
 
-			got, err := catalog.episodeGapCounts(t.Context(), "house/movies", testNow, nil)
+			got, err := catalog.episodeGapCounts(t.Context(), "house/movies", testNow, reopenTimes{})
 
 			if (err != nil) != one.failed || !maps.Equal(got, one.want) {
 				t.Errorf("counts = %v, %v, want %v", got, err, one.want)

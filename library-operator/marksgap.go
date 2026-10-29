@@ -27,7 +27,7 @@ const (
 )
 
 // The marks gap's two parameters beyond the ones every gap binds: the cutoff
-// of the new window as ?6 and of the recent window as ?7, in Unix seconds.
+// of the new window as ?7 and of the recent window as ?8, in Unix seconds.
 func marksGapParams(now time.Time) []any {
 	return []any{now.Add(-marksNewWindow).Unix(), now.Add(-marksRecentWindow).Unix()}
 }
@@ -63,20 +63,20 @@ func marksGapQuery() string {
 		`AND (` + marksAttemptClause() + beforeReleaseClause(factMarks, "path") + `)`
 }
 
-// The attempt window of the marks fact: attemptClause's rule, with the dated
-// window chosen by the release. Both sides of each date comparison are text
+// The attempt window of the marks fact: attemptClause's rule, the refresh and
+// the retry included, with the dated window chosen by the release. Both sides of each date comparison are text
 // that sorts as a date, as in beforeReleaseClause, and a file with no release
 // row reads as neither new nor recent. The day counts are this file's
 // constants and never input.
 func marksAttemptClause() string {
-	newSince := `date(?5, '-` + strconv.Itoa(marksNewDays) + ` days')`
-	recentSince := `date(?5, '-` + strconv.Itoa(marksRecentDays) + ` days')`
+	newSince := `date(?6, '-` + strconv.Itoa(marksNewDays) + ` days')`
+	recentSince := `date(?6, '-` + strconv.Itoa(marksRecentDays) + ` days')`
 	return `path NOT IN (SELECT a.item FROM attempts AS a ` +
 		`LEFT JOIN (` + marksReleaseDates() + `) AS r ON r.library = a.library AND r.item = a.item ` +
-		`WHERE a.library = ?1 AND a.` + attemptFactColumn + ` = '` + factMarks + `' AND a.at >= ?4 ` +
+		`WHERE a.library = ?1 AND a.` + attemptFactColumn + ` = '` + factMarks + `' AND a.at >= ?4 AND ` + retriedAttemptCounts("a.") + ` ` +
 		`AND ((a.result IN ` + retriedResults + ` AND a.at >= ?3) ` +
 		`OR (a.result NOT IN ` + retriedResults + ` AND a.at >= CASE ` +
-		`WHEN r.released >= ` + newSince + ` THEN ?6 ` +
-		`WHEN r.released >= ` + recentSince + ` THEN ?7 ` +
+		`WHEN r.released >= ` + newSince + ` THEN ?7 ` +
+		`WHEN r.released >= ` + recentSince + ` THEN ?8 ` +
 		`ELSE ?2 END)))`
 }

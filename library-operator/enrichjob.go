@@ -343,25 +343,37 @@ func factsContainer(library *Library, name string, facts []string, paths []strin
 	return container
 }
 
-// The refresh times travel as one JSON value, the way the ignore list
-// does, so a fact of any name reaches the container whole. A Library
-// that names none writes an empty value. The walk is not a fact and no
-// container runs it, so it does not travel.
+// The refresh and retry times travel as one JSON value, the way the
+// ignore list does, so a fact of any name reaches the container whole. A
+// Library that names none writes an empty value. The walk is not a fact
+// and no container runs it, so it does not travel.
 func refreshValue(library *Library) string {
-	facts := factRefreshTimes(library)
-	if len(facts) == 0 {
+	times := factReopenTimes(library)
+	if len(times.Refresh) == 0 && len(times.Retry) == 0 {
 		return ""
 	}
-	refresh, _ := json.Marshal(facts)
-	return string(refresh)
+	value, _ := json.Marshal(times)
+	return string(value)
 }
 
-// The refresh times of the facts a Library names, which the containers and
-// the reporter read. The walk is not a fact, so it is not in the map.
-func factRefreshTimes(library *Library) refreshTimes {
-	facts := refreshTimes{}
-	for name, at := range library.Spec.Refresh {
+// The refresh and retry times of the facts a Library names, which the
+// containers and the reporter read. The walk is not a fact, so it is in
+// neither map.
+func factReopenTimes(library *Library) reopenTimes {
+	return reopenTimes{Refresh: containerFactTimes(library.Spec.Refresh),
+		Retry: containerFactTimes(library.Spec.Retry)}
+}
+
+// The times of one of the two fields for the facts a Job's containers run.
+// A field that names none of them reads as no map, so the JSON leaves it
+// out.
+func containerFactTimes(times map[string]time.Time) refreshTimes {
+	var facts refreshTimes
+	for name, at := range times {
 		if isContainerFact(name) {
+			if facts == nil {
+				facts = refreshTimes{}
+			}
 			facts[name] = at
 		}
 	}

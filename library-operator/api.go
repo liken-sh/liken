@@ -200,6 +200,13 @@ type LibrarySpec struct {
 	// untouched.
 	Refresh map[string]time.Time `json:"refresh,omitempty"`
 
+	// One time per fact, by the names status.gaps uses: an attempt of
+	// this fact made before that time whose result is not found does not
+	// count, so each title the fact missed or failed on is in that fact's
+	// gap again. A found attempt still counts, so the titles the fact
+	// answered stay as they are. Nothing is deleted.
+	Retry map[string]time.Time `json:"retry,omitempty"`
+
 	// How often the full walk runs.
 	Scan LibraryScan `json:"scan,omitzero"`
 

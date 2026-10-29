@@ -35,28 +35,45 @@ const libraryWorkerVariable = "LIBRARY_WORKER"
 // holds.
 const libraryContainerVariable = "LIBRARY_CONTAINER"
 
-// The variable every enricher container reads the refresh times from:
-// The Library's spec.refresh as one JSON object, fact name to an
-// RFC 3339 time. The container holds no API credential, so the
-// environment is where it reads a Library's field, as it reads the
-// ignore list.
+// The variable every enricher container reads the refresh and retry times
+// from: the Library's spec.refresh and spec.retry as one JSON object, each
+// a map of fact name to an RFC 3339 time. The container holds no API
+// credential, so the environment is where it reads a Library's field, as it
+// reads the ignore list.
 const libraryRefreshVariable = "LIBRARY_REFRESH"
 
-// The refresh time of each fact a Library named, and the zero time for
-// every fact it did not.
+// The time of each fact a Library named in one of the two fields, and the
+// zero time for every fact it did not.
 type refreshTimes map[string]time.Time
 
-// A value this image cannot read is no refresh at all, because a
-// container that read a bad value as a refresh would ask a provider
-// about every title of the library.
-func parseRefresh(raw string) refreshTimes {
-	times := refreshTimes{}
+// The times that reopen a gap: spec.refresh, which stops every attempt
+// before its time from counting, and spec.retry, which stops only the
+// attempts before its time that found nothing. Both travel as one value, so
+// a container and the reporter read them together.
+type reopenTimes struct {
+	Refresh refreshTimes `json:"refresh,omitempty"`
+	Retry   refreshTimes `json:"retry,omitempty"`
+}
+
+// The two times of one fact.
+type reopenTime struct {
+	refresh, retry time.Time
+}
+
+func (t reopenTimes) of(fact string) reopenTime {
+	return reopenTime{refresh: t.Refresh[fact], retry: t.Retry[fact]}
+}
+
+// A value this image cannot read reopens nothing, because a container
+// that read a bad value as a refresh would ask a provider about every
+// title of the library.
+func parseReopenTimes(raw string) reopenTimes {
 	if raw == "" {
-		return times
+		return reopenTimes{}
 	}
-	read := refreshTimes{}
+	read := reopenTimes{}
 	if err := json.Unmarshal([]byte(raw), &read); err != nil {
-		return times
+		return reopenTimes{}
 	}
 	return read
 }
@@ -127,25 +144,26 @@ const (
 	errorRetryInterval   = 24 * time.Hour
 )
 
-// The four parameters every gap query binds by number: the library, the
+// The five parameters every gap query binds by number: the library, the
 // cutoff a dated attempt stands until, the cutoff an error stands
-// until, and the refresh time this fact carries.
-// A fact the Library's spec.refresh does not name binds a refresh of
-// zero, which every attempt is later than, so the query reads as it did
-// before the field existed.
+// until, the refresh time this fact carries, and its retry time.
+// A fact the Library's spec.refresh or spec.retry does not name binds a
+// time of zero, which every attempt is later than, so the query reads as
+// it does with neither field.
 //
-// A fact whose items carry a release date binds today as a fifth, in the
+// A fact whose items carry a release date binds today as a sixth, in the
 // form the released column holds, because an attempt made before an item
 // was released stands only until that date. A fact whose items carry
-// none names no fifth parameter, so it binds none. The marks fact binds two
+// none names no sixth parameter, so it binds none. The marks fact binds two
 // more, the cutoffs of its shorter windows, which marksgap.go names. The
 // rating.imdb fact binds two more as well, which imdbratinggap.go names. This
 // function binds the reporter's pair, and the nfo container binds its own.
-func gapParams(fact, library string, now, refresh time.Time) []any {
+func gapParams(fact, library string, now time.Time, reopen reopenTime) []any {
 	params := []any{library,
 		now.Add(-defaultRetryInterval).Unix(),
 		now.Add(-errorRetryInterval).Unix(),
-		refreshSeconds(refresh, now)}
+		refreshSeconds(reopen.refresh, now),
+		refreshSeconds(reopen.retry, now)}
 	if releaseDates(fact) == "" {
 		return params
 	}
@@ -159,7 +177,7 @@ func gapParams(fact, library string, now, refresh time.Time) []any {
 	return params
 }
 
-// The refresh time in Unix seconds, and zero where the Library names none or
+// A refresh or retry time in Unix seconds, and zero where the Library names none or
 // names a time that has not come, because a zero time is a large negative
 // second that reads as a refresh of the far past. A refresh in the future
 // waits for its time and then runs once, where a bound future time would
@@ -179,10 +197,11 @@ func refreshSeconds(refresh, now time.Time) int64 {
 // subquery that reads the outer row runs again for every item.
 //
 // An attempt this fact made before the refresh time does not count, so
-// it closes no gap.
+// it closes no gap, and neither does an attempt before the retry time that
+// found nothing.
 func attemptClause(fact, column string) string {
 	return column + ` NOT IN (SELECT item FROM attempts WHERE attempts.library = ?1 ` +
-		`AND ` + attemptFactColumn + ` = '` + fact + `' AND at >= ?4 ` +
+		`AND ` + attemptFactColumn + ` = '` + fact + `' AND at >= ?4 AND ` + retriedAttemptCounts("") + ` ` +
 		`AND ((result NOT IN ` + retriedResults + ` AND at >= ?2) ` +
 		`OR (result IN ` + retriedResults + ` AND at >= ?3)))`
 }
@@ -190,13 +209,22 @@ func attemptClause(fact, column string) string {
 // The results that take the error window, as a list SQL reads.
 const retriedResults = `('` + attemptError + `', '` + attemptPartial + `')`
 
-// The items this fact attempted before the refresh time. They are a gap
-// again whatever the fact's own condition says, because the file the
-// fact wrote and the rows it made are still there and the point of a
-// refresh is to write them again.
+// The items this fact attempted before the refresh time, and the items
+// whose attempt before the retry time found nothing. They are a gap again
+// whatever the fact's own condition says, because the file the fact wrote
+// and the rows it made are still there and the point of a refresh or a retry
+// is to ask again.
 func refreshedClause(fact, column string) string {
 	return column + ` IN (SELECT item FROM attempts WHERE attempts.library = ?1 ` +
-		`AND ` + attemptFactColumn + ` = '` + fact + `' AND at < ?4)`
+		`AND ` + attemptFactColumn + ` = '` + fact + `' AND (at < ?4 OR NOT ` + retriedAttemptCounts("") + `))`
+}
+
+// Whether an attempt still counts under the retry time bound as ?5: an
+// attempt that found its answer always does, and any other result counts
+// only from the retry time on. alias is the attempts table's alias with its
+// dot, or empty where the query names the table alone.
+func retriedAttemptCounts(alias string) string {
+	return `(` + alias + `result = '` + attemptFound + `' OR ` + alias + `at >= ?5)`
 }
 
 // The items this fact attempted before the item was released, where the
@@ -219,7 +247,7 @@ func beforeReleaseClause(fact, column string) string {
 		`JOIN (` + releases + `) AS r ON r.library = a.library AND r.item = a.item ` +
 		`WHERE a.library = ?1 AND a.` + attemptFactColumn + ` = '` + fact + `' ` +
 		`AND r.released != '' AND date(a.at, 'unixepoch') < r.released ` +
-		`AND ?5 >= r.released)`
+		`AND ?6 >= r.released)`
 }
 
 // Where the items of one fact carry their release date, as the library,
@@ -264,11 +292,11 @@ func gapClause(fact, column, missing string) string {
 // error as ?3, and selects the key of each row that needs work, so a count(*)
 // over it is the reporter's number and the rows are the container's work list.
 //
-// Every query binds the fact's refresh time as ?4. A query whose items
-// carry a release date binds today's date as ?5, and no other query
-// names a fifth parameter. The marks query names a sixth and a seventh, the
-// cutoffs of its shorter windows, and the rating.imdb query names a sixth and
-// a seventh of its own.
+// Every query binds the fact's refresh time as ?4 and its retry time as ?5.
+// A query whose items carry a release date binds today's date as ?6, and no
+// other query names a sixth parameter. The marks query names a seventh and an
+// eighth, the cutoffs of its shorter windows, and the rating.imdb query names
+// a seventh and an eighth of its own.
 //
 // A probe gap is a present video, audio, or text subtitle file whose probed column is not
 // its modified column: no probe has read the file, or the file changed after

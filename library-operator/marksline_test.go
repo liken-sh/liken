@@ -101,7 +101,7 @@ func TestASpentAllowanceBringsTheFilesItMissedBackTheNextDay(t *testing.T) {
 		{folder: partialFilms[2], result: attemptPartial, sources: []string{providerBlockIntroDB}, back: true},
 	}
 	nextDay, err := catalog.queryStrings(t.Context(), gapQueries[factMarks],
-		gapParams(factMarks, marksLibrary, time.Now().UTC().Add(25*time.Hour), time.Time{}))
+		gapParams(factMarks, marksLibrary, time.Now().UTC().Add(25*time.Hour), reopenTime{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestAPartialAttemptTakesTheErrorWindow(t *testing.T) {
 			seedMarksAttempt(t, catalog, []string{""}, test.result, now.Add(-test.ago))
 
 			paths, err := catalog.queryStrings(t.Context(), gapQueries[factMarks],
-				gapParams(factMarks, marksLibrary, now, time.Time{}))
+				gapParams(factMarks, marksLibrary, now, reopenTime{}))
 
 			if err != nil {
 				t.Fatal(err)

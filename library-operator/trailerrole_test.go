@@ -847,7 +847,7 @@ func TestTheTrailerGapHoldsTheIdentifiedTitlesAgainstTheRealSchema(t *testing.T)
 			}
 
 			ids, err := catalog.queryStrings(t.Context(), gapQueries[factTrailer],
-				gapParams(factTrailer, "house/movies", now, time.Time{}))
+				gapParams(factTrailer, "house/movies", now, reopenTime{}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -890,7 +890,7 @@ func TestATrailerAttemptFromBeforeTheReleaseDateReopensTheGap(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			ids, err := catalog.queryStrings(t.Context(), gapQueries[factTrailer],
-				gapParams(factTrailer, "house/movies", test.now, time.Time{}))
+				gapParams(factTrailer, "house/movies", test.now, reopenTime{}))
 			if err != nil {
 				t.Fatal(err)
 			}

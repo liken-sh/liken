@@ -70,7 +70,7 @@ func TestTheCreditsFactMakesItsPeopleVisibleToTheContributorGap(t *testing.T) {
 		}})
 
 		gaps, err := catalog.contributorGaps(t.Context(), contributorLibrary, factContributorIDs,
-			time.Now(), time.Time{})
+			time.Now(), reopenTime{})
 		if err != nil {
 			t.Fatal(err)
 		}

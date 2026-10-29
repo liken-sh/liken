@@ -18,7 +18,7 @@ import (
 func TestAGapReadThatIsRefusedIsAnError(t *testing.T) {
 	catalog := NewCatalog(unreachableAddress, refusedClient())
 
-	if _, err := catalog.workItems(t.Context(), factTrickplay, trickplayLibrary, ledgerTime, time.Time{}); err == nil {
+	if _, err := catalog.workItems(t.Context(), factTrickplay, trickplayLibrary, ledgerTime, reopenTime{}); err == nil {
 		t.Error("the gap read answered, want the refused read as an error")
 	}
 }
@@ -32,7 +32,7 @@ func TestARowTheTrickplayGapCannotUseIsNoWork(t *testing.T) {
 		`{"eoq":{"time":0.1}}` + "\n"
 
 	items, err := streamingServer(t, http.StatusOK, body).
-		workItems(t.Context(), factTrickplay, trickplayLibrary, ledgerTime, time.Time{})
+		workItems(t.Context(), factTrickplay, trickplayLibrary, ledgerTime, reopenTime{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestEveryAttemptKindGatesTheTrickplayGapAgainstTheRealSchema(t *testing.T) 
 				t.Fatal(err)
 			}
 
-			gaps, err := catalog.gapCounts(t.Context(), trickplayLibrary, ledgerTime, nil)
+			gaps, err := catalog.gapCounts(t.Context(), trickplayLibrary, ledgerTime, reopenTimes{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -194,7 +194,7 @@ func TestAFileWithNoVideoStreamIsNoTrickplayGap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	gaps, err := catalog.gapCounts(t.Context(), trickplayLibrary, ledgerTime, nil)
+	gaps, err := catalog.gapCounts(t.Context(), trickplayLibrary, ledgerTime, reopenTimes{})
 	if err != nil {
 		t.Fatal(err)
 	}

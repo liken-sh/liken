@@ -62,10 +62,10 @@ type reporter struct {
 
 	mutex     sync.Mutex
 	published map[string]libraryReport
-	// The refresh times of each Library, by library key, as the operator
-	// last published them. A Library with no entry counts its gaps with no
-	// refresh time.
-	refresh map[string]refreshTimes
+	// The refresh and retry times of each Library, by library key, as the
+	// operator last published them. A Library with no entry counts its gaps
+	// with neither.
+	refresh map[string]reopenTimes
 	// The mark that a Library's refresh times changed, which the bus handler
 	// raises and the republish loop answers, because the handler runs on the
 	// bus reader and must not wait on a catalog read.
@@ -337,7 +337,7 @@ func (r *reporter) buildReport(ctx context.Context, library string) (libraryRepo
 	if err != nil {
 		return libraryReport{}, err
 	}
-	report.OldestAttempts, err = r.catalog.oldestAttempts(ctx, library)
+	report.OldestAttempts, report.OldestMisses, err = r.catalog.oldestAttempts(ctx, library)
 	if err != nil {
 		return libraryReport{}, err
 	}
@@ -393,7 +393,7 @@ func (r *reporter) onConnect(bus *Bus) {
 	}
 }
 
-// handleBusMessage folds one Library's refresh times, which the operator
+// handleBusMessage folds one Library's refresh and retry times, which the operator
 // publishes retained. An empty payload clears them, which is what the
 // operator publishes when the Library departs. The fold raises the change
 // mark, so the republish loop counts the gaps again.
@@ -405,12 +405,12 @@ func (r *reporter) handleBusMessage(topic string, payload []byte) {
 	library := libraryKey(namespace, name)
 	r.mutex.Lock()
 	if r.refresh == nil {
-		r.refresh = map[string]refreshTimes{}
+		r.refresh = map[string]reopenTimes{}
 	}
 	if len(payload) == 0 {
 		delete(r.refresh, library)
 	} else {
-		r.refresh[library] = parseRefresh(string(payload))
+		r.refresh[library] = parseReopenTimes(string(payload))
 	}
 	changed := r.changed
 	r.mutex.Unlock()
@@ -419,9 +419,9 @@ func (r *reporter) handleBusMessage(topic string, payload []byte) {
 	}
 }
 
-// The refresh times of one Library, and none where the operator has
-// published none.
-func (r *reporter) refreshOf(library string) refreshTimes {
+// The refresh and retry times of one Library, and none where the operator
+// has published none.
+func (r *reporter) refreshOf(library string) reopenTimes {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 	return r.refresh[library]

@@ -38,16 +38,16 @@ func TestTheReportCountsEachGapWithTheLibrarysRefreshTimes(t *testing.T) {
 	catalog, attempted := catalogWithACreditsAttempt(t)
 	cases := []struct {
 		name    string
-		refresh map[string]refreshTimes
+		refresh map[string]reopenTimes
 		want    int
 	}{
 		{name: "no refresh", want: 2},
 		{name: "a refresh of another library",
-			refresh: map[string]refreshTimes{"studio/movies": {factCredits: attempted.Add(time.Minute)}}, want: 2},
+			refresh: map[string]reopenTimes{"studio/movies": {Refresh: refreshTimes{factCredits: attempted.Add(time.Minute)}}}, want: 2},
 		{name: "a refresh earlier than the attempt",
-			refresh: map[string]refreshTimes{"house/movies": {factCredits: attempted.Add(-time.Minute)}}, want: 2},
+			refresh: map[string]reopenTimes{"house/movies": {Refresh: refreshTimes{factCredits: attempted.Add(-time.Minute)}}}, want: 2},
 		{name: "a refresh later than the attempt",
-			refresh: map[string]refreshTimes{"house/movies": {factCredits: attempted.Add(time.Minute)}}, want: 3},
+			refresh: map[string]reopenTimes{"house/movies": {Refresh: refreshTimes{factCredits: attempted.Add(time.Minute)}}}, want: 3},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -78,7 +78,7 @@ func TestARefreshOnTheBusRepublishesTheReport(t *testing.T) {
 		topic := libraryStatusTopic(defaultTopicBase, "house", "movies")
 		waitForReport(t, broker, topic, func(held libraryReport) bool { return held.Gaps[factCredits] == 2 })
 
-		refresh, _ := json.Marshal(refreshTimes{factCredits: attempted.Add(time.Minute)})
+		refresh, _ := json.Marshal(reopenTimes{Refresh: refreshTimes{factCredits: attempted.Add(time.Minute)}})
 		broker.push(libraryRefreshTopic(defaultTopicBase, "house", "movies"), refresh)
 		waitForReport(t, broker, topic, func(held libraryReport) bool { return held.Gaps[factCredits] == 3 })
 
@@ -87,14 +87,15 @@ func TestARefreshOnTheBusRepublishesTheReport(t *testing.T) {
 	})
 }
 
-// The operator publishes the refresh times of each fact a Library names,
-// retained, so a reporter that starts later reads them. The walk is not a
-// gap, so it does not travel.
+// The operator publishes the refresh and retry times of each fact a Library
+// names, retained, so a reporter that starts later reads them. The walk is
+// not a gap, so it does not travel.
 func TestAPassPublishesTheRefreshTimesOfALibrary(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := newFakeCluster()
 		library := boundHouse(cluster)
 		library.Spec.Refresh = map[string]time.Time{factCredits: testNow, refreshWalk: testNow}
+		library.Spec.Retry = map[string]time.Time{factTrickplay: testNow}
 		operator, broker := operatorOnTheBus(t, cluster)
 
 		operator.pass()
@@ -103,11 +104,11 @@ func TestAPassPublishesTheRefreshTimesOfALibrary(t *testing.T) {
 		if !message.retained {
 			t.Error("the refresh times were not retained")
 		}
-		sent := parseRefresh(string(message.payload))
-		if !sent[factCredits].Equal(testNow) {
-			t.Errorf("refresh = %v, want the credits time", sent)
+		sent := parseReopenTimes(string(message.payload))
+		if !sent.Refresh[factCredits].Equal(testNow) || !sent.Retry[factTrickplay].Equal(testNow) {
+			t.Errorf("times = %+v, want the credits refresh and the trickplay retry", sent)
 		}
-		if _, held := sent[refreshWalk]; held {
+		if _, held := sent.Refresh[refreshWalk]; held {
 			t.Errorf("refresh = %v, want no walk", sent)
 		}
 	})

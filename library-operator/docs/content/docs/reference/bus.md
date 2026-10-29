@@ -101,6 +101,7 @@ catalog pod holds every row the `Job` wrote.
 | `runs` | list | One entry per worker that has run against this library, sorted by worker. Absent until a worker has run. |
 | `gaps` | map of integers | One count per fact of the rows that fact has left to fill, counted with the `Library`'s [refresh times](#the-refresh-times). Absent when no fact has a gap. |
 | `oldestAttempts` | map of RFC 3339 times | The oldest attempt this library holds for each fact. The operator reads it against `spec.refresh`. Absent when no fact has an attempt. |
+| `oldestMisses` | map of RFC 3339 times | The oldest attempt this library holds for each fact whose result is not `found`. The operator reads it against `spec.retry`. Absent when every attempt found its answer. |
 | `waiting` | integer | How many titles the identity fact left as candidates for a person to choose from. |
 | `unresolved` | integer | How many titles no provider could name. |
 | `fights` | integer | How many titles a fact left because another writer holds the elements it writes. |
@@ -138,23 +139,26 @@ is empty for a run that finished its work.
 `libraries/{namespace}/{name}/refresh`
 
 The reporter counts each gap with the `Library`'s
-[`spec.refresh`](/docs/reference/libraries/#spec--refresh), so a title a
-refresh reopened is in `gaps`. The reporter holds no API credential and
-cannot read the `Library`, so the operator publishes the refresh time of
-each fact the `Library` names, retained, whenever the times change. The
-reporter subscribes to the refresh topics of its own namespace and
-publishes the report again when one changes, so an edit of `spec.refresh`
-reaches `gaps` with no restart of the catalog pod. The payload is the value
-a `Job`'s containers read from `LIBRARY_REFRESH`: one RFC 3339 time per
-fact. The walk is not a fact, and it is not in the payload. A `Library`
-that names no refresh time publishes an empty object.
+[`spec.refresh`](/docs/reference/libraries/#spec--refresh) and
+[`spec.retry`](/docs/reference/libraries/#spec--retry), so a title a
+refresh or a retry reopened is in `gaps`. The reporter holds no API
+credential and cannot read the `Library`, so the operator publishes the
+refresh and retry times of each fact the `Library` names, retained,
+whenever the times change. The reporter subscribes to the refresh topics
+of its own namespace and publishes the report again when one changes, so
+an edit of `spec.refresh` or `spec.retry` reaches `gaps` with no restart of
+the catalog pod. The payload is the value a `Job`'s containers read from
+`LIBRARY_REFRESH`: an object whose `refresh` and `retry` keys each hold one
+RFC 3339 time per fact, and a key is absent where its field names no fact.
+The walk is not a fact, and it is not in the payload. A `Library` that
+names no refresh or retry time publishes an empty object.
 
-    {"credits": "2026-09-30T00:00:00Z", "appearances": "2026-09-30T00:00:00Z"}
+    {"refresh": {"credits": "2026-09-30T00:00:00Z"}, "retry": {"trickplay": "2026-10-29T00:00:00Z"}}
 
-A report that the reporter built before the refresh times reached it
-counts with none. The operator reads `oldestAttempts` against
-`spec.refresh` as well, so a fact with a refresh that has work left starts
-its work from such a report too.
+A report that the reporter built before the times reached it counts with
+none. The operator reads `oldestAttempts` against `spec.refresh`, and
+`oldestMisses` against `spec.retry`, so a fact with a refresh or a retry
+that has work left starts its work from such a report too.
 
 ## A work list
 

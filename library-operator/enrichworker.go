@@ -48,9 +48,9 @@ type enricher struct {
 	// The folder names the walk skips. A fact reads its folder through the
 	// scan's reader after each write, and that reader takes the same set.
 	ignore ignoreSet
-	// The refresh time of every fact the Library named, which the gap
-	// query of that fact binds.
-	refresh refreshTimes
+	// The refresh and retry times of every fact the Library named, which the
+	// gap query of that fact binds.
+	refresh reopenTimes
 	// The folders this Job was narrowed to, relative to the library root,
 	// and none where the Job covers the whole library.
 	scopes []string
@@ -126,7 +126,7 @@ func newEnricher(log io.Writer) (*enricher, error) {
 		needs:             phaseNeeds(os.Getenv(libraryPhaseNeedsVariable)),
 		sync:              syncTargetOf(os.Getenv(syncActorVariable), os.Getenv(syncVersionVariable)),
 		ignore:            parseIgnore(os.Getenv(libraryIgnoreVariable)),
-		refresh:           parseRefresh(os.Getenv(libraryRefreshVariable)),
+		refresh:           parseReopenTimes(os.Getenv(libraryRefreshVariable)),
 		syncTimeout:       syncTimeout(os.Getenv(syncTimeoutVariable)),
 		worker:            worker,
 		ratingScope:       ratingScopeFromEnvironment(time.Now().UTC()),
@@ -196,7 +196,7 @@ func (e *enricher) mayStartTitle() bool {
 // Reads one fact's gap out of the local copy of the catalog, with
 // the same query the reporter counts the gap with.
 func (e *enricher) gaps(ctx context.Context, fact string, now time.Time) ([]string, error) {
-	params := gapParams(fact, e.library, now, e.refresh[fact])
+	params := gapParams(fact, e.library, now, e.refresh.of(fact))
 	if fact == factRatingIMDb {
 		// The reporter binds its own pair, and the container binds the pair its
 		// environment states.

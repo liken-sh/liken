@@ -152,7 +152,7 @@ func (r *closeRun) awaitPhases(ctx context.Context) ([]string, error) {
 // it. An empty gap publishes nothing, and the operator clears the list
 // before it.
 func (r *closeRun) publishWorkList(ctx context.Context, fact string) error {
-	items, err := r.catalog.workItems(ctx, fact, r.library, time.Now().UTC(), r.refresh[fact])
+	items, err := r.catalog.workItems(ctx, fact, r.library, time.Now().UTC(), r.refresh.of(fact))
 	if err != nil {
 		return err
 	}

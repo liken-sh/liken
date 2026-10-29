@@ -52,7 +52,7 @@ func TestAnNFOGapHoldsTheTitlesWhoseNFOLacksTheFactAgainstTheRealSchema(t *testi
 	for _, test := range cases {
 		t.Run(test.fact, func(t *testing.T) {
 			ids, err := catalog.queryStrings(t.Context(), gapQueries[test.fact],
-				gapParams(test.fact, "house/movies", now, time.Time{}))
+				gapParams(test.fact, "house/movies", now, reopenTime{}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -109,7 +109,7 @@ func TestTheCreditsGapIsATitleWithNoCreditsFileAgainstTheRealSchema(t *testing.T
 			}
 
 			ids, err := catalog.queryStrings(t.Context(), gapQueries[factCredits],
-				gapParams(factCredits, "house/movies", now, time.Time{}))
+				gapParams(factCredits, "house/movies", now, reopenTime{}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -143,7 +143,7 @@ func TestEveryAttemptKindGatesTheNFOGap(t *testing.T) {
 			}
 
 			ids, err := catalog.queryStrings(t.Context(), gapQueries[factOverview],
-				gapParams(factOverview, "house/movies", now, time.Time{}))
+				gapParams(factOverview, "house/movies", now, reopenTime{}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -161,7 +161,7 @@ func TestTheGapCountsHoldEveryNFOFact(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	seedNFOFactRows(t, catalog)
 
-	counts, err := catalog.gapCounts(t.Context(), "house/movies", time.Now().UTC(), nil)
+	counts, err := catalog.gapCounts(t.Context(), "house/movies", time.Now().UTC(), reopenTimes{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestARefreshOpensTheCreditsGapAgainstTheRealSchema(t *testing.T) {
 			}
 
 			ids, err := catalog.queryStrings(t.Context(), gapQueries[factCredits],
-				gapParams(factCredits, "house/movies", now, test.refresh))
+				gapParams(factCredits, "house/movies", now, reopenTime{refresh: test.refresh}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -336,7 +336,7 @@ func TestAnNFOAttemptBeforeTheReleaseStandsOnlyUntilIt(t *testing.T) {
 			}
 
 			ids, err := catalog.queryStrings(t.Context(), gapQueries[factOverview],
-				gapParams(factOverview, "house/movies", dayOf(t, test.today), time.Time{}))
+				gapParams(factOverview, "house/movies", dayOf(t, test.today), reopenTime{}))
 
 			if err != nil {
 				t.Fatal(err)

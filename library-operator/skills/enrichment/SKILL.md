@@ -1067,7 +1067,26 @@ worker matches them again. The worker takes the videos whose detections
 record is on the volume first, because each of them needs only the
 match.
 
-`kubectl liken library reenrich movies` writes that field for you and
+To ask a fact again only for the titles it missed, set its time in
+`spec.retry` instead. Use it when a fault made a fact record misses and
+the fault is now fixed, such as a GPU that could not decode a codec, or
+a provider that answered nothing while it was broken. A miss lasts for
+thirty days, so without a retry those titles wait out the window. Every
+attempt of that fact before the time whose result is not `found` no
+longer counts, so the titles the fact missed or failed on are in its gap
+again. An attempt that found its answer still counts, so the retry does
+not reopen the titles the fact answered, and their files and rows stay
+as they are:
+
+    spec:
+      retry:
+        trickplay: "2026-10-29T00:00:00Z"
+
+A retry starts a `Job` that fills gaps the same way a refresh does, and
+nothing is deleted. A miss made after the time counts as usual, so a
+title the fact still cannot answer waits for its window again.
+
+`kubectl liken library reenrich movies` writes `spec.refresh` for you and
 asks every fact again. Add `--only overview` to reopen one fact, and
 `-n` to select the namespace. The command reads your kubeconfig, and
 in bash it completes the library names.

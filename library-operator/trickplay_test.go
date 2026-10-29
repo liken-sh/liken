@@ -148,7 +148,7 @@ func TestTheTrickplayGapAgainstTheRealSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	items, err := catalog.workItems(t.Context(), factTrickplay, trickplayLibrary, ledgerTime, time.Time{})
+	items, err := catalog.workItems(t.Context(), factTrickplay, trickplayLibrary, ledgerTime, reopenTime{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestATrickplayAttemptClosesItsOwnGapAgainstTheRealSchema(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			gaps, err := catalog.gapCounts(t.Context(), trickplayLibrary, test.now, nil)
+			gaps, err := catalog.gapCounts(t.Context(), trickplayLibrary, test.now, reopenTimes{})
 			if err != nil {
 				t.Fatal(err)
 			}

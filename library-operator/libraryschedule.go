@@ -204,21 +204,30 @@ func walkCause(library *Library, last time.Time, held []string, now time.Time) s
 }
 
 // Why a Job that fills gaps is due, in the words of the log line: the facts
-// a person asked again for through spec.refresh since the last Job started,
-// or the gaps alone.
+// a person asked again for through spec.refresh or spec.retry since the last
+// Job started, or the gaps alone.
 func gapCause(library *Library, runs []libraryRun, now time.Time) string {
 	enrich, _ := runOf(runs, workerEnrich)
-	var asked []string
-	for _, fact := range slices.Sorted(maps.Keys(library.Spec.Refresh)) {
-		refresh := library.Spec.Refresh[fact]
-		if isContainerFact(fact) && !refresh.After(now) && refresh.After(enrich.Started) {
-			asked = append(asked, fact)
+	var causes []string
+	for _, field := range []struct {
+		name  string
+		times map[string]time.Time
+	}{{"spec.refresh", library.Spec.Refresh}, {"spec.retry", library.Spec.Retry}} {
+		var asked []string
+		for _, fact := range slices.Sorted(maps.Keys(field.times)) {
+			at := field.times[fact]
+			if isContainerFact(fact) && !at.After(now) && at.After(enrich.Started) {
+				asked = append(asked, fact)
+			}
+		}
+		if len(asked) > 0 {
+			causes = append(causes, field.name+" asked again for "+strings.Join(asked, ", "))
 		}
 	}
-	if len(asked) == 0 {
+	if len(causes) == 0 {
 		return "gaps are open"
 	}
-	return "spec.refresh asked again for " + strings.Join(asked, ", ")
+	return strings.Join(causes, ", and ")
 }
 
 // When the last full walk of this Library started: the later of the scan run
@@ -294,8 +303,9 @@ func gapPhases(library *Library, report *libraryReport, providers providerSet,
 	return phases
 }
 
-// The cause of the next Job that fills gaps: the newest of a refresh time
-// that has come, a source provider that turned Ready, and a walk whose own
+// The cause of the next Job that fills gaps: the newest of a refresh or
+// retry time that has come, a source provider that turned Ready, and a walk
+// whose own
 // Job ran no phases. A walk Job runs every phase after its walk, so its walk
 // is answered already.
 func enrichCause(library *Library, runs []libraryRun, providers providerSet, now time.Time) time.Time {
@@ -306,9 +316,11 @@ func enrichCause(library *Library, runs []libraryRun, providers providerSet, now
 			cause = walk.Finished
 		}
 	}
-	for fact, refresh := range library.Spec.Refresh {
-		if isContainerFact(fact) && !refresh.After(now) && refresh.After(cause) {
-			cause = refresh
+	for _, times := range []map[string]time.Time{library.Spec.Refresh, library.Spec.Retry} {
+		for fact, at := range times {
+			if isContainerFact(fact) && !at.After(now) && at.After(cause) {
+				cause = at
+			}
 		}
 	}
 	for _, name := range library.Spec.Sources {
@@ -342,11 +354,21 @@ func enrichDue(cause time.Time, runs []libraryRun) bool {
 // filled. The oldest attempt of the fact says the refresh still has work in
 // either case, and the fact's own run moves that attempt past the refresh,
 // which is what ends the work.
+//
+// A retry time reads the same way against the oldest attempt that did not
+// find its answer, because a retry reopens only those.
 func refreshHasWork(library *Library, report *libraryReport, fact string) bool {
-	refresh, named := library.Spec.Refresh[fact]
+	return askHasWork(library.Spec.Refresh, report.OldestAttempts, fact) ||
+		askHasWork(library.Spec.Retry, report.OldestMisses, fact)
+}
+
+// Whether one field's time for a fact is later than the oldest attempt it
+// reopens, and has come.
+func askHasWork(times, oldestAttempts map[string]time.Time, fact string) bool {
+	at, named := times[fact]
 	if !named {
 		return false
 	}
-	oldest, held := report.OldestAttempts[fact]
-	return held && refresh.After(oldest) && !refresh.After(time.Now())
+	oldest, held := oldestAttempts[fact]
+	return held && at.After(oldest) && !at.After(time.Now())
 }

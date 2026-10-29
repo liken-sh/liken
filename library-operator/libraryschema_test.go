@@ -73,6 +73,29 @@ func TestTheRefreshMapTakesOneTimePerTarget(t *testing.T) {
 	}
 }
 
+// spec.retry takes one RFC 3339 time per fact, and its rule names the facts
+// spec.refresh names without the walk, because a walk records no attempt.
+func TestTheRetryMapTakesOneTimePerFact(t *testing.T) {
+	retry := schemaField(t, librarySchema(t), "schema", "openAPIV3Schema", "properties",
+		"spec", "properties", "retry").(map[string]any)
+
+	values := retry["additionalProperties"].(map[string]any)
+	if values["type"] != "string" || values["format"] != "date-time" {
+		t.Errorf("a value reads %+v, want an RFC 3339 string", values)
+	}
+	rules := retry["x-kubernetes-validations"].([]any)
+	if len(rules) != 1 {
+		t.Fatalf("rules = %+v, want the one that guards the keys", rules)
+	}
+	names := namesInRule(t, rules[0].(map[string]any)["rule"].(string))
+	if !slices.Equal(names, retryVocabulary) {
+		t.Errorf("the rule names %v, want %v", names, retryVocabulary)
+	}
+	if limit := retry["maxProperties"]; limit != len(retryVocabulary) {
+		t.Errorf("maxProperties = %v, want the %d facts the rule names", limit, len(retryVocabulary))
+	}
+}
+
 // The spec the API server admits is the spec the operator reads: a time
 // under a fact's name and a time under the walk's name land in one map.
 func TestTheOperatorReadsARefreshTheSchemaAdmits(t *testing.T) {

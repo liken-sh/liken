@@ -145,10 +145,15 @@ const refreshWalk = "scan"
 // refresh of one of these is a cause for a library Job as a fact's is.
 var workerRefreshFacts = []string{factAppearances}
 
+// Every key spec.retry accepts: the facts and the worker facts. The walk
+// records no attempt, so there is nothing of it to retry. The CRD's retry
+// rule holds these names, and a test reads the two together.
+var retryVocabulary = append(slices.Clone(factVocabulary), workerRefreshFacts...)
+
 // Every key spec.refresh accepts: the facts, the worker facts, then the
 // walk. The CRD's refresh rule holds these names, and a test reads the two
 // together.
-var refreshVocabulary = append(append(slices.Clone(factVocabulary), workerRefreshFacts...), refreshWalk)
+var refreshVocabulary = append(slices.Clone(retryVocabulary), refreshWalk)
 
 // Whether a refresh target is work a Job's container runs: a fact's gap, or
 // the list of a worker fact that the library Job writes. The walk is not, so

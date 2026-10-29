@@ -58,17 +58,18 @@ func libraryAvailabilityTopic(base, namespace, name string) string {
 	return base + "/libraries/" + namespace + "/" + name + "/" + libraryAvailabilityKind
 }
 
-// Carries one Library's refresh times, as a JSON object of fact and RFC 3339
-// time, the value a Job's containers read from LIBRARY_REFRESH. The reporter
-// counts each gap with them, and it holds no API credential, so it cannot read
-// the Library. The operator publishes the times retained whenever they change,
-// so the report follows an edit of spec.refresh with no restart of the catalog
-// pod, and a reporter that starts later reads the current times.
+// Carries one Library's refresh and retry times, as a JSON object that holds
+// a map of fact and RFC 3339 time for each field, the value a Job's
+// containers read from LIBRARY_REFRESH. The reporter counts each gap with
+// them, and it holds no API credential, so it cannot read the Library. The
+// operator publishes the times retained whenever they change, so the report
+// follows an edit of spec.refresh or spec.retry with no restart of the
+// catalog pod, and a reporter that starts later reads the current times.
 func libraryRefreshTopic(base, namespace, name string) string {
 	return base + "/libraries/" + namespace + "/" + name + "/" + libraryRefreshKind
 }
 
-// The reporter's subscription: the refresh times of every Library in its
+// The reporter's subscription: the refresh and retry times of every Library in its
 // namespace, which are the Libraries its catalog serves.
 func libraryRefreshFilter(base, namespace string) string {
 	return base + "/libraries/" + namespace + "/+/" + libraryRefreshKind

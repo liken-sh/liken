@@ -411,6 +411,45 @@ spec:
                     deleted, and a target this map does not name is untouched.
                     A time that has not come yet waits, and the work runs once
                     when it arrives.
+                retry:
+                  type: object
+                  maxProperties: 27
+                  additionalProperties:
+                    type: string
+                    format: date-time
+                    maxLength: 30
+                    description: >-
+                      The time to retry from, as RFC 3339. A fact asks again
+                      for the titles whose attempt before this time found
+                      nothing or failed. A time that has not come yet waits,
+                      and the work runs once when it arrives.
+                  x-kubernetes-validations:
+                    - rule: >-
+                        self.all(fact, fact in ['probe', 'arrival', 'trickplay',
+                        'identity', 'overview', 'certification',
+                        'rating.tmdb', 'rating.imdb',
+                        'rating.rottentomatoes', 'rating.metacritic',
+                        'credits', 'poster', 'backdrop', 'logo',
+                        'clearart', 'banner', 'landscape', 'discart',
+                        'season-poster', 'season-banner',
+                        'episode-thumb', 'trailer', 'marks',
+                        'contributor.ids', 'contributor.biography',
+                        'contributor.headshot', 'appearances'])
+                      message: >-
+                        every key of spec.retry must name a fact the operator
+                        runs
+                  description: >-
+                    One time per fact, by the names status.gaps uses. An
+                    attempt of that fact whose time is before the retry and
+                    whose result is not found does not count, so each title
+                    the fact missed or failed on needs the fact again, and the
+                    fact asks for it again. An attempt that found its answer
+                    still counts, so the retry does not reopen the titles the
+                    fact answered, and their files and rows stay. Use it after a
+                    fault that made a fact miss titles is fixed. Nothing is
+                    deleted, and a fact this map does not name is untouched.
+                    A time that has not come yet waits, and the work runs once
+                    when it arrives.
             status:
               type: object
               description: >-

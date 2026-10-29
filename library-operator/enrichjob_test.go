@@ -5,7 +5,6 @@ package main
 // receive, and the volumes they mount.
 
 import (
-	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -578,8 +577,8 @@ func TestTheJobCarriesTheRefreshTimes(t *testing.T) {
 
 	for _, container := range phaseContainers(job) {
 		got := containerEnvironment(container)[libraryRefreshVariable]
-		if got != `{"credits":"2026-09-03T21:00:00Z"}` {
-			t.Errorf("%s reads %s = %q, want the JSON-encoded map", container.Name, libraryRefreshVariable, got)
+		if got != `{"refresh":{"credits":"2026-09-03T21:00:00Z"}}` {
+			t.Errorf("%s reads %s = %q, want the JSON-encoded times", container.Name, libraryRefreshVariable, got)
 		}
 	}
 	empty := testEnrichJob(studioMovies(), "", readyProvider("tmdb", "house", factIdentity))
@@ -593,30 +592,36 @@ func TestTheJobCarriesTheRefreshTimes(t *testing.T) {
 // container that took a bad value for a refresh would ask a provider
 // about every title.
 func TestTheContainerReadsTheRefreshTimesItIsGiven(t *testing.T) {
+	at := time.Date(2026, 9, 3, 21, 0, 0, 0, time.UTC)
 	cases := []struct {
 		name string
 		raw  string
-		want refreshTimes
+		want reopenTimes
 	}{
-		{name: "no value at all", want: refreshTimes{}},
+		{name: "no value at all"},
 		{
-			name: "the map the operator writes",
-			raw:  `{"credits":"2026-09-03T21:00:00Z"}`,
-			want: refreshTimes{factCredits: time.Date(2026, 9, 3, 21, 0, 0, 0, time.UTC)},
+			name: "the value the operator writes",
+			raw:  `{"refresh":{"credits":"2026-09-03T21:00:00Z"},"retry":{"trickplay":"2026-09-03T21:00:00Z"}}`,
+			want: reopenTimes{Refresh: refreshTimes{factCredits: at}, Retry: refreshTimes{factTrickplay: at}},
 		},
-		{name: "a value that is not JSON", raw: "{", want: refreshTimes{}},
-		{name: "a time this image cannot read", raw: `{"credits":"soon"}`, want: refreshTimes{}},
+		{name: "a value that is not JSON", raw: "{"},
+		{name: "a time this image cannot read", raw: `{"refresh":{"credits":"soon"}}`},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			got := parseRefresh(test.raw)
+			got := parseReopenTimes(test.raw)
 
-			if len(got) != len(test.want) {
-				t.Fatalf("refresh = %v, want %v", got, test.want)
+			if len(got.Refresh) != len(test.want.Refresh) || len(got.Retry) != len(test.want.Retry) {
+				t.Fatalf("times = %+v, want %+v", got, test.want)
 			}
-			for fact, at := range test.want {
-				if !got[fact].Equal(at) {
-					t.Errorf("refresh[%s] = %v, want %v", fact, got[fact], at)
+			for fact, at := range test.want.Refresh {
+				if !got.Refresh[fact].Equal(at) {
+					t.Errorf("refresh[%s] = %v, want %v", fact, got.Refresh[fact], at)
+				}
+			}
+			for fact, at := range test.want.Retry {
+				if !got.Retry[fact].Equal(at) {
+					t.Errorf("retry[%s] = %v, want %v", fact, got.Retry[fact], at)
 				}
 			}
 		})
@@ -632,14 +637,12 @@ func TestRefreshValueSendsTheFactsAlone(t *testing.T) {
 		refreshWalk: testNow,
 	}
 
-	sent := map[string]string{}
-	if err := json.Unmarshal([]byte(refreshValue(library)), &sent); err != nil {
-		t.Fatal(err)
+	sent := parseReopenTimes(refreshValue(library))
+
+	if _, held := sent.Refresh[factCredits]; !held {
+		t.Errorf("refreshValue sent %+v, want the fact", sent)
 	}
-	if _, held := sent[factCredits]; !held {
-		t.Errorf("refreshValue sent %v, want the fact", sent)
-	}
-	if _, held := sent[refreshWalk]; held {
-		t.Errorf("refreshValue sent %v, want no walk", sent)
+	if _, held := sent.Refresh[refreshWalk]; held {
+		t.Errorf("refreshValue sent %+v, want no walk", sent)
 	}
 }

@@ -87,7 +87,7 @@ func TestTheIDsGapNamesAnEntryWithOnlyAnIMDbID(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.fact, func(t *testing.T) {
-			gaps, err := catalog.contributorGaps(t.Context(), contributorLibrary, test.fact, time.Now().UTC(), time.Time{})
+			gaps, err := catalog.contributorGaps(t.Context(), contributorLibrary, test.fact, time.Now().UTC(), reopenTime{})
 			if err != nil {
 				t.Fatal(err)
 			}

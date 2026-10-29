@@ -328,14 +328,14 @@ func readLikenDir(liken likenDir, result *walkResult) {
 // one set.
 //
 // The reporter runs in the catalog pod, which reads no Library, so it
-// counts with the refresh times the operator publishes on the bus for
-// each Library. A Library with no refresh times counts each gap with none.
+// counts with the refresh and retry times the operator publishes on the bus
+// for each Library. A Library with no such times counts each gap with none.
 func (c *Catalog) gapCounts(ctx context.Context, library string, now time.Time,
-	refresh refreshTimes) (map[string]int, error) {
+	reopen reopenTimes) (map[string]int, error) {
 	counts := map[string]int{}
 	for fact, query := range gapQueries {
 		count, err := c.queryInt(ctx, `SELECT count(*) FROM (`+query+`)`,
-			gapParams(fact, library, now, refresh[fact]))
+			gapParams(fact, library, now, reopen.of(fact)))
 		if err != nil {
 			return nil, err
 		}
@@ -346,31 +346,37 @@ func (c *Catalog) gapCounts(ctx context.Context, library string, now time.Time,
 
 // The oldest attempt one library holds for each fact, which is what
 // says whether a refresh time has work left: an attempt older than the refresh
-// is a title that fact asks about again.
-// A fact with no attempt at all has no entry.
-const oldestAttemptQuery = `SELECT ` + attemptFactColumn + `, min(at) FROM attempts ` +
+// is a title that fact asks about again. The oldest attempt that did not find
+// its answer says the same for a retry time. A fact with no attempt at all
+// has no entry, and the third column is NULL for a fact whose attempts all
+// found their answer.
+const oldestAttemptQuery = `SELECT ` + attemptFactColumn + `, min(at), ` +
+	`min(CASE WHEN result != '` + attemptFound + `' THEN at END) FROM attempts ` +
 	`WHERE library = ? GROUP BY ` + attemptFactColumn
 
-// The oldest attempt per fact, read with one statement, because a
-// statement per fact is one round trip per fact on every report.
+// The oldest attempt and the oldest miss per fact, read with one statement,
+// because a statement per fact is one round trip per fact on every report.
 func (c *Catalog) oldestAttempts(ctx context.Context,
-	library string) (map[string]time.Time, error) {
-	oldest := map[string]time.Time{}
-	err := c.stream(ctx, oldestAttemptQuery, []any{library}, func(cells []any) error {
-		if len(cells) < 2 {
+	library string) (oldest, misses map[string]time.Time, err error) {
+	oldest, misses = map[string]time.Time{}, map[string]time.Time{}
+	err = c.stream(ctx, oldestAttemptQuery, []any{library}, func(cells []any) error {
+		if len(cells) < 3 {
 			return nil
 		}
 		fact, _ := cells[0].(string)
 		if fact == "" {
 			return nil
 		}
-		oldest[fact] = time.Unix(int64(cellNumber(cells[1])), 0).UTC()
+		oldest[fact] = time.Unix(cellNumber(cells[1]), 0).UTC()
+		if cells[2] != nil {
+			misses[fact] = time.Unix(cellNumber(cells[2]), 0).UTC()
+		}
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return oldest, nil
+	return oldest, misses, nil
 }
 
 // The fights of one library: the attempts that found an element group another

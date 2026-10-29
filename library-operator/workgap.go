@@ -37,9 +37,10 @@ func (i workItem) duration() time.Duration {
 // One fact's gap out of the local copy of the catalog. A worker fact's gap
 // query selects the path, the size, and the length of each video, in that
 // order.
-func (c *Catalog) workItems(ctx context.Context, fact, library string, now, refresh time.Time) ([]workItem, error) {
+func (c *Catalog) workItems(ctx context.Context, fact, library string, now time.Time,
+	reopen reopenTime) ([]workItem, error) {
 	var items []workItem
-	err := c.stream(ctx, gapQueries[fact], gapParams(fact, library, now, refresh), func(cells []any) error {
+	err := c.stream(ctx, gapQueries[fact], gapParams(fact, library, now, reopen), func(cells []any) error {
 		if len(cells) < 3 {
 			return nil
 		}

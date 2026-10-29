@@ -63,6 +63,10 @@ type libraryReport struct {
 	// operator publishes, and a report built before those times reached
 	// the reporter counts with none.
 	OldestAttempts map[string]time.Time `json:"oldestAttempts,omitempty"`
+	// The oldest attempt this library holds for each fact whose result is
+	// not found. The operator reads it against spec.retry the same way: a
+	// retry later than the oldest miss is a fact with work left.
+	OldestMisses map[string]time.Time `json:"oldestMisses,omitempty"`
 	// Waiting is the titles whose identity ended in candidates for a
 	// person to choose from, and Unresolved the titles no provider could
 	// name. Both are folded into Library status.
@@ -143,7 +147,8 @@ func actsOn(before, after libraryReport) bool {
 	if !reflect.DeepEqual(before.Runs, after.Runs) {
 		return true
 	}
-	if !maps.Equal(before.OldestAttempts, after.OldestAttempts) {
+	if !maps.Equal(before.OldestAttempts, after.OldestAttempts) ||
+		!maps.Equal(before.OldestMisses, after.OldestMisses) {
 		return true
 	}
 	return !maps.Equal(openGaps(before), openGaps(after))

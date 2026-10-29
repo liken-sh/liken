@@ -280,7 +280,7 @@ func TestTheTrailerFileGapAgainstTheRealSchema(t *testing.T) {
 			}
 
 			ids, err := catalog.queryStrings(t.Context(), gapQueries[factTrailerFile],
-				gapParams(factTrailerFile, trailerFileLibrary, now, time.Time{}))
+				gapParams(factTrailerFile, trailerFileLibrary, now, reopenTime{}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -325,7 +325,7 @@ func TestTheTrailerFileGapLeavesOutATitleAtTheLibraryRoot(t *testing.T) {
 			}
 
 			ids, err := catalog.queryStrings(t.Context(), gapQueries[factTrailerFile],
-				gapParams(factTrailerFile, trailerFileLibrary, now, time.Time{}))
+				gapParams(factTrailerFile, trailerFileLibrary, now, reopenTime{}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -393,7 +393,7 @@ func TestTheTrailerFileGapReadsTheTitlesOwnFolder(t *testing.T) {
 			seedTrailerFileSiblings(t, catalog, test.folder, test.sibling)
 
 			ids, err := catalog.queryStrings(t.Context(), gapQueries[factTrailerFile],
-				gapParams(factTrailerFile, trailerFileLibrary, time.Now().UTC(), time.Time{}))
+				gapParams(factTrailerFile, trailerFileLibrary, time.Now().UTC(), reopenTime{}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -438,7 +438,7 @@ func TestTheTrailerFileGapLeavesOutAnUnidentifiedTitle(t *testing.T) {
 	}
 
 	ids, err := catalog.queryStrings(t.Context(), gapQueries[factTrailerFile],
-		gapParams(factTrailerFile, trailerFileLibrary, time.Now().UTC(), time.Time{}))
+		gapParams(factTrailerFile, trailerFileLibrary, time.Now().UTC(), reopenTime{}))
 	if err != nil {
 		t.Fatal(err)
 	}

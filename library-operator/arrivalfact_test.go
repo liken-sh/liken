@@ -89,7 +89,7 @@ func TestTheArrivalGapAgainstTheRealSchema(t *testing.T) {
 	if len(gaps) != 1 || gaps[0] != "A/a.mkv" {
 		t.Errorf("gaps = %v, want the one video with no arrival and no attempt", gaps)
 	}
-	counts, err := catalog.gapCounts(t.Context(), arrivalLibrary, ledgerTime.Add(2*errorRetryInterval), nil)
+	counts, err := catalog.gapCounts(t.Context(), arrivalLibrary, ledgerTime.Add(2*errorRetryInterval), reopenTimes{})
 	if err != nil {
 		t.Fatal(err)
 	}

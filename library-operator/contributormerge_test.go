@@ -265,7 +265,7 @@ func TestTheMergeGap(t *testing.T) {
 			}
 
 			paths, err := catalog.queryStrings(t.Context(), gapQueries[factContributorMerge],
-				gapParams(factContributorMerge, contributorLibrary, now, time.Time{}))
+				gapParams(factContributorMerge, contributorLibrary, now, reopenTime{}))
 			if err != nil {
 				t.Fatal(err)
 			}

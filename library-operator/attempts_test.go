@@ -194,7 +194,7 @@ func TestAnExtrasFileTheProbeOpenedIsNoLongerAGap(t *testing.T) {
 	}
 
 	gaps, err := catalog.queryStrings(t.Context(), gapQueries[factProbe],
-		gapParams(factProbe, "house/series", ledgerTime, time.Time{}))
+		gapParams(factProbe, "house/series", ledgerTime, reopenTime{}))
 
 	if err != nil {
 		t.Fatal(err)
@@ -253,7 +253,7 @@ func TestEveryAttemptKindGatesTheProbeAndIdentityGapsAgainstTheRealSchema(t *tes
 				t.Fatal(err)
 			}
 
-			gaps, err := catalog.gapCounts(t.Context(), "house/movies", now, nil)
+			gaps, err := catalog.gapCounts(t.Context(), "house/movies", now, reopenTimes{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -336,7 +336,7 @@ func TestTheOldestAttemptPerFactAgainstTheRealSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldest, err := catalog.oldestAttempts(t.Context(), "house/movies")
+	oldest, _, err := catalog.oldestAttempts(t.Context(), "house/movies")
 	if err != nil {
 		t.Fatal(err)
 	}

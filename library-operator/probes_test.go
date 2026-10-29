@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
-	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -357,7 +356,7 @@ func TestTheProbeGapNamesEveryFileWithNoCurrentProbe(t *testing.T) {
 	}
 
 	gaps, err := catalog.queryStrings(t.Context(), gapQueries[factProbe],
-		gapParams(factProbe, "house/movies", ledgerTime, time.Time{}))
+		gapParams(factProbe, "house/movies", ledgerTime, reopenTime{}))
 
 	if err != nil {
 		t.Fatal(err)

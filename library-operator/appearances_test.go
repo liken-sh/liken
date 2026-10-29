@@ -209,7 +209,7 @@ func TestTheAppearancesGapAgainstTheRealSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	items, err := catalog.workItems(t.Context(), factAppearances, appearancesLibrary, ledgerTime, time.Time{})
+	items, err := catalog.workItems(t.Context(), factAppearances, appearancesLibrary, ledgerTime, reopenTime{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +261,7 @@ func TestAnAppearancesAttemptHoldsItsFileOutOfTheGap(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			gaps, err := catalog.gapCounts(t.Context(), appearancesLibrary, ledgerTime, nil)
+			gaps, err := catalog.gapCounts(t.Context(), appearancesLibrary, ledgerTime, reopenTimes{})
 
 			if err != nil {
 				t.Fatal(err)
