@@ -138,8 +138,15 @@ impl Home {
     /// Take a page the reader answered. A row the page holds and the
     /// screen already has keeps its focus, focus follows the row it was on
     /// where that row stays, and a strip the day no longer draws goes.
+    ///
+    /// A continue-watching row that comes in while focus is still at the
+    /// top of the page takes focus. The row comes in above the first strip
+    /// when a person is chosen, and focus that stayed on the strip under it
+    /// would scroll the new row up out of view.
     pub fn apply(&mut self, page: Page) {
         let focused = self.blocks.get(self.focus).map(Block::row);
+        let at_top = (1..self.focus).all(|index| !self.holds(index));
+        let continued = self.continues().is_some();
         self.people = page.people;
         self.viewers = page.viewers;
         let mut banner: Option<Banner> = None;
@@ -173,7 +180,20 @@ impl Home {
         {
             self.focus = index;
         }
+        if at_top
+            && !continued
+            && let Some(index) = self.continues()
+        {
+            self.focus = index;
+        }
         self.settle();
+    }
+
+    // The index of the continue-watching row where it holds anything.
+    fn continues(&self) -> Option<usize> {
+        self.blocks
+            .iter()
+            .position(|block| block.row() == Row::Continue && !block.is_empty())
     }
 
     /// Take a continue-watching row the reader answered alone. The row

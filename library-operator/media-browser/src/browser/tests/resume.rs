@@ -122,12 +122,6 @@ fn following() -> (Browser<Fake, NoArt>, FakeBus) {
     watched(plays(), true)
 }
 
-// The browser with focus on the continue-watching row, the first row under
-// the banner.
-fn on_the_row(browser: &mut Browser<Fake, NoArt>) {
-    browser.key("up");
-}
-
 // The continue-watching row's strip.
 pub(super) fn row(browser: &Browser<Fake, NoArt>) -> &crate::screens::home::Strip {
     strip_at(browser, 1)
@@ -347,7 +341,6 @@ fn an_episode_a_series_and_its_franchises_offer_is_one_card_with_every_reason() 
 #[test]
 fn a_press_on_a_card_with_a_series_reason_opens_the_series_page_on_that_episodes_row() {
     let (mut browser, bus) = watched(mid_serial(), true);
-    on_the_row(&mut browser);
 
     browser.key("enter");
 
@@ -393,7 +386,6 @@ fn a_press_on_a_card_only_a_franchise_offers_opens_the_franchise_page_on_the_mem
         )],
         true,
     );
-    on_the_row(&mut browser);
     browser.key("right");
 
     browser.key("enter");
@@ -408,7 +400,6 @@ fn a_press_on_a_card_only_a_franchise_offers_opens_the_franchise_page_on_the_mem
 #[test]
 fn a_press_on_a_film_of_the_row_opens_its_page_on_resume() {
     let (mut browser, bus) = continuing();
-    on_the_row(&mut browser);
     browser.key("right");
     browser.key("right");
 
@@ -429,7 +420,6 @@ fn a_press_on_a_film_of_the_row_opens_its_page_on_resume() {
 #[test]
 fn a_press_on_an_episode_of_the_row_opens_the_series_page_on_that_episodes_row() {
     let (mut browser, bus) = continuing();
-    on_the_row(&mut browser);
     browser.key("right");
 
     browser.key("enter");
@@ -445,7 +435,6 @@ fn a_press_on_an_episode_of_the_row_opens_the_series_page_on_that_episodes_row()
 #[test]
 fn a_press_on_an_episode_the_audience_has_not_started_opens_the_series_page_on_it() {
     let (mut browser, bus) = continuing();
-    on_the_row(&mut browser);
 
     browser.key("enter");
 
@@ -475,7 +464,6 @@ fn the_heading_carries_the_letters_of_the_people_at_the_screen() {
 #[test]
 fn left_from_the_first_card_reaches_the_circles_and_right_returns() {
     let (mut browser, _bus) = continuing();
-    on_the_row(&mut browser);
 
     assert!(browser.key("left"));
     assert!(row(&browser).rung);
@@ -490,7 +478,6 @@ fn left_from_the_first_card_reaches_the_circles_and_right_returns() {
 #[test]
 fn enter_on_the_circles_raises_the_picker_with_the_room_chosen() {
     let (mut browser, _bus) = continuing();
-    on_the_row(&mut browser);
     browser.key("left");
 
     assert!(browser.key("enter"));
@@ -503,7 +490,6 @@ fn enter_on_the_circles_raises_the_picker_with_the_room_chosen() {
 #[test]
 fn up_from_any_card_reaches_the_circles_and_up_again_leaves_the_row_upward() {
     let (mut browser, _bus) = continuing();
-    on_the_row(&mut browser);
     browser.key("right");
     assert_eq!(row(&browser).focus, 1);
 
@@ -522,7 +508,6 @@ fn up_from_any_card_reaches_the_circles_and_up_again_leaves_the_row_upward() {
 #[test]
 fn down_from_the_circles_returns_to_the_card_focus_left() {
     let (mut browser, _bus) = continuing();
-    on_the_row(&mut browser);
     browser.key("right");
     browser.key("up");
     assert!(row(&browser).rung);
@@ -537,7 +522,6 @@ fn down_from_the_circles_returns_to_the_card_focus_left() {
 #[test]
 fn leaving_the_row_puts_focus_back_on_the_cards() {
     let (mut browser, _bus) = continuing();
-    on_the_row(&mut browser);
     browser.key("left");
     assert!(row(&browser).rung);
 
@@ -592,4 +576,50 @@ fn the_row_comes_back_with_the_pickers_answer() {
 
     assert!(holds_the_row(&browser));
     assert_eq!(letters(&row(&browser).viewers), ["F"]);
+}
+
+// The browser over the plays of `continuing`, with nobody chosen yet, so the
+// page holds no continue-watching row and focus is on the first strip.
+fn nobody_chosen() -> Browser<Fake, NoArt> {
+    let (mut browser, _bus) = playing(vec![one_item()]);
+    browser.source.continues = plays();
+    browser.pump(0.0);
+    browser
+}
+
+// Choose the one person whose plays the store holds.
+fn choose(browser: Browser<Fake, NoArt>, at: f64) -> Browser<Fake, NoArt> {
+    let mut browser = browser.with_audience(
+        vec![crate::audience::Person {
+            name: "first".into(),
+            display_name: "First".into(),
+            thumbnail: None,
+        }],
+        vec!["first".into()],
+    );
+    browser.pump(at);
+    browser
+}
+
+#[test]
+fn a_person_chosen_at_the_top_of_the_page_lands_focus_on_their_row() {
+    let browser = nobody_chosen();
+    assert!(!holds_the_row(&browser));
+
+    let browser = choose(browser, 1.0);
+
+    assert_eq!(showing_home(&browser).focus, 1);
+    assert_eq!(row(&browser).row, crate::screens::home::Row::Continue);
+}
+
+#[test]
+fn a_person_chosen_further_down_the_page_leaves_focus_where_it_is() {
+    let mut browser = nobody_chosen();
+    browser.key("down");
+    let below = strip_at(&browser, showing_home(&browser).focus).row.clone();
+
+    let browser = choose(browser, 1.0);
+
+    let home = showing_home(&browser);
+    assert_eq!(strip_at(&browser, home.focus).row, below);
 }

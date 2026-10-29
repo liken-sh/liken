@@ -733,3 +733,25 @@ fn a_film_that_changed_nothing_reads_nothing_when_it_ends() {
 
     assert_eq!(browser.source.calls, Vec::<&str>::new());
 }
+
+// The curtain covers the page, so the outline around the page's focus
+// would draw over the curtain. It leaves with the press and comes back
+// when the page is whole again.
+#[test]
+fn the_outline_leaves_the_page_while_the_curtain_covers_it() {
+    let (mut browser, bus) = on_a_series();
+    assert!(browser.drawn().is_some());
+
+    browser.key("enter");
+    browser.tick(PRESS + look::DEPARTURE);
+    assert_eq!(browser.drawn(), None);
+
+    *bus.inbound.lock().expect("no test panics with the lock") =
+        vec![status(Activity::Playing), status(Activity::Idle)];
+    browser.pump(PRESS + 5.0);
+    browser.tick(PRESS + 5.0);
+    assert_eq!(browser.drawn(), None);
+
+    browser.tick(PRESS + 5.0 + look::RETURN);
+    assert!(browser.drawn().is_some());
+}

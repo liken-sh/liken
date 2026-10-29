@@ -65,9 +65,11 @@ impl<S: Source, A: Art> Browser<S, A> {
 
     // Where focus is now, at rest: the focused tile or link of the picker
     // while it is up, the strip's target while the strip holds focus, and
-    // the screen's own answer otherwise. Nothing under the shade.
+    // the screen's own answer otherwise. Nothing under the shade, and
+    // nothing while the loading curtain covers the page, because the
+    // outline draws over the page's layer and the curtain draws inside it.
     pub(super) fn target(&self) -> Option<Target> {
-        if self.asleep() {
+        if self.asleep() || self.loading.is_some() {
             return None;
         }
         let bounds = self.bounds();

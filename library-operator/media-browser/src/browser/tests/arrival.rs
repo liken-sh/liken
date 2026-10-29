@@ -12,7 +12,6 @@ use super::*;
 fn on_card(place: usize) -> Browser<Fake, NoArt> {
     let (mut browser, _) = watched(plays(), false);
     browser.source.episodes_reached = vec![reached(1_200, 2_760, (1, 2), 30)];
-    browser.key("up");
     for _ in 0..place {
         browser.key("right");
     }

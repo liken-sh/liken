@@ -101,7 +101,8 @@ person picker, the outline travels to the next card, button, or mark
 on each press, and the row scrolls under it on the same press. While
 focus rests, the outline brightens slowly every few seconds, so you
 can find it from the couch. When a press opens a page or goes back,
-the outline starts on the new page's focus with no travel.
+the outline starts on the new page's focus with no travel. While the
+loading screen covers a title's page, the outline is hidden.
 
 Up from the top of any wall puts focus on the strip, the row across
 the top that holds the clock and the search glass. Right from the last
@@ -130,6 +131,10 @@ says why it is there: "Resume", "Next in" the series, the set, or the
 franchise. A card that is next in a series or a set opens that title's
 page. A card that is next in a franchise alone opens the franchise page
 on that member.
+
+When you choose people while focus is at the top of the home page, on
+the banner or the first row, focus moves to their continue-watching
+row when it comes in. Further down the page, focus stays where it is.
 
 A home card that names one episode opens the series' page with that
 episode's row already open, and focus on its first button, Resume or

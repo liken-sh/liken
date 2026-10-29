@@ -41,7 +41,6 @@ fn record(browser: &mut Browser<Fake, NoArt>, position: i64) {
 // the reads of the open cleared.
 fn on_the_films_page() -> Browser<Fake, NoArt> {
     let (mut browser, _bus) = watched(plays(), false);
-    browser.key("up");
     browser.key("right");
     browser.key("right");
     browser.key("enter");
@@ -159,7 +158,6 @@ fn a_change_the_page_does_not_draw_reads_nothing() {
 #[test]
 fn a_change_under_a_film_is_read_when_the_film_ends() {
     let (mut browser, bus) = watched(plays(), false);
-    browser.key("up");
     browser.key("right");
     browser.key("right");
     browser.key("enter");
