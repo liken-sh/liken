@@ -102,8 +102,18 @@ pub trait Art {
     fn draw(&self, brush: &mut Brush<'_>, bounds: Rectangle);
 }
 
-/// The words that start the card's last line, before the time.
+/// The words that start the end time's line, before the time.
 const ENDS_WORDS: &str = "Ends at";
+
+/// The line that says when the next work would end if a person took the
+/// offer at `now`: the wall clock plus the seconds that remain, in the
+/// format of the display's clock. The card and the column both draw it.
+/// Nothing for an offer that carries no seconds.
+fn ends_at(offer: &Offer, now: &Zoned) -> Option<String> {
+    let seconds = offer.remaining?;
+    let ends = now.saturating_add(jiff::Span::new().seconds(seconds));
+    Some(format!("{ENDS_WORDS} {}", clock::reading(&ends)))
+}
 
 /// The block the sidecar sent. A block with none of the three lines and no
 /// art is not an offer.
@@ -495,14 +505,9 @@ impl UpNext {
             ));
         }
         y += DETAIL_PITCH;
-        if let Some(seconds) = offer.remaining {
-            let ends = now.saturating_add(jiff::Span::new().seconds(seconds));
+        if let Some(ends) = ends_at(offer, now) {
             lines.push(Line::new(
-                clip(
-                    &format!("{ENDS_WORDS} {}", clock::reading(&ends)),
-                    theme::type_scale::SMALL,
-                    room,
-                ),
+                clip(&ends, theme::type_scale::SMALL, room),
                 Point::new(x, y),
                 Anchor::TopLeft,
                 theme::type_scale::SMALL,
@@ -595,7 +600,7 @@ impl UpNext {
             return;
         }
         if self.stepped {
-            self.draw_column(brush, focused, art);
+            self.draw_column(brush, focused, art, now);
             return;
         }
         let focused = focused || self.waiting;
@@ -622,12 +627,12 @@ impl UpNext {
     /// The column beside the stepped-back film, on its own fade, over the
     /// bare video and over the OSD alike. A taken column keeps the panel the
     /// press left it in while it fades.
-    fn draw_column(&self, brush: &mut Brush<'_>, focused: bool, art: &dyn Art) {
+    fn draw_column(&self, brush: &mut Brush<'_>, focused: bool, art: &dyn Art, now: &Zoned) {
         let Some(offer) = self.offer.as_ref() else {
             return;
         };
         brush.at_fade(self.column.value(), |brush| {
-            column::draw(brush, offer, focused || self.waiting, art);
+            column::draw(brush, offer, focused || self.waiting, art, now);
         });
     }
 }

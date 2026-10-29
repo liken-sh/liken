@@ -44,10 +44,6 @@ pub const PLAYER_GRACE: Duration = Duration::from_secs(60);
 /// how many commands the frame loop may run ahead of the socket.
 const EVENT_QUEUE: usize = 64;
 
-/// The wall clock's own step, which the reading and the end time follow while
-/// the display stands open with no position arriving.
-const MINUTE: Duration = Duration::from_secs(60);
-
 /// What moves the display.
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -846,7 +842,7 @@ impl Display {
         // a tick of their own while it is up. The up-next card's end time
         // follows the same tick while the card stands over the bare video.
         if (self.focus.visible() || self.upnext.draws_outside(false)) && !self.detached {
-            running.push(iced::time::every(MINUTE).map(|_| Message::Minute));
+            running.push(Subscription::run(minutes));
         }
         Subscription::batch(running)
     }
@@ -1077,6 +1073,24 @@ impl canvas::Program<Message> for Layer<'_> {
             brush.finish();
         })]
     }
+}
+
+/// One `Minute` each time the wall minute turns. A fixed one-minute step
+/// from whenever the display opened would redraw up to a minute after the
+/// turn, so the reading and the end times would lag the wall clock. Each
+/// wait is measured from the clock again, so a slow frame never moves the
+/// tick off the turn.
+fn minutes() -> impl iced::futures::Stream<Item = Message> {
+    iced::stream::channel(1, async |mut output| {
+        use iced::futures::SinkExt;
+
+        loop {
+            tokio::time::sleep(clock::until_next_minute(&clock::now())).await;
+            if output.send(Message::Minute).await.is_err() {
+                return;
+            }
+        }
+    })
 }
 
 /// Open the window and run the frame loop. The caller waits for mpv first,

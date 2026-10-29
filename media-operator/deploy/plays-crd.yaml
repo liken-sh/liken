@@ -383,12 +383,13 @@ spec:
                         How long a play of the work that follows runs,
                         in seconds, from where that play starts: the
                         length of its file, less the position where the
-                        audience stopped in it before. The card draws a
-                        fourth line, "Ends at 10:42 pm", the wall clock
-                        when the card draws plus these seconds, in the
-                        format of the display's clock. The line follows
-                        the minute while the card stands. Omitted, the
-                        card draws no end time.
+                        audience stopped in it before. The card, and the
+                        column beside a stepped-back film, draw a line
+                        under the detail, "Ends at 10:42 pm": the wall
+                        clock when they draw plus these seconds, in the
+                        format of the display's clock. The line changes
+                        when the wall minute turns. Omitted, neither
+                        draws an end time.
                     art:
                       type: string
                       description: >-

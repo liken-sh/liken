@@ -15,6 +15,8 @@
 //! the name against the image's own `/usr/share/zoneinfo`, which the `tzdata`
 //! package installs.
 
+use std::time::Duration;
+
 use iced::Point;
 use jiff::Zoned;
 
@@ -29,6 +31,14 @@ const ENDS_Y: f32 = theme::MARGIN_Y + theme::LINE_PITCH;
 /// The wall clock now, in the zone `TZ` names.
 pub fn now() -> Zoned {
     Zoned::now()
+}
+
+/// How long until the wall minute turns. The minute tick sleeps this long
+/// before each redraw, so the reading and every end time change when the
+/// minute does, and not up to a minute later.
+pub fn until_next_minute(now: &Zoned) -> Duration {
+    let into = now.timestamp().as_millisecond().rem_euclid(60_000);
+    Duration::from_millis((60_000 - into) as u64)
 }
 
 /// The wall minute, which is the third part of the position signature.
@@ -174,6 +184,35 @@ mod tests {
         let wide = Canvas::for_output(iced::Size::new(2560.0, 1080.0));
         let lines = lines(&wide, &film(None, None), &wall(15, 1));
         assert_eq!(lines[0].at, Point::new(2464.0, 90.0));
+    }
+
+    /// The tick lands when the wall minute turns, so a reading never lags
+    /// the minute by up to a minute.
+    #[test]
+    fn the_wait_ends_when_the_wall_minute_turns() {
+        let cases = [
+            ("on the minute", at(15 * 60), Duration::from_secs(60)),
+            (
+                "twenty seconds in",
+                at(15 * 60 + 20),
+                Duration::from_secs(40),
+            ),
+            (
+                "one second before",
+                at(15 * 60 + 59),
+                Duration::from_secs(1),
+            ),
+            (
+                "a part second before",
+                jiff::Timestamp::from_millisecond(15 * 60_000 + 59_750)
+                    .expect("a millisecond inside the clock's range")
+                    .to_zoned(jiff::tz::TimeZone::UTC),
+                Duration::from_millis(250),
+            ),
+        ];
+        for (name, now, want) in cases {
+            assert_eq!(until_next_minute(&now), want, "{name}");
+        }
     }
 
     #[test]
