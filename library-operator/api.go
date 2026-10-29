@@ -489,8 +489,8 @@ type MediaPreferences struct {
 	Spec       MediaPreferencesSpec `json:"spec"`
 }
 
-// The two fields of the household defaults this operator reads: the zone and
-// the audio languages.
+// The three fields of the household defaults this operator reads: the zone,
+// the audio languages, and the subtitle languages.
 type MediaPreferencesSpec struct {
 	// The household wall-clock zone, an IANA name like America/New_York.
 	// The browser pod reads it as TZ, so its clock and its day's draw
@@ -500,6 +500,11 @@ type MediaPreferencesSpec struct {
 	// The languages the household prefers for audio, most preferred first. The
 	// enricher ranks trailers by them.
 	AudioLanguages []string `json:"audioLanguages,omitempty"`
+
+	// The languages the household prefers for subtitles, most preferred
+	// first. The mark estimates read the subtitle file of the first one a
+	// video has.
+	SubtitleLanguages []string `json:"subtitleLanguages,omitempty"`
 }
 
 // Every MediaPreferences the watch holds, which the pass reads.
@@ -536,6 +541,15 @@ func householdZone(list *MediaPreferencesList) string {
 func householdLanguages(list *MediaPreferencesList) []string {
 	if preferences := householdPreferences(list); preferences != nil {
 		return preferences.Spec.AudioLanguages
+	}
+	return nil
+}
+
+// The subtitle languages the household states, most preferred first, or none
+// where the cluster states none.
+func householdSubtitleLanguages(list *MediaPreferencesList) []string {
+	if preferences := householdPreferences(list); preferences != nil {
+		return preferences.Spec.SubtitleLanguages
 	}
 	return nil
 }

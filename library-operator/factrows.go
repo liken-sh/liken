@@ -130,9 +130,14 @@ func filesOfType(files []fileRow, kind string) []fileRow {
 // The probe owns the stream columns of every video and the duration of the
 // items whose .nfo file states no runtime of its own.
 func (e *enricher) writeProbeRows(ctx context.Context, result *walkResult) error {
-	// The probe reads audio files as well as video files, so both take the
-	// probed column that closes the gap.
+	// The probe reads audio files and text subtitle files as well as video
+	// files, so all three take the probed column that closes the gap.
 	probed := append(filesOfType(result.files, fileTypeVideo), filesOfType(result.files, fileTypeAudio)...)
+	for _, file := range filesOfType(result.files, fileTypeSubtitle) {
+		if isTextSubtitle(file.Path) {
+			probed = append(probed, file)
+		}
+	}
 	if _, err := e.catalog.UpdateFileStreams(ctx, probed); err != nil {
 		return err
 	}

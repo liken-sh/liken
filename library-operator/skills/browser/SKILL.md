@@ -283,7 +283,9 @@ A play counts as finished when the time left is at or under a twentieth
 of the work, and at or under five minutes, whichever leaves less time.
 Where the credits marks of the title's file place the credits in the
 second half of the work, the play counts as finished from the start of
-those credits instead. The browser reads the marks from its catalog.
+those credits instead. The browser reads the marks from its catalog,
+the [estimated marks](https://liken.sh/library/docs/guides/enrichment/#estimated-marks) among
+them.
 The jellyfin role writes a title played in Jellyfin by the same rule,
 and [Keep progress with Jellyfin](https://liken.sh/library/docs/guides/jellyfin/#3-what-crosses)
 states it in full. Where the `Catalog` names a Jellyfin server, the

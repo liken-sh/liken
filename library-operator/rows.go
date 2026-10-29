@@ -189,7 +189,14 @@ type fileRow struct {
 	// where no probe has read it. The probe gap is every media file where
 	// this differs from Modified.
 	Probed int64
-	Items  []string
+	// The clues of the marks estimate that the probe ledger holds: a
+	// video's chapters that name the credits and the intro, and a text
+	// subtitle file's dialogue as JSON.
+	CreditsChapterMs    int64
+	IntroChapterStartMs int64
+	IntroChapterEndMs   int64
+	Dialogue            string
+	Items               []string
 }
 
 // fileItemKey names one row of the link table: the file's path, and the id of

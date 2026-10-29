@@ -265,8 +265,8 @@ func TestUpsertFilesCarriesPresentAsAnInteger(t *testing.T) {
 			if !strings.Contains(got.sql, "INSERT INTO files") {
 				t.Errorf("sql = %q, want an upsert on files", got.sql)
 			}
-			if len(got.params) != 18 {
-				t.Fatalf("params = %d, want 18", len(got.params))
+			if len(got.params) != 22 {
+				t.Fatalf("params = %d, want 22", len(got.params))
 			}
 			if got.params[12].(float64) != testCase.want {
 				t.Errorf("present param = %v, want %v", got.params[12], testCase.want)

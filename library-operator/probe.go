@@ -78,20 +78,15 @@ func (e *enricher) probeOne(ctx context.Context, probe mediaProbe, path string) 
 // .nfo file, because no player reads an .nfo file beside a music file.
 // A video whose role is not the feature also gets a record and no .nfo file.
 func (e *enricher) recordProbe(ctx context.Context, probe mediaProbe, absolute string) error {
-	output, err := probe(ctx, absolute)
+	record, err := readProbeRecord(ctx, probe, absolute)
 	if err != nil {
 		return err
-	}
-	var read ffprobeAnswer
-	if err := json.Unmarshal(output, &read); err != nil {
-		return fmt.Errorf("reading the probe of %s: %w", absolute, err)
 	}
 	size, modified, err := statFile(absolute)
 	if err != nil {
 		return err
 	}
 	folder, entry := likenFolderFor(e.kind, absolute)
-	record := read.probedFile()
 	record.Path, record.At = entry, time.Now().UTC()
 	record.Size, record.Modified = size, modified
 	record.Container = containerFromExtension(absolute)
@@ -110,6 +105,24 @@ func (e *enricher) recordProbe(ctx context.Context, probe mediaProbe, absolute s
 		return nil
 	}
 	return e.writeStreamDetails(absolute, record)
+}
+
+// What one file holds, before the probe adds the file's own facts. A text
+// subtitle file is read for its cue times, which ffprobe does not give, and
+// every other file is read through ffprobe.
+func readProbeRecord(ctx context.Context, probe mediaProbe, absolute string) (probedFile, error) {
+	if isTextSubtitle(absolute) {
+		return readSubtitleRecord(absolute)
+	}
+	output, err := probe(ctx, absolute)
+	if err != nil {
+		return probedFile{}, err
+	}
+	var read ffprobeAnswer
+	if err := json.Unmarshal(output, &read); err != nil {
+		return probedFile{}, fmt.Errorf("reading the probe of %s: %w", absolute, err)
+	}
+	return read.probedFile(), nil
 }
 
 // The answer is one edit of one element in the .nfo file, so every other
@@ -274,7 +287,7 @@ func ffprobeFile(ctx context.Context, path string) ([]byte, error) {
 	defer cancel()
 
 	command := exec.CommandContext(timed, "ffprobe",
-		"-v", "error", "-print_format", "json", "-show_format", "-show_streams", path)
+		"-v", "error", "-print_format", "json", "-show_format", "-show_streams", "-show_chapters", path)
 	output, err := command.Output()
 	if err != nil {
 		return nil, fmt.Errorf("ffprobe: %w%s", err, commandStderr(err))

@@ -89,6 +89,8 @@ and a long film is watched with up to five minutes left.
 Where the file's [marks](/docs/guides/enrichment/#intro-and-credits-marks)
 place the credits in the second half of the work, the work counts as
 watched from the start of those credits instead, whatever time is left.
+The marks include the operator's
+[estimate](/docs/guides/enrichment/#estimated-marks) of the credits.
 The role reads the credits marks the way the player's up-next card
 does, and the [media browser](/docs/guides/browser/) reads them the
 same way from its catalog. So a title the role writes as played is a

@@ -226,6 +226,17 @@ CREATE TABLE files (
     -- is every media file where probed differs from modified.
     bitrate INTEGER NOT NULL DEFAULT 0,
     probed INTEGER NOT NULL DEFAULT 0,
+    -- The clues the marks estimate reads, from the probe ledger. On a
+    -- video, credits_chapter_ms is the start of the earliest chapter in
+    -- the second half whose title names the credits, and 0 for none, and
+    -- the two intro columns are the earliest chapter in the first half
+    -- whose title names the intro, with an end of 0 for none. On a text
+    -- subtitle file, dialogue is JSON of the stretches with no dialogue,
+    -- and empty where the probe read none. See markestimate.go.
+    credits_chapter_ms INTEGER NOT NULL DEFAULT 0,
+    intro_chapter_start_ms INTEGER NOT NULL DEFAULT 0,
+    intro_chapter_end_ms INTEGER NOT NULL DEFAULT 0,
+    dialogue TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (library, path)
 );
 

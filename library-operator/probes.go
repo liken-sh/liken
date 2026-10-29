@@ -85,6 +85,12 @@ func (p folderProbes) fill(row *fileRow, entry, absolute string, identities file
 	video := record.first(fileTypeVideo)
 	row.VideoCodec, row.Width, row.Height = video.Codec, video.Width, video.Height
 	row.AudioCodec = record.first(fileTypeAudio).Codec
+	row.CreditsChapterMs = record.creditsChapter()
+	intro := record.introChapter()
+	row.IntroChapterStartMs, row.IntroChapterEndMs = intro.Start, intro.End
+	if record.Dialogue != nil {
+		row.Dialogue = record.Dialogue.column()
+	}
 	rows := make([]streamRow, len(record.Streams))
 	for ordinal, stream := range record.Streams {
 		rows[ordinal] = stream.row(row.Library, row.Path, ordinal)

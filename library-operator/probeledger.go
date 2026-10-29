@@ -32,6 +32,12 @@ type probedFile struct {
 	Duration  float64        `yaml:"duration"`
 	Bitrate   int64          `yaml:"bitrate"`
 	Streams   []probedStream `yaml:"streams"`
+	// The chapters the container names, in its order. The marks estimate
+	// reads their titles for the credits and the intro.
+	Chapters []probedChapter `yaml:"chapters,omitempty"`
+	// The stretches with no dialogue in a text subtitle file, which the
+	// probe reads in place of ffprobe's answer. A video's record holds none.
+	Dialogue *subtitleDialogue `yaml:"dialogue,omitempty"`
 	// The change time of the file when a probe found it at a size the record
 	// before it did not hold, which is when a new file took this path. An
 	// attempt of a file fact made before it, and a thumbnail or a tile
@@ -71,11 +77,30 @@ type probedColor struct {
 	Space     string `yaml:"space,omitempty"`
 }
 
-// The ffprobe answer this container reads: the container's own facts and one
-// entry per stream.
+// One chapter of a file, in seconds from the start of the file, with the
+// title the container gives it.
+type probedChapter struct {
+	Start float64 `yaml:"start"`
+	End   float64 `yaml:"end"`
+	Title string  `yaml:"title,omitempty"`
+}
+
+// The ffprobe answer this container reads: the container's own facts, one
+// entry per stream, and one entry per chapter.
 type ffprobeAnswer struct {
-	Streams []ffprobeStream `json:"streams"`
-	Format  ffprobeFormat   `json:"format"`
+	Streams  []ffprobeStream  `json:"streams"`
+	Chapters []ffprobeChapter `json:"chapters"`
+	Format   ffprobeFormat    `json:"format"`
+}
+
+// One chapter as ffprobe states it: the times as decimal seconds in strings,
+// and the title as a tag.
+type ffprobeChapter struct {
+	StartTime string `json:"start_time"`
+	EndTime   string `json:"end_time"`
+	Tags      struct {
+		Title string `json:"title"`
+	} `json:"tags"`
 }
 
 type ffprobeFormat struct {
@@ -135,6 +160,11 @@ func (a ffprobeAnswer) probedFile() probedFile {
 	}
 	for _, stream := range a.Streams {
 		record.Streams = append(record.Streams, stream.probed())
+	}
+	for _, chapter := range a.Chapters {
+		record.Chapters = append(record.Chapters, probedChapter{
+			Start: probeFloat(chapter.StartTime), End: probeFloat(chapter.EndTime), Title: chapter.Tags.Title,
+		})
 	}
 	if record.Duration == 0 {
 		record.Duration = a.videoDuration()

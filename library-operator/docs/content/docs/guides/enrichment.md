@@ -169,7 +169,8 @@ each phase. The operator runs one `Job` of a `Library` at a time. A walk
 last report counted. The [scanning guide](/docs/guides/scanning/#when-a-scan-runs)
 says when each one starts.
 
-The phases are `probe`, which reads each video's streams, `arrival`,
+The phases are `probe`, which reads each video's streams and chapters
+and the cue times of each text subtitle file, `arrival`,
 which records when a file was first seen, `identity`, which names each
 title, `nfo`, which fills the `.nfo` file, `art`, which downloads the
 images, `trailer`, which records where each title's trailers are,
@@ -879,6 +880,50 @@ it answered.
 Neither Jellyfin nor Kodi reads these marks. Jellyfin keeps its media
 segments in its own database, and Kodi's `.edl` file is a different
 format, so the fact writes no file other than its ledger.
+
+### Estimated marks
+
+Many files have no marks from either database, and the player then
+raises the up-next card, and both watched rules count a play as
+finished, by the time left. So at the end of every library `Job`, after
+every phase, the close container estimates one credits start and one
+intro for each main video of a movie or an episode, from every clue the
+catalog holds. It writes each estimate as one more row in the `marks`
+table, with the source `estimate`, beside the providers' rows. The
+player, the browser, and the jellyfin role read it the way they read a
+provider's candidate. Nothing on the volume holds an estimate, so it
+needs no `marks` provider, and a rebuilt catalog gets it again at the
+end of its next `Job`.
+
+The clues come in two tiers, and the second is read only when the first
+has nothing:
+
+| Tier | Credits, in the second half of the file | Intro, in the first half |
+|---|---|---|
+| exact | the providers' credits spans, a chapter whose title names the credits, such as `End Credits` or `Outro`, and the start of a provider's `preview` span | the providers' intro spans, and a chapter whose title names the intro, such as `Intro`, `Opening`, or `Main Titles`, up to the next chapter |
+| inferred | for an episode, the median length of the credits of the other episodes of the series, taken from the end of this one | for an episode, the median start and length of the intros of the other episodes of the same season, when at least two of them start within 30 seconds of each other |
+| inferred | in a subtitle file, the end of the last line before 45 seconds or more with no dialogue that runs to the end of the file, or to a scene of up to three minutes that ends it | in a subtitle file, the first 30 to 120 seconds with no dialogue that end in the first ten minutes |
+
+In each tier the earliest clue wins, because a card that rises a little
+early costs less than one that rises after the credits have run. A
+provider's intro and an intro chapter that overlap are one intro, and
+the provider's span wins. Where they do not overlap, the earlier wins.
+Where the winning clue is a provider's own span, no estimate is written,
+because that span is in the table already, and a copy would count it
+twice when the player takes the median of the spans that overlap. An
+exact credits estimate ends where the provider's earliest credits span
+ends, so a second run of credits after a scene stays a span of its own.
+
+The probe reads each video's chapters with `ffprobe -show_chapters`,
+and it reads each `.srt`, `.vtt`, `.ass`, and `.ssa` file beside a video
+for its cue times. It never extracts a subtitle track from inside a
+video. A line wrapped in a note mark, such as `♪` or `#`, is music and
+counts as no dialogue. Of the subtitle files of one video, the estimate
+reads the file in the first of the household's `subtitleLanguages` in
+`MediaPreferences` that the video has, or else any file, and the full
+track before a forced or a hearing-impaired one. A video probed before
+the probe read chapters has none recorded until it is probed again, so
+name `probe` in `spec.refresh` to read the chapters of a whole library.
 
 ### Trailer files
 

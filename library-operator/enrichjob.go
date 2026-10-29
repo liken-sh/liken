@@ -48,6 +48,9 @@ type libraryJob struct {
 	paths  []string
 	phases []servedPhase
 	sync   syncTarget
+	// The household's subtitle languages, which the close container's mark
+	// estimates read.
+	subtitleLanguages []string
 	// Why the pass starts the Job, in the words of the log line.
 	cause string
 }
@@ -152,6 +155,10 @@ func libraryPodTemplate(library *Library, providers providerSet, languages []str
 	}
 	closing := enrichContainer(library, closeMode, closeMode, plan.paths, images.operator)
 	withPhaseEnv(&closing, plan, included)
+	if len(plan.subtitleLanguages) > 0 {
+		closing.Env = append(closing.Env, EnvVar{Name: librarySubtitleLanguagesVariable,
+			Value: strings.Join(plan.subtitleLanguages, ",")})
+	}
 	if facts := workListFacts(library); len(facts) > 0 {
 		closing.Env = append(closing.Env, EnvVar{Name: libraryWorkListsVariable, Value: strings.Join(facts, ",")})
 		closing.Env = append(closing.Env, bus.env()...)

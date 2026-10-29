@@ -5,7 +5,7 @@ package main
 // operator reads a run in flight from the moment the Job starts. It then waits
 // for the mark of every phase the Job includes, removes the stale partial
 // files the scan found and the .liken directory at the library root, derives
-// the Library's set rows, publishes the work list of each heavy fact the
+// the Library's set rows and mark estimates (markestimaterows.go), publishes the work list of each heavy fact the
 // Library runs (worklist.go), writes the one finished runs row, and waits for
 // a catalog pod to confirm it. Every container of the Job writes through the
 // one agent, so that confirmation covers every row the Job wrote.
@@ -37,8 +37,11 @@ type closeRun struct {
 	*enricher
 	handoffTimeout time.Duration
 	workLists      []string
-	base           string
-	dial           func(context.Context) (net.Conn, error)
+	// The household's subtitle languages, which choose the subtitle file
+	// each mark estimate reads.
+	subtitleLanguages []string
+	base              string
+	dial              func(context.Context) (net.Conn, error)
 }
 
 // The role's whole program. A Job no catalog pod confirms fails, so its rows
@@ -69,11 +72,12 @@ func newCloseRun(log io.Writer) (*closeRun, error) {
 	}
 	bus := busEndpointOf(os.Getenv(busAddressVariable), os.Getenv(topicBaseVariable))
 	return &closeRun{
-		enricher:       work,
-		handoffTimeout: handoffTimeout(os.Getenv(handoffTimeoutVariable)),
-		workLists:      commaNames(os.Getenv(libraryWorkListsVariable)),
-		base:           bus.base,
-		dial:           bus.dial,
+		enricher:          work,
+		handoffTimeout:    handoffTimeout(os.Getenv(handoffTimeoutVariable)),
+		workLists:         commaNames(os.Getenv(libraryWorkListsVariable)),
+		subtitleLanguages: commaNames(os.Getenv(librarySubtitleLanguagesVariable)),
+		base:              bus.base,
+		dial:              bus.dial,
 	}, nil
 }
 
@@ -104,6 +108,10 @@ func (r *closeRun) runJob(ctx context.Context) error {
 			r.logf("could not derive the sets of %s: %v", r.library, err)
 			failures = append(failures, "the sets: "+err.Error())
 		}
+	}
+	if err := deriveMarkEstimates(ctx, r.catalog, r.library, r.subtitleLanguages); err != nil {
+		r.logf("could not derive the mark estimates of %s: %v", r.library, err)
+		failures = append(failures, "the mark estimates: "+err.Error())
 	}
 	for _, fact := range r.workLists {
 		if err := r.publishWorkList(ctx, fact); err != nil {

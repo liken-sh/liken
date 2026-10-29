@@ -329,8 +329,9 @@ func TestAProbedLibraryLandsItsFilesAndStreamsInTheCatalog(t *testing.T) {
 	}
 }
 
-// The files the probe container works from: every video and audio file
-// whose probed column is not its modified column.
+// The files the probe container works from: every video, audio, and text
+// subtitle file whose probed column is not its modified column. A picture
+// subtitle has no cue text to read.
 func TestTheProbeGapNamesEveryFileWithNoCurrentProbe(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	stamp := ledgerTime.Unix()
@@ -341,6 +342,8 @@ func TestTheProbeGapNamesEveryFileWithNoCurrentProbe(t *testing.T) {
 		{Path: "no probe.mp3", Type: fileTypeAudio, Modified: stamp},
 		{Path: "probed.mp3", Type: fileTypeAudio, Modified: stamp, Probed: stamp},
 		{Path: "no probe.srt", Type: fileTypeSubtitle, Modified: stamp},
+		{Path: "probed.vtt", Type: fileTypeSubtitle, Modified: stamp, Probed: stamp},
+		{Path: "no probe.sup", Type: fileTypeSubtitle, Modified: stamp},
 		{Path: "gone.mkv", Type: fileTypeVideo, Modified: stamp},
 	}
 	seed := &walkResult{}
@@ -360,7 +363,7 @@ func TestTheProbeGapNamesEveryFileWithNoCurrentProbe(t *testing.T) {
 		t.Fatal(err)
 	}
 	slices.Sort(gaps)
-	want := []string{"changed.mkv", "no probe.mkv", "no probe.mp3"}
+	want := []string{"changed.mkv", "no probe.mkv", "no probe.mp3", "no probe.srt"}
 	if !slices.Equal(gaps, want) {
 		t.Errorf("gaps = %v, want %v", gaps, want)
 	}

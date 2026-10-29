@@ -270,7 +270,7 @@ func gapClause(fact, column, missing string) string {
 // cutoffs of its shorter windows, and the rating.imdb query names a sixth and
 // a seventh of its own.
 //
-// A probe gap is a present video or audio file whose probed column is not
+// A probe gap is a present video, audio, or text subtitle file whose probed column is not
 // its modified column: no probe has read the file, or the file changed after
 // one did. An identity gap is an item whose id is its folder key, so no
 // provider named it. Both exclude an item with an attempt inside that
@@ -283,7 +283,8 @@ var gapQueries = map[string]string{
 	// A present video the arrival ledger holds no entry for.
 	factArrival: arrivalGapSQL(),
 	factProbe: `SELECT path FROM files ` +
-		`WHERE library = ?1 AND type IN ('video','audio') AND present = 1 ` +
+		`WHERE library = ?1 AND (type IN ('video','audio') OR (type = '` + fileTypeSubtitle + `' AND ` +
+		textSubtitleClause() + `)) AND present = 1 ` +
 		`AND ` + gapClause(factProbe, "path", `probed != modified`),
 	// The folder key stays in the outer condition, not the source, so a
 	// refresh opens a title a provider has already named.

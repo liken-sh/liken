@@ -77,8 +77,9 @@ func (f folderFiles) read() ([]fileRow, []streamRow, []string, error) {
 	return rows, streams, subdirectories, nil
 }
 
-// A video or an audio file with a record in the folder's probe ledger takes
-// its technical columns and its stream rows from that record. A video with
+// A video, an audio file, or a text subtitle file with a record in the
+// folder's probe ledger takes its technical columns and its stream rows from
+// that record. A video with
 // no record reads the .nfo file beside it.
 func (f folderFiles) row(name string, class fileClass) (fileRow, []streamRow, error) {
 	absolute := filepath.Join(f.dir, name)
@@ -107,7 +108,7 @@ func (f folderFiles) row(name string, class fileClass) (fileRow, []streamRow, er
 		row.Trickplay = trickplayFor(f.root, f.dir, name)
 	}
 	var streams []streamRow
-	if class.Type == fileTypeVideo || class.Type == fileTypeAudio {
+	if class.Type == fileTypeVideo || class.Type == fileTypeAudio || (class.Type == fileTypeSubtitle && isTextSubtitle(name)) {
 		_, entry := likenFolderFor(f.place.kind, absolute)
 		streams = f.probes.fill(&row, entry, absolute, f.identities)
 	}

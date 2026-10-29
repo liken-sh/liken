@@ -108,6 +108,9 @@ type operator struct {
 	// The household languages the pass read last. Every enricher the pass stands
 	// ranks a provider's answers by them.
 	languages []string
+	// The household's subtitle languages, which every library Job's close
+	// container reads to choose the subtitle file of a mark estimate.
+	subtitleLanguages []string
 
 	busAddress string
 	topicBase  string
@@ -339,6 +342,7 @@ func (o *operator) pass() {
 	// The languages come off the same list, so one read per pass answers both
 	// fields.
 	o.languages = householdLanguages(preferences)
+	o.subtitleLanguages = householdSubtitleLanguages(preferences)
 	// The Jobs and the member pods are read once for the whole
 	// pass, because a Library's status reads both and the catalog step
 	// reads the pods again. The member pods include the pods of every
