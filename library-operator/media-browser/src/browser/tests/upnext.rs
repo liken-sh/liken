@@ -58,7 +58,7 @@ fn a_play_from_a_series_wall_names_the_next_episode() {
             "library": SERIALS,
             "reason": "Next in The Serial · S01",
             "title": "E02 · Segment 2",
-            "detail": "The Serial · S01 · E02 · 46m",
+            "detail": "The Serial · S01",
             "remaining_seconds": 2760,
             "art": "s1e2.jpg",
             "request": {
@@ -141,7 +141,7 @@ fn an_episode_of_a_series_reached_through_a_franchise_names_the_next_episode() {
             "library": SERIALS,
             "reason": "Next in The Run · S01",
             "title": "E02 · Segment 2",
-            "detail": "Last Serial · S01 · E02 · 46m",
+            "detail": "Last Serial · S01",
             "remaining_seconds": 2760,
             "art": "s1e2.jpg",
             "request": {
@@ -173,7 +173,7 @@ fn the_last_covered_episode_of_a_member_names_the_member_after_it() {
             "library": "screening/films",
             "reason": "Next in The Run",
             "title": "Entry 4",
-            "detail": "1980 · 1h 30m",
+            "detail": "1980",
             "remaining_seconds": 5400,
             "art": "movies:4.jpg",
             "request": {
@@ -209,7 +209,7 @@ fn a_film_of_a_set_names_the_next_film_of_the_set() {
             "library": "screening/films",
             "reason": "Next in The Entries",
             "title": "Entry 2",
-            "detail": "1980 · 1h 30m · PG",
+            "detail": "1980 · PG",
             "remaining_seconds": 5400,
             "request": {
                 "library": "screening/films",
@@ -376,7 +376,7 @@ fn an_ask_on_the_commands_topic_plays_the_work_the_block_names() {
             "library": SERIALS,
             "reason": "Next in The Run · S01",
             "title": "E03 · Segment 3",
-            "detail": "Last Serial · S01 · E03 · 46m",
+            "detail": "Last Serial · S01",
             "remaining_seconds": 2760,
             "art": "s1e3.jpg",
             "request": {
@@ -405,7 +405,7 @@ fn an_ask_for_a_film_reads_its_own_set_and_its_own_position() {
             "library": "screening/films",
             "reason": "Next in The Entries",
             "title": "Entry 4",
-            "detail": "1980 · 1h 30m · PG",
+            "detail": "1980 · PG",
             "remaining_seconds": 4400,
             "request": {
                 "library": "screening/films",

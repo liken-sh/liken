@@ -4,7 +4,7 @@
 
 use super::home::resume::containers::{self, Container, Episodes};
 use super::home::resume::{self, Reason};
-use super::{InFranchise, Item, Spelling};
+use super::{InFranchise, Item, Spelling, facts};
 use crate::catalog::progress::thread;
 use crate::catalog::{Selection, Slot, Source};
 
@@ -269,7 +269,7 @@ fn spelled(slot: &Slot, reason: &Reason) -> Next {
             true => Item::resumed(slot.clone(), String::new(), None).caption,
             false => slot.title.clone(),
         },
-        detail: Item::spelled(slot.clone(), Spelling::Facts).under,
+        detail: detail(slot),
         art: slot.art.clone(),
         remaining_seconds: (slot.duration > 0).then_some(slot.duration),
         request: Request {
@@ -277,6 +277,26 @@ fn spelled(slot: &Slot, reason: &Reason) -> Next {
             selection: chosen(slot),
             via: resume::in_franchise(reason),
         },
+    }
+}
+
+// The facts line under the offer's title, without the two facts other lines
+// already say. The title of an episode carries its number, and the player's
+// display draws the runtime beside the end time, from the seconds that
+// remain, so a resumed work reads the time it has left.
+fn detail(slot: &Slot) -> String {
+    match &slot.episode {
+        Some(place) => facts::joined(&[&place.name, &format!("S{:02}", place.season)]),
+        None => {
+            Item::spelled(
+                Slot {
+                    duration: 0,
+                    ..slot.clone()
+                },
+                Spelling::Facts,
+            )
+            .under
+        }
     }
 }
 
@@ -343,7 +363,7 @@ mod tests {
 
         assert_eq!(next.title, "Entry 2");
         assert_eq!(next.reason, "Next in The Entries");
-        assert_eq!(next.detail, "1980 · 1h 30m · PG");
+        assert_eq!(next.detail, "1980 · PG");
         assert_eq!(next.art, "movies:2.jpg");
     }
 
@@ -353,7 +373,7 @@ mod tests {
 
         assert_eq!(next.title, "E03 · Segment 3");
         assert_eq!(next.reason, "Next in The Serial · S01");
-        assert_eq!(next.detail, "The Serial · S01 · E03 · 46m");
+        assert_eq!(next.detail, "The Serial · S01");
     }
 
     // Before the browser reads where a play of the work starts, the seconds

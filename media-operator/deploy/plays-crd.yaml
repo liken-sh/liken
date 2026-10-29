@@ -385,11 +385,13 @@ spec:
                         length of its file, less the position where the
                         audience stopped in it before. The card, and the
                         column beside a stepped-back film, draw a line
-                        under the detail, "Ends at 10:42 pm": the wall
-                        clock when they draw plus these seconds, in the
-                        format of the display's clock. The line changes
-                        when the wall minute turns. Omitted, neither
-                        draws an end time.
+                        under the detail, "46m · ends at 10:42 pm": these
+                        seconds in hours and minutes, then the wall clock
+                        when they draw plus these seconds, in the format
+                        of the display's clock. Under a minute, the line
+                        is the end time alone, "Ends at 10:42 pm". The
+                        line changes when the wall minute turns. Omitted,
+                        neither draws the line.
                     art:
                       type: string
                       description: >-

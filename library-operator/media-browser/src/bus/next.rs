@@ -123,7 +123,7 @@ mod tests {
         Next {
             reason: "Next in The Serial · S01".into(),
             title: "E03 · Segment 3".into(),
-            detail: "The Serial · S01 · E03 · 46 min".into(),
+            detail: "The Serial · S01".into(),
             art: "s1e3.jpg".into(),
             remaining_seconds: Some(2_160),
             request: Request {
@@ -165,7 +165,7 @@ mod tests {
                 "library": "screening/serials",
                 "reason": "Next in The Serial · S01",
                 "title": "E03 · Segment 3",
-                "detail": "The Serial · S01 · E03 · 46 min",
+                "detail": "The Serial · S01",
                 "art": "s1e3.jpg",
                 "remaining_seconds": 2160,
                 "request": {

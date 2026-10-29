@@ -149,7 +149,7 @@ mod tests {
         Offer {
             reason: Some("Next in Harbor Lights · S02".to_string()),
             title: Some("E05 · The Long Tide".to_string()),
-            detail: Some("Harbor Lights · S02 · 45 min".to_string()),
+            detail: Some("Harbor Lights · S02".to_string()),
             art: None,
             remaining: Some(2700),
         }
@@ -181,8 +181,8 @@ mod tests {
             [
                 ("NEXT IN HARBOR LIGHTS · S02".to_string(), 1120.0, 596.0),
                 ("E05 · The Long Tide".to_string(), 1120.0, 636.0),
-                ("Harbor Lights · S02 · 45 min".to_string(), 1120.0, 716.0),
-                ("Ends at 11:15 pm".to_string(), 1120.0, 762.0),
+                ("Harbor Lights · S02".to_string(), 1120.0, 716.0),
+                ("45m · ends at 11:15 pm".to_string(), 1120.0, 762.0),
                 (HINT.to_string(), 1120.0, 808.0),
             ]
         );
@@ -203,7 +203,7 @@ mod tests {
     fn the_end_time_reads_the_wall_clock_plus_the_seconds_that_remain() {
         let late = crate::clock::at(23 * 3600 + 50 * 60);
         let lines = lines(&Canvas::default(), &offer(), &late);
-        assert_eq!(lines[3].content, "Ends at 12:35 am");
+        assert_eq!(lines[3].content, "45m · ends at 12:35 am");
     }
 
     /// A block with no seconds draws no end time, and every other line keeps

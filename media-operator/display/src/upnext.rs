@@ -102,17 +102,33 @@ pub trait Art {
     fn draw(&self, brush: &mut Brush<'_>, bounds: Rectangle);
 }
 
-/// The words that start the end time's line, before the time.
-const ENDS_WORDS: &str = "Ends at";
-
-/// The line that says when the next work would end if a person took the
-/// offer at `now`: the wall clock plus the seconds that remain, in the
-/// format of the display's clock. The card and the column both draw it.
-/// Nothing for an offer that carries no seconds.
+/// The line that says how long the next work runs and when it would end if
+/// a person took the offer at `now`, as "46m · ends at 11:15 pm": the
+/// seconds that remain in hours and minutes, the way the browser spells a
+/// runtime, and the wall clock plus those seconds, in the format of the
+/// display's clock. The two times share one line because a person reads
+/// them as one fact. The card and the column both draw it. Under a minute
+/// left, the line is the end time alone. Nothing for an offer that carries
+/// no seconds.
 fn ends_at(offer: &Offer, now: &Zoned) -> Option<String> {
     let seconds = offer.remaining?;
-    let ends = now.saturating_add(jiff::Span::new().seconds(seconds));
-    Some(format!("{ENDS_WORDS} {}", clock::reading(&ends)))
+    let ends = clock::reading(&now.saturating_add(jiff::Span::new().seconds(seconds)));
+    Some(match runtime(seconds) {
+        Some(runtime) => format!("{runtime} \u{b7} ends at {ends}"),
+        None => format!("Ends at {ends}"),
+    })
+}
+
+/// Whole minutes as the browser spells a runtime: "46m", "1h", "1h 30m".
+/// Nothing under a minute.
+fn runtime(seconds: i64) -> Option<String> {
+    let minutes = seconds / 60;
+    match (minutes / 60, minutes % 60) {
+        (0, 0) => None,
+        (0, minutes) => Some(format!("{minutes}m")),
+        (hours, 0) => Some(format!("{hours}h")),
+        (hours, minutes) => Some(format!("{hours}h {minutes}m")),
+    }
 }
 
 /// The block the sidecar sent. A block with none of the three lines and no
@@ -994,7 +1010,7 @@ mod tests {
         assert_eq!(lines[2].size, theme::type_scale::SMALL);
         assert_eq!(lines[2].color, theme::color::muted());
 
-        assert_eq!(lines[3].content, "Ends at 11:15 pm");
+        assert_eq!(lines[3].content, "45m \u{b7} ends at 11:15 pm");
         assert_eq!(lines[3].at, Point::new(TEXT_X, 738.0));
         assert_eq!(lines[3].size, theme::type_scale::SMALL);
         assert_eq!(lines[3].color, theme::color::muted());
@@ -1014,19 +1030,31 @@ mod tests {
         assert_eq!(lines[0].at.y, 642.0);
     }
 
-    /// The end time is the wall clock at the draw plus the seconds that
-    /// remain, in the clock's own format, and it rolls past midnight.
+    /// The line is the seconds that remain in hours and minutes, then the
+    /// wall clock at the draw plus those seconds, in the clock's own format.
+    /// It rolls past midnight, and under a minute it is the end time alone.
     #[test]
     fn the_end_time_reads_the_wall_clock_plus_the_seconds_that_remain() {
         let cases = [
-            ("an evening", 22 * 3600 + 30 * 60, 4320, "Ends at 11:42 pm"),
+            (
+                "an evening",
+                22 * 3600 + 30 * 60,
+                4320,
+                "1h 12m \u{b7} ends at 11:42 pm",
+            ),
             (
                 "past midnight",
                 23 * 3600 + 50 * 60,
                 2700,
-                "Ends at 12:35 am",
+                "45m \u{b7} ends at 12:35 am",
             ),
-            ("a morning", 9 * 3600 + 5 * 60, 1800, "Ends at 9:35 am"),
+            (
+                "a morning",
+                9 * 3600 + 5 * 60,
+                1800,
+                "30m \u{b7} ends at 9:35 am",
+            ),
+            ("whole hours", 20 * 3600, 7200, "2h \u{b7} ends at 10:00 pm"),
             ("a part minute", 12 * 3600 + 59, 30, "Ends at 12:01 pm"),
             ("nothing left", 13 * 3600, 0, "Ends at 1:00 pm"),
         ];
@@ -1052,7 +1080,7 @@ mod tests {
         let later = crate::clock::at(22 * 3600 + 31 * 60);
         assert_eq!(
             upnext.card_lines(&canvas(), &later)[3].content,
-            "Ends at 11:16 pm"
+            "45m \u{b7} ends at 11:16 pm"
         );
     }
 
