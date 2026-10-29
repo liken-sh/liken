@@ -61,6 +61,10 @@ func TestTheCLIFactListIsTheOperators(t *testing.T) {
 	if !slices.Equal(cli, factVocabulary) {
 		t.Errorf("cli/facts.go names %v, want the operator's %v", cli, factVocabulary)
 	}
+	workers := stringListInFile(t, "cli/facts.go", "workerRetryFacts")
+	if !slices.Equal(workers, workerRefreshFacts) {
+		t.Errorf("cli/facts.go names the worker facts %v, want the operator's %v", workers, workerRefreshFacts)
+	}
 }
 
 // Every fact is a refresh target and the walk is the one target that is not a

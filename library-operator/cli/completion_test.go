@@ -34,9 +34,12 @@ func TestCompleteArgs(t *testing.T) {
 		wantCands     []string
 		wantDirective int
 	}{
-		{"no words offers both verbs", nil, []string{"reenrich", "rescan"}, compDirectiveNoFileComp},
-		{"empty word offers both verbs", []string{""}, []string{"reenrich", "rescan"}, compDirectiveNoFileComp},
-		{"a shared verb prefix offers both", []string{"re"}, []string{"reenrich", "rescan"}, compDirectiveNoFileComp},
+		{"no words offers every verb", nil, []string{"reenrich", "rescan", "retry"}, compDirectiveNoFileComp},
+		{"empty word offers every verb", []string{""}, []string{"reenrich", "rescan", "retry"}, compDirectiveNoFileComp},
+		{"a shared verb prefix offers each", []string{"re"}, []string{"reenrich", "rescan", "retry"}, compDirectiveNoFileComp},
+		{"a retry-only prefix filters", []string{"ret"}, []string{"retry"}, compDirectiveNoFileComp},
+		{"the retry positional lists libraries", []string{"retry", ""}, []string{"movies", "kids-movies", "music"}, compDirectiveNoFileComp},
+		{"the retry --only value set holds appearances", []string{"retry", "--only", ""}, retryFactVocabulary, compDirectiveNoFileComp},
 		{"a reenrich-only prefix filters", []string{"ree"}, []string{"reenrich"}, compDirectiveNoFileComp},
 		{"a rescan-only prefix filters", []string{"res"}, []string{"rescan"}, compDirectiveNoFileComp},
 		{"a wrong verb prefix offers nothing", []string{"xyz"}, nil, compDirectiveNoFileComp},

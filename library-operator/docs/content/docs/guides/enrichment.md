@@ -1087,8 +1087,12 @@ title the fact still cannot answer waits for its window again.
 
 `kubectl liken library reenrich movies` writes `spec.refresh` for you and
 asks every fact again. Add `--only overview` to reopen one fact, and
-`-n` to select the namespace. The command reads your kubeconfig, and
-in bash it completes the library names.
+`-n` to select the namespace. `kubectl liken library retry movies
+--only trickplay` writes `spec.retry` the same way, and with no `--only`
+it retries every fact. `retry` also takes `--only appearances`, which
+`reenrich` does not offer, because a retry of the appearances worker
+decodes only the videos it missed. Both commands read your kubeconfig,
+and in bash they complete the library names and the facts.
 
 The same map takes one key that is not a fact: `scan` asks for a full
 walk of the library, and `kubectl liken library rescan movies` writes

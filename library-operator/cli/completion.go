@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -24,15 +25,15 @@ const (
 	compDirectiveDefault    = 0
 )
 
-// The verbs reenrich and rescan answer to; both take the same
-// positional, a Library name, so completion treats them alike everywhere
-// but the verb word itself>
+// The verbs that take a Library name as their one positional, so
+// completion treats them alike everywhere but the verb word itself>
 const (
 	reenrichVerb = "reenrich"
 	rescanVerb   = "rescan"
+	retryVerb    = "retry"
 )
 
-var completionVerbs = []string{reenrichVerb, rescanVerb}
+var completionVerbs = []string{reenrichVerb, rescanVerb, retryVerb}
 
 // One flag the CLI accepts, and whether it reads a value from the
 // next word>
@@ -91,7 +92,7 @@ func completeArgs(args []string, lister libraryLister) ([]string, int) {
 	// The word under the cursor is the value of a flag that
 	// reads one>
 	if parse.pendingValueFlag != "" {
-		return completeFlagValue(parse.pendingValueFlag, toComplete)
+		return completeFlagValue(parse, toComplete)
 	}
 
 	// The word under the cursor starts a flag
@@ -100,13 +101,13 @@ func completeArgs(args []string, lister libraryLister) ([]string, int) {
 	}
 
 	// The word is a positional: with none given yet it names a
-	// verb; after reenrich or rescan it names the Library the verb works
-	// on, so both verbs reach the same lister call>
+	// verb; after a verb it names the Library the verb works on, so every
+	// verb reaches the same lister call>
 	switch len(parse.positionals) {
 	case 0:
 		return filterByPrefix(completionVerbs, toComplete), compDirectiveNoFileComp
 	case 1:
-		if parse.positionals[0] == reenrichVerb || parse.positionals[0] == rescanVerb {
+		if slices.Contains(completionVerbs, parse.positionals[0]) {
 			return filterByPrefix(lister(parse), toComplete), compDirectiveNoFileComp
 		}
 	}
@@ -187,9 +188,13 @@ func flagNames() []string {
 // a fixed vocabulary in the operator's own pass order, offered unsorted;
 // kubeconfig names a file so the shell completes a path; the rest have
 // open values>
-func completeFlagValue(flag, toComplete string) ([]string, int) {
-	switch flag {
+func completeFlagValue(parse completionParse, toComplete string) ([]string, int) {
+	switch parse.pendingValueFlag {
 	case "--only":
+		// retry takes one fact more than reenrich does.
+		if len(parse.positionals) > 0 && parse.positionals[0] == retryVerb {
+			return filterByPrefix(retryFactVocabulary, toComplete), compDirectiveNoFileComp
+		}
 		return filterByPrefix(refreshFactVocabulary, toComplete), compDirectiveNoFileComp
 	case "--kubeconfig":
 		return nil, compDirectiveDefault

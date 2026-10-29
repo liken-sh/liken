@@ -346,6 +346,8 @@ its verbs. The first cut:
   approve. `bluetooth unpair <device>` removes one.
 * `library reenrich <library>` requests an enrichment pass. `--only
   <fact>` limits it to one fact.
+* `library retry <library>` asks the facts again only for the titles
+  they missed or failed on. `--only <fact>` limits it to one fact.
 * `observatory set-up <kind> <name>` confirms that you set a telescope
   or a device up for the night, until dawn or `--until`.
   `observatory take-down <kind> <name>` withdraws the confirmation.

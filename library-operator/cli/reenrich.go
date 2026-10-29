@@ -39,10 +39,16 @@ var libraryResource = schema.GroupVersionResource{
 // the one it names; an unknown fact is an error before the cluster, the
 // way an unknown format is.
 func refreshFacts(only string) ([]string, error) {
+	return factsOf(refreshFactVocabulary, only)
+}
+
+// factsOf is the whole vocabulary when --only names none, or the one fact
+// it names when the vocabulary holds it.
+func factsOf(vocabulary []string, only string) ([]string, error) {
 	if only == "" {
-		return refreshFactVocabulary, nil
+		return vocabulary, nil
 	}
-	for _, fact := range refreshFactVocabulary {
+	for _, fact := range vocabulary {
 		if fact == only {
 			return []string{only}, nil
 		}
@@ -51,26 +57,32 @@ func refreshFacts(only string) ([]string, error) {
 }
 
 // refreshPatch builds the merge patch that sets each
-// named fact's spec.refresh entry to now. A merge patch adds the keys
-// and leaves the rest of the Library untouched, so a person's own spec
-// stands.
+// named fact's spec.refresh entry to now.
 func refreshPatch(only string, now time.Time) ([]byte, error) {
 	facts, err := refreshFacts(only)
 	if err != nil {
 		return nil, err
 	}
+	return timesPatch("refresh", facts, now), nil
+}
+
+// timesPatch builds the merge patch that sets each fact's entry in one map
+// of the spec, refresh or retry, to now. A merge patch adds the keys and
+// leaves the rest of the Library untouched, so a person's own spec stands.
+func timesPatch(field string, facts []string, now time.Time) []byte {
 	stamp := now.UTC().Format(time.RFC3339Nano)
-	refresh := map[string]string{}
+	times := map[string]string{}
 	for _, fact := range facts {
-		refresh[fact] = stamp
+		times[fact] = stamp
 	}
-	return json.Marshal(map[string]any{"spec": map[string]any{"refresh": refresh}})
+	patch, _ := json.Marshal(map[string]any{"spec": map[string]any{field: times}})
+	return patch
 }
 
 // patchLibraryRefresh reads the operator version and warns or refuses on
-// drift, then patches spec.refresh. Both refresh verbs write through here,
-// because the version check and the write are the same whichever target the
-// patch names.
+// drift, then patches spec.refresh or spec.retry. Every verb writes through
+// here, because the version check and the write are the same whichever
+// target the patch names.
 func patchLibraryRefresh(ctx context.Context, clientset kubernetes.Interface, dyn dynamic.Interface,
 	namespace, name string, force bool, patch []byte, stderr io.Writer) error {
 	operator, err := operatorVersion(ctx, clientset)
