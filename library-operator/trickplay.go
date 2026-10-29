@@ -151,11 +151,11 @@ func (w *factWorkerRun) stageTrickplay(ctx context.Context, input, staging strin
 		w.logf("could not stage the trickplay of %s: %v", w.named(input), err)
 		return 0, attemptError
 	}
-	// A decode ffmpeg refuses is the file's own state, and not a fault of
-	// the run, so it is a miss with a date and the long window applies: a file
-	// that will not decode today will not decode tomorrow. A run a signal
-	// ended is an error, and the error window applies.
-	if err := ffmpegSheets(ctx, input, tiles); err != nil {
+	// A decode in software that ffmpeg refuses is the file's own state, and
+	// not a fault of the run, so it is a miss with a date and the long window
+	// applies: a file that will not decode today will not decode tomorrow. A
+	// run a signal ended is an error, and the error window applies.
+	if err := w.decodeSheets(ctx, input, staging, tiles); err != nil {
 		w.logf("could not tile %s: %v", w.named(input), err)
 		if ffmpegRefused(err) {
 			return 0, attemptNothing
@@ -172,6 +172,31 @@ func (w *factWorkerRun) stageTrickplay(ctx context.Context, input, staging strin
 		return 0, attemptNothing
 	}
 	return len(sheets), attemptFound
+}
+
+// The decode, on the render node where the pod holds one. A decode the render
+// node refuses runs again in software: VA-API decodes only the codecs the GPU
+// supports, and ffmpeg does not fall back by itself for each of them
+// (ffmpegSheets says which). A refusal on the render node is a fact about the
+// GPU and not about the file, so it records no miss. The sheets the refused
+// decode wrote cover only the start of the file, so the staging tree is
+// cleared through the writer and staged again before the software decode
+// writes its own. A run that was stopped does not decode again.
+func (w *factWorkerRun) decodeSheets(ctx context.Context, input, staging, tiles string) error {
+	node := renderNode()
+	err := ffmpegSheets(ctx, input, tiles, node)
+	if err == nil || node == "" || ctx.Err() != nil {
+		return err
+	}
+	w.logf("the decode of %s on the render node failed, and runs again with a software decode: %v",
+		w.named(input), err)
+	if err := w.writer.removeTemporaryTree(staging); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(tiles, volumeDirectoryPerm); err != nil {
+		return err
+	}
+	return ffmpegSheets(ctx, input, tiles, "")
 }
 
 // The map of one layout folder, removed where it exists. A removal the volume

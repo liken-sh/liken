@@ -106,7 +106,7 @@ func TestTheDecodeAsksForTheRenderNode(t *testing.T) {
 	record := standInFFmpegRecordingArguments(t)
 	devices := seedRenderNodes(t, "renderD128")
 
-	if err := ffmpegSheets(t.Context(), "One (2001).mkv", t.TempDir()); err != nil {
+	if err := ffmpegSheets(t.Context(), "One (2001).mkv", t.TempDir(), renderNode()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -125,7 +125,7 @@ func TestTheDecodeStaysInSoftwareWithNoRenderNode(t *testing.T) {
 	record := standInFFmpegRecordingArguments(t)
 	seedRenderNodes(t)
 
-	if err := ffmpegSheets(t.Context(), "One (2001).mkv", t.TempDir()); err != nil {
+	if err := ffmpegSheets(t.Context(), "One (2001).mkv", t.TempDir(), renderNode()); err != nil {
 		t.Fatal(err)
 	}
 

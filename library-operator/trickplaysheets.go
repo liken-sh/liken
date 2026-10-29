@@ -55,8 +55,9 @@ func trickplayTilesFolder() string {
 
 // The one call that opens a video. One decode pass writes every sheet to its
 // own file, so the frames of a whole title are never held in memory, and the
-// container runs one of these at a time.
-func ffmpegSheets(ctx context.Context, input, directory string) error {
+// container runs one of these at a time. node is the render node to decode
+// on, and an empty node decodes in software.
+func ffmpegSheets(ctx context.Context, input, directory, node string) error {
 	timed, cancel := context.WithTimeout(ctx, ffmpegTimeout)
 	defer cancel()
 
@@ -66,10 +67,15 @@ func ffmpegSheets(ctx context.Context, input, directory string) error {
 		int(trickplayInterval.Seconds()), trickplayWidth, trickplayColumns, trickplayRows)
 	arguments := []string{"-nostdin", "-loglevel", "error"}
 	// Plain -hwaccel vaapi decodes on the node and downloads the frames, so the
-	// filter chain and the JPEG encode stay in software and a codec the node
-	// refuses falls back to software decoding.
-	if node := renderNode(); node != "" {
-		arguments = append(arguments, "-hwaccel", "vaapi", "-hwaccel_device", node)
+	// filter chain and the JPEG encode stay in software. ffmpeg does not fall
+	// back to software for every codec the GPU cannot decode: with -hwaccel
+	// vaapi it picks the AV1 decoder that only drives a GPU, and on a GPU with
+	// no AV1 decode each frame fails. -xerror ends the run at the first decode
+	// error, so such a file costs one error line and not one per frame, and
+	// the caller decodes the file again in software. The software decode
+	// carries on past a damaged frame, the way a player does.
+	if node != "" {
+		arguments = append(arguments, "-xerror", "-hwaccel", "vaapi", "-hwaccel_device", node)
 	}
 	arguments = append(arguments, "-i", input,
 		"-an", "-sn", "-dn", "-vf", filter, "-qscale:v", "4",

@@ -269,9 +269,13 @@ pod has its own log:
 
 The worker decodes on a GPU when `spec.trickplay.gpuResourceClaimTemplate`
 names a `ResourceClaimTemplate`, as the next section describes.
-`ffmpeg` decodes through VA-API, and it falls back to software for a
-codec the GPU refuses. It does not fall back when the driver cannot
-open the GPU at all. With no template, the worker decodes in software.
+`ffmpeg` decodes through VA-API, and it stops at the first frame the
+GPU does not decode, such as the first frame of an AV1 file on a GPU
+with no AV1 decoder. The worker logs `ffmpeg`'s error and decodes the
+file again in software, so a file the GPU refuses still gets its
+tiles. The same happens when the driver cannot open the GPU at all.
+Only a file that the software decode also refuses records a miss.
+With no template, the worker decodes in software.
 
 #### A worker on a GPU
 
@@ -291,9 +295,10 @@ Both workers need a GPU whose VA-API driver decodes the library's
 video, 10-bit HEVC included, and scales 10-bit frames. A render node
 alone does not say what its driver can do. On a fleet of mixed GPUs, a
 pod can then land on a GPU that the image's driver cannot open, such as
-an AMD GPU when the image holds the Intel driver. `ffmpeg` fails on
-every video before it reads a frame, and the worker records a miss for
-each one, which lasts 30 days. So the template pairs the render node
+an AMD GPU when the image holds the Intel driver. `ffmpeg` then fails
+on every video before it reads a frame, and the worker decodes every
+video in software, which is slower and uses the node's CPU. So the
+template pairs the render node
 with a `media.liken.sh` capability device of the same GPU, and the
 scheduler places the pod only on a GPU whose driver states that it
 decodes and scales 10-bit video.
@@ -574,8 +579,9 @@ the render node through VA-API, and OpenVINO runs the models on the
 Intel GPU. Some GPUs decode a format that their video processor cannot
 scale, such as 10-bit HEVC on an older Intel GPU. The worker tries the
 GPU's scale on the first 2 seconds of each video, and where that fails,
-the GPU decodes and the CPU scales. A file the render node refuses to
-decode is decoded again in software. OpenVINO compiles the models for the GPU when the worker
+the GPU decodes and the CPU scales. The decode on the render node stops
+at the first frame the GPU refuses, and the worker decodes the file
+again in software. OpenVINO compiles the models for the GPU when the worker
 starts, which took seconds in the measurements, and it keeps the
 compiled kernels in an `emptyDir` that the detect and match passes of
 the pod's one video share.

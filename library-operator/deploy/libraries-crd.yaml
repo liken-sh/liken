@@ -315,7 +315,7 @@ spec:
                     gpuResourceClaimTemplate:
                       type: string
                       minLength: 1
-                      description: "The name of a ResourceClaimTemplate in the Library's namespace. The trickplay worker's pod claims a render node from it and decodes on that node. The cluster owner writes the template, so the claim can take any shape that dynamic resource allocation allows, and the operator reads only whether the template exists. While it does not exist, the operator starts no trickplay worker, and the GPUClaimTemplates condition names the template. Unset, the worker carries no claim and decodes in software."
+                      description: "The name of a ResourceClaimTemplate in the Library's namespace. The trickplay worker's pod claims a render node from it and decodes on that node. A file the render node will not decode is decoded again in software. The cluster owner writes the template, so the claim can take any shape that dynamic resource allocation allows, and the operator reads only whether the template exists. While it does not exist, the operator starts no trickplay worker, and the GPUClaimTemplates condition names the template. Unset, the worker carries no claim and decodes in software."
                     parallelism:
                       type: integer
                       minimum: 1

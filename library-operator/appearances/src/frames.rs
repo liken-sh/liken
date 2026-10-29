@@ -241,6 +241,14 @@ fn gpu_scales(video: &Path, width: usize, height: usize, threads: usize) -> bool
 // because it reads frames in CPU memory. Where the GPU cannot scale the
 // frames, as gpu_scales tells, the GPU decodes and ffmpeg copies each frame
 // to the CPU, which selects and scales as a software decode does.
+//
+// A decode on the GPU stops at its first decode error (-xerror). VA-API
+// decodes only the codecs the GPU supports, and ffmpeg does not fall back
+// to software for each of them: with -hwaccel vaapi it picks the AV1 decoder
+// that only drives a GPU, and on a GPU with no AV1 decode each frame fails.
+// Without -xerror, ffmpeg reads the whole file before it fails, and the
+// operator then decodes the file again in software. A software decode
+// carries on past a damaged frame, the way a player does.
 fn decoding(
     hwaccel: Option<&str>,
     scale_on_gpu: bool,
@@ -249,16 +257,22 @@ fn decoding(
 ) -> (Vec<String>, String) {
     match hwaccel {
         Some("vaapi") if scale_on_gpu => (
-            ["-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi"]
-                .map(String::from)
-                .to_vec(),
+            [
+                "-xerror",
+                "-hwaccel",
+                "vaapi",
+                "-hwaccel_output_format",
+                "vaapi",
+            ]
+            .map(String::from)
+            .to_vec(),
             format!(
                 "{},scale_vaapi=w={width}:h={height}:format=nv12,hwdownload,format=nv12,showinfo",
                 select()
             ),
         ),
         Some(other) => (
-            vec!["-hwaccel".into(), other.into()],
+            vec!["-xerror".into(), "-hwaccel".into(), other.into()],
             format!(
                 "{},showinfo,scale={width}:{height}:flags=bilinear",
                 select()
@@ -334,7 +348,7 @@ mod tests {
         assert_eq!(
             (input.join(" "), filter),
             (
-                "-hwaccel vaapi -hwaccel_output_format vaapi".to_string(),
+                "-xerror -hwaccel vaapi -hwaccel_output_format vaapi".to_string(),
                 format!(
                     "{SELECT},scale_vaapi=w=1280:h=720:format=nv12,hwdownload,format=nv12,showinfo"
                 )
@@ -345,13 +359,14 @@ mod tests {
     // A GPU whose video processor cannot scale the source's frames, such
     // as 10-bit HEVC on an older Intel GPU, still decodes them. ffmpeg
     // copies each decoded frame to the CPU, and the CPU selects and scales.
+    // Both decodes on the GPU stop at the first decode error.
     #[test]
     fn vaapi_without_gpu_scaling_decodes_on_the_gpu_and_scales_on_the_cpu() {
         let (input, filter) = decoding(Some("vaapi"), false, 1280, 720);
         assert_eq!(
             (input.join(" "), filter),
             (
-                "-hwaccel vaapi".to_string(),
+                "-xerror -hwaccel vaapi".to_string(),
                 format!("{SELECT},showinfo,scale=1280:720:flags=bilinear")
             )
         );

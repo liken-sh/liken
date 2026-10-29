@@ -135,7 +135,9 @@ func (w *factWorkerRun) appearancesOne(ctx context.Context, item workItem) {
 // else in the log says whether the GPU took the work. A decode the render
 // node refuses runs again in software: VA-API decodes only the codecs the
 // GPU supports, and the frames stay on the GPU for the scale, so ffmpeg
-// cannot fall back by itself.
+// cannot fall back by itself. The tool's decode on the render node stops at
+// its first decode error, so a refused file costs the start of a decode and
+// not a whole one.
 func (w *factWorkerRun) detectFaces(ctx context.Context, absolute string, item workItem) error {
 	hardware := renderNode() != ""
 	w.logf("finding faces in %s, %s long, %s", w.named(absolute), item.duration().Round(time.Second), decoderName())
