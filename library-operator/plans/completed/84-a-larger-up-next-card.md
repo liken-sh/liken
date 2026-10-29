@@ -3,26 +3,28 @@
 This plan, written on 2026-10-27, proposes three changes to the up-next
 card that a `Player` draws near the end of a work. It is a stub: it
 states the problems and the shape of the contract, and leaves the open
-questions for the design. [Plan 53](completed/53-up-next.md) built the
+questions for the design. [Plan 53](53-up-next.md) built the
 `next` block that the browser writes, and
-[media-operator plan 28](../../media-operator/plans/completed/28-up-next.md)
+[media-operator plan 28](../../../media-operator/plans/completed/28-up-next.md)
 built the card, which `media-operator/display/src/upnext.rs` draws
 from it.
-[Plan 62](completed/62-intro-and-credits-marks.md) moved the card's
+[Plan 62](62-intro-and-credits-marks.md) moved the card's
 rise to the start of the credits where the catalog has credits marks.
-[Root plan 85](../../plans/completed/85-motion.md) adds the compositor motion that
+[Root plan 85](../../../plans/completed/85-motion.md) adds the compositor motion that
 the redesign of the card uses, so the film can step back at the credits.
 
 Status on 2026-10-28: the dismissal is built.
-[media-operator plan 44](../../media-operator/plans/completed/44-the-display-arranges-its-claim.md)
+[media-operator plan 44](../../../media-operator/plans/completed/44-the-display-arranges-its-claim.md)
 (d3287df8) made a select on the card fade the film and the card's
 column out over 300 ms and pause mpv, and the display draws nothing
 once mpv's socket closes, so the browser's loading curtain shows until
 the next `Play` draws.
 
 Status later on 2026-10-28: the timing, the runtime, and the end time
-are built, in the three commits that "The decisions" names. The drill
-on `liken-1` is in "How the work is proved".
+are built, in the three commits that "The decisions" names, and the
+drill on `liken-1` in "How the work is proved" passed. The plan is
+complete. No case of a card that rose at the wrong time was recorded
+before the estimate was built, so none is checked against it.
 
 ## The problems
 
@@ -122,3 +124,23 @@ member, and a film of a set. A drill on `liken-1` plays an episode to
 its credits, checks the time of the rise and the lines on the card,
 selects the card, and confirms that the card leaves the screen before
 the next episode draws.
+
+The drill ran on `liken-1` on 2026-10-28, on the development build
+`2026.10.28-005-dev-004-b6ecdf15` of both operators. Corrosion altered
+the replicated `files` table for the four new columns in 14 ms when the
+catalog pod started, with no error. One walk of the `series` library,
+which took 17 minutes, wrote 2123 credits marks and 489 intro marks
+with the source `estimate`. Before the walk, 4429 files of that library
+had a provider's credits mark. After it, 6408 files had a credits mark
+of some source. The probe read 3102 subtitle files. It found no
+chapters, because the drill did not probe the library again, and a
+probe of the whole library from `liken-1` would write the probe
+records on volumes that another cluster shares. The `Play` of an
+episode of a series with no provider's credits mark carried the
+estimated credits start at 2658.4 s of 2706.6 s, which the median of
+its season's other episodes set, and `remainingSeconds: 2712` for the
+next episode. A seek to about 2642 s raised the card about 20 s later,
+at the estimated start, and not at 2645 s, where the time rule would
+have raised it. The stepped-back column drew "Ends at 11:43 pm", which
+is the wall clock plus the 2712 s. The chapter clue is proved by the
+tests only.

@@ -15,7 +15,7 @@ A `Layout` places each claim's windows in one rectangle, and every
 window of the claim fills it (plan 17). A video player that shows its
 film and a panel of its own controls in one region can only stack
 them at full size. The up-next card of
-[library-operator plan 84](../../../library-operator/plans/84-a-larger-up-next-card.md)
+[library-operator plan 84](../../../library-operator/plans/completed/84-a-larger-up-next-card.md)
 needs the film to step back into a frame while the card takes the
 right half of the region, and to step forward again on Back, in the
 next frame after the press. A `Layout` edit goes through the API

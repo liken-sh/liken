@@ -16,7 +16,7 @@ drilled.
 
 The up-next card is a 440 by 416 box in the lower right corner, over
 the film. The design for
-[library-operator plan 84](../../../library-operator/plans/84-a-larger-up-next-card.md)
+[library-operator plan 84](../../../library-operator/plans/completed/84-a-larger-up-next-card.md)
 gives the next work the right half of the screen at the credits, with
 the film still playing in a frame on the left. The display cannot move
 the film: it is a separate client, and mpv's own `video-zoom` moves

@@ -9,7 +9,7 @@ Steps 1 and 2 are built by
 and the step-back of step 3 by
 [media-operator plan 44](../../media-operator/plans/completed/44-the-display-arranges-its-claim.md).
 The rest continues in the component plans.
-[library-operator plan 84](../../library-operator/plans/84-a-larger-up-next-card.md)
+[library-operator plan 84](../../library-operator/plans/completed/84-a-larger-up-next-card.md)
 holds the card's timing and content from step 3.
 [library-operator plan 23](../../library-operator/plans/23-motion.md)
 holds step 4, and with it the part of step 6 that is not written:
@@ -31,7 +31,7 @@ instant change as a glitch and a smooth one as the system answering
 them.
 
 The up-next card shows the cost. The design for
-[library-operator plan 84](../../library-operator/plans/84-a-larger-up-next-card.md)
+[library-operator plan 84](../../library-operator/plans/completed/84-a-larger-up-next-card.md)
 has the film step back into a frame at the credits while the next work
 takes the right half of the screen. No component can do that smoothly
 today. When mpv moves its own picture, the move lands only on the
