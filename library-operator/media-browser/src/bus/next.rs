@@ -9,8 +9,8 @@ use crate::screens::InFranchise;
 use crate::screens::upnext::{Next, Request};
 
 /// The offer as the play request carries it: the library of the next work,
-/// the three lines, the art relative to that library's root, and the
-/// request block.
+/// the three lines, the art relative to that library's root, the seconds of
+/// the next work that remain, and the request block.
 pub fn value(next: &Next) -> Value {
     let mut object = Map::new();
     // The library of the next work. The operator reads it to stamp the art
@@ -27,6 +27,12 @@ pub fn value(next: &Next) -> Value {
         if !text.is_empty() {
             object.insert(name.into(), Value::from(text.as_str()));
         }
+    }
+    // The display adds the seconds to the wall clock to say when the next
+    // work would end. A work whose length the catalog does not hold sends
+    // no key, so the display draws no end time rather than one at now.
+    if let Some(seconds) = next.remaining_seconds {
+        object.insert("remaining_seconds".into(), Value::from(seconds));
     }
     object.insert("request".into(), asked(&next.request));
     Value::Object(object)
@@ -119,6 +125,7 @@ mod tests {
             title: "E03 · Segment 3".into(),
             detail: "The Serial · S01 · E03 · 46 min".into(),
             art: "s1e3.jpg".into(),
+            remaining_seconds: Some(2_160),
             request: Request {
                 library: "screening/serials".into(),
                 selection,
@@ -160,6 +167,7 @@ mod tests {
                 "title": "E03 · Segment 3",
                 "detail": "The Serial · S01 · E03 · 46 min",
                 "art": "s1e3.jpg",
+                "remaining_seconds": 2160,
                 "request": {
                     "library": "screening/serials",
                     "selection": {"episode": {
@@ -190,6 +198,16 @@ mod tests {
         assert_eq!(value.get("art"), None);
         assert_eq!(value.get("detail"), None);
         assert!(value.get("reason").is_some());
+    }
+
+    // The display draws no end time for a work whose length the catalog
+    // does not hold, so the key is left out and never sent as zero.
+    #[test]
+    fn an_offer_with_no_runtime_carries_no_seconds() {
+        let mut next = offer(episode(), None);
+        next.remaining_seconds = None;
+
+        assert_eq!(value(&next).get("remaining_seconds"), None);
     }
 
     #[test]

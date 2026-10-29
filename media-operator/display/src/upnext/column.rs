@@ -126,6 +126,7 @@ mod tests {
             title: Some("E05 · The Long Tide".to_string()),
             detail: Some("Harbor Lights · S02 · 45 min".to_string()),
             art: None,
+            remaining: None,
         }
     }
 

@@ -324,11 +324,14 @@ spec:
                     marks place credits in its second half, the card rises
                     at the start of the credits, or after the scene that
                     follows them, as the marks field describes. Otherwise
-                    a film's card rises when three percent of the item or
-                    three minutes remain, whichever is less, and an
+                    a film's card rises when four percent of the item or
+                    four minutes remain, whichever is less, and an
                     episode's card, for an item whose presentation names a
-                    series, rises when one and a half percent of the item
-                    or ninety seconds remain, whichever is less. With the
+                    series, rises when two and a half percent of the item
+                    or two minutes remain, whichever is less. Both rules
+                    raise the card no earlier than the point where the work
+                    counts as watched, five percent or five minutes before
+                    its end, whichever is less. With the
                     OSD down, the risen card shows focused, and select
                     takes it, unless a skip control is up beside it. Then
                     select does what it does for the skip control alone.
@@ -372,6 +375,20 @@ spec:
                         The third line of the card, under the title:
                         the series and the season, or the year and the
                         runtime. The display draws it as given.
+                    remainingSeconds:
+                      type: integer
+                      format: int64
+                      minimum: 0
+                      description: >-
+                        How long a play of the work that follows runs,
+                        in seconds, from where that play starts: the
+                        length of its file, less the position where the
+                        audience stopped in it before. The card draws a
+                        fourth line, "Ends at 10:42 pm", the wall clock
+                        when the card draws plus these seconds, in the
+                        format of the display's clock. The line follows
+                        the minute while the card stands. Omitted, the
+                        card draws no end time.
                     art:
                       type: string
                       description: >-

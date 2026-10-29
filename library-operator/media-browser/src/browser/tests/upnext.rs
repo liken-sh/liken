@@ -59,6 +59,7 @@ fn a_play_from_a_series_wall_names_the_next_episode() {
             "reason": "Next in The Serial · S01",
             "title": "E02 · Segment 2",
             "detail": "The Serial · S01 · E02 · 46m",
+            "remaining_seconds": 2760,
             "art": "s1e2.jpg",
             "request": {
                 "library": SERIALS,
@@ -141,6 +142,7 @@ fn an_episode_of_a_series_reached_through_a_franchise_names_the_next_episode() {
             "reason": "Next in The Run · S01",
             "title": "E02 · Segment 2",
             "detail": "Last Serial · S01 · E02 · 46m",
+            "remaining_seconds": 2760,
             "art": "s1e2.jpg",
             "request": {
                 "library": SERIALS,
@@ -171,7 +173,8 @@ fn the_last_covered_episode_of_a_member_names_the_member_after_it() {
             "library": "screening/films",
             "reason": "Next in The Run",
             "title": "Entry 4",
-            "detail": "1980",
+            "detail": "1980 · 1h 30m",
+            "remaining_seconds": 5400,
             "art": "movies:4.jpg",
             "request": {
                 "library": "screening/films",
@@ -207,6 +210,7 @@ fn a_film_of_a_set_names_the_next_film_of_the_set() {
             "reason": "Next in The Entries",
             "title": "Entry 2",
             "detail": "1980 · 1h 30m · PG",
+            "remaining_seconds": 5400,
             "request": {
                 "library": "screening/films",
                 "selection": {"movie": {"id": "movies:2"}},
@@ -317,6 +321,18 @@ fn taking(payload: Vec<u8>) -> (Browser<Fake, NoArt>, FakeBus) {
             ..crate::catalog::Progress::default()
         },
     );
+    // The film the set offers after movies:3, stopped in, so the offer
+    // counts its seconds from where a play of it resumes.
+    browser.source.reached.insert(
+        ("screening/films".to_string(), "movies:4".to_string()),
+        crate::catalog::Progress {
+            play: "play-3".into(),
+            position: 1_000,
+            duration: 5_400,
+            recorded: 30,
+            ..crate::catalog::Progress::default()
+        },
+    );
     let (people, preset) = watcher();
     let mut browser = browser
         .with_bus(
@@ -361,6 +377,7 @@ fn an_ask_on_the_commands_topic_plays_the_work_the_block_names() {
             "reason": "Next in The Run · S01",
             "title": "E03 · Segment 3",
             "detail": "Last Serial · S01 · E03 · 46m",
+            "remaining_seconds": 2760,
             "art": "s1e3.jpg",
             "request": {
                 "library": SERIALS,
@@ -389,6 +406,7 @@ fn an_ask_for_a_film_reads_its_own_set_and_its_own_position() {
             "reason": "Next in The Entries",
             "title": "Entry 4",
             "detail": "1980 · 1h 30m · PG",
+            "remaining_seconds": 4400,
             "request": {
                 "library": "screening/films",
                 "selection": {"movie": {"id": "movies:4"}},
@@ -417,4 +435,45 @@ fn an_ask_this_browser_did_not_write_starts_nothing() {
 
     assert_eq!(browser.source.chosen, None);
     assert!(published_nothing(&bus));
+}
+
+// The episode after the one that starts is one these people stopped in, so
+// the offer counts the seconds from where a play of it would resume.
+#[test]
+fn an_offer_counts_from_where_the_next_episode_resumes() {
+    let (mut browser, bus) = on_a_series();
+    browser.source.episodes_reached = vec![crate::catalog::Progress {
+        play: "play-1".into(),
+        position: 600,
+        duration: 2_760,
+        finished: false,
+        recorded: 10,
+        season: 1,
+        episode: 2,
+        ..crate::catalog::Progress::default()
+    }];
+
+    play_episode(&mut browser);
+
+    assert_eq!(offered(&bus).expect("an offer")["remaining_seconds"], 2160);
+}
+
+// A finished episode plays again from its beginning, so it counts whole.
+#[test]
+fn an_offer_counts_a_finished_episode_whole() {
+    let (mut browser, bus) = on_a_series();
+    browser.source.episodes_reached = vec![crate::catalog::Progress {
+        play: "play-1".into(),
+        position: 2_700,
+        duration: 2_760,
+        finished: true,
+        recorded: 10,
+        season: 1,
+        episode: 2,
+        ..crate::catalog::Progress::default()
+    }];
+
+    play_episode(&mut browser);
+
+    assert_eq!(offered(&bus).expect("an offer")["remaining_seconds"], 2760);
 }

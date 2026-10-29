@@ -521,19 +521,22 @@ func TestTheCommandSidecarCarriesTheVolumeTopicOnlyWithSpeakers(t *testing.T) {
 // to.
 func TestBuildPodCarriesTheNextBlockToBothContainers(t *testing.T) {
 	play := testPlay()
-	play.Spec.Next = &PlayNext{
-		Reason:  "Next in Harbor Lights",
-		Title:   "E05",
-		Detail:  "45 min",
-		Art:     "claim://house/library/shows/next.jpg",
-		Request: json.RawMessage(`{"library":"living-room/shows"}`),
+	if err := json.Unmarshal([]byte(`{
+		"reason": "Next in Harbor Lights",
+		"title": "E05",
+		"detail": "45 min",
+		"art": "claim://house/library/shows/next.jpg",
+		"remainingSeconds": 2160,
+		"request": {"library": "living-room/shows"}
+	}`), &play.Spec.Next); err != nil {
+		t.Fatal(err)
 	}
 	resolved, err := resolvePlay("house", play.Spec.Items, play.Spec.Next, frame{})
 	mustSucceed(t, err)
 	pod := buildPod(play, buildClaim(play, testPlayer()), resolved,
 		testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "")
 
-	want := `{"reason":"Next in Harbor Lights","title":"E05","detail":"45 min","art":"/media/1/shows/next.jpg","request":{"library":"living-room/shows"}}`
+	want := `{"reason":"Next in Harbor Lights","title":"E05","detail":"45 min","art":"/media/1/shows/next.jpg","remainingSeconds":2160,"request":{"library":"living-room/shows"}}`
 	mustMatch(t, envValue(pod.Spec.Containers[0], nextVariable), want)
 	mustMatch(t, envValue(initContainer(t, pod, commandContainer), nextVariable), want)
 }

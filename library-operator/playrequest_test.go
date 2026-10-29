@@ -800,12 +800,14 @@ func nextRequest(next *playRequestNext) []byte {
 }
 
 func testNext() *playRequestNext {
+	remaining := int64(2160)
 	return &playRequestNext{
-		Reason:  "Next in The Serial · S01",
-		Title:   "E03 · Segment 3",
-		Detail:  "The Serial · S01 · E03 · 46 min",
-		Art:     testPosterPath,
-		Request: json.RawMessage(`{"library":"house/movies","selection":{"movie":{"id":"movies:2"}}}`),
+		Reason:           "Next in The Serial · S01",
+		Title:            "E03 · Segment 3",
+		Detail:           "The Serial · S01 · E03 · 46 min",
+		Art:              testPosterPath,
+		RemainingSeconds: &remaining,
+		Request:          json.RawMessage(`{"library":"house/movies","selection":{"movie":{"id":"movies:2"}}}`),
 	}
 }
 
@@ -828,6 +830,43 @@ func TestAPlayCarriesTheWorkThatFollowsIt(t *testing.T) {
 	}
 	if string(next.Request) != string(want.Request) {
 		t.Errorf("request = %s, want the browser's own block", next.Request)
+	}
+	if next.RemainingSeconds == nil || *next.RemainingSeconds != 2160 {
+		t.Errorf("remaining = %v, want the browser's 2160 seconds", next.RemainingSeconds)
+	}
+}
+
+// The browser writes the seconds under its own key, and the Play carries
+// them under the field the display reads.
+func TestAPlayCarriesTheSecondsOfTheNextWorkFromTheBrowsersKey(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	publishPlay(operator, []byte(`{"library":"`+testLibraryKey+`",
+		"items":[{"path":"`+testFilmPath+`"}],
+		"next":{"title":"E03","remaining_seconds":2160}}`))
+
+	operator.pass()
+
+	spec, err := json.Marshal(cluster.heldPlays()[0].Spec.Next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"title":"E03","remainingSeconds":2160}`; string(spec) != want {
+		t.Errorf("next = %s, want %s", spec, want)
+	}
+}
+
+// A work whose length the catalog does not hold sends no seconds, and the
+// Play carries none, rather than zero.
+func TestANextWithNoSecondsCarriesNone(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	next := testNext()
+	next.RemainingSeconds = nil
+	publishPlay(operator, nextRequest(next))
+
+	operator.pass()
+
+	if remaining := cluster.heldPlays()[0].Spec.Next.RemainingSeconds; remaining != nil {
+		t.Errorf("remaining = %d, want none", *remaining)
 	}
 }
 
@@ -919,7 +958,7 @@ func TestTheLibraryOfTheNextWorkStaysOffThePlay(t *testing.T) {
 	if err := json.Unmarshal(spec, &keys); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"art", "detail", "reason", "request", "title"}
+	want := []string{"art", "detail", "reason", "remainingSeconds", "request", "title"}
 	if got := slices.Sorted(maps.Keys(keys)); !slices.Equal(got, want) {
 		t.Errorf("next = %v, want %v", got, want)
 	}

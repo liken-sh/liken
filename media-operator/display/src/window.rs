@@ -275,9 +275,16 @@ impl Display {
                 self.volume.fade_mut().step();
                 self.redraw();
             }
-            // The wall clock and the end time stand in the lower layer, and
-            // nothing else moves on a minute.
-            Message::Minute => self.redraw_below(),
+            // The wall clock and the film's end time stand in the lower
+            // layer. The up-next card reads the clock for its end time too,
+            // and it stands in the upper layer while it shows over the bare
+            // video.
+            Message::Minute => {
+                self.redraw_below();
+                if self.upnext.draws_outside(self.focus.visible()) {
+                    self.redraw_above();
+                }
+            }
             Message::Resized(size) => self.on_resize(size),
             Message::Rescaled(density) => self.on_rescale(density),
             Message::Hide(at) if self.idle.expired(at) => {
@@ -734,6 +741,7 @@ impl Display {
             brush,
             self.focus.focused_stop() == Some(Stop::Next),
             &self.bridge(&canvas),
+            now,
         );
     }
 
@@ -744,7 +752,7 @@ impl Display {
     // the same layer as the text lands under every line of it. A second layer
     // draws after the whole of the first, and the dim and the panel cover the
     // text they are meant to cover.
-    fn paint_above(&self, brush: &mut Brush<'_>) {
+    fn paint_above(&self, brush: &mut Brush<'_>, now: &Zoned) {
         let canvas = brush.canvas();
         if self.strip.capturing().is_some() {
             // A chooser is open. Dim the whole frame under it, so the list
@@ -766,8 +774,13 @@ impl Display {
         // so it draws focused when the OSD's focus stands on the offer.
         let focused = self.focus.card_takes_select(&self.upnext, &self.skip)
             || (self.upnext.stepped_back() && self.focus.focused_stop() == Some(Stop::Next));
-        self.upnext
-            .draw_outside(brush, self.focus.visible(), focused, &self.bridge(&canvas));
+        self.upnext.draw_outside(
+            brush,
+            self.focus.visible(),
+            focused,
+            &self.bridge(&canvas),
+            now,
+        );
         // The skip control stays over the bare video for the whole span, on a
         // fade of its own, for the same reason.
         self.skip.draw_outside(brush, self.focus.visible());
@@ -830,8 +843,9 @@ impl Display {
         }
         // A paused film pushes no position, and the display stands open for
         // as long as the pause lasts, so the reading and the end time follow
-        // a tick of their own while it is up.
-        if self.focus.visible() && !self.detached {
+        // a tick of their own while it is up. The up-next card's end time
+        // follows the same tick while the card stands over the bare video.
+        if (self.focus.visible() || self.upnext.draws_outside(false)) && !self.detached {
             running.push(iced::time::every(MINUTE).map(|_| Message::Minute));
         }
         Subscription::batch(running)
@@ -1045,16 +1059,20 @@ impl canvas::Program<Message> for Layer<'_> {
         }
         let fade = self.display.focus.fade().value();
 
-        let (cache, now) = match self.part {
-            Part::Below => (&self.display.below, Some(clock::now())),
-            Part::Above => (&self.display.above, None),
+        // Both layers read the wall clock: the lower one for the reading and
+        // the film's end time, and the upper one for the end time on the
+        // up-next card that stands over the bare video.
+        let now = clock::now();
+        let cache = match self.part {
+            Part::Below => &self.display.below,
+            Part::Above => &self.display.above,
         };
         vec![cache.draw(renderer, bounds.size(), |frame| {
             frame.scale(canvas.scale());
             let mut brush = Brush::new(frame, canvas, fade, self.display.density);
-            match now {
-                Some(now) => self.display.paint_below(&mut brush, &now),
-                None => self.display.paint_above(&mut brush),
+            match self.part {
+                Part::Below => self.display.paint_below(&mut brush, &now),
+                Part::Above => self.display.paint_above(&mut brush, &now),
             }
             brush.finish();
         })]
@@ -1923,38 +1941,38 @@ mod tests {
     }
 
     /// An episode caps its wait for the scene after the credits at the series
-    /// rule, ninety seconds from the end, where a film caps it at three
-    /// minutes. So the card waits for a scene that ends in the last three
-    /// minutes of an episode.
+    /// rule, two minutes from the end of a 100 minute file, where a film caps
+    /// it at four minutes. So the card waits for a scene that ends in the
+    /// last four minutes of an episode.
     #[tokio::test]
     async fn an_episodes_card_waits_for_a_late_scene() {
         let (mut display, _) = display();
         let _ = display.update(present(
             r#"{"series":"Harbor Lights","season":2,"episode":4,"marks":[
                 {"kind":"credits","start":5700.0},
-                {"kind":"post-credits","start":5850.0,"end":5900.0}]}"#,
+                {"kind":"post-credits","start":5820.0,"end":5870.0}]}"#,
         ));
         let _ = display.update(block("next", OFFER));
-        let _ = display.update(property("time-pos", json!(5899.0)));
+        let _ = display.update(property("time-pos", json!(5869.0)));
         assert_eq!(display.card.armed, None);
 
-        let _ = display.update(property("time-pos", json!(5900.0)));
+        let _ = display.update(property("time-pos", json!(5870.0)));
         assert!(display.upnext.showing_card());
     }
 
-    /// An episode with no credits mark raises the card at half the time
-    /// rule, ninety seconds from the end of a 100 minute file.
+    /// An episode with no credits mark raises the card by the series rule,
+    /// two minutes from the end of a 100 minute file.
     #[tokio::test]
-    async fn an_unmarked_episode_raises_the_card_at_half_the_time_rule() {
+    async fn an_unmarked_episode_raises_the_card_by_the_series_rule() {
         let (mut display, _) = display();
         let _ = display.update(present(
             r#"{"series":"Harbor Lights","season":2,"episode":4}"#,
         ));
         let _ = display.update(block("next", OFFER));
-        let _ = display.update(property("time-pos", json!(5909.0)));
+        let _ = display.update(property("time-pos", json!(5879.0)));
         assert_eq!(display.card.armed, None);
 
-        let _ = display.update(property("time-pos", json!(5910.0)));
+        let _ = display.update(property("time-pos", json!(5880.0)));
         assert!(display.card.armed.is_some());
         assert!(display.upnext.showing_card());
     }

@@ -318,7 +318,17 @@ fn orders() -> Vec<Membership> {
                     runs: vec![(1, 0)],
                     ..order_member(1, SERIALS, LAST_SERIAL, "series", "Last Serial")
                 },
-                order_member(2, films, "movies:4", "movies", "Entry 4"),
+                // The one member whose length the catalog holds, so an offer
+                // of it carries the seconds it runs.
+                Entry {
+                    held: order_member(2, films, "movies:4", "movies", "Entry 4")
+                        .held
+                        .map(|held| Held {
+                            duration: 5_400,
+                            ..held
+                        }),
+                    ..order_member(2, films, "movies:4", "movies", "Entry 4")
+                },
             ],
         ),
     ]

@@ -457,13 +457,21 @@ type PlaySpec struct {
 
 // PlayNext is the offer: three lines of text the display draws as given,
 // an art reference the operator resolves the way it resolves an item's
-// art, and a request the operator never reads and copies to the bus
-// when a person takes the offer.
+// art, the seconds of the next work that remain, and a request the
+// operator never reads and copies to the bus when a person takes the
+// offer.
 type PlayNext struct {
 	Reason string `json:"reason,omitempty"`
 	Title  string `json:"title,omitempty"`
 	Detail string `json:"detail,omitempty"`
 	Art    string `json:"art,omitempty"`
+
+	// RemainingSeconds is how long a play of the next work runs from where
+	// it starts. The operator copies it to the display unread, and the
+	// display adds it to the wall clock to draw the time that work would
+	// end. Nil is a work of unknown length, which draws no end time, and
+	// differs from zero.
+	RemainingSeconds *int64 `json:"remainingSeconds,omitempty"`
 
 	// Request is raw JSON because the writer of the Play defines its shape,
 	// and this operator carries it back unread.

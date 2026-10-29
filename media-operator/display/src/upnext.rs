@@ -4,20 +4,24 @@
 //! near the end of it. Focus routes a select on it.
 
 use iced::{Point, Rectangle, Size};
+use jiff::Zoned;
 use serde_json::Value;
 
 mod column;
 
 use crate::canvas::{Anchor, Brush, Canvas, Line, clip, measure};
+use crate::clock;
 use crate::fade::{Clock, Fade, Hide};
 use crate::film::Film;
 use crate::theme;
 
 /// The card's box in canvas pixels. It is 440 wide with its right edge on the
 /// margin, and its bottom edge stays above the row where the scrubber draws
-/// the time label, so the card never covers the scrubber.
+/// the time label, so the card never covers the scrubber. The card is 458
+/// tall with four lines under the art, so its top is at 338 and its bottom
+/// at 796.
 pub const CARD_W: f32 = 440.0;
-const CARD_TOP: f32 = 380.0;
+const CARD_TOP: f32 = 338.0;
 pub const ART_H: f32 = 248.0;
 const PAD_X: f32 = 22.0;
 const PAD_Y: f32 = 16.0;
@@ -29,8 +33,11 @@ pub(crate) const CARD_ALPHA: f32 = theme::opacity(0x54);
 /// line draws in.
 const REASON_PITCH: f32 = 40.0;
 const TITLE_PITCH: f32 = 54.0;
-const DETAIL_H: f32 = 42.0;
-const CARD_H: f32 = ART_H + PAD_Y + REASON_PITCH + TITLE_PITCH + DETAIL_H + PAD_Y;
+const DETAIL_PITCH: f32 = 42.0;
+const ENDS_H: f32 = 42.0;
+/// The card keeps the row of every line, the end time's too, whether or not
+/// the block fills it, so one card never changes size between two offers.
+const CARD_H: f32 = ART_H + PAD_Y + REASON_PITCH + TITLE_PITCH + DETAIL_PITCH + ENDS_H + PAD_Y;
 
 /// The chip's row, above the right end of the bar and above the time label.
 /// `CHIP_Y` is the top of the label's line box, and `CHIP_H` is that line
@@ -44,17 +51,23 @@ pub(crate) const CHIP_PAD_Y: f32 = 9.0;
 /// apart from a panel, which rounds at `CARD_R`.
 pub(crate) const CHIP_R: f32 = (CHIP_H + 2.0 * CHIP_PAD_Y) / 2.0;
 
-/// The two amounts of a work that may remain when the card rises: a share
-/// of its length, and a number of seconds. The rule takes whichever leaves
-/// less time, so the seconds apply only to a work over 100 minutes. It is
-/// the shape of the watched rule, which `library-operator` states in
-/// `watched.go` and in `media-browser/src/catalog/progress.rs`, at three
-/// fifths of that rule's two amounts. So both caps begin to apply at the
-/// same length, and the card never rises before the work counts as watched.
-/// The two rules differ because the card marks the credits and the watched
-/// rule marks the end of the story.
-const RISE_PERCENT: f64 = 3.0;
-const RISE_SECONDS: f64 = 180.0;
+/// The two amounts of a film that may remain when the card rises, where its
+/// marks place no credits: a share of its length, and a number of seconds.
+/// The rule takes whichever leaves less time, so the seconds apply only to
+/// a film over 100 minutes.
+///
+/// The rule has the shape of the watched rule, which `library-operator`
+/// states in `watched.go` and in
+/// `media-browser/src/catalog/progress/watched.rs`: five percent or 300
+/// seconds, whichever is less. Each amount here is no larger than the
+/// watched rule's amount of the same kind, so the smaller of the two is no
+/// larger either, and the card never rises before the work counts as
+/// watched. A person who takes the offer at the rise leaves the work, so a
+/// card that rose earlier would leave a work unwatched. The two rules differ
+/// because the card marks the credits and the watched rule marks the end of
+/// the story.
+const RISE_PERCENT: f64 = 4.0;
+const RISE_SECONDS: f64 = 240.0;
 
 /// The second at which the time rule raises the card: the length less the
 /// smaller of the two amounts. The marks cap a rise after a scene at this
@@ -63,10 +76,12 @@ pub(crate) fn time_rise(duration: f64) -> f64 {
     duration - (duration * RISE_PERCENT / 100.0).min(RISE_SECONDS)
 }
 
-/// An episode with no credits mark raises its card at half the time rule,
-/// because an episode is short and three percent of it ends too early.
-const SERIES_RISE_PERCENT: f64 = RISE_PERCENT / 2.0;
-const SERIES_RISE_SECONDS: f64 = RISE_SECONDS / 2.0;
+/// The two amounts of an episode with no credits mark. An episode is short,
+/// and the film rule's share of it ends too early, so the share is smaller,
+/// and the seconds apply to an episode over 80 minutes. Each amount is no
+/// larger than the watched rule's, for the reason the film rule states.
+const SERIES_RISE_PERCENT: f64 = 2.5;
+const SERIES_RISE_SECONDS: f64 = 120.0;
 
 /// The second at which an episode's card rises: the length less the smaller
 /// of the two series amounts.
@@ -87,6 +102,9 @@ pub trait Art {
     fn draw(&self, brush: &mut Brush<'_>, bounds: Rectangle);
 }
 
+/// The words that start the card's last line, before the time.
+const ENDS_WORDS: &str = "Ends at";
+
 /// The block the sidecar sent. A block with none of the three lines and no
 /// art is not an offer.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -95,6 +113,10 @@ pub struct Offer {
     pub title: Option<String>,
     pub detail: Option<String>,
     pub art: Option<String>,
+    /// How long a play of the next work runs from where it starts. The card
+    /// adds it to the wall clock when it draws, so the end time it reads is
+    /// the time the next work would end if a person took the offer now.
+    pub remaining: Option<i64>,
 }
 
 impl Offer {
@@ -115,8 +137,20 @@ impl Offer {
             title: word("title"),
             detail: word("detail"),
             art: word("art"),
+            remaining: None,
         };
-        (offer != Self::default()).then_some(offer)
+        // The seconds alone give the card nothing to name, so they do not
+        // make a block an offer.
+        if offer == Self::default() {
+            return None;
+        }
+        Some(Self {
+            remaining: block
+                .get("remainingSeconds")
+                .and_then(Value::as_i64)
+                .filter(|seconds| *seconds >= 0),
+            ..offer
+        })
     }
 }
 
@@ -420,8 +454,10 @@ impl UpNext {
         )
     }
 
-    /// The card's three lines, each clipped to the width inside the pad.
-    fn card_lines(&self, canvas: &Canvas) -> Vec<Line> {
+    /// The card's lines, each clipped to the width inside the pad: the three
+    /// the block spells, and the time the next work would end, read from the
+    /// wall clock `now`.
+    fn card_lines(&self, canvas: &Canvas, now: &Zoned) -> Vec<Line> {
         let Some(offer) = self.offer.as_ref() else {
             return Vec::new();
         };
@@ -458,6 +494,21 @@ impl UpNext {
                 theme::color::muted(),
             ));
         }
+        y += DETAIL_PITCH;
+        if let Some(seconds) = offer.remaining {
+            let ends = now.saturating_add(jiff::Span::new().seconds(seconds));
+            lines.push(Line::new(
+                clip(
+                    &format!("{ENDS_WORDS} {}", clock::reading(&ends)),
+                    theme::type_scale::SMALL,
+                    room,
+                ),
+                Point::new(x, y),
+                Anchor::TopLeft,
+                theme::type_scale::SMALL,
+                theme::color::muted(),
+            ));
+        }
         lines
     }
 
@@ -482,8 +533,9 @@ impl UpNext {
         brush.text(self.chip_line(&canvas, focused));
     }
 
-    /// The card: the art over the three lines the block spells.
-    fn card(&self, brush: &mut Brush<'_>, focused: bool, art: &dyn Art) {
+    /// The card: the art over the three lines the block spells and the end
+    /// time.
+    fn card(&self, brush: &mut Brush<'_>, focused: bool, art: &dyn Art, now: &Zoned) {
         let canvas = brush.canvas();
         let box_ = self.card_box(&canvas);
         if focused {
@@ -498,7 +550,7 @@ impl UpNext {
         if let Some(size) = art.next() {
             art.draw(brush, self.art_bounds(&canvas, size));
         }
-        for line in self.card_lines(&canvas) {
+        for line in self.card_lines(&canvas, now) {
             brush.text(line);
         }
     }
@@ -506,12 +558,12 @@ impl UpNext {
     /// Draw the offer as part of the OSD, the chip before the rise and the
     /// card after it, at the OSD's own fade. A taken offer fades on its own
     /// clock outside the OSD, so the OSD draws nothing of it.
-    pub fn draw(&self, brush: &mut Brush<'_>, focused: bool, art: &dyn Art) {
+    pub fn draw(&self, brush: &mut Brush<'_>, focused: bool, art: &dyn Art, now: &Zoned) {
         if self.offer.is_none() || self.waiting || self.stepped {
             return;
         }
         if self.showing_card() {
-            self.card(brush, focused, art);
+            self.card(brush, focused, art, now);
         } else {
             self.chip(brush, focused);
         }
@@ -537,6 +589,7 @@ impl UpNext {
         osd_visible: bool,
         focused: bool,
         art: &dyn Art,
+        now: &Zoned,
     ) {
         if !self.draws_outside(osd_visible) {
             return;
@@ -547,7 +600,7 @@ impl UpNext {
         }
         let focused = focused || self.waiting;
         brush.at_fade(self.fade().value(), |brush| {
-            self.card(brush, focused, art);
+            self.card(brush, focused, art, now);
         });
     }
 
@@ -595,7 +648,8 @@ mod tests {
     /// card draws.
     const OFFER: &str = r#"{"reason":"Next in Harbor Lights · S02",
         "title":"E05 · The Long Tide",
-        "detail":"Harbor Lights · S02 · 45 min"}"#;
+        "detail":"Harbor Lights · S02 · 45 min",
+        "remainingSeconds":2700}"#;
 
     /// The canvas numbers the design gives: the right margin, the card box,
     /// and the row the chip draws on.
@@ -623,12 +677,18 @@ mod tests {
         Canvas::default()
     }
 
+    /// 1970-01-01 22:30 UTC, the wall clock the card's lines read in most
+    /// tests.
+    fn evening() -> Zoned {
+        crate::clock::at(22 * 3600 + 30 * 60)
+    }
+
     #[test]
     fn no_offer_draws_nothing_and_offers_no_stop() {
         let upnext = UpNext::default();
         assert!(!upnext.available());
         assert!(!upnext.draws_outside(false));
-        assert!(upnext.card_lines(&canvas()).is_empty());
+        assert!(upnext.card_lines(&canvas(), &evening()).is_empty());
     }
 
     #[test]
@@ -647,6 +707,7 @@ mod tests {
         for text in [
             r#"{"title":""}"#,
             r#"{"reason":"","title":"","detail":"","art":""}"#,
+            r#"{"remainingSeconds":2700}"#,
         ] {
             let mut upnext = UpNext::default();
             upnext.receive(text);
@@ -753,14 +814,15 @@ mod tests {
     }
 
     /// The rule takes whichever of the two amounts leaves less time, so a four
-    /// hour film raises the card three minutes from its end and not at three
-    /// percent of its length, and a short film raises it at 97 percent.
+    /// hour film raises the card four minutes from its end and not at four
+    /// percent of its length, and a short film raises it at 96 percent.
     #[test]
     fn a_film_raises_the_card_by_the_time_rule() {
         let cases = [
-            ("a 100 second film", 100.0, 97.0),
-            ("a 100 minute film", 6000.0, 5820.0),
-            ("a four hour film", 14400.0, 14220.0),
+            ("a 100 second film", 100.0, 96.0),
+            ("a 90 minute film", 5400.0, 5184.0),
+            ("a 100 minute film", 6000.0, 5760.0),
+            ("a four hour film", 14400.0, 14160.0),
         ];
         for (name, duration, want) in cases {
             assert!((time_rise(duration) - want).abs() < 1e-9, "{name}");
@@ -778,17 +840,44 @@ mod tests {
         assert!(upnext.showing_card());
     }
 
-    /// An episode's card rises at half the time rule: when one and a half
-    /// percent of it or ninety seconds remain, whichever is less.
+    /// An episode's card rises when two and a half percent of it or two
+    /// minutes remain, whichever is less.
     #[test]
-    fn an_episode_raises_the_card_at_half_the_time_rule() {
+    fn an_episode_raises_the_card_by_the_series_rule() {
         let cases = [
-            ("a 22 minute episode", 1320.0, 1300.2),
-            ("a 100 minute episode", 6000.0, 5910.0),
-            ("a two hour special", 7200.0, 7110.0),
+            ("a 22 minute episode", 1320.0, 1287.0),
+            ("a 45 minute episode", 2700.0, 2632.5),
+            ("an 80 minute episode", 4800.0, 4680.0),
+            ("a 100 minute episode", 6000.0, 5880.0),
         ];
         for (name, duration, want) in cases {
             assert!((series_rise(duration) - want).abs() < 1e-9, "{name}");
+        }
+    }
+
+    /// The watched rule of `library-operator`, which `watched.go` and
+    /// `media-browser/src/catalog/progress/watched.rs` state: a work counts
+    /// as watched when five percent of it or five minutes remain, whichever
+    /// is less.
+    fn watched_line(duration: f64) -> f64 {
+        duration - (duration * 0.05).min(300.0)
+    }
+
+    /// A person who takes the offer leaves the work at the rise, so a card
+    /// that rose before the watched line would leave the work unwatched.
+    /// Both time rules rise at or after that line, at every length.
+    #[test]
+    fn neither_rule_raises_the_card_before_the_work_counts_as_watched() {
+        let durations = [
+            60.0, 600.0, 1320.0, 2700.0, 4800.0, 5400.0, 6000.0, 7200.0, 10800.0, 14400.0,
+        ];
+        for duration in durations {
+            let watched = watched_line(duration);
+            assert!(time_rise(duration) >= watched, "a film of {duration} s");
+            assert!(
+                series_rise(duration) >= watched,
+                "an episode of {duration} s"
+            );
         }
     }
 
@@ -821,8 +910,8 @@ mod tests {
     #[test]
     fn credits_raise_the_card_at_their_start() {
         let cases = [
-            ("credits before the three minutes", 5400.0, 89.9, 90.0),
-            ("credits inside the last three minutes", 5950.0, 99.0, 99.2),
+            ("credits before the four minutes", 5400.0, 89.9, 90.0),
+            ("credits inside the last four minutes", 5950.0, 99.0, 99.2),
         ];
         let long = film(6000.0);
         for (name, credits, before, at) in cases {
@@ -860,9 +949,9 @@ mod tests {
         let upnext = risen();
         let box_ = upnext.card_box(&canvas());
         assert_eq!(box_.x, CARD_X);
-        assert_eq!(box_.y, 380.0);
+        assert_eq!(box_.y, 338.0);
         assert_eq!(box_.width, 440.0);
-        assert_eq!(box_.height, 416.0);
+        assert_eq!(box_.height, 458.0);
         assert_eq!(box_.x + box_.width, RIGHT);
         assert!(box_.y + box_.height <= FLOOR);
     }
@@ -872,33 +961,38 @@ mod tests {
         let upnext = risen();
         let plate = upnext.art_plate(&canvas());
         assert_eq!(plate.x, CARD_X);
-        assert_eq!(plate.y, 380.0);
+        assert_eq!(plate.y, 338.0);
         assert_eq!(plate.width, 440.0);
         assert_eq!(plate.height, 248.0);
     }
 
-    /// The three lines are cumulative: the art, a pad, then each line's own
+    /// The four lines are cumulative: the art, a pad, then each line's own
     /// pitch.
     #[test]
-    fn the_card_stacks_its_three_lines_under_the_art() {
+    fn the_card_stacks_its_four_lines_under_the_art() {
         let upnext = risen();
-        let lines = upnext.card_lines(&canvas());
+        let lines = upnext.card_lines(&canvas(), &evening());
 
-        assert_eq!(lines.len(), 3);
+        assert_eq!(lines.len(), 4);
         assert_eq!(lines[0].content, "NEXT IN HARBOR LIGHTS \u{b7} S02");
-        assert_eq!(lines[0].at, Point::new(TEXT_X, 644.0));
+        assert_eq!(lines[0].at, Point::new(TEXT_X, 602.0));
         assert_eq!(lines[0].size, theme::type_scale::TINY);
         assert_eq!(lines[0].color, theme::color::muted());
 
         assert_eq!(lines[1].content, "E05 \u{b7} The Long Tide");
-        assert_eq!(lines[1].at, Point::new(TEXT_X, 684.0));
+        assert_eq!(lines[1].at, Point::new(TEXT_X, 642.0));
         assert_eq!(lines[1].size, theme::type_scale::LABEL);
         assert_eq!(lines[1].color, theme::color::text());
 
         assert_eq!(lines[2].content, "Harbor Lights \u{b7} S02 \u{b7} 45 min");
-        assert_eq!(lines[2].at, Point::new(TEXT_X, 738.0));
+        assert_eq!(lines[2].at, Point::new(TEXT_X, 696.0));
         assert_eq!(lines[2].size, theme::type_scale::SMALL);
         assert_eq!(lines[2].color, theme::color::muted());
+
+        assert_eq!(lines[3].content, "Ends at 11:15 pm");
+        assert_eq!(lines[3].at, Point::new(TEXT_X, 738.0));
+        assert_eq!(lines[3].size, theme::type_scale::SMALL);
+        assert_eq!(lines[3].color, theme::color::muted());
         for line in &lines {
             assert_eq!(line.anchor, Anchor::TopLeft);
         }
@@ -910,9 +1004,72 @@ mod tests {
     fn a_line_the_block_leaves_out_draws_nothing() {
         let mut upnext = UpNext::default();
         upnext.receive(r#"{"title":"E05"}"#);
-        let lines = upnext.card_lines(&canvas());
+        let lines = upnext.card_lines(&canvas(), &evening());
         assert_eq!(lines.len(), 1);
-        assert_eq!(lines[0].at.y, 684.0);
+        assert_eq!(lines[0].at.y, 642.0);
+    }
+
+    /// The end time is the wall clock at the draw plus the seconds that
+    /// remain, in the clock's own format, and it rolls past midnight.
+    #[test]
+    fn the_end_time_reads_the_wall_clock_plus_the_seconds_that_remain() {
+        let cases = [
+            ("an evening", 22 * 3600 + 30 * 60, 4320, "Ends at 11:42 pm"),
+            (
+                "past midnight",
+                23 * 3600 + 50 * 60,
+                2700,
+                "Ends at 12:35 am",
+            ),
+            ("a morning", 9 * 3600 + 5 * 60, 1800, "Ends at 9:35 am"),
+            ("a part minute", 12 * 3600 + 59, 30, "Ends at 12:01 pm"),
+            ("nothing left", 13 * 3600, 0, "Ends at 1:00 pm"),
+        ];
+        for (name, now, remaining, want) in cases {
+            let mut upnext = UpNext::default();
+            upnext.receive(&format!(
+                r#"{{"title":"E05","remainingSeconds":{remaining}}}"#
+            ));
+            let lines = upnext.card_lines(&canvas(), &crate::clock::at(now));
+            assert_eq!(
+                lines.last().map(|line| line.content.as_str()),
+                Some(want),
+                "{name}"
+            );
+        }
+    }
+
+    /// The draw reads the clock each time, so a card that stands while the
+    /// minute turns reads the later end time.
+    #[test]
+    fn the_end_time_follows_the_minute() {
+        let upnext = risen();
+        let later = crate::clock::at(22 * 3600 + 31 * 60);
+        assert_eq!(
+            upnext.card_lines(&canvas(), &later)[3].content,
+            "Ends at 11:16 pm"
+        );
+    }
+
+    /// A block with no seconds, or seconds that are not a count, draws no
+    /// end time, and the card keeps its size.
+    #[test]
+    fn an_offer_with_no_seconds_draws_no_end_time() {
+        for text in [
+            r#"{"title":"E05","detail":"45 min"}"#,
+            r#"{"title":"E05","detail":"45 min","remainingSeconds":-5}"#,
+            r#"{"title":"E05","detail":"45 min","remainingSeconds":"2700"}"#,
+        ] {
+            let mut upnext = UpNext::default();
+            upnext.receive(text);
+            let lines = upnext.card_lines(&canvas(), &evening());
+            assert_eq!(lines.len(), 2, "{text}");
+            assert!(
+                lines.iter().all(|line| !line.content.starts_with("Ends")),
+                "{text}"
+            );
+            assert_eq!(upnext.card_box(&canvas()).height, 458.0, "{text}");
+        }
     }
 
     /// A long line loses the glyphs it has no room for and ends on an
@@ -1080,7 +1237,10 @@ mod tests {
         assert!(!upnext.showing_card());
         assert!(!upnext.waiting());
         assert_eq!(upnext.fade().value(), 0.0);
-        assert_eq!(upnext.card_lines(&canvas())[0].content, "E06 The Turning");
+        assert_eq!(
+            upnext.card_lines(&canvas(), &evening())[0].content,
+            "E06 The Turning"
+        );
     }
 
     /// The first playlist report names the item already playing, so it is not
@@ -1112,7 +1272,7 @@ mod tests {
         let upnext = risen();
         let bounds = upnext.art_bounds(&canvas(), Size::new(300.0, 248.0));
         assert_eq!(bounds.x, CARD_X + (440.0 - 300.0) / 2.0);
-        assert_eq!(bounds.y, 380.0);
+        assert_eq!(bounds.y, 338.0);
         assert_eq!(bounds.width, 300.0);
         assert_eq!(bounds.height, 248.0);
     }

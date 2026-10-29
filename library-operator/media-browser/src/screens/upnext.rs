@@ -9,13 +9,22 @@ use crate::catalog::progress::thread;
 use crate::catalog::{Selection, Slot, Source};
 
 /// The offer a `Play` carries: the three lines of the card, the art beside
-/// them, and the block the browser gets back when a person takes the offer.
+/// them, the seconds of the next work that remain, and the block the browser
+/// gets back when a person takes the offer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Next {
     pub reason: String,
     pub title: String,
     pub detail: String,
     pub art: String,
+    /// The seconds a play of the next work runs, which the player's display
+    /// adds to the wall clock to say when that work would end. The page that
+    /// builds the offer sets the duration of the work's file, and the
+    /// browser subtracts the second a play of it starts at in [`resumed`]
+    /// when it sends the offer, because only the browser holds the people
+    /// whose progress places that second. Nothing where the catalog holds no
+    /// duration.
+    pub remaining_seconds: Option<i64>,
     pub request: Request,
 }
 
@@ -38,27 +47,23 @@ pub fn again(
     people: &[String],
 ) -> (Option<i64>, Option<Next>) {
     let library = &request.library;
-    match &request.selection {
+    let next = match &request.selection {
         Selection::Episode {
             series,
             season,
             episode,
         } => {
-            let numbers = (*season, *episode);
             let title = source
                 .series(library, series)
                 .map(|details| details.title)
                 .unwrap_or_default();
-            (
-                episode_start(source, library, series, numbers, people),
-                after_episode(
-                    source,
-                    library,
-                    series,
-                    &title,
-                    numbers,
-                    request.via.as_ref(),
-                ),
+            after_episode(
+                source,
+                library,
+                series,
+                &title,
+                (*season, *episode),
+                request.via.as_ref(),
             )
         }
         Selection::Movie { id } | Selection::Trailer { id } => {
@@ -66,16 +71,43 @@ pub fn again(
                 .movie(library, id)
                 .map(|details| details.set_id)
                 .unwrap_or_default();
-            (
-                film_start(source, library, id, people),
-                after_film(
-                    source,
-                    library,
-                    id,
-                    (!set.is_empty()).then_some(set.as_str()),
-                    request.via.as_ref(),
-                ),
+            after_film(
+                source,
+                library,
+                id,
+                (!set.is_empty()).then_some(set.as_str()),
+                request.via.as_ref(),
             )
+        }
+    };
+    (start(source, request, people), next)
+}
+
+/// The offer with the seconds that remain counted from where a play of the
+/// next work starts for these people, so a person who stopped in that work
+/// reads the time it would end from where it resumes.
+pub fn resumed(source: &mut dyn Source, next: &Next, people: &[String]) -> Next {
+    let begins = start(source, &next.request, people).unwrap_or(0);
+    Next {
+        remaining_seconds: next
+            .remaining_seconds
+            .map(|runtime| (runtime - begins).max(0)),
+        ..next.clone()
+    }
+}
+
+// The second a play of the work one request names begins at, or nothing
+// where it begins at the start.
+fn start(source: &mut dyn Source, request: &Request, people: &[String]) -> Option<i64> {
+    let library = &request.library;
+    match &request.selection {
+        Selection::Episode {
+            series,
+            season,
+            episode,
+        } => episode_start(source, library, series, (*season, *episode), people),
+        Selection::Movie { id } | Selection::Trailer { id } => {
+            film_start(source, library, id, people)
         }
     }
 }
@@ -239,6 +271,7 @@ fn spelled(slot: &Slot, reason: &Reason) -> Next {
         },
         detail: Item::spelled(slot.clone(), Spelling::Facts).under,
         art: slot.art.clone(),
+        remaining_seconds: (slot.duration > 0).then_some(slot.duration),
         request: Request {
             library: slot.library.clone(),
             selection: chosen(slot),
@@ -321,5 +354,26 @@ mod tests {
         assert_eq!(next.title, "E03 · Segment 3");
         assert_eq!(next.reason, "Next in The Serial · S01");
         assert_eq!(next.detail, "The Serial · S01 · E03 · 46m");
+    }
+
+    // Before the browser reads where a play of the work starts, the seconds
+    // that remain are the whole of its file.
+    #[test]
+    fn an_offer_carries_the_runtime_of_its_file() {
+        let cases = [
+            (film(), Some(5_400)),
+            (episode(), Some(2_760)),
+            (
+                Slot {
+                    duration: 0,
+                    ..film()
+                },
+                None,
+            ),
+        ];
+        for (slot, want) in cases {
+            let next = spelled(&slot, &Reason::Set("The Entries".into()));
+            assert_eq!(next.remaining_seconds, want, "{}", slot.id);
+        }
     }
 }

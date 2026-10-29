@@ -566,16 +566,16 @@ mod tests {
                     {"kind":"post-credits","start":6371.111},
                 ])),
                 Some(6500.0),
-                Some(6320.0),
+                Some(6260.0),
             ),
             (
-                "a scene inside the last three minutes rises by the time rule",
+                "a scene inside the last four minutes rises by the time rule",
                 marks(json!([
                     {"kind":"credits","start":5801.777,"end":6371.111},
                     {"kind":"credits","start":6400.0},
                 ])),
                 Some(6500.0),
-                Some(6320.0),
+                Some(6260.0),
             ),
             (
                 "a post-credits span before the credits is no scene after them",

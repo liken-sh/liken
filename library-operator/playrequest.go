@@ -60,12 +60,16 @@ type playRequest struct {
 // stamp the art and then drops it, because a franchise crosses libraries,
 // and the art of the next work is on that work's own claim.
 type playRequestNext struct {
-	Library string          `json:"library,omitempty"`
-	Reason  string          `json:"reason,omitempty"`
-	Title   string          `json:"title,omitempty"`
-	Detail  string          `json:"detail,omitempty"`
-	Art     string          `json:"art,omitempty"`
-	Request json.RawMessage `json:"request,omitempty"`
+	Library string `json:"library,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+	Title   string `json:"title,omitempty"`
+	Detail  string `json:"detail,omitempty"`
+	Art     string `json:"art,omitempty"`
+	// The seconds a play of the next work runs from where it starts. The
+	// browser writes the key in its own spelling, and the Play carries it
+	// as `remainingSeconds`, the spelling of a Kubernetes field.
+	RemainingSeconds *int64          `json:"remaining_seconds,omitempty"`
+	Request          json.RawMessage `json:"request,omitempty"`
 }
 
 // playRequestItem is one item of the list. Every path is relative to
@@ -242,10 +246,11 @@ func (r playRequest) next(libraries []Library, own *Library) (*PlayNext, error) 
 		return nil, err
 	}
 	next := PlayNext{
-		Reason:  r.Next.Reason,
-		Title:   r.Next.Title,
-		Detail:  r.Next.Detail,
-		Request: r.Next.Request,
+		Reason:           r.Next.Reason,
+		Title:            r.Next.Title,
+		Detail:           r.Next.Detail,
+		RemainingSeconds: r.Next.RemainingSeconds,
+		Request:          r.Next.Request,
 	}
 	if r.Next.Art == "" {
 		return &next, nil

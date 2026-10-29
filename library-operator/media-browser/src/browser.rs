@@ -772,6 +772,7 @@ impl<S: Source, A: Art> Browser<S, A> {
         // The work is read before the bus is borrowed, because the read
         // wants the source and the publish holds a borrow of the bus.
         let identity = self.source.identity(library, selection);
+        let next = next.map(|next| upnext::resumed(&mut self.source, next, &people));
         let files = lines::count(items.len(), "file");
         let Some(bus) = &self.bus else {
             self.log.line(format!(
@@ -793,7 +794,7 @@ impl<S: Source, A: Art> Browser<S, A> {
         // reconnect.
         bus.publish(
             &self.play_topic,
-            play::payload(library, &items, &people, &identity, start, next),
+            play::payload(library, &items, &people, &identity, start, next.as_ref()),
             false,
         );
         self.log.line(format!(

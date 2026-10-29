@@ -714,13 +714,19 @@ type PlaySpec struct {
 	Next *PlayNext `json:"next,omitempty"`
 }
 
-// PlayNext is the offer card: its three lines, the art beside them, and the
-// block the browser gets back when a person takes the offer.
+// PlayNext is the offer card: its three lines, the art beside them, the
+// seconds of the next work that remain, and the block the browser gets back
+// when a person takes the offer.
 type PlayNext struct {
 	Reason string `json:"reason,omitempty"`
 	Title  string `json:"title,omitempty"`
 	Detail string `json:"detail,omitempty"`
 	Art    string `json:"art,omitempty"`
+	// RemainingSeconds is how long a play of the next work runs from where
+	// it starts. The display adds it to the wall clock to say when that work
+	// would end. Nil where the catalog holds no length for the work, so the
+	// display draws no end time rather than one at the present minute.
+	RemainingSeconds *int64 `json:"remainingSeconds,omitempty"`
 	// Request is the browser's own words. This operator carries it and never
 	// reads it.
 	Request json.RawMessage `json:"request,omitempty"`
