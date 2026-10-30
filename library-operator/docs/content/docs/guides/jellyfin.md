@@ -236,17 +236,34 @@ otherwise. For this operator to be the only writer of art and
 * The NFO metadata saver. The nfo fact writes the `.nfo` file.
 * Any subtitle download plugin. Plan 60 covers subtitles.
 
-Leave Jellyfin's trickplay extraction on. With extraction off for a
-library, Jellyfin deletes the whole `.trickplay` directory beside every
-video on each refresh, whoever made the directory. It deletes the rows
-it holds for them too. So on a volume this operator tiles, Jellyfin's
-extraction stays on, and the two race for each new title. The trickplay
-phase of the `Library`'s `Job` claims the node's GPU so that it wins. A directory Jellyfin made
-first holds the same sheets, so the fact leaves it alone.
+For this operator to be the only writer of the trickplay sheets, set
+these two options on each of those Jellyfin libraries:
 
-Jellyfin imports a tile directory it did not make when the folder name
-is the same, the files are present, and it holds no row of its own for
-that width. It records the number of files in the folder as the
-thumbnail count, where its own extraction records the number of
-thumbnails. This operator writes nothing but the sheets into the folder,
-so the count is the sheet count. Verified against Jellyfin 10.11.
+* Turn trickplay image extraction off.
+* Turn on saving trickplay images next to the media.
+
+With both, Jellyfin makes no sheets of its own and deletes none that it
+finds. Its scheduled task that generates trickplay images reads the
+`.trickplay` directory beside each video and records each tile width it
+finds there. Keep that task's trigger, because the task is what adds a
+new title's sheets to Jellyfin. Jellyfin records the number of files in
+the folder as the thumbnail count, where its own extraction records the
+number of thumbnails. This operator writes nothing but the sheets into
+the folder, so the count is the sheet count.
+
+Jellyfin still deletes the `.trickplay` directory beside a video in two
+cases: when it removes the video's item from its library, and when the
+video file's modification time changes. A removal follows a rename, a
+move, or a file Radarr or Sonarr replaced, and Jellyfin 12 can also
+remove and add back the items of a folder when its library monitor sees
+a change there. The trickplay worker runs as its image's root user, so
+the directories it writes belong to root. A Jellyfin that runs as
+another user cannot delete them, and its log names each directory it
+failed to delete. A directory that Jellyfin made belongs to Jellyfin's
+user, and Jellyfin can delete it.
+
+This operator writes every file and every staging directory under a
+temporary name that starts with a dot, and Jellyfin's library monitor
+skips names that start with a dot. So a sheet, an `.nfo` file, or art
+that this operator writes changes the library only when the finished
+file takes its real name. Verified against Jellyfin 12.4.

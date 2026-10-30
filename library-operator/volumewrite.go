@@ -53,10 +53,14 @@ func newVolumeWriter(job string) *volumeWriter {
 
 // The temporary sits in the target's own directory and carries the target's
 // name, so the rename is one directory entry and a person who finds a stray
-// knows which file it was for.
+// knows which file it was for. Its name starts with a dot, because a media
+// server's library monitor reads any other new name beside a video as new
+// media: Jellyfin 12 refreshes the whole folder and removes and adds back
+// the items in it. Jellyfin and the scanner here both skip a name that
+// starts with a dot.
 func (w *volumeWriter) temporary(target string) string {
 	dir, base := filepath.Split(target)
-	return filepath.Join(dir, base+likenTempMark+w.job)
+	return filepath.Join(dir, "."+base+likenTempMark+w.job)
 }
 
 // The whole write rule: a temporary in the same directory, flushed, then

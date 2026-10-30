@@ -23,6 +23,35 @@ func TestAWriteLandsAndLeavesNoTemporary(t *testing.T) {
 	}
 }
 
+// A media server's library monitor reads a new name beside a video as new
+// media, and Jellyfin 12 refreshes the whole folder when one appears. Jellyfin
+// and the scanner here both skip a name that starts with a dot, so every
+// temporary this writer makes, a file's or a tool's staging directory, starts
+// with one.
+func TestEveryTemporaryIsHiddenFromALibraryMonitor(t *testing.T) {
+	dir := t.TempDir()
+	writer := newVolumeWriter("movies-trickplay")
+	staging, err := writer.stageTree(filepath.Join(dir, "Film [1999].trickplay"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name      string
+		temporary string
+	}{
+		{name: "a tool's staging directory", temporary: staging},
+		{name: "a file's temporary", temporary: writer.temporary(filepath.Join(dir, "movie.nfo"))},
+		{name: "the temporary of a replaced file", temporary: writer.temporary(filepath.Join(dir, "poster.jpg.earlier"))},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if base := filepath.Base(test.temporary); !strings.HasPrefix(base, ".") || filepath.Dir(test.temporary) != dir {
+				t.Errorf("temporary = %q, want a name beside its target that starts with a dot", test.temporary)
+			}
+		})
+	}
+}
+
 func TestAWriteReplacesAFileThatIsAlreadyThere(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "probe.yaml")
