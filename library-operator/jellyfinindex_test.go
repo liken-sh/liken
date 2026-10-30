@@ -62,6 +62,37 @@ func TestTheIndexAnswersTheItemOfOneWork(t *testing.T) {
 	}
 }
 
+// Jellyfin 12 leaves the members of a box set out of a listing that names
+// no user, whatever the server's own grouping setting says. The index reads
+// its listings with no user, so it asks for every item, and a film or a
+// series in a collection still takes its keys.
+func TestTheIndexHoldsTheWorksOfABoxSet(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		aliases map[string]string
+		season  int
+		episode int
+		item    string
+	}{
+		{name: "a film in a box set", aliases: map[string]string{"tmdb": "1101"}, item: "item-film"},
+		{name: "an episode of a series in a box set", aliases: map[string]string{"tmdb": "2101"},
+			season: 3, episode: 5, item: "item-series-3-5"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fake := jellyfinFixture()
+			fake.collected = []string{"item-film", "item-series"}
+			index, _, _ := standJellyfinIndex(t, fake)
+			index.prime(t.Context())
+
+			item, found := index.itemFor(t.Context(), test.aliases, test.season, test.episode)
+
+			if item != test.item || !found {
+				t.Errorf("item = %q, %v, want %q", item, found, test.item)
+			}
+		})
+	}
+}
+
 // The listing carries every series, so the ids of a series an episode
 // names are already held and no second call is made.
 func TestTheIndexHoldsTheSeriesTheListingCarried(t *testing.T) {

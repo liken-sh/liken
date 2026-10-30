@@ -64,10 +64,33 @@ func TestTheClientReadsTheWorksListing(t *testing.T) {
 	if len(held) != 3 || held[2].SeriesID != "item-series" || held[2].IndexNumber != 5 {
 		t.Errorf("items = %+v, want the two films and the episode", held)
 	}
-	want := "/Items?recursive=true&includeItemTypes=Movie,Episode&fields=ProviderIds" +
-		"&enableImages=false&startIndex=0&limit=500"
+	want := "/Items?recursive=true&includeItemTypes=Movie,Episode&collapseBoxSetItems=false" +
+		"&fields=ProviderIds&enableImages=false&startIndex=0&limit=500"
 	if fake.queries[0] != want {
 		t.Errorf("query = %q, want %q", fake.queries[0], want)
+	}
+}
+
+// A person's listing on a server that groups movies into collections still
+// carries every film of a box set, because the backfill reads that person's
+// progress in each work, and Jellyfin keeps the progress on the film and not
+// on the box set.
+func TestAPersonsListingCarriesTheFilmsOfABoxSet(t *testing.T) {
+	fake := jellyfinFixture()
+	fake.collected = []string{"item-film"}
+	fake.groups = true
+	api := standJellyfinServer(t, fake)
+	held := []jellyfinItem{}
+
+	err := api.userItems(t.Context(), "user-a", "", func(item jellyfinItem) {
+		held = append(held, item)
+	})
+
+	if err != nil {
+		t.Fatalf("reading the items: %v", err)
+	}
+	if ids := jellyfinIDs(held); !slices.Contains(ids, "item-film") {
+		t.Errorf("items = %q, want the film of the box set among them", ids)
 	}
 }
 

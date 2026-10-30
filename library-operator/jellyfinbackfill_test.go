@@ -209,7 +209,7 @@ func TestTheBackfillReadsBothFiltersAndRetainsNothing(t *testing.T) {
 		}
 
 		items := "/Items?userId=user-a&recursive=true&includeItemTypes=Movie,Episode" +
-			"&fields=ProviderIds&enableImages=false"
+			"&collapseBoxSetItems=false&fields=ProviderIds&enableImages=false"
 		want := []string{
 			"/Users",
 			items + "&filters=IsResumable&startIndex=0&limit=500",

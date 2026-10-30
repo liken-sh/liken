@@ -50,6 +50,12 @@ type fakeJellyfin struct {
 	// A test uses it to make a server that answers a smaller page than
 	// the query asked for.
 	capPage int
+	// The items that belong to a box set. Jellyfin 12 leaves them out of a
+	// listing that names no user, and out of a user's listing when the
+	// server groups movies into collections, unless the query sets
+	// collapseBoxSetItems=false.
+	collected []string
+	groups    bool
 	// The one item whose user-data writes this server refuses. A test uses
 	// it to drive a mark whose write lands on one item and fails on
 	// another.
@@ -152,8 +158,12 @@ func (f *fakeJellyfin) page(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	types := strings.Split(query.Get("includeItemTypes"), ",")
+	collapses := query.Get("collapseBoxSetItems") != "false" && (query.Get("userId") == "" || f.groups)
 	matched := []jellyfinItem{}
 	for _, item := range f.items {
+		if collapses && slices.Contains(f.collected, item.ID) {
+			continue
+		}
 		if slices.Contains(types, item.Type) {
 			matched = append(matched, item)
 		}

@@ -65,18 +65,27 @@ const (
 // answers an item with its image tags, its parents' image tags, and a blur
 // hash for each. Those fields are most of an item's bytes, and nothing
 // here reads them.
+//
+// Every listing sets collapseBoxSetItems=false, because a movie or a
+// series that belongs to a box set is a work the role must find. Without
+// it, Jellyfin 12 shows the box set in place of its members in a listing
+// that names no user, whatever the server's grouping setting is. In a
+// listing that names a user, the server's grouping setting decides.
 const (
 	// The two listings an index build reads. The series listing is read
 	// apart from the works, because an episode is keyed on its series'
 	// provider ids and only the series carries them. Two listings let the
 	// build fold every item as it arrives and hold no listing at all.
-	jellyfinSeriesListing = "/Items?recursive=true&includeItemTypes=Series&fields=ProviderIds&enableImages=false"
-	jellyfinWorksListing  = "/Items?recursive=true&includeItemTypes=Movie,Episode&fields=ProviderIds&enableImages=false"
-	jellyfinSeriesQuery   = "/Items?fields=ProviderIds&enableImages=false&ids="
+	jellyfinSeriesListing = "/Items?recursive=true&includeItemTypes=Series&collapseBoxSetItems=false" +
+		"&fields=ProviderIds&enableImages=false"
+	jellyfinWorksListing = "/Items?recursive=true&includeItemTypes=Movie,Episode&collapseBoxSetItems=false" +
+		"&fields=ProviderIds&enableImages=false"
+	jellyfinSeriesQuery = "/Items?fields=ProviderIds&enableImages=false&ids="
 	// the listing one user takes. It names the user, so every item
 	// carries that person's own user data, and the caller adds the filter
 	// that narrows the answer.
-	jellyfinUserItemsQuery = "&recursive=true&includeItemTypes=Movie,Episode&fields=ProviderIds&enableImages=false"
+	jellyfinUserItemsQuery = "&recursive=true&includeItemTypes=Movie,Episode&collapseBoxSetItems=false" +
+		"&fields=ProviderIds&enableImages=false"
 )
 
 // The two fields of a listing answer that the reader acts on: the items, and
