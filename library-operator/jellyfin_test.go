@@ -14,6 +14,7 @@ import (
 	"sync"
 	"testing"
 	"testing/synctest"
+	"time"
 )
 
 // One message the role published, as the recording publish function
@@ -226,14 +227,18 @@ func TestTheRoleRunsUntilItIsStopped(t *testing.T) {
 		}
 		drain(answer.Body)
 		stop()
-		synctest.Wait()
 
 		if answer.StatusCode != http.StatusOK {
 			t.Errorf("health = %d while the role ran, want %d", answer.StatusCode, http.StatusOK)
 		}
+		// The role shuts its webhook server down before it returns. The
+		// server's Shutdown polls on a timer until the health check's
+		// connection is idle, so the role can take a few milliseconds
+		// of the bubble's clock to return. It has the request timeout
+		// that serve gives the Shutdown.
 		select {
 		case <-served:
-		default:
+		case <-time.After(jellyfinRequestTimeout):
 			t.Error("the role did not return after the stop")
 		}
 	})
