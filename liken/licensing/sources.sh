@@ -222,7 +222,7 @@ place() {
 # module package.
 # Tracks kernel/VERSION.
 mirror "kernel/$kernel_version" "linux-$kernel_version.tar.xz" \
-    "039aef84f2b0994aeda3f4fcfc3d02ec9d7a9bbb9020ea264c43f446c860f606" \
+    "fa595aad93734f829c963c2a90ef7c3673224fd7fdae7b49406e397cde2de231" \
     "https://cdn.kernel.org/pub/linux/kernel/v${kernel_version%%.*}.x/linux-$kernel_version.tar.xz"
 place "kernel/$kernel_version" "config" "$here/../kernel/dist/$kernel_version/config"
 
