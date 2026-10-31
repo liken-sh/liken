@@ -70,13 +70,13 @@ func TestAChangeRunsTheJobsAndImagesThatReadIt(t *testing.T) {
 		images []string
 	}{
 		{"its Go source runs its jobs and the image whose context holds it", "operator/main.go", "package main // changed\n",
-			[]string{"go", "docs"}, []string{"operator"}},
+			[]string{"go", "docs", "codeql-go"}, []string{"operator"}},
 		{"a Rust file in one image's context runs that image alone", "operator/ui/app.rs", "fn main() { }\n",
 			nil, []string{"operator-ui"}},
 		{"its manual runs the manual's job and no image", "operator/docs/index.md", "an edit\n",
 			[]string{"docs"}, nil},
 		{"its test runs its jobs and no image", "operator/main_test.go", "package main\n",
-			[]string{"go", "docs"}, nil},
+			[]string{"go", "docs", "codeql-go"}, nil},
 		{"an ignored file runs its jobs and no image", "operator/local/notes.txt", "more notes\n",
 			[]string{"go", "docs"}, nil},
 		{"its ignore file runs the image that reads it", "operator/.dockerignore", "ui\n",
@@ -114,7 +114,7 @@ func TestAGeneratedFileRunsTheJobsAndImagesThatReadIt(t *testing.T) {
 	}{
 		{"its workflow runs every job and image", func(r *repo) {
 			r.write(".github/workflows/component-operator.yaml", "# generated again\n")
-		}, []string{"go", "docs"}, []string{"operator", "operator-ui"}},
+		}, []string{"go", "docs", "codeql-go"}, []string{"operator", "operator-ui"}},
 		{"an image's bake target runs that image alone", func(r *repo) {
 			r.write(bakeFile, bakeFileText("check", map[string]string{"base": "linux/amd64", "operator": "linux/amd64"})+
 				"\ntarget \"operator-ui\" {\n  context = \"operator/ui\"\n  target = \"ui\"\n}\n")
@@ -155,7 +155,7 @@ func TestARunThatPublishesRunsWhatReadsTheChangeAndTheNewVersion(t *testing.T) {
 		{"a change to the ui runs the ui and the image that reads the version", "operator/ui/app.rs", "fn main() { }\n",
 			nil, []string{"operator", "operator-ui"}},
 		{"a change to the operator leaves out the ui", "operator/main.go", "package main // changed\n",
-			[]string{"go", "docs"}, []string{"operator"}},
+			[]string{"go", "docs", "codeql-go"}, []string{"operator"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

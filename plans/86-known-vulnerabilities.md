@@ -111,22 +111,69 @@ workflow for the languages that the component holds, and the plan job
 runs it when a file that the language's analysis reads changes, the
 same rule that runs a Go job only for a Go change.
 
-Each job uploads its results under the category
-`codeql/<component>/<language>`. Code scanning closes an alert only
-when a later upload in the same category no longer reports it, so a
-category per component keeps the alerts of each component until that
-component's next analysis, and an analysis of one component does not
-close the alerts of another.
+The loader in `ci/codeql.go` derives the CodeQL jobs, so no
+`package.toml` declares one, and the plan and the workflow treat each
+as an ordinary job:
+
+- Each `go` job gets `codeql-<job>`, which runs `go build ./...` in the
+  job's module while CodeQL traces the build.
+- Each `rust` job gets `codeql-<job>`, which reads the crate in the
+  job's directory with build mode `none`.
+- A component that holds C or C++ sources gets `codeql-c-cpp`, and one
+  that holds Python sources gets `codeql-python`, both with build mode
+  `none`. No job builds those files, so the loader finds them by their
+  file names, outside `testdata/`.
+
+A CodeQL job runs when a source of its language changes in its own
+directory. A Go or a Rust job also runs when a source of its language
+changes in a module that the `go.mod` replaces or a crate that the
+crate takes by path. A data file, a manifest, or a Makefile runs no
+CodeQL job. Each job's configuration limits the analysis to its own
+directory, so a module of another component is analyzed only in that
+component's job.
+
+The GitHub Actions code is the files under `.github/`, which belong to
+no component. The root workflow's `codeql-actions` job analyzes them
+when a file under `.github/` changes, and the plan job's `actions`
+output decides that. A change to `ci/` or a `package.toml` that writes
+a different workflow changes a file under `.github/` too.
+
+Each component job uploads its results under the category
+`codeql/<component>/<job>`, where `<job>` is the job's name without
+`codeql-`, such as `codeql/library-operator/rust-appearances`, and the
+Actions job uploads under `codeql/actions`. Code scanning closes an
+alert only when a later upload in the same category no longer reports
+it, so a category per job keeps the alerts of each analysis until that
+analysis runs again, and an analysis of one component does not close
+the alerts of another. A component has more than one job of a
+language when it has two crates, so the category names the job, not
+the language.
+
+A pull request from a fork gets a token that cannot write to code
+scanning, so the CodeQL jobs run only for a branch of this repository.
 
 ## Trivy
 
 Trivy reads the operating system packages and the language packages
 inside an image. It runs in each component's publish job, on each
-image that the job has just pushed, by digest, so it reads the bytes
+image that the job has just pushed. `ci publish` runs the scan right
+after the push, because only the publish knows which images it pushed:
+an image whose version is already published is not pushed again, and
+a dry run pushes nothing. The scan reads the image from the registry
+by its version tag. A publish never pushes a version tag twice, so
+the tag names the bytes that were just pushed, which are the bytes
 that a cluster pulls. Its SARIF goes to code scanning under the
-category `trivy/<image>`. A component that does not publish starts no
-Trivy scan, and a pinned base, which publishes only when its tag is
-new, is scanned once for each tag.
+category `trivy/<image>`, from one `upload-sarif` step for each image
+of the component. A component that does not publish starts no Trivy
+scan, and a pinned base, which publishes only when its tag is new, is
+scanned once for each tag.
+
+A scan reports, and it does not gate the publish. A scan that fails,
+for example when Trivy's database download fails, prints a warning,
+and the publish pushes the next image. The install of Trivy and each
+upload continue on an error too. Each publish job downloads Trivy's
+vulnerability database once, before its first scan. `ci/workflow.go`
+pins the Trivy version, and `ci/latest.sh` reports it.
 
 Trivy's findings change only when it runs, unlike Dependabot's. An
 advisory against a Debian package in an image that no push touches

@@ -169,8 +169,8 @@ func TestAReleaseTagRunsWhatTheNewestGreenRunDidNotVerify(t *testing.T) {
 		images     []string
 	}{
 		{"a tag on the newest green run runs nothing", head, "", nil, nil},
-		{"a tag past the newest green run runs what changed since", before, "", []string{"check"}, []string{"operator"}},
-		{"a tag with no green run to compare with runs everything", "", "the API answered 403", []string{"check"}, []string{"operator"}},
+		{"a tag past the newest green run runs what changed since", before, "", []string{"check", "codeql-check"}, []string{"operator"}},
+		{"a tag with no green run to compare with runs everything", "", "the API answered 403", []string{"check", "codeql-check"}, []string{"operator"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

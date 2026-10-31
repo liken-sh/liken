@@ -121,6 +121,7 @@ jobs:
     outputs:
       components: ${{ steps.plan.outputs.components }}
       site: ${{ steps.plan.outputs.site }}
+      actions: ${{ steps.plan.outputs.actions }}
     steps:
       # The plan diffs against the commit before the push and against
       # each component's release tag, so it needs the history and the
@@ -194,6 +195,37 @@ jobs:
       - name: check each package.toml against the code
         working-directory: ci
         run: go run . deps -root ..{% template "go-save" (goCache "ci/go.mod" "**/go.sum" "every-module" false) %}
+
+  # CodeQL analyzes the GitHub Actions code: the workflows and the local
+  # actions under .github/. That code belongs to no component, so this
+  # workflow runs the analysis, and the plan decides whether it runs:
+  # when a file under .github/ changed, which includes each generated
+  # workflow that a change to ci/ or a package.toml writes again, and
+  # when every job runs. ci/codeql.go gives the rule. A pull request from
+  # a fork gets a token that cannot write to code scanning, so the
+  # analysis runs only for a branch of this repository.
+  codeql-actions:
+    needs: plan
+    if: ${{ needs.plan.outputs.actions == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: actions
+          build-mode: none
+          config: |
+            paths:
+              - .github
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: codeql/actions
 {% range .Components %}
   {% .Name %}:
     needs: [plan{% range .Needs %}, {% . %}{% end %}]
@@ -208,7 +240,8 @@ jobs:
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['{% .Name %}'].images) }}{% end %}
     permissions:
       contents: read
-      packages: write
+      packages: write{% if .SecurityEvents %}
+      security-events: write{% end %}
 {% if .Publishes %}
   {% .Name %}-publish:
     needs: [plan, {% .Name %}{% range .PublishNeeds %}, {% . %}{% end %}]
@@ -223,7 +256,8 @@ jobs:
       images: '[]'{% end %}
     permissions:
       contents: read
-      packages: write{% if .Channel %}
+      packages: write{% if .SecurityEvents %}
+      security-events: write{% end %}{% if .Channel %}
     # The OS publishes to the release channel with the channel's key.
     secrets: inherit{% end %}
 {% end %}{% end %}

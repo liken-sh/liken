@@ -93,6 +93,10 @@ type Job struct {
 	// Skip names the hooks that a prek job leaves out, because another
 	// job of the component runs the same command.
 	Skip []string `toml:"skip"`
+	// Language is the CodeQL language of a job whose toolchain is
+	// codeql. No package.toml declares such a job, because codeql.go
+	// derives each one, so the field has no key.
+	Language string `toml:"-"`
 }
 
 // Toolchains are the setups the workflow template knows.
@@ -188,9 +192,13 @@ var skipDirs = map[string]bool{
 	".cache": true,
 }
 
-// LoadComponents finds every package.toml under root and reads it.
+// LoadComponents finds every package.toml under root and reads it, and
+// derives each component's CodeQL jobs. The same walk lists the files
+// that a C, C++, or Python analysis reads, because no package.toml
+// names them.
 func LoadComponents(root string) (map[string]*Component, error) {
 	components := map[string]*Component{}
+	var sources []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -206,6 +214,13 @@ func LoadComponents(root string) (map[string]*Component, error) {
 			if _, err := os.Lstat(filepath.Join(path, ".git")); err == nil {
 				return filepath.SkipDir
 			}
+		}
+		if !d.IsDir() && (languageSource(languageC, d.Name()) || languageSource(languagePython, d.Name())) {
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				return err
+			}
+			sources = append(sources, filepath.ToSlash(rel))
 		}
 		if d.IsDir() || d.Name() != "package.toml" {
 			return nil
@@ -229,6 +244,15 @@ func LoadComponents(root string) (map[string]*Component, error) {
 	}
 	if err := validateGraph(components); err != nil {
 		return nil, err
+	}
+	owned := map[string][]string{}
+	for _, file := range sources {
+		if owner := ownerOf(components, file); owner != "" {
+			owned[owner] = append(owned[owner], strings.TrimPrefix(file, components[owner].Dir+"/"))
+		}
+	}
+	for _, c := range components {
+		c.Jobs = append(c.Jobs, codeqlJobs(c, owned[c.Name()])...)
 	}
 	return components, validateExcluded(root, components)
 }
@@ -276,6 +300,9 @@ func (c *Component) validate(path string) error {
 			return fmt.Errorf("%s: two jobs are named %q", path, job.Name)
 		}
 		jobs[job.Name] = true
+		if err := validateDeclaredName(path, job); err != nil {
+			return err
+		}
 		if !slices.Contains(toolchains, job.Toolchain) {
 			return fmt.Errorf("%s: job %q: the toolchain %q is not one of %s", path, job.Name, job.Toolchain, strings.Join(toolchains, ", "))
 		}

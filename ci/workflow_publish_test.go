@@ -161,3 +161,66 @@ func TestThePublishJobSetsUpOnlyWhatTheOutputsNeed(t *testing.T) {
 		}
 	}
 }
+
+// trivyFixture is a pinned base with two images, and a component that
+// publishes only a deploy artifact, so it pushes no image to scan.
+func trivyFixture(t *testing.T) map[string][]byte {
+	t.Helper()
+	root := writeTree(t, map[string]string{
+		"base/package.toml":  "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\n[[outputs.images]]\nname = \"base-dev\"\n",
+		"app/package.toml":   "[package]\nname = \"app\"\n[outputs]\ndeploy = \"deploy\"\n",
+		"liken/flux/VERSION": "v2.9.7\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := Workflows(root, components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
+}
+
+// The publish of a component with images installs Trivy, scans each
+// image it pushes, and uploads each scan under the image's own
+// category. Both calls of its workflow grant the upload, because
+// GitHub checks every job of a called workflow against the call.
+func TestThePublishUploadsATrivyScanOfEachImage(t *testing.T) {
+	files := trivyFixture(t)
+	publish := workflowJobs(t, files[".github/workflows/component-base.yaml"])["publish"]
+	var uploads []string
+	trivy, sarif := "", false
+	for _, step := range publish["steps"].([]any) {
+		step := step.(map[string]any)
+		with, _ := step["with"].(map[string]any)
+		switch uses, _ := step["uses"].(string); {
+		case uses == "aquasecurity/setup-trivy@v0.3.1":
+			trivy, _ = with["version"].(string)
+		case strings.HasPrefix(uses, "github/codeql-action/upload-sarif@"):
+			uploads = append(uploads, with["sarif_file"].(string)+" "+with["category"].(string))
+		}
+		if run, _ := step["run"].(string); strings.Contains(run, "go run . publish ") && strings.Contains(run, ` -sarif "${{ github.workspace }}/trivy"`) {
+			sarif = true
+		}
+	}
+	if trivy != "v"+trivyVersion || !sarif {
+		t.Errorf("trivy %q, the publish writes the scans: %v", trivy, sarif)
+	}
+	if want := []string{"trivy/base.sarif trivy/base", "trivy/base-dev.sarif trivy/base-dev"}; !reflect.DeepEqual(uploads, want) {
+		t.Errorf("uploads %v, want %v", uploads, want)
+	}
+	if got := publish["permissions"].(map[string]any)["security-events"]; got != "write" {
+		t.Errorf("the publish job's security-events: %v", got)
+	}
+}
+
+func TestOnlyAComponentThatUploadsIsGrantedSecurityEvents(t *testing.T) {
+	jobs := workflowJobs(t, trivyFixture(t)[".github/workflows/ci.yaml"])
+	cases := map[string]any{"base": "write", "base-publish": "write", "app": nil, "app-publish": nil}
+	for name, want := range cases {
+		if got := jobs[name]["permissions"].(map[string]any)["security-events"]; got != want {
+			t.Errorf("%s grants security-events %v, want %v", name, got, want)
+		}
+	}
+}

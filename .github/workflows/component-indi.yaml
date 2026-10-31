@@ -199,6 +199,114 @@ jobs:
           prek-version: 0.5.2
           extra-args: --all-files indi/
 
+  codeql-go:
+    # ci/codeql.go derives this job. A pull request from a fork gets a
+    # token that cannot write to code scanning, so the analysis runs
+    # only for a branch of this repository.
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'codeql-go') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    defaults:
+      run:
+        working-directory: indi/shim
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: setup-go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: indi/shim/go.mod
+          cache: false
+
+      # The repository's Actions cache holds 10 GB, and GitHub evicts
+      # the oldest entries when the caches pass that limit. So every run
+      # restores the Go caches, and only a push to main saves them: a
+      # branch never writes an entry that pushes one of main's out.
+      #
+      # The downloaded modules are the entry of the module `indi/shim`,
+      # whose `go` job saves it. This job keeps no build cache.
+      # When no entry has the key, as on a branch that changes `go.sum`,
+      # the restore takes the newest entry of the same family, which
+      # holds most of the modules that the job needs.
+      #
+      # The entry holds the extracted source and, from the download
+      # cache, only the `go.mod` files and the zip hashes. `go` reads the
+      # `go.mod` files to load the module graph, and it downloads a module
+      # again when its zip hash is missing. `go` does not read a zip
+      # file after it extracts the source, and the zip files are about
+      # half of the compressed entry.
+      - id: go-modules
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/go/pkg/mod/*
+            !~/go/pkg/mod/cache
+            ~/go/pkg/mod/cache/download/**/*.mod
+            ~/go/pkg/mod/cache/download/**/*.ziphash
+          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-indi/shim-${{ hashFiles('indi/shim/go.sum') }}
+          restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-indi/shim-
+
+      # CodeQL analyzes every file of the checkout unless its
+      # configuration names paths, so the configuration limits the
+      # analysis to this job's directory. The module's go.mod can replace
+      # a module with a directory of another component, and that
+      # component's own job analyzes it. CodeQL traces the build in the
+      # next step and extracts each package that the build compiles.
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: go
+          build-mode: manual
+          config: |
+            paths:
+              - indi/shim
+
+      - run: go build ./...
+
+      # The category keeps this job's alerts apart from every other
+      # analysis: code scanning closes an alert only when a later upload
+      # in the same category no longer reports it.
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: codeql/indi/go
+
+  codeql-python:
+    # ci/codeql.go derives this job. A pull request from a fork gets a
+    # token that cannot write to code scanning, so the analysis runs
+    # only for a branch of this repository.
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'codeql-python') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    defaults:
+      run:
+        working-directory: indi
+    steps:
+      - uses: actions/checkout@v7
+
+      # CodeQL analyzes every file of the checkout unless its
+      # configuration names paths, so the configuration limits the
+      # analysis to this job's directory. The analysis reads the sources
+      # without a build.
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: python
+          build-mode: none
+          config: |
+            paths:
+              - indi
+
+      # The category keeps this job's alerts apart from every other
+      # analysis: code scanning closes an alert only when a later upload
+      # in the same category no longer reports it.
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: codeql/indi/python
+
   # Each image builds through docker-bake.hcl at the top of the
   # repository, as the target of the same name. A Dockerfile that
   # builds on a base of the repository, as in FROM mpv, gets that base's
@@ -273,6 +381,11 @@ jobs:
     if: ${{ inputs.stage == 'publish' || inputs.dryrun }}
     runs-on: ubuntu-26.04
     timeout-minutes: 30
+    # security-events: write uploads the Trivy scan of each image.
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -357,6 +470,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
+      # The publish scans each image that it pushes with Trivy, so only
+      # an image that this run publishes is scanned, and a pinned base is
+      # scanned once for each tag. The scan reports and does not gate: an
+      # install that fails here makes each scan fail, and the publish
+      # warns and pushes the next image. The first scan downloads Trivy's
+      # vulnerability database, and the later scans of the job reuse it.
+      - if: ${{ !inputs.dryrun }}
+        continue-on-error: true
+        uses: aquasecurity/setup-trivy@v0.3.1
+        with:
+          version: v0.76.1
+
       # Each image builds again through docker-bake.hcl, and pushes. An
       # image that ran in the images job above builds from the layers that
       # the job wrote to the cache. An image that did not run reads
@@ -364,7 +489,177 @@ jobs:
       # the layers that an earlier run on main wrote.
       - name: publish
         working-directory: ci
-        run: go run . publish -root .. -component indi -version "${{ inputs.version }}" -mode "${{ inputs.dryrun && 'dry' || inputs.publish }}"
+        run: go run . publish -root .. -component indi -version "${{ inputs.version }}" -mode "${{ inputs.dryrun && 'dry' || inputs.publish }}" -sarif "${{ github.workspace }}/trivy"
+
+      # The scan of indi, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/indi.sarif
+          category: trivy/indi
+
+      # The scan of indi-simulators, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-simulators.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/indi-simulators.sarif
+          category: trivy/indi-simulators
+
+      # The scan of indi-phd2, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-phd2.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/indi-phd2.sarif
+          category: trivy/indi-phd2
+
+      # The scan of indi-open, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-open.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/indi-open.sarif
+          category: trivy/indi-open
+
+      # The scan of indi-zwo, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-zwo.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/indi-zwo.sarif
+          category: trivy/indi-zwo
+
+      # The scan of indi-qhy, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-qhy.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/indi-qhy.sarif
+          category: trivy/indi-qhy
+
+      # The scan of indi-playerone, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-playerone.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/indi-playerone.sarif
+          category: trivy/indi-playerone
+
+      # The scan of indi-svbony, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-svbony.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/indi-svbony.sarif
+          category: trivy/indi-svbony
+
+      # The scan of indi-atik, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-atik.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/indi-atik.sarif
+          category: trivy/indi-atik
+
+      # The scan of indi-fli, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-fli.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/indi-fli.sarif
+          category: trivy/indi-fli
+
+      # The scan of indi-sbig, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-sbig.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/indi-sbig.sarif
+          category: trivy/indi-sbig
+
+      # The scan of indi-mi, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-mi.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/indi-mi.sarif
+          category: trivy/indi-mi
+
+      # The scan of indi-qsi, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-qsi.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/indi-qsi.sarif
+          category: trivy/indi-qsi
+
+      # The scan of indi-apogee, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-apogee.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/indi-apogee.sarif
+          category: trivy/indi-apogee
+
+      # The scan of indi-astroasis, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-astroasis.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/indi-astroasis.sarif
+          category: trivy/indi-astroasis
+
+      # The scan of indi-gphoto, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-gphoto.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/indi-gphoto.sarif
+          category: trivy/indi-gphoto
+
+      # The scan of indi-touptek, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-touptek.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/indi-touptek.sarif
+          category: trivy/indi-touptek
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-build.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6

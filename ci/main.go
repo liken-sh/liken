@@ -70,6 +70,7 @@ func (w World) run(args []string) error {
 	component := flags.String("component", "", "publish, profile: the component")
 	version := flags.String("version", "", "publish: the version")
 	mode := flags.String("mode", "", "publish: dev or release")
+	sarif := flags.String("sarif", "", "publish: the directory for the Trivy scan of each pushed image, or empty for no scan")
 	tag := flags.String("tag", "", "record: the release tag")
 	site := flags.String("site", "", "reports, profile: the address of the site that serves the profiles now")
 	dest := flags.String("dest", "", "reports: the site's tree, where the profiles publish")
@@ -101,7 +102,7 @@ func (w World) run(args []string) error {
 		if err != nil {
 			return err
 		}
-		p := Publisher{Root: *root, Registry: w.Published.Registry, Run: w.Run, Commit: commit, Components: components}
+		p := Publisher{Root: *root, Registry: w.Published.Registry, Run: w.Run, Commit: commit, Components: components, SARIF: *sarif}
 		return p.Publish(c, *version, *mode)
 	case "record":
 		return w.record(*root, components, *tag)

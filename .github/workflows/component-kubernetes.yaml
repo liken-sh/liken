@@ -197,3 +197,76 @@ jobs:
         with:
           prek-version: 0.5.2
           extra-args: --all-files kubernetes/
+
+  codeql-go:
+    # ci/codeql.go derives this job. A pull request from a fork gets a
+    # token that cannot write to code scanning, so the analysis runs
+    # only for a branch of this repository.
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'codeql-go') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    defaults:
+      run:
+        working-directory: kubernetes
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: setup-go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: kubernetes/go.mod
+          cache: false
+
+      # The repository's Actions cache holds 10 GB, and GitHub evicts
+      # the oldest entries when the caches pass that limit. So every run
+      # restores the Go caches, and only a push to main saves them: a
+      # branch never writes an entry that pushes one of main's out.
+      #
+      # The downloaded modules are the entry of the module `kubernetes`,
+      # whose `go` job saves it. This job keeps no build cache.
+      # When no entry has the key, as on a branch that changes `go.sum`,
+      # the restore takes the newest entry of the same family, which
+      # holds most of the modules that the job needs.
+      #
+      # The entry holds the extracted source and, from the download
+      # cache, only the `go.mod` files and the zip hashes. `go` reads the
+      # `go.mod` files to load the module graph, and it downloads a module
+      # again when its zip hash is missing. `go` does not read a zip
+      # file after it extracts the source, and the zip files are about
+      # half of the compressed entry.
+      - id: go-modules
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/go/pkg/mod/*
+            !~/go/pkg/mod/cache
+            ~/go/pkg/mod/cache/download/**/*.mod
+            ~/go/pkg/mod/cache/download/**/*.ziphash
+          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-kubernetes-${{ hashFiles('kubernetes/go.sum') }}
+          restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-kubernetes-
+
+      # CodeQL analyzes every file of the checkout unless its
+      # configuration names paths, so the configuration limits the
+      # analysis to this job's directory. The module's go.mod can replace
+      # a module with a directory of another component, and that
+      # component's own job analyzes it. CodeQL traces the build in the
+      # next step and extracts each package that the build compiles.
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: go
+          build-mode: manual
+          config: |
+            paths:
+              - kubernetes
+
+      - run: go build ./...
+
+      # The category keeps this job's alerts apart from every other
+      # analysis: code scanning closes an alert only when a later upload
+      # in the same category no longer reports it.
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: codeql/kubernetes/go

@@ -116,6 +116,9 @@ func (p Planner) readDiffs(list []comparison, head string) (Diff, error) {
 		}
 		joined.SharedBake = joined.SharedBake || d.SharedBake
 		joined.Site = joined.Site || d.Site
+		if joined.GitHub == "" {
+			joined.GitHub = d.GitHub
+		}
 	}
 	return joined, nil
 }

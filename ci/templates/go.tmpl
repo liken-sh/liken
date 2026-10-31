@@ -26,10 +26,12 @@
       # and this job would download them again on each run until
       # `go.sum` changes.{% else %} The
       # module's `go` job saves the entry, because it runs the module's
-      # tests and reads every module that this job reads.{% end %}{% else %}
+      # tests and reads every module that this job reads.{% end %}{% else if .SavesModules %}
       # The downloaded modules are one entry for the family `{% .Family %}`,
       # saved when the key misses. The key follows the hash of
-      # `{% index .Keys 0 %}`.{% end %}
+      # `{% index .Keys 0 %}`.{% else %}
+      # The downloaded modules are the entry of the module `{% .Family %}`,
+      # whose `go` job saves it. This job keeps no build cache.{% end %}
       # When no entry has the key, as on a branch that changes `go.sum`,
       # the restore takes the newest entry of the same {% if .Build %}module{% else %}family{% end %}, which
       # holds most of the modules that the job needs.

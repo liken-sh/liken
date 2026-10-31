@@ -6,9 +6,10 @@
 # ci/ writes every workflow from its templates, so the templates and
 # the composite action in .github/actions/build-setup hold every
 # GitHub Action that CI runs. The generator holds the prek version
-# that every prek job installs, and each .pre-commit-config.yaml holds
-# the revision of each hook repository. The flux action is not here,
-# because its version follows liken/flux/VERSION.
+# that every prek job installs and the Trivy version that every publish
+# job installs, and each .pre-commit-config.yaml holds the revision of
+# each hook repository. The flux action is not here, because its
+# version follows liken/flux/VERSION.
 #
 # Each pin is built from source by its upstream, so no row has a
 # channel. A major tag such as `@v7` takes every release within the
@@ -16,7 +17,10 @@
 # the newest release. An exact tag such as `@v2.87.1` compares the
 # whole version. The newest release is GitHub's latest release, which
 # is never a pre-release or a draft. A hook repository that publishes
-# no releases compares against its newest version tag.
+# no releases compares against its newest version tag, and so does an
+# action whose latest release is not a version of the action:
+# github/codeql-action publishes the CodeQL bundle as its releases, and
+# tags each version of the action.
 #
 # Usage:
 #   ci/latest.sh                       report every action, prek, and
@@ -24,6 +28,7 @@
 #   ci/latest.sh --bump <action>       move one action, such as
 #                                      actions/checkout, in every template
 #   ci/latest.sh --bump prek           move the prek version
+#   ci/latest.sh --bump trivy          move the Trivy version
 #   ci/latest.sh --bump hook:<repo>    move one hook repository, such as
 #                                      pre-commit/pre-commit-hooks, in
 #                                      every .pre-commit-config.yaml
@@ -72,6 +77,7 @@ latest_ref() {
     local repo release
     repo="$(cut -d/ -f1-2 <<<"$1")"
     release="$(newest_release "$repo")" || release=""
+    [[ "$release" =~ ^v?[0-9] ]] || release="$(newest_tag "$repo")" || release=""
     [[ -n "$release" ]] || return 0
     if [[ "$2" =~ ^v[0-9]+$ ]]; then
         sed -E 's/^(v[0-9]+).*/\1/' <<<"$release"
@@ -81,6 +87,7 @@ latest_ref() {
 }
 
 pinned_prek() { sed -n 's/^const prekVersion = "\(.*\)"$/\1/p' "$here/workflow.go"; }
+pinned_trivy() { sed -n 's/^const trivyVersion = "\(.*\)"$/\1/p' "$here/workflow.go"; }
 
 # hooks prints "repository rev file" for each hook repository of each
 # .pre-commit-config.yaml. git's list leaves out the caches, which
@@ -95,7 +102,7 @@ hooks() {
 }
 
 report() {
-    local action refs latest prek prek_latest repo revs
+    local action refs latest prek prek_latest trivy trivy_latest repo revs
     uses >"$work/uses"
     while read -r action; do
         refs="$(awk -v a="$action" '$1 == a { print $2 }' "$work/uses" | paste -sd,)"
@@ -111,6 +118,11 @@ report() {
     prek_latest="$(newest_release j178/prek)" || prek_latest=""
     prek_latest="${prek_latest#v}"
     row prek "$prek" "${prek_latest:-?}" - - - "prekVersion in ci/workflow.go"
+
+    trivy="$(pinned_trivy)"
+    trivy_latest="$(newest_release aquasecurity/trivy)" || trivy_latest=""
+    trivy_latest="${trivy_latest#v}"
+    row trivy "$trivy" "${trivy_latest:-?}" - - - "trivyVersion in ci/workflow.go"
 
     hooks >"$work/hooks"
     while read -r repo; do
@@ -128,7 +140,7 @@ fi
 target="${2:-}"
 case "$target" in
 "")
-    echo "latest.sh: --bump needs a name: an action, prek, or hook:<repo>" >&2
+    echo "latest.sh: --bump needs a name: an action, prek, trivy, or hook:<repo>" >&2
     exit 1
     ;;
 prek)
@@ -141,6 +153,17 @@ prek)
     }
     sed -i "s/^const prekVersion = \".*\"$/const prekVersion = \"$new\"/" "$here/workflow.go"
     echo "prek: $old -> $new"
+    ;;
+trivy)
+    old="$(pinned_trivy)"
+    new="$(newest_release aquasecurity/trivy)"
+    new="${new#v}"
+    [[ -n "$new" && "$new" != null ]] || {
+        echo "latest.sh: GitHub did not answer for aquasecurity/trivy" >&2
+        exit 1
+    }
+    sed -i "s/^const trivyVersion = \".*\"$/const trivyVersion = \"$new\"/" "$here/workflow.go"
+    echo "trivy: $old -> $new"
     ;;
 hook:*)
     repo="${target#hook:}"

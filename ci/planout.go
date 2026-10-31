@@ -80,6 +80,15 @@ func (w World) plan(root string, components map[string]*Component) error {
 	} else {
 		notes = append(notes, "The site does not deploy: "+siteWhy+".")
 	}
+	actions, actionsWhy, err := planner.Actions(e)
+	if err != nil {
+		return err
+	}
+	if actions {
+		notes = append(notes, "CodeQL analyzes the Actions code: "+actionsWhy+".")
+	} else {
+		notes = append(notes, "CodeQL does not analyze the Actions code: "+actionsWhy+".")
+	}
 	var summary strings.Builder
 	writeSummary(&summary, e, components, decisions, candidates, notes, probed, refused)
 	fmt.Fprint(w.Stdout, summary.String())
@@ -104,7 +113,7 @@ func (w World) plan(root string, components map[string]*Component) error {
 		return err
 	}
 	if path := w.Getenv("GITHUB_OUTPUT"); path != "" {
-		if err := appendFile(path, fmt.Sprintf("components=%s\nsite=%t\n", encoded, site)); err != nil {
+		if err := appendFile(path, fmt.Sprintf("components=%s\nsite=%t\nactions=%t\n", encoded, site, actions)); err != nil {
 			return err
 		}
 	}

@@ -121,6 +121,7 @@ jobs:
     outputs:
       components: ${{ steps.plan.outputs.components }}
       site: ${{ steps.plan.outputs.site }}
+      actions: ${{ steps.plan.outputs.actions }}
     steps:
       # The plan diffs against the commit before the push and against
       # each component's release tag, so it needs the history and the
@@ -339,6 +340,37 @@ jobs:
             ~/go/pkg/mod/cache/download/**/*.ziphash
           key: ${{ steps.go-modules.outputs.cache-primary-key }}
 
+  # CodeQL analyzes the GitHub Actions code: the workflows and the local
+  # actions under .github/. That code belongs to no component, so this
+  # workflow runs the analysis, and the plan decides whether it runs:
+  # when a file under .github/ changed, which includes each generated
+  # workflow that a change to ci/ or a package.toml writes again, and
+  # when every job runs. ci/codeql.go gives the rule. A pull request from
+  # a fork gets a token that cannot write to code scanning, so the
+  # analysis runs only for a branch of this repository.
+  codeql-actions:
+    needs: plan
+    if: ${{ needs.plan.outputs.actions == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: actions
+          build-mode: none
+          config: |
+            paths:
+              - .github
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: codeql/actions
+
   toolchains:
     needs: [plan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['toolchains'].check }}
@@ -367,6 +399,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   vulkan-publish:
     needs: [plan, vulkan, toolchains]
@@ -382,6 +415,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   astrometry:
     needs: [plan, vulkan]
@@ -397,6 +431,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   astrometry-publish:
     needs: [plan, astrometry, toolchains, vulkan]
@@ -412,6 +447,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   kubernetes:
     needs: [plan]
@@ -426,6 +462,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   notices:
     needs: [plan]
@@ -455,6 +492,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   trust-publish:
     needs: [plan, trust]
@@ -470,6 +508,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   indi:
     needs: [plan, trust]
@@ -485,6 +524,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   indi-publish:
     needs: [plan, indi, toolchains, trust]
@@ -500,6 +540,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   weston:
     needs: [plan, vulkan]
@@ -515,6 +556,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   weston-publish:
     needs: [plan, weston, toolchains, vulkan]
@@ -530,6 +572,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   observatory-operator:
     needs: [plan, indi, trust, weston]
@@ -545,6 +588,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   observatory-operator-publish:
     needs: [plan, observatory-operator, indi, kubernetes, notices, toolchains, trust, vulkan, weston]
@@ -560,6 +604,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   astrophotography-operator:
     needs: [plan, astrometry]
@@ -575,6 +620,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   astrophotography-operator-publish:
     needs: [plan, astrophotography-operator, astrometry, indi, kubernetes, notices, observatory-operator, toolchains, trust, vulkan, weston]
@@ -590,6 +636,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   audio-operator:
     needs: [plan, trust, vulkan]
@@ -605,6 +652,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   audio-operator-publish:
     needs: [plan, audio-operator, kubernetes, notices, toolchains, trust, vulkan]
@@ -620,6 +668,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   bluetooth-operator:
     needs: [plan, trust]
@@ -635,6 +684,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   bluetooth-operator-publish:
     needs: [plan, bluetooth-operator, kubernetes, notices, toolchains, trust]
@@ -650,6 +700,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   brand:
     needs: [plan]
@@ -664,6 +715,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   ci:
     needs: [plan]
@@ -678,6 +730,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   vaapi:
     needs: [plan, vulkan]
@@ -693,6 +746,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   vaapi-publish:
     needs: [plan, vaapi, toolchains, vulkan]
@@ -708,6 +762,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   ffmpeg:
     needs: [plan, vaapi, vulkan]
@@ -723,6 +778,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   ffmpeg-publish:
     needs: [plan, ffmpeg, toolchains, vaapi, vulkan]
@@ -738,6 +794,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   display-operator:
     needs: [plan, ffmpeg, trust, weston]
@@ -753,6 +810,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   display-operator-publish:
     needs: [plan, display-operator, ffmpeg, kubernetes, notices, toolchains, trust, vaapi, vulkan, weston]
@@ -768,6 +826,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   equipment-operator:
     needs: [plan]
@@ -783,6 +842,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   equipment-operator-publish:
     needs: [plan, equipment-operator, kubernetes, notices, toolchains]
@@ -798,6 +858,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   firmware-operator:
     needs: [plan, trust, vulkan]
@@ -813,6 +874,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   firmware-operator-publish:
     needs: [plan, firmware-operator, kubernetes, notices, toolchains, trust, vulkan]
@@ -828,6 +890,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   git-csi-driver:
     needs: [plan, trust, vulkan]
@@ -843,6 +906,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   git-csi-driver-publish:
     needs: [plan, git-csi-driver, kubernetes, notices, toolchains, trust, vulkan]
@@ -858,6 +922,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   media-screen:
     needs: [plan]
@@ -872,6 +937,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   library-operator:
     needs: [plan, ffmpeg, trust, vulkan]
@@ -887,6 +953,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   library-operator-publish:
     needs: [plan, library-operator, brand, ffmpeg, kubernetes, media-screen, notices, toolchains, trust, vaapi, vulkan]
@@ -902,6 +969,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   liken:
     needs: [plan, trust]
@@ -916,6 +984,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   liken-publish:
     needs: [plan, liken, brand, kubernetes, toolchains, trust]
@@ -930,6 +999,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
     # The OS publishes to the release channel with the channel's key.
     secrets: inherit
 
@@ -947,6 +1017,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   mpv-publish:
     needs: [plan, mpv, ffmpeg, toolchains, vaapi, vulkan]
@@ -962,6 +1033,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   media-operator:
     needs: [plan, ffmpeg, mpv, trust, vaapi, vulkan]
@@ -977,6 +1049,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   media-operator-publish:
     needs: [plan, media-operator, brand, ffmpeg, kubernetes, media-screen, mpv, notices, toolchains, trust, vaapi, vulkan]
@@ -992,6 +1065,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   people-operator:
     needs: [plan, trust]
@@ -1007,6 +1081,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   people-operator-publish:
     needs: [plan, people-operator, kubernetes, notices, toolchains, trust]
@@ -1022,6 +1097,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   per-node-csi-driver:
     needs: [plan]
@@ -1037,6 +1113,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   per-node-csi-driver-publish:
     needs: [plan, per-node-csi-driver, kubernetes, notices, toolchains]
@@ -1052,6 +1129,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   # The site is every component's manual in one tree: liken's manual
   # at the root, and each other component's manual under its prefix,

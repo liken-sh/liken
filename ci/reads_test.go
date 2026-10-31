@@ -86,20 +86,20 @@ func TestAChangeRunsTheJobsWhoseToolchainReadsIt(t *testing.T) {
 		file string
 		jobs []string
 	}{
-		{"its Go source runs every job but the Rust one", "operator/main.go", []string{"go", "docs", "prek"}},
-		{"its Rust source runs the Rust job", "operator/ui/src/lib.rs", []string{"rust", "prek"}},
-		{"its crate's manifest runs the Rust job", "operator/ui/Cargo.toml", []string{"rust", "prek"}},
-		{"its crate's toolchain pin runs the Rust job", "operator/ui/rust-toolchain.toml", []string{"rust", "prek"}},
+		{"its Go source runs every job but the Rust one", "operator/main.go", []string{"go", "docs", "prek", "codeql-go"}},
+		{"its Rust source runs the Rust job", "operator/ui/src/lib.rs", []string{"rust", "prek", "codeql-rust"}},
+		{"its crate's manifest runs the Rust job", "operator/ui/Cargo.toml", []string{"rust", "prek", "codeql-rust"}},
+		{"its crate's toolchain pin runs the Rust job", "operator/ui/rust-toolchain.toml", []string{"rust", "prek", "codeql-rust"}},
 		{"a data file in the crate runs every job", "operator/ui/cases.json", []string{"go", "docs", "rust", "prek"}},
 		{"its manifests run every job", "operator/deploy/crd.yaml", []string{"go", "docs", "rust", "prek"}},
 		{"a page of its manual runs the manual", "operator/docs/index.md", []string{"docs", "prek"}},
-		{"a Go file of its manual runs the Go job too, whose gofmt reads it", "operator/docs/manual_test.go", []string{"go", "docs", "prek"}},
+		{"a Go file of its manual runs the Go job too, whose gofmt reads it", "operator/docs/manual_test.go", []string{"go", "docs", "prek", "codeql-go"}},
 		{"a generated skill runs the manual", "operator/skills/a/SKILL.md", []string{"docs", "prek"}},
 		{"a smoke check runs the manual", "operator/smoke/operator.sh", []string{"docs", "prek"}},
-		{"a Go module it replaces runs its Go job and its manual", "kubernetes/watch.go", []string{"go", "docs", "prek"}},
-		{"a crate it takes by path runs its Rust job", "screen/src/lib.rs", []string{"rust", "prek"}},
+		{"a Go module it replaces runs its Go job and its manual", "kubernetes/watch.go", []string{"go", "docs", "prek", "codeql-go"}},
+		{"a crate it takes by path runs its Rust job", "screen/src/lib.rs", []string{"rust", "prek", "codeql-rust"}},
 		{"brand's stylesheet runs the crate that reads it and the manual", "brand/liken.css", []string{"docs", "rust", "prek"}},
-		{"brand's crate runs the crate that takes it", "brand/iced/src/lib.rs", []string{"rust", "prek"}},
+		{"brand's crate runs the crate that takes it", "brand/iced/src/lib.rs", []string{"rust", "prek", "codeql-rust"}},
 		{"brand's theme runs the manual, and the crate beside brand's", "brand/layouts/page.html", []string{"docs", "rust", "prek"}},
 		{"a pinned base runs no job", "base/Dockerfile", nil},
 	}

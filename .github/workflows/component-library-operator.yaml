@@ -368,6 +368,151 @@ jobs:
           prek-version: 0.5.2
           extra-args: --all-files library-operator/
 
+  codeql-go:
+    # ci/codeql.go derives this job. A pull request from a fork gets a
+    # token that cannot write to code scanning, so the analysis runs
+    # only for a branch of this repository.
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'codeql-go') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    defaults:
+      run:
+        working-directory: library-operator
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: setup-go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: library-operator/go.mod
+          cache: false
+
+      # The repository's Actions cache holds 10 GB, and GitHub evicts
+      # the oldest entries when the caches pass that limit. So every run
+      # restores the Go caches, and only a push to main saves them: a
+      # branch never writes an entry that pushes one of main's out.
+      #
+      # The downloaded modules are the entry of the module `library-operator`,
+      # whose `go` job saves it. This job keeps no build cache.
+      # When no entry has the key, as on a branch that changes `go.sum`,
+      # the restore takes the newest entry of the same family, which
+      # holds most of the modules that the job needs.
+      #
+      # The entry holds the extracted source and, from the download
+      # cache, only the `go.mod` files and the zip hashes. `go` reads the
+      # `go.mod` files to load the module graph, and it downloads a module
+      # again when its zip hash is missing. `go` does not read a zip
+      # file after it extracts the source, and the zip files are about
+      # half of the compressed entry.
+      - id: go-modules
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/go/pkg/mod/*
+            !~/go/pkg/mod/cache
+            ~/go/pkg/mod/cache/download/**/*.mod
+            ~/go/pkg/mod/cache/download/**/*.ziphash
+          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-library-operator-${{ hashFiles('library-operator/go.sum') }}
+          restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-library-operator-
+
+      # CodeQL analyzes every file of the checkout unless its
+      # configuration names paths, so the configuration limits the
+      # analysis to this job's directory. The module's go.mod can replace
+      # a module with a directory of another component, and that
+      # component's own job analyzes it. CodeQL traces the build in the
+      # next step and extracts each package that the build compiles.
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: go
+          build-mode: manual
+          config: |
+            paths:
+              - library-operator
+
+      - run: go build ./...
+
+      # The category keeps this job's alerts apart from every other
+      # analysis: code scanning closes an alert only when a later upload
+      # in the same category no longer reports it.
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: codeql/library-operator/go
+
+  codeql-rust:
+    # ci/codeql.go derives this job. A pull request from a fork gets a
+    # token that cannot write to code scanning, so the analysis runs
+    # only for a branch of this repository.
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'codeql-rust') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    defaults:
+      run:
+        working-directory: library-operator/media-browser
+    steps:
+      - uses: actions/checkout@v7
+
+      # CodeQL analyzes every file of the checkout unless its
+      # configuration names paths, so the configuration limits the
+      # analysis to this job's directory. A crate of another component
+      # that this crate takes by path is analyzed in that component's own
+      # job. The analysis reads the sources without a build.
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: rust
+          build-mode: none
+          config: |
+            paths:
+              - library-operator/media-browser
+
+      # The category keeps this job's alerts apart from every other
+      # analysis: code scanning closes an alert only when a later upload
+      # in the same category no longer reports it.
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: codeql/library-operator/rust
+
+  codeql-rust-appearances:
+    # ci/codeql.go derives this job. A pull request from a fork gets a
+    # token that cannot write to code scanning, so the analysis runs
+    # only for a branch of this repository.
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'codeql-rust-appearances') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    defaults:
+      run:
+        working-directory: library-operator/appearances
+    steps:
+      - uses: actions/checkout@v7
+
+      # CodeQL analyzes every file of the checkout unless its
+      # configuration names paths, so the configuration limits the
+      # analysis to this job's directory. A crate of another component
+      # that this crate takes by path is analyzed in that component's own
+      # job. The analysis reads the sources without a build.
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: rust
+          build-mode: none
+          config: |
+            paths:
+              - library-operator/appearances
+
+      # The category keeps this job's alerts apart from every other
+      # analysis: code scanning closes an alert only when a later upload
+      # in the same category no longer reports it.
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: codeql/library-operator/rust-appearances
+
   # Each image builds through docker-bake.hcl at the top of the
   # repository, as the target of the same name. A Dockerfile that
   # builds on a base of the repository, as in FROM mpv, gets that base's
@@ -442,6 +587,11 @@ jobs:
     if: ${{ inputs.stage == 'publish' || inputs.dryrun }}
     runs-on: ubuntu-26.04
     timeout-minutes: 30
+    # security-events: write uploads the Trivy scan of each image.
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -530,6 +680,18 @@ jobs:
         with:
           version: 2.9.6
 
+      # The publish scans each image that it pushes with Trivy, so only
+      # an image that this run publishes is scanned, and a pinned base is
+      # scanned once for each tag. The scan reports and does not gate: an
+      # install that fails here makes each scan fail, and the publish
+      # warns and pushes the next image. The first scan downloads Trivy's
+      # vulnerability database, and the later scans of the job reuse it.
+      - if: ${{ !inputs.dryrun }}
+        continue-on-error: true
+        uses: aquasecurity/setup-trivy@v0.3.1
+        with:
+          version: v0.76.1
+
       # Each image builds again through docker-bake.hcl, and pushes. An
       # image that ran in the images job above builds from the layers that
       # the job wrote to the cache. An image that did not run reads
@@ -539,7 +701,67 @@ jobs:
       # must never name an image that is not pushed yet.
       - name: publish
         working-directory: ci
-        run: go run . publish -root .. -component library-operator -version "${{ inputs.version }}" -mode "${{ inputs.dryrun && 'dry' || inputs.publish }}"
+        run: go run . publish -root .. -component library-operator -version "${{ inputs.version }}" -mode "${{ inputs.dryrun && 'dry' || inputs.publish }}" -sarif "${{ github.workspace }}/trivy"
+
+      # The scan of library-operator, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/library-operator.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/library-operator.sarif
+          category: trivy/library-operator
+
+      # The scan of library-operator-ffmpeg, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/library-operator-ffmpeg.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/library-operator-ffmpeg.sarif
+          category: trivy/library-operator-ffmpeg
+
+      # The scan of library-operator-media-browser, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/library-operator-media-browser.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/library-operator-media-browser.sarif
+          category: trivy/library-operator-media-browser
+
+      # The scan of library-operator-appearances, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/library-operator-appearances.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/library-operator-appearances.sarif
+          category: trivy/library-operator-appearances
+
+      # The scan of library-operator-corrosion, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/library-operator-corrosion.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/library-operator-corrosion.sarif
+          category: trivy/library-operator-corrosion
+
+      # The scan of library-operator-cli, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/library-operator-cli.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/library-operator-cli.sarif
+          category: trivy/library-operator-cli
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-build.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6

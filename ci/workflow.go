@@ -27,6 +27,11 @@ var templateFiles embed.FS
 // run, so a hook behaves the same in each.
 const prekVersion = "0.5.2"
 
+// trivyVersion is the Trivy that each publish job installs to scan the
+// images it pushes. ci/latest.sh reports it against Trivy's newest
+// release.
+const trivyVersion = "0.76.1"
+
 // fluxVersionFile holds the flux release that the OS ships. The
 // publish job pushes each deploy artifact with the same flux CLI, so
 // the artifact's format is the one that the cluster's flux reads.
@@ -35,9 +40,10 @@ const fluxVersionFile = "liken/flux/VERSION"
 var templates = template.Must(template.New("").
 	Delims("{%", "%}").
 	Funcs(template.FuncMap{
-		"prekVersion": func() string { return prekVersion },
-		"join":        strings.Join,
-		"lines":       func(s string) []string { return strings.Split(strings.TrimSpace(s), "\n") },
+		"prekVersion":  func() string { return prekVersion },
+		"trivyVersion": func() string { return trivyVersion },
+		"join":         strings.Join,
+		"lines":        func(s string) []string { return strings.Split(strings.TrimSpace(s), "\n") },
 		"goCache": func(mod, sum, family string, build bool) goCache {
 			return goCache{Mod: mod, Keys: []string{sum}, Family: family, Build: build, SavesModules: !build}
 		},
@@ -125,6 +131,12 @@ type rootComponent struct {
 	// checks must pass before it publishes.
 	PublishNeeds               []string
 	Channel, Images, Publishes bool
+	// SecurityEvents is true when a job of the component's workflow
+	// uploads to code scanning: a CodeQL job, or the publish job, which
+	// uploads the Trivy scan of each image it pushes. GitHub checks the
+	// permissions of every job in a called workflow against the call,
+	// including a job that the call skips, so both calls grant it.
+	SecurityEvents bool
 }
 
 type coverageDownload struct{ Component, Job, Dir string }
@@ -150,6 +162,8 @@ func rootData(components map[string]*Component) map[string]any {
 			Channel:      c.Outputs.Channel,
 			Images:       len(c.Outputs.Images) > 0,
 			Publishes:    c.HasOutputs(),
+			SecurityEvents: len(c.Outputs.Images) > 0 ||
+				slices.ContainsFunc(c.Jobs, func(j Job) bool { return j.Toolchain == "codeql" }),
 		})
 		for _, job := range c.Jobs {
 			if len(job.Coverage) > 0 {
@@ -196,6 +210,8 @@ type jobData struct {
 	Go bool
 	// Cache is the job's Go cache, when Go is true.
 	Cache goCache
+	// Category is the code scanning category of a CodeQL job.
+	Category string
 }
 
 func componentData(root string, c *Component) (map[string]any, error) {
@@ -223,6 +239,9 @@ func componentData(root string, c *Component) (map[string]any, error) {
 			}
 			_, noModule := os.Stat(filepath.Join(root, d.ModuleDir, "go.mod"))
 			d.Go = runsGo && noModule == nil
+		case "codeql":
+			d.Go = job.Language == languageGo
+			d.Category = codeqlCategory(c, job)
 		}
 		d.Cache = jobCache(c, d)
 		for _, file := range job.Coverage {
@@ -334,6 +353,13 @@ func jobCache(c *Component, d jobData) goCache {
 	sum := path.Join(d.ModuleDir, "go.sum")
 	if d.Toolchain == "hugo" {
 		return goCache{Mod: path.Join(d.ModuleDir, "go.mod"), Keys: []string{sum}, Family: "manuals", SavesModules: true}
+	}
+	// A CodeQL job restores the modules entry of the go job of the same
+	// module, and keeps no build cache, so the build that CodeQL traces
+	// compiles every package of the module and does not take one from an
+	// earlier build.
+	if d.Toolchain == "codeql" {
+		return goCache{Mod: path.Join(d.ModuleDir, "go.mod"), Keys: []string{sum}, Family: d.ModuleDir}
 	}
 	return goCache{Mod: path.Join(d.ModuleDir, "go.mod"), Family: d.ModuleDir, Build: true,
 		SavesModules: d.Toolchain == "go", Keys: []string{

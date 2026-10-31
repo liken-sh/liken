@@ -124,3 +124,39 @@ jobs:
         with:
           prek-version: 0.5.2
           extra-args: --all-files media-screen/
+
+  codeql-rust:
+    # ci/codeql.go derives this job. A pull request from a fork gets a
+    # token that cannot write to code scanning, so the analysis runs
+    # only for a branch of this repository.
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'codeql-rust') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    defaults:
+      run:
+        working-directory: media-screen
+    steps:
+      - uses: actions/checkout@v7
+
+      # CodeQL analyzes every file of the checkout unless its
+      # configuration names paths, so the configuration limits the
+      # analysis to this job's directory. A crate of another component
+      # that this crate takes by path is analyzed in that component's own
+      # job. The analysis reads the sources without a build.
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: rust
+          build-mode: none
+          config: |
+            paths:
+              - media-screen
+
+      # The category keeps this job's alerts apart from every other
+      # analysis: code scanning closes an alert only when a later upload
+      # in the same category no longer reports it.
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: codeql/media-screen/rust

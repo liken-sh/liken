@@ -32,6 +32,9 @@ import (
 //     is not an OS artifact and ships to the site on its own path.
 //   - A prek job reads every file, because its hooks check every file
 //     of the component.
+//   - A CodeQL job reads only the sources of its language in its own
+//     directory, because the analysis reports results only for those
+//     files, and no data file, manifest, or Makefile changes them.
 //
 // The manual is docs/ and the skills/ that its guides generate, in a
 // component that has a manual. brand has no manual, and its skills/
@@ -49,8 +52,10 @@ import (
 // includes the stylesheet. A hugo job reads what its manual's go.mod
 // and its component's go.mod replace, and brand's theme. A prek job and
 // the OS build read every dependency, because a hook such as go mod
-// tidy reads the modules that go.mod replaces. A pinned dependency is a
-// base image, and only images build on it.
+// tidy reads the modules that go.mod replaces. A Go or a Rust CodeQL
+// job reads the sources of its language in the dependencies of the job
+// it comes from, and a C, C++, or Python one reads no dependency. A
+// pinned dependency is a base image, and only images build on it.
 //
 // A go.mod or a Cargo.toml that cannot be read makes the job read every
 // dependency, so the job runs and fails there.
@@ -87,6 +92,8 @@ func ownReads(c *Component, job Job, rest string) bool {
 		return !rustSource(rest)
 	case "os":
 		return !manual
+	case "codeql":
+		return codeqlReads(job, true, rest)
 	}
 	return true
 }
@@ -98,6 +105,8 @@ func (s selector) jobDeps(c *Component, job Job) map[string]bool {
 	var deps map[string]bool
 	var err error
 	switch job.Toolchain {
+	case "codeql":
+		return s.codeqlDeps(c, job)
 	case "go":
 		deps, err = s.goReplaces(path.Join(c.Dir, orDefault(job.Module, job.Dir)))
 	case "rust":
@@ -148,6 +157,8 @@ func (s selector) jobReads(c *Component, job Job, deps map[string]bool, file str
 		return !rustSource(rest)
 	case "rust":
 		return !goSource(rest)
+	case "codeql":
+		return codeqlReads(job, false, rest)
 	}
 	return true
 }

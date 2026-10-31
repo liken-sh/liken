@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -75,6 +76,81 @@ func TestAReleasePushesEveryImageThenTheDeployArtifactThenLatest(t *testing.T) {
 		!strings.HasSuffix(rest[0], "--source https://github.com/liken-sh/liken --revision 2026.10.02-001@sha1:0123456789abcdef0123456789abcdef01234567") ||
 		rest[1] != "flux tag artifact oci://ghcr.io/liken-sh/operator-deploy:2026.10.02-001 --tag latest" {
 		t.Errorf("the deploy commands:\n%s", strings.Join(rest, "\n"))
+	}
+}
+
+// trivyCommands lists the Trivy scans among the recorded commands.
+func trivyCommands(commands []string) []string {
+	var scans []string
+	for _, command := range commands {
+		if strings.HasPrefix(command, "trivy ") {
+			scans = append(scans, command)
+		}
+	}
+	return scans
+}
+
+// The publish scans each image right after it pushes it, and only an
+// image that it pushes: a dry run pushes nothing, and a published
+// version is not pushed again.
+func TestThePublishScansEachImageThatItPushes(t *testing.T) {
+	scan := func(dir, image, version string) string {
+		return "trivy image --scanners vuln --format sarif --output " + filepath.Join(dir, image+".sarif") + " ghcr.io/liken-sh/" + image + ":" + version
+	}
+	cases := []struct {
+		name, version, mode string
+		tags                []string
+		scans               []string
+	}{
+		{"a release", "2026.10.02-001", publishRelease, nil,
+			[]string{"operator", "operator-cli"}},
+		{"a development build", "2026.10.02-001-dev-017-abcdef01", publishDev, nil,
+			[]string{"operator", "operator-cli"}},
+		{"a dry run", "2026.10.02-001", publishDry, nil, nil},
+		{"a version that is already published", "2026.10.02-001", publishRelease, []string{"2026.10.02-001"},
+			[]string{"operator-cli"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p, rec, component := publishFixture(t, map[string][]string{"operator": c.tags})
+			p.SARIF = t.TempDir()
+			if err := p.Publish(component, c.version, c.mode); err != nil {
+				t.Fatal(err)
+			}
+			var want []string
+			for _, image := range c.scans {
+				want = append(want, scan(p.SARIF, image, c.version))
+			}
+			if got := trivyCommands(rec.commands); !reflect.DeepEqual(got, want) {
+				t.Errorf("scans:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+			}
+		})
+	}
+}
+
+// failingTrivy records each command and fails each Trivy scan, as a
+// scan does when the vulnerability database cannot be downloaded.
+type failingTrivy struct{ recorder }
+
+func (f *failingTrivy) run(dir, name string, args ...string) error {
+	f.recorder.run(dir, name, args...)
+	if name == "trivy" {
+		return errors.New("the database download failed")
+	}
+	return nil
+}
+
+// A scan reports and does not gate: a scan that fails leaves the
+// publish to push every image and the deploy artifact.
+func TestAScanThatFailsDoesNotStopThePublish(t *testing.T) {
+	p, _, c := publishFixture(t, nil)
+	runner := &failingTrivy{}
+	p.Run, p.SARIF = runner.run, t.TempDir()
+	if err := p.Publish(c, "2026.10.02-001", publishRelease); err != nil {
+		t.Fatal(err)
+	}
+	if last := runner.commands[len(runner.commands)-1]; last != "flux tag artifact oci://ghcr.io/liken-sh/operator-deploy:2026.10.02-001 --tag latest" {
+		t.Errorf("the publish stopped at %q", last)
 	}
 }
 

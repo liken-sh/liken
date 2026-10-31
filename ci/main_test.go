@@ -146,7 +146,7 @@ func TestThePlanWritesItsDecisionsAndItsDryRun(t *testing.T) {
 	if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "components=")), &decisions); err != nil {
 		t.Fatalf("%v: %s", err, output)
 	}
-	if d := decisions["operator"]; !d.Check || d.Publish != publishNone || !reflect.DeepEqual(d.Jobs, []string{"check"}) ||
+	if d := decisions["operator"]; !d.Check || d.Publish != publishNone || !reflect.DeepEqual(d.Jobs, []string{"check", "codeql-check"}) ||
 		!reflect.DeepEqual(d.Images, []ImageRun{{Image: "operator", Load: true}}) {
 		t.Errorf("operator: %+v", d)
 	}
@@ -155,7 +155,7 @@ func TestThePlanWritesItsDecisionsAndItsDryRun(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Publishing is off",
-		"| `operator` | check, operator | none | `-` | changed: operator/main.go |",
+		"| `operator` | check, codeql-check, operator | none | `-` | changed: operator/main.go |",
 		"| `base` | skip | none | `-` | nothing in its paths changed |",
 		"| `operator` | `2026.09.27-001` | yes | releases: changed: operator/main.go (since operator/2026.09.27-001) | `operator`, `operator-deploy` |",
 		"| `liken` | `2026.09.28-001` | no | no change since 2026.09.28-001 | - |",

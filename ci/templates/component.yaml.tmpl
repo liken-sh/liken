@@ -72,10 +72,17 @@ env:
   GOPROXY: https://proxy.golang.org|direct
 
 jobs:{% range .Jobs %}
-  {% .Name %}:
-    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), '{% .Name %}') }}
+  {% .Name %}:{% if eq .Toolchain "codeql" %}
+    # ci/codeql.go derives this job. A pull request from a fork gets a
+    # token that cannot write to code scanning, so the analysis runs
+    # only for a branch of this repository.
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), '{% .Name %}') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}{% else %}
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), '{% .Name %}') }}{% end %}
     runs-on: ubuntu-26.04
-    timeout-minutes: {% .Timeout %}
+    timeout-minutes: {% .Timeout %}{% if eq .Toolchain "codeql" %}
+    permissions:
+      contents: read
+      security-events: write{% end %}
     defaults:
       run:
         working-directory: {% .WorkDir %}{% if .Env %}
@@ -144,12 +151,12 @@ jobs:{% range .Jobs %}
           SKIP: {% join .Skip "," %}{% end %}
         with:
           prek-version: {% prekVersion %}
-          extra-args: --all-files {% .Component %}/{% else %}{% $lines := lines .Run %}{% if eq (len $lines) 1 %}
+          extra-args: --all-files {% .Component %}/{% else %}{% if eq .Toolchain "codeql" %}{% template "codeql-init" . %}{% end %}{% $lines := lines .Run %}{% if not .Run %}{% else if eq (len $lines) 1 %}
 
       - run: {% .Run %}{% else %}
 
       - run: |{% range $lines %}
-          {% . %}{% end %}{% end %}{% end %}{% if eq .Toolchain "os" %}{% template "os-go-save" %}{% end %}{% if .Go %}{% template "go-save" .Cache %}{% end %}{% if eq .Toolchain "hugo" %}
+          {% . %}{% end %}{% end %}{% if eq .Toolchain "codeql" %}{% template "codeql-analyze" . %}{% end %}{% end %}{% if eq .Toolchain "os" %}{% template "os-go-save" %}{% end %}{% if .Go %}{% template "go-save" .Cache %}{% end %}{% if eq .Toolchain "hugo" %}
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
@@ -247,7 +254,12 @@ jobs:{% range .Jobs %}
   publish:
     if: ${{ inputs.stage == 'publish' || inputs.dryrun }}
     runs-on: ubuntu-26.04
-    timeout-minutes: {% .PublishTimeout %}{% if .Channel %}
+    timeout-minutes: {% .PublishTimeout %}{% if and .Images (not .Channel) %}
+    # security-events: write uploads the Trivy scan of each image.
+    permissions:
+      contents: read
+      packages: write
+      security-events: write{% end %}{% if .Channel %}
     # The channel's key comes from the repository secrets that
     # liken.sh/terraform.tf keeps delivered.
     env:
@@ -301,7 +313,19 @@ jobs:{% range .Jobs %}
 
       - uses: fluxcd/flux2/action@v{% .Flux %}
         with:
-          version: {% .Flux %}{% end %}
+          version: {% .Flux %}{% end %}{% if .Images %}
+
+      # The publish scans each image that it pushes with Trivy, so only
+      # an image that this run publishes is scanned, and a pinned base is
+      # scanned once for each tag. The scan reports and does not gate: an
+      # install that fails here makes each scan fail, and the publish
+      # warns and pushes the next image. The first scan downloads Trivy's
+      # vulnerability database, and the later scans of the job reuse it.
+      - if: ${{ !inputs.dryrun }}
+        continue-on-error: true
+        uses: aquasecurity/setup-trivy@v0.3.1
+        with:
+          version: v{% trivyVersion %}{% end %}
 
 {% if .Images %}      # Each image builds again through docker-bake.hcl, and pushes. An
       # image that ran in the images job above builds from the layers that
@@ -314,5 +338,15 @@ jobs:{% range .Jobs %}
       # alone.
 {% end %}      - name: publish
         working-directory: ci
-        run: go run . publish -root .. -component {% .Name %} -version "${{ inputs.version }}" -mode "${{ inputs.dryrun && 'dry' || inputs.publish }}"{% template "go-save" (goCache "ci/go.mod" "ci/go.sum" "ci" true) %}{% end %}
+        run: go run . publish -root .. -component {% .Name %} -version "${{ inputs.version }}" -mode "${{ inputs.dryrun && 'dry' || inputs.publish }}"{% if .Images %} -sarif "${{ github.workspace }}/trivy"{% end %}{% range .Images %}
+
+      # The scan of {% .Name %}, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/{% .Name %}.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/{% .Name %}.sarif
+          category: trivy/{% .Name %}{% end %}{% template "go-save" (goCache "ci/go.mod" "ci/go.sum" "ci" true) %}{% end %}
 {% end %}

@@ -37,6 +37,9 @@ type Diff struct {
 	SharedBake bool
 	// Site is true when the site job of the root workflow changed.
 	Site bool
+	// GitHub is a changed file under .github/, or "" when none changed.
+	// The CodeQL analysis of the Actions code reads those files.
+	GitHub string
 }
 
 // componentWorkflow matches the path of a component's generated
@@ -58,6 +61,9 @@ func (g Git) ReadDiff(components map[string]*Component, from, to string) (Diff, 
 	}
 	action := ""
 	for _, file := range files {
+		if strings.HasPrefix(file, githubDir) && d.GitHub == "" {
+			d.GitHub = file
+		}
 		switch {
 		case file == rootWorkflowFile:
 			if err := g.rootWorkflowDiff(components, from, to, &d); err != nil {

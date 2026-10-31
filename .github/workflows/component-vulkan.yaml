@@ -164,6 +164,11 @@ jobs:
     if: ${{ inputs.stage == 'publish' || inputs.dryrun }}
     runs-on: ubuntu-26.04
     timeout-minutes: 30
+    # security-events: write uploads the Trivy scan of each image.
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -248,6 +253,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
+      # The publish scans each image that it pushes with Trivy, so only
+      # an image that this run publishes is scanned, and a pinned base is
+      # scanned once for each tag. The scan reports and does not gate: an
+      # install that fails here makes each scan fail, and the publish
+      # warns and pushes the next image. The first scan downloads Trivy's
+      # vulnerability database, and the later scans of the job reuse it.
+      - if: ${{ !inputs.dryrun }}
+        continue-on-error: true
+        uses: aquasecurity/setup-trivy@v0.3.1
+        with:
+          version: v0.76.1
+
       # Each image builds again through docker-bake.hcl, and pushes. An
       # image that ran in the images job above builds from the layers that
       # the job wrote to the cache. An image that did not run reads
@@ -255,7 +272,17 @@ jobs:
       # the layers that an earlier run on main wrote.
       - name: publish
         working-directory: ci
-        run: go run . publish -root .. -component vulkan -version "${{ inputs.version }}" -mode "${{ inputs.dryrun && 'dry' || inputs.publish }}"
+        run: go run . publish -root .. -component vulkan -version "${{ inputs.version }}" -mode "${{ inputs.dryrun && 'dry' || inputs.publish }}" -sarif "${{ github.workspace }}/trivy"
+
+      # The scan of vulkan, under a category of its own, so the upload
+      # of one image never closes the alerts of another. The step runs
+      # when the publish wrote the scan, even when a later image failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/vulkan.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/vulkan.sarif
+          category: trivy/vulkan
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-build.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6

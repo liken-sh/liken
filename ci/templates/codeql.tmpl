@@ -1,0 +1,26 @@
+{% define "codeql-init" %}
+
+      # CodeQL analyzes every file of the checkout unless its
+      # configuration names paths, so the configuration limits the
+      # analysis to this job's directory.{% if eq .Language "go" %} The module's go.mod can replace
+      # a module with a directory of another component, and that
+      # component's own job analyzes it. CodeQL traces the build in the
+      # next step and extracts each package that the build compiles.{% else if eq .Language "rust" %} A crate of another component
+      # that this crate takes by path is analyzed in that component's own
+      # job. The analysis reads the sources without a build.{% else %} The analysis reads the sources
+      # without a build.{% end %}
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: {% .Language %}
+          build-mode: {% if eq .Language "go" %}manual{% else %}none{% end %}
+          config: |
+            paths:
+              - {% .WorkDir %}{% end %}
+{% define "codeql-analyze" %}
+
+      # The category keeps this job's alerts apart from every other
+      # analysis: code scanning closes an alert only when a later upload
+      # in the same category no longer reports it.
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: {% .Category %}{% end %}
