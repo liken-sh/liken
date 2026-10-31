@@ -11,8 +11,7 @@
 //! change to any number here is a change a person watching a screen
 //! sees.
 
-/// The golden ratio, to the ten decimal places this module chooses to
-/// carry.
+/// The golden ratio, at the full precision of `f64`.
 ///
 /// A hexagon's spread is its index times this number, taken modulo one. That
 /// places the fourteen spreads across the range with no two close together, so
@@ -20,7 +19,7 @@
 /// independent parts rather than one block. A hexagon's second rate is its
 /// first times this number, so its two sines share no common period short
 /// enough to see.
-pub const PHI: f64 = 1.6180339887;
+pub const PHI: f64 = std::f64::consts::GOLDEN_RATIO;
 
 /// The slowest first rate, in cycles a second at full energy.
 pub const RATE_MIN: f64 = 0.22;

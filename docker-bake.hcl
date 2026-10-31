@@ -55,7 +55,7 @@ target "toolchains" {
     "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:18f4cc26c9ffa7f20a359298be7deadac5c607c8e03a02b8119f1a5fc2f82c99"
     "golang" = "docker-image://golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5"
     "oras" = "docker-image://ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179"
-    "rust" = "docker-image://rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e"
+    "rust" = "docker-image://rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
     "ubuntu" = "docker-image://ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
   }
 }
@@ -971,7 +971,7 @@ target "library-operator-media-browser" {
     "brand" = "brand"
     "media-screen" = "media-screen"
     "notices" = "notices"
-    "rust" = "docker-image://rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e"
+    "rust" = "docker-image://rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
     "vulkan" = "target:vulkan"
   }
   args = {
@@ -994,7 +994,7 @@ target "library-operator-appearances" {
     "kubernetes" = "kubernetes"
     "notices" = "notices"
     "oras" = "docker-image://ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179"
-    "rust" = "docker-image://rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e"
+    "rust" = "docker-image://rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
   }
   args = {
     VERSION = VERSION
@@ -1108,7 +1108,7 @@ target "media-operator-idle" {
     "debian" = "docker-image://debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84"
     "media-screen" = "media-screen"
     "notices" = "notices"
-    "rust" = "docker-image://rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e"
+    "rust" = "docker-image://rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
     "vulkan" = "target:vulkan"
   }
   args = {
@@ -1131,7 +1131,7 @@ target "media-operator-display" {
     "debian" = "docker-image://debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84"
     "media-screen" = "media-screen"
     "notices" = "notices"
-    "rust" = "docker-image://rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e"
+    "rust" = "docker-image://rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
     "vulkan" = "target:vulkan"
   }
   args = {
