@@ -85,13 +85,13 @@ func (b *fakeBroker) serve() {
 // push sends the client a retained message, the way the broker
 // delivers a topic's last value to a fresh subscriber.
 func (b *fakeBroker) push(topic string, payload []byte) {
-	b.conn.Write(encodePublish(topic, payload, true))
+	b.conn.Write(frameOf(encodePublish(topic, payload, true)))
 }
 
 // forward sends the client a live message, the way the broker forwards
 // a publish to a subscriber that is already connected.
 func (b *fakeBroker) forward(topic string, payload []byte) {
-	b.conn.Write(encodePublish(topic, payload, false))
+	b.conn.Write(frameOf(encodePublish(topic, payload, false)))
 }
 
 // readTopicFilter reads the length-prefixed filter a SUBSCRIBE carries.

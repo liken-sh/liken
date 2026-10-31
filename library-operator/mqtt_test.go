@@ -52,8 +52,29 @@ func TestRemainingLengthRefusesAFifthByte(t *testing.T) {
 	}
 }
 
+// frameOf returns the frame an encoder built. Every frame a test or a
+// fake broker builds is far below the protocol's limit, so an error
+// here is a broken encoder, and the panic ends the test.
+func frameOf(frame []byte, err error) []byte {
+	if err != nil {
+		panic(err)
+	}
+	return frame
+}
+
+// A body past the protocol's limit has no remaining length that a
+// broker accepts, so packet refuses it before it allocates the frame.
+// The body is never written, so its pages are never touched and the
+// test costs no real memory.
+func TestPacketRefusesABodyPastTheProtocolLimit(t *testing.T) {
+	frame, err := packet(mqttPublish, make([]byte, mqttMaxRemainingLength+1))
+	if err == nil {
+		t.Fatalf("a body of %d bytes framed to %d bytes, want an error", mqttMaxRemainingLength+1, len(frame))
+	}
+}
+
 func TestEncodeConnectWithNoWill(t *testing.T) {
-	packet := encodeConnect("op", 30, nil)
+	packet := frameOf(encodeConnect("op", 30, nil))
 
 	want := []byte{
 		mqttConnect, 0x0E,
@@ -72,11 +93,11 @@ func TestEncodeConnectWithNoWill(t *testing.T) {
 // the will is retained, and the topic and payload in the payload after
 // the client identifier.
 func TestEncodeConnectCarriesARetainedWill(t *testing.T) {
-	packet := encodeConnect("op", 30, &busWill{
+	packet := frameOf(encodeConnect("op", 30, &busWill{
 		Topic:    "a/b",
 		Payload:  []byte("offline"),
 		Retained: true,
-	})
+	}))
 
 	flags := packet[9]
 	if flags&connectWillFlag == 0 {
@@ -91,11 +112,11 @@ func TestEncodeConnectCarriesARetainedWill(t *testing.T) {
 }
 
 func TestEncodePublishSetsTheRetainBit(t *testing.T) {
-	plain := encodePublish("a/b", []byte("hi"), false)
+	plain := frameOf(encodePublish("a/b", []byte("hi"), false))
 	if plain[0] != mqttPublish {
 		t.Errorf("first byte = %#x, want %#x", plain[0], mqttPublish)
 	}
-	retained := encodePublish("a/b", []byte("hi"), true)
+	retained := frameOf(encodePublish("a/b", []byte("hi"), true))
 	if retained[0] != mqttPublish|0x01 {
 		t.Errorf("first byte = %#x, want the retain bit set", retained[0])
 	}
@@ -108,7 +129,7 @@ func TestEncodePublishSetsTheRetainBit(t *testing.T) {
 }
 
 func TestEncodeSubscribeNamesOneFilterAtQoSZero(t *testing.T) {
-	packet := encodeSubscribe(1, "a/+/c")
+	packet := frameOf(encodeSubscribe(1, "a/+/c"))
 
 	want := []byte{
 		mqttSubscribe | 0x02, 0x0A,
@@ -130,7 +151,7 @@ func TestEncodePingreqIsTwoBytes(t *testing.T) {
 // A PUBLISH encoded by this codec reads back through readPacket and
 // parsePublish as the topic and payload it went in as.
 func TestReadPacketReadsBackAPublish(t *testing.T) {
-	frame := encodePublish("libraries/house/movies/status", []byte(`{"titles":12}`), true)
+	frame := frameOf(encodePublish("libraries/house/movies/status", []byte(`{"titles":12}`), true))
 	reader := bufio.NewReader(bytes.NewReader(frame))
 
 	first, body, err := readPacket(reader)
@@ -187,7 +208,7 @@ func TestParsePublishRefusesAShortBody(t *testing.T) {
 // A CONNECT built here reads back with the fields it went in as, so
 // the encoder and reader agree on framing.
 func TestReadPacketReadsBackAConnect(t *testing.T) {
-	frame := encodeConnect("library-operator", 30, nil)
+	frame := frameOf(encodeConnect("library-operator", 30, nil))
 	first, body, err := readPacket(bufio.NewReader(bytes.NewReader(frame)))
 	if err != nil {
 		t.Fatal(err)

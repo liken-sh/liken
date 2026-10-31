@@ -46,7 +46,11 @@ func openBusSession(ctx context.Context, dial func(context.Context) (net.Conn, e
 	}
 	session := &busSession{conn: conn, reader: bufio.NewReader(conn)}
 	session.stop = context.AfterFunc(ctx, func() { conn.Close() })
-	if _, err := conn.Write(encodeConnect(clientID, busKeepalive, nil)); err != nil {
+	connect, err := encodeConnect(clientID, busKeepalive, nil)
+	if err == nil {
+		_, err = conn.Write(connect)
+	}
+	if err != nil {
 		session.close()
 		return nil, fmt.Errorf("connecting to the broker: %w", err)
 	}
@@ -66,7 +70,11 @@ func openBusSession(ctx context.Context, dial func(context.Context) (net.Conn, e
 
 // Writes one retained message. An empty payload clears the topic.
 func (s *busSession) retain(topic string, payload []byte) error {
-	if _, err := s.conn.Write(encodePublish(topic, payload, true)); err != nil {
+	frame, err := encodePublish(topic, payload, true)
+	if err == nil {
+		_, err = s.conn.Write(frame)
+	}
+	if err != nil {
 		return fmt.Errorf("publishing to the broker: %w", err)
 	}
 	return nil
@@ -81,7 +89,11 @@ func (s *busSession) flush() error {
 // The retained message on one topic, and whether there is one. An empty
 // retained message is a cleared topic, so it reads as none.
 func (s *busSession) readRetained(topic string) ([]byte, bool, error) {
-	if _, err := s.conn.Write(encodeSubscribe(1, topic)); err != nil {
+	frame, err := encodeSubscribe(1, topic)
+	if err == nil {
+		_, err = s.conn.Write(frame)
+	}
+	if err != nil {
 		return nil, false, fmt.Errorf("subscribing on the broker: %w", err)
 	}
 	return s.ping(topic)

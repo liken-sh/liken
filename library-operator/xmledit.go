@@ -9,6 +9,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"io"
+	"slices"
 )
 
 // The element an edit inserts or replaces, and the attribute that tells one
@@ -81,11 +82,11 @@ func afterLastNewline(space []byte) []byte {
 }
 
 // The result is a new slice, so the caller's document is never written over.
+// slices.Concat sizes the result from the three parts and panics when their
+// lengths add past the largest slice, where a sum computed here would wrap
+// to a small capacity.
 func splice(document []byte, start, end int, replacement []byte) []byte {
-	out := make([]byte, 0, len(document)-(end-start)+len(replacement))
-	out = append(out, document[:start]...)
-	out = append(out, replacement...)
-	return append(out, document[end:]...)
+	return slices.Concat(document[:start], replacement, document[end:])
 }
 
 // The run of whitespace before the root's end tag is repeated after an

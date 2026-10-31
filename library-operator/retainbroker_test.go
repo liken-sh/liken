@@ -156,7 +156,7 @@ func (b *retainBroker) publish(topic string, payload []byte, retained bool) {
 	}
 	b.mutex.Unlock()
 	for _, client := range receivers {
-		client.write(encodePublish(topic, payload, false))
+		client.write(frameOf(encodePublish(topic, payload, false)))
 	}
 }
 
@@ -168,7 +168,7 @@ func (b *retainBroker) subscribe(client *brokerClient, filter string) {
 	var frames [][]byte
 	for topic, payload := range b.retained {
 		if topicMatches(filter, topic) {
-			frames = append(frames, encodePublish(topic, payload, true))
+			frames = append(frames, frameOf(encodePublish(topic, payload, true)))
 		}
 	}
 	b.mutex.Unlock()

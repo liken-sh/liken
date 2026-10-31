@@ -131,7 +131,12 @@ func (b *Bus) runSession(parent context.Context) (connected bool) {
 	}
 	defer conn.Close()
 
-	if _, err := conn.Write(encodeConnect(b.clientID, busKeepalive, b.will)); err != nil {
+	connect, err := encodeConnect(b.clientID, busKeepalive, b.will)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "connecting to the broker: %v\n", err)
+		return false
+	}
+	if _, err := conn.Write(connect); err != nil {
 		return false
 	}
 	reader := bufio.NewReader(conn)
@@ -243,7 +248,9 @@ func (b *Bus) readLoop(reader *bufio.Reader) {
 // is disconnected the queue does not exist and the publish is dropped,
 // which is correct at QoS 0: a caller re-publishes its retained state
 // from onConnect, so the broker holds the current value again within
-// the reconnect.
+// the reconnect. A message too long for one packet is refused with a
+// line in the pod log, because the broker would close the connection
+// on the malformed packet and drop every publish queued behind it.
 func (b *Bus) Publish(topic string, payload []byte, retained bool) {
 	b.mutex.Lock()
 	out := b.out
@@ -251,8 +258,13 @@ func (b *Bus) Publish(topic string, payload []byte, retained bool) {
 	if out == nil {
 		return
 	}
+	frame, err := encodePublish(topic, payload, retained)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "publishing to %s: %v\n", topic, err)
+		return
+	}
 	select {
-	case out <- encodePublish(topic, payload, retained):
+	case out <- frame:
 	default:
 	}
 }
@@ -260,11 +272,18 @@ func (b *Bus) Publish(topic string, payload []byte, retained bool) {
 // Subscribe remembers the filter and sends it if the client is
 // connected. The remembered set is what runSession re-sends on every
 // reconnect, so a subscription outlives the connection it was made on.
+// A filter too long for one packet is refused with a line in the pod
+// log and is not remembered, so every remembered filter encodes.
 func (b *Bus) Subscribe(filter string) {
 	b.mutex.Lock()
+	frame, err := encodeSubscribe(b.nextPacketID(), filter)
+	if err != nil {
+		b.mutex.Unlock()
+		fmt.Fprintf(os.Stderr, "subscribing to %s: %v\n", filter, err)
+		return
+	}
 	b.filters[filter] = struct{}{}
 	out := b.out
-	frame := encodeSubscribe(b.nextPacketID(), filter)
 	b.mutex.Unlock()
 	if out == nil {
 		return
@@ -287,7 +306,13 @@ func (b *Bus) resubscribe(out chan<- []byte) {
 	frames := make([][]byte, 0, len(filters))
 	sort.Strings(filters)
 	for _, filter := range filters {
-		frames = append(frames, encodeSubscribe(b.nextPacketID(), filter))
+		// Subscribe remembers only a filter that encodes, so this
+		// refuses none in practice.
+		frame, err := encodeSubscribe(b.nextPacketID(), filter)
+		if err != nil {
+			continue
+		}
+		frames = append(frames, frame)
 	}
 	b.mutex.Unlock()
 	for _, frame := range frames {

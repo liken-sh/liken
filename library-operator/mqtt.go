@@ -52,6 +52,11 @@ const (
 	connectWillRetain   = 0x20
 )
 
+// mqttMaxRemainingLength is the largest body one control packet can
+// carry. The remaining length has at most four bytes of seven bits
+// each, so a longer body has no encoding that a broker accepts.
+const mqttMaxRemainingLength = 268_435_455
+
 // encodeRemainingLength writes the packet length in the variable-byte
 // form the protocol uses: seven bits of length per byte, and the high
 // bit set on every byte but the last. One byte covers up to 127, and
@@ -108,12 +113,19 @@ func appendBytes(buffer []byte, value []byte) []byte {
 
 // packet frames one control packet: a fixed-header first byte, then
 // the remaining length, then the body. Every encode function ends
-// here, so the length is computed once from the finished body.
-func packet(first byte, body []byte) []byte {
-	frame := make([]byte, 0, 2+len(body))
+// here, so the length is computed once from the finished body. A body
+// past mqttMaxRemainingLength is refused before the frame is
+// allocated, because its length would encode to a fifth byte that the
+// broker reads as a malformed packet. The frame holds the first byte,
+// at most four bytes of length, and the body.
+func packet(first byte, body []byte) ([]byte, error) {
+	if len(body) > mqttMaxRemainingLength {
+		return nil, fmt.Errorf("mqtt: a packet body of %d bytes is longer than the %d bytes the protocol allows", len(body), mqttMaxRemainingLength)
+	}
+	frame := make([]byte, 0, 5+len(body))
 	frame = append(frame, first)
 	frame = append(frame, encodeRemainingLength(len(body))...)
-	return append(frame, body...)
+	return append(frame, body...), nil
 }
 
 // encodeConnect builds the first packet the client sends. The body is
@@ -122,7 +134,7 @@ func packet(first byte, body []byte) []byte {
 // states one, the will topic and payload. The client authenticates
 // with nothing more than its identifier, because the broker accepts
 // the cluster's own pods.
-func encodeConnect(clientID string, keepalive uint16, will *busWill) []byte {
+func encodeConnect(clientID string, keepalive uint16, will *busWill) ([]byte, error) {
 	flags := byte(connectCleanSession)
 	if will != nil {
 		flags |= connectWillFlag
@@ -148,7 +160,7 @@ func encodeConnect(clientID string, keepalive uint16, will *busWill) []byte {
 // payload as the topic's last value and deliver it to every later
 // subscriber. QoS 0 carries no packet identifier, so the body is the
 // length-prefixed topic and then the raw payload.
-func encodePublish(topic string, payload []byte, retained bool) []byte {
+func encodePublish(topic string, payload []byte, retained bool) ([]byte, error) {
 	first := byte(mqttPublish)
 	if retained {
 		first |= 0x01
@@ -163,7 +175,7 @@ func encodePublish(topic string, payload []byte, retained bool) []byte {
 // on a SUBSCRIBE. The body is the packet identifier the broker echoes
 // in its SUBACK, then the length-prefixed filter and one byte of
 // requested QoS.
-func encodeSubscribe(packetID uint16, filter string) []byte {
+func encodeSubscribe(packetID uint16, filter string) ([]byte, error) {
 	body := []byte{byte(packetID >> 8), byte(packetID)}
 	body = appendString(body, filter)
 	body = append(body, 0x00)
