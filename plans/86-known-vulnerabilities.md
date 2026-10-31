@@ -168,6 +168,11 @@ of the component. A component that does not publish starts no Trivy
 scan, and a pinned base, which publishes only when its tag is new, is
 scanned once for each tag.
 
+The scan reports only a vulnerability that has a fixed version, with
+`--ignore-unfixed`. The bases install from Debian sid, which carries
+many vulnerabilities that no package fixes yet, and those would bury
+the findings that a snapshot bump can act on.
+
 A scan reports, and it does not gate the publish. A scan that fails,
 for example when Trivy's database download fails, prints a warning,
 and the publish pushes the next image. The install of Trivy and each

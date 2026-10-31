@@ -202,7 +202,10 @@ func (p Publisher) image(c *Component, image Image, version, mode string, labels
 // publish never pushes a version tag twice, so the tag names the bytes
 // that were just pushed, and the scan reads what a cluster pulls. It
 // looks for known vulnerabilities only: GitHub's secret scanning reads
-// the repository that every image is built from.
+// the repository that every image is built from. It reports only a
+// vulnerability that has a fixed version. The bases install from
+// Debian sid, which carries many vulnerabilities that no package fixes
+// yet, and those would bury the findings that a bump can act on.
 //
 // A scan reports, and it does not gate the publish. A finding has no
 // effect on the publish, and a scan that fails prints a warning, so a
@@ -213,7 +216,7 @@ func (p Publisher) scan(image Image, version string) {
 	}
 	err := os.MkdirAll(p.SARIF, 0o755)
 	if err == nil {
-		err = p.Run(p.Root, "trivy", "image", "--scanners", "vuln", "--format", "sarif",
+		err = p.Run(p.Root, "trivy", "image", "--scanners", "vuln", "--ignore-unfixed", "--format", "sarif",
 			"--output", filepath.Join(p.SARIF, image.Name+".sarif"), ref(image.Name, version))
 	}
 	if err != nil {

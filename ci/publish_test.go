@@ -95,7 +95,7 @@ func trivyCommands(commands []string) []string {
 // version is not pushed again.
 func TestThePublishScansEachImageThatItPushes(t *testing.T) {
 	scan := func(dir, image, version string) string {
-		return "trivy image --scanners vuln --format sarif --output " + filepath.Join(dir, image+".sarif") + " ghcr.io/liken-sh/" + image + ":" + version
+		return "trivy image --scanners vuln --ignore-unfixed --format sarif --output " + filepath.Join(dir, image+".sarif") + " ghcr.io/liken-sh/" + image + ":" + version
 	}
 	cases := []struct {
 		name, version, mode string
