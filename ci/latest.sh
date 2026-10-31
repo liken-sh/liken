@@ -6,10 +6,10 @@
 # ci/ writes every workflow from its templates, so the templates and
 # the composite action in .github/actions/build-setup hold every
 # GitHub Action that CI runs. The generator holds the prek version
-# that every prek job installs and the Trivy version that every publish
-# job installs, and each .pre-commit-config.yaml holds the revision of
-# each hook repository. The flux action is not here, because its
-# version follows liken/flux/VERSION.
+# that every prek job installs and the Trivy version that each publish
+# job and the trivy job install, and each .pre-commit-config.yaml holds
+# the revision of each hook repository. The flux action is not here,
+# because its version follows liken/flux/VERSION.
 #
 # Each pin is built from source by its upstream, so no row has a
 # channel. A major tag such as `@v7` takes every release within the
@@ -87,7 +87,7 @@ latest_ref() {
 }
 
 pinned_prek() { sed -n 's/^const prekVersion = "\(.*\)"$/\1/p' "$here/workflow.go"; }
-pinned_trivy() { sed -n 's/^const trivyVersion = "\(.*\)"$/\1/p' "$here/workflow.go"; }
+pinned_trivy() { sed -n 's/^const trivyVersion = "\(.*\)"$/\1/p' "$here/trivy.go"; }
 
 # hooks prints "repository rev file" for each hook repository of each
 # .pre-commit-config.yaml. git's list leaves out the caches, which
@@ -122,7 +122,7 @@ report() {
     trivy="$(pinned_trivy)"
     trivy_latest="$(newest_release aquasecurity/trivy)" || trivy_latest=""
     trivy_latest="${trivy_latest#v}"
-    row trivy "$trivy" "${trivy_latest:-?}" - - - "trivyVersion in ci/workflow.go"
+    row trivy "$trivy" "${trivy_latest:-?}" - - - "trivyVersion in ci/trivy.go"
 
     hooks >"$work/hooks"
     while read -r repo; do
@@ -162,7 +162,7 @@ trivy)
         echo "latest.sh: GitHub did not answer for aquasecurity/trivy" >&2
         exit 1
     }
-    sed -i "s/^const trivyVersion = \".*\"$/const trivyVersion = \"$new\"/" "$here/workflow.go"
+    sed -i "s/^const trivyVersion = \".*\"$/const trivyVersion = \"$new\"/" "$here/trivy.go"
     echo "trivy: $old -> $new"
     ;;
 hook:*)

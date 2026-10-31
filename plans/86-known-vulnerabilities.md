@@ -27,7 +27,9 @@ and each fix lands through a pull request that runs the usual checks.
 Each scan runs only for the components that a push or a publish
 changes, the same way `ci/` runs a component's builds. A scan that
 reads every component on every push would add tens of minutes to each
-run for nothing new.
+run for nothing new. A change to Trivy's own configuration is the one
+exception: Trivy then scans every published image again, as the Trivy
+section says.
 
 ## Evidence
 
@@ -176,9 +178,116 @@ the findings that a snapshot bump can act on.
 A scan reports, and it does not gate the publish. A scan that fails,
 for example when Trivy's database download fails, prints a warning,
 and the publish pushes the next image. The install of Trivy and each
-upload continue on an error too. Each publish job downloads Trivy's
-vulnerability database once, before its first scan. `ci/workflow.go`
-pins the Trivy version, and `ci/latest.sh` reports it.
+upload continue on an error too. `ci/trivy.go` pins the Trivy
+version, and `ci/latest.sh` reports it.
+
+The Trivy configuration is two files: `ci/trivy.go`, which holds the
+Trivy version and the arguments of a scan, and
+`ci/templates/trivy.tmpl`, which holds the steps that install Trivy,
+restore its database, and upload a scan, and the root workflow's
+`trivy-db` and `trivy` jobs. A publish
+scans only the images that it pushes, so a change to the
+configuration would reach each image only at its next publish. On
+2026-10-31, the push that added Trivy, run 41210017489, changed `ci/`
+and the workflows and no component's outputs, so nothing published
+and Trivy scanned nothing.
+
+So a push to `main` that changes one of the two files scans every
+published image again, with no build and no push. `Planner.Rescan` in
+`ci/rescan.go` decides it from the same diff that selects the jobs:
+since the newest `main` run that passed, or every image when every job
+runs. A change to any other file, including the rest of `ci/`, scans
+nothing again, and a branch, a pull request, and a release tag never
+scan again. The plan job writes the images and their versions to its
+`trivy` output, and its summary says why the rescan runs or does not.
+For a tracked component, the version is its newest release or
+development build on ghcr.io, the one that a cluster that follows the
+newest version pulls. For a pinned component, it is the published tag.
+A component that publishes in the run is left out, because its
+publish job scans what it pushes with the new configuration, and a
+component with nothing published has nothing to scan.
+
+The `trivy` job runs one matrix entry for each image: `ci scan` scans
+the image, and the upload goes under `trivy/<image>`, the category
+that the image's publish uploads under, so the new results replace the
+old ones. The job continues on an error, and a scan that fails prints
+a warning, so a rescan never fails the run. The alternative was to make
+the configuration an input of every image, so that a change to it
+publishes every component as a development build, and each publish
+scans. The plan rejected it: every image would build and push again,
+and every cluster that follows the development builds would restart
+its pods for a change to the scanner.
+
+### The vulnerability database
+
+Every scan reads Trivy's vulnerability database, and a run that scans
+in the `trivy` job's matrix and in each publish job would download it
+once for each job: 57 images on 2026-10-31. Trivy pulls the database
+from `mirror.gcr.io/aquasec/trivy-db:2` first and
+`ghcr.io/aquasecurity/trivy-db:2` second, and the ghcr.io copy has a
+history of `TOOMANYREQUESTS` refusals for CI fleets
+([trivy#7668](https://github.com/aquasecurity/trivy/discussions/7668)).
+So the root workflow's `trivy-db` job downloads the database once,
+and every job that scans restores it from the Actions cache.
+
+The facts the design rests on, checked on 2026-10-31:
+
+- The database layer on ghcr.io was 137,670,336 bytes gzipped, and
+  `trivy.db` was 1,674,162,176 bytes unpacked. Its `metadata.json`
+  held `UpdatedAt` 2026-10-31T13:09Z and `NextUpdate` 24 hours later.
+  The trivy-db repository builds the database every 6 hours
+  ([trivy-db](https://github.com/aquasecurity/trivy-db)).
+- Trivy downloads nothing when the database in its cache directory is
+  current: `NeedsUpdate` in `pkg/db/db.go` of v0.76.1 returns false
+  while the time is before `NextUpdate`, or within an hour of
+  `DownloadedAt`. `trivy image --download-db-only` writes
+  `DownloadedAt`, so a restored copy needs no `--skip-db-update`. A
+  copy pulled with `oras`, as in trivy-action's README, has no
+  `DownloadedAt`, and Trivy downloads it again unless the scan skips
+  the update.
+- The default cache directory is `os.UserCacheDir()` plus `trivy`,
+  which is `~/.cache/trivy` on a runner (`pkg/cache/dir.go`), and the
+  database is under `db/` there.
+- The Java database downloads only when a scan finds a JAR file
+  (`pkg/javadb/client.go` updates it in `NewClient`), and the checks
+  bundle only for a misconfiguration scan, so `--scanners vuln` on an
+  image without JAR files reads neither
+  ([databases](https://trivy.dev/latest/docs/configuration/db/),
+  [cache](https://trivy.dev/latest/docs/configuration/cache/)).
+- trivy-action caches the cache directory under
+  `cache-trivy-<YYYY-MM-DD>` with the restore key `cache-trivy-`, and
+  its README suggests a scheduled job on the default branch that
+  saves the database for the scans to restore
+  ([trivy-action](https://github.com/aquasecurity/trivy-action)).
+  setup-trivy caches only the binary
+  ([setup-trivy](https://github.com/aquasecurity/setup-trivy)).
+- A run can restore a cache entry of its own branch or of the default
+  branch, an entry never changes, and GitHub deletes an entry that no
+  run read for 7 days, within a limit of 10 GB for the repository
+  ([dependency caching](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching)).
+
+The `trivy-db` job follows trivy-action's key, with no schedule,
+because a timer that reads state again is a defect. The plan runs the
+job only when the run scans an image: the `trivy` job, or a publish of
+a component with images (`ScansImages` in `ci/rescan.go`, and the plan
+job's `trivy-db` output). The job looks up `trivy-db-<day>` without
+downloading it. On a miss, it installs Trivy, runs `trivy image
+--download-db-only`, saves `~/.cache/trivy/db` under the key, and
+deletes every older `trivy-db-` entry with `gh cache delete`, so the
+cache holds one entry of about 140 MB, not one for each of the last 7
+days. The `trivy` job and each publish call that scans images need the
+`trivy-db` job, and each restores the key of its own day, or the
+newest `trivy-db-` entry, before it installs Trivy. So when the cache works, a run downloads
+the database at most once, and only the first scanning run of a day
+downloads it.
+
+An artifact was the alternative. It would not use the cache's 10 GB,
+but each run would upload the database again and download nothing
+from an earlier run, and the cache already shares one entry with every
+run of the day. Every step that reads or writes the cache continues on
+an error. When a restore fails, or restores a database that is no
+longer current, Trivy downloads its own before the first scan, so the
+cache saves downloads and never stops a scan.
 
 Trivy's findings change only when it runs, unlike Dependabot's. An
 advisory against a Debian package in an image that no push touches

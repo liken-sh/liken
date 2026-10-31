@@ -27,11 +27,6 @@ var templateFiles embed.FS
 // run, so a hook behaves the same in each.
 const prekVersion = "0.5.2"
 
-// trivyVersion is the Trivy that each publish job installs to scan the
-// images it pushes. ci/latest.sh reports it against Trivy's newest
-// release.
-const trivyVersion = "0.76.1"
-
 // fluxVersionFile holds the flux release that the OS ships. The
 // publish job pushes each deploy artifact with the same flux CLI, so
 // the artifact's format is the one that the cluster's flux reads.
@@ -42,8 +37,11 @@ var templates = template.Must(template.New("").
 	Funcs(template.FuncMap{
 		"prekVersion":  func() string { return prekVersion },
 		"trivyVersion": func() string { return trivyVersion },
-		"join":         strings.Join,
-		"lines":        func(s string) []string { return strings.Split(strings.TrimSpace(s), "\n") },
+		"trivyUpload": func(image, present string, dry bool) trivyUpload {
+			return trivyUpload{Image: image, Present: present, Dry: dry}
+		},
+		"join":  strings.Join,
+		"lines": func(s string) []string { return strings.Split(strings.TrimSpace(s), "\n") },
 		"goCache": func(mod, sum, family string, build bool) goCache {
 			return goCache{Mod: mod, Keys: []string{sum}, Family: family, Build: build, SavesModules: !build}
 		},
@@ -174,7 +172,12 @@ func rootData(components map[string]*Component) map[string]any {
 			sites = append(sites, site{c.Name(), c.Docs.Prefix})
 		}
 	}
-	return map[string]any{"Components": list, "Coverage": coverage, "Sites": sites}
+	// The trivy job restores the modules of the ci module, which the ci
+	// module's go job saves, and keeps no build cache: each of its jobs
+	// scans one image, and the many jobs of one run would each try to
+	// save the same entry.
+	trivyCache := goCache{Mod: "ci/go.mod", Keys: []string{"ci/go.sum"}, Family: "ci"}
+	return map[string]any{"Components": list, "Coverage": coverage, "Sites": sites, "TrivyCache": trivyCache}
 }
 
 // dependencyOrder lists the components so that each one comes after

@@ -253,12 +253,28 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      # The publish scans each image that it pushes with Trivy, so only
-      # an image that this run publishes is scanned, and a pinned base is
-      # scanned once for each tag. The scan reports and does not gate: an
-      # install that fails here makes each scan fail, and the publish
-      # warns and pushes the next image. The first scan downloads Trivy's
-      # vulnerability database, and the later scans of the job reuse it.
+      # The publish scans each image that it pushes with Trivy, so an
+      # image that this run publishes is scanned, and a pinned base is
+      # scanned once for each tag. The root workflow's trivy job scans
+      # every published image again when the Trivy configuration
+      # changes. The scan reports and does not gate: an install that
+      # fails here makes each scan fail, and the publish warns and pushes
+      # the next image. Each scan reads Trivy's vulnerability database
+      # that the root workflow's trivy-db job saved to the cache, and
+      # Trivy downloads the database once, before the first scan, when
+      # the restore finds none that is current.
+      - id: trivy-day
+        if: ${{ !inputs.dryrun }}
+        run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - if: ${{ !inputs.dryrun }}
+        continue-on-error: true
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/trivy/db
+          key: trivy-db-${{ steps.trivy-day.outputs.day }}
+          restore-keys: trivy-db-
+
       - if: ${{ !inputs.dryrun }}
         continue-on-error: true
         uses: aquasecurity/setup-trivy@v0.3.1
@@ -274,9 +290,13 @@ jobs:
         working-directory: ci
         run: go run . publish -root .. -component mpv -version "${{ inputs.version }}" -mode "${{ inputs.dryrun && 'dry' || inputs.publish }}" -sarif "${{ github.workspace }}/trivy"
 
-      # The scan of mpv, under a category of its own, so the upload
-      # of one image never closes the alerts of another. The step runs
-      # when the publish wrote the scan, even when a later image failed.
+      # The scan of each image goes under a category of its own,
+      # trivy/<image>. Code scanning closes an alert only when a later
+      # upload in the same category no longer reports it, so the upload
+      # of one image never closes the alerts of another, and the next
+      # scan of the same image replaces its results. Each step runs when
+      # the publish wrote its image's scan, even when a later image
+      # failed.
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/mpv.sarif') != '' }}
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4

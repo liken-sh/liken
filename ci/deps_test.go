@@ -1,7 +1,9 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -153,5 +155,42 @@ func TestANestedComponentOwnsItsOwnDirectory(t *testing.T) {
 		if got := d.owner(path); got != want {
 			t.Errorf("owner(%s) = %q, want %q", path, got, want)
 		}
+	}
+}
+
+// A line uses a project image only when one of its words starts with that
+// image's reference and the image's name ends at a tag, a digest, or the end
+// of the word. Another registry's path that holds the same text, a longer
+// host name, and a repository under the image's name are not uses of it.
+func TestAnImageReferenceIsReadFromTheStartOfAWord(t *testing.T) {
+	for name, tc := range map[string]struct {
+		line string
+		uses bool
+	}{
+		"a FROM line":                  {"FROM ghcr.io/liken-sh/base-image:1 AS runtime", true},
+		"a FROM line with a platform":  {"FROM --platform=$BUILDPLATFORM ghcr.io/liken-sh/base-image:1", true},
+		"a FROM line with no tag":      {"FROM ghcr.io/liken-sh/base-image", true},
+		"an ARG default":               {"ARG BASE=ghcr.io/liken-sh/base-image:1", true},
+		"a quoted ARG default":         {`ARG BASE="ghcr.io/liken-sh/base-image@sha256:abc"`, true},
+		"a mirror's path":              {"FROM mirror.example/ghcr.io/liken-sh/base-image:1", false},
+		"a longer host name":           {"FROM notghcr.io/liken-sh/base-image:1", false},
+		"a repository under the image": {"FROM ghcr.io/liken-sh/base-image/extra:1", false},
+		"an ARG default from a mirror": {"ARG BASE=mirror.example/ghcr.io/liken-sh/base-image:1", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := depsFixture(t, `"brand"`)
+			if err := os.WriteFile(filepath.Join(d.Root, "operator/Dockerfile"), []byte(tc.line+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			findings, err := d.Check()
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "operator uses base, and its package.toml does not name it in [depends]: operator/Dockerfile starts from ghcr.io/liken-sh/base-image"
+			got := slices.ContainsFunc(findings, func(f Finding) bool { return f.String() == want })
+			if got != tc.uses {
+				t.Errorf("found the use: %v, want %v, in %v", got, tc.uses, findings)
+			}
+		})
 	}
 }

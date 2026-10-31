@@ -315,17 +315,17 @@ jobs:{% range .Jobs %}
         with:
           version: {% .Flux %}{% end %}{% if .Images %}
 
-      # The publish scans each image that it pushes with Trivy, so only
-      # an image that this run publishes is scanned, and a pinned base is
-      # scanned once for each tag. The scan reports and does not gate: an
-      # install that fails here makes each scan fail, and the publish
-      # warns and pushes the next image. The first scan downloads Trivy's
-      # vulnerability database, and the later scans of the job reuse it.
-      - if: ${{ !inputs.dryrun }}
-        continue-on-error: true
-        uses: aquasecurity/setup-trivy@v0.3.1
-        with:
-          version: v{% trivyVersion %}{% end %}
+      # The publish scans each image that it pushes with Trivy, so an
+      # image that this run publishes is scanned, and a pinned base is
+      # scanned once for each tag. The root workflow's trivy job scans
+      # every published image again when the Trivy configuration
+      # changes. The scan reports and does not gate: an install that
+      # fails here makes each scan fail, and the publish warns and pushes
+      # the next image. Each scan reads Trivy's vulnerability database
+      # that the root workflow's trivy-db job saved to the cache, and
+      # Trivy downloads the database once, before the first scan, when
+      # the restore finds none that is current.{% template "trivy-db-restore" "${{ !inputs.dryrun }}" %}
+{% template "trivy-setup" "${{ !inputs.dryrun }}" %}{% end %}
 
 {% if .Images %}      # Each image builds again through docker-bake.hcl, and pushes. An
       # image that ran in the images job above builds from the layers that
@@ -338,15 +338,14 @@ jobs:{% range .Jobs %}
       # alone.
 {% end %}      - name: publish
         working-directory: ci
-        run: go run . publish -root .. -component {% .Name %} -version "${{ inputs.version }}" -mode "${{ inputs.dryrun && 'dry' || inputs.publish }}"{% if .Images %} -sarif "${{ github.workspace }}/trivy"{% end %}{% range .Images %}
+        run: go run . publish -root .. -component {% .Name %} -version "${{ inputs.version }}" -mode "${{ inputs.dryrun && 'dry' || inputs.publish }}"{% if .Images %} -sarif "${{ github.workspace }}/trivy"
 
-      # The scan of {% .Name %}, under a category of its own, so the upload
-      # of one image never closes the alerts of another. The step runs
-      # when the publish wrote the scan, even when a later image failed.
-      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/{% .Name %}.sarif') != '' }}
-        continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: trivy/{% .Name %}.sarif
-          category: trivy/{% .Name %}{% end %}{% template "go-save" (goCache "ci/go.mod" "ci/go.sum" "ci" true) %}{% end %}
+      # The scan of each image goes under a category of its own,
+      # trivy/<image>. Code scanning closes an alert only when a later
+      # upload in the same category no longer reports it, so the upload
+      # of one image never closes the alerts of another, and the next
+      # scan of the same image replaces its results. Each step runs when
+      # the publish wrote its image's scan, even when a later image
+      # failed.{% range $i, $image := .Images %}{% if $i %}
+{% end %}{% template "trivy-upload" (trivyUpload $image.Name (printf "trivy/%s.sarif" $image.Name) true) %}{% end %}{% end %}{% template "go-save" (goCache "ci/go.mod" "ci/go.sum" "ci" true) %}{% end %}
 {% end %}

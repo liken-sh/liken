@@ -260,9 +260,15 @@ func (d DepsChecker) cargoWorkspaces(c *Component) ([]Finding, error) {
 	return findings, nil
 }
 
-// imageRef matches an image of the project in a FROM line or in an
-// ARG default that a FROM line names.
-var imageRef = regexp.MustCompile(`ghcr\.io/liken-sh/([a-z0-9-]+)`)
+// imageRef matches an image of the project in one word of a FROM line,
+// or in the value of an ARG default that a FROM line names. The pattern
+// is anchored at the start of the word, and the image's name ends at a
+// tag, a digest, or the end of the word. Unanchored, it would also match
+// another registry's path such as mirror.example/ghcr.io/liken-sh/mpv
+// and a repository under the name such as ghcr.io/liken-sh/mpv/extra,
+// and report a use of mpv that the Dockerfile does not make. The first
+// group is the reference without its tag, and the second is the name.
+var imageRef = regexp.MustCompile(`\A(ghcr\.io/liken-sh/([a-z0-9-]+))(?:[:@]|\z)`)
 
 // images checks each image's build contexts, and the images of other
 // components that its Dockerfile starts from: a published image by its
@@ -300,10 +306,17 @@ func (d DepsChecker) images(c *Component) ([]Finding, error) {
 			if len(fields) == 0 || (fields[0] != "FROM" && fields[0] != "ARG") {
 				continue
 			}
-			for _, match := range imageRef.FindAllStringSubmatch(line, -1) {
-				if other, ok := producer[match[1]]; ok && !d.allowed(c, other, false) {
+			for _, field := range fields[1:] {
+				// An ARG default and a flag such as --platform carry their
+				// value after the last "=", and a default may be quoted.
+				word := strings.Trim(field[strings.LastIndex(field, "=")+1:], `"'`)
+				match := imageRef.FindStringSubmatch(word)
+				if match == nil {
+					continue
+				}
+				if other, ok := producer[match[2]]; ok && !d.allowed(c, other, false) {
 					findings = append(findings, Finding{Component: c.Name(), Uses: other,
-						Where: fmt.Sprintf("%s starts from %s", filepath.Join(c.Dir, orDefault(image.File, "Dockerfile")), match[0])})
+						Where: fmt.Sprintf("%s starts from %s", filepath.Join(c.Dir, orDefault(image.File, "Dockerfile")), match[1])})
 				}
 			}
 		}

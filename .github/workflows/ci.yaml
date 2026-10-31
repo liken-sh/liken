@@ -122,6 +122,8 @@ jobs:
       components: ${{ steps.plan.outputs.components }}
       site: ${{ steps.plan.outputs.site }}
       actions: ${{ steps.plan.outputs.actions }}
+      trivy: ${{ steps.plan.outputs.trivy }}
+      trivy-db: ${{ steps.plan.outputs.trivy-db }}
     steps:
       # The plan diffs against the commit before the push and against
       # each component's release tag, so it needs the history and the
@@ -371,6 +373,202 @@ jobs:
         with:
           category: codeql/actions
 
+  # Each scan needs Trivy's vulnerability database, about 140 MB to
+  # download and 1.7 GB on disk. Trivy builds it every 6 hours, and the
+  # database's metadata says it is current for 24 hours. A run can scan
+  # dozens of images, in the trivy job's matrix and in each publish job,
+  # and a download in each of them would meet the registry's rate limit.
+  # So this job downloads the database once a day, and saves it to the
+  # Actions cache under trivy-db-<day>. The trivy job and each publish
+  # job that scans wait for this job, and restore the newest entry.
+  #
+  # Trivy reads the metadata of the restored database, and it downloads
+  # nothing while the database is current. When a restore fails, or
+  # restores a database that is no longer current, Trivy downloads its
+  # own, so a scan never depends on this job. Every step continues on
+  # an error, and the job never fails the run.
+  #
+  # The repository's Actions cache holds 10 GB, and each entry of the
+  # database takes about 140 MB of it. A save deletes every older entry,
+  # so the cache holds one at a time. The plan runs this job only when
+  # the run scans an image: ScansImages in ci/rescan.go gives the rule.
+  trivy-db:
+    needs: plan
+    if: ${{ needs.plan.outputs.trivy-db == 'true' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    # actions: write deletes the older entries of the cache.
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - id: day
+        run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      # The lookup reads only whether today's entry exists, and
+      # downloads nothing.
+      - id: lookup
+        continue-on-error: true
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/trivy/db
+          key: trivy-db-${{ steps.day.outputs.day }}
+          lookup-only: true
+
+      # Trivy installs only when today's entry is missing.
+      - if: ${{ steps.lookup.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: aquasecurity/setup-trivy@v0.3.1
+        with:
+          version: v0.76.1
+
+      # Trivy writes the database under ~/.cache/trivy, the directory
+      # that every scan reads by default.
+      - id: download
+        if: ${{ steps.lookup.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        run: trivy image --download-db-only --cache-dir ~/.cache/trivy
+
+      - if: ${{ steps.download.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/trivy/db
+          key: trivy-db-${{ steps.day.outputs.day }}
+
+      - if: ${{ steps.download.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP: trivy-db-${{ steps.day.outputs.day }}
+        run: |
+          gh cache list --repo "$GITHUB_REPOSITORY" --key trivy-db- --limit 100 --json key --jq '.[].key' |
+            sort -u | { grep -vx "$KEEP" || true; } | while read -r key; do
+              gh cache delete "$key" --repo "$GITHUB_REPOSITORY"
+            done
+
+  # Trivy scans each published image again when the Trivy configuration
+  # changes. The configuration is two files: ci/trivy.go, which holds
+  # the Trivy version and the arguments of a scan, and
+  # ci/templates/trivy.tmpl, which holds this job, the trivy-db job,
+  # and the steps that install Trivy, restore its database, and upload
+  # each scan. A publish scans only the images that it pushes, so
+  # without this job a new version or a new argument would reach an
+  # image only at its next publish, and the Security tab would show the
+  # results of the old configuration until then. This job pushes
+  # nothing, so a change to the scanner gives no component a new
+  # version, and no cluster that follows the development builds
+  # restarts a pod for it.
+  #
+  # The plan names each image and the version to scan: the newest
+  # release or development build of a tracked component on ghcr.io, and
+  # the published tag of a pinned component. It leaves out each
+  # component that publishes in this run, because that component's
+  # publish job scans the images it pushes. Only a push to main scans
+  # again, when one of the two files changed since the newest main run
+  # that passed, or when every job runs. Planner.Rescan in ci/rescan.go
+  # gives the rule.
+  #
+  # A scan reports and never fails the run, so the job continues on an
+  # error, and the run's result does not depend on it.
+  trivy:
+    name: trivy ${{ matrix.image }}
+    needs: [plan, trivy-db]
+    if: ${{ !cancelled() && fromJSON(needs.plan.outputs.trivy)[0] != null }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    continue-on-error: true
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.trivy) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: setup-go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: ci/go.mod
+          cache: false
+
+      # The repository's Actions cache holds 10 GB, and GitHub evicts
+      # the oldest entries when the caches pass that limit. So every run
+      # restores the Go caches, and only a push to main saves them: a
+      # branch never writes an entry that pushes one of main's out.
+      #
+      # The downloaded modules are the entry of the module `ci`,
+      # whose `go` job saves it. This job keeps no build cache.
+      # When no entry has the key, as on a branch that changes `go.sum`,
+      # the restore takes the newest entry of the same family, which
+      # holds most of the modules that the job needs.
+      #
+      # The entry holds the extracted source and, from the download
+      # cache, only the `go.mod` files and the zip hashes. `go` reads the
+      # `go.mod` files to load the module graph, and it downloads a module
+      # again when its zip hash is missing. `go` does not read a zip
+      # file after it extracts the source, and the zip files are about
+      # half of the compressed entry.
+      - id: go-modules
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/go/pkg/mod/*
+            !~/go/pkg/mod/cache
+            ~/go/pkg/mod/cache/download/**/*.mod
+            ~/go/pkg/mod/cache/download/**/*.ziphash
+          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ hashFiles('ci/go.sum') }}
+          restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-
+
+      # The scan reads the image from ghcr.io. The login lets it read a
+      # package that is not public, and a login that fails leaves the
+      # scan to read the image without one.
+      - continue-on-error: true
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # The database that the trivy-db job saved.
+      - id: trivy-day
+        run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - continue-on-error: true
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/trivy/db
+          key: trivy-db-${{ steps.trivy-day.outputs.day }}
+          restore-keys: trivy-db-
+
+      # A scan reports and does not gate. An install that fails here
+      # makes the scan fail, and the scan prints a warning and the job
+      # goes on.
+      - continue-on-error: true
+        uses: aquasecurity/setup-trivy@v0.3.1
+        with:
+          version: v0.76.1
+
+      - name: scan
+        working-directory: ci
+        env:
+          IMAGE: ${{ matrix.image }}
+          VERSION: ${{ matrix.version }}
+        run: go run . scan -root .. -image "$IMAGE" -version "$VERSION" -sarif "${{ github.workspace }}/trivy"
+
+      # The upload goes under the category that the image's publish
+      # uploads under, so it replaces the results of the image's last
+      # scan. The step runs when the scan wrote its file.
+      - if: ${{ !cancelled() && hashFiles('trivy/*.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy/${{ matrix.image }}.sarif
+          category: trivy/${{ matrix.image }}
+
   toolchains:
     needs: [plan]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['toolchains'].check }}
@@ -402,7 +600,7 @@ jobs:
       security-events: write
 
   vulkan-publish:
-    needs: [plan, vulkan, toolchains]
+    needs: [plan, vulkan, toolchains, trivy-db]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['vulkan'].publish != 'none' }}
     uses: ./.github/workflows/component-vulkan.yaml
     with:
@@ -434,7 +632,7 @@ jobs:
       security-events: write
 
   astrometry-publish:
-    needs: [plan, astrometry, toolchains, vulkan]
+    needs: [plan, astrometry, toolchains, vulkan, trivy-db]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['astrometry'].publish != 'none' }}
     uses: ./.github/workflows/component-astrometry.yaml
     with:
@@ -495,7 +693,7 @@ jobs:
       security-events: write
 
   trust-publish:
-    needs: [plan, trust]
+    needs: [plan, trust, trivy-db]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['trust'].publish != 'none' }}
     uses: ./.github/workflows/component-trust.yaml
     with:
@@ -527,7 +725,7 @@ jobs:
       security-events: write
 
   indi-publish:
-    needs: [plan, indi, toolchains, trust]
+    needs: [plan, indi, toolchains, trust, trivy-db]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['indi'].publish != 'none' }}
     uses: ./.github/workflows/component-indi.yaml
     with:
@@ -559,7 +757,7 @@ jobs:
       security-events: write
 
   weston-publish:
-    needs: [plan, weston, toolchains, vulkan]
+    needs: [plan, weston, toolchains, vulkan, trivy-db]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['weston'].publish != 'none' }}
     uses: ./.github/workflows/component-weston.yaml
     with:
@@ -591,7 +789,7 @@ jobs:
       security-events: write
 
   observatory-operator-publish:
-    needs: [plan, observatory-operator, indi, kubernetes, notices, toolchains, trust, vulkan, weston]
+    needs: [plan, observatory-operator, indi, kubernetes, notices, toolchains, trust, vulkan, weston, trivy-db]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['observatory-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-observatory-operator.yaml
     with:
@@ -623,7 +821,7 @@ jobs:
       security-events: write
 
   astrophotography-operator-publish:
-    needs: [plan, astrophotography-operator, astrometry, indi, kubernetes, notices, observatory-operator, toolchains, trust, vulkan, weston]
+    needs: [plan, astrophotography-operator, astrometry, indi, kubernetes, notices, observatory-operator, toolchains, trust, vulkan, weston, trivy-db]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['astrophotography-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-astrophotography-operator.yaml
     with:
@@ -655,7 +853,7 @@ jobs:
       security-events: write
 
   audio-operator-publish:
-    needs: [plan, audio-operator, kubernetes, notices, toolchains, trust, vulkan]
+    needs: [plan, audio-operator, kubernetes, notices, toolchains, trust, vulkan, trivy-db]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['audio-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-audio-operator.yaml
     with:
@@ -687,7 +885,7 @@ jobs:
       security-events: write
 
   bluetooth-operator-publish:
-    needs: [plan, bluetooth-operator, kubernetes, notices, toolchains, trust]
+    needs: [plan, bluetooth-operator, kubernetes, notices, toolchains, trust, trivy-db]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['bluetooth-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-bluetooth-operator.yaml
     with:
@@ -749,7 +947,7 @@ jobs:
       security-events: write
 
   vaapi-publish:
-    needs: [plan, vaapi, toolchains, vulkan]
+    needs: [plan, vaapi, toolchains, vulkan, trivy-db]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['vaapi'].publish != 'none' }}
     uses: ./.github/workflows/component-vaapi.yaml
     with:
@@ -781,7 +979,7 @@ jobs:
       security-events: write
 
   ffmpeg-publish:
-    needs: [plan, ffmpeg, toolchains, vaapi, vulkan]
+    needs: [plan, ffmpeg, toolchains, vaapi, vulkan, trivy-db]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['ffmpeg'].publish != 'none' }}
     uses: ./.github/workflows/component-ffmpeg.yaml
     with:
@@ -813,7 +1011,7 @@ jobs:
       security-events: write
 
   display-operator-publish:
-    needs: [plan, display-operator, ffmpeg, kubernetes, notices, toolchains, trust, vaapi, vulkan, weston]
+    needs: [plan, display-operator, ffmpeg, kubernetes, notices, toolchains, trust, vaapi, vulkan, weston, trivy-db]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['display-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-display-operator.yaml
     with:
@@ -845,7 +1043,7 @@ jobs:
       security-events: write
 
   equipment-operator-publish:
-    needs: [plan, equipment-operator, kubernetes, notices, toolchains]
+    needs: [plan, equipment-operator, kubernetes, notices, toolchains, trivy-db]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['equipment-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-equipment-operator.yaml
     with:
@@ -877,7 +1075,7 @@ jobs:
       security-events: write
 
   firmware-operator-publish:
-    needs: [plan, firmware-operator, kubernetes, notices, toolchains, trust, vulkan]
+    needs: [plan, firmware-operator, kubernetes, notices, toolchains, trust, vulkan, trivy-db]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['firmware-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-firmware-operator.yaml
     with:
@@ -909,7 +1107,7 @@ jobs:
       security-events: write
 
   git-csi-driver-publish:
-    needs: [plan, git-csi-driver, kubernetes, notices, toolchains, trust, vulkan]
+    needs: [plan, git-csi-driver, kubernetes, notices, toolchains, trust, vulkan, trivy-db]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['git-csi-driver'].publish != 'none' }}
     uses: ./.github/workflows/component-git-csi-driver.yaml
     with:
@@ -956,7 +1154,7 @@ jobs:
       security-events: write
 
   library-operator-publish:
-    needs: [plan, library-operator, brand, ffmpeg, kubernetes, media-screen, notices, toolchains, trust, vaapi, vulkan]
+    needs: [plan, library-operator, brand, ffmpeg, kubernetes, media-screen, notices, toolchains, trust, vaapi, vulkan, trivy-db]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['library-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-library-operator.yaml
     with:
@@ -1020,7 +1218,7 @@ jobs:
       security-events: write
 
   mpv-publish:
-    needs: [plan, mpv, ffmpeg, toolchains, vaapi, vulkan]
+    needs: [plan, mpv, ffmpeg, toolchains, vaapi, vulkan, trivy-db]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['mpv'].publish != 'none' }}
     uses: ./.github/workflows/component-mpv.yaml
     with:
@@ -1052,7 +1250,7 @@ jobs:
       security-events: write
 
   media-operator-publish:
-    needs: [plan, media-operator, brand, ffmpeg, kubernetes, media-screen, mpv, notices, toolchains, trust, vaapi, vulkan]
+    needs: [plan, media-operator, brand, ffmpeg, kubernetes, media-screen, mpv, notices, toolchains, trust, vaapi, vulkan, trivy-db]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['media-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-media-operator.yaml
     with:
@@ -1084,7 +1282,7 @@ jobs:
       security-events: write
 
   people-operator-publish:
-    needs: [plan, people-operator, kubernetes, notices, toolchains, trust]
+    needs: [plan, people-operator, kubernetes, notices, toolchains, trust, trivy-db]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['people-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-people-operator.yaml
     with:
@@ -1116,7 +1314,7 @@ jobs:
       security-events: write
 
   per-node-csi-driver-publish:
-    needs: [plan, per-node-csi-driver, kubernetes, notices, toolchains]
+    needs: [plan, per-node-csi-driver, kubernetes, notices, toolchains, trivy-db]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].publish != 'none' }}
     uses: ./.github/workflows/component-per-node-csi-driver.yaml
     with:

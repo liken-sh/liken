@@ -192,35 +192,14 @@ func (p Publisher) image(c *Component, image Image, version, mode string, labels
 	return nil
 }
 
-// scan runs Trivy on the image that the publish just pushed, and
-// writes its findings as SARIF to <SARIF>/<image>.sarif, which the
-// publish job uploads to code scanning. The scan runs here because
-// only the publish knows which images it pushed: an image that is
-// already published is not pushed again, and is not scanned again.
-//
-// The scan reads the image from the registry by its version tag. A
-// publish never pushes a version tag twice, so the tag names the bytes
-// that were just pushed, and the scan reads what a cluster pulls. It
-// looks for known vulnerabilities only: GitHub's secret scanning reads
-// the repository that every image is built from. It reports only a
-// vulnerability that has a fixed version. The bases install from
-// Debian sid, which carries many vulnerabilities that no package fixes
-// yet, and those would bury the findings that a bump can act on.
-//
-// A scan reports, and it does not gate the publish. A finding has no
-// effect on the publish, and a scan that fails prints a warning, so a
-// release is never held back by Trivy or by its database download.
+// scan runs Trivy on the image that the publish just pushed. The scan
+// runs here because only the publish knows which images it pushed: an
+// image that is already published is not pushed again, and is not
+// scanned again. scanImage gives the arguments of the scan and why a
+// scan that fails does not fail the publish.
 func (p Publisher) scan(image Image, version string) {
-	if p.SARIF == "" {
-		return
-	}
-	err := os.MkdirAll(p.SARIF, 0o755)
-	if err == nil {
-		err = p.Run(p.Root, "trivy", "image", "--scanners", "vuln", "--ignore-unfixed", "--format", "sarif",
-			"--output", filepath.Join(p.SARIF, image.Name+".sarif"), ref(image.Name, version))
-	}
-	if err != nil {
-		fmt.Printf("::warning::the Trivy scan of %s failed, and the publish goes on: %v\n", ref(image.Name, version), err)
+	if p.SARIF != "" {
+		scanImage(p.Run, p.Root, p.SARIF, image.Name, version)
 	}
 }
 

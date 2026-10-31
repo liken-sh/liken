@@ -122,6 +122,8 @@ jobs:
       components: ${{ steps.plan.outputs.components }}
       site: ${{ steps.plan.outputs.site }}
       actions: ${{ steps.plan.outputs.actions }}
+      trivy: ${{ steps.plan.outputs.trivy }}
+      trivy-db: ${{ steps.plan.outputs.trivy-db }}
     steps:
       # The plan diffs against the commit before the push and against
       # each component's release tag, so it needs the history and the
@@ -226,7 +228,7 @@ jobs:
       - uses: github/codeql-action/analyze@v4
         with:
           category: codeql/actions
-{% range .Components %}
+{% template "trivy-db" %}{% template "trivy-rescan" .TrivyCache %}{% range .Components %}
   {% .Name %}:
     needs: [plan{% range .Needs %}, {% . %}{% end %}]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['{% .Name %}'].check }}
@@ -244,7 +246,7 @@ jobs:
       security-events: write{% end %}
 {% if .Publishes %}
   {% .Name %}-publish:
-    needs: [plan, {% .Name %}{% range .PublishNeeds %}, {% . %}{% end %}]
+    needs: [plan, {% .Name %}{% range .PublishNeeds %}, {% . %}{% end %}{% if and .Images (not .Channel) %}, trivy-db{% end %}]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['{% .Name %}'].publish != 'none' }}
     uses: ./.github/workflows/component-{% .Name %}.yaml
     with:

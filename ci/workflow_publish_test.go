@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestAPinnedImageJobLogsInOnEveryBranch(t *testing.T) {
@@ -51,7 +53,7 @@ func TestTheChecksWaitForTheBasesAndThePublishWaitsForTheClosure(t *testing.T) {
 		"app":          {"plan", "base"},
 		"top":          {"plan"},
 		"lib":          {"plan"},
-		"base-publish": {"plan", "base"},
+		"base-publish": {"plan", "base", "trivy-db"},
 		"app-publish":  {"plan", "app", "base", "lib"},
 		"top-publish":  {"plan", "top", "app", "base", "lib"},
 	}
@@ -212,6 +214,98 @@ func TestThePublishUploadsATrivyScanOfEachImage(t *testing.T) {
 	}
 	if got := publish["permissions"].(map[string]any)["security-events"]; got != "write" {
 		t.Errorf("the publish job's security-events: %v", got)
+	}
+}
+
+// The root workflow's trivy job runs one scan for each image that the
+// plan names, and uploads it under the image's own category, the one
+// that the image's publish uploads under. It runs only when the plan
+// names an image, and it never fails the run.
+func TestTheTrivyJobScansEachImageThatThePlanNames(t *testing.T) {
+	root := trivyFixture(t)[".github/workflows/ci.yaml"]
+	var doc struct {
+		Jobs map[string]struct {
+			If              string `yaml:"if"`
+			ContinueOnError bool   `yaml:"continue-on-error"`
+			Permissions     map[string]string
+			Strategy        struct {
+				Matrix struct {
+					Include string `yaml:"include"`
+				} `yaml:"matrix"`
+			} `yaml:"strategy"`
+			Outputs map[string]string `yaml:"outputs"`
+			Steps   []struct {
+				Uses string            `yaml:"uses"`
+				Run  string            `yaml:"run"`
+				With map[string]string `yaml:"with"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(root, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if got := doc.Jobs["plan"].Outputs["trivy"]; got != "${{ steps.plan.outputs.trivy }}" {
+		t.Errorf("the plan's trivy output is %q", got)
+	}
+	job := doc.Jobs["trivy"]
+	if job.If != "${{ !cancelled() && fromJSON(needs.plan.outputs.trivy)[0] != null }}" || !job.ContinueOnError ||
+		job.Strategy.Matrix.Include != "${{ fromJSON(needs.plan.outputs.trivy) }}" || job.Permissions["security-events"] != "write" {
+		t.Errorf("the trivy job: %+v", job)
+	}
+	var trivy, scan, upload string
+	for _, step := range job.Steps {
+		switch {
+		case step.Uses == "aquasecurity/setup-trivy@v0.3.1":
+			trivy = step.With["version"]
+		case strings.Contains(step.Run, "go run . scan "):
+			scan = step.Run
+		case strings.HasPrefix(step.Uses, "github/codeql-action/upload-sarif@"):
+			upload = step.With["sarif_file"] + " " + step.With["category"]
+		}
+	}
+	if trivy != "v"+trivyVersion || scan != `go run . scan -root .. -image "$IMAGE" -version "$VERSION" -sarif "${{ github.workspace }}/trivy"` ||
+		upload != "trivy/${{ matrix.image }}.sarif trivy/${{ matrix.image }}" {
+		t.Errorf("trivy %q, scan %q, upload %q", trivy, scan, upload)
+	}
+}
+
+// The trivy-db job downloads Trivy's database once for the run, and
+// every job that scans waits for it and restores the database before
+// it installs Trivy. A publish that pushes no image does not wait.
+func TestEveryScanRestoresTheDatabaseThatTheTrivyDBJobSaves(t *testing.T) {
+	files := trivyFixture(t)
+	jobs := workflowJobs(t, files[".github/workflows/ci.yaml"])
+	db := jobs["trivy-db"]
+	if db["if"] != "${{ needs.plan.outputs.trivy-db == 'true' }}" || db["permissions"].(map[string]any)["actions"] != "write" {
+		t.Errorf("the trivy-db job: %v", db)
+	}
+	needs := map[string]bool{}
+	for _, job := range []string{"trivy", "base-publish", "app-publish"} {
+		for _, need := range jobs[job]["needs"].([]any) {
+			needs[job] = needs[job] || need == "trivy-db"
+		}
+	}
+	if want := map[string]bool{"trivy": true, "base-publish": true, "app-publish": false}; !reflect.DeepEqual(needs, want) {
+		t.Errorf("the jobs that wait for trivy-db: %v, want %v", needs, want)
+	}
+	for name, steps := range map[string]any{
+		"the trivy job":          jobs["trivy"]["steps"],
+		"the base's publish job": workflowJobs(t, files[".github/workflows/component-base.yaml"])["publish"]["steps"],
+	} {
+		var order []string
+		for _, step := range steps.([]any) {
+			step := step.(map[string]any)
+			with, _ := step["with"].(map[string]any)
+			switch uses, _ := step["uses"].(string); {
+			case uses == "actions/cache/restore@v6" && with["path"] == "~/.cache/trivy/db":
+				order = append(order, "restore "+with["restore-keys"].(string))
+			case uses == "aquasecurity/setup-trivy@v0.3.1":
+				order = append(order, "install")
+			}
+		}
+		if want := []string{"restore trivy-db-", "install"}; !reflect.DeepEqual(order, want) {
+			t.Errorf("%s: %v, want %v", name, order, want)
+		}
 	}
 }
 

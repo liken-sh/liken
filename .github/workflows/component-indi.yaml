@@ -470,12 +470,28 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      # The publish scans each image that it pushes with Trivy, so only
-      # an image that this run publishes is scanned, and a pinned base is
-      # scanned once for each tag. The scan reports and does not gate: an
-      # install that fails here makes each scan fail, and the publish
-      # warns and pushes the next image. The first scan downloads Trivy's
-      # vulnerability database, and the later scans of the job reuse it.
+      # The publish scans each image that it pushes with Trivy, so an
+      # image that this run publishes is scanned, and a pinned base is
+      # scanned once for each tag. The root workflow's trivy job scans
+      # every published image again when the Trivy configuration
+      # changes. The scan reports and does not gate: an install that
+      # fails here makes each scan fail, and the publish warns and pushes
+      # the next image. Each scan reads Trivy's vulnerability database
+      # that the root workflow's trivy-db job saved to the cache, and
+      # Trivy downloads the database once, before the first scan, when
+      # the restore finds none that is current.
+      - id: trivy-day
+        if: ${{ !inputs.dryrun }}
+        run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - if: ${{ !inputs.dryrun }}
+        continue-on-error: true
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/trivy/db
+          key: trivy-db-${{ steps.trivy-day.outputs.day }}
+          restore-keys: trivy-db-
+
       - if: ${{ !inputs.dryrun }}
         continue-on-error: true
         uses: aquasecurity/setup-trivy@v0.3.1
@@ -491,9 +507,13 @@ jobs:
         working-directory: ci
         run: go run . publish -root .. -component indi -version "${{ inputs.version }}" -mode "${{ inputs.dryrun && 'dry' || inputs.publish }}" -sarif "${{ github.workspace }}/trivy"
 
-      # The scan of indi, under a category of its own, so the upload
-      # of one image never closes the alerts of another. The step runs
-      # when the publish wrote the scan, even when a later image failed.
+      # The scan of each image goes under a category of its own,
+      # trivy/<image>. Code scanning closes an alert only when a later
+      # upload in the same category no longer reports it, so the upload
+      # of one image never closes the alerts of another, and the next
+      # scan of the same image replaces its results. Each step runs when
+      # the publish wrote its image's scan, even when a later image
+      # failed.
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi.sarif') != '' }}
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4
@@ -501,9 +521,6 @@ jobs:
           sarif_file: trivy/indi.sarif
           category: trivy/indi
 
-      # The scan of indi-simulators, under a category of its own, so the upload
-      # of one image never closes the alerts of another. The step runs
-      # when the publish wrote the scan, even when a later image failed.
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-simulators.sarif') != '' }}
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4
@@ -511,9 +528,6 @@ jobs:
           sarif_file: trivy/indi-simulators.sarif
           category: trivy/indi-simulators
 
-      # The scan of indi-phd2, under a category of its own, so the upload
-      # of one image never closes the alerts of another. The step runs
-      # when the publish wrote the scan, even when a later image failed.
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-phd2.sarif') != '' }}
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4
@@ -521,9 +535,6 @@ jobs:
           sarif_file: trivy/indi-phd2.sarif
           category: trivy/indi-phd2
 
-      # The scan of indi-open, under a category of its own, so the upload
-      # of one image never closes the alerts of another. The step runs
-      # when the publish wrote the scan, even when a later image failed.
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-open.sarif') != '' }}
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4
@@ -531,9 +542,6 @@ jobs:
           sarif_file: trivy/indi-open.sarif
           category: trivy/indi-open
 
-      # The scan of indi-zwo, under a category of its own, so the upload
-      # of one image never closes the alerts of another. The step runs
-      # when the publish wrote the scan, even when a later image failed.
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-zwo.sarif') != '' }}
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4
@@ -541,9 +549,6 @@ jobs:
           sarif_file: trivy/indi-zwo.sarif
           category: trivy/indi-zwo
 
-      # The scan of indi-qhy, under a category of its own, so the upload
-      # of one image never closes the alerts of another. The step runs
-      # when the publish wrote the scan, even when a later image failed.
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-qhy.sarif') != '' }}
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4
@@ -551,9 +556,6 @@ jobs:
           sarif_file: trivy/indi-qhy.sarif
           category: trivy/indi-qhy
 
-      # The scan of indi-playerone, under a category of its own, so the upload
-      # of one image never closes the alerts of another. The step runs
-      # when the publish wrote the scan, even when a later image failed.
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-playerone.sarif') != '' }}
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4
@@ -561,9 +563,6 @@ jobs:
           sarif_file: trivy/indi-playerone.sarif
           category: trivy/indi-playerone
 
-      # The scan of indi-svbony, under a category of its own, so the upload
-      # of one image never closes the alerts of another. The step runs
-      # when the publish wrote the scan, even when a later image failed.
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-svbony.sarif') != '' }}
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4
@@ -571,9 +570,6 @@ jobs:
           sarif_file: trivy/indi-svbony.sarif
           category: trivy/indi-svbony
 
-      # The scan of indi-atik, under a category of its own, so the upload
-      # of one image never closes the alerts of another. The step runs
-      # when the publish wrote the scan, even when a later image failed.
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-atik.sarif') != '' }}
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4
@@ -581,9 +577,6 @@ jobs:
           sarif_file: trivy/indi-atik.sarif
           category: trivy/indi-atik
 
-      # The scan of indi-fli, under a category of its own, so the upload
-      # of one image never closes the alerts of another. The step runs
-      # when the publish wrote the scan, even when a later image failed.
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-fli.sarif') != '' }}
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4
@@ -591,9 +584,6 @@ jobs:
           sarif_file: trivy/indi-fli.sarif
           category: trivy/indi-fli
 
-      # The scan of indi-sbig, under a category of its own, so the upload
-      # of one image never closes the alerts of another. The step runs
-      # when the publish wrote the scan, even when a later image failed.
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-sbig.sarif') != '' }}
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4
@@ -601,9 +591,6 @@ jobs:
           sarif_file: trivy/indi-sbig.sarif
           category: trivy/indi-sbig
 
-      # The scan of indi-mi, under a category of its own, so the upload
-      # of one image never closes the alerts of another. The step runs
-      # when the publish wrote the scan, even when a later image failed.
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-mi.sarif') != '' }}
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4
@@ -611,9 +598,6 @@ jobs:
           sarif_file: trivy/indi-mi.sarif
           category: trivy/indi-mi
 
-      # The scan of indi-qsi, under a category of its own, so the upload
-      # of one image never closes the alerts of another. The step runs
-      # when the publish wrote the scan, even when a later image failed.
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-qsi.sarif') != '' }}
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4
@@ -621,9 +605,6 @@ jobs:
           sarif_file: trivy/indi-qsi.sarif
           category: trivy/indi-qsi
 
-      # The scan of indi-apogee, under a category of its own, so the upload
-      # of one image never closes the alerts of another. The step runs
-      # when the publish wrote the scan, even when a later image failed.
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-apogee.sarif') != '' }}
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4
@@ -631,9 +612,6 @@ jobs:
           sarif_file: trivy/indi-apogee.sarif
           category: trivy/indi-apogee
 
-      # The scan of indi-astroasis, under a category of its own, so the upload
-      # of one image never closes the alerts of another. The step runs
-      # when the publish wrote the scan, even when a later image failed.
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-astroasis.sarif') != '' }}
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4
@@ -641,9 +619,6 @@ jobs:
           sarif_file: trivy/indi-astroasis.sarif
           category: trivy/indi-astroasis
 
-      # The scan of indi-gphoto, under a category of its own, so the upload
-      # of one image never closes the alerts of another. The step runs
-      # when the publish wrote the scan, even when a later image failed.
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-gphoto.sarif') != '' }}
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4
@@ -651,9 +626,6 @@ jobs:
           sarif_file: trivy/indi-gphoto.sarif
           category: trivy/indi-gphoto
 
-      # The scan of indi-touptek, under a category of its own, so the upload
-      # of one image never closes the alerts of another. The step runs
-      # when the publish wrote the scan, even when a later image failed.
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-touptek.sarif') != '' }}
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4

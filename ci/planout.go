@@ -89,6 +89,11 @@ func (w World) plan(root string, components map[string]*Component) error {
 	} else {
 		notes = append(notes, "CodeQL does not analyze the Actions code: "+actionsWhy+".")
 	}
+	rescan, rescanWhy, err := planner.Rescan(e, decisions)
+	if err != nil {
+		return err
+	}
+	notes = append(notes, rescanNote(rescan, rescanWhy))
 	var summary strings.Builder
 	writeSummary(&summary, e, components, decisions, candidates, notes, probed, refused)
 	fmt.Fprint(w.Stdout, summary.String())
@@ -112,8 +117,16 @@ func (w World) plan(root string, components map[string]*Component) error {
 	if err != nil {
 		return err
 	}
+	if rescan == nil {
+		rescan = []ScanRun{}
+	}
+	scans, err := json.Marshal(rescan)
+	if err != nil {
+		return err
+	}
 	if path := w.Getenv("GITHUB_OUTPUT"); path != "" {
-		if err := appendFile(path, fmt.Sprintf("components=%s\nsite=%t\nactions=%t\n", encoded, site, actions)); err != nil {
+		if err := appendFile(path, fmt.Sprintf("components=%s\nsite=%t\nactions=%t\ntrivy=%s\ntrivy-db=%t\n",
+			encoded, site, actions, scans, ScansImages(components, decisions, rescan))); err != nil {
 			return err
 		}
 	}

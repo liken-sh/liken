@@ -11,6 +11,8 @@
 //	go run ./ci pins                check that each shared pin names one version
 //	go run ./ci namespaces          check that a namespace override moves no deploy object
 //	go run ./ci publish ...         push one component's outputs
+//	go run ./ci scan -image I -version V -sarif DIR
+//	                                scan one published image with Trivy
 //	go run ./ci record -tag T       write the GitHub release for a tag
 //	go run ./ci sites               list each manual's directory and prefix
 //	go run ./ci reports -site URL -dest DIR
@@ -62,15 +64,16 @@ type World struct {
 func (w World) run(args []string) error {
 	stdout := w.Stdout
 	if len(args) == 0 {
-		return fmt.Errorf("name a command: generate, plan, deps, pins, namespaces, publish, record, sites, reports, or profile")
+		return fmt.Errorf("name a command: generate, plan, deps, pins, namespaces, publish, scan, record, sites, reports, or profile")
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	root := flags.String("root", ".", "the repository root")
 	check := flags.Bool("check", false, "generate: fail when a workflow on disk differs, and write nothing")
 	component := flags.String("component", "", "publish, profile: the component")
-	version := flags.String("version", "", "publish: the version")
+	version := flags.String("version", "", "publish, scan: the version")
 	mode := flags.String("mode", "", "publish: dev or release")
-	sarif := flags.String("sarif", "", "publish: the directory for the Trivy scan of each pushed image, or empty for no scan")
+	sarif := flags.String("sarif", "", "publish: the directory for the Trivy scan of each pushed image, or empty for no scan; scan: the directory for the scan")
+	image := flags.String("image", "", "scan: the image")
 	tag := flags.String("tag", "", "record: the release tag")
 	site := flags.String("site", "", "reports, profile: the address of the site that serves the profiles now")
 	dest := flags.String("dest", "", "reports: the site's tree, where the profiles publish")
@@ -104,6 +107,8 @@ func (w World) run(args []string) error {
 		}
 		p := Publisher{Root: *root, Registry: w.Published.Registry, Run: w.Run, Commit: commit, Components: components, SARIF: *sarif}
 		return p.Publish(c, *version, *mode)
+	case "scan":
+		return w.scan(*root, components, *image, *version, *sarif)
 	case "record":
 		return w.record(*root, components, *tag)
 	case "reports":
@@ -260,4 +265,23 @@ func (w World) record(root string, components map[string]*Component, tag string)
 		return w.Run(root, "gh", "release", "edit", tag, "--notes-file", file)
 	}
 	return w.Run(root, "gh", "release", "create", tag, "--verify-tag", "--title", tag, "--notes-file", file)
+}
+
+// scan runs Trivy on one published image of a component, for the root
+// workflow's trivy job. A scan that fails prints a warning and returns
+// no error, as scanImage says; only a request that names no image of
+// the repository, or no version or directory, is an error.
+func (w World) scan(root string, components map[string]*Component, image, version, dir string) error {
+	if version == "" || dir == "" {
+		return fmt.Errorf("a scan needs a -version and a -sarif directory")
+	}
+	for _, c := range components {
+		for _, i := range c.Outputs.Images {
+			if i.Name == image {
+				scanImage(w.Run, root, dir, image, version)
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("%q is not an image of any component", image)
 }
