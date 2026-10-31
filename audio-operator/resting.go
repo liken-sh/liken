@@ -80,15 +80,13 @@ type endpointWrites struct {
 	Codec    string
 }
 
-// nodeMemory is what the controller remembers about an endpoint's
-// node: whether PipeWire built it since the last pass, whether the
-// first pass after the operator started found it, and the declaration
-// the node was last judged against, if any. A declaration that differs
-// from that judgment is a change of the spec.
+// nodeMemory is what the controller knows about an endpoint's node:
+// whether PipeWire built it since the operator last judged it, and the
+// declaration the node was last judged against, if any. A declaration
+// that differs from that judgment is a change of the spec.
 type nodeMemory struct {
-	New   bool
-	Found bool
-	Held  *levelWrite
+	New  bool
+	Held *levelWrite
 }
 
 // nodeRecord is one endpoint's node as the controller last saw it.
@@ -100,19 +98,30 @@ type nodeMemory struct {
 // held it or because the first pass found the node. A declaration is
 // written again only when it differs from held, so a level that moved
 // at the device or by an ask stays where it moved.
+//
+// cookie and id name the node: PipeWire gives out the same small ids
+// again after it restarts, so an id alone can name a node of an older
+// PipeWire.
 type nodeRecord struct {
+	cookie  uint32
 	id      int
 	written *levelWrite
 	held    *levelWrite
+}
+
+// names reports whether the record names the node the facts hold.
+func (r nodeRecord) names(facts endpointFacts) bool {
+	return r.cookie == facts.PipeWire && r.id == facts.Node.ID
 }
 
 // actuate writes what the declaration and the endpoint disagree on.
 // A spec it refuses posts one SpecRefused Warning on the resource for
 // each run of passes that refuses the same values, because a person
 // wrote the spec and the endpoint does not take it.
-func (e *endpointControl) actuate(ctx context.Context, object events.ObjectReference, spec declaration, reading endpoint) error {
+func (e *endpointControl) actuate(ctx context.Context, object events.ObjectReference, spec declaration,
+	applied *EndpointApplied, reading endpoint) error {
 	name := reading.facts.Name
-	writes, refusals := plannedWrites(spec, reading.facts, e.remember(reading.facts))
+	writes, refusals := plannedWrites(spec, reading.facts, e.remember(reading.facts, applied))
 	if said := e.report(name, refusals); said != "" {
 		e.recorder.Warning(object, reasonSpecRefused, said)
 	}
@@ -135,8 +144,8 @@ func (e *endpointControl) actuate(ctx context.Context, object events.ObjectRefer
 		e.nodes[name] = record
 	case spec.Volume != nil || spec.Mute != nil:
 		// The pass judged the declaration and planned no level write:
-		// the node holds it, the first pass adopted it, or the
-		// declaration is unchanged. Later passes judge against it.
+		// the node holds it, or the declaration is unchanged. Later
+		// passes judge against it.
 		record.held = &levelWrite{Volume: spec.Volume, Mute: spec.Mute}
 		e.nodes[name] = record
 	default:
@@ -159,28 +168,55 @@ func (e *endpointControl) actuate(ctx context.Context, object events.ObjectRefer
 }
 
 // remember reports whether PipeWire built this endpoint's node since
-// the operator last looked, with the declaration the node that stands
-// was last judged against, and records the node it sees now.
+// the operator last judged it, with the declaration the node that
+// stands was last judged against, and records the node it sees now.
 //
-// This is what the unity default and a declaration read. A new node
-// takes the declaration, or unity when there is none, once. A level a
-// person or an ask set on a node that stands is left alone: it reaches
-// status.observed and nothing else. A node the first pass finds is not
-// new, because the memory starts empty when the operator starts, and a
-// node that stood before the start can hold a level a person chose,
-// under a claim that plays. The first pass reports it as found, so
-// that a declaration on it is adopted and not written.
-func (e *endpointControl) remember(facts endpointFacts) nodeMemory {
+// The memory is a cache of status.applied. When the memory holds no
+// record, as in the first pass after a start, the status decides: a
+// node whose cookie and id match status.applied kept running through
+// the restart. Its level can be a volume ask or a press of a
+// speaker's button that the declaration does not know, so it is
+// judged against the declaration it was judged against before, and
+// not written again unless the declaration changed. Any other node
+// was built since, as on a machine that booted, where PipeWire starts
+// with the operator and builds every node again unmuted at its
+// configured level. That node takes the declaration, or unity.
+func (e *endpointControl) remember(facts endpointFacts, applied *EndpointApplied) nodeMemory {
 	if !facts.HasNode {
 		delete(e.nodes, facts.Name)
 		return nodeMemory{}
 	}
 	last, seen := e.nodes[facts.Name]
-	if !seen || last.id != facts.Node.ID {
-		e.nodes[facts.Name] = nodeRecord{id: facts.Node.ID}
-		return nodeMemory{New: e.started, Found: !e.started}
+	if seen && last.names(facts) {
+		return nodeMemory{Held: last.held}
 	}
-	return nodeMemory{Held: last.held}
+	if !seen && applied != nil {
+		stood := nodeRecord{cookie: applied.PipeWireCookie, id: applied.Node}
+		if stood.names(facts) {
+			if applied.Volume != nil || applied.Mute != nil {
+				stood.held = &levelWrite{Volume: applied.Volume, Mute: applied.Mute}
+			}
+			e.nodes[facts.Name] = stood
+			return nodeMemory{Held: stood.held}
+		}
+	}
+	e.nodes[facts.Name] = nodeRecord{cookie: facts.PipeWire, id: facts.Node.ID}
+	return nodeMemory{New: true}
+}
+
+// applied is what status.applied publishes for the endpoint after the
+// pass judged it: the node and the declaration it holds, or nothing
+// when the endpoint has no node.
+func (e *endpointControl) applied(facts endpointFacts) *EndpointApplied {
+	record, seen := e.nodes[facts.Name]
+	if !facts.HasNode || !seen {
+		return nil
+	}
+	applied := &EndpointApplied{PipeWireCookie: record.cookie, Node: record.id}
+	if record.held != nil {
+		applied.Volume, applied.Mute = record.held.Volume, record.held.Mute
+	}
+	return applied
 }
 
 // plannedWrites is the resting layer's whole decision: what the
@@ -211,15 +247,7 @@ func plannedWrites(spec declaration, facts endpointFacts, node nodeMemory) (endp
 		// judged against, and not with the level the node reports, so a
 		// level that moved at the device or by an ask stays where it
 		// moved. A node with no judgment yet takes the declaration.
-		//
-		// The first pass after a start writes nothing. The node stood
-		// before the start, and its level can be an ask or a press of a
-		// speaker's button that the declaration does not know. A
-		// suspended node also reports no current level, and PipeWire 1.4.2
-		// applies a Props write to one and announces no change, so the
-		// operator cannot read whether it holds the declaration. The
-		// pass records the declaration as the one the node holds.
-		changed := node.New || (!node.Found && (node.Held == nil || !node.Held.same(want)))
+		changed := node.New || node.Held == nil || !node.Held.same(want)
 		holds := known && !facts.suspended() && (want.Volume == nil || *want.Volume == volume) && (want.Mute == nil || *want.Mute == mute)
 		if changed && !holds {
 			writes.Level = &want

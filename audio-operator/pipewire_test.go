@@ -44,6 +44,30 @@ func TestParseGraph(t *testing.T) {
 	}
 }
 
+// The cookie is the random number a PipeWire daemon picks when it
+// starts, and pw-dump prints it in the Core object's info block. A
+// document with no Core object reads as cookie zero.
+func TestParseGraphReadsThePipeWireCookie(t *testing.T) {
+	cases := []struct {
+		fixture string
+		cookie  uint32
+	}{
+		{"pw-dump-bluez.json", 1067734355},
+		{"pw-dump.json", 0},
+	}
+	for _, c := range cases {
+		t.Run(c.fixture, func(t *testing.T) {
+			graph, err := parseGraph(fixture(t, c.fixture))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if graph.Cookie != c.cookie {
+				t.Errorf("cookie = %d, want %d", graph.Cookie, c.cookie)
+			}
+		})
+	}
+}
+
 // The nodes this operator declares have no alsa.card and no
 // alsa.device, because those two come from the udev device that
 // WirePlumber's monitor builds and this graph has no monitor in it.

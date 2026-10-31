@@ -91,7 +91,6 @@ func TestPlannedWrites(t *testing.T) {
 		spec     declaration
 		facts    endpointFacts
 		newNode  bool
-		found    bool
 		held     *levelWrite
 		level    *levelWrite
 		controls []controlWrite
@@ -254,21 +253,21 @@ func TestPlannedWrites(t *testing.T) {
 			level: &levelWrite{Volume: pointerTo(40), Mute: pointerTo(true)},
 		},
 		{
-			// PipeWire announces no write to a suspended node, so the
-			// first pass cannot read whether the node holds the
-			// declaration, and adopts it.
-			name:  "a declaration on a suspended node the first pass found",
+			// PipeWire announces no write to a suspended node, so a
+			// node that stood through a restart is judged by the
+			// declaration status.applied holds, not by its level.
+			name:  "an unchanged declaration on a suspended node that stood",
 			spec:  declaration{Volume: pointerTo(40)},
 			facts: suspendedSink(),
-			found: true,
+			held:  &levelWrite{Volume: pointerTo(40)},
 		},
 		{
 			// The level can be an ask or a press at the device that the
-			// declaration does not know, so a start adopts it.
-			name:  "a declaration the first pass found a running node away from",
+			// declaration does not know, so it stays.
+			name:  "an unchanged declaration on a running node that moved away from it",
 			spec:  declaration{Volume: pointerTo(40)},
 			facts: alsaSink(50, false),
-			found: true,
+			held:  &levelWrite{Volume: pointerTo(40)},
 		},
 		{
 			// A suspended node can print the level it last ran at, so
@@ -287,7 +286,7 @@ func TestPlannedWrites(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			writes, refusals := plannedWrites(c.spec, c.facts, nodeMemory{New: c.newNode, Found: c.found, Held: c.held})
+			writes, refusals := plannedWrites(c.spec, c.facts, nodeMemory{New: c.newNode, Held: c.held})
 			if !sameLevel(writes.Level, c.level) {
 				t.Errorf("level = %+v, want %+v", writes.Level, c.level)
 			}

@@ -39,6 +39,18 @@ func controlOver(t *testing.T, api http.Handler, record *writeRecord) *endpointC
 	return control
 }
 
+// ranBefore runs one pass of an operator that ran before the one under
+// test, over the same graph, so the API holds the status.applied that
+// operator published. Its writes go nowhere, and the graph does not
+// change under them.
+func ranBefore(t *testing.T, api *endpointAPI, graph pwGraph) {
+	t.Helper()
+	before := testEndpointControl(t, api, &writeRecord{})
+	if err := before.pass(context.Background(), labEndpoints(), testSpeakers(), graph, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // labEndpoints is the analog jack of the lab card and its capture
 // side, which is one PCM device in both directions.
 func labEndpoints() []alsaEndpoint {
@@ -48,11 +60,15 @@ func labEndpoints() []alsaEndpoint {
 	)
 }
 
+// labCookie is the cookie of the PipeWire the lab graph comes from.
+const labCookie = 1067734355
+
 // labGraph holds a node for each of those endpoints and one for the
 // speaker.
 func labGraph() pwGraph {
 	address := pcmAddress{Card: 0, PCM: 0}
 	return pwGraph{
+		Cookie: labCookie,
 		Nodes: map[nodeAddress]pwNode{
 			{pcmAddress: address, Direction: directionSink}: {
 				ID: 42, Name: sinkNodeName(0, 0), Volumes: []float64{1, 1},
@@ -147,12 +163,13 @@ func turnedDownGraph() pwGraph {
 	return graph
 }
 
-// An operator that starts, or starts again, finds nodes that were
-// built before it and levels a person chose. The first pass records
-// those nodes and writes nothing to them, so a speaker that plays a
-// film under a claim keeps the level it has.
+// An operator that starts again while PipeWire runs finds the nodes
+// that status.applied names, at levels a person chose. The first pass
+// writes nothing to them, so a speaker that plays a film under a claim
+// keeps the level it has.
 func TestAStartWritesNothingToNodesThatStand(t *testing.T) {
 	api := newEndpointAPI()
+	ranBefore(t, api, turnedDownGraph())
 	record := &writeRecord{}
 	control := testEndpointControl(t, api, record)
 	control.claims.prepared("claim-1",

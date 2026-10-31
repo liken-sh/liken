@@ -39,9 +39,11 @@ type endpointFacts struct {
 	// The radio's half. It is nil on a card's endpoint.
 	Speaker *speakerFacts
 
-	// The node PipeWire holds for the endpoint now.
-	Node    pwNode
-	HasNode bool
+	// The node PipeWire holds for the endpoint now, and the cookie of
+	// the PipeWire that holds it.
+	Node     pwNode
+	HasNode  bool
+	PipeWire uint32
 
 	// The card's controls that belong to this endpoint, and the value
 	// each one reads now.
@@ -68,6 +70,10 @@ type endpointFacts struct {
 	// last ran at, so this is what observed reports for an idle
 	// endpoint.
 	Written *levelWrite
+
+	// The node the operator last judged the declaration against, which
+	// status.applied publishes.
+	Applied *EndpointApplied
 }
 
 // speakerFacts is one Bluetooth speaker: what bluetoothd says about
@@ -199,6 +205,7 @@ func (f endpointFacts) status(published EndpointStatus, now time.Time) EndpointS
 	}
 	status.Format = f.format()
 	status.Observed = f.observed()
+	status.Applied = f.Applied
 
 	connected, reason, message := f.connected()
 	status.Conditions = setCondition(status.Conditions,

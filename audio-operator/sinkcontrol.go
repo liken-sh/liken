@@ -80,18 +80,10 @@ type endpointControl struct {
 	recorder *events.Recorder
 
 	// nodes is what this operator remembers about each endpoint's
-	// node: the PipeWire object id it had when the operator last
-	// looked, and the level last written to it. A node whose id is
-	// not this one is a node PipeWire built since, and the unity
-	// default writes to a new node alone.
+	// node: the PipeWire cookie and object id it had when the operator
+	// last looked, and the level last written to it. It is a cache of
+	// status.applied, which a start reads in its place (resting.go).
 	nodes map[string]nodeRecord
-
-	// started is true once the first pass has run. The first pass
-	// finds nodes PipeWire built before this operator started, with
-	// levels a person may have chosen, so it records them as seen and
-	// writes no unity to them. Only a node that appears after it is
-	// new.
-	started bool
 
 	// refusals keeps the report of a declaration this operator cannot
 	// write to one line for each run of passes that finds it.
@@ -172,7 +164,6 @@ func (e *endpointControl) pass(ctx context.Context, endpoints []alsaEndpoint,
 	if err := e.sweep(present); err != nil {
 		failures = append(failures, err)
 	}
-	e.started = true
 	return errors.Join(failures...)
 }
 
@@ -198,9 +189,10 @@ func (e *endpointControl) read(cards map[int]*mixer, endpoints []alsaEndpoint,
 				Sink:    sink,
 				HasSink: hasSink,
 			},
-			Node:    sink.sinkNode(),
-			HasNode: hasSink,
-			Claims:  e.claims.holders(name),
+			Node:     sink.sinkNode(),
+			HasNode:  hasSink,
+			PipeWire: graph.Cookie,
+			Claims:   e.claims.holders(name),
 		}})
 	}
 	return readings
@@ -286,6 +278,7 @@ func (e *endpointControl) cardEndpoints(device *mixer, endpoints []alsaEndpoint,
 				Endpoint:  alsa,
 				Node:      node,
 				HasNode:   hasNode,
+				PipeWire:  graph.Cookie,
 				Controls:  controls,
 				Values:    e.controlValues(device, alsa.Name(), controls),
 				Plugged:   plugged,
@@ -348,8 +341,10 @@ func (e *endpointControl) reconcileSink(ctx context.Context, reading endpoint) e
 		return err
 	}
 	e.noteAsk(sink)
-	actuated := e.actuate(ctx, endpointReference(SinkKind, sink.Metadata.Name, sink.Metadata.UID), sink.Spec.declaration(), reading)
+	actuated := e.actuate(ctx, endpointReference(SinkKind, sink.Metadata.Name, sink.Metadata.UID),
+		sink.Spec.declaration(), sink.Status.Applied, reading)
 	reading.facts.Written = e.nodes[reading.facts.Name].written
+	reading.facts.Applied = e.applied(reading.facts)
 	e.latest[reading.facts.Name] = reading.facts
 	e.recordEndpoint(reading)
 	now := e.now()
@@ -374,8 +369,10 @@ func (e *endpointControl) reconcileSource(ctx context.Context, reading endpoint)
 	if err != nil {
 		return err
 	}
-	actuated := e.actuate(ctx, endpointReference(SourceKind, source.Metadata.Name, source.Metadata.UID), source.Spec.declaration(), reading)
+	actuated := e.actuate(ctx, endpointReference(SourceKind, source.Metadata.Name, source.Metadata.UID),
+		source.Spec.declaration(), source.Status.Applied, reading)
 	reading.facts.Written = e.nodes[reading.facts.Name].written
+	reading.facts.Applied = e.applied(reading.facts)
 	e.recordEndpoint(reading)
 	now := e.now()
 	want := func(published EndpointStatus) (EndpointStatus, bool) {

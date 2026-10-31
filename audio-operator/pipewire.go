@@ -120,7 +120,14 @@ type pwFormat struct {
 // Linked holds the id of every node that a link touches, on either
 // side. A stream that plays into a sink, and a tap that records from
 // its monitor ports, each hold a link to the sink's node.
+//
+// Cookie is the random number the PipeWire daemon picks when it starts
+// (pw_rand32 in src/pipewire/impl-core.c), read from its Core object.
+// PipeWire hands out the same small object ids again after a restart,
+// so a node id names a node only together with the cookie of the
+// PipeWire that built it. Zero means the graph held no Core object.
 type pwGraph struct {
+	Cookie   uint32
 	Nodes    map[nodeAddress]pwNode
 	Speakers map[string]bluezSink
 	Linked   map[int]bool
@@ -223,6 +230,7 @@ type pwObject struct {
 // of every other object holds neither. A node's block holds its state:
 // creating, suspended, idle, running, or error.
 type pwInfo struct {
+	Cookie       uint32                     `json:"cookie"`
 	State        string                     `json:"state"`
 	Props        map[string]json.RawMessage `json:"props"`
 	Params       pwParams                   `json:"params"`
@@ -317,6 +325,10 @@ func buildGraph(objects []pwObject) pwGraph {
 	devices := map[string]bluez5Device{}
 	for _, object := range objects {
 		if object.Info == nil {
+			continue
+		}
+		if object.Type == "PipeWire:Interface:Core" {
+			graph.Cookie = object.Info.Cookie
 			continue
 		}
 		if object.Type == "PipeWire:Interface:Link" {

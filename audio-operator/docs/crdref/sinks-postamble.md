@@ -66,17 +66,23 @@ nothing at all. The operator invents no value: an endpoint with no
 declarations keeps whatever the hardware holds, except that every
 sink starts at unity gain so that no hidden multiplier costs
 resolution before the codec runs. The unity write goes only to a
-node PipeWire builds while the operator runs. After a restart, the
-operator writes nothing to a sink that was there before it started,
-and the sink keeps the level it holds.
+node that PipeWire built since the operator last applied the
+declaration.
 
-A restart writes no declared level either. The level an endpoint
-holds when the operator starts can be a volume ask or a press of the
-speaker's button that the declaration does not know, and an idle
-node reports no level, so the operator cannot read whether it
-already holds the declaration. The first pass treats the declaration
-as the level each endpoint holds, and a later change of the
-declaration is written at once.
+The operator records in `status.applied` the node it applied the
+declaration to, by the node's id and the cookie of the PipeWire that
+built it, and the declared `volume.level` and `mute` it applied. So
+when the operator starts again, it can tell which nodes ran through
+the restart. A node that `status.applied` names keeps the level it
+holds, because that level can be a volume ask or a press of the
+speaker's button that the declaration does not know. The operator
+writes the declaration to it only when the declaration differs from
+the one in `status.applied`, as when you changed it while the
+operator was down. Every other node is new, so it takes the
+declaration, or unity on a sink with no declared level. When the
+machine boots, PipeWire starts with a new cookie and builds every
+node again unmuted at its configured level, so each node takes the
+declaration on the operator's first pass.
 
 `volume.max` and `volume.step` bound the volume asks below, and the
 operator writes neither to the hardware. Each one has a default, 100

@@ -166,6 +166,7 @@ type EndpointStatus struct {
 	Layout         []string                     `json:"layout,omitempty"`
 	LayoutSource   string                       `json:"layoutSource,omitempty"`
 	Observed       *EndpointObserved            `json:"observed,omitempty"`
+	Applied        *EndpointApplied             `json:"applied,omitempty"`
 	Claims         []EndpointClaim              `json:"claims,omitempty"`
 	Conditions     []EndpointCondition          `json:"conditions,omitempty"`
 }
@@ -252,6 +253,22 @@ type EndpointObserved struct {
 	Mute     *bool             `json:"mute,omitempty"`
 	Codec    string            `json:"codec,omitempty"`
 	Controls map[string]string `json:"controls,omitempty"`
+}
+
+// EndpointApplied is the node the operator last judged the declared
+// level and mute against, and the declaration it judged. The operator
+// keeps it in the API so that a start can tell a node that kept
+// running from a node PipeWire built again. A node whose PipeWire
+// cookie and id match this record kept running, and the operator
+// writes it only when the declaration differs from Volume and Mute.
+// Any other node is new, and takes the declaration, or unity when the
+// spec declares no level. Volume and Mute are absent when the spec
+// declared no level at that judgment.
+type EndpointApplied struct {
+	PipeWireCookie uint32 `json:"pipewireCookie"`
+	Node           int    `json:"node"`
+	Volume         *int   `json:"volume,omitempty"`
+	Mute           *bool  `json:"mute,omitempty"`
 }
 
 // EndpointClaim names one claim that holds the endpoint now. The DRA

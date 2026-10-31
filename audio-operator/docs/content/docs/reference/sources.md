@@ -93,6 +93,7 @@ What the hardware declares and what the operator last read. The operator owns ev
 | <span id="status--format"></span>`format` | [object](#statusformat) | no | The format the node runs at, from PipeWire's own Format parameter. Absent while the node is not running. |
 | <span id="status--capabilities"></span>`capabilities` | [map\[string\]object](#statuscapabilities) | no | The card's own controls that belong to this endpoint, keyed by the kernel's control name. A Capture control goes to the card's sources, and a jack control is not listed because it is read-only and feeds the Connected condition. |
 | <span id="status--observed"></span>`observed` | [object](#statusobserved) | no | The last value the operator read for each setting. The operator reads the card's control device on every event it delivers, and PipeWire's graph on every change it prints, so a change a person made with a knob or a client shows here without a poll. |
+| <span id="status--applied"></span>`applied` | [object](#statusapplied) | no | The node the operator last applied the declared volume and mute to, and the declaration it applied. When the operator starts, a node whose PipeWire cookie and node id match this record ran through the restart, so the operator keeps the level it holds and writes the declaration only when it differs from the one recorded here. Any other node is one PipeWire built since, as after the machine boots, so it takes the declaration, or unity on a sink with no declared level. Absent while the endpoint has no node. |
 | <span id="status--claims"></span>`claims` | [\[\]object](#statusclaims) | no | The claims that hold the endpoint now, sorted by namespace and name. It holds one claim, or up to spec.sharedClaims on a shared endpoint, and it is absent when no claim holds the endpoint. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports that the endpoint can capture now: a plug in an analog jack, and always on USB. Ready reports that PipeWire holds a node for it. |
 
@@ -150,6 +151,17 @@ The last value the operator read for each setting. The operator reads the card's
 | <span id="statusobserved--volume"></span>`volume` | integer | no | The gain PipeWire applies, as a percent of unity. An idle node reports no level of its own, so an idle endpoint reports the level the operator last wrote to it, and nothing until a level is declared. |
 | <span id="statusobserved--mute"></span>`mute` | boolean | no | Whether the endpoint captures silence, on the same terms as volume. |
 | <span id="statusobserved--controls"></span>`controls` | map[string]string | no | The value of every control in capabilities, in the same spelling spec.controls takes. A control with several channels reports the first channel's value. |
+
+### status.applied
+
+The node the operator last applied the declared volume and mute to, and the declaration it applied. When the operator starts, a node whose PipeWire cookie and node id match this record ran through the restart, so the operator keeps the level it holds and writes the declaration only when it differs from the one recorded here. Any other node is one PipeWire built since, as after the machine boots, so it takes the declaration, or unity on a sink with no declared level. Absent while the endpoint has no node.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusapplied--pipewirecookie"></span>`pipewireCookie` | integer | no | The random number the PipeWire daemon picked when it started, from its Core object. PipeWire gives out the same node ids again after a restart, so the id names a node only together with this number. |
+| <span id="statusapplied--node"></span>`node` | integer | no | The PipeWire object id of the node. |
+| <span id="statusapplied--volume"></span>`volume` | integer | no | The declared level the node was judged against, as a percent of unity. Absent when the spec declared no level. |
+| <span id="statusapplied--mute"></span>`mute` | boolean | no | The declared mute the node was judged against. Absent when the spec declared no mute. |
 
 ### status.claims[]
 

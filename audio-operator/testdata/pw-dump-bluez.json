@@ -3,6 +3,7 @@
     "id": 32,
     "type": "PipeWire:Interface:Core",
     "info": {
+      "cookie": 1067734355,
       "props": {
         "core.name": "pipewire-0"
       }

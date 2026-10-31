@@ -127,6 +127,7 @@ What the hardware declares and what the operator last read. The operator owns ev
 | <span id="status--layout"></span>`layout` | []string | no | The channel positions the operator declares the sink's node with, in PCM slot order. Absent when layoutSource is ChannelMap, because PipeWire reads the positions from the device, and absent when it is None. While LayoutApplied is False with the reason Restarting, this is the layout PipeWire loads when its container starts again. |
 | <span id="status--layoutsource"></span>`layoutSource` | string | no | Where the layout came from. Spec is spec.layout. ELD is the monitor's speaker allocation, capped by the largest LPCM channel count it accepts. ChannelMap is the channel map a USB device describes. None is no positions, and a multichannel stream then plays in stereo. An HDMI sink keeps a layout from the ELD while its monitor is off. Absent on a Bluetooth speaker. One of: `Spec`, `ELD`, `ChannelMap`, `None`. |
 | <span id="status--observed"></span>`observed` | [object](#statusobserved) | no | The last value the operator read for each setting. The operator reads the card's control device for every event it receives. It reads PipeWire's graph for every change PipeWire reports. A change from a physical knob or a client therefore appears here without polling. |
+| <span id="status--applied"></span>`applied` | [object](#statusapplied) | no | The node the operator last applied the declared volume and mute to, and the declaration it applied. When the operator starts, a node whose PipeWire cookie and node id match this record ran through the restart, so the operator keeps the level it holds and writes the declaration only when it differs from the one recorded here. Any other node is one PipeWire built since, as after the machine boots, so it takes the declaration, or unity on a sink with no declared level. Absent while the endpoint has no node. |
 | <span id="status--claims"></span>`claims` | [\[\]object](#statusclaims) | no | The claims that hold the endpoint now, sorted by namespace and name. It holds one claim, or up to spec.sharedClaims on a shared endpoint, and it is absent when no claim holds the endpoint. It identifies the workloads that have the speakers. The operator records a claim when the kubelet prepares it on this machine, so after an operator restart a claim shows again when the kubelet prepares it next. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | Connected reports whether the endpoint can play now. It is true for a monitor on an HDMI slot, a plug in an analog jack, a connected speaker, and every USB endpoint. Ready reports whether PipeWire has a node for the endpoint. These two conditions expose the same facts as the device's no-monitor and no-sink taints, in a form a person can read. LayoutApplied, on a sink of a sound card, reports whether PipeWire runs the sink with the layout the operator selected. It is False with the reason AwaitingIdle while a new layout waits for every stream on the machine to end, and with the reason Restarting while PipeWire restarts in its container to load it. |
 
@@ -228,6 +229,17 @@ The last value the operator read for each setting. The operator reads the card's
 | <span id="statusobserved--codec"></span>`codec` | string | no | The codec a Bluetooth speaker plays with now. |
 | <span id="statusobserved--controls"></span>`controls` | map[string]string | no | The value of every control in capabilities, in the same spelling spec.controls takes. A control with several channels reports the first channel's value. |
 
+### status.applied
+
+The node the operator last applied the declared volume and mute to, and the declaration it applied. When the operator starts, a node whose PipeWire cookie and node id match this record ran through the restart, so the operator keeps the level it holds and writes the declaration only when it differs from the one recorded here. Any other node is one PipeWire built since, as after the machine boots, so it takes the declaration, or unity on a sink with no declared level. Absent while the endpoint has no node.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statusapplied--pipewirecookie"></span>`pipewireCookie` | integer | no | The random number the PipeWire daemon picked when it started, from its Core object. PipeWire gives out the same node ids again after a restart, so the id names a node only together with this number. |
+| <span id="statusapplied--node"></span>`node` | integer | no | The PipeWire object id of the node. |
+| <span id="statusapplied--volume"></span>`volume` | integer | no | The declared level the node was judged against, as a percent of unity. Absent when the spec declared no level. |
+| <span id="statusapplied--mute"></span>`mute` | boolean | no | The declared mute the node was judged against. Absent when the spec declared no mute. |
+
 ### status.claims[]
 
 The claims that hold the endpoint now, sorted by namespace and name. It holds one claim, or up to spec.sharedClaims on a shared endpoint, and it is absent when no claim holds the endpoint. It identifies the workloads that have the speakers. The operator records a claim when the kubelet prepares it on this machine, so after an operator restart a claim shows again when the kubelet prepares it next.
@@ -317,17 +329,23 @@ nothing at all. The operator invents no value: an endpoint with no
 declarations keeps whatever the hardware holds, except that every
 sink starts at unity gain so that no hidden multiplier costs
 resolution before the codec runs. The unity write goes only to a
-node PipeWire builds while the operator runs. After a restart, the
-operator writes nothing to a sink that was there before it started,
-and the sink keeps the level it holds.
+node that PipeWire built since the operator last applied the
+declaration.
 
-A restart writes no declared level either. The level an endpoint
-holds when the operator starts can be a volume ask or a press of the
-speaker's button that the declaration does not know, and an idle
-node reports no level, so the operator cannot read whether it
-already holds the declaration. The first pass treats the declaration
-as the level each endpoint holds, and a later change of the
-declaration is written at once.
+The operator records in `status.applied` the node it applied the
+declaration to, by the node's id and the cookie of the PipeWire that
+built it, and the declared `volume.level` and `mute` it applied. So
+when the operator starts again, it can tell which nodes ran through
+the restart. A node that `status.applied` names keeps the level it
+holds, because that level can be a volume ask or a press of the
+speaker's button that the declaration does not know. The operator
+writes the declaration to it only when the declaration differs from
+the one in `status.applied`, as when you changed it while the
+operator was down. Every other node is new, so it takes the
+declaration, or unity on a sink with no declared level. When the
+machine boots, PipeWire starts with a new cookie and builds every
+node again unmuted at its configured level, so each node takes the
+declaration on the operator's first pass.
 
 `volume.max` and `volume.step` bound the volume asks below, and the
 operator writes neither to the hardware. Each one has a default, 100

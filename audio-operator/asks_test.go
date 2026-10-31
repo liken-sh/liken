@@ -27,10 +27,12 @@ const (
 	secondAsk = "2026-10-04T12:15:25.264Z"
 )
 
-// startedControl is a controller whose first pass over the lab graph
-// has run, so every Sink is read and every ask so far is recorded.
+// startedControl is a controller that started again while PipeWire
+// ran, and whose first pass over the graph has run, so every Sink is
+// read and every ask so far is recorded.
 func startedControl(t *testing.T, api *endpointAPI, record *writeRecord, graph pwGraph) *endpointControl {
 	t.Helper()
+	ranBefore(t, api, graph)
 	control := testEndpointControl(t, api, record)
 	if err := control.pass(context.Background(), labEndpoints(), testSpeakers(), graph, nil); err != nil {
 		t.Fatal(err)

@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"reflect"
 	"testing"
 )
 
@@ -53,6 +54,7 @@ func TestAStartWritesNothingToASuspendedNodeUntilTheDeclarationChanges(t *testin
 		Metadata: EndpointMeta{Name: testAnalogName},
 		Spec:     SinkSpec{Volume: declaredLevel(40)},
 	}
+	ranBefore(t, api, suspendedGraph())
 	ctx := context.Background()
 
 	for range 2 {
@@ -147,6 +149,7 @@ func TestAReconnectTakesTheDeclaredLevel(t *testing.T) {
 	}
 	ctx := context.Background()
 	graph := turnedDownGraph()
+	ranBefore(t, api, graph)
 	if err := control.pass(ctx, labEndpoints(), testSpeakers(), graph, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -185,5 +188,111 @@ func TestARunningNodeThatMatchesTakesNoWriteWhenItGoesIdle(t *testing.T) {
 	}
 	if record.node != nil {
 		t.Errorf("a node that matched the declaration was written %+v when it went idle", record.level)
+	}
+}
+
+// mutedGraph is the lab graph with the analog jack's node muted, the
+// state a mute declaration leaves it in.
+func mutedGraph() pwGraph {
+	graph := labGraph()
+	address := nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 0}, Direction: directionSink}
+	muted := graph.Nodes[address]
+	muted.Mute = true
+	graph.Nodes[address] = muted
+	return graph
+}
+
+// A machine that reboots starts PipeWire and the operator together.
+// PipeWire builds every node again at its configured level, unmuted,
+// and hands out the same small object ids it handed out before the
+// reboot, under a new cookie. The Sink keeps its declaration in the
+// API across the reboot, so the new node takes it.
+func TestARebootedMachineTakesTheDeclaredMute(t *testing.T) {
+	api := newEndpointAPI()
+	api.sinks[testAnalogName] = &Sink{
+		Metadata: EndpointMeta{Name: testAnalogName},
+		Spec:     SinkSpec{Mute: pointerTo(true)},
+	}
+	ranBefore(t, api, mutedGraph())
+
+	record := &writeRecord{}
+	after := testEndpointControl(t, api, record)
+	booted := labGraph()
+	booted.Cookie = labCookie + 1
+	if err := after.pass(context.Background(), labEndpoints(), nil, booted, nil); err != nil {
+		t.Fatal(err)
+	}
+	if record.node == nil || record.level.Mute == nil || !*record.level.Mute {
+		t.Errorf("the node PipeWire built at the boot took %+v, want the declared mute", record.level)
+	}
+}
+
+// The status publishes the node the declaration was judged against
+// and the declaration itself, so that the next operator to start can
+// tell that node from one PipeWire built since.
+func TestThePassPublishesTheNodeItApplied(t *testing.T) {
+	api := newEndpointAPI()
+	api.sinks[testAnalogName] = &Sink{
+		Metadata: EndpointMeta{Name: testAnalogName},
+		Spec:     SinkSpec{Volume: declaredLevel(40), Mute: pointerTo(true)},
+	}
+	control := testEndpointControl(t, api, &writeRecord{})
+	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph(), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	want := EndpointApplied{PipeWireCookie: labCookie, Node: 42, Volume: pointerTo(40), Mute: pointerTo(true)}
+	if got := api.sinks[testAnalogName].Status.Applied; got == nil || !reflect.DeepEqual(*got, want) {
+		t.Errorf("status.applied = %+v, want %+v", got, want)
+	}
+}
+
+// A declaration a person changes while the operator is down differs
+// from the one status.applied holds, so the start writes it to the
+// node that stood.
+func TestAStartWritesADeclarationChangedWhileTheOperatorWasDown(t *testing.T) {
+	api := newEndpointAPI()
+	api.sinks[testAnalogName] = &Sink{
+		Metadata: EndpointMeta{Name: testAnalogName},
+		Spec:     SinkSpec{Volume: declaredLevel(40)},
+	}
+	ranBefore(t, api, turnedDownGraph())
+
+	api.sinks[testAnalogName].Spec.Mute = pointerTo(true)
+	record := &writeRecord{}
+	control := testEndpointControl(t, api, record)
+	if err := control.pass(context.Background(), labEndpoints(), nil, turnedDownGraph(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(record.levels) != 1 || record.levels[0].Mute == nil || !*record.levels[0].Mute {
+		t.Errorf("the start wrote %+v, want the changed declaration once", record.levels)
+	}
+}
+
+// PipeWire restarts inside its container while the operator runs, for
+// a new layout, and builds the node again under the same id. The new
+// cookie tells the operator that the node is new, so it takes the
+// declaration.
+func TestAPipeWireRestartedInPlaceTakesTheDeclaredMute(t *testing.T) {
+	api := newEndpointAPI()
+	api.sinks[testAnalogName] = &Sink{
+		Metadata: EndpointMeta{Name: testAnalogName},
+		Spec:     SinkSpec{Mute: pointerTo(true)},
+	}
+	record := &writeRecord{}
+	control := testEndpointControl(t, api, record)
+	ctx := context.Background()
+	if err := control.pass(ctx, labEndpoints(), nil, mutedGraph(), nil); err != nil {
+		t.Fatal(err)
+	}
+	written := len(record.levels)
+
+	restarted := labGraph()
+	restarted.Cookie = labCookie + 1
+	if err := control.pass(ctx, labEndpoints(), nil, restarted, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := record.levels[written:]; len(got) != 1 || got[0].Mute == nil || !*got[0].Mute {
+		t.Errorf("the node PipeWire built again took %+v, want the declared mute", got)
 	}
 }
