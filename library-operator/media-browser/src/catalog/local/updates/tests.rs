@@ -342,3 +342,20 @@ fn a_progress_event_keeps_its_play_and_wakes_the_loop() {
 
     assert_eq!(source.changed(), Change::Progress);
 }
+
+// ureq wraps its per-read timeout in an `io::Error` of kind `Other`, so
+// the stream must find the timeout inside the error and not by its kind.
+#[test]
+fn a_per_read_timeout_is_idleness_and_a_reset_is_not() {
+    let timeout = std::io::Error::other(ureq::Error::Timeout(ureq::Timeout::PerRead));
+    let reset = std::io::Error::from(ErrorKind::ConnectionReset);
+    let other = std::io::Error::other(ureq::Error::Timeout(ureq::Timeout::Global));
+    assert_eq!(
+        [
+            super::idle(&timeout),
+            super::idle(&reset),
+            super::idle(&other)
+        ],
+        [true, false, false]
+    );
+}

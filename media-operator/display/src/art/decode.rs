@@ -29,15 +29,17 @@ pub fn open(reference: &str) -> Option<Vec<u8>> {
 /// Fetch one picture over https. A reply with any status but 200 carries no
 /// picture, which `ureq` reports as an error of its own.
 fn fetch(url: &str) -> Option<Vec<u8>> {
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(CONNECT_TIMEOUT)
-        .timeout_read(READ_TIMEOUT)
-        .build();
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_connect(Some(CONNECT_TIMEOUT))
+        .timeout_per_read(Some(READ_TIMEOUT))
+        .build()
+        .into();
     let mut bytes = Vec::new();
     agent
         .get(url)
         .call()
         .ok()?
+        .into_body()
         .into_reader()
         .read_to_end(&mut bytes)
         .ok()?;

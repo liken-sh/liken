@@ -24,7 +24,7 @@ path = "src/main.rs"
 # Every version is exact, so a build from this manifest resolves the same
 # crates the lock file names.
 [dependencies]
-iced_winit = { version = "=0.14.0", default-features = false, features = [
+iced_winit = { version = "=0.14.1", default-features = false, features = [
     "wayland",
 ] }
 iced_wgpu = { version = "=0.14.0", features = ["geometry", "image"] }
@@ -48,27 +48,27 @@ image = { version = "=0.25.10", default-features = false, features = [
 # base64 opens the `data:` URI a person's thumbnail arrives in. ureq and
 # the Prometheus exporter already build this version, so naming it here
 # adds no crate to the build.
-base64 = "=0.22.1"
+base64 = "=0.23.1"
 # libc is here for glibc's mallopt, which main.rs calls to pin the
 # allocator's mmap and trim thresholds. Without the pin, image decodes
 # dirty heap arenas the process never returns.
-libc = "=0.2.189"
+libc = "=0.2.191"
 # rustix opens the inotify watch on the directory the `Person` list is
 # mounted in, through a safe interface over the system calls. The Wayland
 # client and the process metrics already build this version with the
 # `fs` feature, so naming it here adds nothing to the build.
-rustix = { version = "=1.1.4", default-features = false, features = [
+rustix = { version = "=1.1.6", default-features = false, features = [
     "fs",
     "std",
 ] }
 # serde_json writes the measurements file.
-serde_json = "=1.0.151"
+serde_json = "=1.0.154"
 # SHA-256 gives each disk cache key a stable file name across processes
 # and Rust releases.
-sha2 = "=0.10.9"
+sha2 = "=0.11.1"
 # rusqlite reads the agent's file; bundled compiles its own SQLite so
 # the read path loads no extension and matches no system library.
-rusqlite = { version = "=0.40.2", features = ["bundled"] }
+rusqlite = { version = "=0.41.1", features = ["bundled"] }
 # media-screen is the bus half of a screen client: the connection, the
 # timers, the focus gate, the shade, the volume level, the cycle request,
 # and the panel desire. media-operator's idle client links it too, so
@@ -80,10 +80,10 @@ media-screen = { path = "../../media-screen" }
 # ureq holds the streaming update subscriptions; it decodes the chunked
 # body and puts a timeout on every read; the defaults come off because the
 # agent answers on loopback with no TLS and no compression.
-ureq = { version = "=2.12.1", default-features = false }
+ureq = { version = "=3.5.0", default-features = false }
 # The search fold decomposes every string (NFD) and drops the combining
 # marks, so "Brévelle" answers to "brevelle".
-unicode-normalization = "=0.1.25"
+unicode-normalization = "=0.1.26"
 # metrics is the facade milestone 65 puts behind every gauge and
 # histogram in the crate, so the recording call sites name nothing about
 # where the numbers go.

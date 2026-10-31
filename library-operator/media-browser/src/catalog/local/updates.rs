@@ -7,7 +7,7 @@
 // EOF or a real error means the stream dropped.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{BufRead, BufReader, ErrorKind};
+use std::io::{BufRead, BufReader};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
@@ -154,10 +154,11 @@ fn named(table: &str, line: &str) -> Option<(String, Option<String>)> {
 // after a single drop.
 pub(super) fn follow(shared: Arc<Shared>, base: String, table: &'static str, change: Change) {
     thread::spawn(move || {
-        let agent = ureq::AgentBuilder::new()
-            .timeout_connect(CONNECT_TIMEOUT)
-            .timeout_read(READ_TIMEOUT)
-            .build();
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_connect(Some(CONNECT_TIMEOUT))
+            .timeout_per_read(Some(READ_TIMEOUT))
+            .build()
+            .into();
         let url = format!("{base}/v1/updates/{table}");
         let mut backoff = BACKOFF_FLOOR;
         while !shared.stopping() {
@@ -175,10 +176,10 @@ pub(super) fn follow(shared: Arc<Shared>, base: String, table: &'static str, cha
 // failed connect does not mark, because the end that preceded it
 // already did.
 fn stream(agent: &ureq::Agent, url: &str, shared: &Shared, table: &str, change: Change) -> bool {
-    let Ok(response) = agent.post(url).call() else {
+    let Ok(response) = agent.post(url).send_empty() else {
         return false;
     };
-    let mut reader = BufReader::new(response.into_reader());
+    let mut reader = BufReader::new(response.into_body().into_reader());
     let mut line = String::new();
     loop {
         if shared.stopping() {
@@ -193,14 +194,22 @@ fn stream(agent: &ureq::Agent, url: &str, shared: &Shared, table: &str, change: 
                 }
                 line.clear();
             }
-            Err(error) if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
-                continue;
-            }
+            Err(error) if idle(&error) => continue,
             Err(_) => break,
         }
     }
     shared.mark(change);
     true
+}
+
+// ureq reports the per-read timeout as its own error inside an
+// `io::Error` of kind `Other`, and the next read on the same body
+// resumes, so a quiet stream stays open.
+fn idle(error: &std::io::Error) -> bool {
+    error
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<ureq::Error>())
+        .is_some_and(|inner| matches!(inner, ureq::Error::Timeout(ureq::Timeout::PerRead)))
 }
 
 // Fold one event in. A catalog event marks the catalog changed. A

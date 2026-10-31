@@ -57,7 +57,7 @@ liken-iced = { path = "../../brand/iced" }
 # reads the image's own /usr/share/zoneinfo, and the bundled databases stay
 # out of the binary, so the clock and the rest of the image name the same
 # zone rules.
-jiff = { version = "=0.2.35", default-features = false, features = [
+jiff = { version = "=0.2.38", default-features = false, features = [
     "std",
     "tz-system",
     "tzdb-zoneinfo",
@@ -73,7 +73,7 @@ image = { version = "=0.25.10", default-features = false, features = [
 # lofty reads the picture inside a music file's tags, which is the cover
 # tier between the block's own reference and a cover file beside the
 # track. It reads the ID3, MP4, FLAC, Vorbis, and APE families.
-lofty = "=0.25.2"
+lofty = "=0.25.5"
 serde_json = { workspace = true }
 # The display binds liken_arrangement_v1 on the Wayland connection winit
 # opened for its window, because the compositor tells clients apart by
@@ -87,7 +87,7 @@ wayland-client = "=0.31.15"
 wayland-scanner = "=0.31.11"
 # The display needs tokio for one unix socket, newline-delimited JSON, and
 # a reconnect loop with a timeout on every wait.
-tokio = { version = "=1.48.0", default-features = false, features = [
+tokio = { version = "=1.54.1", default-features = false, features = [
     "io-util",
     "macros",
     "net",
@@ -98,7 +98,7 @@ tokio = { version = "=1.48.0", default-features = false, features = [
 # ureq fetches an https logo. The library's browser reads its own streams
 # with the same crate; this one turns tls on, because a logo the Play
 # names is a URL on the internet, and leaves the rest of the defaults off.
-ureq = { version = "=2.12.1", default-features = false, features = ["tls"] }
+ureq = { version = "=3.5.0", default-features = false, features = ["rustls"] }
 # tiny-skia rasterizes every shape the display draws, with its edges
 # antialiased, into a picture the frame draws. The toolkit's own
 # antialiasing multisamples a target the size of the whole window for

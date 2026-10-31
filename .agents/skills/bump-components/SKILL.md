@@ -1,6 +1,6 @@
 ---
 name: bump-components
-description: Bump every pin that is behind the newest upstream release, under the rule in root plan 83 - the top-level make versions report, each latest.sh --bump, the changelog research, and a final report of what changes and what to watch - including the toolchains, the pinned base images, their Debian snapshot and their revisions. Use when I say /bump-components or ask to bump, update, or refresh the component pins or the base images.
+description: Bump every pin that is behind the newest upstream release, under the rule in root plan 83 - the top-level make versions report, each latest.sh --bump, the changelog research, and a final report of what changes and what to watch - including the toolchains, the whole Go module and Rust crate graphs with a vulnerability check, the pinned base images, their Debian snapshot and their revisions. Use when I say /bump-components or ask to bump, update, or refresh the component pins or the base images.
 ---
 
 Bump every vendored pin that is behind, read the changelogs, and
@@ -325,6 +325,60 @@ push.
 `ci/latest.sh --bump` moves one GitHub Action, prek, or one hook
 revision. A major version of an action can change its inputs, so read
 its release notes before you take it.
+
+## 5d. The Go modules and the Rust crates
+
+`make versions` reports only the direct and tool requirements of each
+`go.mod` and the exact `=` pins of each `Cargo.toml`. An indirect
+module or a crate that only a lock file names never shows in the
+report, and a known vulnerability is most often in one of those: the
+operators took `golang.org/x/net` through client-go as an indirect
+requirement. So every bump also updates the whole dependency graph of
+each module and each workspace.
+
+1. Run `toolchains/latest.sh --bump go:<module>` and `--bump
+   crate:<name>` for each row that is behind, as in step 5c.
+2. In the directory of each `go.mod` that `git ls-files` lists, except
+   under `testdata/`, record the `k8s.io/` and `sigs.k8s.io/` lines,
+   then run `GOWORK=off go get -u ./...`. Add the `tool` pattern when
+   the `go.mod` has a `tool` block, so the docs modules move Hugo's
+   graph too. Then run `go get` again with each recorded
+   `k8s.io/...@<version>` and `sigs.k8s.io/...@<version>`, because
+   those modules follow the k3s release, and run `go mod tidy`.
+3. In the directory of each `Cargo.lock`, run `cargo update`. It
+   moves every crate that the `=` pins and the semver ranges of the
+   graph allow, and it moves nothing past them.
+4. A crate whose newest release is a new major version can be blocked
+   by another crate in the graph. `toolchains/latest.sh --bump crate:`
+   then fails with `failed to select a version for the requirement`,
+   and the message names the crate that holds the old range. Decide
+   for each one:
+   - Keep the old pin when the code passes the crate's types to the
+     crate that holds it back. `tiny-skia` stays on the version that
+     `iced_tiny_skia` requires, because `media-operator/display` and
+     the toolkit draw with the same `tiny-skia`, and a second copy is
+     a second build of it.
+   - Take the new pin when the two copies never meet, and let cargo
+     build both. `base64` in `media-browser` is an example, because
+     `metrics-exporter-prometheus` uses its own copy internally.
+   Report each kept pin with the crate that holds it back.
+5. A new major version of a direct dependency can change its API or
+   its behavior. Read its migration notes, port each call site, and
+   check each behavior that a comment at the call site depends on.
+   `ureq` 3 replaced the per-socket read timeout of 2 with whole-stage
+   deadlines, and it kept a per-read timeout only as
+   `timeout_per_read`, which it reports as `ureq::Error::Timeout`
+   inside an `io::Error` of kind `Other`.
+6. Check the result for known vulnerabilities. Run `govulncheck ./...`
+   in each module and `osv-scanner scan source --lockfile=<lock>` on
+   each `Cargo.lock`. Neither tool is pinned in the repository, so
+   install each one into the session's scratch directory with
+   `GOBIN=<dir> go install <module>@latest`. Report each finding that
+   remains, with its fixed version or the reason no bump reaches it.
+   Root open problem `no-check-finds-known-vulnerabilities.md` holds
+   the design of a check in CI.
+7. Run `cd ci && go run . pins -root ..` and `make test` in each
+   changed component.
 
 ## 6. Report
 

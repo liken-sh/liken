@@ -39,8 +39,8 @@ measure = ["dep:image"]
 [dependencies]
 # libc is here for sigaction and kill, which harness/respawn.rs uses to pass
 # the kubelet's stop to the client it runs as a child.
-libc = "=0.2.189"
-iced_winit = { version = "=0.14.0", default-features = false, features = [
+libc = "=0.2.191"
+iced_winit = { version = "=0.14.1", default-features = false, features = [
     "wayland",
 ] }
 # The brand states every color and alpha as encoded sRGB, and every
@@ -88,7 +88,7 @@ serde_json = { workspace = true }
 # reads the image's own /usr/share/zoneinfo, and the bundled databases stay
 # out of the binary, so the clock and the rest of the image name the same
 # zone rules.
-jiff = { version = "=0.2.35", default-features = false, features = [
+jiff = { version = "=0.2.38", default-features = false, features = [
     "std",
     "tz-system",
     "tzdb-zoneinfo",

@@ -20,13 +20,13 @@ path = "src/main.rs"
 # it links. The build needs no OpenVINO installation, and the binary links
 # only the C library, so the OpenVINO libraries stay in the image that runs
 # the fact and out of every other image.
-openvino = { version = "=0.11.0", features = ["runtime-linking"] }
+openvino = { version = "=0.11.1", features = ["runtime-linking"] }
 # The detections record stores each embedding as 16-bit floats, half the
 # size of 32-bit floats, and the GPU computes in 16 bits anyway.
 half = "=2.7.1"
-base64 = "=0.22.1"
+base64 = "=0.23.1"
 serde = { version = "=1.0.229", features = ["derive"] }
-serde_json = "=1.0.151"
+serde_json = "=1.0.154"
 # The credits fact writes .liken/credits.yaml, which names the cast that
 # match compares faces with. review also writes its spans as YAML.
 serde_yaml_ng = "=0.10.0"
@@ -35,4 +35,4 @@ image = { version = "=0.25.10", default-features = false, features = [
     "jpeg",
     "png",
 ] }
-sha2 = "=0.10.9"
+sha2 = "=0.11.1"
