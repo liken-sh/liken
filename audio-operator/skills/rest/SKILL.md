@@ -80,10 +80,12 @@ that reconnects, or a node that PipeWire builds again. Between those
 moments the level can move. A press of the speaker's own button, a
 client that changes the graph, and a remote's volume key all change
 it, and the operator reports the new level in `observed` and does not
-write your value back. An operator restart writes nothing, so the
-level a person chose before the restart stays. If you never declare a
-level, a node that PipeWire builds while the operator runs starts at
-100.
+write your value back. A restart of the operator alone writes
+nothing, so the level a person chose before the restart stays. When
+the machine boots, PipeWire builds every node again, and each one
+takes your declared level and mute. `status.applied` records the
+node and the declaration the operator last applied. If you never
+declare a level, a node that PipeWire builds starts at 100.
 
 A remote's volume key reaches a `Sink` through the media operator. It
 writes each press as an ask in `status.session.volumeAsk`, and the
