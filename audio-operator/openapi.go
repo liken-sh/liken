@@ -306,6 +306,8 @@ func openAPIResponseHeaders(route apiRoute) map[string]any {
 		headers["Cache-Control"] = openAPIHeader("Always no-store. A capture is never cacheable.")
 		headers["Accept-Ranges"] = openAPIHeader("Always none. A live capture has no byte " +
 			"identity: offset 44 of two requests is two different moments.")
+		headers["X-Content-Type-Options"] = openAPIHeader("Always nosniff. A browser uses the " +
+			"Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6).")
 		headers["Content-Disposition"] = openAPIHeader("The save name a browser gets, with " +
 			"the RFC 3339 time's colons replaced by dashes.")
 		if route.negotiated() {

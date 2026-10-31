@@ -218,6 +218,7 @@ The screen, in the format chosen by Accept
 | `Content-Location` | 200 | The absolute path of the extension form served (RFC 9110 section 8.7). |
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
 | `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `HEAD` `/v1/display/displays/{name}/screen` {data-method=HEAD}
 
@@ -265,6 +266,7 @@ The screen, in the format chosen by Accept
 | `Content-Location` | 200 | The absolute path of the extension form served (RFC 9110 section 8.7). |
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
 | `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `OPTIONS` `/v1/display/displays/{name}/screen` {data-method=OPTIONS}
 
@@ -335,6 +337,7 @@ One frame of the screen as JPEG
 | `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
 | `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `HEAD` `/v1/display/displays/{name}/screen.jpg` {data-method=HEAD}
 
@@ -377,6 +380,7 @@ One frame of the screen as JPEG
 | `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
 | `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `OPTIONS` `/v1/display/displays/{name}/screen.jpg` {data-method=OPTIONS}
 
@@ -447,6 +451,7 @@ A stream of the screen, one JPEG per frame
 | `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
 | `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `HEAD` `/v1/display/displays/{name}/screen.mjpeg` {data-method=HEAD}
 
@@ -490,6 +495,7 @@ A stream of the screen, one JPEG per frame
 | `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
 | `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `OPTIONS` `/v1/display/displays/{name}/screen.mjpeg` {data-method=OPTIONS}
 
@@ -560,6 +566,7 @@ A clip of the screen as H.264 in fragmented MP4
 | `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
 | `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `HEAD` `/v1/display/displays/{name}/screen.mp4` {data-method=HEAD}
 
@@ -602,6 +609,7 @@ A clip of the screen as H.264 in fragmented MP4
 | `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
 | `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `OPTIONS` `/v1/display/displays/{name}/screen.mp4` {data-method=OPTIONS}
 
@@ -670,6 +678,7 @@ One frame of the screen as PNG
 | `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
 | `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `HEAD` `/v1/display/displays/{name}/screen.png` {data-method=HEAD}
 
@@ -711,6 +720,7 @@ One frame of the screen as PNG
 | `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
 | `Vary` | 200 | Accept. The response was subject to negotiation (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `OPTIONS` `/v1/display/displays/{name}/screen.png` {data-method=OPTIONS}
 

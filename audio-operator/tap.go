@@ -515,28 +515,16 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request, plan tapP
 	}
 	close(release)
 
-	w.Header().Set("Content-Type", plan.Form.ContentType)
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Accept-Ranges", "none")
-	w.WriteHeader(http.StatusOK)
-	// The headers go out now, not when the first block of audio
-	// arrives. A tap with a begin sends nothing for as long as the
-	// discard runs, and a client that had not yet seen the status
-	// would have nothing to show for it.
-	if err := flush(w); err != nil {
-		fmt.Fprintf(os.Stderr, "the capture headers could not be flushed: %v\n", err)
-	}
 
 	s.readings.started(plan.Route.Aspect)
 	started := s.now()
-	var sent int64
+	body := io.Reader(tap.Body)
 	if plan.Form.Extension == "wav" {
-		written, _ := w.Write(wavHeader(plan.Format.Rate, plan.Format.Channels))
-		sent += int64(written)
-		_ = flush(w)
+		body = io.MultiReader(bytes.NewReader(wavHeader(plan.Format.Rate, plan.Format.Channels)), tap.Body)
 	}
-	copied, copyErr := copyFlushing(w, tap.Body, nil)
-	sent += copied
+	sent, copyErr := copyFlushing(w, plan.Form.ContentType, body, nil)
 	ran := s.now().Sub(started)
 	s.readings.finished(plan.Route.Aspect, plan.Form.Extension, sent, ran)
 
@@ -659,14 +647,29 @@ func bodyCut(delivered, left, encoderFailed bool) bool {
 	return (!delivered && !left) || encoderFailed
 }
 
-// copyFlushing copies the pipeline to the response, flushing each
-// block, so a client hears the tap as it arrives rather than when a
-// buffer fills. onFirst runs once, when the first block has been
-// written, which is the moment a request has produced bytes.
+// copyFlushing sends a 200 with its type, then copies the pipeline to
+// the response, flushing each block, so a client hears the tap as it
+// arrives rather than when a buffer fills. onFirst runs once, when the
+// first block has been written, which is the moment a request has
+// produced bytes.
+//
+// The type is set here, beside the write of the body, and nosniff
+// tells a browser to keep that type: the bytes are audio and never a
+// page to render. The headers go out at once, not with the first block
+// of audio. A tap with a begin sends nothing for as long as the discard
+// runs, and a client that had not yet seen the status, the type, or the
+// save name would have nothing to show for it.
 //
 // An error from the writing side is wrapped in errClientGone; an error
 // from the reading side is returned as it came.
-func copyFlushing(w http.ResponseWriter, from io.Reader, onFirst func()) (int64, error) {
+func copyFlushing(w http.ResponseWriter, contentType string, from io.Reader,
+	onFirst func()) (int64, error) {
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	if err := flush(w); err != nil {
+		fmt.Fprintf(os.Stderr, "the tap's headers could not be flushed: %v\n", err)
+	}
 	block := make([]byte, 32*1024)
 	var sent int64
 	for {

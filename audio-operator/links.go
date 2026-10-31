@@ -105,13 +105,14 @@ func documentETag(version string) string {
 	return `"` + version + `"`
 }
 
-// writeTapHeaders sets what a capture answer carries. at is the accept
-// instant, which is both the save name's time and the span's zero.
+// writeTapHeaders sets what a capture answer carries besides its type.
+// at is the accept instant, which is both the save name's time and the
+// span's zero. The Content-Type and X-Content-Type-Options are set where
+// the body is written, by copyFlushing, and by the HEAD that has no body.
 func writeTapHeaders(w http.ResponseWriter, route apiRoute, name string,
 	form representation, at time.Time) {
 	writeAnswerHeaders(w, route, name)
 	header := w.Header()
-	header.Set("Content-Type", form.ContentType)
 	header.Set("Cache-Control", "no-store")
 	header.Set("Accept-Ranges", "none")
 	header.Set("Content-Disposition", contentDisposition(name, form.Extension, at))

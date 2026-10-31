@@ -89,10 +89,7 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request,
 	defer s.readings.capturing(screenAspect, -1)
 
 	plan := s.plan(mediaType, screen, crop, chosen)
-	w.Header().Set("Content-Type",
-		captureContentType(mediaType, plan.encodedWidth(), plan.encodedHeight(), plan.framerate))
-	w.WriteHeader(http.StatusOK)
-	_ = http.NewResponseController(w).Flush()
+	served := captureContentType(mediaType, plan.encodedWidth(), plan.encodedHeight(), plan.framerate)
 
 	// The feed runs under a context of its own, so a failure that
 	// ends the request can end it too. A still that was asked to wait
@@ -105,7 +102,7 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request,
 		frames <- s.feed(feeding, session, encoder, first, chosen, origin, still, mediaType)
 	}()
 
-	written := copyFlushing(w, encoder.body)
+	written := copyFlushing(w, served, encoder.body)
 	// The encoder's body has ended, so nothing reads the frames any
 	// more. A feed that is waiting out a t= begin is waiting on this
 	// context, and an encoder that died before the beginning must not
@@ -292,10 +289,19 @@ func writeCropped(to *bufio.Writer, frame []byte, stride int, crop cropRect) err
 	return to.Flush()
 }
 
+// copyFlushing sends the status line and the headers at once, then
+// copies the encoder's output. The type is set here, beside the write
+// of the body, and nosniff tells a browser to keep that type: the
+// bytes are an image or a video and never a page to render.
+//
 // The copy flushes after every block, so a still leaves the moment
 // the encoder writes it and a clip arrives as it is made.
-func copyFlushing(w http.ResponseWriter, body io.Reader) int {
+func copyFlushing(w http.ResponseWriter, served string, body io.Reader) int {
+	w.Header().Set("Content-Type", served)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
 	control := http.NewResponseController(w)
+	_ = control.Flush()
 	buffer := make([]byte, 64<<10)
 	written := 0
 	for {

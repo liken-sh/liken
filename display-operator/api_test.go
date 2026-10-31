@@ -394,6 +394,30 @@ func TestACaptureCarriesItsOwnConduct(t *testing.T) {
 	}
 }
 
+// A capture answer is typed by the route that serves it, and a
+// browser that opens one must not sniff the bytes into another type.
+func TestACaptureForbidsSniffing(t *testing.T) {
+	cases := []struct {
+		name   string
+		method string
+		target string
+	}{
+		{"a still", http.MethodGet, "/screen.png"},
+		{"a still by HEAD", http.MethodHead, "/screen.png"},
+		{"a clip", http.MethodGet, "/screen.mp4"},
+		{"the negotiated screen", http.MethodGet, "/screen"},
+	}
+	for _, row := range cases {
+		t.Run(row.name, func(t *testing.T) {
+			server := newTestAPI(t, newTestCluster(t), newSidecarFixture(t))
+			resp := call(t, server, row.method, apiRoot+"/displays/HDMI-A-1"+row.target, nil)
+			if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+				t.Errorf("%s %s answered X-Content-Type-Options %q, want nosniff", row.method, row.target, got)
+			}
+		})
+	}
+}
+
 // An extension route names one representation, so it carries no
 // Content-Location and no alternate links.
 func TestAnExtensionRouteNamesOneRepresentation(t *testing.T) {

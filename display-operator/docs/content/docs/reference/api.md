@@ -250,6 +250,7 @@ A document (discovery, OpenAPI, or the info route) has an `ETag` and
 | `Cache-Control` | `no-store` | RFC 9111 section 5.2.2.5 |
 | `Content-Disposition` | `inline; filename="{name}-{time}.{ext}"` | RFC 6266 section 4 |
 | `Accept-Ranges` | `none` | RFC 9110 section 14.3 |
+| `X-Content-Type-Options` | `nosniff` | [Fetch Standard section 3.6](https://fetch.spec.whatwg.org/#x-content-type-options-header) |
 | `Transfer-Encoding` | `chunked`, on HTTP/1.1 | RFC 9112 section 7.1 |
 | `Content-Location` | on `screen` only: the absolute path of the extension route that was served | RFC 9110 section 8.7 |
 | `Link` | on `screen` only: one `rel="alternate"; type="image/png"` and so on, per extension route | RFC 8288 |
@@ -262,6 +263,11 @@ is also why `Accept-Ranges` is `none`. There is no `Content-Length`,
 because RFC 9112 section 6.2 forbids one next to
 `Transfer-Encoding`. A still is streamed the same way as a clip. On
 HTTP/2 (RFC 9113), the protocol frames the body itself.
+
+`X-Content-Type-Options: nosniff` tells a browser to use the
+`Content-Type` and not to guess a type from the bytes. A capture is
+an image or a video, so a browser that opens one never renders it as
+a page.
 
 The time in `filename` is RFC 3339 UTC with the colons replaced by
 hyphens, for example `HDMI-A-1-2026-09-16T21-02-16Z.png`. A colon is

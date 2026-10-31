@@ -112,6 +112,9 @@ func TestATapAddsTheFourHeadersTheAPIOwns(t *testing.T) {
 	if got := answer.Header.Get("Accept-Ranges"); got != "none" {
 		t.Errorf("the tap says Accept-Ranges: %q", got)
 	}
+	if got := answer.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("the tap says X-Content-Type-Options: %q, want nosniff", got)
+	}
 }
 
 func TestATapThatProducedBytesWritesACapturedEvent(t *testing.T) {
@@ -149,6 +152,9 @@ func TestAHeadTakesNoSampleAndMakesNoPrivateCall(t *testing.T) {
 		}
 		if got := answer.Header.Get("Content-Type"); got != "audio/wav" {
 			t.Errorf("the HEAD says Content-Type: %q", got)
+		}
+		if got := answer.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+			t.Errorf("the HEAD says X-Content-Type-Options: %q, want nosniff", got)
 		}
 		if got := answer.Header.Get("Content-Disposition"); got == "" {
 			t.Error("the HEAD carries no Content-Disposition")

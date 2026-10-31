@@ -358,6 +358,7 @@ func (s *captureServer) answerCapture(w http.ResponseWriter, r *http.Request, ro
 	}
 	if head {
 		w.Header().Set("Content-Type", contentTypeOf(mediaType))
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		return
 	}
 

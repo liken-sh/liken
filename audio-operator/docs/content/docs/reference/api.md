@@ -257,6 +257,7 @@ of its capture routes. A tap has these headers instead:
 | --- | --- | --- |
 | `Cache-Control` | `no-store` | RFC 9111 section 5.2.2.5 |
 | `Accept-Ranges` | `none` | RFC 9110 section 14.3 |
+| `X-Content-Type-Options` | `nosniff` | [Fetch Standard section 3.6](https://fetch.spec.whatwg.org/#x-content-type-options-header) |
 | `Content-Disposition` | `inline; filename="<name>-<time>.<ext>"` | RFC 6266 |
 | `Transfer-Encoding` | `chunked`, on HTTP/1.1 | RFC 9112 section 7.1 |
 | `Content-Location` | on the negotiated route only: the absolute path of the extension route that was served | RFC 9110 section 8.7 |
@@ -269,6 +270,10 @@ the same representation. That is not true for a live capture, and the
 API does not claim it. `Accept-Ranges: none` says the same thing
 about bytes: a live capture has no byte identity, and byte 44 of two
 requests is two different moments.
+
+`X-Content-Type-Options: nosniff` tells a browser to use the
+`Content-Type` and not to guess a type from the bytes. A tap is audio,
+so a browser that opens one never renders it as a page.
 
 `Vary: Accept` is on the extension routes as well, where `Accept` can
 turn a `200` into a `406`. RFC 9110 section 12.5.5 gives a second

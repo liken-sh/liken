@@ -249,7 +249,8 @@ func okResponse(route apiRoute) map[string]any {
 
 // The fields every answer carries: Vary (RFC 9110) and Link (RFC
 // 8288). A capture adds Cache-Control: no-store (RFC 9111),
-// Content-Disposition (RFC 6266), and Accept-Ranges, and the
+// Content-Disposition (RFC 6266), Accept-Ranges, and
+// X-Content-Type-Options: nosniff (the Fetch Standard), and the
 // negotiated route adds Content-Location. A document carries an ETag
 // and Cache-Control: no-cache instead.
 func okHeaders(route apiRoute) map[string]any {
@@ -261,6 +262,7 @@ func okHeaders(route apiRoute) map[string]any {
 		headers["Cache-Control"] = headerSpec("no-store. A capture is never stored (RFC 9111 section 5.2.2.5).")
 		headers["Content-Disposition"] = headerSpec("inline, with the file name a browser save gets (RFC 6266 section 4).")
 		headers["Accept-Ranges"] = headerSpec("none. A live capture has no byte identity (RFC 9110 section 14.3).")
+		headers["X-Content-Type-Options"] = headerSpec("nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6).")
 		if route.ext == "" {
 			headers["Content-Location"] = headerSpec("The absolute path of the extension form served (RFC 9110 section 8.7).")
 		}

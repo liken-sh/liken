@@ -123,6 +123,9 @@ func TestTheSidecarHeadTakesNoFrame(t *testing.T) {
 	if got := resp.Header.Get("Content-Type"); got != "image/png" {
 		t.Errorf("the HEAD answered %q", got)
 	}
+	if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("the HEAD answered X-Content-Type-Options %q, want nosniff", got)
+	}
 }
 
 // A compositor that does not answer is a 503 with Retry-After,

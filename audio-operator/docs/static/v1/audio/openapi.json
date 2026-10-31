@@ -560,6 +560,12 @@
                 "schema": {
                   "type": "string"
                 }
+              },
+              "X-Content-Type-Options": {
+                "description": "Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6).",
+                "schema": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -677,6 +683,12 @@
               },
               "Vary": {
                 "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "description": "Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6).",
                 "schema": {
                   "type": "string"
                 }
@@ -803,6 +815,12 @@
                 "schema": {
                   "type": "string"
                 }
+              },
+              "X-Content-Type-Options": {
+                "description": "Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6).",
+                "schema": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -893,6 +911,12 @@
               },
               "Vary": {
                 "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "description": "Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6).",
                 "schema": {
                   "type": "string"
                 }
@@ -1028,6 +1052,12 @@
                 "schema": {
                   "type": "string"
                 }
+              },
+              "X-Content-Type-Options": {
+                "description": "Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6).",
+                "schema": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -1127,6 +1157,12 @@
               },
               "Vary": {
                 "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "description": "Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6).",
                 "schema": {
                   "type": "string"
                 }
@@ -1253,6 +1289,12 @@
                 "schema": {
                   "type": "string"
                 }
+              },
+              "X-Content-Type-Options": {
+                "description": "Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6).",
+                "schema": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -1343,6 +1385,12 @@
               },
               "Vary": {
                 "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "description": "Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6).",
                 "schema": {
                   "type": "string"
                 }
@@ -1678,6 +1726,12 @@
                 "schema": {
                   "type": "string"
                 }
+              },
+              "X-Content-Type-Options": {
+                "description": "Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6).",
+                "schema": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -1795,6 +1849,12 @@
               },
               "Vary": {
                 "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "description": "Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6).",
                 "schema": {
                   "type": "string"
                 }
@@ -1921,6 +1981,12 @@
                 "schema": {
                   "type": "string"
                 }
+              },
+              "X-Content-Type-Options": {
+                "description": "Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6).",
+                "schema": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -2011,6 +2077,12 @@
               },
               "Vary": {
                 "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "description": "Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6).",
                 "schema": {
                   "type": "string"
                 }
@@ -2146,6 +2218,12 @@
                 "schema": {
                   "type": "string"
                 }
+              },
+              "X-Content-Type-Options": {
+                "description": "Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6).",
+                "schema": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -2245,6 +2323,12 @@
               },
               "Vary": {
                 "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "description": "Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6).",
                 "schema": {
                   "type": "string"
                 }
@@ -2371,6 +2455,12 @@
                 "schema": {
                   "type": "string"
                 }
+              },
+              "X-Content-Type-Options": {
+                "description": "Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6).",
+                "schema": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -2461,6 +2551,12 @@
               },
               "Vary": {
                 "description": "Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "description": "Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6).",
                 "schema": {
                   "type": "string"
                 }

@@ -255,6 +255,7 @@ func (s *captureServer) answer(w http.ResponseWriter, r *http.Request) {
 	// starts no process (RFC 9110 section 9.3.2).
 	if r.Method == http.MethodHead {
 		w.Header().Set("Content-Type", form.ContentType)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Accept-Ranges", "none")
 		w.WriteHeader(http.StatusOK)

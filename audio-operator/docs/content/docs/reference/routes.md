@@ -291,6 +291,7 @@ The audio the speakers play now. The Accept header selects the format.
 | `Content-Location` | 200 | The extension route that serves the representation the negotiation chose. |
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `HEAD` `/v1/audio/sinks/{name}/audio` {data-method=HEAD}
 
@@ -333,6 +334,7 @@ The headers of the audio the speakers play now. The Accept header selects the fo
 | `Content-Location` | 200 | The extension route that serves the representation the negotiation chose. |
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `OPTIONS` `/v1/audio/sinks/{name}/audio` {data-method=OPTIONS}
 
@@ -393,6 +395,7 @@ The audio the speakers play now, as FLAC.
 | `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `HEAD` `/v1/audio/sinks/{name}/audio.flac` {data-method=HEAD}
 
@@ -431,6 +434,7 @@ The headers of the audio the speakers play now, as FLAC. HEAD takes no sample an
 | `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `OPTIONS` `/v1/audio/sinks/{name}/audio.flac` {data-method=OPTIONS}
 
@@ -492,6 +496,7 @@ The audio the speakers play now, as Ogg Opus.
 | `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `HEAD` `/v1/audio/sinks/{name}/audio.opus` {data-method=HEAD}
 
@@ -531,6 +536,7 @@ The headers of the audio the speakers play now, as Ogg Opus. HEAD takes no sampl
 | `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `OPTIONS` `/v1/audio/sinks/{name}/audio.opus` {data-method=OPTIONS}
 
@@ -591,6 +597,7 @@ The audio the speakers play now, as PCM in a RIFF WAVE stream.
 | `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `HEAD` `/v1/audio/sinks/{name}/audio.wav` {data-method=HEAD}
 
@@ -629,6 +636,7 @@ The headers of the audio the speakers play now, as PCM in a RIFF WAVE stream. HE
 | `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `OPTIONS` `/v1/audio/sinks/{name}/audio.wav` {data-method=OPTIONS}
 
@@ -787,6 +795,7 @@ The audio the microphone captures now. The Accept header selects the format.
 | `Content-Location` | 200 | The extension route that serves the representation the negotiation chose. |
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `HEAD` `/v1/audio/sources/{name}/audio` {data-method=HEAD}
 
@@ -829,6 +838,7 @@ The headers of the audio the microphone captures now. The Accept header selects 
 | `Content-Location` | 200 | The extension route that serves the representation the negotiation chose. |
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `OPTIONS` `/v1/audio/sources/{name}/audio` {data-method=OPTIONS}
 
@@ -889,6 +899,7 @@ The audio the microphone captures now, as FLAC.
 | `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `HEAD` `/v1/audio/sources/{name}/audio.flac` {data-method=HEAD}
 
@@ -927,6 +938,7 @@ The headers of the audio the microphone captures now, as FLAC. HEAD takes no sam
 | `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `OPTIONS` `/v1/audio/sources/{name}/audio.flac` {data-method=OPTIONS}
 
@@ -988,6 +1000,7 @@ The audio the microphone captures now, as Ogg Opus.
 | `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `HEAD` `/v1/audio/sources/{name}/audio.opus` {data-method=HEAD}
 
@@ -1027,6 +1040,7 @@ The headers of the audio the microphone captures now, as Ogg Opus. HEAD takes no
 | `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `OPTIONS` `/v1/audio/sources/{name}/audio.opus` {data-method=OPTIONS}
 
@@ -1087,6 +1101,7 @@ The audio the microphone captures now, as PCM in a RIFF WAVE stream.
 | `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `HEAD` `/v1/audio/sources/{name}/audio.wav` {data-method=HEAD}
 
@@ -1125,6 +1140,7 @@ The headers of the audio the microphone captures now, as PCM in a RIFF WAVE stre
 | `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
 | `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
 | `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `OPTIONS` `/v1/audio/sources/{name}/audio.wav` {data-method=OPTIONS}
 

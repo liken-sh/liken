@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
@@ -167,6 +166,8 @@ func (s *apiServer) serveTap(w http.ResponseWriter, r *http.Request, route apiRo
 	// no call to the capture container (RFC 9110 section 9.3.2).
 	if r.Method == http.MethodHead {
 		writeTapHeaders(w, route, held.Name, form, at)
+		w.Header().Set("Content-Type", form.ContentType)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.WriteHeader(http.StatusOK)
 		return answered{Status: http.StatusOK, Who: who, Ended: "ok"}
 	}
@@ -195,14 +196,6 @@ func (s *apiServer) serveTap(w http.ResponseWriter, r *http.Request, route apiRo
 	// writeTapHeaders owns the type and the cache directives on a 200,
 	// so nothing of the container's is relayed onto it.
 	writeTapHeaders(w, route, held.Name, form, at)
-	w.WriteHeader(http.StatusOK)
-	// The container's headers reach the caller now, not when the first
-	// block of audio does. A tap with a begin sends no audio until the
-	// discard is over, and a caller that had not yet seen the status,
-	// the type, or the save name would have nothing to show for it.
-	if err := flush(w); err != nil {
-		fmt.Fprintf(os.Stderr, "the relayed headers could not be flushed: %v\n", err)
-	}
 
 	s.readings.streaming(route.Aspect, 1)
 	defer s.readings.streaming(route.Aspect, -1)
@@ -214,7 +207,7 @@ func (s *apiServer) serveTap(w http.ResponseWriter, r *http.Request, route apiRo
 	// The Event is posted on the first block, not at the end: an
 	// open-ended tap runs for hours, and `kubectl describe` has to
 	// answer who is listening while they still are.
-	sent, copyErr := copyFlushing(w, body, func() {
+	sent, copyErr := copyFlushing(w, form.ContentType, body, func() {
 		s.recordCapture(held.Kind, held.Name, held.UID, route.Aspect, form.Extension, who.Username)
 	})
 	streamed := s.now().Sub(started)

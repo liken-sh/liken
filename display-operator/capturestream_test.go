@@ -137,6 +137,9 @@ func TestAStillReachesTheBodyCropped(t *testing.T) {
 	if got := resp.Header.Get("Content-Type"); got != "image/png" {
 		t.Errorf("the capture is typed %q", got)
 	}
+	if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("the capture answered X-Content-Type-Options %q, want nosniff", got)
+	}
 	frame := capturePattern(1, 4*capturePixelBytes*3)
 	want := append(append([]byte{}, frame[1*16+4:1*16+12]...), frame[2*16+4:2*16+12]...)
 	if got := body(t, resp); got != string(want) {

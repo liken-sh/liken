@@ -246,6 +246,9 @@ func TestATapCarriesTheCaptureOnlyHeadersAndNothingTheAPIAdds(t *testing.T) {
 	if got := answer.Header.Get("Accept-Ranges"); got != "none" {
 		t.Errorf("the container says Accept-Ranges: %q", got)
 	}
+	if got := answer.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("the container says X-Content-Type-Options: %q, want nosniff", got)
+	}
 	// The API adds these four; the container sends none of them.
 	for _, added := range []string{"Vary", "Link", "Content-Location", "Content-Disposition"} {
 		if got := answer.Header.Get(added); got != "" {
@@ -263,6 +266,9 @@ func TestAHeadTakesNoSampleAndStartsNoProcess(t *testing.T) {
 	}
 	if got := answer.Header.Get("Content-Type"); got != "audio/wav" {
 		t.Errorf("the HEAD says Content-Type: %q", got)
+	}
+	if got := answer.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("the HEAD says X-Content-Type-Options: %q, want nosniff", got)
 	}
 	body, _ := io.ReadAll(answer.Body)
 	if len(body) != 0 {

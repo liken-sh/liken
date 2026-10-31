@@ -241,7 +241,9 @@ func (s *apiServer) serveCapture(w http.ResponseWriter, r *http.Request, route a
 	id string, start time.Time, head bool) {
 	at := s.now()
 	if head {
-		s.captureHeaders(w, route, name, mediaType, s.capturedAs(screen, mediaType, chosen), at)
+		s.captureHeaders(w, route, name, mediaType, at)
+		w.Header().Set("Content-Type", s.capturedAs(screen, mediaType, chosen))
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.WriteHeader(http.StatusOK)
 		s.readings.answered(route.template, r.Method, http.StatusOK, s.now().Sub(start))
 		s.logged(r, route, id, "", http.StatusOK, 0, start)
@@ -280,20 +282,12 @@ func (s *apiServer) serveCapture(w http.ResponseWriter, r *http.Request, route a
 	if !strings.HasPrefix(served, mediaType) {
 		served = s.capturedAs(screen, mediaType, chosen)
 	}
-	s.captureHeaders(w, route, name, mediaType, served, at)
-	w.WriteHeader(http.StatusOK)
-	// The flush is what puts them on the wire. Go holds a written
-	// header block until the body has bytes, and a capture's first
-	// byte waits for the t= begin, so without this the headers of
-	// t=1,3 arrive a second and a third late. media-api reads the
-	// instant they arrive as this API's zero, so that delay reaches a
-	// composed stream as an offset the length of the lead-in.
-	_ = http.NewResponseController(w).Flush()
+	s.captureHeaders(w, route, name, mediaType, at)
 	s.readings.answered(route.template, r.Method, http.StatusOK, s.now().Sub(start))
 	s.readings.streaming(route.aspect, 1)
 	defer s.readings.streaming(route.aspect, -1)
 
-	written, truncated := s.stream(w, r, resp.Body, cancel, seconds(chosen.Time.Begin))
+	written, truncated := s.stream(w, r, served, resp.Body, cancel, seconds(chosen.Time.Begin))
 	if written > 0 && s.record != nil {
 		s.record(screen, who.Username, route.aspect, mediaType)
 	}
@@ -314,17 +308,34 @@ func truncatedDetail(truncated bool) string {
 	return ""
 }
 
+// stream sends the status line and the headers, then copies the
+// capture's bytes. The type is set here, beside the write of the
+// body, and nosniff tells a browser to keep that type: the bytes are
+// an image or a video and never a page to render.
+//
+// The flush after the headers is what puts them on the wire. Go holds
+// a written header block until the body has bytes, and a capture's
+// first byte waits for the t= begin, so without the flush the headers
+// of t=1,3 arrive a second and a third late. media-api reads the
+// instant they arrive as this API's zero, so that delay reaches a
+// composed stream as an offset the length of the lead-in.
+//
 // The copy flushes after every block, so a browser and mpv both see
 // the stream as it arrives. An idle timer ends a capture nothing is
 // writing to. It is armed for the t= begin plus the idle deadline
 // and reset by every block, so it never fires during the beginning
 // the caller asked to discard, and it counts idle from the first
 // body byte after that.
-func (s *apiServer) stream(w http.ResponseWriter, r *http.Request, body io.Reader,
+func (s *apiServer) stream(w http.ResponseWriter, r *http.Request, served string, body io.Reader,
 	quiet context.CancelFunc, begins time.Duration) (int, bool) {
+	w.Header().Set("Content-Type", served)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	control := http.NewResponseController(w)
+	_ = control.Flush()
+
 	idle := time.AfterFunc(begins+idleDeadline, quiet)
 	defer idle.Stop()
-	control := http.NewResponseController(w)
 
 	buffer := make([]byte, 64<<10)
 	written := 0
