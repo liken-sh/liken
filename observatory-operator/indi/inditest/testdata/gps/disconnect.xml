@@ -1,4 +1,4 @@
-<setSwitchVector device="GPS Simulator" name="CONNECTION" state="Idle" timeout="60" timestamp="2026-10-05T19:54:06">
+<setSwitchVector device="GPS Simulator" name="CONNECTION" state="Idle" timeout="60" timestamp="2026-10-31T20:22:36">
     <oneSwitch name="CONNECT">
 Off
     </oneSwitch>
@@ -6,8 +6,8 @@ Off
 On
     </oneSwitch>
 </setSwitchVector>
-<delProperty device="GPS Simulator" name="GEOGRAPHIC_COORD" timestamp="2026-10-05T19:54:06"/>
-<delProperty device="GPS Simulator" name="TIME_UTC" timestamp="2026-10-05T19:54:06"/>
-<delProperty device="GPS Simulator" name="GPS_REFRESH" timestamp="2026-10-05T19:54:06"/>
-<delProperty device="GPS Simulator" name="GPS_REFRESH_PERIOD" timestamp="2026-10-05T19:54:06"/>
-<delProperty device="GPS Simulator" name="SYSTEM_TIME_UPDATE" timestamp="2026-10-05T19:54:06"/>
+<delProperty device="GPS Simulator" name="GEOGRAPHIC_COORD" timestamp="2026-10-31T20:22:36"/>
+<delProperty device="GPS Simulator" name="TIME_UTC" timestamp="2026-10-31T20:22:36"/>
+<delProperty device="GPS Simulator" name="GPS_REFRESH" timestamp="2026-10-31T20:22:36"/>
+<delProperty device="GPS Simulator" name="GPS_REFRESH_PERIOD" timestamp="2026-10-31T20:22:36"/>
+<delProperty device="GPS Simulator" name="SYSTEM_TIME_UPDATE" timestamp="2026-10-31T20:22:36"/>

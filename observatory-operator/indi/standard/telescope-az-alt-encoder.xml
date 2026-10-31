@@ -209,10 +209,10 @@ On
 </defTextVector>
 <defTextVector device="Bare Telescope" name="SAT_PASS_WINDOW" label="Pass Window" group="Satellite" state="Idle" perm="rw" timeout="60">
     <defText name="SAT_PASS_WINDOW_START" label="Start UTC">
-2026-10-11T19:01:36
+2026-10-31T20:16:43
     </defText>
     <defText name="SAT_PASS_WINDOW_END" label="End UTC">
-2026-10-11T19:01:36
+2026-10-31T20:16:43
     </defText>
 </defTextVector>
 <defSwitchVector device="Bare Telescope" name="SAT_TRACKING_STAT" label="Sat tracking" group="Satellite" state="Idle" perm="rw" rule="OneOfMany" timeout="60">

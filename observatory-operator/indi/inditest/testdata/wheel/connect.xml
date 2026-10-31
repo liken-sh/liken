@@ -1,4 +1,4 @@
-<setSwitchVector device="Filter Simulator" name="CONNECTION" state="Ok" timeout="60" timestamp="2026-10-05T19:53:19">
+<setSwitchVector device="Filter Simulator" name="CONNECTION" state="Ok" timeout="60" timestamp="2026-10-31T20:20:52">
     <oneSwitch name="CONNECT">
 On
     </oneSwitch>
@@ -6,12 +6,12 @@ On
 Off
     </oneSwitch>
 </setSwitchVector>
-<defNumberVector device="Filter Simulator" name="FILTER_SLOT" label="Filter Slot" group="Filter Wheel" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:19">
+<defNumberVector device="Filter Simulator" name="FILTER_SLOT" label="Filter Slot" group="Filter Wheel" state="Idle" perm="rw" timeout="60" timestamp="2026-10-31T20:20:52">
     <defNumber name="FILTER_SLOT_VALUE" label="Filter" format="%.f" min="1" max="8" step="1">
 1
     </defNumber>
 </defNumberVector>
-<defTextVector device="Filter Simulator" name="FILTER_NAME" label="Filter" group="Filter Wheel" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:53:19">
+<defTextVector device="Filter Simulator" name="FILTER_NAME" label="Filter" group="Filter Wheel" state="Idle" perm="rw" timeout="0" timestamp="2026-10-31T20:20:52">
     <defText name="FILTER_SLOT_NAME_1" label="Filter#1">
 Red
     </defText>
@@ -37,7 +37,7 @@ LPR
 Luminance
     </defText>
 </defTextVector>
-<defSwitchVector device="Filter Simulator" name="USEJOYSTICK" label="Joystick" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:53:19">
+<defSwitchVector device="Filter Simulator" name="USEJOYSTICK" label="Joystick" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-31T20:20:52">
     <defSwitch name="ENABLE" label="Enable">
 Off
     </defSwitch>
@@ -45,12 +45,12 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defTextVector device="Filter Simulator" name="SNOOP_JOYSTICK" label="Snoop Joystick" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:19">
+<defTextVector device="Filter Simulator" name="SNOOP_JOYSTICK" label="Snoop Joystick" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-10-31T20:20:52">
     <defText name="SNOOP_JOYSTICK_DEVICE" label="Device">
 Joystick
     </defText>
 </defTextVector>
-<defNumberVector device="Filter Simulator" name="DELAY" label="Filter Delay" group="Filter Wheel" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:19">
+<defNumberVector device="Filter Simulator" name="DELAY" label="Filter Delay" group="Filter Wheel" state="Idle" perm="rw" timeout="60" timestamp="2026-10-31T20:20:52">
     <defNumber name="VALUE" label="Seconds" format="%.f" min="-1" max="30" step="1">
 1
     </defNumber>

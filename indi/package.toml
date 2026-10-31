@@ -8,8 +8,8 @@ name = "indi"
 # The date of the snapshots of Ubuntu, the INDI PPA, and the PHD2 PPA
 # that the build installs from, as YYYYMMDD. A new INDI is a new date:
 # CI builds these images only when this tag is not published yet.
-version = "20261005"
-revision = 10
+version = "20261031"
+revision = 1
 license = "MIT"
 
 # The upstream releases that the snapshots hold, as the packages name

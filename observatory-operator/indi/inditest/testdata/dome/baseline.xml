@@ -1,4 +1,4 @@
-<defSwitchVector device="Dome Simulator" name="CONNECTION" label="Connection" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:53:36">
+<defSwitchVector device="Dome Simulator" name="CONNECTION" label="Connection" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-31T20:21:32">
     <defSwitch name="CONNECT" label="Connect">
 Off
     </defSwitch>
@@ -6,7 +6,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defTextVector device="Dome Simulator" name="DRIVER_INFO" label="Driver Info" group="Connection" state="Idle" perm="ro" timeout="60" timestamp="2026-10-05T19:53:36">
+<defTextVector device="Dome Simulator" name="DRIVER_INFO" label="Driver Info" group="Connection" state="Idle" perm="ro" timeout="60" timestamp="2026-10-31T20:21:32">
     <defText name="DRIVER_NAME" label="Name">
 Dome Simulator
     </defText>
@@ -20,7 +20,7 @@ indi_simulator_dome
 32
     </defText>
 </defTextVector>
-<defSwitchVector device="Dome Simulator" name="DEBUG" label="Debug" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:53:36">
+<defSwitchVector device="Dome Simulator" name="DEBUG" label="Debug" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-31T20:21:32">
     <defSwitch name="ENABLE" label="Enable">
 Off
     </defSwitch>
@@ -28,7 +28,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defSwitchVector device="Dome Simulator" name="SIMULATION" label="Simulation" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-05T19:53:36">
+<defSwitchVector device="Dome Simulator" name="SIMULATION" label="Simulation" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-31T20:21:32">
     <defSwitch name="ENABLE" label="Enable">
 Off
     </defSwitch>
@@ -36,7 +36,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defSwitchVector device="Dome Simulator" name="CONFIG_PROCESS" label="Configuration" group="Options" state="Idle" perm="rw" rule="AtMostOne" timeout="0" timestamp="2026-10-05T19:53:36">
+<defSwitchVector device="Dome Simulator" name="CONFIG_PROCESS" label="Configuration" group="Options" state="Idle" perm="rw" rule="AtMostOne" timeout="0" timestamp="2026-10-31T20:21:32">
     <defSwitch name="CONFIG_LOAD" label="Load">
 Off
     </defSwitch>
@@ -50,12 +50,12 @@ Off
 Off
     </defSwitch>
 </defSwitchVector>
-<defNumberVector device="Dome Simulator" name="POLLING_PERIOD" label="Polling" group="Options" state="Idle" perm="rw" timeout="0" timestamp="2026-10-05T19:53:36">
+<defNumberVector device="Dome Simulator" name="POLLING_PERIOD" label="Polling" group="Options" state="Idle" perm="rw" timeout="0" timestamp="2026-10-31T20:21:32">
     <defNumber name="PERIOD_MS" label="Period (ms)" format="%.f" min="10" max="600000" step="1000">
 1000
     </defNumber>
 </defNumberVector>
-<defSwitchVector device="Dome Simulator" name="CONNECTION_MODE" label="Connection Mode" group="Connection" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:53:36">
+<defSwitchVector device="Dome Simulator" name="CONNECTION_MODE" label="Connection Mode" group="Connection" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-31T20:21:32">
     <defSwitch name="CONNECTION_SERIAL" label="Serial">
 On
     </defSwitch>
@@ -63,12 +63,12 @@ On
 Off
     </defSwitch>
 </defSwitchVector>
-<defTextVector device="Dome Simulator" name="DEVICE_PORT" label="Ports" group="Connection" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:36">
+<defTextVector device="Dome Simulator" name="DEVICE_PORT" label="Ports" group="Connection" state="Idle" perm="rw" timeout="60" timestamp="2026-10-31T20:21:32">
     <defText name="PORT" label="Port">
 /dev/ttyUSB0
     </defText>
 </defTextVector>
-<defSwitchVector device="Dome Simulator" name="DEVICE_BAUD_RATE" label="Baud Rate" group="Connection" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:53:36">
+<defSwitchVector device="Dome Simulator" name="DEVICE_BAUD_RATE" label="Baud Rate" group="Connection" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-31T20:21:32">
     <defSwitch name="9600" label="9600">
 On
     </defSwitch>
@@ -88,7 +88,7 @@ Off
 Off
     </defSwitch>
 </defSwitchVector>
-<defSwitchVector device="Dome Simulator" name="DEVICE_AUTO_SEARCH" label="Auto Search" group="Connection" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:53:36">
+<defSwitchVector device="Dome Simulator" name="DEVICE_AUTO_SEARCH" label="Auto Search" group="Connection" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-31T20:21:32">
     <defSwitch name="INDI_ENABLED" label="Enabled">
 On
     </defSwitch>
@@ -96,19 +96,19 @@ On
 Off
     </defSwitch>
 </defSwitchVector>
-<defSwitchVector device="Dome Simulator" name="DEVICE_PORT_SCAN" label="Refresh" group="Connection" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:53:36">
+<defSwitchVector device="Dome Simulator" name="DEVICE_PORT_SCAN" label="Refresh" group="Connection" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-31T20:21:32">
     <defSwitch name="Scan Ports" label="Scan Ports">
 Off
     </defSwitch>
 </defSwitchVector>
-<defTextVector device="Dome Simulator" name="ACTIVE_DEVICES" label="Snoop devices" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:36">
+<defTextVector device="Dome Simulator" name="ACTIVE_DEVICES" label="Snoop devices" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-10-31T20:21:32">
     <defText name="ACTIVE_TELESCOPE" label="Telescope">
 Telescope Simulator
     </defText>
     <defText name="ACTIVE_INPUT" label="Input"/>
     <defText name="ACTIVE_OUTPUT" label="Output"/>
 </defTextVector>
-<defSwitchVector device="Dome Simulator" name="MOUNT_POLICY" label="Mount Policy" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:53:36">
+<defSwitchVector device="Dome Simulator" name="MOUNT_POLICY" label="Mount Policy" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-31T20:21:32">
     <defSwitch name="MOUNT_IGNORED" label="Mount ignored">
 On
     </defSwitch>
@@ -116,14 +116,14 @@ On
 Off
     </defSwitch>
 </defSwitchVector>
-<defTextVector device="Dome Simulator" name="ACTIVE_DEVICES" label="Snoop devices" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-10-05T19:53:36">
+<defTextVector device="Dome Simulator" name="ACTIVE_DEVICES" label="Snoop devices" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-10-31T20:21:32">
     <defText name="ACTIVE_TELESCOPE" label="Telescope">
 Telescope Simulator
     </defText>
     <defText name="ACTIVE_INPUT" label="Input"/>
     <defText name="ACTIVE_OUTPUT" label="Output"/>
 </defTextVector>
-<defSwitchVector device="Dome Simulator" name="MOUNT_POLICY" label="Mount Policy" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:53:36">
+<defSwitchVector device="Dome Simulator" name="MOUNT_POLICY" label="Mount Policy" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-31T20:21:32">
     <defSwitch name="MOUNT_IGNORED" label="Mount ignored">
 On
     </defSwitch>

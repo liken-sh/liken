@@ -1,4 +1,4 @@
-<setSwitchVector device="Light Panel Simulator" name="CONNECTION" state="Idle" timeout="60" timestamp="2026-10-05T19:54:01">
+<setSwitchVector device="Light Panel Simulator" name="CONNECTION" state="Idle" timeout="60" timestamp="2026-10-31T20:22:23">
     <oneSwitch name="CONNECT">
 Off
     </oneSwitch>
@@ -6,5 +6,5 @@ Off
 On
     </oneSwitch>
 </setSwitchVector>
-<delProperty device="Light Panel Simulator" name="FLAT_LIGHT_CONTROL" timestamp="2026-10-05T19:54:01"/>
-<delProperty device="Light Panel Simulator" name="FLAT_LIGHT_INTENSITY" timestamp="2026-10-05T19:54:01"/>
+<delProperty device="Light Panel Simulator" name="FLAT_LIGHT_CONTROL" timestamp="2026-10-31T20:22:23"/>
+<delProperty device="Light Panel Simulator" name="FLAT_LIGHT_INTENSITY" timestamp="2026-10-31T20:22:23"/>

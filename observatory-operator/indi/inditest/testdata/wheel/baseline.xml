@@ -1,4 +1,4 @@
-<defSwitchVector device="Filter Simulator" name="CONNECTION" label="Connection" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-05T19:53:18">
+<defSwitchVector device="Filter Simulator" name="CONNECTION" label="Connection" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-31T20:20:49">
     <defSwitch name="CONNECT" label="Connect">
 Off
     </defSwitch>
@@ -6,7 +6,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defTextVector device="Filter Simulator" name="DRIVER_INFO" label="Driver Info" group="General Info" state="Idle" perm="ro" timeout="60" timestamp="2026-10-05T19:53:18">
+<defTextVector device="Filter Simulator" name="DRIVER_INFO" label="Driver Info" group="General Info" state="Idle" perm="ro" timeout="60" timestamp="2026-10-31T20:20:49">
     <defText name="DRIVER_NAME" label="Name">
 Filter Simulator
     </defText>
@@ -20,7 +20,7 @@ indi_simulator_wheel
 16
     </defText>
 </defTextVector>
-<defSwitchVector device="Filter Simulator" name="CONFIG_PROCESS" label="Configuration" group="Options" state="Idle" perm="rw" rule="AtMostOne" timeout="0" timestamp="2026-10-05T19:53:18">
+<defSwitchVector device="Filter Simulator" name="CONFIG_PROCESS" label="Configuration" group="Options" state="Idle" perm="rw" rule="AtMostOne" timeout="0" timestamp="2026-10-31T20:20:49">
     <defSwitch name="CONFIG_LOAD" label="Load">
 Off
     </defSwitch>

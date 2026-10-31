@@ -13,7 +13,7 @@
 // /usr/lib/udev/rules.d/85-qhyccd.rules in the indi-qhy image, which
 // installs it from the indi-3rdparty-libs package of the INDI PPA. The
 // copy came from indi-3rdparty-libs 2.2.0+202610040511~ubuntu26.04.1,
-// the version that the snapshot of 20261005 installs. `make
+// the version that the snapshot of 20261031 installs. `make
 // firmware-rules` copies it again from the image at the tag that
 // indi/package.toml pins.
 package firmware
