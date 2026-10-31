@@ -14,7 +14,8 @@ This plan gives `liken` three parts:
 - **Find.** CI scans every Go module, every Rust lock file, and every
   image, and fails the build on a finding that a bump can fix.
 - **Fix.** Renovate opens one pull request that moves every copy of a
-  dependency at once, as soon as an advisory names it.
+  dependency at once, as soon as an advisory names it. Later it also
+  takes the routine bumps.
 - **Show.** Each release publishes a software bill of materials (SBOM)
   for each image and for the OS, so anyone can match a new advisory
   against a release that is already out.
@@ -63,7 +64,9 @@ updates and CodeQL were off.
 ## The rule
 
 A finding that a bump can fix fails the build. A finding that no bump
-can fix only warns, and the warning names what blocks the fix.
+can fix only warns, and the warning names what blocks the fix. One
+exception: in a package of a base image, a fixable finding below high
+severity only warns, for the reason in [Find](#find).
 
 The rule matches [plan 83](completed/83-every-pin-stays-current.md):
 a fix that is published is a pin that is behind, and a blocked fix is
@@ -95,7 +98,11 @@ finding. So `ci vulns` reads each tool's JSON and sorts each finding.
   builds, before its smoke check. A finding in a package of a base
   image is fixable when the snapshot of sid that `vulkan/latest.sh`
   reports holds the fixed version, because a new snapshot is the bump.
-  A finding in a Go binary or a crate inside an image is the same
+  A fixable finding of critical or high severity fails the build until
+  the snapshot moves, and one of medium or low severity warns. sid
+  takes uploads every day, so a lower finding with a fix in sid is
+  common, and failing on it would block every image between snapshot
+  bumps. A finding in a Go binary or a crate inside an image is the same
   finding as the source scan's, so `ci vulns` reports it once.
 
 `ci vulns` runs as a job of each component that ships Go, Rust, or an
@@ -116,24 +123,17 @@ Renovate acts on those alerts. Its `vulnerabilityAlerts` setting reads
 the repository's Dependabot alerts and opens a pull request at once,
 outside its schedule. Renovate replaces Dependabot's own pull requests
 for one reason: Dependabot groups a security update only within one
-directory, so each of the 14 Go modules gets its own pull request, and
-each one fails `ci pins` because the other 13 copies still name the
-old version. A Renovate `groupName` collects one dependency from every
-package file into one pull request, so every copy moves together.
+directory, so each Go module gets its own pull request, and each one
+fails `ci pins` because the other copies still name the old version.
+A Renovate `groupName` collects one dependency from every package file
+into one pull request, so every copy moves together.
 
-Renovate also opens the routine bumps that `bump-components` makes by
-hand today, under the rule of plan 83:
-
-- One group for the security fixes, opened at once.
-- One group each for the Go modules, the crates, and the toolchain
-  images in `toolchains/images.toml`, on a weekly schedule.
-- `gomodTidy` after each Go bump, and indirect Go modules in scope,
-  because the `golang.org/x/net` fix was indirect.
-- No updates for `k8s.io/*` and `sigs.k8s.io/*`, which follow the k3s
-  release in `liken/k3s/VERSION`.
-- Later, custom regex managers for the `VERSION` files of the OS, so
-  the OS pins reach the same pull requests. Until then,
-  `bump-components` keeps them.
+Renovate starts with one group, the security fixes, opened at once.
+Its configuration runs `gomodTidy` after each Go bump, keeps indirect
+Go modules in scope, because the `golang.org/x/net` fix was indirect,
+and makes no update to `k8s.io/*` or `sigs.k8s.io/*`, which follow the
+k3s release in `liken/k3s/VERSION`. `bump-components` keeps every
+routine bump until [routine maintenance](#routine-maintenance).
 
 Renovate runs as Mend's hosted app, which is free for a public
 repository, so `liken` runs no scheduler of its own. Dependabot alerts
@@ -143,6 +143,21 @@ updates stay off.
 CodeQL default setup turns on in the same step. It reads the
 repository's own code, not its dependencies, so it finds a different
 kind of fault from the scanners above.
+
+## Routine maintenance
+
+When the security group has run for a while and its pull requests pass
+CI, Renovate also takes the routine bumps that `bump-components` makes
+by hand, under the rule of plan 83:
+
+- One group each for the Go modules, the crates, and the toolchain
+  images in `toolchains/images.toml`, on a weekly schedule.
+- Custom regex managers for the `VERSION` files of the OS, so the OS
+  pins reach the same pull requests.
+
+`bump-components` then says which pins Renovate owns, and keeps the
+research and the pins that Renovate cannot read: the Debian snapshot
+of the bases, the INDI snapshots, and the trust bundle.
 
 ## Show
 
@@ -175,25 +190,16 @@ The kernel's CVE Numbering Authority publishes hundreds of CVEs each
 month, one for nearly every fix that goes into a stable series. OSV
 lists them under the `Linux` ecosystem. A kernel finding therefore
 only warns. The kernel stays current under plan 83 by following the
-newest stable release, and a kernel bump for one CVE, as in liken plan
-90, is a decision someone makes after reading that CVE.
+newest stable release, and a kernel bump for one CVE, as in
+[liken plan 90](../liken/plans/completed/90-the-kernel-moves-to-7-3-1-for-a-tcp-use-after-free.md),
+is a decision someone makes after reading that CVE.
 
-## The decisions it needs
+## The decision it needs
 
-- **An image finding that a new snapshot fixes.** sid takes uploads
-  every day, so a fix in sid that the pinned snapshot lacks is common.
-  Under the rule, it fails every image build until someone bumps the
-  snapshot. The other choice is to make an image finding warn and to
-  make `vulkan/latest.sh` report the snapshot as `behind, with fixes`
-  when it is.
 - **The OS SBOM's identifiers.** Some pins, such as `linux-firmware`
   and `wireless-regdb`, have no purl or CPE that any database matches.
   The generator can list them by name only, which no scanner checks,
   or leave them out.
-- **Renovate's scope at the start.** Renovate can take only the
-  security group at first, while `bump-components` keeps the routine
-  bumps, or it can take every Go module, crate, and toolchain image
-  from the start.
 
 ## Order
 
@@ -201,9 +207,9 @@ newest stable release, and a kernel bump for one CVE, as in liken plan
    group only.
 2. Write `ci vulns` for Go and Rust, with the fixable rule, and add its
    job to each component's `package.toml`.
-3. Add the image scan to `ci vulns`, after the decision on snapshot
-   findings.
+3. Add the image scan to `ci vulns`.
 4. Write the image SBOMs, then the OS SBOM generator and its entry in
    `release.yaml`.
-5. Move the routine Go, crate, and toolchain bumps to Renovate, and
-   update `bump-components` to say which pins Renovate owns.
+5. Routine maintenance: move the routine Go, crate, and toolchain bumps
+   to Renovate, then the OS `VERSION` files, and update
+   `bump-components` to say which pins Renovate owns.
