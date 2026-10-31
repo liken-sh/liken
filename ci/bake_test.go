@@ -134,7 +134,7 @@ func TestTheBakeFileRefusesAVersionArgument(t *testing.T) {
 
 // toolchainImages is an images.toml with one build image and one run
 // image.
-const toolchainImages = "[build]\ngolang = \"golang:1.27.3-bookworm@sha256:aaa\"\n[run]\ncurl = \"curlimages/curl:8.22.0\"\n"
+const toolchainImages = "[build]\ngolang = \"golang:1.27.3-trixie@sha256:aaa\"\n[run]\ncurl = \"curlimages/curl:8.22.0\"\n"
 
 func toolchainTree(t *testing.T, files map[string]string) string {
 	t.Helper()
@@ -161,7 +161,7 @@ func TestTheBakeFileResolvesAToolchainImageToItsDigest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "  contexts = {\n    \"brand\" = \"brand\"\n    \"golang\" = \"docker-image://golang:1.27.3-bookworm@sha256:aaa\"\n  }\n"
+	want := "  contexts = {\n    \"brand\" = \"brand\"\n    \"golang\" = \"docker-image://golang:1.27.3-trixie@sha256:aaa\"\n  }\n"
 	if !strings.Contains(string(out), want) {
 		t.Errorf("the bake file lacks:\n%s\n\nin:\n%s", want, out)
 	}
@@ -179,7 +179,7 @@ func TestTheBakeFileGivesOverlaysEveryToolchainImage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "target \"toolchains\" {\n  contexts = {\n    \"golang\" = \"docker-image://golang:1.27.3-bookworm@sha256:aaa\"\n  }\n}\n"
+	want := "target \"toolchains\" {\n  contexts = {\n    \"golang\" = \"docker-image://golang:1.27.3-trixie@sha256:aaa\"\n  }\n}\n"
 	if !strings.Contains(string(out), want) {
 		t.Errorf("the bake file lacks:\n%s\n\nin:\n%s", want, out)
 	}
@@ -199,7 +199,7 @@ func TestTheBakeFileRefusesAToolchainImage(t *testing.T) {
 			"app/package.toml": "[package]\nname = \"app\"\n[[outputs.images]]\nname = \"app\"\n",
 		}, "app does not depend on toolchains"},
 		"with no digest": {map[string]string{
-			"toolchains/images.toml": "[build]\ngolang = \"golang:1.27.3-bookworm\"\n",
+			"toolchains/images.toml": "[build]\ngolang = \"golang:1.27.3-trixie\"\n",
 			"app/package.toml":       "[package]\nname = \"app\"\n[depends]\ncomponents = [\"toolchains\"]\n[[outputs.images]]\nname = \"app\"\n",
 		}, "golang names no digest"},
 		"with the name of an image of the repository": {map[string]string{

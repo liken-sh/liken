@@ -12,7 +12,7 @@
 # carries a digest, because a tag moves and the recipe of a pinned
 # component must not.
 [build]
-golang = "golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5"
+golang = "golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
 rust = "rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
 # The builder of the static binaries in the OS domains and in
 # bluetoothd. The four OS fetch.sh scripts read this line too.

@@ -186,8 +186,8 @@ func TestTheRecipeCoversTheDigestOfEachToolchainImageItReads(t *testing.T) {
 		images  string
 		changes bool
 	}{
-		{"the digest of an image it reads", "[build]\ngolang = \"golang:1.27.3-bookworm@sha256:bbb\"\n[run]\ncurl = \"curlimages/curl:8.22.0\"\n", true},
-		{"an image it does not read", toolchainImages + "rust = \"rust:1.98.1-bookworm@sha256:ccc\"\n", false},
+		{"the digest of an image it reads", "[build]\ngolang = \"golang:1.27.3-trixie@sha256:bbb\"\n[run]\ncurl = \"curlimages/curl:8.22.0\"\n", true},
+		{"an image it does not read", toolchainImages + "rust = \"rust:1.99.1-trixie@sha256:ccc\"\n", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
