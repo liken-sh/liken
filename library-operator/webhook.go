@@ -122,24 +122,30 @@ func resolveVolumePath(root, payloadPath string) string {
 	}
 	cleaned := filepath.Clean(payloadPath)
 	if !filepath.IsAbs(cleaned) {
-		// A relative path that climbs above the root maps to nothing. The
-		// path arrives from a media server over HTTP and from a Job's own
-		// annotation, so no caller may read it as a path under the mount.
-		if !inside(cleaned) {
-			return ""
-		}
-		candidate := filepath.Join(root, cleaned)
-		if pathExists(candidate) {
+		if candidate, ok := underRoot(root, cleaned); ok && pathExists(candidate) {
 			return candidate
 		}
 		return ""
 	}
 	parts := strings.Split(strings.TrimPrefix(cleaned, "/"), "/")
 	for i := range parts {
-		candidate := filepath.Join(append([]string{root}, parts[i:]...)...)
-		if pathExists(candidate) {
+		candidate, ok := underRoot(root, filepath.Join(parts[i:]...))
+		if ok && pathExists(candidate) {
 			return candidate
 		}
 	}
 	return ""
+}
+
+// underRoot joins a name from a payload to the root, and refuses a name that
+// is empty, absolute, or climbs above the root. The name arrives from a media
+// server over HTTP and from a Job's own annotation, so every path the
+// resolver checks must stay under the mount. The scan follows a symbolic link
+// that the library itself holds, because the person who manages the library
+// puts it there.
+func underRoot(root, name string) (string, bool) {
+	if !filepath.IsLocal(name) {
+		return "", false
+	}
+	return filepath.Join(root, name), true
 }

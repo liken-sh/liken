@@ -213,3 +213,36 @@ func TestAPayloadPathThatClimbsAboveTheRootMapsToNothing(t *testing.T) {
 		})
 	}
 }
+
+// An absolute payload path maps only to a path under the root, even when it
+// names a file that exists outside the root. A normal absolute path still
+// maps by its suffix, and a ".." at the top of an absolute path stops at "/".
+func TestAnAbsolutePayloadPathMapsOnlyUnderTheRoot(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "library")
+	film := filepath.Join(root, "One (2001)")
+	outside := filepath.Join(parent, "outside.mkv")
+	if err := os.MkdirAll(film, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(outside, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		payload string
+		want    string
+	}{
+		{payload: outside, want: ""},
+		{payload: "/", want: ""},
+		{payload: "/../../outside.mkv", want: ""},
+		{payload: "/srv/media/One (2001)", want: film},
+		{payload: "/../One (2001)", want: film},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.payload, func(t *testing.T) {
+			if got := resolveVolumePath(root, testCase.payload); got != testCase.want {
+				t.Errorf("resolveVolumePath(%q) = %q, want %q", testCase.payload, got, testCase.want)
+			}
+		})
+	}
+}

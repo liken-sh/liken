@@ -80,6 +80,20 @@ func TestAnswersAMissingPageWithTheSitesNotFoundPage(t *testing.T) {
 	}
 }
 
+// A request that climbs above the tree gets the site's 404 page, even
+// when the file it names exists beside the tree.
+func TestAnswersAPathAboveTheTreeWithTheSitesNotFoundPage(t *testing.T) {
+	root := site(t)
+	outside := filepath.Join(filepath.Dir(root), "outside.html")
+	if err := os.WriteFile(outside, []byte("<title>outside</title>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	response := get(t, root, "/../outside.html")
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", response.StatusCode)
+	}
+}
+
 func TestRefusesACommandLineWithNoDirectory(t *testing.T) {
 	if err := run([]string{"-addr", "localhost:0"}); err == nil {
 		t.Fatal("run accepted a command line with no -dir")

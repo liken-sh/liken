@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liken-sh/liken/astrophotography-operator/outbox"
 	"github.com/liken-sh/liken/astrophotography-operator/sky"
 )
 
@@ -115,6 +116,31 @@ func TestARequestTheWorkerDoesNotRunIsRefused(t *testing.T) {
 			p := fakePrograms(t, programsWork)
 			if _, err := p.extractor.Extract(t.Context(), c.request); !errors.Is(err, ErrBadRequest) {
 				t.Errorf("answered %v, want %v", err, ErrBadRequest)
+			}
+		})
+	}
+}
+
+// The extractor refuses a frame whose path leaves the outbox even when
+// the frame did not come from outbox.Parse, and finds a normal frame
+// under the outbox.
+func TestTheExtractorReadsOnlyAFrameUnderTheOutbox(t *testing.T) {
+	cases := []struct {
+		name  string
+		frame outbox.Frame
+		want  string
+		err   error
+	}{
+		{"a frame in the outbox", outbox.Frame{Camera: "east-main", Reservation: "tonight", Name: "f1"}, "/outbox/east-main/tonight/_centering/f1.fits", nil},
+		{"a camera that climbs above the outbox", outbox.Frame{Camera: "..", Reservation: "tonight", Name: "f1"}, "", ErrBadRequest},
+		{"a name that climbs above the outbox", outbox.Frame{Camera: "east-main", Reservation: "tonight", Name: "../../../../etc/passwd"}, "", ErrBadRequest},
+		{"an absolute camera", outbox.Frame{Camera: "/etc", Reservation: "tonight", Name: "f1"}, "", ErrBadRequest},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := framePath("/outbox", c.frame)
+			if got != c.want || !errors.Is(err, c.err) {
+				t.Errorf("framePath = %q, %v, want %q, %v", got, err, c.want, c.err)
 			}
 		})
 	}

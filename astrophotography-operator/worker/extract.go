@@ -66,7 +66,10 @@ func (e Extractor) Extract(ctx context.Context, request ExtractRequest) (Extract
 	if err := checkHint(request.Hint); err != nil {
 		return ExtractAnswer{}, err
 	}
-	path := filepath.Join(e.Outbox, frame.Path())
+	path, err := framePath(e.Outbox, frame)
+	if err != nil {
+		return ExtractAnswer{}, err
+	}
 	width, height, err := frameSize(path)
 	if err != nil {
 		return ExtractAnswer{}, err
@@ -94,6 +97,19 @@ func (e Extractor) Extract(ctx context.Context, request ExtractRequest) (Extract
 		return ExtractAnswer{}, err
 	}
 	return ExtractAnswer{AXY: axy, Stars: stars, MedianFWHM: fwhm}, nil
+}
+
+// framePath answers where a frame is in the outbox, and refuses a frame
+// whose path is not under the outbox. The frame comes from a request,
+// and the extractor keeps this guarantee itself instead of relying on
+// the rules of outbox.Parse, so a change to the parser cannot let a
+// request read a file outside the outbox.
+func framePath(outboxRoot string, frame outbox.Frame) (string, error) {
+	relative := frame.Path()
+	if !filepath.IsLocal(relative) {
+		return "", fmt.Errorf("%w: the frame %s is not under the outbox", ErrBadRequest, relative)
+	}
+	return filepath.Join(outboxRoot, relative), nil
 }
 
 // checkHint refuses a hint that solve-field would refuse or misread: a

@@ -23,7 +23,6 @@ import (
 	"mime"
 	"net/http"
 	"os"
-	"path"
 	"path/filepath"
 )
 
@@ -57,7 +56,9 @@ func handler(root string) http.Handler {
 	_ = mime.AddExtensionType(".md", "text/markdown; charset=utf-8")
 	files := http.FileServer(http.Dir(root))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		name := filepath.Join(root, filepath.FromSlash(path.Clean("/"+r.URL.Path)))
+		// Cleaning the path as an absolute one drops every ".." at its top,
+		// so a request cannot name a file outside the tree.
+		name := filepath.Join(root, filepath.Clean("/"+r.URL.Path))
 		if _, err := os.Stat(name); errors.Is(err, os.ErrNotExist) {
 			notFound(w, root)
 			return
