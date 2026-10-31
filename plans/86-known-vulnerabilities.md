@@ -314,13 +314,6 @@ state again to find a change, which `AGENTS.md` calls a defect.
   only, so a pod that runs as root or a manifest with no
   `securityContext` raises no alert today. The first scan will report
   many findings, so it needs its own pass to fix or dismiss them.
-- OpenSSF Scorecard, which grades supply-chain practices such as
-  pinned actions, token permissions, and branch protection, and
-  reports each failed check to code scanning. Several checks conflict
-  with choices `liken` made on purpose: actions are pinned by tag,
-  not by commit, and one maintainer pushes to `main` with no review.
-  So the work starts with a decision on which checks `liken` accepts,
-  and it runs on a push to `main`, not on a weekly schedule.
 
 ## Order
 
