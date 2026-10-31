@@ -23,7 +23,7 @@ debian = "debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7
 ubuntu = "ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
 distroless = "gcr.io/distroless/static:nonroot@sha256:18f4cc26c9ffa7f20a359298be7deadac5c607c8e03a02b8119f1a5fc2f82c99"
 oras = "ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179"
-corrosion = "ghcr.io/liken-sh/corrosion:2026.10.23-003@sha256:60b550a1c6a005940e76062a95b07cca93dc01ab5f2e93274828124f55db4f6e"
+corrosion = "ghcr.io/liken-sh/corrosion:2026.10.31-001@sha256:8050e5a5a6d5638ffb4249aa1e9fcf8202258c1d37d18eb6413f99246196d85b"
 
 # The images that a manifest, a guide, a skill, or a test names by
 # tag. A check in ci/ fails when one of those files names an image
