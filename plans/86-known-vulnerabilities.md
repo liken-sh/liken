@@ -2,28 +2,32 @@
 
 Proposed on 2026-10-31. Not built.
 
-CI runs no vulnerability scanner. A pin with a published advisory stays
-in the tree until `make versions` reports it as `behind` and someone
-bumps it. `make versions` compares versions, not advisories, so it
-cannot say which bump fixes a vulnerability, and it says nothing about
-a vulnerability in a version that is still the newest release. A
-release that is already published gets no check at all after its tag.
+CI runs no vulnerability scanner, and nothing shows a known
+vulnerability in `liken` in one place. A pin with a published advisory
+stays in the tree until `make versions` reports it as `behind` and
+someone bumps it. `make versions` compares versions, not advisories,
+so it cannot say which bump fixes a vulnerability. The Debian packages
+inside the images get no check at all.
 
-This plan gives `liken` three parts:
+This plan puts every known vulnerability in the repository's GitHub
+Security tab, from tools that GitHub runs or reads:
 
-- **Find.** CI scans every Go module, every Rust lock file, and every
-  image, and fails the build on a finding that a bump can fix.
-- **Fix.** Renovate opens one pull request that moves every copy of a
-  dependency at once, as soon as an advisory names it. Later it also
-  takes the routine bumps.
-- **Show.** Each release publishes a software bill of materials (SBOM)
-  for each image and for the OS, so anyone can match a new advisory
-  against a release that is already out.
+- **Dependabot** matches each `go.mod` and `Cargo.lock` against
+  GitHub's advisory database, raises an alert, and opens a pull
+  request with the fix.
+- **CodeQL** reads `liken`'s own code for faults, such as an injection
+  or an unchecked path.
+- **Trivy** reads each image that CI publishes, and its findings
+  become code scanning alerts beside CodeQL's.
 
-Each part uses the tools that open source projects use for this work.
-`liken` adds the rule that sorts a finding into fixable or not, and
-the SBOM of the OS, which no tool writes for a system built from
-source pins.
+Secret scanning and push protection are already on and stay on. The
+alerts fail no build. The Security tab is where a person reads them,
+and each fix lands through a pull request that runs the usual checks.
+
+Each scan runs only for the components that a push or a publish
+changes, the same way `ci/` runs a component's builds. A scan that
+reads every component on every push would add tens of minutes to each
+run for nothing new.
 
 ## Evidence
 
@@ -61,155 +65,93 @@ On 2026-10-31, the repository had Dependabot alerts, secret scanning,
 and push protection turned on, with no open alert. Dependabot security
 updates and CodeQL were off.
 
-## The rule
+## Dependabot
 
-A finding that a bump can fix fails the build. A finding that no bump
-can fix only warns, and the warning names what blocks the fix. One
-exception: in a package of a base image, a fixable finding below high
-severity only warns, for the reason in [Find](#find).
+GitHub's dependency graph reads every `go.mod` and `Cargo.lock` in the
+repository, and Dependabot alerts match them against each new
+advisory as GitHub publishes it. This is the one part that needs no
+scan of ours and no timer: GitHub matches each advisory when it
+arrives, which a check on a push cannot do, because an advisory
+arrives with no commit. Alerts are on already.
 
-The rule matches [plan 83](completed/83-every-pin-stays-current.md):
-a fix that is published is a pin that is behind, and a blocked fix is
-a hold. A hold states its reason in its row, so a blocked finding
-states its blocker in its warning.
+Dependabot security updates turn on with a `.github/dependabot.yml`
+that lists each Go module directory and each Cargo workspace, and
+groups the security updates in each directory into one pull request.
+The configuration makes no update to `k8s.io/*` or `sigs.k8s.io/*`,
+which follow the k3s release in `liken/k3s/VERSION`, and it opens no
+routine version updates, which `bump-components` keeps.
 
-## Find
+A pull request from Dependabot runs CI like any other, and the plan
+job runs only the jobs of the components that it changes.
 
-A new `ci vulns` command runs the scanners and applies the rule. None
-of the scanners can apply the rule on its own: `govulncheck`,
-`cargo deny`, `osv-scanner`, and `trivy` each exit non-zero for every
-finding. So `ci vulns` reads each tool's JSON and sorts each finding.
+Dependabot groups a security update only within one directory, not
+across the repository. A module that several `go.mod` files require,
+such as `golang.org/x/net` in every operator, gets one pull request for
+each directory, and each one fails `ci pins`, because the other copies
+still name the old version. A person finishes the fix with
+`toolchains/latest.sh --bump go:<module>` on one of the branches, and
+closes the others. `ci/` gets a check that fails when a module or a
+workspace is missing from `dependabot.yml`, so a new component cannot
+go without updates.
 
-- **Go.** `govulncheck -json` runs in each module. It reports a
-  vulnerability only when the module's code can reach it, so a finding
-  is worth acting on. A finding is fixable when it has a
-  `fixed_version`. Go's minimum version selection takes the highest
-  version that any requirement names, so a `require` line reaches a fix
-  even for an indirect module. A finding in the standard library is
-  fixable by a Go toolchain bump.
-- **Rust.** `cargo deny check advisories` runs in each workspace. A
-  patched version is not enough for a Rust finding, because a semver
-  range elsewhere in the graph can block it. A finding is fixable when
-  `cargo update --precise <fixed> --dry-run` resolves, and the warning
-  for a blocked one names the crate whose range blocks it.
-  `cargo deny` also reports a crate that is unmaintained, which only
-  warns.
-- **Images.** `trivy image` runs on each image after its bake target
-  builds, before its smoke check. A finding in a package of a base
-  image is fixable when the snapshot of sid that `vulkan/latest.sh`
-  reports holds the fixed version, because a new snapshot is the bump.
-  A fixable finding of critical or high severity fails the build until
-  the snapshot moves, and one of medium or low severity warns. sid
-  takes uploads every day, so a lower finding with a fix in sid is
-  common, and failing on it would block every image between snapshot
-  bumps. A finding in a Go binary or a crate inside an image is the same
-  finding as the source scan's, so `ci vulns` reports it once.
+Each alert names the version that fixes it, but not whether `liken`'s
+code reaches the vulnerable function. `golang.org/x/image` v0.41.0
+raised an alert in 15 modules on 2026-10-30, and `govulncheck` found a
+call path in one of them. An alert that does not apply is dismissed in
+the Security tab, with the reason.
 
-`ci vulns` runs as a job of each component that ships Go, Rust, or an
-image, from its `package.toml`, so `ci/` runs it when the component
-changes. A component that does not change gets no scan from CI, which
-is the gap that [Fix](#fix) covers.
+## CodeQL
 
-## Fix
+CodeQL reads the repository's own Go, Rust, Python, C and C++, and
+GitHub Actions code. Its default setup analyzes every language of the
+whole repository on every push to `main`, every pull request, and once
+a week, and it accepts no path filter. So `liken` uses the advanced
+setup instead: `ci/` writes a CodeQL job into each component's
+workflow for the languages that the component holds, and the plan job
+runs it when a file that the language's analysis reads changes, the
+same rule that runs a Go job only for a Go change.
 
-An advisory arrives with no commit, so a check that runs only on a
-push misses it. The advisory databases offer no subscription, and a
-daily scan is the timer that `AGENTS.md` calls a defect. GitHub's
-dependency graph is the one source that sends an event: it matches each
-new advisory against the `go.mod` and `Cargo.lock` files of the
-repository and raises a Dependabot alert.
+Each job uploads its results under the category
+`codeql/<component>/<language>`. Code scanning closes an alert only
+when a later upload in the same category no longer reports it, so a
+category per component keeps the alerts of each component until that
+component's next analysis, and an analysis of one component does not
+close the alerts of another.
 
-Renovate acts on those alerts. Its `vulnerabilityAlerts` setting reads
-the repository's Dependabot alerts and opens a pull request at once,
-outside its schedule. Renovate replaces Dependabot's own pull requests
-for one reason: Dependabot groups a security update only within one
-directory, so each Go module gets its own pull request, and each one
-fails `ci pins` because the other copies still name the old version.
-A Renovate `groupName` collects one dependency from every package file
-into one pull request, so every copy moves together.
+## Trivy
 
-Renovate starts with one group, the security fixes, opened at once.
-Its configuration runs `gomodTidy` after each Go bump, keeps indirect
-Go modules in scope, because the `golang.org/x/net` fix was indirect,
-and makes no update to `k8s.io/*` or `sigs.k8s.io/*`, which follow the
-k3s release in `liken/k3s/VERSION`. `bump-components` keeps every
-routine bump until [routine maintenance](#routine-maintenance).
+Trivy reads the operating system packages and the language packages
+inside an image. It runs in each component's publish job, on each
+image that the job has just pushed, by digest, so it reads the bytes
+that a cluster pulls. Its SARIF goes to code scanning under the
+category `trivy/<image>`. A component that does not publish starts no
+Trivy scan, and a pinned base, which publishes only when its tag is
+new, is scanned once for each tag.
 
-Renovate runs as Mend's hosted app, which is free for a public
-repository, so `liken` runs no scheduler of its own. Dependabot alerts
-stay on, because they are Renovate's event source. Dependabot security
-updates stay off.
+Trivy's findings change only when it runs, unlike Dependabot's. An
+advisory against a Debian package in an image that no push touches
+shows in the Security tab at that image's next publish. The plan
+accepts that gap, because a scan on a schedule is a timer that reads
+state again to find a change, which `AGENTS.md` calls a defect.
 
-CodeQL default setup turns on in the same step. It reads the
-repository's own code, not its dependencies, so it finds a different
-kind of fault from the scanners above.
+## Later work
 
-## Routine maintenance
-
-When the security group has run for a while and its pull requests pass
-CI, Renovate also takes the routine bumps that `bump-components` makes
-by hand, under the rule of plan 83:
-
-- One group each for the Go modules, the crates, and the toolchain
-  images in `toolchains/images.toml`, on a weekly schedule.
-- Custom regex managers for the `VERSION` files of the OS, so the OS
-  pins reach the same pull requests.
-
-`bump-components` then says which pins Renovate owns, and keeps the
-research and the pins that Renovate cannot read: the Debian snapshot
-of the bases, the INDI snapshots, and the trust bundle.
-
-## Show
-
-A finding that arrives after a release has nothing to match against
-unless the release says what it holds. So each release publishes an
-SBOM in CycloneDX format:
-
-- **Each image.** `docker buildx bake` writes an SBOM attestation for
-  each image with `--sbom=true`, and the publish pushes it beside the
-  image on ghcr.io. BuildKit's SBOM generator, Syft, reads the Debian
-  packages, the Go binaries, and the Rust binaries.
-- **The OS.** No tool can read the OS's pins, because the OS builds
-  from source pins: the `VERSION` files, `licensing/sources.sh`, and
-  `toolchains/images.toml`. A new generator in `liken/releases/` writes
-  one component for each pin, with a package URL (purl) or a CPE that
-  the advisory databases match, and `release.yaml` lists the SBOM
-  beside the other artifacts with its sha256. The catalog digest
-  covers `release.yaml`, so it also covers the SBOM.
-
-With the SBOMs published, `osv-scanner scan --sbom` checks any release
-against today's advisories. Signing the images and their attestations
-with Sigstore `cosign`, publishing VEX statements for findings that do
-not apply, and OWASP Dependency-Track as a service that watches the
-published SBOMs are later steps. They are worth their cost when
-someone outside the project runs `liken` releases and needs the record.
-
-## The kernel
-
-The kernel's CVE Numbering Authority publishes hundreds of CVEs each
-month, one for nearly every fix that goes into a stable series. OSV
-lists them under the `Linux` ecosystem. A kernel finding therefore
-only warns. The kernel stays current under plan 83 by following the
-newest stable release, and a kernel bump for one CVE, as in
-[liken plan 90](../liken/plans/completed/90-the-kernel-moves-to-7-3-1-for-a-tcp-use-after-free.md),
-is a decision someone makes after reading that CVE.
-
-## The decision it needs
-
-- **The OS SBOM's identifiers.** Some pins, such as `linux-firmware`
-  and `wireless-regdb`, have no purl or CPE that any database matches.
-  The generator can list them by name only, which no scanner checks,
-  or leave them out.
+- An SBOM for each image, with `--sbom=true` on the bake, and for the
+  OS, from a generator that reads its `VERSION` files, published with
+  each release.
+- A check that fails the build on a finding that a bump can reach.
+  The rule from the evidence above: a Go finding is fixable when it has
+  a `fixed_version`, and a Rust finding when `cargo update --precise`
+  resolves to it.
+- Renovate, if Dependabot's per-directory pull requests cost too much
+  to finish by hand, because a Renovate group moves every copy of a
+  dependency in one pull request.
 
 ## Order
 
-1. Turn on CodeQL default setup, and add Renovate with the security
-   group only.
-2. Write `ci vulns` for Go and Rust, with the fixable rule, and add its
-   job to each component's `package.toml`.
-3. Add the image scan to `ci vulns`.
-4. Write the image SBOMs, then the OS SBOM generator and its entry in
-   `release.yaml`.
-5. Routine maintenance: move the routine Go, crate, and toolchain bumps
-   to Renovate, then the OS `VERSION` files, and update
-   `bump-components` to say which pins Renovate owns.
+1. Add the CodeQL job to `ci/`'s templates, with its rule for which
+   files each language reads, and run `make workflows`.
+2. Add the Trivy step to the publish job's template, and run
+   `make workflows`.
+3. Turn on Dependabot security updates with `.github/dependabot.yml`,
+   and add the `ci/` check that every module and workspace is listed.
