@@ -3,8 +3,9 @@
 //!
 //! The column takes the card's lines and the card's picture at a larger
 //! size: the art over the reason, the title in the title type, the detail,
-//! the time the next work would end, and a line that names the two keys. It
-//! draws in canvas pixels, so it scales with the canvas the way every other
+//! and the time the next work would end, each line a step larger than on the
+//! card because the column is read from across the room. It draws in canvas
+//! pixels, so it scales with the canvas the way every other
 //! part of the display does, and it ends on the right margin.
 
 use iced::{Color, Point, Rectangle, Size};
@@ -18,26 +19,25 @@ use crate::theme;
 pub(super) const ART: Size = Size::new(704.0, 396.0);
 /// The column is placed from its foot. Near the credits the scrubber's
 /// current time stands under the column's right end, from 846 down to the
-/// bar, so the line of keys and the focus panel stay where they are, and a
-/// line added to the column moves the art and the lines above it up. The
-/// art starts below the line box of the corner clock's end time, which ends
-/// at 170.
+/// bar, so the focus panel ends above it, and a line added to the column
+/// moves the art and the lines above it up. The art starts below the line
+/// box of the corner clock's end time, which ends at 170.
 const ART_Y: f32 = 176.0;
 const _: () = assert!(ART_Y >= theme::MARGIN_Y + theme::LINE_PITCH + theme::type_scale::SMALL);
-/// The top of each line under the art. The end time drops one line pitch
-/// from the detail, and the line of keys one more.
-const REASON_Y: f32 = 596.0;
-const TITLE_Y: f32 = 636.0;
-const DETAIL_Y: f32 = 716.0;
-const ENDS_Y: f32 = DETAIL_Y + theme::LINE_PITCH;
-const HINT_Y: f32 = 808.0;
+/// The top of each line under the art. The reason clears the art by 32, the
+/// title and the detail take the room between them, and the end time drops
+/// one label line plus the same 12 that `theme::LINE_PITCH` adds, so the end
+/// time's line box ends at 832, 26 above the bottom of the focus panel.
+const REASON_Y: f32 = 604.0;
+const TITLE_Y: f32 = 652.0;
+const DETAIL_Y: f32 = 740.0;
+const ENDS_Y: f32 = DETAIL_Y + ENDS_DROP;
+const ENDS_DROP: f32 = theme::type_scale::LABEL + 12.0;
 /// How far the focus panel reaches past the column on every side.
 const FOCUS_PAD: f32 = 16.0;
-/// The bottom of the focus panel, under the line of keys.
+/// The bottom of the focus panel, under the end time.
 const FOCUS_BOTTOM: f32 = 858.0;
-
-/// The two keys the column answers, in the tiny type at its foot.
-const HINT: &str = "OK  Play now   ·   Back  Keep watching";
+const _: () = assert!(ENDS_Y + theme::type_scale::LABEL + FOCUS_PAD <= FOCUS_BOTTOM);
 
 /// The column's left edge. Its right edge is the right margin.
 pub(super) fn left(canvas: &Canvas) -> f32 {
@@ -104,7 +104,7 @@ fn lines(canvas: &Canvas, offer: &Offer, now: &Zoned) -> Vec<Line> {
         lines.push(line(
             &reason.to_uppercase(),
             REASON_Y,
-            theme::type_scale::TINY,
+            theme::type_scale::SMALL,
             theme::color::muted(),
         ));
     }
@@ -120,7 +120,7 @@ fn lines(canvas: &Canvas, offer: &Offer, now: &Zoned) -> Vec<Line> {
         lines.push(line(
             detail,
             DETAIL_Y,
-            theme::type_scale::SMALL,
+            theme::type_scale::LABEL,
             theme::color::muted(),
         ));
     }
@@ -128,16 +128,10 @@ fn lines(canvas: &Canvas, offer: &Offer, now: &Zoned) -> Vec<Line> {
         lines.push(line(
             &ends,
             ENDS_Y,
-            theme::type_scale::SMALL,
+            theme::type_scale::LABEL,
             theme::color::muted(),
         ));
     }
-    lines.push(line(
-        HINT,
-        HINT_Y,
-        theme::type_scale::TINY,
-        theme::color::muted(),
-    ));
     lines
 }
 
@@ -179,11 +173,10 @@ mod tests {
         assert_eq!(
             placed,
             [
-                ("NEXT IN HARBOR LIGHTS · S02".to_string(), 1120.0, 596.0),
-                ("E05 · The Long Tide".to_string(), 1120.0, 636.0),
-                ("Harbor Lights · S02".to_string(), 1120.0, 716.0),
-                ("45m · ends at 11:15 pm".to_string(), 1120.0, 762.0),
-                (HINT.to_string(), 1120.0, 808.0),
+                ("NEXT IN HARBOR LIGHTS · S02".to_string(), 1120.0, 604.0),
+                ("E05 · The Long Tide".to_string(), 1120.0, 652.0),
+                ("Harbor Lights · S02".to_string(), 1120.0, 740.0),
+                ("45m · ends at 11:15 pm".to_string(), 1120.0, 792.0),
             ]
         );
     }
@@ -192,7 +185,7 @@ mod tests {
     #[test]
     fn the_end_time_reads_like_the_detail() {
         let lines = lines(&Canvas::default(), &offer(), &evening());
-        assert_eq!(lines[3].size, theme::type_scale::SMALL);
+        assert_eq!(lines[3].size, theme::type_scale::LABEL);
         assert_eq!(lines[3].color, theme::color::muted());
         assert_eq!(lines[3].size, lines[2].size);
     }
@@ -218,17 +211,16 @@ mod tests {
             .iter()
             .map(|line| line.at.y)
             .collect();
-        assert_eq!(rows, [596.0, 636.0, 716.0, 808.0]);
+        assert_eq!(rows, [604.0, 652.0, 740.0]);
     }
 
     /// The column stays clear of the line box of the corner clock's end
-    /// time above it, and its focus panel ends where it did, above the
-    /// scrubber.
+    /// time above it, and its focus panel ends above the scrubber.
     #[test]
     fn the_column_keeps_its_bottom_and_its_art_clears_the_clock() {
         assert_eq!(ART_Y, 176.0);
         assert_eq!(FOCUS_BOTTOM, 858.0);
-        assert_eq!(ENDS_Y - DETAIL_Y, theme::LINE_PITCH);
+        assert_eq!(ENDS_Y, 792.0);
     }
 
     #[test]
