@@ -377,8 +377,11 @@ each module and each workspace.
    remains, with its fixed version or the reason no bump reaches it.
    Root open problem `no-check-finds-known-vulnerabilities.md` holds
    the design of a check in CI.
-7. Run `cd ci && go run . pins -root ..` and `make test` in each
-   changed component.
+7. Run `cd ci && go run . pins -root ..`, then `make test` in each
+   changed component and the `run` of each `[[jobs]]` entry that names
+   a `dir` in its `package.toml`. A component's `make test` does not
+   always build those directories: `library-operator`'s skips
+   `appearances`, which CI builds as `rust-appearances`.
 
 ## 6. Report
 

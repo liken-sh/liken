@@ -4,7 +4,7 @@
 // compared. A record whose embedder hash differs from the run's is stale.
 
 use std::fs::File;
-use std::io;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
@@ -22,13 +22,24 @@ pub struct ModelFile {
 
 // The SHA-256 of a file's bytes, in hex. A model's hash tells two models
 // apart, and a headshot's hash tells a reader when the headshot changed.
+// A model file is tens of megabytes, so the hash reads it in pieces
+// instead of whole.
 pub fn sha256(path: &Path) -> Result<String, Error> {
+    let mut file = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut hasher = Sha256::new();
-    io::copy(
-        &mut File::open(path).map_err(|e| format!("{}: {e}", path.display()))?,
-        &mut hasher,
-    )?;
-    Ok(format!("{:x}", hasher.finalize()))
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
 }
 
 pub fn find(directory: &Path, name: &str) -> Result<ModelFile, Error> {
