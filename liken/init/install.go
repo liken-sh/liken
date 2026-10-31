@@ -393,7 +393,7 @@ type slotPartition struct {
 func partitionNumber(p partition) (uint32, error) {
 	suffix := strings.TrimPrefix(p.name, p.disk)
 	suffix = strings.TrimPrefix(suffix, "p")
-	n, err := strconv.Atoi(suffix)
+	n, err := strconv.ParseUint(suffix, 10, 32)
 	if err != nil || n < 1 {
 		return 0, fmt.Errorf("install: cannot read a partition number from %q on disk %s", p.name, p.disk)
 	}

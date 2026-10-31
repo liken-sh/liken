@@ -130,8 +130,11 @@ func promotionNumber(j jobObject) (int32, bool) {
 	if j.Metadata.Labels[labelComponent] != componentPromotion {
 		return 0, false
 	}
-	number, err := strconv.Atoi(j.Metadata.Annotations[annotationNumber])
-	return int32(number), err == nil
+	number, err := strconv.ParseInt(j.Metadata.Annotations[annotationNumber], 10, 32)
+	if err != nil {
+		return 0, false
+	}
+	return int32(number), true
 }
 
 // finished reports whether a Job ended, and whether it succeeded.

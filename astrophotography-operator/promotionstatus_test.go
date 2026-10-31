@@ -152,6 +152,28 @@ func TestTheReportIsInThePodThatSucceeded(t *testing.T) {
 	}
 }
 
+func TestPromotionPending(t *testing.T) {
+	cases := []struct {
+		name       string
+		annotation string
+		want       int32
+	}{
+		{"a count", "2", 2},
+		{"no count", "", 0},
+		{"a count that does not parse", "two", 0},
+		{"a count too large for an int32", "4294967296", 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			j := jobObject{}
+			j.Metadata.Annotations = map[string]string{annotationPending: c.annotation}
+			if got := promotionPending(j); got != c.want {
+				t.Errorf("promotionPending = %d, want %d", got, c.want)
+			}
+		})
+	}
+}
+
 func TestPromotionNumber(t *testing.T) {
 	job := func(component, number string) jobObject {
 		j := jobObject{}
@@ -168,6 +190,7 @@ func TestPromotionNumber(t *testing.T) {
 		{"a promotion Job", job(componentPromotion, "3"), 3, true},
 		{"another Job of the operator", job("worker", "3"), 0, false},
 		{"a number that does not parse", job(componentPromotion, "three"), 0, false},
+		{"a number too large for an int32", job(componentPromotion, "4294967296"), 0, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -47,6 +47,17 @@ type promotionResult struct {
 	failure string
 }
 
+// promotionPending reads the count of frames that a promotion Job's
+// annotation records. An annotation that is missing, is not a number, or
+// does not fit in an int32 reads as zero.
+func promotionPending(j jobObject) int32 {
+	pending, err := strconv.ParseInt(j.Metadata.Annotations[annotationPending], 10, 32)
+	if err != nil {
+		return 0
+	}
+	return int32(pending)
+}
+
 // resultOf answers the result of a finished promotion Job, with the
 // report from the termination message of the pod that succeeded.
 //
@@ -57,8 +68,7 @@ type promotionResult struct {
 // never changes again, so the loop runs the Job again (rerun in
 // promotion.go). A Job that failed has no report to wait for.
 func resultOf(j jobObject, number int32, succeeded bool, pods []podObject) (promotionResult, bool) {
-	pending, _ := strconv.Atoi(j.Metadata.Annotations[annotationPending])
-	result := promotionResult{job: j.Metadata.Name, number: number, claim: j.Metadata.Annotations[annotationClaim], pending: int32(pending)}
+	result := promotionResult{job: j.Metadata.Name, number: number, claim: j.Metadata.Annotations[annotationClaim], pending: promotionPending(j)}
 	if !succeeded {
 		failed, _ := condition(j.Status.Conditions, "Failed", "True")
 		result.failure = fmt.Sprintf("the promotion Job %s failed: %s", j.Metadata.Name, failed.Message)

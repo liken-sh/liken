@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -180,7 +181,11 @@ func espPartition(mountinfo, sys, mount string) (partition, error) {
 				return partition{}, fmt.Errorf("reading the partition of %s: %w", mount, err)
 			}
 		}
-		return partition{number: uint32(values[0]), start: values[1], size: values[2]}, nil
+		number := values[0]
+		if number > math.MaxUint32 {
+			return partition{}, fmt.Errorf("the partition number %d of %s is outside the range of a GPT entry", number, mount)
+		}
+		return partition{number: uint32(number), start: values[1], size: values[2]}, nil
 	}
 	return partition{}, fmt.Errorf("%s is not a mount point", mount)
 }

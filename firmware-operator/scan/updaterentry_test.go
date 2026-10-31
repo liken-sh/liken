@@ -150,6 +150,9 @@ func TestTheStatusVariableTakesTheESPsPartition(t *testing.T) {
 func TestESPPartitionFails(t *testing.T) {
 	sys := t.TempDir()
 	writeFile(t, filepath.Join(sys, "dev", "block", "252:36", "partition"), []byte("three\n"))
+	for name, value := range map[string]string{"partition": "4294967297\n", "start": "135168\n", "size": "2097152\n"} {
+		writeFile(t, filepath.Join(sys, "dev", "block", "252:37", name), []byte(value))
+	}
 	cases := []struct {
 		name      string
 		mountinfo string
@@ -158,6 +161,7 @@ func TestESPPartitionFails(t *testing.T) {
 		{"no mount", "29 1 252:33 / / rw - ext4 /dev/vdc1 rw\n", "/run/esp-next is not a mount point"},
 		{"no sysfs entry", "612 590 252:35 / /run/esp-next rw - vfat /dev/vdc3 rw\n", "reading the partition of /run/esp-next"},
 		{"a number that does not parse", "612 590 252:36 / /run/esp-next rw - vfat /dev/vdc4 rw\n", "reading the partition of /run/esp-next"},
+		{"a number past a uint32", "612 590 252:37 / /run/esp-next rw - vfat /dev/vdc5 rw\n", "outside the range of a GPT entry"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

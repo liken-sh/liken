@@ -227,9 +227,16 @@ func jellyfinNumber(value string) int64 {
 	return number
 }
 
-// One count of the payload, which is a season or an episode number.
+// One count of the payload, which is a season or an episode number. The
+// parse is at 32 bits because an int is 32 bits on some platforms, so a
+// larger count reads as zero, the same as a field of any other shape, and
+// does not wrap to a wrong episode.
 func jellyfinCount(value string) int {
-	return int(jellyfinNumber(value))
+	number, err := strconv.ParseInt(strings.TrimSpace(value), 10, 32)
+	if err != nil {
+		return 0
+	}
+	return int(number)
 }
 
 // One boolean of the payload. The server writes True and False, and a

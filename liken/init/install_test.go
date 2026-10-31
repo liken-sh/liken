@@ -49,10 +49,11 @@ func TestPartitionNumberRefusesMalformedNames(t *testing.T) {
 	// the install. 0 is not a valid GPT slot, and a boot entry that
 	// carries it would be garbage that the firmware trusts.
 	cases := []partition{
-		{name: "vda", disk: "vda"},         // no suffix at all
-		{name: "vdap", disk: "vda"},        // separator with no number
-		{name: "vdaXY", disk: "vda"},       // non-numeric suffix
-		{name: "mmcblk0", disk: "mmcblk1"}, // name doesn't extend the disk's
+		{name: "vda", disk: "vda"},           // no suffix at all
+		{name: "vdap", disk: "vda"},          // separator with no number
+		{name: "vdaXY", disk: "vda"},         // non-numeric suffix
+		{name: "mmcblk0", disk: "mmcblk1"},   // name doesn't extend the disk's
+		{name: "vda4294967297", disk: "vda"}, // number past a uint32
 	}
 	for _, c := range cases {
 		if _, err := partitionNumber(c); err == nil {

@@ -302,6 +302,27 @@ func TestANumberFFprobeStatesAsAStringReadsBack(t *testing.T) {
 	}
 }
 
+func TestASmallNumberFFprobeStatesAsAStringReadsBack(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		want  int
+	}{
+		{name: "a sample rate", value: "48000", want: 48000},
+		{name: "no sample rate at all", value: "", want: 0},
+		{name: "a value that is not a number", value: "N/A", want: 0},
+		{name: "a negative depth", value: "-10", want: 0},
+		{name: "a value too large for an int on every platform", value: "4294967296", want: 0},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if got := probeSmallInt(test.value); got != test.want {
+				t.Errorf("probeSmallInt(%q) = %d, want %d", test.value, got, test.want)
+			}
+		})
+	}
+}
+
 func TestASecondProbeOfAFileReplacesTheRecordTheLedgerHeld(t *testing.T) {
 	ledger := &likenLedger{}
 

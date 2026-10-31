@@ -196,7 +196,7 @@ func (s ffprobeStream) probed() probedStream {
 		Depth:      s.depth(kind),
 		Channels:   s.Channels,
 		Layout:     s.ChannelLayout,
-		SampleRate: int(probeInt(s.SampleRate)),
+		SampleRate: probeSmallInt(s.SampleRate),
 		Bitrate:    s.bitrate(),
 		Language:   s.Tags.Language,
 		Title:      s.Tags.Title,
@@ -231,7 +231,7 @@ func (s ffprobeStream) kind() string {
 // The bits per sample. ffprobe states it for some codecs. Where it does not,
 // the pixel format names it for a picture, and a sound stream has none.
 func (s ffprobeStream) depth(kind string) int {
-	if depth := int(probeInt(s.BitsPerRawSample)); depth > 0 {
+	if depth := probeSmallInt(s.BitsPerRawSample); depth > 0 {
 		return depth
 	}
 	if kind != fileTypeVideo && kind != fileTypeImage {
@@ -293,4 +293,16 @@ func probeInt(value string) int64 {
 		return 0
 	}
 	return number
+}
+
+// probeSmallInt reads a number that the record keeps as an int, such as a
+// sample rate or a bit depth. The parse is at 32 bits because an int is 32
+// bits on some platforms, so a larger value reads as zero, the same as any
+// other bad value, and does not wrap to a wrong number.
+func probeSmallInt(value string) int {
+	number, err := strconv.ParseInt(strings.TrimSpace(value), 10, 32)
+	if err != nil || number <= 0 {
+		return 0
+	}
+	return int(number)
 }

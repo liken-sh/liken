@@ -96,6 +96,7 @@ func TestAnIndexFileThatDoesNotReadIsLeftOut(t *testing.T) {
 		{"empty, as a download just made it", []byte{}},
 		{"cut in its data", append(indexHeader("NAXIS1  = 3000", "INDEXID = 4207"), make([]byte, 100)...)},
 		{"no INDEXID", indexHeader("SCALE_U = " + arcmin30)},
+		{"an INDEXID too large for a series number", indexHeader("INDEXID = 4294967296", "SCALE_U = "+arcmin30, "SCALE_L = "+arcmin22)},
 		{"no SCALE_L", indexHeader("INDEXID = 4207", "SCALE_U = "+arcmin30)},
 		{"no SCALE_U", indexHeader("INDEXID = 4207", "SCALE_L = "+arcmin22)},
 	}

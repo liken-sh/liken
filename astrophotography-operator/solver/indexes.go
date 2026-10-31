@@ -95,6 +95,12 @@ func readIndexFile(path string) (IndexFile, error) {
 	if err != nil {
 		return IndexFile{}, err
 	}
+	// IndexFile keeps the series as an int32, so a file whose INDEXID does
+	// not fit is left out, the same as a file with no INDEXID, and does
+	// not wrap to the number of another series.
+	if id < math.MinInt32 || id > math.MaxInt32 {
+		return IndexFile{}, fmt.Errorf("INDEXID = %d is outside the range of a series number", id)
+	}
 	low, err := h.Float("SCALE_L")
 	if err != nil {
 		return IndexFile{}, err

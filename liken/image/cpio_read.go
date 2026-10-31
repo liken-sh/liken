@@ -13,6 +13,7 @@ package image
 
 import (
 	"fmt"
+	"math"
 	"path"
 	"slices"
 	"strconv"
@@ -52,6 +53,18 @@ func readCPIO(raw []byte) ([]cpioEntry, []byte, error) {
 			}
 			return uint32(v), nil
 		}
+		// A size indexes raw, and an int is 32 bits on some platforms, so a
+		// size past math.MaxInt32 is an error instead of a negative index.
+		size := func(i int) (int, error) {
+			v, err := field(i)
+			if err != nil {
+				return 0, err
+			}
+			if v > math.MaxInt32 {
+				return 0, fmt.Errorf("header field %d at byte %d: %d is too large for a size", i, off, v)
+			}
+			return int(v), nil
+		}
 		mode, err := field(1)
 		if err != nil {
 			return nil, nil, err
@@ -64,24 +77,24 @@ func readCPIO(raw []byte) ([]cpioEntry, []byte, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		filesize, err := field(6)
+		filesize, err := size(6)
 		if err != nil {
 			return nil, nil, err
 		}
-		namesize, err := field(11)
+		namesize, err := size(11)
 		if err != nil {
 			return nil, nil, err
 		}
-		if namesize == 0 || off+110+int(namesize) > len(raw) {
+		if namesize == 0 || off+110+namesize > len(raw) {
 			return nil, nil, fmt.Errorf("archive ends mid-name at byte %d", off)
 		}
-		name := string(raw[off+110 : off+110+int(namesize)-1])
-		dataStart := pad4(off + 110 + int(namesize))
-		if dataStart+int(filesize) > len(raw) {
+		name := string(raw[off+110 : off+110+namesize-1])
+		dataStart := pad4(off + 110 + namesize)
+		if dataStart+filesize > len(raw) {
 			return nil, nil, fmt.Errorf("archive ends mid-file in %q", name)
 		}
-		data := raw[dataStart : dataStart+int(filesize)]
-		off = pad4(dataStart + int(filesize))
+		data := raw[dataStart : dataStart+filesize]
+		off = pad4(dataStart + filesize)
 		if name == "TRAILER!!!" {
 			return entries, raw[off:], nil
 		}

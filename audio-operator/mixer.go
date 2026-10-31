@@ -22,6 +22,7 @@ package main
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"os"
 	"slices"
 	"strconv"
@@ -445,6 +446,9 @@ func fillChannels(raw []byte, width, channels int, number uint64) error {
 		if width == 8 {
 			binary.NativeEndian.PutUint64(raw[channel*8:], number)
 		} else {
+			if number > math.MaxUint32 {
+				return fmt.Errorf("%d does not fit in a channel of %d bytes", number, width)
+			}
 			binary.NativeEndian.PutUint32(raw[channel*4:], uint32(number))
 		}
 	}

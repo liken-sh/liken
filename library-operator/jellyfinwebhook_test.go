@@ -326,6 +326,7 @@ func TestACountOfThePayload(t *testing.T) {
 	}{
 		{name: "a season", value: "3", want: 3},
 		{name: "no season", value: "", want: 0},
+		{name: "a count too large for an int on every platform", value: "4294967296", want: 0},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if got := jellyfinCount(test.value); got != test.want {

@@ -251,8 +251,14 @@ func readEndpoints() ([]alsaEndpoint, error) {
 			continue
 		}
 		card, _ := strconv.Atoi(match[1])
-		pcm, _ := strconv.Atoi(match[2])
-		byCard[card] = append(byCard[card], pcmDevice{PCM: pcm, Capture: match[3] == "c"})
+		// The PCM number goes into the 32-bit device field of the
+		// kernel's snd_pcm_info, so a node whose number does not fit is
+		// skipped, the same as a node whose name does not match.
+		pcm, err := strconv.ParseInt(match[2], 10, 32)
+		if err != nil {
+			continue
+		}
+		byCard[card] = append(byCard[card], pcmDevice{PCM: int(pcm), Capture: match[3] == "c"})
 	}
 
 	for card, devices := range byCard {
