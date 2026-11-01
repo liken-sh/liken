@@ -240,11 +240,14 @@ func TestTheRecordCreatesTheTagsRelease(t *testing.T) {
 
 func TestPublishRunsThroughTheWorld(t *testing.T) {
 	r := planFixture(t)
+	r.write(imagesFile, fixtureImages)
 	w := newWorld(t, &fakeRegistry{})
+	w.env["DOCKER_CONFIG"] = fixtureDockerConfig
 	if err := w.run([]string{"publish", "-root", r.git.Dir, "-component", "base", "-version", "2026.10.02-001", "-mode", "release"}); err != nil {
 		t.Fatal(err)
 	}
-	if len(w.recorded.commands) != 2 {
+	// The push, its signature, and the move of :latest.
+	if len(w.recorded.commands) != 3 || w.recorded.commands[1] != signCommand("ghcr.io/liken-sh/base@"+fakeDigest("base")) {
 		t.Errorf("commands %v", w.recorded.commands)
 	}
 }

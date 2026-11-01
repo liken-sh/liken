@@ -239,10 +239,14 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     # security-events: write uploads the Trivy scan of each image.
+    # id-token: write lets cosign take the job's OIDC token and sign
+    # each image keyless, with this workflow at its ref as the signer.
+    # No other job of the workflow holds it.
     permissions:
       contents: read
       packages: write
       security-events: write
+      id-token: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -370,7 +374,10 @@ jobs:
       # image that ran in the images job above builds from the layers that
       # the job wrote to the cache. An image that did not run reads
       # neither the version nor any file that changed, and it builds from
-      # the layers that an earlier run on main wrote.
+      # the layers that an earlier run on main wrote. Each push carries
+      # buildx's SBOM and provenance attestations, and cosign, from the
+      # image that toolchains/images.toml pins, signs the digest of each
+      # image that the push wrote. ci/sign.go gives the details.
       - name: publish
         working-directory: ci
         run: go run . publish -root .. -component weston -version "${{ inputs.version }}" -mode "${{ inputs.dryrun && 'dry' || inputs.publish }}" -sarif "${{ github.workspace }}/trivy"

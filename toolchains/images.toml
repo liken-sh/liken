@@ -26,12 +26,19 @@ ubuntu = "ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f
 distroless = "gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329"
 oras = "ghcr.io/oras-project/oras:v1.3.6@sha256:9cfb578be975b762fd898b9d004243d8003aeb807a3e15b2ed212cdd1326c9eb"
 corrosion = "ghcr.io/liken-sh/corrosion:2026.10.31-001@sha256:8050e5a5a6d5638ffb4249aa1e9fcf8202258c1d37d18eb6413f99246196d85b"
-# The sigstore verifier. No Dockerfile builds from it. A bump script
-# runs it with docker to check a keyless signature before it copies a
-# digest from a signed file, and it reads this line, so the verifier
-# is pinned by digest like the builders; grep for cosign under liken/
-# to list the scripts.
+# The sigstore verifier and signer. No Dockerfile builds from it. A
+# bump script runs it with docker to check a keyless signature before
+# it copies a digest from a signed file, and the publish job of each
+# component runs it to sign each image it pushes. Both read this line,
+# so cosign is pinned by digest like the builders; grep for cosign
+# under liken/ and ci/ to list the users.
 cosign = "ghcr.io/sigstore/cosign/cosign:v3.1.4@sha256:0f06154836d2de34f887a5c273506d52ca43edaa1d9e53e6510fa78a48f69c2d"
+# The SBOM generator that buildx runs on each image that a publish
+# pushes. No Dockerfile builds from it. Without this line, buildx pulls
+# its default generator by the moving tag stable-1, so the scanner
+# that writes each SBOM would change with no change to the tree.
+# ci/sign.go reads this line.
+buildkit-syft-scanner = "docker/buildkit-syft-scanner:1.12.1@sha256:873a7458c3c8ac8e32c7b796c10e1600b07b963d2aa000a72a2d97aaaa2d6315"
 
 # The images that a manifest, a guide, a skill, or a test names by
 # tag. A check in ci/ fails when one of those files names an image

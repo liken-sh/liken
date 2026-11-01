@@ -302,6 +302,28 @@ the CA bundle that the OS build and every image that verifies TLS read,
 so one bump reaches all of them. The `bump-components`
 skill under `.agents/skills` holds the procedure.
 
+Every image that CI publishes, as a development build, a release, or
+a pinned component's tag, carries an SBOM and the provenance of its
+build, so a person who pulls it can read what it holds and how it was
+built. buildx writes both as attestations into the image's index on
+ghcr.io, with the syft scanner that `toolchains/images.toml` pins.
+Then cosign, pinned in the same file, signs the digest of that index
+keyless, as the component's workflow at `refs/heads/main` or at the
+release tag. The signature is in the same ghcr.io repository, and
+Rekor records it.
+One signature covers the image and both attestations, because the
+index names each of them by its digest. `ci/sign.go` holds the
+settings, and the `releases` skill holds the commands that verify an
+image:
+
+```sh
+cosign verify ghcr.io/liken-sh/<image>@<digest> \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github\.com/liken-sh/liken/\.github/workflows/component-[a-z0-9-]+\.yaml@refs/(heads/main|tags/[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3})$'
+docker buildx imagetools inspect ghcr.io/liken-sh/<image>@<digest> --format '{{ json .SBOM }}'
+docker buildx imagetools inspect ghcr.io/liken-sh/<image>@<digest> --format '{{ json .Provenance }}'
+```
+
 The `releases` skill under `.agents/skills` holds the calendar scheme,
 what a tag releases, and how to pin a development build. Load it before
 tagging, publishing an image, or pinning a development build.

@@ -622,6 +622,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   vulkan-publish:
     needs: [plan, vulkan, toolchains, trivy-db]
@@ -638,6 +639,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   astrometry:
     needs: [plan, vulkan]
@@ -654,6 +656,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   astrometry-publish:
     needs: [plan, astrometry, toolchains, vulkan, trivy-db]
@@ -670,6 +673,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   kubernetes:
     needs: [plan]
@@ -715,6 +719,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   trust-publish:
     needs: [plan, trust, trivy-db]
@@ -731,6 +736,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   indi:
     needs: [plan, trust]
@@ -747,6 +753,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   indi-publish:
     needs: [plan, indi, toolchains, trust, trivy-db]
@@ -763,6 +770,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   weston:
     needs: [plan, vulkan]
@@ -779,6 +787,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   weston-publish:
     needs: [plan, weston, toolchains, vulkan, trivy-db]
@@ -795,6 +804,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   observatory-operator:
     needs: [plan, indi, trust, weston]
@@ -811,6 +821,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   observatory-operator-publish:
     needs: [plan, observatory-operator, indi, kubernetes, notices, toolchains, trust, vulkan, weston, trivy-db]
@@ -827,6 +838,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   astrophotography-operator:
     needs: [plan, astrometry]
@@ -843,6 +855,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   astrophotography-operator-publish:
     needs: [plan, astrophotography-operator, astrometry, indi, kubernetes, notices, observatory-operator, toolchains, trust, vulkan, weston, trivy-db]
@@ -859,6 +872,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   audio-operator:
     needs: [plan, trust, vulkan]
@@ -875,6 +889,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   audio-operator-publish:
     needs: [plan, audio-operator, kubernetes, notices, toolchains, trust, vulkan, trivy-db]
@@ -891,6 +906,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   bluetooth-operator:
     needs: [plan, trust]
@@ -907,6 +923,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   bluetooth-operator-publish:
     needs: [plan, bluetooth-operator, kubernetes, notices, toolchains, trust, trivy-db]
@@ -923,6 +940,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   brand:
     needs: [plan]
@@ -969,6 +987,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   vaapi-publish:
     needs: [plan, vaapi, toolchains, vulkan, trivy-db]
@@ -985,6 +1004,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   ffmpeg:
     needs: [plan, vaapi, vulkan]
@@ -1001,6 +1021,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   ffmpeg-publish:
     needs: [plan, ffmpeg, toolchains, vaapi, vulkan, trivy-db]
@@ -1017,6 +1038,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   display-operator:
     needs: [plan, ffmpeg, trust, weston]
@@ -1033,6 +1055,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   display-operator-publish:
     needs: [plan, display-operator, ffmpeg, kubernetes, notices, toolchains, trust, vaapi, vulkan, weston, trivy-db]
@@ -1049,6 +1072,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   equipment-operator:
     needs: [plan]
@@ -1065,6 +1089,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   equipment-operator-publish:
     needs: [plan, equipment-operator, kubernetes, notices, toolchains, trivy-db]
@@ -1081,6 +1106,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   firmware-operator:
     needs: [plan, trust, vulkan]
@@ -1097,6 +1123,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   firmware-operator-publish:
     needs: [plan, firmware-operator, kubernetes, notices, toolchains, trust, vulkan, trivy-db]
@@ -1113,6 +1140,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   git-csi-driver:
     needs: [plan, trust, vulkan]
@@ -1129,6 +1157,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   git-csi-driver-publish:
     needs: [plan, git-csi-driver, kubernetes, notices, toolchains, trust, vulkan, trivy-db]
@@ -1145,6 +1174,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   media-screen:
     needs: [plan]
@@ -1176,6 +1206,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   library-operator-publish:
     needs: [plan, library-operator, brand, ffmpeg, kubernetes, media-screen, notices, toolchains, trust, vaapi, vulkan, trivy-db]
@@ -1192,6 +1223,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   liken:
     needs: [plan, trust]
@@ -1240,6 +1272,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   mpv-publish:
     needs: [plan, mpv, ffmpeg, toolchains, vaapi, vulkan, trivy-db]
@@ -1256,6 +1289,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   media-operator:
     needs: [plan, ffmpeg, mpv, trust, vaapi, vulkan]
@@ -1272,6 +1306,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   media-operator-publish:
     needs: [plan, media-operator, brand, ffmpeg, kubernetes, media-screen, mpv, notices, toolchains, trust, vaapi, vulkan, trivy-db]
@@ -1288,6 +1323,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   people-operator:
     needs: [plan, trust]
@@ -1304,6 +1340,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   people-operator-publish:
     needs: [plan, people-operator, kubernetes, notices, toolchains, trust, trivy-db]
@@ -1320,6 +1357,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   per-node-csi-driver:
     needs: [plan]
@@ -1336,6 +1374,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   per-node-csi-driver-publish:
     needs: [plan, per-node-csi-driver, kubernetes, notices, toolchains, trivy-db]
@@ -1352,6 +1391,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   # The site is every component's manual in one tree: liken's manual
   # at the root, and each other component's manual under its prefix,

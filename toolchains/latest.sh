@@ -464,6 +464,26 @@ pinned_users() {
     done | sort -u | paste -sd' '
 }
 
+# verify_cosign <pinned ref> <new ref> stops a bump of cosign unless
+# the new image verifies as sigstore's own release. The publish job of
+# every component signs each image that it pushes with this image, and
+# the bump scripts verify upstream signatures with it, so a cosign from
+# anywhere else would sign and verify for the whole repository.
+# sigstore signs each release image keyless from its release build,
+# whose Google service account Fulcio certifies through Google's OIDC
+# issuer. The verifier is the cosign that the entry pins before the
+# bump. The container runs as the calling user, and HOME points at a
+# writable directory for the sigstore trust root that cosign fetches.
+verify_cosign() {
+    require_tools docker
+    docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp "$1" verify \
+        --certificate-identity keyless@projectsigstore.iam.gserviceaccount.com \
+        --certificate-oidc-issuer https://accounts.google.com \
+        "$(repo_of "$2")@$(digest_of "$2")" >/dev/null ||
+        fail "$2 does not verify as signed by sigstore's release build"
+    echo "the cosign digest verified as signed by sigstore's release build"
+}
+
 # bump_image writes the newest tag of one entry, with its digest for a
 # build image, and prints what moved.
 bump_image() {
@@ -497,6 +517,7 @@ bump_image() {
         echo "$key $tag is current"
         return
     fi
+    [[ "$key" != cosign ]] || verify_cosign "$ref" "$new"
     set_toml "$images" "$(section_of "$key")" "$key" "\"$new\""
     bumped "$key" "$ref" "$new"
     if [[ "$(section_of "$key")" == build ]]; then

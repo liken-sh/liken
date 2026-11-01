@@ -47,12 +47,20 @@ type Publisher struct {
 	// SARIF is the directory where the Trivy scan of each pushed image
 	// is written, or "" for no scan. See scan.
 	SARIF string
+	// DockerConfig is the directory of the Docker configuration that
+	// holds the registry credential, which cosign pushes each signature
+	// with. See sign.
+	DockerConfig string
 }
 
 // Publish pushes the component's outputs under the version: every
 // image first, then the deploy artifact, because a cluster follows the
 // deploy artifact and must never read one that names an image that is
 // not pushed yet.
+//
+// Each image carries an SBOM and its provenance, and cosign signs it,
+// so a person who pulls it can check what it holds, how it was built,
+// and that this repository's CI pushed it. See image.
 //
 // A version that is already published stays as it is. A run of the
 // same tag again, after a failure, pushes only what the failed run did
@@ -135,20 +143,42 @@ const upstreamLabel = "sh.liken.upstream."
 
 func ref(name, tag string) string { return "ghcr.io/liken-sh/" + name + ":" + tag }
 
+func digestRef(name, digest string) string { return "ghcr.io/liken-sh/" + name + "@" + digest }
+
 // image builds and pushes one image through the bake file, so an
 // image that builds on another image of the repository builds on the
 // one at this commit. The bake file gives the target its context, its
 // platforms, and its layer cache. Only the target that the command
 // names is pushed; a base that the build needs builds with it and
 // stays in the builder.
+//
+// The push carries an SBOM and the provenance, and cosign signs the
+// pushed digest under each name of the image before anything else
+// names it: before the scan, the move of :latest, and the deploy
+// artifact. A signature that fails fails the publish. A run again then
+// finds the version published, and signs it by its tag, which cosign
+// resolves to the digest. A published version tag never moves, so the
+// tag names the bytes that the failed run pushed.
 func (p Publisher) image(c *Component, image Image, version, mode string, labels map[string]string) error {
+	tools, err := readPublishTools(p.Root)
+	if err != nil {
+		return err
+	}
 	tags, err := p.Registry.Tags(image.Name)
 	if err != nil {
 		return err
 	}
+	names := append([]string{image.Name}, image.Aliases...)
 	dry := mode == publishDry
 	if slices.Contains(tags, version) && !dry {
 		fmt.Printf("%s is already published; a published version never changes\n", ref(image.Name, version))
+		var references []string
+		for _, name := range names {
+			references = append(references, ref(name, version))
+		}
+		if err := p.sign(tools.Cosign, references...); err != nil {
+			return err
+		}
 	} else {
 		target := image.Name
 		set := func(key, value string) []string { return []string{"--set", target + "." + key + "=" + value} }
@@ -168,14 +198,32 @@ func (p Publisher) image(c *Component, image Image, version, mode string, labels
 		for _, key := range sortedKeys(all) {
 			args = append(args, set("labels."+key, all[key])...)
 		}
-		for _, name := range append([]string{image.Name}, image.Aliases...) {
+		for _, name := range names {
 			args = append(args, set("tags", ref(name, version))...)
 		}
-		args = append(args, target)
+		metadata, err := os.CreateTemp("", image.Name+"-metadata-*.json")
+		if err != nil {
+			return err
+		}
+		metadata.Close()
+		defer os.Remove(metadata.Name())
+		args = append(args, tools.attestArgs(target)...)
+		args = append(args, "--metadata-file", metadata.Name(), target)
 		if err := p.Run(p.Root, "docker", args...); err != nil {
 			return fmt.Errorf("pushing %s: %w", ref(image.Name, version), err)
 		}
 		if !dry {
+			digest, err := pushedDigest(metadata.Name(), target)
+			if err != nil {
+				return fmt.Errorf("pushing %s: %w", ref(image.Name, version), err)
+			}
+			var references []string
+			for _, name := range names {
+				references = append(references, digestRef(name, digest))
+			}
+			if err := p.sign(tools.Cosign, references...); err != nil {
+				return err
+			}
 			p.scan(image, version)
 		}
 	}
@@ -183,7 +231,7 @@ func (p Publisher) image(c *Component, image Image, version, mode string, labels
 	if dry || !moves {
 		return nil
 	}
-	for _, name := range append([]string{image.Name}, image.Aliases...) {
+	for _, name := range names {
 		if err := p.Run(p.Root, "docker", "buildx", "imagetools", "create",
 			"--tag", ref(name, "latest"), ref(image.Name, version)); err != nil {
 			return fmt.Errorf("moving %s: %w", ref(name, "latest"), err)

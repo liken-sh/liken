@@ -1,21 +1,63 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
 
 // recorder is a Runner that records each command and runs nothing.
+// For a bake with --metadata-file, it writes the file that buildx
+// writes, with the digest that fakeDigest gives the target, which is
+// the bake's last argument. The file's path is a new temporary path
+// in each publish, so the recorded command names it <metadata>.
 type recorder struct{ commands []string }
 
 func (r *recorder) run(dir, name string, args ...string) error {
+	i := slices.Index(args, "--metadata-file")
+	if i < 0 {
+		r.commands = append(r.commands, name+" "+strings.Join(args, " "))
+		return nil
+	}
+	path := args[i+1]
+	args = slices.Clone(args)
+	args[i+1] = "<metadata>"
 	r.commands = append(r.commands, name+" "+strings.Join(args, " "))
-	return nil
+	target := args[len(args)-1]
+	data, err := json.Marshal(map[string]map[string]string{target: {"containerimage.digest": fakeDigest(target)}})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
 }
+
+// fixtureDockerConfig is the Docker configuration directory of the
+// publish fixtures, where docker/login-action writes the credential
+// that cosign pushes each signature with.
+const fixtureDockerConfig = "/home/runner/.docker"
+
+// fakeDigest is the digest of the image that the recorder's bake
+// pushes for a target.
+func fakeDigest(target string) string {
+	return fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(target)))
+}
+
+// fixtureCosign is the cosign image of the publish fixtures'
+// images.toml.
+const fixtureCosign = "ghcr.io/sigstore/cosign/cosign:v3.1.4@sha256:0f06154836d2de34f887a5c273506d52ca43edaa1d9e53e6510fa78a48f69c2d"
+
+// fixtureScanner is the SBOM generator of the publish fixtures'
+// images.toml.
+const fixtureScanner = "docker/buildkit-syft-scanner:1.12.1@sha256:873a7458c3c8ac8e32c7b796c10e1600b07b963d2aa000a72a2d97aaaa2d6315"
+
+const fixtureImages = "[build]\ncosign = \"" + fixtureCosign + "\"\nbuildkit-syft-scanner = \"" + fixtureScanner + "\"\n"
 
 func publishFixture(t *testing.T, tags map[string][]string) (Publisher, *recorder, *Component) {
 	t.Helper()
@@ -39,6 +81,7 @@ images:
   - name: ghcr.io/liken-sh/operator
     newTag: latest
 `,
+		"toolchains/images.toml": fixtureImages,
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
@@ -46,7 +89,7 @@ images:
 	}
 	rec := &recorder{}
 	registry := (&fakeRegistry{tags: tags}).serve(t)
-	return Publisher{Root: root, Registry: registry, Run: rec.run, Commit: "0123456789abcdef0123456789abcdef01234567"}, rec, components["operator"]
+	return Publisher{Root: root, Registry: registry, Run: rec.run, Commit: "0123456789abcdef0123456789abcdef01234567", DockerConfig: fixtureDockerConfig}, rec, components["operator"]
 }
 
 func TestAReleasePushesEveryImageThenTheDeployArtifactThenLatest(t *testing.T) {
@@ -59,13 +102,19 @@ func TestAReleasePushesEveryImageThenTheDeployArtifactThenLatest(t *testing.T) {
 			" --set " + target + ".labels.org.opencontainers.image.source=https://github.com/liken-sh/liken" +
 			" --set " + target + ".labels.org.opencontainers.image.version=2026.10.02-001"
 	}
+	attest := func(target string) string {
+		return " --set " + target + ".attest=type=sbom,generator=" + fixtureScanner + " --set " + target + ".attest=type=provenance,mode=max --metadata-file <metadata> " + target
+	}
 	want := []string{
 		"docker buildx bake --file docker-bake.hcl --push --set operator.args.VERSION=2026.10.02-001" + labels("operator") +
-			" --set operator.tags=ghcr.io/liken-sh/operator:2026.10.02-001 --set operator.tags=ghcr.io/liken-sh/operator-sidecar:2026.10.02-001 operator",
+			" --set operator.tags=ghcr.io/liken-sh/operator:2026.10.02-001 --set operator.tags=ghcr.io/liken-sh/operator-sidecar:2026.10.02-001" + attest("operator"),
+		signCommand("ghcr.io/liken-sh/operator@" + fakeDigest("operator")),
+		signCommand("ghcr.io/liken-sh/operator-sidecar@" + fakeDigest("operator")),
 		"docker buildx imagetools create --tag ghcr.io/liken-sh/operator:latest ghcr.io/liken-sh/operator:2026.10.02-001",
 		"docker buildx imagetools create --tag ghcr.io/liken-sh/operator-sidecar:latest ghcr.io/liken-sh/operator:2026.10.02-001",
 		"docker buildx bake --file docker-bake.hcl --push --set operator-cli.args.VERSION=2026.10.02-001" + labels("operator-cli") +
-			" --set operator-cli.tags=ghcr.io/liken-sh/operator-cli:2026.10.02-001 operator-cli",
+			" --set operator-cli.tags=ghcr.io/liken-sh/operator-cli:2026.10.02-001" + attest("operator-cli"),
+		signCommand("ghcr.io/liken-sh/operator-cli@" + fakeDigest("operator-cli")),
 		"docker buildx imagetools create --tag ghcr.io/liken-sh/operator-cli:latest ghcr.io/liken-sh/operator-cli:2026.10.02-001",
 	}
 	if !reflect.DeepEqual(rec.commands[:len(want)], want) {
@@ -192,7 +241,9 @@ func TestADevelopmentBuildNeverMovesLatest(t *testing.T) {
 			t.Errorf("moved latest: %s", command)
 		}
 	}
-	if len(rec.commands) != 3 {
+	// Two pushes, a signature for each of the three image names, and
+	// the deploy artifact.
+	if len(rec.commands) != 6 {
 		t.Errorf("commands:\n%s", strings.Join(rec.commands, "\n"))
 	}
 }
@@ -256,10 +307,11 @@ images:
 func pinnedPublishFixture(t *testing.T, tags map[string][]string) (Publisher, *recorder, map[string]*Component) {
 	t.Helper()
 	root := writeTree(t, map[string]string{
-		"tool/package.toml": "[package]\nname = \"tool\"\nversion = \"20260928\"\nrevision = 3\n[[outputs.images]]\nname = \"tool\"\n",
-		"tool/Dockerfile":   "FROM debian@sha256:abc\n",
-		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[depends]\ncomponents = [\"tool\"]\n[[outputs.images]]\nname = \"base\"\n",
-		"base/Dockerfile":   "FROM tool\n",
+		"tool/package.toml":      "[package]\nname = \"tool\"\nversion = \"20260928\"\nrevision = 3\n[[outputs.images]]\nname = \"tool\"\n",
+		"tool/Dockerfile":        "FROM debian@sha256:abc\n",
+		"base/package.toml":      "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[depends]\ncomponents = [\"tool\"]\n[[outputs.images]]\nname = \"base\"\n",
+		"base/Dockerfile":        "FROM tool\n",
+		"toolchains/images.toml": fixtureImages,
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
@@ -267,7 +319,7 @@ func pinnedPublishFixture(t *testing.T, tags map[string][]string) (Publisher, *r
 	}
 	rec := &recorder{}
 	registry := (&fakeRegistry{tags: tags}).serve(t)
-	return Publisher{Root: root, Registry: registry, Run: rec.run, Commit: "0123456789abcdef0123456789abcdef01234567", Components: components}, rec, components
+	return Publisher{Root: root, Registry: registry, Run: rec.run, Commit: "0123456789abcdef0123456789abcdef01234567", Components: components, DockerConfig: fixtureDockerConfig}, rec, components
 }
 
 func TestAPinnedComponentPushesItsTagWithItsRecipeThenMovesLatest(t *testing.T) {
@@ -284,9 +336,11 @@ func TestAPinnedComponentPushesItsTagWithItsRecipeThenMovesLatest(t *testing.T) 
 		" --set base.labels.org.opencontainers.image.source=https://github.com/liken-sh/liken" +
 		" --set base.labels.org.opencontainers.image.version=20260928-1" +
 		" --set base.labels.sh.liken.recipe=" + recipe +
-		" --set base.tags=ghcr.io/liken-sh/base:20260928-1 base"
+		" --set base.tags=ghcr.io/liken-sh/base:20260928-1" +
+		" --set base.attest=type=sbom,generator=" + fixtureScanner + " --set base.attest=type=provenance,mode=max --metadata-file <metadata> base"
+	sign := signCommand("ghcr.io/liken-sh/base@" + fakeDigest("base"))
 	latest := "docker buildx imagetools create --tag ghcr.io/liken-sh/base:latest ghcr.io/liken-sh/base:20260928-1"
-	if !reflect.DeepEqual(rec.commands, []string{want, latest}) {
+	if !reflect.DeepEqual(rec.commands, []string{want, sign, latest}) {
 		t.Errorf("commands:\n%s", strings.Join(rec.commands, "\n"))
 	}
 }
@@ -298,14 +352,15 @@ func TestAPinnedImageCarriesItsUpstreamVersionsAsLabels(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20261004\"\nrevision = 1\n" +
 			"[package.upstream]\nindi = \"2.2.5\"\nphd2 = \"2.6.14\"\n[[outputs.images]]\nname = \"base\"\n",
-		"base/Dockerfile": "FROM debian@sha256:abc\n",
+		"base/Dockerfile":        "FROM debian@sha256:abc\n",
+		"toolchains/images.toml": fixtureImages,
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	rec := &recorder{}
-	p := Publisher{Root: root, Registry: (&fakeRegistry{}).serve(t), Run: rec.run, Commit: "0123456789abcdef0123456789abcdef01234567", Components: components}
+	p := Publisher{Root: root, Registry: (&fakeRegistry{}).serve(t), Run: rec.run, Commit: "0123456789abcdef0123456789abcdef01234567", Components: components, DockerConfig: fixtureDockerConfig}
 	if err := p.Publish(components["base"], "20261004-1", publishDev); err != nil {
 		t.Fatal(err)
 	}
@@ -316,14 +371,18 @@ func TestAPinnedImageCarriesItsUpstreamVersionsAsLabels(t *testing.T) {
 	}
 }
 
-// A pin that is already published still moves :latest, so a run
-// again after a failed move sets it.
+// A pin that is already published is still signed and still moves
+// :latest, so a run again after a failed signature or a failed move
+// does it.
 func TestAPublishedPinStillMovesLatest(t *testing.T) {
 	p, rec, components := pinnedPublishFixture(t, map[string][]string{"base": {"20260928-1"}})
 	if err := p.Publish(components["base"], "20260928-1", publishDev); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"docker buildx imagetools create --tag ghcr.io/liken-sh/base:latest ghcr.io/liken-sh/base:20260928-1"}
+	want := []string{
+		signCommand("ghcr.io/liken-sh/base:20260928-1"),
+		"docker buildx imagetools create --tag ghcr.io/liken-sh/base:latest ghcr.io/liken-sh/base:20260928-1",
+	}
 	if !reflect.DeepEqual(rec.commands, want) {
 		t.Errorf("commands:\n%s", strings.Join(rec.commands, "\n"))
 	}

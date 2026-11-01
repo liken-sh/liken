@@ -1,6 +1,6 @@
 ---
 name: releases
-description: How the components of the liken repository version and release. Covers the CalVer scheme, the one release tag, which components a tag publishes, the development builds on main, the pinned base images, pinning a development build, and the liken OS channel publish. Use when tagging, publishing an image, pinning a development build, or reasoning about a component's version.
+description: How the components of the liken repository version and release. Covers the CalVer scheme, the one release tag, which components a tag publishes, the development builds on main, the pinned base images, each image's SBOM, provenance, and cosign signature and how to verify them, pinning a development build, and the liken OS channel publish. Use when tagging, publishing an image, verifying a published image, pinning a development build, or reasoning about a component's version.
 ---
 
 # Releases and development builds
@@ -173,6 +173,63 @@ target beside the repository's.
 
 A published version never changes. A rerun of a failed tag pushes only
 what the failed run did not.
+
+## Image attestations and signatures
+
+Every image that a publish job pushes, in a development build, a
+release, or a pinned component's tag, carries two buildx attestations:
+an SPDX SBOM, and the build's SLSA provenance in max mode, which
+records the build arguments, the named contexts, the Dockerfile, and
+the digest of each base image and download. The commit is in the
+image's `org.opencontainers.image.revision` label. buildx stores both
+attestations in the image's index on ghcr.io, as a manifest of the
+platform `unknown/unknown` beside the image's own manifest. The SBOM
+comes from buildx's syft scanner, which `toolchains/images.toml` pins
+as `buildkit-syft-scanner`, so the program that writes each SBOM
+changes only with a commit. `ci/sign.go` sets both attestations on the
+one target that the publish pushes, so a base that the build needs as
+a context carries none. The bake file carries none either, because the
+images job and a workstation load the image into Docker.
+
+After the push, the publish job runs cosign, from the image that
+`toolchains/images.toml` pins, and signs the digest of the index
+under each name of the image. The signature is keyless: the job holds
+`id-token: write`, Fulcio certifies the component's workflow at its
+ref as the signer, and Rekor records the signature. cosign pushes the
+signature to the image's own ghcr.io repository, as an OCI referrer
+of the digest, or under the tag `sha256-<digest>` on a registry that
+has no referrers API. Only the publish job
+of a component with images holds `id-token: write`. A dry run builds
+the same attestations and signs nothing.
+
+A signature that fails fails the publish, before `:latest` moves and
+before the deploy artifact names the image. The rerun finds the
+version published, and signs it again by its tag, which cosign
+resolves to the digest that the failed run pushed.
+
+To verify an image, resolve its tag to a digest once, and read
+everything by that digest:
+
+```sh
+image=ghcr.io/liken-sh/git-csi-driver
+digest="$(docker buildx imagetools inspect "$image:2026.11.01-001" --format '{{ .Manifest.Digest }}')"
+cosign verify "$image@$digest" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github\.com/liken-sh/liken/\.github/workflows/component-[a-z0-9-]+\.yaml@refs/(heads/main|tags/[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3})$'
+docker buildx imagetools inspect "$image@$digest" --format '{{ json .SBOM }}'
+docker buildx imagetools inspect "$image@$digest" --format '{{ json .Provenance }}'
+```
+
+`cosign verify` checks that Fulcio issued the certificate to a
+workflow of this repository from GitHub's OIDC issuer, that the
+workflow ran at `main` or at a release tag, that the signature covers
+the digest, and that Rekor holds it. A branch or a pull request never
+publishes, and the identity refuses a signature from any other ref.
+To require one component, put its workflow in the identity, as in
+`component-git-csi-driver\.yaml`. The SBOM and the provenance carry no
+signature of their own. The index names each of them by its digest,
+so they are the ones that the signature covers when they are read
+through the digest that `cosign verify` checked.
 
 ## Pin a component
 

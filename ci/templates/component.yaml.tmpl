@@ -260,10 +260,14 @@ jobs:{% range .Jobs %}
     runs-on: ubuntu-26.04
     timeout-minutes: {% .PublishTimeout %}{% if and .Images (not .Channel) %}
     # security-events: write uploads the Trivy scan of each image.
+    # id-token: write lets cosign take the job's OIDC token and sign
+    # each image keyless, with this workflow at its ref as the signer.
+    # No other job of the workflow holds it.
     permissions:
       contents: read
       packages: write
-      security-events: write{% end %}{% if .Channel %}
+      security-events: write
+      id-token: write{% end %}{% if .Channel %}
     # The channel's key comes from the repository secrets that
     # liken.sh/terraform.tf keeps delivered.
     env:
@@ -335,7 +339,10 @@ jobs:{% range .Jobs %}
       # image that ran in the images job above builds from the layers that
       # the job wrote to the cache. An image that did not run reads
       # neither the version nor any file that changed, and it builds from
-      # the layers that an earlier run on main wrote.{% if .Deploy %} The deploy artifact
+      # the layers that an earlier run on main wrote. Each push carries
+      # buildx's SBOM and provenance attestations, and cosign, from the
+      # image that toolchains/images.toml pins, signs the digest of each
+      # image that the push wrote. ci/sign.go gives the details.{% if .Deploy %} The deploy artifact
       # goes last, because a cluster follows the deploy artifact, and it
       # must never name an image that is not pushed yet.{% end %}
 {% else %}      # The component builds no image, so the deploy artifact pushes

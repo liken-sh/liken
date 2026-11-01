@@ -106,7 +106,7 @@ func (w World) run(args []string) error {
 		if err != nil {
 			return err
 		}
-		p := Publisher{Root: *root, Registry: w.Published.Registry, Run: w.Run, Commit: commit, Components: components, SARIF: *sarif}
+		p := Publisher{Root: *root, Registry: w.Published.Registry, Run: w.Run, Commit: commit, Components: components, SARIF: *sarif, DockerConfig: dockerConfig(w.Getenv)}
 		return p.Publish(c, *version, *mode)
 	case "scan":
 		return w.scan(*root, components, *image, *version, *sarif)
