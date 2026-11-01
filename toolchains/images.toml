@@ -27,7 +27,7 @@ debian = "debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce6
 ubuntu = "ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
 distroless = "gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329"
 oras = "ghcr.io/oras-project/oras:v1.3.6@sha256:9cfb578be975b762fd898b9d004243d8003aeb807a3e15b2ed212cdd1326c9eb"
-corrosion = "ghcr.io/liken-sh/corrosion:2026.10.31-001@sha256:8050e5a5a6d5638ffb4249aa1e9fcf8202258c1d37d18eb6413f99246196d85b"
+corrosion = "ghcr.io/liken-sh/corrosion:2026.10.31-001-dev-002-4e70c66e@sha256:50bad5dbe49ebeb52e1db0d982a07ef3cbef46ec76b4b455050fab15a0931682"
 # The sigstore verifier and signer. No Dockerfile builds from it. A
 # bump script runs it with docker to check a keyless signature before
 # it copies a digest from a signed file, and the publish job of each
