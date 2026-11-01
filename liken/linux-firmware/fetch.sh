@@ -114,9 +114,18 @@ regdb_url="https://mirrors.edge.kernel.org/pub/software/network/wireless-regdb/$
 
 if ! sha256sum --check --status <<<"$regdb_digest  $cache/$regdb_tarball" >/dev/null 2>&1; then
     echo "downloading $regdb_tarball"
+    # The bytes go to a .partial file, which replaces the cached file
+    # only after it matches the digest, so a torn or changed download
+    # never takes the name of a good one. The tarball is small, so each
+    # download starts from the first byte and never resumes a .partial
+    # that an earlier run left.
     curl -fL --retry 5 --retry-all-errors --retry-delay 5 \
-        --progress-bar -o "$cache/$regdb_tarball" "$regdb_url"
-    sha256sum --check --quiet <<<"$regdb_digest  $cache/$regdb_tarball"
+        --progress-bar -o "$cache/$regdb_tarball.partial" "$regdb_url"
+    sha256sum --check --quiet <<<"$regdb_digest  $cache/$regdb_tarball.partial" || {
+        rm -f "$cache/$regdb_tarball.partial"
+        exit 1
+    }
+    mv "$cache/$regdb_tarball.partial" "$cache/$regdb_tarball"
 fi
 
 # regulatory.db is the artifact this pin exists for, so its presence
