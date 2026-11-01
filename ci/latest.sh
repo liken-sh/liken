@@ -5,8 +5,8 @@
 #
 # ci/ writes every workflow from its templates, so the templates and
 # the composite action in .github/actions/build-setup hold every
-# GitHub Action that CI runs. The generator holds the prek version
-# that every prek job installs and the Trivy version that each publish
+# GitHub Action that CI runs. The generator holds the prek version and
+# the digest of its archive that every prek job installs and the Trivy version that each publish
 # job and the trivy job install, and each .pre-commit-config.yaml holds
 # the revision of each hook repository. The flux action is not here,
 # because its version follows liken/flux/VERSION.
@@ -27,7 +27,9 @@
 #                                      each hook repository
 #   ci/latest.sh --bump <action>       move one action, such as
 #                                      actions/checkout, in every template
-#   ci/latest.sh --bump prek           move the prek version
+#   ci/latest.sh --bump prek           move the prek version and the
+#                                      digest of its archive; needs gh,
+#                                      which verifies the attestation
 #   ci/latest.sh --bump trivy          move the Trivy version
 #   ci/latest.sh --bump hook:<repo>    move one hook repository, such as
 #                                      pre-commit/pre-commit-hooks, in
@@ -117,7 +119,7 @@ report() {
     prek="$(pinned_prek)"
     prek_latest="$(newest_release j178/prek)" || prek_latest=""
     prek_latest="${prek_latest#v}"
-    row prek "$prek" "${prek_latest:-?}" - - - "prekVersion in ci/workflow.go"
+    row prek "$prek" "${prek_latest:-?}" - - - "prekVersion and prekSHA256 in ci/workflow.go"
 
     trivy="$(pinned_trivy)"
     trivy_latest="$(newest_release aquasecurity/trivy)" || trivy_latest=""
@@ -151,8 +153,33 @@ prek)
         echo "latest.sh: GitHub did not answer for j178/prek" >&2
         exit 1
     }
-    sed -i "s/^const prekVersion = \".*\"$/const prekVersion = \"$new\"/" "$here/workflow.go"
-    echo "prek: $old -> $new"
+    # prek-action runs a prek that its own checksum table does not name
+    # without a check, so prekSHA256 pins the digest of the archive that
+    # the action downloads on the runner. The digest comes from the
+    # release's published .sha256 file, and the archive must match it
+    # and carry the GitHub attestation of prek's release workflow, so a
+    # changed release asset fails here and not in CI.
+    asset="prek-x86_64-unknown-linux-gnu.tar.gz"
+    base="https://github.com/j178/prek/releases/download/v$new"
+    curl -fsSL --retry 3 --max-time 120 -o "$work/$asset" "$base/$asset"
+    digest="$(curl -fsSL --retry 3 --max-time 20 "$base/$asset.sha256" | awk '{ print $1 }')"
+    [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || {
+        echo "latest.sh: $base/$asset.sha256 holds no SHA-256 digest" >&2
+        exit 1
+    }
+    actual="$(sha256sum "$work/$asset" | awk '{ print $1 }')"
+    [[ "$actual" == "$digest" ]] || {
+        echo "latest.sh: $asset is $actual, and its .sha256 file says $digest" >&2
+        exit 1
+    }
+    gh attestation verify "$work/$asset" --repo j178/prek \
+        --signer-workflow j178/prek/.github/workflows/release.yml >/dev/null || {
+        echo "latest.sh: $asset carries no attestation of prek's release workflow" >&2
+        exit 1
+    }
+    sed -i -e "s/^const prekVersion = \".*\"$/const prekVersion = \"$new\"/" \
+        -e "s/^const prekSHA256 = \".*\"$/const prekSHA256 = \"$digest\"/" "$here/workflow.go"
+    echo "prek: $old -> $new, $asset $digest"
     ;;
 trivy)
     old="$(pinned_trivy)"

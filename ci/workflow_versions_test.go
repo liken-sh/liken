@@ -1,6 +1,7 @@
 package main
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -32,6 +33,34 @@ func TestEveryPrekJobRunsOnePrek(t *testing.T) {
 	for _, file := range []string{".github/workflows/ci.yaml", ".github/workflows/component-app.yaml"} {
 		if want := "prek-version: " + prekVersion + "\n"; !strings.Contains(string(files[file]), want) {
 			t.Errorf("%s lacks %q", file, want)
+		}
+	}
+}
+
+// prek-action verifies a download only against its own checksum table,
+// and it runs a prek that the table does not name unverified. So every
+// prek step passes the digest that this repository pins.
+func TestEveryPrekStepVerifiesThePinnedDigest(t *testing.T) {
+	root := writeTree(t, map[string]string{"app/package.toml": "[package]\nname = \"app\"\n[[jobs]]\nname = \"prek\"\ntoolchain = \"prek\"\n"})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := Workflows(root, components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(prekSHA256) {
+		t.Fatalf("prekSHA256 is %q, want a SHA-256 digest", prekSHA256)
+	}
+	for _, step := range []struct{ file, job string }{
+		{".github/workflows/ci.yaml", "repository"},
+		{".github/workflows/component-app.yaml", "prek"},
+	} {
+		steps := workflowJobs(t, files[step.file])[step.job]["steps"].([]any)
+		prek := steps[len(steps)-1].(map[string]any)
+		if got := prek["with"].(map[string]any)["sha256"]; got != prekSHA256 {
+			t.Errorf("the %s job of %s passes sha256 %v, want %s", step.job, step.file, got, prekSHA256)
 		}
 	}
 }

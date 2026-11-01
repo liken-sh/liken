@@ -230,7 +230,8 @@ jobs:
   # time. The hook stays in the root .pre-commit-config.yaml for a
   # workstation. The skip is a `--skip` argument and not the SKIP
   # variable, because prek ignores SKIP when the command line has a
-  # `--skip`.
+  # `--skip`. sha256 is the digest that prekSHA256 in ci/workflow.go
+  # pins, because prek-action checks only the versions in its own table.
   repository:
     runs-on: ubuntu-26.04
     timeout-minutes: 5
@@ -239,6 +240,7 @@ jobs:
       - uses: j178/prek-action@v3.1.0
         with:
           prek-version: 0.5.9
+          sha256: 2fee13923018dd517c19dba032ddcae8010cadfb81bc47e742ad5e8981a3f126
           extra-args: >-
             --all-files
             --skip workflows

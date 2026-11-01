@@ -279,13 +279,16 @@ jobs:
       # prek runs the hooks of this component only, with
       # --show-diff-on-failure, so a hook that changes a file fails
       # with the change it would make. The reference names a release,
-      # because prek-action publishes no major tag. SKIP leaves out the hooks
+      # because prek-action publishes no major tag. sha256 is the digest
+      # that prekSHA256 in ci/workflow.go pins, because the action checks
+      # only the versions in its own table. SKIP leaves out the hooks
       # that another job of this workflow runs.
       - uses: j178/prek-action@v3.1.0
         env:
           SKIP: gofmt,go-vet,go-mod-tidy
         with:
           prek-version: 0.5.9
+          sha256: 2fee13923018dd517c19dba032ddcae8010cadfb81bc47e742ad5e8981a3f126
           extra-args: --all-files bluetooth-operator/
 
   codeql-go:

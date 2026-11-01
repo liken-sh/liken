@@ -328,7 +328,12 @@ push.
 
 `ci/latest.sh --bump` moves one GitHub Action, prek, or one hook
 revision. A major version of an action can change its inputs, so read
-its release notes before you take it.
+its release notes before you take it. prek-action runs a prek that its
+own checksum table does not name without a check, so `--bump prek`
+also writes `prekSHA256` in `ci/workflow.go`, the digest of the
+archive that the action downloads. The bump takes the digest from the
+release's `.sha256` file and verifies the archive's GitHub attestation
+with `gh`, so it needs `gh`.
 
 ## 5d. The Go modules and the Rust crates
 

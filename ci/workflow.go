@@ -27,6 +27,17 @@ var templateFiles embed.FS
 // run, so a hook behaves the same in each.
 const prekVersion = "0.5.9"
 
+// prekSHA256 is the digest of prek's x86_64-unknown-linux-gnu archive
+// at prekVersion, the archive that prek-action downloads on an
+// ubuntu-26.04 runner. prek-action checks a download against its own
+// table of checksums, and it runs a version that the table does not
+// name without a check. So every prek step passes this digest as the
+// action's sha256 input, and the action fails on a mismatch.
+// `ci/latest.sh --bump prek` writes it with prekVersion, from the
+// digest that the release publishes, after it verifies the release's
+// GitHub attestation.
+const prekSHA256 = "2fee13923018dd517c19dba032ddcae8010cadfb81bc47e742ad5e8981a3f126"
+
 // fluxVersionFile holds the flux release that the OS ships. The
 // publish job pushes each deploy artifact with the same flux CLI, so
 // the artifact's format is the one that the cluster's flux reads.
@@ -36,6 +47,7 @@ var templates = template.Must(template.New("").
 	Delims("{%", "%}").
 	Funcs(template.FuncMap{
 		"prekVersion":  func() string { return prekVersion },
+		"prekSHA256":   func() string { return prekSHA256 },
 		"trivyVersion": func() string { return trivyVersion },
 		"trivyUpload": func(image, present string, dry bool) trivyUpload {
 			return trivyUpload{Image: image, Present: present, Dry: dry}

@@ -145,13 +145,16 @@ jobs:{% range .Jobs %}
       # prek runs the hooks of this component only, with
       # --show-diff-on-failure, so a hook that changes a file fails
       # with the change it would make. The reference names a release,
-      # because prek-action publishes no major tag.{% if .Skip %} SKIP leaves out the hooks
+      # because prek-action publishes no major tag. sha256 is the digest
+      # that prekSHA256 in ci/workflow.go pins, because the action checks
+      # only the versions in its own table.{% if .Skip %} SKIP leaves out the hooks
       # that another job of this workflow runs.{% end %}
       - uses: j178/prek-action@v3.1.0{% if .Skip %}
         env:
           SKIP: {% join .Skip "," %}{% end %}
         with:
           prek-version: {% prekVersion %}
+          sha256: {% prekSHA256 %}
           extra-args: --all-files {% .Component %}/{% else %}{% if eq .Toolchain "codeql" %}{% template "codeql-init" . %}{% end %}{% $lines := lines .Run %}{% if not .Run %}{% else if eq (len $lines) 1 %}
 
       - run: {% .Run %}{% else %}
