@@ -160,6 +160,21 @@ runs:
       with:
         path: liken/userland/dist
         key: userland-${{ hashFiles('liken/userland/**', 'toolchains/images.toml') }}
+    # When the userland's key misses, buildroot builds again from a
+    # fresh tree, and liken/userland/build.sh points it at the download
+    # directory and the compiler cache in liken/userland/cache. A
+    # change to one recipe changes the key above, so this cache
+    # restores the newest earlier entry through restore-keys: the
+    # tarballs that the change did not move are not downloaded again,
+    # and ccache returns each object whose compiler and source are
+    # unchanged. buildroot checks every tarball against its .hash
+    # file, so a stale entry costs a download and never changes what
+    # the build makes.
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: liken/userland/cache
+        key: userland-cache-${{ hashFiles('liken/userland/**', '!liken/userland/dist/**', '!liken/userland/cache/**', 'toolchains/images.toml') }}
+        restore-keys: userland-cache-
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/systemd-boot/dist
