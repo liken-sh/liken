@@ -8,7 +8,7 @@
 # that no component owns, to the inputs of the generated workflows, and
 # to the inputs of `ci pins`: a component's own exclusions, such as its
 # test data, stay in force.
-files: ^(\.agents/|\.github/|liken\.sh/|plans/|[^/]+$|ci/templates/|[^/]+/package\.toml$|.*/Dockerfile[^/]*$|toolchains/images\.toml$|toolchains/pin\.sh$|trust/keys/|.*/VERSION$|.*/fetch\.sh$|.*/latest\.sh$|.*/closure\.sh$)
+files: ^(\.agents/|\.github/|liken\.sh/|plans/|[^/]+$|ci/templates/|[^/]+/package\.toml$|.*/Dockerfile[^/]*$|toolchains/images\.toml$|toolchains/pin\.sh$|trust/keys/|.*/VERSION$|.*/pin\.toml$|.*/fetch\.sh$|.*/latest\.sh$|.*/closure\.sh$|.*/go\.mod$|.*/Cargo\.toml$|.*/rust-toolchain\.toml$|.*/\.pre-commit-config\.yaml$|.*/liken-[a-z-]+-v[0-9]+\.xml$|ci/(actions|trivy|workflow)\.go$)
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -60,7 +60,13 @@ repos:
         # change that makes the two copies of closure.sh differ, and a
         # uses: under .github/ that names an action by anything but
         # the commit and the release of actionPins in ci/actions.go.
+        # The check also compares the Go and Rust versions, the module
+        # and crate versions, the hook revisions, and the copies of a
+        # liken Wayland protocol across the tree, so a go.mod, a
+        # Cargo.toml, a rust-toolchain.toml, a .pre-commit-config.yaml,
+        # a protocol file, or a ci source that holds a pin starts it
+        # too.
         entry: bash -c 'cd ci && go run . pins -root ..'
         language: system
-        files: (^|/)(fetch|latest)\.sh$|/Dockerfile[^/]*$|(^|/)(VERSION|pin\.toml)$|^toolchains/(images\.toml|pin\.sh)$|^versions\.sh$|^trust/keys/|(^|/)closure\.sh$|^\.github/
+        files: (^|/)(fetch|latest)\.sh$|/Dockerfile[^/]*$|(^|/)(VERSION|pin\.toml)$|^toolchains/(images\.toml|pin\.sh)$|^versions\.sh$|^trust/keys/|(^|/)closure\.sh$|^\.github/|(^|/)(go\.mod|Cargo\.toml|rust-toolchain\.toml|\.pre-commit-config\.yaml)$|(^|/)liken-[a-z-]+-v[0-9]+\.xml$|^ci/(actions|trivy|workflow)\.go$
         pass_filenames: false
