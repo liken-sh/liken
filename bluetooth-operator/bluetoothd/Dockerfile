@@ -145,12 +145,18 @@ RUN ./configure \
 # calls any method on org.bluez, so a person starts one connection or
 # reads one property with no shell.
 #
-# The three additions cost 4,190,512 bytes on a 14,352,243-byte
-# image, measured uncompressed: btmgmt 1,525,056, btmon 2,237,560, and
-# dbus-send 427,896, each after strip. btmon is the largest because
-# its decoder tables name every HCI command, event, and profile.
-# dbus-monitor stays out: it costs 415,608 bytes and watches the same events btmon
-# already reports, one layer up.
+# Each tool adds its whole static binary to every node that runs the
+# pod, so a tool goes in only when it answers one of those questions.
+# btmon is the largest of the three because its decoder tables name
+# every HCI command, event, and profile. dbus-monitor stays out
+# because it watches the same events btmon already reports, one layer
+# up. To see what each tool costs, build the image with
+# `docker buildx bake bluetoothd --load` at the top of the repository.
+# The image has no shell, so list its files from outside: `docker
+# create` a container of it, and `docker export` that container into
+# `tar -tv`, which prints each stripped binary with its size. `docker
+# image inspect --format '{{.Size}}'` gives the size of the whole
+# image.
 #
 # btmgmt is a noinst_PROGRAMS entry in Makefile.tools, so make
 # install leaves it in the build tree, and the copy below takes it

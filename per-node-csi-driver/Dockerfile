@@ -29,10 +29,13 @@ ARG VERSION=dev
 # CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
 # static binary with no paths from the build machine in it.
 #
-# -s -w drops the symbol table and the DWARF data, which are 20 MB
-# of the binary. The driver reports its version through --version and
-# its log, and a panic's stack trace keeps its function names without
-# the symbol table, so nothing this project reads is lost.
+# -s -w drops the symbol table and the DWARF data, which are a large
+# part of the binary, and every node that runs the driver pulls the
+# binary. To see that part, build the package once with -ldflags
+# "-s -w" and once without, and compare the sizes of the two files.
+# The driver reports its version through --version and its log, and a
+# panic's stack trace keeps its function names without the symbol
+# table, so nothing this project reads is lost.
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /per-node-csi-driver .
 # The license files of the Go standard library and of each module that
 # the binary links. notices/go.sh says why the image needs them.

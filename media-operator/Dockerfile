@@ -15,10 +15,12 @@
 # build, with the build tag pod, and every sidecar container the
 # operator creates runs it. The pod build leaves out client-go's leader
 # election, which the operator alone needs, so the program that runs in
-# every playback pod and every Remote's pod is less than half the size
-# and takes less than half the memory at start. leader_pod.go says why.
-# The sidecar image is this image, so each node that runs a sidecar
-# pulls both builds, about 40MB where one build was 17MB.
+# every playback pod and every Remote's pod is smaller and takes less
+# memory at start. leader_pod.go says why. The sidecar image is this
+# image, so each node that runs a sidecar pulls both builds. To see
+# the two sizes, run the two go build commands below and compare the
+# files, and `docker image inspect --format '{{.Size}}'` of the image
+# gives what a node pulls.
 
 FROM golang AS build
 # proxy.golang.org sometimes drops a module download partway through
