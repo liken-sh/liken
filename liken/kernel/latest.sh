@@ -67,4 +67,13 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' kernel "$pinned" "${latest:-?}" \
 echo "$latest" >"$here/VERSION"
 echo "kernel: $pinned -> $latest"
 echo "the archive's CHECKSUMS file stands behind these bytes"
+# licensing/sources.sh mirrors kernel.org's tarball of this release
+# and pins it by digest, so a kernel bump moves that digest too. A
+# refused re-pin leaves the domain pin moved and the mirror behind
+# it, which is a release that cannot serve its own sources. Say that
+# plainly, because the fix is a hand edit.
+"$here/../licensing/sources.sh" --repin || {
+    echo "the pin moved; licensing/sources.sh still needs a hand edit" >&2
+    exit 1
+}
 echo "next: make -C .. kernel"

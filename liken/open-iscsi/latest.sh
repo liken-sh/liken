@@ -128,11 +128,8 @@ libeconf)
     ;;
 esac
 
-# A refused re-pin leaves the domain pin moved and the mirror
-# behind it, which is a release that cannot serve its own
-# sources. Say that plainly, because the fix is a hand edit.
-"$here/../licensing/sources.sh" --repin || {
-    echo "the pin moved; licensing/sources.sh still needs a hand edit" >&2
-    exit 1
-}
+# licensing/sources.sh needs no re-pin after this bump. It mirrors
+# this domain's source tarballs from the domain's own cache, which
+# fetch.sh verified against its own digests, so sources.sh holds no
+# digest of its own for them.
 echo "next: make -C .. open-iscsi"
