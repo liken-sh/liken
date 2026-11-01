@@ -132,6 +132,11 @@ func playerArgv(items []string, blocks []json.RawMessage) ([]string, error) {
 		// window carries the name the display steps back at the credits.
 		// display/src/arranger.rs names the same value.
 		"--wayland-app-id=" + videoAppID,
+		// mpv's --tls-verify defaults to no, so without this flag mpv plays
+		// an https:// item from a server with an expired, self-signed, or
+		// wrong-host certificate. mpv checks the chain against the CA bundle
+		// that the image copies from the trust component.
+		"--tls-verify=yes",
 	}
 	// --quiet is the default because mpv prints its status line about
 	// eight times a second, this process's stdout is the pod log on the

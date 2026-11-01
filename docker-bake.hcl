@@ -1087,6 +1087,7 @@ target "media-operator-player" {
     "kubernetes" = "kubernetes"
     "mpv" = "target:mpv"
     "notices" = "notices"
+    "trust" = "target:trust"
   }
   args = {
     VERSION = VERSION
