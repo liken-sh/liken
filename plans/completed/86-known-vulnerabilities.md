@@ -325,23 +325,9 @@ state again to find a change, which `AGENTS.md` calls a defect.
 
 ## Later work
 
-- An SBOM for each image, with `--sbom=true` on the bake, and for the
-  OS, from a generator that reads its `VERSION` files, published with
-  each release.
-- A check that fails the build on a finding that a bump can reach.
-  The rule from the evidence above: a Go finding is fixable when it has
-  a `fixed_version`, and a Rust finding when `cargo update --precise`
-  resolves to it.
-- Renovate, if Dependabot's per-directory pull requests cost too much
-  to finish by hand, because a Renovate group moves every copy of a
-  dependency in one pull request.
-- A Trivy misconfiguration scan (`trivy fs --scanners misconfig`) of
-  each component's Dockerfiles and `deploy/` manifests, on the same
-  rule as the other jobs: the plan job runs it only for a component
-  whose Dockerfile or manifests changed. The image scan reads packages
-  only, so a pod that runs as root or a manifest with no
-  `securityContext` raises no alert today. The first scan will report
-  many findings, so it needs its own pass to fix or dismiss them.
+Root plan 87 holds the work that this plan left for later: SBOMs, a
+check that fails on a fixable finding, Renovate, and Trivy
+misconfiguration scans.
 
 ## Order
 
