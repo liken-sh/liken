@@ -80,10 +80,10 @@ jobs:
       run:
         working-directory: audio-operator
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - id: setup-go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: audio-operator/go.mod
           cache: false
@@ -114,7 +114,7 @@ jobs:
       # file after it extracts the source, and the zip files are about
       # half of the compressed entry.
       - id: go-modules
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod/*
@@ -152,7 +152,7 @@ jobs:
       # an entry without the packages that the other job compiles, and
       # the other job would restore it and compile them again.
       - id: go-build
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
           key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-audio-operator-${{ github.job }}-${{ hashFiles('audio-operator/go.sum', 'audio-operator/Makefile', 'audio-operator/package.toml', 'audio-operator/.pre-commit-config.yaml') }}-${{ github.sha }}
@@ -163,7 +163,7 @@ jobs:
       - run: make test-go
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-modules.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod/*
@@ -173,13 +173,13 @@ jobs:
           key: ${{ steps.go-modules.outputs.cache-primary-key }}
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-build.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
           key: ${{ steps.go-build.outputs.cache-primary-key }}
 
       # The site renders the coverage report from these files.
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-audio-operator-go
           path: |
@@ -195,10 +195,10 @@ jobs:
       run:
         working-directory: audio-operator
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - id: setup-go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: audio-operator/docs/go.mod
           cache: false
@@ -222,7 +222,7 @@ jobs:
       # file after it extracts the source, and the zip files are about
       # half of the compressed entry.
       - id: go-modules
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod/*
@@ -240,7 +240,7 @@ jobs:
       # when none matches, as on a branch that changes it. Every manual
       # with the same go.sum shares the entry.
       - id: hugo-cache
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
           key: hugo-build-${{ runner.os }}-${{ hashFiles('audio-operator/docs/go.sum') }}-${{ github.sha }}
@@ -251,7 +251,7 @@ jobs:
       - run: make test-docs
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-modules.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod/*
@@ -261,7 +261,7 @@ jobs:
           key: ${{ steps.go-modules.outputs.cache-primary-key }}
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
           key: ${{ steps.hugo-cache.outputs.cache-primary-key }}
@@ -274,16 +274,15 @@ jobs:
       run:
         working-directory: audio-operator
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # prek runs the hooks of this component only, with
       # --show-diff-on-failure, so a hook that changes a file fails
-      # with the change it would make. The reference names a release,
-      # because prek-action publishes no major tag. sha256 is the digest
+      # with the change it would make. sha256 is the digest
       # that prekSHA256 in ci/workflow.go pins, because the action checks
       # only the versions in its own table. SKIP leaves out the hooks
       # that another job of this workflow runs.
-      - uses: j178/prek-action@v3.1.0
+      - uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0
         env:
           SKIP: gofmt,go-vet,go-mod-tidy
         with:
@@ -305,10 +304,10 @@ jobs:
       run:
         working-directory: audio-operator
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - id: setup-go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: audio-operator/go.mod
           cache: false
@@ -331,7 +330,7 @@ jobs:
       # file after it extracts the source, and the zip files are about
       # half of the compressed entry.
       - id: go-modules
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod/*
@@ -347,7 +346,7 @@ jobs:
       # a module with a directory of another component, and that
       # component's own job analyzes it. CodeQL traces the build in the
       # next step and extracts each package that the build compiles.
-      - uses: github/codeql-action/init@v4
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           languages: go
           build-mode: manual
@@ -360,7 +359,7 @@ jobs:
       # The category keeps this job's alerts apart from every other
       # analysis: code scanning closes an alert only when a later upload
       # in the same category no longer reports it.
-      - uses: github/codeql-action/analyze@v4
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           category: codeql/audio-operator/go
 
@@ -400,14 +399,14 @@ jobs:
       matrix:
         include: ${{ fromJSON(inputs.images) }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       # A pinned base writes its branch cache on every branch, so its job
       # logs in on every branch too.
       - if: ${{ inputs.publish != 'none' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || matrix.pinned }}
-        uses: docker/login-action@v4
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -418,7 +417,7 @@ jobs:
       # and only a loaded image has a smoke check. The build reads the
       # bake file from the checkout, so a named context reaches the
       # directories of the repository.
-      - uses: docker/bake-action@v7
+      - uses: docker/bake-action@59cb1203cd42bcefd40a1b6d73b589e48c86040e # v7.5.0
         with:
           source: .
           files: docker-bake.hcl
@@ -448,12 +447,12 @@ jobs:
       security-events: write
       id-token: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - id: setup-go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ci/go.mod
           cache: false
@@ -481,7 +480,7 @@ jobs:
       # file after it extracts the source, and the zip files are about
       # half of the compressed entry.
       - id: go-modules
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod/*
@@ -513,7 +512,7 @@ jobs:
       # an entry without the packages that the other job compiles, and
       # the other job would restore it and compile them again.
       - id: go-build
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
           key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}-${{ github.sha }}
@@ -521,17 +520,17 @@ jobs:
             go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}-
             go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       # A dry run pushes nothing, so it needs no login.
       - if: ${{ !inputs.dryrun }}
-        uses: docker/login-action@v4
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - uses: fluxcd/flux2/action@v2.10.0
+      - uses: fluxcd/flux2/action@3fa784edd773d56630bb9f62645e08f70c2cff0a # v2.10.0
         with:
           version: 2.10.0
 
@@ -551,7 +550,7 @@ jobs:
 
       - if: ${{ !inputs.dryrun }}
         continue-on-error: true
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/trivy/db
           key: trivy-db-${{ steps.trivy-day.outputs.day }}
@@ -597,20 +596,20 @@ jobs:
       # failed.
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/audio-operator.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: trivy/audio-operator.sarif
           category: trivy/audio-operator
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/audio-operator-cli.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: trivy/audio-operator-cli.sarif
           category: trivy/audio-operator-cli
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-build.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
           key: ${{ steps.go-build.outputs.cache-primary-key }}

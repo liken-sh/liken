@@ -26,7 +26,7 @@ runs:
     # from its origin, and the checksum database still verifies it.
     # ci/templates/component.yaml.tmpl gives the reason.
     - id: setup-go
-      uses: actions/setup-go@v7
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with:
         go-version-file: liken/go.mod
         cache: false
@@ -49,7 +49,7 @@ runs:
     # half of the compressed entry, and `go` does not read them after
     # it extracts the source.
     - id: go-modules
-      uses: actions/cache/restore@v6
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
           ~/go/pkg/mod/*
@@ -72,7 +72,7 @@ runs:
     # same hash, and when none exists, as on a branch that changes one
     # of those files, the newest entry of the same job.
     - id: go-build
-      uses: actions/cache/restore@v6
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.cache/go-build
         key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-liken-${{ github.job }}-${{ hashFiles('liken/go.sum', 'liken/Makefile', 'liken/*/Makefile', 'liken/package.toml') }}-${{ github.sha }}
@@ -132,23 +132,23 @@ runs:
     # branch restores it instead of fetching the domain again. Such a
     # write is large, the kernel's is 187M, but a bump branch is rare,
     # and its entry leaves the cache a week after its last use.
-    - uses: actions/cache@v6
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/kernel/dist
         key: kernel-${{ hashFiles('liken/kernel/VERSION', 'liken/kernel/fetch.sh') }}
-    - uses: actions/cache@v6
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/k3s/dist
         key: k3s-${{ hashFiles('liken/k3s/VERSION', 'liken/k3s/fetch.sh') }}
-    - uses: actions/cache@v6
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/xtables/dist
         key: xtables-${{ hashFiles('liken/xtables/VERSION', 'liken/xtables/fetch.sh') }}
-    - uses: actions/cache@v6
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: trust/dist
         key: trust-${{ hashFiles('trust/VERSION', 'trust/fetch.sh') }}
-    - uses: actions/cache@v6
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/e2fsprogs/dist
         key: e2fsprogs-${{ hashFiles('liken/e2fsprogs/VERSION', 'liken/e2fsprogs/fetch.sh') }}
@@ -159,21 +159,21 @@ runs:
     # the run. So make rebuilds the tar from the cached binaries every
     # time. This step is cheap, compared to the container build that
     # the cache exists to avoid.
-    - uses: actions/cache@v6
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/open-iscsi/dist
         key: open-iscsi-${{ hashFiles('liken/open-iscsi/VERSION', 'liken/open-iscsi/fetch.sh') }}
-    - uses: actions/cache@v6
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/nfs-utils/dist
         key: nfs-utils-${{ hashFiles('liken/nfs-utils/VERSION', 'liken/nfs-utils/fetch.sh') }}
     # The key covers build.config too, because the feature list
     # decides what the binary contains.
-    - uses: actions/cache@v6
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/wpa-supplicant/dist
         key: wpa-supplicant-${{ hashFiles('liken/wpa-supplicant/VERSION', 'liken/wpa-supplicant/fetch.sh', 'liken/wpa-supplicant/build.config') }}
-    - uses: actions/cache@v6
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/systemd-boot/dist
         key: systemd-boot-${{ hashFiles('liken/systemd-boot/VERSION', 'liken/systemd-boot/fetch.sh') }}
@@ -181,7 +181,7 @@ runs:
     # core image linked from them. So the key also covers the inputs
     # to the link step: the embedded config and the module list in
     # the Makefile.
-    - uses: actions/cache@v6
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/grub/dist
         key: grub-${{ hashFiles('liken/grub/VERSION', 'liken/grub/fetch.sh', 'liken/grub/early.cfg', 'liken/grub/Makefile') }}
@@ -190,13 +190,13 @@ runs:
     # derivation. The key includes the kernel pin because the derived
     # set is a function of the kernel's module tree: a kernel bump
     # must re-derive even when the firmware pin is unchanged.
-    - uses: actions/cache@v6
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/linux-firmware/dist
         key: linux-firmware-${{ hashFiles('liken/linux-firmware/VERSION', 'liken/linux-firmware/fetch.sh', 'liken/linux-firmware/derive.sh', 'liken/kernel/VERSION') }}
     # The microcode key includes the linux-firmware pin because the
     # AMD half comes from that domain's tree.
-    - uses: actions/cache@v6
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/microcode/dist
         key: microcode-${{ hashFiles('liken/microcode/VERSION', 'liken/microcode/fetch.sh', 'liken/linux-firmware/VERSION') }}

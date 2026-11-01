@@ -35,7 +35,7 @@ func TestAPrekJobSkipsTheHooksThatOtherJobsRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "      - uses: j178/prek-action@v3.1.0\n        env:\n          SKIP: test-go,test-docs\n"
+	want := "      - uses: " + pinnedText("j178/prek-action") + "\n        env:\n          SKIP: test-go,test-docs\n"
 	if text := string(files[".github/workflows/component-app.yaml"]); !strings.Contains(text, want) {
 		t.Errorf("the workflow lacks %q:\n%s", want, text)
 	}
@@ -63,7 +63,7 @@ func TestTheRepositoryJobSkipsTheWorkflowsHook(t *testing.T) {
 	steps := jobs["repository"]["steps"].([]any)
 	prek := steps[len(steps)-1].(map[string]any)
 	args := prek["with"].(map[string]any)["extra-args"].(string) + " "
-	if prek["uses"] != "j178/prek-action@v3.1.0" || !strings.Contains(args, " --skip workflows ") {
+	if prek["uses"] != pinnedRef("j178/prek-action") || !strings.Contains(args, " --skip workflows ") {
 		t.Errorf("the repository job's prek step is %v", prek)
 	}
 }

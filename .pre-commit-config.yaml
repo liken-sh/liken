@@ -55,8 +55,10 @@ repos:
         # make versions runs. A change to a script, a Dockerfile, a
         # VERSION, images.toml, versions.sh, the library, or a key in
         # trust/keys/ that breaks a rule fails here, and so does a
-        # change that makes the two copies of closure.sh differ.
+        # change that makes the two copies of closure.sh differ, and a
+        # uses: under .github/ that names an action by anything but
+        # the commit and the release of actionPins in ci/actions.go.
         entry: bash -c 'cd ci && go run . pins -root ..'
         language: system
-        files: (^|/)(fetch|latest)\.sh$|/Dockerfile[^/]*$|(^|/)VERSION$|^toolchains/(images\.toml|pin\.sh)$|^versions\.sh$|^trust/keys/|(^|/)closure\.sh$
+        files: (^|/)(fetch|latest)\.sh$|/Dockerfile[^/]*$|(^|/)VERSION$|^toolchains/(images\.toml|pin\.sh)$|^versions\.sh$|^trust/keys/|(^|/)closure\.sh$|^\.github/
         pass_filenames: false

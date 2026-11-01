@@ -5,7 +5,7 @@
             ~/go/pkg/mod/cache/download/**/*.ziphash{% end %}
 {% define "go-restore" %}
       - id: setup-go
-        uses: actions/setup-go@v7
+        uses: {% action "actions/setup-go" %}
         with:
           go-version-file: {% .Mod %}
           cache: false
@@ -43,7 +43,7 @@
       # file after it extracts the source, and the zip files are about
       # half of the compressed entry.
       - id: go-modules
-        uses: actions/cache/restore@v6
+        uses: {% action "actions/cache/restore" %}
         with:
           path: |{% template "go-module-paths" %}
           key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-{% .Family %}-${{ {% .SumHashFiles %} }}
@@ -74,7 +74,7 @@
       # an entry without the packages that the other job compiles, and
       # the other job would restore it and compile them again.
       - id: go-build
-        uses: actions/cache/restore@v6
+        uses: {% action "actions/cache/restore" %}
         with:
           path: ~/.cache/go-build
           key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-{% .Family %}-${{ github.job }}-${{ {% .HashFiles %} }}-${{ github.sha }}
@@ -84,20 +84,20 @@
 {% define "go-save" %}{% if .SavesModules %}
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-modules.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v6
+        uses: {% action "actions/cache/save" %}
         with:
           path: |{% template "go-module-paths" %}
           key: ${{ steps.go-modules.outputs.cache-primary-key }}{% end %}{% if .Build %}
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-build.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v6
+        uses: {% action "actions/cache/save" %}
         with:
           path: ~/.cache/go-build
           key: ${{ steps.go-build.outputs.cache-primary-key }}{% end %}{% end %}
 {% define "os-go-save" %}
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.build-setup.outputs.go-build-hit != 'true' }}
-        uses: actions/cache/save@v6
+        uses: {% action "actions/cache/save" %}
         with:
           path: ~/.cache/go-build
           key: ${{ steps.build-setup.outputs.go-build-key }}{% end %}

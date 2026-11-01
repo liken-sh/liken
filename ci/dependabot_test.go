@@ -32,26 +32,29 @@ type dependabotConfig struct {
 
 // dependabotTree is a repository with two Go modules, a manual's
 // module, a Cargo workspace with a member crate, a standalone crate,
-// and the trees that the configuration leaves out: test data, a cache,
+// a composite action, and the trees that the configuration leaves out: test data, a cache,
 // and a checkout that .gitignore leaves out.
 func dependabotTree(t *testing.T) string {
 	t.Helper()
 	root := writeTree(t, map[string]string{
-		"go.mod":                     "module root\n",
-		"a/go.mod":                   "module a\n",
-		"a/docs/go.mod":              "module a/docs\n",
-		"b/Cargo.toml":               "[workspace]\nmembers = [\"c\"]\n",
-		"b/Cargo.lock":               "version = 4\n",
-		"b/c/Cargo.toml":             "[package]\nname = \"c\"\n",
-		"d/Cargo.toml":               "[package]\nname = \"d\"\n",
-		"d/Cargo.lock":               "version = 4\n",
-		"a/testdata/go.mod":          "module t\n",
-		"a/.cache/go.mod":            "module c\n",
-		"a/.gitignore":               "/download/\n",
-		"a/download/go.mod":          "module x\n",
-		"a/download/Cargo.lock":      "version = 4\n",
-		"plans/1-history/go.mod":     "module p\n",
-		"plans/1-history/Cargo.lock": "version = 4\n",
+		"go.mod":                            "module root\n",
+		"a/go.mod":                          "module a\n",
+		"a/docs/go.mod":                     "module a/docs\n",
+		"b/Cargo.toml":                      "[workspace]\nmembers = [\"c\"]\n",
+		"b/Cargo.lock":                      "version = 4\n",
+		"b/c/Cargo.toml":                    "[package]\nname = \"c\"\n",
+		"d/Cargo.toml":                      "[package]\nname = \"d\"\n",
+		"d/Cargo.lock":                      "version = 4\n",
+		"a/testdata/go.mod":                 "module t\n",
+		"a/.cache/go.mod":                   "module c\n",
+		"a/.gitignore":                      "/download/\n",
+		"a/download/go.mod":                 "module x\n",
+		"a/download/Cargo.lock":             "version = 4\n",
+		"plans/1-history/go.mod":            "module p\n",
+		"plans/1-history/Cargo.lock":        "version = 4\n",
+		".github/workflows/ci.yaml":         "name: ci\n",
+		".github/workflows/cert.yml":        "name: cert\n",
+		".github/actions/setup/action.yaml": "name: setup\n",
 	})
 	return root
 }
@@ -75,7 +78,7 @@ func TestDependabotListsEveryModuleAndEveryLockfile(t *testing.T) {
 	for _, u := range config.Updates {
 		entries = append(entries, u.Ecosystem+" "+u.Directory)
 	}
-	want := []string{"gomod /", "gomod /a", "gomod /a/docs", "cargo /b", "cargo /d"}
+	want := []string{"gomod /", "gomod /a", "gomod /a/docs", "cargo /b", "cargo /d", "github-actions /", "github-actions /.github/actions/setup"}
 	if config.Version != 2 || !reflect.DeepEqual(entries, want) {
 		t.Errorf("version %d, entries %q, want version 2 and %q", config.Version, entries, want)
 	}
@@ -91,7 +94,9 @@ func TestEveryDependabotEntryOpensOnlyGroupedSecurityUpdates(t *testing.T) {
 	}
 }
 
-func TestDependabotLeavesTheKubernetesModulesToK3s(t *testing.T) {
+// The Kubernetes modules follow the k3s release, and the flux action
+// follows the flux that the OS ships, so Dependabot moves none of them.
+func TestDependabotLeavesThePinsThatFollowAnotherPin(t *testing.T) {
 	ignored := map[string][]string{}
 	for _, u := range readDependabot(t, dependabotTree(t)).Updates {
 		for _, i := range u.Ignore {
@@ -99,7 +104,9 @@ func TestDependabotLeavesTheKubernetesModulesToK3s(t *testing.T) {
 		}
 	}
 	k8s := []string{"k8s.io/*", "sigs.k8s.io/*"}
-	want := map[string][]string{"gomod /": k8s, "gomod /a": k8s, "gomod /a/docs": k8s}
+	flux := []string{fluxActionRepository + "*"}
+	want := map[string][]string{"gomod /": k8s, "gomod /a": k8s, "gomod /a/docs": k8s,
+		"github-actions /": flux, "github-actions /.github/actions/setup": flux}
 	if !reflect.DeepEqual(ignored, want) {
 		t.Errorf("ignored %q, want %q", ignored, want)
 	}
@@ -110,10 +117,10 @@ func TestDependabotSkipsAModuleThatTheTreeDeleted(t *testing.T) {
 	os.Remove(filepath.Join(r.git.Dir, "b/go.mod"))
 	var entries []string
 	for _, u := range readDependabot(t, r.git.Dir).Updates {
-		entries = append(entries, u.Directory)
+		entries = append(entries, u.Ecosystem+" "+u.Directory)
 	}
-	if !reflect.DeepEqual(entries, []string{"/a"}) {
-		t.Errorf("entries %q, want only /a", entries)
+	if want := []string{"gomod /a", "github-actions /"}; !reflect.DeepEqual(entries, want) {
+		t.Errorf("entries %q, want %q", entries, want)
 	}
 }
 
@@ -123,7 +130,7 @@ func TestGenerateCheckFailsForAModuleThatDependabotDoesNotList(t *testing.T) {
 	r := planFixture(t)
 	os.MkdirAll(filepath.Join(r.git.Dir, ".github/workflows"), 0o755)
 	os.MkdirAll(filepath.Join(r.git.Dir, "liken/flux"), 0o755)
-	os.WriteFile(filepath.Join(r.git.Dir, fluxVersionFile), []byte("v2.9.7\n"), 0o644)
+	os.WriteFile(filepath.Join(r.git.Dir, fluxVersionFile), []byte(testFlux+"\n"), 0o644)
 	w := newWorld(t, &fakeRegistry{})
 	if err := w.run([]string{"generate", "-root", r.git.Dir}); err != nil {
 		t.Fatal(err)

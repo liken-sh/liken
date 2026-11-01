@@ -10,7 +10,7 @@ func signFixture(t *testing.T) map[string][]byte {
 		"base/package.toml":  "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\n",
 		"app/package.toml":   "[package]\nname = \"app\"\n[outputs]\ndeploy = \"deploy\"\n",
 		"os/package.toml":    "[package]\nname = \"os\"\n[outputs]\nchannel = true\n",
-		"liken/flux/VERSION": "v2.9.7\n",
+		"liken/flux/VERSION": testFlux + "\n",
 	})
 	components, err := LoadComponents(root)
 	if err != nil {

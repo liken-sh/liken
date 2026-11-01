@@ -355,9 +355,19 @@ anchore/syft:latest <image> -o json -q | jq '[.artifacts[] |
 select(.type == "rust-crate")] | length'` prints more than 0. The Rust
 images are tracked components, so no revision changes.
 
-`ci/latest.sh --bump` moves one GitHub Action, prek, or one hook
-revision. A major version of an action can change its inputs, so read
-its release notes before you take it. prek-action runs a prek that its
+`ci/latest.sh --bump` moves one repository of GitHub Actions, prek,
+or one hook revision. `actionPins` in `ci/actions.go` names each
+repository of actions once, by its release and the commit of the
+release's tag, and every `uses:` reads
+`<action>@<commit> # <release>`. `--bump <repository>`, such as
+`--bump actions/checkout`, stops unless GitHub publishes the newest
+release as a release that is not a pre-release. Then it writes the
+commit of the tag, the commit under an annotated tag, into the table
+and into each composite action under `.github/actions`. Run
+`make workflows` after it. The `fluxcd/flux2` line follows
+`liken/flux/VERSION`, and `liken/flux/latest.sh --bump` moves it. A
+major version of an action can change its inputs, so read its release
+notes before you take it. prek-action runs a prek that its
 own checksum table does not name without a check, so `--bump prek`
 also writes `prekSHA256` in `ci/workflow.go`, the digest of the
 archive that the action downloads. The bump takes the digest from the
@@ -481,8 +491,8 @@ arguments and the reason for its behavior:
 
 - `require_tools` stops on a missing tool, and `fail` stops with a
   message that names the script.
-- `fetch_text`, `url_exists`, `newest_tag`, `github_api`, and
-  `registry_digest` read an upstream, with the retries and time limits
+- `fetch_text`, `url_exists`, `newest_tag`, `tag_commit`,
+  `github_api`, and `registry_digest` read an upstream, with the retries and time limits
   that every read takes. `github_api` sends `GITHUB_TOKEN` or the gh
   CLI's token when one is at hand.
 - `fetch_verified [--resume] <url> <digest> <path>` puts a pinned file
@@ -598,12 +608,16 @@ so a check with file(1) accepts both words:
   `versions.sh` skips;
 - a `latest.sh` reads a `sha256sums.asc` file and does not call
   `trust/keys/kernel-org-digest.sh`;
-- a grep for "statically linked" does not accept "static-pie linked".
+- a grep for "statically linked" does not accept "static-pie linked";
+- a `uses:` in a workflow or a composite action under `.github/`
+  names another repository's action by anything but the commit and
+  the release that `actionPins` in `ci/actions.go` names, or a
+  `docker://` image by anything but a digest.
 
 The pins hook of the root `.pre-commit-config.yaml` runs the check on
 each commit that changes a pin script, a Dockerfile, a `VERSION`,
-`toolchains/images.toml`, `versions.sh`, the library, or
-`trust/keys/`. The check sees only these forms. It does not see a
+`toolchains/images.toml`, `versions.sh`, the library,
+`trust/keys/`, or a file under `.github/`. The check sees only these forms. It does not see a
 signature that an upstream other than kernel.org publishes and a bump
 skips. A line that breaks a pattern for a reason the check cannot see
 takes a comment line directly above it with `fetch-check: allow` and

@@ -70,15 +70,14 @@ jobs:
       run:
         working-directory: notices
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # prek runs the hooks of this component only, with
       # --show-diff-on-failure, so a hook that changes a file fails
-      # with the change it would make. The reference names a release,
-      # because prek-action publishes no major tag. sha256 is the digest
+      # with the change it would make. sha256 is the digest
       # that prekSHA256 in ci/workflow.go pins, because the action checks
       # only the versions in its own table.
-      - uses: j178/prek-action@v3.1.0
+      - uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0
         with:
           prek-version: 0.5.9
           sha256: 2fee13923018dd517c19dba032ddcae8010cadfb81bc47e742ad5e8981a3f126

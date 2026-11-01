@@ -225,6 +225,14 @@ comment that excuses one line.
 - A check that a binary is static accepts both "statically linked"
   and "static-pie linked", because gcc on Alpine builds a static PIE
   for `-static`.
+- Every `uses:` of a GitHub Action names the commit of a release, as
+  in `actions/checkout@<commit> # <release>`, because the owner of an
+  action can move a tag to other code, and the publish jobs run their
+  actions with a token that writes the registry and one that signs
+  images. `actionPins` in `ci/actions.go` names each repository of
+  actions once, the generated workflows and the composite actions
+  name the same commits, and `ci/latest.sh --bump <repository>`
+  writes the commit of the newest release's tag.
 
 ## Closures
 

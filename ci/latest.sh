@@ -3,31 +3,39 @@
 # Report what the CI workflows pin, and what each upstream has
 # released now.
 #
-# ci/ writes every workflow from its templates, so the templates and
-# the composite action in .github/actions/build-setup hold every
-# GitHub Action that CI runs. The generator holds the prek version and
-# the digest of its archive that every prek job installs, and the Trivy
-# version and the digest of its archive that each publish job, the
-# trivy-db job, and the trivy job install. Each .pre-commit-config.yaml holds
-# the revision of each hook repository. The flux action is not here,
-# because its version follows liken/flux/VERSION.
+# actionPins in ci/actions.go names each repository of GitHub Actions
+# that CI runs once, by a release and the commit of its tag. ci/ writes
+# every workflow from that table, and the composite actions under
+# .github/actions name the same commits. The generator holds the prek
+# version and the digest of its archive that every prek job installs,
+# and the Trivy version and the digest of its archive that each publish
+# job, the trivy-db job, and the trivy job install. Each
+# .pre-commit-config.yaml holds the revision of each hook repository.
 #
 # Each pin is built from source by its upstream, so no row has a
-# channel. A major tag such as `@v7` takes every release within the
-# major version, so a major-tag row compares only the major version of
-# the newest release. An exact tag such as `@v2.87.1` compares the
-# whole version. The newest release is GitHub's latest release, which
-# is never a pre-release or a draft. A hook repository that publishes
-# no releases compares against its newest version tag, and so does an
+# channel. The newest release is GitHub's latest release, which is
+# never a pre-release or a draft. A hook repository that publishes no
+# releases compares against its newest version tag, and so does an
 # action whose latest release is not a version of the action:
-# github/codeql-action publishes the CodeQL bundle as its releases, and
-# tags each version of the action.
+# github/codeql-action publishes the CodeQL bundle as its latest
+# release, and publishes each version of the action as a release too.
+# The fluxcd/flux2 row compares against liken/flux/VERSION, because
+# the publish job pushes each deploy artifact with the flux that the OS
+# ships.
+#
+# A tag can move to other code, so a bump pins the commit. It reads the
+# release of the tag from the GitHub API and stops unless the release
+# exists and is not a pre-release, then reads the commit of the tag
+# from git. An annotated tag is an object of its own, and the bump pins
+# the commit under it, which is what a checkout of the tag holds.
 #
 # Usage:
 #   ci/latest.sh                       report every action, prek, and
 #                                      each hook repository
-#   ci/latest.sh --bump <action>       move one action, such as
-#                                      actions/checkout, in every template
+#   ci/latest.sh --bump <repository>   move one repository of actions,
+#                                      such as actions/checkout, in
+#                                      ci/actions.go and in each
+#                                      composite action
 #   ci/latest.sh --bump prek           move the prek version and the
 #                                      digest of its archive; needs gh,
 #                                      which verifies the attestation
@@ -48,16 +56,16 @@ root="$(cd "$here/.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-# The files that name an action.
-workflow_sources() {
-    ls "$here"/templates/*
-    ls "$root"/.github/actions/*/action.yaml
+# action_pins prints "repository release commit" for each line of
+# actionPins in ci/actions.go.
+action_pins() {
+    sed -n 's/^\t{"\([^"]*\)", "\([^"]*\)", "\([0-9a-f]*\)"},$/\1 \2 \3/p' "$here/actions.go"
 }
 
-# uses prints "action ref" for each action in the sources, once.
-uses() {
-    workflow_sources | xargs sed -n 's/.*uses: *\([^ .][^ @]*\)@\([^ {]*\).*/\1 \2/p' |
-        grep -v '^fluxcd/flux2/action ' | sort -u
+# composite_actions lists the composite actions, which are written by
+# hand and name the same commits as the table.
+composite_actions() {
+    find "$root/.github/actions" -name 'action.y*ml' | sort
 }
 
 newest_release() {
@@ -68,19 +76,20 @@ newest_version_tag() {
     newest_tag "https://github.com/$1" '^v?[0-9]+(\.[0-9]+)+$'
 }
 
-# latest_ref <action> <pinned ref>: the ref that the newest release
-# gives, in the form of the pinned ref.
-latest_ref() {
-    local repo release
-    repo="$(cut -d/ -f1-2 <<<"$1")"
-    release="$(newest_release "$repo")" || release=""
-    [[ "$release" =~ ^v?[0-9] ]] || release="$(newest_version_tag "$repo")" || release=""
-    [[ -n "$release" ]] || return 0
-    if [[ "$2" =~ ^v[0-9]+$ ]]; then
-        sed -E 's/^(v[0-9]+).*/\1/' <<<"$release"
-    else
-        echo "$release"
+# flux_release prints the flux release that the OS ships.
+flux_release() { cat "$root/liken/flux/VERSION"; }
+
+# latest_release <repository>: the release that the table's line of the
+# repository should name.
+latest_release() {
+    local release
+    if [[ "$1" == fluxcd/flux2 ]]; then
+        flux_release
+        return
     fi
+    release="$(newest_release "$1")" || release=""
+    [[ "$release" =~ ^v?[0-9] ]] || release="$(newest_version_tag "$1")" || release=""
+    echo "$release"
 }
 
 pinned_prek() { sed -n 's/^const prekVersion = "\(.*\)"$/\1/p' "$here/workflow.go"; }
@@ -99,17 +108,15 @@ hooks() {
 }
 
 report() {
-    local action refs latest prek prek_latest trivy trivy_latest repo revs
-    uses >"$work/uses"
-    while read -r action; do
-        refs="$(awk -v a="$action" '$1 == a { print $2 }' "$work/uses" | paste -sd,)"
-        latest="$(latest_ref "$action" "${refs%%,*}")"
-        if [[ "${refs%%,*}" =~ ^v[0-9]+$ ]]; then
-            row "$action" "$refs" "${latest:-?}" - - - "a major tag; the newest major version"
+    local repo release commit latest prek prek_latest trivy trivy_latest revs
+    while read -r repo release commit; do
+        latest="$(latest_release "$repo")"
+        if [[ "$repo" == fluxcd/flux2 ]]; then
+            row "$repo" "$release" "${latest:-?}" - - - "liken/flux/VERSION; ci/actions.go"
         else
-            row "$action" "$refs" "${latest:-?}" - - - "the newest release"
+            row "$repo" "$release" "${latest:-?}" - - - "the newest release; ci/actions.go"
         fi
-    done < <(awk '{ print $1 }' "$work/uses" | sort -u)
+    done < <(action_pins)
 
     prek="$(pinned_prek)"
     prek_latest="$(newest_release j178/prek)" || prek_latest=""
@@ -136,7 +143,7 @@ fi
 
 target="${2:-}"
 case "$target" in
-"") fail "--bump needs a name: an action, prek, trivy, or hook:<repo>" ;;
+"") fail "--bump needs a name: a repository of actions, prek, trivy, or hook:<repo>" ;;
 prek)
     old="$(pinned_prek)"
     new="$(newest_release j178/prek)" || new=""
@@ -206,13 +213,22 @@ hook:*)
     done
     ;;
 *)
-    old="$(uses | awk -v a="$target" '$1 == a { print $2; exit }')"
-    [[ -n "$old" ]] || fail "no template uses $target"
-    new="$(latest_ref "$target" "$old")"
+    repo="$(cut -d/ -f1-2 <<<"$target")"
+    old="$(action_pins | awk -v r="$repo" '$1 == r { print $2 }')"
+    [[ -n "$old" ]] || fail "actionPins in ci/actions.go has no line for $repo"
+    new="$(latest_release "$repo")"
     [[ "$new" != null ]] || new=""
-    [[ -n "$new" ]] || fail "GitHub did not answer for $target"
-    workflow_sources | xargs sed -i "s|uses: $target@[^ {]*|uses: $target@$new|"
-    bumped "$target" "$old" "$new"
+    bump_needed "$repo" "$old" "$new" || exit 0
+    prerelease="$(github_api "repos/$repo/releases/tags/$new" --max-time 20 | jq -r .prerelease)" ||
+        fail "github.com/$repo publishes no release for the tag $new"
+    [[ "$prerelease" == false ]] || fail "$repo $new is a pre-release"
+    commit="$(tag_commit "https://github.com/$repo" "$new")"
+    set_line "$here/actions.go" "^[[:space:]]+[{]\"${repo//./\\.}\", " "$(printf '\t{"%s", "%s", "%s"},' "$repo" "$new" "$commit")"
+    while read -r file; do
+        sed -i -E "s|(uses: ${repo//./\\.})(/[^@ ]*)?@[^ ]*( # [^ ]*)?$|\1\2@$commit # $new|" "$file"
+    done < <(composite_actions)
+    bumped "$repo" "$old" "$new, the commit $commit"
+    echo "the commit came from the tag $new, which GitHub publishes as a release that is not a pre-release"
     ;;
 esac
 next_step "make workflows at the top of the repository"

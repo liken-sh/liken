@@ -55,9 +55,9 @@ run = "make test"
 			"          restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-manuals-\n",
 		"key: hugo-build-${{ runner.os }}-${{ hashFiles('app/docs/go.sum') }}-${{ github.sha }}\n" +
 			"          restore-keys: |\n            hugo-build-${{ runner.os }}-${{ hashFiles('app/docs/go.sum') }}-\n            hugo-build-${{ runner.os }}-\n",
-		"      - if: ${{ github.ref == 'refs/heads/main' && steps.go-modules.outputs.cache-hit != 'true' }}\n        uses: actions/cache/save@v6",
-		"      - if: ${{ github.ref == 'refs/heads/main' && steps.go-build.outputs.cache-hit != 'true' }}\n        uses: actions/cache/save@v6",
-		"      - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}\n        uses: actions/cache/save@v6",
+		"      - if: ${{ github.ref == 'refs/heads/main' && steps.go-modules.outputs.cache-hit != 'true' }}\n        uses: " + pinnedText("actions/cache/save"),
+		"      - if: ${{ github.ref == 'refs/heads/main' && steps.go-build.outputs.cache-hit != 'true' }}\n        uses: " + pinnedText("actions/cache/save"),
+		"      - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}\n        uses: " + pinnedText("actions/cache/save"),
 		"          key: app\n          save-if: ${{ github.ref == 'refs/heads/main' }}\n",
 	} {
 		if !strings.Contains(text, want) {
@@ -136,12 +136,12 @@ func TestEveryJobOfAModuleSharesOneModulesEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	jobs := workflowJobs(t, files[".github/workflows/component-app.yaml"])
-	const (
+	var (
 		modulePaths    = "~/go/pkg/mod/*\n!~/go/pkg/mod/cache\n~/go/pkg/mod/cache/download/**/*.mod\n~/go/pkg/mod/cache/download/**/*.ziphash\n"
-		restoreModules = "actions/cache/restore@v6 go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ hashFiles('app/go.sum') }} " + modulePaths
-		restoreBuild   = "actions/cache/restore@v6 go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ github.job }}-${{ hashFiles('app/go.sum', 'app/Makefile', 'app/package.toml', 'app/.pre-commit-config.yaml') }}-${{ github.sha }} ~/.cache/go-build"
-		saveModules    = "actions/cache/save@v6 ${{ steps.go-modules.outputs.cache-primary-key }} " + modulePaths
-		saveBuild      = "actions/cache/save@v6 ${{ steps.go-build.outputs.cache-primary-key }} ~/.cache/go-build"
+		restoreModules = pinnedRef("actions/cache/restore") + " go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ hashFiles('app/go.sum') }} " + modulePaths
+		restoreBuild   = pinnedRef("actions/cache/restore") + " go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ github.job }}-${{ hashFiles('app/go.sum', 'app/Makefile', 'app/package.toml', 'app/.pre-commit-config.yaml') }}-${{ github.sha }} ~/.cache/go-build"
+		saveModules    = pinnedRef("actions/cache/save") + " ${{ steps.go-modules.outputs.cache-primary-key }} " + modulePaths
+		saveBuild      = pinnedRef("actions/cache/save") + " ${{ steps.go-build.outputs.cache-primary-key }} ~/.cache/go-build"
 	)
 	tests := []struct {
 		job  string
@@ -175,7 +175,7 @@ func TestTheOSBuildSavesItsGoCacheOnMain(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(files[".github/workflows/component-os.yaml"])
-	save := "      - if: ${{ github.ref == 'refs/heads/main' && steps.build-setup.outputs.go-build-hit != 'true' }}\n        uses: actions/cache/save@v6\n        with:\n          path: ~/.cache/go-build\n"
+	save := "      - if: ${{ github.ref == 'refs/heads/main' && steps.build-setup.outputs.go-build-hit != 'true' }}\n        uses: " + pinnedText("actions/cache/save") + "\n        with:\n          path: ~/.cache/go-build\n"
 	if strings.Count(text, "id: build-setup\n        uses: ./.github/actions/build-setup") != 2 || strings.Count(text, save) != 2 {
 		t.Errorf("the build and the publish do not both save the action's Go cache:\n%s", text)
 	}

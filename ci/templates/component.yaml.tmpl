@@ -91,7 +91,7 @@ jobs:{% range .Jobs %}
     steps:{% if eq .Toolchain "os" %}
       # The build names itself with git describe, which needs the
       # history and the tags.
-      - uses: actions/checkout@v7
+      - uses: {% action "actions/checkout" %}
         with:
           fetch-depth: 0
 
@@ -99,7 +99,7 @@ jobs:{% range .Jobs %}
       # inputs.
       - id: build-setup
         uses: ./.github/actions/build-setup{% else %}
-      - uses: actions/checkout@v7{% end %}{% if .Go %}
+      - uses: {% action "actions/checkout" %}{% end %}{% if .Go %}
 {% template "go-restore" .Cache %}{% end %}{% if eq .Toolchain "hugo" %}
 
       # A saved cache never changes, and Go trims a build cache entry
@@ -110,7 +110,7 @@ jobs:{% range .Jobs %}
       # when none matches, as on a branch that changes it. Every manual
       # with the same go.sum shares the entry.
       - id: hugo-cache
-        uses: actions/cache/restore@v6
+        uses: {% action "actions/cache/restore" %}
         with:
           path: ~/.cache/go-build
           key: hugo-build-${{ runner.os }}-${{ hashFiles('{% .ModuleDir %}/go.sum') }}-${{ github.sha }}
@@ -131,25 +131,24 @@ jobs:{% range .Jobs %}
       # another component's target directory. Only a push to main
       # saves, so a branch never writes an entry that pushes one of
       # main's out of the repository's 10 GB.
-      - uses: Swatinem/rust-cache@v2
+      - uses: {% action "Swatinem/rust-cache" %}
         with:
           workspaces: {% .WorkDir %}
           key: {% .Component %}
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
 
-      - uses: taiki-e/install-action@v2.88.1
+      - uses: {% action "taiki-e/install-action" %}
         with:
           tool: cargo-llvm-cov{% end %}{% if eq .Toolchain "prek" %}
 
       # prek runs the hooks of this component only, with
       # --show-diff-on-failure, so a hook that changes a file fails
-      # with the change it would make. The reference names a release,
-      # because prek-action publishes no major tag. sha256 is the digest
+      # with the change it would make. sha256 is the digest
       # that prekSHA256 in ci/workflow.go pins, because the action checks
       # only the versions in its own table.{% if .Skip %} SKIP leaves out the hooks
       # that another job of this workflow runs.{% end %}
-      - uses: j178/prek-action@v3.1.0{% if .Skip %}
+      - uses: {% action "j178/prek-action" %}{% if .Skip %}
         env:
           SKIP: {% join .Skip "," %}{% end %}
         with:
@@ -163,13 +162,13 @@ jobs:{% range .Jobs %}
           {% . %}{% end %}{% end %}{% if eq .Toolchain "codeql" %}{% template "codeql-analyze" . %}{% end %}{% end %}{% if eq .Toolchain "os" %}{% template "os-go-save" %}{% end %}{% if .Go %}{% template "go-save" .Cache %}{% end %}{% if eq .Toolchain "hugo" %}
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v6
+        uses: {% action "actions/cache/save" %}
         with:
           path: ~/.cache/go-build
           key: ${{ steps.hugo-cache.outputs.cache-primary-key }}{% end %}{% if .Coverage %}
 
       # The site renders the coverage report from these files.
-      - uses: actions/upload-artifact@v7
+      - uses: {% action "actions/upload-artifact" %}
         with:
           name: coverage-{% .Component %}-{% .Name %}
           path: |{% range .Coverage %}
@@ -177,7 +176,7 @@ jobs:{% range .Jobs %}
           if-no-files-found: error
           retention-days: 7{% end %}{% if .Artifacts %}
 
-      - uses: actions/upload-artifact@v7
+      - uses: {% action "actions/upload-artifact" %}
         if: always()
         with:
           name: {% .Component %}-{% .Name %}-logs
@@ -221,14 +220,14 @@ jobs:{% range .Jobs %}
       matrix:
         include: ${{ fromJSON(inputs.images) }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: {% action "actions/checkout" %}
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: {% action "docker/setup-buildx-action" %}
 
       # A pinned base writes its branch cache on every branch, so its job
       # logs in on every branch too.
       - if: ${{ inputs.publish != 'none' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || matrix.pinned }}
-        uses: docker/login-action@v4
+        uses: {% action "docker/login-action" %}
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -239,7 +238,7 @@ jobs:{% range .Jobs %}
       # and only a loaded image has a smoke check. The build reads the
       # bake file from the checkout, so a named context reaches the
       # directories of the repository.
-      - uses: docker/bake-action@v7
+      - uses: {% action "docker/bake-action" %}
         with:
           source: .
           files: docker-bake.hcl
@@ -274,7 +273,7 @@ jobs:{% range .Jobs %}
       RELEASES_ACCESS_KEY: ${{ secrets.RELEASES_ACCESS_KEY }}
       RELEASES_SECRET_KEY: ${{ secrets.RELEASES_SECRET_KEY }}{% end %}
     steps:
-      - uses: actions/checkout@v7
+      - uses: {% action "actions/checkout" %}
         with:
           fetch-depth: 0{% if .Channel %}
 
@@ -309,17 +308,17 @@ jobs:{% range .Jobs %}
         run: releases/publish.sh "${{ inputs.version }}"{% template "os-go-save" %}{% else %}
 {% template "go-restore" (goCache "ci/go.mod" "ci/go.sum" "ci" true) %}{% if .Images %}
 
-      - uses: docker/setup-buildx-action@v4{% end %}
+      - uses: {% action "docker/setup-buildx-action" %}{% end %}
 
       # A dry run pushes nothing, so it needs no login.
       - if: ${{ !inputs.dryrun }}
-        uses: docker/login-action@v4
+        uses: {% action "docker/login-action" %}
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}{% if .Deploy %}
 
-      - uses: fluxcd/flux2/action@v{% .Flux %}
+      - uses: {% action "fluxcd/flux2/action" %}
         with:
           version: {% .Flux %}{% end %}{% if .Images %}
 

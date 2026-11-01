@@ -102,6 +102,21 @@ newest_tag() {
         sort -V | tail -1
 }
 
+# tag_commit <repository URL> <tag>: print the commit that a tag of a
+# git repository names. An annotated tag is an object of its own, and
+# git lists the commit under it as the tag with ^{} appended, so the
+# commit comes from that line when it exists. A pin that names the tag
+# object would not match the commit that a checkout of the tag holds.
+tag_commit() {
+    local refs commit
+    refs="$(timeout 60 git ls-remote --tags "$1" "refs/tags/$2" "refs/tags/$2^{}")" ||
+        fail "$1 did not answer"
+    commit="$(awk -v t="refs/tags/$2^{}" '$2 == t { print $1 }' <<<"$refs")"
+    [[ -n "$commit" ]] || commit="$(awk -v t="refs/tags/$2" '$2 == t { print $1 }' <<<"$refs")"
+    [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || fail "$1 has no tag $2"
+    echo "$commit"
+}
+
 # github_token: print the token for the GitHub API, from GITHUB_TOKEN
 # or from the gh CLI, or nothing. The API allows 60 anonymous requests
 # an hour, which one run of `make versions` can use up.

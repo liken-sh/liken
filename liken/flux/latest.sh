@@ -32,8 +32,9 @@
 #
 # Usage:
 #   flux/latest.sh          report the pin and the newest release
-#   flux/latest.sh --bump   write the newest release into VERSION, and
-#                           its digest into fetch.sh
+#   flux/latest.sh --bump   write the newest release into VERSION, its
+#                           digest into fetch.sh, and the commit of the
+#                           flux action into ci/actions.go
 
 set -euo pipefail
 
@@ -84,4 +85,8 @@ echo "$latest" >"$here/VERSION"
 set_entry "$here/fetch.sh" flux_sha256 "$latest" "$digest"
 bumped flux "$pinned" "$latest"
 echo "the digest came from the release's checksums file, signed by flux's release workflow"
+# The publish job pushes each deploy artifact with the flux action at
+# the same release, and the generator refuses a flux action that
+# differs from VERSION, so the action's commit moves here too.
+"$here/../../ci/latest.sh" --bump fluxcd/flux2
 next_step "make -C .. cluster-operator"

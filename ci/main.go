@@ -8,7 +8,7 @@
 //	go run ./ci generate [-check]   write the workflows, the bake file, and dependabot.yml, or check them
 //	go run ./ci plan                decide what this workflow run does
 //	go run ./ci deps                check each [depends] against the code
-//	go run ./ci pins                check the pins and the downloads against AGENTS.md
+//	go run ./ci pins                check the pins, the downloads, and the actions against AGENTS.md
 //	go run ./ci namespaces          check that a namespace override moves no deploy object
 //	go run ./ci publish ...         push one component's outputs
 //	go run ./ci scan -image I -version V -sarif DIR
@@ -191,13 +191,18 @@ func pins(root string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	for _, f := range slices.Concat(drift, fetches) {
+	actions, err := checkActions(root)
+	if err != nil {
+		return err
+	}
+	for _, f := range slices.Concat(drift, fetches, actions) {
 		fmt.Fprintln(stdout, f)
 	}
-	if len(drift) > 0 || len(fetches) > 0 {
-		return fmt.Errorf("%d pins drift, and %d downloads break a rule in AGENTS.md", len(drift), len(fetches))
+	if len(drift) > 0 || len(fetches) > 0 || len(actions) > 0 {
+		return fmt.Errorf("%d pins drift, %d downloads break a rule in AGENTS.md, and %d actions run code that no commit named",
+			len(drift), len(fetches), len(actions))
 	}
-	fmt.Fprintln(stdout, "every shared pin names one version, and every download follows the rules in AGENTS.md")
+	fmt.Fprintln(stdout, "every shared pin names one version, every download follows the rules in AGENTS.md, and every action is pinned by commit")
 	return nil
 }
 

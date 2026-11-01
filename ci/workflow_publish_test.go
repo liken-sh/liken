@@ -21,7 +21,7 @@ func TestAPinnedImageJobLogsInOnEveryBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(files[".github/workflows/component-base.yaml"])
-	for _, want := range []string{"|| matrix.pinned }}\n        uses: docker/login-action@v4"} {
+	for _, want := range []string{"|| matrix.pinned }}\n        uses: " + pinnedText("docker/login-action")} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the workflow lacks %q:\n%s", want, text)
 		}
@@ -38,7 +38,7 @@ func TestTheChecksWaitForTheBasesAndThePublishWaitsForTheClosure(t *testing.T) {
 		"lib/package.toml":   "[package]\nname = \"lib\"\n",
 		"app/package.toml":   "[package]\nname = \"app\"\n[depends]\ncomponents = [\"base\", \"lib\"]\n[outputs]\ndeploy = \"deploy\"\n",
 		"top/package.toml":   "[package]\nname = \"top\"\n[depends]\ncomponents = [\"app\"]\n[outputs]\ndeploy = \"deploy\"\n",
-		"liken/flux/VERSION": "v2.9.7\n",
+		"liken/flux/VERSION": testFlux + "\n",
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
@@ -85,7 +85,7 @@ func TestTheCheckStageRunsADryRunOfThePublish(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"app/package.toml":   "[package]\nname = \"app\"\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"app\"\n",
 		"os/package.toml":    "[package]\nname = \"os\"\n[[jobs]]\nname = \"build\"\ntoolchain = \"os\"\nrun = \"make all\"\n[outputs]\nchannel = true\n",
-		"liken/flux/VERSION": "v2.9.7\n",
+		"liken/flux/VERSION": testFlux + "\n",
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
@@ -105,7 +105,7 @@ func TestTheCheckStageRunsADryRunOfThePublish(t *testing.T) {
 	app := string(files[".github/workflows/component-app.yaml"])
 	for _, want := range []string{
 		"  publish:\n    if: ${{ inputs.stage == 'publish' || inputs.dryrun }}\n",
-		"      - if: ${{ !inputs.dryrun }}\n        uses: docker/login-action@v4",
+		"      - if: ${{ !inputs.dryrun }}\n        uses: " + pinnedText("docker/login-action"),
 		`-mode "${{ inputs.dryrun && 'dry' || inputs.publish }}"`,
 	} {
 		if !strings.Contains(app, want) {
@@ -134,7 +134,7 @@ func TestThePublishJobSetsUpOnlyWhatTheOutputsNeed(t *testing.T) {
 		"operator/package.toml": "[package]\nname = \"operator\"\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"operator\"\n",
 		"crd/package.toml":      "[package]\nname = \"crd\"\n[outputs]\ndeploy = \"deploy\"\n",
 		"base/package.toml":     "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\n",
-		"liken/flux/VERSION":    "v2.9.7\n",
+		"liken/flux/VERSION":    testFlux + "\n",
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
@@ -145,9 +145,9 @@ func TestThePublishJobSetsUpOnlyWhatTheOutputsNeed(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := map[string][]string{
-		"operator": {"docker/setup-buildx-action@v4", "docker/login-action@v4", "fluxcd/flux2/action@v2.9.7"},
-		"crd":      {"docker/login-action@v4", "fluxcd/flux2/action@v2.9.7"},
-		"base":     {"docker/setup-buildx-action@v4", "docker/login-action@v4"},
+		"operator": {pinnedRef("docker/setup-buildx-action"), pinnedRef("docker/login-action"), pinnedRef("fluxcd/flux2/action")},
+		"crd":      {pinnedRef("docker/login-action"), pinnedRef("fluxcd/flux2/action")},
+		"base":     {pinnedRef("docker/setup-buildx-action"), pinnedRef("docker/login-action")},
 	}
 	for name, want := range cases {
 		publish := workflowJobs(t, files[".github/workflows/component-"+name+".yaml"])["publish"]
@@ -171,7 +171,7 @@ func trivyFixture(t *testing.T) map[string][]byte {
 	root := writeTree(t, map[string]string{
 		"base/package.toml":  "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\n[[outputs.images]]\nname = \"base-dev\"\n",
 		"app/package.toml":   "[package]\nname = \"app\"\n[outputs]\ndeploy = \"deploy\"\n",
-		"liken/flux/VERSION": "v2.9.7\n",
+		"liken/flux/VERSION": testFlux + "\n",
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
@@ -300,7 +300,7 @@ func TestEveryScanRestoresTheDatabaseThatTheTrivyDBJobSaves(t *testing.T) {
 			with, _ := step["with"].(map[string]any)
 			env, _ := step["env"].(map[string]any)
 			switch uses, _ := step["uses"].(string); {
-			case uses == "actions/cache/restore@v6" && with["path"] == "~/.cache/trivy/db":
+			case uses == pinnedRef("actions/cache/restore") && with["path"] == "~/.cache/trivy/db":
 				order = append(order, "restore "+with["restore-keys"].(string))
 			case env["TRIVY_VERSION"] != nil:
 				order = append(order, "install")

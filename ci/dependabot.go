@@ -15,7 +15,8 @@ import (
 const dependabotFile = ".github/dependabot.yml"
 
 // dependabotEntry is one directory that Dependabot reads: a Go module,
-// or a Cargo workspace or a standalone crate.
+// a Cargo workspace or a standalone crate, or a directory of workflows
+// or of one composite action.
 type dependabotEntry struct {
 	Ecosystem, Directory string
 }
@@ -28,14 +29,28 @@ type dependabotEntry struct {
 // that adds a module or a crate without its entry. A member of a Cargo
 // workspace has no Cargo.lock of its own, and the workspace's entry
 // covers it.
+//
+// The github-actions entries cover the workflows, which Dependabot
+// reads from .github/workflows under the entry of the root, and each
+// composite action under .github/actions, which needs an entry of its
+// own directory. The root's entry is always there, because the
+// generator always writes ci.yaml. A security update of an action rewrites the commit and
+// the release comment of each uses: line, and `generate -check` fails
+// until `ci/latest.sh --bump <repository>` writes the same pin into
+// actionPins in ci/actions.go.
 func Dependabot(root string) ([]byte, error) {
 	files, err := sourceFiles(root)
 	if err != nil {
 		return nil, err
 	}
 	var modules, crates []dependabotEntry
+	actions := []dependabotEntry{{Ecosystem: "github-actions", Directory: "/"}}
 	for _, file := range files {
 		name := path.Base(file)
+		if matched, _ := path.Match(".github/actions/*/action.y*ml", file); matched {
+			actions = append(actions, dependabotEntry{Ecosystem: "github-actions", Directory: path.Join("/", path.Dir(file))})
+			continue
+		}
 		if name != "go.mod" && name != "Cargo.lock" {
 			continue
 		}
@@ -55,5 +70,6 @@ func Dependabot(root string) ([]byte, error) {
 	byDirectory := func(a, b dependabotEntry) int { return strings.Compare(a.Directory, b.Directory) }
 	slices.SortFunc(modules, byDirectory)
 	slices.SortFunc(crates, byDirectory)
-	return render("dependabot.yml.tmpl", append(modules, crates...))
+	slices.SortFunc(actions, byDirectory)
+	return render("dependabot.yml.tmpl", slices.Concat(modules, crates, actions))
 }

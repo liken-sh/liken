@@ -38,7 +38,7 @@ func TestTheSiteSharesTheHugoBuildCacheAndBuildsInParallel(t *testing.T) {
 	for _, want := range []string{
 		"key: hugo-build-${{ runner.os }}-${{ hashFiles('**/docs/go.sum') }}-${{ github.sha }}\n" +
 			"          restore-keys: |\n            hugo-build-${{ runner.os }}-${{ hashFiles('**/docs/go.sum') }}-\n            hugo-build-${{ runner.os }}-\n",
-		"      - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}\n        uses: actions/cache/save@v6",
+		"      - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}\n        uses: " + pinnedText("actions/cache/save"),
 		"run: make -j\"$(nproc)\" site SITE_URL=https://liken.sh\n",
 	} {
 		if !strings.Contains(text, want) {
@@ -55,7 +55,7 @@ func TestTheSiteWaitsForTheChecksAndTheRecordForThePublishes(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"lib/package.toml":   "[package]\nname = \"lib\"\n",
 		"app/package.toml":   "[package]\nname = \"app\"\n[depends]\ncomponents = [\"lib\"]\n[outputs]\ndeploy = \"deploy\"\n",
-		"liken/flux/VERSION": "v2.9.7\n",
+		"liken/flux/VERSION": testFlux + "\n",
 	})
 	components, err := LoadComponents(root)
 	if err != nil {

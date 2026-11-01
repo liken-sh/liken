@@ -14,7 +14,7 @@ import (
 // publish job of a component with a deploy artifact reads.
 func fluxTree(t *testing.T) string {
 	t.Helper()
-	return writeTree(t, map[string]string{"liken/flux/VERSION": "v2.9.7\n"})
+	return writeTree(t, map[string]string{"liken/flux/VERSION": testFlux + "\n"})
 }
 
 func TestTheWorkflowsAreWrittenAndChecked(t *testing.T) {
@@ -133,7 +133,7 @@ name = "app-cli"
 file = "Dockerfile.cli"
 platforms = ["linux/amd64", "linux/arm64"]
 `,
-		"liken/flux/VERSION": "v2.9.7\n",
+		"liken/flux/VERSION": testFlux + "\n",
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
@@ -161,7 +161,7 @@ platforms = ["linux/amd64", "linux/arm64"]
 		"include: ${{ fromJSON(inputs.images) }}",
 		"targets: ${{ matrix.image }}",
 		"BRANCH_CACHE=${{ matrix.image }}",
-		"fluxcd/flux2/action@v2.9.7\n        with:\n          version: 2.9.7\n",
+		pinnedText("fluxcd/flux2/action") + "\n        with:\n          version: " + strings.TrimPrefix(testFlux, "v") + "\n",
 		"go run . publish -root .. -component app",
 	} {
 		if !strings.Contains(text, want) {

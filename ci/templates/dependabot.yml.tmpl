@@ -1,9 +1,10 @@
-# This file is generated from every go.mod and Cargo.lock that git
-# tracks or would track, outside testdata/, plans/, and .cache/. Do
-# not edit it: edit the template in ci/templates/, then run
+# This file is generated from every go.mod, Cargo.lock, and composite
+# action that git tracks or would track, outside testdata/, plans/, and
+# .cache/. Do not edit it: edit the template in ci/templates/, then run
 # `make workflows` at the top of the repository. The graph job fails
 # when this file differs from what the generator writes, so a new
-# module or crate cannot go without security updates.
+# module, crate, or composite action cannot go without security
+# updates.
 #
 # Dependabot opens a pull request with the fix when an advisory names
 # a dependency of one of these directories. Each directory gets one
@@ -22,6 +23,14 @@
 # The k8s.io and sigs.k8s.io modules follow the k3s release in
 # liken/k3s/VERSION, so Dependabot moves none of them. An advisory
 # against one of them shows as an alert, and the fix is a k3s bump.
+#
+# The github-actions entries cover the workflows and each composite
+# action. Each uses: line names its action by the commit of a release,
+# with the release as a comment, which is the form Dependabot rewrites.
+# ci/ writes the workflows from actionPins in ci/actions.go, so a
+# security update fails the graph job until
+# `ci/latest.sh --bump <repository>` writes the same pin there. The flux
+# action follows liken/flux/VERSION, so Dependabot moves none of it.
 
 version: 2
 updates:
@@ -40,5 +49,9 @@ updates:
     ignore:
       - dependency-name: k8s.io/*
       - dependency-name: sigs.k8s.io/*
+{%- end %}
+{%- if eq .Ecosystem "github-actions" %}
+    ignore:
+      - dependency-name: fluxcd/flux2*
 {%- end %}
 {%- end %}

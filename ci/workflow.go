@@ -46,6 +46,7 @@ const fluxVersionFile = "liken/flux/VERSION"
 var templates = template.Must(template.New("").
 	Delims("{%", "%}").
 	Funcs(template.FuncMap{
+		"action":       pinnedAction,
 		"prekVersion":  func() string { return prekVersion },
 		"prekSHA256":   func() string { return prekSHA256 },
 		"trivyVersion": func() string { return trivyVersion },
@@ -112,6 +113,9 @@ func Workflows(root string, components map[string]*Component) (map[string][]byte
 				return nil, fmt.Errorf("%s publishes a deploy artifact with the flux CLI, whose version is in %s: %w", c.Name(), fluxVersionFile, err)
 			}
 			data["Flux"] = strings.TrimPrefix(strings.TrimSpace(string(flux)), "v")
+			if err := checkFluxAction(data["Flux"].(string)); err != nil {
+				return nil, err
+			}
 		}
 		out, err := render("component.yaml.tmpl", data)
 		if err != nil {

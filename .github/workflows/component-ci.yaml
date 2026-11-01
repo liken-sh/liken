@@ -70,10 +70,10 @@ jobs:
       run:
         working-directory: ci
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - id: setup-go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ci/go.mod
           cache: false
@@ -104,7 +104,7 @@ jobs:
       # file after it extracts the source, and the zip files are about
       # half of the compressed entry.
       - id: go-modules
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod/*
@@ -142,7 +142,7 @@ jobs:
       # an entry without the packages that the other job compiles, and
       # the other job would restore it and compile them again.
       - id: go-build
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
           key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum', 'ci/Makefile', 'ci/package.toml', 'ci/.pre-commit-config.yaml') }}-${{ github.sha }}
@@ -153,7 +153,7 @@ jobs:
       - run: make test
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-modules.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod/*
@@ -163,7 +163,7 @@ jobs:
           key: ${{ steps.go-modules.outputs.cache-primary-key }}
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-build.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
           key: ${{ steps.go-build.outputs.cache-primary-key }}
@@ -176,16 +176,15 @@ jobs:
       run:
         working-directory: ci
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # prek runs the hooks of this component only, with
       # --show-diff-on-failure, so a hook that changes a file fails
-      # with the change it would make. The reference names a release,
-      # because prek-action publishes no major tag. sha256 is the digest
+      # with the change it would make. sha256 is the digest
       # that prekSHA256 in ci/workflow.go pins, because the action checks
       # only the versions in its own table. SKIP leaves out the hooks
       # that another job of this workflow runs.
-      - uses: j178/prek-action@v3.1.0
+      - uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0
         env:
           SKIP: gofmt,go-vet,go-mod-tidy
         with:
@@ -207,10 +206,10 @@ jobs:
       run:
         working-directory: ci
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - id: setup-go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ci/go.mod
           cache: false
@@ -233,7 +232,7 @@ jobs:
       # file after it extracts the source, and the zip files are about
       # half of the compressed entry.
       - id: go-modules
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod/*
@@ -249,7 +248,7 @@ jobs:
       # a module with a directory of another component, and that
       # component's own job analyzes it. CodeQL traces the build in the
       # next step and extracts each package that the build compiles.
-      - uses: github/codeql-action/init@v4
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           languages: go
           build-mode: manual
@@ -262,6 +261,6 @@ jobs:
       # The category keeps this job's alerts apart from every other
       # analysis: code scanning closes an alert only when a later upload
       # in the same category no longer reports it.
-      - uses: github/codeql-action/analyze@v4
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           category: codeql/ci/go

@@ -128,12 +128,12 @@ jobs:
       # The plan diffs against the commit before the push and against
       # each component's release tag, so it needs the history and the
       # tags.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - id: setup-go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ci/go.mod
           cache: false
@@ -161,7 +161,7 @@ jobs:
       # file after it extracts the source, and the zip files are about
       # half of the compressed entry.
       - id: go-modules
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod/*
@@ -193,7 +193,7 @@ jobs:
       # an entry without the packages that the other job compiles, and
       # the other job would restore it and compile them again.
       - id: go-build
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
           key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}-${{ github.sha }}
@@ -214,7 +214,7 @@ jobs:
         run: go run . plan -root ..
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-build.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
           key: ${{ steps.go-build.outputs.cache-primary-key }}
@@ -236,8 +236,8 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
-      - uses: j178/prek-action@v3.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0
         with:
           prek-version: 0.5.9
           sha256: 2fee13923018dd517c19dba032ddcae8010cadfb81bc47e742ad5e8981a3f126
@@ -281,10 +281,10 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - id: setup-go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ci/go.mod
           cache: false
@@ -308,7 +308,7 @@ jobs:
       # file after it extracts the source, and the zip files are about
       # half of the compressed entry.
       - id: go-modules
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod/*
@@ -335,7 +335,7 @@ jobs:
         run: go run . deps -root ..
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-modules.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod/*
@@ -361,9 +361,9 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: github/codeql-action/init@v4
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           languages: actions
           build-mode: none
@@ -371,7 +371,7 @@ jobs:
             paths:
               - .github
 
-      - uses: github/codeql-action/analyze@v4
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           category: codeql/actions
 
@@ -411,7 +411,7 @@ jobs:
       # downloads nothing.
       - id: lookup
         continue-on-error: true
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/trivy/db
           key: trivy-db-${{ steps.day.outputs.day }}
@@ -444,7 +444,7 @@ jobs:
 
       - if: ${{ steps.download.outcome == 'success' }}
         continue-on-error: true
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/trivy/db
           key: trivy-db-${{ steps.day.outputs.day }}
@@ -500,10 +500,10 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.trivy) }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - id: setup-go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ci/go.mod
           cache: false
@@ -526,7 +526,7 @@ jobs:
       # file after it extracts the source, and the zip files are about
       # half of the compressed entry.
       - id: go-modules
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod/*
@@ -540,7 +540,7 @@ jobs:
       # package that is not public, and a login that fails leaves the
       # scan to read the image without one.
       - continue-on-error: true
-        uses: docker/login-action@v4
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -551,7 +551,7 @@ jobs:
         run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
 
       - continue-on-error: true
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/trivy/db
           key: trivy-db-${{ steps.trivy-day.outputs.day }}
@@ -588,7 +588,7 @@ jobs:
       # scan. The step runs when the scan wrote its file.
       - if: ${{ !cancelled() && hashFiles('trivy/*.sarif') != '' }}
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: trivy/${{ matrix.image }}.sarif
           category: trivy/${{ matrix.image }}
@@ -1425,10 +1425,10 @@ jobs:
     concurrency:
       group: site
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - id: setup-go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: liken/docs/go.mod
           cache: false
@@ -1452,7 +1452,7 @@ jobs:
       # file after it extracts the source, and the zip files are about
       # half of the compressed entry.
       - id: go-modules
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod/*
@@ -1473,7 +1473,7 @@ jobs:
       # key ends in the commit for the reason the docs jobs give: Go
       # trims a build cache entry that no build used for five days.
       - id: hugo-cache
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
           key: hugo-build-${{ runner.os }}-${{ hashFiles('**/docs/go.sum') }}-${{ github.sha }}
@@ -1481,103 +1481,103 @@ jobs:
             hugo-build-${{ runner.os }}-${{ hashFiles('**/docs/go.sum') }}-
             hugo-build-${{ runner.os }}-
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ fromJSON(needs.plan.outputs.components)['kubernetes'].check && contains(fromJSON(needs.plan.outputs.components)['kubernetes'].jobs, 'go') }}
         with:
           name: coverage-kubernetes-go
           path: kubernetes
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ fromJSON(needs.plan.outputs.components)['observatory-operator'].check && contains(fromJSON(needs.plan.outputs.components)['observatory-operator'].jobs, 'go') }}
         with:
           name: coverage-observatory-operator-go
           path: observatory-operator
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ fromJSON(needs.plan.outputs.components)['astrophotography-operator'].check && contains(fromJSON(needs.plan.outputs.components)['astrophotography-operator'].jobs, 'go') }}
         with:
           name: coverage-astrophotography-operator-go
           path: astrophotography-operator
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].check && contains(fromJSON(needs.plan.outputs.components)['audio-operator'].jobs, 'go') }}
         with:
           name: coverage-audio-operator-go
           path: audio-operator
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ fromJSON(needs.plan.outputs.components)['bluetooth-operator'].check && contains(fromJSON(needs.plan.outputs.components)['bluetooth-operator'].jobs, 'go') }}
         with:
           name: coverage-bluetooth-operator-go
           path: bluetooth-operator
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ fromJSON(needs.plan.outputs.components)['display-operator'].check && contains(fromJSON(needs.plan.outputs.components)['display-operator'].jobs, 'go') }}
         with:
           name: coverage-display-operator-go
           path: display-operator
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ fromJSON(needs.plan.outputs.components)['equipment-operator'].check && contains(fromJSON(needs.plan.outputs.components)['equipment-operator'].jobs, 'go') }}
         with:
           name: coverage-equipment-operator-go
           path: equipment-operator
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ fromJSON(needs.plan.outputs.components)['firmware-operator'].check && contains(fromJSON(needs.plan.outputs.components)['firmware-operator'].jobs, 'go') }}
         with:
           name: coverage-firmware-operator-go
           path: firmware-operator
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].check && contains(fromJSON(needs.plan.outputs.components)['git-csi-driver'].jobs, 'go') }}
         with:
           name: coverage-git-csi-driver-go
           path: git-csi-driver
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ fromJSON(needs.plan.outputs.components)['media-screen'].check && contains(fromJSON(needs.plan.outputs.components)['media-screen'].jobs, 'rust') }}
         with:
           name: coverage-media-screen-rust
           path: media-screen
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].check && contains(fromJSON(needs.plan.outputs.components)['library-operator'].jobs, 'go') }}
         with:
           name: coverage-library-operator-go
           path: library-operator
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].check && contains(fromJSON(needs.plan.outputs.components)['library-operator'].jobs, 'rust') }}
         with:
           name: coverage-library-operator-rust
           path: library-operator
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ fromJSON(needs.plan.outputs.components)['liken'].check && contains(fromJSON(needs.plan.outputs.components)['liken'].jobs, 'go') }}
         with:
           name: coverage-liken-go
           path: liken
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].check && contains(fromJSON(needs.plan.outputs.components)['media-operator'].jobs, 'go') }}
         with:
           name: coverage-media-operator-go
           path: media-operator
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].check && contains(fromJSON(needs.plan.outputs.components)['media-operator'].jobs, 'rust') }}
         with:
           name: coverage-media-operator-rust
           path: media-operator
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].check && contains(fromJSON(needs.plan.outputs.components)['people-operator'].jobs, 'go') }}
         with:
           name: coverage-people-operator-go
           path: people-operator
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].check && contains(fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].jobs, 'go') }}
         with:
           name: coverage-per-node-csi-driver-go
@@ -1589,7 +1589,7 @@ jobs:
         run: make -j"$(nproc)" site SITE_URL=https://liken.sh
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-modules.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod/*
@@ -1599,16 +1599,16 @@ jobs:
           key: ${{ steps.go-modules.outputs.cache-primary-key }}
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
           key: ${{ steps.hugo-cache.outputs.cache-primary-key }}
 
-      - uses: actions/upload-pages-artifact@v5
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: dist/docs
 
-      - uses: actions/deploy-pages@v5
+      - uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
 
       # The deploy finishing does not mean the public name serves the
       # new tree yet: Pages is behind a CDN that caches pages for up to
@@ -1684,12 +1684,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - id: setup-go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ci/go.mod
           cache: false
@@ -1717,7 +1717,7 @@ jobs:
       # file after it extracts the source, and the zip files are about
       # half of the compressed entry.
       - id: go-modules
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod/*
@@ -1749,7 +1749,7 @@ jobs:
       # an entry without the packages that the other job compiles, and
       # the other job would restore it and compile them again.
       - id: go-build
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
           key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}-${{ github.sha }}
@@ -1764,7 +1764,7 @@ jobs:
         run: go run . record -root .. -tag "${{ github.ref_name }}"
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-build.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
           key: ${{ steps.go-build.outputs.cache-primary-key }}
