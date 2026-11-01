@@ -35,37 +35,30 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
 archive="https://www.kernel.org/pub/linux/kernel/people/tytso/e2fsprogs"
 
 pinned="$(cat "$here/VERSION")"
 
-latest="$(curl -fsS --retry 3 --max-time 60 "$archive/" |
+latest="$(fetch_text "$archive/" |
     grep -oE 'href="v[0-9]+\.[0-9]+(\.[0-9]+)?/"' |
     sed -e 's|href="v||' -e 's|/"$||' |
     sort -V | tail -1)" || latest=""
 
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' e2fsprogs "$pinned" "${latest:-?}" - - - \
+row e2fsprogs "$pinned" "$latest" - - - \
     "newest release on kernel.org; built static against musl"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
-[[ -n "$latest" ]] || {
-    echo "latest.sh: the release directory did not answer" >&2
-    exit 1
-}
-[[ "$latest" != "$pinned" ]] || {
-    echo "e2fsprogs $pinned is current"
-    exit 0
-}
+bump_needed e2fsprogs "$pinned" "$latest" || exit 0
 
 sums="$archive/v$latest/sha256sums.asc"
 digest="$("$here/../../trust/keys/kernel-org-digest.sh" "$sums" "e2fsprogs-$latest.tar.gz")"
 
-# The array in fetch.sh holds one entry, the pinned version's, so the
-# bump replaces the line after the array's opening line.
 echo "$latest" >"$here/VERSION"
-sed -i "/^declare -A e2fsprogs_sha256=(/{n;s|.*|    [\"$latest\"]=\"$digest\"|}" "$here/fetch.sh"
-echo "e2fsprogs: $pinned -> $latest"
+set_entry "$here/fetch.sh" e2fsprogs_sha256 "$latest" "$digest"
+bumped e2fsprogs "$pinned" "$latest"
 echo "the digest came from sha256sums.asc, signed by kernel.org's checksum autosigner"
-echo "next: make -C .. e2fsprogs"
+next_step "make -C .. e2fsprogs"

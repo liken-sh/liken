@@ -22,47 +22,36 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
 releases="https://w1.fi/releases"
 
 pinned="$(cat "$here/VERSION")"
 # hostap publishes one tarball per release in this one directory, so
 # the names in the directory listing are the release list.
-latest="$(curl -fsS --retry 3 --max-time 60 "$releases/" |
+latest="$(fetch_text "$releases/" |
     grep -oE 'wpa_supplicant-[0-9]+\.[0-9]+\.tar\.gz' |
     sed -e 's|wpa_supplicant-||' -e 's|\.tar\.gz||' |
     sort -V | tail -1)" || latest=""
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' wpa-supplicant "$pinned" "${latest:-?}" - - - \
-    "newest release on w1.fi"
+row wpa-supplicant "$pinned" "$latest" - - - "newest release on w1.fi"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
 case "${2:-wpa-supplicant}" in
 wpa-supplicant)
-    [[ -n "$latest" ]] || {
-        echo "latest.sh: w1.fi did not answer" >&2
-        exit 1
-    }
-    [[ "$latest" != "$pinned" ]] || {
-        echo "wpa_supplicant $pinned is current"
-        exit 0
-    }
-    digest="$(curl -fsSL --retry 3 --max-time 300 "$releases/wpa_supplicant-$latest.tar.gz" |
-        sha256sum | cut -d' ' -f1)"
+    bump_needed wpa_supplicant "$pinned" "$latest" || exit 0
+    digest="$(digest_of_url "$releases/wpa_supplicant-$latest.tar.gz")"
     echo "$latest" >"$here/VERSION"
-    sed -i "s|^wpasupplicant_sha256=\".*\"|wpasupplicant_sha256=\"$digest\"|" \
-        "$here/fetch.sh"
-    echo "wpa-supplicant: $pinned -> $latest"
+    set_var "$here/fetch.sh" wpasupplicant_sha256 "$digest"
+    bumped wpa-supplicant "$pinned" "$latest"
     echo "the digest came from this download; check w1.fi's .asc signature by hand"
     ;;
-*)
-    echo "latest.sh: this domain has one pin, wpa-supplicant" >&2
-    exit 1
-    ;;
+*) fail "this domain has one pin, wpa-supplicant" ;;
 esac
 
 # licensing/sources.sh needs no re-pin after this bump. It mirrors
 # this domain's source tarball from the domain's own cache, which
 # fetch.sh verified against its own digests, so sources.sh holds no
 # digest of its own for them.
-echo "next: make -C .. wpa-supplicant"
+next_step "make -C .. wpa-supplicant"

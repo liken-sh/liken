@@ -29,78 +29,55 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
 archive="https://www.kernel.org/pub/linux/utils/nfs-utils"
 
-pin_of() { sed -n "s|^$1=\"\([^\"]*\)\".*|\1|p" "$here/fetch.sh"; }
-
 pinned="$(cat "$here/VERSION")"
-pinned_libtirpc="$(pin_of libtirpc_version)"
+pinned_libtirpc="$(var_of "$here/fetch.sh" libtirpc_version)"
 # Every release gets its own directory here, so the listing of
 # directory names is the list of releases.
-latest="$(curl -fsS --retry 3 --max-time 60 "$archive/" |
+latest="$(fetch_text "$archive/" |
     grep -oE 'href="[0-9]+\.[0-9]+\.[0-9]+/"' |
     sed -e 's|href="||' -e 's|/"$||' |
     sort -V | tail -1)" || latest=""
 
 # SourceForge's file listing is a page of markup, but its per-path RSS
 # feed names each file plainly, so the feed is the cheaper read.
-latest_libtirpc="$(curl -fsS --retry 3 --max-time 60 "https://sourceforge.net/projects/libtirpc/rss?path=/libtirpc" |
+latest_libtirpc="$(fetch_text "https://sourceforge.net/projects/libtirpc/rss?path=/libtirpc" |
     grep -oE 'libtirpc-[0-9]+\.[0-9]+\.[0-9]+\.tar\.bz2' |
     sed -e 's|libtirpc-||' -e 's|\.tar\.bz2||' |
     sort -V | tail -1)" || latest_libtirpc=""
 
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' nfs-utils "$pinned" "${latest:-?}" - - - \
-    "newest release on kernel.org"
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' '  libtirpc' "$pinned_libtirpc" "${latest_libtirpc:-?}" - - - \
-    "the RPC library, linked static"
+row nfs-utils "$pinned" "$latest" - - - "newest release on kernel.org"
+row '  libtirpc' "$pinned_libtirpc" "$latest_libtirpc" - - - "the RPC library, linked static"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
 case "${2:-nfs-utils}" in
 nfs-utils)
-    [[ -n "$latest" ]] || {
-        echo "latest.sh: the nfs-utils directory did not answer" >&2
-        exit 1
-    }
-    [[ "$latest" != "$pinned" ]] || {
-        echo "nfs-utils $pinned is current"
-        exit 0
-    }
+    bump_needed nfs-utils "$pinned" "$latest" || exit 0
     digest="$("$here/../../trust/keys/kernel-org-digest.sh" \
         "$archive/$latest/sha256sums.asc" "nfs-utils-$latest.tar.xz")"
     echo "$latest" >"$here/VERSION"
-    sed -i "s|^nfsutils_sha256=\".*\"|nfsutils_sha256=\"$digest\"|" "$here/fetch.sh"
-    echo "nfs-utils: $pinned -> $latest"
+    set_var "$here/fetch.sh" nfsutils_sha256 "$digest"
+    bumped nfs-utils "$pinned" "$latest"
     echo "the digest came from sha256sums.asc, signed by kernel.org's checksum autosigner"
     ;;
 libtirpc)
-    [[ -n "$latest_libtirpc" ]] || {
-        echo "latest.sh: the libtirpc feed did not answer" >&2
-        exit 1
-    }
-    [[ "$latest_libtirpc" != "$pinned_libtirpc" ]] || {
-        echo "libtirpc $pinned_libtirpc is current"
-        exit 0
-    }
-    digest="$(curl -fsSL --retry 3 --max-time 300 \
-        "https://downloads.sourceforge.net/project/libtirpc/libtirpc/$latest_libtirpc/libtirpc-$latest_libtirpc.tar.bz2" |
-        sha256sum | cut -d' ' -f1)"
-    sed -i \
-        -e "s|^libtirpc_version=\".*\"|libtirpc_version=\"$latest_libtirpc\"|" \
-        -e "s|^libtirpc_sha256=\".*\"|libtirpc_sha256=\"$digest\"|" \
-        "$here/fetch.sh"
-    echo "libtirpc: $pinned_libtirpc -> $latest_libtirpc"
+    bump_needed libtirpc "$pinned_libtirpc" "$latest_libtirpc" || exit 0
+    digest="$(digest_of_url "https://downloads.sourceforge.net/project/libtirpc/libtirpc/$latest_libtirpc/libtirpc-$latest_libtirpc.tar.bz2")"
+    set_var "$here/fetch.sh" libtirpc_version "$latest_libtirpc"
+    set_var "$here/fetch.sh" libtirpc_sha256 "$digest"
+    bumped libtirpc "$pinned_libtirpc" "$latest_libtirpc"
     echo "the digest came from this download; nothing upstream signs it"
     ;;
-*)
-    echo "latest.sh: no pin named ${2}; try libtirpc" >&2
-    exit 1
-    ;;
+*) fail "no pin named ${2}; try libtirpc" ;;
 esac
 
 # licensing/sources.sh needs no re-pin after this bump. It mirrors
 # this domain's source tarballs from the domain's own cache, which
 # fetch.sh verified against its own digests, so sources.sh holds no
 # digest of its own for them.
-echo "next: make -C .. nfs-utils"
+next_step "make -C .. nfs-utils"

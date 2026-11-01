@@ -62,28 +62,16 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
 sources_only=""
 [[ "${1:-}" != "--sources-only" ]] || sources_only=1
 
-for tool in curl sha256sum gpg gpgv; do
-    command -v "$tool" >/dev/null || {
-        echo "fetch.sh: missing required tool: $tool" >&2
-        exit 1
-    }
-done
+require_tools sha256sum gpg gpgv
 
-runtime=""
-for candidate in docker podman; do
-    if command -v "$candidate" >/dev/null; then
-        runtime="$candidate"
-        break
-    fi
-done
-[[ -n "$runtime" || -n "$sources_only" ]] || {
-    echo "fetch.sh: needs docker or podman to run the pinned build container" >&2
-    exit 1
-}
+runtime="$(container_runtime)"
+[[ -n "$runtime" || -n "$sources_only" ]] || fail "needs docker or podman to run the pinned build container"
 
 version="$(cat "$here/VERSION")"
 
@@ -93,57 +81,24 @@ version="$(cat "$here/VERSION")"
 #
 # The builder is the `alpine` entry in toolchains/images.toml, a tag
 # and a digest. Each static build in the OS, and `bluetoothd`, builds
-# in that image, and one entry keeps them all on one toolchain. The
-# table names Docker Hub's short form, and podman needs the registry
-# in full, so the read adds it.
-builder="$(sed -n '/^\[build\]/,/^\[/ s|^alpine = "\(.*\)"$|docker.io/library/\1|p' \
-    "$here/../../toolchains/images.toml")"
-[[ -n "$builder" ]] || {
-    echo "fetch.sh: toolchains/images.toml names no alpine image" >&2
-    exit 1
-}
+# in that image, and one entry keeps them all on one toolchain.
+builder="$(image_of alpine)"
 
 releases="https://data.iana.org/time-zones/releases"
 
 cache="$here/cache/$version"
 out="$here/dist/$version"
-mkdir -p "$cache"
 
-# gpgv reads a binary keyring, and the repository carries the key
-# armored, because a diff can show armored text. Dearmoring into the
-# cache keeps the working tree clean.
-gpg --dearmor <"$here/tz.asc" >"$cache/tz.gpg.partial"
-mv "$cache/tz.gpg.partial" "$cache/tz.gpg"
-
-# A cached tarball that matches its line in DIGESTS is used as it is.
-# Anything else, a missing, torn, or changed file, is downloaded again
-# into a .partial file, which replaces the cached file only after it
-# matches. The files are small, so each download starts from the
-# first byte and never resumes a .partial that an earlier run left.
-# The signature file of each tarball is downloaded when it is missing,
-# and gpgv checks the pair on every run.
+# Each tarball's digest is its line in DIGESTS. The files are small, so
+# each download starts from the first byte. The signature file of each
+# tarball is downloaded when it is missing, and gpgv checks the pair on
+# every run.
 for name in "tzcode$version.tar.gz" "tzdata$version.tar.gz"; do
     digest="$(awk -v n="$name" '$2 == n { print $1 }' "$here/DIGESTS")"
-    [[ -n "$digest" ]] || {
-        echo "fetch.sh: tzdata/DIGESTS lists no $name" >&2
-        exit 1
-    }
-    if ! sha256sum --check --status <<<"$digest  $cache/$name" >/dev/null 2>&1; then
-        curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
-            "$releases/$name" -o "$cache/$name.partial"
-        sha256sum --check --quiet <<<"$digest  $cache/$name.partial" || {
-            rm -f "$cache/$name.partial"
-            exit 1
-        }
-        mv "$cache/$name.partial" "$cache/$name"
-    fi
-    if [[ ! -f "$cache/$name.asc" ]]; then
-        curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
-            "$releases/$name.asc" -o "$cache/$name.asc.partial"
-        mv "$cache/$name.asc.partial" "$cache/$name.asc"
-    fi
-    gpgv --keyring "$cache/tz.gpg" "$cache/$name.asc" "$cache/$name" 2>&1 |
-        sed 's/^/  /'
+    [[ -n "$digest" ]] || fail "tzdata/DIGESTS lists no $name"
+    fetch_verified "$releases/$name" "$digest" "$cache/$name"
+    [[ -f "$cache/$name.asc" ]] || fetch_file "$releases/$name.asc" "$cache/$name.asc"
+    verify_signature "$here/tz.asc" "$cache/$name.asc" "$cache/$name" 2>&1 | sed 's/^/  /'
 done
 
 [[ -z "$sources_only" ]] || exit 0

@@ -24,53 +24,36 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
 releases="https://data.iana.org/time-zones/releases"
 
 pinned="$(cat "$here/VERSION")"
-latest="$(curl -fsS --retry 3 --max-time 60 https://data.iana.org/time-zones/tzdb/version |
+latest="$(fetch_text https://data.iana.org/time-zones/tzdb/version |
     tr -d '[:space:]')" || latest=""
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' tzdata "$pinned" "${latest:-?}" - - - \
-    "the release IANA names as current"
+row tzdata "$pinned" "$latest" - - - "the release IANA names as current"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
-[[ "${2:-tzdata}" == "tzdata" ]] || {
-    echo "latest.sh: this domain has one pin, tzdata" >&2
-    exit 1
-}
-[[ -n "$latest" ]] || {
-    echo "latest.sh: IANA did not answer" >&2
-    exit 1
-}
-[[ "$latest" != "$pinned" ]] || {
-    echo "tzdata $pinned is current"
-    exit 0
-}
+[[ "${2:-tzdata}" == "tzdata" ]] || fail "this domain has one pin, tzdata"
+bump_needed tzdata "$pinned" "$latest" || exit 0
 
-for tool in curl gpg gpgv sha256sum; do
-    command -v "$tool" >/dev/null || {
-        echo "latest.sh: missing required tool: $tool" >&2
-        exit 1
-    }
-done
+require_tools sha256sum
 
-# gpgv reads a keyring, not an armored key, and the repository keeps
-# the key in its armored form because that is the form a person can
-# read and compare against IANA's published fingerprint.
+# The tarballs land in the cache of the new version, where fetch.sh
+# finds them, and each signature verifies against IANA's key in tz.asc
+# before its tarball's digest is written.
 cache="$here/cache/$latest"
-mkdir -p "$cache"
-gpg --dearmor <"$here/tz.asc" >"$cache/tz.gpg"
 for name in "tzcode$latest.tar.gz" "tzdata$latest.tar.gz"; do
-    for file in "$name" "$name.asc"; do
-        curl -fsSL --retry 3 --max-time 300 -o "$cache/$file" "$releases/$file"
-    done
-    gpgv --keyring "$cache/tz.gpg" "$cache/$name.asc" "$cache/$name"
+    fetch_file "$releases/$name" "$cache/$name"
+    fetch_file "$releases/$name.asc" "$cache/$name.asc"
+    verify_signature "$here/tz.asc" "$cache/$name.asc" "$cache/$name"
 done
 
 echo "$latest" >"$here/VERSION"
 (cd "$cache" && sha256sum "tzcode$latest.tar.gz" "tzdata$latest.tar.gz") >"$here/DIGESTS"
 
-echo "tzdata: $pinned -> $latest"
+bumped tzdata "$pinned" "$latest"
 echo "IANA's detached signatures stand behind these bytes"
-echo "next: make -C .. tzdata"
+next_step "make -C .. tzdata"

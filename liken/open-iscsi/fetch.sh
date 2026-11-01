@@ -50,28 +50,16 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
 sources_only=""
 [[ "${1:-}" != "--sources-only" ]] || sources_only=1
 
-for tool in curl sha256sum; do
-    command -v "$tool" >/dev/null || {
-        echo "fetch.sh: missing required tool: $tool" >&2
-        exit 1
-    }
-done
+require_tools sha256sum
 
-runtime=""
-for candidate in docker podman; do
-    if command -v "$candidate" >/dev/null; then
-        runtime="$candidate"
-        break
-    fi
-done
-[[ -n "$runtime" || -n "$sources_only" ]] || {
-    echo "fetch.sh: needs docker or podman to run the pinned build container" >&2
-    exit 1
-}
+runtime="$(container_runtime)"
+[[ -n "$runtime" || -n "$sources_only" ]] || fail "needs docker or podman to run the pinned build container"
 
 version="$(cat "$here/VERSION")"
 
@@ -82,15 +70,8 @@ version="$(cat "$here/VERSION")"
 #
 # The builder is the `alpine` entry in toolchains/images.toml, a tag
 # and a digest. Each static build in the OS, and `bluetoothd`, builds
-# in that image, and one entry keeps them all on one toolchain. The
-# table names Docker Hub's short form, and podman needs the registry
-# in full, so the read adds it.
-builder="$(sed -n '/^\[build\]/,/^\[/ s|^alpine = "\(.*\)"$|docker.io/library/\1|p' \
-    "$here/../../toolchains/images.toml")"
-[[ -n "$builder" ]] || {
-    echo "fetch.sh: toolchains/images.toml names no alpine image" >&2
-    exit 1
-}
+# in that image, and one entry keeps them all on one toolchain.
+builder="$(image_of alpine)"
 openiscsi_sha256="1c3a8ad7d86e57d247a08c013f5055ef695b3a07ed760d1aea7d90b9f9011602"
 kmod_version="34"
 kmod_sha256="12e7884484151fbd432b6a520170ea185c159f4393c7a2c2a886ab820313149a"
@@ -99,34 +80,14 @@ libeconf_sha256="0d4ae78a5924e1af0e1c4fe9e538cb62d507dfb6f50b827654f89caabe83a33
 
 cache="$here/cache/$version"
 out="$here/dist/$version"
-mkdir -p "$cache" "$out"
+mkdir -p "$out"
 
-# A cached tarball that matches its pin is used as it is. Anything else,
-# a missing, torn, or changed file, is downloaded again. The bytes go to
-# a .partial file, which replaces the cached file only after it matches
-# the digest. A .partial that does not match is deleted: when the file
-# on disk is already full length, curl -C - gets a 416 answer, exits
-# with success, and leaves the bytes as they are, so a bad full-length
-# file would fail every later run.
-fetch() {
-    local url="$1" sha="$2" file="$cache/$3"
-    if ! sha256sum --check --status <<<"$sha  $file" >/dev/null 2>&1; then
-        curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -C - \
-            "$url" -o "$file.partial"
-        sha256sum --check --quiet <<<"$sha  $file.partial" || {
-            rm -f "$file.partial"
-            exit 1
-        }
-        mv "$file.partial" "$file"
-    fi
-}
-
-fetch "https://github.com/open-iscsi/open-iscsi/archive/refs/tags/$version.tar.gz" \
-    "$openiscsi_sha256" "open-iscsi-$version.tar.gz"
-fetch "https://www.kernel.org/pub/linux/utils/kernel/kmod/kmod-$kmod_version.tar.xz" \
-    "$kmod_sha256" "kmod-$kmod_version.tar.xz"
-fetch "https://github.com/openSUSE/libeconf/archive/refs/tags/v$libeconf_version.tar.gz" \
-    "$libeconf_sha256" "libeconf-$libeconf_version.tar.gz"
+fetch_verified --resume "https://github.com/open-iscsi/open-iscsi/archive/refs/tags/$version.tar.gz" \
+    "$openiscsi_sha256" "$cache/open-iscsi-$version.tar.gz"
+fetch_verified --resume "https://www.kernel.org/pub/linux/utils/kernel/kmod/kmod-$kmod_version.tar.xz" \
+    "$kmod_sha256" "$cache/kmod-$kmod_version.tar.xz"
+fetch_verified --resume "https://github.com/openSUSE/libeconf/archive/refs/tags/v$libeconf_version.tar.gz" \
+    "$libeconf_sha256" "$cache/libeconf-$libeconf_version.tar.gz"
 
 [[ -z "$sources_only" ]] || exit 0
 

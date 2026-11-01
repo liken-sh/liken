@@ -46,28 +46,16 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
 sources_only=""
 [[ "${1:-}" != "--sources-only" ]] || sources_only=1
 
-for tool in curl sha256sum; do
-    command -v "$tool" >/dev/null || {
-        echo "fetch.sh: missing required tool: $tool" >&2
-        exit 1
-    }
-done
+require_tools sha256sum
 
-runtime=""
-for candidate in docker podman; do
-    if command -v "$candidate" >/dev/null; then
-        runtime="$candidate"
-        break
-    fi
-done
-[[ -n "$runtime" || -n "$sources_only" ]] || {
-    echo "fetch.sh: needs docker or podman to run the build container" >&2
-    exit 1
-}
+runtime="$(container_runtime)"
+[[ -n "$runtime" || -n "$sources_only" ]] || fail "needs docker or podman to run the build container"
 
 version="$(cat "$here/VERSION")"
 tarball="e2fsprogs-$version.tar.gz"
@@ -75,47 +63,21 @@ release="https://www.kernel.org/pub/linux/kernel/people/tytso/e2fsprogs/v$versio
 
 # The builder is the `alpine` entry in toolchains/images.toml, a tag
 # and a digest. Each static build in the OS, and `bluetoothd`, builds
-# in that image, and one entry keeps them all on one toolchain. The
-# table names Docker Hub's short form, and podman needs the registry
-# in full, so the read adds it.
-builder="$(sed -n '/^\[build\]/,/^\[/ s|^alpine = "\(.*\)"$|docker.io/library/\1|p' \
-    "$here/../../toolchains/images.toml")"
-[[ -n "$builder" ]] || {
-    echo "fetch.sh: toolchains/images.toml names no alpine image" >&2
-    exit 1
-}
+# in that image, and one entry keeps them all on one toolchain.
+builder="$(image_of alpine)"
 
 cache="$here/cache/$version"
 out="$here/dist/$version"
-mkdir -p "$cache"
 
 # The tarball's digest, pinned beside the version it belongs to.
 # kernel.org publishes a sha256sums.asc file in each release
 # directory, clearsigned by its checksum autosigner, and
 # e2fsprogs/latest.sh --bump copies the tarball's line from it after
-# the signature verifies against the autosigner's key in trust/keys/,
-# so a fetch never reads a digest from upstream.
+# the signature verifies against the autosigner's key in trust/keys/.
 declare -A e2fsprogs_sha256=(
     ["1.47.4"]="da274408bebbfd13a5a2fc3cfc66e3ffff17c48534673aa67f88d49b99123b96"
 )
-digest="${e2fsprogs_sha256[$version]:-}"
-[[ -n "$digest" ]] || {
-    echo "fetch.sh: no digest pinned for e2fsprogs $version; e2fsprogs/latest.sh --bump writes it" >&2
-    exit 1
-}
-
-# A cached tarball that matches the pin is used as it is. Anything
-# else, a missing, torn, or changed file, is downloaded again into a
-# .partial file, which replaces the cached file only after it matches.
-if ! sha256sum --check --status <<<"$digest  $cache/$tarball" >/dev/null 2>&1; then
-    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --max-time 300 \
-        "$release/$tarball" -o "$cache/$tarball.partial"
-    sha256sum --check --quiet <<<"$digest  $cache/$tarball.partial" || {
-        rm -f "$cache/$tarball.partial"
-        exit 1
-    }
-    mv "$cache/$tarball.partial" "$cache/$tarball"
-fi
+fetch_verified "$release/$tarball" "${e2fsprogs_sha256[$version]:-}" "$cache/$tarball"
 
 [[ -z "$sources_only" ]] || exit 0
 
