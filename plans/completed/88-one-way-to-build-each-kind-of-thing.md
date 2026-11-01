@@ -1,6 +1,32 @@
 # 88, One way to build each kind of thing
 
-Proposed on 2026-11-01. Not built.
+Proposed on 2026-11-01. Built on 2026-11-01, except two parts:
+
+- The Go images do not build with ko. bake already writes the SBOM
+  and the provenance of every image and cosign signs each one, syft
+  reads the module list from each Go binary's build info, and
+  `AGENTS.md` states one Dockerfile form for a Go program, which
+  `ci/goimages.go` checks. ko would add a second build path for one
+  kind of image. This is open for a decision by the maintainer.
+- No apk lock exists, because no build installs from Alpine now.
+  buildroot builds every static program, including open-iscsi and the
+  daemons of the `bluetoothd` image, and `ci pins` fails on an
+  `apk add`.
+
+`AGENTS.md` at the top of the repository states each build form and
+the SBOM of each kind of artifact, and the `bump-components` and
+`releases` skills hold the procedures. Each image that holds software
+syft cannot find, such as a program built from a tarball or by
+buildroot, carries a CycloneDX record that `toolchains/manifest`
+writes from its `pin.toml` or from buildroot's SBOM.
+
+The drills ran on the `lab` fleet on 2026-11-01: a release built from
+these changes booted, an upgrade to it reached `Ready`, and its SBOM
+passed the schema check. These have not run: the first CI publish,
+which proves the cosign signer identities and the job limits; the
+`bluetoothd` image with its renamed `dbus` user on a machine with a
+radio; and the audio and Bluetooth programs at their new paths on
+real hardware.
 
 The components of `liken` started in separate repositories, and each
 one wrote its own build scripts. In this repository, components that
@@ -84,4 +110,4 @@ Each image puts its program at `/<name>`.
 
 Renovate replaces Dependabot only if finishing Dependabot's pull
 requests by hand keeps costing too much
-([plan 87](87-vulnerability-follow-ups.md)).
+([plan 87](../87-vulnerability-follow-ups.md)).
