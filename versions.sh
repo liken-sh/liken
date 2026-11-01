@@ -32,8 +32,11 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
 # Caches, build output, and vendored packages can hold a copy of a
-# latest.sh that is not a pin of this repository.
+# latest.sh that is not a pin of this repository. So can .claude/,
+# where each git worktree of an agent session holds a whole checkout,
+# and each of its pins would print a second row.
 mapfile -t scripts < <(cd "$root" && find . -name latest.sh \
+    -not -path './.claude/*' \
     -not -path '*/.cache/*' -not -path '*/dist/*' \
     -not -path '*/node_modules/*' -not -path '*/cache/*' | sort)
 
