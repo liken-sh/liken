@@ -466,6 +466,58 @@ bump_image() {
     fi
 }
 
+# local_targets <go.mod> prints the go.mod of each directory that the
+# module replaces a requirement with.
+local_targets() {
+    local mod="$1" dir
+    go mod edit -json "$mod" | jq -r '.Replace[]? | select(.New.Version == null) | .New.Path' |
+        while read -r dir; do
+            echo "$(cd "$(dirname "$mod")/$dir" && pwd)/go.mod"
+        done
+}
+
+# tidy_modules reads the go.mod files that a bump wrote, one on each
+# line, and runs go mod tidy in each of them. go get adds the go.sum
+# lines of the new version and keeps the lines of the old one, so
+# without tidy the `go mod tidy -diff` check of each component fails.
+#
+# The operators replace github.com/liken-sh/liken/kubernetes with
+# ../kubernetes, so a version that kubernetes/go.mod raises is also
+# the version that each operator selects. An operator's go.mod must
+# name that version, even for an indirect requirement. So tidy also
+# runs in every module that reaches a written module through a local
+# replace, and in each module only after the modules it replaces,
+# because its tidy reads their go.mod files.
+tidy_modules() {
+    local -A touched=() targets=() tidied=()
+    local mod target grew=1
+    while read -r mod; do touched[$mod]=1; done
+    while read -r mod; do
+        targets[$mod]="$(local_targets "$mod" | paste -sd' ')"
+    done < <(go_mods)
+    while ((grew)); do
+        grew=0
+        for mod in "${!targets[@]}"; do
+            [[ -z "${touched[$mod]:-}" ]] || continue
+            for target in ${targets[$mod]}; do
+                if [[ -n "${touched[$target]:-}" ]]; then
+                    touched[$mod]=1 grew=1
+                    break
+                fi
+            done
+        done
+    done
+    tidy_one() {
+        local mod="$1" target
+        [[ -n "${touched[$mod]:-}" && -z "${tidied[$mod]:-}" ]] || return 0
+        tidied[$mod]=1
+        for target in ${targets[$mod]}; do tidy_one "$target"; done
+        (cd "$(dirname "$mod")" && GOWORK=off go mod tidy)
+        echo "${mod#"$root"/}: go mod tidy"
+    }
+    while read -r mod; do tidy_one "$mod"; done < <(printf '%s\n' "${!touched[@]}" | sort)
+}
+
 case "$target" in
 go | golang)
     bump_image golang
@@ -473,6 +525,7 @@ go | golang)
     version="${version%%-*}"
     go_mods | while read -r mod; do go mod edit -go="$version" "$mod"; done
     echo "go: every go.mod names go $version"
+    go_mods | tidy_modules
     ;;
 rustc | rust)
     bump_image rust
@@ -502,12 +555,14 @@ go:*)
     # go get writes go.mod and go.sum together, and raises any other
     # requirement that the new version needs.
     awk 'NR == FNR { group[$1] = 1; next } $1 in group { print $3 }' \
-        "$work/group" "$work/requires" | sort -u | while read -r mod; do
+        "$work/group" "$work/requires" | sort -u >"$work/touched"
+    while read -r mod; do
         mapfile -t mine < <(awk -v f="$mod" -v v="$version" 'NR == FNR { group[$1] = 1; next }
             $3 == f && $1 in group { print $1 "@" v }' "$work/group" "$work/requires" | sort -u)
         (cd "$(dirname "$mod")" && GOWORK=off go get "${mine[@]}")
         echo "${mod#"$root"/}: ${mine[*]}"
-    done
+    done <"$work/touched"
+    tidy_modules <"$work/touched"
     echo "next: make test in each component above"
     ;;
 crate:*)

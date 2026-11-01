@@ -312,7 +312,12 @@ rustc` move the toolchain image and every `go.mod` or
 `rust-toolchain.toml`. `--bump go:<module>` and `--bump
 crate:<name>` move every copy of one dependency. The k8s.io modules
 follow the k3s release in `liken/k3s/VERSION`, so they move after
-k3s does.
+k3s does. `--bump go` and `--bump go:<module>` then run `go mod tidy`
+in each module they wrote, and in each module that replaces one of
+those with a local directory, such as every operator that replaces
+`github.com/liken-sh/liken/kubernetes`. Without tidy, `go get` keeps
+the `go.sum` lines of the old version, and the `go mod tidy -diff`
+check of each component fails.
 
 A new reference in `[build]` changes the recipe of each pinned
 component whose Dockerfile names that key, so each one needs a new
