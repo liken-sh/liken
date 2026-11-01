@@ -21,6 +21,11 @@ COPY cacert.pem /etc/ssl/certs/ca-certificates.crt
 # Python. The catalog needs openssl for edk2's capsule signing tool,
 # gcab for the cabinets, jcat-tool to sign the catalog, and zstd to
 # compress it.
+#
+# The Ubuntu image holds packages of the day its digest was built, and
+# apt-get install upgrades one of them only when a new package
+# requires it. The upgrade brings the rest to the snapshot's date too,
+# so the whole toolchain comes from the one snapshot.
 RUN echo 'Acquire::https::CAInfo "/etc/ssl/certs/ca-certificates.crt";' >/etc/apt/apt.conf.d/99snapshot-ca \
     && rm -f /etc/apt/sources.list /etc/apt/sources.list.d/* \
     && printf '%s\n' \
@@ -31,6 +36,7 @@ RUN echo 'Acquire::https::CAInfo "/etc/ssl/certs/ca-certificates.crt";' >/etc/ap
         'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg' \
         >/etc/apt/sources.list.d/snapshot.sources \
     && apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         build-essential uuid-dev nasm acpica-tools python3 python3-setuptools python-is-python3 \
         openssl gcab jcat zstd \
