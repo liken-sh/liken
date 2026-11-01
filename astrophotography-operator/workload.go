@@ -14,9 +14,12 @@ package main
 // the Deployment again, or replace it again at the older copy's
 // resourceVersion, which the API server refuses with 409, and the
 // failed pass would turn the Solver's Ready False. So every write and
-// read of a workload goes through the memo of the operator's versions,
-// and a store's copy that is older than the operator's last write is
-// read from the API server.
+// read of a workload goes through the memo of the operator's versions
+// (informer.ReadSelected), and a store's copy that is older than the
+// operator's last write is read from the API server. The watch selects
+// every object with the operator's label, and each object the operator
+// creates has it, so a ready store's absence of an object the memo has
+// not noted answers that it does not exist.
 
 import (
 	"crypto/sha256"
@@ -55,7 +58,7 @@ func (o *operator) ensure(w workload) error {
 	d.Metadata.Annotations = map[string]string{templateAnnotation: stamp}
 	key := memo.Key(&d.Metadata.ObjectMeta)
 	deployments := o.held("Deployment", o.deploymentVersions)
-	held, err := readOwn[deployment](o.client, deployments, key, deploymentPath(d.Metadata.Namespace, d.Metadata.Name))
+	held, err := informer.ReadSelected[deployment](o.client, deployments, key, deploymentPath(d.Metadata.Namespace, d.Metadata.Name))
 	switch {
 	case errors.Is(err, apiclient.ErrNotFound):
 		if err := create(o.client, deployments.Versions, "/apis/apps/v1/namespaces/"+d.Metadata.Namespace+"/deployments", d); err != nil {
@@ -76,7 +79,7 @@ func (o *operator) ensure(w workload) error {
 	}
 	s := w.service
 	services := o.held("Service", o.serviceVersions)
-	_, err = readOwn[service](o.client, services, memo.Key(&s.Metadata.ObjectMeta), servicePath(s.Metadata.Namespace, s.Metadata.Name))
+	_, err = informer.ReadSelected[service](o.client, services, memo.Key(&s.Metadata.ObjectMeta), servicePath(s.Metadata.Namespace, s.Metadata.Name))
 	if !errors.Is(err, apiclient.ErrNotFound) {
 		return err
 	}
@@ -87,36 +90,6 @@ func (o *operator) ensure(w workload) error {
 // memo of its writes.
 func (o *operator) held(kind string, versions *memo.Versions) informer.Held {
 	return informer.Held{View: o.stores.collections[kind].View(), Versions: versions}
-}
-
-// readOwn answers one object of a kind the operator creates: the
-// store's copy when it is at the version of the operator's last write
-// or read, and the API server's copy otherwise. The watch selects every
-// object with the operator's label, and each object the operator
-// creates has it. So once the store holds its first read, an object it
-// does not hold and the memo has not noted does not exist, and the read
-// sends nothing. An object the memo noted, such as one the operator
-// created a moment ago, is read from the API server until the store
-// holds it.
-//
-// The memo keeps a record only while a write has not reached the
-// store. When the store's copy is at the noted version, every later
-// copy is newer, so readOwn drops the record. After a 404 the memo
-// forgets the object, so the next read answers from the store again.
-func readOwn[T any, P informer.Object[T]](c *apiclient.Client, held informer.Held, key, path string) (*T, error) {
-	if held.View.Ready() {
-		if _, stored, _ := held.View.Store.GetByKey(key); !stored && !held.Versions.Noted(key) {
-			return nil, apiclient.ErrNotFound
-		}
-	}
-	found, err := informer.ReadOne[T, P](c, held, key, path)
-	if errors.Is(err, apiclient.ErrNotFound) {
-		held.Versions.Forget(key)
-	}
-	if copied, stored := informer.Cached[T](held.View, key); stored {
-		held.Versions.ForgetAt(key, P(copied).GetObjectMeta().GetResourceVersion())
-	}
-	return found, err
 }
 
 // create posts an object and notes the version the API server answered.

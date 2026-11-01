@@ -208,49 +208,6 @@ func TestAProviderThatCannotBeReadKeepsTheStoresCopies(t *testing.T) {
 	}
 }
 
-// A Service the operator stands is read from the store. Once the store
-// holds its first read, a Service it does not hold and the memo has not
-// noted does not exist, and the read sends nothing. A Service the memo
-// noted, such as one this operator created a moment ago, is read from the
-// API server until the store holds it.
-func TestAStoodObjectIsReadFromTheAPIServerOnlyWhenTheMemoNotedIt(t *testing.T) {
-	service := buildCatalogService("house", nil)
-	service.Metadata.ResourceVersion = "3"
-	cases := []struct {
-		name   string
-		stored []Service
-		noted  string
-		found  bool
-		reads  int
-	}{
-		{name: "a current copy in the store", stored: []Service{*service}, noted: "3", found: true},
-		{name: "no copy and no note", found: false},
-		{name: "no copy and a note of the create", noted: "3", found: true, reads: 1},
-		{name: "an older copy than the operator's write", stored: []Service{*service}, noted: "4", found: true, reads: 1},
-	}
-	for _, one := range cases {
-		t.Run(one.name, func(t *testing.T) {
-			cluster := newFakeCluster()
-			cluster.services["house/catalog"] = service
-			versions := memo.New()
-			if one.noted != "" {
-				versions.Note("house/catalog", one.noted)
-			}
-
-			got, err := readStood[Service](t.Context(), testOperator(t, cluster).client,
-				informer.Held{View: storeHolding(t, one.stored...), Versions: versions},
-				"house/catalog", servicesPath("house")+"/catalog")
-
-			if found := err == nil && got != nil; found != one.found {
-				t.Errorf("found = %v (err %v), want %v", found, err, one.found)
-			}
-			if got := countObjectReads(cluster.requestLines(), "services"); got != one.reads {
-				t.Errorf("reads of the Service = %d, want %d", got, one.reads)
-			}
-		})
-	}
-}
-
 // jobStoreReads answers the worker Jobs from a store through the
 // operator's memo, the way watch.go does, and every other collection
 // with a list.

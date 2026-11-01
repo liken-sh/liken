@@ -442,11 +442,17 @@ it.
   the writes made while its reflector waited out a backoff.
   `ReadOne` reads an object the store does not hold from the API
   server. A copy that does not convert is read from the API server
-  too, so a list leaves out no object. `liken`'s watches each select
-  exactly the objects a pass reads, often one object by name, so its
-  reads (`liken/kubernetes/watch`) answer from a ready store that an
-  object it does not hold, and that the memo has not noted, does not
-  exist, the same way `library-operator`'s `readStood` does.
+  too, so a list leaves out no object. Read one object whose store's
+  watch selects every object the read can ask for with
+  `informer.ReadSelected`: the objects the operator creates and labels,
+  or the one object a watch follows by name. A ready store's absence
+  of such an object, when the memo has not noted it, answers
+  `apiclient.ErrNotFound` with no request, so a pass that creates a
+  missing object sends no read to learn that it is missing. The memo forgets the object after
+  a `404`, and drops its record once the store holds the noted version
+  (`informer.ForgetStored`). `astrophotography-operator` reads its
+  workloads this way, `library-operator` the objects it stands, and
+  `liken`'s operators their `Machine` and `Cluster`.
 - **The memo.** A store's copy can be older than the operator's own
   last write, because the watch delivers the write a moment later, and
   later still while the watch is down. A pass that acts on that copy
@@ -482,7 +488,8 @@ it.
   a read once at start, before the watch opens.
 - **The reference files.** `kubernetes/informer/cache.go` and
   `cache_test.go` (the reads, a list that meets a create, and a list
-  before the store is ready),
+  before the store is ready), `kubernetes/informer/selected.go` and
+  `selected_test.go` (the read of a selected object by name),
   `kubernetes/memo/requests_test.go` (the status write after a `409`),
   `kubernetes/memo/memo_test.go` (the memo itself), `bluetooth-operator/objectcache_test.go` (the memo
   across three kinds and a store that follows its selector),

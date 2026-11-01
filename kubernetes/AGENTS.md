@@ -21,14 +21,14 @@ an option of a shared function or it reads a shared type's private
 state. Such a hook comes here even for one operator, and the commit
 that adds it names the operator. The hooks of that kind now are:
 
-- `informer.Options.ListFailed` and `Options.Transform`, and
-  `memo.Versions.Forget` and `Versions.Noted`, for `library-operator`.
+- `informer.Options.ListFailed` and `Options.Transform`, for
+  `library-operator`.
 - `apiclient.ErrThrottled`, `RetryAfterSeconds`, and
   `Client.WithWaitContext`, for `equipment-operator`.
 - `apiclient.InClusterOptions.Server` and `Timeout`,
   `Client.WithWriteGuard`, `informer.InClusterAt`, `Options.Indexers`,
-  `Options.UnreadyOnWatchError`, `memo.Versions.ForgetAt`, and the
-  alias `memo.Meta`, for `liken`'s two operators.
+  `Options.UnreadyOnWatchError`, and the alias `memo.Meta`, for
+  `liken`'s two operators.
 
 The code the hook runs, such as the transform itself, stays in the
 operator.

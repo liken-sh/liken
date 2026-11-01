@@ -359,24 +359,24 @@ func (w *watches) readNodes() (*NodeList, error) {
 }
 
 func (w *watches) readService(ctx context.Context, namespace, name string) (*Service, error) {
-	return readStood[Service](ctx, w.client, informer.Held{View: w.services.view(), Versions: w.versions.services},
+	return informer.ReadSelected[Service](w.client.WithContext(ctx), informer.Held{View: w.services.view(), Versions: w.versions.services},
 		informer.Key(&ObjectMeta{Namespace: namespace, Name: name}), servicesPath(namespace)+"/"+name)
 }
 
 func (w *watches) readEndpointSlice(ctx context.Context, namespace, name string) (*EndpointSlice, error) {
-	return readStood[EndpointSlice](ctx, w.client,
+	return informer.ReadSelected[EndpointSlice](w.client.WithContext(ctx),
 		informer.Held{View: w.endpointSlices.view(), Versions: w.versions.endpointSlices},
 		informer.Key(&ObjectMeta{Namespace: namespace, Name: name}), endpointSlicesPath(namespace)+"/"+name)
 }
 
 func (w *watches) readClaimTemplate(ctx context.Context, namespace, name string) (*ResourceClaimTemplate, error) {
-	return readStood[ResourceClaimTemplate](ctx, w.client,
+	return informer.ReadSelected[ResourceClaimTemplate](w.client.WithContext(ctx),
 		informer.Held{View: w.claimTemplates.view(), Versions: w.versions.claimTemplates},
 		informer.Key(&ObjectMeta{Namespace: namespace, Name: name}), claimTemplatesPath(namespace)+"/"+name)
 }
 
 func (w *watches) readConfigMap(ctx context.Context, namespace, name string) (*ConfigMap, error) {
-	return readStood[ConfigMap](ctx, w.client, informer.Held{View: w.configMaps.view(), Versions: w.versions.configMaps},
+	return informer.ReadSelected[ConfigMap](w.client.WithContext(ctx), informer.Held{View: w.configMaps.view(), Versions: w.versions.configMaps},
 		informer.Key(&ObjectMeta{Namespace: namespace, Name: name}), configMapsPath(namespace)+"/"+name)
 }
 

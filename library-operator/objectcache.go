@@ -22,7 +22,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 
@@ -45,30 +44,4 @@ func currentOrCached[T any, P informer.Object[T]](ctx context.Context, c *apicli
 	}
 	fmt.Fprintf(os.Stderr, "reading one object from the API server: %v; the pass reads the watch's copies\n", err)
 	return informer.CachedList[T](held.View)
-}
-
-// readStood answers one object this operator stands by name: the store's
-// copy when it holds a current one, and the API server's copy when it does
-// not. This operator alone needs it. The store holds every object the
-// watch selects, so once it holds its first read, an object it does not
-// hold and the memo has not noted does not exist, and the read costs the
-// API server nothing. An object the memo noted, such as one this operator
-// created a moment ago or one whose create met a conflict, is read from
-// the API server until the store holds it or the API server answers that
-// it is gone.
-func readStood[T any, P informer.Object[T]](ctx context.Context, c *apiclient.Client, held informer.Held, key, path string) (*T, error) {
-	if held.View.Ready() {
-		if _, stored, _ := held.View.Store.GetByKey(key); !stored && !held.Versions.Noted(key) {
-			return nil, apiclient.ErrNotFound
-		}
-	}
-	found, err := informer.ReadOne[T, P](c.WithContext(ctx), held, key, path)
-	if errors.Is(err, apiclient.ErrNotFound) {
-		// The object is gone, and the store holds no copy of it or
-		// holds the last one until the watch delivers the delete. The
-		// memo forgets it, so the next read answers from the store and
-		// sends nothing.
-		held.Versions.Forget(key)
-	}
-	return found, err
 }

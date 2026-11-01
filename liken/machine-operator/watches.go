@@ -323,7 +323,7 @@ func (r *reader) machine(name string) (*machine.Machine, error) {
 	if r.throughAPI {
 		return r.freshMachine(name)
 	}
-	return watch.ReadOne[machine.Machine](r.client,
+	return informer.ReadSelected[machine.Machine](r.client,
 		informer.Held{View: r.machines.View(), Versions: r.machineVersions}, name, kubernetes.MachinesPath+"/"+name)
 }
 

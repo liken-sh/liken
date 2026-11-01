@@ -314,7 +314,7 @@ func clusterPath(name string) string { return kubernetes.ClustersPath + "/" + na
 // out and the store no longer holds: a Machine somebody deleted, whose
 // record would otherwise stay for the life of the process. It also
 // drops the record of each object whose copy in the store is at the
-// noted version (watch.Settle), so a later write from another writer
+// noted version (informer.ForgetStored), so a later write from another writer
 // costs no read. A list from the API server settles nothing, because
 // no ready store compares with it. The records that list noted stay
 // until a ready store holds their versions.
@@ -330,7 +330,7 @@ func settleMemo[T any, P informer.Object[T]](held informer.Held, items []T) {
 		keys = append(keys, key)
 	}
 	held.Versions.ForgetGone(held.View.Store, listed)
-	watch.Settle(held, keys...)
+	informer.ForgetStored(held, keys...)
 }
 
 // publishStatus writes a Machine's status, and notes the version the
@@ -375,7 +375,7 @@ func (r *fleetReader) clusters() ([]cluster.Cluster, error) {
 
 // cluster reads the Cluster this program operates.
 func (r *fleetReader) cluster(name string) (*cluster.Cluster, error) {
-	return watch.ReadOne[cluster.Cluster](r.client,
+	return informer.ReadSelected[cluster.Cluster](r.client,
 		informer.Held{View: r.current(r.clusterCopy), Versions: r.clusterVersions}, name, clusterPath(name))
 }
 

@@ -12,7 +12,9 @@
 // one object by name. So a ready store that does not hold an object
 // answers that the object does not exist, and the pass sends no
 // request to learn it. That is the one rule these reads add to the
-// shared ones.
+// shared ones. A read of one object that the operator writes goes
+// through the memo of its writes with informer.ReadSelected, which
+// follows the same rule.
 //
 // The CLI imports the kubernetes package and watches nothing. This is
 // a package of its own, apart from that one, so the CLI links no
@@ -20,14 +22,12 @@
 package watch
 
 import (
-	"errors"
 	"slices"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/cache"
 
-	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
@@ -117,60 +117,5 @@ func LabelIndex(label string) cache.IndexFunc {
 			return nil, nil
 		}
 		return []string{value}, nil
-	}
-}
-
-// ReadOne reads one object of a kind this operator writes, through the
-// memo of its writes (the shared memo package). The store's copy
-// answers when it is at the version of the operator's last write or
-// read, and the API server answers otherwise, once, and then the store
-// answers again. When the store holds the noted version, the memo
-// drops its record (Settle).
-//
-// A ready store that holds no such object, and whose memo holds no
-// record of it, answers apiclient.ErrNotFound with no request. An
-// object the memo noted, such as one whose write failed, is read from
-// the API server until the store holds it or the API server answers
-// that it is gone. Then the memo forgets it, so the next read answers
-// from the store and sends nothing.
-func ReadOne[T any, P informer.Object[T]](c *apiclient.Client, held informer.Held, key, path string) (*T, error) {
-	if held.View.Ready() {
-		if _, stored, _ := held.View.Store.GetByKey(key); !stored && !held.Versions.Noted(key) {
-			return nil, apiclient.ErrNotFound
-		}
-	}
-	found, err := informer.ReadOne[T, P](c, held, key, path)
-	if errors.Is(err, apiclient.ErrNotFound) {
-		held.Versions.Forget(key)
-	}
-	Settle(held, key)
-	return found, err
-}
-
-// Settle drops the memo's record of each key whose copy in a ready
-// store is at the version the memo noted. From then on the store holds
-// this operator's write, and each later copy is newer, so the record
-// guards nothing. A record that stayed would make each later write from
-// another writer, such as a machine operator's status write to a
-// Machine the cluster operator granted a turn, cost one read from the
-// API server.
-//
-// Settle, like the Forget in ReadOne, drops the memo's request lock of
-// the key (memo.Versions.Forget says what that allows). Each of liken's
-// operators sends its writes of an object and reads it from the one
-// goroutine of its pass loop, so no request about the key runs while
-// Settle forgets it.
-func Settle(held informer.Held, keys ...string) {
-	if held.Versions == nil || !held.View.Ready() {
-		return
-	}
-	for _, key := range keys {
-		object, exists, err := held.View.Store.GetByKey(key)
-		if err != nil || !exists {
-			continue
-		}
-		if item, ok := object.(*unstructured.Unstructured); ok {
-			held.Versions.ForgetAt(key, item.GetResourceVersion())
-		}
 	}
 }
