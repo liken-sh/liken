@@ -64,9 +64,18 @@ fi
 
 if ! sha256sum --check --status <<<"$digest  $cache/cacert.pem" >/dev/null 2>&1; then
     echo "downloading CA bundle $version"
+    # The bytes go to a .partial file, which replaces the cached file
+    # only after it matches the digest. A .partial that does not match
+    # is deleted: when the file on disk is already full length, curl -C
+    # - gets a 416 answer, exits with success, and leaves the bytes as
+    # they are, so a bad full-length file would fail every later run.
     curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
-        --progress-bar -o "$cache/cacert.pem" "$url"
-    sha256sum --check --quiet <<<"$digest  $cache/cacert.pem"
+        --progress-bar -o "$cache/cacert.pem.partial" "$url"
+    sha256sum --check --quiet <<<"$digest  $cache/cacert.pem.partial" || {
+        rm -f "$cache/cacert.pem.partial"
+        exit 1
+    }
+    mv "$cache/cacert.pem.partial" "$cache/cacert.pem"
 fi
 
 rm -rf "$out"

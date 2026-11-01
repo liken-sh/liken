@@ -75,9 +75,18 @@ mkdir -p "$cache"
 
 if ! sha256sum --check --status <<<"$digest  $cache/$deb" >/dev/null 2>&1; then
     echo "downloading systemd-boot-efi $version"
+    # The bytes go to a .partial file, which replaces the cached file
+    # only after it matches the digest. A .partial that does not match
+    # is deleted: when the file on disk is already full length, curl -C
+    # - gets a 416 answer, exits with success, and leaves the bytes as
+    # they are, so a bad full-length file would fail every later run.
     curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
-        --progress-bar -o "$cache/$deb" "$url"
-    sha256sum --check --quiet <<<"$digest  $cache/$deb"
+        --progress-bar -o "$cache/$deb.partial" "$url"
+    sha256sum --check --quiet <<<"$digest  $cache/$deb.partial" || {
+        rm -f "$cache/$deb.partial"
+        exit 1
+    }
+    mv "$cache/$deb.partial" "$cache/$deb"
 fi
 
 # A .deb file is an `ar` archive wrapping a compressed tarball of the

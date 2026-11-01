@@ -103,14 +103,18 @@ digest="${e2fsprogs_sha256[$version]:-}"
     exit 1
 }
 
-# Download once, verify every time. If a cached tarball stops matching
-# the pin, the build fails instead of using it.
-if [[ ! -f "$cache/$tarball" ]]; then
+# A cached tarball that matches the pin is used as it is. Anything
+# else, a missing, torn, or changed file, is downloaded again into a
+# .partial file, which replaces the cached file only after it matches.
+if ! sha256sum --check --status <<<"$digest  $cache/$tarball" >/dev/null 2>&1; then
     curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --max-time 300 \
         "$release/$tarball" -o "$cache/$tarball.partial"
+    sha256sum --check --quiet <<<"$digest  $cache/$tarball.partial" || {
+        rm -f "$cache/$tarball.partial"
+        exit 1
+    }
     mv "$cache/$tarball.partial" "$cache/$tarball"
 fi
-echo "$digest  $cache/$tarball" | sha256sum --check --quiet
 
 [[ -z "$sources_only" ]] || exit 0
 

@@ -64,9 +64,18 @@ if ! sha256sum --check --status <<<"$digest  $cache/k3s" >/dev/null 2>&1; then
     # already on disk, so repeated breaks still converge on a
     # complete file. The checksum below decides whether the
     # assembled bytes are good.
+    # The bytes go to a .partial file, which replaces the cached file
+    # only after it matches the digest. A .partial that does not match
+    # is deleted: when the file on disk is already full length, curl -C
+    # - gets a 416 answer, exits with success, and leaves the bytes as
+    # they are, so a bad full-length file would fail every later run.
     curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
-        --progress-bar -o "$cache/k3s" "$base/k3s"
-    sha256sum --check --quiet <<<"$digest  $cache/k3s"
+        --progress-bar -o "$cache/k3s.partial" "$base/k3s"
+    sha256sum --check --quiet <<<"$digest  $cache/k3s.partial" || {
+        rm -f "$cache/k3s.partial"
+        exit 1
+    }
+    mv "$cache/k3s.partial" "$cache/k3s"
 fi
 
 rm -rf "$out"

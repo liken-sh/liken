@@ -83,9 +83,19 @@ fetch() {
     fi
     if ! sha256sum --check --status <<<"$digest  $cache/$deb" >/dev/null 2>&1; then
         echo "downloading $deb"
+        # The bytes go to a .partial file, which replaces the cached
+        # file only after it matches the digest. A .partial that does
+        # not match is deleted: when the file on disk is already full
+        # length, curl -C - gets a 416 answer, exits with success, and
+        # leaves the bytes as they are, so a bad full-length file would
+        # fail every later run.
         curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
-            --progress-bar -o "$cache/$deb" "$pool/$deb"
-        sha256sum --check --quiet <<<"$digest  $cache/$deb"
+            --progress-bar -o "$cache/$deb.partial" "$pool/$deb"
+        sha256sum --check --quiet <<<"$digest  $cache/$deb.partial" || {
+            rm -f "$cache/$deb.partial"
+            exit 1
+        }
+        mv "$cache/$deb.partial" "$cache/$deb"
     fi
 }
 

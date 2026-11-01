@@ -71,9 +71,18 @@ fi
 
 if ! sha256sum --check --status <<<"$digest  $cache/$tarball" >/dev/null 2>&1; then
     echo "downloading flux $version"
+    # The bytes go to a .partial file, which replaces the cached file
+    # only after it matches the digest. A .partial that does not match
+    # is deleted: when the file on disk is already full length, curl -C
+    # - gets a 416 answer, exits with success, and leaves the bytes as
+    # they are, so a bad full-length file would fail every later run.
     curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
-        --progress-bar -o "$cache/$tarball" "$base/$tarball"
-    sha256sum --check --quiet <<<"$digest  $cache/$tarball"
+        --progress-bar -o "$cache/$tarball.partial" "$base/$tarball"
+    sha256sum --check --quiet <<<"$digest  $cache/$tarball.partial" || {
+        rm -f "$cache/$tarball.partial"
+        exit 1
+    }
+    mv "$cache/$tarball.partial" "$cache/$tarball"
 fi
 tar -xzf "$cache/$tarball" -C "$cache" flux
 

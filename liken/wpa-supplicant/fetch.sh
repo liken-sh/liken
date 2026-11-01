@@ -81,16 +81,24 @@ cache="$here/cache/$version"
 out="$here/dist/$version"
 mkdir -p "$cache" "$out"
 
-# Download once, verify every time. If a cached tarball stops matching
-# its pin, the build fails instead of using the tarball.
+# A cached tarball that matches its pin is used as it is. Anything else,
+# a missing, torn, or changed file, is downloaded again. The bytes go to
+# a .partial file, which replaces the cached file only after it matches
+# the digest. A .partial that does not match is deleted: when the file
+# on disk is already full length, curl -C - gets a 416 answer, exits
+# with success, and leaves the bytes as they are, so a bad full-length
+# file would fail every later run.
 fetch() {
     local url="$1" sha="$2" file="$cache/$3"
-    if [[ ! -f "$file" ]]; then
+    if ! sha256sum --check --status <<<"$sha  $file" >/dev/null 2>&1; then
         curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -C - \
             "$url" -o "$file.partial"
+        sha256sum --check --quiet <<<"$sha  $file.partial" || {
+            rm -f "$file.partial"
+            exit 1
+        }
         mv "$file.partial" "$file"
     fi
-    echo "$sha  $file" | sha256sum --check --quiet
 }
 
 fetch "https://w1.fi/releases/wpa_supplicant-$version.tar.gz" \

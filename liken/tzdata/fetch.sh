@@ -115,21 +115,36 @@ mkdir -p "$cache"
 gpg --dearmor <"$here/tz.asc" >"$cache/tz.gpg.partial"
 mv "$cache/tz.gpg.partial" "$cache/tz.gpg"
 
-# Download once, verify every time. A cached tarball that stops
-# matching its signature or its digest fails the build.
+# A cached tarball that matches its line in DIGESTS is used as it is.
+# Anything else, a missing, torn, or changed file, is downloaded again
+# into a .partial file, which replaces the cached file only after it
+# matches. The files are small, so each download starts from the
+# first byte and never resumes a .partial that an earlier run left.
+# The signature file of each tarball is downloaded when it is missing,
+# and gpgv checks the pair on every run.
 for name in "tzcode$version.tar.gz" "tzdata$version.tar.gz"; do
-    for file in "$name" "$name.asc"; do
-        if [[ ! -f "$cache/$file" ]]; then
-            curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -C - \
-                "$releases/$file" -o "$cache/$file.partial"
-            mv "$cache/$file.partial" "$cache/$file"
-        fi
-    done
+    digest="$(awk -v n="$name" '$2 == n { print $1 }' "$here/DIGESTS")"
+    [[ -n "$digest" ]] || {
+        echo "fetch.sh: tzdata/DIGESTS lists no $name" >&2
+        exit 1
+    }
+    if ! sha256sum --check --status <<<"$digest  $cache/$name" >/dev/null 2>&1; then
+        curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
+            "$releases/$name" -o "$cache/$name.partial"
+        sha256sum --check --quiet <<<"$digest  $cache/$name.partial" || {
+            rm -f "$cache/$name.partial"
+            exit 1
+        }
+        mv "$cache/$name.partial" "$cache/$name"
+    fi
+    if [[ ! -f "$cache/$name.asc" ]]; then
+        curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
+            "$releases/$name.asc" -o "$cache/$name.asc.partial"
+        mv "$cache/$name.asc.partial" "$cache/$name.asc"
+    fi
     gpgv --keyring "$cache/tz.gpg" "$cache/$name.asc" "$cache/$name" 2>&1 |
         sed 's/^/  /'
 done
-
-(cd "$cache" && sha256sum --check --quiet "$here/DIGESTS")
 
 [[ -z "$sources_only" ]] || exit 0
 

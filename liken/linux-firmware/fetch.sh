@@ -79,9 +79,18 @@ if ! sha256sum --check --status <<<"$digest  $cache/$tarball" >/dev/null 2>&1; t
     # attempt from the bytes already on disk and repeated breaks
     # still converge on a complete file. The checksum below is what
     # decides whether the assembled bytes are good.
+    # The bytes go to a .partial file, which replaces the cached file
+    # only after it matches the digest. A .partial that does not match
+    # is deleted: when the file on disk is already full length, curl -C
+    # - gets a 416 answer, exits with success, and leaves the bytes as
+    # they are, so a bad full-length file would fail every later run.
     curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
-        --progress-bar -o "$cache/$tarball" "$url"
-    sha256sum --check --quiet <<<"$digest  $cache/$tarball"
+        --progress-bar -o "$cache/$tarball.partial" "$url"
+    sha256sum --check --quiet <<<"$digest  $cache/$tarball.partial" || {
+        rm -f "$cache/$tarball.partial"
+        exit 1
+    }
+    mv "$cache/$tarball.partial" "$cache/$tarball"
 fi
 
 # The extracted tree is large (about 1.9 GB), so extraction is

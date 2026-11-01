@@ -99,9 +99,18 @@ if ! sha512sum --check --status <<<"$digest  $cache/$image" >/dev/null 2>&1; the
     # partway through. -C - resumes each retry from the bytes already
     # on disk, so repeated breaks still converge on a complete file.
     # The checksum below decides whether the assembled bytes are good.
+    # The bytes go to a .partial file, which replaces the cached file
+    # only after it matches the digest. A .partial that does not match
+    # is deleted: when the file on disk is already full length, curl -C
+    # - gets a 416 answer, exits with success, and leaves the bytes as
+    # they are, so a bad full-length file would fail every later run.
     curl -fL --retry 5 --retry-all-errors --retry-delay 5 --max-time 1800 -C - \
-        --progress-bar -o "$cache/$image" "$url/$image"
-    sha512sum --check --quiet <<<"$digest  $cache/$image"
+        --progress-bar -o "$cache/$image.partial" "$url/$image"
+    sha512sum --check --quiet <<<"$digest  $cache/$image.partial" || {
+        rm -f "$cache/$image.partial"
+        exit 1
+    }
+    mv "$cache/$image.partial" "$cache/$image"
 fi
 ln -sfn "$image" "$cache/base.qcow2"
 

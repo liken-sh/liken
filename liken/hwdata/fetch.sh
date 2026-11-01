@@ -50,9 +50,18 @@ mkdir -p "$cache"
 
 if ! sha256sum --check --status <<<"$digest  $cache/pci.ids" >/dev/null 2>&1; then
     echo "downloading pci.ids $version"
+    # The bytes go to a .partial file, which replaces the cached file
+    # only after it matches the digest. A .partial that does not match
+    # is deleted: when the file on disk is already full length, curl -C
+    # - gets a 416 answer, exits with success, and leaves the bytes as
+    # they are, so a bad full-length file would fail every later run.
     curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
-        --progress-bar -o "$cache/pci.ids" "$url"
-    sha256sum --check --quiet <<<"$digest  $cache/pci.ids"
+        --progress-bar -o "$cache/pci.ids.partial" "$url"
+    sha256sum --check --quiet <<<"$digest  $cache/pci.ids.partial" || {
+        rm -f "$cache/pci.ids.partial"
+        exit 1
+    }
+    mv "$cache/pci.ids.partial" "$cache/pci.ids"
 fi
 
 rm -rf "$out"
