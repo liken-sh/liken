@@ -58,9 +58,17 @@ if ! sha256sum --check --status <<<"$digest  $deb" >/dev/null 2>&1; then
     sha1="$(curl -fsS --retry 3 "https://snapshot.debian.org/mr/binary/ovmf-generic/$encoded/binfiles" |
         python3 -c 'import json, sys; print(json.load(sys.stdin)["result"][0]["hash"])')"
     echo "downloading ovmf-generic $version"
+    # The bytes go to a .partial file, which replaces the cached file
+    # only after it matches the digest, so a torn or changed download
+    # never takes the name of a good one. The SHA1 above only finds the
+    # file; the pinned SHA256 decides whether its bytes are good.
     curl -fL --retry 5 --retry-all-errors --retry-delay 5 \
-        --progress-bar -o "$deb" "https://snapshot.debian.org/file/$sha1"
-    sha256sum --check --quiet <<<"$digest  $deb"
+        --progress-bar -o "$deb.partial" "https://snapshot.debian.org/file/$sha1"
+    sha256sum --check --quiet <<<"$digest  $deb.partial" || {
+        rm -f "$deb.partial"
+        exit 1
+    }
+    mv "$deb.partial" "$deb"
 fi
 
 rm -rf "$out"
