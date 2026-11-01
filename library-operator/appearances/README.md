@@ -35,13 +35,13 @@ installation.
 To run `detect` or `match` on a workstation, unpack Intel's runtime
 archive and point the loader at it:
 
-    curl -LO https://storage.openvinotoolkit.org/repositories/openvino/packages/2026.4.1/linux/openvino_toolkit_ubuntu24_2026.4.1.22982.07f9c262b05_x86_64.tgz
-    tar xzf openvino_toolkit_ubuntu24_2026.4.1.22982.07f9c262b05_x86_64.tgz
-    runtime=$PWD/openvino_toolkit_ubuntu24_2026.4.1.22982.07f9c262b05_x86_64/runtime
+    curl -LO https://storage.openvinotoolkit.org/repositories/openvino/packages/2026.4.1/linux/openvino_toolkit_ubuntu26_2026.4.1.22982.07f9c262b05_x86_64.tgz
+    tar xzf openvino_toolkit_ubuntu26_2026.4.1.22982.07f9c262b05_x86_64.tgz
+    runtime=$PWD/openvino_toolkit_ubuntu26_2026.4.1.22982.07f9c262b05_x86_64/runtime
     export LD_LIBRARY_PATH=$runtime/lib/intel64:$runtime/3rdparty/tbb/lib
 
 The archive's SHA-256 is
-`772ce52d9b0aa375c77d391fccea71450d889c98b9af197bb8f05167a9dabd87`. The
+`148fbc5c8f213718861a85e323b5c137c53674b878596413cb2b402dc4caab7e`. The
 GPU also needs Intel's OpenCL runtime, `intel-opencl-icd` on Debian and
 Ubuntu.
 

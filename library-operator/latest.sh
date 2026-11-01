@@ -31,7 +31,7 @@
 # Usage:
 #   library-operator/latest.sh          report the four pins
 #   library-operator/latest.sh --bump   write the newest OpenVINO
-#                                       release of the pinned channel
+#                                       release of the newest channel
 #   library-operator/latest.sh --bump compute-runtime
 #                                       write the newest compute-runtime
 #                                       release, its gmmlib, and the
@@ -134,20 +134,27 @@ openvino)
         echo "latest.sh: GitHub or storage.openvinotoolkit.org did not answer" >&2
         exit 1
     }
-    [[ "$openvino_latest" != "$openvino" ]] || {
-        echo "openvino $openvino is current"
-        exit 0
-    }
-    read -r dir file < <(grep " openvino_toolkit_${channel}_" "$work/archives") || {
-        echo "latest.sh: OpenVINO $openvino_latest has no $channel archive for x86_64" >&2
+    [[ -n "$newest_channel" ]] || {
+        echo "latest.sh: OpenVINO $openvino_latest has no Ubuntu archive for x86_64" >&2
         exit 1
     }
+    # The bump takes the newest channel as well as the newest release,
+    # so a pin on an older Ubuntu archive moves even when its release
+    # is current.
+    [[ "$openvino_latest" != "$openvino" || "$newest_channel" != "$channel" ]] || {
+        echo "openvino $openvino ($channel) is current"
+        exit 0
+    }
+    read -r dir file < <(grep " openvino_toolkit_${newest_channel}_" "$work/archives")
     new="https://storage.openvinotoolkit.org/repositories/openvino/packages/$dir/linux/$file"
     sha256="$(curl -fsSL --retry 3 --max-time 60 "$new.sha256" | awk -v f="$file" '$2 == f { print $1 }')"
+    # appearances/README.md gives the archive's URL, its file names, and
+    # its SHA-256, for a workstation that unpacks it by hand.
+    old_sha256="$(grep -B1 -F "$openvino_url" "$dockerfile" | sed -nE 's/.*--checksum=sha256:([0-9a-f]{64}).*/\1/p')"
     pin "$openvino_url" "$new" "$sha256"
-    sed -i "s|$openvino_file|$file|g; s|${openvino_file%.tgz}|${file%.tgz}|g; s|/packages/[^/]*/linux/|/packages/$dir/linux/|" \
+    sed -i "s|$openvino_file|$file|g; s|${openvino_file%.tgz}|${file%.tgz}|g; s|/packages/[^/]*/linux/|/packages/$dir/linux/|; s|$old_sha256|$sha256|g" \
         "$here/appearances/README.md"
-    echo "openvino: $openvino -> $openvino_latest"
+    echo "openvino: $openvino ($channel) -> $openvino_latest ($newest_channel)"
     echo "the release's .sha256 file stands behind these bytes"
     echo "next: move the libopenvino and libtbb file names in appearances/inference-closure.sh,"
     echo "then docker buildx bake library-operator-appearances at the top of the repository"
