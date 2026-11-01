@@ -88,7 +88,7 @@ FROM debian AS runtime
 
 # OpenVINO's runtime archive, from Intel, for the newest Ubuntu release
 # that Intel builds it for. latest.sh beside this file reports the pin
-# and moves it.
+# and moves it, here and in pin.toml.
 ADD --checksum=sha256:148fbc5c8f213718861a85e323b5c137c53674b878596413cb2b402dc4caab7e \
     https://storage.openvinotoolkit.org/repositories/openvino/packages/2026.4.1/linux/openvino_toolkit_ubuntu26_2026.4.1.22982.07f9c262b05_x86_64.tgz \
     /openvino.tgz
@@ -133,12 +133,28 @@ RUN oras pull --plain-http="$MODELS_PLAIN_HTTP" --output /models \
     && sha256sum -c /pin/models.sha256 \
     && test "$(ls | wc -l)" -eq "$(wc -l < /pin/models.sha256)"
 
+# syft finds no package in OpenVINO's archive or in a model file, so the
+# image carries a CycloneDX record of both that image-sbom writes from
+# pin.toml beside this file and the one beside the models, and syft
+# copies its components into the image's SBOM. Intel's Debian packages
+# need no record, because inference-closure.sh writes their dpkg
+# records. The build context manifest is toolchains/manifest, the
+# reader of the pin manifests.
+FROM golang AS record
+WORKDIR /src
+COPY --from=manifest . ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /image-sbom ./image-sbom
+COPY pin.toml /pins/openvino.toml
+COPY --from=appearances models/pin.toml /pins/models.toml
+RUN /image-sbom -out /library-operator-appearances.cdx.json /pins/openvino.toml /pins/models.toml
+
 # The ffmpeg base is a closure on scratch, with no shell, so every
 # layer below is a copy.
 FROM ffmpeg
 COPY --from=runtime /out /
 # The license files and the notice travel with the weights.
 COPY --from=models /models /usr/share/appearances/models
+COPY --from=record /library-operator-appearances.cdx.json /usr/share/doc/liken/library-operator-appearances.cdx.json
 COPY --from=build /src/target/release/appearances /appearances
 COPY --from=build /notices /
 # The worker makes one kind of request, the rescan, over plain HTTP to the

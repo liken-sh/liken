@@ -89,11 +89,13 @@ smoke = "library-operator/smoke/library-operator-media-browser.sh"
 # The image of `appearances` builds on the ffmpeg base and pulls the face
 # models as an OCI artifact by digest. It carries the pod program beside
 # the tool, so it builds from this module's Go files like the ffmpeg
-# image, and takes the crate's directory as a named context.
+# image, and takes the crate's directory as a named context. The
+# context manifest is toolchains/manifest, for image-sbom, which writes
+# the image's SBOM record of OpenVINO and the models.
 [[outputs.images]]
 name = "library-operator-appearances"
 file = "Dockerfile.appearances"
-contexts = { kubernetes = "kubernetes", appearances = "library-operator/appearances", notices = "notices", toolchains = "toolchains" }
+contexts = { kubernetes = "kubernetes", appearances = "library-operator/appearances", notices = "notices", toolchains = "toolchains", manifest = "toolchains/manifest" }
 smoke = "library-operator/smoke/library-operator-appearances.sh"
 
 [[outputs.images]]

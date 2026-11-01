@@ -25,3 +25,7 @@ LICENSE
 # The report of the appearances image's pins, which runs on a
 # workstation and never in a build.
 latest.sh
+# The manifest of the appearances image's pins. Only that image reads
+# it, through Dockerfile.appearances.dockerignore, so a bump of
+# OpenVINO rebuilds no Go image.
+pin.toml

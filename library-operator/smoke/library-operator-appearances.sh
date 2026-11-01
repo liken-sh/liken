@@ -24,12 +24,14 @@ set -euo pipefail
 image=$1
 
 # The image must hold the notices of the third-party software in it,
-# as notices/check.sh describes.
+# as notices/check.sh describes, and the SBOM record of OpenVINO and
+# the models, in which syft finds no package of its own.
 "$(dirname "$0")/../../notices/check.sh" "$image" \
   usr/share/doc/go/LICENSE \
   usr/share/doc/rust/COPYRIGHT-library.html \
   usr/share/doc/openvino/EULA.txt \
-  usr/share/doc/intel-graphics-compiler/NOTICES.txt
+  usr/share/doc/intel-graphics-compiler/NOTICES.txt \
+  usr/share/doc/liken/library-operator-appearances.cdx.json
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT

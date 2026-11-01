@@ -1,0 +1,28 @@
+# The two face models that the appearances image ships, for the SBOM
+# record that the image carries. push.sh downloads each model from
+# its url and pushes it in the OCI artifact that the image build pulls
+# by digest. models.sha256 checks the same files by name, and `ci pins`
+# fails when a digest there differs from this file. The models come
+# from one commit of OpenCV Zoo, so no latest.sh moves them, and
+# NVD lists no CPE for either. NOTICE beside this file gives the
+# authors.
+
+# YuNet, the face detector. Its LICENSE in OpenCV Zoo is the MIT
+# license.
+[face_detection_yunet]
+version = "2023mar"
+url = "https://media.githubusercontent.com/media/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
+sha256 = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
+purl = "pkg:generic/face_detection_yunet@2023mar?download_url=https://media.githubusercontent.com/media/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_detection_yunet/face_detection_yunet_2023mar.onnx&checksum=sha256:8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
+license = "MIT"
+type = "machine-learning-model"
+
+# SFace, the face embedding model. Its LICENSE in OpenCV Zoo is the
+# Apache License 2.0.
+[face_recognition_sface]
+version = "2021dec"
+url = "https://media.githubusercontent.com/media/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_recognition_sface/face_recognition_sface_2021dec.onnx"
+sha256 = "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"
+purl = "pkg:generic/face_recognition_sface@2021dec?download_url=https://media.githubusercontent.com/media/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_recognition_sface/face_recognition_sface_2021dec.onnx&checksum=sha256:0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"
+license = "Apache-2.0"
+type = "machine-learning-model"

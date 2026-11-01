@@ -39,9 +39,11 @@ source "$here/../../../toolchains/pin.sh"
 tag=yunet-2023mar-sface-2021dec
 
 # OpenCV Zoo keeps the ONNX files in Git LFS, so the raw URL of a model
-# returns the LFS pointer, and the media URL returns the file.
+# returns the LFS pointer, and the media URL returns the file. pin.toml
+# beside this script holds the media URL of each model, which the
+# image's SBOM record names, and the license files come from the same
+# commit.
 zoo=47534e27c9851bb1128ccc0102f1145e27f23f98
-media=https://media.githubusercontent.com/media/opencv/opencv_zoo/$zoo/models
 raw=https://raw.githubusercontent.com/opencv/opencv_zoo/$zoo/models
 
 oras_image=$(image_of oras)
@@ -52,9 +54,9 @@ trap 'rm -rf "$work"' EXIT
 fetch() {
 	curl --fail --silent --show-error --location --retry 3 --output "$work/$2" "$1"
 }
-fetch "$media/face_detection_yunet/face_detection_yunet_2023mar.onnx" face_detection_yunet_2023mar.onnx
+fetch "$(pin_value face_detection_yunet url "$here/pin.toml")" face_detection_yunet_2023mar.onnx
 fetch "$raw/face_detection_yunet/LICENSE" face_detection_yunet_2023mar.LICENSE
-fetch "$media/face_recognition_sface/face_recognition_sface_2021dec.onnx" face_recognition_sface_2021dec.onnx
+fetch "$(pin_value face_recognition_sface url "$here/pin.toml")" face_recognition_sface_2021dec.onnx
 fetch "$raw/face_recognition_sface/LICENSE" face_recognition_sface_2021dec.LICENSE
 cp "$here/NOTICE" "$work/NOTICE"
 (cd "$work" && sha256sum --check --strict "$here/models.sha256")

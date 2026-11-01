@@ -24,7 +24,10 @@
 #
 # A bump reads each checksum from the file or release text that
 # upstream publishes beside the bytes, and writes the URL and the
-# checksum into Dockerfile.appearances. Intel signs none of these
+# checksum into Dockerfile.appearances. The OpenVINO bump also writes
+# them, with the purl and the CPE, into pin.toml, which the image's
+# SBOM record reads. Intel's Debian packages need no entry, because the
+# image holds their dpkg records. Intel signs none of these
 # files: storage.openvinotoolkit.org publishes each archive with a
 # .sha256 file and no signature, compute-runtime publishes a ww<week>.sum
 # file and no signature, and the compiler's sums are in its release
@@ -141,6 +144,9 @@ openvino)
     # its SHA-256, for a workstation that unpacks it by hand.
     old_sha256="$(grep -B1 -F "$openvino_url" "$dockerfile" | sed -nE 's/.*--checksum=sha256:([0-9a-f]{64}).*/\1/p')"
     pin "$openvino_url" "$new" "$sha256"
+    set_pin openvino "$openvino_latest" "$new" "$sha256" \
+        "$(generic_purl openvino "$openvino_latest" "$new" "$sha256")" \
+        "cpe:2.3:a:intel:openvino:$openvino_latest:*:*:*:*:*:*:*"
     sed -i "s|$openvino_file|$file|g; s|${openvino_file%.tgz}|${file%.tgz}|g; s|/packages/[^/]*/linux/|/packages/$dir/linux/|; s|$old_sha256|$sha256|g" \
         "$here/appearances/README.md"
     bumped openvino "$openvino ($channel)" "$openvino_latest ($newest_channel)"

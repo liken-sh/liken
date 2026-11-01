@@ -1,0 +1,25 @@
+# The files that Dockerfile.appearances fetches and the image ships,
+# for the SBOM record that the image carries. latest.sh --bump writes
+# the version, url, sha256, purl, and cpe, and toolchains/pin.sh
+# describes each field. The Dockerfile fetches the same file by its
+# checksum, and `ci pins` fails when its URL or digest differs from
+# this entry.
+#
+# Intel's OpenCL driver, gmmlib, and the graphics compiler have no
+# entry here. Each one is a Debian package, and inference-closure.sh
+# writes the package's control file into /var/lib/dpkg/status.d, where
+# syft reads it.
+
+# OpenVINO's runtime archive. docs/licensing/readme.txt in the archive
+# puts the runtime's libraries under the Intel OpenVINO Distribution
+# License, in docs/licensing/EULA.txt, and the headers and oneTBB under
+# the Apache License 2.0. The image carries those files under
+# /usr/share/doc/openvino/.
+[openvino]
+version = "2026.4.1"
+url = "https://storage.openvinotoolkit.org/repositories/openvino/packages/2026.4.1/linux/openvino_toolkit_ubuntu26_2026.4.1.22982.07f9c262b05_x86_64.tgz"
+sha256 = "148fbc5c8f213718861a85e323b5c137c53674b878596413cb2b402dc4caab7e"
+purl = "pkg:generic/openvino@2026.4.1?download_url=https://storage.openvinotoolkit.org/repositories/openvino/packages/2026.4.1/linux/openvino_toolkit_ubuntu26_2026.4.1.22982.07f9c262b05_x86_64.tgz&checksum=sha256:148fbc5c8f213718861a85e323b5c137c53674b878596413cb2b402dc4caab7e"
+license = "LicenseRef-Intel-OpenVINO-Distribution-License AND Apache-2.0"
+type = "library"
+cpe = "cpe:2.3:a:intel:openvino:2026.4.1:*:*:*:*:*:*:*"
