@@ -215,14 +215,19 @@ ovmf: $(OVMF_CODE)
 $(OVMF_CODE) $(OVMF_CODE_SECBOOT) $(OVMF_VARS) &: firmware/VERSION firmware/fetch.sh
 	firmware/fetch.sh
 
+# The capsule firmware's compiler comes from the builder image, which
+# builds FROM the `ubuntu` entry of toolchains/images.toml. So a new
+# entry there is a new compiler, and the firmware builds again.
+CAPSULE_INPUTS := firmware/capsule/build.sh firmware/capsule/builder.sh \
+	firmware/capsule/Dockerfile firmware/capsule/ovmf-capsule.patch \
+	../../toolchains/images.toml
+
 OVMF_CODE_CAPSULE := firmware/capsule/dist/OVMF_CODE_4M.fd
-$(OVMF_CODE_CAPSULE): firmware/capsule/build.sh firmware/capsule/builder.sh \
-		firmware/capsule/Dockerfile firmware/capsule/ovmf-capsule.patch
+$(OVMF_CODE_CAPSULE): $(CAPSULE_INPUTS)
 	firmware/capsule/build.sh
 
 OVMF_CODE_ON_DISK := firmware/capsule/dist/on-disk/OVMF_CODE_4M.fd
-$(OVMF_CODE_ON_DISK): firmware/capsule/build.sh firmware/capsule/builder.sh \
-		firmware/capsule/Dockerfile firmware/capsule/ovmf-capsule.patch
+$(OVMF_CODE_ON_DISK): $(CAPSULE_INPUTS)
 	CAPSULE_ON_DISK=1 firmware/capsule/build.sh
 
 guests/$(NODE)/OVMF_VARS.fd: | $(OVMF_VARS)
