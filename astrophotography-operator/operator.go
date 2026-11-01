@@ -52,6 +52,11 @@ type operator struct {
 	// wrote or read, so a pass never acts on a store's copy that is
 	// older than its own last write (informer.ReadOne).
 	targetVersions *memo.Versions
+	// deploymentVersions and serviceVersions record the version of each
+	// workload's Deployment and Service that the operator wrote or read,
+	// so a pass neither creates one again nor replaces one from a copy
+	// older than its own last write (workload.go).
+	deploymentVersions, serviceVersions *memo.Versions
 	// indiDialer opens each runner's connection to its telescope's INDI
 	// server, and workerClient sends each request to a reservation's
 	// worker. A test replaces both with fakes in memory.
@@ -70,12 +75,14 @@ type operator struct {
 func newOperator(client *apiclient.Client, recorder *events.Recorder, m *metrics, logs io.Writer) *operator {
 	return &operator{
 		client: client, recorder: recorder, metrics: m, logs: logs, changed: newBell(),
-		targetVersions: memo.New(),
-		indiDialer:     &net.Dialer{Timeout: indi.DialTimeout},
-		workerClient:   &http.Client{},
-		centering:      plateCentering{},
-		guiding:        newPHD2Guiding(),
-		phd2Dialer:     &net.Dialer{Timeout: phd2.DialTimeout},
+		targetVersions:     memo.New(),
+		deploymentVersions: memo.New(),
+		serviceVersions:    memo.New(),
+		indiDialer:         &net.Dialer{Timeout: indi.DialTimeout},
+		workerClient:       &http.Client{},
+		centering:          plateCentering{},
+		guiding:            newPHD2Guiding(),
+		phd2Dialer:         &net.Dialer{Timeout: phd2.DialTimeout},
 	}
 }
 

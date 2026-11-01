@@ -2,8 +2,8 @@ package main
 
 // What the tests of the solvers and the workers read of the fake API
 // server's writes (fakeobjects_test.go): each write to a collection,
-// one object as a Go value, and an API server that refuses every write
-// for a while.
+// one object as a Go value, and an API server that refuses every write,
+// or every read of one object, for a while.
 
 import (
 	"encoding/json"
@@ -17,6 +17,14 @@ func (a *fakeAPI) refuse(refusing bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.refusing = refusing
+}
+
+// refuseReads makes the reads of one object fail with 500, or succeed
+// again.
+func (a *fakeAPI) refuseReads(refusing bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.refusingReads = refusing
 }
 
 // writes answers each request that wrote to a collection, as its

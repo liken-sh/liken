@@ -39,7 +39,7 @@ func (a *fakeAPI) serveObject(w http.ResponseWriter, r *http.Request) bool {
 	if _, held := a.collections[path]; !held || (name == "") != (r.Method == http.MethodPost) {
 		return false
 	}
-	if a.refusing && r.Method != http.MethodGet {
+	if (a.refusing && r.Method != http.MethodGet) || (a.refusingReads && r.Method == http.MethodGet) {
 		answerStatus(w, http.StatusInternalServerError, "InternalError")
 		return true
 	}

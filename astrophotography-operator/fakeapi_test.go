@@ -68,11 +68,18 @@ type fakeAPI struct {
 	// absent holds the collections whose kind the cluster does not
 	// serve, which answer 404 the way an uninstalled CRD does.
 	absent map[string]bool
+	// lagging holds the collections whose watches deliver no change
+	// until the test calls catchUp, the way a watch delivers a write some
+	// time after the API server answers it.
+	lagging map[string]bool
 	// recorded holds the Events that the operator writes.
 	recorded eventstest.Events
 	// refusing makes every write to a collection answer 500, the way an
 	// API server that cannot reach etcd does (fakeobjects_test.go).
 	refusing bool
+	// refusingReads makes every read of one object answer 500, and
+	// leaves the lists and the watches alone (fakereads_test.go).
+	refusingReads bool
 	// objectHooks script the status writes (fakewrites_test.go).
 	objectHooks
 }
@@ -83,6 +90,7 @@ func startFakeAPI(t *testing.T) *fakeAPI {
 		objects:     map[string]map[string]map[string]any{},
 		changed:     make(chan struct{}),
 		absent:      map[string]bool{},
+		lagging:     map[string]bool{},
 	}
 	for _, w := range watches() {
 		c := collectionOf(w)
@@ -112,6 +120,24 @@ func (a *fakeAPI) drop(path string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.absent[path] = true
+}
+
+// lag makes the watches of a collection deliver no change, while reads
+// and writes of the collection still answer at once.
+func (a *fakeAPI) lag(path string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.lagging[path] = true
+}
+
+// catchUp makes the watches of a lagging collection deliver every
+// change they held back, in order.
+func (a *fakeAPI) catchUp(path string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.lagging, path)
+	close(a.changed)
+	a.changed = make(chan struct{})
 }
 
 // put stores an object in a collection, created or replaced, and tells
@@ -270,7 +296,7 @@ func (a *fakeAPI) watch(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
 		changed := a.changed
 		for _, event := range a.events {
-			if event.collection == c.path && event.version > from {
+			if event.collection == c.path && event.version > from && !a.lagging[c.path] {
 				if selects(query, event.object) {
 					writeEvent(w, event.kind, event.object)
 				}

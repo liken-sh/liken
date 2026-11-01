@@ -9,6 +9,7 @@ package main
 
 import (
 	"github.com/liken-sh/liken/astrophotography-operator/astrophotography"
+	"github.com/liken-sh/liken/kubernetes/memo"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
@@ -27,6 +28,10 @@ type deployment struct {
 	Metadata   objectMeta     `json:"metadata"`
 	Spec       deploymentSpec `json:"spec"`
 }
+
+// GetObjectMeta answers the metadata, for the memo of the operator's
+// writes (workload.go).
+func (d *deployment) GetObjectMeta() memo.Meta { return &d.Metadata.ObjectMeta }
 
 type deploymentSpec struct {
 	Replicas *int32        `json:"replicas"`
@@ -68,6 +73,10 @@ type service struct {
 	Metadata   objectMeta  `json:"metadata"`
 	Spec       serviceSpec `json:"spec"`
 }
+
+// GetObjectMeta answers the metadata, for the memo of the operator's
+// writes (workload.go).
+func (s *service) GetObjectMeta() memo.Meta { return &s.Metadata.ObjectMeta }
 
 type serviceSpec struct {
 	Selector map[string]string `json:"selector"`
