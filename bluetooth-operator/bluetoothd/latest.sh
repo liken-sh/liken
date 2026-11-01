@@ -17,13 +17,20 @@
 # clearsigns. The BlueZ bump copies a digest only from a sums file
 # whose signature verifies against the autosigner's key:
 # trust/keys/kernel-org-digest.sh makes the check, and
-# trust/keys/README.md says where the key comes from. dbus publishes
-# its tarballs on dbus.freedesktop.org, with a .sha256sum file beside
-# each one. dbus
-# numbers a development series with an odd minor version, such as
-# 1.15, and a stable series with an even one, so the report reads the
-# even series only. A bump reads each checksum from upstream's own
-# file and writes it into the Dockerfile.
+# trust/keys/README.md says where the key comes from.
+#
+# dbus publishes its tarballs on dbus.freedesktop.org, each with a
+# detached signature beside it, and signs no checksum file. So the dbus
+# bump downloads the tarball and its .asc, verifies the signature
+# against dbus.asc beside this script, and writes the digest of the
+# verified bytes. dbus.asc is the key of Simon McVittie, who signs the
+# dbus releases, exported alone from debian/upstream/signing-key.asc
+# of Debian's dbus package, and keys.openpgp.org serves the same
+# primary key. The bump accepts a signature from that key only, so a
+# release that another maintainer signs stops the bump until a person
+# checks the new key and adds it. dbus numbers a development series
+# with an odd minor version, such as 1.15, and a stable series with an
+# even one, so the report reads the even series only.
 #
 # The two projects release on separate schedules, so each one bumps
 # on its own.
@@ -38,76 +45,62 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 dockerfile="$here/Dockerfile"
 
 bluez_archive="https://mirrors.edge.kernel.org/pub/linux/bluetooth"
 dbus_archive="https://dbus.freedesktop.org/releases/dbus"
+# The fingerprint of the primary key in dbus.asc.
+dbus_signer="DA98F25C0871C49A59EAFF2C4DE8FF2A63C7CC90"
 
 arg() { sed -n "s/^ARG $1=//p" "$dockerfile"; }
-row() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$@"; }
 
 bluez="$(arg BLUEZ_VERSION)"
 dbus="$(arg DBUS_VERSION)"
 
-bluez_latest="$(curl -fsS --retry 3 --max-time 60 "$bluez_archive/" |
+bluez_latest="$(fetch_text "$bluez_archive/" |
     grep -oE 'bluez-[0-9]+\.[0-9]+\.tar\.xz' |
     sed -e 's|^bluez-||' -e 's|\.tar\.xz$||' |
     sort -uV | tail -1)" || bluez_latest=""
-dbus_latest="$(curl -fsS --retry 3 --max-time 60 "$dbus_archive/" |
+dbus_latest="$(fetch_text "$dbus_archive/" |
     grep -oE 'dbus-[0-9]+\.[0-9]+\.[0-9]+\.tar\.xz"' |
     sed -e 's|^dbus-||' -e 's|\.tar\.xz"$||' |
     awk -F. '$2 % 2 == 0' | sort -uV | tail -1)" || dbus_latest=""
 
-row bluez "$bluez" "${bluez_latest:-?}" - - - \
+row bluez "$bluez" "$bluez_latest" - - - \
     "newest release on kernel.org; built static against musl in bluetoothd/Dockerfile"
-row dbus "$dbus" "${dbus_latest:-?}" - - - \
+row dbus "$dbus" "$dbus_latest" - - - \
     "newest stable release on dbus.freedesktop.org; bluetoothd links its libdbus-1.a"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
 case "${2:-bluez}" in
 bluez)
-    [[ -n "$bluez_latest" ]] || {
-        echo "latest.sh: kernel.org did not answer" >&2
-        exit 1
-    }
-    [[ "$bluez_latest" != "$bluez" ]] || {
-        echo "bluez $bluez is current"
-        exit 0
-    }
+    bump_needed bluez "$bluez" "$bluez_latest" || exit 0
     tarball="bluez-$bluez_latest.tar.xz"
     sha256="$("$here/../../trust/keys/kernel-org-digest.sh" "$bluez_archive/sha256sums.asc" "$tarball")"
-    sed -i -e "s|^ARG BLUEZ_VERSION=.*|ARG BLUEZ_VERSION=$bluez_latest|" \
-        -e "s|^ARG BLUEZ_SHA256=.*|ARG BLUEZ_SHA256=$sha256|" "$dockerfile"
-    echo "bluez: $bluez -> $bluez_latest"
+    set_line "$dockerfile" '^ARG BLUEZ_VERSION=' "ARG BLUEZ_VERSION=$bluez_latest"
+    set_line "$dockerfile" '^ARG BLUEZ_SHA256=' "ARG BLUEZ_SHA256=$sha256"
+    bumped bluez "$bluez" "$bluez_latest"
     echo "the digest came from sha256sums.asc, signed by kernel.org's checksum autosigner"
-    echo "next: docker buildx bake bluetoothd at the top of the repository; the build stops"
+    next_step "docker buildx bake bluetoothd at the top of the repository; the build stops"
     echo "when a patch in patches/bluez/ no longer applies, and patches/README.md says what to do"
     ;;
 dbus)
-    [[ -n "$dbus_latest" ]] || {
-        echo "latest.sh: dbus.freedesktop.org did not answer" >&2
-        exit 1
-    }
-    [[ "$dbus_latest" != "$dbus" ]] || {
-        echo "dbus $dbus is current"
-        exit 0
-    }
+    bump_needed dbus "$dbus" "$dbus_latest" || exit 0
     tarball="dbus-$dbus_latest.tar.xz"
-    sha256="$(curl -fsSL --retry 3 --max-time 60 "$dbus_archive/$tarball.sha256sum" |
-        awk -v t="$tarball" '$2 == t || $2 == "*" t { print $1 }')"
-    [[ "$sha256" =~ ^[0-9a-f]{64}$ ]] || {
-        echo "latest.sh: $dbus_archive/$tarball.sha256sum names no checksum for $tarball" >&2
-        exit 1
-    }
-    sed -i -e "s|^ARG DBUS_VERSION=.*|ARG DBUS_VERSION=$dbus_latest|" \
-        -e "s|^ARG DBUS_SHA256=.*|ARG DBUS_SHA256=$sha256|" "$dockerfile"
-    echo "dbus: $dbus -> $dbus_latest"
-    echo "dbus.freedesktop.org's sha256sum file stands behind these bytes"
-    echo "next: docker buildx bake bluetoothd at the top of the repository"
+    work="$(mktemp -d)"
+    trap 'rm -rf "$work"' EXIT
+    fetch_file "$dbus_archive/$tarball" "$work/$tarball"
+    fetch_file "$dbus_archive/$tarball.asc" "$work/$tarball.asc"
+    verify_signature --signer "$dbus_signer" "$here/dbus.asc" "$work/$tarball.asc" "$work/$tarball"
+    sha256="$(sha256sum "$work/$tarball" | cut -d' ' -f1)"
+    set_line "$dockerfile" '^ARG DBUS_VERSION=' "ARG DBUS_VERSION=$dbus_latest"
+    set_line "$dockerfile" '^ARG DBUS_SHA256=' "ARG DBUS_SHA256=$sha256"
+    bumped dbus "$dbus" "$dbus_latest"
+    echo "the digest came from the tarball, whose signature verified against dbus.asc"
+    next_step "docker buildx bake bluetoothd at the top of the repository"
     ;;
-*)
-    echo "latest.sh: no pin named $2; try bluez or dbus" >&2
-    exit 1
-    ;;
+*) fail "no pin named $2; try bluez or dbus" ;;
 esac
