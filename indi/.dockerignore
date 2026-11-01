@@ -13,3 +13,5 @@ smoke/
 # inputs of the binary.
 shim/*_test.go
 shim/Makefile
+# The pin's report, which runs on a workstation and never in a build.
+latest.sh

@@ -106,9 +106,19 @@ newest_version() {
 
 row snapshot "$pinned" "${latest:-?}" "$series" "${newest:-?}" - \
     "the date of the Ubuntu, mutlaqja/ppa, and pch/phd2 snapshots"
+# The PPA versions indi-3rdparty-drivers with the number in the
+# metapackage's debian/indi-3rdparty-drivers/changelog, which does not
+# move with the indi-3rdparty releases. The date after the + is when
+# the PPA built it, so the date, compared with the release tags of
+# indilib/indi-3rdparty, tells which release a version holds.
+note_of() {
+    package_of "$1" | awk '{ print $2 " from " $1 }'
+    [[ "$1" != indi-3rdparty ]] || echo "; its number is the packaging's, and its build date names the release"
+}
+
 upstreams | while read -r name version; do
     now="$(newest_version "$name")"
-    row "  $name" "$version" "${now:-?}" - - - "$(package_of "$name" | awk '{ print $2 " from " $1 }')"
+    row "  $name" "$version" "${now:-?}" - - - "$(note_of "$name" | paste -sd '')"
 done
 
 [[ "${1:-}" == "--bump" ]] || exit 0
