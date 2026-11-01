@@ -187,11 +187,11 @@ target "indi" {
   args = {
     VERSION = "20261031"
   }
-  tags       = ["ghcr.io/liken-sh/indi:20261031-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi:buildcache-20261031-1"]
+  tags       = ["ghcr.io/liken-sh/indi:20261031-2"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi:buildcache-20261031-2"]
   cache-to = concat(
     CACHE_WRITE == "indi" ? ["type=registry,ref=ghcr.io/liken-sh/indi:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi:buildcache-20261031-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -208,11 +208,11 @@ target "indi-simulators" {
   args = {
     VERSION = "20261031"
   }
-  tags       = ["ghcr.io/liken-sh/indi-simulators:20261031-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-simulators:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-simulators:buildcache-20261031-1"]
+  tags       = ["ghcr.io/liken-sh/indi-simulators:20261031-2"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-simulators:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-simulators:buildcache-20261031-2"]
   cache-to = concat(
     CACHE_WRITE == "indi-simulators" ? ["type=registry,ref=ghcr.io/liken-sh/indi-simulators:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-simulators" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-simulators:buildcache-20261031-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-simulators" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-simulators:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -229,11 +229,11 @@ target "indi-phd2" {
   args = {
     VERSION = "20261031"
   }
-  tags       = ["ghcr.io/liken-sh/indi-phd2:20261031-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-phd2:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-phd2:buildcache-20261031-1"]
+  tags       = ["ghcr.io/liken-sh/indi-phd2:20261031-2"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-phd2:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-phd2:buildcache-20261031-2"]
   cache-to = concat(
     CACHE_WRITE == "indi-phd2" ? ["type=registry,ref=ghcr.io/liken-sh/indi-phd2:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-phd2" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-phd2:buildcache-20261031-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-phd2" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-phd2:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -250,11 +250,11 @@ target "indi-open" {
   args = {
     VERSION = "20261031"
   }
-  tags       = ["ghcr.io/liken-sh/indi-open:20261031-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-open:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-open:buildcache-20261031-1"]
+  tags       = ["ghcr.io/liken-sh/indi-open:20261031-2"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-open:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-open:buildcache-20261031-2"]
   cache-to = concat(
     CACHE_WRITE == "indi-open" ? ["type=registry,ref=ghcr.io/liken-sh/indi-open:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-open" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-open:buildcache-20261031-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-open" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-open:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -271,11 +271,11 @@ target "indi-zwo" {
   args = {
     VERSION = "20261031"
   }
-  tags       = ["ghcr.io/liken-sh/indi-zwo:20261031-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-zwo:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-zwo:buildcache-20261031-1"]
+  tags       = ["ghcr.io/liken-sh/indi-zwo:20261031-2"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-zwo:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-zwo:buildcache-20261031-2"]
   cache-to = concat(
     CACHE_WRITE == "indi-zwo" ? ["type=registry,ref=ghcr.io/liken-sh/indi-zwo:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-zwo" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-zwo:buildcache-20261031-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-zwo" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-zwo:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -292,11 +292,11 @@ target "indi-qhy" {
   args = {
     VERSION = "20261031"
   }
-  tags       = ["ghcr.io/liken-sh/indi-qhy:20261031-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-qhy:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-qhy:buildcache-20261031-1"]
+  tags       = ["ghcr.io/liken-sh/indi-qhy:20261031-2"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-qhy:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-qhy:buildcache-20261031-2"]
   cache-to = concat(
     CACHE_WRITE == "indi-qhy" ? ["type=registry,ref=ghcr.io/liken-sh/indi-qhy:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-qhy" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-qhy:buildcache-20261031-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-qhy" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-qhy:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -313,11 +313,11 @@ target "indi-playerone" {
   args = {
     VERSION = "20261031"
   }
-  tags       = ["ghcr.io/liken-sh/indi-playerone:20261031-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-playerone:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-playerone:buildcache-20261031-1"]
+  tags       = ["ghcr.io/liken-sh/indi-playerone:20261031-2"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-playerone:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-playerone:buildcache-20261031-2"]
   cache-to = concat(
     CACHE_WRITE == "indi-playerone" ? ["type=registry,ref=ghcr.io/liken-sh/indi-playerone:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-playerone" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-playerone:buildcache-20261031-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-playerone" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-playerone:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -334,11 +334,11 @@ target "indi-svbony" {
   args = {
     VERSION = "20261031"
   }
-  tags       = ["ghcr.io/liken-sh/indi-svbony:20261031-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-svbony:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-svbony:buildcache-20261031-1"]
+  tags       = ["ghcr.io/liken-sh/indi-svbony:20261031-2"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-svbony:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-svbony:buildcache-20261031-2"]
   cache-to = concat(
     CACHE_WRITE == "indi-svbony" ? ["type=registry,ref=ghcr.io/liken-sh/indi-svbony:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-svbony" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-svbony:buildcache-20261031-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-svbony" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-svbony:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -355,11 +355,11 @@ target "indi-atik" {
   args = {
     VERSION = "20261031"
   }
-  tags       = ["ghcr.io/liken-sh/indi-atik:20261031-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-atik:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-atik:buildcache-20261031-1"]
+  tags       = ["ghcr.io/liken-sh/indi-atik:20261031-2"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-atik:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-atik:buildcache-20261031-2"]
   cache-to = concat(
     CACHE_WRITE == "indi-atik" ? ["type=registry,ref=ghcr.io/liken-sh/indi-atik:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-atik" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-atik:buildcache-20261031-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-atik" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-atik:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -376,11 +376,11 @@ target "indi-fli" {
   args = {
     VERSION = "20261031"
   }
-  tags       = ["ghcr.io/liken-sh/indi-fli:20261031-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-fli:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-fli:buildcache-20261031-1"]
+  tags       = ["ghcr.io/liken-sh/indi-fli:20261031-2"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-fli:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-fli:buildcache-20261031-2"]
   cache-to = concat(
     CACHE_WRITE == "indi-fli" ? ["type=registry,ref=ghcr.io/liken-sh/indi-fli:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-fli" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-fli:buildcache-20261031-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-fli" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-fli:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -397,11 +397,11 @@ target "indi-sbig" {
   args = {
     VERSION = "20261031"
   }
-  tags       = ["ghcr.io/liken-sh/indi-sbig:20261031-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-sbig:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-sbig:buildcache-20261031-1"]
+  tags       = ["ghcr.io/liken-sh/indi-sbig:20261031-2"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-sbig:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-sbig:buildcache-20261031-2"]
   cache-to = concat(
     CACHE_WRITE == "indi-sbig" ? ["type=registry,ref=ghcr.io/liken-sh/indi-sbig:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-sbig" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-sbig:buildcache-20261031-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-sbig" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-sbig:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -418,11 +418,11 @@ target "indi-mi" {
   args = {
     VERSION = "20261031"
   }
-  tags       = ["ghcr.io/liken-sh/indi-mi:20261031-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-mi:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-mi:buildcache-20261031-1"]
+  tags       = ["ghcr.io/liken-sh/indi-mi:20261031-2"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-mi:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-mi:buildcache-20261031-2"]
   cache-to = concat(
     CACHE_WRITE == "indi-mi" ? ["type=registry,ref=ghcr.io/liken-sh/indi-mi:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-mi" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-mi:buildcache-20261031-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-mi" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-mi:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -439,11 +439,11 @@ target "indi-qsi" {
   args = {
     VERSION = "20261031"
   }
-  tags       = ["ghcr.io/liken-sh/indi-qsi:20261031-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-qsi:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-qsi:buildcache-20261031-1"]
+  tags       = ["ghcr.io/liken-sh/indi-qsi:20261031-2"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-qsi:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-qsi:buildcache-20261031-2"]
   cache-to = concat(
     CACHE_WRITE == "indi-qsi" ? ["type=registry,ref=ghcr.io/liken-sh/indi-qsi:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-qsi" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-qsi:buildcache-20261031-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-qsi" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-qsi:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -460,11 +460,11 @@ target "indi-apogee" {
   args = {
     VERSION = "20261031"
   }
-  tags       = ["ghcr.io/liken-sh/indi-apogee:20261031-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-apogee:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-apogee:buildcache-20261031-1"]
+  tags       = ["ghcr.io/liken-sh/indi-apogee:20261031-2"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-apogee:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-apogee:buildcache-20261031-2"]
   cache-to = concat(
     CACHE_WRITE == "indi-apogee" ? ["type=registry,ref=ghcr.io/liken-sh/indi-apogee:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-apogee" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-apogee:buildcache-20261031-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-apogee" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-apogee:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -481,11 +481,11 @@ target "indi-astroasis" {
   args = {
     VERSION = "20261031"
   }
-  tags       = ["ghcr.io/liken-sh/indi-astroasis:20261031-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-astroasis:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-astroasis:buildcache-20261031-1"]
+  tags       = ["ghcr.io/liken-sh/indi-astroasis:20261031-2"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-astroasis:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-astroasis:buildcache-20261031-2"]
   cache-to = concat(
     CACHE_WRITE == "indi-astroasis" ? ["type=registry,ref=ghcr.io/liken-sh/indi-astroasis:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-astroasis" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-astroasis:buildcache-20261031-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-astroasis" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-astroasis:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -502,11 +502,11 @@ target "indi-gphoto" {
   args = {
     VERSION = "20261031"
   }
-  tags       = ["ghcr.io/liken-sh/indi-gphoto:20261031-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-gphoto:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-gphoto:buildcache-20261031-1"]
+  tags       = ["ghcr.io/liken-sh/indi-gphoto:20261031-2"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-gphoto:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-gphoto:buildcache-20261031-2"]
   cache-to = concat(
     CACHE_WRITE == "indi-gphoto" ? ["type=registry,ref=ghcr.io/liken-sh/indi-gphoto:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-gphoto" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-gphoto:buildcache-20261031-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-gphoto" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-gphoto:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -523,11 +523,11 @@ target "indi-touptek" {
   args = {
     VERSION = "20261031"
   }
-  tags       = ["ghcr.io/liken-sh/indi-touptek:20261031-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-touptek:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-touptek:buildcache-20261031-1"]
+  tags       = ["ghcr.io/liken-sh/indi-touptek:20261031-2"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-touptek:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-touptek:buildcache-20261031-2"]
   cache-to = concat(
     CACHE_WRITE == "indi-touptek" ? ["type=registry,ref=ghcr.io/liken-sh/indi-touptek:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-touptek" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-touptek:buildcache-20261031-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-touptek" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-touptek:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
   )
 }
 

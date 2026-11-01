@@ -18,11 +18,18 @@ ARG VERSION
 # has no CA bundle. The bundle is the one that the trust component pins
 # for every image of liken, with its notice. It stays in the builder;
 # only indi-open ships it, for its weather drivers.
+#
+# The Ubuntu image holds packages of the day its digest was built, and
+# apt-get install upgrades one of them only when a new package
+# requires it. The upgrade brings the rest, such as libssl3t64 and
+# libudev1, to the snapshot's date too, so a closure copies the
+# snapshot's libraries and not the image's.
 COPY --from=trust / /
 COPY mutlaqja.asc pch.asc /etc/apt/trusted.gpg.d/
 COPY snapshot.sh /snapshot.sh
 RUN sh /snapshot.sh "$VERSION" \
     && apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         indi-bin \
         indi-3rdparty-drivers \
