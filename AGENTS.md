@@ -196,8 +196,11 @@ A build uses only the bytes that a commit named, so a person who
 reviews the commit reviews what every later build downloads. Every
 pin in the repository follows these rules, and
 `cd ci && go run . pins -root ..` fails CI on each break that a
-pattern can find. The `bump-components` skill holds the procedure,
-the patterns, and the comment that excuses one line.
+pattern can find. Every `fetch.sh` and `latest.sh` sources
+`toolchains/pin.sh`, which holds one implementation of each step of a
+pin, and prek runs `ci pins` on each commit that changes a pin. The
+`bump-components` skill holds the procedure, the patterns, and the
+comment that excuses one line.
 
 - The digest of every file that a pin downloads is in the
   repository, and `latest.sh --bump` writes it. No `fetch.sh`,

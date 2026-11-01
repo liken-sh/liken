@@ -432,22 +432,72 @@ library-operator-appearances`.
 ## 5f. A new or changed latest.sh or fetch.sh
 
 "Pins and downloads" in the root `AGENTS.md` gives the rules and the
-reasons. This step gives the forms that the scripts of the repository
-use, and the check in `ci/` that reads them.
+reasons. This step gives the library that every pin script uses, and
+the check in `ci/` that holds the scripts to it.
+
+**The library.** Every `fetch.sh` and `latest.sh` sources
+`toolchains/pin.sh` by its path from the script's directory, after
+`set -euo pipefail`:
+
+```bash
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
+```
+
+The directive lets the component's shellcheck hook, which runs with
+`-x`, read the library. The library holds one implementation of each
+step, and the comment above each function in `pin.sh` gives its
+arguments and the reason for its behavior:
+
+- `require_tools` stops on a missing tool, and `fail` stops with a
+  message that names the script.
+- `fetch_text`, `url_exists`, `newest_tag`, `github_api`, and
+  `registry_digest` read an upstream, with the retries and time limits
+  that every read takes. `github_api` sends `GITHUB_TOKEN` or the gh
+  CLI's token when one is at hand.
+- `fetch_verified [--resume] <url> <digest> <path>` puts a pinned file
+  in the cache: it keeps a cached file that matches, downloads anything
+  else into a `.partial` file, deletes a `.partial` that does not match
+  and stops, and moves a match into place. `--resume` is for a large
+  file. The digest is the one the script pins, often
+  `"${k3s_sha256[$version]:-}"` from a `declare -A` table, and an empty
+  digest stops the fetch.
+- `fetch_file` downloads a file whose digest the repository does not
+  hold yet, such as a checksum file or a signature, and
+  `digest_of_url` prints the sha256 of a download for an upstream that
+  publishes no checksum.
+- `verify_signature [--signer <fingerprint>] <key.asc> <signature>
+  [<file>]` checks a detached signature, or a clearsigned file and
+  prints its signed text.
+- `container_runtime` and `image_of <key>` give a build its docker or
+  podman and its image from `toolchains/images.toml`.
+- `row` prints one report row of seven columns, with `?` for an empty
+  latest.
+- `bump_needed`, `bumped`, and `next_step` print the lines of a bump.
+  `set_line`, `set_var`, `set_toml`, `set_entry`, and `add_entry` write
+  a bump into the file that holds the pin, and each one stops when its
+  pattern matches no line or more than one, so a bump never reports a
+  move that it did not write. `repin_sources` runs
+  `liken/licensing/sources.sh --repin` after a bump of a version that
+  the source mirror names.
+
+When a new script needs a step that the library lacks, add the step
+to `pin.sh` with a comment, and do not write it in the script.
 
 **The digest.** `latest.sh --bump` reads the upstream's checksum once,
 when the pin moves, and writes it into the repository: a `declare -A`
 table or a variable in `fetch.sh`, a file such as
-`liken/tzdata/DIGESTS`, an `ARG` of a Dockerfile, or the `--checksum`
-of an `ADD`. The fetch and the build read only that copy. Each
-`--bump` prints one line that says where the digest came from, such
-as "the digest came from sha256sums.asc, signed by kernel.org's
-checksum autosigner".
+`liken/tzdata/DIGESTS`, an `ARG` of a Dockerfile, the `--checksum`
+of an `ADD`, or a constant in `ci/`. The fetch and the build read only
+that copy. Each `--bump` prints one line that says where the digest
+came from, such as "the digest came from sha256sums.asc, signed by
+kernel.org's checksum autosigner".
 
-**The signature.** When the upstream signs its checksum file,
-`--bump` verifies the signature before it reads a digest, and stops
-when the signature is missing, does not verify, or names another
-signer:
+**The signature.** When the upstream signs its checksum file or its
+release file, `--bump` verifies the signature before it writes a
+digest, and stops when the signature is missing, does not verify, or
+names another signer:
 
 - kernel.org signs the `sha256sums.asc` file of each directory with
   its checksum autosigner. Call
@@ -456,44 +506,30 @@ signer:
   and prints the digest. Add the caller to the list in
   `trust/keys/README.md`.
 - The Kernel PPA signs each build's `CHECKSUMS` file.
-  `liken/kernel/latest.sh` verifies `CHECKSUMS.gpg` with `gpgv`
-  against `liken/kernel/kernel-ppa.asc` and accepts one pinned
-  fingerprint.
-- Flux signs its checksums file with sigstore. `liken/flux/latest.sh`
-  verifies the bundle with cosign, from the `cosign` entry of
-  `toolchains/images.toml`, and accepts only the certificate identity
-  of fluxcd/flux2's release workflow at the release's tag, from
+  `liken/kernel/latest.sh` verifies `CHECKSUMS.gpg` against
+  `liken/kernel/kernel-ppa.asc` and accepts one pinned fingerprint.
+- dbus signs each release tarball. `bluetooth-operator/bluetoothd/latest.sh`
+  verifies the tarball against `bluetoothd/dbus.asc`, accepts one
+  pinned fingerprint, and pins the digest of the verified bytes.
+- IANA signs each tzdata tarball, and weston's release managers sign
+  each weston tarball. `liken/tzdata/latest.sh` and `weston/latest.sh`
+  verify the tarball against the key file beside the script before
+  they pin its digest, and `liken/tzdata/fetch.sh` verifies the
+  signature again on every build.
+- Flux signs its checksums file, and Trivy signs each release archive,
+  with sigstore. `liken/flux/latest.sh` and `ci/latest.sh --bump trivy`
+  verify the bundle with cosign, from the `cosign` entry of
+  `toolchains/images.toml`, and accept only the certificate identity
+  of the project's release workflow at the release's tag, from
   GitHub's OIDC issuer.
-- IANA signs each tzdata tarball. `liken/tzdata/fetch.sh` verifies the
-  signature against `liken/tzdata/tz.asc` as well as the digest.
+- prek publishes a GitHub attestation of each archive.
+  `ci/latest.sh --bump prek` verifies it with `gh attestation verify`.
 
 A key that one script reads stays beside that script. A key that a
 second component reads moves to `trust/keys/`, with a section in its
 `README.md` that says where the key comes from. When the upstream
-signs nothing, the printed line names the unsigned file, so the
-commit says what stands behind the digest.
-
-**The download.** A `fetch.sh` downloads into a `.partial` file,
-checks the digest, deletes the `.partial` when it does not match, and
-moves it into the cache when it does. It checks the cached file first,
-so a cached file that does not match is downloaded again:
-
-```bash
-if ! sha256sum --check --status <<<"$digest  $cache/$file" >/dev/null 2>&1; then
-    curl -fL --retry 5 --retry-all-errors --retry-delay 5 \
-        -o "$cache/$file.partial" "$url"
-    sha256sum --check --quiet <<<"$digest  $cache/$file.partial" || {
-        rm -f "$cache/$file.partial"
-        exit 1
-    }
-    mv "$cache/$file.partial" "$cache/$file"
-fi
-```
-
-A large file adds `-C -` to resume a broken transfer. The delete
-matters then: curl answers a full-length `.partial` with success and
-leaves the bytes as they are, so a bad full-length file would fail
-every later run.
+signs nothing, the script's comment and the printed line say so, so
+the commit says what stands behind the digest.
 
 **A static binary.** gcc on Alpine builds a static PIE for `-static`,
 so a check with file(1) accepts both words:
@@ -502,11 +538,14 @@ so a check with file(1) accepts both words:
 **The check.** `cd ci && go run . pins -root ..` runs
 `ci/fetches.go`, which reads the scripts by pattern and fails when:
 
+- a `fetch.sh` or `latest.sh` does not source `toolchains/pin.sh` by
+  its path from the script's directory, or runs curl or wget as a
+  command of its own;
 - a `fetch.sh` names a checksum file, such as `SHA256SUMS`,
   `sha256sums.asc`, `checksums.txt`, or `<file>.sha256`, or a
   Dockerfile's `ADD` or `RUN` downloads one;
-- a curl or wget in a `fetch.sh` writes a file whose name does not end
-  in `.partial`;
+- a curl or wget in a `fetch.sh` or in `toolchains/pin.sh` writes a
+  file whose name does not end in `.partial`;
 - a `VERSION` or `fetch.sh` has no `latest.sh` in its directory, a
   Dockerfile that downloads has none in its directory or above it, or
   a `latest.sh` is not executable or is under a directory that
@@ -515,10 +554,14 @@ so a check with file(1) accepts both words:
   `trust/keys/kernel-org-digest.sh`;
 - a grep for "statically linked" does not accept "static-pie linked".
 
-The check sees only these forms. It does not see a signature that an
-upstream other than kernel.org publishes and a bump skips. A line that
-breaks a pattern for a reason the check cannot see takes a comment
-line directly above it with `fetch-check: allow` and the reason.
+The pins hook of the root `.pre-commit-config.yaml` runs the check on
+each commit that changes a pin script, a Dockerfile, a `VERSION`,
+`toolchains/images.toml`, `versions.sh`, the library, or
+`trust/keys/`. The check sees only these forms. It does not see a
+signature that an upstream other than kernel.org publishes and a bump
+skips. A line that breaks a pattern for a reason the check cannot see
+takes a comment line directly above it with `fetch-check: allow` and
+the reason.
 
 ## 6. Report
 
