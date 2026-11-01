@@ -95,13 +95,13 @@ func (p *publishedStatuses) reset() {
 
 // clear empties the retained value of every topic outside the set the
 // caller still owns, so a deleted Player leaves no unit on the bus for a
-// subscriber to draw.
+// subscriber to draw. The record of a topic goes only once the bus queued
+// its clear, so a clear dropped on a full queue goes out on the next pass.
 func (p *publishedStatuses) clear(bus *Bus, owned map[string]bool) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	for topic := range p.payloads {
-		if !owned[topic] {
-			bus.Publish(topic, nil, true)
+		if !owned[topic] && bus.Publish(topic, nil, true) {
 			delete(p.payloads, topic)
 		}
 	}

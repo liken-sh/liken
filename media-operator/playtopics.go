@@ -59,10 +59,10 @@ func (o *operator) holdPlay(play *Play) {
 // would be overwritten by them, and the topics would stand again.
 //
 // The finalizer goes last because the clear is what it exists to make
-// certain: the release publishes first and releases second. A session the
-// client does not hold is the one state that stops the release short. A
-// QoS 0 publish with no session is dropped, and the Play would then be
-// gone with its topics standing.
+// certain: the release publishes first and releases second. A clear the
+// bus did not queue stops the release short. The bus drops a QoS 0
+// publish while it holds no session and when its write queue is full, and
+// the Play would then be gone with its topics standing.
 func (o *operator) releasePlay(play *Play) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	if err := DeletePod(o.client, namespace, podName(name)); err != nil {
@@ -77,13 +77,12 @@ func (o *operator) releasePlay(play *Play) {
 	}
 
 	// A clear is a QoS 0 publish, which Bus.Publish drops while the client
-	// holds no session. The finalizer is what makes the clear certain, so a
-	// release with no session publishes nothing, keeps the finalizer, and
-	// leaves the work to a later pass.
-	if !o.bus.Connected() {
+	// holds no session and when its write queue is full. The finalizer is
+	// what makes the clear certain, so a release whose clear the bus did
+	// not queue keeps the finalizer and leaves the work to a later pass.
+	if !o.clearPlayTopics(namespace, name) {
 		return
 	}
-	o.clearPlayTopics(namespace, name)
 	o.reports.forget(runKey(namespace, name))
 
 	if !play.Metadata.holds(playFinalizer) {
@@ -100,10 +99,13 @@ func (o *operator) releasePlay(play *Play) {
 }
 
 // clearPlayTopics empties the two retained topics one run stood on the
-// bus. An empty retained payload is how a writer clears a topic.
-func (o *operator) clearPlayTopics(namespace, name string) {
-	o.bus.Publish(playStatusTopic(o.topicBase, namespace, name), nil, true)
-	o.bus.Publish(playAvailabilityTopic(o.topicBase, namespace, name), nil, true)
+// bus. An empty retained payload is how a writer clears a topic. It
+// answers whether the bus queued both clears, and a caller that answered
+// false clears both again on a later pass.
+func (o *operator) clearPlayTopics(namespace, name string) bool {
+	status := o.bus.Publish(playStatusTopic(o.topicBase, namespace, name), nil, true)
+	availability := o.bus.Publish(playAvailabilityTopic(o.topicBase, namespace, name), nil, true)
+	return status && availability
 }
 
 // reclaimPlays is the sweep behind the finalizer. It is for two runs: one
@@ -120,14 +122,14 @@ func (o *operator) clearPlayTopics(namespace, name string) {
 func (o *operator) reclaimPlays(live map[string]bool) {
 	for _, key := range o.reports.stale(live) {
 		// Forgetting a run is what stops the sweep offering it again, so the
-		// sweep does neither the clear nor the forget while the client holds no
-		// session. The run keeps its place on the desk and the next pass sweeps
-		// it.
-		if !o.bus.Connected() {
+		// sweep forgets a run only once the bus queued its clear. The bus
+		// drops a clear while it holds no session and when its write queue is
+		// full, and the run then keeps its place on the desk for the next
+		// pass.
+		namespace, name := splitRunKey(key)
+		if !o.clearPlayTopics(namespace, name) {
 			return
 		}
-		namespace, name := splitRunKey(key)
-		o.clearPlayTopics(namespace, name)
 		o.reports.forget(key)
 	}
 }

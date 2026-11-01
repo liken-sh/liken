@@ -1351,13 +1351,17 @@ func (o *operator) reconcileRemotes(remotes []Remote, claims map[string]claimRea
 	// The codes desk holds a key per controller it has heard from, so it
 	// shrinks to the Remotes the cluster still holds.
 	o.codes.retain(live)
-	// A Remote that is gone leaves its retained table behind, so the
-	// pass clears the topic with an empty payload. The map is the record
-	// of what this operator wrote, so it is the one place that knows
-	// which topics to clear.
+	o.clearGoneKeys(present)
+}
+
+// clearGoneKeys clears the retained table of each Remote that is gone
+// with an empty payload. The map is the record of what this operator
+// wrote, so it is the one place that knows which topics to clear, and a
+// topic leaves it only once the bus queued the clear. A clear dropped on
+// a full queue goes out on the next pass.
+func (o *operator) clearGoneKeys(present map[string]bool) {
 	for topic := range o.keysPublished {
-		if !present[topic] {
-			o.bus.Publish(topic, nil, true)
+		if !present[topic] && o.bus.Publish(topic, nil, true) {
 			delete(o.keysPublished, topic)
 		}
 	}

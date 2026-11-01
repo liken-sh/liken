@@ -33,7 +33,8 @@ and the next report from each running `Play` refills the rest within
 seconds. The operator's client drops a publish when its write queue is
 full, for example while the broker falls behind on a burst of many
 topics. The operator publishes each `Player` status and each key table
-that it dropped again on its next pass.
+that it dropped again on its next pass, and the same holds for each
+clear of a topic.
 
 ## The topic base
 
@@ -62,7 +63,8 @@ would act on a run or a unit that no longer exists.
 An operator clears the topics of an object it owns on a finalizer, so
 the object is never gone from the API server while its topics still
 stand on the broker. The media operator's finalizer on a `Play` is
-`media.liken.sh/bus-topics`. A sweep on every pass is the backstop
+`media.liken.sh/bus-topics`, and the operator removes it only after its
+client queued both clears. A sweep on every pass is the backstop
 behind it: it clears the topics of any run the pass's own list of
 `Play`s does not hold, which is what finds a run whose clear the broker
 never received.
