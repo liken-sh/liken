@@ -122,6 +122,45 @@ github_api() {
     fi
 }
 
+# registry <repository> <path> [curl option]...: one request to the
+# registry of an image repository. The repository can carry a host, and
+# a bare name is an official image on Docker Hub. A registry that
+# answers 401 names its token service in WWW-Authenticate, and an
+# anonymous pull token from there reads any public image, so a report
+# needs no docker daemon and no login.
+registry() {
+    local repo="$1" path="$2" host=registry-1.docker.io name="$1" url auth realm service token
+    shift 2
+    if [[ "${repo%%/*}" == *.* ]]; then
+        host="${repo%%/*}"
+        name="${repo#*/}"
+    elif [[ "$repo" != */* ]]; then
+        name="library/$repo"
+    fi
+    url="https://$host/v2/$name/$path"
+    auth="$(http -o /dev/null -D - --max-time 20 "$url" | tr -d '\r' |
+        grep -i '^www-authenticate:' || true)"
+    if [[ -z "$auth" ]]; then
+        fetch_text "$url" "$@"
+        return
+    fi
+    realm="$(sed -n 's/.*realm="\([^"]*\)".*/\1/p' <<<"$auth")"
+    service="$(sed -n 's/.*service="\([^"]*\)".*/\1/p' <<<"$auth")"
+    token="$(fetch_text "$realm?service=$service&scope=repository:$name:pull" --max-time 20 |
+        jq -r '.token // .access_token')"
+    fetch_text "$url" -H "Authorization: Bearer $token" "$@"
+}
+
+# registry_digest <repository> <tag>: print the digest that a tag names
+# today. The Accept header lists the index types first, so a
+# multi-platform tag answers with the digest of its index, which is
+# what a pin names.
+registry_digest() {
+    registry "$1" "manifests/$2" -I \
+        -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' |
+        tr -d '\r' | awk 'tolower($1) == "docker-content-digest:" { print $2 }'
+}
+
 # --- downloading a pinned file -------------------------------------------
 
 # digest_matches <digest> <path>: true when the file exists and its
@@ -344,6 +383,25 @@ var_of() {
 # assigns the variable at the start of a line.
 set_var() {
     set_line "$1" "^$2=\"[^\"]*\"$" "$2=\"$3\""
+}
+
+# set_toml <file> <section> <key> <value>: write `key = value` over the
+# one line that sets the key in the [section] of a TOML file, such as
+# the version of a package.toml or an entry of its
+# [package.upstream]. The value is TOML, so a string carries its
+# quotes: set_toml package.toml package version '"20261101"'.
+set_toml() {
+    local file="$1"
+    PIN_SECTION="[$2]" PIN_KEY="$3" PIN_LINE="$3 = $4" awk '
+        /^\[/ { inside = ($0 == ENVIRON["PIN_SECTION"]) }
+        inside && $1 == ENVIRON["PIN_KEY"] && $2 == "=" { print ENVIRON["PIN_LINE"]; n++; next }
+        { print }
+        END { exit n != 1 }' "$file" >"$file.pin" || {
+        rm -f "$file.pin"
+        fail "${file#"$pin_root"/} has no one $3 in [$2]"
+    }
+    cat "$file.pin" >"$file"
+    rm "$file.pin"
 }
 
 # set_entry <file> <table> <key> <value>: write the one entry of a

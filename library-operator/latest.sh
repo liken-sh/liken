@@ -24,7 +24,12 @@
 #
 # A bump reads each checksum from the file or release text that
 # upstream publishes beside the bytes, and writes the URL and the
-# checksum into Dockerfile.appearances. inference-closure.sh in
+# checksum into Dockerfile.appearances. Intel signs none of these
+# files: storage.openvinotoolkit.org publishes each archive with a
+# .sha256 file and no signature, compute-runtime publishes a ww<week>.sum
+# file and no signature, and the compiler's sums are in its release
+# text. So each digest rests on the HTTPS connection to its host
+# alone. inference-closure.sh in
 # appearances/ names the versioned library files of each runtime, so a
 # bump stops at the Dockerfile and prints what to move by hand.
 #
@@ -40,21 +45,14 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../toolchains/pin.sh
+source "$here/../toolchains/pin.sh"
 dockerfile="$here/Dockerfile.appearances"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-row() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$@"; }
-
-# The GitHub API allows 60 anonymous requests an hour, so the report
-# sends a token when one is at hand.
-github_auth=()
-token="${GITHUB_TOKEN:-$(gh auth token 2>/dev/null || true)}"
-[[ -n "$token" ]] && github_auth=(-H "Authorization: Bearer $token")
-github() {
-    curl -fsS --retry 3 --max-time 60 "${github_auth[@]}" "https://api.github.com/repos/$1"
-}
+github() { github_api "repos/$1"; }
 
 # url prints the one ADD source in the Dockerfile whose file name
 # matches the pattern.
@@ -73,7 +71,7 @@ igc="$(url 'intel-igc-core-2_[^ ]*\.deb' | sed -E 's|.*/intel-igc-core-2_([^+]+)
 # .0 drops that part, such as 2026.4 for 2026.4.0.
 openvino_latest="$(github openvinotoolkit/openvino/releases/latest | jq -r .tag_name)" || openvino_latest=""
 if [[ -n "$openvino_latest" ]] &&
-    curl -fsS --retry 3 --max-time 300 https://storage.openvinotoolkit.org/filetree.json |
+    fetch_text https://storage.openvinotoolkit.org/filetree.json --max-time 300 |
     jq -r '.children[] | select(.name == "repositories") | .children[] | select(.name == "openvino")
             | .children[] | select(.name == "packages") | .children[] | .name as $d
             | .children[]? | select(.name == "linux") | .children[] | .name
@@ -97,13 +95,13 @@ jq -r '.body // empty' "$work/runtime.json" |
     sort -u >"$work/igc-urls" || true
 igc_latest="$(sed -nE 's|.*/intel-igc-core-2_([^+]+)\+.*|\1|p' "$work/igc-urls")"
 
-row openvino "$openvino" "${openvino_latest:-?}" "$channel" "${newest_channel:-?}" - \
+row openvino "$openvino" "$openvino_latest" "$channel" "${newest_channel:-?}" - \
     "OpenVINO's runtime archive in Dockerfile.appearances"
-row compute-runtime "$runtime" "${runtime_latest:-?}" - - - \
+row compute-runtime "$runtime" "$runtime_latest" - - - \
     "Intel's OpenCL driver in Dockerfile.appearances"
-row '  gmmlib' "$gmmlib" "${gmmlib_latest:-?}" - - - \
+row '  gmmlib' "$gmmlib" "$gmmlib_latest" - - - \
     "the libigdgmm12 of the compute-runtime release"
-row '  igc' "$igc" "${igc_latest:-?}" - - - \
+row '  igc' "$igc" "$igc_latest" - - - \
     "the graphics compiler release that compute-runtime names"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
@@ -112,10 +110,7 @@ row '  igc' "$igc" "${igc_latest:-?}" - - - \
 # line above it with sha256.
 pin() {
     local old="$1" new="$2" sha256="$3"
-    [[ "$sha256" =~ ^[0-9a-f]{64}$ ]] || {
-        echo "latest.sh: no checksum for ${new##*/}" >&2
-        exit 1
-    }
+    [[ "$sha256" =~ ^[0-9a-f]{64}$ ]] || fail "no checksum for ${new##*/}"
     awk -v old="$old" -v new="$new" -v sum="$sha256" '
         index($0, old) {
             sub(/--checksum=sha256:[0-9a-f]+/, "--checksum=sha256:" sum, prev)
@@ -130,14 +125,8 @@ pin() {
 
 case "${2:-openvino}" in
 openvino)
-    [[ -n "$openvino_latest" ]] || {
-        echo "latest.sh: GitHub or storage.openvinotoolkit.org did not answer" >&2
-        exit 1
-    }
-    [[ -n "$newest_channel" ]] || {
-        echo "latest.sh: OpenVINO $openvino_latest has no Ubuntu archive for x86_64" >&2
-        exit 1
-    }
+    [[ -n "$openvino_latest" ]] || fail "GitHub or storage.openvinotoolkit.org did not answer"
+    [[ -n "$newest_channel" ]] || fail "OpenVINO $openvino_latest has no Ubuntu archive for x86_64"
     # The bump takes the newest channel as well as the newest release,
     # so a pin on an older Ubuntu archive moves even when its release
     # is current.
@@ -147,32 +136,25 @@ openvino)
     }
     read -r dir file < <(grep " openvino_toolkit_${newest_channel}_" "$work/archives")
     new="https://storage.openvinotoolkit.org/repositories/openvino/packages/$dir/linux/$file"
-    sha256="$(curl -fsSL --retry 3 --max-time 60 "$new.sha256" | awk -v f="$file" '$2 == f { print $1 }')"
+    sha256="$(fetch_text "$new.sha256" | awk -v f="$file" '$2 == f { print $1 }')"
     # appearances/README.md gives the archive's URL, its file names, and
     # its SHA-256, for a workstation that unpacks it by hand.
     old_sha256="$(grep -B1 -F "$openvino_url" "$dockerfile" | sed -nE 's/.*--checksum=sha256:([0-9a-f]{64}).*/\1/p')"
     pin "$openvino_url" "$new" "$sha256"
     sed -i "s|$openvino_file|$file|g; s|${openvino_file%.tgz}|${file%.tgz}|g; s|/packages/[^/]*/linux/|/packages/$dir/linux/|; s|$old_sha256|$sha256|g" \
         "$here/appearances/README.md"
-    echo "openvino: $openvino ($channel) -> $openvino_latest ($newest_channel)"
-    echo "the release's .sha256 file stands behind these bytes"
-    echo "next: move the libopenvino and libtbb file names in appearances/inference-closure.sh,"
+    bumped openvino "$openvino ($channel)" "$openvino_latest ($newest_channel)"
+    echo "the release's .sha256 file stands behind these bytes; Intel signs neither file"
+    next_step "move the libopenvino and libtbb file names in appearances/inference-closure.sh,"
     echo "then docker buildx bake library-operator-appearances at the top of the repository"
     ;;
 compute-runtime)
-    [[ -n "$runtime_latest" ]] || {
-        echo "latest.sh: GitHub did not answer" >&2
-        exit 1
-    }
-    [[ "$runtime_latest" != "$runtime" ]] || {
-        echo "compute-runtime $runtime is current"
-        exit 0
-    }
+    bump_needed compute-runtime "$runtime" "$runtime_latest" || exit 0
     # The release's ww<week>.sum file lists the sum of each of its
     # packages, and the compiler's release text lists the sum of each
     # of its own. The release text has CRLF line ends.
     sums="$(jq -r '.assets[] | select(.name | test("^ww[0-9]+\\.sum$")) | .browser_download_url' "$work/runtime.json")"
-    curl -fsSL --retry 3 --max-time 60 "$sums" | tr -d '\r' >"$work/sums"
+    fetch_text "$sums" | tr -d '\r' >"$work/sums"
     github "intel/intel-graphics-compiler/releases/tags/v$igc_latest" | jq -r .body | tr -d '\r' >>"$work/sums"
     # Each line is "old new", for the four ADD sources.
     base="https://github.com/intel/compute-runtime/releases/download/$runtime_latest"
@@ -187,24 +169,18 @@ compute-runtime)
     # cannot find one leaves the Dockerfile as it was.
     while read -r old new; do
         sha256="$(awk -v f="${new##*/}" '$2 == f { print $1 }' "$work/sums")"
-        [[ "$sha256" =~ ^[0-9a-f]{64}$ ]] || {
-            echo "latest.sh: no checksum for ${new##*/}" >&2
-            exit 1
-        }
+        [[ "$sha256" =~ ^[0-9a-f]{64}$ ]] || fail "no checksum for ${new##*/}"
         echo "$old $new $sha256"
     done <"$work/moves" >"$work/pins"
     while read -r old new sha256; do
         pin "$old" "$new" "$sha256"
     done <"$work/pins"
-    echo "compute-runtime: $runtime -> $runtime_latest"
-    echo "gmmlib: $gmmlib -> $gmmlib_latest"
-    echo "igc: $igc -> $igc_latest"
-    echo "the release's sum file and the compiler's release text stand behind these bytes"
-    echo "next: move the libigdgmm and libigc file names in appearances/inference-closure.sh,"
+    bumped compute-runtime "$runtime" "$runtime_latest"
+    bumped gmmlib "$gmmlib" "$gmmlib_latest"
+    bumped igc "$igc" "$igc_latest"
+    echo "the release's sum file and the compiler's release text stand behind these bytes; Intel signs neither"
+    next_step "move the libigdgmm and libigc file names in appearances/inference-closure.sh,"
     echo "then docker buildx bake library-operator-appearances at the top of the repository"
     ;;
-*)
-    echo "latest.sh: no pin named $2; try openvino or compute-runtime" >&2
-    exit 1
-    ;;
+*) fail "no pin named $2; try openvino or compute-runtime" ;;
 esac

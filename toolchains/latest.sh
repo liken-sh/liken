@@ -54,13 +54,13 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=pin.sh
+source "$here/pin.sh"
 root="$(cd "$here/.." && pwd)"
 images="$here/images.toml"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-
-row() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$@"; }
 
 # The digest is 71 characters and the table has to stay readable, so
 # the rows carry enough of it to tell two apart.
@@ -94,42 +94,6 @@ repo_of() { local r="${1%@*}"; echo "${r%:*}"; }
 tag_of() { local r="${1%@*}"; echo "${r##*:}"; }
 digest_of() { [[ "$1" == *@* ]] && echo "${1#*@}" || true; }
 
-# registry <repository> <path> [curl args]: one request to the
-# repository's registry. A registry that answers 401 names the token
-# service in WWW-Authenticate, and an anonymous pull token from there
-# reads any public image.
-registry() {
-    local repo="$1" path="$2" host=registry-1.docker.io name="$1" url auth realm service token
-    shift 2
-    if [[ "${repo%%/*}" == *.* ]]; then
-        host="${repo%%/*}"
-        name="${repo#*/}"
-    elif [[ "$repo" != */* ]]; then
-        name="library/$repo"
-    fi
-    url="https://$host/v2/$name/$path"
-    auth="$(curl -sS -o /dev/null -D - --max-time 20 "$url" | tr -d '\r' |
-        grep -i '^www-authenticate:' || true)"
-    if [[ -z "$auth" ]]; then
-        curl -fsSL --retry 3 --max-time 60 "$@" "$url"
-        return
-    fi
-    realm="$(sed -n 's/.*realm="\([^"]*\)".*/\1/p' <<<"$auth")"
-    service="$(sed -n 's/.*service="\([^"]*\)".*/\1/p' <<<"$auth")"
-    token="$(curl -fsS --retry 3 --max-time 20 \
-        "$realm?service=$service&scope=repository:$name:pull" | jq -r '.token // .access_token')"
-    curl -fsSL --retry 3 --max-time 60 -H "Authorization: Bearer $token" "$@" "$url"
-}
-
-# The digest that a tag names today. The Accept header lists the
-# index types first, so a multi-platform tag answers with the digest
-# of its index, which is what a pin names.
-registry_digest() {
-    registry "$1" "manifests/$2" -I \
-        -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' |
-        tr -d '\r' | awk 'tolower($1) == "docker-content-digest:" { print $2 }'
-}
-
 # The tag list of a repository, read once and kept for the run.
 tags() {
     local file
@@ -143,8 +107,7 @@ newest_matching() { grep -E "$1" | sort -V | tail -1; }
 # The Debian releases in order. distro-info-data is Debian's own list,
 # and it includes the releases that are not out yet.
 debian_codenames() {
-    curl -fsS --retry 3 --max-time 20 \
-        https://salsa.debian.org/debian/distro-info-data/-/raw/main/debian.csv |
+    fetch_text https://salsa.debian.org/debian/distro-info-data/-/raw/main/debian.csv --max-time 20 |
         awk -F, '$1 ~ /^[0-9]+$/ { print $3 }'
 }
 
@@ -162,15 +125,15 @@ newest_variant() {
     done
 }
 
-newest_go() { curl -fsS --retry 3 --max-time 20 'https://go.dev/dl/?mode=json' | jq -r '.[0].version' | sed 's/^go//'; }
+newest_go() { fetch_text 'https://go.dev/dl/?mode=json' --max-time 20 | jq -r '.[0].version' | sed 's/^go//'; }
 newest_rust() {
-    curl -fsS --retry 3 --max-time 20 https://static.rust-lang.org/dist/channel-rust-stable.toml |
+    fetch_text https://static.rust-lang.org/dist/channel-rust-stable.toml --max-time 20 |
         awk '/^\[pkg\.rust\]/ { getline; print $3 }' | tr -d '"'
 }
 
 # The Ubuntu series by version, from Launchpad.
 ubuntu_series() {
-    curl -fsS --retry 3 --max-time 20 https://api.launchpad.net/devel/ubuntu/series |
+    fetch_text https://api.launchpad.net/devel/ubuntu/series --max-time 20 |
         jq -r '.entries[] | "\(.version) \(.name)"' | sort -V
 }
 
@@ -180,19 +143,12 @@ ubuntu_series() {
 ppa_newest_series() {
     local version name
     ubuntu_series | tac | while read -r version name; do
-        if curl -fs -o /dev/null --max-time 20 \
-            "https://ppa.launchpadcontent.net/mutlaqja/ppa/ubuntu/dists/$name/Release"; then
+        if url_exists "https://ppa.launchpadcontent.net/mutlaqja/ppa/ubuntu/dists/$name/Release"; then
             echo "$version $name"
             break
         fi
     done
 }
-
-# The GitHub API allows 60 anonymous requests an hour, so the report
-# sends a token when one is at hand.
-github_auth=()
-token="${GITHUB_TOKEN:-$(gh auth token 2>/dev/null || true)}"
-[[ -n "$token" ]] && github_auth=(-H "Authorization: Bearer $token")
 
 # latest_image <key> sets four variables for one entry: the newest tag
 # under the rule, the channel the pin reads, the newest channel, and
@@ -234,14 +190,12 @@ latest_image() {
             note="indi's base; Ubuntu's newest series is $(tail -1 <<<"$series" | cut -d' ' -f2), and mutlaqja/ppa does not publish it"
         ;;
     oras)
-        version="$(curl -fsS --retry 3 --max-time 20 "${github_auth[@]}" \
-            https://api.github.com/repos/oras-project/oras/releases/latest | jq -r .tag_name)" || version=""
+        version="$(github_api repos/oras-project/oras/releases/latest | jq -r .tag_name)" || version=""
         latest_tag="$version"
         note="the newest release of oras-project/oras"
         ;;
     cosign)
-        version="$(curl -fsS --retry 3 --max-time 20 "${github_auth[@]}" \
-            https://api.github.com/repos/sigstore/cosign/releases/latest | jq -r .tag_name)" || version=""
+        version="$(github_api repos/sigstore/cosign/releases/latest | jq -r .tag_name)" || version=""
         latest_tag="$version"
         note="the newest release of sigstore/cosign"
         ;;
@@ -384,8 +338,9 @@ crate_pins() {
 # report sends one request for each crate.
 newest_crate() {
     sleep 1
-    curl -fsS --retry 3 --max-time 20 -A 'liken toolchains/latest.sh (https://github.com/liken-sh/liken)' \
-        "https://crates.io/api/v1/crates/$1" | jq -r '.crate.max_stable_version'
+    fetch_text "https://crates.io/api/v1/crates/$1" --max-time 20 \
+        -A 'liken toolchains/latest.sh (https://github.com/liken-sh/liken)' |
+        jq -r '.crate.max_stable_version'
 }
 
 report_crates() {
@@ -542,13 +497,13 @@ bump_image() {
         echo "$key $tag is current"
         return
     fi
-    sed -i "s|^$key = \".*\"$|$key = \"$new\"|" "$images"
-    echo "$key: $ref -> $new"
+    set_toml "$images" "$(section_of "$key")" "$key" "\"$new\""
+    bumped "$key" "$ref" "$new"
     if [[ "$(section_of "$key")" == build ]]; then
         users="$(pinned_users "$key")"
-        echo "next: make workflows at the top of the repository, and a new revision of: ${users:-no pinned component}"
+        next_step "make workflows at the top of the repository, and a new revision of: ${users:-no pinned component}"
     else
-        echo "next: make each manifest, guide, and skill name $new:"
+        next_step "make each manifest, guide, and skill name $new:"
         git -C "$root" grep --untracked -lF "$ref" | sed 's/^/  /' || true
     fi
 }
@@ -650,7 +605,7 @@ go:*)
         echo "${mod#"$root"/}: ${mine[*]}"
     done <"$work/touched"
     tidy_modules <"$work/touched"
-    echo "next: make test in each component above"
+    next_step "make test in each component above"
     ;;
 crate:*)
     crate="${target#crate:}"
@@ -676,7 +631,7 @@ crate:*)
         done
     done
     echo "crate $crate: $old -> $version in every Cargo.toml"
-    echo "next: make test in each component that builds the crate"
+    next_step "make test in each component that builds the crate"
     ;;
 *)
     bump_image "$target"

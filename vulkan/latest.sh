@@ -35,13 +35,13 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../toolchains/pin.sh
+source "$here/../toolchains/pin.sh"
 root="$(cd "$here/.." && pwd)"
 images=(vulkan vaapi ffmpeg mpv weston astrometry)
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-
-row() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$@"; }
 
 pinned="$(sed -n 's/^version = "\([0-9]*\)"$/\1/p' "$here/package.toml")"
 latest="$(date -u +%Y%m%d)"
@@ -79,7 +79,7 @@ built_from_source() {
 indexes() {
     local component
     for component in main non-free; do
-        curl -fsSL --retry 3 --max-time 120 "$archive/dists/sid/$component/binary-amd64/Packages.xz" |
+        fetch_text "$archive/dists/sid/$component/binary-amd64/Packages.xz" --max-time 120 |
             xz -dc | awk '
                 /^Package:/ { p = $2; s = $2; sv = "" }
                 /^Source:/ { s = $2; if ($3 ~ /^\(/) { sv = $3; gsub(/[()]/, "", sv) } }
@@ -115,61 +115,45 @@ else
     latest=""
 fi
 
-row snapshot "$pinned" "${latest:-?}" sid sid - "the snapshot.debian.org date of all six images"
+row snapshot "$pinned" "$latest" sid sid - "the snapshot.debian.org date of all six images"
 upstreams | awk '{ print $2, $3 }' | sort -u | awk '{ v[$1] = v[$1] (v[$1] ? "," : "") $2 } END { for (n in v) print n, v[n] }' |
     sort | while read -r name versions; do
     now=""
     [[ -z "$have_indexes" ]] || now="$(newest_version "$name")" || now=""
-    row "  $name" "$versions" "${now:-?}" - - - "in $(upstreams | awk -v n="$name" '$2 == n { print $1 }' | paste -sd' ')"
+    row "  $name" "$versions" "$now" - - - "in $(upstreams | awk -v n="$name" '$2 == n { print $1 }' | paste -sd' ')"
 done
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
-[[ -n "$latest" ]] || {
-    echo "latest.sh: snapshot.debian.org did not answer" >&2
-    exit 1
-}
-[[ "$latest" != "$pinned" ]] || {
-    echo "the snapshot $pinned is current"
-    exit 0
-}
+bump_needed "the snapshot" "$pinned" "$latest" || exit 0
 
 # The checksum of the day's InRelease file binds the date to its
 # package lists. The fetch is over https, so the host is checked.
-inrelease="$(curl -fsSL --retry 3 --max-time 60 "$archive/dists/sid/InRelease" | sha256sum | cut -d' ' -f1)"
+inrelease="$(digest_of_url "$archive/dists/sid/InRelease")"
 
-# The digest of debian:sid-slim today, from Docker Hub with an
-# anonymous pull token. Each build image comes from the same day as
-# the snapshot.
-token="$(curl -fsS --retry 3 --max-time 20 \
-    "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/debian:pull" | jq -r .token)"
-digest="$(curl -fsSI --retry 3 --max-time 20 -H "Authorization: Bearer $token" \
-    -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
-    https://registry-1.docker.io/v2/library/debian/manifests/sid-slim |
-    tr -d '\r' | awk 'tolower($1) == "docker-content-digest:" { print $2 }')"
-[[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || {
-    echo "latest.sh: Docker Hub did not answer with the digest of debian:sid-slim" >&2
-    exit 1
-}
+# The digest of debian:sid-slim today. Each build image comes from the
+# same day as the snapshot.
+digest="$(registry_digest debian sid-slim)" || digest=""
+[[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+    fail "Docker Hub did not answer with the digest of debian:sid-slim"
 
-sed -i "s|^[0-9a-f]\{64\}  snapshot\.debian\.org_archive_debian_[0-9]*T000000Z_dists_sid_InRelease$|$inrelease  snapshot.debian.org_archive_debian_${latest}T000000Z_dists_sid_InRelease|" \
-    "$here/snapshot.sha256"
-sed -i "s|^debian = \"debian:sid-slim@sha256:[0-9a-f]*\"$|debian = \"debian:sid-slim@$digest\"|" \
-    "$root/toolchains/images.toml"
+set_line "$here/snapshot.sha256" \
+    '^[0-9a-f]+  snapshot\.debian\.org_archive_debian_[0-9]*T000000Z_dists_sid_InRelease$' \
+    "$inrelease  snapshot.debian.org_archive_debian_${latest}T000000Z_dists_sid_InRelease"
+set_toml "$root/toolchains/images.toml" build debian "\"debian:sid-slim@$digest\""
 
 # A new date starts every revision at 1 again, so the bump needs no
 # cascade of revisions up the graph.
 for image in "${images[@]}"; do
-    sed -i -e "s/^version = \"$pinned\"$/version = \"$latest\"/" \
-        -e 's/^revision = [0-9]*$/revision = 1/' "$root/$image/package.toml"
+    set_toml "$root/$image/package.toml" package version "\"$latest\""
+    set_toml "$root/$image/package.toml" package revision 1
 done
 upstreams | while read -r image name old; do
     new="$(newest_version "$name")"
-    sed -i "/^\[package\.upstream\]$/,/^\[/ s/^$name = \".*\"$/$name = \"$new\"/" \
-        "$root/$image/package.toml"
-    [[ "$old" == "$new" ]] || echo "$image: $name $old -> $new"
+    set_toml "$root/$image/package.toml" package.upstream "$name" "\"$new\""
+    [[ "$old" == "$new" ]] || bumped "$image" "$name $old" "$new"
 done
-echo "snapshot: $pinned -> $latest"
+bumped snapshot "$pinned" "$latest"
 echo "debian:sid-slim: $digest"
-echo "next: make workflows and make images at the top of the repository, run each"
+next_step "make workflows and make images at the top of the repository, run each"
 echo "image's smoke check, and read the release notes of each major release that moved"

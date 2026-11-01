@@ -32,11 +32,11 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../toolchains/pin.sh
+source "$here/../toolchains/pin.sh"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-
-row() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$@"; }
 
 ppas=(mutlaqja/ppa pch/phd2)
 
@@ -66,12 +66,11 @@ upstreams() {
 # serves a Release file under its name.
 newest_series() {
     local version name ppa
-    curl -fsS --retry 3 --max-time 20 https://api.launchpad.net/devel/ubuntu/series |
+    fetch_text https://api.launchpad.net/devel/ubuntu/series --max-time 20 |
         jq -r '.entries[] | "\(.version) \(.name)"' | sort -rV >"$work/series"
     while read -r version name; do
         for ppa in "${ppas[@]}"; do
-            curl -fs -o /dev/null --max-time 20 \
-                "https://ppa.launchpadcontent.net/$ppa/ubuntu/dists/$name/Release" || continue 2
+            url_exists "https://ppa.launchpadcontent.net/$ppa/ubuntu/dists/$name/Release" || continue 2
         done
         echo "$name"
         return
@@ -83,8 +82,7 @@ newest="$(newest_series)" || newest=""
 # The Packages index of one PPA at the newest date, in one series, as
 # "package version".
 packages() {
-    curl -fsSL --retry 3 --max-time 60 \
-        "https://snapshot.ppa.launchpadcontent.net/$1/ubuntu/${latest}T000000Z/dists/$2/main/binary-amd64/Packages.gz" |
+    fetch_text "https://snapshot.ppa.launchpadcontent.net/$1/ubuntu/${latest}T000000Z/dists/$2/main/binary-amd64/Packages.gz" |
         gunzip | awk '/^Package:/ { p = $2 } /^Version:/ { print p, $2 }'
 }
 
@@ -104,7 +102,7 @@ newest_version() {
     awk -v p="$package" '$1 == p { print $2 }' "$work/${ppa//\//_}" | sort -V | tail -1
 }
 
-row snapshot "$pinned" "${latest:-?}" "$series" "${newest:-?}" - \
+row snapshot "$pinned" "$latest" "$series" "${newest:-?}" - \
     "the date of the Ubuntu, mutlaqja/ppa, and pch/phd2 snapshots"
 # The PPA versions indi-3rdparty-drivers with the number in the
 # metapackage's debian/indi-3rdparty-drivers/changelog, which does not
@@ -118,39 +116,28 @@ note_of() {
 
 upstreams | while read -r name version; do
     now="$(newest_version "$name")"
-    row "  $name" "$version" "${now:-?}" - - - "$(note_of "$name" | paste -sd '')"
+    row "  $name" "$version" "$now" - - - "$(note_of "$name" | paste -sd '')"
 done
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
-[[ -n "$latest" && -n "$newest" ]] || {
-    echo "latest.sh: Launchpad or the PPA snapshots did not answer" >&2
-    exit 1
-}
+[[ -n "$latest" && -n "$newest" ]] || fail "Launchpad or the PPA snapshots did not answer"
 # A new series changes snapshot.sh, the ubuntu entry in
 # toolchains/images.toml, and every version suffix, so it is a hand
 # edit and a separate step.
-[[ "$newest" == "$series" ]] || {
-    echo "latest.sh: the PPAs publish $newest; move snapshot.sh and the ubuntu image from $series by hand first" >&2
-    exit 1
-}
-[[ "$latest" != "$pinned" ]] || {
-    echo "indi $pinned is current"
-    exit 0
-}
+[[ "$newest" == "$series" ]] ||
+    fail "the PPAs publish $newest; move snapshot.sh and the ubuntu image from $series by hand first"
+bump_needed indi "$pinned" "$latest" || exit 0
 
-sed -i -e "s/^version = \"$pinned\"$/version = \"$latest\"/" \
-    -e 's/^revision = [0-9]*$/revision = 1/' "$here/package.toml"
+set_toml "$here/package.toml" package version "\"$latest\""
+set_toml "$here/package.toml" package revision 1
 upstreams | while read -r name old; do
     new="$(newest_version "$name")"
-    [[ -n "$new" ]] || {
-        echo "latest.sh: no version of $name in the snapshot" >&2
-        exit 1
-    }
-    sed -i "/^\[package\.upstream\]$/,/^\[/ s/^$name = \".*\"$/$name = \"$new\"/" "$here/package.toml"
-    [[ "$old" == "$new" ]] || echo "$name: $old -> $new"
+    [[ -n "$new" ]] || fail "no version of $name in the snapshot"
+    set_toml "$here/package.toml" package.upstream "$name" "\"$new\""
+    [[ "$old" == "$new" ]] || bumped "$name" "$old" "$new"
 done
-echo "indi: $pinned -> $latest"
-echo "next: make workflows at the top of the repository, then the steps of section 5a"
+bumped indi "$pinned" "$latest"
+next_step "make workflows at the top of the repository, then the steps of section 5a"
 echo "of the bump-components skill: the SDK licenses, the builds and smoke checks, and"
 echo "make -C observatory-operator drivers firmware-rules captures schema crosscheck"

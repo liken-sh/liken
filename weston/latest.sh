@@ -31,6 +31,8 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../toolchains/pin.sh
+source "$here/../toolchains/pin.sh"
 api="https://gitlab.freedesktop.org/api/v4/projects/wayland%2Fweston/releases"
 
 pinned="$(sed -n 's/^ARG WESTON_VERSION=//p' "$here/Dockerfile")"
@@ -38,29 +40,19 @@ pinned="$(sed -n 's/^ARG WESTON_VERSION=//p' "$here/Dockerfile")"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-curl -fsS --retry 3 --max-time 60 "$api?per_page=50" >"$work/releases.json" 2>/dev/null ||
+fetch_text "$api?per_page=50" >"$work/releases.json" 2>/dev/null ||
     echo '[]' >"$work/releases.json"
 latest="$(jq -r '.[] | select(.upcoming_release | not) | .tag_name' "$work/releases.json" |
     grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | awk -F. '$3 < 90' | sort -V | tail -1)" || latest=""
 
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' weston "$pinned" "${latest:-?}" - - - \
+row weston "$pinned" "$latest" - - - \
     "newest release on gitlab.freedesktop.org; built in weston/Dockerfile"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
-[[ -n "$latest" ]] || {
-    echo "latest.sh: gitlab.freedesktop.org did not answer" >&2
-    exit 1
-}
-[[ "$latest" != "$pinned" ]] || {
-    echo "weston $pinned is current"
-    exit 0
-}
-[[ "${latest%%.*}" == "${pinned%%.*}" ]] || {
-    echo "latest.sh: weston $latest is a new major release. Move libweston-${pinned%%.*}," >&2
-    echo "weston-closure.sh and layout/ivi-layout-export.h by hand." >&2
-    exit 1
-}
+bump_needed weston "$pinned" "$latest" || exit 0
+[[ "${latest%%.*}" == "${pinned%%.*}" ]] ||
+    fail "weston $latest is a new major release. Move libweston-${pinned%%.*}, weston-closure.sh and layout/ivi-layout-export.h by hand."
 
 asset() {
     jq -r --arg t "$latest" --arg n "$1" \
@@ -69,29 +61,21 @@ asset() {
 }
 tarball="weston-$latest.tar.xz"
 url="$(asset "$tarball")"
-[[ "$url" == https://* ]] || {
-    echo "latest.sh: the release $latest has no $tarball" >&2
-    exit 1
-}
-curl -fsSL --retry 3 --max-time 300 -o "$work/$tarball" "$url"
-curl -fsSL --retry 3 --max-time 60 -o "$work/$tarball.sig" "$(asset "$tarball.sig")"
-curl -fsSL --retry 3 --max-time 60 -o "$work/$tarball.sha256sum" "$(asset "$tarball.sha256sum")"
+[[ "$url" == https://* ]] || fail "the release $latest has no $tarball"
+fetch_file "$url" "$work/$tarball"
+fetch_file "$(asset "$tarball.sig")" "$work/$tarball.sig"
+fetch_file "$(asset "$tarball.sha256sum")" "$work/$tarball.sha256sum"
 
-export GNUPGHOME="$work/gnupg"
-mkdir -m 700 "$GNUPGHOME"
-gpg --quiet --import "$here/signing-keys.asc" 2>/dev/null
-gpg --quiet --verify "$work/$tarball.sig" "$work/$tarball"
+verify_signature "$here/signing-keys.asc" "$work/$tarball.sig" "$work/$tarball"
 
 sha256="$(sha256sum "$work/$tarball" | cut -d' ' -f1)"
-[[ "$(cut -d' ' -f1 "$work/$tarball.sha256sum")" == "$sha256" ]] || {
-    echo "latest.sh: $tarball does not match the release's sha256sum file" >&2
-    exit 1
-}
+[[ "$(cut -d' ' -f1 "$work/$tarball.sha256sum")" == "$sha256" ]] ||
+    fail "$tarball does not match the release's sha256sum file"
 
-sed -i -e "s|^ARG WESTON_VERSION=.*|ARG WESTON_VERSION=$latest|" \
-    -e "s|^ARG WESTON_URL=.*|ARG WESTON_URL=$url|" \
-    -e "s|^ARG WESTON_SHA256=.*|ARG WESTON_SHA256=$sha256|" "$here/Dockerfile"
-sed -i "/^\[package\.upstream\]$/,/^\[/ s/^weston = \".*\"$/weston = \"$latest\"/" "$here/package.toml"
-echo "weston: $pinned -> $latest"
+set_line "$here/Dockerfile" '^ARG WESTON_VERSION=' "ARG WESTON_VERSION=$latest"
+set_line "$here/Dockerfile" '^ARG WESTON_URL=' "ARG WESTON_URL=$url"
+set_line "$here/Dockerfile" '^ARG WESTON_SHA256=' "ARG WESTON_SHA256=$sha256"
+set_toml "$here/package.toml" package.upstream weston "\"$latest\""
+bumped weston "$pinned" "$latest"
 echo "the signature of $tarball checks against signing-keys.asc"
-echo "next: raise weston's revision and display-operator's, run make workflows, and run layout/smoke.sh"
+next_step "raise weston's revision and display-operator's, run make workflows, and run layout/smoke.sh"
