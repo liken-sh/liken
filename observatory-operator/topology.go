@@ -196,11 +196,20 @@ func (o *operator) waitDefined(ctx context.Context, report func(string), ref ser
 // handlesOf answers a handle for each device whose driver has defined
 // its device on the server now, with no wait. A step that ends a
 // reservation acts on the devices that are there.
+//
+// The client's store changes while handlesOf reads it, because a
+// driver that restarts defines its device at any moment. So the name
+// of each driver's device is read once, and a served device gets the
+// answer that its owner gets. Without that, a served filter wheel
+// that comes before its camera in the order can miss a device that
+// the camera then finds, and the camera's configuration names no
+// filter wheel in ACTIVE_FILTER.
 func (o *operator) handlesOf(t *tree, ref serverRef, devices []*device) []handle {
 	server, ok := o.servers.get(ref.String())
 	if !ok || !server.client.Connected() {
 		return nil
 	}
+	names := map[*device]string{}
 	var out []handle
 	for _, d := range devices {
 		// A device whose driver another device runs would find that
@@ -212,7 +221,12 @@ func (o *operator) handlesOf(t *tree, ref serverRef, devices []*device) []handle
 		if _, taken := t.driverTakenBy(runner); taken {
 			continue
 		}
-		if name := t.indiName(server.client, d); name != "" {
+		name, read := names[runner]
+		if !read {
+			name = t.indiName(server.client, d)
+			names[runner] = name
+		}
+		if name != "" {
 			out = append(out, handle{d: d, server: server, name: name})
 		}
 	}
