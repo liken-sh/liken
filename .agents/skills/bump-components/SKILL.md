@@ -590,7 +590,9 @@ names another signer:
   of each `Packages` index, and the index lists the digest of each
   package. `liken/dev-cluster/firmware/latest.sh` takes the digest of
   `ovmf-generic` through that chain with `archive_deb`, against
-  Debian's archive keys in `liken/dev-cluster/firmware/debian-archive.asc`.
+  Debian's archive keys in `trust/keys/debian-archive.asc`. `vulkan/latest.sh`
+  verifies the snapshot's `InRelease` against the same keys before it
+  pins its digest in `vulkan/snapshot.sha256`.
 - Ubuntu signs its archive the same way. `liken/grub/latest.sh` and
   `liken/systemd-boot/latest.sh` take their digests through the chain
   with `ubuntu_deb_digest`, against `trust/keys/ubuntu-archive.asc`.

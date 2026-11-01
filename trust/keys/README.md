@@ -63,5 +63,30 @@ These bumps call `ubuntu_deb_digest`:
   packages
 - `liken/systemd-boot/latest.sh`, for the `systemd-boot-efi` package
 
+## Debian's archive signing keys
+
+`debian-archive.asc` holds the keys of `Debian Archive Automatic
+Signing Key (12/bookworm) <ftpmaster@debian.org>`, fingerprint
+`B8B8 0B5B 623E AB6A D877 5C45 B7C5 D7D6 3509 47F8`, and `Debian
+Archive Automatic Signing Key (13/trixie) <ftpmaster@debian.org>`,
+fingerprint `04B5 4C3C DCA7 9751 B16B C6B5 2256 29DF 75B1 88BD`.
+
+Debian signs the `InRelease` file of each suite, and signs no
+package. Debian signs each suite with the archive keys of more than
+one release, and gpgv fails on a signature whose key it does not
+have, so the file holds the archive signing key of each release that
+signs sid. <https://ftp-master.debian.org/keys.html> lists those
+keys. A new key is a change that a person makes by hand, after
+comparing it with the keys that the `debian-archive-keyring` package
+installs.
+
+These bumps verify a signature against the file:
+
+- `liken/dev-cluster/firmware/latest.sh`, through `archive_deb`, for
+  the `ovmf-generic` package of sid
+- `vulkan/latest.sh`, for the `InRelease` file of the snapshot.debian.org
+  date that the bases and `astrometry` install from, whose digest
+  `vulkan/snapshot.sha256` pins
+
 No image build reads this directory, so a change here needs no new
 revision of `trust`.

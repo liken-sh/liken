@@ -128,8 +128,15 @@ done
 bump_needed "the snapshot" "$pinned" "$latest" || exit 0
 
 # The checksum of the day's InRelease file binds the date to its
-# package lists. The fetch is over https, so the host is checked.
-inrelease="$(digest_of_url "$archive/dists/sid/InRelease")"
+# package lists. snapshot.debian.org serves the file that Debian's
+# archive signed, so the bump verifies that signature against Debian's
+# archive keys in trust/keys/debian-archive.asc before it pins the
+# digest of the same bytes. Without the check, a snapshot server or a
+# mirror that changed the file would change the pin, and apt in the
+# build would accept the file only because its digest matches.
+fetch_file "$archive/dists/sid/InRelease" "$work/InRelease"
+verify_signature "$root/trust/keys/debian-archive.asc" "$work/InRelease" >/dev/null
+inrelease="$(sha256sum "$work/InRelease" | cut -d' ' -f1)"
 
 # The digest of debian:sid-slim today. Each build image comes from the
 # same day as the snapshot.
@@ -154,6 +161,7 @@ upstreams | while read -r image name old; do
     [[ "$old" == "$new" ]] || bumped "$image" "$name $old" "$new"
 done
 bumped snapshot "$pinned" "$latest"
+echo "the InRelease digest came from the snapshot's InRelease, signed by Debian's archive keys"
 echo "debian:sid-slim: $digest"
 next_step "make workflows and make images at the top of the repository, run each"
 echo "image's smoke check, and read the release notes of each major release that moved"
