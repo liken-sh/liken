@@ -1,0 +1,15 @@
+# The file that trust/fetch.sh downloads, for the fetch and for the
+# SBOM of a release. trust/latest.sh --bump writes the version, url,
+# sha256, and purl, and toolchains/pin.sh describes each field. The
+# trust image's Dockerfile fetches the same file by its checksum, and
+# `ci pins` fails when its URL or digest differs from this entry.
+
+# Mozilla's CA certificates, as curl publishes them. The data is
+# Mozilla's, under the MPL 2.0, which the image's copyright file
+# quotes.
+[cacert]
+version = "2026-10-20"
+url = "https://curl.se/ca/cacert-2026-10-20.pem"
+sha256 = "796f1389bfea13c0ed78f663b765baaff54a508e5483786bd6ece73c5e3e3cbe"
+purl = "pkg:generic/cacert@2026-10-20?download_url=https://curl.se/ca/cacert-2026-10-20.pem&checksum=sha256:796f1389bfea13c0ed78f663b765baaff54a508e5483786bd6ece73c5e3e3cbe"
+license = "MPL-2.0"

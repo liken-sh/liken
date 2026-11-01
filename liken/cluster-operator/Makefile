@@ -21,7 +21,7 @@ FLUX_VERSION := $(strip $(file <../flux/VERSION))
 seed/gotk-components.yaml: ../flux/dist/$(FLUX_VERSION)/gotk-components.yaml
 	cp $< $@
 
-../flux/dist/$(FLUX_VERSION)/gotk-components.yaml: ../flux/VERSION ../flux/fetch.sh
+../flux/dist/$(FLUX_VERSION)/gotk-components.yaml: ../flux/VERSION ../flux/pin.toml ../flux/fetch.sh
 	$(MAKE) -C ../flux
 
 $(DIST)/liken-cluster-operator: ../go.mod ../go.sum $(wildcard *.go) \

@@ -169,6 +169,8 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 kernel_version="$(cat "$here/../kernel/VERSION")"
 k3s_version="$(cat "$here/../k3s/VERSION")"
 xtables_version="$(cat "$here/../xtables/VERSION")"
@@ -448,11 +450,11 @@ cp -a "$userland_dist/zoneinfo" "$root/usr/share/zoneinfo"
 # deployment of the image.
 #
 # wireless-regdb's version does not come from a VERSION file either.
-# linux-firmware/fetch.sh owns the nested pin, and
-# linux-firmware/derive.sh reads it out of that script the same way.
+# Its entry in linux-firmware/pin.toml is the nested pin, and
+# linux-firmware/fetch.sh and derive.sh read it there the same way.
 # Reading it here too is what keeps this record and the shipped blob
 # naming one version.
-regdb_version="$(sed -n 's|^regdb_version="\(.*\)"$|\1|p' "$here/../linux-firmware/fetch.sh")"
+regdb_version="$(pin_value wireless-regdb version "$here/../linux-firmware/pin.toml")"
 mkdir -p "$root/usr/share/liken"
 {
     echo "components:"

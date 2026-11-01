@@ -1,0 +1,13 @@
+# The file that flux/fetch.sh downloads, for the fetch and for the SBOM
+# of a release. flux/latest.sh --bump writes the version, url, sha256,
+# and purl, and toolchains/pin.sh describes each field.
+
+# The flux CLI. No release ships the CLI, but the manifests that it
+# renders are the seed in the cluster operator's image, so the SBOM
+# names the release that they come from.
+[flux]
+version = "v2.10.0"
+url = "https://github.com/fluxcd/flux2/releases/download/v2.10.0/flux_2.10.0_linux_amd64.tar.gz"
+sha256 = "208dd7012c04fedeed5b2d0b6e63df3b15b1c34a381527811685c098bc9f8659"
+purl = "pkg:github/fluxcd/flux2@v2.10.0"
+license = "Apache-2.0"

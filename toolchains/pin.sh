@@ -193,11 +193,13 @@ digest_matches() {
 # fetch_verified [--resume] <url> <digest> <path>: put the file that
 # the digest names at the path.
 #
-# The digest is the one that the calling script pins, often from a
-# `declare -A` table that holds it beside the version it belongs to,
-# as in "${k3s_sha256[$version]:-}". latest.sh --bump writes it, so a
-# fetch never reads a digest from upstream. An empty digest means that
-# the script pins none for this version, and the fetch stops.
+# The digest is the one that the calling script pins: from its
+# manifest through fetch_pinned, or from a `declare -A` table that
+# holds it beside the version it belongs to, as in
+# "${buildroot_sha256[$version]:-}", in a pin that no release ships.
+# latest.sh --bump writes it, so a fetch never reads a digest from
+# upstream. An empty digest means that the script pins none for this
+# version, and the fetch stops.
 #
 # A cached file that matches the digest is used as it is. Anything
 # else, a missing, torn, or changed file, is downloaded again into a
@@ -244,6 +246,112 @@ pin_dir() {
     local dir
     dir="$(cd "$(dirname "$0")" && pwd)"
     echo "${dir#"$pin_root"/}"
+}
+
+# --- the manifest --------------------------------------------------------
+
+# Each pin whose files a release ships holds a manifest, pin.toml, in
+# its directory. The manifest has one table for each file that the
+# fetch downloads, and the table holds what the SBOM of a release
+# needs to name the file: its version, url, sha256, purl, and the SPDX
+# expression of its license, and an optional CycloneDX scope:
+#
+#   [k3s]
+#   version = "v1.37.1+k3s1"
+#   url = "https://github.com/k3s-io/k3s/releases/download/v1.37.1%2Bk3s1/k3s"
+#   sha256 = "92b9..."
+#   purl = "pkg:github/k3s-io/k3s@v1.37.1%2Bk3s1"
+#   license = "Apache-2.0"
+#
+# latest.sh --bump writes the version, url, sha256, and purl with
+# set_pin, fetch.sh downloads with fetch_pinned, and the source mirror,
+# the image's components record, and the release document read a field
+# with pin_value. So the repository holds each digest once, and the
+# SBOM reads the same bytes that the build checked. A person writes the
+# license and the scope, which a bump leaves as they are. `ci pins`
+# fails a pin that ships with no manifest, an entry with a missing
+# field, and a manifest at another version than the pin's VERSION. The
+# reader is the shell, so every value is a string on one line.
+
+# pin_manifest: print the path of the manifest beside the calling
+# script.
+pin_manifest() {
+    echo "$(cd "$(dirname "$0")" && pwd)/pin.toml"
+}
+
+# pin_value <entry> <field> [<manifest>]: print one field of one entry
+# of a manifest, the one beside the calling script unless the call
+# names another, and stop when the entry has no such field.
+pin_value() {
+    local entry="$1" field="$2" manifest="${3:-$(pin_manifest)}" value
+    [[ -f "$manifest" ]] || fail "${manifest#"$pin_root"/} does not exist"
+    value="$(PIN_ENTRY="[$entry]" PIN_FIELD="$field" awk '
+        /^\[/ { inside = ($0 == ENVIRON["PIN_ENTRY"]) }
+        inside && $1 == ENVIRON["PIN_FIELD"] && $2 == "=" {
+            sub(/^[^=]*= *"/, ""); sub(/" *$/, ""); print; exit
+        }' "$manifest")"
+    [[ -n "$value" ]] || fail "${manifest#"$pin_root"/} names no $field for [$entry]"
+    echo "$value"
+}
+
+# fetch_pinned [--resume] <entry> <version> <path>: put the file that
+# an entry of the manifest names at the path, through fetch_verified,
+# with the entry's url and sha256. The version is the one that the
+# fetch builds, from its VERSION file, and the fetch stops when the
+# manifest names another, because the files that a build extracts must
+# be the ones that the SBOM lists.
+fetch_pinned() {
+    local resume=()
+    if [[ "$1" == --resume ]]; then
+        resume=(--resume)
+        shift
+    fi
+    local entry="$1" version="$2" path="$3" pinned url digest
+    pinned="$(pin_value "$entry" version)"
+    [[ "$pinned" == "$version" ]] ||
+        fail "$(pin_dir)/pin.toml names $entry $pinned, and this fetch builds $version; $(pin_dir)/latest.sh --bump writes both"
+    url="$(pin_value "$entry" url)"
+    digest="$(pin_value "$entry" sha256)"
+    fetch_verified "${resume[@]}" "$url" "$digest" "$path"
+}
+
+# set_pin <entry> <version> <url> <sha256> <purl>: write a bump into
+# one entry of the manifest beside the calling script. The entry and
+# each field must exist, so a bump never writes half an entry.
+set_pin() {
+    local manifest
+    manifest="$(pin_manifest)"
+    set_toml "$manifest" "$1" version "\"$2\""
+    set_toml "$manifest" "$1" url "\"$3\""
+    set_toml "$manifest" "$1" sha256 "\"$4\""
+    set_toml "$manifest" "$1" purl "\"$5\""
+}
+
+# purl_escape <text>: percent-encode text for the version of a package
+# URL, so the + of v1.37.1+k3s1 reads %2B. jq's @uri keeps the
+# characters that the purl specification leaves bare.
+purl_escape() {
+    jq -rn --arg text "$1" '$text | @uri'
+}
+
+# generic_purl <name> <version> <url> <sha256>: print the package URL
+# of a file that no package ecosystem names. The purl specification
+# identifies such a file by the URL it downloads from and its digest.
+generic_purl() {
+    echo "pkg:generic/$1@$(purl_escape "$2")?download_url=$3&checksum=sha256:$4"
+}
+
+# github_purl <owner/repository> <tag>: print the package URL of a
+# release or a tagged tree of a GitHub repository. The specification
+# lowercases the owner and the name.
+github_purl() {
+    echo "pkg:github/${1,,}@$(purl_escape "$2")"
+}
+
+# deb_purl <distribution> <package> <version>: print the package URL
+# of an amd64 package of a Debian or Ubuntu archive.
+deb_purl() {
+    echo "pkg:deb/$1/$2@$(purl_escape "$3")?arch=amd64"
 }
 
 # --- the build container -------------------------------------------------

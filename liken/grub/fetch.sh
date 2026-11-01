@@ -19,9 +19,7 @@
 #   grub-pc-bin   the BIOS ("i386-pc") build: boot.img (the MBR
 #                 stage) and the module tree grub-mkimage links core
 #                 images from
-#   grub-common   grub-mkimage itself, the tool that does the linking.
-#                 Ubuntu's 2.14 packaging moved it to grub2-common, so
-#                 mkimage_package below names the deb for each version.
+#   grub2-common  grub-mkimage itself, the tool that does the linking.
 #
 # The fetch includes the tool instead of taking it from the build
 # host, so the pair can never drift apart: a grub-mkimage from one GRUB version
@@ -36,7 +34,8 @@
 #
 # When Ubuntu supersedes this version, the URLs return a 404 error,
 # and the fix is the ordinary re-pin: grub/latest.sh --bump writes
-# the new version into grub/VERSION and its digests below.
+# the new version into grub/VERSION and the URLs and digests of both
+# debs into grub/pin.toml.
 #
 # Usage:
 #   grub/fetch.sh    fetch the version pinned in VERSION
@@ -53,37 +52,19 @@ source "$here/../../toolchains/pin.sh"
 
 require_tools ar tar zstd sha256sum
 
-version="${1:-$(cat "$here/VERSION")}"
+version="$(cat "$here/VERSION")"
 
-# Per-deb digests, pinned beside the version they belong to. The
-# Ubuntu archive publishes per-file digests only inside the Packages
-# indexes that its signed InRelease files list, not beside the files,
-# so this file holds the pins. grub/latest.sh --bump verifies that
-# chain and adds the entries of each new version, and the
-# entries of older versions stay.
-declare -A pc_bin_sha256=(
-    ["2.14-2ubuntu3"]="187f86d4c802a250d417f9f0d2a4095c2e3995ea5194f55a6d9ec27fd16f5055"
-    ["2.12-1ubuntu7.3"]="698d80bc51c0c593fbc829758365a0e4bce96819e2c8c754ae77dfe39b0388df"
-)
-# The deb that holds grub-mkimage, for each version. A version that
-# is not named here takes grub2-common, the package of the 2.14
-# packaging and later.
-declare -A mkimage_package=(
-    ["2.12-1ubuntu7.3"]="grub-common"
-)
-declare -A common_sha256=(
-    ["2.14-2ubuntu3"]="5d45c86963028b5d027d65c9126580742f8924195f71265144dc7ea6422acdbd"
-    ["2.12-1ubuntu7.3"]="464e7c3a9f261b2120a6755fbf753384669c666a5cc7cd571cf836d6da88373f"
-)
-
-pool="http://archive.ubuntu.com/ubuntu/pool/main/g/grub2"
+# The Ubuntu archive publishes per-file digests only inside the
+# Packages indexes that its signed InRelease files list, not beside the
+# files, so pin.toml holds the digests of both debs. grub/latest.sh
+# --bump verifies that chain and writes them.
 cache="$here/cache/$version"
 out="$here/dist/$version"
 
 pc_bin="grub-pc-bin_${version}_amd64.deb"
-common="${mkimage_package[$version]:-grub2-common}_${version}_amd64.deb"
-fetch_verified --resume "$pool/$pc_bin" "${pc_bin_sha256[$version]:-}" "$cache/$pc_bin"
-fetch_verified --resume "$pool/$common" "${common_sha256[$version]:-}" "$cache/$common"
+common="grub2-common_${version}_amd64.deb"
+fetch_pinned --resume grub-pc-bin "$version" "$cache/$pc_bin"
+fetch_pinned --resume grub2-common "$version" "$cache/$common"
 
 # A .deb file is an `ar` archive wrapping a compressed tarball of the
 # files. This script takes the whole i386-pc tree, not just the

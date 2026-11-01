@@ -23,8 +23,8 @@
 # The two vendors come from two upstreams:
 #
 #   Intel publishes microcode in its own repository, pinned here by
-#   release tag (microcode/VERSION) and digest, fetched as the tag's
-#   source tarball. Both vendors ship unconditionally: Intel's blob
+#   release tag (microcode/VERSION) and digest (microcode/pin.toml),
+#   fetched as the tag's source tarball. Both vendors ship unconditionally: Intel's blob
 #   is about 21 MiB and AMD's about 1 MiB, and nothing that small
 #   needs a decision either way.
 #
@@ -56,9 +56,6 @@ require_tools sha256sum tar cpio
 
 version="$(cat "$here/VERSION")"
 tarball="intel-microcode-$version.tar.gz"
-url="https://github.com/intel/Intel-Linux-Processor-Microcode-Data-Files/archive/refs/tags/microcode-$version.tar.gz"
-
-digest="0ec19023dad1e6dd0c5909174b8dff2555b91cf01671e36271a1ef36655c0cfc"
 
 linuxfirmware_version="$(cat "$here/../linux-firmware/VERSION")"
 amd="$here/../linux-firmware/cache/$linuxfirmware_version/amd-ucode"
@@ -68,7 +65,7 @@ amd="$here/../linux-firmware/cache/$linuxfirmware_version/amd-ucode"
 [[ -d "$amd" ]] || "$here/../linux-firmware/fetch.sh"
 
 cache="$here/cache"
-fetch_verified --resume "$url" "$digest" "$cache/$tarball"
+fetch_pinned --resume intel-microcode "$version" "$cache/$tarball"
 
 out="$here/dist/$version"
 rm -rf "$out"

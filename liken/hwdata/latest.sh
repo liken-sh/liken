@@ -41,10 +41,11 @@ row hwdata "$pinned" "$latest" - - - "newest tag; the file ships from the tagged
 
 bump_needed hwdata "$pinned" "$latest" || exit 0
 
-digest="$(digest_of_url "https://raw.githubusercontent.com/vcrhonek/hwdata/$latest/pci.ids")"
+url="https://raw.githubusercontent.com/vcrhonek/hwdata/$latest/pci.ids"
+digest="$(digest_of_url "$url")"
 
 echo "$latest" >"$here/VERSION"
-set_var "$here/fetch.sh" digest "$digest"
+set_pin hwdata "$latest" "$url" "$digest" "$(github_purl vcrhonek/hwdata "$latest")"
 bumped hwdata "$pinned" "$latest"
 echo "the digest came from this download; nothing upstream signs it"
 next_step "make -C .. hwdata"

@@ -12,10 +12,10 @@
 #
 # The pin is an hwdata release tag (hwdata/VERSION), and this fetch
 # takes just the one file, at that tag, from hwdata's repository.
-# hwdata publishes no checksum manifest, so this file records the
-# digest, the same arrangement as the mke2fs vendoring: a version bump
-# must update VERSION and the digest together, and the fetch fails
-# with an error when they disagree.
+# hwdata publishes no checksum manifest, so hwdata/pin.toml records
+# the digest of the bump's own download: a version bump updates VERSION
+# and the manifest together, and the fetch fails with an error when
+# they disagree.
 #
 # pci.ids is dual-licensed (GPL-2-or-later or 3-clause BSD). liken
 # redistributes it under the BSD license, which asks for notices, not
@@ -37,14 +37,11 @@ source "$here/../../toolchains/pin.sh"
 require_tools sha256sum
 
 version="$(cat "$here/VERSION")"
-url="https://raw.githubusercontent.com/vcrhonek/hwdata/$version/pci.ids"
-
-digest="4f020f031d1f2d011b2a656a191519a056cb9744229551aed2cf7f90dfc2e18a"
 
 cache="$here/cache/$version"
 out="$here/dist/$version"
 
-fetch_verified --resume "$url" "$digest" "$cache/pci.ids"
+fetch_pinned --resume hwdata "$version" "$cache/pci.ids"
 
 rm -rf "$out"
 mkdir -p "$out"

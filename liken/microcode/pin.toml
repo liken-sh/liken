@@ -1,0 +1,16 @@
+# The file that microcode/fetch.sh downloads, for the fetch and for the
+# SBOM of a release. microcode/latest.sh --bump writes the version,
+# url, sha256, and purl, and toolchains/pin.sh describes each field.
+# The AMD half of the microcode comes from linux-firmware, whose
+# manifest names it.
+
+# Intel's microcode, as the tarball of a tag of Intel's repository.
+# Its `license` file allows redistribution in binary form, without
+# modification. The SPDX list has no identifier for it, so the SBOM
+# names it with a LicenseRef.
+[intel-microcode]
+version = "20260925"
+url = "https://github.com/intel/Intel-Linux-Processor-Microcode-Data-Files/archive/refs/tags/microcode-20260925.tar.gz"
+sha256 = "0ec19023dad1e6dd0c5909174b8dff2555b91cf01671e36271a1ef36655c0cfc"
+purl = "pkg:github/intel/intel-linux-processor-microcode-data-files@microcode-20260925"
+license = "LicenseRef-Intel-Microcode"

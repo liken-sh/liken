@@ -18,7 +18,7 @@
 # Flux publishes no standalone manifest artifact for a component
 # subset. The manifests live inside the flux CLI, and the CLI renders
 # them offline (`flux install --export`). So this script fetches the
-# CLI, verifies it against the digest pinned below, which
+# CLI, verifies it against the digest in flux/pin.toml, which
 # flux/latest.sh --bump copies from the checksum file published beside
 # it, and renders the seed with it. The CLI is a build tool only; nothing
 # ships it. Pinning the CLI version pins the rendered manifests, so
@@ -27,8 +27,6 @@
 #
 # Usage:
 #   flux/fetch.sh             fetch the version pinned in flux/VERSION
-#   flux/fetch.sh v2.9.1      fetch another version that has a digest
-#                             pinned below
 #
 # Results land in flux/dist/<version>/gotk-components.yaml, with the
 # CLI cached in flux/cache/.
@@ -42,24 +40,18 @@ source "$here/../../toolchains/pin.sh"
 require_tools sha256sum tar
 
 arch="amd64"
-version="${1:-$(cat "$here/VERSION")}"
+version="$(cat "$here/VERSION")"
 # Release artifacts name the version without the leading v.
 bare="${version#v}"
-
-base="https://github.com/fluxcd/flux2/releases/download/$version"
 tarball="flux_${bare}_linux_${arch}.tar.gz"
 
 cache="$here/cache/$version"
 out="$here/dist/$version"
 
-# The digest of the CLI tarball, pinned beside the version it belongs
-# to. flux/latest.sh --bump copies it from the checksum file that the
-# release publishes, after the file's sigstore signature verifies as
-# the work of Flux's release workflow.
-declare -A flux_sha256=(
-    ["v2.10.0"]="208dd7012c04fedeed5b2d0b6e63df3b15b1c34a381527811685c098bc9f8659"
-)
-fetch_verified --resume "$base/$tarball" "${flux_sha256[$version]:-}" "$cache/$tarball"
+# flux/latest.sh --bump copies the digest from the checksum file that
+# the release publishes, after the file's sigstore signature verifies
+# as the work of Flux's release workflow.
+fetch_pinned --resume flux "$version" "$cache/$tarball"
 tar -xzf "$cache/$tarball" -C "$cache" flux
 
 # Render the seed. --export writes manifests to stdout and touches no

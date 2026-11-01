@@ -36,12 +36,10 @@
 # Usage:
 #
 #   kernel/fetch.sh            fetch the version pinned in kernel/VERSION
-#   kernel/fetch.sh 7.1.1      fetch another version that has packages
-#                              pinned below
 #
 # To upgrade the kernel, run kernel/latest.sh --bump. It writes the new
-# version into kernel/VERSION and the new packages' names and digests
-# into this file, and the commit carries both.
+# version into kernel/VERSION and the new packages' URLs and digests
+# into kernel/pin.toml, and the commit carries both.
 #
 # Results land in kernel/dist/<version>/:
 #
@@ -56,10 +54,10 @@
 #                            exactly as it will appear in the initramfs
 #
 # This script caches downloads in kernel/cache/ and verifies them
-# against the sha256 digests pinned below. This makes re-runs cheap
-# and stops a torn download from passing as good. The digests come
-# from the CHECKSUMS file that the archive publishes beside each
-# build, copied into this file when the pin moved, so a package that
+# against the sha256 digests in kernel/pin.toml. This makes re-runs
+# cheap and stops a torn download from passing as good. The digests
+# come from the CHECKSUMS file that the archive publishes beside each
+# build, copied into pin.toml when the pin moved, so a package that
 # changes upstream after that fails the check. kernel/latest.sh
 # --bump copies the digests only after the checksum file's signature
 # verifies against the Ubuntu kernel team's key in kernel-ppa.asc, so
@@ -79,25 +77,10 @@ source "$here/../../toolchains/pin.sh"
 # download.
 require_tools ar tar zstd sha256sum depmod
 
-arch="amd64"
-version="${1:-$(cat "$here/VERSION")}"
-base="https://kernel.ubuntu.com/mainline/v$version/$arch"
+version="$(cat "$here/VERSION")"
 
 cache="$here/cache"
 out="$here/dist/$version"
-
-# The two packages of each pinned build, as "<sha256>  <filename>"
-# lines, which is the form of the sha256 lines in the build's CHECKSUMS
-# file. The filenames embed a build timestamp that has no other
-# source, so each filename is pinned with its digest instead of
-# constructed from the version. kernel/latest.sh --bump writes these
-# lines.
-declare -A image_package=(
-    ["7.3.1"]="93c7c059e51cd81d7aa817f0cb0d2a7e94c5b04642a8e20de8b4ab4628b6a357  linux-image-unsigned-7.3.1-070301-generic_7.3.1-070301.202610301300_amd64.deb"
-)
-declare -A modules_package=(
-    ["7.3.1"]="7f9a44175036fd63b01ec317ccace29e184261a794d39046902439458fb18c2f  linux-modules-7.3.1-070301-generic_7.3.1-070301.202610301300_amd64.deb"
-)
 
 # Files extract into a scratch directory first. This script touches
 # dist/ only after everything arrives and verifies, so a failed run
@@ -105,20 +88,21 @@ declare -A modules_package=(
 staging="$(mktemp -d)"
 trap 'rm -rf "$staging"' EXIT
 
-# Download (with a cache) and unpack one package, named by its pinned
-# "<sha256>  <filename>" line. `ar p` streams the payload member to
-# stdout. The payload may be a plain data.tar (current mainline
-# builds), or compressed with zstd or xz (Ubuntu's own archives, older
-# builds).
+# Download (with a cache) and unpack one package, named by its entry
+# in pin.toml. The file names embed a build timestamp that has no
+# other source than the build's CHECKSUMS file, so the cache takes the
+# name from the pinned url instead of building it from the version.
+# `ar p` streams the payload member to stdout. The payload may be a
+# plain data.tar (current mainline builds), or compressed with zstd or
+# xz (Ubuntu's own archives, older builds).
 fetch() {
-    local line="$1" digest deb payload
-    [[ -n "$line" ]] || fail "no packages pinned for kernel $version; kernel/latest.sh --bump writes them"
-    digest="${line%% *}"
-    deb="${line##* }"
+    local entry="$1" url deb payload
+    url="$(pin_value "$entry" url)"
+    deb="${url##*/}"
 
     # These .debs are large, and a long stream sometimes breaks partway
     # through, so each retry resumes from the bytes already on disk.
-    fetch_verified --resume "$base/$deb" "$digest" "$cache/$deb"
+    fetch_pinned --resume "$entry" "$version" "$cache/$deb"
 
     payload="$(ar t "$cache/$deb" | grep '^data\.tar')"
     case "$payload" in
@@ -129,8 +113,8 @@ fetch() {
     esac
 }
 
-fetch "${image_package[$version]:-}"
-fetch "${modules_package[$version]:-}"
+fetch linux-image-unsigned
+fetch linux-modules
 
 # The kernel's "release string" (uname -r) is embedded in every
 # artifact's filename and directory layout. The kernel uses this

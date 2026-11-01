@@ -1,0 +1,26 @@
+# The files that kernel/fetch.sh downloads, for the fetch and for the
+# SBOM of a release. kernel/latest.sh --bump writes the version, url,
+# sha256, and purl of both, and toolchains/pin.sh describes each field.
+#
+# Both are packages of a mainline build of Canonical's kernel team,
+# which kernel.ubuntu.com serves outside Ubuntu's archive, so their
+# purl is generic and names the URL. Each package's file name holds a
+# build timestamp that only the build's CHECKSUMS file gives, so the
+# url is the one place that names the file. The license is the one
+# that the kernel's COPYING states.
+
+# The kernel image.
+[linux-image-unsigned]
+version = "7.3.1"
+url = "https://kernel.ubuntu.com/mainline/v7.3.1/amd64/linux-image-unsigned-7.3.1-070301-generic_7.3.1-070301.202610301300_amd64.deb"
+sha256 = "93c7c059e51cd81d7aa817f0cb0d2a7e94c5b04642a8e20de8b4ab4628b6a357"
+purl = "pkg:generic/linux-image-unsigned@7.3.1?download_url=https://kernel.ubuntu.com/mainline/v7.3.1/amd64/linux-image-unsigned-7.3.1-070301-generic_7.3.1-070301.202610301300_amd64.deb&checksum=sha256:93c7c059e51cd81d7aa817f0cb0d2a7e94c5b04642a8e20de8b4ab4628b6a357"
+license = "GPL-2.0-only WITH Linux-syscall-note"
+
+# The modules, the build's configuration, and its System.map.
+[linux-modules]
+version = "7.3.1"
+url = "https://kernel.ubuntu.com/mainline/v7.3.1/amd64/linux-modules-7.3.1-070301-generic_7.3.1-070301.202610301300_amd64.deb"
+sha256 = "7f9a44175036fd63b01ec317ccace29e184261a794d39046902439458fb18c2f"
+purl = "pkg:generic/linux-modules@7.3.1?download_url=https://kernel.ubuntu.com/mainline/v7.3.1/amd64/linux-modules-7.3.1-070301-generic_7.3.1-070301.202610301300_amd64.deb&checksum=sha256:7f9a44175036fd63b01ec317ccace29e184261a794d39046902439458fb18c2f"
+license = "GPL-2.0-only WITH Linux-syscall-note"

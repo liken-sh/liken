@@ -8,7 +8,7 @@
 # the VERSION file beside this Makefile, never from a caller.
 override VERSION := $(strip $(file <VERSION))
 
-dist/$(VERSION)/pci.ids: VERSION fetch.sh
+dist/$(VERSION)/pci.ids: VERSION pin.toml fetch.sh
 	./fetch.sh
 
 .PHONY: all clean

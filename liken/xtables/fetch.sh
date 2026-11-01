@@ -13,9 +13,9 @@
 # k3s's own bundled userland. As a result, the bytes on liken's PATH
 # are the same bytes k3s carries. This script fetches them the same way
 # as every other vendored input: a pinned version, fetched from the
-# project's GitHub releases, verified against a pinned digest that
-# xtables/latest.sh --bump copies from the sha256 manifest published
-# beside it. The version pin (xtables/VERSION) must match the
+# project's GitHub releases, verified against the digest in
+# xtables/pin.toml, which xtables/latest.sh --bump copies from the
+# sha256 manifest published beside it. The version pin (xtables/VERSION) must match the
 # VERSION_ROOT in the vendored k3s release's scripts/version.sh. This
 # keeps the two copies of xtables on the machine in agreement.
 #
@@ -31,8 +31,6 @@
 #
 # Usage:
 #   xtables/fetch.sh              fetch the version pinned in xtables/VERSION
-#   xtables/fetch.sh v0.15.1      fetch another version that has a
-#                                 digest pinned below
 #
 # Results land in xtables/dist/<version>/bin/, cached in xtables/cache/.
 
@@ -45,21 +43,13 @@ source "$here/../../toolchains/pin.sh"
 require_tools sha256sum tar
 
 arch="amd64"
-version="${1:-$(cat "$here/VERSION")}"
-
-base="https://github.com/k3s-io/k3s-root/releases/download/$version"
+version="$(cat "$here/VERSION")"
 tarball="k3s-root-xtables-$arch.tar"
 
 cache="$here/cache/$version"
 out="$here/dist/$version"
 
-# The digest of the xtables tarball, pinned beside the version it
-# belongs to. xtables/latest.sh --bump copies it from the sha256
-# manifest that the release publishes.
-declare -A xtables_sha256=(
-    ["v0.15.2"]="1272950a6dd969ced16f36eed91f3cc3feb552edbb7d6dcfbfc9b04930d9ba3f"
-)
-fetch_verified --resume "$base/$tarball" "${xtables_sha256[$version]:-}" "$cache/$tarball"
+fetch_pinned --resume k3s-root-xtables "$version" "$cache/$tarball"
 
 rm -rf "$out"
 mkdir -p "$out"

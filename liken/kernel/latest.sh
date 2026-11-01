@@ -24,9 +24,10 @@
 #
 # The pin carries a digest for each of the two packages that
 # kernel/fetch.sh unpacks. Each mainline build publishes a CHECKSUMS
-# file beside its packages, and --bump copies the two packages' sha256
-# lines from it into fetch.sh. A fetch reads only those lines, so a
-# package that changes upstream after the bump fails the check.
+# file beside its packages, and --bump copies the two packages' file
+# names and sha256 digests from it into kernel/pin.toml. A fetch reads
+# only pin.toml, so a package that changes upstream after the bump
+# fails the check.
 #
 # The digests are worth only as much as the file they come from, so
 # --bump first checks CHECKSUMS.gpg, the archive's detached signature
@@ -41,7 +42,8 @@
 # Usage:
 #   kernel/latest.sh          report the pin and the newest release
 #   kernel/latest.sh --bump   write the newest release into VERSION,
-#                             and its packages' digests into fetch.sh
+#                             and its packages' URLs and digests into
+#                             pin.toml
 
 set -euo pipefail
 
@@ -92,9 +94,16 @@ modules="$(grep -E '^[0-9a-f]{64}  linux-modules-.*-generic_.*_amd64\.deb$' <<<"
 [[ -n "$image" && -n "$modules" ]] ||
     fail "the CHECKSUMS file of $latest lists no image or no modules package"
 
+# pin_package <entry> <"<sha256>  <file name>">: write one package of
+# the CHECKSUMS file into its entry of pin.toml.
+pin_package() {
+    local digest="${2%% *}" url="${index}v$latest/amd64/${2##* }"
+    set_pin "$1" "$latest" "$url" "$digest" "$(generic_purl "$1" "$latest" "$url" "$digest")"
+}
+
 echo "$latest" >"$here/VERSION"
-set_entry "$here/fetch.sh" image_package "$latest" "$image"
-set_entry "$here/fetch.sh" modules_package "$latest" "$modules"
+pin_package linux-image-unsigned "$image"
+pin_package linux-modules "$modules"
 bumped kernel "$pinned" "$latest"
 echo "the digests came from the build's CHECKSUMS file, signed by the Kernel PPA key"
 # licensing/sources.sh mirrors kernel.org's tarball of this release

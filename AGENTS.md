@@ -207,6 +207,26 @@ comment that excuses one line.
   Dockerfile, or other build step reads a digest from the network,
   because a checksum file read at build time accepts whatever the
   upstream serves that day.
+- A pin whose files a release ships holds a manifest, `pin.toml`,
+  beside its `fetch.sh`, because the SBOM of a release must name each
+  of those files, and only the pin knows where it came from. The
+  manifest has one table for each file that the fetch downloads, with
+  its `version`, `url`, `sha256`, `purl`, and the SPDX expression of
+  its `license`, and an optional CycloneDX `scope` of `excluded` for a
+  file that only the build reads. The manifest is the one copy of the
+  URL and the digest: `latest.sh --bump` writes them with `set_pin`,
+  `fetch.sh` downloads with `fetch_pinned`, and every other reader
+  takes a field with `pin_value`. A purl follows the purl
+  specification for the file's kind: `pkg:deb/ubuntu/...?arch=amd64`
+  for a package of Ubuntu's archive, `pkg:github/<owner>/<name>@<tag>`
+  for a GitHub release or tag, and `pkg:generic/<name>@<version>` with
+  the `download_url` and the `checksum` for any other file. A person
+  reads the upstream's license and writes the expression. The
+  programs that buildroot builds, the closure images, and the Go and
+  Rust binaries need no manifest, because buildroot's CycloneDX SBOM,
+  the `status.d` records, the build info, and cargo-auditable already
+  name them. `unmanifested` in `ci/manifests.go` names each other
+  `fetch.sh` that needs no manifest, with the reason.
 - When the upstream signs the checksum file that a bump copies a
   digest from, the bump verifies the signature first. Without that
   check, a mirror that changes the file changes the pin. The keys are

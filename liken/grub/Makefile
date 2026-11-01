@@ -39,7 +39,7 @@ MODULES := biosdisk part_gpt fat search search_label normal linux \
 
 all: $(DIST)/grub-core.img
 
-$(DIST)/grub-mkimage $(DIST)/grub-boot.img &: VERSION fetch.sh
+$(DIST)/grub-mkimage $(DIST)/grub-boot.img &: VERSION pin.toml fetch.sh
 	./fetch.sh
 
 # This strips the embedded copy of early.cfg down to its bare

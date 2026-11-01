@@ -13,17 +13,15 @@
 # from Firefox's source and converted to PEM, as dated immutable
 # snapshots.
 #
-# So the pin here is a date (trust/VERSION) and a sha256 digest, and
-# this script verifies the fetch against that digest, the same as
-# every other vendored input. As a result, the image's trust store
+# So the pin here is a date (trust/VERSION) and a sha256 digest
+# (trust/pin.toml), and this script verifies the fetch against that
+# digest, the same as every other vendored input. As a result, the image's trust store
 # does not depend on whichever build host assembled it. A change in
 # what the machine trusts shows up in this repo as a deliberate,
 # reviewable version bump.
 #
 # Usage:
 #   trust/fetch.sh               fetch the snapshot pinned in trust/VERSION
-#   trust/fetch.sh 2026-03-11    fetch another snapshot, which the
-#                                Dockerfile must name with its digest
 #
 # Results land in trust/dist/<version>/cacert.pem, cached in trust/cache/.
 
@@ -35,28 +33,16 @@ source "$here/../toolchains/pin.sh"
 
 require_tools sha256sum
 
-version="${1:-$(cat "$here/VERSION")}"
-url="https://curl.se/ca/cacert-$version.pem"
+version="$(cat "$here/VERSION")"
 
 cache="$here/cache/$version"
 out="$here/dist/$version"
 
-# The digest comes from the trust image's Dockerfile. Its ADD line
-# names the snapshot's URL with a --checksum on the line before, and
-# trust/latest.sh --bump writes both from curl's .sha256 file. One pin
-# serves the image and this fetch, so the two cannot disagree, and a
-# fetch never reads a digest from curl.se.
-digest="$(awk -v url="$url" '
-    index($0, url) && prev ~ /--checksum=sha256:/ {
-        sub(/.*--checksum=sha256:/, "", prev)
-        sub(/[^0-9a-f].*/, "", prev)
-        print prev
-    }
-    { prev = $0 }' "$here/Dockerfile")"
-[[ "$digest" =~ ^[0-9a-f]{64}$ ]] ||
-    fail "trust/Dockerfile pins no digest for $url; trust/latest.sh --bump writes it"
-
-fetch_verified "$url" "$digest" "$cache/cacert.pem"
+# trust/latest.sh --bump writes the snapshot's URL and digest from
+# curl's .sha256 file into trust/pin.toml and into the ADD line of the
+# trust image's Dockerfile, and `ci pins` fails when the two differ, so
+# the image and this fetch take the same bytes.
+fetch_pinned cacert "$version" "$cache/cacert.pem"
 
 rm -rf "$out"
 mkdir -p "$out"

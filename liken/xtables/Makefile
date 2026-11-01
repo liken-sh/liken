@@ -8,7 +8,7 @@
 # the VERSION file beside this Makefile, never from a caller.
 override VERSION := $(strip $(file <VERSION))
 
-dist/$(VERSION)/bin/xtables-legacy-multi: VERSION fetch.sh
+dist/$(VERSION)/bin/xtables-legacy-multi: VERSION pin.toml fetch.sh
 	./fetch.sh
 
 .PHONY: all clean

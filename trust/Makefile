@@ -8,7 +8,7 @@
 # the VERSION file beside this Makefile, never from a caller.
 override VERSION := $(strip $(file <VERSION))
 
-dist/$(VERSION)/cacert.pem: VERSION fetch.sh
+dist/$(VERSION)/cacert.pem: VERSION pin.toml fetch.sh
 	./fetch.sh
 
 .PHONY: all clean

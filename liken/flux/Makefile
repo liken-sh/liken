@@ -9,7 +9,7 @@
 # whole story.
 override VERSION := $(strip $(file <VERSION))
 
-dist/$(VERSION)/gotk-components.yaml: VERSION fetch.sh
+dist/$(VERSION)/gotk-components.yaml: VERSION pin.toml fetch.sh
 	./fetch.sh
 
 .PHONY: all clean

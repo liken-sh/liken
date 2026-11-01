@@ -30,7 +30,8 @@
 # carries only the current build of each series. When this version is
 # superseded, the URL returns a 404 error, and the fix is the ordinary
 # re-pin: systemd-boot/latest.sh --bump writes the new version into
-# systemd-boot/VERSION and its digest below.
+# systemd-boot/VERSION and its URL and digest into
+# systemd-boot/pin.toml.
 #
 # Usage:
 #   systemd-boot/fetch.sh    fetch the version pinned in VERSION
@@ -46,28 +47,18 @@ source "$here/../../toolchains/pin.sh"
 
 require_tools ar tar zstd sha256sum
 
-version="${1:-$(cat "$here/VERSION")}"
+version="$(cat "$here/VERSION")"
 
-# The deb's digest, pinned beside the version it belongs to. The
-# Ubuntu archive publishes per-file digests only inside the Packages
-# indexes that its signed InRelease files list, not beside the files,
-# so this file holds the pin. systemd-boot/latest.sh --bump verifies
-# that chain and adds the entry of each new version, and
-# the entries of older versions stay.
-declare -A deb_sha256=(
-    ["261.3-0ubuntu3"]="128d8a69e4274dee41fcbd5d74e2c55ec4d67b1726005cce9b41c20a3ea453e6"
-    ["259.5-0ubuntu3.4"]="e1d7a0e05abca7c33ff349eb43895cd09aed406894ab369f9a2654bcace418b0"
-    ["259.5-0ubuntu3.3"]="0776d7f1bd2d80caf5882024b3d4b979a9ca8fe799f9828992b0959e0c19fa47"
-    ["259.5-0ubuntu3"]="068d9c2f0c450c47869669367738057a604e5b8bab3b194ec7808c6e6e712ca6"
-)
-
+# The Ubuntu archive publishes per-file digests only inside the
+# Packages indexes that its signed InRelease files list, not beside the
+# files, so pin.toml holds the deb's digest. systemd-boot/latest.sh
+# --bump verifies that chain and writes it.
 deb="systemd-boot-efi_${version}_amd64.deb"
-url="http://archive.ubuntu.com/ubuntu/pool/universe/s/systemd/$deb"
 
 cache="$here/cache/$version"
 out="$here/dist/$version"
 
-fetch_verified --resume "$url" "${deb_sha256[$version]:-}" "$cache/$deb"
+fetch_pinned --resume systemd-boot-efi "$version" "$cache/$deb"
 
 # A .deb file is an `ar` archive wrapping a compressed tarball of the
 # files. liken extracts only the EFI binary from it.

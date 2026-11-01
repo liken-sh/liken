@@ -51,14 +51,16 @@ repos:
         # that each pin follows the rules of "Pins and downloads" in
         # AGENTS.md: each fetch.sh and latest.sh sources
         # toolchains/pin.sh and downloads through it, no build reads a
-        # digest from the network, and each pin has a latest.sh that
-        # make versions runs. A change to a script, a Dockerfile, a
-        # VERSION, images.toml, versions.sh, the library, or a key in
-        # trust/keys/ that breaks a rule fails here, and so does a
+        # digest from the network, each pin has a latest.sh that make
+        # versions runs, and each pin that a release ships has a
+        # pin.toml that agrees with its fetch. A change to a script, a
+        # Dockerfile, a VERSION, a pin.toml, images.toml, versions.sh,
+        # the library, or a key in trust/keys/ that breaks a rule
+        # fails here, and so does a
         # change that makes the two copies of closure.sh differ, and a
         # uses: under .github/ that names an action by anything but
         # the commit and the release of actionPins in ci/actions.go.
         entry: bash -c 'cd ci && go run . pins -root ..'
         language: system
-        files: (^|/)(fetch|latest)\.sh$|/Dockerfile[^/]*$|(^|/)VERSION$|^toolchains/(images\.toml|pin\.sh)$|^versions\.sh$|^trust/keys/|(^|/)closure\.sh$|^\.github/
+        files: (^|/)(fetch|latest)\.sh$|/Dockerfile[^/]*$|(^|/)(VERSION|pin\.toml)$|^toolchains/(images\.toml|pin\.sh)$|^versions\.sh$|^trust/keys/|(^|/)closure\.sh$|^\.github/
         pass_filenames: false

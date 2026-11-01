@@ -103,11 +103,11 @@ NFSUTILS_VERSION = $(call userland_version,nfs-utils)
 WPASUPPLICANT_VERSION = $(call userland_version,wpa-supplicant)
 TZDATA_VERSION = $(call userland_version,tzdata)
 LINUXFIRMWARE_VERSION := $(strip $(file <../linux-firmware/VERSION))
-# This pin is read out of a script instead of a VERSION file because
-# linux-firmware/fetch.sh owns the nested wireless-regdb pin.
-# linux-firmware/derive.sh and image/build.sh read it the same way, so
-# the release document and the shipped blob name one version.
-WIRELESSREGDB_VERSION := $(shell sed -n 's|^regdb_version="\(.*\)"$$|\1|p' ../linux-firmware/fetch.sh)
+# This pin is read out of a manifest instead of a VERSION file because
+# the wireless-regdb entry of linux-firmware/pin.toml is the nested
+# pin. linux-firmware/derive.sh and image/build.sh read the same entry,
+# so the release document and the shipped blob name one version.
+WIRELESSREGDB_VERSION := $(shell awk '/^\[/ { inside = ($$0 == "[wireless-regdb]") } inside && $$1 == "version" { gsub(/"/, "", $$3); print $$3 }' ../linux-firmware/pin.toml)
 MICROCODE_VERSION := $(strip $(file <../microcode/VERSION))
 FLUX_VERSION := $(strip $(file <../flux/VERSION))
 

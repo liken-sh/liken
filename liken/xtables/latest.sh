@@ -13,9 +13,9 @@
 # line at the tag in k3s/VERSION. A k3s bump therefore comes first,
 # and this domain follows it.
 #
-# The pin carries the tarball's digest in xtables/fetch.sh. Each
+# The pin carries the tarball's digest in xtables/pin.toml. Each
 # k3s-root release publishes a sha256 manifest per architecture, and
-# --bump copies the xtables tarball's line from it into fetch.sh.
+# --bump copies the xtables tarball's digest from it into pin.toml.
 #
 # A bump moves what iptables version liken redistributes, and the
 # source mirror pins that version by name. So the bump ends by
@@ -53,13 +53,15 @@ bump_needed xtables "$pinned" "$latest" || exit 0
 
 # One sha256 manifest per architecture covers all of the release's
 # artifacts, and the bump reads the line for the xtables tarball.
-manifest="https://github.com/k3s-io/k3s-root/releases/download/$latest/sha256sum-amd64.txt"
+base="https://github.com/k3s-io/k3s-root/releases/download/$latest"
+manifest="$base/sha256sum-amd64.txt"
 digest="$(fetch_text "$manifest" |
     awk '$2 == "k3s-root-xtables-amd64.tar" { print $1 }')" || digest=""
 [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || fail "$manifest lists no xtables tarball"
 
 echo "$latest" >"$here/VERSION"
-set_entry "$here/fetch.sh" xtables_sha256 "$latest" "$digest"
+set_pin k3s-root-xtables "$latest" "$base/k3s-root-xtables-amd64.tar" "$digest" \
+    "$(github_purl k3s-io/k3s-root "$latest")"
 bumped xtables "$pinned" "$latest"
 echo "the digest came from the release's sha256 manifest"
 repin_sources

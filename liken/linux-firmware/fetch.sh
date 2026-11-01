@@ -12,10 +12,10 @@
 #
 # The pin is a release date (linux-firmware/VERSION), and this fetch
 # takes the release tarball from kernel.org. kernel.org publishes a
-# checksum list, but this file records the digest directly, the same
-# arrangement as the hwdata vendoring: a version bump must update
-# VERSION and the digest together, and the fetch fails with an error
-# when they disagree.
+# checksum list, but linux-firmware/pin.toml records the digest, the
+# same arrangement as every pin: a version bump updates VERSION and the
+# manifest together, and the fetch fails with an error when they
+# disagree.
 #
 # The tarball also serves the licensing domain. Some blobs in the
 # tree carry the GPL, and the GPL requires a source offer. The
@@ -36,7 +36,8 @@
 #
 # Usage:
 #   linux-firmware/fetch.sh    fetch the versions pinned in VERSION
-#                              and in regdb_version below
+#                              and in the wireless-regdb entry of
+#                              pin.toml
 #
 # The tarballs land in linux-firmware/cache/, and the extracted trees
 # in linux-firmware/cache/<version>/ and
@@ -53,17 +54,14 @@ require_tools sha256sum tar xz
 
 version="$(cat "$here/VERSION")"
 tarball="linux-firmware-$version.tar.xz"
-url="https://cdn.kernel.org/pub/linux/kernel/firmware/$tarball"
-
-digest="a10d1ab5baf2c74ba92e8c7cf313e691696c26bddfa6df00db795e48d70cd4ca"
 
 # The nested pin. wireless-regdb names its releases for the date, the
 # way linux-firmware does, and kernel.org publishes one clearsigned
 # sha256sums.asc for the directory. linux-firmware/latest.sh --bump
-# wireless-regdb moves this pair. The two pins move independently,
-# because the two upstreams cut releases on their own schedules.
-regdb_version="2026.09.03"
-regdb_digest="b22e0901227b820cd1c280abe681a15b773a5103a5e10dc442e94ebb34cbf58d"
+# wireless-regdb moves its entry in pin.toml, which is the one place
+# that names its version. The two pins move independently, because the
+# two upstreams cut releases on their own schedules.
+regdb_version="$(pin_value wireless-regdb version)"
 
 cache="$here/cache"
 
@@ -71,7 +69,7 @@ cache="$here/cache"
 # partway through. A plain retry would start over and can fail the
 # same way forever, so each retry resumes from the bytes already on
 # disk.
-fetch_verified --resume "$url" "$digest" "$cache/$tarball"
+fetch_pinned --resume linux-firmware "$version" "$cache/$tarball"
 
 # The extracted tree is large (about 1.9 GB), so extraction is
 # skipped when the tree for this version is already present. The
@@ -90,9 +88,8 @@ echo "linux-firmware $version: $(find "$tree" -type f | wc -l) files"
 # project is not part of the linux-firmware tree; the release above
 # simply does not contain it.
 regdb_tarball="wireless-regdb-$regdb_version.tar.xz"
-regdb_url="https://mirrors.edge.kernel.org/pub/software/network/wireless-regdb/$regdb_tarball"
 
-fetch_verified "$regdb_url" "$regdb_digest" "$cache/$regdb_tarball"
+fetch_pinned wireless-regdb "$regdb_version" "$cache/$regdb_tarball"
 
 # regulatory.db is the artifact this pin exists for, so its presence
 # is what says the extraction finished.

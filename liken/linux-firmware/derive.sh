@@ -82,6 +82,8 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
 for tool in modinfo realpath; do
     command -v "$tool" >/dev/null || {
@@ -97,9 +99,9 @@ tree="$here/cache/$version"
     exit 1
 }
 
-# fetch.sh owns the wireless-regdb pin, and reading it out of that
-# script is what keeps the two files from drifting apart.
-regdb_version="$(sed -n 's|^regdb_version="\(.*\)"$|\1|p' "$here/fetch.sh")"
+# The wireless-regdb entry of pin.toml is the one place that names the
+# regulatory database's version, and fetch.sh reads it there too.
+regdb_version="$(pin_value wireless-regdb version "$here/pin.toml")"
 regdb="$here/cache/wireless-regdb-$regdb_version"
 [[ -f "$regdb/regulatory.db" ]] || {
     echo "derive.sh: no extracted tree at $regdb; run fetch.sh first" >&2

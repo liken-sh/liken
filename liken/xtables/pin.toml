@@ -1,0 +1,13 @@
+# The file that xtables/fetch.sh downloads, for the fetch and for the
+# SBOM of a release. xtables/latest.sh --bump writes the version, url,
+# sha256, and purl, and toolchains/pin.sh describes each field.
+
+# k3s-root's static netfilter tools. The OS ships xtables-legacy-multi
+# from it, which is iptables, under the GPL version 2 that iptables'
+# COPYING gives, linked with musl, whose license is MIT.
+[k3s-root-xtables]
+version = "v0.15.2"
+url = "https://github.com/k3s-io/k3s-root/releases/download/v0.15.2/k3s-root-xtables-amd64.tar"
+sha256 = "1272950a6dd969ced16f36eed91f3cc3feb552edbb7d6dcfbfc9b04930d9ba3f"
+purl = "pkg:github/k3s-io/k3s-root@v0.15.2"
+license = "GPL-2.0-only AND MIT"

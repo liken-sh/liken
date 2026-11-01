@@ -48,10 +48,10 @@ archive="https://cdn.kernel.org/pub/linux/kernel/firmware"
 regdb_archive="https://mirrors.edge.kernel.org/pub/software/network/wireless-regdb"
 
 pinned="$(cat "$here/VERSION")"
-# The regulatory database is a nested pin: fetch.sh holds the version
-# and the digest, because this domain's VERSION file names the
-# firmware release and nothing else.
-regdb_pinned="$(var_of "$here/fetch.sh" regdb_version)"
+# The regulatory database is a nested pin: its entry in pin.toml holds
+# the version and the digest, because this domain's VERSION file names
+# the firmware release and nothing else.
+regdb_pinned="$(pin_value wireless-regdb version)"
 
 latest="$(fetch_text "$archive/" |
     grep -oE 'linux-firmware-[0-9]{8}\.tar\.xz' |
@@ -78,13 +78,13 @@ if [[ "${2:-linux-firmware}" == "wireless-regdb" ]]; then
     bump_needed wireless-regdb "$regdb_pinned" "$regdb_latest" || exit 0
     regdb_tarball="wireless-regdb-$regdb_latest.tar.xz"
     regdb_digest="$(sums_digest "$regdb_archive" "$regdb_tarball")"
-    set_var "$here/fetch.sh" regdb_version "$regdb_latest"
-    set_var "$here/fetch.sh" regdb_digest "$regdb_digest"
+    regdb_url="$regdb_archive/$regdb_tarball"
+    # licensing/sources.sh mirrors this tarball by the url and the
+    # digest of this entry, so the bump moves the mirror too.
+    set_pin wireless-regdb "$regdb_latest" "$regdb_url" "$regdb_digest" \
+        "$(generic_purl wireless-regdb "$regdb_latest" "$regdb_url" "$regdb_digest")"
     bumped wireless-regdb "$regdb_pinned" "$regdb_latest"
     echo "the digest came from sha256sums.asc, signed by kernel.org's checksum autosigner"
-    # licensing/sources.sh mirrors this tarball and pins it by digest,
-    # so a regdb bump moves that digest too.
-    repin_sources
     next_step "make -C .. linux-firmware"
     exit 0
 fi
@@ -97,12 +97,13 @@ tarball="linux-firmware-$latest.tar.xz"
 digest="$(sums_digest "$archive" "$tarball")"
 
 echo "$latest" >"$here/VERSION"
-set_var "$here/fetch.sh" digest "$digest"
+set_pin linux-firmware "$latest" "$archive/$tarball" "$digest" \
+    "$(generic_purl linux-firmware "$latest" "$archive/$tarball" "$digest")"
 bumped linux-firmware "$pinned" "$latest"
 echo "the digest came from sha256sums.asc, signed by kernel.org's checksum autosigner"
 echo "the microcode domain builds AMD's blobs from this tarball; rebuild it too"
 # licensing/sources.sh needs no re-pin after this bump. It mirrors the
 # firmware tarball from this domain's own cache, which fetch.sh
-# verified against its own digest, so sources.sh holds no digest of
-# its own for it.
+# verified against the digest in pin.toml, so sources.sh holds no
+# digest of its own for it.
 next_step "make -C .. linux-firmware microcode"

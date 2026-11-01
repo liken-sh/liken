@@ -86,13 +86,14 @@ grep -qxF "$target" <<<"$versions" || fail "the pool does not carry $target"
 bump_needed grub "$pinned" "$target" || exit 0
 
 pc_bin="$(ubuntu_deb_digest grub2 grub-pc-bin main "$target")"
-# grub-mkimage is in grub2-common from the 2.14 packaging on, and
-# fetch.sh takes that package for every version it does not name.
+# grub-mkimage is in grub2-common from the 2.14 packaging on.
 common="$(ubuntu_deb_digest grub2 grub2-common main "$target")"
 
 echo "$target" >"$here/VERSION"
-add_entry "$here/fetch.sh" pc_bin_sha256 "$target" "$pc_bin"
-add_entry "$here/fetch.sh" common_sha256 "$target" "$common"
+set_pin grub-pc-bin "$target" "$pool/grub-pc-bin_${target}_amd64.deb" "$pc_bin" \
+    "$(deb_purl ubuntu grub-pc-bin "$target")"
+set_pin grub2-common "$target" "$pool/grub2-common_${target}_amd64.deb" "$common" \
+    "$(deb_purl ubuntu grub2-common "$target")"
 bumped grub "$pinned" "$target"
 echo "the digests came from the Packages index, checked against InRelease, signed by Ubuntu's archive key"
 repin_sources

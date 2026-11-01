@@ -1,0 +1,12 @@
+# The file that hwdata/fetch.sh downloads, for the fetch and for the
+# SBOM of a release. hwdata/latest.sh --bump writes the version, url,
+# sha256, and purl, and toolchains/pin.sh describes each field.
+
+# pci.ids at an hwdata tag. The file's own header gives its license:
+# the GPL version 2 or later, or the 3-clause BSD license.
+[hwdata]
+version = "v0.412"
+url = "https://raw.githubusercontent.com/vcrhonek/hwdata/v0.412/pci.ids"
+sha256 = "4f020f031d1f2d011b2a656a191519a056cb9744229551aed2cf7f90dfc2e18a"
+purl = "pkg:github/vcrhonek/hwdata@v0.412"
+license = "GPL-2.0-or-later OR BSD-3-Clause"

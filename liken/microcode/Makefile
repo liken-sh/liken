@@ -16,7 +16,7 @@ override VERSION := $(strip $(file <VERSION))
 # cpio is still at the same path, and without that pin make reports
 # it as up to date with the old AMD files in it. The CI cache key in
 # .github/actions/build-setup hashes the same files.
-dist/$(VERSION)/microcode.cpio: VERSION fetch.sh ../linux-firmware/VERSION
+dist/$(VERSION)/microcode.cpio: VERSION pin.toml fetch.sh ../linux-firmware/VERSION
 	./fetch.sh
 
 .PHONY: all clean

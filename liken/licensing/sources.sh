@@ -71,6 +71,8 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
 repin=0
 if [[ "${1:-}" == "--repin" ]]; then
@@ -97,9 +99,10 @@ grub_version="$(cat "$here/../grub/VERSION")"
 hwdata_version="$(cat "$here/../hwdata/VERSION")"
 linuxfirmware_version="$(cat "$here/../linux-firmware/VERSION")"
 # The regulatory database is a nested pin inside the linux-firmware
-# domain, so its version comes out of that domain's fetch script
-# instead of a VERSION file.
-regdb_version="$(sed -n 's|^regdb_version="\(.*\)"$|\1|p' "$here/../linux-firmware/fetch.sh")"
+# domain, so its version comes out of that domain's manifest instead
+# of a VERSION file.
+regdb_manifest="$here/../linux-firmware/pin.toml"
+regdb_version="$(pin_value wireless-regdb version "$regdb_manifest")"
 
 cache="$here/cache"
 out="$here/dist/sources"
@@ -395,28 +398,37 @@ place "hwdata/$hwdata_version" "pci.ids" \
 # few carry the GPL, and where their source exists upstream keeps it
 # in this same tree. Mirroring the one tarball satisfies the source
 # offer for all of them at once, and the WHENCE file inside it is the
-# per-blob record of terms. The tarball lives in that domain's cache,
-# which CI does not keep between runs, so this entry re-runs the
-# domain's own verifying fetch when the tarball is absent and the
-# channel does not already serve it.
-linuxfirmware_tarball="linux-firmware-$linuxfirmware_version.tar.xz"
-if ! ((repin)) &&
-    ! published "linux-firmware/$linuxfirmware_version" "$linuxfirmware_tarball" &&
-    [[ ! -f "$here/../linux-firmware/cache/$linuxfirmware_tarball" ]]; then
-    "$here/../linux-firmware/fetch.sh"
-fi
-place "linux-firmware/$linuxfirmware_version" "$linuxfirmware_tarball" \
-    "$here/../linux-firmware/cache/$linuxfirmware_tarball"
-
+# per-blob record of terms.
+#
 # The regulatory database. The ISC license asks for notices, not
 # source, but db.txt is the text form that regulatory.db compiles
 # from, and the tarball carries it along with the compiler and the
 # public certificate. The whole mirror is 32 KB, so it costs nothing
-# to keep the channel's rule whole. Tracks the regdb pin in
-# linux-firmware/fetch.sh.
-mirror "wireless-regdb/$regdb_version" "wireless-regdb-$regdb_version.tar.xz" \
-    "b22e0901227b820cd1c280abe681a15b773a5103a5e10dc442e94ebb34cbf58d" \
-    "https://mirrors.edge.kernel.org/pub/software/network/wireless-regdb/wireless-regdb-$regdb_version.tar.xz"
+# to keep the channel's rule whole. The linux-firmware domain's fetch
+# downloads it too, and verifies it against its entry in
+# linux-firmware/pin.toml, so this script holds no digest for it.
+#
+# Both tarballs live in that domain's cache, which CI does not keep
+# between runs, so this entry re-runs the domain's own verifying fetch
+# when a tarball is absent and the channel does not already serve it.
+linuxfirmware_tarball="linux-firmware-$linuxfirmware_version.tar.xz"
+regdb_tarball="wireless-regdb-$regdb_version.tar.xz"
+linuxfirmware_cache="$here/../linux-firmware/cache"
+if ! ((repin)) && {
+    {
+        ! published "linux-firmware/$linuxfirmware_version" "$linuxfirmware_tarball" &&
+            [[ ! -f "$linuxfirmware_cache/$linuxfirmware_tarball" ]]
+    } || {
+        ! published "wireless-regdb/$regdb_version" "$regdb_tarball" &&
+            [[ ! -f "$linuxfirmware_cache/$regdb_tarball" ]]
+    }
+}; then
+    "$here/../linux-firmware/fetch.sh"
+fi
+place "linux-firmware/$linuxfirmware_version" "$linuxfirmware_tarball" \
+    "$linuxfirmware_cache/$linuxfirmware_tarball"
+place "wireless-regdb/$regdb_version" "$regdb_tarball" \
+    "$linuxfirmware_cache/$regdb_tarball"
 
 echo
 if ((repin)); then

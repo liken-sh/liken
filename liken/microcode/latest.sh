@@ -43,10 +43,12 @@ row microcode "$pinned" "$latest" - - - \
 
 bump_needed microcode "$pinned" "$latest" || exit 0
 
-digest="$(digest_of_url "$repository/archive/refs/tags/microcode-$latest.tar.gz")"
+url="$repository/archive/refs/tags/microcode-$latest.tar.gz"
+digest="$(digest_of_url "$url")"
 
 echo "$latest" >"$here/VERSION"
-set_var "$here/fetch.sh" digest "$digest"
+set_pin intel-microcode "$latest" "$url" "$digest" \
+    "$(github_purl intel/Intel-Linux-Processor-Microcode-Data-Files "microcode-$latest")"
 bumped microcode "$pinned" "$latest"
 echo "the digest came from this download; nothing upstream signs it"
 next_step "make -C .. microcode"

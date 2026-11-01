@@ -84,7 +84,8 @@ bump_needed systemd-boot "$pinned" "$target" || exit 0
 digest="$(ubuntu_deb_digest systemd systemd-boot-efi universe "$target")"
 
 echo "$target" >"$here/VERSION"
-add_entry "$here/fetch.sh" deb_sha256 "$target" "$digest"
+set_pin systemd-boot-efi "$target" "$pool/systemd-boot-efi_${target}_amd64.deb" "$digest" \
+    "$(deb_purl ubuntu systemd-boot-efi "$target")"
 bumped systemd-boot "$pinned" "$target"
 echo "the digest came from the Packages index, checked against InRelease, signed by Ubuntu's archive key"
 repin_sources

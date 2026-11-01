@@ -179,9 +179,9 @@ metal boot are its first real test.
 ## 4. Verify
 
 1. `make versions` again: every row must read `current` or `held`.
-2. `git diff --stat`: the change is `VERSION` files, `fetch.sh`
-   digests, `licensing/sources.sh`, and `toolchains/images.toml`,
-   nothing else.
+2. `git diff --stat`: the change is `VERSION` files, `pin.toml`
+   files, `fetch.sh` digests, `licensing/sources.sh`, and
+   `toolchains/images.toml`, nothing else.
 3. `make all`: changelogs do not show configure or toolchain
    breakage, and a bump that does not build is not done. The
    domains that compile from source against musl, `userland` and
@@ -514,9 +514,16 @@ arguments and the reason for its behavior:
   in the cache: it keeps a cached file that matches, downloads anything
   else into a `.partial` file, deletes a `.partial` that does not match
   and stops, and moves a match into place. `--resume` is for a large
-  file. The digest is the one the script pins, often
-  `"${k3s_sha256[$version]:-}"` from a `declare -A` table, and an empty
-  digest stops the fetch.
+  file. The digest is the one the script pins, and an empty digest
+  stops the fetch.
+- `fetch_pinned [--resume] <entry> <version> <path>` fetches the file
+  that an entry of the `pin.toml` beside the script names, through
+  `fetch_verified`, and stops when the entry is at another version
+  than the one the fetch builds. `pin_value <entry> <field>
+  [<manifest>]` prints one field of a manifest, and `set_pin <entry>
+  <version> <url> <sha256> <purl>` writes a bump into one entry.
+  `generic_purl`, `github_purl`, and `deb_purl` print the purl of each
+  kind.
 - `fetch_file` downloads a file whose digest the repository does not
   hold yet, such as a checksum file or a signature, and
   `digest_of_url` prints the sha256 of a download for an upstream that
@@ -549,13 +556,46 @@ When a new script needs a step that the library lacks, add the step
 to `pin.sh` with a comment, and do not write it in the script.
 
 **The digest.** `latest.sh --bump` reads the upstream's checksum once,
-when the pin moves, and writes it into the repository: a `declare -A`
-table or a variable in `fetch.sh`, a buildroot `.hash` file under
-`liken/userland/patches/`, an `ARG` of a Dockerfile, the `--checksum`
-of an `ADD`, or a constant in `ci/`. The fetch and the build read only
-that copy. Each `--bump` prints one line that says where the digest
-came from, such as "the digest came from sha256sums.asc, signed by
-kernel.org's checksum autosigner".
+when the pin moves, and writes it into the repository: the
+`pin.toml` beside `fetch.sh` for a pin whose files a release ships, a
+`declare -A` table in `fetch.sh` for a pin that no release ships, a
+buildroot `.hash` file under `liken/userland/patches/`, an `ARG` of a
+Dockerfile, the `--checksum` of an `ADD`, or a constant in `ci/`. The
+fetch and the build read only that copy. Each `--bump` prints one line
+that says where the digest came from, such as "the digest came from
+sha256sums.asc, signed by kernel.org's checksum autosigner".
+
+**The manifest.** "Pins and downloads" in the root `AGENTS.md` says
+which pins hold a `pin.toml` and what each field means. A new pin that
+a release ships gets one table for each file that its `fetch.sh`
+downloads:
+
+```toml
+[k3s]
+version = "v1.37.1+k3s1"
+url = "https://github.com/k3s-io/k3s/releases/download/v1.37.1%2Bk3s1/k3s"
+sha256 = "92b94582eb7b34a8cf532e6006842b9ed215a6783cf56a3dd6271fd35243b2c0"
+purl = "pkg:github/k3s-io/k3s@v1.37.1%2Bk3s1"
+license = "Apache-2.0"
+```
+
+Its `latest.sh --bump` computes the URL and the purl of the new
+version and writes all four with `set_pin`, and its `fetch.sh` calls
+`fetch_pinned`. Write the license from the upstream's own files: its
+`COPYING` or `LICENSE`, its SPDX headers, or the package's
+`copyright` file. Use a `LicenseRef-` for terms that the SPDX list
+does not name, and say in the comment above the table where the
+terms are. A bump keeps the license, so check it when a release
+changes the upstream's license. The trust image's Dockerfile fetches
+the CA bundle by a `--checksum` of its own, because BuildKit reads the
+checksum from the Dockerfile's text, and `trust/latest.sh --bump`
+writes both copies.
+
+To list the purl of every pin that a release ships:
+
+```sh
+tomlq -r '.[] | .purl' liken/*/pin.toml trust/pin.toml
+```
 
 **The signature.** When the upstream signs its checksum file or its
 release file, `--bump` verifies the signature before it writes a
@@ -635,6 +675,14 @@ otherwise download.
   `versions.sh` skips;
 - a `latest.sh` reads a `sha256sums.asc` file and does not call
   `trust/keys/kernel-org-digest.sh`;
+- a `fetch.sh` has no `pin.toml` beside it, unless `unmanifested` in
+  `ci/manifests.go` names its directory; an entry of a `pin.toml`
+  lacks a field, holds an unknown one, is at another version than the
+  `VERSION` beside it, or has a purl at another version or, for
+  `pkg:generic`, with another `download_url` or `checksum`; the
+  `fetch.sh` holds a digest of its own or does not call
+  `fetch_pinned`; or a Dockerfile beside a `pin.toml` `ADD`s a URL by
+  a checksum that the manifest does not name;
 - a grep for "statically linked" does not accept "static-pie linked";
 - a `uses:` in a workflow or a composite action under `.github/`
   names another repository's action by anything but the commit and
@@ -642,8 +690,8 @@ otherwise download.
   `docker://` image by anything but a digest.
 
 The pins hook of the root `.pre-commit-config.yaml` runs the check on
-each commit that changes a pin script, a Dockerfile, a `VERSION`,
-`toolchains/images.toml`, `versions.sh`, the library,
+each commit that changes a pin script, a Dockerfile, a `VERSION`, a
+`pin.toml`, `toolchains/images.toml`, `versions.sh`, the library,
 `trust/keys/`, or a file under `.github/`. The check sees only these forms. It does not see a
 signature that an upstream other than kernel.org publishes and a bump
 skips. A line that breaks a pattern for a reason the check cannot see

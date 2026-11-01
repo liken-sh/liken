@@ -18,7 +18,7 @@ override VERSION := $(strip $(file <VERSION))
 # to date. The root Makefile orders the kernel build before this one.
 # The CI cache key in .github/actions/build-setup hashes the same
 # files.
-dist/$(VERSION)/derived.txt: VERSION fetch.sh derive.sh ../kernel/VERSION
+dist/$(VERSION)/derived.txt: VERSION pin.toml fetch.sh derive.sh ../kernel/VERSION
 	./fetch.sh
 	./derive.sh
 

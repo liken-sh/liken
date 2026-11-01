@@ -18,7 +18,7 @@ override VERSION := $(strip $(file <VERSION))
 # release string all arrive in the same fetch.sh run. Make runs this
 # rule only when the pin or the script changes, and fetch.sh's own
 # download cache keeps even those re-runs cheap.
-dist/$(VERSION)/vmlinuz: VERSION fetch.sh
+dist/$(VERSION)/vmlinuz: VERSION pin.toml fetch.sh
 	./fetch.sh
 
 .PHONY: all clean

@@ -1,0 +1,16 @@
+# The file that systemd-boot/fetch.sh downloads, for the fetch and for
+# the SBOM of a release. systemd-boot/latest.sh --bump writes the
+# version, url, sha256, and purl, and toolchains/pin.sh describes each
+# field.
+
+# Ubuntu's systemd-boot-efi package, from the systemd source package.
+# The release ships systemd-bootx64.efi from it. The sources under
+# src/boot and src/fundamental that build it state their licenses by
+# SPDX identifier: most are LGPL-2.1-or-later, the CHID code is
+# BSD-3-Clause, and the SHA-1 code is public domain.
+[systemd-boot-efi]
+version = "261.3-0ubuntu3"
+url = "http://archive.ubuntu.com/ubuntu/pool/universe/s/systemd/systemd-boot-efi_261.3-0ubuntu3_amd64.deb"
+sha256 = "128d8a69e4274dee41fcbd5d74e2c55ec4d67b1726005cce9b41c20a3ea453e6"
+purl = "pkg:deb/ubuntu/systemd-boot-efi@261.3-0ubuntu3?arch=amd64"
+license = "LGPL-2.1-or-later AND BSD-3-Clause AND LicenseRef-alg-sha1-public-domain"

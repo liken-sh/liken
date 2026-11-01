@@ -1,0 +1,23 @@
+# The files that grub/fetch.sh downloads, for the fetch and for the
+# SBOM of a release. grub/latest.sh --bump writes the version, url,
+# sha256, and purl of both, and toolchains/pin.sh describes each field.
+# Both packages come from Ubuntu's grub2 source package, whose
+# copyright file gives GRUB's code the GPL version 3 or later.
+
+# The BIOS build: boot.img and the modules that the core image links.
+[grub-pc-bin]
+version = "2.14-2ubuntu3"
+url = "http://archive.ubuntu.com/ubuntu/pool/main/g/grub2/grub-pc-bin_2.14-2ubuntu3_amd64.deb"
+sha256 = "187f86d4c802a250d417f9f0d2a4095c2e3995ea5194f55a6d9ec27fd16f5055"
+purl = "pkg:deb/ubuntu/grub-pc-bin@2.14-2ubuntu3?arch=amd64"
+license = "GPL-3.0-or-later"
+
+# grub-mkimage, which links the core image at build time. No release
+# ships it, so its scope is excluded.
+[grub2-common]
+version = "2.14-2ubuntu3"
+url = "http://archive.ubuntu.com/ubuntu/pool/main/g/grub2/grub2-common_2.14-2ubuntu3_amd64.deb"
+sha256 = "5d45c86963028b5d027d65c9126580742f8924195f71265144dc7ea6422acdbd"
+purl = "pkg:deb/ubuntu/grub2-common@2.14-2ubuntu3?arch=amd64"
+license = "GPL-3.0-or-later"
+scope = "excluded"

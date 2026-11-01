@@ -18,14 +18,15 @@
 # file is one that every machine stops trusting on its next boot.
 #
 # --bump reads curl's .sha256 file beside the new snapshot and writes
-# the digest into the trust image's Dockerfile. The image fetches by
-# that digest, and trust/fetch.sh, the OS build's fetch, reads it from
-# the same line.
+# the digest into trust/pin.toml, which trust/fetch.sh, the OS build's
+# fetch, reads, and into the trust image's Dockerfile, which fetches by
+# it. `ci pins` fails when the two differ.
 #
 # Usage:
 #   trust/latest.sh          report the pin and the newest snapshot
 #   trust/latest.sh --bump   write the newest snapshot into VERSION,
-#                            package.toml, and the Dockerfile
+#                            pin.toml, package.toml, and the
+#                            Dockerfile
 
 set -euo pipefail
 
@@ -49,16 +50,19 @@ row trust "$pinned" "$latest" - - - "newest Mozilla extract that curl publishes"
 
 bump_needed "the CA bundle" "$pinned" "$latest" || exit 0
 
-# The pin is the date, in the three places that state it: VERSION, which
-# the OS build reads; the version of the trust image in package.toml; and
-# the snapshot that the Dockerfile fetches by its checksum. A new date
+# The pin is the date, in the places that state it: VERSION, which the
+# OS build reads; pin.toml, which the OS build's fetch and the SBOM
+# read; the version of the trust image in package.toml; and the
+# snapshot that the Dockerfile fetches by its checksum. A new date
 # starts the image's revisions at 1 again.
 #
 # curl.se publishes no signature of the bundle or of its .sha256 file,
 # so the digest rests on the HTTPS connection to curl.se alone.
 digest="$(fetch_text "https://curl.se/ca/cacert-$latest.pem.sha256" | cut -d' ' -f1)" || digest=""
 [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || fail "curl.se published no sha256 for $latest"
+url="https://curl.se/ca/cacert-$latest.pem"
 echo "$latest" >"$here/VERSION"
+set_pin cacert "$latest" "$url" "$digest" "$(generic_purl cacert "$latest" "$url" "$digest")"
 set_line "$here/package.toml" '^version = "[0-9]*"$' "version = \"${latest//-/}\""
 set_line "$here/package.toml" '^revision = [0-9]*$' "revision = 1"
 set_line "$here/package.toml" '^mozilla-ca = ".*"$' "mozilla-ca = \"$latest\""

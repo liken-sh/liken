@@ -13,9 +13,9 @@
 # channel and both channel columns print `-`. Under the rule in root
 # plan 83 it follows the newest release of Flux.
 #
-# The pin carries the CLI tarball's digest in flux/fetch.sh. Each Flux
+# The pin carries the CLI tarball's digest in flux/pin.toml. Each Flux
 # release publishes a checksums file, and --bump copies the tarball's
-# line from it into fetch.sh.
+# digest from it into pin.toml.
 #
 # Flux signs the checksums file keylessly with sigstore: the release
 # workflow gets a short-lived certificate from sigstore's Fulcio for
@@ -33,8 +33,9 @@
 # Usage:
 #   flux/latest.sh          report the pin and the newest release
 #   flux/latest.sh --bump   write the newest release into VERSION, its
-#                           digest into fetch.sh, and the commit of the
-#                           flux action into ci/actions.go
+#                           URL and digest into pin.toml, and the
+#                           commit of the flux action into
+#                           ci/actions.go
 
 set -euo pipefail
 
@@ -82,7 +83,8 @@ digest="$(awk -v f="$tarball" '$2 == f { print $1 }' "$work/checksums.txt")"
 [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || fail "$sums lists no $tarball"
 
 echo "$latest" >"$here/VERSION"
-set_entry "$here/fetch.sh" flux_sha256 "$latest" "$digest"
+set_pin flux "$latest" "$repository/releases/download/$latest/$tarball" "$digest" \
+    "$(github_purl fluxcd/flux2 "$latest")"
 bumped flux "$pinned" "$latest"
 echo "the digest came from the release's checksums file, signed by flux's release workflow"
 # The publish job pushes each deploy artifact with the flux action at

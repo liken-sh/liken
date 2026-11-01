@@ -9,7 +9,7 @@
 # the VERSION file beside this Makefile, never from a caller.
 override VERSION := $(strip $(file <VERSION))
 
-dist/$(VERSION)/systemd-bootx64.efi: VERSION fetch.sh
+dist/$(VERSION)/systemd-bootx64.efi: VERSION pin.toml fetch.sh
 	./fetch.sh
 
 .PHONY: all clean

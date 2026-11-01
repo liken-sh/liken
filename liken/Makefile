@@ -66,21 +66,21 @@ all: kernel k3s xtables trust userland open-iscsi systemd-boot grub hwdata linux
 # the target path itself, and Make rebuilds the artifact with no
 # extra staleness tracking. The prerequisites here match the
 # prerequisites that the kernel domain's own Makefile declares.
-$(KERNEL_DIST)/vmlinuz: kernel/VERSION kernel/fetch.sh
+$(KERNEL_DIST)/vmlinuz: kernel/VERSION kernel/pin.toml kernel/fetch.sh
 	$(MAKE) -C kernel
 
 kernel: $(KERNEL_DIST)/vmlinuz
 
 # k3s packages all of Kubernetes as one pinned, verified download.
 # See k3s/fetch.sh.
-$(K3S_DIST)/k3s: k3s/VERSION k3s/fetch.sh
+$(K3S_DIST)/k3s: k3s/VERSION k3s/pin.toml k3s/fetch.sh
 	$(MAKE) -C k3s
 
 k3s: $(K3S_DIST)/k3s
 
 # The build vendors the netfilter userspace tools from the same
 # project that builds k3s's own bundled copy. See xtables/fetch.sh.
-$(XTABLES_DIST)/bin/xtables-legacy-multi: xtables/VERSION xtables/fetch.sh
+$(XTABLES_DIST)/bin/xtables-legacy-multi: xtables/VERSION xtables/pin.toml xtables/fetch.sh
 	$(MAKE) -C xtables
 
 xtables: $(XTABLES_DIST)/bin/xtables-legacy-multi
@@ -88,14 +88,14 @@ xtables: $(XTABLES_DIST)/bin/xtables-legacy-multi
 # These are the CA certificates that the machine trusts. The build
 # pins them by snapshot date. See ../trust/fetch.sh: the trust store is
 # its own component, which the INDI and other images read too.
-$(TRUST_DIST)/cacert.pem: ../trust/VERSION ../trust/fetch.sh
+$(TRUST_DIST)/cacert.pem: ../trust/VERSION ../trust/pin.toml ../trust/fetch.sh
 	$(MAKE) -C ../trust
 
 trust: $(TRUST_DIST)/cacert.pem
 
 # The PCI naming database is the file that lets the unclaimed-hardware
 # report name devices in words. See hwdata/fetch.sh.
-$(HWDATA_DIST)/pci.ids: hwdata/VERSION hwdata/fetch.sh
+$(HWDATA_DIST)/pci.ids: hwdata/VERSION hwdata/pin.toml hwdata/fetch.sh
 	$(MAKE) -C hwdata
 
 hwdata: $(HWDATA_DIST)/pci.ids
@@ -104,7 +104,7 @@ hwdata: $(HWDATA_DIST)/pci.ids
 # tree rather than curated. The vmlinuz prerequisite is load-bearing
 # twice: the derivation reads the kernel's modules, and a kernel bump
 # must re-derive the set. See linux-firmware/fetch.sh and derive.sh.
-$(LINUXFIRMWARE_DIST)/derived.txt: linux-firmware/VERSION \
+$(LINUXFIRMWARE_DIST)/derived.txt: linux-firmware/VERSION linux-firmware/pin.toml \
 		linux-firmware/fetch.sh linux-firmware/derive.sh \
 		$(KERNEL_DIST)/vmlinuz
 	$(MAKE) -C linux-firmware
@@ -114,7 +114,7 @@ linux-firmware: $(LINUXFIRMWARE_DIST)/derived.txt
 # The CPU microcode early cpio. The linux-firmware prerequisite is
 # where the AMD families come from; the Intel half has its own pin
 # and fetch. See microcode/fetch.sh.
-$(MICROCODE_DIST)/microcode.cpio: microcode/VERSION microcode/fetch.sh \
+$(MICROCODE_DIST)/microcode.cpio: microcode/VERSION microcode/pin.toml microcode/fetch.sh \
 		$(LINUXFIRMWARE_DIST)/derived.txt
 	$(MAKE) -C microcode
 
@@ -156,7 +156,7 @@ open-iscsi: $(OPENISCSI_DIST)/iscsid-image.tar
 # systemd-boot is the boot menu on install media. Its fetch.sh
 # explains why the stick needs a boot program when installed machines
 # do not.
-$(SYSTEMDBOOT_DIST)/systemd-bootx64.efi: systemd-boot/VERSION systemd-boot/fetch.sh
+$(SYSTEMDBOOT_DIST)/systemd-bootx64.efi: systemd-boot/VERSION systemd-boot/pin.toml systemd-boot/fetch.sh
 	$(MAKE) -C systemd-boot
 
 systemd-boot: $(SYSTEMDBOOT_DIST)/systemd-bootx64.efi
@@ -165,7 +165,7 @@ systemd-boot: $(SYSTEMDBOOT_DIST)/systemd-bootx64.efi
 # BIOS machines need one when UEFI machines do not. One make run
 # produces both boot-sector artifacts: the fetch step delivers
 # grub-boot.img, and the build links the core image beside it.
-$(GRUB_DIST)/grub-core.img $(GRUB_DIST)/grub-boot.img &: grub/VERSION grub/fetch.sh grub/early.cfg grub/Makefile
+$(GRUB_DIST)/grub-core.img $(GRUB_DIST)/grub-boot.img &: grub/VERSION grub/pin.toml grub/fetch.sh grub/early.cfg grub/Makefile
 	$(MAKE) -C grub
 
 grub: $(GRUB_DIST)/grub-core.img
@@ -232,7 +232,7 @@ machine-operator/dist/liken-machine-operator-image.tar: $(wildcard machine-opera
 
 machine-operator: machine-operator/dist/liken-machine-operator-image.tar
 
-cluster-operator/dist/liken-cluster-operator-image.tar: flux/VERSION flux/fetch.sh \
+cluster-operator/dist/liken-cluster-operator-image.tar: flux/VERSION flux/pin.toml flux/fetch.sh \
 		$(wildcard cluster-operator/*.go) \
 		go.mod go.sum image/oci.sh \
 		$(wildcard api/*.go) $(wildcard cluster/*.go) \

@@ -135,19 +135,19 @@ runs:
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/kernel/dist
-        key: kernel-${{ hashFiles('liken/kernel/VERSION', 'liken/kernel/fetch.sh') }}
+        key: kernel-${{ hashFiles('liken/kernel/VERSION', 'liken/kernel/pin.toml', 'liken/kernel/fetch.sh') }}
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/k3s/dist
-        key: k3s-${{ hashFiles('liken/k3s/VERSION', 'liken/k3s/fetch.sh') }}
+        key: k3s-${{ hashFiles('liken/k3s/VERSION', 'liken/k3s/pin.toml', 'liken/k3s/fetch.sh') }}
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/xtables/dist
-        key: xtables-${{ hashFiles('liken/xtables/VERSION', 'liken/xtables/fetch.sh') }}
+        key: xtables-${{ hashFiles('liken/xtables/VERSION', 'liken/xtables/pin.toml', 'liken/xtables/fetch.sh') }}
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: trust/dist
-        key: trust-${{ hashFiles('trust/VERSION', 'trust/fetch.sh') }}
+        key: trust-${{ hashFiles('trust/VERSION', 'trust/pin.toml', 'trust/fetch.sh') }}
     # The userland's key covers every file of its BR2_EXTERNAL tree and
     # the image table, the same prerequisites that liken/Makefile
     # declares, because each one changes what buildroot builds.
@@ -169,7 +169,7 @@ runs:
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/systemd-boot/dist
-        key: systemd-boot-${{ hashFiles('liken/systemd-boot/VERSION', 'liken/systemd-boot/fetch.sh') }}
+        key: systemd-boot-${{ hashFiles('liken/systemd-boot/VERSION', 'liken/systemd-boot/pin.toml', 'liken/systemd-boot/fetch.sh') }}
     # grub's dist carries the fetched module tree and tool, plus the
     # core image linked from them. So the key also covers the inputs
     # to the link step: the embedded config and the module list in
@@ -177,7 +177,7 @@ runs:
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/grub/dist
-        key: grub-${{ hashFiles('liken/grub/VERSION', 'liken/grub/fetch.sh', 'liken/grub/early.cfg', 'liken/grub/Makefile') }}
+        key: grub-${{ hashFiles('liken/grub/VERSION', 'liken/grub/pin.toml', 'liken/grub/fetch.sh', 'liken/grub/early.cfg', 'liken/grub/Makefile') }}
     # The firmware cache carries the derived set, not the upstream
     # tarball, so a hit skips both the 400 MB download and the
     # derivation. The key includes the kernel pin because the derived
@@ -186,13 +186,13 @@ runs:
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/linux-firmware/dist
-        key: linux-firmware-${{ hashFiles('liken/linux-firmware/VERSION', 'liken/linux-firmware/fetch.sh', 'liken/linux-firmware/derive.sh', 'liken/kernel/VERSION') }}
+        key: linux-firmware-${{ hashFiles('liken/linux-firmware/VERSION', 'liken/linux-firmware/pin.toml', 'liken/linux-firmware/fetch.sh', 'liken/linux-firmware/derive.sh', 'liken/kernel/VERSION') }}
     # The microcode key includes the linux-firmware pin because the
     # AMD half comes from that domain's tree.
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/microcode/dist
-        key: microcode-${{ hashFiles('liken/microcode/VERSION', 'liken/microcode/fetch.sh', 'liken/linux-firmware/VERSION') }}
+        key: microcode-${{ hashFiles('liken/microcode/VERSION', 'liken/microcode/pin.toml', 'liken/microcode/fetch.sh', 'liken/linux-firmware/VERSION') }}
 
     # Make determines staleness by timestamps, and the two halves of
     # this working tree carry different timestamps: checkout stamps
