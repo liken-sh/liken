@@ -16,13 +16,15 @@
 # go into the testing/ directory beside them, so the listing at the
 # top holds releases only.
 #
-# This pin carries no digest. Each release directory holds a
-# sha256sums.asc file, and fetch.sh reads it on every fetch, so a bump
-# here is one line in VERSION.
+# The pin carries the tarball's digest in fetch.sh. Each release
+# directory holds a sha256sums.asc file, and --bump copies the
+# tarball's line from it into fetch.sh. The file is clearsigned by the
+# maintainer, and nothing here checks that signature.
 #
 # Usage:
 #   e2fsprogs/latest.sh          report the pin and the newest release
-#   e2fsprogs/latest.sh --bump   write the newest release into VERSION
+#   e2fsprogs/latest.sh --bump   write the newest release into VERSION,
+#                                and its digest into fetch.sh
 
 set -euo pipefail
 
@@ -51,7 +53,21 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' e2fsprogs "$pinned" "${latest:-?}" - - - \
     exit 0
 }
 
+# The sums file is a clearsigned document, so the digest lines sit
+# among the signature's own text. Matching the exact filename picks
+# the one line that matters.
+sums="$archive/v$latest/sha256sums.asc"
+digest="$(curl -fsSL --retry 3 --max-time 60 "$sums" |
+    awk -v t="e2fsprogs-$latest.tar.gz" '$2 == t { print $1 }')" || digest=""
+[[ "$digest" =~ ^[0-9a-f]{64}$ ]] || {
+    echo "latest.sh: $sums lists no e2fsprogs-$latest.tar.gz" >&2
+    exit 1
+}
+
+# The array in fetch.sh holds one entry, the pinned version's, so the
+# bump replaces the line after the array's opening line.
 echo "$latest" >"$here/VERSION"
+sed -i "/^declare -A e2fsprogs_sha256=(/{n;s|.*|    [\"$latest\"]=\"$digest\"|}" "$here/fetch.sh"
 echo "e2fsprogs: $pinned -> $latest"
-echo "kernel.org's sha256sums file stands behind these bytes"
+echo "the digest came from sha256sums.asc; check its signature by hand"
 echo "next: make -C .. e2fsprogs"

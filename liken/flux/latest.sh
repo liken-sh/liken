@@ -13,13 +13,14 @@
 # channel and both channel columns print `-`. Under the rule in root
 # plan 83 it follows the newest release of Flux.
 #
-# This pin carries no digest. Each Flux release publishes a checksums
-# file, and flux/fetch.sh reads it on every fetch, so a bump here is
-# one line in VERSION.
+# The pin carries the CLI tarball's digest in flux/fetch.sh. Each Flux
+# release publishes a checksums file, and --bump copies the tarball's
+# line from it into fetch.sh.
 #
 # Usage:
 #   flux/latest.sh          report the pin and the newest release
-#   flux/latest.sh --bump   write the newest release into VERSION
+#   flux/latest.sh --bump   write the newest release into VERSION, and
+#                           its digest into fetch.sh
 
 set -euo pipefail
 
@@ -48,7 +49,20 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' flux "$pinned" "${latest:-?}" - - - \
     exit 0
 }
 
+# Release artifacts name the version without the leading v.
+bare="${latest#v}"
+sums="$repository/releases/download/$latest/flux_${bare}_checksums.txt"
+tarball="flux_${bare}_linux_amd64.tar.gz"
+digest="$(curl -fsSL --retry 3 --max-time 60 "$sums" | awk -v f="$tarball" '$2 == f { print $1 }')" || digest=""
+[[ "$digest" =~ ^[0-9a-f]{64}$ ]] || {
+    echo "latest.sh: $sums lists no $tarball" >&2
+    exit 1
+}
+
+# The array in fetch.sh holds one entry, the pinned version's, so the
+# bump replaces the line after the array's opening line.
 echo "$latest" >"$here/VERSION"
+sed -i "/^declare -A flux_sha256=(/{n;s|.*|    [\"$latest\"]=\"$digest\"|}" "$here/fetch.sh"
 echo "flux: $pinned -> $latest"
-echo "the release's checksums file stands behind these bytes"
+echo "the digest came from the release's checksums file"
 echo "next: make -C .. cluster-operator"

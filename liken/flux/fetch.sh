@@ -18,15 +18,17 @@
 # Flux publishes no standalone manifest artifact for a component
 # subset. The manifests live inside the flux CLI, and the CLI renders
 # them offline (`flux install --export`). So this script fetches the
-# CLI, verifies it against the checksum manifest published beside it,
-# and renders the seed with it. The CLI is a build tool only; nothing
+# CLI, verifies it against the digest pinned below, which
+# flux/latest.sh --bump copies from the checksum file published beside
+# it, and renders the seed with it. The CLI is a build tool only; nothing
 # ships it. Pinning the CLI version pins the rendered manifests, so
 # one VERSION file governs the seed the way every vendored pin works
 # here.
 #
 # Usage:
 #   flux/fetch.sh             fetch the version pinned in flux/VERSION
-#   flux/fetch.sh v2.9.1      fetch a specific version instead
+#   flux/fetch.sh v2.9.1      fetch another version that has a digest
+#                             pinned below
 #
 # Results land in flux/dist/<version>/gotk-components.yaml, with the
 # CLI cached in flux/cache/.
@@ -54,9 +56,16 @@ cache="$here/cache/$version"
 out="$here/dist/$version"
 mkdir -p "$cache"
 
-digest="$(curl -fsSL "$base/flux_${bare}_checksums.txt" | awk -v f="$tarball" '$2 == f { print $1 }')"
+# The digest of the CLI tarball, pinned beside the version it belongs to.
+# flux/latest.sh --bump copies it from the checksum file that the
+# release publishes, so a fetch never reads a digest from upstream, and
+# a file that changes upstream after the bump fails the check.
+declare -A flux_sha256=(
+    ["v2.9.6"]="b4d22673e9246cbd628881f1a9ef3b090085dced291e42d804555cee8e8d42c5"
+)
+digest="${flux_sha256[$version]:-}"
 if [[ -z "$digest" ]]; then
-    echo "fetch.sh: no $tarball listed in $base/flux_${bare}_checksums.txt" >&2
+    echo "fetch.sh: no digest pinned for flux $version; flux/latest.sh --bump writes it" >&2
     exit 1
 fi
 

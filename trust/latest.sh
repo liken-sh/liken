@@ -17,9 +17,10 @@
 # as well as adding it, and a certificate authority that leaves this
 # file is one that every machine stops trusting on its next boot.
 #
-# The OS build's fetch reads curl's .sha256 file beside each snapshot,
-# and the trust image fetches by the same digest, written into its
-# Dockerfile by --bump.
+# --bump reads curl's .sha256 file beside the new snapshot and writes
+# the digest into the trust image's Dockerfile. The image fetches by
+# that digest, and trust/fetch.sh, the OS build's fetch, reads it from
+# the same line.
 #
 # Usage:
 #   trust/latest.sh          report the pin and the newest snapshot

@@ -13,12 +13,14 @@
 # As with the kernel, this script pins a version (k3s/VERSION, for
 # example v1.36.2+k3s1: upstream Kubernetes plus k3s's packaging
 # revision). It fetches the published build from the project's GitHub
-# releases, and verifies the build against the sha256 manifest
-# published beside it.
+# releases, and verifies the build against the digest pinned below,
+# which k3s/latest.sh --bump copies from the sha256 manifest published
+# beside the build.
 #
 # Usage:
 #   k3s/fetch.sh                  fetch the version pinned in k3s/VERSION
-#   k3s/fetch.sh v1.36.1+k3s1     fetch a specific version instead
+#   k3s/fetch.sh v1.36.1+k3s1     fetch another version that has a
+#                                 digest pinned below
 #
 # Results land in k3s/dist/<version>/k3s, cached in k3s/cache/.
 
@@ -33,7 +35,6 @@ for tool in curl sha256sum; do
     }
 done
 
-arch="amd64"
 version="${1:-$(cat "$here/VERSION")}"
 
 # Release URLs must percent-encode the "+" in k3s version tags.
@@ -43,14 +44,16 @@ cache="$here/cache/$version"
 out="$here/dist/$version"
 mkdir -p "$cache"
 
-# Each release publishes one sha256 manifest per architecture, covering
-# all of its artifacts. The line ending in exactly " k3s" names the
-# bare server/agent binary. Its siblings are airgap image bundles,
-# which liken does not vendor; a machine pulls its images over the
-# network on its first boot instead.
-digest="$(curl -fsSL "$base/sha256sum-$arch.txt" | awk '$2 == "k3s" { print $1 }')"
+# The digest of the bare k3s binary, pinned beside the version it belongs to.
+# k3s/latest.sh --bump copies it from the sha256 manifest that the
+# release publishes, so a fetch never reads a digest from upstream, and
+# a file that changes upstream after the bump fails the check.
+declare -A k3s_sha256=(
+    ["v1.37.1+k3s1"]="92b94582eb7b34a8cf532e6006842b9ed215a6783cf56a3dd6271fd35243b2c0"
+)
+digest="${k3s_sha256[$version]:-}"
 if [[ -z "$digest" ]]; then
-    echo "fetch.sh: no k3s binary listed in $base/sha256sum-$arch.txt" >&2
+    echo "fetch.sh: no digest pinned for k3s $version; k3s/latest.sh --bump writes it" >&2
     exit 1
 fi
 

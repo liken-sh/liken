@@ -16,12 +16,12 @@
 # Makefile).
 #
 # The pin is a dated build (storage/VERSION) of one Debian suite (the
-# suite below). Debian publishes each cloud image build into its own
-# directory, named by date and serial, with checksums stored beside
-# it. Because of this, the fetch verifies the image against the
-# SHA512SUMS file published in the same directory. This is the same
-# approach that trust/fetch.sh takes, where the pin is the snapshot
-# and the checksum travels with it.
+# suite below), and the image's sha512 digest. Debian publishes each
+# cloud image build into its own directory, named by date and serial,
+# with a SHA512SUMS file beside it. storage/latest.sh --bump copies
+# the image's line from that file into this one, so a fetch never
+# reads a digest from upstream, and an image that changes upstream
+# after the bump fails the check.
 #
 # The two suites publish under different paths and names. A release
 # such as trixie keeps each build in images/cloud/trixie/<build>/, as
@@ -37,6 +37,9 @@
 #                                 storage/VERSION, from the suite below
 #   fetch.sh 20260706-2531        fetch another build of that suite
 #   fetch.sh 20261023-2640 sid    fetch a build of another suite
+#
+# A build other than the pinned one needs its digest in the table
+# below first.
 #
 # The image lands in storage/cache/<version>/, and base.qcow2 beside
 # it names the image. The Makefile uses base.qcow2 read-only as the
@@ -79,9 +82,14 @@ esac
 cache="$here/cache/$version"
 mkdir -p "$cache"
 
-digest="$(curl -fsSL --retry 3 --max-time 60 "$url/SHA512SUMS" | awk -v img="$image" '$2 == img { print $1 }')"
+# The sha512 digest of each pinned build's image, from the build's
+# SHA512SUMS file. storage/latest.sh --bump writes it.
+declare -A image_sha512=(
+    ["20261017-2634"]="ec584ccabfef7120b4c4f7482adf0e615894d9292cedec446b64194b951ebe5dd97c336b5dcbae458333764b0edd516334506017f33c4f2020ef8d38b569ffe3"
+)
+digest="${image_sha512[$version]:-}"
 if [[ -z "$digest" ]]; then
-    echo "fetch.sh: no checksum for $image published at $url/SHA512SUMS" >&2
+    echo "fetch.sh: no digest pinned for the storage image $version; storage/latest.sh --bump writes it" >&2
     exit 1
 fi
 

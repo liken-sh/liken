@@ -13,8 +13,9 @@
 # k3s's own bundled userland. As a result, the bytes on liken's PATH
 # are the same bytes k3s carries. This script fetches them the same way
 # as every other vendored input: a pinned version, fetched from the
-# project's GitHub releases, verified against the sha256 manifest
-# published beside it. The version pin (xtables/VERSION) must match the
+# project's GitHub releases, verified against a pinned digest that
+# xtables/latest.sh --bump copies from the sha256 manifest published
+# beside it. The version pin (xtables/VERSION) must match the
 # VERSION_ROOT in the vendored k3s release's scripts/version.sh. This
 # keeps the two copies of xtables on the machine in agreement.
 #
@@ -30,7 +31,8 @@
 #
 # Usage:
 #   xtables/fetch.sh              fetch the version pinned in xtables/VERSION
-#   xtables/fetch.sh v0.15.1      fetch a specific version instead
+#   xtables/fetch.sh v0.15.1      fetch another version that has a
+#                                 digest pinned below
 #
 # Results land in xtables/dist/<version>/bin/, cached in xtables/cache/.
 
@@ -55,11 +57,16 @@ cache="$here/cache/$version"
 out="$here/dist/$version"
 mkdir -p "$cache"
 
-# One sha256 manifest per architecture covers all of the release's
-# artifacts. This script reads the line for the xtables tarball.
-digest="$(curl -fsSL "$base/sha256sum-$arch.txt" | awk -v t="$tarball" '$2 == t { print $1 }')"
+# The digest of the xtables tarball, pinned beside the version it belongs to.
+# xtables/latest.sh --bump copies it from the sha256 manifest that the
+# release publishes, so a fetch never reads a digest from upstream, and
+# a file that changes upstream after the bump fails the check.
+declare -A xtables_sha256=(
+    ["v0.15.2"]="1272950a6dd969ced16f36eed91f3cc3feb552edbb7d6dcfbfc9b04930d9ba3f"
+)
+digest="${xtables_sha256[$version]:-}"
 if [[ -z "$digest" ]]; then
-    echo "fetch.sh: no $tarball listed in $base/sha256sum-$arch.txt" >&2
+    echo "fetch.sh: no digest pinned for xtables $version; xtables/latest.sh --bump writes it" >&2
     exit 1
 fi
 

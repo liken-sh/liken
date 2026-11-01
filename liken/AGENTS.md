@@ -159,11 +159,15 @@ version.
 
 ## Version pins
 
-Every domain that vendors something pins it by version, and by digest
-when its upstream publishes no checksum of its own. `make versions` at
-the top of the repository asks every upstream what it has now and
-prints the answer beside each pin, for every component. Root plan 83
-gives the rule that the report checks.
+Every domain that vendors something pins it by version and by digest,
+and the digest is in the repository even when the upstream publishes
+checksums beside its files. A fetch that reads the upstream's checksum
+proves only that the download is complete, so it accepts whatever the
+upstream serves that day. `latest.sh --bump` reads the upstream's
+checksum once, when the pin moves, and the commit records it.
+`make versions` at the top of the repository asks every upstream what
+it has now and prints the answer beside each pin, for every component.
+Root plan 83 gives the rule that the report checks.
 
 Each pin belongs to a domain, so the `latest.sh` beside that domain's
 `fetch.sh` holds the address of its upstream. Run it alone and it reports

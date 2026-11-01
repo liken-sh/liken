@@ -13,9 +13,9 @@
 # line at the tag in k3s/VERSION. A k3s bump therefore comes first,
 # and this domain follows it.
 #
-# This pin carries no digest. Each k3s-root release publishes a sha256
-# manifest per architecture, and xtables/fetch.sh reads it on every
-# fetch, so a bump here is one line in VERSION.
+# The pin carries the tarball's digest in xtables/fetch.sh. Each
+# k3s-root release publishes a sha256 manifest per architecture, and
+# --bump copies the xtables tarball's line from it into fetch.sh.
 #
 # A bump moves what iptables version liken redistributes, and the
 # source mirror pins that version by name. So the bump ends by
@@ -56,9 +56,22 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' xtables "$pinned" "${latest:-?}" - - - \
     exit 0
 }
 
+# One sha256 manifest per architecture covers all of the release's
+# artifacts, and the bump reads the line for the xtables tarball.
+manifest="https://github.com/k3s-io/k3s-root/releases/download/$latest/sha256sum-amd64.txt"
+digest="$(curl -fsSL --retry 3 --max-time 60 "$manifest" |
+    awk '$2 == "k3s-root-xtables-amd64.tar" { print $1 }')" || digest=""
+[[ "$digest" =~ ^[0-9a-f]{64}$ ]] || {
+    echo "latest.sh: $manifest lists no xtables tarball" >&2
+    exit 1
+}
+
+# The array in fetch.sh holds one entry, the pinned version's, so the
+# bump replaces the line after the array's opening line.
 echo "$latest" >"$here/VERSION"
+sed -i "/^declare -A xtables_sha256=(/{n;s|.*|    [\"$latest\"]=\"$digest\"|}" "$here/fetch.sh"
 echo "xtables: $pinned -> $latest"
-echo "the release's sha256 manifest stands behind these bytes"
+echo "the digest came from the release's sha256 manifest"
 # A refused re-pin leaves the domain pin moved and the mirror
 # behind it, which is a release that cannot serve its own
 # sources. Say that plainly, because the fix is a hand edit.

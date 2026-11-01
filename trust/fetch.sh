@@ -13,16 +13,17 @@
 # from Firefox's source and converted to PEM, as dated immutable
 # snapshots.
 #
-# So the pin here is a date (trust/VERSION), and this script verifies
-# the fetch against the sha256 published beside the snapshot, the same
-# as every other vendored input. As a result, the image's trust store
+# So the pin here is a date (trust/VERSION) and a sha256 digest, and
+# this script verifies the fetch against that digest, the same as
+# every other vendored input. As a result, the image's trust store
 # does not depend on whichever build host assembled it. A change in
 # what the machine trusts shows up in this repo as a deliberate,
 # reviewable version bump.
 #
 # Usage:
 #   trust/fetch.sh               fetch the snapshot pinned in trust/VERSION
-#   trust/fetch.sh 2026-03-11    fetch a specific snapshot instead
+#   trust/fetch.sh 2026-03-11    fetch another snapshot, which the
+#                                Dockerfile must name with its digest
 #
 # Results land in trust/dist/<version>/cacert.pem, cached in trust/cache/.
 
@@ -44,9 +45,20 @@ cache="$here/cache/$version"
 out="$here/dist/$version"
 mkdir -p "$cache"
 
-digest="$(curl -fsSL "$url.sha256" | awk '{ print $1 }')"
-if [[ -z "$digest" ]]; then
-    echo "fetch.sh: no checksum published at $url.sha256" >&2
+# The digest comes from the trust image's Dockerfile. Its ADD line
+# names the snapshot's URL with a --checksum on the line before, and
+# trust/latest.sh --bump writes both from curl's .sha256 file. One pin
+# serves the image and this fetch, so the two cannot disagree, and a
+# fetch never reads a digest from curl.se.
+digest="$(awk -v url="$url" '
+    index($0, url) && prev ~ /--checksum=sha256:/ {
+        sub(/.*--checksum=sha256:/, "", prev)
+        sub(/[^0-9a-f].*/, "", prev)
+        print prev
+    }
+    { prev = $0 }' "$here/Dockerfile")"
+if [[ ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "fetch.sh: trust/Dockerfile pins no digest for $url; trust/latest.sh --bump writes it" >&2
     exit 1
 fi
 

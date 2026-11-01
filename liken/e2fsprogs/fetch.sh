@@ -21,9 +21,8 @@
 # No project publishes a static mke2fs for each e2fsprogs release, so
 # this script builds one, the same way open-iscsi/fetch.sh and
 # nfs-utils/fetch.sh build their binaries. It downloads the release
-# tarball from kernel.org, checks it against the sha256sums.asc file
-# that the e2fsprogs maintainer publishes in the same directory, and
-# builds mke2fs in the `alpine` image that toolchains/images.toml
+# tarball from kernel.org, checks it against the digest pinned below,
+# and builds mke2fs in the `alpine` image that toolchains/images.toml
 # names. Alpine's libc is musl, and Alpine ships musl's static
 # archive, so the link takes everything into the one binary, and the
 # binary runs on a machine with no libraries. e2fsprogs carries its
@@ -41,8 +40,8 @@
 # mirrors the same tarball as the source that corresponds to the
 # binary, and that needs the verified bytes, not the build.
 #
-# Results land in e2fsprogs/dist/<version>/, with the tarball and its
-# sums file cached in e2fsprogs/cache/<version>/.
+# Results land in e2fsprogs/dist/<version>/, with the tarball cached
+# in e2fsprogs/cache/<version>/.
 
 set -euo pipefail
 
@@ -90,28 +89,27 @@ cache="$here/cache/$version"
 out="$here/dist/$version"
 mkdir -p "$cache"
 
-# Download once, verify every time. The sums file is the pin: it is
-# the maintainer's list of digests for this release, so the version in
-# VERSION is the only value this repository keeps. If a cached tarball
-# stops matching the list, the build fails instead of using it.
-download() {
-    if [[ ! -f "$cache/$1" ]]; then
-        curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --max-time 300 \
-            "$release/$1" -o "$cache/$1.partial"
-        mv "$cache/$1.partial" "$cache/$1"
-    fi
-}
-download sha256sums.asc
-download "$tarball"
-
-# The sums file is a clearsigned document, so the digest lines sit
-# among the signature's own text. Matching the exact filename picks
-# the one line that matters.
-digest="$(awk -v t="$tarball" '$2 == t { print $1 }' "$cache/sha256sums.asc")"
+# The tarball's digest, pinned beside the version it belongs to. The
+# maintainer publishes a clearsigned sha256sums.asc file in each
+# release directory, and e2fsprogs/latest.sh --bump copies the
+# tarball's line from it, so a fetch never reads a digest from
+# upstream.
+declare -A e2fsprogs_sha256=(
+    ["1.47.1"]="0d2e0bf80935c3392b73a60dbff82d8a6ef7ea88b806c2eea964b6837d3fd6c2"
+)
+digest="${e2fsprogs_sha256[$version]:-}"
 [[ -n "$digest" ]] || {
-    echo "fetch.sh: $release/sha256sums.asc lists no $tarball" >&2
+    echo "fetch.sh: no digest pinned for e2fsprogs $version; e2fsprogs/latest.sh --bump writes it" >&2
     exit 1
 }
+
+# Download once, verify every time. If a cached tarball stops matching
+# the pin, the build fails instead of using it.
+if [[ ! -f "$cache/$tarball" ]]; then
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 --max-time 300 \
+        "$release/$tarball" -o "$cache/$tarball.partial"
+    mv "$cache/$tarball.partial" "$cache/$tarball"
+fi
 echo "$digest  $cache/$tarball" | sha256sum --check --quiet
 
 [[ -z "$sources_only" ]] || exit 0

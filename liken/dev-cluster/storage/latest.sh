@@ -23,9 +23,10 @@
 # still gets watched, because a stale image is a drill against a
 # server that stopped receiving security updates months ago.
 #
-# This pin carries no digest. Every build directory holds a SHA512SUMS
-# file, and fetch.sh reads it on every fetch, so a bump writes one
-# line in VERSION and, when the suite changes, one line in fetch.sh.
+# The pin carries the image's digest in fetch.sh. Every build
+# directory holds a SHA512SUMS file, and --bump copies the image's
+# line from it into fetch.sh, with the suite line when the suite
+# changes.
 #
 # Usage:
 #   dev-cluster/storage/latest.sh          report the pin
@@ -62,8 +63,22 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' storage "$pinned" "${latest:-?}" \
     exit 0
 }
 
+# sid's daily builds name the image with the word daily and the build.
+image="debian-sid-genericcloud-amd64-daily-$latest.qcow2"
+digest="$(curl -fsSL --retry 3 --max-time 60 "$images/$latest/SHA512SUMS" |
+    awk -v img="$image" '$2 == img { print $1 }')" || digest=""
+[[ "$digest" =~ ^[0-9a-f]{128}$ ]] || {
+    echo "latest.sh: $images/$latest/SHA512SUMS lists no $image" >&2
+    exit 1
+}
+
+# The array in fetch.sh holds one entry, the pinned build's, so the
+# bump replaces the line after the array's opening line.
 echo "$latest" >"$here/VERSION"
-sed -i "s|^suite=\"[a-z]*\"$|suite=\"$newest_suite\"|" "$here/fetch.sh"
+sed -i \
+    -e "s|^suite=\"[a-z]*\"$|suite=\"$newest_suite\"|" \
+    -e "/^declare -A image_sha512=(/{n;s|.*|    [\"$latest\"]=\"$digest\"|}" \
+    "$here/fetch.sh"
 echo "storage: $suite $pinned -> $newest_suite $latest"
-echo "the build's SHA512SUMS file stands behind these bytes"
+echo "the digest came from the build's SHA512SUMS file"
 echo "next: make -C .. storage"
