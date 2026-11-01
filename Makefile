@@ -31,8 +31,8 @@ versions:
 # Every image of the repository, through the bake file, into the local
 # Docker daemon, each tagged the way the bake file names it. The Docker
 # daemon loads an image of one platform only, so the build makes each
-# image for this machine's platform, including the CLI images that CI
-# makes for two. The target runs no smoke check. CI's image job runs
+# image for this machine's platform, even an image whose package.toml
+# names more than one platform for CI. The target runs no smoke check. CI's image job runs
 # the script under each component's smoke/ on the image it builds, and
 # a person runs one by hand with the loaded image's reference.
 PLATFORM ?= linux/$(shell docker version --format '{{.Server.Arch}}')

@@ -2,9 +2,9 @@
 # Collects PipeWire, WirePlumber, and every file the two daemons open
 # at runtime into one directory tree, so the image ships that tree and
 # nothing else. Run it in a builder that has the Debian packages
-# installed, with the output directory as the argument. The sibling
-# display operator's weston-closure.sh is the same shape for the same
-# reason.
+# installed, with the output directory as the argument. The base
+# images collect their trees the same way, with the functions in
+# vulkan/closure.sh at the top of the repository.
 set -eu
 
 out=$1

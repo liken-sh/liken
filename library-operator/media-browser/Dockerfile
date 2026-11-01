@@ -55,11 +55,12 @@ COPY --from=brand liken.svg liken.css /brand/
 COPY --from=brand fonts/ /brand/fonts/
 COPY --from=media-screen src/ /media-screen/src/
 
-# The release this build makes, for the `liken_build_info` gauge milestone
-# 65 puts on every process. release.yaml names a version for the image tag
-# already; a caller that also passes it here through --build-arg is what
-# makes the gauge read the same string. A build with no argument, such as
-# a workstation's `docker build`, compiles the binary reporting "dev".
+# The release this build makes, for the `liken_build_info` gauge that
+# every process exports. The bake file at the top of the repository
+# passes its VERSION variable as this argument, the same version that
+# tags the image, so the gauge reads the tag. A build with no argument,
+# such as a workstation's `docker build`, compiles the binary reporting
+# "dev".
 #
 # The argument is declared here, not at the top of the file, so setting it
 # never invalidates the dependency layer above: only this RUN's cache

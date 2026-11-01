@@ -14,8 +14,8 @@
 # at the top of the repository gives this build the ffmpeg image of the
 # same commit as the named context ffmpeg, and the shared kubernetes
 # module as the named context kubernetes. Every file that comes from
-# outside the repository is pinned: the Rust and Debian images by
-# digest, the Go image by version as in Dockerfile.ffmpeg, OpenVINO and
+# outside the repository is pinned: the Go, Rust, Debian, and oras
+# images by the digests that toolchains/images.toml gives, OpenVINO and
 # Intel's packages by sha256, and the models by the digest of their OCI
 # artifact.
 

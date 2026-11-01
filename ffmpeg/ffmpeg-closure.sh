@@ -1,11 +1,12 @@
 #!/bin/sh
 # Collects ffmpeg and ffprobe and everything they load into one directory
-# tree, less every file the trees named after it hold. The tree is the
+# tree, less every file of the base image under it. The tree is the
 # ghcr.io/liken-sh/ffmpeg image.
 #
 # Run it in a builder that has the packages installed. It writes a
 # rootfs to the first directory named on the command line, less every
-# file the directories after it already hold.
+# file the second directory already holds. The second is the tree of
+# the vaapi image, which holds the vulkan tree too.
 set -eu
 
 # closure.sh is in the vulkan directory, the lowest base, and the
@@ -30,6 +31,4 @@ notices "$out" ffmpeg
 
 # The image is FROM vaapi, which is FROM vulkan, so the layer carries
 # neither tree.
-for base in "$@"; do
-	subtract "$out" "$base"
-done
+subtract "$out" "$1"

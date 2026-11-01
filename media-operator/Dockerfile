@@ -3,10 +3,12 @@
 # its image carries no shell, no libc, and no tools, which is the
 # least there is to attack.
 #
-# The player image (mpv under this same program as its supervisor) and
-# the idle image build from the two Dockerfiles beside this one. The
-# sidecar image is this image under a second name: release.yaml tags
-# it, and no Dockerfile builds it. A release ships all four together.
+# The other images of the component, such as the player image (mpv
+# under this same program as its supervisor) and the screen images,
+# build from the Dockerfiles beside this one, and package.toml lists
+# each one. The sidecar image is this image under a second name:
+# package.toml names it as an alias of this image, and no Dockerfile
+# builds it. A release ships every image of the component together.
 #
 # The image holds two builds of the program. /media-operator is the
 # full build, and the operator runs it. /media-operator-pod is the pod

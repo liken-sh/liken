@@ -38,9 +38,9 @@ COPY *.go ./
 # full build, and the operator runs it. /library-operator-pod is the pod
 # build, with the build tag pod, and every pod and Job the operator
 # creates runs it. The pod build leaves out client-go, which the
-# operator's watches and its Lease link, so the program each catalog
-# pod and each library Job runs is 11.9 MB stripped where the full
-# build is 30.8 MB. operate_pod.go says why.
+# operator's watches and its Lease link, so the program that each
+# catalog pod and each library Job runs is much smaller than the full
+# build. operate_pod.go says why.
 RUN CGO_ENABLED=0 go build -trimpath -o /library-operator . \
     && CGO_ENABLED=0 go build -trimpath -tags pod -o /library-operator-pod .
 # The license files of the Go standard library and of each module that
