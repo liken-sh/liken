@@ -59,7 +59,7 @@ done
 
 # The suite that the pin in VERSION comes from. latest.sh reads this
 # line, and its --bump writes it.
-suite="trixie"
+suite="sid"
 
 version="${1:-$(cat "$here/VERSION")}"
 suite="${2:-$suite}"
@@ -85,7 +85,7 @@ mkdir -p "$cache"
 # The sha512 digest of each pinned build's image, from the build's
 # SHA512SUMS file. storage/latest.sh --bump writes it.
 declare -A image_sha512=(
-    ["20261017-2634"]="ec584ccabfef7120b4c4f7482adf0e615894d9292cedec446b64194b951ebe5dd97c336b5dcbae458333764b0edd516334506017f33c4f2020ef8d38b569ffe3"
+    ["20261101-2649"]="8f012e85f08ab078da8a4ab5bb8fa5bd80f3d40502fde4fc6126a90028aa77ae357f8ac146e3dcdfbe9d75e8c4837de78dc8316e198bdd2981bacbf8cfcc141c"
 )
 digest="${image_sha512[$version]:-}"
 if [[ -z "$digest" ]]; then
