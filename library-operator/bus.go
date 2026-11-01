@@ -251,21 +251,27 @@ func (b *Bus) readLoop(reader *bufio.Reader) {
 // the reconnect. A message too long for one packet is refused with a
 // line in the pod log, because the broker would close the connection
 // on the malformed packet and drop every publish queued behind it.
-func (b *Bus) Publish(topic string, payload []byte, retained bool) {
+//
+// The answer is whether the frame reached the queue. A caller that skips
+// a payload it already published records the payload only on true, so a
+// frame dropped on a full queue goes out again on its next try.
+func (b *Bus) Publish(topic string, payload []byte, retained bool) bool {
 	b.mutex.Lock()
 	out := b.out
 	b.mutex.Unlock()
 	if out == nil {
-		return
+		return false
 	}
 	frame, err := encodePublish(topic, payload, retained)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "publishing to %s: %v\n", topic, err)
-		return
+		return false
 	}
 	select {
 	case out <- frame:
+		return true
 	default:
+		return false
 	}
 }
 

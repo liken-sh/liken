@@ -6,6 +6,7 @@ package main
 
 import (
 	"testing"
+	"testing/synctest"
 )
 
 // A Person as a pass meets it: new, or deleting with the finalizer held.
@@ -41,16 +42,23 @@ func TestAPersonLeavesOneLinePerStepAcrossPasses(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			operator, cluster, logged := loggingHouse(t)
-			c.arrange(cluster)
-			if c.forgotten {
-				publishForgotten(operator, "person-a", testLibraryNamespace)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				operator, cluster, logged := loggingHouse(t)
+				c.arrange(cluster)
+				if c.forgotten {
+					publishForgotten(operator, "person-a", testLibraryNamespace)
+				}
+				// The forget ask is logged once the bus queues it, so the
+				// operator is connected to a broker.
+				operator.bus.dial = newRetainBroker(t).dial
+				go operator.bus.Run(t.Context())
+				synctest.Wait()
 
-			operator.pass()
-			operator.pass()
+				operator.pass()
+				operator.pass()
 
-			wantOneLine(t, logged, c.want)
+				wantOneLine(t, logged, c.want)
+			})
 		})
 	}
 }

@@ -27,6 +27,9 @@ type retainBroker struct {
 	conns map[net.Conn]struct{}
 	// Every topic a client published to, in the order the broker read them.
 	published []string
+	// While held is open, every connection stops reading after its CONNACK,
+	// the way a broker that falls behind stops draining a socket.
+	held chan struct{}
 }
 
 // One connection's write side. A pipe has no buffer, so a broker that wrote
@@ -102,6 +105,31 @@ func (b *retainBroker) restart() {
 	}
 }
 
+// Stops every connection reading after its CONNACK until the release it
+// answers runs, so a client's writes back up into its own queue.
+func (b *retainBroker) holdReads() (release func()) {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	held := make(chan struct{})
+	b.held = held
+	return func() {
+		b.mutex.Lock()
+		b.held = nil
+		b.mutex.Unlock()
+		close(held)
+	}
+}
+
+// Waits while the broker holds its reads.
+func (b *retainBroker) waitForReads() {
+	b.mutex.Lock()
+	held := b.held
+	b.mutex.Unlock()
+	if held != nil {
+		<-held
+	}
+}
+
 func (b *retainBroker) serve(conn net.Conn) {
 	b.mutex.Lock()
 	b.conns[conn] = struct{}{}
@@ -138,6 +166,7 @@ func (b *retainBroker) serve(conn net.Conn) {
 	}
 	client.write([]byte{mqttConnack, 0x02, 0x00, 0x00})
 	for {
+		b.waitForReads()
 		first, body, err := readPacket(reader)
 		if err != nil {
 			return

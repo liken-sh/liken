@@ -1108,6 +1108,26 @@ func TestAPassWiresABoundRemote(t *testing.T) {
 		remoteFocusTopic(defaultTopicBase, "house", "sofa"))
 }
 
+// connectedBus is a bus with a session to a fake broker that takes every
+// publish, for a test that reads what the operator records as published.
+// The operator records a payload only when the bus queued it, and a bus
+// with no session queues nothing.
+func connectedBus(t *testing.T) *Bus {
+	t.Helper()
+	bus, brokers, connected := startBus(t, 1, nil, nil)
+	waitForConnect(t, connected)
+	go func() {
+		for {
+			select {
+			case <-brokers[0].pubs:
+			case <-t.Context().Done():
+				return
+			}
+		}
+	}()
+	return bus
+}
+
 // The operator publishes each Remote's compiled table on that Remote's
 // own keys topic, retained, so the standing pod reads it the instant it
 // connects.
@@ -1117,6 +1137,7 @@ func TestAPassPublishesEachRemotesKeyTable(t *testing.T) {
 	cluster.remotes["sofa"] = houseRemote("gamepad")
 	cluster.keymaps["gamepad"] = testKeymap()
 	media := testOperator(t, cluster, make(chan struct{}, 1))
+	media.bus = connectedBus(t)
 
 	media.pass()
 
@@ -1279,6 +1300,7 @@ func TestAPassKeepsThePeripheralsItHeldWhenTheListFails(t *testing.T) {
 func TestAPassSkipsTheRemotesWhenTheirListFails(t *testing.T) {
 	cluster := bondedRemote(t)
 	media := testOperator(t, cluster, make(chan struct{}, 1))
+	media.bus = connectedBus(t)
 	media.pass()
 	mustMatch(t, cluster.remotes["sofa"].Status.Peripheral, "aa-bb-cc-dd-ee-ff")
 

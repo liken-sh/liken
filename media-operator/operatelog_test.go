@@ -286,6 +286,7 @@ func TestAPressLogsTheInputAskItSent(t *testing.T) {
 // a fresh broker session writes none.
 func TestAKeyTableLogsOnceUntilItChanges(t *testing.T) {
 	media := testOperator(t, newFakeCluster(), make(chan struct{}, 1))
+	media.bus = connectedBus(t)
 	var log logBuffer
 	media.log = &log
 	keymaps := map[string]*Keymap{"gamepad": testKeymap()}

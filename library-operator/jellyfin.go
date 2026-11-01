@@ -93,7 +93,7 @@ func newJellyfin(log io.Writer) *jellyfin {
 	fmt.Fprintf(log, "library.liken.sh: carrying the progress of %s to %s\n", namespace, address)
 
 	role.bus = newBus(os.Getenv(busAddressVariable), "jellyfin-"+namespace, nil, nil, role.onMessage)
-	role.publish = role.bus.Publish
+	role.publish = func(topic string, payload []byte, retained bool) { role.bus.Publish(topic, payload, retained) }
 	return role
 }
 

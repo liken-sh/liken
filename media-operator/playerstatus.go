@@ -60,8 +60,9 @@ func (p *publishedStatuses) publishDerived(bus *Bus, topic string,
 	if err != nil {
 		return "", false, err
 	}
-	if p.payloads[topic] != string(payload) {
-		bus.Publish(topic, payload, true)
+	// The record holds a payload only when the bus queued it, so a frame
+	// the bus dropped on a full queue goes out again on the next pass.
+	if p.payloads[topic] != string(payload) && bus.Publish(topic, payload, true) {
 		if p.payloads == nil {
 			p.payloads = map[string]string{}
 		}

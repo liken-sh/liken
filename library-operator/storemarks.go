@@ -169,29 +169,49 @@ func (o *operator) publishMark(topic string, mark any) {
 	if held, standing := o.published[topic]; standing && held == string(payload) {
 		return
 	}
-	o.published[topic] = string(payload)
-	o.bus.Publish(topic, payload, true)
+	// The map records a payload only when the bus queued it. The bus drops
+	// a frame while it is disconnected and when its write queue is full,
+	// and a payload recorded after a drop would be skipped on every later
+	// pass, so the broker would never hold it. An unrecorded payload goes
+	// out on the next pass, which the backstop tick runs at the latest.
+	if o.bus.Publish(topic, payload, true) {
+		o.published[topic] = string(payload)
+		delete(o.unsent, topic)
+	}
 }
 
 // onBusConnect runs on the bus goroutine each time a session reaches a
 // CONNACK, the first one included, and wakes the pass to publish the
 // marks again. The bus runs with persistence off, so a broker that
-// restarted holds none of them, and a publish made while the client was
-// disconnected was dropped although published records it. Without this,
-// a progress pod or a reporter that subscribes later reads no mark until
-// the object behind it changes or the operator restarts.
+// restarted holds none of them. Without this, a progress pod or a
+// reporter that subscribes later reads no mark until the object behind it
+// changes or the operator restarts.
 func (o *operator) onBusConnect(*Bus) {
 	o.busConnected.Store(true)
 	poke(o.wake)
 }
 
-// republishMarks publishes every payload in published again, word for
-// word. A forget ask keeps the time it was first made, so a store reads
-// the same ask and not a new one. The topics go out in sorted order so
-// the frames are the same on every connect.
+// republishMarks publishes each mark in published again, word for word.
+// A forget ask keeps the time it was first made, so a store reads the
+// same ask and not a new one. A connect marks every topic in published
+// as unsent, and the topics go out in sorted order so the frames are the
+// same on every connect.
+//
+// A connect sends the marks in one burst, which can fill the bus's write
+// queue. The pass stops at the first mark the bus drops, and the next
+// pass resumes from it, so a set of marks larger than the queue reaches
+// the broker over several passes, each of which the writer drains.
 func (o *operator) republishMarks() {
-	for _, topic := range slices.Sorted(maps.Keys(o.published)) {
-		o.bus.Publish(topic, []byte(o.published[topic]), true)
+	if o.busConnected.Swap(false) {
+		for topic := range o.published {
+			o.unsent[topic] = struct{}{}
+		}
+	}
+	for _, topic := range slices.Sorted(maps.Keys(o.unsent)) {
+		if !o.bus.Publish(topic, []byte(o.published[topic]), true) {
+			return
+		}
+		delete(o.unsent, topic)
 	}
 }
 
@@ -211,5 +231,6 @@ func (o *operator) publishStanding(topic string, mark any) {
 // for a Play or a person that is gone.
 func (o *operator) clearTopic(topic string) {
 	delete(o.published, topic)
+	delete(o.unsent, topic)
 	o.bus.Publish(topic, nil, true)
 }

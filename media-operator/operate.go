@@ -1084,8 +1084,9 @@ func (o *operator) publishKeys(remote *Remote, keymaps map[string]*Keymap, prese
 			remote.Metadata.Namespace, remote.Metadata.Name, err)
 		return nil
 	}
-	if o.keysPublished[topic] != string(payload) {
-		o.bus.Publish(topic, payload, true)
+	// The record holds a table only when the bus queued it, so a frame the
+	// bus dropped on a full queue goes out again on the next pass.
+	if o.keysPublished[topic] != string(payload) && o.bus.Publish(topic, payload, true) {
 		o.keysPublished[topic] = string(payload)
 		// A fresh broker session republishes every table, and that is no
 		// edit, so the line compares against the last table logged.

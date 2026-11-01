@@ -30,7 +30,10 @@ operator restarts without dropping a message: a button press reaches
 broker restart loses only the retained set. Each connected program
 republishes the retained state it owns when its session reconnects,
 and the next report from each running `Play` refills the rest within
-seconds.
+seconds. The operator's client drops a publish when its write queue is
+full, for example while the broker falls behind on a burst of many
+topics. The operator publishes each `Player` status and each key table
+that it dropped again on its next pass.
 
 ## The topic base
 

@@ -66,11 +66,14 @@ func (o *operator) holdPerson(ctx context.Context, person *Person) {
 func (o *operator) forgetPerson(ctx context.Context, person *Person, stores map[string]bool, now time.Time) {
 	name := person.Metadata.Name
 	forget := personForgetTopic(o.topicBase, name)
-	if _, asked := o.published[forget]; !asked {
+	// The line follows the publish, because a publish the bus dropped is
+	// not recorded and the next pass asks again.
+	_, asked := o.published[forget]
+	o.publishStanding(forget, personForgetRequest{At: now.UTC().Format(time.RFC3339)})
+	if _, sent := o.published[forget]; sent && !asked {
 		o.logf("person %s is deleting: asked the progress stores of %s to forget the person's progress",
 			name, counted(len(stores), "namespace"))
 	}
-	o.publishStanding(forget, personForgetRequest{At: now.UTC().Format(time.RFC3339)})
 
 	forgotten := o.marks.forgottenBy(name)
 	for namespace := range stores {

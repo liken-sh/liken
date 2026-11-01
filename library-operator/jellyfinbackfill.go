@@ -121,7 +121,7 @@ func newJellyfinBackfill(log io.Writer) *jellyfinBackfill {
 	backfill.ready = ready
 	backfill.bus = newBus(os.Getenv(busAddressVariable), "jellyfin-backfill-"+namespace, nil,
 		func(*Bus) { once.Do(func() { close(ready) }) }, nil)
-	backfill.publish = backfill.bus.Publish
+	backfill.publish = func(topic string, payload []byte, retained bool) { backfill.bus.Publish(topic, payload, retained) }
 	return backfill
 }
 

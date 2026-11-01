@@ -80,7 +80,10 @@ dropped. So the operator publishes each of its retained topics again
 after every connect to the broker, the first one included: the pass that
 the connect starts publishes the `refresh`, `audience`, `final`, and
 `forget` topics with the payload it last published on each, so a
-`forget` request keeps the time of the first ask.
+`forget` request keeps the time of the first ask. The operator's client
+drops a publish when its write queue is full, for example while the
+broker falls behind on a burst of many topics. The operator publishes a
+dropped topic again on its next pass, which runs within ten seconds.
 
 ## The library report
 

@@ -167,6 +167,10 @@ type operator struct {
 	// because the two goroutines share it with no other lock.
 	busConnected atomic.Bool
 
+	// The topics in published whose mark the bus has not queued since the
+	// last connect. The pass is its only reader and writer.
+	unsent map[string]struct{}
+
 	// The base of media-operator's topic tree, which every progress
 	// pod reads each Play's position from. The operator passes it
 	// down, so a cluster that moved that tree names it once, here.
@@ -264,6 +268,7 @@ func newOperator(client *apiclient.Client, stamped images,
 		marks:            newStoreMarks(wake),
 		workLists:        newWorkLists(wake),
 		published:        map[string]string{},
+		unsent:           map[string]struct{}{},
 		mediaTopicBase:   defaultMediaTopicBase,
 		wake:             wake,
 		cleanupStands:    map[string]cleanupStand{},
@@ -310,9 +315,7 @@ func (o *operator) pass() {
 	ctx, done := context.WithTimeout(context.Background(), passTimeout)
 	defer done()
 
-	if o.busConnected.Swap(false) {
-		o.republishMarks()
-	}
+	o.republishMarks()
 
 	// The class answers are this pass's own, so a class a person edits
 	// is read again on the next pass.
