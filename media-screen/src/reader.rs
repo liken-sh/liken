@@ -37,7 +37,9 @@ const KEEPALIVE: Duration = Duration::from_secs(30);
 /// The largest packet this client sends or accepts. rumqttc caps both at
 /// ten kilobytes unless told otherwise, and a play request for a whole
 /// season of episodes with the work that follows it is larger than that.
-/// The broker sets no limit of its own.
+/// The broker enforces a cap of its own as well: `media-operator/deploy/bus.yaml`
+/// sets no `max_packet_size`, so Mosquitto applies the default that the
+/// `mosquitto.conf` manual states for that option, which is above this one.
 const MAX_PACKET_SIZE: usize = 256 * 1024;
 
 /// The bounds of the wait after a failed session. The wait starts at the
