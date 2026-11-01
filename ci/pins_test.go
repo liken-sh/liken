@@ -60,9 +60,9 @@ func pinsTree(t *testing.T, changes map[string]string) string {
 		"lib/closure.sh":                     "collect() { :; }\n",
 		"c/closure.sh":                       "collect() { :; }\n",
 		"liken/userland/VERSION":             "abc\n",
-		"liken/userland/fetch.sh":            "source \"$here/../../toolchains/pin.sh\"\ndeclare -A buildroot_sha256=(\n    [\"abc\"]=\"111\"\n    [\"old\"]=\"000\"\n)\n",
+		"liken/userland/fetch.sh":            "source \"$here/../../toolchains/pin.sh\"\ndeclare -A buildroot_sha256=(\n    [\"abc\"]=\"111\"\n    [\"old\"]=\"000\"\n)\ndeclare -A spdx_schema_sha256=(\n    [\"1.6.2\"]=\"333\"\n)\n",
 		"liken/userland/latest.sh":           "source \"$here/../../toolchains/pin.sh\"\n",
-		"d/Dockerfile":                       "FROM buildroot AS daemons\nARG BUILDROOT_COMMIT=abc\nARG BUILDROOT_SHA256=111\n",
+		"d/Dockerfile":                       "FROM buildroot AS daemons\nARG BUILDROOT_COMMIT=abc\nARG BUILDROOT_SHA256=111\nARG SPDX_SCHEMA_VERSION=1.6.2\nARG SPDX_SCHEMA_SHA256=333\n",
 		// A script reads an outside image from images.toml, and a
 		// comment may quote a reference.
 		"a/models/push.sh": "# The image was ghcr.io/x/oras:v1@sha256:" + strings.Repeat("a", 64) + ".\n" +
@@ -138,6 +138,10 @@ func TestADriftedPinIsFound(t *testing.T) {
 			"the buildroot pin buildroot has 2 versions: abc sha256:111 in liken/userland/VERSION; old sha256:000 in d/Dockerfile"},
 		"a buildroot digest in a Dockerfile": {"d/Dockerfile", "FROM buildroot AS daemons\nARG BUILDROOT_COMMIT=abc\nARG BUILDROOT_SHA256=222\n",
 			"the buildroot pin buildroot has 2 versions: abc sha256:111 in liken/userland/VERSION; abc sha256:222 in d/Dockerfile"},
+		"an SPDX schema digest in a Dockerfile": {"d/Dockerfile", "FROM buildroot AS daemons\nARG BUILDROOT_COMMIT=abc\nARG BUILDROOT_SHA256=111\nARG SPDX_SCHEMA_VERSION=1.6.2\nARG SPDX_SCHEMA_SHA256=444\n",
+			"d/Dockerfile fetches the SPDX schema 1.6.2 by sha256:444, and the spdx_schema_sha256 table of liken/userland/fetch.sh pins sha256:333"},
+		"an SPDX schema that userland does not pin": {"d/Dockerfile", "FROM buildroot AS daemons\nARG BUILDROOT_COMMIT=abc\nARG BUILDROOT_SHA256=111\nARG SPDX_SCHEMA_VERSION=1.7.0\nARG SPDX_SCHEMA_SHA256=333\n",
+			"d/Dockerfile fetches the SPDX schema 1.7.0 by sha256:333, and the spdx_schema_sha256 table of liken/userland/fetch.sh pins sha256:"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

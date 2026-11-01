@@ -264,6 +264,10 @@ buildroot)
     fi
     set_line "$dockerfile" '^ARG BUILDROOT_COMMIT=' "ARG BUILDROOT_COMMIT=$tip"
     set_line "$dockerfile" '^ARG BUILDROOT_SHA256=' "ARG BUILDROOT_SHA256=$digest"
+    # The bluetoothd image fetches the same SPDX schema for its SBOM.
+    set_line "$dockerfile" '^ARG SPDX_SCHEMA_VERSION=' "ARG SPDX_SCHEMA_VERSION=$schema"
+    set_line "$dockerfile" '^ARG SPDX_SCHEMA_SHA256=' \
+        "ARG SPDX_SCHEMA_SHA256=$(sed -n "s/^    \[\"$schema\"\]=\"\([0-9a-f]*\)\"$/\1/p" "$here/fetch.sh")"
     bumped buildroot "${commit:0:12}" "${tip:0:12}"
     echo "the digest came from this download; nothing upstream signs it"
     drop_overrides

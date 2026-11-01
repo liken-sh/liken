@@ -714,6 +714,7 @@ target "bluetoothd" {
     "buildroot" = "docker-image://registry.gitlab.com/buildroot.org/buildroot/base:20250218.2110@sha256:340aa0de68e8e13e4eca70a00aaf94ec68d3a3891c28f3e7495d844829a8c958"
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "kubernetes" = "kubernetes"
+    "manifest" = "toolchains/manifest"
     "notices" = "notices"
     "userland" = "liken/userland"
   }

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -54,7 +55,11 @@ import (
 //     liken/userland/VERSION and the digest that liken/userland/fetch.sh
 //     pins for it, because the image and the OS build their static
 //     programs from one BR2_EXTERNAL tree, and the tree is written for
-//     one buildroot.
+//     one buildroot;
+//   - each Dockerfile that downloads the SPDX license list that
+//     buildroot's generate-cyclonedx reads names a version and a digest
+//     of the spdx_schema_sha256 table of liken/userland/fetch.sh, so
+//     the image's SBOM and the OS's read the same list.
 //
 // The plans keep the versions of their day, so the check reads none of
 // them. Neither does it read test data, a cache, or another checkout.
@@ -71,6 +76,10 @@ func checkPins(root string) ([]string, error) {
 	rustVersion := strings.SplitN(parseImageRef(tools.Build["rust"]).Tag, "-", 2)[0]
 	modules, crates, hooks, protocols, closures := versions{}, versions{}, versions{}, versions{}, versions{}
 	buildroots, err := userlandBuildroot(root)
+	if err != nil {
+		return nil, err
+	}
+	schemas, err := userlandSchemas(root)
 	if err != nil {
 		return nil, err
 	}
@@ -116,6 +125,7 @@ func checkPins(root string) ([]string, error) {
 			if pin := dockerfileBuildroot(string(data)); pin != "" {
 				buildroots.add("buildroot", pin, file)
 			}
+			findings = append(findings, schemaFindings(file, string(data), schemas)...)
 		}
 	}
 	findings = append(findings, modules.drift("the Go module")...)
@@ -156,10 +166,58 @@ func userlandBuildroot(root string) (versions, error) {
 	return pins, nil
 }
 
-// dockerfileBuildroot reads the BUILDROOT_COMMIT and BUILDROOT_SHA256
-// arguments of a Dockerfile that downloads buildroot, in the form of
-// userlandBuildroot, or "" for a Dockerfile that names neither.
-func dockerfileBuildroot(text string) string {
+// userlandSchemas reads the spdx_schema_sha256 table of
+// liken/userland/fetch.sh: the digest of the SPDX license list of each
+// CycloneDX version that a pinned buildroot's generate-cyclonedx names.
+// The table keeps the entries of older buildroot commits, so a
+// Dockerfile may name any of them.
+func userlandSchemas(root string) (map[string]string, error) {
+	data, err := os.ReadFile(filepath.Join(root, "liken/userland/fetch.sh"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	schemas := map[string]string{}
+	inside := false
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case line == "declare -A spdx_schema_sha256=(":
+			inside = true
+		case inside && line == ")":
+			inside = false
+		case inside:
+			if m := tableEntry.FindStringSubmatch(line); m != nil {
+				schemas[m[1]] = m[2]
+			}
+		}
+	}
+	return schemas, nil
+}
+
+// tableEntry matches one entry of a `declare -A` table, ["key"]="value".
+var tableEntry = regexp.MustCompile(`^\["([^"]+)"\]="([^"]*)"$`)
+
+// schemaFindings lists a Dockerfile whose SPDX_SCHEMA_VERSION and
+// SPDX_SCHEMA_SHA256 arguments name a digest that the
+// spdx_schema_sha256 table of liken/userland/fetch.sh does not pin for
+// that version.
+func schemaFindings(file, text string, schemas map[string]string) []string {
+	args := dockerfileArgs(text)
+	version, digest := args["SPDX_SCHEMA_VERSION"], args["SPDX_SCHEMA_SHA256"]
+	if version == "" && digest == "" {
+		return nil
+	}
+	if pinned := schemas[version]; pinned != digest {
+		return []string{fmt.Sprintf("%s fetches the SPDX schema %s by sha256:%s, and the spdx_schema_sha256 table of liken/userland/fetch.sh pins sha256:%s", file, version, digest, pinned)}
+	}
+	return nil
+}
+
+// dockerfileArgs reads the default of each ARG of a Dockerfile.
+func dockerfileArgs(text string) map[string]string {
 	args := map[string]string{}
 	for _, line := range strings.Split(text, "\n") {
 		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "ARG "); ok {
@@ -168,6 +226,14 @@ func dockerfileBuildroot(text string) string {
 			}
 		}
 	}
+	return args
+}
+
+// dockerfileBuildroot reads the BUILDROOT_COMMIT and BUILDROOT_SHA256
+// arguments of a Dockerfile that downloads buildroot, in the form of
+// userlandBuildroot, or "" for a Dockerfile that names neither.
+func dockerfileBuildroot(text string) string {
+	args := dockerfileArgs(text)
 	if args["BUILDROOT_COMMIT"] == "" && args["BUILDROOT_SHA256"] == "" {
 		return ""
 	}

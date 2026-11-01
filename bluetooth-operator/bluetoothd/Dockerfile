@@ -64,6 +64,32 @@ RUN --mount=type=cache,target=/home/br-user/dl,uid=1000,gid=1000 \
     BR2_DL_DIR=/home/br-user/dl BR2_CCACHE_DIR=/home/br-user/ccache \
     bash external/buildroot.sh /home/br-user/buildroot /home/br-user/output bluetoothd.config
 
+# buildroot's CycloneDX SBOM of the build, as liken/userland/build.sh
+# writes the OS's: `show-info` prints each package of the
+# configuration, and generate-cyclonedx turns the list into the SBOM.
+#
+# generate-cyclonedx reads the SPDX license list of the CycloneDX
+# version that it names, and downloads the list when its download
+# directory has none. So the build fetches the list by the version and
+# the digest that the spdx_schema_sha256 table of
+# liken/userland/fetch.sh pins, and the SBOM step reads no unpinned
+# byte. liken/userland/latest.sh --bump writes the two lines below, and
+# `cd ci && go run . pins -root ..` fails when they disagree with the
+# table. They follow the build of the packages, so a new list does not
+# rebuild them. The build stops when the pinned buildroot names another
+# CycloneDX version, because generate-cyclonedx would then download
+# that version's list.
+ARG SPDX_SCHEMA_VERSION=1.6.2
+ARG SPDX_SCHEMA_SHA256=c41917196639055e9f9670811bac23ef777732144f3ff5a2f39686f61580dbe6
+ADD --chown=br-user:br-user --checksum=sha256:${SPDX_SCHEMA_SHA256} \
+    https://raw.githubusercontent.com/CycloneDX/specification/${SPDX_SCHEMA_VERSION}/schema/spdx.schema.json \
+    sbom-dl/cyclonedx/spdx-${SPDX_SCHEMA_VERSION}.schema.json
+RUN set -eu; \
+    cd buildroot; \
+    test "$(sed -n 's/^DEFAULT_CYCLONEDX_VERSION = "\(.*\)"$/\1/p' utils/generate-cyclonedx)" = "$SPDX_SCHEMA_VERSION"; \
+    make --no-print-directory -s O=/home/br-user/output show-info \
+        | BR2_DL_DIR=/home/br-user/sbom-dl utils/generate-cyclonedx >/home/br-user/output/sbom.cdx.json
+
 # Every file the image ships, named. install -D fails on a path that
 # moved, so a BlueZ or dbus release that relocates one of these stops
 # the build rather than shipping an image without it. buildroot strips
@@ -172,12 +198,26 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /start-rescan ./bluetoo
 COPY --from=notices go.sh /
 RUN CGO_ENABLED=0 sh /go.sh /notices ./bluetoothd ./bluetoothd/btmon ./bluetoothd/rescan
 
+# syft finds no package in a static C program, so the image carries a
+# CycloneDX record of the packages that buildroot built into its
+# daemons: image-sbom keeps the target packages of buildroot's SBOM,
+# with their CPEs and licenses, and leaves out the host tools that ran
+# during the build. syft copies the record's components into the
+# image's SBOM. The build context manifest is toolchains/manifest.
+FROM golang AS record
+WORKDIR /src
+COPY --from=manifest . ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /image-sbom ./image-sbom
+COPY --from=daemons /home/br-user/output/sbom.cdx.json /buildroot.cdx.json
+RUN /image-sbom -out /bluetoothd.cdx.json -buildroot /buildroot.cdx.json
+
 FROM scratch
 COPY --from=daemons /home/br-user/out/ /
 COPY --from=entrypoint /start-bluetoothd /start-bluetoothd
 COPY --from=entrypoint /start-btmon /start-btmon
 COPY --from=entrypoint /start-rescan /start-rescan
 COPY --from=entrypoint /notices /
+COPY --from=record /bluetoothd.cdx.json /usr/share/doc/liken/bluetoothd.cdx.json
 
 # /etc/bluetooth holds no file in the image. The entrypoint writes
 # main.conf and input.conf at start: main.conf takes its Privacy key

@@ -55,8 +55,10 @@ contexts = { kubernetes = "kubernetes", notices = "notices" }
 name = "bluetoothd"
 file = "bluetoothd/Dockerfile"
 # userland is the BR2_EXTERNAL tree whose buildroot build makes the
-# image's static daemons.
-contexts = { kubernetes = "kubernetes", notices = "notices", userland = "liken/userland" }
+# image's static daemons, and manifest is toolchains/manifest, for
+# image-sbom, which writes the image's SBOM record of the packages
+# that buildroot built.
+contexts = { kubernetes = "kubernetes", notices = "notices", userland = "liken/userland", manifest = "toolchains/manifest" }
 # A build whose layer cache misses compiles buildroot's cross-compiler,
 # glib, dbus, and BlueZ from source, which takes longer than the
 # default limit of the images and publish jobs.
