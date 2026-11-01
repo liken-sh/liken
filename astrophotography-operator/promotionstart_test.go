@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/liken-sh/liken/astrophotography-operator/astrophotography"
+	"github.com/liken-sh/liken/astrophotography-operator/promote"
 	"github.com/liken-sh/liken/kubernetes/conditions"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
@@ -72,6 +73,44 @@ func TestTheSameClaimIsMountedOnce(t *testing.T) {
 		spec := decode[jobObject](api, jobsPath, observatoryNS, "m42-promote-1").Spec.Template.Spec
 		if len(spec.Volumes) != 1 || !slices.Contains(spec.Containers[0].Args, "--same-claim") {
 			t.Errorf("the Job mounts %+v and runs %v", spec.Volumes, spec.Containers[0].Args)
+		}
+	})
+}
+
+// m43 is a second target that counts its frames in the same outbox
+// claim as m42.
+func m43() astrophotography.Target {
+	t := m42()
+	t.Metadata.Name, t.Metadata.UID = "m43", "uid-m43"
+	return t
+}
+
+// Two targets with frames in one outbox claim start one Job, because
+// one Job copies from an outbox claim at a time. The second target's
+// Job starts when the first Job ends.
+func TestTwoTargetsOnOneOutboxClaimStartOneJob(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		api := startFakeAPI(t)
+		putClaim(api, "frames")
+		putClaim(api, "archive")
+		putTarget(t, api, withPending(m42(), 1, 0))
+		putTarget(t, api, withPending(m43(), 1, 0))
+		startOperator(t, api)
+		synctest.Wait()
+
+		want := []string{"POST /apis/batch/v1/namespaces/observatory/jobs"}
+		if got := api.writes(jobsPath); !slices.Equal(got, want) {
+			t.Errorf("Job writes %q, want %q", got, want)
+		}
+		if api.get(jobsPath, observatoryNS, "m43-promote-1") != nil {
+			t.Error("m43's Job started while m42's Job uses the outbox claim")
+		}
+
+		finish(t, api, "m42-promote-1", &promote.Report{Totals: luminance(1), Promoted: 1})
+		synctest.Wait()
+
+		if api.get(jobsPath, observatoryNS, "m43-promote-1") == nil {
+			t.Error("m43's Job did not start after m42's Job ended")
 		}
 	})
 }

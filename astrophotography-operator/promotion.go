@@ -112,6 +112,12 @@ type world struct {
 	// cameras holds each namespace's cameras, with the telescope and
 	// the train of each.
 	cameras map[string]map[string]promote.Camera
+	// created holds each outbox claim, as namespace/name, that a Job
+	// this pass created uses. The pass lists its Jobs once, before it
+	// creates any, so without the record a second target on the same
+	// claim would start a second Job in the same pass. The next pass
+	// lists the new Job (currentJobs), so the record lives for one pass.
+	created map[string]bool
 }
 
 func (s *stores) view(kind string) informer.View { return s.collections[kind].View() }
@@ -128,6 +134,7 @@ func (p *promotions) read() (world, error) {
 		reservations: informer.CachedList[observatory.Reservation](s.view(observatory.ReservationKind.Name)),
 		claims:       map[string]claimObject{},
 		cameras:      map[string]map[string]promote.Camera{},
+		created:      map[string]bool{},
 	}
 	for _, c := range informer.CachedList[claimObject](s.view(claimKind)) {
 		w.claims[c.Metadata.Namespace+"/"+c.Metadata.Name] = c
@@ -299,8 +306,11 @@ func (p *promotions) rerun(t *astrophotography.Target, j jobObject) error {
 }
 
 // claimBusy reports whether a promotion Job that has not ended uses an
-// outbox claim.
+// outbox claim: one the pass listed, or one the pass created.
 func (w world) claimBusy(namespace, claim string) bool {
+	if w.created[namespace+"/"+claim] {
+		return true
+	}
 	return slices.ContainsFunc(w.jobs, func(j jobObject) bool {
 		_, promotes := promotionNumber(j)
 		ended, _ := finished(j)
@@ -345,6 +355,7 @@ func (p *promotions) startJob(t *astrophotography.Target, w world, number int32)
 			return err
 		}
 		p.started[key] = true
+		w.created[namespace+"/"+entry.ClaimName] = true
 		fmt.Fprintf(p.logs, "%s: started the promotion Job %s/%s for %s in %s\n", managedBy, namespace, job.Metadata.Name, frames(entry.Pending), entry.ClaimName)
 		return nil
 	}
