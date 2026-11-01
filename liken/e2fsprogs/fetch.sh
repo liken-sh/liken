@@ -93,8 +93,8 @@ mkdir -p "$cache"
 # kernel.org publishes a sha256sums.asc file in each release
 # directory, clearsigned by its checksum autosigner, and
 # e2fsprogs/latest.sh --bump copies the tarball's line from it after
-# the signature verifies against autosigner.asc, so a fetch never
-# reads a digest from upstream.
+# the signature verifies against the autosigner's key in trust/keys/,
+# so a fetch never reads a digest from upstream.
 declare -A e2fsprogs_sha256=(
     ["1.47.4"]="da274408bebbfd13a5a2fc3cfc66e3ffff17c48534673aa67f88d49b99123b96"
 )

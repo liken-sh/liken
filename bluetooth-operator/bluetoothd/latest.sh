@@ -13,8 +13,13 @@
 # toolchains/latest.sh reports it.
 #
 # BlueZ publishes its tarballs on kernel.org, with one sha256sums.asc
-# file for the directory. dbus publishes its tarballs on
-# dbus.freedesktop.org, with a .sha256sum file beside each one. dbus
+# file for the directory that kernel.org's checksum autosigner
+# clearsigns. The BlueZ bump copies a digest only from a sums file
+# whose signature verifies against the autosigner's key:
+# trust/keys/kernel-org-digest.sh makes the check, and
+# trust/keys/README.md says where the key comes from. dbus publishes
+# its tarballs on dbus.freedesktop.org, with a .sha256sum file beside
+# each one. dbus
 # numbers a development series with an odd minor version, such as
 # 1.15, and a stable series with an even one, so the report reads the
 # even series only. A bump reads each checksum from upstream's own
@@ -71,19 +76,11 @@ bluez)
         exit 0
     }
     tarball="bluez-$bluez_latest.tar.xz"
-    # The sums file is a clearsigned document, so the digest lines sit
-    # among the signature's own text. Matching the exact filename picks
-    # the one line that matters.
-    sha256="$(curl -fsSL --retry 3 --max-time 60 "$bluez_archive/sha256sums.asc" |
-        awk -v t="$tarball" '$2 == t { print $1 }')"
-    [[ "$sha256" =~ ^[0-9a-f]{64}$ ]] || {
-        echo "latest.sh: no $tarball listed in $bluez_archive/sha256sums.asc" >&2
-        exit 1
-    }
+    sha256="$("$here/../../trust/keys/kernel-org-digest.sh" "$bluez_archive/sha256sums.asc" "$tarball")"
     sed -i -e "s|^ARG BLUEZ_VERSION=.*|ARG BLUEZ_VERSION=$bluez_latest|" \
         -e "s|^ARG BLUEZ_SHA256=.*|ARG BLUEZ_SHA256=$sha256|" "$dockerfile"
     echo "bluez: $bluez -> $bluez_latest"
-    echo "kernel.org's sha256sums file stands behind these bytes"
+    echo "the digest came from sha256sums.asc, signed by kernel.org's checksum autosigner"
     echo "next: docker buildx bake bluetoothd at the top of the repository; the build stops"
     echo "when a patch in patches/bluez/ no longer applies, and patches/README.md says what to do"
     ;;

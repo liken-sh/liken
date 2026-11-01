@@ -33,3 +33,10 @@ that `smoke/trust.sh` names.
 A snapshot removes trust as well as adding it. Read which roots left
 the bundle before you take the bump: a root that leaves is one that
 every machine and every image stops trusting.
+
+## Signing keys
+
+`keys/` holds the upstream signing keys that more than one
+`latest.sh --bump` checks before it copies a digest into a pin.
+`keys/README.md` names each key, where it comes from, and the bumps
+that read it. No image build reads `keys/`.

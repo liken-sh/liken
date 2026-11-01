@@ -14,7 +14,11 @@
 #
 # Nothing upstream checksums a GitHub source archive, so those bumps
 # compute the digest from their own download. kernel.org publishes a
-# sums file, so the kmod bump reads its digest from there.
+# sums file for kmod that its checksum autosigner clearsigns, so the
+# kmod bump reads its digest from there, and only after the signature
+# verifies against the autosigner's key:
+# trust/keys/kernel-org-digest.sh makes the check, and
+# trust/keys/README.md says where the key comes from.
 #
 # Usage:
 #   open-iscsi/latest.sh                report all three pins
@@ -93,20 +97,14 @@ kmod)
         echo "kmod $pinned_kmod is current"
         exit 0
     }
-    # kernel.org signs one sums file per directory, so this digest
-    # comes from upstream and not from the download.
-    digest="$(curl -fsSL --retry 3 --max-time 60 https://www.kernel.org/pub/linux/utils/kernel/kmod/sha256sums.asc |
-        awk -v t="kmod-$latest_kmod.tar.xz" '$2 == t { print $1 }')"
-    [[ -n "$digest" ]] || {
-        echo "latest.sh: no kmod-$latest_kmod.tar.xz in kernel.org's sums file" >&2
-        exit 1
-    }
+    digest="$("$here/../../trust/keys/kernel-org-digest.sh" \
+        https://www.kernel.org/pub/linux/utils/kernel/kmod/sha256sums.asc "kmod-$latest_kmod.tar.xz")"
     sed -i \
         -e "s|^kmod_version=\".*\"|kmod_version=\"$latest_kmod\"|" \
         -e "s|^kmod_sha256=\".*\"|kmod_sha256=\"$digest\"|" \
         "$here/fetch.sh"
     echo "kmod: $pinned_kmod -> $latest_kmod"
-    echo "kernel.org's sums file stands behind these bytes"
+    echo "the digest came from sha256sums.asc, signed by kernel.org's checksum autosigner"
     ;;
 libeconf)
     [[ -n "$latest_libeconf" ]] || {

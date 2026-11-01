@@ -13,8 +13,13 @@
 # toolchains/images.toml, and toolchains/latest.sh reports it.
 #
 # kernel.org publishes a sums file in every release directory, so the
-# nfs-utils bump reads its digest from upstream. SourceForge publishes
-# none, so the libtirpc bump computes its own.
+# nfs-utils bump reads its digest from upstream. kernel.org's checksum
+# autosigner clearsigns the sums file, and the bump copies a digest
+# only from a sums file whose signature verifies against the
+# autosigner's key: trust/keys/kernel-org-digest.sh makes the check,
+# and trust/keys/README.md says where the key comes from. SourceForge
+# publishes no sums file for libtirpc, so the libtirpc bump computes
+# its own digest.
 #
 # Usage:
 #   nfs-utils/latest.sh                 report both pins
@@ -62,16 +67,12 @@ nfs-utils)
         echo "nfs-utils $pinned is current"
         exit 0
     }
-    digest="$(curl -fsSL --retry 3 --max-time 60 "$archive/$latest/sha256sums.asc" |
-        awk -v t="nfs-utils-$latest.tar.xz" '$2 == t { print $1 }')"
-    [[ -n "$digest" ]] || {
-        echo "latest.sh: no nfs-utils-$latest.tar.xz in that release's sums file" >&2
-        exit 1
-    }
+    digest="$("$here/../../trust/keys/kernel-org-digest.sh" \
+        "$archive/$latest/sha256sums.asc" "nfs-utils-$latest.tar.xz")"
     echo "$latest" >"$here/VERSION"
     sed -i "s|^nfsutils_sha256=\".*\"|nfsutils_sha256=\"$digest\"|" "$here/fetch.sh"
     echo "nfs-utils: $pinned -> $latest"
-    echo "kernel.org's sums file stands behind these bytes"
+    echo "the digest came from sha256sums.asc, signed by kernel.org's checksum autosigner"
     ;;
 libtirpc)
     [[ -n "$latest_libtirpc" ]] || {
