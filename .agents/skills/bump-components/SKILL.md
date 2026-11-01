@@ -359,10 +359,11 @@ each module and each workspace.
    and the message names the crate that holds the old range. Decide
    for each one:
    - Keep the old pin when the code passes the crate's types to the
-     crate that holds it back. `tiny-skia` stays on the version that
-     `iced_tiny_skia` requires, because `media-operator/display` and
-     the toolkit draw with the same `tiny-skia`, and a second copy is
-     a second build of it.
+     crate that holds it back, or when the old version is already in
+     the build. `tiny-skia` stays on the version that winit's
+     `sctk-adwaita` requires for its window decorations, because
+     `media-operator/display` rasterizes with that same build, and a
+     second copy is a second build of it.
    - Take the new pin when the two copies never meet, and let cargo
      build both. `base64` in `media-browser` is an example, because
      `metrics-exporter-prometheus` uses its own copy internally.

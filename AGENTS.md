@@ -196,8 +196,9 @@ One CalVer tag releases every component whose outputs changed since its
 own previous release, and a push to `main` publishes a development
 build of each component that changed. Each component's `package.toml`
 names its dependencies, its checks, and its outputs, and `ci/` writes
-`.github/workflows/` and `docker-bake.hcl` from those files and from
-the `FROM` lines of each Dockerfile. Run `make workflows` after you
+`.github/workflows/`, `.github/dependabot.yml`, and `docker-bake.hcl`
+from those files, from the `FROM` lines of each Dockerfile, and from
+the `go.mod` and `Cargo.lock` files in the tree. Run `make workflows` after you
 change a `package.toml` or a `FROM` line; CI fails when the generated
 files differ from what the generator writes.
 
