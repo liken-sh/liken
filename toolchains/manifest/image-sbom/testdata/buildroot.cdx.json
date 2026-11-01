@@ -1,0 +1,49 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "metadata": {
+    "component": {"bom-ref": "buildroot", "type": "firmware", "name": "buildroot", "version": "2026.11-git"},
+    "tools": {"components": [{"type": "application", "name": "Buildroot generate-cyclonedx", "version": "2026.11-git"}]}
+  },
+  "components": [
+    {
+      "bom-ref": "bluez5_utils-static",
+      "type": "library",
+      "name": "bluez5_utils-static",
+      "version": "5.86",
+      "licenses": [{"license": {"id": "GPL-2.0+"}}],
+      "cpe": "cpe:2.3:a:bluez:bluez:5.86:*:*:*:*:*:*:*",
+      "properties": [{"name": "BR_TYPE", "value": "target"}]
+    },
+    {
+      "bom-ref": "dbus",
+      "type": "library",
+      "name": "dbus",
+      "version": "1.16.2",
+      "cpe": "cpe:2.3:a:freedesktop:dbus:1.16.2:*:*:*:*:*:*:*",
+      "properties": [{"name": "BR_TYPE", "value": "target"}]
+    },
+    {
+      "bom-ref": "toolchain",
+      "type": "library",
+      "name": "toolchain",
+      "properties": [{"name": "BR_TYPE", "value": "target"}]
+    },
+    {
+      "bom-ref": "host-m4",
+      "type": "library",
+      "scope": "excluded",
+      "name": "host-m4",
+      "version": "1.4.21",
+      "properties": [{"name": "BR_TYPE", "value": "host"}]
+    }
+  ],
+  "dependencies": [
+    {"ref": "bluez5_utils-static", "dependsOn": ["dbus", "host-m4", "toolchain"]},
+    {"ref": "dbus", "dependsOn": ["host-m4"]},
+    {"ref": "host-m4", "dependsOn": []}
+  ],
+  "vulnerabilities": [
+    {"id": "CVE-2000-0001", "affects": [{"ref": "dbus"}]}
+  ]
+}

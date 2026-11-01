@@ -36,6 +36,22 @@ var manifestFields = []string{"version", "url", "sha256", "purl", "license"}
 // grub-mkimage, is excluded.
 var manifestScopes = []string{"required", "optional", "excluded"}
 
+// optionalFields are the fields that an entry may hold beside the
+// required ones. The type is the entry's CycloneDX component type, file
+// when it names none, and the cpe is the CPE 2.3 name that NVD lists
+// the upstream under. An entry that an image ships names a type that
+// syft keeps, because toolchains/manifest/image-sbom refuses one that
+// syft drops, and a CPE where NVD has one, because syft otherwise
+// guesses several.
+var optionalFields = []string{"scope", "type", "cpe"}
+
+// componentTypes are the component types of CycloneDX 1.6.
+var componentTypes = []string{
+	"application", "framework", "library", "container", "platform",
+	"operating-system", "device", "device-driver", "firmware", "file",
+	"machine-learning-model", "data", "cryptographic-asset",
+}
+
 // unmanifested names the directories whose fetch.sh needs no manifest,
 // with the reason, because a release does not ship what they download,
 // or because another SBOM already lists it.
@@ -85,11 +101,13 @@ var addChecksum = regexp.MustCompile(`^ADD\b.*--checksum=sha256:([0-9a-f]*)\s+(\
 //   - each directory with a fetch.sh holds a pin.toml, unless
 //     unmanifested names it;
 //   - each entry of a pin.toml holds a version, a url, a sha256, a purl,
-//     and a license, and nothing else but an optional scope;
+//     and a license, and nothing else but an optional scope, type, and
+//     cpe;
 //   - an entry's version is the one that the directory's VERSION pins,
-//     and its purl names the same version, alone or after the prefix of
-//     a tag, as in microcode-20260925; a pkg:generic purl repeats
-//     the url as its download_url and the sha256 as its checksum;
+//     and its purl and its CPE name the same version, the purl alone or
+//     after the prefix of a tag, as in microcode-20260925; a
+//     pkg:generic purl repeats the url as its download_url and the
+//     sha256 as its checksum;
 //   - the fetch.sh holds no digest of its own and downloads through
 //     fetch_pinned, which reads the url and the sha256 from pin.toml;
 //   - a Dockerfile beside a pin.toml that ADDs a URL by its checksum
@@ -172,12 +190,18 @@ func entryFindings(manifest, name string, entry map[string]string) []string {
 		}
 	}
 	for _, field := range slices.Sorted(maps.Keys(entry)) {
-		if !slices.Contains(manifestFields, field) && field != "scope" {
+		if !slices.Contains(manifestFields, field) && !slices.Contains(optionalFields, field) {
 			findings = append(findings, fmt.Sprintf("%s: [%s] holds %s, which is not a field of a manifest", manifest, name, field))
 		}
 	}
 	if scope, ok := entry["scope"]; ok && !slices.Contains(manifestScopes, scope) {
 		findings = append(findings, fmt.Sprintf("%s: [%s] has the scope %q, which is not required, optional, or excluded", manifest, name, scope))
+	}
+	if kind, ok := entry["type"]; ok && !slices.Contains(componentTypes, kind) {
+		findings = append(findings, fmt.Sprintf("%s: [%s] has the type %q, which is not a CycloneDX component type", manifest, name, kind))
+	}
+	if cpe, ok := entry["cpe"]; ok {
+		findings = append(findings, cpeFindings(manifest, name, cpe, entry["version"])...)
 	}
 	if digest := entry["sha256"]; digest != "" && !sha256Hex.MatchString(digest) {
 		findings = append(findings, fmt.Sprintf("%s: [%s] has a sha256 that is not 64 hex digits", manifest, name))
@@ -269,6 +293,21 @@ func mirrorFindings(text string) []string {
 		}
 	}
 	return findings
+}
+
+// cpeFindings lists what is wrong with an entry's CPE: a name that is
+// not a CPE 2.3 formatted string of 13 parts, or a version other than
+// the entry's. A CPE quotes some characters with a backslash, which
+// the comparison removes.
+func cpeFindings(manifest, name, cpe, version string) []string {
+	parts := strings.Split(cpe, ":")
+	if len(parts) != 13 || parts[0] != "cpe" || parts[1] != "2.3" {
+		return []string{fmt.Sprintf("%s: [%s] has the CPE %q, which is not a CPE 2.3 name of 13 parts", manifest, name, cpe)}
+	}
+	if got := strings.ReplaceAll(parts[5], `\`, ""); got != version {
+		return []string{fmt.Sprintf("%s: [%s] has a CPE at %s, and its version is %s", manifest, name, got, version)}
+	}
+	return nil
 }
 
 // imageFindings lists each ADD of a Dockerfile that fetches a URL by a

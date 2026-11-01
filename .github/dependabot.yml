@@ -424,6 +424,19 @@ updates:
     ignore:
       - dependency-name: k8s.io/*
       - dependency-name: sigs.k8s.io/*
+  - package-ecosystem: gomod
+    directory: /toolchains/manifest
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 0
+    groups:
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+    ignore:
+      - dependency-name: k8s.io/*
+      - dependency-name: sigs.k8s.io/*
   - package-ecosystem: cargo
     directory: /brand/iced
     schedule:

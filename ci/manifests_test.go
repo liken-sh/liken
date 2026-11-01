@@ -8,13 +8,14 @@ import (
 )
 
 // trustManifest is the manifest of a pin whose generic purl repeats its
-// url and its sha256.
+// url and its sha256, with the type that an image's record needs.
 var trustManifest = "[cacert]\n" +
 	"version = \"2026-10-20\"\n" +
 	"url = \"https://curl.se/ca/cacert-2026-10-20.pem\"\n" +
 	"sha256 = \"" + strings.Repeat("e", 64) + "\"\n" +
 	"purl = \"pkg:generic/cacert@2026-10-20?download_url=https://curl.se/ca/cacert-2026-10-20.pem&checksum=sha256:" + strings.Repeat("e", 64) + "\"\n" +
-	"license = \"MPL-2.0\"\n"
+	"license = \"MPL-2.0\"\n" +
+	"type = \"library\"\n"
 
 // manifestsTree is a repository in which every pin that ships has a
 // manifest that agrees with its fetch: a domain with one file, a
@@ -168,6 +169,15 @@ func TestAManifestThatBreaksARuleIsFound(t *testing.T) {
 		"a source mirror that holds a digest": {"liken/licensing/sources.sh",
 			"#!/usr/bin/env bash\n# Mirror the sources.\nmirror \"xtables/$v\" \"iptables-1.8.11.tar.xz\" \\\n    \"" + strings.Repeat("a", 64) + "\" \\\n    \"https://www.netfilter.org/pub/iptables/iptables-1.8.11.tar.xz\"\n",
 			"liken/licensing/sources.sh:3 holds a digest; the digest of each source that it mirrors is in the pin.toml of the pin that the source belongs to"},
+		"an entry with a type CycloneDX does not name": {"trust/pin.toml",
+			strings.Replace(trustManifest, "\"library\"", "\"tarball\"", 1),
+			"trust/pin.toml: [cacert] has the type \"tarball\", which is not a CycloneDX component type"},
+		"a CPE at another version": {"trust/pin.toml",
+			trustManifest + "cpe = \"cpe:2.3:a:mozilla:cacert:2026-10-19:*:*:*:*:*:*:*\"\n",
+			"trust/pin.toml: [cacert] has a CPE at 2026-10-19, and its version is 2026-10-20"},
+		"a CPE that is not a CPE 2.3 name": {"trust/pin.toml",
+			trustManifest + "cpe = \"cpe:/a:mozilla:cacert:2026-10-20\"\n",
+			"trust/pin.toml: [cacert] has the CPE \"cpe:/a:mozilla:cacert:2026-10-20\", which is not a CPE 2.3 name of 13 parts"},
 		"an image that fetches a file no entry names": {"trust/Dockerfile",
 			"FROM scratch\nADD --checksum=sha256:" + strings.Repeat("e", 64) + " https://curl.se/ca/cacert-2026-10-21.pem /cacert.pem\n",
 			"trust/Dockerfile:2 fetches https://curl.se/ca/cacert-2026-10-21.pem, and trust/pin.toml names no file at that url"},

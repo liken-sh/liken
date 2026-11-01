@@ -62,6 +62,112 @@ env:
   GOPROXY: https://proxy.golang.org|direct
 
 jobs:
+  go:
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'go') }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: toolchains/manifest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - id: setup-go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: toolchains/manifest/go.mod
+          cache: false
+
+      # The repository's Actions cache holds 10 GB, and GitHub evicts
+      # the oldest entries when the caches pass that limit. So every run
+      # restores the Go caches, and only a push to main saves them: a
+      # branch never writes an entry that pushes one of main's out.
+      #
+      # The downloaded modules are one entry for each Go module, which
+      # every job of the module restores. The key follows the hash of
+      # `go.sum` alone, so the entry changes only when `go.sum` changes,
+      # and a push to main that does not change `go.sum` saves no
+      # modules.
+      # This job saves the entry: it runs the module's tests, so it
+      # reads every module that another job of the module reads. A job
+      # that reads fewer modules would save an entry without the rest,
+      # and this job would download them again on each run until
+      # `go.sum` changes.
+      # When no entry has the key, as on a branch that changes `go.sum`,
+      # the restore takes the newest entry of the same module, which
+      # holds most of the modules that the job needs.
+      #
+      # The entry holds the extracted source and, from the download
+      # cache, only the `go.mod` files and the zip hashes. `go` reads the
+      # `go.mod` files to load the module graph, and it downloads a module
+      # again when its zip hash is missing. `go` does not read a zip
+      # file after it extracts the source, and the zip files are about
+      # half of the compressed entry.
+      - id: go-modules
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod/*
+            !~/go/pkg/mod/cache
+            ~/go/pkg/mod/cache/download/**/*.mod
+            ~/go/pkg/mod/cache/download/**/*.ziphash
+          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-toolchains/manifest-${{ hashFiles('toolchains/manifest/go.sum') }}
+          restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-toolchains/manifest-
+
+      # The build cache holds Go's test results and the compiled
+      # packages of the job's own module, and most commits change both.
+      # So the key ends in the commit: each push to main saves a new
+      # entry, and every run restores the newest one. A key without the
+      # commit would save one entry when its files last changed. That
+      # entry would keep the test results and packages of that commit,
+      # and each run would compile the module's packages again and run
+      # the tests of every package. The cost is one entry for each job
+      # on each push to main. The modules are not in this entry, so
+      # each of these entries holds only compiled output.
+      #
+      # Before the commit, the key holds the hash of these files:
+      #
+      #   toolchains/manifest/go.sum
+      #   toolchains/manifest/Makefile
+      #   toolchains/package.toml
+      #   toolchains/.pre-commit-config.yaml
+      #
+      # The files after go.sum choose what the job compiles and with
+      # which flags.
+      #
+      # A restore takes the newest entry with the same hash. When no
+      # entry has that hash, as on a branch that changes one of the
+      # files, the restore takes the newest entry of the same job. Each
+      # job has entries of its own: a job that builds less would save
+      # an entry without the packages that the other job compiles, and
+      # the other job would restore it and compile them again.
+      - id: go-build
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-toolchains/manifest-${{ github.job }}-${{ hashFiles('toolchains/manifest/go.sum', 'toolchains/manifest/Makefile', 'toolchains/package.toml', 'toolchains/.pre-commit-config.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-toolchains/manifest-${{ github.job }}-${{ hashFiles('toolchains/manifest/go.sum', 'toolchains/manifest/Makefile', 'toolchains/package.toml', 'toolchains/.pre-commit-config.yaml') }}-
+            go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-toolchains/manifest-${{ github.job }}-
+
+      - run: make test
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.go-modules.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod/*
+            !~/go/pkg/mod/cache
+            ~/go/pkg/mod/cache/download/**/*.mod
+            ~/go/pkg/mod/cache/download/**/*.ziphash
+          key: ${{ steps.go-modules.outputs.cache-primary-key }}
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.go-build.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.go-build.outputs.cache-primary-key }}
+
   prek:
     if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'prek') }}
     runs-on: ubuntu-26.04
@@ -76,9 +182,85 @@ jobs:
       # --show-diff-on-failure, so a hook that changes a file fails
       # with the change it would make. sha256 is the digest
       # that prekSHA256 in ci/workflow.go pins, because the action checks
-      # only the versions in its own table.
+      # only the versions in its own table. SKIP leaves out the hooks
+      # that another job of this workflow runs.
       - uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0
+        env:
+          SKIP: gofmt,go-vet,go-mod-tidy
         with:
           prek-version: 0.5.9
           sha256: 2fee13923018dd517c19dba032ddcae8010cadfb81bc47e742ad5e8981a3f126
           extra-args: --all-files toolchains/
+
+  codeql-go:
+    # ci/codeql.go derives this job. A pull request from a fork gets a
+    # token that cannot write to code scanning, so the analysis runs
+    # only for a branch of this repository.
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'codeql-go') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    defaults:
+      run:
+        working-directory: toolchains/manifest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - id: setup-go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: toolchains/manifest/go.mod
+          cache: false
+
+      # The repository's Actions cache holds 10 GB, and GitHub evicts
+      # the oldest entries when the caches pass that limit. So every run
+      # restores the Go caches, and only a push to main saves them: a
+      # branch never writes an entry that pushes one of main's out.
+      #
+      # The downloaded modules are the entry of the module `toolchains/manifest`,
+      # whose `go` job saves it. This job keeps no build cache.
+      # When no entry has the key, as on a branch that changes `go.sum`,
+      # the restore takes the newest entry of the same family, which
+      # holds most of the modules that the job needs.
+      #
+      # The entry holds the extracted source and, from the download
+      # cache, only the `go.mod` files and the zip hashes. `go` reads the
+      # `go.mod` files to load the module graph, and it downloads a module
+      # again when its zip hash is missing. `go` does not read a zip
+      # file after it extracts the source, and the zip files are about
+      # half of the compressed entry.
+      - id: go-modules
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod/*
+            !~/go/pkg/mod/cache
+            ~/go/pkg/mod/cache/download/**/*.mod
+            ~/go/pkg/mod/cache/download/**/*.ziphash
+          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-toolchains/manifest-${{ hashFiles('toolchains/manifest/go.sum') }}
+          restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-toolchains/manifest-
+
+      # CodeQL analyzes every file of the checkout unless its
+      # configuration names paths, so the configuration limits the
+      # analysis to this job's directory. The module's go.mod can replace
+      # a module with a directory of another component, and that
+      # component's own job analyzes it. CodeQL traces the build in the
+      # next step and extracts each package that the build compiles.
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: go
+          build-mode: manual
+          config: |
+            paths:
+              - toolchains/manifest
+
+      - run: go build ./...
+
+      # The category keeps this job's alerts apart from every other
+      # analysis: code scanning closes an alert only when a later upload
+      # in the same category no longer reports it.
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: codeql/toolchains/go

@@ -1,0 +1,6 @@
+.PHONY: test
+test:
+	test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
+	go mod tidy -diff
+	go vet ./...
+	go test -race ./...

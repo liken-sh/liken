@@ -17,3 +17,28 @@ repos:
         # -x follows the source line of each fetch.sh and latest.sh
         # into toolchains/pin.sh.
         args: [-x]
+  # The reader of the pin manifests is the only Go here, in its own
+  # module under manifest/.
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        entry: bash -c 'cd manifest && test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }'
+        language: system
+        files: ^manifest/.*\.go$
+        pass_filenames: false
+      - id: go-vet
+        name: go vet
+        entry: bash -c 'cd manifest && go vet ./...'
+        language: system
+        files: ^manifest/(.*\.go|go\.(mod|sum))$
+        pass_filenames: false
+      - id: go-mod-tidy
+        name: go mod tidy
+        # -diff reports what a tidy would change, without changing
+        # it, so a stale go.mod fails the commit instead of changing
+        # under it.
+        entry: bash -c 'cd manifest && go mod tidy -diff'
+        language: system
+        files: ^manifest/(.*\.go|go\.(mod|sum))$
+        pass_filenames: false

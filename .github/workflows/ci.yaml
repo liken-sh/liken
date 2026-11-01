@@ -606,6 +606,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
   vulkan:
     needs: [plan]

@@ -1,0 +1,19 @@
+# A manifest of an image: one file that the image ships, and one that
+# only its build reads.
+
+[weston]
+version = "16.0.2"
+url = "https://gitlab.freedesktop.org/-/project/120/uploads/7158a97a42a6d8562081e84b49fc8c3a/weston-16.0.2.tar.xz"
+sha256 = "49dd87d18cb229384264d2f69cb5a51f14f61a111e9227bfedb91b3ca8c39643"
+purl = "pkg:generic/weston@16.0.2?download_url=https://gitlab.freedesktop.org/-/project/120/uploads/7158a97a42a6d8562081e84b49fc8c3a/weston-16.0.2.tar.xz&checksum=sha256:49dd87d18cb229384264d2f69cb5a51f14f61a111e9227bfedb91b3ca8c39643"
+license = "MIT"
+type = "application"
+cpe = "cpe:2.3:a:wayland:weston:16.0.2:*:*:*:*:*:*:*"
+
+[grub2-common]
+version = "2.14-2ubuntu3"
+url = "http://archive.ubuntu.com/ubuntu/pool/main/g/grub2/grub2-common_2.14-2ubuntu3_amd64.deb"
+sha256 = "5d45c86963028b5d027d65c9126580742f8924195f71265144dc7ea6422acdbd"
+purl = "pkg:deb/ubuntu/grub2-common@2.14-2ubuntu3?arch=amd64"
+license = "GPL-3.0-or-later"
+scope = "excluded"

@@ -4,11 +4,27 @@
 # names. Each component whose Dockerfile names one of these images
 # depends on this one, so a change to images.toml releases it. It
 # publishes nothing of its own.
+#
+# It also holds the pin library, pin.sh, and the reader of the pin
+# manifests in manifest/, which the SBOM of an OS release imports and
+# each image build that ships a pinned file runs as image-sbom. An
+# image takes manifest/ as the build context manifest, so the recipe
+# of a pinned component covers that directory and not images.toml.
 [package]
 name = "toolchains"
 license = "MIT"
+
+# gofmt, vet, a tidy check of go.mod, and the tests of the manifest
+# reader and of image-sbom.
+[[jobs]]
+name = "go"
+toolchain = "go"
+dir = "manifest"
+run = "make test"
 
 # shellcheck and the whitespace checks, from .pre-commit-config.yaml.
 [[jobs]]
 name = "prek"
 toolchain = "prek"
+# The go job runs the same checks as these hooks.
+skip = ["gofmt", "go-vet", "go-mod-tidy"]

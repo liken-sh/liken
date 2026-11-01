@@ -250,11 +250,12 @@ pin_dir() {
 
 # --- the manifest --------------------------------------------------------
 
-# Each pin whose files a release ships holds a manifest, pin.toml, in
-# its directory. The manifest has one table for each file that the
-# fetch downloads, and the table holds what the SBOM of a release
-# needs to name the file: its version, url, sha256, purl, and the SPDX
-# expression of its license, and an optional CycloneDX scope:
+# Each pin whose files a release or an image ships holds a manifest,
+# pin.toml, in its directory. The manifest has one table for each file
+# that the fetch or the Dockerfile downloads, and the table holds what
+# an SBOM needs to name the file: its version, url, sha256, purl, and
+# the SPDX expression of its license, and an optional CycloneDX scope,
+# CycloneDX component type, and CPE 2.3 name:
 #
 #   [k3s]
 #   version = "v1.37.1+k3s1"
@@ -263,12 +264,17 @@ pin_dir() {
 #   purl = "pkg:github/k3s-io/k3s@v1.37.1%2Bk3s1"
 #   license = "Apache-2.0"
 #
-# latest.sh --bump writes the version, url, sha256, and purl with
+# latest.sh --bump writes the version, url, sha256, purl, and CPE with
 # set_pin, fetch.sh downloads with fetch_pinned, and the source mirror,
 # the image's components record, and the release document read a field
 # with pin_value. So the repository holds each digest once, and the
-# SBOM reads the same bytes that the build checked. A person writes the
-# license and the scope, which a bump leaves as they are. `ci pins`
+# SBOM reads the same bytes that the build checked. A Dockerfile that
+# fetches the file with ADD --checksum keeps a copy of the digest,
+# because BuildKit reads it from the Dockerfile's text, and the same
+# bump writes it. toolchains/manifest gives each entry as a CycloneDX
+# component, for the SBOM of a release and for the record that an
+# image carries. A person writes the license, the scope, and the type,
+# which a bump leaves as they are. `ci pins`
 # fails a pin that ships with no manifest, an entry with a missing
 # field, and a manifest at another version than the pin's VERSION. The
 # reader is the shell, so every value is a string on one line.
@@ -319,9 +325,11 @@ fetch_pinned() {
     fetch_verified "${resume[@]}" "$url" "$digest" "$path"
 }
 
-# set_pin <entry> <version> <url> <sha256> <purl>: write a bump into
-# one entry of the manifest beside the calling script. The entry and
-# each field must exist, so a bump never writes half an entry.
+# set_pin <entry> <version> <url> <sha256> <purl> [<cpe>]: write a bump
+# into one entry of the manifest beside the calling script. The entry
+# and each field must exist, so a bump never writes half an entry. A
+# CPE names the version, so the bump of an entry that has one writes
+# the new CPE too.
 set_pin() {
     local manifest
     manifest="$(pin_manifest)"
@@ -329,6 +337,9 @@ set_pin() {
     set_toml "$manifest" "$1" url "\"$3\""
     set_toml "$manifest" "$1" sha256 "\"$4\""
     set_toml "$manifest" "$1" purl "\"$5\""
+    if [[ -n "${6:-}" ]]; then
+        set_toml "$manifest" "$1" cpe "\"$6\""
+    fi
 }
 
 # purl_escape <text>: percent-encode text for the version of a package

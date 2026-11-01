@@ -15,8 +15,6 @@ module github.com/liken-sh/liken/liken
 go 1.27.3
 
 require (
-	// releases/sbom reads each pin's manifest, pin.toml, with it.
-	github.com/BurntSushi/toml v1.6.0
 	github.com/beevik/ntp v1.6.0
 	github.com/google/go-containerregistry v0.22.1
 	github.com/insomniacslk/dhcp v0.0.0-20261014062924-c6bb46ad3f3a
@@ -27,6 +25,10 @@ require (
 	// replace below builds against the copy in the tree, so no version of
 	// it is published.
 	github.com/liken-sh/liken/kubernetes v0.0.0
+	// releases/sbom reads each pin's manifest through it, the reader
+	// that also writes the record an image carries, so both SBOMs read
+	// a manifest the same way.
+	github.com/liken-sh/liken/toolchains/manifest v0.0.0
 	github.com/prometheus/client_golang v1.25.0
 	// releases/sbom checks each SBOM against the CycloneDX schema in
 	// releases/sbom/schema with it, before it writes the file.
@@ -51,6 +53,7 @@ require (
 )
 
 require (
+	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/alexflint/go-arg v1.6.1 // indirect
 	github.com/alexflint/go-scalar v1.2.0 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.47.5 // indirect
@@ -153,3 +156,5 @@ tool (
 replace github.com/liken-sh/brand => ../brand
 
 replace github.com/liken-sh/liken/kubernetes => ../kubernetes
+
+replace github.com/liken-sh/liken/toolchains/manifest => ../toolchains/manifest

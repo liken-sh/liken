@@ -1,0 +1,9 @@
+# An entry that names no type, so its component has the type file,
+# which syft drops.
+
+[cacert]
+version = "2026-10-20"
+url = "https://curl.se/ca/cacert-2026-10-20.pem"
+sha256 = "796f1389bfea13c0ed78f663b765baaff54a508e5483786bd6ece73c5e3e3cbe"
+purl = "pkg:generic/cacert@2026-10-20?download_url=https://curl.se/ca/cacert-2026-10-20.pem&checksum=sha256:796f1389bfea13c0ed78f663b765baaff54a508e5483786bd6ece73c5e3e3cbe"
+license = "MPL-2.0"
