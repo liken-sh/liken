@@ -112,7 +112,12 @@ a revision, and every image publishes under the tag
   from: Ubuntu 26.04 from `snapshot.ubuntu.com`, and the INDI PPA and
   the PHD2 PPA from `snapshot.ppa.launchpadcontent.net`. A PPA itself
   keeps only its newest build of each package, so only a snapshot
-  builds the same files again.
+  builds the same files again. `snapshot.sh` points apt at the three
+  archives, and after `apt-get update` it checks the `InRelease` file
+  of each suite against its sha256 in `snapshot.sha256`. apt checks
+  the signatures against the keys in `Signed-By`, but any file that
+  the same keys once signed passes that check, so the digests bind the
+  date to its package lists.
 - The **revision** counts the changes to the recipe at one version.
 - `[package.upstream]` states the package versions that the date
   installs. Each one is a label of every image,
@@ -124,17 +129,29 @@ images build when someone bumps them, and at no other time.
 
 ## Bump the snapshot
 
+`latest.sh --bump` does steps 1 to 3 for today's date in UTC.
+
 1. Choose a date, and read the versions that the PPA snapshots of that
    date serve:
    `https://snapshot.ppa.launchpadcontent.net/mutlaqja/ppa/ubuntu/<date>T000000Z/dists/resolute/main/binary-amd64/Packages.gz`
    and the same path under `pch/phd2`.
 2. Set `version` to the date and `revision` to 1, and update
    `[package.upstream]`.
-3. Run `make workflows` at the top of the repository.
-4. Build every image with `docker buildx bake --load` and the 17
+3. Replace each line of `snapshot.sha256` with the sha256 of the
+   `InRelease` file it names, at the new date: the `resolute`,
+   `resolute-updates`, and `resolute-security` suites of
+   `https://snapshot.ubuntu.com/ubuntu/<date>T000000Z/`, and the
+   `resolute` suite of each PPA snapshot. Verify each file's signature
+   first, Ubuntu's against `trust/keys/ubuntu-archive.asc` and each
+   PPA's against `mutlaqja.asc` or `pch.asc`. Launchpad signs the INDI
+   PPA's file with an older key too, which the repository does not
+   hold, so a check with `gpgv` reports one good signature and one
+   that it cannot check.
+4. Run `make workflows` at the top of the repository.
+5. Build every image with `docker buildx bake --load` and the 17
    targets of `package.toml`, and run each image's smoke check with
    its tag.
-5. Run `make -C observatory-operator firmware-rules`, which copies
+6. Run `make -C observatory-operator firmware-rules`, which copies
    `libqhy`'s udev rules from the new `indi-qhy` image and writes the
    operator's QHY `Firmware` objects again.
 

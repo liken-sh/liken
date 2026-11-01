@@ -63,6 +63,10 @@ These bumps call `ubuntu_deb_digest`:
   packages
 - `liken/systemd-boot/latest.sh`, for the `systemd-boot-efi` package
 
+`indi/latest.sh` verifies the `InRelease` file of each Ubuntu suite
+that the INDI images install from against the key, before it pins
+the file's digest in `indi/snapshot.sha256`.
+
 ## Debian's archive signing keys
 
 `debian-archive.asc` holds the keys of `Debian Archive Automatic

@@ -26,8 +26,9 @@
 #   indi/latest.sh          report the date, the series, and the
 #                           upstream releases
 #   indi/latest.sh --bump   move the date, set the revision to 1, and
-#                           write the upstream releases; the other
-#                           steps are in the bump-components skill
+#                           write the upstream releases and the
+#                           InRelease digests in snapshot.sha256; the
+#                           other steps are in the bump-components skill
 
 set -euo pipefail
 
@@ -39,6 +40,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
 ppas=(mutlaqja/ppa pch/phd2)
+root="$(cd "$here/.." && pwd)"
 
 pinned="$(sed -n 's/^version = "\([0-9]*\)"$/\1/p' "$here/package.toml")"
 series="$(sed -n 's/^Suites: \([a-z]*\)$/\1/p' "$here/snapshot.sh" | head -1)"
@@ -129,6 +131,36 @@ done
     fail "the PPAs publish $newest; move snapshot.sh and the ubuntu image from $series by hand first"
 bump_needed indi "$pinned" "$latest" || exit 0
 
+# The checksum of each InRelease file binds the date to its package
+# lists, as vulkan/snapshot.sha256 does for the Debian bases. The bump
+# verifies each file's signature before it pins the digest of the same
+# bytes: Ubuntu's suites against Ubuntu's archive key in trust/keys,
+# and each PPA against the key beside this script that the Dockerfile
+# gives apt. Launchpad signs a PPA's InRelease with the PPA's current
+# key and with the key it used before, so --signer names the current
+# key, the fingerprint that Launchpad's API reports for the PPA.
+stamp="${latest}T000000Z"
+pin_inrelease() {
+    local url="$1" name="$2"
+    shift 2
+    fetch_file "$url" "$work/$name"
+    verify_signature "$@" "$work/$name" >/dev/null
+    set_line "$here/snapshot.sha256" \
+        "^[0-9a-f]+  ${name//$stamp/[0-9]*T000000Z}\$" \
+        "$(sha256sum "$work/$name" | cut -d' ' -f1)  $name"
+}
+for suite in "$series" "$series-updates" "$series-security"; do
+    pin_inrelease "https://snapshot.ubuntu.com/ubuntu/$stamp/dists/$suite/InRelease" \
+        "snapshot.ubuntu.com_ubuntu_${stamp}_dists_${suite}_InRelease" \
+        "$root/trust/keys/ubuntu-archive.asc"
+done
+pin_inrelease "https://snapshot.ppa.launchpadcontent.net/mutlaqja/ppa/ubuntu/$stamp/dists/$series/InRelease" \
+    "snapshot.ppa.launchpadcontent.net_mutlaqja_ppa_ubuntu_${stamp}_dists_${series}_InRelease" \
+    --signer F81D4F8C16975C8882D7B38333E72D44A5F2E962 "$here/mutlaqja.asc"
+pin_inrelease "https://snapshot.ppa.launchpadcontent.net/pch/phd2/ubuntu/$stamp/dists/$series/InRelease" \
+    "snapshot.ppa.launchpadcontent.net_pch_phd2_ubuntu_${stamp}_dists_${series}_InRelease" \
+    --signer DAE27FFB13432BED41181735E3DBD5D75CFABF12 "$here/pch.asc"
+
 set_toml "$here/package.toml" package version "\"$latest\""
 set_toml "$here/package.toml" package revision 1
 upstreams | while read -r name old; do
@@ -138,6 +170,7 @@ upstreams | while read -r name old; do
     [[ "$old" == "$new" ]] || bumped "$name" "$old" "$new"
 done
 bumped indi "$pinned" "$latest"
+echo "the InRelease digests came from the snapshots' InRelease files, signed by Ubuntu's archive key and each PPA's key"
 next_step "make workflows at the top of the repository, then the steps of section 5a"
 echo "of the bump-components skill: the SDK licenses, the builds and smoke checks, and"
 echo "make -C observatory-operator drivers firmware-rules captures schema crosscheck"

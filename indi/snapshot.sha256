@@ -1,0 +1,10 @@
+# The sha256 of each InRelease file that the INDI images install from,
+# by its name under /var/lib/apt/lists: three suites of Ubuntu and one
+# suite of each PPA, all at one snapshot date. snapshot.sh checks them
+# after apt-get update, and latest.sh --bump writes them. The names
+# carry the date, so a date with no lines here fails the build.
+45f95ce276cdba3e41870516a130e03c58b8b7a79e9546b0efe9e526d255740c  snapshot.ubuntu.com_ubuntu_20261101T000000Z_dists_resolute_InRelease
+1e2d91b94c525902e4187150b3d80ebc813886e599cbbfde5a61027bd2e16dc0  snapshot.ubuntu.com_ubuntu_20261101T000000Z_dists_resolute-updates_InRelease
+9d3d87c98e9c69d47ee9a209b59411b36ef257d28ac7e2548638c981ade9c179  snapshot.ubuntu.com_ubuntu_20261101T000000Z_dists_resolute-security_InRelease
+3fef5355c5ef61a010552eb00767bc86a7b4a6ebdf84487e4873f786c03a4d35  snapshot.ppa.launchpadcontent.net_mutlaqja_ppa_ubuntu_20261101T000000Z_dists_resolute_InRelease
+42be9077da835ef4b34213f121e95b7e8f2cf513a29ef8fd049d26940f5220e1  snapshot.ppa.launchpadcontent.net_pch_phd2_ubuntu_20261101T000000Z_dists_resolute_InRelease

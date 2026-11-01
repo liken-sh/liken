@@ -399,6 +399,15 @@ image_of() {
 # only from the key with that fingerprint, when the key file holds
 # more than one key or a bump must name the one signer it trusts.
 #
+# A file can carry signatures from more than one key. Launchpad signs a
+# PPA's InRelease with the PPA's current key and with the key it used
+# before, and the repository holds only the current one. gpgv fails
+# when it lacks the key of any signature, so with --signer the function
+# reads gpgv's status lines in place of its exit code: it accepts the
+# file when the named key made a valid signature and no signature is
+# bad, expired, or revoked. apt accepts such a file the same way, on
+# one valid signature from a key in Signed-By.
+#
 # gpgv reads a binary keyring, and the repository keeps each key in
 # its armored form, which a person can read and compare against the
 # fingerprint that the upstream publishes.
@@ -420,9 +429,12 @@ verify_signature() {
         gpgv --status-fd 3 --keyring "$work/key.gpg" --output "$work/signed" \
             "$signature" 3>"$work/status" >&2 || status=1
     fi
-    if ((status == 0)) && [[ -n "$signer" ]]; then
-        awk -v f="$signer" '$2 == "VALIDSIG" && $NF == f { found = 1 } END { exit !found }' \
-            "$work/status" || status=2
+    if [[ -n "$signer" ]]; then
+        status=0
+        awk -v f="$signer" '
+            $2 == "VALIDSIG" && $NF == f { found = 1 }
+            $2 ~ /^(BADSIG|EXPSIG|EXPKEYSIG|REVKEYSIG)$/ { bad = 1 }
+            END { exit !(found && !bad) }' "$work/status" || status=2
     fi
     [[ -n "$file" || "$status" != 0 ]] || cat "$work/signed"
     rm -rf "$work"

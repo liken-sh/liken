@@ -300,8 +300,10 @@ versions, and the newest Ubuntu series that both PPAs publish. When a
 PPA publishes a newer series, the row reads `wrong channel`, and the
 move to that series is a hand edit of `indi/snapshot.sh` and the
 `ubuntu` entry of `toolchains/images.toml`. `indi/latest.sh --bump`
-sets the date and revision 1 and updates `[package.upstream]` from
-the snapshot's `Packages` index. Then run `make workflows`. Compare the license file of
+sets the date and revision 1, updates `[package.upstream]` from
+the snapshot's `Packages` index, and writes the digest of each
+suite's `InRelease` file into `indi/snapshot.sha256`. A move to a new
+series also renames the suites in `indi/snapshot.sha256`. Then run `make workflows`. Compare the license file of
 each SDK directory in indi-3rdparty, at the commit that the PPA built
 from, with `indi/sdk-licenses/`, and copy each new or changed one; the
 section "The notices" in `indi/README.md` holds the steps. Build every target in
@@ -636,6 +638,12 @@ names another signer:
 - Ubuntu signs its archive the same way. `liken/grub/latest.sh` and
   `liken/systemd-boot/latest.sh` take their digests through the chain
   with `ubuntu_deb_digest`, against `trust/keys/ubuntu-archive.asc`.
+  `indi/latest.sh` verifies the `InRelease` file of each Ubuntu suite
+  of its snapshot against the same key, and each PPA's against the
+  key beside it with `--signer`, before it pins the digests in
+  `indi/snapshot.sha256`. Launchpad signs a PPA's file with the PPA's
+  older key as well, and `--signer` accepts the file on the valid
+  signature of the named key.
 
 A key that one script reads stays beside that script. A key that a
 second component reads moves to `trust/keys/`, with a section in its

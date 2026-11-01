@@ -12,7 +12,8 @@
 # 26.04 from snapshot.ubuntu.com, and the INDI PPA and the PHD2 PPA
 # from snapshot.ppa.launchpadcontent.net. A PPA itself keeps only its
 # newest build of each package, so only a snapshot builds the same
-# files again. VERSION, the date in package.toml, names every snapshot.
+# files again. VERSION, the date in package.toml, names every snapshot,
+# and snapshot.sha256 pins the InRelease file of each suite at that date.
 
 FROM ubuntu AS builder
 ARG VERSION
@@ -28,9 +29,8 @@ ARG VERSION
 # snapshot's libraries and not the image's.
 COPY --from=trust / /
 COPY mutlaqja.asc pch.asc /etc/apt/trusted.gpg.d/
-COPY snapshot.sh /snapshot.sh
+COPY snapshot.sh snapshot.sha256 /
 RUN sh /snapshot.sh "$VERSION" \
-    && apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         indi-bin \
