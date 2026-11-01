@@ -33,6 +33,11 @@
 # today. A registry rebuilds a tag for a fix in its packages, so a
 # moved digest is a new build of the same release.
 #
+# A module or a crate that must stay on an older release has a case
+# in hold_of, which names the dependency that holds it back. The row's
+# hold column then gives that dependency's version, read from the lock
+# file or the module graph, and the hold lapses when it moves.
+#
 # Usage:
 #   toolchains/latest.sh                      report every pin
 #   toolchains/latest.sh --bump <key>         move one images.toml
@@ -346,9 +351,11 @@ report_modules() {
         fi
         latest="$(awk -v p="$path" '$1 == p { print $2 }' "$work/latest-modules")"
         [[ "$versions" == "$latest" ]] || if [[ "$latest" =~ -[0-9]{14}-[0-9a-f]{12}$ ]]; then
-            row "  go:$path" "$versions" "$latest" - - - "the newest commit; the module has no release"
+            row "  go:$path" "$versions" "$latest" - - "$(hold_of "go:$path" "$versions")" \
+                "the newest commit; the module has no release"
         else
-            row "  go:$path" "$versions" "${latest:-?}" - - - "the newest release on the module proxy"
+            row "  go:$path" "$versions" "${latest:-?}" - - "$(hold_of "go:$path" "$versions")" \
+                "the newest release on the module proxy"
         fi
     done < <(awk '{ print $1 }' "$work/requires" | sort -u)
 }
@@ -382,8 +389,82 @@ report_crates() {
         versions="$(awk -v n="$name" '$1 == n { print $2 }' "$work/crates" | sort -uV | paste -sd,)"
         latest="$(newest_crate "$name")" || latest=""
         [[ "$versions" == "$latest" ]] ||
-            row "  crate:$name" "$versions" "${latest:-?}" - - - "the newest stable release on crates.io"
+            row "  crate:$name" "$versions" "${latest:-?}" - - "$(hold_of "crate:$name" "$versions")" \
+                "the newest stable release on crates.io"
     done < <(awk '{ print $1 }' "$work/crates" | sort -u)
+}
+
+# --- holds ---------------------------------------------------------------
+
+# A hold keeps a module or a crate on an older release, because a
+# person decided that a newer one costs more than it gives. Each hold
+# names the dependency that holds the pin back, and the report reads
+# that dependency's requirement from the lock file or the module
+# graph. So the hold column states versions that a reader can check,
+# and when the dependency moves past the pin, the hold lapses and the
+# row reads behind.
+
+# hold_of <key> <pinned> prints the reason that a pin stays back, or
+# `-`. Each case names the holders and gives the reason that the pin
+# must match them.
+hold_of() {
+    local key="$1" pinned="$2"
+    case "$key" in
+    crate:tiny-skia)
+        # winit draws its window decorations through sctk-adwaita, which
+        # builds tiny-skia. media-operator/display rasterizes its shapes
+        # with the same version, so the build compiles one copy of the
+        # crate. A newer pin is a second build of tiny-skia.
+        hold_text "$(lock_holders media-operator/Cargo.lock tiny-skia "$pinned" sctk-adwaita)" \
+            "depends on tiny-skia $pinned in media-operator/Cargo.lock" \
+            "media-operator/display shares that build"
+        ;;
+    *) echo - ;;
+    esac
+}
+
+# hold_text <holders> <relation> <reason> prints one hold, or `-` when
+# no holder names the pinned version any more.
+hold_text() {
+    if [[ -z "$1" ]]; then
+        echo -
+        return
+    fi
+    echo "$(paste -sd, <<<"$1" | sed 's/,/, /g') $2, and $3"
+}
+
+# lock_holders <Cargo.lock> <crate> <version> <holder>... prints
+# "holder version" for each named holder whose entry in the lock file
+# depends on the crate at that version. A lock file names a dependency
+# by name alone when it holds one version of it, and by name and
+# version when it holds more.
+lock_holders() {
+    local lock="$root/$1" crate="$2" version="$3" single=0
+    shift 3
+    [[ "$(grep -cx "name = \"$crate\"" "$lock")" == 1 ]] &&
+        grep -A1 -x "name = \"$crate\"" "$lock" | grep -qx "version = \"$version\"" && single=1
+    awk -v c="$crate" -v v="$version" -v single="$single" -v names=" $* " '
+        /^\[\[package\]\]$/ { name = ""; ver = "" }
+        /^name = / { name = $3; gsub(/"/, "", name) }
+        /^version = / { ver = $3; gsub(/"/, "", ver) }
+        /^ "/ {
+            dep = $0; sub(/^ "/, "", dep); sub(/".*/, "", dep); split(dep, d, " ")
+            if (d[1] == c && ((d[2] == "" && single) || d[2] == v) && index(names, " " name " "))
+                print name, ver
+        }' "$lock"
+}
+
+# module_holders <directory> <module> <version> <holder>... prints
+# "holder version" for each named holder whose selected version
+# requires the module at that version in the module graph of the
+# go.mod in that directory.
+module_holders() {
+    local dir="$root/$1" module="$2" version="$3"
+    shift 3
+    (cd "$dir" && GOWORK=off go list -m -f '{{.Path}} {{.Version}}' "$@") >"$work/holders"
+    (cd "$dir" && GOWORK=off go mod graph) |
+        awk -v m="$module@$version" 'NR == FNR { selected[$1 "@" $2] = 1; next }
+            $2 == m && ($1 in selected) { split($1, h, "@"); print h[1], h[2] }' "$work/holders" -
 }
 
 # --- the report ----------------------------------------------------------

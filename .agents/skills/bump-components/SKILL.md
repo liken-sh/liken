@@ -366,7 +366,15 @@ each module and each workspace.
    - Take the new pin when the two copies never meet, and let cargo
      build both. `base64` in `media-browser` is an example, because
      `metrics-exporter-prometheus` uses its own copy internally.
-   Report each kept pin with the crate that holds it back.
+   Record each kept pin as a case in `hold_of` in
+   `toolchains/latest.sh`. The case names the crate that holds the
+   pin back, `lock_holders` reads that crate's entry in the lock
+   file, and the row reads `held` with the holder's version in the
+   hold column. When the holder no longer depends on the pinned
+   version, the hold lapses and the row reads `behind`. A Go module
+   that stays back gets a case the same way, with `module_holders`,
+   which reads the module graph. Report each kept pin with the crate
+   or module that holds it back.
 5. A new major version of a direct dependency can change its API or
    its behavior. Read its migration notes, port each call site, and
    check each behavior that a comment at the call site depends on.
