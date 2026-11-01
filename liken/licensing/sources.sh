@@ -294,7 +294,15 @@ done
 # reports each one against that index, and a row that says "behind"
 # means a build now links a newer library than this mirror carries.
 # libnl is the third library: LGPL-2.1, linked into the wireless
-# supplicant, and the only way a program speaks nl80211.
+# supplicant, and the only way a program speaks nl80211. OpenSSL is
+# the fourth: Apache-2.0, linked into iscsid, iscsiadm, and the
+# wireless supplicant. iscsid and iscsiadm are GPL-2.0-or-later, and
+# the GPL's corresponding source of a binary covers every library
+# linked into it, so the mirror carries OpenSSL too. The OpenSSL
+# project publishes a .sha256 file and a detached .asc signature beside
+# each release tarball. Take a new OpenSSL digest from that .sha256
+# file only after the .asc signature verifies against the release key
+# that https://openssl-library.org/source/ names.
 # Tracks the `alpine` entry in toolchains/images.toml, and the path
 # names the image's tag, so a new Alpine release gets its own
 # directory.
@@ -313,6 +321,9 @@ mirror "toolchain/alpine-$alpine_tag" "util-linux-2.41.6.tar.xz" \
 mirror "toolchain/alpine-$alpine_tag" "libnl-3.11.0.tar.gz" \
     "2a56e1edefa3e68a7c00879496736fdbf62fc94ed3232c0baba127ecfa76874d" \
     "https://github.com/thom311/libnl/releases/download/libnl3_11_0/libnl-3.11.0.tar.gz"
+mirror "toolchain/alpine-$alpine_tag" "openssl-3.5.9.tar.gz" \
+    "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a" \
+    "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz"
 
 # systemd-boot and GRUB are prebuilt Ubuntu packages, so their
 # corresponding source is the Ubuntu source package: the upstream

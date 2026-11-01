@@ -84,8 +84,9 @@ in one background task. These rules matter:
    `toolchains/images.toml`, and `../toolchains/latest.sh --bump
    alpine` moves it for `open-iscsi`, `nfs-utils`, `tzdata`,
    `wpa-supplicant`, `e2fsprogs`, and `bluetoothd` at once.
-   `licensing/latest.sh` reads `musl`, `util-linux`, and `libnl`
-   from the same Alpine branch, so those rows follow the builder.
+   `licensing/latest.sh` reads `musl`, `util-linux`, `libnl`, and
+   `openssl` from the same Alpine branch, so those rows follow the
+   builder.
 3. Bump `k3s` before `xtables`. The xtables pin follows the k3s-root
    release that the pinned k3s names as `VERSION_ROOT`, so
    `xtables/latest.sh` reads `k3s/VERSION` and reports xtables as

@@ -78,7 +78,7 @@ from pinned source. It statically links libkmod (LGPL-2.1 or later,
 copyright the kmod contributors), libblkid and libmount from
 util-linux (LGPL-2.1 or later, copyright Karel Zak and others),
 libeconf (MIT, copyright SUSE LLC), OpenSSL (Apache-2.0, copyright
-the OpenSSL Project), and musl (MIT, copyright Rich Felker and
+The OpenSSL Project Authors), and musl (MIT, copyright Rich Felker and
 contributors). Sources are mirrored under `sources/open-iscsi/`, and
 for the alpine-packaged static libraries, under `sources/toolchain/`.
 The recipe pins the build container by digest. Alpine's musl and
@@ -104,9 +104,9 @@ hostap contributors.
 This repository's own recipe (`wpa-supplicant/fetch.sh`) builds the
 binary from pinned hostap source. It statically links libnl
 (LGPL-2.1 or later, copyright Thomas Graf and the libnl
-contributors), OpenSSL (Apache-2.0, copyright the OpenSSL Project),
-and the same musl as the two clients above. The sources are mirrored
-under `sources/wpa-supplicant/` and `sources/toolchain/`.
+contributors), OpenSSL (Apache-2.0, copyright The OpenSSL Project
+Authors), and the same musl as the two clients above. The sources are
+mirrored under `sources/wpa-supplicant/` and `sources/toolchain/`.
 
 The BSD license asks for notices, not source. The mirror exists
 because the channel offers source for everything a release carries.
