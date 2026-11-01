@@ -558,9 +558,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - uses: fluxcd/flux2/action@v2.9.6
+      - uses: fluxcd/flux2/action@v2.10.0
         with:
-          version: 2.9.6
+          version: 2.10.0
 
       # The publish scans each image that it pushes with Trivy, so an
       # image that this run publishes is scanned, and a pinned base is

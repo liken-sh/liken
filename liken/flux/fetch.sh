@@ -61,7 +61,7 @@ mkdir -p "$cache"
 # release publishes, so a fetch never reads a digest from upstream, and
 # a file that changes upstream after the bump fails the check.
 declare -A flux_sha256=(
-    ["v2.9.6"]="b4d22673e9246cbd628881f1a9ef3b090085dced291e42d804555cee8e8d42c5"
+    ["v2.10.0"]="208dd7012c04fedeed5b2d0b6e63df3b15b1c34a381527811685c098bc9f8659"
 )
 digest="${flux_sha256[$version]:-}"
 if [[ -z "$digest" ]]; then
