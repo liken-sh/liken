@@ -22,9 +22,10 @@ package main
 //     pod is gone with the report, it deletes the Job, and the next pass
 //     starts it again.
 //  2. When the next Job runs, it reports a pod that cannot start.
-//  3. Otherwise, when an outbox holds frames to move, it creates the
-//     next Job, if the target's pacing allows and no other Job uses the
-//     outbox claim.
+//  3. Otherwise, it serves the retry annotation (promotionretry.go),
+//     and when an outbox holds more frames than the last Job left
+//     there, it creates the next Job, if the target's pacing allows and
+//     no other Job uses the outbox claim.
 //
 // So one Job runs for a target at a time, because one Job writes the
 // target's catalog, and one runs for an outbox claim at a time, so the
@@ -58,12 +59,7 @@ type promotions struct {
 	// and jobs the memo of the Jobs it created.
 	versions, jobs *memo.Versions
 	// image is the operator's own image, which the Jobs run.
-	image string
-	// started holds each target and outbox claim that this process gave
-	// a Job. A claim whose frames all failed starts no Job until a new
-	// frame arrives, except once after each start of the operator, so a
-	// restart retries a failure that a person fixed.
-	started map[string]bool
+	image   string
 	metrics *promotionMetrics
 }
 
@@ -76,7 +72,7 @@ const (
 
 // promote runs the promotion loop until ctx ends.
 func (o *operator) promote(ctx context.Context) {
-	p := &promotions{operator: o, versions: o.targetVersions, jobs: memo.New(), started: map[string]bool{}, metrics: newPromotionMetrics(o.metrics)}
+	p := &promotions{operator: o, versions: o.targetVersions, jobs: memo.New(), metrics: newPromotionMetrics(o.metrics)}
 	retry := firstRetry
 	for {
 		wake := o.changed.wait()
@@ -221,6 +217,9 @@ func (p *promotions) target(t *astrophotography.Target, w world) error {
 	next := applied(t) + 1
 	job, exists := w.promotionJob(t, next)
 	if !exists {
+		if err := p.retry(t); err != nil {
+			return err
+		}
 		return p.startJob(t, w, next)
 	}
 	if ended, succeeded := finished(job); ended {
@@ -338,9 +337,7 @@ func unschedulable(j jobObject, pods []podObject) (string, bool) {
 func (p *promotions) startJob(t *astrophotography.Target, w world, number int32) error {
 	namespace := t.Metadata.Namespace
 	for _, entry := range t.Status.Outboxes {
-		key := namespace + "/" + t.Metadata.Name + "/" + entry.ClaimName
-		needed := entry.Pending > entry.Left || (entry.Pending > 0 && !p.started[key])
-		if !needed || waitsForReservation(t, entry.ClaimName, w.reservations) || w.claimBusy(namespace, entry.ClaimName) {
+		if entry.Pending <= entry.Left || waitsForReservation(t, entry.ClaimName, w.reservations) || w.claimBusy(namespace, entry.ClaimName) {
 			continue
 		}
 		if _, exists := w.claims[namespace+"/"+t.Spec.Archive.ClaimName]; !exists {
@@ -355,7 +352,6 @@ func (p *promotions) startJob(t *astrophotography.Target, w world, number int32)
 		if err := create(p.client, p.jobs, "/apis/batch/v1/namespaces/"+namespace+"/jobs", &job); err != nil {
 			return err
 		}
-		p.started[key] = true
 		w.created[namespace+"/"+entry.ClaimName] = true
 		fmt.Fprintf(p.logs, "%s: started the promotion Job %s/%s for %s in %s\n", managedBy, namespace, job.Metadata.Name, frames(entry.Pending), entry.ClaimName)
 		return nil

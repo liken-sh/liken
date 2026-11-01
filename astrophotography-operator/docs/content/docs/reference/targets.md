@@ -141,7 +141,7 @@ One outbox claim and the target's frames in it.
 | --- | --- | --- | --- |
 | <span id="statusoutboxes--claimname"></span>`claimName` | string | yes | The `PersistentVolumeClaim`. |
 | <span id="statusoutboxes--pending"></span>`pending` | integer | yes | The target's frames in the claim. |
-| <span id="statusoutboxes--left"></span>`left` | integer | no | The frames that the last promotion `Job` of this claim left in it: frames that wait as incomplete, and frames that failed. A new promotion starts when `pending` is more than `left`, so a frame that fails does not start a `Job` again until a new frame arrives. |
+| <span id="statusoutboxes--left"></span>`left` | integer | no | The frames that the last promotion `Job` of this claim left in it: frames that wait as incomplete, and frames that failed. A new promotion starts when `pending` is more than `left`, so a frame that fails does not start a `Job` again until a new frame arrives. The annotation `astrophotography.liken.sh/retry` on the target sets `left` to 0 when no `Job` of the target runs, so the next `Job` tries the frames again, and the operator then removes the annotation. |
 
 ### status.promotion
 

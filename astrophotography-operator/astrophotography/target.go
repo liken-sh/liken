@@ -170,7 +170,8 @@ type OutboxFrames struct {
 	Pending   int32  `json:"pending"`
 	// Left is the frames that the last promotion Job of the claim left
 	// in it. A promotion starts when Pending is more than Left, so a
-	// frame that failed starts no Job until a new frame arrives.
+	// frame that failed starts no Job until a new frame arrives, or
+	// until the retry annotation on the target sets Left to 0.
 	Left int32 `json:"left,omitempty"`
 }
 

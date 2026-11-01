@@ -37,7 +37,8 @@ rules:
     resources: [targets, solvers]
     verbs: [get, list, watch]
   # A merge patch adds and removes the finalizer that holds a delete of
-  # a Target while frames of it wait in an outbox.
+  # a Target while frames of it wait in an outbox, and removes the
+  # retry annotation after the operator acts on it.
   - apiGroups: [astrophotography.liken.sh]
     resources: [targets]
     verbs: [patch]

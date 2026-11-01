@@ -1,7 +1,7 @@
 ---
 title: Troubleshoot
 weight: 60
-description: "Find why a Target does not start, stops, or does not reach the archive, from its conditions and Events and the reservation's Events, and fix it: a target with no reservation, Imaging False with OutboxFull, ExposureFailed, GuidingFailed, NoFilter, NoTrain, SlewFailed, CenteringFailed, or Deleting, ArchiveAvailable False with ClaimMissing, Unschedulable, CopyFailed, VerifyFailed, or NameConflict, the Events AstrophotographyNoOutbox, AstrophotographyIdle, AstrophotographyWorkerPending, AstrophotographyOutboxFull, AstrophotographyNotCentered, and PromotionReportLost, a Solver that is not Ready, a target that does not delete, and an outbox claim that does not delete. Use when a target does not image, when frames stay pending, or when a condition is False."
+description: "Find why a Target does not start, stops, or does not reach the archive, from its conditions and Events and the reservation's Events, and fix it: a target with no reservation, Imaging False with OutboxFull, ExposureFailed, GuidingFailed, NoFilter, NoTrain, SlewFailed, CenteringFailed, or Deleting, ArchiveAvailable False with ClaimMissing, Unschedulable, CopyFailed, VerifyFailed, or NameConflict, the Events AstrophotographyNoOutbox, AstrophotographyIdle, AstrophotographyWorkerPending, AstrophotographyOutboxFull, AstrophotographyNotCentered, PromotionReportLost, and PromotionRetry, the retry annotation for a frame that failed, a Solver that is not Ready, a target that does not delete, and an outbox claim that does not delete. Use when a target does not image, when frames stay pending, or when a condition is False."
 ---
 
 # Troubleshoot
@@ -152,10 +152,25 @@ kubectl get jobs -n observatory -l app.kubernetes.io/managed-by=astrophotography
 | `VerifyFailed` | The copy read back with another hash, or the frame differs from its catalog line. | Check the archive's storage and the network between the nodes. |
 | `NameConflict` | Another file has the frame's name in the archive. | Move the other file away. The operator never replaces a file. |
 
-A frame that failed stays in the outbox. The operator does not start a
-`Job` again for that frame alone. The next `Job` of the target moves it: after the next exposure, or after the operator restarts. With
-`promotion: AfterReservation`, no `Job` starts while the reservation
-that writes to the outbox is activating, ready, or deactivating.
+A frame that failed stays in the outbox, and the operator does not
+start a `Job` again for that frame alone, because most failures need a
+person to fix the archive first. `left` in `status.outboxes` counts the
+frames that the last `Job` left. The next `Job` starts after the next
+exposure of the target, or when you ask for a retry after the fix:
+
+```sh
+kubectl annotate target m42 -n observatory astrophotography.liken.sh/retry=1
+```
+
+When no `Job` of the target runs, the operator sets `left` to 0, removes
+the annotation, posts the `Normal` `Event` `PromotionRetry` on the
+target, and starts the next `Job`. An annotation that arrives while a
+`Job` runs waits until that `Job` ends. The annotation asks once, so a
+frame that fails again waits for the next exposure or the next
+annotation. A restart of the operator does not retry, because the
+count is in the target's status. With `promotion: AfterReservation`,
+no `Job` starts while the reservation that writes to the outbox is
+activating, ready, or deactivating.
 
 The `Normal` `Event` `PromotionReportLost` on the target means that the
 pod of a `Job` that succeeded was deleted before the operator read its

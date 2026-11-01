@@ -13,7 +13,9 @@ package main
 //     Astrophotography, because the Reservation is observatory-operator's
 //     resource.
 //   - The promotion loop posts reasonReportLost on a Target when it
-//     runs a Job again because the Job's report is gone.
+//     runs a Job again because the Job's report is gone, and
+//     reasonPromotionRetry when a person's retry annotation starts a
+//     Job for the frames that the last Jobs left in the outbox.
 //   - An exposure and a dither change no condition and post nothing, so
 //     a target posts a few Events in a night, not one for each frame.
 
@@ -44,3 +46,9 @@ const (
 // that succeeded is gone, and its report with it, so the loop deleted
 // the Job and starts it again (plan 03).
 const reasonReportLost = "PromotionReportLost"
+
+// reasonPromotionRetry is Normal, on a Target: a person asked with the
+// annotation astrophotography.liken.sh/retry, so the loop tries again
+// the frames that the last promotion Jobs left in the outbox
+// (promotionretry.go).
+const reasonPromotionRetry = "PromotionRetry"

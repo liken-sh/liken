@@ -552,7 +552,12 @@ spec:
                           incomplete, and frames that failed. A new
                           promotion starts when `pending` is more than
                           `left`, so a frame that fails does not start a
-                          `Job` again until a new frame arrives.
+                          `Job` again until a new frame arrives. The
+                          annotation `astrophotography.liken.sh/retry` on
+                          the target sets `left` to 0 when no `Job` of the
+                          target runs, so the next `Job` tries the frames
+                          again, and the operator then removes the
+                          annotation.
                 promotion:
                   type: object
                   required: [applied]

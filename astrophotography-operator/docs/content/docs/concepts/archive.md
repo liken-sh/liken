@@ -201,7 +201,10 @@ gives the command that removes the finalizer.
 that moved every frame. It turns `False` with the reasons
 `ClaimMissing`, `Unschedulable`, `CopyFailed`, `VerifyFailed`, and
 `NameConflict`, and a frame that failed stays in the outbox until the
-next `Job` of the target moves it.
+next `Job` of the target moves it. That `Job` starts after the next
+exposure, or when you put the annotation
+`astrophotography.liken.sh/retry` on the target after you fix the
+cause.
 [A frame does not reach the archive](/docs/guides/troubleshoot/#a-frame-does-not-reach-the-archive)
 gives the cause and the fix for each reason.
 

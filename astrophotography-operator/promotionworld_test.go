@@ -5,6 +5,7 @@ package main
 // pods that the loop reads.
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"testing"
@@ -40,11 +41,18 @@ func operatorPod(container string) map[string]any {
 
 // runOperator runs the operator until the test ends.
 func runOperator(t *testing.T, api *fakeAPI) *operator {
-	client := apiclient.New(apiservertest.Host, api.server.Client(), "").WithWaitContext(t.Context())
+	return runOperatorUntil(t.Context(), t, api)
+}
+
+// runOperatorUntil runs the operator until ctx ends, so a test can stop
+// one operator and start the next against the same API server, the way
+// a restart does.
+func runOperatorUntil(ctx context.Context, t *testing.T, api *fakeAPI) *operator {
+	client := apiclient.New(apiservertest.Host, api.server.Client(), "").WithWaitContext(ctx)
 	recorder := events.New(t.Context(), client, managedBy, events.Options{Instance: operatorPodName, Log: io.Discard})
 	o := newOperator(client, recorder, newMetrics("dev"), io.Discard)
 	o.pod, o.namespace = operatorPodName, operatorNS
-	go o.run(t.Context(), api.watcher(t))
+	go o.run(ctx, api.watcher(t))
 	return o
 }
 
