@@ -120,6 +120,7 @@ jobs:
               echo "$served" | openssl x509 -noout -subject -issuer -enddate
               exit 0
             fi
+            echo "attempt $attempt of 20: releases.liken.sh does not serve the new certificate yet"
             sleep 15
           done
           echo "releases.liken.sh is not serving the new certificate" >&2
