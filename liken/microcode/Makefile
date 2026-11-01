@@ -10,8 +10,13 @@
 override VERSION := $(strip $(file <VERSION))
 
 # The AMD half comes from the linux-firmware domain's fetched tree,
-# so liken/Makefile orders that domain before this one.
-dist/$(VERSION)/microcode.cpio: VERSION fetch.sh
+# so liken/Makefile orders that domain before this one. The
+# linux-firmware pin is a prerequisite here, because the output path
+# names only the Intel release: after a linux-firmware bump the old
+# cpio is still at the same path, and without that pin make reports
+# it as up to date with the old AMD files in it. The CI cache key in
+# .github/actions/build-setup hashes the same files.
+dist/$(VERSION)/microcode.cpio: VERSION fetch.sh ../linux-firmware/VERSION
 	./fetch.sh
 
 .PHONY: all clean

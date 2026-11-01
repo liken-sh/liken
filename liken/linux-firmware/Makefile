@@ -11,10 +11,14 @@
 override VERSION := $(strip $(file <VERSION))
 
 # The derived set is a function of two pins: this domain's release
-# and the kernel build whose modules declare the names. The root
-# Makefile orders the kernel build before this one and re-runs this
-# rule when either pin moves.
-dist/$(VERSION)/derived.txt: VERSION fetch.sh derive.sh
+# and the kernel build whose modules declare the names. The kernel
+# pin is a prerequisite here, because the output path names only this
+# domain's release: after a kernel bump the old derived set is still
+# at the same path, and without the kernel pin make reports it as up
+# to date. The root Makefile orders the kernel build before this one.
+# The CI cache key in .github/actions/build-setup hashes the same
+# files.
+dist/$(VERSION)/derived.txt: VERSION fetch.sh derive.sh ../kernel/VERSION
 	./fetch.sh
 	./derive.sh
 
