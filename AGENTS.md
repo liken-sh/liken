@@ -243,7 +243,9 @@ comment that excuses one line.
   takes the name of a good one.
 - Every `FROM` and `COPY --from` names an image of
   `toolchains/images.toml`, or an image of the repository by its bare
-  name, so that one entry pins each outside image.
+  name, and a shell script that runs an outside image reads its
+  reference with `image_of`, so that one entry pins each outside
+  image.
 - Every `VERSION`, every `fetch.sh`, and every Dockerfile that
   downloads has a `latest.sh` that `make versions` runs, so no pin
   falls behind where the report cannot show it.

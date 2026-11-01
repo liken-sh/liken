@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"maps"
+	"path"
 	"regexp"
 	"slices"
 	"strings"
@@ -46,6 +47,37 @@ func imagePattern(name string) *regexp.Regexp {
 		names = append(names, "docker\\.io/"+regexp.QuoteMeta(name))
 	}
 	return regexp.MustCompile(`(?:^|[^A-Za-z0-9._/-])(` + strings.Join(names, "|") + `):([A-Za-z0-9_][A-Za-z0-9_.-]*)`)
+}
+
+// isScript is true for a shell script, by its extension.
+func isScript(name string) bool {
+	return path.Ext(name) == ".sh"
+}
+
+// pinnedImageRef matches an image reference that names a digest, such as
+// ghcr.io/oras-project/oras:<tag>@sha256:<hex> or alpine@sha256:<hex>.
+// The reference must start a word, so a URL path or a longer name does
+// not start inside it.
+var pinnedImageRef = regexp.MustCompile(`(?:^|[^A-Za-z0-9._/:@-])([a-z0-9][a-z0-9._/-]*(?::[A-Za-z0-9_][A-Za-z0-9_.-]*)?@sha256:[0-9a-f]{64})\b`)
+
+// scriptImages lists each image that a shell script pins by its own
+// digest. A script that runs an outside image, such as a bump that runs
+// cosign or a push that runs oras, reads the reference from images.toml
+// with image_of in toolchains/pin.sh, so that one entry pins the image,
+// toolchains/latest.sh reports it, and a bump moves every user at once.
+// A comment can quote a reference, so the check reads the commands
+// alone.
+func scriptImages(file, text string) []string {
+	var findings []string
+	for _, l := range logicalLines(text) {
+		if l.allowed {
+			continue
+		}
+		for _, m := range pinnedImageRef.FindAllStringSubmatch(l.text, -1) {
+			findings = append(findings, fmt.Sprintf("%s:%d names %s, which is not read from %s; name the image there and read it with image_of", file, l.n, m[1], imagesFile))
+		}
+	}
+	return findings
 }
 
 // isDockerfile is true for a Dockerfile: Dockerfile, or Dockerfile.<name>

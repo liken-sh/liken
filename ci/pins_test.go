@@ -63,6 +63,10 @@ func pinsTree(t *testing.T, changes map[string]string) string {
 		"liken/userland/fetch.sh":            "source \"$here/../../toolchains/pin.sh\"\ndeclare -A buildroot_sha256=(\n    [\"abc\"]=\"111\"\n    [\"old\"]=\"000\"\n)\n",
 		"liken/userland/latest.sh":           "source \"$here/../../toolchains/pin.sh\"\n",
 		"d/Dockerfile":                       "FROM buildroot AS daemons\nARG BUILDROOT_COMMIT=abc\nARG BUILDROOT_SHA256=111\n",
+		// A script reads an outside image from images.toml, and a
+		// comment may quote a reference.
+		"a/models/push.sh": "# The image was ghcr.io/x/oras:v1@sha256:" + strings.Repeat("a", 64) + ".\n" +
+			"oras_image=\"$(image_of oras)\"\n",
 	}
 	for name, text := range changes {
 		tree[name] = text
@@ -120,6 +124,12 @@ func TestADriftedPinIsFound(t *testing.T) {
 			"a/Dockerfile.cli builds from docker.io/library/busybox:1,"},
 		"an outside image in a mount": {"a/Dockerfile", "FROM scratch\nRUN --mount=type=bind,from=alpine@sha256:abc,target=/a true\n",
 			"a/Dockerfile builds from alpine@sha256:abc,"},
+		"an outside image by digest in a script": {"a/models/push.sh",
+			"oras_image=ghcr.io/oras-project/oras:v1.3.4@sha256:" + strings.Repeat("a", 64) + "\n",
+			"a/models/push.sh:1 names ghcr.io/oras-project/oras:v1.3.4@sha256:" + strings.Repeat("a", 64) + ", which is not read from toolchains/images.toml; name the image there and read it with image_of"},
+		"a bare image by digest in a script": {"a/run.sh",
+			"docker run --rm \"alpine@sha256:" + strings.Repeat("b", 64) + "\" true\n",
+			"a/run.sh:1 names alpine@sha256:" + strings.Repeat("b", 64) + ", which is not read from"},
 		"a copy of a protocol": {"b/src/liken-thing-v1.xml", "<protocol name=\"liken_thing_v1\" version=\"2\"/>\n",
 			"the Wayland protocol liken-thing-v1.xml has 2 versions:"},
 		"a copy of the closure library": {"c/closure.sh", "collect() { true; }\n",

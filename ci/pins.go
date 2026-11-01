@@ -34,6 +34,8 @@ import (
 //   - each Dockerfile names each outside image by its key in
 //     images.toml, and never by a reference of its own, which would be
 //     a second copy of the pin or a pin that no report reads;
+//   - each shell script reads an outside image that it pins by digest
+//     from images.toml with image_of, for the same reason;
 //   - each Dockerfile builds Rust with `cargo auditable build`, so each
 //     binary records its crates for the SBOM, as unauditedBuilds says;
 //   - each Dockerfile builds and ships a Go program in the one form
@@ -103,6 +105,9 @@ func checkPins(root string) ([]string, error) {
 		findings = append(findings, found...)
 		if namesImages(file) {
 			findings = append(findings, imageDrift(file, string(data), tools)...)
+		}
+		if isScript(path.Base(file)) {
+			findings = append(findings, scriptImages(file, string(data))...)
 		}
 		if isDockerfile(path.Base(file)) {
 			findings = append(findings, outsideImages(file, string(data))...)
@@ -178,7 +183,7 @@ func pinFiles(root string) ([]string, error) {
 	var files []string
 	for _, file := range all {
 		switch name := path.Base(file); {
-		case name == "go.mod", name == "rust-toolchain.toml", name == "Cargo.toml", name == ".pre-commit-config.yaml", name == closureLibrary, isProtocol(name), isDockerfile(name), namesImages(file):
+		case name == "go.mod", name == "rust-toolchain.toml", name == "Cargo.toml", name == ".pre-commit-config.yaml", name == closureLibrary, isProtocol(name), isDockerfile(name), namesImages(file), isScript(name):
 			files = append(files, file)
 		}
 	}

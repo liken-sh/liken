@@ -713,6 +713,9 @@ Dockerfile downloads buildroot itself with `ADD --checksum`, and
   `fetch.sh` holds a digest of its own or does not call
   `fetch_pinned`; or a Dockerfile beside a `pin.toml` `ADD`s a URL by
   a checksum that the manifest does not name;
+- a shell script names an image by a digest of its own, such as
+  `ghcr.io/oras-project/oras:<tag>@sha256:<digest>`, and does not read
+  the reference from `toolchains/images.toml` with `image_of`;
 - `liken/licensing/sources.sh` holds a digest, because each source
   that it mirrors is an entry of the `pin.toml` of the pin that the
   source belongs to;

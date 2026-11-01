@@ -20,13 +20,18 @@
 # digest beside it. The image build pulls that digest, so a push that
 # passes here is the artifact the build reads.
 #
-# oras runs from its own image when no oras is installed. The container
-# reads the registry credentials from ~/.docker/config.json.
+# oras runs from its own image when no oras is installed. The image is
+# the `oras` entry of toolchains/images.toml, which the image build of
+# library-operator-appearances pulls the artifact with too, so one
+# entry pins oras for both, and toolchains/latest.sh reports it. The
+# container reads the registry credentials from ~/.docker/config.json.
 set -euo pipefail
 
 repository=${1:-ghcr.io/liken-sh/library-operator-appearances-models}
 plain_http=${PLAIN_HTTP:-false}
 here=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source-path=SCRIPTDIR source=../../../toolchains/pin.sh
+source "$here/../../../toolchains/pin.sh"
 
 # The tag names the two model versions, so a person who lists the
 # repository reads which models each artifact holds. The build reads
@@ -39,7 +44,7 @@ zoo=47534e27c9851bb1128ccc0102f1145e27f23f98
 media=https://media.githubusercontent.com/media/opencv/opencv_zoo/$zoo/models
 raw=https://raw.githubusercontent.com/opencv/opencv_zoo/$zoo/models
 
-oras_image=ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179
+oras_image=$(image_of oras)
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT

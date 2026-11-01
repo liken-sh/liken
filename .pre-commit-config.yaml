@@ -8,7 +8,7 @@
 # that no component owns, to the inputs of the generated workflows, and
 # to the inputs of `ci pins`: a component's own exclusions, such as its
 # test data, stay in force.
-files: ^(\.agents/|\.github/|liken\.sh/|plans/|[^/]+$|ci/templates/|[^/]+/package\.toml$|.*/Dockerfile[^/]*$|toolchains/images\.toml$|toolchains/pin\.sh$|trust/keys/|.*/VERSION$|.*/pin\.toml$|.*/fetch\.sh$|.*/latest\.sh$|.*/closure\.sh$|liken/licensing/sources\.sh$|.*/go\.mod$|.*/Cargo\.toml$|.*/rust-toolchain\.toml$|.*/\.pre-commit-config\.yaml$|.*/liken-[a-z-]+-v[0-9]+\.xml$|ci/(actions|trivy|workflow)\.go$)
+files: ^(\.agents/|\.github/|liken\.sh/|plans/|[^/]+$|ci/templates/|[^/]+/package\.toml$|.*/Dockerfile[^/]*$|toolchains/images\.toml$|toolchains/pin\.sh$|trust/keys/|.*/VERSION$|.*/pin\.toml$|.*\.sh$|.*/go\.mod$|.*/Cargo\.toml$|.*/rust-toolchain\.toml$|.*/\.pre-commit-config\.yaml$|.*/liken-[a-z-]+-v[0-9]+\.xml$|ci/(actions|trivy|workflow)\.go$)
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -58,7 +58,8 @@ repos:
         # the library, or a key in trust/keys/ that breaks a rule
         # fails here, and so does a
         # change that makes the two copies of closure.sh differ, a
-        # digest in the source mirror liken/licensing/sources.sh, and a
+        # digest in the source mirror liken/licensing/sources.sh, a
+        # shell script that pins an image by a digest of its own, and a
         # uses: under .github/ that names an action by anything but
         # the commit and the release of actionPins in ci/actions.go.
         # The check also compares the Go and Rust versions, the module
@@ -69,5 +70,5 @@ repos:
         # too.
         entry: bash -c 'cd ci && go run . pins -root ..'
         language: system
-        files: (^|/)(fetch|latest)\.sh$|/Dockerfile[^/]*$|(^|/)(VERSION|pin\.toml)$|^toolchains/(images\.toml|pin\.sh)$|^versions\.sh$|^trust/keys/|(^|/)closure\.sh$|^liken/licensing/sources\.sh$|^\.github/|(^|/)(go\.mod|Cargo\.toml|rust-toolchain\.toml|\.pre-commit-config\.yaml)$|(^|/)liken-[a-z-]+-v[0-9]+\.xml$|^ci/(actions|trivy|workflow)\.go$
+        files: \.sh$|/Dockerfile[^/]*$|(^|/)(VERSION|pin\.toml)$|^toolchains/(images\.toml|pin\.sh)$|^versions\.sh$|^trust/keys/|^\.github/|(^|/)(go\.mod|Cargo\.toml|rust-toolchain\.toml|\.pre-commit-config\.yaml)$|(^|/)liken-[a-z-]+-v[0-9]+\.xml$|^ci/(actions|trivy|workflow)\.go$
         pass_filenames: false
