@@ -264,9 +264,9 @@ RUN CGO_ENABLED=0 sh /go.sh /notices ./bluetoothd ./bluetoothd/btmon ./bluetooth
 
 FROM scratch
 COPY --from=daemons /out/ /
-COPY --from=entrypoint /start-bluetoothd /usr/local/bin/start-bluetoothd
-COPY --from=entrypoint /start-btmon /usr/local/bin/start-btmon
-COPY --from=entrypoint /start-rescan /usr/local/bin/start-rescan
+COPY --from=entrypoint /start-bluetoothd /start-bluetoothd
+COPY --from=entrypoint /start-btmon /start-btmon
+COPY --from=entrypoint /start-rescan /start-rescan
 COPY --from=entrypoint /notices /
 
 # /etc/bluetooth holds no file in the image. The entrypoint writes
@@ -281,4 +281,4 @@ COPY --from=entrypoint /notices /
 # whichever of the two applies.
 ENV DBUS_SYSTEM_BUS_ADDRESS=unix:path=/var/run/bluetooth.liken.sh/dbus/system_bus_socket
 
-ENTRYPOINT ["/usr/local/bin/start-bluetoothd"]
+ENTRYPOINT ["/start-bluetoothd"]

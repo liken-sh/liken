@@ -29,7 +29,7 @@ COPY --from=kubernetes go.mod go.sum /kubernetes/
 RUN go mod download
 COPY --from=kubernetes . /kubernetes/
 COPY *.go ./
-RUN CGO_ENABLED=0 go build -trimpath -tags pod -o /library-operator-pod .
+RUN CGO_ENABLED=0 go build -trimpath -tags pod -ldflags "-s -w" -o /library-operator-pod .
 # The license files of the Go standard library and of each module that
 # the binary links. notices/go.sh says why the image needs them.
 COPY --from=notices go.sh /

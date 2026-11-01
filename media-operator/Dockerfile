@@ -53,8 +53,8 @@ COPY edl/ ./edl/
 # CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
 # static binary with no paths from the build machine in it. It runs
 # from scratch, where there is no loader to need.
-RUN CGO_ENABLED=0 go build -trimpath -o /media-operator . \
-    && CGO_ENABLED=0 go build -trimpath -tags pod -o /media-operator-pod .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /media-operator . \
+    && CGO_ENABLED=0 go build -trimpath -tags pod -ldflags "-s -w" -o /media-operator-pod .
 # The license files of the Go standard library and of each module that
 # the two binaries link. notices/go.sh says why the image needs them.
 COPY --from=notices go.sh /

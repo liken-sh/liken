@@ -55,7 +55,7 @@ func TestThePodCarriesALayoutChangeToPipeWire(t *testing.T) {
 	}
 	for name, mode := range map[string]string{"pipewire": pipewireMode, "wireplumber": wireplumberMode} {
 		command := containerIn(t, daemonSet, name).Command
-		if len(command) < 2 || command[0] != "/usr/local/bin/audio-operator" || command[1] != mode {
+		if len(command) < 2 || command[0] != "/audio-operator" || command[1] != mode {
 			t.Errorf("the %s container runs %q, want the operator's %s mode", name, command, mode)
 		}
 	}

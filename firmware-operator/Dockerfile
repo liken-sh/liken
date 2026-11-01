@@ -43,4 +43,8 @@ COPY --from=build /notices /
 # catalog fails without one. The bundle is the one that the trust
 # component pins for every image of liken, with its notice.
 COPY --from=trust / /
+# deploy/operator.yaml runs the operator as this user, and the image
+# names the same one. The pods that read and write firmware run the
+# scan image, which stays root.
+USER 65534:65534
 ENTRYPOINT ["/firmware-operator"]

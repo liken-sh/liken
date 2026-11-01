@@ -111,7 +111,7 @@ func TestTheServerPodListsEachDeviceForTheShim(t *testing.T) {
 		// -r is the largest restart count that indiserver's atoi holds,
 		// because the count never resets.
 		{"server command", server.Command, []string{
-			"/usr/bin/indi-shim", "serve", "/etc/indi/devices/drivers", "/run/indi/drivers", "/tmp/indiserver.fifo",
+			"/indi-shim", "serve", "/etc/indi/devices/drivers", "/run/indi/drivers", "/tmp/indiserver.fifo",
 			"/usr/bin/indiserver", "-v", "-r", "2147483647",
 		}},
 		{"server args", server.Args, []string(nil)},

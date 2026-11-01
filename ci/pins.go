@@ -36,6 +36,8 @@ import (
 //     a second copy of the pin or a pin that no report reads;
 //   - each Dockerfile builds Rust with `cargo auditable build`, so each
 //     binary records its crates for the SBOM, as unauditedBuilds says;
+//   - each Dockerfile builds and ships a Go program in the one form
+//     that goImageFindings says, at /<name> with its build info kept;
 //   - each copy of a Wayland protocol that liken defines, such as
 //     liken-arrangement-v1.xml, holds the same bytes. The compositor
 //     module and each client build from their own directory, so each
@@ -96,6 +98,7 @@ func checkPins(root string) ([]string, error) {
 		if isDockerfile(path.Base(file)) {
 			findings = append(findings, outsideImages(file, string(data))...)
 			findings = append(findings, unauditedBuilds(file, string(data))...)
+			findings = append(findings, goImageFindings(file, string(data))...)
 		}
 	}
 	findings = append(findings, modules.drift("the Go module")...)

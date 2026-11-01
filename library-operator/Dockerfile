@@ -41,8 +41,8 @@ COPY *.go ./
 # operator's watches and its Lease link, so the program that each
 # catalog pod and each library Job runs is much smaller than the full
 # build. operate_pod.go says why.
-RUN CGO_ENABLED=0 go build -trimpath -o /library-operator . \
-    && CGO_ENABLED=0 go build -trimpath -tags pod -o /library-operator-pod .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /library-operator . \
+    && CGO_ENABLED=0 go build -trimpath -tags pod -ldflags "-s -w" -o /library-operator-pod .
 # The license files of the Go standard library and of each module that
 # the two binaries link. notices/go.sh says why the image needs them.
 COPY --from=notices go.sh /

@@ -29,7 +29,7 @@ COPY capabilities/ ./capabilities/
 # libva with no cgo, so the build needs no C toolchain and no libva
 # headers. The binary names the system's dynamic loader, which the base
 # carries for libva itself.
-RUN CGO_ENABLED=0 go build -trimpath -o /media-capabilities ./capabilities
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /media-capabilities ./capabilities
 # The license files of the Go standard library and of each module that
 # the binary links. notices/go.sh says why the image needs them.
 COPY --from=notices go.sh /

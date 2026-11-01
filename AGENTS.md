@@ -274,6 +274,61 @@ takes `toolchains/` as the build context `toolchains`, copies
 serves every image. `cd ci && go run . pins -root ..` fails on a
 Dockerfile that runs `cargo build`.
 
+## Go programs
+
+A Go binary records the modules it links in its build info, and syft
+and Trivy read that record to list the modules of an image. Every
+Dockerfile that ships a Go program builds it the same way, so the
+record is in every binary, and a person, a manifest, or an operator
+that writes a pod's command finds the program at the same path in
+every image:
+
+```dockerfile
+FROM golang AS build
+...
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /<name> .
+COPY --from=notices go.sh /
+RUN CGO_ENABLED=0 sh /go.sh /notices .
+
+FROM scratch
+COPY --from=build /<name> /<name>
+COPY --from=build /notices /
+ENTRYPOINT ["/<name>"]
+```
+
+- The builder is the `golang` entry of `toolchains/images.toml`. A CLI
+  image runs the build stage with `--platform=$BUILDPLATFORM` and
+  cross-compiles with `GOOS` and `GOARCH`.
+- `CGO_ENABLED=0` makes a static binary that runs on `scratch` and on
+  any base, and the build needs no C toolchain. No Go program in the
+  repository needs cgo. `media-capabilities` calls libva through
+  purego, which needs no cgo, but its binary names the dynamic loader,
+  so it runs only on the `vaapi` base that carries libva.
+- `-trimpath` keeps the paths of the build machine out of the binary.
+- `-s -w` drops the symbol table and the DWARF data. The build info is
+  in its own section, which `-s -w` keeps, and
+  `go version -m <binary>` prints it. A panic's stack trace keeps its
+  function names. No build runs upx, strip, or objcopy on a Go
+  program, because upx and objcopy can hide or remove the build info.
+- `-X main.version=${VERSION}` is there only when the program has a
+  `version` variable.
+- The program is at `/<name>`, where `<name>` is the program's name,
+  in every image that ships it, on any base. A second program of the
+  same image, such as a pod build or a helper that a manifest runs, is
+  at `/<its name>` too.
+- `notices/go.sh` writes the license notices of the standard library
+  and of each linked module. An image whose program makes HTTPS
+  requests to hosts outside the cluster copies the `trust` component.
+- When every pod that runs the image sets a non-root `runAsUser`, the
+  image names the same user with a numeric `USER`, so `docker run`
+  runs the program the same way. An image that a pod runs as root
+  keeps root and names no `USER`.
+
+`cd ci && go run . pins -root ..` fails on a `go build` without
+`CGO_ENABLED=0`, `-trimpath`, or `-ldflags "-s -w"`, on a program
+built, copied, or named in an `ENTRYPOINT` at a path other than
+`/<name>`, and on upx, strip, or objcopy run on a program.
+
 ## Releases and development builds
 
 One CalVer tag releases every component whose outputs changed since its

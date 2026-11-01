@@ -60,4 +60,8 @@ RUN CGO_ENABLED=0 sh /go.sh /notices .
 FROM scratch
 COPY --from=build /astrophotography-operator /astrophotography-operator
 COPY --from=build /notices /
+# deploy/operator.yaml runs the operator as this user, and the image
+# names the same one, so `docker run` runs it the same way. The
+# promotion Jobs set their own user.
+USER 65534:65534
 ENTRYPOINT ["/astrophotography-operator"]

@@ -37,7 +37,7 @@ ARG TARGETARCH
 # CGO_ENABLED=0 with -trimpath is liken's build discipline: a
 # static binary with no paths from the build machine in it.
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags "-X main.version=${VERSION}" \
+    go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
     -o /kubectl-liken-display ./cli
 # The license files of the Go standard library and of each module that
 # the binary links. notices/go.sh says why the image needs them.
@@ -50,8 +50,8 @@ FROM distroless
 # distroless carries its own Debian CA bundle. The one that the trust
 # component pins for every image of liken replaces it, with its notice.
 COPY --from=trust / /
-COPY --from=build /kubectl-liken-display /usr/local/bin/kubectl-liken-display
+COPY --from=build /kubectl-liken-display /kubectl-liken-display
 COPY --from=build /notices /
 # The binary is the entrypoint, so docker run passes the verbs
 # straight to it and a Job in the cluster runs it the same way.
-ENTRYPOINT ["/usr/local/bin/kubectl-liken-display"]
+ENTRYPOINT ["/kubectl-liken-display"]

@@ -31,8 +31,8 @@ container=$(docker create "$image")
 docker export "$container" | tar -t | sed 's|^|/|; s|/$||' | sort -u > "$work/image-files.txt"
 docker rm "$container" > /dev/null
 
-grep -qx /usr/local/bin/per-node-csi-driver "$work/image-files.txt" \
-  || { echo "the image has no /usr/local/bin/per-node-csi-driver"; exit 1; }
+grep -qx /per-node-csi-driver "$work/image-files.txt" \
+  || { echo "the image has no /per-node-csi-driver"; exit 1; }
 
 # The driver runs no other program, so a shell or a library directory
 # in the image means the build pulled something in. The export also

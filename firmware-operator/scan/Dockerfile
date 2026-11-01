@@ -88,9 +88,9 @@ RUN mkdir -p /usr/share/doc/liken \
                 if [ ! -L "/usr/share/doc/$package" ]; then echo "$package $rest"; fi; \
             done; \
     } >/usr/share/doc/liken/firmware-operator-scan.packages
-COPY --from=build /scan /usr/local/bin/scan
+COPY --from=build /scan /scan
 COPY --from=build /notices /
 # The scan pod is privileged and runs as root, because fwupd reads
 # SMBIOS tables, efivarfs, sysfs, and device nodes. The rehearsal pod
 # runs as root with only DAC_READ_SEARCH, and reads a read-only mount.
-ENTRYPOINT ["/usr/local/bin/scan"]
+ENTRYPOINT ["/scan"]

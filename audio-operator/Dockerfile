@@ -33,7 +33,7 @@ ARG VERSION=dev
 # static binary with no paths from the build machine in it. The binary
 # runs beside a closure that holds a loader and a libc, and it needs
 # neither.
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=${VERSION}" -o /audio-operator .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /audio-operator .
 # The license files of the Go standard library and of each module that
 # the binary links. notices/go.sh says why the image needs them.
 COPY --from=notices go.sh /
@@ -119,10 +119,10 @@ COPY config/50-pipewire-access.conf /usr/share/pipewire/pipewire.conf.d/
 # /etc/wireplumber/wireplumber.conf.d/, and only when the claim
 # delivered a Bluetooth media bus.
 
-COPY --from=build /audio-operator /usr/local/bin/audio-operator
+COPY --from=build /audio-operator /audio-operator
 COPY --from=build /notices /
 
 # The operator is the default entrypoint, and the three other
 # containers name their own program. The image holds no shell, so
 # every command in the pod spec is a binary path.
-ENTRYPOINT ["/usr/local/bin/audio-operator"]
+ENTRYPOINT ["/audio-operator"]

@@ -203,7 +203,7 @@ spec:
           # start-btmon runs btmon with the arguments that
           # bluetoothd/btmon/child.go explains.
           command:
-            - /usr/local/bin/start-btmon
+            - /start-btmon
           # The terminal makes the C library write each line when
           # btmon finishes it. With a pipe, the library holds the
           # output until its buffer fills, and a rare line waits in
@@ -261,7 +261,7 @@ spec:
           image: ghcr.io/liken-sh/bluetoothd:latest
           restartPolicy: Always
           command:
-            - /usr/local/bin/start-rescan
+            - /start-rescan
           securityContext:
             # NET_RAW for the bind of the monitor channel, the same
             # test the btmon container passes, and NET_ADMIN for Add

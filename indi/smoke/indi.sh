@@ -44,7 +44,7 @@ done
 getprop "$name" 'Telescope Simulator.EQUATORIAL_EOD_COORD.*'
 getprop "$name" -1 'Telescope Simulator.EQUATORIAL_EOD_COORD._STATE' | grep -qx Ok
 
-if out=$(docker run --rm --entrypoint /usr/bin/indi-shim "$image" 2>&1); then
+if out=$(docker run --rm --entrypoint /indi-shim "$image" 2>&1); then
 	echo "the shim ran with no address" >&2
 	exit 1
 fi

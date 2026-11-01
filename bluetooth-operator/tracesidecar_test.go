@@ -64,7 +64,7 @@ func TestTheTraceReadsItsSettingFromTheSettingsVolume(t *testing.T) {
 	trace := daemonSet.Spec.Template.Spec.InitContainers[1]
 	operator := daemonSet.Spec.Template.Spec.Containers[0]
 
-	if !slices.Equal(trace.Command, []string{"/usr/local/bin/start-btmon"}) {
+	if !slices.Equal(trace.Command, []string{"/start-btmon"}) {
 		t.Errorf("the btmon container runs %v, want start-btmon", trace.Command)
 	}
 	if mount := settingsMount(t, trace); !mount.ReadOnly {

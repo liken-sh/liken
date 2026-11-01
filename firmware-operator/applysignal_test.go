@@ -80,7 +80,7 @@ func TestTheApplyPodStartsWhenTheRehearsalPasses(t *testing.T) {
 			t.Errorf("the pod has the deadline %v and the token %v, want neither", spec.ActiveDeadlineSeconds, spec.AutomountServiceAccountToken)
 		}
 		probe := spec.Containers[0].ReadinessProbe
-		if probe == nil || probe.Exec == nil || !slices.Equal(probe.Exec.Command, []string{"/usr/local/bin/scan", "prepared"}) || probe.PeriodSeconds != 2 {
+		if probe == nil || probe.Exec == nil || !slices.Equal(probe.Exec.Command, []string{"/scan", "prepared"}) || probe.PeriodSeconds != 2 {
 			t.Errorf("the readiness probe is %+v, want scan prepared every 2 seconds", probe)
 		}
 		marker, markerMount := volumeNamed(t, spec, "prepared")

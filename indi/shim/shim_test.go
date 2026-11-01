@@ -27,7 +27,7 @@ func TestTheTargetIsTheProgramsOwnName(t *testing.T) {
 }
 
 func TestANameWithNoPortIsRefused(t *testing.T) {
-	for _, argv0 := range []string{"/usr/bin/indi-shim", "ccd.observatory", ":7625"} {
+	for _, argv0 := range []string{"/indi-shim", "ccd.observatory", ":7625"} {
 		if got, err := target(argv0); err == nil {
 			t.Errorf("target(%q) = %q, want an error", argv0, got)
 		}

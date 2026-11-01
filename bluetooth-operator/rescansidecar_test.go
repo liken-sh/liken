@@ -17,7 +17,7 @@ func TestTheRescanContainerHoldsTwoCapabilities(t *testing.T) {
 	if rescan.Name != "rescan" {
 		t.Fatalf("the third init container is %q, want rescan", rescan.Name)
 	}
-	if !slices.Equal(rescan.Command, []string{"/usr/local/bin/start-rescan"}) {
+	if !slices.Equal(rescan.Command, []string{"/start-rescan"}) {
 		t.Errorf("the rescan container runs %v, want start-rescan", rescan.Command)
 	}
 	capabilities := rescan.SecurityContext.Capabilities

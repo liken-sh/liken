@@ -54,4 +54,8 @@ COPY --from=build /astrophotography-operator /astrophotography-operator
 COPY --from=build /notices /
 # The modes run the programs by their full paths, so the image needs no
 # PATH.
+#
+# The solver's and the workers' pods run as user 1000, the user of
+# observatory-operator's drivers, and the image names the same user.
+USER 1000:1000
 ENTRYPOINT ["/astrophotography-operator"]

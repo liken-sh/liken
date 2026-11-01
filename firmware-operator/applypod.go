@@ -66,7 +66,7 @@ const (
 // (scan/Dockerfile), because a probe names its whole command.
 const (
 	preparedPath = "/run/apply"
-	scanBinary   = "/usr/local/bin/scan"
+	scanBinary   = "/scan"
 )
 
 // cordonTaint is the taint that a cordon sets on a node.

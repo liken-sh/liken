@@ -186,7 +186,7 @@ func serverPod(namespace string, server serverRef, ownerUID string, devices []*d
 				// a link for each device of the file, and writes a start
 				// or a stop to the fifo when the file changes.
 				Command: []string{
-					"/usr/bin/indi-shim", "serve", driversFile, linksDir, fifoPath,
+					"/indi-shim", "serve", driversFile, linksDir, fifoPath,
 					"/usr/bin/indiserver", "-v", "-r", maxRestarts,
 				},
 				Ports:           []containerPort{{Name: "indi", ContainerPort: serverPort}},

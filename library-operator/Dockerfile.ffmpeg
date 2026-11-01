@@ -30,7 +30,7 @@ COPY *.go ./
 # static binary with no paths from the build machine in it. It runs
 # from scratch, where there is no loader to need. The tag pod builds the
 # program without the operator, which no container of this image runs.
-RUN CGO_ENABLED=0 go build -trimpath -tags pod -o /library-operator-pod .
+RUN CGO_ENABLED=0 go build -trimpath -tags pod -ldflags "-s -w" -o /library-operator-pod .
 # The license files of the Go standard library and of each module that
 # the binary links. notices/go.sh says why the image needs them.
 COPY --from=notices go.sh /

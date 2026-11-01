@@ -43,7 +43,7 @@ COPY --from=notices go.sh /
 RUN CGO_ENABLED=0 sh /go.sh /notices .
 
 FROM scratch
-COPY --from=build /per-node-csi-driver /usr/local/bin/per-node-csi-driver
+COPY --from=build /per-node-csi-driver /per-node-csi-driver
 COPY --from=build /notices /
 
-ENTRYPOINT ["/usr/local/bin/per-node-csi-driver"]
+ENTRYPOINT ["/per-node-csi-driver"]

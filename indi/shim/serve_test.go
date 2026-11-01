@@ -67,7 +67,7 @@ func newPod(t *testing.T) *pod {
 		volume: filepath.Join(run, "devices"),
 		links:  filepath.Join(run, "drivers"),
 		fifo:   filepath.Join(run, "indiserver.fifo"),
-		self:   "/usr/bin/indi-shim",
+		self:   "/indi-shim",
 	}
 	for _, dir := range []string{p.volume, p.links} {
 		if err := os.Mkdir(dir, 0o755); err != nil {

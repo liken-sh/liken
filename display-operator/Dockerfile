@@ -51,7 +51,7 @@ ARG VERSION=dev
 # static binary with no paths from the build machine in it. The binary
 # is the whole of the operator image, so it also has to run with no
 # loader and no libc under it.
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=${VERSION}" -o /display-operator .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /display-operator .
 # The license files of the Go standard library and of each module that
 # the binary links. notices/go.sh says why the image needs them.
 COPY --from=notices go.sh /
@@ -62,26 +62,28 @@ FROM weston AS display-operator
 # pod. The argument the manifest passes selects the role: the config
 # write, the compositor it execs, the capture server, or, with no
 # argument, the DRA driver.
-COPY --from=build /display-operator /usr/local/bin/display-operator
+COPY --from=build /display-operator /display-operator
 COPY --from=build /notices /
 
-ENTRYPOINT ["/usr/local/bin/display-operator"]
+ENTRYPOINT ["/display-operator"]
 
 # The capture sidecar runs an ffmpeg process for every request, so
 # its image is the ffmpeg image plus the binary. It carries no
 # compositor: the sidecar is a Wayland client of the weston container
 # beside it.
 FROM ffmpeg AS display-capture
-COPY --from=build /display-operator /usr/local/bin/display-operator
+COPY --from=build /display-operator /display-operator
 COPY --from=build /notices /
 
-ENTRYPOINT ["/usr/local/bin/display-operator"]
+ENTRYPOINT ["/display-operator"]
 
 # The API talks to the Kubernetes API and to the sidecars, and opens
 # no library and no device, so the static binary is the whole image
 # and there is nothing else in it to patch.
 FROM scratch AS display-api
-COPY --from=build /display-operator /usr/local/bin/display-operator
+COPY --from=build /display-operator /display-operator
 COPY --from=build /notices /
-
-ENTRYPOINT ["/usr/local/bin/display-operator"]
+# deploy/api.yaml runs the API as this user, and the image names the
+# same one.
+USER 65532:65532
+ENTRYPOINT ["/display-operator"]

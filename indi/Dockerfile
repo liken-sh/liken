@@ -52,7 +52,7 @@ RUN sh /check-lists.sh /images
 FROM golang AS shim
 WORKDIR /src
 COPY shim/go.mod shim/*.go ./
-RUN CGO_ENABLED=0 go build -trimpath -ldflags=-s -o /indi-shim .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /indi-shim .
 
 FROM builder AS indi-tree
 # /etc/indi-versions records the packages the closure came from, and
@@ -62,13 +62,15 @@ FROM builder AS indi-tree
 RUN sh /indi-closure.sh /out /images/indi \
     && dpkg-query -W indi-bin indi-3rdparty-drivers gsc > /out/etc/indi-versions \
     && mkdir -p -m 1777 /out/tmp
-COPY --from=shim /indi-shim /out/usr/bin/indi-shim
 # The shim links the Go standard library and no other module, and the
 # Go license asks that its notice travel with the binary.
 COPY --from=shim /usr/local/go/LICENSE /out/usr/share/doc/go/LICENSE
 
 FROM scratch AS indi
 COPY --from=indi-tree /out /
+# The shim is a Go program, so it is at /indi-shim, the place of every
+# Go program in a liken image. It reaches no file of the closure.
+COPY --from=shim /indi-shim /indi-shim
 # socat starts a driver by name, and the CCD simulator runs gsc by
 # name, so the image states the one directory that holds programs.
 ENV PATH=/usr/bin HOME=/tmp

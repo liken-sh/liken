@@ -72,7 +72,7 @@ COPY --from=closure /out /
 # component pins for every image of liken, with its notice.
 COPY --from=trust / /
 
-COPY --from=build /git-csi-driver /usr/local/bin/git-csi-driver
+COPY --from=build /git-csi-driver /git-csi-driver
 COPY --from=build /notices /
 
-ENTRYPOINT ["/usr/local/bin/git-csi-driver"]
+ENTRYPOINT ["/git-csi-driver"]

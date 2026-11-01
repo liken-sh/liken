@@ -166,7 +166,7 @@ spec:
           # exit that the binary did not cause ends the container, so
           # the restart count is the count of crashes. restarts.go
           # holds the details.
-          command: ["/usr/local/bin/audio-operator", "pipewire"]
+          command: ["/audio-operator", "pipewire"]
           env:
             # PipeWire looks for its runtime directory in
             # PIPEWIRE_RUNTIME_DIR first and XDG_RUNTIME_DIR second,
@@ -187,7 +187,7 @@ spec:
           # probe names the operator's binary.
           startupProbe:
             exec:
-              command: ["/usr/local/bin/audio-operator", "graph-answers"]
+              command: ["/audio-operator", "graph-answers"]
             periodSeconds: 2
             failureThreshold: 30
             timeoutSeconds: 10
@@ -231,7 +231,7 @@ spec:
           # starts it again when it exits because a new PipeWire
           # replaced the one it served. Any other exit ends the
           # container.
-          command: ["/usr/local/bin/audio-operator", "wireplumber", "--profile=main-embedded"]
+          command: ["/audio-operator", "wireplumber", "--profile=main-embedded"]
           env:
             - name: PIPEWIRE_RUNTIME_DIR
               value: /var/run/audio.liken.sh
@@ -259,7 +259,7 @@ spec:
           # instead of repeating that.
           startupProbe:
             exec:
-              command: ["/usr/local/bin/audio-operator", "endpoints-registered"]
+              command: ["/audio-operator", "endpoints-registered"]
             periodSeconds: 2
             failureThreshold: 30
             timeoutSeconds: 10
@@ -275,7 +275,7 @@ spec:
           # per period and repairs within a minute of the loss.
           livenessProbe:
             exec:
-              command: ["/usr/local/bin/audio-operator", "endpoints-registered"]
+              command: ["/audio-operator", "endpoints-registered"]
             periodSeconds: 20
             failureThreshold: 3
             timeoutSeconds: 10

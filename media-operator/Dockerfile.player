@@ -41,7 +41,7 @@ COPY edl/ ./edl/
 # even though this image has a libc, because the same build then
 # serves both images. The build tag pod leaves out client-go's leader
 # election, which only the operator needs.
-RUN CGO_ENABLED=0 go build -trimpath -tags pod -o /media-operator-pod .
+RUN CGO_ENABLED=0 go build -trimpath -tags pod -ldflags "-s -w" -o /media-operator-pod .
 # The license files of the Go standard library and of each module that
 # the binary links. notices/go.sh says why the image needs them.
 COPY --from=notices go.sh /
