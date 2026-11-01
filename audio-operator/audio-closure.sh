@@ -182,8 +182,18 @@ hops() {
 # ldd prints the whole DT_NEEDED graph of one file, so one call per
 # seed reaches every library the loader resolves at load time.
 # linux-vdso has no file behind it, and the loader's own line prints
-# with no arrow, which is what the two sed patterns accept.
+# with no arrow, which is what the two sed patterns accept. A library
+# the loader cannot find prints "not found", and a tree missing one
+# library fails at the first start in a pod, so the build fails here
+# instead. The exit stops the script only when needed runs in the
+# script's own shell and not in a pipeline, so the loop below writes
+# its output to a file.
 needed() {
+	if ldd "$1" | grep -q 'not found'; then
+		echo "$1 needs a library this builder does not have:" >&2
+		ldd "$1" | grep 'not found' >&2
+		exit 1
+	fi
 	ldd "$1" | sed -n 's/.*=> \(\/[^ ]*\).*/\1/p; s/^\t\(\/[^ ]*\) (0x.*/\1/p'
 }
 
@@ -201,9 +211,11 @@ done
 for seed in $seeds; do
 	{
 		hops "$seed"
-		needed "$(readlink -f "$seed")" | while read -r path; do hops "$path"; done
+		needed "$(readlink -f "$seed")" >"$out/.needed"
+		while read -r path; do hops "$path"; done <"$out/.needed"
 	} >>"$out/.closure"
 done
+rm -f "$out/.needed"
 sort -u "$out/.closure" | while read -r path; do
 	cp -a --parents "$path" "$out"
 done
