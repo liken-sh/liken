@@ -127,23 +127,27 @@ published() {
 # repin_one <component>/<version> <filename> <sha256> <url>: what
 # mirror does in --repin mode. It ignores the channel, because a file
 # the channel already serves is a file whose pin is already right, and
-# the point here is the one that is not. The cache is keyed by
-# version, so a bumped version is always a fresh download and an
-# unchanged one costs a local hash.
+# the point here is the one that is not. A cached file that matches
+# its pin costs a local hash. Any other cached file is downloaded
+# again before it is hashed, because the new digest must come from the
+# bytes that the URL serves now. A cached file that a broken download
+# or a disk fault changed would otherwise become the pin.
 repins=()
 repin_one() {
     local dir="$1" file="$2" sha="$3" url="$4" bytes
     mkdir -p "$cache/$dir"
-    if [[ ! -f "$cache/$dir/$file" ]]; then
-        echo "fetching $dir/$file"
-        curl -fsSL --retry 5 --retry-delay 5 --max-time 1800 "$url" -o "$cache/$dir/$file.partial" || {
-            echo "sources.sh: $url does not resolve" >&2
-            echo "sources.sh: this URL carries a version in its name, so the" >&2
-            echo "bump changed the name; edit the entry in this file by hand" >&2
-            exit 1
-        }
-        mv "$cache/$dir/$file.partial" "$cache/$dir/$file"
+    if sha256sum --check --status <<<"$sha  $cache/$dir/$file" >/dev/null 2>&1; then
+        return
     fi
+    echo "fetching $dir/$file"
+    curl -fsSL --retry 5 --retry-delay 5 --max-time 1800 "$url" -o "$cache/$dir/$file.partial" || {
+        rm -f "$cache/$dir/$file.partial"
+        echo "sources.sh: $url does not resolve" >&2
+        echo "sources.sh: this URL carries a version in its name, so the" >&2
+        echo "bump changed the name; edit the entry in this file by hand" >&2
+        exit 1
+    }
+    mv "$cache/$dir/$file.partial" "$cache/$dir/$file"
     bytes="$(sha256sum "$cache/$dir/$file" | cut -d' ' -f1)"
     if [[ "$bytes" != "$sha" ]]; then
         repins+=(-e "s|$sha|$bytes|")
@@ -159,10 +163,11 @@ repin_one() {
 prefetch() { ((repin)) || "$@"; }
 
 # mirror <component>/<version> <filename> <sha256> <url>: download
-# the file once into the cache, verify it against the pin every time,
-# and place it in the tree the channel serves. Hardlinks keep the big
-# tarballs from existing twice on disk. The retries matter here more
-# than in most fetch scripts, because this function pulls from
+# the file into the cache when the cache has no good copy, verify it
+# against the pin every time, and place it in the tree the channel
+# serves. Hardlinks keep the big tarballs from existing twice on disk.
+# The retries matter here more than in most fetch scripts, because
+# this function pulls from
 # several upstreams in a row (kernel.org, GitHub, GNU, Launchpad).
 # Without the retries, a single transient 502 error from any of them
 # would fail a release.
@@ -177,16 +182,23 @@ mirror() {
         return
     fi
     mkdir -p "$cache/$dir" "$out/$dir"
-    if [[ ! -f "$cache/$dir/$file" ]]; then
+    # A cached file that matches its pin is good. Any other cached
+    # file (missing, torn, or changed) is downloaded again. The bytes
+    # go to a .partial file, which replaces the cached file only after
+    # it matches the pin, and a .partial that does not match is
+    # deleted, so a bad download never stays in the cache to fail
+    # every later run.
+    if ! sha256sum --check --status <<<"$sha  $cache/$dir/$file" >/dev/null 2>&1; then
         echo "mirroring $dir/$file"
         curl -fsSL --retry 5 --retry-delay 5 --max-time 1800 "$url" -o "$cache/$dir/$file.partial"
+        sha256sum --check --quiet <<<"$sha  $cache/$dir/$file.partial" || {
+            rm -f "$cache/$dir/$file.partial"
+            echo "sources.sh: the bytes at $url do not match the pin of $dir/$file" >&2
+            echo "sources.sh: if a domain's version bumped, run licensing/sources.sh --repin" >&2
+            exit 1
+        }
         mv "$cache/$dir/$file.partial" "$cache/$dir/$file"
     fi
-    echo "$sha  $cache/$dir/$file" | sha256sum --check --quiet || {
-        echo "sources.sh: $dir/$file does not match its pin; if a domain's" >&2
-        echo "version bumped, update the matching source pin in this script" >&2
-        exit 1
-    }
     ln -f "$cache/$dir/$file" "$out/$dir/$file" 2>/dev/null \
         || cp "$cache/$dir/$file" "$out/$dir/$file"
 }
