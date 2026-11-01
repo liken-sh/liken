@@ -193,12 +193,14 @@ var skipDirs = map[string]bool{
 }
 
 // LoadComponents finds every package.toml under root and reads it, and
-// derives each component's CodeQL jobs. The same walk lists the files
-// that a C, C++, or Python analysis reads, because no package.toml
-// names them.
+// derives each component's CodeQL jobs. No package.toml names the files
+// that a C, C++, or Python analysis reads, so the loader finds them in
+// git's list of the repository's files. A walk of the directory would
+// also read the upstream sources that a fetch script extracts into a
+// directory that .gitignore leaves out, and the generated workflows
+// would then differ between two checkouts of one commit.
 func LoadComponents(root string) (map[string]*Component, error) {
 	components := map[string]*Component{}
-	var sources []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -214,13 +216,6 @@ func LoadComponents(root string) (map[string]*Component, error) {
 			if _, err := os.Lstat(filepath.Join(path, ".git")); err == nil {
 				return filepath.SkipDir
 			}
-		}
-		if !d.IsDir() && (languageSource(languageC, d.Name()) || languageSource(languagePython, d.Name())) {
-			rel, err := filepath.Rel(root, path)
-			if err != nil {
-				return err
-			}
-			sources = append(sources, filepath.ToSlash(rel))
 		}
 		if d.IsDir() || d.Name() != "package.toml" {
 			return nil
@@ -245,8 +240,15 @@ func LoadComponents(root string) (map[string]*Component, error) {
 	if err := validateGraph(components); err != nil {
 		return nil, err
 	}
+	sources, err := sourceFiles(root)
+	if err != nil {
+		return nil, err
+	}
 	owned := map[string][]string{}
 	for _, file := range sources {
+		if !languageSource(languageC, file) && !languageSource(languagePython, file) {
+			continue
+		}
 		if owner := ownerOf(components, file); owner != "" {
 			owned[owner] = append(owned[owner], strings.TrimPrefix(file, components[owner].Dir+"/"))
 		}

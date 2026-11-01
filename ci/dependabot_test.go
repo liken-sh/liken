@@ -53,9 +53,6 @@ func dependabotTree(t *testing.T) string {
 		"plans/1-history/go.mod":     "module p\n",
 		"plans/1-history/Cargo.lock": "version = 4\n",
 	})
-	if _, err := (Git{Dir: root}).run("init", "-q"); err != nil {
-		t.Fatal(err)
-	}
 	return root
 }
 

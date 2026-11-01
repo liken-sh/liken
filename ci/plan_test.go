@@ -19,7 +19,6 @@ type repo struct {
 func newRepo(t *testing.T, files map[string]string) *repo {
 	t.Helper()
 	r := &repo{t: t, git: Git{Dir: writeTree(t, files)}}
-	r.run("init", "--quiet", "--initial-branch=main")
 	r.commit("the first commit")
 	return r
 }

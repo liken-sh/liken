@@ -56,9 +56,6 @@ func pinsTree(t *testing.T, changes map[string]string) string {
 		tree[name] = text
 	}
 	root := writeTree(t, tree)
-	if _, err := (Git{Dir: root}).run("init", "-q"); err != nil {
-		t.Fatal(err)
-	}
 	return root
 }
 

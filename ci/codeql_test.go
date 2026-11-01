@@ -227,3 +227,40 @@ func TestTheRootWorkflowGrantsTheUploadsAndAnalyzesTheActions(t *testing.T) {
 		t.Errorf("analyze %v", analyze)
 	}
 }
+
+// A fetch script extracts upstream sources into a directory that
+// .gitignore leaves out. The loader reads the sources that git tracks
+// or would track, so a downloaded C or Python file derives no CodeQL
+// job, and the workflows are the same in every checkout of a commit.
+func TestAnIgnoredSourceDerivesNoCodeQLJob(t *testing.T) {
+	r := newRepo(t, map[string]string{
+		"app/package.toml":      "[package]\nname = \"app\"\n",
+		"app/native.c":          "int app(void) { return 0; }\n",
+		"os/package.toml":       "[package]\nname = \"os\"\n",
+		"os/.gitignore":         "/cache/\n",
+		"os/cache/1.0/tool.c":   "int tool(void) { return 0; }\n",
+		"os/cache/1.0/fetch.py": "print('fetched')\n",
+	})
+	components, err := LoadComponents(r.git.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		component string
+		jobs      []string
+	}{
+		{"app", []string{"codeql-c-cpp"}},
+		{"os", nil},
+	}
+	for _, c := range cases {
+		t.Run(c.component, func(t *testing.T) {
+			var got []string
+			for _, job := range components[c.component].Jobs {
+				got = append(got, job.Name)
+			}
+			if !reflect.DeepEqual(got, c.jobs) {
+				t.Errorf("got %v, want %v", got, c.jobs)
+			}
+		})
+	}
+}

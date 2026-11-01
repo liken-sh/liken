@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,6 +21,14 @@ func writeTree(t *testing.T, files map[string]string) string {
 		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// The loader and the checks list a repository's files through git,
+	// so every tree is a repository, with its files not yet committed.
+	init := exec.Command("git", "init", "--quiet", "--initial-branch=main")
+	init.Dir = root
+	init.Env = gitEnv(testGit...)
+	if out, err := init.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
 	}
 	return root
 }
