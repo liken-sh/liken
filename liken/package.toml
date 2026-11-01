@@ -1,7 +1,7 @@
 # The OS. Its version is the repository's release tag, and it publishes
 # to the release channel at releases.liken.sh, not to a registry. The
-# fetch.sh scripts of its domains read the alpine builder from
-# toolchains.
+# fetch.sh scripts of its domains, and the buildroot build of its
+# static programs, read their builders from toolchains.
 [package]
 name = "liken"
 license = "MIT"
@@ -44,8 +44,14 @@ run = "make test-docs"
 # and that it boots to a Ready Kubernetes node under both firmware
 # types. The UEFI drill installs node-1 onto a blank disk and boots it
 # through OVMF's boot entries. The BIOS drill proves the other chain:
-# MBR boot code, GRUB's core image, and the chosen slot's kernel. A
-# warm-cache build takes 3 to 6 minutes and a cold one about 15.
+# MBR boot code, GRUB's core image, and the chosen slot's kernel.
+#
+# The limit covers a build whose userland cache misses, after a change
+# under liken/userland or to toolchains/images.toml. That build compiles
+# buildroot's cross-compiler and every static program from source
+# before the rest of the OS, and buildroot runs BR2_JLEVEL jobs on the
+# runner's cores. A build that restores the userland from the cache
+# fetches and assembles the rest, and finishes far inside the limit.
 #
 # The serial console is the record of the boot, and it is worth keeping
 # when the drill passes: a healthy boot is the baseline for the next
@@ -54,7 +60,7 @@ run = "make test-docs"
 [[jobs]]
 name = "build"
 toolchain = "os"
-timeout = 20
+timeout = 120
 run = """
 make all
 make smoke-uefi
@@ -64,6 +70,10 @@ artifacts = ["dev-cluster/guests/node-1/*.log"]
 
 [outputs]
 channel = true
+# The publish job builds the release with `make release`, which builds
+# the userland from source when the cache misses, as the build job's
+# limit above says.
+timeout = 120
 # deploy/monitoring is a kustomize Component that a fleet fetches by
 # git at a release tag. Nothing on the channel is built from it, so a
 # change to it does not release the OS. The change reaches fleets with

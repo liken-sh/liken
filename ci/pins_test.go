@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -15,6 +17,7 @@ func pinsTree(t *testing.T, changes map[string]string) string {
 			"golang = \"golang:1.27.3-trixie@sha256:aaa\"\n" +
 			"rust = \"rust:1.99.1-trixie@sha256:bbb\"\n" +
 			"debian = \"debian:sid-slim@sha256:ccc\"\n" +
+			"buildroot = \"registry.example/buildroot/base:1@sha256:ddd\"\n" +
 			"[run]\n" +
 			"curl = \"curlimages/curl:8.22.0\"\n" +
 			"mosquitto = \"eclipse-mosquitto:2.0.22\"\n",
@@ -56,11 +59,18 @@ func pinsTree(t *testing.T, changes map[string]string) string {
 		"b/src/other-v1.xml":                 "<protocol name=\"other_v1\"/>\n",
 		"lib/closure.sh":                     "collect() { :; }\n",
 		"c/closure.sh":                       "collect() { :; }\n",
+		"liken/userland/VERSION":             "abc\n",
+		"liken/userland/fetch.sh":            "source \"$here/../../toolchains/pin.sh\"\ndeclare -A buildroot_sha256=(\n    [\"abc\"]=\"111\"\n    [\"old\"]=\"000\"\n)\n",
+		"liken/userland/latest.sh":           "source \"$here/../../toolchains/pin.sh\"\n",
+		"d/Dockerfile":                       "FROM buildroot AS daemons\nARG BUILDROOT_COMMIT=abc\nARG BUILDROOT_SHA256=111\n",
 	}
 	for name, text := range changes {
 		tree[name] = text
 	}
 	root := writeTree(t, tree)
+	if err := os.Chmod(filepath.Join(root, "liken/userland/latest.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	return root
 }
 
@@ -114,6 +124,10 @@ func TestADriftedPinIsFound(t *testing.T) {
 			"the Wayland protocol liken-thing-v1.xml has 2 versions:"},
 		"a copy of the closure library": {"c/closure.sh", "collect() { true; }\n",
 			"the closure library closure.sh has 2 versions:"},
+		"a buildroot commit in a Dockerfile": {"d/Dockerfile", "FROM buildroot AS daemons\nARG BUILDROOT_COMMIT=old\nARG BUILDROOT_SHA256=000\n",
+			"the buildroot pin buildroot has 2 versions: abc sha256:111 in liken/userland/VERSION; old sha256:000 in d/Dockerfile"},
+		"a buildroot digest in a Dockerfile": {"d/Dockerfile", "FROM buildroot AS daemons\nARG BUILDROOT_COMMIT=abc\nARG BUILDROOT_SHA256=222\n",
+			"the buildroot pin buildroot has 2 versions: abc sha256:111 in liken/userland/VERSION; abc sha256:222 in d/Dockerfile"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

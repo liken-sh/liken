@@ -48,6 +48,11 @@ import (
 //     because its build context does not reach vulkan/. A drifted copy
 //     builds images whose trees, notices, and package records follow
 //     other rules than the bases'.
+//   - each Dockerfile that downloads buildroot names the commit in
+//     liken/userland/VERSION and the digest that liken/userland/fetch.sh
+//     pins for it, because the image and the OS build their static
+//     programs from one BR2_EXTERNAL tree, and the tree is written for
+//     one buildroot.
 //
 // The plans keep the versions of their day, so the check reads none of
 // them. Neither does it read test data, a cache, or another checkout.
@@ -63,6 +68,10 @@ func checkPins(root string) ([]string, error) {
 	goVersion := strings.SplitN(parseImageRef(tools.Build["golang"]).Tag, "-", 2)[0]
 	rustVersion := strings.SplitN(parseImageRef(tools.Build["rust"]).Tag, "-", 2)[0]
 	modules, crates, hooks, protocols, closures := versions{}, versions{}, versions{}, versions{}, versions{}
+	buildroots, err := userlandBuildroot(root)
+	if err != nil {
+		return nil, err
+	}
 	var findings []string
 	for _, file := range files {
 		data, err := os.ReadFile(filepath.Join(root, file))
@@ -99,6 +108,9 @@ func checkPins(root string) ([]string, error) {
 			findings = append(findings, outsideImages(file, string(data))...)
 			findings = append(findings, unauditedBuilds(file, string(data))...)
 			findings = append(findings, goImageFindings(file, string(data))...)
+			if pin := dockerfileBuildroot(string(data)); pin != "" {
+				buildroots.add("buildroot", pin, file)
+			}
 		}
 	}
 	findings = append(findings, modules.drift("the Go module")...)
@@ -106,7 +118,55 @@ func checkPins(root string) ([]string, error) {
 	findings = append(findings, hooks.drift("the hook repository")...)
 	findings = append(findings, protocols.drift("the Wayland protocol")...)
 	findings = append(findings, closures.drift("the closure library")...)
+	findings = append(findings, buildroots.drift("the buildroot pin")...)
 	return findings, nil
+}
+
+// userlandBuildroot reads the buildroot pin of liken/userland: the
+// commit in VERSION and its digest in the buildroot_sha256 table of
+// fetch.sh, as "<commit> sha256:<digest>". A tree with no userland pin
+// has none to compare.
+func userlandBuildroot(root string) (versions, error) {
+	pins := versions{}
+	data, err := os.ReadFile(filepath.Join(root, "liken/userland/VERSION"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return pins, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	commit := strings.TrimSpace(string(data))
+	fetch, err := os.ReadFile(filepath.Join(root, "liken/userland/fetch.sh"))
+	if err != nil {
+		return nil, err
+	}
+	digest := ""
+	prefix := `["` + commit + `"]="`
+	for _, line := range strings.Split(string(fetch), "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), prefix); ok {
+			digest = strings.TrimSuffix(rest, `"`)
+		}
+	}
+	pins.add("buildroot", commit+" sha256:"+digest, "liken/userland/VERSION")
+	return pins, nil
+}
+
+// dockerfileBuildroot reads the BUILDROOT_COMMIT and BUILDROOT_SHA256
+// arguments of a Dockerfile that downloads buildroot, in the form of
+// userlandBuildroot, or "" for a Dockerfile that names neither.
+func dockerfileBuildroot(text string) string {
+	args := map[string]string{}
+	for _, line := range strings.Split(text, "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "ARG "); ok {
+			if name, value, found := strings.Cut(rest, "="); found {
+				args[name] = value
+			}
+		}
+	}
+	if args["BUILDROOT_COMMIT"] == "" && args["BUILDROOT_SHA256"] == "" {
+		return ""
+	}
+	return args["BUILDROOT_COMMIT"] + " sha256:" + args["BUILDROOT_SHA256"]
 }
 
 // pinFiles lists the files of the repository that can hold a pin.

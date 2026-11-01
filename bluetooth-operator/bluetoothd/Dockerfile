@@ -11,9 +11,15 @@
 # distribution's package: a package brings a package manager, a shell,
 # and a base filesystem, and this container runs three programs.
 #
-# The build applies the patches in bluetoothd/patches/bluez/ to the
-# BlueZ source. bluetoothd/patches/README.md lists each one and the
-# bug it fixes.
+# buildroot builds BlueZ, dbus, and every library they link, from the
+# BR2_EXTERNAL tree in liken/userland, the same tree and the same
+# buildroot.sh that build the static programs of the OS.
+# bluetoothd.config in that tree selects the programs, and
+# bluetooth/bluez-static in it holds the BlueZ recipe and the patches
+# that the build applies to BlueZ. The README.md beside the patches
+# lists each one and the bug it fixes. buildroot checks every source
+# tarball against a .hash file, so this build reads no byte that a
+# commit did not name.
 #
 # The BlueZ shells have one limit in this image. BlueZ parses each
 # command's argument specification with wordexp(3), musl implements
@@ -33,110 +39,35 @@
 # whose version has to agree with the binary that opens it. The static
 # binaries here open none, so no version can disagree. The build checks
 # each binary with file(1) and accepts "statically linked" or
-# "static-pie linked": gcc on Alpine builds a static PIE for -static,
-# which carries no loader request and relocates itself at start.
-#
-# Two things make the static link work, and both are easy to lose:
-#
-#   - libtool reads -static as "link the project's own .la libraries
-#     statically" and leaves the rest dynamic. -all-static is the flag
-#     that makes the whole binary static, and the binary that comes
-#     out of -static alone still names /lib/ld-musl-x86_64.so.1 as its
-#     interpreter, so `file` is the check.
-#   - No distribution ships a static libdbus, so dbus is built here
-#     first and BlueZ links against the libdbus-1.a that build
-#     installs.
+# "static-pie linked".
 
-FROM alpine AS daemons
+FROM buildroot AS daemons
 
-ARG BLUEZ_VERSION=5.87
-ARG BLUEZ_SHA256=26bdcf2cebd7310c6f598850606b037ef0c515fe6608ebc54d22c50c4c32b35f
-ARG DBUS_VERSION=1.16.2
-ARG DBUS_SHA256=0ba2a1a4b16afe7bceb2c07e9ce99a8c2c3508e5dec290dbb643384bd6beb7e2
+# The buildroot commit and the digest of its tarball are the pin in
+# liken/userland/VERSION and liken/userland/fetch.sh, and
+# liken/userland/latest.sh --bump writes the two lines below with
+# them. `cd ci && go run . pins -root ..` fails when they disagree.
+ARG BUILDROOT_COMMIT=c1490f289c129c12de1249074eac765dee1a5d9d
+ARG BUILDROOT_SHA256=34923d316a19c4acbffc8fffa2281a99e9f6666c43b3bfe1c06c2c491cdff262
 
-# patch is GNU patch. BusyBox's patch, which Alpine ships by default,
-# has no --forward, and the patches below depend on it.
-# fetch-check: allow, because buildroot's BlueZ recipe refuses a static-only build (AGENTS.md, Static programs)
-RUN apk add --no-cache \
-        build-base pkgconf meson ninja wget tar xz linux-headers patch \
-        expat-dev expat-static \
-        glib-dev glib-static pcre2-dev pcre2-static libffi-dev zlib-static \
-        eudev-dev json-c-dev readline-dev readline-static ncurses-static
-
-# dbus comes first. BlueZ links against libdbus-1.a, and this install
-# is where that archive, its headers, and its pkg-config file come
-# from. dbus 1.16 builds with meson only, and prefer_static makes the
-# link pick expat's archive over its shared object.
-WORKDIR /build
-RUN wget -q "https://dbus.freedesktop.org/releases/dbus/dbus-${DBUS_VERSION}.tar.xz" \
-    && echo "${DBUS_SHA256}  dbus-${DBUS_VERSION}.tar.xz" | sha256sum -c - \
-    && tar xf "dbus-${DBUS_VERSION}.tar.xz"
-WORKDIR /build/dbus-${DBUS_VERSION}
-RUN meson setup build \
-        --prefix=/usr --sysconfdir=/etc --localstatedir=/var \
-        --default-library=static -Dprefer_static=true \
-        -Dmodular_tests=disabled -Dxml_docs=disabled -Ddoxygen_docs=disabled \
-        -Dsystemd=disabled -Dselinux=disabled -Dapparmor=disabled -Dlibaudit=disabled \
-        -Dc_link_args=-static \
-    && meson compile -C build \
-    && meson install -C build --destdir /staging \
-    && meson install -C build
-
-# BlueZ. The disabled parts are the ones no controller on this bus
-# needs: the CUPS printer backend and the OBEX file-transfer daemon.
-# bluetoothctl stays, because a kubectl exec session with it is how a
-# person inspects the running daemon by hand. Pairing itself is the
-# operator's job, over D-Bus, from a PairingRequest.
-#
-# The monitor and the tools build, and the install step below takes
-# btmon out of monitor/ and btmgmt out of tools/, and leaves every
-# other program the two directories produce. --enable-deprecated
-# stays off, so the hciconfig-era tools never build: they drive the
-# raw HCI socket while bluetoothd drives the management channel, so
-# a command from one of them and the state the daemon holds
-# disagree.
-#
-# LIBS includes -lncursesw because readline's pkg-config file names no
-# terminal library, and a static bluetoothctl then has no tputs.
-WORKDIR /build
-RUN wget -q "https://mirrors.edge.kernel.org/pub/linux/bluetooth/bluez-${BLUEZ_VERSION}.tar.xz" \
-    && echo "${BLUEZ_SHA256}  bluez-${BLUEZ_VERSION}.tar.xz" | sha256sum -c - \
-    && tar xf "bluez-${BLUEZ_VERSION}.tar.xz"
-WORKDIR /build/bluez-${BLUEZ_VERSION}
-
-# THE BLUEZ IN THIS IMAGE IS PATCHED. Each file in
-# bluetoothd/patches/bluez/ fixes a BlueZ bug that stops a controller
-# from working and that no release fixes yet, and
-# bluetoothd/patches/README.md says what each one fixes, why, and
-# where it stands upstream. Read that file before you change
-# BLUEZ_VERSION.
-#
-# Today there is one patch. BlueZ 5.87 can turn off the kernel's
-# reconnect of a bonded Bluetooth LE remote for good when the remote
-# reconnects within 4 seconds of an authentication failure. The
-# remote then never reconnects after its next sleep, and only a
-# restart of bluetoothd recovers it.
-#
-# --forward makes a patch that a new release already carries fail
-# instead of being reversed, and the build stops. That failure is the
-# reminder: delete the patch and its entry in the README, and build
-# again. The patches are applied in the order of their names.
-COPY bluetoothd/patches/bluez/ /build/patches/bluez/
-RUN set -eux; \
-    for patch in /build/patches/bluez/*.patch; do \
-        patch -p1 --forward --batch < "$patch"; \
-    done
-RUN ./configure \
-        --prefix=/usr --sysconfdir=/etc --localstatedir=/var --libexecdir=/usr/libexec \
-        --enable-client --enable-datafiles \
-        --enable-monitor --enable-tools \
-        --disable-manpages --disable-cups --disable-obex --disable-systemd \
-    && make -j"$(nproc)" LDFLAGS="-all-static" LIBS="-lncursesw" \
-    && make install DESTDIR=/staging
+# The buildroot image runs as br-user, and buildroot writes its output
+# and its caches as that user. The download directory and the compiler
+# cache are cache mounts, so a rebuild on the same machine downloads
+# and compiles only what changed.
+WORKDIR /home/br-user
+ADD --chown=br-user:br-user --checksum=sha256:${BUILDROOT_SHA256} \
+    https://github.com/buildroot/buildroot/archive/${BUILDROOT_COMMIT}.tar.gz buildroot.tar.gz
+RUN tar -xzf buildroot.tar.gz && mv "buildroot-${BUILDROOT_COMMIT}" buildroot && rm buildroot.tar.gz
+COPY --from=userland --chown=br-user:br-user . external/
+RUN --mount=type=cache,target=/home/br-user/dl,uid=1000,gid=1000 \
+    --mount=type=cache,target=/home/br-user/ccache,uid=1000,gid=1000 \
+    BR2_DL_DIR=/home/br-user/dl BR2_CCACHE_DIR=/home/br-user/ccache \
+    bash external/buildroot.sh /home/br-user/buildroot /home/br-user/output bluetoothd.config
 
 # Every file the image ships, named. install -D fails on a path that
 # moved, so a BlueZ or dbus release that relocates one of these stops
-# the build rather than shipping an image without it.
+# the build rather than shipping an image without it. buildroot strips
+# each binary in its target tree.
 #
 # The four tools each answer a question nothing else in the pod can.
 # btmgmt reads the kernel's management settings, and btmgmt info is
@@ -158,74 +89,52 @@ RUN ./configure \
 # `docker buildx bake bluetoothd --load` at the top of the repository.
 # The image has no shell, so list its files from outside: `docker
 # create` a container of it, and `docker export` that container into
-# `tar -tv`, which prints each stripped binary with its size. `docker
-# image inspect --format '{{.Size}}'` gives the size of the whole
-# image.
-#
-# btmgmt is a noinst_PROGRAMS entry in Makefile.tools, so make
-# install leaves it in the build tree, and the copy below takes it
-# from there. A BlueZ release that moves it stops the build.
-RUN set -eux; \
-    install -D -m 0755 /staging/usr/libexec/bluetooth/bluetoothd /out/usr/libexec/bluetooth/bluetoothd; \
-    install -D -m 0755 /staging/usr/bin/bluetoothctl /out/usr/bin/bluetoothctl; \
-    install -D -m 0755 /staging/usr/bin/btmon /out/usr/bin/btmon; \
-    install -D -m 0755 "/build/bluez-${BLUEZ_VERSION}/tools/btmgmt" /out/usr/bin/btmgmt; \
-    install -D -m 0755 /staging/usr/bin/dbus-daemon /out/usr/bin/dbus-daemon; \
-    install -D -m 0755 /staging/usr/bin/dbus-send /out/usr/bin/dbus-send; \
-    strip /out/usr/libexec/bluetooth/bluetoothd /out/usr/bin/bluetoothctl \
-        /out/usr/bin/btmon /out/usr/bin/btmgmt \
-        /out/usr/bin/dbus-daemon /out/usr/bin/dbus-send; \
-    for binary in /out/usr/libexec/bluetooth/bluetoothd /out/usr/bin/bluetoothctl \
-        /out/usr/bin/btmon /out/usr/bin/btmgmt \
-        /out/usr/bin/dbus-daemon /out/usr/bin/dbus-send; do \
-        file "$binary" | grep -qE "statically linked|static-pie linked" || { file "$binary"; exit 1; }; \
+# `tar -tv`, which prints each binary with its size. `docker image
+# inspect --format '{{.Size}}'` gives the size of the whole image.
+RUN set -eu; \
+    target=/home/br-user/output/target; \
+    for binary in usr/libexec/bluetooth/bluetoothd usr/bin/bluetoothctl \
+        usr/bin/btmon usr/bin/btmgmt usr/bin/dbus-daemon usr/bin/dbus-send; do \
+        file "$target/$binary" | grep -qE "statically linked|static-pie linked" || { file "$target/$binary"; exit 1; }; \
+        install -D -m 0755 "$target/$binary" "/home/br-user/out/$binary"; \
     done
 
 # dbus's own system.conf, unchanged, and the policy file BlueZ
 # installs into it. system.conf denies every name and every method
 # call, and bluetooth.conf is the hole that lets root own org.bluez.
 # Writing a policy by hand here would mean re-deriving that pair.
-RUN set -eux; \
-    install -D -m 0644 /staging/usr/share/dbus-1/system.conf /out/usr/share/dbus-1/system.conf; \
-    install -D -m 0644 /staging/usr/share/dbus-1/system.d/bluetooth.conf /out/usr/share/dbus-1/system.d/bluetooth.conf
+RUN set -eu; \
+    target=/home/br-user/output/target; \
+    install -D -m 0644 "$target/usr/share/dbus-1/system.conf" /home/br-user/out/usr/share/dbus-1/system.conf; \
+    install -D -m 0644 "$(find "$target" -path '*/dbus-1/system.d/bluetooth.conf' | head -1)" \
+        /home/br-user/out/usr/share/dbus-1/system.d/bluetooth.conf
 
-# The licenses of BlueZ and dbus ask that their notices travel with the
-# programs, and the GPL that BlueZ uses also requires that the source of
-# a static program be available, the libraries it links included, and
-# the changes made to it. So the image carries the license files and
-# the authors of the two projects, the patches applied to BlueZ, and a
-# list of the Alpine packages whose static libraries the build
-# installed, with the license that Alpine states for each. Alpine's
-# packages carry no license files of their own.
-RUN set -eux; \
-    mkdir -p /out/usr/share/doc/bluez /out/usr/share/doc/dbus /out/usr/share/doc/liken; \
-    cp -r /build/patches/bluez /out/usr/share/doc/liken/bluez-patches; \
-    cp "/build/bluez-${BLUEZ_VERSION}/COPYING" "/build/bluez-${BLUEZ_VERSION}/COPYING.LIB" \
-        "/build/bluez-${BLUEZ_VERSION}/AUTHORS" /out/usr/share/doc/bluez/; \
-    cp "/build/dbus-${DBUS_VERSION}/COPYING" "/build/dbus-${DBUS_VERSION}/AUTHORS" /out/usr/share/doc/dbus/; \
-    { \
-        echo "ghcr.io/liken-sh/bluetoothd holds static programs built from BlueZ ${BLUEZ_VERSION},"; \
-        echo "https://mirrors.edge.kernel.org/pub/linux/bluetooth/bluez-${BLUEZ_VERSION}.tar.xz,"; \
-        echo "with the patches in /usr/share/doc/liken/bluez-patches applied,"; \
-        echo "and dbus ${DBUS_VERSION},"; \
-        echo "https://dbus.freedesktop.org/releases/dbus/dbus-${DBUS_VERSION}.tar.xz,"; \
-        echo "unmodified. They link the static libraries of the Alpine $(cut -d. -f1,2 /etc/alpine-release)"; \
-        echo "packages below. Alpine serves the recipe of each package at"; \
-        echo "https://gitlab.alpinelinux.org/alpine/aports and the source it builds from"; \
-        echo "at https://distfiles.alpinelinux.org/distfiles/."; \
-        echo; \
-        apk list --installed 2>/dev/null | grep -E '^(expat|glib|pcre2|libffi|zlib|eudev|json-c|readline|ncurses|musl)-' | sort; \
-    } > /out/usr/share/doc/liken/bluetoothd.alpine
+# The licenses of BlueZ, dbus, and the libraries they link ask that
+# their notices travel with the programs, and the GPL that BlueZ uses
+# also requires that the source of a static program be available, the
+# libraries it links included, and the changes made to it. So the
+# image carries buildroot's legal-info manifest, which names each
+# package, its version, its license, and where its source comes from,
+# the license files of every package, and the patches applied to
+# BlueZ.
+RUN set -eu; \
+    doc=/home/br-user/out/usr/share/doc/liken; \
+    mkdir -p "$doc/bluez-patches"; \
+    cp /home/br-user/output/legal-info/manifest.csv "$doc/manifest.csv"; \
+    cp -r /home/br-user/output/legal-info/licenses "$doc/licenses"; \
+    cp external/bluetooth/bluez-static/*.patch "$doc/bluez-patches/"
 
-# dbus-daemon drops to its messagebus user as soon as it has bound the
-# socket, and it looks the name up in /etc/passwd. musl resolves users
-# from those files directly, with no NSS modules to load, so these two
+# dbus-daemon drops to its user, dbus, as soon as it has bound the
+# socket, and it looks the name up in /etc/passwd. buildroot's dbus
+# recipe names that user in system.conf. musl resolves users from
+# those files directly, with no NSS modules to load, so these two
 # files are the whole of what the lookup reads. The shells name a path
 # that is not in the image, because nothing here ever starts one.
-RUN set -eux; \
-    mkdir -p /out/etc /out/etc/bluetooth /out/var/lib/bluetooth; \
-    printf 'root:x:0:0:root:/root:/sbin/nologin\nmessagebus:x:100:100:D-Bus message bus:/:/sbin/nologin\n' > /out/etc/passwd; \
-    printf 'root:x:0:\nmessagebus:x:100:\n' > /out/etc/group
+RUN set -eu; \
+    out=/home/br-user/out; \
+    mkdir -p "$out/etc/bluetooth" "$out/var/lib/bluetooth"; \
+    printf 'root:x:0:0:root:/root:/sbin/nologin\ndbus:x:100:100:D-Bus message bus:/:/sbin/nologin\n' > "$out/etc/passwd"; \
+    printf 'root:x:0:\ndbus:x:100:\n' > "$out/etc/group"
 
 # The three entrypoints. They are built from this repository's own
 # module, which is also where the operator comes from, so the images
@@ -264,7 +173,7 @@ COPY --from=notices go.sh /
 RUN CGO_ENABLED=0 sh /go.sh /notices ./bluetoothd ./bluetoothd/btmon ./bluetoothd/rescan
 
 FROM scratch
-COPY --from=daemons /out/ /
+COPY --from=daemons /home/br-user/out/ /
 COPY --from=entrypoint /start-bluetoothd /start-bluetoothd
 COPY --from=entrypoint /start-btmon /start-btmon
 COPY --from=entrypoint /start-rescan /start-rescan

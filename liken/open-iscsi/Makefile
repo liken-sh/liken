@@ -1,35 +1,31 @@
 # The open-iscsi domain: the iSCSI initiator userspace, the host half
 # of the iscsi feature (plans/completed/17-network-storage-clients.md).
 #
-# Two artifacts. The static binaries (iscsid and iscsiadm) come from
-# fetch.sh, which builds them from pinned source inside a pinned
-# container. CSI drivers run the host's iscsiadm, so those binaries
-# ship at /sbin in every image. The OCI image tarball carries iscsid
-# into the cluster as the feature's DaemonSet (manifests/iscsid.yaml),
-# packaged by the recipe the image domain owns (image/oci.sh), from
-# the same binary. This keeps the daemon and the tool that talks to it
-# as one build.
+# The static binaries, iscsid and iscsiadm, come from the userland
+# domain, whose buildroot build compiles them from pinned source with
+# the recipe in userland/iscsi/. CSI drivers run the host's iscsiadm,
+# so those binaries ship at /sbin in every image. This domain packages
+# the same iscsid as an OCI image tarball, which carries it into the
+# cluster as the feature's DaemonSet (manifests/iscsid.yaml), with the
+# recipe the image domain owns (image/oci.sh). This keeps the daemon
+# and the tool that talks to it as one build.
 #
 # The version stamp and output directory can be overridden for the
 # same reason as the operators': a release rebuilds the iscsid image
 # under its own version into its own tree. The binaries do not vary by
-# liken version, so they always come from this domain's
-# dist/<version>/, and this Makefile copies them into an overridden
-# DIST for packaging.
+# liken version, so this Makefile copies them from the userland domain
+# into DIST, beside the image that it packages from them.
 include ../version.mk
-OPENISCSI_VERSION := $(strip $(file <VERSION))
-DIST ?= dist/$(OPENISCSI_VERSION)
+DIST ?= dist
+USERLAND_DIST := ../userland/dist
 
 all: $(DIST)/iscsid-image.tar
 
-dist/$(OPENISCSI_VERSION)/iscsid dist/$(OPENISCSI_VERSION)/iscsiadm &: VERSION fetch.sh ../../toolchains/images.toml
-	./fetch.sh
-
-$(DIST)/iscsid-image.tar: dist/$(OPENISCSI_VERSION)/iscsid ../image/oci.sh $(LIKEN_VERSION_STAMP)
+$(DIST)/iscsid $(DIST)/iscsiadm &: $(USERLAND_DIST)/sbin/iscsid $(USERLAND_DIST)/sbin/iscsiadm
 	@mkdir -p $(DIST)
-	@if [ "$(abspath $(DIST))" != "$(abspath dist/$(OPENISCSI_VERSION))" ]; then \
-		cp dist/$(OPENISCSI_VERSION)/iscsid dist/$(OPENISCSI_VERSION)/iscsiadm $(DIST)/; \
-	fi
+	cp $(USERLAND_DIST)/sbin/iscsid $(USERLAND_DIST)/sbin/iscsiadm $(DIST)/
+
+$(DIST)/iscsid-image.tar: $(DIST)/iscsid ../image/oci.sh $(LIKEN_VERSION_STAMP)
 	DIST=$(abspath $(DIST)) LIKEN_VERSION=$(LIKEN_VERSION) ../image/oci.sh iscsid liken.sh/iscsid
 
 .PHONY: all clean

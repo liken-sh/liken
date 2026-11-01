@@ -149,23 +149,17 @@ runs:
         path: trust/dist
         key: trust-${{ hashFiles('trust/VERSION', 'trust/pin.toml', 'trust/fetch.sh') }}
     # The userland's key covers every file of its BR2_EXTERNAL tree and
-    # the image table, the same prerequisites that liken/Makefile
-    # declares, because each one changes what buildroot builds.
+    # the image table, the prerequisites that liken/Makefile declares
+    # and the bluetoothd image's files beside them, because each one
+    # changes what buildroot builds. A miss compiles buildroot's
+    # cross-compiler and every program, which the build job's limit in
+    # liken/package.toml covers. open-iscsi/dist holds copies of the
+    # userland's iscsid and iscsiadm and the iscsid image, which bakes
+    # in the liken version, so it has no cache of its own.
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/userland/dist
         key: userland-${{ hashFiles('liken/userland/**', 'toolchains/images.toml') }}
-    # The cache carries only what fetch.sh built. The iscsid image
-    # tar in it is always stale, because the tar bakes in the liken
-    # version, and that version now changes with every commit. The
-    # version stamp file (version.mk) gets a fresh timestamp during
-    # the run. So make rebuilds the tar from the cached binaries every
-    # time. This step is cheap, compared to the container build that
-    # the cache exists to avoid.
-    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      with:
-        path: liken/open-iscsi/dist
-        key: open-iscsi-${{ hashFiles('liken/open-iscsi/VERSION', 'liken/open-iscsi/fetch.sh') }}
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/systemd-boot/dist
@@ -208,7 +202,7 @@ runs:
       run: |
         cd liken
         for dist in kernel/dist k3s/dist xtables/dist ../trust/dist \
-                    userland/dist open-iscsi/dist \
+                    userland/dist \
                     systemd-boot/dist grub/dist linux-firmware/dist \
                     microcode/dist; do
             [ -d "$dist" ] && find "$dist" -type f -exec touch {} +

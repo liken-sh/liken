@@ -14,15 +14,12 @@
 [build]
 golang = "golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
 rust = "rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
-# The builder of the static binaries in liken/open-iscsi and in
-# bluetoothd, the two builds that buildroot's recipes cannot make
-# static. liken/open-iscsi/fetch.sh reads this line too, and
-# licensing/sources.sh and licensing/latest.sh read its tag.
-alpine = "alpine:edge@sha256:020dfcbaaf4cc1078bf2d9c7ba31a8466e334061dcd2f248001d68f79e52c000"
-# The builder of the static programs in liken/userland. It is
-# buildroot's own CI image, at the tag that .gitlab-ci.yml names at the
-# buildroot commit in liken/userland/VERSION, so buildroot runs on the
-# host tools that its CI tests. liken/userland/build.sh reads this line.
+# The builder of the static programs in liken/userland and of the
+# daemons of the bluetoothd image. It is buildroot's own CI image, at
+# the tag that .gitlab-ci.yml names at the buildroot commit in
+# liken/userland/VERSION, so buildroot runs on the host tools that its
+# CI tests. liken/userland/build.sh reads this line, and
+# bluetooth-operator/bluetoothd/Dockerfile builds from it.
 buildroot = "registry.gitlab.com/buildroot.org/buildroot/base:20250218.2110@sha256:340aa0de68e8e13e4eca70a00aaf94ec68d3a3891c28f3e7495d844829a8c958"
 # The digest moves with the snapshot date in vulkan/package.toml,
 # because the image and the snapshot must come from the same day.

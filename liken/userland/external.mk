@@ -1,6 +1,8 @@
-# The changes that `liken` makes to buildroot's package recipes. buildroot
-# reads this file after every package recipe, so a hook added here runs
-# in the recipe's own steps.
+# The recipes of this tree, and the changes that `liken` makes to
+# buildroot's package recipes. buildroot reads this file after every
+# package recipe of its own, so a hook added here runs in the recipe's
+# own steps.
+include $(sort $(wildcard $(addsuffix /*/*.mk,$(addprefix $(BR2_EXTERNAL_LIKEN_PATH)/,iscsi bluetooth))))
 
 # wpa_supplicant builds the features that its .config names. buildroot's
 # recipe writes that file from upstream's defconfig and a list of edits,

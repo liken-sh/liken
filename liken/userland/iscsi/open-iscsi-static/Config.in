@@ -1,0 +1,16 @@
+config BR2_PACKAGE_OPEN_ISCSI_STATIC
+	bool "open-iscsi-static"
+	select BR2_PACKAGE_LIBKMOD_STATIC
+	select BR2_PACKAGE_OPENSSL
+	select BR2_PACKAGE_UTIL_LINUX
+	select BR2_PACKAGE_UTIL_LINUX_LIBMOUNT
+	help
+	  iscsid and iscsiadm, the iSCSI initiator, linked static.
+
+	  buildroot's open-iscsi recipe needs shared libraries, because
+	  it links buildroot's kmod and because open-iscsi's build names
+	  its own library a shared library. This recipe links
+	  libkmod-static, and a patch lets meson's default_library
+	  choose the kind of open-iscsi's library.
+
+	  https://github.com/open-iscsi/open-iscsi

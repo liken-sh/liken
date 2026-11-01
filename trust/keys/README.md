@@ -33,9 +33,8 @@ bumps call it:
 
 - `liken/linux-firmware/latest.sh`, for the linux-firmware and
   wireless-regdb tarballs
-- `liken/userland/latest.sh`, for the e2fsprogs and nfs-utils tarballs
-- `liken/open-iscsi/latest.sh`, for the kmod tarball
-- `bluetooth-operator/bluetoothd/latest.sh`, for the BlueZ tarball
+- `liken/userland/latest.sh`, for the e2fsprogs, nfs-utils, kmod, and
+  BlueZ tarballs
 
 ## Ubuntu's archive signing key
 

@@ -1,0 +1,22 @@
+From: liken <https://liken.sh>
+Subject: [PATCH] meson: build libkmod as default_library asks
+
+shared_library() builds a shared object whatever default_library
+names, so a toolchain that links static only cannot build libkmod.
+library() builds the kind that default_library names and keeps the
+shared build the default. The version script and the soname version
+apply to the shared kind only.
+
+Upstream: not submitted
+
+--- a/meson.build
++++ b/meson.build
+@@ -421,7 +421,7 @@
+
+ install_headers('libkmod/libkmod.h')
+
+-libkmod = shared_library(
++libkmod = library(
+   'kmod',
+   libkmod_files,
+   dependencies : libkmod_deps + cdeps,

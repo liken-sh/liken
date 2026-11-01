@@ -32,8 +32,7 @@ XTABLES_VERSION := $(strip $(file <xtables/VERSION))
 XTABLES_DIST := xtables/dist/$(XTABLES_VERSION)
 TRUST_VERSION := $(strip $(file <../trust/VERSION))
 TRUST_DIST := ../trust/dist/$(TRUST_VERSION)
-OPENISCSI_VERSION := $(strip $(file <open-iscsi/VERSION))
-OPENISCSI_DIST := open-iscsi/dist/$(OPENISCSI_VERSION)
+OPENISCSI_DIST := open-iscsi/dist
 SYSTEMDBOOT_VERSION := $(strip $(file <systemd-boot/VERSION))
 SYSTEMDBOOT_DIST := systemd-boot/dist/$(SYSTEMDBOOT_VERSION)
 GRUB_VERSION := $(strip $(file <grub/VERSION))
@@ -45,11 +44,10 @@ LINUXFIRMWARE_DIST := linux-firmware/dist/$(LINUXFIRMWARE_VERSION)
 MICROCODE_VERSION := $(strip $(file <microcode/VERSION))
 MICROCODE_DIST := microcode/dist/$(MICROCODE_VERSION)
 
-# The builds of static binaries run in the images that
-# toolchains/images.toml names: the userland in the buildroot image,
-# and the iSCSI initiator in the alpine image. The table holds every
-# outside image, so a change to any entry rebuilds both domains, which
-# is slower than needed but never stale.
+# The userland builds its static binaries in the buildroot image that
+# toolchains/images.toml names. The table holds every outside image,
+# so a change to any entry rebuilds the userland, which is slower than
+# needed but never stale.
 IMAGE_PINS := ../toolchains/images.toml
 
 # The static programs that buildroot builds land in one directory,
@@ -57,6 +55,7 @@ IMAGE_PINS := ../toolchains/images.toml
 # names the files and their prerequisites.
 USERLAND_DIST := userland/dist
 USERLAND_OUTPUTS := $(USERLAND_DIST)/sbin/mke2fs $(USERLAND_DIST)/sbin/mount.nfs \
+	$(USERLAND_DIST)/sbin/iscsid $(USERLAND_DIST)/sbin/iscsiadm \
 	$(USERLAND_DIST)/sbin/wpa_supplicant $(USERLAND_DIST)/zoneinfo/UTC \
 	$(USERLAND_DIST)/versions $(USERLAND_DIST)/sbom.cdx.json
 
@@ -122,29 +121,30 @@ microcode: $(MICROCODE_DIST)/microcode.cpio
 
 # The static programs: mke2fs, which init runs to make a filesystem
 # on a claimed disk; mount.nfs, the host half of the nfs feature;
+# iscsid and iscsiadm, the host half of the iscsi feature;
 # wpa_supplicant, which init runs for a wireless spec.network entry;
 # and the time zone database, which a CronJob's spec.timeZone names a
 # zone of. buildroot builds them from pinned source in a pinned
-# container. See userland/build.sh.
-$(USERLAND_OUTPUTS) &: $(addprefix userland/,VERSION fetch.sh build.sh defconfig \
-		external.desc Config.in external.mk versions.mk wpa_supplicant.config) \
-		$(shell find userland/patches -type f) $(IMAGE_PINS)
+# container. See userland/build.sh. The prerequisites match the ones
+# that userland/Makefile declares.
+$(USERLAND_OUTPUTS) &: $(addprefix userland/,VERSION fetch.sh build.sh buildroot.sh \
+		common.config os.config external.desc Config.in external.mk versions.mk \
+		wpa_supplicant.config) \
+		$(shell find userland/patches userland/iscsi -type f) $(IMAGE_PINS)
 	$(MAKE) -C userland
 
 userland: $(USERLAND_OUTPUTS)
 
-# The iSCSI initiator userspace is the host half of the iscsi
-# feature: static iscsid and iscsiadm, built from pinned source
-# inside a pinned container. This build needs docker or podman on the
-# build host, like the userland above. See open-iscsi/fetch.sh. The
-# build also produces the OCI image that runs iscsid as the feature's
-# DaemonSet.
+# The iSCSI initiator's OCI image, which runs iscsid as the iscsi
+# feature's DaemonSet. The open-iscsi domain copies iscsid and
+# iscsiadm out of the userland and packages the image from the same
+# iscsid.
 #
 # Two rules match the domain's own rules. The binaries depend only on
-# the pin. The image tar also includes the liken version, so only the
-# tar goes stale when the version changes.
+# the userland's. The image tar also includes the liken version, so
+# only the tar goes stale when the version changes.
 $(OPENISCSI_DIST)/iscsid $(OPENISCSI_DIST)/iscsiadm &: \
-		open-iscsi/VERSION open-iscsi/fetch.sh $(IMAGE_PINS)
+		$(USERLAND_DIST)/sbin/iscsid $(USERLAND_DIST)/sbin/iscsiadm
 	$(MAKE) -C open-iscsi
 
 $(OPENISCSI_DIST)/iscsid-image.tar: $(OPENISCSI_DIST)/iscsid \

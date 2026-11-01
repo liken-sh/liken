@@ -284,6 +284,11 @@ func componentData(root string, c *Component) (map[string]any, error) {
 	if c.Outputs.Channel {
 		publishTimeout = 40
 	}
+	for _, image := range images {
+		imageTimeout = max(imageTimeout, image.Timeout)
+		publishTimeout = max(publishTimeout, image.Timeout)
+	}
+	publishTimeout = max(publishTimeout, c.Outputs.Timeout)
 	return map[string]any{
 		"Name":           c.Name(),
 		"Dir":            c.Dir,

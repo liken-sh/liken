@@ -93,7 +93,6 @@ kernel_version="$(cat "$here/../kernel/VERSION")"
 xtables_version="$(cat "$here/../xtables/VERSION")"
 trust_version="$(cat "$here/../../trust/VERSION")"
 userland_commit="$(cat "$here/../userland/VERSION")"
-openiscsi_version="$(cat "$here/../open-iscsi/VERSION")"
 systemdboot_version="$(cat "$here/../systemd-boot/VERSION")"
 grub_version="$(cat "$here/../grub/VERSION")"
 hwdata_version="$(cat "$here/../hwdata/VERSION")"
@@ -258,7 +257,8 @@ mirror "xtables/$xtables_version" "buildroot-2025.02.14.tar.gz" \
     "https://github.com/buildroot/buildroot/archive/refs/tags/2025.02.14.tar.gz"
 
 # The static programs of the userland domain: mke2fs, mount.nfs,
-# wpa_supplicant, and the time zone database. buildroot builds them,
+# iscsid and iscsiadm, wpa_supplicant, and the time zone database.
+# buildroot builds them,
 # and `make legal-info` copies the source of every package that the
 # build put into them, the libraries and musl included, with the
 # patches that buildroot applied, into
@@ -287,12 +287,17 @@ if ! ((repin)); then
     while IFS=, read -r package version _; do
         package="${package//\"/}"
         version="${version//\"/}"
-        # A release document names the supplicant wpa-supplicant, and
-        # buildroot names its package wpa_supplicant. The mirror takes
-        # the release document's name, because a reader finds a
-        # component's source by the name and version that it lists.
-        component="$package"
-        [[ "$package" != wpa_supplicant ]] || component=wpa-supplicant
+        # A release document names two components otherwise than
+        # buildroot names their packages: wpa_supplicant is
+        # buildroot's spelling, and open-iscsi-static is the recipe in
+        # userland/iscsi/. The mirror takes the release document's
+        # name, because a reader finds a component's source by the
+        # name and version that it lists.
+        case "$package" in
+        wpa_supplicant) component=wpa-supplicant ;;
+        open-iscsi-static) component=open-iscsi ;;
+        *) component="$package" ;;
+        esac
         for file in "$legal/sources/$package-$version"/*; do
             place "$component/$version" "$(basename "$file")" "$file"
         done
@@ -305,52 +310,6 @@ if ! ((repin)); then
         place "zic/${version#zic-}" "$(basename "$file")" "$file"
     done
 fi
-
-# The iSCSI client is built from source by its own domain, so its
-# tarballs are already fetched and verified against that domain's
-# pins. The --sources-only flag downloads the sources without running
-# the container build.
-prefetch "$here/../open-iscsi/fetch.sh" --sources-only
-for tarball in "$here/../open-iscsi/cache/$openiscsi_version"/*.tar.*; do
-    place "open-iscsi/$openiscsi_version" "$(basename "$tarball")" "$tarball"
-done
-
-# These are the static libraries that the iSCSI build links in the
-# alpine image: musl (the binaries' libc) and util-linux (libblkid and
-# libmount). The image does not carry them. The build runs apk add,
-# which installs the compiler and these libraries from Alpine's
-# package repository for the image's branch as it is on the day of the
-# build, so the image digest in toolchains/images.toml does not fix
-# their versions or their bytes. Alpine patches its packages lightly,
-# and these upstream tarballs are the versions that the branch's index
-# lists. licensing/latest.sh reports each one against that index, and
-# a row that says "behind" means a build now links a newer library
-# than this mirror carries. OpenSSL is the third: Apache-2.0, linked
-# into iscsid and iscsiadm. iscsid and iscsiadm are GPL-2.0-or-later,
-# and the GPL's corresponding source of a binary covers every library
-# linked into it, so the mirror carries OpenSSL too. The OpenSSL
-# project publishes a .sha256 file and a detached .asc signature beside
-# each release tarball. Take a new OpenSSL digest from that .sha256
-# file only after the .asc signature verifies against the release key
-# that https://openssl-library.org/source/ names.
-# Tracks the `alpine` entry in toolchains/images.toml, and the path
-# names the image's tag, so a new Alpine release gets its own
-# directory.
-alpine_tag="$(sed -n '/^\[build\]/,/^\[/ s|^alpine = "alpine:\([^@"]*\).*"$|\1|p' \
-    "$here/../../toolchains/images.toml")"
-[[ -n "$alpine_tag" ]] || {
-    echo "sources.sh: toolchains/images.toml names no alpine image" >&2
-    exit 1
-}
-mirror "toolchain/alpine-$alpine_tag" "musl-1.2.6.tar.gz" \
-    "d585fd3b613c66151fc3249e8ed44f77020cb5e6c1e635a616d3f9f82460512a" \
-    "https://musl.libc.org/releases/musl-1.2.6.tar.gz"
-mirror "toolchain/alpine-$alpine_tag" "util-linux-2.42.4.tar.xz" \
-    "fbd62a100ab7bb8746ba0661255c3c48185b1e9021507c624da01fbc696330ec" \
-    "https://www.kernel.org/pub/linux/utils/util-linux/v2.42/util-linux-2.42.4.tar.xz"
-mirror "toolchain/alpine-$alpine_tag" "openssl-3.5.9.tar.gz" \
-    "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a" \
-    "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz"
 
 # systemd-boot and GRUB are prebuilt Ubuntu packages, so their
 # corresponding source is the Ubuntu source package: the upstream

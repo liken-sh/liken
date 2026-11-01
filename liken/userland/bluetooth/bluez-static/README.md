@@ -1,22 +1,23 @@
 # Patches to BlueZ
 
-The bluetoothd image builds BlueZ from its release tarball, and
-`bluetoothd/Dockerfile` applies each file in `bluez/` to that source
-before it configures the build. Each patch fixes a BlueZ bug that
-stops a `liken` controller from working, and that no BlueZ release
-fixes yet. A patch here is a stopgap: it stays only until a release
-that `BLUEZ_VERSION` names carries the same fix.
+The bluetoothd image builds BlueZ from its release tarball with the
+buildroot recipe in this directory, and buildroot applies each
+`.patch` file here to that source before it configures the build.
+Each patch fixes a BlueZ bug that stops a `liken` controller from
+working, and that no BlueZ release fixes yet. A patch here is a
+stopgap: it stays only until a release that `BLUEZ_STATIC_VERSION` in
+`bluez-static.mk` names carries the same fix.
 
 Each file is the output of `git format-patch` against the release
-that `BLUEZ_VERSION` names. Its message is written for the BlueZ
+that `BLUEZ_STATIC_VERSION` names. Its message is written for the BlueZ
 mailing list, so the same file is what goes upstream. The image ships
 a copy of each patch under `/usr/share/doc/liken/bluez-patches/`,
 because the GPL requires that the source of a modified program travel
 with it.
 
-The Dockerfile applies each patch with `patch --forward`. When a new
-release already carries a fix, the patch no longer applies forward,
-and the build stops. Then delete the file and its entry below.
+buildroot applies each patch with `patch`, which stops on a patch
+that a new release already carries. Then delete the file and its
+entry below.
 
 ## `0001-device-re-enable-auto-connect-after-auth-retry.patch`
 

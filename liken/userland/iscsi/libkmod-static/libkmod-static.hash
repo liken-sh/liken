@@ -1,0 +1,4 @@
+# The digest came from sha256sums.asc, signed by kernel.org's checksum autosigner.
+sha256  985554de49c21a58abd68c6cda2251384e1e5bb08b3b14c7f02b51f4c90c2958  kmod-34.3.tar.xz
+# Locally computed
+sha256  6095e9ffa777dd22839f7801aa845b31c9ed07f3d6bf8a26dc5d2dec8ccc0ef3  libkmod/COPYING

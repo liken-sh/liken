@@ -49,7 +49,6 @@ variable "BRANCH_CACHE" {
 # images bare too, and a bump of images.toml reaches it.
 target "toolchains" {
   contexts = {
-    "alpine" = "docker-image://alpine:edge@sha256:020dfcbaaf4cc1078bf2d9c7ba31a8466e334061dcd2f248001d68f79e52c000"
     "buildkit-syft-scanner" = "docker-image://docker/buildkit-syft-scanner:1.12.1@sha256:873a7458c3c8ac8e32c7b796c10e1600b07b963d2aa000a72a2d97aaaa2d6315"
     "buildroot" = "docker-image://registry.gitlab.com/buildroot.org/buildroot/base:20250218.2110@sha256:340aa0de68e8e13e4eca70a00aaf94ec68d3a3891c28f3e7495d844829a8c958"
     "corrosion" = "docker-image://ghcr.io/liken-sh/corrosion:2026.10.31-001@sha256:8050e5a5a6d5638ffb4249aa1e9fcf8202258c1d37d18eb6413f99246196d85b"
@@ -705,10 +704,11 @@ target "bluetoothd" {
   dockerfile = "bluetoothd/Dockerfile"
   platforms  = ["linux/amd64"]
   contexts = {
-    "alpine" = "docker-image://alpine:edge@sha256:020dfcbaaf4cc1078bf2d9c7ba31a8466e334061dcd2f248001d68f79e52c000"
+    "buildroot" = "docker-image://registry.gitlab.com/buildroot.org/buildroot/base:20250218.2110@sha256:340aa0de68e8e13e4eca70a00aaf94ec68d3a3891c28f3e7495d844829a8c958"
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
+    "userland" = "liken/userland"
   }
   args = {
     VERSION = VERSION

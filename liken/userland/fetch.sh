@@ -43,6 +43,7 @@ require_tools sha256sum tar
 commit="$(cat "$here/VERSION")"
 
 declare -A buildroot_sha256=(
+    ["c1490f289c129c12de1249074eac765dee1a5d9d"]="34923d316a19c4acbffc8fffa2281a99e9f6666c43b3bfe1c06c2c491cdff262"
     ["ccdd1ca4aac11d913f10eb071d7c15d5fbede9a4"]="336913f25e7d307b596d812ebd4a806c7813bee32c71effa24319a9bd4f75635"
 )
 tarball="$here/cache/buildroot/buildroot-$commit.tar.gz"

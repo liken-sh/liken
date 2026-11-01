@@ -95,7 +95,7 @@
 #   /sbin/iscsiadm, /sbin/iscsid  the iSCSI initiator userspace, the
 #     and /etc/iscsi/             host half of the iscsi feature.
 #                                 Static, built from pinned source by
-#                                 open-iscsi/fetch.sh. Every image
+#                                 userland/build.sh. Every image
 #                                 ships it, and it stays inert until
 #                                 the cluster document declares the
 #                                 feature. CSI drivers chroot into the
@@ -204,8 +204,7 @@ mount_dist="${MOUNT_DIST:-$here/../mount/dist}"
 machine_operator_dist="${MACHINE_OPERATOR_DIST:-$here/../machine-operator/dist}"
 cluster_operator_dist="${CLUSTER_OPERATOR_DIST:-$here/../cluster-operator/dist}"
 logs_dist="${LOGS_DIST:-$here/../logs/dist}"
-openiscsi_version="$(cat "$here/../open-iscsi/VERSION")"
-openiscsi_dist="${OPENISCSI_DIST:-$here/../open-iscsi/dist/$openiscsi_version}"
+openiscsi_dist="${OPENISCSI_DIST:-$here/../open-iscsi/dist}"
 userland_dist="${USERLAND_DIST:-$here/../userland/dist}"
 
 root="$dist/root"
@@ -247,7 +246,7 @@ done
 cp "$userland_dist/sbin/mke2fs" "$root/sbin/mke2fs"
 
 # This is the iSCSI initiator userspace, the host half of the iscsi
-# feature (open-iscsi/fetch.sh explains the static build). Every
+# feature (userland/build.sh explains the static build). Every
 # image ships it, whether or not the deployment declares the
 # feature. Until the cluster document opts in, the payload is a few
 # megabytes of inert bytes. Shipping it unconditionally keeps
@@ -461,7 +460,7 @@ mkdir -p "$root/usr/share/liken"
     for component in kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware wireless-regdb microcode; do
         case "$component" in
             wireless-regdb) version="$regdb_version" ;;
-            e2fsprogs | nfs-utils | wpa-supplicant | tzdata)
+            e2fsprogs | nfs-utils | open-iscsi | wpa-supplicant | tzdata)
                 version="$(awk -v c="$component" '$1 == c { print $2 }' "$userland_dist/versions")"
                 [[ -n "$version" ]] || {
                     echo "build.sh: $userland_dist/versions names no $component" >&2

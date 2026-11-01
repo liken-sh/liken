@@ -22,8 +22,7 @@
 # channel that the registry offers. The channel of `golang` and `rust`
 # is the Debian release in the tag, and the newest channel is the
 # newest Debian release that the image publishes, because Debian's
-# own newest release can be ahead of the image. The channel of
-# `alpine` is its release, and the newest is `edge`. `ubuntu` is the
+# own newest release can be ahead of the image. `ubuntu` is the
 # base of `indi`, which installs the INDI PPA, so its newest channel
 # is the newest Ubuntu series that the PPA publishes. The k8s.io
 # modules follow `liken/k3s/VERSION`, because the client libraries
@@ -171,13 +170,6 @@ latest_image() {
         newest_channel="${variant:-?}"
         [[ -n "$version" && -n "$variant" ]] && latest_tag="$version-$variant"
         note="the newest $([[ "$key" == golang ]] && echo Go || echo Rust) release, in the newest Debian that the image publishes"
-        ;;
-    alpine)
-        channel="$tag"
-        newest_channel=edge
-        newest="$(tags alpine | newest_matching '^[0-9]+\.[0-9]+\.[0-9]+$')" || newest=""
-        [[ -n "$newest" ]] && latest_tag=edge
-        note="the static builder; the newest release is ${newest:-?}"
         ;;
     ubuntu)
         series="$(ubuntu_series)" || series=""

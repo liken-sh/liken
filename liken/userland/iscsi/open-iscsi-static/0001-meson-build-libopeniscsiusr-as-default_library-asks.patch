@@ -1,0 +1,23 @@
+From: liken <https://liken.sh>
+Subject: [PATCH] meson: build libopeniscsiusr as default_library asks
+
+shared_library() builds a shared object whatever default_library
+names, so a toolchain that links static only cannot build iscsid and
+iscsiadm, which link the library. library() builds the kind that
+default_library names and keeps the shared build the default.
+
+Upstream: not submitted
+
+--- a/meson.build
++++ b/meson.build
+@@ -142,8 +142,8 @@
+ # install our static man page(s)
+ install_man(libiscsi_usr_docs)
+
+-# build the shared library
+-libiscsi_usr = shared_library('openiscsiusr',
++# build the library, shared or static as default_library asks
++libiscsi_usr = library('openiscsiusr',
+   libiscsi_usr_srcs,
+   include_directories: [libiscsi_usr_private_includes, libiscsi_usr_public_includes],
+   dependencies: kmod_dep,

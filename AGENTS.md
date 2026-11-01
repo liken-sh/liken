@@ -351,27 +351,36 @@ built, copied, or named in an `ENTRYPOINT` at a path other than
 
 ## Static programs
 
-A program that the OS image carries from another project must be one
-static binary, because a `liken` machine has no loader and no shared
+A program that the OS image or an image's `FROM scratch` stage
+carries from another project must be one static binary, because a
+`liken` machine and those images have no loader and no shared
 libraries. buildroot builds these programs, from the BR2_EXTERNAL tree
 in `liken/userland/`, because it builds the musl toolchain and every
 library from source tarballs that its `.hash` files pin, and its
 `legal-info` and `utils/generate-cyclonedx` write the source offer and
 the CycloneDX SBOM of each build. An Alpine container with `apk add`
-installs the packages of the day of the build, so no new build takes
-that form.
+installs the packages of the day of the build, so no build takes that
+form, and `cd ci && go run . pins -root ..` fails on an `apk add`.
 
-- A new program is a buildroot package that `liken/userland/defconfig`
-  selects, and `liken/userland/build.sh` copies its file into `dist/`.
-  A change to buildroot's recipe is a hook in `external.mk`.
+- A new program is a buildroot package that a fragment of
+  `liken/userland` selects: `os.config` for the OS, which
+  `liken/userland/build.sh` builds and copies into `dist/`, and
+  `bluetoothd.config` for the bluetoothd image, which its Dockerfile
+  builds. `liken/userland/buildroot.sh` runs both builds with
+  `common.config`. A change to buildroot's recipe is a hook in
+  `external.mk`.
+- When buildroot's recipe builds a program only with shared libraries,
+  a recipe of the tree builds it static: `iscsi/` holds open-iscsi and
+  libkmod, and `bluetooth/` holds BlueZ. A patch to a project's source
+  is one that upstream can take, such as a build definition that
+  respects meson's `default_library`.
 - buildroot is pinned to a commit on its `master` branch in
   `liken/userland/VERSION`, and its builder is the `buildroot` entry of
-  `toolchains/images.toml`. When master packages an older release than
-  upstream, `liken/userland/versions.mk` sets the newer version, and
+  `toolchains/images.toml`. The bluetoothd Dockerfile names the same
+  commit and digest, and `ci pins` fails when they differ. When master
+  packages an older release than upstream,
+  `liken/userland/versions.mk` sets the newer version, and
   `patches/<package>/<version>/<package>.hash` pins its tarball.
-- `liken/open-iscsi` and the `bluetoothd` image still build on Alpine,
-  because buildroot's recipes for open-iscsi, kmod, and BlueZ refuse a
-  static-only build.
 
 ## Releases and development builds
 

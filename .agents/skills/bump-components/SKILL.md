@@ -64,7 +64,7 @@ The report has these sources:
 | `vulkan/latest.sh` | the Debian snapshot of the bases and `astrometry`, step 5 |
 | `indi/latest.sh` | the snapshots of Ubuntu and the two PPAs, step 5a |
 | `trust/latest.sh` | the CA bundle, step 5b |
-| `bluetooth-operator/bluetoothd/latest.sh` | the BlueZ and dbus releases that the bluetoothd image builds, step 5e |
+| `bluetooth-operator/bluetoothd/latest.sh` | the buildroot commit that the bluetoothd image builds with, which follows `liken/userland/VERSION`, step 5e |
 | `library-operator/latest.sh` | OpenVINO, Intel's compute-runtime, gmmlib, and the graphics compiler in the appearances image, step 5e |
 | `ci/latest.sh` | the GitHub Actions, prek, and the hook revisions |
 | `liken.sh/latest.sh` | Flatcar and the Terraform providers |
@@ -79,20 +79,20 @@ in one background task. These rules matter:
    connections, and each bump's tail runs `licensing/sources.sh
    --repin`, which retries launchpad every time.
 2. A sub-pin needs a named bump, for example
-   `open-iscsi/latest.sh --bump kmod` or
-   `linux-firmware/latest.sh --bump wireless-regdb`. The alpine
-   builder of `open-iscsi` and `bluetoothd` is the `alpine` entry in
-   `toolchains/images.toml`, and `../toolchains/latest.sh --bump
-   alpine` moves it for both. `licensing/latest.sh` reads `musl`,
-   `util-linux`, and `openssl` from the same Alpine branch, so those
-   rows follow the builder.
+   `userland/latest.sh --bump kmod` or
+   `linux-firmware/latest.sh --bump wireless-regdb`.
 3. The static programs in `userland/` follow buildroot's `master`.
-   `userland/latest.sh --bump` moves buildroot to master's tip and
-   deletes each line of `userland/versions.mk` whose version the new
-   recipe meets. Then a program row that still reads `behind` takes a
-   named bump, such as `userland/latest.sh --bump tzdata`, which sets
-   the newer version in `versions.mk` and writes its `.hash` file
-   under `userland/patches/`. When the `buildroot` row of
+   `userland/latest.sh --bump` moves buildroot to master's tip, writes
+   the same commit and digest into `bluetooth-operator/bluetoothd/Dockerfile`,
+   and deletes each line of `userland/versions.mk` whose version the
+   new recipe meets. Then a program row that still reads `behind`
+   takes a named bump, such as `userland/latest.sh --bump tzdata`. For
+   a program of buildroot's own recipes, the bump sets the newer
+   version in `versions.mk` and writes its `.hash` file under
+   `userland/patches/`. For open-iscsi, kmod, and BlueZ, whose recipes
+   are in `userland/iscsi/` and `userland/bluetooth/`, it writes the
+   version into the recipe and the tarball's line into the recipe's
+   `.hash` file. When the `buildroot` row of
    `toolchains/latest.sh` reads behind after the move, run
    `../toolchains/latest.sh --bump buildroot`. A buildroot bump can
    move every library and the compiler, so `make -C userland` must
@@ -139,7 +139,7 @@ the notes live:
   against the new tag.
 * xtables: the k3s-root release notes on GitHub.
 * buildroot: the git log of `master` between the two commits, for
-  the packages that `userland/defconfig` selects, the libraries they
+  the packages that `userland/os.config` and `userland/bluetoothd.config` select, the libraries they
   link, and the toolchain. `make -C userland` then prints each
   version in `userland/dist/legal-info/manifest.csv`; compare it with
   the old build's.
@@ -166,10 +166,7 @@ the notes live:
 * e2fsprogs: the release notes at
   e2fsprogs.sourceforge.net. Only `mke2fs` ships.
 * trust, hugo: no research unless the version jump looks unusual.
-* alpine, storage: a new Alpine release or a move to `edge` can
-  drop a static library or change a default that a build from
-  source depends on, so build `open-iscsi` and `bluetoothd`.
-  The lab's storage guest runs sid's daily cloud image, which
+* storage: the lab's storage guest runs sid's daily cloud image, which
   Debian deletes after about four months.
 
 Note each release's age. A firmware or microcode release that is
@@ -184,9 +181,9 @@ metal boot are its first real test.
    `toolchains/images.toml`, nothing else.
 3. `make all`: changelogs do not show configure or toolchain
    breakage, and a bump that does not build is not done. The
-   domains that compile from source against musl, `userland` and
-   `open-iscsi`, break the most often; a new configure check or a
-   dropped default there is invisible until the build runs.
+   programs that `userland` compiles from source against musl break
+   the most often; a new configure check or a dropped default there
+   is invisible until the build runs.
 4. `make smoke-uefi`: one boot to Ready proves the pieces still
    assemble into a machine.
 
@@ -460,17 +457,19 @@ each module and each workspace.
 ## 5e. The sources inside operator images
 
 Two operator images fetch upstream releases in their Dockerfiles, and
-a `latest.sh` beside each Dockerfile reports and bumps them.
+a `latest.sh` reports and bumps them.
 
-`bluetooth-operator/bluetoothd/latest.sh --bump` moves BlueZ, and
-`--bump dbus` moves dbus to the newest release of a stable series,
-which has an even minor version. Each bump writes the version and the
-checksum that upstream publishes into `bluetoothd/Dockerfile`. Then
-run `docker buildx bake bluetoothd`. The build stops when a patch in
-`bluetoothd/patches/bluez/` no longer applies, and
-`bluetoothd/patches/README.md` says what to do. Read the BlueZ
-release notes for changes to the D-Bus API and to the mgmt socket,
-because the operator reads both.
+The bluetoothd image builds its static daemons with buildroot from
+`liken/userland/bluetoothd.config`, so `liken/userland/latest.sh`
+reports BlueZ and dbus. `--bump bluez` writes the newest BlueZ release
+into `liken/userland/bluetooth/bluez-static/`, and `--bump dbus` sets
+the newest release of a stable series of dbus, which has an even
+minor version, in `versions.mk`. Then run
+`docker buildx bake bluetoothd`. The build stops when a patch in
+`liken/userland/bluetooth/bluez-static/` no longer applies, and the
+`README.md` beside it says what to do. Read the BlueZ release notes
+for changes to the D-Bus API and to the mgmt socket, because the
+operator reads both.
 
 `library-operator/latest.sh --bump` moves OpenVINO within the
 archive channel that the pin names, such as `ubuntu24`. A row that
@@ -613,8 +612,8 @@ names another signer:
 - The Kernel PPA signs each build's `CHECKSUMS` file.
   `liken/kernel/latest.sh` verifies `CHECKSUMS.gpg` against
   `liken/kernel/kernel-ppa.asc` and accepts one pinned fingerprint.
-- dbus signs each release tarball. `bluetooth-operator/bluetoothd/latest.sh`
-  verifies the tarball against `bluetoothd/dbus.asc`, accepts one
+- dbus signs each release tarball. `liken/userland/latest.sh --bump dbus`
+  verifies the tarball against `liken/userland/dbus.asc`, accepts one
   pinned fingerprint, and pins the digest of the verified bytes.
 - IANA signs each tzdata and tzcode tarball, and weston's release
   managers sign each weston tarball. `liken/userland/latest.sh --bump
@@ -659,12 +658,16 @@ so a check with file(1) accepts both words:
 builder, so the check below cannot read its downloads. The pins are
 `liken/userland/VERSION` and the `buildroot_sha256` table of
 `liken/userland/fetch.sh` for buildroot itself, buildroot's own `.hash`
-files for every package at that commit, and the `.hash` file under
-`liken/userland/patches/` for each version that `versions.mk` sets.
-`BR2_DOWNLOAD_FORCE_CHECK_HASHES` in `liken/userland/defconfig` makes
-buildroot stop on a download that no `.hash` file lists, and
-`fetch.sh` pins the SPDX schema that `utils/generate-cyclonedx` would
-otherwise download.
+files for every package at that commit, the `.hash` file beside each
+recipe under `liken/userland/iscsi/` and `liken/userland/bluetooth/`,
+and the `.hash` file under `liken/userland/patches/` for each version
+that `versions.mk` sets. `BR2_DOWNLOAD_FORCE_CHECK_HASHES` in
+`liken/userland/common.config` makes buildroot stop on a download that
+no `.hash` file lists, and `fetch.sh` pins the SPDX schema that
+`utils/generate-cyclonedx` would otherwise download. The bluetoothd
+Dockerfile downloads buildroot itself with `ADD --checksum`, and
+`ci pins` fails when its commit or digest differs from the pin of
+`liken/userland`.
 
 **The check.** `cd ci && go run . pins -root ..` runs
 `ci/fetches.go`, which reads the scripts by pattern and fails when:

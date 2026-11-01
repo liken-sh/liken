@@ -366,7 +366,7 @@ jobs:
   build:
     if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'build') }}
     runs-on: ubuntu-26.04
-    timeout-minutes: 20
+    timeout-minutes: 120
     defaults:
       run:
         working-directory: liken
@@ -477,7 +477,7 @@ jobs:
   publish:
     if: ${{ inputs.stage == 'publish' || inputs.dryrun }}
     runs-on: ubuntu-26.04
-    timeout-minutes: 40
+    timeout-minutes: 120
     # The channel's key comes from the repository secrets that
     # liken.sh/terraform.tf keeps delivered.
     env:

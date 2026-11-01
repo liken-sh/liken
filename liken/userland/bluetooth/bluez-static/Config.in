@@ -1,0 +1,18 @@
+config BR2_PACKAGE_BLUEZ_STATIC
+	bool "bluez-static"
+	depends on BR2_USE_WCHAR # libglib2
+	depends on BR2_TOOLCHAIN_HAS_THREADS # dbus, libglib2
+	select BR2_PACKAGE_DBUS
+	select BR2_PACKAGE_LIBGLIB2
+	select BR2_PACKAGE_READLINE
+	help
+	  bluetoothd, bluetoothctl, btmon, and btmgmt, linked static,
+	  with the patches in this directory applied.
+
+	  buildroot's bluez5_utils recipe needs shared libraries,
+	  because bluetoothd can load plugins with dlopen. The plugins
+	  that the bluetoothd image needs are built into bluetoothd,
+	  and musl's static dlopen fails at run time, so the static
+	  build loads no outside plugin.
+
+	  https://www.bluez.org

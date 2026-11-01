@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Build the static programs that every liken image carries: mke2fs,
-# mount.nfs, wpa_supplicant, and the compiled time zone database.
+# mount.nfs, iscsid and iscsiadm, wpa_supplicant, and the compiled
+# time zone database.
 #
 # A liken machine has no loader and no shared libraries, so each
 # program must be one static binary, and no project publishes static
@@ -9,10 +10,12 @@
 # cross-compiler from source, then each library and each program from
 # a source tarball that a .hash file pins, and it records the license
 # and the source of each package that it built. The configuration is
-# the BR2_EXTERNAL tree in this directory: defconfig selects buildroot's
-# own recipes for the programs, external.mk and versions.mk hold what
-# liken changes in them, and patches/ holds the .hash file of each
-# version that versions.mk sets.
+# the BR2_EXTERNAL tree in this directory: os.config selects the
+# programs, iscsi/ holds the recipes of the two that buildroot builds
+# only with shared libraries, external.mk and versions.mk hold what
+# liken changes in buildroot's own recipes, and patches/ holds the
+# .hash file of each version that versions.mk sets. buildroot.sh runs
+# the build itself, and the bluetoothd image runs the same script.
 #
 # The build runs in the `buildroot` image of toolchains/images.toml,
 # which is buildroot's own CI image, so the host tools that buildroot
@@ -21,6 +24,7 @@
 # Results land in userland/dist/:
 #
 #   sbin/mke2fs, sbin/mount.nfs,  the programs, each checked static
+#   sbin/iscsid, sbin/iscsiadm,
 #   sbin/wpa_supplicant
 #   zoneinfo/                     the time zone database
 #   legal-info/                   buildroot's `make legal-info`: the
@@ -67,11 +71,9 @@ mv "$work/buildroot-$commit" "$work/buildroot"
 # The container sees this directory read-only at /external, the
 # buildroot tree and its output at /work, and the two caches. It runs
 # as the calling user, so every file it writes belongs to that user.
-# `make defconfig` expands defconfig into the full .config, and the
-# plain `make` builds every package. `legal-info` then copies each
-# package's license files and source tarballs out of the download
-# directory, and `show-info` prints the JSON that generate-cyclonedx
-# turns into the SBOM.
+# buildroot.sh builds os.config and writes legal-info, and then
+# `show-info` prints the JSON that generate-cyclonedx turns into the
+# SBOM.
 echo "building the static programs with buildroot ${commit:0:12}; the log is userland/_build/build.log"
 "$runtime" run --rm -i \
     -u "$(id -u):$(id -g)" \
@@ -83,10 +85,8 @@ echo "building the static programs with buildroot ${commit:0:12}; the log is use
     -v "$here/cache/dl:/dl" \
     -v "$here/cache/ccache:/ccache" \
     "$builder" bash -e >"$work/build.log" 2>&1 <<'BUILD' || {
+bash /external/buildroot.sh /work/buildroot /work/output os.config
 cd /work/buildroot
-make O=/work/output BR2_EXTERNAL=/external BR2_DEFCONFIG=/external/defconfig defconfig
-make O=/work/output
-make O=/work/output legal-info
 make --no-print-directory -s O=/work/output show-info | utils/generate-cyclonedx >/work/output/sbom.cdx.json
 BUILD
     tail -40 "$work/build.log" >&2
@@ -103,7 +103,7 @@ mkdir -p "$out/sbin"
 # passes too: it carries no loader request and no library, and
 # relocates itself at start, and file(1) calls it "static-pie linked".
 # buildroot strips each target binary already.
-for program in mke2fs mount.nfs wpa_supplicant; do
+for program in mke2fs mount.nfs iscsid iscsiadm wpa_supplicant; do
     binary=""
     for dir in sbin usr/sbin usr/bin; do
         if [[ -f "$output/target/$dir/$program" && ! -L "$output/target/$dir/$program" ]]; then
@@ -154,12 +154,15 @@ cp "$output/sbom.cdx.json" "$out/sbom.cdx.json"
 # The versions file names each program by its name in the OS's
 # components record, with the version that manifest.csv records for
 # its buildroot package, so the image and the release document name
-# the version that the build used.
+# the version that the build used. Two programs have another package
+# name: wpa_supplicant is buildroot's spelling, and
+# open-iscsi-static is the recipe in iscsi/.
 version_of() {
     awk -F'","' -v p="$1" 'substr($1, 2) == p { print $2 }' "$out/legal-info/manifest.csv"
 }
 {
-    for pair in e2fsprogs:e2fsprogs nfs-utils:nfs-utils wpa-supplicant:wpa_supplicant tzdata:tzdata; do
+    for pair in e2fsprogs:e2fsprogs nfs-utils:nfs-utils open-iscsi:open-iscsi-static \
+        wpa-supplicant:wpa_supplicant tzdata:tzdata; do
         version="$(version_of "${pair#*:}")"
         [[ -n "$version" ]] || fail "legal-info/manifest.csv names no ${pair#*:}"
         echo "${pair%%:*} $version"
@@ -174,4 +177,4 @@ mv "$out/versions.partial" "$out/versions"
 
 echo "static programs (buildroot ${commit:0:12}):"
 sed 's/^/  /' "$out/versions"
-(cd "$out/sbin" && sha256sum mke2fs mount.nfs wpa_supplicant | sed 's/^/  /')
+(cd "$out/sbin" && sha256sum mke2fs mount.nfs iscsid iscsiadm wpa_supplicant | sed 's/^/  /')

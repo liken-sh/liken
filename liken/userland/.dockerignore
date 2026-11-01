@@ -1,0 +1,5 @@
+# The build outputs and the caches of the OS build stay out of the
+# context that the bluetoothd image reads this tree through.
+_build/
+cache/
+dist/

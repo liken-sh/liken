@@ -1,5 +1,8 @@
-# buildroot reads this file from every BR2_EXTERNAL tree, and it must
-# exist. This tree adds no packages and no options of its own: every
-# program it builds is a package that buildroot maintains, so
-# `defconfig` beside this file selects them, and `external.mk` and
-# `versions.mk` hold the few changes `liken` makes to them.
+# The recipes of this tree. Each one builds static a program that
+# buildroot's own recipe builds only with shared libraries. Every other
+# program that this tree builds is a recipe that buildroot maintains,
+# which a fragment such as os.config selects, and external.mk and
+# versions.mk hold the few changes `liken` makes to those.
+source "$BR2_EXTERNAL_LIKEN_PATH/iscsi/libkmod-static/Config.in"
+source "$BR2_EXTERNAL_LIKEN_PATH/iscsi/open-iscsi-static/Config.in"
+source "$BR2_EXTERNAL_LIKEN_PATH/bluetooth/bluez-static/Config.in"

@@ -1,0 +1,12 @@
+config BR2_PACKAGE_LIBKMOD_STATIC
+	bool "libkmod-static"
+	help
+	  libkmod, the kernel module library of kmod, as a static
+	  archive. iscsid links it to check that iscsi_tcp is loaded.
+
+	  buildroot's kmod recipe needs shared libraries, because kmod's
+	  build names libkmod a shared library. This recipe builds the
+	  library alone, with a patch that lets meson's default_library
+	  choose the kind.
+
+	  https://git.kernel.org/pub/scm/utils/kernel/kmod/kmod.git

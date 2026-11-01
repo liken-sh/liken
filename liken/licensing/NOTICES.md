@@ -57,8 +57,8 @@ everything else in k3s-root's userland.
 
 ## The static programs that buildroot builds
 
-mke2fs, the NFS client, the wireless supplicant, and the time zone
-database are built by buildroot, at the commit that
+mke2fs, the NFS client, the iSCSI initiator, the wireless
+supplicant, and the time zone database are built by buildroot, at the commit that
 `userland/VERSION` pins, with the configuration in `userland/`.
 buildroot builds each program, its musl C library, and each library
 that it links statically, from upstream source tarballs that its
@@ -85,17 +85,15 @@ and others. It statically links libblkid and libuuid from util-linux
 License: GPL-2.0 or later. Copyright the open-iscsi contributors
 (including Cisco Systems, Dicon Zhang, Red Hat, and others).
 
-This repository's own recipe (open-iscsi/fetch.sh) builds this binary
-from pinned source. It statically links libkmod (LGPL-2.1 or later,
+buildroot builds these binaries, as the section on the static
+programs above describes, with the recipes in `userland/iscsi/`. Each
+recipe applies one patch to the build definition of its project, so
+that the library builds static; the patches are mirrored with the
+sources. The binaries statically link libkmod (LGPL-2.1 or later,
 copyright the kmod contributors), libblkid and libmount from
-util-linux (LGPL-2.1 or later, copyright Karel Zak and others),
-libeconf (MIT, copyright SUSE LLC), OpenSSL (Apache-2.0, copyright
-The OpenSSL Project Authors), and musl (MIT, copyright Rich Felker and
-contributors). Sources are mirrored under `sources/open-iscsi/`, and
-for the alpine-packaged static libraries, under `sources/toolchain/`.
-The recipe pins the build container by digest. Alpine's musl and
-util-linux packages carry small distribution patches on top of the
-upstream tarballs mirrored here.
+util-linux (LGPL-2.1 or later, copyright Karel Zak and others), and
+OpenSSL (Apache-2.0, copyright The OpenSSL Project Authors). libkmod's
+source is mirrored under `sources/libkmod-static/`.
 
 ## The NFS client (`/sbin/mount.nfs`)
 

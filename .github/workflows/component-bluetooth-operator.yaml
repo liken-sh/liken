@@ -393,7 +393,7 @@ jobs:
     name: ${{ matrix.image }}
     if: ${{ inputs.stage == 'check' && fromJSON(inputs.images)[0] != null }}
     runs-on: ubuntu-26.04
-    timeout-minutes: 45
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -436,7 +436,7 @@ jobs:
   publish:
     if: ${{ inputs.stage == 'publish' || inputs.dryrun }}
     runs-on: ubuntu-26.04
-    timeout-minutes: 30
+    timeout-minutes: 120
     # security-events: write uploads the Trivy scan of each image.
     # id-token: write lets cosign take the job's OIDC token and sign
     # each image keyless, with this workflow at its ref as the signer.

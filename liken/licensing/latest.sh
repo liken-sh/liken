@@ -3,30 +3,19 @@
 # Report the pins that exist only in the source mirror.
 #
 # Most of what sources.sh mirrors is keyed to a domain's own VERSION
-# file, and that domain's latest.sh watches it. Five pins have no
+# file, and that domain's latest.sh watches it. Two pins have no
 # domain of their own, because liken never fetches them: they are the
 # corresponding source for code that arrives already compiled inside
-# something else. musl, util-linux, and OpenSSL are linked into the
-# iSCSI tools, which the OS builds in the alpine image. iptables is
-# what the k3s-root release built, and buildroot is what built it.
-# The static programs that liken/userland builds need no pin here,
-# because buildroot's legal-info names their sources.
+# something else. iptables is what the k3s-root release built, and
+# buildroot is what built it. The static programs that liken/userland
+# builds need no pin here, because buildroot's legal-info names their
+# sources and the libraries that they link.
 #
-# None of these five moves on its own. Each one follows something
-# else, and this report asks that governing thing what it ships now.
-# So a row that says "behind" here means the pin it follows already
-# moved, and the mirror has not caught up.
-#
-# musl, util-linux, and OpenSSL are the packages of the Alpine
-# branch that the `alpine` entry in toolchains/images.toml installs
-# from, so their channel is that branch, such as v3.22. Under the rule in root
-# plan 83, a pin from a package repository follows the newest branch
-# that the repository offers to install whole, and for Alpine that is
-# `edge`. So their newest-channel column prints `edge`, and their
-# latest column is the version in the branch that the image uses now,
-# because the mirror must match the libraries that the build linked.
-# iptables and buildroot follow the k3s-root release in
-# xtables/VERSION, so both channel columns print `-`.
+# Neither of the two moves on its own. Each one follows the k3s-root
+# release in xtables/VERSION, and this report asks that release what
+# it ships now. So a row that says "behind" here means the pin it
+# follows already moved, and the mirror has not caught up. Both
+# channel columns print `-`.
 #
 # There is no independent bump. The version is part of the filename
 # that the channel serves, so a new version is a new URL, and
@@ -35,7 +24,7 @@
 # digest whose bytes changed under an unchanged URL.
 #
 # Usage:
-#   licensing/latest.sh          report the five source-only pins
+#   licensing/latest.sh          report the two source-only pins
 #   licensing/latest.sh --bump   re-pin the digests that moved
 
 set -euo pipefail
@@ -51,53 +40,8 @@ pin_of() {
         head -1 | sed -e "s|\"$1-||" -e 's|\.tar\.[a-z]*"$||'
 }
 
-pinned_musl="$(pin_of musl)"
-pinned_utillinux="$(pin_of util-linux)"
-pinned_openssl="$(pin_of openssl)"
 pinned_iptables="$(pin_of iptables)"
 pinned_buildroot="$(pin_of buildroot)"
-
-# The image's tag names the Alpine release, as 3.22 or 3.22.2, and
-# Alpine's package repository names its branch by the first two
-# numbers with a v in front, as v3.22. edge has no number.
-alpine_tag="$(sed -n '/^\[build\]/,/^\[/ s|^alpine = "alpine:\([^@"]*\).*"$|\1|p' \
-    "$here/../../toolchains/images.toml")"
-case "$alpine_tag" in
-edge) branch="edge" ;;
-"") branch="?" ;;
-*) branch="v$(cut -d. -f1-2 <<<"$alpine_tag")" ;;
-esac
-newest_branch="edge"
-
-# One index lists every package in an Alpine release, as records
-# separated by a blank line, with P: for the name and V: for the
-# version. The version carries Alpine's own -rN build suffix, which is
-# not part of the upstream release the mirror carries.
-#
-# The awk reads to the end of the index instead of stopping at the
-# record it wants. Stopping would close the pipe under tar, and a
-# pipeline that ends in a broken pipe fails, which would report every
-# package as unknown.
-alpine_package() {
-    fetch_text "https://dl-cdn.alpinelinux.org/alpine/$branch/main/x86_64/APKINDEX.tar.gz" --max-time 120 |
-        tar -xzO APKINDEX |
-        awk -v want="P:$1" -v RS='' '
-            { hit = 0
-              for (i = 1; i <= NF; i++) if ($i == want) hit = 1
-              if (hit && !done)
-                  for (i = 1; i <= NF; i++)
-                      if ($i ~ /^V:/) { print substr($i, 3); done = 1 } }' |
-        sed 's|-r[0-9]*$||'
-}
-
-latest_musl=""
-latest_utillinux=""
-latest_openssl=""
-if [[ "$branch" != "?" ]]; then
-    latest_musl="$(alpine_package musl)" || latest_musl=""
-    latest_utillinux="$(alpine_package util-linux-dev)" || latest_utillinux=""
-    latest_openssl="$(alpine_package openssl-libs-static)" || latest_openssl=""
-fi
 
 # iptables and buildroot come from a chain: the k3s-root release liken
 # pins names a buildroot version in its download script, and that
@@ -113,10 +57,6 @@ if [[ -n "$latest_buildroot" ]]; then
         sed -n 's|^IPTABLES_VERSION *= *||p' | head -1)" || latest_iptables=""
 fi
 
-alpine_note="follows the alpine image in toolchains/images.toml"
-row musl "$pinned_musl" "$latest_musl" "$branch" "$newest_branch" - "$alpine_note"
-row util-linux "$pinned_utillinux" "$latest_utillinux" "$branch" "$newest_branch" - "$alpine_note"
-row openssl "$pinned_openssl" "$latest_openssl" "$branch" "$newest_branch" - "$alpine_note"
 row iptables "$pinned_iptables" "$latest_iptables" - - - \
     "follows xtables: what k3s-root $k3s_root builds"
 row buildroot "$pinned_buildroot" "$latest_buildroot" - - - \

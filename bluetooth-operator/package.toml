@@ -54,7 +54,13 @@ contexts = { kubernetes = "kubernetes", notices = "notices" }
 [[outputs.images]]
 name = "bluetoothd"
 file = "bluetoothd/Dockerfile"
-contexts = { kubernetes = "kubernetes", notices = "notices" }
+# userland is the BR2_EXTERNAL tree whose buildroot build makes the
+# image's static daemons.
+contexts = { kubernetes = "kubernetes", notices = "notices", userland = "liken/userland" }
+# A build whose layer cache misses compiles buildroot's cross-compiler,
+# glib, dbus, and BlueZ from source, which takes longer than the
+# default limit of the images and publish jobs.
+timeout = 120
 
 # The CLI image carries the same version as the operator, so the base
 # binary pulls a CLI that never drifts from the operator it faces. It is

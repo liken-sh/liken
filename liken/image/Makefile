@@ -23,8 +23,7 @@ MOUNT_DIST ?= ../mount/dist
 MACHINE_OPERATOR_DIST ?= ../machine-operator/dist
 CLUSTER_OPERATOR_DIST ?= ../cluster-operator/dist
 LOGS_DIST ?= ../logs/dist
-OPENISCSI_VERSION := $(strip $(file <../open-iscsi/VERSION))
-OPENISCSI_DIST ?= ../open-iscsi/dist/$(OPENISCSI_VERSION)
+OPENISCSI_DIST ?= ../open-iscsi/dist
 USERLAND_DIST ?= ../userland/dist
 
 KERNEL_VERSION := $(strip $(file <../kernel/VERSION))

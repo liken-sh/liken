@@ -120,6 +120,11 @@ type Outputs struct {
 	// that the deploy artifact holds or that an image receives, because
 	// an output is built from it.
 	Exclude []string `toml:"exclude"`
+	// Timeout is the publish job's limit in minutes, for a component
+	// whose publish builds more than the default limit allows, such as
+	// a release that compiles a toolchain from source when the cache
+	// misses. The default stays when it is larger.
+	Timeout int `toml:"timeout"`
 }
 
 // An Image is one image on ghcr.io/liken-sh.
@@ -145,6 +150,12 @@ type Image struct {
 	// Aliases are more names for the same image, pushed with the same
 	// tags.
 	Aliases []string `toml:"aliases"`
+	// Timeout is the limit in minutes of the jobs that build the image,
+	// for an image whose build compiles a toolchain from source when
+	// the cache misses. It raises the images job and the publish job,
+	// which builds the image again, and a default that is larger
+	// stays.
+	Timeout int `toml:"timeout"`
 	// Smoke is a script, relative to the repository root, that checks
 	// the built image. It takes the image reference as its first
 	// argument.
