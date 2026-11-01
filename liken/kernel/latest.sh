@@ -39,11 +39,17 @@
 # Its fingerprint is pinned below as `signer`. A new key is a change
 # that a person makes by hand, after checking the team's page.
 #
+# The same bump pins kernel.org's tarball of the release, which
+# licensing/sources.sh mirrors as the kernel's corresponding source.
+# Its digest comes from kernel.org's sha256sums.asc, through
+# trust/keys/kernel-org-digest.sh, which checks the file's signature
+# first.
+#
 # Usage:
 #   kernel/latest.sh          report the pin and the newest release
 #   kernel/latest.sh --bump   write the newest release into VERSION,
-#                             and its packages' URLs and digests into
-#                             pin.toml
+#                             and the URLs and digests of its packages
+#                             and its source into pin.toml
 
 set -euo pipefail
 
@@ -101,12 +107,21 @@ pin_package() {
     set_pin "$1" "$latest" "$url" "$digest" "$(generic_purl "$1" "$latest" "$url" "$digest")"
 }
 
+# licensing/sources.sh mirrors kernel.org's tarball of the release as
+# the kernel's corresponding source, from the linux-source entry of
+# pin.toml. kernel.org lists the digest of each tarball of a major
+# version in one sums file, signed by its checksum autosigner.
+source_dir="https://cdn.kernel.org/pub/linux/kernel/v${latest%%.*}.x"
+source_url="$source_dir/linux-$latest.tar.xz"
+source_digest="$("$here/../../trust/keys/kernel-org-digest.sh" \
+    "$source_dir/sha256sums.asc" "linux-$latest.tar.xz")"
+
 echo "$latest" >"$here/VERSION"
 pin_package linux-image-unsigned "$image"
 pin_package linux-modules "$modules"
+set_pin linux-source "$latest" "$source_url" "$source_digest" \
+    "$(generic_purl linux "$latest" "$source_url" "$source_digest")"
 bumped kernel "$pinned" "$latest"
-echo "the digests came from the build's CHECKSUMS file, signed by the Kernel PPA key"
-# licensing/sources.sh mirrors kernel.org's tarball of this release
-# and pins it by digest, so a kernel bump moves that digest too.
-repin_sources
+echo "the digests of the packages came from the build's CHECKSUMS file, signed by the Kernel PPA key"
+echo "the digest of the source came from sha256sums.asc, signed by kernel.org's checksum autosigner"
 next_step "make -C .. kernel"

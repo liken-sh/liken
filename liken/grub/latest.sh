@@ -34,7 +34,11 @@
 #
 # This domain fetches two debs and pins both. They always share a
 # version, because they come from one source package, so one bump
-# writes both digests.
+# writes both digests. The same bump pins the three files of that
+# source package, which licensing/sources.sh mirrors as the
+# corresponding source. The suite's Sources index lists their digests,
+# and InRelease lists the digest of the index, so ubuntu_source_files
+# takes them through the same chain.
 #
 # Usage:
 #   grub/latest.sh                       report the pin
@@ -88,13 +92,14 @@ bump_needed grub "$pinned" "$target" || exit 0
 pc_bin="$(ubuntu_deb_digest grub2 grub-pc-bin main "$target")"
 # grub-mkimage is in grub2-common from the 2.14 packaging on.
 common="$(ubuntu_deb_digest grub2 grub2-common main "$target")"
+sources="$(ubuntu_source_files grub2 main "$target")"
 
 echo "$target" >"$here/VERSION"
 set_pin grub-pc-bin "$target" "$pool/grub-pc-bin_${target}_amd64.deb" "$pc_bin" \
     "$(deb_purl ubuntu grub-pc-bin "$target")"
 set_pin grub2-common "$target" "$pool/grub2-common_${target}_amd64.deb" "$common" \
     "$(deb_purl ubuntu grub2-common "$target")"
+set_ubuntu_source_pins grub2-source grub2 "$target" "$sources"
 bumped grub "$pinned" "$target"
-echo "the digests came from the Packages index, checked against InRelease, signed by Ubuntu's archive key"
-repin_sources
+echo "the digests came from the Packages and Sources indexes, checked against InRelease, signed by Ubuntu's archive key"
 next_step "make -C .. grub"

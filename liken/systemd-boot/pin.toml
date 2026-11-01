@@ -1,7 +1,8 @@
-# The file that systemd-boot/fetch.sh downloads, for the fetch and for
+# The file that systemd-boot/fetch.sh downloads, and the source that
+# licensing/sources.sh mirrors, for the fetch, for the mirror, and for
 # the SBOM of a release. systemd-boot/latest.sh --bump writes the
-# version, url, sha256, and purl, and toolchains/pin.sh describes each
-# field.
+# version, url, sha256, and purl of each, and toolchains/pin.sh
+# describes each field.
 
 # Ubuntu's systemd-boot-efi package, from the systemd source package.
 # The release ships systemd-bootx64.efi from it. The sources under
@@ -14,3 +15,36 @@ url = "http://archive.ubuntu.com/ubuntu/pool/universe/s/systemd/systemd-boot-efi
 sha256 = "128d8a69e4274dee41fcbd5d74e2c55ec4d67b1726005cce9b41c20a3ea453e6"
 purl = "pkg:deb/ubuntu/systemd-boot-efi@261.3-0ubuntu3?arch=amd64"
 license = "LGPL-2.1-or-later AND BSD-3-Clause AND LicenseRef-alg-sha1-public-domain"
+
+# The next three are the corresponding source: the files of the systemd
+# source package that built the package above. They are the upstream
+# tarball, the packaging tarball with Ubuntu's patches, and the .dsc
+# file that names both. No build reads them. licensing/sources.sh
+# mirrors them onto the release channel from Launchpad, which keeps
+# every version, so their scope is excluded. LICENSES/README.md in the
+# upstream tarball gives the project the LGPL version 2.1 or later and
+# the udev programs the GPL version 2 or later, and it names the other
+# licenses of single files.
+[systemd-source-orig]
+version = "261.3-0ubuntu3"
+url = "https://launchpad.net/ubuntu/+archive/primary/+sourcefiles/systemd/261.3-0ubuntu3/systemd_261.3.orig.tar.gz"
+sha256 = "3f8d3d3969af7214bda600930e14c6a24135eb3dce1ba7f1b980b74e6dc15b72"
+purl = "pkg:deb/ubuntu/systemd@261.3-0ubuntu3?arch=source"
+license = "LGPL-2.1-or-later AND GPL-2.0-or-later"
+scope = "excluded"
+
+[systemd-source-debian]
+version = "261.3-0ubuntu3"
+url = "https://launchpad.net/ubuntu/+archive/primary/+sourcefiles/systemd/261.3-0ubuntu3/systemd_261.3-0ubuntu3.debian.tar.xz"
+sha256 = "337c25d28338d17316e52e2d2309a4b71946db7c350feb51555253bd296a29af"
+purl = "pkg:deb/ubuntu/systemd@261.3-0ubuntu3?arch=source"
+license = "LGPL-2.1-or-later AND GPL-2.0-or-later"
+scope = "excluded"
+
+[systemd-source-dsc]
+version = "261.3-0ubuntu3"
+url = "https://launchpad.net/ubuntu/+archive/primary/+sourcefiles/systemd/261.3-0ubuntu3/systemd_261.3-0ubuntu3.dsc"
+sha256 = "dbf49a9e6358233b12f706f5503bab6eceb557af22af21f321b6bc3191fed637"
+purl = "pkg:deb/ubuntu/systemd@261.3-0ubuntu3?arch=source"
+license = "LGPL-2.1-or-later AND GPL-2.0-or-later"
+scope = "excluded"

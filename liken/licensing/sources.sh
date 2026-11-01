@@ -23,13 +23,16 @@
 # because sources only change when a pin changes. Every release built
 # from the same pins shares the same mirrored sources.
 #
-# Every mirrored file is pinned here by its sha256 digest, the same
-# discipline that every fetch script in this repository follows. Some
-# pins track another domain's pin and must move together with it.
-# Each pin below names the pin it follows. If a domain pin changes
-# without a matching update here, the digest or URL check fails.
-# Because of this check, a release cannot silently ship binaries
-# whose sources are not mirrored.
+# Every file that this script downloads is an entry of the pin.toml of
+# the domain whose binary was built from it, with its url and its
+# sha256, and the script reads both with pin_value and downloads with
+# fetch_pinned, the same way a fetch.sh does. That domain's latest.sh
+# --bump writes the entry in the same bump that moves the binary, so
+# one bump moves both. `ci pins` fails when this script holds a digest,
+# and when an entry's version differs from the domain's VERSION, except
+# for the iptables and buildroot releases that the k3s-root release in
+# xtables/VERSION names. The other files come from a domain's own
+# cache, where its fetch already checked them.
 #
 # Some components need no mirror. k3s uses the Apache-2.0 license,
 # which requires notices, not source, but its release page carries
@@ -48,25 +51,21 @@
 # Usage:
 #   licensing/sources.sh            mirror the sources for the pinned
 #                                   versions
-#   licensing/sources.sh --repin    write the digests that a domain's
-#                                   version bump moved
+#   licensing/sources.sh --verify   download each file that a pin.toml
+#                                   entry names into the cache and
+#                                   check it against its digest
 #
 # Results land in licensing/dist/sources/<component>/<version>/, laid
 # out exactly as the channel serves them at
 # https://releases.liken.sh/sources/. Downloads are cached in
 # licensing/cache/.
 #
-# The --repin mode exists because the pins above track other domains,
-# and a domain that bumps its VERSION moves the source that belongs to
-# it. That mode fetches each pinned URL, and where the bytes no longer
-# match, it writes the new digest into this file. A sha256 string
-# appears once here, so the rewrite is exact.
-#
-# It refuses one case on purpose. Several URLs carry a version inside
-# the filename, so a bump changes the name and not only the bytes, and
-# the fetch returns a 404 error. The mode reports that URL and stops.
-# The mirror path is what the source offer depends on, and a guess
-# there ships a release whose sources cannot be downloaded.
+# A bump takes each digest from what the upstream lists, such as a
+# signed sums file, and does not always download the file. The
+# --verify mode downloads every file that a pin.toml entry names, so it
+# shows before a release that each URL serves the bytes of its pin. It
+# does not ask the channel, it writes nothing into dist, and it uploads
+# nothing.
 
 set -euo pipefail
 
@@ -74,17 +73,14 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
 source "$here/../../toolchains/pin.sh"
 
-repin=0
-if [[ "${1:-}" == "--repin" ]]; then
-    repin=1
-fi
+verify=0
+case "${1:-}" in
+"") ;;
+--verify) verify=1 ;;
+*) fail "unknown option ${1}; try --verify" ;;
+esac
 
-for tool in curl sha256sum; do
-    command -v "$tool" >/dev/null || {
-        echo "sources.sh: missing required tool: $tool" >&2
-        exit 1
-    }
-done
+require_tools sha256sum
 
 # The component versions come from the domains that pin them. Because
 # of this, the script can never disagree with what a release actually
@@ -100,8 +96,7 @@ linuxfirmware_version="$(cat "$here/../linux-firmware/VERSION")"
 # The regulatory database is a nested pin inside the linux-firmware
 # domain, so its version comes out of that domain's manifest instead
 # of a VERSION file.
-regdb_manifest="$here/../linux-firmware/pin.toml"
-regdb_version="$(pin_value wireless-regdb version "$regdb_manifest")"
+regdb_version="$(pin_value wireless-regdb version "$here/../linux-firmware/pin.toml")"
 
 cache="$here/cache"
 out="$here/dist/sources"
@@ -123,81 +118,38 @@ published() {
     curl -fsI --retry 3 --max-time 60 "$channel/sources/$1/$2" >/dev/null 2>&1
 }
 
-# repin_one <component>/<version> <filename> <sha256> <url>: what
-# mirror does in --repin mode. It ignores the channel, because a file
-# the channel already serves is a file whose pin is already right, and
-# the point here is the one that is not. A cached file that matches
-# its pin costs a local hash. Any other cached file is downloaded
-# again before it is hashed, because the new digest must come from the
-# bytes that the URL serves now. A cached file that a broken download
-# or a disk fault changed would otherwise become the pin.
-repins=()
-repin_one() {
-    local dir="$1" file="$2" sha="$3" url="$4" bytes
-    mkdir -p "$cache/$dir"
-    if sha256sum --check --status <<<"$sha  $cache/$dir/$file" >/dev/null 2>&1; then
-        return
-    fi
-    echo "fetching $dir/$file"
-    curl -fsSL --retry 5 --retry-delay 5 --max-time 1800 "$url" -o "$cache/$dir/$file.partial" || {
-        rm -f "$cache/$dir/$file.partial"
-        echo "sources.sh: $url does not resolve" >&2
-        echo "sources.sh: this URL carries a version in its name, so the" >&2
-        echo "bump changed the name; edit the entry in this file by hand" >&2
-        exit 1
-    }
-    mv "$cache/$dir/$file.partial" "$cache/$dir/$file"
-    bytes="$(sha256sum "$cache/$dir/$file" | cut -d' ' -f1)"
-    if [[ "$bytes" != "$sha" ]]; then
-        repins+=(-e "s|$sha|$bytes|")
-        echo "re-pinned $dir/$file"
-    fi
-}
+# In --verify mode this script does one job: download each file that
+# a pin.toml entry names and check it. So the domains that mirror from
+# their own cache are not fetched, and place() returns without doing
+# anything. Nothing here needs a built domain, and nothing here writes
+# into dist.
+prefetch() { ((verify)) || "$@"; }
 
-# In --repin mode this script does one job: bring its own digests up
-# to the bytes that the pinned URLs serve now. So the domains that
-# mirror from their own cache are not fetched, and place() returns
-# without doing anything. Nothing here needs a built domain, and
-# nothing here writes into dist.
-prefetch() { ((repin)) || "$@"; }
-
-# mirror <component>/<version> <filename> <sha256> <url>: download
-# the file into the cache when the cache has no good copy, verify it
-# against the pin every time, and place it in the tree the channel
-# serves. Hardlinks keep the big tarballs from existing twice on disk.
-# The retries matter here more than in most fetch scripts, because
-# this function pulls from
-# several upstreams in a row (kernel.org, GitHub, GNU, Launchpad).
-# Without the retries, a single transient 502 error from any of them
-# would fail a release.
+# mirror <component>/<version> <domain> <entry> <version> [<filename>]:
+# download the file that the entry of the domain's pin.toml names into
+# the cache when the cache has no good copy, and place it in the tree
+# the channel serves under the filename, or under the last part of its
+# url. The version is the one that the domain pins, and fetch_pinned
+# stops when the entry names another. fetch_pinned checks the cached
+# file against the pin every time, downloads a missing or changed one
+# again, and retries a transient error, which matters here because
+# this script reads several upstreams in a row: kernel.org, GitHub,
+# netfilter.org, and Launchpad. Hardlinks keep the big tarballs from
+# existing twice on disk.
 mirror() {
-    local dir="$1" file="$2" sha="$3" url="$4"
-    if ((repin)); then
-        repin_one "$dir" "$file" "$sha" "$url"
+    local dir="$1" manifest="$here/../$2/pin.toml" entry="$3" version="$4" file="${5:-}"
+    [[ -n "$file" ]] || file="$(basename "$(pin_value "$entry" url "$manifest")")"
+    if ((verify)); then
+        fetch_pinned --resume "$entry" "$version" "$cache/$dir/$file" "$manifest"
+        echo "$dir/$file matches $2/pin.toml"
         return
     fi
     if published "$dir" "$file"; then
         echo "$dir/$file is already on the channel"
         return
     fi
-    mkdir -p "$cache/$dir" "$out/$dir"
-    # A cached file that matches its pin is good. Any other cached
-    # file (missing, torn, or changed) is downloaded again. The bytes
-    # go to a .partial file, which replaces the cached file only after
-    # it matches the pin, and a .partial that does not match is
-    # deleted, so a bad download never stays in the cache to fail
-    # every later run.
-    if ! sha256sum --check --status <<<"$sha  $cache/$dir/$file" >/dev/null 2>&1; then
-        echo "mirroring $dir/$file"
-        curl -fsSL --retry 5 --retry-delay 5 --max-time 1800 "$url" -o "$cache/$dir/$file.partial"
-        sha256sum --check --quiet <<<"$sha  $cache/$dir/$file.partial" || {
-            rm -f "$cache/$dir/$file.partial"
-            echo "sources.sh: the bytes at $url do not match the pin of $dir/$file" >&2
-            echo "sources.sh: if a domain's version bumped, run licensing/sources.sh --repin" >&2
-            exit 1
-        }
-        mv "$cache/$dir/$file.partial" "$cache/$dir/$file"
-    fi
+    fetch_pinned --resume "$entry" "$version" "$cache/$dir/$file" "$manifest"
+    mkdir -p "$out/$dir"
     ln -f "$cache/$dir/$file" "$out/$dir/$file" 2>/dev/null \
         || cp "$cache/$dir/$file" "$out/$dir/$file"
 }
@@ -208,9 +160,9 @@ mirror() {
 # and not even that when the channel already serves it.
 place() {
     local dir="$1" file="$2" src="$3"
-    # A placed file carries no digest here, so --repin has nothing to
-    # write for it.
-    if ((repin)); then
+    # A placed file came through its domain's own fetch, so --verify
+    # has nothing to check for it.
+    if ((verify)); then
         return
     fi
     if published "$dir" "$file"; then
@@ -231,10 +183,7 @@ place() {
 # configuration, which the GPL counts as part of the corresponding
 # source, and which the kernel domain already extracts from the
 # module package.
-# Tracks kernel/VERSION.
-mirror "kernel/$kernel_version" "linux-$kernel_version.tar.xz" \
-    "fa595aad93734f829c963c2a90ef7c3673224fd7fdae7b49406e397cde2de231" \
-    "https://cdn.kernel.org/pub/linux/kernel/v${kernel_version%%.*}.x/linux-$kernel_version.tar.xz"
+mirror "kernel/$kernel_version" kernel linux-source "$kernel_version"
 place "kernel/$kernel_version" "config" "$here/../kernel/dist/$kernel_version/config"
 
 # The xtables binaries are iptables, built by k3s-root's buildroot
@@ -243,18 +192,18 @@ place "kernel/$kernel_version" "config" "$here/../kernel/dist/$kernel_version/co
 # pins every remaining package it builds by hash. The same three
 # files are the source for the GPL-licensed userland embedded in the
 # k3s binary, which k3s assembles from the same k3s-root version.
-# iptables tracks what k3s-root builds (xtables-legacy-multi
-# --version prints the version); buildroot tracks k3s-root's
-# scripts/download.
-mirror "xtables/$xtables_version" "iptables-1.8.11.tar.xz" \
-    "d87303d55ef8c92bcad4dd3f978b26d272013642b029425775f5bad1009fe7b2" \
-    "https://www.netfilter.org/pub/iptables/iptables-1.8.11.tar.xz"
-mirror "xtables/$xtables_version" "k3s-root-$xtables_version.tar.gz" \
-    "ab4ddff445f4aa19add06f1a53d9f1c8194b65f5e31ca54ab2abb67036bf442f" \
-    "https://github.com/k3s-io/k3s-root/archive/refs/tags/$xtables_version.tar.gz"
-mirror "xtables/$xtables_version" "buildroot-2025.02.14.tar.gz" \
-    "8133a06142f6eb0177726b54a948b46289ebe48f9cbcaac5403cffd1a3cc9f36" \
-    "https://github.com/buildroot/buildroot/archive/refs/tags/2025.02.14.tar.gz"
+# xtables/latest.sh --bump writes all three entries from the k3s-root
+# release in xtables/VERSION: the iptables and buildroot releases are
+# the ones that the k3s-root release names, so their versions are in
+# their entries alone. GitHub names the archive of a tag by the tag, so
+# the mirror names the two archives after their projects.
+iptables_version="$(pin_value iptables-source version "$here/../xtables/pin.toml")"
+buildroot_version="$(pin_value buildroot-source version "$here/../xtables/pin.toml")"
+mirror "xtables/$xtables_version" xtables iptables-source "$iptables_version"
+mirror "xtables/$xtables_version" xtables k3s-root-source "$xtables_version" \
+    "k3s-root-$xtables_version.tar.gz"
+mirror "xtables/$xtables_version" xtables buildroot-source "$buildroot_version" \
+    "buildroot-$buildroot_version.tar.gz"
 
 # The static programs of the userland domain: mke2fs, mount.nfs,
 # iscsid and iscsiadm, wpa_supplicant, and the time zone database.
@@ -277,7 +226,7 @@ prefetch "$here/../userland/fetch.sh" --sources-only
 place "buildroot/$userland_commit" "buildroot-$userland_commit.tar.gz" \
     "$here/../userland/cache/buildroot/buildroot-$userland_commit.tar.gz"
 legal="$here/../userland/dist/legal-info"
-if ! ((repin)); then
+if ! ((verify)); then
     [[ -f "$legal/manifest.csv" ]] || {
         echo "sources.sh: $legal/manifest.csv is missing; build the userland domain first" >&2
         exit 1
@@ -316,27 +265,14 @@ fi
 # tarball, the packaging tarball with Ubuntu's patches, and the .dsc
 # file that ties them together. Launchpad keeps every version
 # forever, unlike the pool that the binaries come from, but the
-# mirror means nobody has to depend on that.
-# Track systemd-boot/VERSION and grub/VERSION.
-launchpad="https://launchpad.net/ubuntu/+archive/primary/+sourcefiles"
-mirror "systemd-boot/$systemdboot_version" "systemd_261.3.orig.tar.gz" \
-    "3f8d3d3969af7214bda600930e14c6a24135eb3dce1ba7f1b980b74e6dc15b72" \
-    "$launchpad/systemd/$systemdboot_version/systemd_261.3.orig.tar.gz"
-mirror "systemd-boot/$systemdboot_version" "systemd_$systemdboot_version.debian.tar.xz" \
-    "337c25d28338d17316e52e2d2309a4b71946db7c350feb51555253bd296a29af" \
-    "$launchpad/systemd/$systemdboot_version/systemd_$systemdboot_version.debian.tar.xz"
-mirror "systemd-boot/$systemdboot_version" "systemd_$systemdboot_version.dsc" \
-    "dbf49a9e6358233b12f706f5503bab6eceb557af22af21f321b6bc3191fed637" \
-    "$launchpad/systemd/$systemdboot_version/systemd_$systemdboot_version.dsc"
-mirror "grub/$grub_version" "grub2_2.14.orig.tar.xz" \
-    "bc8d3c73535b8838d8c8e2654d73edc4e6ae8c8acdb45d5df5dc9a1547446d43" \
-    "$launchpad/grub2/$grub_version/grub2_2.14.orig.tar.xz"
-mirror "grub/$grub_version" "grub2_$grub_version.debian.tar.xz" \
-    "5e8cc04300ff891370b9bdfe46f477b17694a97712f36a69c4d33ab19ab3aa91" \
-    "$launchpad/grub2/$grub_version/grub2_$grub_version.debian.tar.xz"
-mirror "grub/$grub_version" "grub2_$grub_version.dsc" \
-    "2c697a2d159bc2494f32eafbd6fb67cddf2b3a8ae1088f8108f4276c5a600c07" \
-    "$launchpad/grub2/$grub_version/grub2_$grub_version.dsc"
+# mirror means nobody has to depend on that. Each file keeps the name
+# that Launchpad serves it under, which the url of its entry ends in.
+mirror "systemd-boot/$systemdboot_version" systemd-boot systemd-source-orig "$systemdboot_version"
+mirror "systemd-boot/$systemdboot_version" systemd-boot systemd-source-debian "$systemdboot_version"
+mirror "systemd-boot/$systemdboot_version" systemd-boot systemd-source-dsc "$systemdboot_version"
+mirror "grub/$grub_version" grub grub2-source-orig "$grub_version"
+mirror "grub/$grub_version" grub grub2-source-debian "$grub_version"
+mirror "grub/$grub_version" grub grub2-source-dsc "$grub_version"
 
 # The CA bundle: MPL-2.0, whose obligation is to keep the file's own
 # source form available. The PEM file is that form.
@@ -373,7 +309,7 @@ place "hwdata/$hwdata_version" "pci.ids" \
 linuxfirmware_tarball="linux-firmware-$linuxfirmware_version.tar.xz"
 regdb_tarball="wireless-regdb-$regdb_version.tar.xz"
 linuxfirmware_cache="$here/../linux-firmware/cache"
-if ! ((repin)) && {
+if ! ((verify)) && {
     {
         ! published "linux-firmware/$linuxfirmware_version" "$linuxfirmware_tarball" &&
             [[ ! -f "$linuxfirmware_cache/$linuxfirmware_tarball" ]]
@@ -390,22 +326,8 @@ place "wireless-regdb/$regdb_version" "$regdb_tarball" \
     "$linuxfirmware_cache/$regdb_tarball"
 
 echo
-if ((repin)); then
-    # The edits are applied in one pass at the end, and not as each
-    # one is found, so a run that stops on an unresolvable URL leaves
-    # this file exactly as it was.
-    if ((${#repins[@]})); then
-        sed -i "${repins[@]}" "$here/sources.sh"
-        # Each edit is two array elements, the -e and its expression.
-        moved=$((${#repins[@]} / 2))
-        if ((moved == 1)); then
-            echo "1 source digest moved in licensing/sources.sh"
-        else
-            echo "$moved source digests moved in licensing/sources.sh"
-        fi
-    else
-        echo "every source pin already matches its bytes"
-    fi
+if ((verify)); then
+    echo "every source that a pin.toml names matches its digest"
 elif [[ -d "$out" ]]; then
     echo "sources to publish:"
     (cd "$out" && find . -type f | sort | sed 's|^\./|  |')

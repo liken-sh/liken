@@ -1,8 +1,9 @@
-# The files that grub/fetch.sh downloads, for the fetch and for the
-# SBOM of a release. grub/latest.sh --bump writes the version, url,
-# sha256, and purl of both, and toolchains/pin.sh describes each field.
-# Both packages come from Ubuntu's grub2 source package, whose
-# copyright file gives GRUB's code the GPL version 3 or later.
+# The files that grub/fetch.sh downloads, and the source that
+# licensing/sources.sh mirrors, for the fetch, for the mirror, and for
+# the SBOM of a release. grub/latest.sh --bump writes the version, url,
+# sha256, and purl of each, and toolchains/pin.sh describes each field.
+# Every file comes from Ubuntu's grub2 source package, whose copyright
+# file gives GRUB's code the GPL version 3 or later.
 
 # The BIOS build: boot.img and the modules that the core image links.
 [grub-pc-bin]
@@ -19,5 +20,34 @@ version = "2.14-2ubuntu3"
 url = "http://archive.ubuntu.com/ubuntu/pool/main/g/grub2/grub2-common_2.14-2ubuntu3_amd64.deb"
 sha256 = "5d45c86963028b5d027d65c9126580742f8924195f71265144dc7ea6422acdbd"
 purl = "pkg:deb/ubuntu/grub2-common@2.14-2ubuntu3?arch=amd64"
+license = "GPL-3.0-or-later"
+scope = "excluded"
+
+# The next three are the corresponding source: the upstream tarball,
+# the packaging tarball with Ubuntu's patches, and the .dsc file that
+# names both. No build reads them. licensing/sources.sh mirrors them
+# onto the release channel from Launchpad, which keeps every version,
+# so their scope is excluded.
+[grub2-source-orig]
+version = "2.14-2ubuntu3"
+url = "https://launchpad.net/ubuntu/+archive/primary/+sourcefiles/grub2/2.14-2ubuntu3/grub2_2.14.orig.tar.xz"
+sha256 = "bc8d3c73535b8838d8c8e2654d73edc4e6ae8c8acdb45d5df5dc9a1547446d43"
+purl = "pkg:deb/ubuntu/grub2@2.14-2ubuntu3?arch=source"
+license = "GPL-3.0-or-later"
+scope = "excluded"
+
+[grub2-source-debian]
+version = "2.14-2ubuntu3"
+url = "https://launchpad.net/ubuntu/+archive/primary/+sourcefiles/grub2/2.14-2ubuntu3/grub2_2.14-2ubuntu3.debian.tar.xz"
+sha256 = "5e8cc04300ff891370b9bdfe46f477b17694a97712f36a69c4d33ab19ab3aa91"
+purl = "pkg:deb/ubuntu/grub2@2.14-2ubuntu3?arch=source"
+license = "GPL-3.0-or-later"
+scope = "excluded"
+
+[grub2-source-dsc]
+version = "2.14-2ubuntu3"
+url = "https://launchpad.net/ubuntu/+archive/primary/+sourcefiles/grub2/2.14-2ubuntu3/grub2_2.14-2ubuntu3.dsc"
+sha256 = "2c697a2d159bc2494f32eafbd6fb67cddf2b3a8ae1088f8108f4276c5a600c07"
+purl = "pkg:deb/ubuntu/grub2@2.14-2ubuntu3?arch=source"
 license = "GPL-3.0-or-later"
 scope = "excluded"

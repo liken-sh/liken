@@ -49,13 +49,26 @@ var unmanifested = map[string]string{
 // nestedPins names the entries of a manifest that no VERSION file pins.
 // linux-firmware/fetch.sh downloads wireless-regdb beside the firmware,
 // and the regulatory database has its own releases, so its manifest
-// entry alone holds its version.
+// entry alone holds its version. The k3s-root release in
+// xtables/VERSION builds iptables with a release of buildroot, and the
+// source mirror offers the source of both at the versions that the
+// release names, which xtables/latest.sh --bump writes.
 var nestedPins = map[string][]string{
 	"liken/linux-firmware": {"wireless-regdb"},
+	"liken/xtables":        {"iptables-source", "buildroot-source"},
 }
 
+// sourceMirror is the script that mirrors the corresponding source of
+// what an OS release ships onto the release channel. Each file that it
+// mirrors belongs to the pin of the binary that was built from it, so
+// the file's url and sha256 are an entry of that pin's manifest, which
+// the pin's latest.sh --bump writes in the same bump that moves the
+// binary. A digest in the script itself would be a second pin that no
+// bump moves.
+const sourceMirror = "liken/licensing/sources.sh"
+
 // digestLiteral matches a sha256 or a sha512 in hex, which a fetch.sh
-// in a manifested directory must not hold.
+// in a manifested directory and the source mirror must not hold.
 var digestLiteral = regexp.MustCompile(`\b([0-9a-f]{128}|[0-9a-f]{64})\b`)
 
 // sha256Hex matches a whole sha256 in hex, the form of an entry's
@@ -80,13 +93,19 @@ var addChecksum = regexp.MustCompile(`^ADD\b.*--checksum=sha256:([0-9a-f]*)\s+(\
 //   - the fetch.sh holds no digest of its own and downloads through
 //     fetch_pinned, which reads the url and the sha256 from pin.toml;
 //   - a Dockerfile beside a pin.toml that ADDs a URL by its checksum
-//     names a URL and a digest of the manifest.
+//     names a URL and a digest of the manifest;
+//   - the source mirror holds no digest of its own.
 func checkManifests(root string) ([]string, error) {
 	files, err := sourceFiles(root)
 	if err != nil {
 		return nil, err
 	}
 	var findings []string
+	mirror, err := os.ReadFile(filepath.Join(root, sourceMirror))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	findings = append(findings, mirrorFindings(string(mirror))...)
 	for _, file := range files {
 		if path.Base(file) != "fetch.sh" {
 			continue
@@ -236,6 +255,18 @@ func fetchFindings(file, text string) []string {
 	}
 	if !reads {
 		findings = append(findings, fmt.Sprintf("%s does not download through fetch_pinned, so it does not read %s", file, pinManifest))
+	}
+	return findings
+}
+
+// mirrorFindings lists each digest that the source mirror holds. A
+// comment can quote a digest, so the check reads the commands alone.
+func mirrorFindings(text string) []string {
+	var findings []string
+	for _, l := range logicalLines(text) {
+		if digestLiteral.MatchString(l.text) {
+			findings = append(findings, fmt.Sprintf("%s:%d holds a digest; the digest of each source that it mirrors is in the %s of the pin that the source belongs to", sourceMirror, l.n, pinManifest))
+		}
 	}
 	return findings
 }

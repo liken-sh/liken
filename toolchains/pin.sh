@@ -294,24 +294,28 @@ pin_value() {
     echo "$value"
 }
 
-# fetch_pinned [--resume] <entry> <version> <path>: put the file that
-# an entry of the manifest names at the path, through fetch_verified,
-# with the entry's url and sha256. The version is the one that the
-# fetch builds, from its VERSION file, and the fetch stops when the
-# manifest names another, because the files that a build extracts must
-# be the ones that the SBOM lists.
+# fetch_pinned [--resume] <entry> <version> <path> [<manifest>]: put
+# the file that an entry of a manifest names at the path, through
+# fetch_verified, with the entry's url and sha256. The manifest is the
+# one beside the calling script unless the call names another, as the
+# source mirror names the manifest of each pin whose source it offers.
+# The version is the one that the caller builds or mirrors, from the
+# pin's VERSION file, and the fetch stops when the manifest names
+# another, because the files that a build extracts must be the ones
+# that the SBOM lists.
 fetch_pinned() {
     local resume=()
     if [[ "$1" == --resume ]]; then
         resume=(--resume)
         shift
     fi
-    local entry="$1" version="$2" path="$3" pinned url digest
-    pinned="$(pin_value "$entry" version)"
+    local entry="$1" version="$2" path="$3" manifest="${4:-$(pin_manifest)}" pinned url digest dir
+    dir="$(dirname "${manifest#"$pin_root"/}")"
+    pinned="$(pin_value "$entry" version "$manifest")"
     [[ "$pinned" == "$version" ]] ||
-        fail "$(pin_dir)/pin.toml names $entry $pinned, and this fetch builds $version; $(pin_dir)/latest.sh --bump writes both"
-    url="$(pin_value "$entry" url)"
-    digest="$(pin_value "$entry" sha256)"
+        fail "$dir/pin.toml names $entry $pinned, and this fetch builds $version; $dir/latest.sh --bump writes both"
+    url="$(pin_value "$entry" url "$manifest")"
+    digest="$(pin_value "$entry" sha256 "$manifest")"
     fetch_verified "${resume[@]}" "$url" "$digest" "$path"
 }
 
@@ -348,10 +352,12 @@ github_purl() {
     echo "pkg:github/${1,,}@$(purl_escape "$2")"
 }
 
-# deb_purl <distribution> <package> <version>: print the package URL
-# of an amd64 package of a Debian or Ubuntu archive.
+# deb_purl <distribution> <package> <version> [<arch>]: print the
+# package URL of a package of a Debian or Ubuntu archive, an amd64
+# package unless the call names another architecture. The purl
+# specification names a source package with the architecture source.
 deb_purl() {
-    echo "pkg:deb/$1/$2@$(purl_escape "$3")?arch=amd64"
+    echo "pkg:deb/$1/$2@$(purl_escape "$3")?arch=${4:-amd64}"
 }
 
 # --- the build container -------------------------------------------------
@@ -446,7 +452,40 @@ verify_signature() {
 
 # --- Debian and Ubuntu archives ------------------------------------------
 
-# archive_deb <key.asc> <suite URL> <index> <package> [<version>]
+# archive_index <key.asc> <suite URL> <index> <path>: put one index of
+# a Debian or Ubuntu suite, such as main/binary-amd64/Packages.xz or
+# main/source/Sources.xz, at the path, after it matches the digest that
+# the suite's signed InRelease file lists for it. archive_deb and
+# archive_source read the digest of each file that they pin from the
+# index, so the signature on InRelease covers that digest too.
+#
+# An InRelease file that names a Valid-Until date in the past stops
+# the function, as it stops apt, so a mirror cannot serve an old signed
+# index that still names a superseded package.
+archive_index() {
+    local key="$1" suite="$2" index="$3" path="$4" valid digest
+    command -v xz >/dev/null || fail "missing required tool: xz"
+    fetch_file "$suite/InRelease" "$path.InRelease"
+    verify_signature "$key" "$path.InRelease" >"$path.Release"
+    valid="$(sed -n 's/^Valid-Until: //p' "$path.Release")"
+    if [[ -n "$valid" ]] && (($(date -d "$valid" +%s) < $(date +%s))); then
+        fail "$suite/InRelease expired at $valid"
+    fi
+
+    # The digest sections of a Release file start with a line such as
+    # "SHA256:", and each entry under one is "<digest> <size> <path>".
+    # SHA256 is the first choice, and Ubuntu's development series lists
+    # SHA512 alone.
+    digest="$(awk -v idx="$index" '
+        /^[^ ]/ { section = $1 }
+        section == "SHA256:" && $3 == idx { sha256 = $1 }
+        section == "SHA512:" && $3 == idx { sha512 = $1 }
+        END { print (sha256 != "" ? sha256 : sha512) }' "$path.Release")"
+    [[ -n "$digest" ]] || fail "$suite/InRelease lists no $index"
+    fetch_verified "$suite/$index" "$digest" "$path"
+}
+
+# archive_deb<key.asc> <suite URL> <index> <package> [<version>]
 #
 # Print "<version> <sha256>" for one binary package in a Debian or
 # Ubuntu archive, such as
@@ -468,35 +507,13 @@ verify_signature() {
 # The function downloads the package and prints the sha256 of the
 # verified bytes, because a fetch.sh pins a sha256, and the Packages
 # indexes of Ubuntu's development series list only a SHA512.
-#
-# An InRelease file that names a Valid-Until date in the past stops
-# the function too, as it stops apt, so a mirror cannot serve an old
-# signed index that still names a superseded package.
 archive_deb() (
     local key="$1" suite="$2" index="$3" package="$4" version="${5:-}"
-    local work valid digest record deb_digest
-    command -v xz >/dev/null || fail "missing required tool: xz"
+    local work record deb_digest
     work="$(mktemp -d)"
     trap 'rm -rf "$work"' EXIT
 
-    fetch_file "$suite/InRelease" "$work/InRelease"
-    verify_signature "$key" "$work/InRelease" >"$work/Release"
-    valid="$(sed -n 's/^Valid-Until: //p' "$work/Release")"
-    if [[ -n "$valid" ]] && (($(date -d "$valid" +%s) < $(date +%s))); then
-        fail "$suite/InRelease expired at $valid"
-    fi
-
-    # The digest sections of a Release file start with a line such as
-    # "SHA256:", and each entry under one is "<digest> <size> <path>".
-    # SHA256 is the first choice, and Ubuntu's development series lists
-    # SHA512 alone.
-    digest="$(awk -v idx="$index" '
-        /^[^ ]/ { section = $1 }
-        section == "SHA256:" && $3 == idx { sha256 = $1 }
-        section == "SHA512:" && $3 == idx { sha512 = $1 }
-        END { print (sha256 != "" ? sha256 : sha512) }' "$work/Release")"
-    [[ -n "$digest" ]] || fail "$suite/InRelease lists no $index"
-    fetch_verified "$suite/$index" "$digest" "$work/Packages.xz"
+    archive_index "$key" "$suite" "$index" "$work/Packages.xz"
 
     # One record per package version: "<version> <filename> <digest>".
     record="$(xz -dc "$work/Packages.xz" | awk -v p="$package" -v v="$version" '
@@ -517,6 +534,57 @@ archive_deb() (
 
     fetch_verified "${suite%/dists/*}/$file" "$deb_digest" "$work/package.deb"
     echo "$version $(sha256sum "$work/package.deb" | cut -d' ' -f1)"
+)
+
+# archive_source <key.asc> <suite URL> <index> <source package> <version>
+#
+# Print "<file> <sha256>" for each file of one version of a source
+# package in a Debian or Ubuntu archive, such as the upstream tarball,
+# the packaging tarball, and the .dsc file. The index is the suite's
+# Sources index, such as main/source/Sources.xz, and its record of the
+# version lists the digest of each file. The chain of digests is the
+# one that archive_deb follows, so the files that the function prints
+# are the ones that the archive's key covers. It downloads each file
+# from the archive's pool and prints the sha256 of the verified bytes,
+# because the Sources indexes of Ubuntu's development series list only
+# a SHA512.
+archive_source() (
+    local key="$1" suite="$2" index="$3" package="$4" version="$5"
+    local work files dir file digest
+    work="$(mktemp -d)"
+    trap 'rm -rf "$work"' EXIT
+
+    archive_index "$key" "$suite" "$index" "$work/Sources.xz"
+
+    # A record of a Sources index is a paragraph. Each file is a line of
+    # the field whose name ends in -Sha256 or -Sha512, as
+    # " <digest> <size> <file>", and Directory names the file's
+    # directory in the pool. One line per file: "<dir> <file> <digest>".
+    files="$(xz -dc "$work/Sources.xz" | awk -v p="$package" -v v="$version" '
+        BEGIN { RS = ""; FS = "\n" }
+        {
+            name = ""; ver = ""; dir = ""; section = ""; n = 0; m = 0
+            for (i = 1; i <= NF; i++) {
+                line = $i
+                if (line ~ /^[^ ]/) section = substr(line, 1, index(line, ":"))
+                if (line ~ /^Package: /) name = substr(line, 10)
+                else if (line ~ /^Version: /) ver = substr(line, 10)
+                else if (line ~ /^Directory: /) dir = substr(line, 12)
+                else if (line ~ /^ / && section ~ /-Sha256:$/) { split(line, f, " "); s256[++n] = f[3] " " f[1] }
+                else if (line ~ /^ / && section ~ /-Sha512:$/) { split(line, f, " "); s512[++m] = f[3] " " f[1] }
+            }
+            if (name == p && ver == v) {
+                if (n > 0) for (i = 1; i <= n; i++) print dir, s256[i]
+                else for (i = 1; i <= m; i++) print dir, s512[i]
+                exit
+            }
+        }')"
+    [[ -n "$files" ]] || fail "$suite/$index lists no $package $version"
+
+    while read -r dir file digest; do
+        fetch_verified "${suite%/dists/*}/$dir/$file" "$digest" "$work/$file"
+        echo "$file $(sha256sum "$work/$file" | cut -d' ' -f1)"
+    done <<<"$files"
 )
 
 # ubuntu_api is the root of Launchpad's API for the Ubuntu
@@ -559,24 +627,80 @@ ubuntu_newest_in() {
         cut -d' ' -f1 | sort -V | tail -1
 }
 
+# ubuntu_suite <source package> <version>: print the URL of the suite
+# of Ubuntu's archive that publishes the version of the source package.
+# Launchpad names the series and the pocket, and each pocket other
+# than Release is a suite of its own, such as resolute-updates.
+ubuntu_suite() {
+    local series pocket suite
+    read -r _ series pocket < <(launchpad_published "$1" \
+        --data status=Published --data "version=$2" | head -1) ||
+        fail "Launchpad names no series that publishes $1 $2"
+    suite="$series"
+    [[ "$pocket" == Release ]] || suite="$series-${pocket,,}"
+    echo "http://archive.ubuntu.com/ubuntu/dists/$suite"
+}
+
 # ubuntu_deb_digest <source package> <binary package> <component>
 # <version>: print the sha256 of an amd64 package of Ubuntu's archive
 # that one Ubuntu source package builds, through the signed InRelease
-# of the suite that publishes the version. Launchpad names the series
-# and the pocket, and each pocket other than Release is a suite of its
-# own, such as resolute-updates. trust/keys/ubuntu-archive.asc holds
-# the key that signs the archive.
+# of the suite that publishes the version. trust/keys/ubuntu-archive.asc
+# holds the key that signs the archive.
 ubuntu_deb_digest() {
-    local source="$1" package="$2" component="$3" version="$4" series pocket suite
-    read -r _ series pocket < <(launchpad_published "$source" \
-        --data status=Published --data "version=$version" | head -1) ||
-        fail "Launchpad names no series that publishes $source $version"
-    suite="$series"
-    [[ "$pocket" == Release ]] || suite="$series-${pocket,,}"
-    archive_deb "$pin_root/trust/keys/ubuntu-archive.asc" \
-        "http://archive.ubuntu.com/ubuntu/dists/$suite" \
+    local source="$1" package="$2" component="$3" version="$4" suite
+    suite="$(ubuntu_suite "$source" "$version")"
+    archive_deb "$pin_root/trust/keys/ubuntu-archive.asc" "$suite" \
         "$component/binary-amd64/Packages.xz" "$package" "$version" |
         cut -d' ' -f2
+}
+
+# launchpad_sourcefiles is the root of the URLs at which Launchpad
+# serves each file of each version of an Ubuntu source package. The
+# archive's pool deletes a version when a newer one replaces it, and
+# Launchpad keeps every version, so the source mirror downloads from
+# Launchpad.
+launchpad_sourcefiles="https://launchpad.net/ubuntu/+archive/primary/+sourcefiles"
+
+# ubuntu_source_files <source package> <component> <version>: print
+# "<kind> <file> <sha256>" for each file of a version of an Ubuntu
+# source package, through the signed InRelease of the suite that
+# publishes it. The kind is orig for the upstream tarball, debian for
+# the packaging tarball, and dsc for the .dsc file. The function stops
+# when one of the three is missing or when the package holds a file of
+# another kind, such as a second upstream tarball, because the source
+# mirror offers every file and a bump must not drop one. It leaves out
+# an upstream signature, a .asc file, which the mirror does not offer.
+ubuntu_source_files() {
+    local source="$1" component="$2" version="$3" suite files file digest kind kinds=""
+    suite="$(ubuntu_suite "$source" "$version")"
+    files="$(archive_source "$pin_root/trust/keys/ubuntu-archive.asc" "$suite" \
+        "$component/source/Sources.xz" "$source" "$version")"
+    while read -r file digest; do
+        case "$file" in
+        *.asc) continue ;;
+        *.orig.tar.*) kind=orig ;;
+        *.debian.tar.*) kind=debian ;;
+        *.dsc) kind=dsc ;;
+        *) fail "$source $version holds $file, which is not an upstream tarball, a packaging tarball, or a .dsc file" ;;
+        esac
+        [[ " $kinds " != *" $kind "* ]] || fail "$source $version holds more than one $kind file"
+        kinds="$kinds $kind"
+        echo "$kind $file $digest"
+    done <<<"$files"
+    [[ " $kinds " == *" orig "* && " $kinds " == *" debian "* && " $kinds " == *" dsc "* ]] ||
+        fail "$source $version holds no upstream tarball, packaging tarball, or .dsc file"
+}
+
+# set_ubuntu_source_pins <entry prefix> <source package> <version>
+# <files>: write the files that ubuntu_source_files printed into the
+# entries <prefix>-orig, <prefix>-debian, and <prefix>-dsc of the
+# manifest beside the calling script, at their Launchpad URLs.
+set_ubuntu_source_pins() {
+    local prefix="$1" source="$2" version="$3" kind file digest
+    while read -r kind file digest; do
+        set_pin "$prefix-$kind" "$version" "$launchpad_sourcefiles/$source/$version/$file" \
+            "$digest" "$(deb_purl ubuntu "$source" "$version" source)"
+    done <<<"$4"
 }
 
 # --- the report ----------------------------------------------------------
@@ -614,18 +738,6 @@ bumped() {
 # next_step <text>: print the line that names what to run after a bump.
 next_step() {
     echo "next: $*"
-}
-
-# repin_sources: bring the digests of liken/licensing/sources.sh up to
-# the bytes that its URLs serve after a bump. A bump of an OS domain
-# whose version the source mirror names calls it, because the mirror
-# must serve the source of the version that a release ships. A refused
-# re-pin leaves the domain pin moved and the mirror behind it, which
-# is a release that cannot serve its own sources, so the message says
-# that plainly: the fix is a hand edit.
-repin_sources() {
-    "$pin_root/liken/licensing/sources.sh" --repin ||
-        fail "the pin moved; licensing/sources.sh still needs a hand edit"
 }
 
 # set_line <file> <extended regex> <line>: replace the one line of the

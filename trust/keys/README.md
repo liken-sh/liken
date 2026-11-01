@@ -31,6 +31,8 @@ pinned as `signer` in `kernel-org-digest.sh` too.
 against this key, and prints the digest it lists for one file. These
 bumps call it:
 
+- `liken/kernel/latest.sh`, for the kernel's source tarball, which
+  `liken/licensing/sources.sh` mirrors
 - `liken/linux-firmware/latest.sh`, for the linux-firmware and
   wireless-regdb tarballs
 - `liken/userland/latest.sh`, for the e2fsprogs, nfs-utils, kmod, and

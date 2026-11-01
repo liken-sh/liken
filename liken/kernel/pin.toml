@@ -1,8 +1,10 @@
-# The files that kernel/fetch.sh downloads, for the fetch and for the
-# SBOM of a release. kernel/latest.sh --bump writes the version, url,
-# sha256, and purl of both, and toolchains/pin.sh describes each field.
+# The files that kernel/fetch.sh downloads, and the source that
+# licensing/sources.sh mirrors, for the fetch, for the mirror, and for
+# the SBOM of a release. kernel/latest.sh --bump writes the version,
+# url, sha256, and purl of each, and toolchains/pin.sh describes each
+# field.
 #
-# Both are packages of a mainline build of Canonical's kernel team,
+# The first two are packages of a mainline build of Canonical's kernel team,
 # which kernel.ubuntu.com serves outside Ubuntu's archive, so their
 # purl is generic and names the URL. Each package's file name holds a
 # build timestamp that only the build's CHECKSUMS file gives, so the
@@ -24,3 +26,16 @@ url = "https://kernel.ubuntu.com/mainline/v7.3.1/amd64/linux-modules-7.3.1-07030
 sha256 = "7f9a44175036fd63b01ec317ccace29e184261a794d39046902439458fb18c2f"
 purl = "pkg:generic/linux-modules@7.3.1?download_url=https://kernel.ubuntu.com/mainline/v7.3.1/amd64/linux-modules-7.3.1-070301-generic_7.3.1-070301.202610301300_amd64.deb&checksum=sha256:7f9a44175036fd63b01ec317ccace29e184261a794d39046902439458fb18c2f"
 license = "GPL-2.0-only WITH Linux-syscall-note"
+
+# kernel.org's tarball of the same release, which Canonical's mainline
+# build compiles without changes. No build reads it. licensing/sources.sh
+# mirrors it onto the release channel as the kernel's corresponding
+# source, so its scope is excluded. kernel/latest.sh --bump takes its
+# digest from kernel.org's signed sha256sums.asc.
+[linux-source]
+version = "7.3.1"
+url = "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.3.1.tar.xz"
+sha256 = "fa595aad93734f829c963c2a90ef7c3673224fd7fdae7b49406e397cde2de231"
+purl = "pkg:generic/linux@7.3.1?download_url=https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.3.1.tar.xz&checksum=sha256:fa595aad93734f829c963c2a90ef7c3673224fd7fdae7b49406e397cde2de231"
+license = "GPL-2.0-only WITH Linux-syscall-note"
+scope = "excluded"

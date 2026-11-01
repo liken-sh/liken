@@ -213,12 +213,17 @@ comment that excuses one line.
   manifest has one table for each file that the fetch downloads, with
   its `version`, `url`, `sha256`, `purl`, and the SPDX expression of
   its `license`, and an optional CycloneDX `scope` of `excluded` for a
-  file that only the build reads. The manifest is the one copy of the
-  URL and the digest: `latest.sh --bump` writes them with `set_pin`,
-  `fetch.sh` downloads with `fetch_pinned`, and every other reader
-  takes a field with `pin_value`. A purl follows the purl
-  specification for the file's kind: `pkg:deb/ubuntu/...?arch=amd64`
-  for a package of Ubuntu's archive, `pkg:github/<owner>/<name>@<tag>`
+  file that only the build reads. It also has a table, with the scope
+  `excluded`, for each file of the corresponding source that
+  `liken/licensing/sources.sh` mirrors onto the release channel, so
+  the bump that moves a binary moves its source too. The manifest is
+  the one copy of the URL and the digest: `latest.sh --bump` writes
+  them with `set_pin`, `fetch.sh` and the source mirror download with
+  `fetch_pinned`, and every other reader takes a field with
+  `pin_value`. A purl follows the purl specification for the file's
+  kind: `pkg:deb/ubuntu/...?arch=amd64` for a package of Ubuntu's
+  archive, `?arch=source` for a file of its source package,
+  `pkg:github/<owner>/<name>@<tag>`
   for a GitHub release or tag, and `pkg:generic/<name>@<version>` with
   the `download_url` and the `checksum` for any other file. A person
   reads the upstream's license and writes the expression. The

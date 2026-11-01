@@ -102,8 +102,7 @@ set_pin linux-firmware "$latest" "$archive/$tarball" "$digest" \
 bumped linux-firmware "$pinned" "$latest"
 echo "the digest came from sha256sums.asc, signed by kernel.org's checksum autosigner"
 echo "the microcode domain builds AMD's blobs from this tarball; rebuild it too"
-# licensing/sources.sh needs no re-pin after this bump. It mirrors the
-# firmware tarball from this domain's own cache, which fetch.sh
-# verified against the digest in pin.toml, so sources.sh holds no
-# digest of its own for it.
+# licensing/sources.sh mirrors the firmware tarball from this domain's
+# own cache, which fetch.sh verified against the digest in pin.toml,
+# so the bump has no source entry to write for it.
 next_step "make -C .. linux-firmware microcode"

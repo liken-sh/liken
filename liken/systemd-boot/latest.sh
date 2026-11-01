@@ -32,6 +32,12 @@
 # archive key in trust/keys/ubuntu-archive.asc, and pins the sha256 of
 # the bytes it verified.
 #
+# The same bump pins the three files of the systemd source package,
+# which licensing/sources.sh mirrors as the corresponding source. The
+# suite's Sources index lists their digests, and InRelease lists the
+# digest of the index, so ubuntu_source_files takes them through the
+# same chain.
+#
 # Usage:
 #   systemd-boot/latest.sh                     report the pin
 #   systemd-boot/latest.sh --bump              take the version in the
@@ -82,11 +88,14 @@ grep -qxF "$target" <<<"$versions" || fail "the pool does not carry $target"
 bump_needed systemd-boot "$pinned" "$target" || exit 0
 
 digest="$(ubuntu_deb_digest systemd systemd-boot-efi universe "$target")"
+# The systemd source package is in main, and the binary package is in
+# universe.
+sources="$(ubuntu_source_files systemd main "$target")"
 
 echo "$target" >"$here/VERSION"
 set_pin systemd-boot-efi "$target" "$pool/systemd-boot-efi_${target}_amd64.deb" "$digest" \
     "$(deb_purl ubuntu systemd-boot-efi "$target")"
+set_ubuntu_source_pins systemd-source systemd "$target" "$sources"
 bumped systemd-boot "$pinned" "$target"
-echo "the digest came from the Packages index, checked against InRelease, signed by Ubuntu's archive key"
-repin_sources
+echo "the digests came from the Packages and Sources indexes, checked against InRelease, signed by Ubuntu's archive key"
 next_step "make -C .. systemd-boot"

@@ -1,6 +1,8 @@
-# The file that xtables/fetch.sh downloads, for the fetch and for the
-# SBOM of a release. xtables/latest.sh --bump writes the version, url,
-# sha256, and purl, and toolchains/pin.sh describes each field.
+# The file that xtables/fetch.sh downloads, and the sources that
+# licensing/sources.sh mirrors, for the fetch, for the mirror, and for
+# the SBOM of a release. xtables/latest.sh --bump writes the version,
+# url, sha256, and purl of each, and toolchains/pin.sh describes each
+# field.
 
 # k3s-root's static netfilter tools. The OS ships xtables-legacy-multi
 # from it, which is iptables, under the GPL version 2 that iptables'
@@ -11,3 +13,40 @@ url = "https://github.com/k3s-io/k3s-root/releases/download/v0.15.2/k3s-root-xta
 sha256 = "1272950a6dd969ced16f36eed91f3cc3feb552edbb7d6dcfbfc9b04930d9ba3f"
 purl = "pkg:github/k3s-io/k3s-root@v0.15.2"
 license = "GPL-2.0-only AND MIT"
+
+# The next three are the corresponding source of the netfilter tools,
+# and of the GPL-licensed userland that k3s embeds from the same
+# k3s-root release. No build reads them. licensing/sources.sh mirrors
+# them onto the release channel, so their scope is excluded.
+
+# k3s-root's recipe at the release's tag, under k3s-root's Apache-2.0
+# LICENSE.
+[k3s-root-source]
+version = "v0.15.2"
+url = "https://github.com/k3s-io/k3s-root/archive/refs/tags/v0.15.2.tar.gz"
+sha256 = "ab4ddff445f4aa19add06f1a53d9f1c8194b65f5e31ca54ab2abb67036bf442f"
+purl = "pkg:github/k3s-io/k3s-root@v0.15.2"
+license = "Apache-2.0"
+scope = "excluded"
+
+# The iptables release that the recipe builds: the version that
+# package/iptables/iptables.mk names in the buildroot release below.
+[iptables-source]
+version = "1.8.11"
+url = "https://www.netfilter.org/pub/iptables/iptables-1.8.11.tar.xz"
+sha256 = "d87303d55ef8c92bcad4dd3f978b26d272013642b029425775f5bad1009fe7b2"
+purl = "pkg:generic/iptables@1.8.11?download_url=https://www.netfilter.org/pub/iptables/iptables-1.8.11.tar.xz&checksum=sha256:d87303d55ef8c92bcad4dd3f978b26d272013642b029425775f5bad1009fe7b2"
+license = "GPL-2.0-only"
+scope = "excluded"
+
+# The buildroot release that k3s-root's scripts/download names. It
+# holds the build scripts and the hash of every other package that the
+# recipe builds. buildroot's COPYING gives the GPL version 2 or later,
+# except for the files that state their own license.
+[buildroot-source]
+version = "2025.02.14"
+url = "https://github.com/buildroot/buildroot/archive/refs/tags/2025.02.14.tar.gz"
+sha256 = "8133a06142f6eb0177726b54a948b46289ebe48f9cbcaac5403cffd1a3cc9f36"
+purl = "pkg:github/buildroot/buildroot@2025.02.14"
+license = "GPL-2.0-or-later"
+scope = "excluded"

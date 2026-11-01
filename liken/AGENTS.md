@@ -150,12 +150,14 @@ source from the same channel. The licensing domain owns both tasks: every
 release bundles its `LICENSES.md` file as an artifact, and the release
 workflow publishes its source mirror to `sources/<component>/<version>/`.
 
-When a vendored pin changes, update `licensing/` at the same time: the
-source pins in `licensing/sources.sh` and the notices in
-`licensing/NOTICES.md`. Those files explain the reasoning.
-`licensing/sources.sh --repin` writes the digests that a bump moved, and
-refuses the case it must not guess at: a URL whose filename contains the
-version.
+Each source that `licensing/sources.sh` mirrors is an entry of the
+`pin.toml` of the domain whose binary was built from it, and that
+domain's `latest.sh --bump` writes it in the same bump that moves the
+binary. When a vendored pin changes, check `licensing/NOTICES.md` at
+the same time, and add a mirror to `licensing/sources.sh` for a new
+component whose license asks for the source. Those files explain the
+reasoning. `licensing/sources.sh --verify` downloads each source that
+a `pin.toml` names and checks it against its digest.
 
 ## Version pins
 

@@ -75,10 +75,10 @@ The report has these sources:
 Run `<domain>/latest.sh --bump` for each behind domain, sequentially,
 in one background task. These rules matter:
 
-1. Put `systemd-boot` and `grub` last. Their source mirrors fetch
-   from launchpad.net, which is slow and sometimes refuses
-   connections, and each bump's tail runs `licensing/sources.sh
-   --repin`, which retries launchpad every time.
+1. Put `systemd-boot` and `grub` last. Each bump downloads the files
+   of its Ubuntu source package from the archive to check them
+   against the signed Sources index, and those downloads are the
+   slowest of the run.
 2. A sub-pin needs a named bump, for example
    `userland/latest.sh --bump kmod` or
    `linux-firmware/latest.sh --bump wireless-regdb`.
@@ -103,14 +103,17 @@ in one background task. These rules matter:
 4. Bump `k3s` before `xtables`. The xtables pin follows the k3s-root
    release that the pinned k3s names as `VERSION_ROOT`, so
    `xtables/latest.sh` reads `k3s/VERSION` and reports xtables as
-   behind only after k3s moves.
-5. Finish with one `licensing/sources.sh --repin`. The mirror cache
-   in `licensing/cache/` skips files it already has, so the final
-   pass is cheap and proves the source pins match their bytes.
-
-If a bump's repin fails, the pin still moved; the final repin
-repairs it. If the final repin fails, stop and report which file it
-could not fetch.
+   behind only after k3s moves. Its `iptables` and `buildroot`
+   sub-rows are the sources that the k3s-root release builds from,
+   and the xtables bump writes them too.
+5. The bump of `kernel`, `xtables`, `systemd-boot`, or `grub` also
+   writes the entries of the corresponding source that
+   `licensing/sources.sh` mirrors, in the same `pin.toml`. Finish with
+   one `licensing/sources.sh --verify`, which downloads each of those
+   files into `licensing/cache/` and checks it against its digest. It
+   skips a cached file that matches, so a pass after the first is
+   cheap. If it fails, stop and report which file it could not fetch
+   or which digest did not match.
 
 Each bump prints a `next:` hint naming the make target that rebuilds
 its domain. `make all` covers them, with one trap: `make storage` is
@@ -178,8 +181,8 @@ metal boot are its first real test.
 
 1. `make versions` again: every row must read `current` or `held`.
 2. `git diff --stat`: the change is `VERSION` files, `pin.toml`
-   files, `fetch.sh` digests, `licensing/sources.sh`, and
-   `toolchains/images.toml`, nothing else.
+   files, `fetch.sh` digests, and `toolchains/images.toml`, nothing
+   else.
 3. `make all`: changelogs do not show configure or toolchain
    breakage, and a bump that does not build is not done. The
    programs that `userland` compiles from source against musl break
@@ -541,7 +544,10 @@ arguments and the reason for its behavior:
   `ubuntu_newest_in` read Launchpad's API for an Ubuntu source
   package, and `ubuntu_deb_digest` takes the digest of one of its
   packages through `archive_deb`, against
-  `trust/keys/ubuntu-archive.asc`.
+  `trust/keys/ubuntu-archive.asc`. `ubuntu_source_files` takes the
+  digests of the files of the source package through `archive_source`
+  and the suite's Sources index, and `set_ubuntu_source_pins` writes
+  them into the manifest at their Launchpad URLs.
 - `container_runtime` and `image_of <key>` give a build its docker or
   podman and its image from `toolchains/images.toml`.
 - `row` prints one report row of seven columns, with `?` for an empty
@@ -550,9 +556,7 @@ arguments and the reason for its behavior:
   `set_line`, `set_var`, `set_toml`, `set_entry`, and `add_entry` write
   a bump into the file that holds the pin, and each one stops when its
   pattern matches no line or more than one, so a bump never reports a
-  move that it did not write. `repin_sources` runs
-  `liken/licensing/sources.sh --repin` after a bump of a version that
-  the source mirror names.
+  move that it did not write.
 
 When a new script needs a step that the library lacks, add the step
 to `pin.sh` with a comment, and do not write it in the script.
@@ -592,6 +596,18 @@ changes the upstream's license. The trust image's Dockerfile fetches
 the CA bundle by a `--checksum` of its own, because BuildKit reads the
 checksum from the Dockerfile's text, and `trust/latest.sh --bump`
 writes both copies.
+
+The manifest of a pin whose license asks for the source holds an
+entry for each file of that source too, with the scope `excluded`,
+because `liken/licensing/sources.sh` mirrors it onto the release
+channel and no build reads it: the kernel's tarball in
+`liken/kernel/pin.toml`, k3s-root's recipe with the iptables and
+buildroot releases it builds from in `liken/xtables/pin.toml`, and
+the three files of each Ubuntu source package in
+`liken/systemd-boot/pin.toml` and `liken/grub/pin.toml`. The same
+`--bump` that moves the binary writes them. `sources.sh` downloads
+each one with `fetch_pinned`, and names the manifest as its last
+argument.
 
 To list the purl of every pin that a release ships:
 
@@ -637,7 +653,9 @@ names another signer:
   pins its digest in `vulkan/snapshot.sha256`.
 - Ubuntu signs its archive the same way. `liken/grub/latest.sh` and
   `liken/systemd-boot/latest.sh` take their digests through the chain
-  with `ubuntu_deb_digest`, against `trust/keys/ubuntu-archive.asc`.
+  with `ubuntu_deb_digest`, against `trust/keys/ubuntu-archive.asc`,
+  and the digests of their source packages through the suite's
+  Sources index with `ubuntu_source_files`.
   `indi/latest.sh` verifies the `InRelease` file of each Ubuntu suite
   of its snapshot against the same key, and each PPA's against the
   key beside it with `--signer`, before it pins the digests in
@@ -695,6 +713,9 @@ Dockerfile downloads buildroot itself with `ADD --checksum`, and
   `fetch.sh` holds a digest of its own or does not call
   `fetch_pinned`; or a Dockerfile beside a `pin.toml` `ADD`s a URL by
   a checksum that the manifest does not name;
+- `liken/licensing/sources.sh` holds a digest, because each source
+  that it mirrors is an entry of the `pin.toml` of the pin that the
+  source belongs to;
 - a grep for "statically linked" does not accept "static-pie linked";
 - a `uses:` in a workflow or a composite action under `.github/`
   names another repository's action by anything but the commit and

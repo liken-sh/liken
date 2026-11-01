@@ -82,6 +82,8 @@ func manifestsTree(t *testing.T, changes map[string]string) string {
 			"sha256 = \"" + strings.Repeat("a", 64) + "\"\n" +
 			"purl = \"pkg:github/intel/x@microcode-20260925\"\n" +
 			"license = \"LicenseRef-Intel-Microcode\"\n",
+		"liken/licensing/sources.sh": "#!/usr/bin/env bash\n" +
+			"mirror \"kernel/$kernel_version\" \"$here/../kernel/pin.toml\" linux-source \"$kernel_version\"\n",
 		"liken/userland/VERSION": "abc\n",
 		"liken/userland/fetch.sh": "#!/usr/bin/env bash\n" +
 			"source \"$here/../../toolchains/pin.sh\"\n" +
@@ -163,6 +165,9 @@ func TestAManifestThatBreaksARuleIsFound(t *testing.T) {
 		"an image that fetches by another checksum": {"trust/Dockerfile",
 			"FROM scratch\nADD --checksum=sha256:" + strings.Repeat("0", 64) + " https://curl.se/ca/cacert-2026-10-20.pem /cacert.pem\n",
 			"trust/Dockerfile:2 fetches https://curl.se/ca/cacert-2026-10-20.pem by sha256:" + strings.Repeat("0", 64) + ", and trust/pin.toml names " + strings.Repeat("e", 64)},
+		"a source mirror that holds a digest": {"liken/licensing/sources.sh",
+			"#!/usr/bin/env bash\n# Mirror the sources.\nmirror \"xtables/$v\" \"iptables-1.8.11.tar.xz\" \\\n    \"" + strings.Repeat("a", 64) + "\" \\\n    \"https://www.netfilter.org/pub/iptables/iptables-1.8.11.tar.xz\"\n",
+			"liken/licensing/sources.sh:3 holds a digest; the digest of each source that it mirrors is in the pin.toml of the pin that the source belongs to"},
 		"an image that fetches a file no entry names": {"trust/Dockerfile",
 			"FROM scratch\nADD --checksum=sha256:" + strings.Repeat("e", 64) + " https://curl.se/ca/cacert-2026-10-21.pem /cacert.pem\n",
 			"trust/Dockerfile:2 fetches https://curl.se/ca/cacert-2026-10-21.pem, and trust/pin.toml names no file at that url"},
