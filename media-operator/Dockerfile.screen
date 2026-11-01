@@ -37,6 +37,15 @@ RUN mkdir -p idle/src display/src /brand/iced/src /media-screen/src \
     && : > display/src/lib.rs \
     && : > /brand/iced/src/lib.rs
 
+# cargo-auditable records the crate graph of the build in the binary's
+# `.dep-v0` section, so syft and Trivy list the crates from the image.
+# toolchains/cargo-auditable/fetch.sh pins the tool and says why. Every
+# build below runs through it, the stub build too, so the dependencies
+# compile once under the same wrapper that the real build uses.
+COPY --from=toolchains pin.sh /toolchains/
+COPY --from=toolchains cargo-auditable/fetch.sh /toolchains/cargo-auditable/
+RUN bash /toolchains/cargo-auditable/fetch.sh /usr/local/cargo/bin
+
 # The cache mounts hold the crate registry and the git checkouts between
 # builds, so a rebuild on a workstation downloads no crate a second time.
 # --locked builds the versions the lock file names and never rewrites it.
@@ -53,8 +62,8 @@ RUN mkdir -p idle/src display/src /brand/iced/src /media-screen/src \
 # proven to start rather than assumed to.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    cargo build --release --locked --no-default-features -p idle-screen \
-    && cargo build --release --locked -p media-display
+    cargo auditable build --release --locked --no-default-features -p idle-screen \
+    && cargo auditable build --release --locked -p media-display
 
 # liken-iced's sources land here, over the stub, with the two brand files it
 # parses and the two font files it embeds. All four are inputs of the real
@@ -77,7 +86,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     touch idle/src/main.rs idle/src/lib.rs /media-screen/src/lib.rs \
         /brand/iced/src/*.rs \
-    && cargo build --release --locked --no-default-features -p idle-screen \
+    && cargo auditable build --release --locked --no-default-features -p idle-screen \
     && sh /cargo.sh /notices --no-default-features -p idle-screen
 
 FROM deps AS build-display
@@ -90,7 +99,7 @@ COPY --from=notices cargo.sh /
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     touch display/src/main.rs display/src/lib.rs /brand/iced/src/*.rs \
-    && cargo build --release --locked -p media-display \
+    && cargo auditable build --release --locked -p media-display \
     && sh /cargo.sh /notices -p media-display
 
 # fonts-droid-fallback is one small file that draws Chinese, Japanese, and

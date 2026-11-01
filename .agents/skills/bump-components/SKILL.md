@@ -60,6 +60,7 @@ The report has these sources:
 | `liken/<domain>/latest.sh` | the OS domains, steps 2 to 4 |
 | `liken/dev-cluster/firmware/capsule/latest.sh` | edk2 and the Ubuntu snapshot of the lab's capsule firmware builder, which builds on the `ubuntu` entry of `toolchains/images.toml`; it has no `--bump`, because each move changes the compiler that builds the firmware, so edit `build.sh` or the `Dockerfile` by hand and boot the lab with `FIRMWARE=capsule`, and do the same after a move of the `ubuntu` entry |
 | `toolchains/latest.sh` | each image in `toolchains/images.toml`, Go and Rust, each Go module and crate that is behind |
+| `toolchains/cargo-auditable/latest.sh` | cargo-auditable, which every Rust image builds with, step 5c |
 | `vulkan/latest.sh` | the Debian snapshot of the bases and `astrometry`, step 5 |
 | `indi/latest.sh` | the snapshots of Ubuntu and the two PPAs, step 5a |
 | `trust/latest.sh` | the CA bundle, step 5b |
@@ -336,6 +337,19 @@ after every bump of `images.toml`. `cd ci && go run . pins -root ..`
 fails when two copies of a Go version, a Rust version, a module, a
 crate, a hook revision, or an image tag disagree; CI runs it on every
 push.
+
+`toolchains/cargo-auditable/latest.sh --bump` moves cargo-auditable,
+the cargo subcommand that every Rust image builds with, so each binary
+records its crates in a `.dep-v0` section that syft and Trivy read.
+"Rust binaries" in the root `AGENTS.md` gives the form. The bump writes
+the version and the digest from the release's `.sha256` file into
+`toolchains/cargo-auditable/fetch.sh`. The project signs neither file.
+Then build each image whose Dockerfile runs `cargo auditable build`,
+and check that syft still lists the crates of one of them:
+`docker run --rm -v /var/run/docker.sock:/var/run/docker.sock
+anchore/syft:latest <image> -o json -q | jq '[.artifacts[] |
+select(.type == "rust-crate")] | length'` prints more than 0. The Rust
+images are tracked components, so no revision changes.
 
 `ci/latest.sh --bump` moves one GitHub Action, prek, or one hook
 revision. A major version of an action can change its inputs, so read

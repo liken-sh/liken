@@ -1,7 +1,8 @@
 # The media browser's image: the Rust client, and the Wayland and Vulkan
 # libraries it opens by name on a real machine. The build context is this
 # directory, and brand/ and media-screen/ arrive as named build
-# contexts for the two path crates below.
+# contexts for the two path crates below. toolchains/ arrives as the
+# named build context toolchains, for the pinned cargo-auditable.
 
 FROM rust AS build
 WORKDIR /src
@@ -37,12 +38,21 @@ RUN mkdir -p src /brand/iced/src /media-screen/src \
     && : > /brand/iced/src/lib.rs \
     && : > /media-screen/src/lib.rs
 
+# cargo-auditable records the crate graph of the build in the binary's
+# `.dep-v0` section, so syft and Trivy list the crates from the image.
+# toolchains/cargo-auditable/fetch.sh pins the tool and says why. Every
+# build below runs through it, the stub build too, so the dependencies
+# compile once under the same wrapper that the real build uses.
+COPY --from=toolchains pin.sh /toolchains/
+COPY --from=toolchains cargo-auditable/fetch.sh /toolchains/cargo-auditable/
+RUN bash /toolchains/cargo-auditable/fetch.sh /usr/local/cargo/bin
+
 # The cache mounts hold the crate registry and the git checkouts between
 # builds, so a rebuild on a workstation downloads no crate a second time.
 # --locked builds the versions the lock file names and never rewrites it.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    cargo build --release --locked
+    cargo auditable build --release --locked
 
 COPY src/ ./src/
 # The ratings marks are baked into the binary from this directory.
@@ -79,7 +89,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     touch src/main.rs src/lib.rs /brand/iced/src/*.rs \
         /media-screen/src/lib.rs \
-    && MEDIA_BROWSER_VERSION="$VERSION" cargo build --release --locked \
+    && MEDIA_BROWSER_VERSION="$VERSION" cargo auditable build --release --locked \
     && sh /cargo.sh /notices
 
 # The runtime is liken's Vulkan base: the loader, the Intel and AMD

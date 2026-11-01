@@ -65,7 +65,9 @@ deploy = "deploy"
 # Every image that builds from this module's go.mod takes the shared
 # kubernetes module as a build context, because go.mod replaces it with
 # ../kubernetes. The media browser and Corrosion images build from their
-# own directories alone.
+# own directories alone. Every image that builds a Rust binary takes
+# toolchains as a build context, for the cargo-auditable that
+# toolchains/cargo-auditable/fetch.sh pins.
 [[outputs.images]]
 name = "library-operator"
 file = "Dockerfile"
@@ -81,7 +83,7 @@ smoke = "library-operator/smoke/library-operator-ffmpeg.sh"
 name = "library-operator-media-browser"
 context = "media-browser"
 file = "media-browser/Dockerfile"
-contexts = { brand = "brand", media-screen = "media-screen", notices = "notices" }
+contexts = { brand = "brand", media-screen = "media-screen", notices = "notices", toolchains = "toolchains" }
 smoke = "library-operator/smoke/library-operator-media-browser.sh"
 
 # The image of `appearances` builds on the ffmpeg base and pulls the face
@@ -91,7 +93,7 @@ smoke = "library-operator/smoke/library-operator-media-browser.sh"
 [[outputs.images]]
 name = "library-operator-appearances"
 file = "Dockerfile.appearances"
-contexts = { kubernetes = "kubernetes", appearances = "library-operator/appearances", notices = "notices" }
+contexts = { kubernetes = "kubernetes", appearances = "library-operator/appearances", notices = "notices", toolchains = "toolchains" }
 smoke = "library-operator/smoke/library-operator-appearances.sh"
 
 [[outputs.images]]

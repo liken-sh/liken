@@ -248,6 +248,24 @@ library, because the build context of `indi` does not reach `vulkan/`,
 and `cd ci && go run . pins -root ..` fails when the two copies
 differ.
 
+## Rust binaries
+
+A Rust binary holds no record of the crates that it links, so syft
+and Trivy list none of them from an image, and a scan matches no
+advisory against them. So every Dockerfile that builds Rust runs
+`cargo auditable build` in place of `cargo build`. cargo-auditable
+records the crate graph of the build in the binary's `.dep-v0`
+section, and both scanners read that section. The stub build of the
+dependency layer runs through it too, so the dependencies compile
+once under the same wrapper that the real build uses.
+
+`toolchains/cargo-auditable/fetch.sh` pins cargo-auditable, and the
+`latest.sh` beside it reports and bumps the pin. Each Rust image
+takes `toolchains/` as the build context `toolchains`, copies
+`fetch.sh` and `pin.sh` from it, and runs `fetch.sh`, so one pin
+serves every image. `cd ci && go run . pins -root ..` fails on a
+Dockerfile that runs `cargo build`.
+
 ## Releases and development builds
 
 One CalVer tag releases every component whose outputs changed since its

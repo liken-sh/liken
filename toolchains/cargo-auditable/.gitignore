@@ -1,0 +1,3 @@
+# Downloads; fetch.sh fetches and verifies them again.
+cache/
+dist/

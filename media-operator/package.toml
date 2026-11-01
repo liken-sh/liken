@@ -65,7 +65,8 @@ deploy = "deploy"
 # The player and the screen images install a fallback font from the
 # Debian snapshot of the bases. So they take the vulkan directory as
 # the context builder, for snapshot.sh, and vulkan's version as the
-# snapshot date.
+# snapshot date. The screen images take toolchains as a build context,
+# for the cargo-auditable that toolchains/cargo-auditable/fetch.sh pins.
 [[outputs.images]]
 name = "media-operator"
 file = "Dockerfile"
@@ -83,7 +84,7 @@ smoke = "media-operator/smoke/media-operator-player.sh"
 name = "media-operator-idle"
 file = "Dockerfile.screen"
 target = "idle"
-contexts = { brand = "brand", builder = "vulkan", media-screen = "media-screen", notices = "notices" }
+contexts = { brand = "brand", builder = "vulkan", media-screen = "media-screen", notices = "notices", toolchains = "toolchains" }
 versions = { SNAPSHOT = "vulkan" }
 smoke = "media-operator/smoke/media-operator-idle.sh"
 
@@ -91,7 +92,7 @@ smoke = "media-operator/smoke/media-operator-idle.sh"
 name = "media-operator-display"
 file = "Dockerfile.screen"
 target = "display"
-contexts = { brand = "brand", builder = "vulkan", media-screen = "media-screen", notices = "notices" }
+contexts = { brand = "brand", builder = "vulkan", media-screen = "media-screen", notices = "notices", toolchains = "toolchains" }
 versions = { SNAPSHOT = "vulkan" }
 smoke = "media-operator/smoke/media-operator-display.sh"
 

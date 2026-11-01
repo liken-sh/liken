@@ -973,6 +973,7 @@ target "library-operator-media-browser" {
     "media-screen" = "media-screen"
     "notices" = "notices"
     "rust" = "docker-image://rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
+    "toolchains" = "toolchains"
     "vulkan" = "target:vulkan"
   }
   args = {
@@ -996,6 +997,7 @@ target "library-operator-appearances" {
     "notices" = "notices"
     "oras" = "docker-image://ghcr.io/oras-project/oras:v1.3.6@sha256:9cfb578be975b762fd898b9d004243d8003aeb807a3e15b2ed212cdd1326c9eb"
     "rust" = "docker-image://rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
+    "toolchains" = "toolchains"
   }
   args = {
     VERSION = VERSION
@@ -1111,6 +1113,7 @@ target "media-operator-idle" {
     "media-screen" = "media-screen"
     "notices" = "notices"
     "rust" = "docker-image://rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
+    "toolchains" = "toolchains"
     "vulkan" = "target:vulkan"
   }
   args = {
@@ -1134,6 +1137,7 @@ target "media-operator-display" {
     "media-screen" = "media-screen"
     "notices" = "notices"
     "rust" = "docker-image://rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
+    "toolchains" = "toolchains"
     "vulkan" = "target:vulkan"
   }
   args = {

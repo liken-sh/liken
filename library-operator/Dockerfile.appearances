@@ -46,12 +46,21 @@ RUN mkdir src \
     && echo 'fn main() {}' > src/main.rs \
     && : > src/lib.rs
 
+# cargo-auditable records the crate graph of the build in the binary's
+# `.dep-v0` section, so syft and Trivy list the crates from the image.
+# toolchains/cargo-auditable/fetch.sh pins the tool and says why. Every
+# build below runs through it, the stub build too, so the dependencies
+# compile once under the same wrapper that the real build uses.
+COPY --from=toolchains pin.sh /toolchains/
+COPY --from=toolchains cargo-auditable/fetch.sh /toolchains/cargo-auditable/
+RUN bash /toolchains/cargo-auditable/fetch.sh /usr/local/cargo/bin
+
 # The cache mounts hold the crate registry and the git checkouts between
 # builds, so a rebuild on a workstation downloads no crate a second time.
 # --locked builds the versions the lock file names and never rewrites it.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    cargo build --release --locked
+    cargo auditable build --release --locked
 
 # The review command embeds the mpv overlay script from dev/.
 COPY --from=appearances src/ ./src/
@@ -67,7 +76,7 @@ COPY --from=notices cargo.sh /
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     touch src/main.rs src/lib.rs \
-    && cargo build --release --locked \
+    && cargo auditable build --release --locked \
     && sh /cargo.sh /notices
 
 # The inference runtime. The binary opens libopenvino_c.so when it
