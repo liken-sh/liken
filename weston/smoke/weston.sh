@@ -37,8 +37,10 @@ image=$1
 
 # The image must hold the notices of the third-party software in it,
 # as notices/check.sh describes. weston comes from its release, not
-# from a Debian package, so its license is named here.
-"$(dirname "$0")/../../notices/check.sh" "$image" usr/share/doc/weston/COPYING
+# from a Debian package, so its license and the SBOM record that names
+# it for syft are named here.
+"$(dirname "$0")/../../notices/check.sh" "$image" usr/share/doc/weston/COPYING \
+	usr/share/doc/liken/weston.cdx.json
 
 # The compositor must be the release that the Dockerfile pins.
 version=$(sed -n 's/^ARG WESTON_VERSION=//p' "$(dirname "$0")/../Dockerfile")

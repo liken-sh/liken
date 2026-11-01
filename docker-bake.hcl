@@ -545,6 +545,8 @@ target "weston" {
   contexts = {
     "builder" = "vulkan"
     "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
+    "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
+    "manifest" = "toolchains/manifest"
     "vulkan" = "target:vulkan"
   }
   args = {

@@ -31,7 +31,7 @@
 # checksum when it fetches the file, so no CA bundle enters the build.
 # The gitlab release of the tag publishes the tarball, its sha256sum
 # file, and a signature by the release manager; latest.sh reads that
-# release and writes the URL and the checksum here.
+# release and writes the URL and the checksum here and in pin.toml.
 ARG WESTON_VERSION=16.0.2
 ARG WESTON_URL=https://gitlab.freedesktop.org/-/project/120/uploads/7158a97a42a6d8562081e84b49fc8c3a/weston-16.0.2.tar.xz
 ARG WESTON_SHA256=49dd87d18cb229384264d2f69cb5a51f14f61a111e9227bfedb91b3ca8c39643
@@ -148,6 +148,20 @@ COPY weston-closure.sh /
 COPY --from=vulkan / /base/
 RUN sh /weston-closure.sh /out /base
 
+# syft finds weston's libraries in the image but no package for them,
+# because weston builds from its tarball and no dpkg record names it.
+# So the image carries a CycloneDX record of the tarball that
+# image-sbom writes from pin.toml, and syft copies its component, with
+# NVD's CPE for weston, into the SBOM of this image and of each image
+# that builds on it. The build context manifest is
+# toolchains/manifest, the reader of the pin manifests.
+FROM golang AS record
+WORKDIR /src
+COPY --from=manifest . ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /image-sbom ./image-sbom
+COPY pin.toml /pins/weston.toml
+RUN /image-sbom -out /weston.cdx.json /pins/weston.toml
+
 FROM vulkan
 COPY --from=closure /out /
 # display-operator preloads this library into the compositor. It moves
@@ -162,6 +176,7 @@ COPY --from=layout /out/liken-layout.so /usr/lib/x86_64-linux-gnu/weston/liken-l
 # where every claim's socket is under XDG_RUNTIME_DIR. It loads
 # libwayland-client, which the closure holds for wayland-info.
 COPY --from=layout /out/liken-arrange-drill /usr/bin/liken-arrange-drill
+COPY --from=record /weston.cdx.json /usr/share/doc/liken/weston.cdx.json
 # The image runs the compositor and holds no other program, so a
 # release can start it and read what it says.
 ENTRYPOINT ["/usr/bin/weston"]

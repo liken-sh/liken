@@ -20,8 +20,9 @@
 # script, which holds the keys of weston's release managers as
 # Debian's package of weston lists them in debian/upstream. It checks
 # the tarball against the release's sha256sum file too, and only then
-# writes the URL and the checksum into the Dockerfile. A new major
-# release changes libweston's soname and the copy of
+# writes the URL and the checksum into the Dockerfile, and the same
+# facts with the purl and the CPE into pin.toml, which the image's SBOM
+# record reads. A new major release changes libweston's soname and the copy of
 # ivi-layout-export.h, so the bump stops there and a person moves it.
 #
 # Usage:
@@ -75,6 +76,8 @@ sha256="$(sha256sum "$work/$tarball" | cut -d' ' -f1)"
 set_line "$here/Dockerfile" '^ARG WESTON_VERSION=' "ARG WESTON_VERSION=$latest"
 set_line "$here/Dockerfile" '^ARG WESTON_URL=' "ARG WESTON_URL=$url"
 set_line "$here/Dockerfile" '^ARG WESTON_SHA256=' "ARG WESTON_SHA256=$sha256"
+set_pin weston "$latest" "$url" "$sha256" "$(generic_purl weston "$latest" "$url" "$sha256")" \
+    "cpe:2.3:a:wayland:weston:$latest:*:*:*:*:*:*:*"
 set_toml "$here/package.toml" package.upstream weston "\"$latest\""
 bumped weston "$pinned" "$latest"
 echo "the signature of $tarball checks against signing-keys.asc"
