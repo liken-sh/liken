@@ -1,4 +1,4 @@
-<setSwitchVector device="Alignment Correction Simulator" name="CONNECTION" state="Idle" timeout="60" timestamp="2026-10-31T20:22:48">
+<setSwitchVector device="Alignment Correction Simulator" name="CONNECTION" state="Idle" timeout="60" timestamp="2026-11-01T15:52:11">
     <oneSwitch name="CONNECT">
 Off
     </oneSwitch>
@@ -6,9 +6,9 @@ Off
 On
     </oneSwitch>
 </setSwitchVector>
-<delProperty device="Alignment Correction Simulator" name="CORRECTION_GAIN" timestamp="2026-10-31T20:22:48"/>
-<delProperty device="Alignment Correction Simulator" name="PAC_MANUAL_ADJUSTMENT" timestamp="2026-10-31T20:22:48"/>
-<delProperty device="Alignment Correction Simulator" name="PAC_ABORT_MOTION" timestamp="2026-10-31T20:22:48"/>
-<delProperty device="Alignment Correction Simulator" name="PAC_SPEED" timestamp="2026-10-31T20:22:48"/>
-<delProperty device="Alignment Correction Simulator" name="PAC_AZ_REVERSE" timestamp="2026-10-31T20:22:48"/>
-<delProperty device="Alignment Correction Simulator" name="PAC_ALT_REVERSE" timestamp="2026-10-31T20:22:48"/>
+<delProperty device="Alignment Correction Simulator" name="CORRECTION_GAIN" timestamp="2026-11-01T15:52:11"/>
+<delProperty device="Alignment Correction Simulator" name="PAC_MANUAL_ADJUSTMENT" timestamp="2026-11-01T15:52:11"/>
+<delProperty device="Alignment Correction Simulator" name="PAC_ABORT_MOTION" timestamp="2026-11-01T15:52:11"/>
+<delProperty device="Alignment Correction Simulator" name="PAC_SPEED" timestamp="2026-11-01T15:52:11"/>
+<delProperty device="Alignment Correction Simulator" name="PAC_AZ_REVERSE" timestamp="2026-11-01T15:52:11"/>
+<delProperty device="Alignment Correction Simulator" name="PAC_ALT_REVERSE" timestamp="2026-11-01T15:52:11"/>

@@ -57,7 +57,7 @@ target "toolchains" {
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "oras" = "docker-image://ghcr.io/oras-project/oras:v1.3.6@sha256:9cfb578be975b762fd898b9d004243d8003aeb807a3e15b2ed212cdd1326c9eb"
     "rust" = "docker-image://rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
-    "ubuntu" = "docker-image://ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
+    "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
 }
 
@@ -183,16 +183,16 @@ target "indi" {
   contexts = {
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "trust" = "target:trust"
-    "ubuntu" = "docker-image://ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
+    "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
   args = {
-    VERSION = "20261031"
+    VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/indi:20261031-2"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi:buildcache-20261031-2"]
+  tags       = ["ghcr.io/liken-sh/indi:20261101-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi:buildcache-20261101-1"]
   cache-to = concat(
     CACHE_WRITE == "indi" ? ["type=registry,ref=ghcr.io/liken-sh/indi:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi:buildcache-20261101-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -204,16 +204,16 @@ target "indi-simulators" {
   contexts = {
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "trust" = "target:trust"
-    "ubuntu" = "docker-image://ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
+    "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
   args = {
-    VERSION = "20261031"
+    VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/indi-simulators:20261031-2"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-simulators:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-simulators:buildcache-20261031-2"]
+  tags       = ["ghcr.io/liken-sh/indi-simulators:20261101-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-simulators:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-simulators:buildcache-20261101-1"]
   cache-to = concat(
     CACHE_WRITE == "indi-simulators" ? ["type=registry,ref=ghcr.io/liken-sh/indi-simulators:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-simulators" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-simulators:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-simulators" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-simulators:buildcache-20261101-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -225,16 +225,16 @@ target "indi-phd2" {
   contexts = {
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "trust" = "target:trust"
-    "ubuntu" = "docker-image://ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
+    "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
   args = {
-    VERSION = "20261031"
+    VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/indi-phd2:20261031-2"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-phd2:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-phd2:buildcache-20261031-2"]
+  tags       = ["ghcr.io/liken-sh/indi-phd2:20261101-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-phd2:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-phd2:buildcache-20261101-1"]
   cache-to = concat(
     CACHE_WRITE == "indi-phd2" ? ["type=registry,ref=ghcr.io/liken-sh/indi-phd2:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-phd2" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-phd2:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-phd2" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-phd2:buildcache-20261101-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -246,16 +246,16 @@ target "indi-open" {
   contexts = {
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "trust" = "target:trust"
-    "ubuntu" = "docker-image://ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
+    "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
   args = {
-    VERSION = "20261031"
+    VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/indi-open:20261031-2"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-open:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-open:buildcache-20261031-2"]
+  tags       = ["ghcr.io/liken-sh/indi-open:20261101-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-open:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-open:buildcache-20261101-1"]
   cache-to = concat(
     CACHE_WRITE == "indi-open" ? ["type=registry,ref=ghcr.io/liken-sh/indi-open:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-open" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-open:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-open" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-open:buildcache-20261101-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -267,16 +267,16 @@ target "indi-zwo" {
   contexts = {
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "trust" = "target:trust"
-    "ubuntu" = "docker-image://ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
+    "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
   args = {
-    VERSION = "20261031"
+    VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/indi-zwo:20261031-2"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-zwo:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-zwo:buildcache-20261031-2"]
+  tags       = ["ghcr.io/liken-sh/indi-zwo:20261101-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-zwo:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-zwo:buildcache-20261101-1"]
   cache-to = concat(
     CACHE_WRITE == "indi-zwo" ? ["type=registry,ref=ghcr.io/liken-sh/indi-zwo:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-zwo" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-zwo:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-zwo" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-zwo:buildcache-20261101-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -288,16 +288,16 @@ target "indi-qhy" {
   contexts = {
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "trust" = "target:trust"
-    "ubuntu" = "docker-image://ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
+    "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
   args = {
-    VERSION = "20261031"
+    VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/indi-qhy:20261031-2"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-qhy:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-qhy:buildcache-20261031-2"]
+  tags       = ["ghcr.io/liken-sh/indi-qhy:20261101-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-qhy:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-qhy:buildcache-20261101-1"]
   cache-to = concat(
     CACHE_WRITE == "indi-qhy" ? ["type=registry,ref=ghcr.io/liken-sh/indi-qhy:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-qhy" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-qhy:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-qhy" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-qhy:buildcache-20261101-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -309,16 +309,16 @@ target "indi-playerone" {
   contexts = {
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "trust" = "target:trust"
-    "ubuntu" = "docker-image://ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
+    "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
   args = {
-    VERSION = "20261031"
+    VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/indi-playerone:20261031-2"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-playerone:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-playerone:buildcache-20261031-2"]
+  tags       = ["ghcr.io/liken-sh/indi-playerone:20261101-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-playerone:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-playerone:buildcache-20261101-1"]
   cache-to = concat(
     CACHE_WRITE == "indi-playerone" ? ["type=registry,ref=ghcr.io/liken-sh/indi-playerone:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-playerone" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-playerone:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-playerone" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-playerone:buildcache-20261101-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -330,16 +330,16 @@ target "indi-svbony" {
   contexts = {
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "trust" = "target:trust"
-    "ubuntu" = "docker-image://ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
+    "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
   args = {
-    VERSION = "20261031"
+    VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/indi-svbony:20261031-2"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-svbony:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-svbony:buildcache-20261031-2"]
+  tags       = ["ghcr.io/liken-sh/indi-svbony:20261101-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-svbony:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-svbony:buildcache-20261101-1"]
   cache-to = concat(
     CACHE_WRITE == "indi-svbony" ? ["type=registry,ref=ghcr.io/liken-sh/indi-svbony:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-svbony" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-svbony:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-svbony" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-svbony:buildcache-20261101-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -351,16 +351,16 @@ target "indi-atik" {
   contexts = {
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "trust" = "target:trust"
-    "ubuntu" = "docker-image://ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
+    "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
   args = {
-    VERSION = "20261031"
+    VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/indi-atik:20261031-2"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-atik:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-atik:buildcache-20261031-2"]
+  tags       = ["ghcr.io/liken-sh/indi-atik:20261101-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-atik:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-atik:buildcache-20261101-1"]
   cache-to = concat(
     CACHE_WRITE == "indi-atik" ? ["type=registry,ref=ghcr.io/liken-sh/indi-atik:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-atik" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-atik:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-atik" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-atik:buildcache-20261101-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -372,16 +372,16 @@ target "indi-fli" {
   contexts = {
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "trust" = "target:trust"
-    "ubuntu" = "docker-image://ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
+    "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
   args = {
-    VERSION = "20261031"
+    VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/indi-fli:20261031-2"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-fli:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-fli:buildcache-20261031-2"]
+  tags       = ["ghcr.io/liken-sh/indi-fli:20261101-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-fli:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-fli:buildcache-20261101-1"]
   cache-to = concat(
     CACHE_WRITE == "indi-fli" ? ["type=registry,ref=ghcr.io/liken-sh/indi-fli:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-fli" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-fli:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-fli" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-fli:buildcache-20261101-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -393,16 +393,16 @@ target "indi-sbig" {
   contexts = {
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "trust" = "target:trust"
-    "ubuntu" = "docker-image://ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
+    "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
   args = {
-    VERSION = "20261031"
+    VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/indi-sbig:20261031-2"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-sbig:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-sbig:buildcache-20261031-2"]
+  tags       = ["ghcr.io/liken-sh/indi-sbig:20261101-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-sbig:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-sbig:buildcache-20261101-1"]
   cache-to = concat(
     CACHE_WRITE == "indi-sbig" ? ["type=registry,ref=ghcr.io/liken-sh/indi-sbig:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-sbig" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-sbig:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-sbig" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-sbig:buildcache-20261101-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -414,16 +414,16 @@ target "indi-mi" {
   contexts = {
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "trust" = "target:trust"
-    "ubuntu" = "docker-image://ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
+    "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
   args = {
-    VERSION = "20261031"
+    VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/indi-mi:20261031-2"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-mi:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-mi:buildcache-20261031-2"]
+  tags       = ["ghcr.io/liken-sh/indi-mi:20261101-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-mi:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-mi:buildcache-20261101-1"]
   cache-to = concat(
     CACHE_WRITE == "indi-mi" ? ["type=registry,ref=ghcr.io/liken-sh/indi-mi:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-mi" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-mi:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-mi" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-mi:buildcache-20261101-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -435,16 +435,16 @@ target "indi-qsi" {
   contexts = {
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "trust" = "target:trust"
-    "ubuntu" = "docker-image://ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
+    "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
   args = {
-    VERSION = "20261031"
+    VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/indi-qsi:20261031-2"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-qsi:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-qsi:buildcache-20261031-2"]
+  tags       = ["ghcr.io/liken-sh/indi-qsi:20261101-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-qsi:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-qsi:buildcache-20261101-1"]
   cache-to = concat(
     CACHE_WRITE == "indi-qsi" ? ["type=registry,ref=ghcr.io/liken-sh/indi-qsi:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-qsi" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-qsi:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-qsi" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-qsi:buildcache-20261101-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -456,16 +456,16 @@ target "indi-apogee" {
   contexts = {
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "trust" = "target:trust"
-    "ubuntu" = "docker-image://ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
+    "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
   args = {
-    VERSION = "20261031"
+    VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/indi-apogee:20261031-2"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-apogee:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-apogee:buildcache-20261031-2"]
+  tags       = ["ghcr.io/liken-sh/indi-apogee:20261101-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-apogee:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-apogee:buildcache-20261101-1"]
   cache-to = concat(
     CACHE_WRITE == "indi-apogee" ? ["type=registry,ref=ghcr.io/liken-sh/indi-apogee:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-apogee" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-apogee:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-apogee" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-apogee:buildcache-20261101-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -477,16 +477,16 @@ target "indi-astroasis" {
   contexts = {
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "trust" = "target:trust"
-    "ubuntu" = "docker-image://ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
+    "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
   args = {
-    VERSION = "20261031"
+    VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/indi-astroasis:20261031-2"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-astroasis:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-astroasis:buildcache-20261031-2"]
+  tags       = ["ghcr.io/liken-sh/indi-astroasis:20261101-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-astroasis:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-astroasis:buildcache-20261101-1"]
   cache-to = concat(
     CACHE_WRITE == "indi-astroasis" ? ["type=registry,ref=ghcr.io/liken-sh/indi-astroasis:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-astroasis" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-astroasis:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-astroasis" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-astroasis:buildcache-20261101-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -498,16 +498,16 @@ target "indi-gphoto" {
   contexts = {
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "trust" = "target:trust"
-    "ubuntu" = "docker-image://ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
+    "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
   args = {
-    VERSION = "20261031"
+    VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/indi-gphoto:20261031-2"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-gphoto:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-gphoto:buildcache-20261031-2"]
+  tags       = ["ghcr.io/liken-sh/indi-gphoto:20261101-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-gphoto:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-gphoto:buildcache-20261101-1"]
   cache-to = concat(
     CACHE_WRITE == "indi-gphoto" ? ["type=registry,ref=ghcr.io/liken-sh/indi-gphoto:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-gphoto" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-gphoto:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-gphoto" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-gphoto:buildcache-20261101-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -519,16 +519,16 @@ target "indi-touptek" {
   contexts = {
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "trust" = "target:trust"
-    "ubuntu" = "docker-image://ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
+    "ubuntu" = "docker-image://ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c"
   }
   args = {
-    VERSION = "20261031"
+    VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/indi-touptek:20261031-2"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-touptek:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-touptek:buildcache-20261031-2"]
+  tags       = ["ghcr.io/liken-sh/indi-touptek:20261101-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/indi-touptek:buildcache", "type=registry,ref=ghcr.io/liken-sh/indi-touptek:buildcache-20261101-1"]
   cache-to = concat(
     CACHE_WRITE == "indi-touptek" ? ["type=registry,ref=ghcr.io/liken-sh/indi-touptek:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "indi-touptek" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-touptek:buildcache-20261031-2,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "indi-touptek" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/indi-touptek:buildcache-20261101-1,mode=max,ignore-error=true"] : [],
   )
 }
 

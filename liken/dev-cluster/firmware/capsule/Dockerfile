@@ -15,7 +15,7 @@
 # image has no CA bundle, and snapshot.ubuntu.com answers only over
 # HTTPS.
 FROM ubuntu
-ENV SNAPSHOT=20261031
+ENV SNAPSHOT=20261101
 COPY cacert.pem /etc/ssl/certs/ca-certificates.crt
 # The edk2 build needs gcc, nasm, iasl (acpica-tools), libuuid, and
 # Python. The catalog needs openssl for edk2's capsule signing tool,

@@ -1,10 +1,10 @@
-<message device="Dome Simulator" timestamp="2026-10-31T20:21:38" message="[INFO] Dome is moving to position 30.00 degrees azimuth..."/>
-<setNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" state="Busy" timeout="60" timestamp="2026-10-31T20:21:38">
+<message device="Dome Simulator" timestamp="2026-11-01T15:51:02" message="[INFO] Dome is moving to position 30.00 degrees azimuth..."/>
+<setNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" state="Busy" timeout="60" timestamp="2026-11-01T15:51:02">
     <oneNumber name="DOME_ABSOLUTE_POSITION">
 0
     </oneNumber>
 </setNumberVector>
-<setSwitchVector device="Dome Simulator" name="DOME_MOTION" state="Busy" timeout="60" timestamp="2026-10-31T20:21:38">
+<setSwitchVector device="Dome Simulator" name="DOME_MOTION" state="Busy" timeout="60" timestamp="2026-11-01T15:51:02">
     <oneSwitch name="DOME_CW">
 On
     </oneSwitch>
@@ -12,28 +12,28 @@ On
 Off
     </oneSwitch>
 </setSwitchVector>
-<setNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" state="Busy" timeout="60" timestamp="2026-10-31T20:21:39">
+<setNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" state="Busy" timeout="60" timestamp="2026-11-01T15:51:02">
     <oneNumber name="DOME_ABSOLUTE_POSITION">
 5
     </oneNumber>
 </setNumberVector>
-<setNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" state="Busy" timeout="60" timestamp="2026-10-31T20:21:40">
+<setNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" state="Busy" timeout="60" timestamp="2026-11-01T15:51:03">
     <oneNumber name="DOME_ABSOLUTE_POSITION">
 10
     </oneNumber>
 </setNumberVector>
-<setNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" state="Busy" timeout="60" timestamp="2026-10-31T20:21:41">
+<setNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" state="Busy" timeout="60" timestamp="2026-11-01T15:51:04">
     <oneNumber name="DOME_ABSOLUTE_POSITION">
 15
     </oneNumber>
 </setNumberVector>
-<setNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" state="Busy" timeout="60" timestamp="2026-10-31T20:21:42">
+<setNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" state="Busy" timeout="60" timestamp="2026-11-01T15:51:05">
     <oneNumber name="DOME_ABSOLUTE_POSITION">
 20
     </oneNumber>
 </setNumberVector>
-<message device="Dome Simulator" timestamp="2026-10-31T20:21:43" message="[INFO] Dome reached requested azimuth angle."/>
-<setSwitchVector device="Dome Simulator" name="DOME_MOTION" state="Ok" timeout="60" timestamp="2026-10-31T20:21:43">
+<message device="Dome Simulator" timestamp="2026-11-01T15:51:06" message="[INFO] Dome reached requested azimuth angle."/>
+<setSwitchVector device="Dome Simulator" name="DOME_MOTION" state="Ok" timeout="60" timestamp="2026-11-01T15:51:06">
     <oneSwitch name="DOME_CW">
 Off
     </oneSwitch>
@@ -41,12 +41,12 @@ Off
 Off
     </oneSwitch>
 </setSwitchVector>
-<setNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" state="Ok" timeout="60" timestamp="2026-10-31T20:21:43">
+<setNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" state="Ok" timeout="60" timestamp="2026-11-01T15:51:06">
     <oneNumber name="DOME_ABSOLUTE_POSITION">
 30
     </oneNumber>
 </setNumberVector>
-<setNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" state="Ok" timeout="60" timestamp="2026-10-31T20:21:43">
+<setNumberVector device="Dome Simulator" name="ABS_DOME_POSITION" state="Ok" timeout="60" timestamp="2026-11-01T15:51:06">
     <oneNumber name="DOME_ABSOLUTE_POSITION">
 30
     </oneNumber>

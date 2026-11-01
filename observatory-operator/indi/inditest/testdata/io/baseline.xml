@@ -1,4 +1,4 @@
-<defSwitchVector device="Simulator IO" name="CONNECTION" label="Connection" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-10-31T20:22:54">
+<defSwitchVector device="Simulator IO" name="CONNECTION" label="Connection" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-01T15:52:17">
     <defSwitch name="CONNECT" label="Connect">
 Off
     </defSwitch>
@@ -6,7 +6,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defTextVector device="Simulator IO" name="DRIVER_INFO" label="Driver Info" group="General Info" state="Idle" perm="ro" timeout="60" timestamp="2026-10-31T20:22:54">
+<defTextVector device="Simulator IO" name="DRIVER_INFO" label="Driver Info" group="General Info" state="Idle" perm="ro" timeout="60" timestamp="2026-11-01T15:52:17">
     <defText name="DRIVER_NAME" label="Name">
 Simulator IO
     </defText>
@@ -20,7 +20,7 @@ indi_simulator_io
 229376
     </defText>
 </defTextVector>
-<defSwitchVector device="Simulator IO" name="DEBUG" label="Debug" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-31T20:22:54">
+<defSwitchVector device="Simulator IO" name="DEBUG" label="Debug" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-01T15:52:17">
     <defSwitch name="ENABLE" label="Enable">
 Off
     </defSwitch>
@@ -28,7 +28,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defSwitchVector device="Simulator IO" name="SIMULATION" label="Simulation" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-10-31T20:22:54">
+<defSwitchVector device="Simulator IO" name="SIMULATION" label="Simulation" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-01T15:52:17">
     <defSwitch name="ENABLE" label="Enable">
 Off
     </defSwitch>
@@ -36,7 +36,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defSwitchVector device="Simulator IO" name="CONFIG_PROCESS" label="Configuration" group="Options" state="Idle" perm="rw" rule="AtMostOne" timeout="0" timestamp="2026-10-31T20:22:54">
+<defSwitchVector device="Simulator IO" name="CONFIG_PROCESS" label="Configuration" group="Options" state="Idle" perm="rw" rule="AtMostOne" timeout="0" timestamp="2026-11-01T15:52:17">
     <defSwitch name="CONFIG_LOAD" label="Load">
 Off
     </defSwitch>
@@ -50,7 +50,7 @@ Off
 Off
     </defSwitch>
 </defSwitchVector>
-<defNumberVector device="Simulator IO" name="POLLING_PERIOD" label="Polling" group="Options" state="Idle" perm="rw" timeout="0" timestamp="2026-10-31T20:22:54">
+<defNumberVector device="Simulator IO" name="POLLING_PERIOD" label="Polling" group="Options" state="Idle" perm="rw" timeout="0" timestamp="2026-11-01T15:52:17">
     <defNumber name="PERIOD_MS" label="Period (ms)" format="%.f" min="10" max="600000" step="1000">
 1000
     </defNumber>

@@ -1,4 +1,4 @@
-<setSwitchVector device="Simulator IO" name="CONNECTION" state="Idle" timeout="60" timestamp="2026-10-31T20:23:01">
+<setSwitchVector device="Simulator IO" name="CONNECTION" state="Idle" timeout="60" timestamp="2026-11-01T15:52:24">
     <oneSwitch name="CONNECT">
 Off
     </oneSwitch>
@@ -6,18 +6,18 @@ Off
 On
     </oneSwitch>
 </setSwitchVector>
-<delProperty device="Simulator IO" name="DIGITAL_INPUT_1" timestamp="2026-10-31T20:23:01"/>
-<delProperty device="Simulator IO" name="DIGITAL_INPUT_2" timestamp="2026-10-31T20:23:01"/>
-<delProperty device="Simulator IO" name="DIGITAL_INPUT_3" timestamp="2026-10-31T20:23:01"/>
-<delProperty device="Simulator IO" name="DIGITAL_INPUT_4" timestamp="2026-10-31T20:23:01"/>
-<delProperty device="Simulator IO" name="DIGITAL_INPUT_LABELS" timestamp="2026-10-31T20:23:01"/>
-<delProperty device="Simulator IO" name="DIGITAL_OUTPUT_1" timestamp="2026-10-31T20:23:01"/>
-<delProperty device="Simulator IO" name="DIGITAL_OUTPUT_2" timestamp="2026-10-31T20:23:01"/>
-<delProperty device="Simulator IO" name="DIGITAL_OUTPUT_3" timestamp="2026-10-31T20:23:01"/>
-<delProperty device="Simulator IO" name="DIGITAL_OUTPUT_4" timestamp="2026-10-31T20:23:01"/>
-<delProperty device="Simulator IO" name="DIGITAL_OUTPUT_LABELS" timestamp="2026-10-31T20:23:01"/>
-<delProperty device="Simulator IO" name="PULSE_0" timestamp="2026-10-31T20:23:01"/>
-<delProperty device="Simulator IO" name="PULSE_1" timestamp="2026-10-31T20:23:01"/>
-<delProperty device="Simulator IO" name="PULSE_2" timestamp="2026-10-31T20:23:01"/>
-<delProperty device="Simulator IO" name="PULSE_3" timestamp="2026-10-31T20:23:01"/>
-<delProperty device="Simulator IO" name="SIMULATOR_INPUT" timestamp="2026-10-31T20:23:01"/>
+<delProperty device="Simulator IO" name="DIGITAL_INPUT_1" timestamp="2026-11-01T15:52:24"/>
+<delProperty device="Simulator IO" name="DIGITAL_INPUT_2" timestamp="2026-11-01T15:52:24"/>
+<delProperty device="Simulator IO" name="DIGITAL_INPUT_3" timestamp="2026-11-01T15:52:24"/>
+<delProperty device="Simulator IO" name="DIGITAL_INPUT_4" timestamp="2026-11-01T15:52:24"/>
+<delProperty device="Simulator IO" name="DIGITAL_INPUT_LABELS" timestamp="2026-11-01T15:52:24"/>
+<delProperty device="Simulator IO" name="DIGITAL_OUTPUT_1" timestamp="2026-11-01T15:52:24"/>
+<delProperty device="Simulator IO" name="DIGITAL_OUTPUT_2" timestamp="2026-11-01T15:52:24"/>
+<delProperty device="Simulator IO" name="DIGITAL_OUTPUT_3" timestamp="2026-11-01T15:52:24"/>
+<delProperty device="Simulator IO" name="DIGITAL_OUTPUT_4" timestamp="2026-11-01T15:52:24"/>
+<delProperty device="Simulator IO" name="DIGITAL_OUTPUT_LABELS" timestamp="2026-11-01T15:52:24"/>
+<delProperty device="Simulator IO" name="PULSE_0" timestamp="2026-11-01T15:52:24"/>
+<delProperty device="Simulator IO" name="PULSE_1" timestamp="2026-11-01T15:52:24"/>
+<delProperty device="Simulator IO" name="PULSE_2" timestamp="2026-11-01T15:52:24"/>
+<delProperty device="Simulator IO" name="PULSE_3" timestamp="2026-11-01T15:52:24"/>
+<delProperty device="Simulator IO" name="SIMULATOR_INPUT" timestamp="2026-11-01T15:52:24"/>
