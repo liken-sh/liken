@@ -5,7 +5,7 @@
             ~/go/pkg/mod/cache/download/**/*.ziphash{% end %}
 {% define "go-restore" %}
       - id: setup-go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: {% .Mod %}
           cache: false

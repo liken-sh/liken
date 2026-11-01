@@ -74,8 +74,9 @@ jobs:
 
       # prek runs the hooks of this component only, with
       # --show-diff-on-failure, so a hook that changes a file fails
-      # with the change it would make.
-      - uses: j178/prek-action@v2
+      # with the change it would make. The reference names a release,
+      # because prek-action publishes no major tag.
+      - uses: j178/prek-action@v3.1.0
         with:
-          prek-version: 0.5.2
+          prek-version: 0.5.9
           extra-args: --all-files toolchains/

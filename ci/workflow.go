@@ -25,7 +25,7 @@ var templateFiles embed.FS
 
 // prekVersion is the prek that every prek job and the repository job
 // run, so a hook behaves the same in each.
-const prekVersion = "0.5.2"
+const prekVersion = "0.5.9"
 
 // fluxVersionFile holds the flux release that the OS ships. The
 // publish job pushes each deploy artifact with the same flux CLI, so

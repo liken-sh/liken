@@ -141,7 +141,7 @@
       # package that is not public, and a login that fails leaves the
       # scan to read the image without one.
       - continue-on-error: true
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

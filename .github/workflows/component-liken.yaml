@@ -75,7 +75,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - id: setup-go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: liken/go.mod
           cache: false
@@ -190,7 +190,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - id: setup-go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: liken/go.mod
           cache: false
@@ -266,13 +266,14 @@ jobs:
 
       # prek runs the hooks of this component only, with
       # --show-diff-on-failure, so a hook that changes a file fails
-      # with the change it would make. SKIP leaves out the hooks
+      # with the change it would make. The reference names a release,
+      # because prek-action publishes no major tag. SKIP leaves out the hooks
       # that another job of this workflow runs.
-      - uses: j178/prek-action@v2
+      - uses: j178/prek-action@v3.1.0
         env:
           SKIP: go-vet,staticcheck,go-mod-tidy
         with:
-          prek-version: 0.5.2
+          prek-version: 0.5.9
           extra-args: --all-files liken/
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-build.outputs.cache-hit != 'true' }}
@@ -292,7 +293,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - id: setup-go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: liken/docs/go.mod
           cache: false
@@ -415,7 +416,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - id: setup-go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: liken/go.mod
           cache: false

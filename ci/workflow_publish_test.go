@@ -21,7 +21,7 @@ func TestAPinnedImageJobLogsInOnEveryBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(files[".github/workflows/component-base.yaml"])
-	for _, want := range []string{"|| matrix.pinned }}\n        uses: docker/login-action@v3"} {
+	for _, want := range []string{"|| matrix.pinned }}\n        uses: docker/login-action@v4"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the workflow lacks %q:\n%s", want, text)
 		}
@@ -105,7 +105,7 @@ func TestTheCheckStageRunsADryRunOfThePublish(t *testing.T) {
 	app := string(files[".github/workflows/component-app.yaml"])
 	for _, want := range []string{
 		"  publish:\n    if: ${{ inputs.stage == 'publish' || inputs.dryrun }}\n",
-		"      - if: ${{ !inputs.dryrun }}\n        uses: docker/login-action@v3",
+		"      - if: ${{ !inputs.dryrun }}\n        uses: docker/login-action@v4",
 		`-mode "${{ inputs.dryrun && 'dry' || inputs.publish }}"`,
 	} {
 		if !strings.Contains(app, want) {
@@ -145,9 +145,9 @@ func TestThePublishJobSetsUpOnlyWhatTheOutputsNeed(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := map[string][]string{
-		"operator": {"docker/setup-buildx-action@v3", "docker/login-action@v3", "fluxcd/flux2/action@v2.9.7"},
-		"crd":      {"docker/login-action@v3", "fluxcd/flux2/action@v2.9.7"},
-		"base":     {"docker/setup-buildx-action@v3", "docker/login-action@v3"},
+		"operator": {"docker/setup-buildx-action@v4", "docker/login-action@v4", "fluxcd/flux2/action@v2.9.7"},
+		"crd":      {"docker/login-action@v4", "fluxcd/flux2/action@v2.9.7"},
+		"base":     {"docker/setup-buildx-action@v4", "docker/login-action@v4"},
 	}
 	for name, want := range cases {
 		publish := workflowJobs(t, files[".github/workflows/component-"+name+".yaml"])["publish"]
