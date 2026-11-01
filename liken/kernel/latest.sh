@@ -28,6 +28,16 @@
 # lines from it into fetch.sh. A fetch reads only those lines, so a
 # package that changes upstream after the bump fails the check.
 #
+# The digests are worth only as much as the file they come from, so
+# --bump first checks CHECKSUMS.gpg, the archive's detached signature
+# of the file, against the key in kernel-ppa.asc. The bump stops when
+# the signature is missing, does not verify, or was made by any other
+# key. The key belongs to Launchpad's "Ubuntu Kernel PPA" team
+# (https://launchpad.net/~kernel-ppa), which lists it among the
+# team's OpenPGP keys, and Canonical's mainline builds sign with it.
+# Its fingerprint is pinned below as `signer`. A new key is a change
+# that a person makes by hand, after checking the team's page.
+#
 # Usage:
 #   kernel/latest.sh          report the pin and the newest release
 #   kernel/latest.sh --bump   write the newest release into VERSION,
@@ -66,15 +76,46 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' kernel "$pinned" "${latest:-?}" \
     exit 0
 }
 
-# The CHECKSUMS file holds sha1 lines (40 hex characters) and then
-# sha256 lines (64 characters), each in the form "<digest>  <filename>".
-# Matching 64 characters keeps the sha256 lines. The filenames embed a
-# build timestamp, so the pattern matches the package name around it.
-checksums="$(curl -fsSL --retry 3 --max-time 60 "${index}v$latest/amd64/CHECKSUMS")" || {
+for tool in curl gpg gpgv; do
+    command -v "$tool" >/dev/null || {
+        echo "latest.sh: missing required tool: $tool" >&2
+        exit 1
+    }
+done
+
+signer="60AA7B6F30434AE68E569963E50C6A0917C622B0"
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
+curl -fsSL --retry 3 --max-time 60 -o "$work/CHECKSUMS" "${index}v$latest/amd64/CHECKSUMS" || {
     echo "latest.sh: no mainline build found for $latest" >&2
     echo "latest.sh: (not every release builds successfully; check $index)" >&2
     exit 1
 }
+curl -fsSL --retry 3 --max-time 60 -o "$work/CHECKSUMS.gpg" "${index}v$latest/amd64/CHECKSUMS.gpg" || {
+    echo "latest.sh: the build of $latest publishes no CHECKSUMS.gpg signature" >&2
+    exit 1
+}
+# gpgv reads a binary keyring, and the repository keeps the key in
+# its armored form, which a person can read and compare. gpgv's
+# status lines name the fingerprint of the key that made a good
+# signature, and the bump accepts only the pinned one.
+gpg --dearmor <"$here/kernel-ppa.asc" >"$work/kernel-ppa.gpg"
+gpgv --status-fd 3 --keyring "$work/kernel-ppa.gpg" \
+    "$work/CHECKSUMS.gpg" "$work/CHECKSUMS" 3>"$work/status" || {
+    echo "latest.sh: the CHECKSUMS file of $latest does not verify against kernel-ppa.asc" >&2
+    exit 1
+}
+awk -v f="$signer" '$2 == "VALIDSIG" && $NF == f { found = 1 } END { exit !found }' "$work/status" || {
+    echo "latest.sh: the CHECKSUMS file of $latest is not signed by $signer" >&2
+    exit 1
+}
+
+# The CHECKSUMS file holds sha1 lines (40 hex characters) and then
+# sha256 lines (64 characters), each in the form "<digest>  <filename>".
+# Matching 64 characters keeps the sha256 lines. The filenames embed a
+# build timestamp, so the pattern matches the package name around it.
+checksums="$(cat "$work/CHECKSUMS")"
 image="$(grep -E '^[0-9a-f]{64}  linux-image-unsigned-.*-generic_.*_amd64\.deb$' <<<"$checksums" | head -n1)" || image=""
 modules="$(grep -E '^[0-9a-f]{64}  linux-modules-.*-generic_.*_amd64\.deb$' <<<"$checksums" | head -n1)" || modules=""
 [[ -n "$image" && -n "$modules" ]] || {
@@ -90,7 +131,7 @@ sed -i \
     -e "/^declare -A modules_package=(/{n;s|.*|    [\"$latest\"]=\"$modules\"|}" \
     "$here/fetch.sh"
 echo "kernel: $pinned -> $latest"
-echo "the digests came from the build's CHECKSUMS file; its GPG signature is not checked"
+echo "the digests came from the build's CHECKSUMS file, signed by the Kernel PPA key"
 # licensing/sources.sh mirrors kernel.org's tarball of this release
 # and pins it by digest, so a kernel bump moves that digest too. A
 # refused re-pin leaves the domain pin moved and the mirror behind

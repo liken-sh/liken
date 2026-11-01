@@ -60,11 +60,10 @@
 # and stops a torn download from passing as good. The digests come
 # from the CHECKSUMS file that the archive publishes beside each
 # build, copied into this file when the pin moved, so a package that
-# changes upstream after that fails the check. (The archive also signs
-# its checksum file with the Ubuntu kernel team's GPG key. Neither
-# this script nor latest.sh verifies that signature, so the digest
-# proves that the bytes are the bytes the pin named, not who published
-# them.)
+# changes upstream after that fails the check. kernel/latest.sh
+# --bump copies the digests only after the checksum file's signature
+# verifies against the Ubuntu kernel team's key in kernel-ppa.asc, so
+# the pinned digests name bytes that the kernel team published.
 
 set -euo pipefail
 
