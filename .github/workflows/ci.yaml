@@ -1239,6 +1239,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
 
   liken-publish:
     needs: [plan, liken, brand, kubernetes, toolchains, trust]
@@ -1254,6 +1255,7 @@ jobs:
       contents: read
       packages: write
       security-events: write
+      id-token: write
     # The OS publishes to the release channel with the channel's key.
     secrets: inherit
 

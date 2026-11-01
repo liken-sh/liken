@@ -246,10 +246,10 @@ jobs:
       contents: read
       packages: write{% if .SecurityEvents %}
       security-events: write{% end %}{%/* id-token: write lets the
-      publish job of the component's workflow sign each image with
-      cosign. GitHub checks every job of a called workflow against the
-      call, including the publish job that the check call skips, so both
-      calls grant it. */%}{% if and .Images (not .Channel) %}
+      publish job of the component's workflow sign with cosign: each
+      image, or each file of the OS release. GitHub checks every job of
+      a called workflow against the call, including the publish job
+      that the check call skips, so both calls grant it. */%}{% if or .Images .Channel %}
       id-token: write{% end %}
 {% if .Publishes %}
   {% .Name %}-publish:
@@ -266,7 +266,7 @@ jobs:
     permissions:
       contents: read
       packages: write{% if .SecurityEvents %}
-      security-events: write{% end %}{% if and .Images (not .Channel) %}
+      security-events: write{% end %}{% if or .Images .Channel %}
       id-token: write{% end %}{% if .Channel %}
     # The OS publishes to the release channel with the channel's key.
     secrets: inherit{% end %}

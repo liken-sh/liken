@@ -32,6 +32,8 @@ fleet](/docs/guides/upgrade/) gives the steps that use it.
       LICENSES.md              third-party license notices
       sbom.cdx.json            the CycloneDX SBOM: every component in
                                the release
+      <file>.sigstore.json     the cosign signature of each file that
+                               release.yaml names, and of release.yaml
       notes.md                 what changed in this release
       coverage.html            the test coverage of the tree it was built from
     sources/                   source mirrors for GPL and LGPL components,
@@ -132,6 +134,26 @@ build wrote an SBOM.
 `release.yaml` lists the SBOM with its digest, like every other
 artifact, so each machine carries the SBOM of the release it runs on
 its boot slot. A release published before the SBOM existed has none.
+
+## Signatures
+
+Each file that `release.yaml` names, and `release.yaml` itself, has a
+Sigstore bundle beside it: `<file>.sigstore.json`. The release
+workflow signs each file with cosign, with no key: Fulcio certifies
+the workflow of this repository at the release tag, and Rekor records
+the signature. To check a file that you downloaded:
+
+```sh
+cosign verify-blob release.yaml --bundle release.yaml.sigstore.json \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github\.com/liken-sh/liken/\.github/workflows/component-liken\.yaml@refs/tags/[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3}$'
+```
+
+A machine does not read the signatures. It trusts a release through
+the digest that its Cluster pins, as [the trust
+chain](#the-trust-chain) describes. The signature is for a person who
+has no Cluster yet, such as before an install. A release published
+before the workflow signed its files has no bundles.
 
 ## The notes
 

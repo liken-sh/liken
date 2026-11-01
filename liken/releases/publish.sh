@@ -96,9 +96,9 @@ fi
 # The artifacts go first and the document last: release.yaml is how
 # anyone discovers the artifacts, so until it lands, the half-uploaded
 # release does not exist yet. The loop reads the directory, so the
-# coverage report goes up with the artifacts. It is not one of them:
-# the document does not name it, and no machine downloads it onto a
-# boot slot. Every object is public-read, because the channel is public
+# signature bundles that releases/sign.sh wrote and the coverage report
+# go up with the artifacts. They are not artifacts: the document does
+# not name them, and no machine downloads them onto a boot slot. Every object is public-read, because the channel is public
 # by design, while the bucket itself refuses to list its contents, so
 # only named paths answer. channel.yaml goes last of all. It is the
 # channel's one mutable object: the pointer that clusters poll for the

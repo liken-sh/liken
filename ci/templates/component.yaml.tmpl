@@ -267,6 +267,12 @@ jobs:{% range .Jobs %}
       packages: write
       security-events: write
       id-token: write{% end %}{% if .Channel %}
+    # id-token: write lets cosign take the job's OIDC token and sign
+    # each file of the release keyless, with this workflow at its ref
+    # as the signer. No other job of the workflow holds it.
+    permissions:
+      contents: read
+      id-token: write
     # The channel's key comes from the repository secrets that
     # liken.sh/terraform.tf keeps delivered.
     env:
@@ -301,6 +307,16 @@ jobs:{% range .Jobs %}
         if: ${{ inputs.dryrun }}
         working-directory: {% .Dir %}
         run: bash -n releases/publish.sh
+
+      # cosign, from the image that toolchains/images.toml pins, signs
+      # each file of the release keyless and writes the signature, the
+      # certificate, and the Rekor entry into one bundle beside the
+      # file, which the publish uploads with it. releases/sign.sh gives
+      # the details. A dry run signs nothing.
+      - name: sign the release's files
+        if: ${{ !inputs.dryrun }}
+        working-directory: {% .Dir %}
+        run: releases/sign.sh "${{ inputs.version }}"
 
       - name: publish to the channel
         if: ${{ !inputs.dryrun }}

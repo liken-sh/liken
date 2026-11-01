@@ -456,6 +456,18 @@ SBOM keeps the manifest's or buildroot's component, with its purl and
 license. The property `liken:source` of each component names its
 source, and the `compositions` state which lists are complete.
 
+The OS's publish job signs each file of the release, `release.yaml`
+and every artifact that it names, keyless with the same pinned cosign,
+and publishes the Sigstore bundle `<file>.sigstore.json` beside each
+file. `liken/releases/sign.sh` holds the settings, and the `releases`
+skill holds the commands that verify a file:
+
+```sh
+cosign verify-blob <file> --bundle <file>.sigstore.json \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github\.com/liken-sh/liken/\.github/workflows/component-liken\.yaml@refs/tags/[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3}$'
+```
+
 The `releases` skill under `.agents/skills` holds the calendar scheme,
 what a tag releases, and how to pin a development build. Load it before
 tagging, publishing an image, or pinning a development build.

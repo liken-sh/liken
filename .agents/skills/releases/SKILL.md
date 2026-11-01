@@ -1,6 +1,6 @@
 ---
 name: releases
-description: How the components of the liken repository version and release. Covers the CalVer scheme, the one release tag, which components a tag publishes, the development builds on main, the pinned base images, each image's SBOM, provenance, and cosign signature and how to verify them, the OS release's SBOM, pinning a development build, and the liken OS channel publish. Use when tagging, publishing an image, verifying a published image, pinning a development build, or reasoning about a component's version.
+description: How the components of the liken repository version and release. Covers the CalVer scheme, the one release tag, which components a tag publishes, the development builds on main, the pinned base images, each image's SBOM, provenance, and cosign signature and how to verify them, the OS release's SBOM and the signature of each of its files and how to verify them, pinning a development build, and the liken OS channel publish. Use when tagging, publishing an image, verifying a published image, pinning a development build, or reasoning about a component's version.
 ---
 
 # Releases and development builds
@@ -169,7 +169,8 @@ target beside the repository's.
   names the component's images at the same version, so a cluster that
   follows the artifact moves the manifests and the images in one step.
 * The OS goes to the channel at `https://releases.liken.sh`, through
-  `liken/releases/publish.sh`, with its SBOM.
+  `liken/releases/publish.sh`, with its SBOM and a signature bundle
+  beside each file.
 
 A published version never changes. A rerun of a failed tag pushes only
 what the failed run did not.
@@ -198,8 +199,8 @@ under each name of the image. The signature is keyless: the job holds
 ref as the signer, and Rekor records the signature. cosign pushes the
 signature to the image's own ghcr.io repository, as an OCI referrer
 of the digest, or under the tag `sha256-<digest>` on a registry that
-has no referrers API. Only the publish job
-of a component with images holds `id-token: write`. A dry run builds the
+has no referrers API. Only the publish job of a component with images
+and the OS's publish job hold `id-token: write`. A dry run builds the
 same attestations and signs nothing.
 
 A signature that fails fails the publish, before `:latest` moves and
@@ -273,7 +274,7 @@ A tag releases the OS when any of its paths changed since its previous
 release, whatever the tag was meant for. An OS release reboots every
 machine in a fleet that follows releases.
 
-## The OS release's SBOM
+## The OS release's SBOM and signatures
 
 Each OS release carries `sbom.cdx.json`, a CycloneDX SBOM, at
 `https://releases.liken.sh/<version>/sbom.cdx.json`. `release.yaml`
@@ -314,6 +315,40 @@ sbom=releases/dist/<version>/sbom.cdx.json
 jq -r '.components[] | .properties[] | select(.name == "liken:source") | .value' "$sbom" | sort | uniq -c
 jq '.components[] | select(.name == "k3s")' "$sbom"
 jq '.compositions' "$sbom"
+```
+
+The publish job signs `release.yaml` and every file that it names,
+keyless, with the cosign that `toolchains/images.toml` pins, through
+`liken/releases/sign.sh`, before `publish.sh` uploads the directory.
+Fulcio certifies `component-liken.yaml` at the release tag, Rekor
+records each signature, and the Sigstore bundle of each file is at
+`<file>.sigstore.json` beside it. To verify a downloaded file:
+
+```sh
+v=2026.11.01-001
+curl -fsSLO "https://releases.liken.sh/$v/release.yaml"
+curl -fsSLO "https://releases.liken.sh/$v/release.yaml.sigstore.json"
+cosign verify-blob release.yaml --bundle release.yaml.sigstore.json \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github\.com/liken-sh/liken/\.github/workflows/component-liken\.yaml@refs/tags/[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3}$'
+```
+
+The OS publishes from release tags alone, so the identity names no
+branch. A verified `release.yaml` also vouches for each artifact by
+its digest, as it does for a machine.
+
+To rehearse the signing on a lab release, sign with a throwaway key.
+The script then writes nothing to the public Rekor, so the verify
+skips the log:
+
+```sh
+cosign=$(awk -F' = ' '$1 == "cosign" { gsub(/"/, "", $2); print $2 }' ../toolchains/images.toml)
+key=$(mktemp -d)
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e COSIGN_PASSWORD= -v "$key:/k" -w /k "$cosign" generate-key-pair
+COSIGN_PASSWORD= releases/sign.sh <version> "$key/cosign.key"
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$key:/k:ro" -v "$PWD/releases/dist/<version>:/r:ro" -w /r "$cosign" \
+  verify-blob --key /k/cosign.pub --insecure-ignore-tlog --bundle sbom.cdx.json.sigstore.json sbom.cdx.json
+rm -rf "$key"
 ```
 
 ## Rules
