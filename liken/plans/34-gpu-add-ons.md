@@ -39,10 +39,10 @@ One part does not exist yet: a release that carries an artifact for
 one machine. The fetcher writes every artifact in the release document
 to every slot, and the bundle sums all artifacts against one
 fleet-wide slot size. [Milestone 33](completed/33-firmware-updates.md) once
-needed the same artifact for fwupd, and its prerequisites section gives
-the proposed design. Milestone 33 set it aside when `firmware-operator`
-ran fwupd as a container image, so this plan is the only one that
-waits on it.
+needed the same artifact for fwupd, and set it aside when
+`firmware-operator` ran fwupd as a container image. Its "Considered and
+set aside" section records that choice and gives no design. So this
+plan is the only one that waits on it.
 
 ## What the NVIDIA add-on would hold
 
@@ -65,8 +65,9 @@ only needs a driver at least as new as the pod's CUDA requires.
 The payload is not the difficult part. The module build is the
 difficult part. It is an out-of-tree compile
 against the kernel pin, in CI, and it must run again with every kernel
-bump. This would be liken's first vendored
-domain that builds source instead of one that verifies a download. A
+bump. Other vendored domains, such as `liken/wpa-supplicant/`, build
+from source inside a pinned container, but none of them builds against
+the kernel pin. A
 wrong build does not affect the boot path: it breaks GPU workloads, and
 the base OS still boots.
 

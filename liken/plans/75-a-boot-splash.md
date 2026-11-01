@@ -16,7 +16,7 @@ at the screen reads it when nothing else answers. So a splash must not
 hide that record where it matters:
 
 - The serial console keeps every line. The lab sets `console=ttyS0`
-  (`Makefile`), and a splash on the screen changes nothing there.
+  (`liken/dev-cluster/Makefile`), and a splash on the screen changes nothing there.
 - A panic, a failed `switch_root`, and init's refusals still reach a
   screen. A splash that stays up over a machine that stopped is worse
   than the text it replaced.

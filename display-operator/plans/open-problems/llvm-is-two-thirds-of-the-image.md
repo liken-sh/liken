@@ -1,7 +1,9 @@
 # LLVM is two thirds of the image
 
-Open problem. The compositor image is already `FROM scratch`, and it is
-still 234,346,900 bytes. Since [plan 16](../completed/16-the-vulkan-base-image.md)
+Open problem. The compositor image is already `FROM scratch`, and it
+measured 234,346,900 bytes in the trixie build of 2026-08-16 that
+"Sizes in the closure" below describes. `docker image ls` on a pulled
+`weston` image gives its size today. Since [plan 16](../completed/16-the-vulkan-base-image.md)
 that LLVM is in the `vulkan` base layer, where the AMD Vulkan driver
 links it too, and the media browser and the idle screen share the one
 copy with the compositor. So each node stores one LLVM instead of
@@ -26,10 +28,11 @@ libllvm19 1:19.1.7-3+b1, and weston 14.0.2-1. The rebuilt tree is
 234,348,772 bytes, which is 1,872 bytes over the size plan 01 records
 for the published image.
 
-The bases now install from a snapshot of Debian sid, with mesa
-26.2.5-1, and the `weston` image builds weston 16.0.2 from its release.
-Nobody has measured the closure again since that change, so every byte
-count in this document is from the trixie build above.
+After that build, the bases moved to snapshots of Debian sid, and the
+`weston` image began to build weston from its release.
+`weston/package.toml` names the mesa and weston versions the image
+holds now. Nobody has measured the closure again since that change, so
+every byte count in this document is from the trixie build above.
 
 | Bytes | File | Why it is there |
 | --- | --- | --- |
@@ -262,4 +265,4 @@ two, so it is a worse trade for CI time and a better one for coverage.
 * The size of `libLLVM` built for X86 alone with Z3 off.
 * What the image size costs today. A node pulls it once and both images
   share every layer, and no pull time or disk figure has been recorded
-  against the 252 MB.
+  against the image's size.

@@ -48,43 +48,43 @@ that path.
 ## What `liken` does now
 
 The follower answers a directed request it does not support with
-`<Feature Abort>` "Unrecognized opcode" (`equipment-operator/cec/follower.go:102`).
-It skips the answer for any opcode in its `answers` set, which lists
-the opcodes that reply to a request (`follower.go:51-78`). That set
-includes `OpSetMenuLanguage` (`follower.go:73`), so the follower drops
+`<Feature Abort>` "Unrecognized opcode" (`Answer` in
+`equipment-operator/cec/follower.go`). It skips the answer for any
+opcode in its `answers` set, which lists the opcodes that reply to a
+request. That set includes `OpSetMenuLanguage`, so the follower drops
 `<Set Menu Language>` and sends no reply. `OpDeckStatus` and
 `OpMenuStatus` are in the set too, for the same reason.
 
 The follower's tests fix the current answer for `<Menu Request>`: a
 `<Feature Abort>` for a directed request, and no answer for a request
-from address 15 or a broadcast (`equipment-operator/cec/follower_test.go:17-24`).
+from address 15 or a broadcast (`equipment-operator/cec/follower_test.go`).
 
-`equipment-operator/cec/message.go` declares `OpMenuRequest` (line
-101), `OpMenuStatus` (86), `OpGiveDeckStatus` (100), `OpDeckStatus`
-(84), `OpSetMenuLanguage` (93), and `OpGetMenuLanguage` (102). It
+`equipment-operator/cec/message.go` declares `OpMenuRequest`,
+`OpMenuStatus`, `OpGiveDeckStatus`, `OpDeckStatus`,
+`OpSetMenuLanguage`, and `OpGetMenuLanguage`. It
 declares no opcode for `<Play>` (0x41) or `<Deck Control>` (0x42), and
 it has no builder for any of the messages this plan sends.
 
 The node workload records one active-source address. `noteSource`
-(`equipment-operator/cecnode_source.go:25`) sets it when the adapter
-hears an `<Active Source>` (`cecnode_adapter.go:548-551`) and when the
-adapter sends one itself (`announceSource`, `cecnode_source.go:69`).
+(`equipment-operator/cecnode_source.go`) sets it when the adapter
+hears an `<Active Source>` (`cecnode_adapter.go`) and when the
+adapter sends one itself (`announceSource`, `cecnode_source.go`).
 `noteSource` also records the route, and an `<Active Source>` for
 `0.0.0.0` is a route that a person chose. `claimInput`
-(`cecnode_source.go:58`) is the one place that sends `<Active Source>`
+(`cecnode_source.go`) is the one place that sends `<Active Source>`
 for a person's request.
 
 On the media side, the `Play` status holds a phase, and
 `playActivity` folds the phase and the paused flag into `Starting`,
-`Playing`, `Paused`, `Finished`, or `Failed` (`media-operator/api.go:626-643`).
+`Playing`, `Paused`, `Finished`, or `Failed` (`media-operator/api.go`).
 The `Player` status reads `Idle` between films
 (`media-operator/playerstatus.go`). The playback sidecar maps key names
 to commands in `playbackKeys` (`media-operator/keybindings.go`). Its
 `actionPause` toggles, and `KEY_PLAYPAUSE`, `KEY_PLAY`, and
-`KEY_PAUSE` bind to it (`keybindings.go:55-57`). `KEY_PLAYCD`,
+`KEY_PAUSE` bind to it (`keybindings.go`). `KEY_PLAYCD`,
 `KEY_PAUSECD`, and `KEY_STOPCD`, the names `rc-cec` gives a TV
 remote's Play Function, Pause, and Stop Function, bind to `actionPlay`,
-`actionHold`, and `actionStop` (`keybindings.go:59-61`). Play and hold
+`actionHold`, and `actionStop` (`keybindings.go`). Play and hold
 set the state they name, so a second press changes nothing
 (`media-operator/input.go`). Stop ends the run and asks the screen
 under it nothing (`media-operator/stop.go`). Home also ends a run and
@@ -95,7 +95,7 @@ and the receiver in standby (`media-operator/playerpower.go`).
 
 `MediaPreferences` holds `audioLanguages`, `subtitleLanguages`,
 `subtitles`, and `timeZone`, with the idle screen policy
-(`media-operator/api.go:681-692`). The first two select
+(`MediaPreferencesSpec` in `media-operator/api.go`). The first two select
 tracks inside a film. They are not the language of a menu. I found no
 string table or translation code in `library-operator/media-browser`,
 `media-operator/idle`, or `media-screen`, so the screens draw one
@@ -143,7 +143,7 @@ The feature is optional. A device that implements it takes on every
 
 ### What `liken` does now
 
-`<Menu Request>` gets a `<Feature Abort>` (`follower.go:102`).
+`<Menu Request>` gets a `<Feature Abort>` (`Answer` in `follower.go`).
 Nothing sends `<Menu Status>`.
 
 ### Questions to answer
@@ -169,7 +169,7 @@ Nothing sends `<Menu Status>`.
    The options:
    - The node workload reads the `Player` status through the
      `Receiver` session that already names the `Player`
-     (`TelevisionSession.Player`, `equipment-operator/television.go:56`).
+     (`TelevisionSession.Player`, `equipment-operator/television.go`).
      It stays event-driven, with no timer, if it watches the
      `Player`. It adds a second watch to a component that watches
      `Television` and `Receiver` today.
@@ -248,7 +248,7 @@ binds it.
 ### What `liken` does now
 
 `<Play>`, `<Deck Control>`, and `<Give Deck Status>` get a
-`<Feature Abort>` "Unrecognized opcode" (`follower.go:102`). The
+`<Feature Abort>` "Unrecognized opcode" (`Answer` in `follower.go`). The
 opcodes `<Play>` and `<Deck Control>` are not declared in
 `equipment-operator/cec/message.go`.
 
@@ -256,7 +256,7 @@ opcodes `<Play>` and `<Deck Control>` are not declared in
 
 1. Where does each message map in `media-operator`'s commands? The
    commands the sidecar accepts are the actions in
-   `media-operator/input.go:31-50` (`pause`, `play`, `hold`, `seek`,
+   `media-operator/input.go` (`pause`, `play`, `hold`, `seek`,
    `chapter`, `subtitles`, `audio`, `info`, `cycle-focus`, and the
    navigation actions), with `stop`, `home`, and `power`. The
    candidates:
@@ -266,7 +266,7 @@ opcodes `<Play>` and `<Deck Control>` are not declared in
    | `<Play>` "Play Forward" | `play` | None. `actionPlay` resumes and never pauses. |
    | `<Play>` "Play Still" | `hold` | None. `actionHold` pauses and never resumes. |
    | `<Play>` fast modes | `seek` with a step | The sidecar seeks by a fixed step. A speed has no equivalent, and a device "should select the closest match" (CEC Table 13 note). |
-   | `<Deck Control>` "Skip Forward" and "Skip Reverse" | `chapter` +1 and -1 | Fits `actionChapter` (`keybindings.go:69-70`). |
+   | `<Deck Control>` "Skip Forward" and "Skip Reverse" | `chapter` +1 and -1 | Fits `actionChapter` (`keybindings.go`). |
    | `<Deck Control>` "Stop" | `stop` | None. `actionStop` ends the run and sends no ask to the screen under it (`stop.go`). |
    | `<Deck Control>` "Eject" | none | `liken` has no media tray. |
 
@@ -359,9 +359,9 @@ exists.
 
 ### What `liken` does now
 
-The follower drops `<Set Menu Language>` (`follower.go:73`). Nothing
+The follower drops `<Set Menu Language>` (its `answers` set in `follower.go`). Nothing
 sends `<Get Menu Language>`, and nothing answers one from the TV: the
-follower aborts `<Get Menu Language>` as unrecognized (`follower.go:102`).
+follower aborts `<Get Menu Language>` as unrecognized (`Answer` in `follower.go`).
 No screen has a translation, as the section above states.
 
 ### Questions to answer
@@ -370,11 +370,11 @@ No screen has a translation, as the section above states.
    node workload hears the message, so it records the value. The
    options for where it lands:
    - `Television` status, as a field beside `activeSource`
-     (`equipment-operator/television.go:105-107`). The fact belongs to
+     (`equipment-operator/television.go`). The fact belongs to
      the TV, and `kubectl` shows it. The screens do not read
      `Television` today.
    - `MediaPreferences` `spec`. This is where the household's language
-     choices sit (`media-operator/api.go:686-689`), but it is spec, so
+     choices sit (`MediaPreferencesSpec` in `media-operator/api.go`), but it is spec, so
      a person writes it, and the operator would overwrite a person's
      edit. A status field on another kind avoids the conflict.
    - `Player` status. The screens already read the `Player`. The
@@ -429,7 +429,7 @@ No screen has a translation, as the section above states.
   dependency is met.
 - A reason on every refusal. `<Feature Abort>` reasons other than
   "Unrecognized opcode" (`equipment-operator/cec/message.go`, the
-  `AbortUnrecognizedOpcode` reason at the call in `follower.go:102`)
+  `AbortUnrecognizedOpcode` reason at the call in `Answer` in `follower.go`)
   are needed once a feature exists and cannot act: "Not in correct mode
   to respond" for no `Play`, and "Refused" for a request that the
   standard to claim only when asked declines.

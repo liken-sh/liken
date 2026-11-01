@@ -20,7 +20,9 @@ ceiling on a children's screen.
 
 Nothing about it is decided: the resource's name, whether rows are
 configuration at all or code with one field for the ceiling, and whether
-"continue watching" belongs here or in plan 14. The work starts when
+the "continue watching" row that
+[plan 14](../completed/14-watch-state-and-people.md) built obeys the
+same limits. The work starts when
 the first screen needs it.
 
 [Plan 26](../completed/26-the-home-page.md) builds the first view as

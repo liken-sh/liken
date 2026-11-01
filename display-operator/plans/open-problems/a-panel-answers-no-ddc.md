@@ -1,8 +1,10 @@
-# A panel in standby answers no DDC/CI
+# A panel answers no DDC/CI
 
-Many panels answer no DDC/CI while they are in standby. The operator
-meets that silence in four places, and each one gives a costly or a
-wrong answer:
+`display-operator` reads and writes a panel's controls over DDC/CI. Many
+panels answer nothing while they are in standby, and a TV that a
+machine reaches through an A/V receiver never answers, because the
+receiver does not pass DDC/CI through. The operator meets a panel in
+standby in four places, and each one gives a costly or a wrong answer:
 
 - The probe of a panel that answered nothing runs again every 60 s,
   for as long as the panel stays dark.
@@ -14,8 +16,33 @@ wrong answer:
   sleeps through the restart.
 
 All four ask one question: what a failed DDC read means for
-`status.observed` and for the controls the operator publishes. This
-document asks it once.
+`status.observed` and for the controls the operator publishes. A TV
+behind a receiver asks a fifth: what the operator does with an override
+that it cannot write. This document asks both.
+
+## A TV behind a receiver skips its override
+
+The `Display` of a TV behind a receiver reports its `Responsive`
+condition False. When an override such as a `Player`'s `off` panel
+desire asks for that panel, the operator skips the write and posts no
+condition, `Event`, or log line. So the soft off of a `Player`'s idle
+timers draws a black picture, and the TV stays on and lit with the HDMI
+signal on.
+
+A `Player` that is off still turns its TV off, over HDMI-CEC through
+`equipment-operator`
+([root plan 84](../../../plans/completed/84-one-power-state-for-a-player.md)).
+The gap is the soft off and the skipped override, which reports
+nothing. The options:
+
+1. Report the skip, as a condition on the `Display` or as an `Event`
+   for each override that the operator cannot write.
+2. Let the soft off fall back to CEC through `equipment-operator`, the
+   way the hard off already does. This works only for a TV on a
+   `CECBus` in `Control`.
+
+These options and option 3 for a silent panel below read the same CEC
+power state, so one design can answer both.
 
 ## The probe runs again every minute
 

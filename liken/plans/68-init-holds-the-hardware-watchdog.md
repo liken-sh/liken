@@ -23,10 +23,12 @@ went up by one when the person cut the power.
 
 The machine boots with `panic=10` and `kernel.panic_on_oops=1`, so a
 panic or an oops reboots it in ten seconds. A lockup is neither. The
-vendored kernel (7.2.6) builds both lockup detectors, but it builds
-them with `CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC=0` and without
-`CONFIG_BOOTPARAM_HARDLOCKUP_PANIC`. A detector that fires prints a
-warning and the machine keeps its hang.
+vendored kernel was 7.2.6 when this plan was written, and that build
+had both lockup detectors, with `CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC=0`
+and without `CONFIG_BOOTPARAM_HARDLOCKUP_PANIC`. A detector that fires
+prints a warning and the machine keeps its hang. `liken/kernel/VERSION`
+names the kernel that `liken` vendors now, and the `config-*` file in
+that release's modules package gives its current settings.
 
 A hang below the kernel is worse. If a CPU stops completely, or the
 firmware holds it in system management mode, no kernel code runs, and

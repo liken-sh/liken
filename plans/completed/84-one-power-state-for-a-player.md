@@ -75,4 +75,4 @@ minutes after a power-off. A program also has no way to turn a
 
 * `equipment-operator/plans/open-problems/a-tv-turned-off-by-its-own-remote-reaches-no-record.md`
 * `media-operator/plans/open-problems/the-home-ask-on-the-commands-topic-switches-no-equipment.md`
-* `display-operator/plans/open-problems/a-tv-behind-a-receiver-answers-no-ddc.md`
+* `display-operator/plans/open-problems/a-panel-answers-no-ddc.md`

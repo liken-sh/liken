@@ -282,9 +282,9 @@ digests is read as "every family of that block settled", the way
 ### The CRD stays typed, and a test holds it to the tables
 
 A typed schema gives `kubectl explain` and validation at apply. The
-CRD is written by hand (`deploy/receivers-crd.yaml`, 53,116 bytes),
-no test compares it with the Go types, and plans 15 to 17 add rows by
-the hundred. So a test walks the spec schema and every driver's
+CRD is written by hand (`deploy/receivers-crd.yaml`, which was 53,116
+bytes when this plan was written), no test compares it with the Go
+types, and plans 15 to 17 add rows by the hundred. So a test walks the spec schema and every driver's
 table. It fails when a spec
 property has no row, a row has no property, or a field description
 does not name the row's tier. `TestTheAPIServerWouldAcceptTheCRD`

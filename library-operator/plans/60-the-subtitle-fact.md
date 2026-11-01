@@ -52,7 +52,8 @@ same way an art fact with no image retries.
 **The name.** `<video base>.<language>.srt`, with `.hi` before the
 extension for a hearing-impaired track and `.forced` for a forced one.
 Jellyfin and Kodi read this form, and the scanner already parses it.
-The fact writes through the write package: it writes a temporary file
+The fact writes through `volumeWriter`
+(`library-operator/volumewrite.go`): it writes a temporary file
 and does one rename. It never writes over a file that exists.
 
 **Two writers.** While a subtitle downloader still runs beside this

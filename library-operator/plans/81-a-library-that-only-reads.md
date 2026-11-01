@@ -19,13 +19,15 @@ also spend the same provider allowances.
 
 A `Library` can drop most writers today: `sources: []` stops every fact
 that asks a provider, and `trickplay`, `appearances`, and `trailers`
-are off by default. Three writers remain, and the spec cannot turn them
+are off by default. These writers remain, and the spec cannot turn them
 off:
 
 * The probe phase writes `.liken/probe.yaml` on every walk.
 * The arrival phase writes `.liken/arrival.yaml` on every walk.
 * The close container of a walk `Job` removes the partial files that a
   stopped writer left behind.
+* The close container also removes the `.liken` directory at the
+  library root (`removeRootLiken` in `library-operator/rootliken.go`).
 
 A franchises `Library` also writes the art that its walk fetches onto
 its art claim.
