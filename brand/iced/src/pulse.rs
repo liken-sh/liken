@@ -33,17 +33,21 @@ pub const RATE_SPAN: f64 = 0.18;
 pub const SWING: f64 = 0.10;
 
 /// One hexagon's motion: two sine rates in cycles a second, and the phase
-/// offset each sine starts at, in radians.
+/// offset both sines start at, in radians.
+///
+/// The two sines share one offset. A separate offset from the ordinal times
+/// [`PHI`] squared would give the same angle, because φ² = φ + 1, so the
+/// ordinal times φ² is the ordinal times φ plus a whole number, and modulo one
+/// the two are equal. The sines move out of step because the second runs
+/// [`PHI`] times as fast as the first.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Pulse {
     /// The rate of the first sine.
     pub first_rate: f64,
     /// The rate of the second sine, the first times [`PHI`].
     pub second_rate: f64,
-    /// The phase offset of the first sine.
-    pub first_offset: f64,
-    /// The phase offset of the second sine.
-    pub second_offset: f64,
+    /// The phase offset of both sines, one full turn times the spread.
+    pub offset: f64,
 }
 
 impl Pulse {
@@ -61,8 +65,7 @@ impl Pulse {
         Self {
             first_rate,
             second_rate: first_rate * PHI,
-            first_offset: std::f64::consts::TAU * spread,
-            second_offset: std::f64::consts::TAU * ((ordinal * PHI * PHI) % 1.0),
+            offset: std::f64::consts::TAU * spread,
         }
     }
 
@@ -79,8 +82,8 @@ impl Pulse {
     pub fn scale_at(&self, energy: f64, phase: f64) -> f64 {
         let tau = std::f64::consts::TAU;
         let swing = 0.5
-            * ((tau * self.first_rate * phase + self.first_offset).sin()
-                + (tau * self.second_rate * phase + self.second_offset).sin());
+            * ((tau * self.first_rate * phase + self.offset).sin()
+                + (tau * self.second_rate * phase + self.offset).sin());
 
         1.0 + SWING * energy * swing
     }

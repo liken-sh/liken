@@ -11,50 +11,23 @@ use liken_iced::pulse::{PHI, Pulse, RATE_MIN, RATE_SPAN, SWING};
 /// an `f32` vertex or a screen can hold.
 const TOLERANCE: f64 = 1e-12;
 
-// The rates and the offsets of the first hexagon, the seventh, and the
+// The rates and the offset of the first hexagon, the seventh, and the
 // last, in cycles a second and in radians. Nothing in the motion is
 // random, so each value is arithmetic, and the properties below hold for
 // the eleven hexagons this table leaves out.
-const NUMBERS: [(usize, f64, f64, f64, f64); 3] = [
-    (
-        0,
-        0.331246117975,
-        0.535967477525,
-        3.883222077451,
-        3.883222077451,
-    ),
-    (
-        6,
-        0.278722825825,
-        0.450983005625,
-        2.049813313438,
-        2.049813313438,
-    ),
-    (
-        13,
-        0.337445651650,
-        0.545998533725,
-        4.099626626876,
-        4.099626626876,
-    ),
+const NUMBERS: [(usize, f64, f64, f64); 3] = [
+    (0, 0.331246117975, 0.535967477525, 3.883222077451),
+    (6, 0.278722825825, 0.450983005625, 2.049813313438),
+    (13, 0.337445651650, 0.545998533725, 4.099626626876),
 ];
 
 #[test]
-fn every_hexagon_runs_the_rates_and_offsets_the_mpv_screen_runs() {
-    for (index, first_rate, second_rate, first_offset, second_offset) in NUMBERS {
+fn a_hexagon_runs_the_rates_and_the_offset_its_ordinal_gives() {
+    for (index, first_rate, second_rate, offset) in NUMBERS {
         let pulse = Pulse::for_index(index);
-        let measured = [
-            pulse.first_rate,
-            pulse.second_rate,
-            pulse.first_offset,
-            pulse.second_offset,
-        ];
+        let measured = [pulse.first_rate, pulse.second_rate, pulse.offset];
 
-        for (measured, expected) in
-            measured
-                .into_iter()
-                .zip([first_rate, second_rate, first_offset, second_offset])
-        {
+        for (measured, expected) in measured.into_iter().zip([first_rate, second_rate, offset]) {
             assert!(
                 (measured - expected).abs() < TOLERANCE,
                 "hexagon {index} runs at {measured}, and the numbers state {expected}"
@@ -92,33 +65,34 @@ fn the_second_rate_is_the_first_times_the_golden_ratio() {
 }
 
 // The scale of hexagons 0, 6, and 13 at four moments, as phase, energy,
-// and the three scales. Each value is the two-sine arithmetic worked by
-// hand, and it holds `Pulse::scale_at` to twelve decimal places.
+// and the three scales. Each value is the two-sine arithmetic worked out
+// at sixty digits from the exact golden ratio and rounded to an `f64`, and
+// it holds `Pulse::scale_at` to twelve decimal places.
 const MOMENTS: [(f64, f64, [f64; 3]); 4] = [
     (
         0.0,
         0.5,
-        [0.9662254852869238, 1.0443724214622627, 0.9590968784890017],
+        [0.9662254852869239, 1.0443724214622627, 0.9590968784890017],
     ),
     (
         1.0,
         1.0,
-        [1.0255111082334663, 0.9200939279919017, 1.0442383946885917],
+        [1.0255111082334663, 0.9200939279919017, 1.0442383946885916],
     ),
     (
         3.5,
         0.5,
-        [0.9763242340846764, 1.0095953060086878, 0.9686574911213128],
+        [0.9763242340846764, 1.0095953060086877, 0.9686574911213127],
     ),
     (
         12.25,
         1.0,
-        [1.001052100036052, 0.9097809414837628, 0.9933411169596844],
+        [1.001052100036052, 0.9097809414837629, 0.9933411169596843],
     ),
 ];
 
 #[test]
-fn a_moment_renders_the_scales_the_mpv_screen_renders() {
+fn a_moment_renders_the_mean_of_the_two_sines() {
     for (phase, energy, expected) in MOMENTS {
         for (index, expected) in [0, 6, 13].into_iter().zip(expected) {
             let scale = Pulse::for_index(index).scale_at(energy, phase);
