@@ -42,10 +42,11 @@ spec:
         runAsNonRoot: true
       containers:
         - name: bus
-          # eclipse-mosquitto 2.0.22, the current 2.0 release. Pinned to
-          # a version rather than latest so a broker restart runs the
-          # same broker the manifest was read with.
-          image: eclipse-mosquitto:2.0.22
+          # The `eclipse-mosquitto` entry of toolchains/images.toml.
+          # Mosquitto 2.1 publishes only the Alpine variant, so the tag
+          # names it. Pinned to a version rather than latest so a broker
+          # restart runs the same broker the manifest was read with.
+          image: eclipse-mosquitto:2.1.2-alpine
           # Run the broker directly, not through the image's entrypoint,
           # which chowns and drops privileges the locked-down pod cannot.
           command: ["/usr/sbin/mosquitto", "-c", "/mosquitto/config/mosquitto.conf"]
@@ -53,9 +54,9 @@ spec:
             - name: mqtt
               containerPort: 1883
           # The ConfigMap below, mounted where the image reads its
-          # configuration. The image's own default config forbids an
-          # anonymous client and listens on no network port, so the
-          # mount is what makes the broker reachable at all.
+          # configuration, so it replaces the image's default config. The
+          # default config also opens Mosquitto's HTTP API on port 9883,
+          # and the ConfigMap opens only the MQTT port.
           volumeMounts:
             - name: config
               mountPath: /mosquitto/config/mosquitto.conf
@@ -88,8 +89,9 @@ kind: ConfigMap
 metadata:
   name: bus
 data:
-  # listener 1883 opens the MQTT port. The image's default config binds
-  # no listener, so without this line the broker accepts no client.
+  # listener 1883 opens the MQTT port on every interface. A config with
+  # no listener line makes Mosquitto listen on localhost only, and then
+  # no other pod reaches the broker.
   #
   # allow_anonymous true accepts a client that presents no credentials.
   # The in-cluster network is the trust boundary, and the broker accepts
