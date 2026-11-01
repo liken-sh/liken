@@ -1,3 +1,0 @@
-# Vendored artifacts; `make` re-fetches and re-verifies them.
-cache/
-dist/

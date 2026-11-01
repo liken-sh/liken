@@ -86,9 +86,9 @@
 #                                 above: k3s bundles a busybox mount
 #                                 that never runs a helper
 #   /sbin/mke2fs                  makes ext4 filesystems on the disks
-#                                 init claims. Static, built from
-#                                 the e2fsprogs release against musl
-#                                 (see e2fsprogs/fetch.sh). It
+#                                 init claims. Static, built by
+#                                 buildroot against musl (see
+#                                 userland/build.sh). It
 #                                 carries its own built-in default
 #                                 profile, so the system ships no
 #                                 mke2fs.conf
@@ -103,14 +103,14 @@
 #                                 the contract
 #   /sbin/mount.nfs (and its      the NFSv4 client, the whole host
 #     mount.nfs4 alias)           half of the nfs feature. Static,
-#                                 built by nfs-utils/fetch.sh. It is
+#                                 built by userland/build.sh. It is
 #                                 the nfs filesystem's mount helper:
 #                                 the program mount(8) runs to
 #                                 negotiate a protocol version with
 #                                 the server before the kernel mounts
 #                                 the export
 #   /sbin/wpa_supplicant          the wireless supplicant, static,
-#                                 built by wpa-supplicant/fetch.sh.
+#                                 built by userland/build.sh.
 #                                 Init runs it as a child process
 #                                 when spec.network names a wireless
 #                                 interface
@@ -204,6 +204,7 @@ cluster_operator_dist="${CLUSTER_OPERATOR_DIST:-$here/../cluster-operator/dist}"
 logs_dist="${LOGS_DIST:-$here/../logs/dist}"
 openiscsi_version="$(cat "$here/../open-iscsi/VERSION")"
 openiscsi_dist="${OPENISCSI_DIST:-$here/../open-iscsi/dist/$openiscsi_version}"
+userland_dist="${USERLAND_DIST:-$here/../userland/dist}"
 
 root="$dist/root"
 rm -rf "$dist"
@@ -241,8 +242,7 @@ for tool in iptables iptables-save iptables-restore \
 done
 
 # mke2fs creates the ext4 filesystems on the disks init claims.
-e2fsprogs_version="$(cat "$here/../e2fsprogs/VERSION")"
-cp "$here/../e2fsprogs/dist/$e2fsprogs_version/mke2fs" "$root/sbin/mke2fs"
+cp "$userland_dist/sbin/mke2fs" "$root/sbin/mke2fs"
 
 # This is the iSCSI initiator userspace, the host half of the iscsi
 # feature (open-iscsi/fetch.sh explains the static build). Every
@@ -271,7 +271,7 @@ cp "$here/../open-iscsi/iscsid.conf" "$root/etc/iscsi/iscsid.conf"
 cp "$mount_dist/mount" "$root/sbin/mount"
 
 # This is the NFS client, the host half of the nfs feature
-# (nfs-utils/fetch.sh explains the static build). Every image ships
+# (userland/build.sh explains the static build). Every image ships
 # it, whether or not the deployment declares the feature. Inert
 # bytes cost little, and shipping them unconditionally keeps
 # enabling a feature a runtime act, not an image rebuild.
@@ -282,20 +282,17 @@ cp "$mount_dist/mount" "$root/sbin/mount"
 # binary answers under both of its names, because a helper reads its
 # own name to get the filesystem type: mount -t nfs and mount -t nfs4
 # both reach it.
-nfsutils_version="$(cat "$here/../nfs-utils/VERSION")"
-cp "$here/../nfs-utils/dist/$nfsutils_version/mount.nfs" "$root/sbin/mount.nfs"
+cp "$userland_dist/sbin/mount.nfs" "$root/sbin/mount.nfs"
 ln -s mount.nfs "$root/sbin/mount.nfs4"
 
 # The wireless supplicant, the one program that runs the WPA
-# handshake for a wireless spec.network entry (wpa-supplicant/fetch.sh
+# handshake for a wireless spec.network entry (userland/build.sh
 # explains the static build). Every image carries it and it stays
 # inert: init starts it only when the manifest names a wireless
 # interface, so a machine with no radio never runs the process. It
 # lands in /sbin with the rest of the vendored userspace, and init
 # names it by absolute path.
-wpasupplicant_version="$(cat "$here/../wpa-supplicant/VERSION")"
-cp "$here/../wpa-supplicant/dist/$wpasupplicant_version/wpa_supplicant" \
-   "$root/sbin/wpa_supplicant"
+cp "$userland_dist/sbin/wpa_supplicant" "$root/sbin/wpa_supplicant"
 
 # /etc/mtab is the file where mount tools once recorded mounts, from
 # before the kernel exposed them itself. On every mainstream
@@ -422,7 +419,7 @@ mkdir -p "$root/usr/share/hwdata"
 cp "$here/../hwdata/dist/$hwdata_version/pci.ids" \
    "$root/usr/share/hwdata/pci.ids"
 
-# This is the timezone database (see tzdata/fetch.sh). A CronJob names
+# This is the timezone database (see userland/build.sh). A CronJob names
 # its zone in spec.timeZone, and both halves of that feature resolve
 # the name through Go's time.LoadLocation inside the k3s process: the
 # apiserver, which validates the CronJob at admission, and the
@@ -434,22 +431,24 @@ cp "$here/../hwdata/dist/$hwdata_version/pci.ids" \
 # This dependency is not soft. Without the tree, the apiserver
 # rejects every zoned CronJob at admission, so the object never
 # reaches etcd and GitOps cannot apply one at all.
-tzdata_version="$(cat "$here/../tzdata/VERSION")"
-cp -a "$here/../tzdata/dist/$tzdata_version/zoneinfo" \
-   "$root/usr/share/zoneinfo"
+cp -a "$userland_dist/zoneinfo" "$root/usr/share/zoneinfo"
 
 # This is the components record: the upstream version of every
 # outside component this image carries. The build reads these
-# versions from the same VERSION pins that the release document
-# publishes (releases/Makefile), so the two can never disagree. The
+# versions from the same pins that the release document publishes
+# (releases/Makefile), so the two can never disagree. The programs
+# that buildroot builds have no VERSION file, because the buildroot
+# pin and userland/versions.mk decide their versions, so
+# userland/build.sh writes the version of each one into the versions
+# file beside them, and both readers take it from there. The
 # file ships in the image so that a running machine reports its own
 # composition in Machine status (init/versions.go) with no request to
 # the channel. It sits under /usr/share, deliberately outside
 # /etc/liken, because it states a fact about the image, not about any
 # deployment of the image.
 #
-# wireless-regdb is the one row whose version does not come from a
-# VERSION file. linux-firmware/fetch.sh owns the nested pin, and
+# wireless-regdb's version does not come from a VERSION file either.
+# linux-firmware/fetch.sh owns the nested pin, and
 # linux-firmware/derive.sh reads it out of that script the same way.
 # Reading it here too is what keeps this record and the shipped blob
 # naming one version.
@@ -460,6 +459,13 @@ mkdir -p "$root/usr/share/liken"
     for component in kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware wireless-regdb microcode; do
         case "$component" in
             wireless-regdb) version="$regdb_version" ;;
+            e2fsprogs | nfs-utils | wpa-supplicant | tzdata)
+                version="$(awk -v c="$component" '$1 == c { print $2 }' "$userland_dist/versions")"
+                [[ -n "$version" ]] || {
+                    echo "build.sh: $userland_dist/versions names no $component" >&2
+                    exit 1
+                }
+                ;;
             # The trust store is its own component at the top of the
             # repository, and $trust_version above holds its pin.
             trust) version="$trust_version" ;;
@@ -560,7 +566,7 @@ mksquashfs "$root" "$dist/liken.sqfs" \
 boot_root="$dist/boot-root"
 mkdir -p "$boot_root/lib/modules/$release" "$boot_root/sbin"
 cp "$init_dist/liken" "$boot_root/liken"
-cp "$here/../e2fsprogs/dist/$e2fsprogs_version/mke2fs" "$boot_root/sbin/mke2fs"
+cp "$userland_dist/sbin/mke2fs" "$boot_root/sbin/mke2fs"
 
 # The boot archive is the one place that still prunes. It stages only
 # the few modules on boot-modules.conf, with their dependencies,

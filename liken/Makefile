@@ -32,34 +32,35 @@ XTABLES_VERSION := $(strip $(file <xtables/VERSION))
 XTABLES_DIST := xtables/dist/$(XTABLES_VERSION)
 TRUST_VERSION := $(strip $(file <../trust/VERSION))
 TRUST_DIST := ../trust/dist/$(TRUST_VERSION)
-E2FSPROGS_VERSION := $(strip $(file <e2fsprogs/VERSION))
-E2FSPROGS_DIST := e2fsprogs/dist/$(E2FSPROGS_VERSION)
 OPENISCSI_VERSION := $(strip $(file <open-iscsi/VERSION))
 OPENISCSI_DIST := open-iscsi/dist/$(OPENISCSI_VERSION)
-NFSUTILS_VERSION := $(strip $(file <nfs-utils/VERSION))
-NFSUTILS_DIST := nfs-utils/dist/$(NFSUTILS_VERSION)
-WPASUPPLICANT_VERSION := $(strip $(file <wpa-supplicant/VERSION))
-WPASUPPLICANT_DIST := wpa-supplicant/dist/$(WPASUPPLICANT_VERSION)
 SYSTEMDBOOT_VERSION := $(strip $(file <systemd-boot/VERSION))
 SYSTEMDBOOT_DIST := systemd-boot/dist/$(SYSTEMDBOOT_VERSION)
 GRUB_VERSION := $(strip $(file <grub/VERSION))
 GRUB_DIST := grub/dist/$(GRUB_VERSION)
 HWDATA_VERSION := $(strip $(file <hwdata/VERSION))
 HWDATA_DIST := hwdata/dist/$(HWDATA_VERSION)
-TZDATA_VERSION := $(strip $(file <tzdata/VERSION))
-TZDATA_DIST := tzdata/dist/$(TZDATA_VERSION)
 LINUXFIRMWARE_VERSION := $(strip $(file <linux-firmware/VERSION))
 LINUXFIRMWARE_DIST := linux-firmware/dist/$(LINUXFIRMWARE_VERSION)
 MICROCODE_VERSION := $(strip $(file <microcode/VERSION))
 MICROCODE_DIST := microcode/dist/$(MICROCODE_VERSION)
 
-# The builds that compile static binaries run in the alpine image that
-# toolchains/images.toml names. The table holds every outside image,
-# so a change to any entry rebuilds these domains, which is slower
-# than needed but never stale.
-ALPINE_PIN := ../toolchains/images.toml
+# The builds of static binaries run in the images that
+# toolchains/images.toml names: the userland in the buildroot image,
+# and the iSCSI initiator in the alpine image. The table holds every
+# outside image, so a change to any entry rebuilds both domains, which
+# is slower than needed but never stale.
+IMAGE_PINS := ../toolchains/images.toml
 
-all: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity image
+# The static programs that buildroot builds land in one directory,
+# because one buildroot build writes all of them. userland/Makefile
+# names the files and their prerequisites.
+USERLAND_DIST := userland/dist
+USERLAND_OUTPUTS := $(USERLAND_DIST)/sbin/mke2fs $(USERLAND_DIST)/sbin/mount.nfs \
+	$(USERLAND_DIST)/sbin/wpa_supplicant $(USERLAND_DIST)/zoneinfo/UTC \
+	$(USERLAND_DIST)/versions $(USERLAND_DIST)/sbom.cdx.json
+
+all: kernel k3s xtables trust userland open-iscsi systemd-boot grub hwdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity image
 
 # The version is part of the artifact's name. So a pin bump changes
 # the target path itself, and Make rebuilds the artifact with no
@@ -99,14 +100,6 @@ $(HWDATA_DIST)/pci.ids: hwdata/VERSION hwdata/fetch.sh
 
 hwdata: $(HWDATA_DIST)/pci.ids
 
-# The timezone database, compiled from IANA's rules so that a CronJob
-# can name the zone its schedule means. See tzdata/fetch.sh.
-$(TZDATA_DIST)/zoneinfo/UTC: tzdata/VERSION tzdata/DIGESTS tzdata/tz.asc \
-		tzdata/fetch.sh $(ALPINE_PIN)
-	$(MAKE) -C tzdata
-
-tzdata: $(TZDATA_DIST)/zoneinfo/UTC
-
 # The driver firmware blobs, derived from the kernel's own module
 # tree rather than curated. The vmlinuz prerequisite is load-bearing
 # twice: the derivation reads the kernel's modules, and a kernel bump
@@ -127,18 +120,23 @@ $(MICROCODE_DIST)/microcode.cpio: microcode/VERSION microcode/fetch.sh \
 
 microcode: $(MICROCODE_DIST)/microcode.cpio
 
-# mke2fs is the program that init runs to make a filesystem on a
-# claimed disk. It is a static binary, built from pinned source inside
-# a container, like the iSCSI initiator below. See e2fsprogs/fetch.sh.
-$(E2FSPROGS_DIST)/mke2fs: e2fsprogs/VERSION e2fsprogs/fetch.sh $(ALPINE_PIN)
-	$(MAKE) -C e2fsprogs
+# The static programs: mke2fs, which init runs to make a filesystem
+# on a claimed disk; mount.nfs, the host half of the nfs feature;
+# wpa_supplicant, which init runs for a wireless spec.network entry;
+# and the time zone database, which a CronJob's spec.timeZone names a
+# zone of. buildroot builds them from pinned source in a pinned
+# container. See userland/build.sh.
+$(USERLAND_OUTPUTS) &: $(addprefix userland/,VERSION fetch.sh build.sh defconfig \
+		external.desc Config.in external.mk versions.mk wpa_supplicant.config) \
+		$(shell find userland/patches -type f) $(IMAGE_PINS)
+	$(MAKE) -C userland
 
-e2fsprogs: $(E2FSPROGS_DIST)/mke2fs
+userland: $(USERLAND_OUTPUTS)
 
 # The iSCSI initiator userspace is the host half of the iscsi
 # feature: static iscsid and iscsiadm, built from pinned source
 # inside a pinned container. This build needs docker or podman on the
-# build host, like nfs-utils below. See open-iscsi/fetch.sh. The
+# build host, like the userland above. See open-iscsi/fetch.sh. The
 # build also produces the OCI image that runs iscsid as the feature's
 # DaemonSet.
 #
@@ -146,7 +144,7 @@ e2fsprogs: $(E2FSPROGS_DIST)/mke2fs
 # the pin. The image tar also includes the liken version, so only the
 # tar goes stale when the version changes.
 $(OPENISCSI_DIST)/iscsid $(OPENISCSI_DIST)/iscsiadm &: \
-		open-iscsi/VERSION open-iscsi/fetch.sh $(ALPINE_PIN)
+		open-iscsi/VERSION open-iscsi/fetch.sh $(IMAGE_PINS)
 	$(MAKE) -C open-iscsi
 
 $(OPENISCSI_DIST)/iscsid-image.tar: $(OPENISCSI_DIST)/iscsid \
@@ -154,26 +152,6 @@ $(OPENISCSI_DIST)/iscsid-image.tar: $(OPENISCSI_DIST)/iscsid \
 	$(MAKE) -C open-iscsi
 
 open-iscsi: $(OPENISCSI_DIST)/iscsid-image.tar
-
-# The NFS client is the host half of the nfs feature: one static
-# mount.nfs, built from pinned source inside a pinned container. See
-# nfs-utils/fetch.sh. This build has no daemon and no OCI image, on
-# purpose, because NFSv4 needs neither.
-$(NFSUTILS_DIST)/mount.nfs: nfs-utils/VERSION nfs-utils/fetch.sh $(ALPINE_PIN)
-	$(MAKE) -C nfs-utils
-
-nfs-utils: $(NFSUTILS_DIST)/mount.nfs
-
-# The wireless supplicant: one static binary, built from pinned
-# source inside a pinned container, the same shape as nfs-utils
-# above (wpa-supplicant/fetch.sh). The build configuration is a
-# prerequisite because the feature list decides what the binary
-# contains.
-$(WPASUPPLICANT_DIST)/wpa_supplicant: wpa-supplicant/VERSION \
-		wpa-supplicant/build.config wpa-supplicant/fetch.sh $(ALPINE_PIN)
-	$(MAKE) -C wpa-supplicant
-
-wpa-supplicant: $(WPASUPPLICANT_DIST)/wpa_supplicant
 
 # systemd-boot is the boot menu on install media. Its fetch.sh
 # explains why the stick needs a boot program when installed machines
@@ -348,13 +326,12 @@ $(SYSTEM_IMAGE) $(BOOT_ARCHIVE) &: init/dist/liken mount/dist/mount \
 		$(KERNEL_DIST)/vmlinuz $(K3S_DIST)/k3s \
 		$(XTABLES_DIST)/bin/xtables-legacy-multi \
 		$(TRUST_DIST)/cacert.pem \
-		$(E2FSPROGS_DIST)/mke2fs \
+		$(USERLAND_OUTPUTS) \
 		$(OPENISCSI_DIST)/iscsid $(OPENISCSI_DIST)/iscsiadm \
 		$(OPENISCSI_DIST)/iscsid-image.tar \
 		$(wildcard open-iscsi/manifests/*.yaml) \
 		open-iscsi/modules.conf open-iscsi/iscsid.conf \
-		$(NFSUTILS_DIST)/mount.nfs nfs-utils/modules.conf \
-		$(WPASUPPLICANT_DIST)/wpa_supplicant \
+		nfs-utils/modules.conf \
 		$(wildcard flux/manifests/*.yaml) \
 		machine-operator/dist/liken-machine-operator-image.tar \
 		$(wildcard machine-operator/manifests/*.yaml) \
@@ -367,7 +344,6 @@ $(SYSTEM_IMAGE) $(BOOT_ARCHIVE) &: init/dist/liken mount/dist/mount \
 		$(wildcard logs/manifests/*.yaml) \
 		image/build.sh image/boot-modules.conf \
 		$(HWDATA_DIST)/pci.ids \
-		$(TZDATA_DIST)/zoneinfo/UTC \
 		$(LINUXFIRMWARE_DIST)/derived.txt \
 		$(shell find image/etc -type f) image/Makefile
 	$(MAKE) -C image
@@ -652,7 +628,7 @@ install-gitops: $(GITOPS_IMAGE_DIR)/install.cpio
 # no per-deployment channel. The lab's machines upgrade from this
 # bundle directly, and they carry their own deployment layer between
 # slots.
-release: kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils wpa-supplicant hwdata tzdata linux-firmware microcode
+release: kernel k3s xtables trust userland open-iscsi hwdata linux-firmware microcode
 	$(MAKE) -C releases release
 
 # This target serves the release channel to the lab over HTTP. The
@@ -799,10 +775,8 @@ clean:
 	$(MAKE) -C k3s clean
 	$(MAKE) -C xtables clean
 	$(MAKE) -C ../trust clean
-	$(MAKE) -C e2fsprogs clean
+	$(MAKE) -C userland clean
 	$(MAKE) -C open-iscsi clean
-	$(MAKE) -C nfs-utils clean
-	$(MAKE) -C wpa-supplicant clean
 	$(MAKE) -C systemd-boot clean
 	$(MAKE) -C grub clean
 	$(MAKE) -C licensing clean
@@ -818,4 +792,4 @@ clean:
 	rm -rf $(HW_IMAGE_DIR)
 	rm -rf $(EMMC_IMAGE_DIR)
 
-.PHONY: versions all kernel k3s xtables trust e2fsprogs open-iscsi nfs-utils wpa-supplicant systemd-boot grub hwdata tzdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware smoke-emmc install install-stick install-gitops storage registry registry-stop release serve docs test test-go coverage-profile coverage-report test-docs clean
+.PHONY: versions all kernel k3s xtables trust userland open-iscsi systemd-boot grub hwdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware smoke-emmc install install-stick install-gitops storage registry registry-stop release serve docs test test-go coverage-profile coverage-report test-docs clean

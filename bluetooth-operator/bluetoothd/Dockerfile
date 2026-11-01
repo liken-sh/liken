@@ -56,6 +56,7 @@ ARG DBUS_SHA256=0ba2a1a4b16afe7bceb2c07e9ce99a8c2c3508e5dec290dbb643384bd6beb7e2
 
 # patch is GNU patch. BusyBox's patch, which Alpine ships by default,
 # has no --forward, and the patches below depend on it.
+# fetch-check: allow, because buildroot's BlueZ recipe refuses a static-only build (AGENTS.md, Static programs)
 RUN apk add --no-cache \
         build-base pkgconf meson ninja wget tar xz linux-headers patch \
         expat-dev expat-static \

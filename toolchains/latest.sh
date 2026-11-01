@@ -203,6 +203,16 @@ latest_image() {
         latest_tag="$(tags "$repo" | newest_matching '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]+$')" || latest_tag=""
         note="the newest release of liken-sh/corrosion"
         ;;
+    buildroot)
+        # buildroot's CI names the image that it tests buildroot with,
+        # and the registry can hold a newer tag that no buildroot commit
+        # names yet. So the image follows the tag that buildroot's CI
+        # names at the commit that liken/userland pins, and it moves
+        # after that pin moves.
+        latest_tag="$(fetch_text "https://raw.githubusercontent.com/buildroot/buildroot/$(cat "$root/liken/userland/VERSION")/.gitlab-ci.yml" |
+            sed -n 's|^image: .*/buildroot/base:\(.*\)$|\1|p')" || latest_tag=""
+        note="the image that buildroot's CI names at the commit in liken/userland/VERSION"
+        ;;
     debian)
         channel=sid newest_channel=sid latest_tag="$tag"
         note="vulkan/latest.sh moves it with the snapshot date"

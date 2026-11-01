@@ -31,10 +31,9 @@ pinned as `signer` in `kernel-org-digest.sh` too.
 against this key, and prints the digest it lists for one file. These
 bumps call it:
 
-- `liken/e2fsprogs/latest.sh`, for the e2fsprogs tarball
 - `liken/linux-firmware/latest.sh`, for the linux-firmware and
   wireless-regdb tarballs
-- `liken/nfs-utils/latest.sh`, for the nfs-utils tarball
+- `liken/userland/latest.sh`, for the e2fsprogs and nfs-utils tarballs
 - `liken/open-iscsi/latest.sh`, for the kmod tarball
 - `bluetooth-operator/bluetoothd/latest.sh`, for the BlueZ tarball
 

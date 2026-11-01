@@ -90,14 +90,11 @@ done
 kernel_version="$(cat "$here/../kernel/VERSION")"
 xtables_version="$(cat "$here/../xtables/VERSION")"
 trust_version="$(cat "$here/../../trust/VERSION")"
-e2fsprogs_version="$(cat "$here/../e2fsprogs/VERSION")"
+userland_commit="$(cat "$here/../userland/VERSION")"
 openiscsi_version="$(cat "$here/../open-iscsi/VERSION")"
-nfsutils_version="$(cat "$here/../nfs-utils/VERSION")"
-wpasupplicant_version="$(cat "$here/../wpa-supplicant/VERSION")"
 systemdboot_version="$(cat "$here/../systemd-boot/VERSION")"
 grub_version="$(cat "$here/../grub/VERSION")"
 hwdata_version="$(cat "$here/../hwdata/VERSION")"
-tzdata_version="$(cat "$here/../tzdata/VERSION")"
 linuxfirmware_version="$(cat "$here/../linux-firmware/VERSION")"
 # The regulatory database is a nested pin inside the linux-firmware
 # domain, so its version comes out of that domain's fetch script
@@ -257,47 +254,77 @@ mirror "xtables/$xtables_version" "buildroot-2025.02.14.tar.gz" \
     "8133a06142f6eb0177726b54a948b46289ebe48f9cbcaac5403cffd1a3cc9f36" \
     "https://github.com/buildroot/buildroot/archive/refs/tags/2025.02.14.tar.gz"
 
-# mke2fs, the iSCSI client, and the NFS client are built from source
-# by their own domains, so their tarballs are already fetched and
-# verified against those domains' pins. The --sources-only flag
-# downloads the sources without running the container builds.
-prefetch "$here/../e2fsprogs/fetch.sh" --sources-only
-place "e2fsprogs/$e2fsprogs_version" "e2fsprogs-$e2fsprogs_version.tar.gz" \
-    "$here/../e2fsprogs/cache/$e2fsprogs_version/e2fsprogs-$e2fsprogs_version.tar.gz"
+# The static programs of the userland domain: mke2fs, mount.nfs,
+# wpa_supplicant, and the time zone database. buildroot builds them,
+# and `make legal-info` copies the source of every package that the
+# build put into them, the libraries and musl included, with the
+# patches that buildroot applied, into
+# userland/dist/legal-info/sources/. Each package's directory there is
+# <package>-<version>, and manifest.csv beside it names the package
+# and the version, so each one lands at sources/<package>/<version>/.
+# Every file in that tree matched a buildroot .hash file when
+# buildroot downloaded it, so it carries no digest here. The scripts
+# that control the build are buildroot itself, at the commit in
+# userland/VERSION, which lands at sources/buildroot/<commit>/, and the
+# BR2_EXTERNAL tree in liken/userland/ at the release's tag. The
+# wireless supplicant and the time zone database ask for no source,
+# and the channel offers it anyway: for everything a release carries,
+# the channel can give you the source.
+prefetch "$here/../userland/fetch.sh" --sources-only
+place "buildroot/$userland_commit" "buildroot-$userland_commit.tar.gz" \
+    "$here/../userland/cache/buildroot/buildroot-$userland_commit.tar.gz"
+legal="$here/../userland/dist/legal-info"
+if ! ((repin)); then
+    [[ -f "$legal/manifest.csv" ]] || {
+        echo "sources.sh: $legal/manifest.csv is missing; build the userland domain first" >&2
+        exit 1
+    }
+    # manifest.csv quotes every field, and its first two are the
+    # package and the version.
+    while IFS=, read -r package version _; do
+        package="${package//\"/}"
+        version="${version//\"/}"
+        # A release document names the supplicant wpa-supplicant, and
+        # buildroot names its package wpa_supplicant. The mirror takes
+        # the release document's name, because a reader finds a
+        # component's source by the name and version that it lists.
+        component="$package"
+        [[ "$package" != wpa_supplicant ]] || component=wpa-supplicant
+        for file in "$legal/sources/$package-$version"/*; do
+            place "$component/$version" "$(basename "$file")" "$file"
+        done
+    done < <(tail -n +2 "$legal/manifest.csv")
+    # zic ran on the build machine and compiled the zone files, so
+    # legal-info lists its tzcode tarball among the host sources, and
+    # userland/build.sh keeps that one.
+    for file in "$legal/host-sources"/zic-*/*; do
+        version="$(basename "$(dirname "$file")")"
+        place "zic/${version#zic-}" "$(basename "$file")" "$file"
+    done
+fi
+
+# The iSCSI client is built from source by its own domain, so its
+# tarballs are already fetched and verified against that domain's
+# pins. The --sources-only flag downloads the sources without running
+# the container build.
 prefetch "$here/../open-iscsi/fetch.sh" --sources-only
 for tarball in "$here/../open-iscsi/cache/$openiscsi_version"/*.tar.*; do
     place "open-iscsi/$openiscsi_version" "$(basename "$tarball")" "$tarball"
 done
-prefetch "$here/../nfs-utils/fetch.sh" --sources-only
-for tarball in "$here/../nfs-utils/cache/$nfsutils_version"/*.tar.*; do
-    place "nfs-utils/$nfsutils_version" "$(basename "$tarball")" "$tarball"
-done
 
-# The wireless supplicant is built from source the same way. Its BSD
-# license asks for notices rather than source, so this mirror is the
-# channel's own rule, not an obligation: the channel offers source for
-# everything a release carries.
-prefetch "$here/../wpa-supplicant/fetch.sh" --sources-only
-for tarball in "$here/../wpa-supplicant/cache/$wpasupplicant_version"/*.tar.*; do
-    place "wpa-supplicant/$wpasupplicant_version" "$(basename "$tarball")" "$tarball"
-done
-
-# These are the static libraries that those builds link in the
-# alpine image: musl (every binary's libc) and util-linux (libblkid
-# and libmount, in the iSCSI and NFS clients). The image does not
-# carry them. Each build runs apk add, which installs the compiler and
-# these libraries from Alpine's package repository for the image's
-# branch as it is on the day of the build, so the image digest in
-# toolchains/images.toml does not fix their versions or their bytes.
-# Alpine patches its packages lightly, and these upstream tarballs are
-# the versions that the branch's index lists. licensing/latest.sh
-# reports each one against that index, and a row that says "behind"
-# means a build now links a newer library than this mirror carries.
-# libnl is the third library: LGPL-2.1, linked into the wireless
-# supplicant, and the only way a program speaks nl80211. OpenSSL is
-# the fourth: Apache-2.0, linked into iscsid, iscsiadm, and the
-# wireless supplicant. iscsid and iscsiadm are GPL-2.0-or-later, and
-# the GPL's corresponding source of a binary covers every library
+# These are the static libraries that the iSCSI build links in the
+# alpine image: musl (the binaries' libc) and util-linux (libblkid and
+# libmount). The image does not carry them. The build runs apk add,
+# which installs the compiler and these libraries from Alpine's
+# package repository for the image's branch as it is on the day of the
+# build, so the image digest in toolchains/images.toml does not fix
+# their versions or their bytes. Alpine patches its packages lightly,
+# and these upstream tarballs are the versions that the branch's index
+# lists. licensing/latest.sh reports each one against that index, and
+# a row that says "behind" means a build now links a newer library
+# than this mirror carries. OpenSSL is the third: Apache-2.0, linked
+# into iscsid and iscsiadm. iscsid and iscsiadm are GPL-2.0-or-later,
+# and the GPL's corresponding source of a binary covers every library
 # linked into it, so the mirror carries OpenSSL too. The OpenSSL
 # project publishes a .sha256 file and a detached .asc signature beside
 # each release tarball. Take a new OpenSSL digest from that .sha256
@@ -318,9 +345,6 @@ mirror "toolchain/alpine-$alpine_tag" "musl-1.2.6.tar.gz" \
 mirror "toolchain/alpine-$alpine_tag" "util-linux-2.42.4.tar.xz" \
     "fbd62a100ab7bb8746ba0661255c3c48185b1e9021507c624da01fbc696330ec" \
     "https://www.kernel.org/pub/linux/utils/util-linux/v2.42/util-linux-2.42.4.tar.xz"
-mirror "toolchain/alpine-$alpine_tag" "libnl-3.12.0.tar.gz" \
-    "fc51ca7196f1a3f5fdf6ffd3864b50f4f9c02333be28be4eeca057e103c0dd18" \
-    "https://github.com/thom311/libnl/releases/download/libnl3_12_0/libnl-3.12.0.tar.gz"
 mirror "toolchain/alpine-$alpine_tag" "openssl-3.5.9.tar.gz" \
     "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a" \
     "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz"
@@ -364,17 +388,6 @@ place "trust/$trust_version" "cacert-$trust_version.pem" \
 # release carries, the channel can give you the source.
 place "hwdata/$hwdata_version" "pci.ids" \
     "$here/../hwdata/dist/$hwdata_version/pci.ids"
-
-# The timezone database: IANA's code and data tarballs, already
-# fetched and verified by the tzdata domain. The tz project puts its
-# files in the public domain, so no license requires this mirror.
-# liken ships compiled zone files, and these tarballs plus the zic
-# flags in tzdata/fetch.sh are what reproduces them. The detached
-# signatures come along so a downloader can run the same check.
-prefetch "$here/../tzdata/fetch.sh" --sources-only
-for source in "$here/../tzdata/cache/$tzdata_version"/*.tar.gz*; do
-    place "tzdata/$tzdata_version" "$(basename "$source")" "$source"
-done
 
 # The driver firmware: the upstream release tarball, already fetched
 # and verified by the linux-firmware domain. Most blobs are

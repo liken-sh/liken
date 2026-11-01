@@ -25,15 +25,13 @@ CLUSTER_OPERATOR_DIST ?= ../cluster-operator/dist
 LOGS_DIST ?= ../logs/dist
 OPENISCSI_VERSION := $(strip $(file <../open-iscsi/VERSION))
 OPENISCSI_DIST ?= ../open-iscsi/dist/$(OPENISCSI_VERSION)
-NFSUTILS_VERSION := $(strip $(file <../nfs-utils/VERSION))
-WPASUPPLICANT_VERSION := $(strip $(file <../wpa-supplicant/VERSION))
+USERLAND_DIST ?= ../userland/dist
 
 KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 K3S_VERSION := $(strip $(file <../k3s/VERSION))
 XTABLES_VERSION := $(strip $(file <../xtables/VERSION))
 TRUST_VERSION := $(strip $(file <../../trust/VERSION))
 HWDATA_VERSION := $(strip $(file <../hwdata/VERSION))
-TZDATA_VERSION := $(strip $(file <../tzdata/VERSION))
 LINUXFIRMWARE_VERSION := $(strip $(file <../linux-firmware/VERSION))
 
 # The prerequisites here mirror the ones that liken/Makefile's rule
@@ -48,15 +46,15 @@ $(DIST)/liken.sqfs $(DIST)/boot.cpio &: build.sh boot-modules.conf \
 		../xtables/dist/$(XTABLES_VERSION)/bin/xtables-legacy-multi \
 		../../trust/dist/$(TRUST_VERSION)/cacert.pem \
 		../hwdata/dist/$(HWDATA_VERSION)/pci.ids \
-		../tzdata/dist/$(TZDATA_VERSION)/zoneinfo/UTC \
 		../linux-firmware/dist/$(LINUXFIRMWARE_VERSION)/derived.txt \
 		$(OPENISCSI_DIST)/iscsid $(OPENISCSI_DIST)/iscsiadm \
 		$(OPENISCSI_DIST)/iscsid-image.tar \
 		$(wildcard ../open-iscsi/manifests/*.yaml) \
 		../open-iscsi/modules.conf ../open-iscsi/iscsid.conf \
-		../nfs-utils/dist/$(NFSUTILS_VERSION)/mount.nfs \
+		$(USERLAND_DIST)/sbin/mke2fs $(USERLAND_DIST)/sbin/mount.nfs \
+		$(USERLAND_DIST)/sbin/wpa_supplicant $(USERLAND_DIST)/zoneinfo/UTC \
+		$(USERLAND_DIST)/versions \
 		../nfs-utils/modules.conf \
-		../wpa-supplicant/dist/$(WPASUPPLICANT_VERSION)/wpa_supplicant \
 		$(wildcard ../flux/manifests/*.yaml) \
 		$(MACHINE_OPERATOR_DIST)/liken-machine-operator-image.tar \
 		$(wildcard ../machine-operator/manifests/*.yaml) \
@@ -76,6 +74,7 @@ $(DIST)/liken.sqfs $(DIST)/boot.cpio &: build.sh boot-modules.conf \
 		CLUSTER_OPERATOR_DIST=$(abspath $(CLUSTER_OPERATOR_DIST)) \
 		LOGS_DIST=$(abspath $(LOGS_DIST)) \
 		OPENISCSI_DIST=$(abspath $(OPENISCSI_DIST)) \
+		USERLAND_DIST=$(abspath $(USERLAND_DIST)) \
 		./build.sh
 
 .PHONY: all clean

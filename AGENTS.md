@@ -329,6 +329,30 @@ ENTRYPOINT ["/<name>"]
 built, copied, or named in an `ENTRYPOINT` at a path other than
 `/<name>`, and on upx, strip, or objcopy run on a program.
 
+## Static programs
+
+A program that the OS image carries from another project must be one
+static binary, because a `liken` machine has no loader and no shared
+libraries. buildroot builds these programs, from the BR2_EXTERNAL tree
+in `liken/userland/`, because it builds the musl toolchain and every
+library from source tarballs that its `.hash` files pin, and its
+`legal-info` and `utils/generate-cyclonedx` write the source offer and
+the CycloneDX SBOM of each build. An Alpine container with `apk add`
+installs the packages of the day of the build, so no new build takes
+that form.
+
+- A new program is a buildroot package that `liken/userland/defconfig`
+  selects, and `liken/userland/build.sh` copies its file into `dist/`.
+  A change to buildroot's recipe is a hook in `external.mk`.
+- buildroot is pinned to a commit on its `master` branch in
+  `liken/userland/VERSION`, and its builder is the `buildroot` entry of
+  `toolchains/images.toml`. When master packages an older release than
+  upstream, `liken/userland/versions.mk` sets the newer version, and
+  `patches/<package>/<version>/<package>.hash` pins its tarball.
+- `liken/open-iscsi` and the `bluetoothd` image still build on Alpine,
+  because buildroot's recipes for open-iscsi, kmod, and BlueZ refuse a
+  static-only build.
+
 ## Releases and development builds
 
 One CalVer tag releases every component whose outputs changed since its

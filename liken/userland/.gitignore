@@ -1,0 +1,5 @@
+# Downloads, the compiler cache, the buildroot work tree, and the built
+# programs; `make` downloads, verifies, and builds them again.
+cache/
+_build/
+dist/

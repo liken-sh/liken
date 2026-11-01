@@ -4,8 +4,9 @@ liken's own code is MIT-licensed, copyright Chris Guidry. That covers
 the init, the operators, the log relays, the toolkit, and everything
 else in [its repository](https://github.com/liken-sh/liken). A liken
 release is an aggregate. Alongside liken's own programs, it
-redistributes other people's work, unmodified, under their own
-licenses. This document names each of those components, its license,
+redistributes other people's work under their own licenses, and the
+section of each component says whether its build changed the source.
+This document names each of those components, its license,
 and where to get its source. The full text of every license appears
 in the appendix.
 
@@ -54,19 +55,30 @@ the build system that the recipe drives. Buildroot pins every package
 it builds by hash, so the recipe identifies the exact source of
 everything else in k3s-root's userland.
 
+## The static programs that buildroot builds
+
+mke2fs, the NFS client, the wireless supplicant, and the time zone
+database are built by buildroot, at the commit that
+`userland/VERSION` pins, with the configuration in `userland/`.
+buildroot builds each program, its musl C library, and each library
+that it links statically, from upstream source tarballs that its
+`.hash` files pin, and it applies its own patches to some of them.
+Its `legal-info` step records the license and the license files of
+every package in the build, and copies each package's source tarball
+and patches, which the channel mirrors under
+`sources/<package>/<version>/`. buildroot itself is mirrored under
+`sources/buildroot/`. The sections below name the license of each
+program and of the libraries in it.
+
+musl, the C library in each of these programs, uses the MIT license.
+Copyright Rich Felker and contributors.
+
 ## mke2fs (`/sbin/mke2fs`)
 
-License: GPL-2.0 (the program), with LGPL-2.0 (libext2fs), BSD-3
-(libuuid), and MIT-style (libet/libss) libraries built in. Copyright
-Theodore Ts'o and others. The static link also carries musl (MIT,
-copyright Rich Felker and contributors).
-
-This repository's own recipe (`e2fsprogs/fetch.sh`) builds this
-binary from the upstream e2fsprogs release tarball, which it checks
-against the maintainer's sums file on kernel.org. Sources are
-mirrored under `sources/e2fsprogs/`, and musl's under
-`sources/toolchain/`. The recipe builds in the alpine image that
-`toolchains/images.toml` pins by digest.
+License: GPL-2.0 (the program), with LGPL-2.0 (libext2fs) and
+MIT-style (libet/libss) libraries built in. Copyright Theodore Ts'o
+and others. It statically links libblkid and libuuid from util-linux
+(LGPL-2.1 or later and BSD-3-Clause, copyright Karel Zak and others).
 
 ## The iSCSI initiator (`/sbin/iscsid`, `/sbin/iscsiadm`)
 
@@ -90,23 +102,20 @@ upstream tarballs mirrored here.
 License: GPL-2.0. Copyright the Linux NFS maintainers and
 contributors.
 
-This repository's own recipe (nfs-utils/fetch.sh) builds this binary
-from pinned source. It statically links libtirpc (BSD-3, copyright
-Sun Microsystems, Inc.) and the same util-linux and musl libraries as
-the iSCSI initiator. Sources are mirrored under `sources/nfs-utils/`
-and `sources/toolchain/`.
+buildroot builds this binary, as the section on the static programs
+above describes. It statically links libtirpc (BSD-3, copyright Sun
+Microsystems, Inc.) and libblkid and libmount from util-linux
+(LGPL-2.1 or later, copyright Karel Zak and others).
 
 ## The wireless supplicant (`/sbin/wpa_supplicant`)
 
 License: BSD-3-Clause. Copyright 2002-2026 Jouni Malinen and the
 hostap contributors.
 
-This repository's own recipe (`wpa-supplicant/fetch.sh`) builds the
-binary from pinned hostap source. It statically links libnl
-(LGPL-2.1 or later, copyright Thomas Graf and the libnl
-contributors), OpenSSL (Apache-2.0, copyright The OpenSSL Project
-Authors), and the same musl as the two clients above. The sources are
-mirrored under `sources/wpa-supplicant/` and `sources/toolchain/`.
+buildroot builds this binary, as the section on the static programs
+above describes. It statically links libnl (LGPL-2.1 or later,
+copyright Thomas Graf and the libnl contributors) and OpenSSL
+(Apache-2.0, copyright The OpenSSL Project Authors).
 
 The BSD license asks for notices, not source. The mirror exists
 because the channel offers source for everything a release carries.
@@ -152,9 +161,9 @@ License: public domain. The tz project places its code and its data in
 the public domain.
 
 These are the compiled zone files that resolve a CronJob's
-`spec.timeZone`. liken builds them with `zic` from IANA's `tzcode` and
-`tzdata` release tarballs. Those tarballs are mirrored under
-`sources/tzdata/`, with the detached PGP signatures IANA publishes.
+`spec.timeZone`. buildroot compiles them with `zic` from IANA's
+`tzcode` and `tzdata` release tarballs. Those tarballs are mirrored
+under `sources/zic/` and `sources/tzdata/`.
 
 ## Driver firmware (`/lib/firmware`)
 

@@ -3,21 +3,21 @@
 # Report the pins that exist only in the source mirror.
 #
 # Most of what sources.sh mirrors is keyed to a domain's own VERSION
-# file, and that domain's latest.sh watches it. Six pins have no
+# file, and that domain's latest.sh watches it. Five pins have no
 # domain of their own, because liken never fetches them: they are the
 # corresponding source for code that arrives already compiled inside
-# something else. musl and util-linux are linked into the static
-# binaries that the OS builds in the alpine image. libnl is linked
-# into the wireless supplicant. OpenSSL is linked into the iSCSI tools
-# and the wireless supplicant. iptables is what the k3s-root release
-# built, and buildroot is what built it.
+# something else. musl, util-linux, and OpenSSL are linked into the
+# iSCSI tools, which the OS builds in the alpine image. iptables is
+# what the k3s-root release built, and buildroot is what built it.
+# The static programs that liken/userland builds need no pin here,
+# because buildroot's legal-info names their sources.
 #
-# None of these six moves on its own. Each one follows something
+# None of these five moves on its own. Each one follows something
 # else, and this report asks that governing thing what it ships now.
 # So a row that says "behind" here means the pin it follows already
 # moved, and the mirror has not caught up.
 #
-# musl, util-linux, libnl, and OpenSSL are the packages of the Alpine
+# musl, util-linux, and OpenSSL are the packages of the Alpine
 # branch that the `alpine` entry in toolchains/images.toml installs
 # from, so their channel is that branch, such as v3.22. Under the rule in root
 # plan 83, a pin from a package repository follows the newest branch
@@ -35,7 +35,7 @@
 # digest whose bytes changed under an unchanged URL.
 #
 # Usage:
-#   licensing/latest.sh          report the six source-only pins
+#   licensing/latest.sh          report the five source-only pins
 #   licensing/latest.sh --bump   re-pin the digests that moved
 
 set -euo pipefail
@@ -53,7 +53,6 @@ pin_of() {
 
 pinned_musl="$(pin_of musl)"
 pinned_utillinux="$(pin_of util-linux)"
-pinned_libnl="$(pin_of libnl)"
 pinned_openssl="$(pin_of openssl)"
 pinned_iptables="$(pin_of iptables)"
 pinned_buildroot="$(pin_of buildroot)"
@@ -93,12 +92,10 @@ alpine_package() {
 
 latest_musl=""
 latest_utillinux=""
-latest_libnl=""
 latest_openssl=""
 if [[ "$branch" != "?" ]]; then
     latest_musl="$(alpine_package musl)" || latest_musl=""
     latest_utillinux="$(alpine_package util-linux-dev)" || latest_utillinux=""
-    latest_libnl="$(alpine_package libnl3-dev)" || latest_libnl=""
     latest_openssl="$(alpine_package openssl-libs-static)" || latest_openssl=""
 fi
 
@@ -119,7 +116,6 @@ fi
 alpine_note="follows the alpine image in toolchains/images.toml"
 row musl "$pinned_musl" "$latest_musl" "$branch" "$newest_branch" - "$alpine_note"
 row util-linux "$pinned_utillinux" "$latest_utillinux" "$branch" "$newest_branch" - "$alpine_note"
-row libnl "$pinned_libnl" "$latest_libnl" "$branch" "$newest_branch" - "$alpine_note"
 row openssl "$pinned_openssl" "$latest_openssl" "$branch" "$newest_branch" - "$alpine_note"
 row iptables "$pinned_iptables" "$latest_iptables" - - - \
     "follows xtables: what k3s-root $k3s_root builds"

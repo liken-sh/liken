@@ -31,6 +31,11 @@ import (
 //   - a check that a binary is static accepts a static PIE, which gcc
 //     on Alpine builds for -static and file(1) calls "static-pie
 //     linked";
+//   - no script or Dockerfile installs Alpine packages with apk add,
+//     because apk installs whatever the branch holds on the day of the
+//     build, and no digest in the repository names those bytes. A
+//     static program builds with buildroot in liken/userland instead,
+//     as "Static programs" in root AGENTS.md says;
 //   - each fetch.sh and latest.sh sources toolchains/pin.sh and reads
 //     the network only through its functions, never with curl or wget
 //     of its own, so each step of a pin has one implementation. The
@@ -72,6 +77,7 @@ func checkFetches(root string) ([]string, error) {
 		}
 		lines := logicalLines(string(data))
 		findings = append(findings, staticChecks(file, lines)...)
+		findings = append(findings, apkInstalls(file, lines)...)
 		switch {
 		case file == pinLibrary:
 			findings = append(findings, fetchScript(file, lines)...)
@@ -369,6 +375,22 @@ func staticChecks(file string, lines []line) []string {
 	for _, l := range lines {
 		if strings.Contains(l.text, "grep") && strings.Contains(l.text, "statically linked") && !strings.Contains(l.text, "static-pie linked") {
 			findings = append(findings, fmt.Sprintf("%s:%d accepts \"statically linked\" and refuses \"static-pie linked\"", file, l.n))
+		}
+	}
+	return findings
+}
+
+// apkAdd matches a command that installs Alpine packages: apk add at the
+// start of a command, after a separator, or after a Dockerfile's RUN.
+var apkAdd = regexp.MustCompile(`(^|[;&|(]\s*|\bRUN\s+)apk\s+add\b`)
+
+// apkInstalls lists each line of a script or a Dockerfile that installs
+// Alpine packages with apk add.
+func apkInstalls(file string, lines []line) []string {
+	var findings []string
+	for _, l := range lines {
+		if !l.allowed && apkAdd.MatchString(strings.TrimSpace(l.text)) {
+			findings = append(findings, fmt.Sprintf("%s:%d installs Alpine packages with apk add, which no digest pins; build the program with buildroot in liken/userland", file, l.n))
 		}
 	}
 	return findings

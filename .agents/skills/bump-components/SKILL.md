@@ -79,20 +79,31 @@ in one background task. These rules matter:
    connections, and each bump's tail runs `licensing/sources.sh
    --repin`, which retries launchpad every time.
 2. A sub-pin needs a named bump, for example
-   `nfs-utils/latest.sh --bump libtirpc` or
+   `open-iscsi/latest.sh --bump kmod` or
    `linux-firmware/latest.sh --bump wireless-regdb`. The alpine
-   builder of the static builds is the `alpine` entry in
+   builder of `open-iscsi` and `bluetoothd` is the `alpine` entry in
    `toolchains/images.toml`, and `../toolchains/latest.sh --bump
-   alpine` moves it for `open-iscsi`, `nfs-utils`, `tzdata`,
-   `wpa-supplicant`, `e2fsprogs`, and `bluetoothd` at once.
-   `licensing/latest.sh` reads `musl`, `util-linux`, `libnl`, and
-   `openssl` from the same Alpine branch, so those rows follow the
-   builder.
-3. Bump `k3s` before `xtables`. The xtables pin follows the k3s-root
+   alpine` moves it for both. `licensing/latest.sh` reads `musl`,
+   `util-linux`, and `openssl` from the same Alpine branch, so those
+   rows follow the builder.
+3. The static programs in `userland/` follow buildroot's `master`.
+   `userland/latest.sh --bump` moves buildroot to master's tip and
+   deletes each line of `userland/versions.mk` whose version the new
+   recipe meets. Then a program row that still reads `behind` takes a
+   named bump, such as `userland/latest.sh --bump tzdata`, which sets
+   the newer version in `versions.mk` and writes its `.hash` file
+   under `userland/patches/`. When the `buildroot` row of
+   `toolchains/latest.sh` reads behind after the move, run
+   `../toolchains/latest.sh --bump buildroot`. A buildroot bump can
+   move every library and the compiler, so `make -C userland` must
+   build before the bump is done. The first build after a buildroot
+   bump compiles the cross-compiler again, and the compiler cache in
+   `userland/cache/ccache/` shortens the rebuilds after it.
+4. Bump `k3s` before `xtables`. The xtables pin follows the k3s-root
    release that the pinned k3s names as `VERSION_ROOT`, so
    `xtables/latest.sh` reads `k3s/VERSION` and reports xtables as
    behind only after k3s moves.
-4. Finish with one `licensing/sources.sh --repin`. The mirror cache
+5. Finish with one `licensing/sources.sh --repin`. The mirror cache
    in `licensing/cache/` skips files it already has, so the final
    pass is cheap and proves the source pins match their bytes.
 
@@ -127,9 +138,13 @@ the notes live:
   for the Kubernetes patch; the k3s issue tracker for reports
   against the new tag.
 * xtables: the k3s-root release notes on GitHub.
+* buildroot: the git log of `master` between the two commits, for
+  the packages that `userland/defconfig` selects, the libraries they
+  link, and the toolchain. `make -C userland` then prints each
+  version in `userland/dist/legal-info/manifest.csv`; compare it with
+  the old build's.
 * nfs-utils: the git shortlog between tags at git.linux-nfs.org.
   Only the mount.nfs client path matters; liken runs no NFS server.
-* libtirpc: its changelog at git.linux-nfs.org or sourceforge.
 * systemd-boot and grub: changelogs.ubuntu.com for the package
   revision. Only changes to sd-boot, bootctl, or the EFI stub
   matter for systemd-boot; the daemons are not shipped.
@@ -153,7 +168,7 @@ the notes live:
 * trust, hugo: no research unless the version jump looks unusual.
 * alpine, storage: a new Alpine release or a move to `edge` can
   drop a static library or change a default that a build from
-  source depends on, so build every domain that uses the builder.
+  source depends on, so build `open-iscsi` and `bluetoothd`.
   The lab's storage guest runs sid's daily cloud image, which
   Debian deletes after about four months.
 
@@ -169,9 +184,9 @@ metal boot are its first real test.
    nothing else.
 3. `make all`: changelogs do not show configure or toolchain
    breakage, and a bump that does not build is not done. The
-   domains that compile from source on the musl builder break the
-   most often; a new configure check or a dropped default there is
-   invisible until the build runs.
+   domains that compile from source against musl, `userland` and
+   `open-iscsi`, break the most often; a new configure check or a
+   dropped default there is invisible until the build runs.
 4. `make smoke-uefi`: one boot to Ready proves the pieces still
    assemble into a machine.
 
@@ -535,8 +550,8 @@ to `pin.sh` with a comment, and do not write it in the script.
 
 **The digest.** `latest.sh --bump` reads the upstream's checksum once,
 when the pin moves, and writes it into the repository: a `declare -A`
-table or a variable in `fetch.sh`, a file such as
-`liken/tzdata/DIGESTS`, an `ARG` of a Dockerfile, the `--checksum`
+table or a variable in `fetch.sh`, a buildroot `.hash` file under
+`liken/userland/patches/`, an `ARG` of a Dockerfile, the `--checksum`
 of an `ADD`, or a constant in `ci/`. The fetch and the build read only
 that copy. Each `--bump` prints one line that says where the digest
 came from, such as "the digest came from sha256sums.asc, signed by
@@ -559,11 +574,10 @@ names another signer:
 - dbus signs each release tarball. `bluetooth-operator/bluetoothd/latest.sh`
   verifies the tarball against `bluetoothd/dbus.asc`, accepts one
   pinned fingerprint, and pins the digest of the verified bytes.
-- IANA signs each tzdata tarball, and weston's release managers sign
-  each weston tarball. `liken/tzdata/latest.sh` and `weston/latest.sh`
-  verify the tarball against the key file beside the script before
-  they pin its digest, and `liken/tzdata/fetch.sh` verifies the
-  signature again on every build.
+- IANA signs each tzdata and tzcode tarball, and weston's release
+  managers sign each weston tarball. `liken/userland/latest.sh --bump
+  tzdata` and `weston/latest.sh` verify the tarball against the key
+  file beside the script before they pin its digest.
 - Flux signs its checksums file, and Trivy signs each release archive,
   with sigstore. `liken/flux/latest.sh` and `ci/latest.sh --bump trivy`
   verify the bundle with cosign, from the `cosign` entry of
@@ -590,6 +604,17 @@ the commit says what stands behind the digest.
 **A static binary.** gcc on Alpine builds a static PIE for `-static`,
 so a check with file(1) accepts both words:
 `grep -qE "statically linked|static-pie linked"`.
+
+**A static program from buildroot.** buildroot downloads inside its
+builder, so the check below cannot read its downloads. The pins are
+`liken/userland/VERSION` and the `buildroot_sha256` table of
+`liken/userland/fetch.sh` for buildroot itself, buildroot's own `.hash`
+files for every package at that commit, and the `.hash` file under
+`liken/userland/patches/` for each version that `versions.mk` sets.
+`BR2_DOWNLOAD_FORCE_CHECK_HASHES` in `liken/userland/defconfig` makes
+buildroot stop on a download that no `.hash` file lists, and
+`fetch.sh` pins the SPDX schema that `utils/generate-cyclonedx` would
+otherwise download.
 
 **The check.** `cd ci && go run . pins -root ..` runs
 `ci/fetches.go`, which reads the scripts by pattern and fails when:

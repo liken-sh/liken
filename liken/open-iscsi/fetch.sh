@@ -20,9 +20,12 @@
 # image's branch as it is on the day of the build, so two builds of
 # the same pins can link different library releases. (Talos
 # compiles these same binaries for its iscsi-tools extension, a useful
-# independent comparison for an audit.) Building from source inside a
-# container (nfs-utils does the same) needs a container runtime on the
-# build host: docker or podman, whichever is present.
+# independent comparison for an audit.) The other static programs of
+# the OS build with buildroot in userland/, from pinned sources only,
+# but buildroot's recipes for open-iscsi and kmod refuse a static-only
+# build, so this one stays on Alpine. Building from source inside a
+# container needs a container runtime on the build host: docker or
+# podman, whichever is present.
 #
 # Two more pinned sources come along, because a fully static link
 # needs static libraries that alpine does not package:
@@ -69,8 +72,8 @@ version="$(cat "$here/VERSION")"
 # in open-iscsi/VERSION. To build any other version, update both.
 #
 # The builder is the `alpine` entry in toolchains/images.toml, a tag
-# and a digest. Each static build in the OS, and `bluetoothd`, builds
-# in that image, and one entry keeps them all on one toolchain.
+# and a digest. This build and `bluetoothd` build in that image, and
+# one entry keeps both on one toolchain.
 builder="$(image_of alpine)"
 openiscsi_sha256="1c3a8ad7d86e57d247a08c013f5055ef695b3a07ed760d1aea7d90b9f9011602"
 kmod_version="34"
@@ -104,6 +107,7 @@ fetch_verified --resume "https://github.com/openSUSE/libeconf/archive/refs/tags/
     -e HOST_UID="$(id -u)" \
     -e HOST_GID="$(id -g)" \
     "$builder" sh -e <<'BUILD'
+# fetch-check: allow, because buildroot's open-iscsi and kmod recipes refuse a static-only build (AGENTS.md, Static programs)
 apk add --quiet build-base bash meson ninja pkgconf util-linux-dev \
     util-linux-static openssl-dev openssl-libs-static linux-headers file
 mkdir /build

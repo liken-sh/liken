@@ -29,7 +29,7 @@ import (
 )
 
 // supplicantBinary is the program the image carries for the 802.11
-// session. wpa-supplicant/fetch.sh builds it static, with the nl80211
+// session. userland/build.sh builds it static, with the nl80211
 // driver, the control interface, and SAE, and nothing else.
 const supplicantBinary = "/sbin/wpa_supplicant"
 

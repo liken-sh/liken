@@ -1,0 +1,2 @@
+# The tarball of the version that versions.mk sets. The digest came from bytes whose IANA signature verified against tz.asc.
+sha256  01b4a91cec5167ed48c11e8ab78f2048cead78ce94b0cafcad0ae8c5a3044d3d  tzdata2026f.tar.gz

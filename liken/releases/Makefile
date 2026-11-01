@@ -85,14 +85,23 @@ KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 K3S_VERSION := $(strip $(file <../k3s/VERSION))
 XTABLES_VERSION := $(strip $(file <../xtables/VERSION))
 TRUST_VERSION := $(strip $(file <../../trust/VERSION))
-E2FSPROGS_VERSION := $(strip $(file <../e2fsprogs/VERSION))
 OPENISCSI_VERSION := $(strip $(file <../open-iscsi/VERSION))
-NFSUTILS_VERSION := $(strip $(file <../nfs-utils/VERSION))
-WPASUPPLICANT_VERSION := $(strip $(file <../wpa-supplicant/VERSION))
 SYSTEMDBOOT_VERSION := $(strip $(file <../systemd-boot/VERSION))
 GRUB_VERSION := $(strip $(file <../grub/VERSION))
 HWDATA_VERSION := $(strip $(file <../hwdata/VERSION))
-TZDATA_VERSION := $(strip $(file <../tzdata/VERSION))
+# The programs that buildroot builds have no VERSION file: the
+# buildroot pin and userland/versions.mk decide their versions, and
+# userland/build.sh writes each one into the versions file beside the
+# programs. image/build.sh reads the same file, so the image's
+# components record and the release document name one version. These
+# are recursive variables, so a target that names none of them runs
+# before the userland is built.
+USERLAND_VERSIONS := ../userland/dist/versions
+userland_version = $(or $(shell awk '$$1 == "$(1)" { print $$2 }' $(USERLAND_VERSIONS) 2>/dev/null),$(error $(USERLAND_VERSIONS) names no $(1); run make userland first))
+E2FSPROGS_VERSION = $(call userland_version,e2fsprogs)
+NFSUTILS_VERSION = $(call userland_version,nfs-utils)
+WPASUPPLICANT_VERSION = $(call userland_version,wpa-supplicant)
+TZDATA_VERSION = $(call userland_version,tzdata)
 LINUXFIRMWARE_VERSION := $(strip $(file <../linux-firmware/VERSION))
 # This pin is read out of a script instead of a VERSION file because
 # linux-firmware/fetch.sh owns the nested wireless-regdb pin.
