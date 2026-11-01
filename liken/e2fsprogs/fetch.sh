@@ -95,7 +95,7 @@ mkdir -p "$cache"
 # tarball's line from it, so a fetch never reads a digest from
 # upstream.
 declare -A e2fsprogs_sha256=(
-    ["1.47.1"]="0d2e0bf80935c3392b73a60dbff82d8a6ef7ea88b806c2eea964b6837d3fd6c2"
+    ["1.47.4"]="da274408bebbfd13a5a2fc3cfc66e3ffff17c48534673aa67f88d49b99123b96"
 )
 digest="${e2fsprogs_sha256[$version]:-}"
 [[ -n "$digest" ]] || {
