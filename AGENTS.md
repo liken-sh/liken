@@ -190,6 +190,39 @@ image tag disagree. The `bump-components` skill under
 `.agents/skills` holds the row format and the procedure, and root
 plan 83 holds the reasons.
 
+## Pins and downloads
+
+A build uses only the bytes that a commit named, so a person who
+reviews the commit reviews what every later build downloads. Every
+pin in the repository follows these rules, and
+`cd ci && go run . pins -root ..` fails CI on each break that a
+pattern can find. The `bump-components` skill holds the procedure,
+the patterns, and the comment that excuses one line.
+
+- The digest of every file that a pin downloads is in the
+  repository, and `latest.sh --bump` writes it. No `fetch.sh`,
+  Dockerfile, or other build step reads a digest from the network,
+  because a checksum file read at build time accepts whatever the
+  upstream serves that day.
+- When the upstream signs the checksum file that a bump copies a
+  digest from, the bump verifies the signature first. Without that
+  check, a mirror that changes the file changes the pin. The keys are
+  in the repository, and a key that more than one component reads is
+  in `trust/keys/`.
+- A download goes to a `.partial` file, which takes its name in the
+  cache only after its digest matches. A cached file that does not
+  match is downloaded again. So a torn or changed download never
+  takes the name of a good one.
+- Every `FROM` and `COPY --from` names an image of
+  `toolchains/images.toml`, or an image of the repository by its bare
+  name, so that one entry pins each outside image.
+- Every `VERSION`, every `fetch.sh`, and every Dockerfile that
+  downloads has a `latest.sh` that `make versions` runs, so no pin
+  falls behind where the report cannot show it.
+- A check that a binary is static accepts both "statically linked"
+  and "static-pie linked", because gcc on Alpine builds a static PIE
+  for `-static`.
+
 ## Releases and development builds
 
 One CalVer tag releases every component whose outputs changed since its

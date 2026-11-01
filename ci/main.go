@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -182,17 +183,21 @@ func deps(root string, components map[string]*Component, stdout io.Writer) error
 }
 
 func pins(root string, stdout io.Writer) error {
-	findings, err := checkPins(root)
+	drift, err := checkPins(root)
 	if err != nil {
 		return err
 	}
-	for _, f := range findings {
+	fetches, err := checkFetches(root)
+	if err != nil {
+		return err
+	}
+	for _, f := range slices.Concat(drift, fetches) {
 		fmt.Fprintln(stdout, f)
 	}
-	if len(findings) > 0 {
-		return fmt.Errorf("%d pins drift; give each copy the newest version", len(findings))
+	if len(drift) > 0 || len(fetches) > 0 {
+		return fmt.Errorf("%d pins drift, and %d downloads break a rule in AGENTS.md", len(drift), len(fetches))
 	}
-	fmt.Fprintln(stdout, "every shared pin names one version")
+	fmt.Fprintln(stdout, "every shared pin names one version, and every download follows the rules in AGENTS.md")
 	return nil
 }
 

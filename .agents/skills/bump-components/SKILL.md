@@ -429,6 +429,97 @@ names the versioned library files of each runtime, so move those
 names by hand, then run `docker buildx bake
 library-operator-appearances`.
 
+## 5f. A new or changed latest.sh or fetch.sh
+
+"Pins and downloads" in the root `AGENTS.md` gives the rules and the
+reasons. This step gives the forms that the scripts of the repository
+use, and the check in `ci/` that reads them.
+
+**The digest.** `latest.sh --bump` reads the upstream's checksum once,
+when the pin moves, and writes it into the repository: a `declare -A`
+table or a variable in `fetch.sh`, a file such as
+`liken/tzdata/DIGESTS`, an `ARG` of a Dockerfile, or the `--checksum`
+of an `ADD`. The fetch and the build read only that copy. Each
+`--bump` prints one line that says where the digest came from, such
+as "the digest came from sha256sums.asc, signed by kernel.org's
+checksum autosigner".
+
+**The signature.** When the upstream signs its checksum file,
+`--bump` verifies the signature before it reads a digest, and stops
+when the signature is missing, does not verify, or names another
+signer:
+
+- kernel.org signs the `sha256sums.asc` file of each directory with
+  its checksum autosigner. Call
+  `trust/keys/kernel-org-digest.sh <URL of sha256sums.asc> <file>`,
+  which verifies the file against `trust/keys/kernel-org-autosigner.asc`
+  and prints the digest. Add the caller to the list in
+  `trust/keys/README.md`.
+- The Kernel PPA signs each build's `CHECKSUMS` file.
+  `liken/kernel/latest.sh` verifies `CHECKSUMS.gpg` with `gpgv`
+  against `liken/kernel/kernel-ppa.asc` and accepts one pinned
+  fingerprint.
+- Flux signs its checksums file with sigstore. `liken/flux/latest.sh`
+  verifies the bundle with cosign, from the `cosign` entry of
+  `toolchains/images.toml`, and accepts only the certificate identity
+  of fluxcd/flux2's release workflow at the release's tag, from
+  GitHub's OIDC issuer.
+- IANA signs each tzdata tarball. `liken/tzdata/fetch.sh` verifies the
+  signature against `liken/tzdata/tz.asc` as well as the digest.
+
+A key that one script reads stays beside that script. A key that a
+second component reads moves to `trust/keys/`, with a section in its
+`README.md` that says where the key comes from. When the upstream
+signs nothing, the printed line names the unsigned file, so the
+commit says what stands behind the digest.
+
+**The download.** A `fetch.sh` downloads into a `.partial` file,
+checks the digest, deletes the `.partial` when it does not match, and
+moves it into the cache when it does. It checks the cached file first,
+so a cached file that does not match is downloaded again:
+
+```bash
+if ! sha256sum --check --status <<<"$digest  $cache/$file" >/dev/null 2>&1; then
+    curl -fL --retry 5 --retry-all-errors --retry-delay 5 \
+        -o "$cache/$file.partial" "$url"
+    sha256sum --check --quiet <<<"$digest  $cache/$file.partial" || {
+        rm -f "$cache/$file.partial"
+        exit 1
+    }
+    mv "$cache/$file.partial" "$cache/$file"
+fi
+```
+
+A large file adds `-C -` to resume a broken transfer. The delete
+matters then: curl answers a full-length `.partial` with success and
+leaves the bytes as they are, so a bad full-length file would fail
+every later run.
+
+**A static binary.** gcc on Alpine builds a static PIE for `-static`,
+so a check with file(1) accepts both words:
+`grep -qE "statically linked|static-pie linked"`.
+
+**The check.** `cd ci && go run . pins -root ..` runs
+`ci/fetches.go`, which reads the scripts by pattern and fails when:
+
+- a `fetch.sh` names a checksum file, such as `SHA256SUMS`,
+  `sha256sums.asc`, `checksums.txt`, or `<file>.sha256`, or a
+  Dockerfile's `ADD` or `RUN` downloads one;
+- a curl or wget in a `fetch.sh` writes a file whose name does not end
+  in `.partial`;
+- a `VERSION` or `fetch.sh` has no `latest.sh` in its directory, a
+  Dockerfile that downloads has none in its directory or above it, or
+  a `latest.sh` is not executable or is under a directory that
+  `versions.sh` skips;
+- a `latest.sh` reads a `sha256sums.asc` file and does not call
+  `trust/keys/kernel-org-digest.sh`;
+- a grep for "statically linked" does not accept "static-pie linked".
+
+The check sees only these forms. It does not see a signature that an
+upstream other than kernel.org publishes and a bump skips. A line that
+breaks a pattern for a reason the check cannot see takes a comment
+line directly above it with `fetch-check: allow` and the reason.
+
 ## 6. Report
 
 Give one verdict per bumped component: what changed, whether there
