@@ -192,6 +192,20 @@ one target that the publish pushes, so a base that the build needs as
 a context carries none. The bake file carries none either, because the
 images job and a workstation load the image into Docker.
 
+syft lists what a program or a package database records about itself:
+a Go binary's build info, the crates that cargo-auditable records,
+and the dpkg records of a closure. It finds nothing in a file that a
+Dockerfile fetches by its checksum, or in a static program that
+buildroot built. So an image that ships such files carries a CycloneDX
+record of them at `/usr/share/doc/liken/<image>.cdx.json`, which
+`image-sbom` from `toolchains/manifest` writes during the build from
+the pin's `pin.toml`, or from buildroot's SBOM for the bluetoothd
+image. syft copies each record's components into the image's SBOM,
+with the purl, the CPE, and the license of the record, and gives the
+record's path as their `sourceInfo`. An image that copies another
+image's tree, such as `COPY --from=trust / /`, copies its record too.
+"Pins and downloads" in the root `AGENTS.md` gives the rule.
+
 After the push, the publish job runs cosign, from the image that
 `toolchains/images.toml` pins, and signs the digest of the index
 under each name of the image. The signature is keyless: the job holds
@@ -219,6 +233,15 @@ cosign verify "$image@$digest" \
   --certificate-identity-regexp '^https://github\.com/liken-sh/liken/\.github/workflows/component-[a-z0-9-]+\.yaml@refs/(heads/main|tags/[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3})$'
 docker buildx imagetools inspect "$image@$digest" --format '{{ json .SBOM }}'
 docker buildx imagetools inspect "$image@$digest" --format '{{ json .Provenance }}'
+```
+
+To list the packages of the SBOM that came from a record, with the
+purl and the CPE of each:
+
+```sh
+docker buildx imagetools inspect "$image@$digest" --format '{{ json .SBOM.SPDX }}' |
+  jq -r '.packages[] | select((.sourceInfo // "") | test("/usr/share/doc/liken/.*[.]cdx[.]json"))
+    | [.name, .versionInfo, (.externalRefs[]?.referenceLocator)] | join(" ")'
 ```
 
 `cosign verify` checks that Fulcio issued the certificate to a

@@ -17,11 +17,48 @@ var trustManifest = "[cacert]\n" +
 	"license = \"MPL-2.0\"\n" +
 	"type = \"library\"\n"
 
+// westonManifest is the manifest of a file that an image fetches by
+// its checksum and builds from, with the type and the CPE that an
+// image's record carries.
+var westonManifest = "[weston]\n" +
+	"version = \"16.0.2\"\n" +
+	"url = \"https://gitlab.freedesktop.org/uploads/weston-16.0.2.tar.xz\"\n" +
+	"sha256 = \"" + strings.Repeat("1", 64) + "\"\n" +
+	"purl = \"pkg:generic/weston@16.0.2?download_url=https://gitlab.freedesktop.org/uploads/weston-16.0.2.tar.xz&checksum=sha256:" + strings.Repeat("1", 64) + "\"\n" +
+	"license = \"MIT\"\n" +
+	"type = \"application\"\n" +
+	"cpe = \"cpe:2.3:a:wayland:weston:16.0.2:*:*:*:*:*:*:*\"\n"
+
+// westonDockerfile fetches the tarball through two arguments, and
+// writes the image's record from the manifest.
+var westonDockerfile = "ARG WESTON_URL=https://gitlab.freedesktop.org/uploads/weston-16.0.2.tar.xz\n" +
+	"ARG WESTON_SHA256=" + strings.Repeat("1", 64) + "\n" +
+	"FROM debian AS build\n" +
+	"ARG WESTON_SHA256\n" +
+	"ARG WESTON_URL\n" +
+	"ADD --checksum=sha256:${WESTON_SHA256} ${WESTON_URL} /weston.tar.xz\n" +
+	"FROM golang AS sbom\n" +
+	"COPY pin.toml /pins/weston.toml\n" +
+	"RUN go run ./image-sbom -out /weston.cdx.json /pins/weston.toml\n"
+
+// modelsManifest is the manifest of a file that a build pulls inside an
+// OCI artifact, beside the sums file that the pull checks it against.
+var modelsManifest = "[face_detection_yunet]\n" +
+	"version = \"2023mar\"\n" +
+	"url = \"https://media.example.org/models/face_detection_yunet_2023mar.onnx\"\n" +
+	"sha256 = \"" + strings.Repeat("2", 64) + "\"\n" +
+	"purl = \"pkg:generic/face_detection_yunet@2023mar?download_url=https://media.example.org/models/face_detection_yunet_2023mar.onnx&checksum=sha256:" + strings.Repeat("2", 64) + "\"\n" +
+	"license = \"MIT\"\n" +
+	"type = \"machine-learning-model\"\n"
+
 // manifestsTree is a repository in which every pin that ships has a
 // manifest that agrees with its fetch: a domain with one file, a
 // domain with a second pin nested in it, a domain whose image fetches
-// the same file by its checksum, and a domain that another SBOM
-// covers, which has no manifest.
+// the same file by its checksum, a domain that another SBOM covers,
+// which has no manifest, and the images that fetch a file by its
+// checksum with no fetch.sh: one through arguments, one that also
+// fetches a Debian package, one beside a sums file, and the bluetoothd
+// image, whose download only its build reads.
 func manifestsTree(t *testing.T, changes map[string]string) string {
 	t.Helper()
 	tree := map[string]string{
@@ -73,7 +110,34 @@ func manifestsTree(t *testing.T, changes map[string]string) string {
 		"trust/pin.toml": trustManifest,
 		"trust/Dockerfile": "FROM scratch AS fetch\n" +
 			"ADD --checksum=sha256:" + strings.Repeat("e", 64) + " \\\n" +
-			"    https://curl.se/ca/cacert-2026-10-20.pem /cacert.pem\n",
+			"    https://curl.se/ca/cacert-2026-10-20.pem /cacert.pem\n" +
+			"FROM golang AS sbom\n" +
+			"RUN go run ./image-sbom -out /trust.cdx.json /pin.toml\n",
+		"weston/Dockerfile": westonDockerfile,
+		"weston/pin.toml":   westonManifest,
+		"library-operator/Dockerfile.appearances": "FROM debian AS runtime\n" +
+			"ADD --checksum=sha256:" + strings.Repeat("3", 64) + " \\\n" +
+			"    https://storage.example.org/openvino_toolkit_2026.4.1.tgz /openvino.tgz\n" +
+			"ADD --checksum=sha256:" + strings.Repeat("4", 64) + " \\\n" +
+			"    https://github.com/intel/compute-runtime/releases/download/1/intel-opencl-icd_1_amd64.deb /debs/\n" +
+			"FROM golang AS sbom\n" +
+			"RUN go run ./image-sbom -out /x.cdx.json /pins/openvino.toml /pins/models.toml\n",
+		"library-operator/pin.toml": "[openvino]\n" +
+			"version = \"2026.4.1\"\n" +
+			"url = \"https://storage.example.org/openvino_toolkit_2026.4.1.tgz\"\n" +
+			"sha256 = \"" + strings.Repeat("3", 64) + "\"\n" +
+			"purl = \"pkg:generic/openvino@2026.4.1?download_url=https://storage.example.org/openvino_toolkit_2026.4.1.tgz&checksum=sha256:" + strings.Repeat("3", 64) + "\"\n" +
+			"license = \"Apache-2.0\"\n" +
+			"type = \"library\"\n" +
+			"cpe = \"cpe:2.3:a:intel:openvino:2026.4.1:*:*:*:*:*:*:*\"\n",
+		"library-operator/appearances/models/pin.toml": modelsManifest,
+		"library-operator/appearances/models/models.sha256": strings.Repeat("2", 64) + "  face_detection_yunet_2023mar.onnx\n" +
+			strings.Repeat("5", 64) + "  face_detection_yunet_2023mar.LICENSE\n",
+		"bluetooth-operator/bluetoothd/Dockerfile": "FROM buildroot AS daemons\n" +
+			"ARG BUILDROOT_COMMIT=abc\n" +
+			"ARG BUILDROOT_SHA256=" + strings.Repeat("f", 64) + "\n" +
+			"ADD --chown=br-user:br-user --checksum=sha256:${BUILDROOT_SHA256} \\\n" +
+			"    https://github.com/buildroot/buildroot/archive/${BUILDROOT_COMMIT}.tar.gz buildroot.tar.gz\n",
 		"liken/microcode/VERSION": "20260925\n",
 		"liken/microcode/fetch.sh": "#!/usr/bin/env bash\n" +
 			"fetch_pinned --resume intel-microcode \"$version\" \"$cache/$tarball\"\n",
@@ -169,15 +233,27 @@ func TestAManifestThatBreaksARuleIsFound(t *testing.T) {
 		"a source mirror that holds a digest": {"liken/licensing/sources.sh",
 			"#!/usr/bin/env bash\n# Mirror the sources.\nmirror \"xtables/$v\" \"iptables-1.8.11.tar.xz\" \\\n    \"" + strings.Repeat("a", 64) + "\" \\\n    \"https://www.netfilter.org/pub/iptables/iptables-1.8.11.tar.xz\"\n",
 			"liken/licensing/sources.sh:3 holds a digest; the digest of each source that it mirrors is in the pin.toml of the pin that the source belongs to"},
-		"an entry with a type CycloneDX does not name": {"trust/pin.toml",
-			strings.Replace(trustManifest, "\"library\"", "\"tarball\"", 1),
-			"trust/pin.toml: [cacert] has the type \"tarball\", which is not a CycloneDX component type"},
-		"a CPE at another version": {"trust/pin.toml",
-			trustManifest + "cpe = \"cpe:2.3:a:mozilla:cacert:2026-10-19:*:*:*:*:*:*:*\"\n",
-			"trust/pin.toml: [cacert] has a CPE at 2026-10-19, and its version is 2026-10-20"},
-		"a CPE that is not a CPE 2.3 name": {"trust/pin.toml",
-			trustManifest + "cpe = \"cpe:/a:mozilla:cacert:2026-10-20\"\n",
-			"trust/pin.toml: [cacert] has the CPE \"cpe:/a:mozilla:cacert:2026-10-20\", which is not a CPE 2.3 name of 13 parts"},
+		"an entry with a type CycloneDX does not name": {"weston/pin.toml",
+			strings.Replace(westonManifest, "\"application\"", "\"tarball\"", 1),
+			"weston/pin.toml: [weston] has the type \"tarball\", which is not a CycloneDX component type"},
+		"a CPE at another version": {"weston/pin.toml",
+			strings.Replace(westonManifest, "weston:16.0.2:", "weston:16.0.1:", 1),
+			"weston/pin.toml: [weston] has a CPE at 16.0.1, and its version is 16.0.2"},
+		"a CPE that is not a CPE 2.3 name": {"weston/pin.toml",
+			strings.Replace(westonManifest, "cpe:2.3:a:wayland:weston:16.0.2:*:*:*:*:*:*:*", "cpe:/a:wayland:weston:16.0.2", 1),
+			"weston/pin.toml: [weston] has the CPE \"cpe:/a:wayland:weston:16.0.2\", which is not a CPE 2.3 name of 13 parts"},
+		"an image that fetches by an argument that the manifest does not name": {"weston/Dockerfile",
+			strings.Replace(westonDockerfile, "ARG WESTON_SHA256="+strings.Repeat("1", 64), "ARG WESTON_SHA256="+strings.Repeat("0", 64), 1),
+			"weston/Dockerfile:6 fetches https://gitlab.freedesktop.org/uploads/weston-16.0.2.tar.xz by sha256:" + strings.Repeat("0", 64) + ", and weston/pin.toml names " + strings.Repeat("1", 64)},
+		"an image that fetches by its checksum with no manifest": {"astrometry/Dockerfile",
+			"FROM debian\nADD --checksum=sha256:" + strings.Repeat("6", 64) + " https://example.org/index.tar.gz /index.tar.gz\n",
+			"astrometry/Dockerfile:2 fetches https://example.org/index.tar.gz by its checksum, and astrometry has no pin.toml, so the image's SBOM cannot name the file"},
+		"an image that ships a manifest's file and writes no record": {"weston/Dockerfile",
+			strings.Replace(westonDockerfile, "RUN go run ./image-sbom -out /weston.cdx.json /pins/weston.toml\n", "", 1),
+			"weston/Dockerfile fetches a file that weston/pin.toml names, and runs no image-sbom, so the image's SBOM does not list the file"},
+		"a sums file that disagrees with the manifest": {"library-operator/appearances/models/models.sha256",
+			strings.Repeat("0", 64) + "  face_detection_yunet_2023mar.onnx\n",
+			"library-operator/appearances/models/models.sha256:1 names face_detection_yunet_2023mar.onnx by sha256:" + strings.Repeat("0", 64) + ", and library-operator/appearances/models/pin.toml names " + strings.Repeat("2", 64)},
 		"an image that fetches a file no entry names": {"trust/Dockerfile",
 			"FROM scratch\nADD --checksum=sha256:" + strings.Repeat("e", 64) + " https://curl.se/ca/cacert-2026-10-21.pem /cacert.pem\n",
 			"trust/Dockerfile:2 fetches https://curl.se/ca/cacert-2026-10-21.pem, and trust/pin.toml names no file at that url"},

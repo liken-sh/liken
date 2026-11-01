@@ -232,6 +232,28 @@ comment that excuses one line.
   the `status.d` records, the build info, and cargo-auditable already
   name them. `unmanifested` in `ci/manifests.go` names each other
   `fetch.sh` that needs no manifest, with the reason.
+- A pin whose files an image ships holds a `pin.toml` too, beside the
+  Dockerfile that fetches them, because syft finds no package in a
+  file that a Dockerfile fetches by its checksum. An entry that an
+  image ships also names its CycloneDX `type`, one that syft keeps,
+  such as `library`, `application`, or `machine-learning-model`, and
+  the `cpe` that NVD lists the upstream under, when NVD has one. The
+  Dockerfile keeps a copy of the URL and the digest in its
+  `ADD --checksum`, because BuildKit reads the checksum from the
+  Dockerfile's text, and the pin's `latest.sh --bump` writes both
+  copies. The image build runs `image-sbom` from
+  `toolchains/manifest`, through the build context `manifest`, and the
+  image carries the record that it writes at
+  `/usr/share/doc/liken/<image>.cdx.json`. syft copies the components
+  of each such file into the image's SBOM. `toolchains/manifest` is
+  also the reader that the SBOM of a release uses, so a field means
+  the same in both. `ci pins` fails on an `ADD --checksum` that no
+  manifest beside the Dockerfile names at that digest, and on a
+  Dockerfile that fetches a manifest's file and runs no `image-sbom`.
+  A Debian package needs no entry, because the closure that unpacks
+  it writes its dpkg record, and `unmanifestedDownloads` in
+  `ci/manifests.go` names each Dockerfile whose downloads only its
+  build reads.
 - When the upstream signs the checksum file that a bump copies a
   digest from, the bump verifies the signature first. Without that
   check, a mirror that changes the file changes the pin. The keys are
@@ -281,7 +303,10 @@ knows which advisories apply. syft and Trivy read this layout, which
 Google's distroless images use. `indi/closure.sh` is a copy of the
 library, because the build context of `indi` does not reach `vulkan/`,
 and `cd ci && go run . pins -root ..` fails when the two copies
-differ.
+differ. A closure that unpacks a Debian package that its Dockerfile
+fetches by checksum, as `library-operator/appearances/inference-closure.sh`
+does, writes the same record from the package's control file, so the
+package needs no `pin.toml` entry.
 
 ## Rust binaries
 
@@ -384,7 +409,12 @@ form, and `cd ci && go run . pins -root ..` fails on an `apk add`.
 - buildroot is pinned to a commit on its `master` branch in
   `liken/userland/VERSION`, and its builder is the `buildroot` entry of
   `toolchains/images.toml`. The bluetoothd Dockerfile names the same
-  commit and digest, and `ci pins` fails when they differ. When master
+  commit and digest, and the same SPDX license list that
+  `generate-cyclonedx` reads, and `ci pins` fails when they differ.
+  syft finds no package in a static program, so the bluetoothd image
+  carries buildroot's SBOM of its build as its record for syft:
+  `image-sbom -buildroot` keeps the target packages and leaves out the
+  host tools. When master
   packages an older release than upstream,
   `liken/userland/versions.mk` sets the newer version, and
   `patches/<package>/<version>/<package>.hash` pins its tarball.
@@ -433,7 +463,11 @@ ghcr.io, with the syft scanner that `toolchains/images.toml` pins.
 Then cosign, pinned in the same file, signs the digest of that index
 keyless, as the component's workflow at `refs/heads/main` or at the
 release tag. The signature is in the same ghcr.io repository, and
-Rekor records it.
+Rekor records it. syft lists what a program or a package database
+records about itself, and copies the components of each record that
+an image carries at `/usr/share/doc/liken/<image>.cdx.json`, so the
+SBOM also names the pinned files and the buildroot packages that
+"Pins and downloads" and "Static programs" give the records of.
 One signature covers the image and both attestations, because the
 index names each of them by its digest. `ci/sign.go` holds the
 settings, and the `releases` skill holds the commands that verify an

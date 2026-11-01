@@ -52,6 +52,18 @@ var componentTypes = []string{
 	"machine-learning-model", "data", "cryptographic-asset",
 }
 
+// imageRecorder is the command that writes an image's record of the
+// files that its pins name. A Dockerfile that fetches a file of a
+// manifest runs it, or the image's SBOM leaves the file out.
+const imageRecorder = "image-sbom"
+
+// unmanifestedDownloads names each Dockerfile whose downloads by
+// checksum need no manifest, with the reason, because the image ships
+// none of the files.
+var unmanifestedDownloads = map[string]string{
+	"bluetooth-operator/bluetoothd/Dockerfile": "buildroot and the SPDX license list are the build system of the daemons, and buildroot's own SBOM names each package that the image ships",
+}
+
 // unmanifested names the directories whose fetch.sh needs no manifest,
 // with the reason, because a release does not ship what they download,
 // or because another SBOM already lists it.
@@ -94,6 +106,9 @@ var sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // addChecksum matches a Dockerfile's ADD of a URL by its checksum.
 var addChecksum = regexp.MustCompile(`^ADD\b.*--checksum=sha256:([0-9a-f]*)\s+(\S+://\S+)`)
 
+// argDefault matches an ARG with a default value.
+var argDefault = regexp.MustCompile(`^ARG\s+([A-Za-z_][A-Za-z0-9_]*)=(\S+)`)
+
 // checkManifests lists each pin whose manifest is missing, incomplete,
 // or different from what its fetch downloads. Root AGENTS.md states the
 // rule under "Pins and downloads":
@@ -110,8 +125,13 @@ var addChecksum = regexp.MustCompile(`^ADD\b.*--checksum=sha256:([0-9a-f]*)\s+(\
 //     sha256 as its checksum;
 //   - the fetch.sh holds no digest of its own and downloads through
 //     fetch_pinned, which reads the url and the sha256 from pin.toml;
-//   - a Dockerfile beside a pin.toml that ADDs a URL by its checksum
-//     names a URL and a digest of the manifest;
+//   - each Dockerfile that ADDs a URL by its checksum has a pin.toml
+//     beside it that names the URL at that digest, unless the file is a
+//     Debian package or unmanifestedDownloads names the Dockerfile, and
+//     a Dockerfile that ADDs a file that a manifest names runs
+//     image-sbom, which writes the image's record of the file;
+//   - a sums file beside a pin.toml, such as models.sha256, names the
+//     file of each entry by the entry's digest;
 //   - the source mirror holds no digest of its own.
 func checkManifests(root string) ([]string, error) {
 	files, err := sourceFiles(root)
@@ -124,37 +144,64 @@ func checkManifests(root string) ([]string, error) {
 		return nil, err
 	}
 	findings = append(findings, mirrorFindings(string(mirror))...)
+	var dirs []string
 	for _, file := range files {
-		if path.Base(file) != "fetch.sh" {
-			continue
-		}
 		dir := path.Dir(file)
-		if _, exempt := unmanifested[dir]; exempt {
-			continue
+		switch path.Base(file) {
+		case "fetch.sh":
+			if _, exempt := unmanifested[dir]; !exempt && !slices.Contains(dirs, dir) {
+				dirs = append(dirs, dir)
+			}
+		case pinManifest:
+			if !slices.Contains(dirs, dir) {
+				dirs = append(dirs, dir)
+			}
 		}
-		found, err := checkManifest(root, dir)
+	}
+	manifests := map[string]map[string]map[string]string{}
+	for _, dir := range dirs {
+		entries, found, err := checkManifest(root, dir)
 		if err != nil {
 			return nil, err
 		}
 		findings = append(findings, found...)
+		if entries != nil {
+			manifests[dir] = entries
+		}
+	}
+	for _, file := range files {
+		name, dir := path.Base(file), path.Dir(file)
+		if !isDockerfile(name) && !(strings.HasSuffix(name, ".sha256") && manifests[dir] != nil) {
+			continue
+		}
+		text, err := os.ReadFile(filepath.Join(root, file))
+		if err != nil {
+			return nil, err
+		}
+		if isDockerfile(name) {
+			findings = append(findings, imageFindings(file, dir, string(text), manifests[dir])...)
+		} else {
+			findings = append(findings, sumsFindings(file, path.Join(dir, pinManifest), string(text), manifests[dir])...)
+		}
 	}
 	return findings, nil
 }
 
 // checkManifest checks the manifest of one directory against its
-// VERSION, its fetch.sh, and its Dockerfile.
-func checkManifest(root, dir string) ([]string, error) {
+// VERSION and its fetch.sh, and returns its entries, or none when the
+// directory has no manifest.
+func checkManifest(root, dir string) (map[string]map[string]string, []string, error) {
 	manifest := path.Join(dir, pinManifest)
 	data, err := os.ReadFile(filepath.Join(root, manifest))
 	if errors.Is(err, fs.ErrNotExist) {
-		return []string{fmt.Sprintf("%s/fetch.sh downloads a file that a release ships, and %s has no %s", dir, dir, pinManifest)}, nil
+		return nil, []string{fmt.Sprintf("%s/fetch.sh downloads a file that a release ships, and %s has no %s", dir, dir, pinManifest)}, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var entries map[string]map[string]string
 	if err := toml.Unmarshal(data, &entries); err != nil {
-		return nil, fmt.Errorf("%s: %w", manifest, err)
+		return nil, nil, fmt.Errorf("%s: %w", manifest, err)
 	}
 	pinned := ""
 	if version, err := os.ReadFile(filepath.Join(root, dir, "VERSION")); err == nil {
@@ -169,15 +216,13 @@ func checkManifest(root, dir string) ([]string, error) {
 		}
 	}
 	fetch, err := os.ReadFile(filepath.Join(root, dir, "fetch.sh"))
-	if err != nil {
-		return nil, err
+	switch {
+	case err == nil:
+		findings = append(findings, fetchFindings(path.Join(dir, "fetch.sh"), string(fetch))...)
+	case !errors.Is(err, fs.ErrNotExist):
+		return nil, nil, err
 	}
-	findings = append(findings, fetchFindings(path.Join(dir, "fetch.sh"), string(fetch))...)
-	dockerfile, err := os.ReadFile(filepath.Join(root, dir, "Dockerfile"))
-	if err == nil {
-		findings = append(findings, imageFindings(path.Join(dir, "Dockerfile"), manifest, string(dockerfile), entries)...)
-	}
-	return findings, nil
+	return entries, findings, nil
 }
 
 // entryFindings lists each field of one entry that is missing or does
@@ -310,31 +355,95 @@ func cpeFindings(manifest, name, cpe, version string) []string {
 	return nil
 }
 
-// imageFindings lists each ADD of a Dockerfile that fetches a URL by a
-// checksum other than the one that the manifest beside it names. The
-// image and the OS build fetch the same file, and BuildKit reads the
-// checksum from the Dockerfile's own text, so the Dockerfile keeps a
-// copy and this check holds the copy to the manifest.
-func imageFindings(file, manifest, text string, entries map[string]map[string]string) []string {
+// imageFindings lists each ADD of a Dockerfile that fetches a URL by
+// its checksum and that no manifest beside the Dockerfile names at that
+// checksum, and a Dockerfile that fetches a file of a manifest and runs
+// no image-sbom. BuildKit reads the checksum from the Dockerfile's own
+// text, so the Dockerfile keeps a copy of the digest, and this check
+// holds the copy to the manifest. The manifest is what image-sbom reads
+// to write the image's record of the file, because syft finds nothing
+// in a file that a Dockerfile fetches.
+//
+// A Debian package is the exception: the closure that unpacks it writes
+// the package's control file into /var/lib/dpkg/status.d, and syft
+// reads the package from there.
+func imageFindings(file, dir, text string, entries map[string]map[string]string) []string {
+	if _, exempt := unmanifestedDownloads[file]; exempt {
+		return nil
+	}
+	manifest := path.Join(dir, pinManifest)
 	var findings []string
+	shipsEntry, records := false, false
+	args := map[string]string{}
 	for _, l := range logicalLines(text) {
-		m := addChecksum.FindStringSubmatch(strings.Join(strings.Fields(l.text), " "))
+		joined := strings.Join(strings.Fields(l.text), " ")
+		if m := argDefault.FindStringSubmatch(joined); m != nil {
+			args[m[1]] = strings.Trim(m[2], `"'`)
+		}
+		if strings.Contains(joined, imageRecorder) {
+			records = true
+		}
+		m := addChecksum.FindStringSubmatch(expandArgs(joined, args))
 		if m == nil {
 			continue
 		}
 		digest, address := m[1], m[2]
+		if strings.HasSuffix(address, ".deb") {
+			continue
+		}
+		if entries == nil {
+			findings = append(findings, fmt.Sprintf("%s:%d fetches %s by its checksum, and %s has no %s, so the image's SBOM cannot name the file", file, l.n, address, dir, pinManifest))
+			continue
+		}
 		found := false
 		for _, entry := range entries {
 			if entry["url"] != address {
 				continue
 			}
 			found = true
+			shipsEntry = shipsEntry || entry["scope"] != "excluded"
 			if entry["sha256"] != digest {
 				findings = append(findings, fmt.Sprintf("%s:%d fetches %s by sha256:%s, and %s names %s", file, l.n, address, digest, manifest, entry["sha256"]))
 			}
 		}
 		if !found {
 			findings = append(findings, fmt.Sprintf("%s:%d fetches %s, and %s names no file at that url", file, l.n, address, manifest))
+		}
+	}
+	if shipsEntry && !records {
+		findings = append(findings, fmt.Sprintf("%s fetches a file that %s names, and runs no %s, so the image's SBOM does not list the file", file, manifest, imageRecorder))
+	}
+	return findings
+}
+
+// expandArgs replaces each ${NAME} and $NAME in a line with the default
+// of the ARG of that name, so a checksum that an argument holds is
+// compared as BuildKit reads it. A name with no default stays as it is.
+func expandArgs(text string, args map[string]string) string {
+	return os.Expand(text, func(name string) string {
+		if value, ok := args[name]; ok {
+			return value
+		}
+		return "${" + name + "}"
+	})
+}
+
+// sumsFindings lists each line of a sums file, such as models.sha256,
+// that names the file of a manifest entry by another digest. A build
+// that checks the files against the sums file and an SBOM that reads
+// the manifest must name the same bytes.
+func sumsFindings(file, manifest, text string, entries map[string]map[string]string) []string {
+	var findings []string
+	for i, raw := range strings.Split(text, "\n") {
+		fields := strings.Fields(raw)
+		if len(fields) != 2 {
+			continue
+		}
+		digest, name := fields[0], strings.TrimPrefix(fields[1], "*")
+		for _, entry := range entries {
+			if path.Base(entry["url"]) == name && entry["sha256"] != digest {
+				findings = append(findings, fmt.Sprintf("%s:%d names %s by sha256:%s, and %s names %s", file, i+1, name, digest, manifest, entry["sha256"]))
+			}
 		}
 	}
 	return findings

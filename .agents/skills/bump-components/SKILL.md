@@ -232,8 +232,10 @@ snapshot's `Packages` indexes, or with `dpkg-query -W` in the builder.
 
 The `weston` entry of `weston/package.toml` is the exception. The
 weston image builds Weston from the upstream release, so
-`weston/latest.sh` reports and bumps that entry, and the snapshot
-holds no package that the image installs under that name.
+`weston/latest.sh` reports and bumps that entry, with the tarball's
+URL and digest in the Dockerfile and in `weston/pin.toml`, which the
+image's SBOM record reads, and the snapshot holds no package that the
+image installs under that name.
 `built_from_source` in `vulkan/latest.sh` names that entry, so the
 snapshot's report and its `--bump` skip it.
 
@@ -483,7 +485,9 @@ Ubuntu release; the move to it is a hand edit of the URL in
 `--bump`. `--bump compute-runtime` moves the OpenCL driver, gmmlib
 from the same release, and the graphics compiler release that the
 runtime's release text names. Both bumps write URLs and checksums
-into `Dockerfile.appearances`. `appearances/inference-closure.sh`
+into `Dockerfile.appearances`, and the OpenVINO bump writes the same
+facts, with the purl and the CPE, into `library-operator/pin.toml`,
+which the image's SBOM record reads. `appearances/inference-closure.sh`
 names the versioned library files of each runtime, so move those
 names by hand, then run `docker buildx bake
 library-operator-appearances`.
@@ -609,6 +613,16 @@ the three files of each Ubuntu source package in
 each one with `fetch_pinned`, and names the manifest as its last
 argument.
 
+A pin whose files an image ships holds a `pin.toml` beside the
+Dockerfile that fetches them, with a `type` that syft keeps and the
+`cpe` that NVD lists, and its bump writes the entry with `set_pin`,
+the CPE as the last argument, and the same URL and digest into the
+Dockerfile's `ADD --checksum`. The image build runs `image-sbom` on
+the manifest, and "Pins and downloads" in the root `AGENTS.md` gives
+the rule: `weston/pin.toml`, `library-operator/pin.toml`, and
+`library-operator/appearances/models/pin.toml`, whose models no bump
+moves.
+
 To list the purl of every pin that a release ships:
 
 ```sh
@@ -711,8 +725,18 @@ Dockerfile downloads buildroot itself with `ADD --checksum`, and
   `VERSION` beside it, or has a purl at another version or, for
   `pkg:generic`, with another `download_url` or `checksum`; the
   `fetch.sh` holds a digest of its own or does not call
-  `fetch_pinned`; or a Dockerfile beside a `pin.toml` `ADD`s a URL by
-  a checksum that the manifest does not name;
+  `fetch_pinned`; an entry has a `type` that CycloneDX does not name,
+  or a `cpe` at another version;
+- a Dockerfile `ADD`s a URL by a checksum, after its `ARG` defaults
+  are put in, that no `pin.toml` beside it names at that digest,
+  unless the file is a Debian package or `unmanifestedDownloads` in
+  `ci/manifests.go` names the Dockerfile; a Dockerfile fetches a file
+  of a manifest and runs no `image-sbom`; or a sums file beside a
+  `pin.toml`, such as `models.sha256`, names an entry's file by
+  another digest;
+- the bluetoothd Dockerfile names an SPDX schema version and digest
+  that the `spdx_schema_sha256` table of `liken/userland/fetch.sh`
+  does not pin;
 - a shell script names an image by a digest of its own, such as
   `ghcr.io/oras-project/oras:<tag>@sha256:<digest>`, and does not read
   the reference from `toolchains/images.toml` with `image_of`;
