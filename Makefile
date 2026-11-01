@@ -3,7 +3,8 @@
 # together.
 #
 #   make workflows  write .github/workflows/ and docker-bake.hcl from
-#                   every package.toml
+#                   every package.toml, and .github/dependabot.yml
+#                   from every go.mod and Cargo.lock
 #   make images     build every image into the local Docker daemon
 #   make docs       build every manual into dist/docs/, for a preview
 #   make preview    build them, then serve dist/docs/ at localhost
@@ -12,8 +13,9 @@
 
 # The generator reads each component's package.toml and writes the
 # root workflow, one workflow for each component, and the bake file
-# that builds every image. CI fails when the committed files differ
-# from what it writes.
+# that builds every image. It also writes the Dependabot configuration,
+# with one entry for each Go module and each Cargo lockfile. CI fails
+# when the committed files differ from what it writes.
 .PHONY: workflows
 workflows:
 	cd ci && go run . generate -root ..

@@ -1,0 +1,44 @@
+# This file is generated from every go.mod and Cargo.lock that git
+# tracks or would track, outside testdata/, plans/, and .cache/. Do
+# not edit it: edit the template in ci/templates/, then run
+# `make workflows` at the top of the repository. The graph job fails
+# when this file differs from what the generator writes, so a new
+# module or crate cannot go without security updates.
+#
+# Dependabot opens a pull request with the fix when an advisory names
+# a dependency of one of these directories. Each directory gets one
+# pull request that groups all of its security updates. Dependabot
+# groups only within one directory, so a module that several go.mod
+# files require gets one pull request for each directory, and each one
+# fails `ci pins` until the other copies move. Finish the fix with
+# `toolchains/latest.sh --bump go:<module>` on one branch, and close
+# the others. Root plan 86 gives the design.
+#
+# `open-pull-requests-limit: 0` turns off the routine version updates,
+# which `make versions` and the bump-components skill keep, and leaves
+# the security updates on. The format requires a schedule, and with
+# the limit at 0 a scheduled run opens no pull request.
+#
+# The k8s.io and sigs.k8s.io modules follow the k3s release in
+# liken/k3s/VERSION, so Dependabot moves none of them. An advisory
+# against one of them shows as an alert, and the fix is a k3s bump.
+
+version: 2
+updates:
+{%- range . %}
+  - package-ecosystem: {% .Ecosystem %}
+    directory: {% .Directory %}
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 0
+    groups:
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+{%- if eq .Ecosystem "gomod" %}
+    ignore:
+      - dependency-name: k8s.io/*
+      - dependency-name: sigs.k8s.io/*
+{%- end %}
+{%- end %}

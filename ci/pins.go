@@ -89,12 +89,29 @@ func checkPins(root string) ([]string, error) {
 	return findings, nil
 }
 
-// pinFiles lists the files of the repository that can hold a pin: the
-// files that git tracks or would track, so a download, a build output,
-// or another checkout that .gitignore leaves out is not read. Test data
-// keeps the versions that its test needs, and a plan keeps the
-// versions of its day.
+// pinFiles lists the files of the repository that can hold a pin.
 func pinFiles(root string) ([]string, error) {
+	all, err := sourceFiles(root)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, file := range all {
+		switch name := path.Base(file); {
+		case name == "go.mod", name == "rust-toolchain.toml", name == "Cargo.toml", name == ".pre-commit-config.yaml", isProtocol(name), namesImages(file):
+			files = append(files, file)
+		}
+	}
+	return files, nil
+}
+
+// sourceFiles lists the files that git tracks or would track, so a
+// download, a build output, or another checkout that .gitignore leaves
+// out is not read. It leaves out test data, which keeps the versions
+// that its test needs, a plan, which keeps the versions of its day,
+// and a cache. The list is sorted, and a file that the tree deleted
+// but git still tracks stays in it.
+func sourceFiles(root string) ([]string, error) {
 	out, err := Git{Dir: root}.run("ls-files", "-z", "--cached", "--others", "--exclude-standard")
 	if err != nil {
 		return nil, err
@@ -105,10 +122,7 @@ func pinFiles(root string) ([]string, error) {
 		if file == "" || slices.Contains(dirs, "testdata") || slices.Contains(dirs, "plans") || slices.Contains(dirs, ".cache") {
 			continue
 		}
-		switch name := path.Base(file); {
-		case name == "go.mod", name == "rust-toolchain.toml", name == "Cargo.toml", name == ".pre-commit-config.yaml", isProtocol(name), namesImages(file):
-			files = append(files, file)
-		}
+		files = append(files, file)
 	}
 	slices.Sort(files)
 	return slices.Compact(files), nil

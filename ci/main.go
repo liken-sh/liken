@@ -1,11 +1,11 @@
 // ci reads the package.toml of every component in the repository and
 // runs the parts of CI that need the whole graph: it writes the
-// workflows, decides what each run builds and publishes, checks each
-// component's declared dependencies against its code, publishes a
-// component's images and deploy artifact, and writes the release
-// record.
+// workflows and the Dependabot configuration, decides what each run
+// builds and publishes, checks each component's declared dependencies
+// against its code, publishes a component's images and deploy
+// artifact, and writes the release record.
 //
-//	go run ./ci generate [-check]   write the workflows and the bake file, or check them
+//	go run ./ci generate [-check]   write the workflows, the bake file, and dependabot.yml, or check them
 //	go run ./ci plan                decide what this workflow run does
 //	go run ./ci deps                check each [depends] against the code
 //	go run ./ci pins                check that each shared pin names one version
@@ -148,6 +148,9 @@ func generate(root string, components map[string]*Component, check bool, stdout 
 	if files[bakeFile], err = Bake(root, components); err != nil {
 		return err
 	}
+	if files[dependabotFile], err = Dependabot(root); err != nil {
+		return err
+	}
 	if !check {
 		return WriteWorkflows(root, files)
 	}
@@ -158,7 +161,7 @@ func generate(root string, components map[string]*Component, check bool, stdout 
 	if len(differ) > 0 {
 		return fmt.Errorf("these files differ from what the generator writes; run `make workflows`: %s", strings.Join(differ, ", "))
 	}
-	fmt.Fprintln(stdout, "every generated workflow and the bake file are current")
+	fmt.Fprintln(stdout, "every generated workflow, the bake file, and the Dependabot configuration are current")
 	return nil
 }
 

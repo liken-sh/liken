@@ -1,6 +1,6 @@
 # 86, Known vulnerabilities
 
-Proposed on 2026-10-31. Not built.
+Proposed and built on 2026-10-31. Touches `ci`.
 
 CI runs no vulnerability scanner, and nothing shows a known
 vulnerability in `liken` in one place. A pin with a published advisory
@@ -83,6 +83,33 @@ The configuration makes no update to `k8s.io/*` or `sigs.k8s.io/*`,
 which follow the k3s release in `liken/k3s/VERSION`, and it opens no
 routine version updates, which `bump-components` keeps.
 
+`ci generate` writes `dependabot.yml` beside the workflows, from
+`ci/templates/dependabot.yml.tmpl`: one `gomod` entry for each
+directory with a `go.mod`, and one `cargo` entry for each directory
+with a `Cargo.lock`, which is each workspace and each crate outside a
+workspace. It reads the files that git tracks or would track, outside
+`testdata/`, `plans/`, and `.cache/`, the same files that `ci pins`
+reads. The graph job's `generate -check` then fails at the commit that
+adds a module or a crate without its entry, so a new component cannot
+go without updates, and no separate check is needed. On 2026-10-31 the
+file had 35 entries: 30 Go modules and 5 Cargo lockfiles.
+
+Each entry sets `open-pull-requests-limit: 0`, which turns off version
+updates and leaves security updates on, under their separate limit of
+10 open pull requests. It holds one group, `security`, with
+`applies-to: security-updates` and the pattern `*`. The `ignore` of
+the k8s.io modules applies to security updates too, so an advisory
+against one of them raises an alert and opens no pull request. The
+format requires a `schedule`, and the entries name `monthly`. With the
+limit at 0, a scheduled run opens nothing. These facts come from
+GitHub's
+[options reference](https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference),
+[security pull requests](https://docs.github.com/en/code-security/dependabot/dependabot-security-updates/customizing-dependabot-security-prs),
+and [controlling dependencies](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/manage-your-dependency-security/controlling-dependencies-updated)
+pages, read on 2026-10-31. Dependabot security updates were turned on
+for the repository the same day, through the repository's
+`automated-security-fixes` API.
+
 A pull request from Dependabot runs CI like any other, and the plan
 job runs only the jobs of the components that it changes.
 
@@ -92,9 +119,10 @@ such as `golang.org/x/net` in every operator, gets one pull request for
 each directory, and each one fails `ci pins`, because the other copies
 still name the old version. A person finishes the fix with
 `toolchains/latest.sh --bump go:<module>` on one of the branches, and
-closes the others. `ci/` gets a check that fails when a module or a
-workspace is missing from `dependabot.yml`, so a new component cannot
-go without updates.
+closes the others. A group's `group-by: dependency-name` option moves
+one dependency in several directories with one pull request, but on
+2026-10-31 GitHub's options reference said that it applies to version
+updates only.
 
 Each alert names the version that fixes it, but not whether `liken`'s
 code reaches the vulnerable function. `golang.org/x/image` v0.41.0
