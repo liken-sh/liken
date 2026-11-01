@@ -26,7 +26,7 @@ lib=$(dirname "$(dpkg -L libc6 | grep '/libc\.so\.6$')")
 # fetch runs index-pack and rev-list, a push runs pack-objects, and a
 # rebase runs reset and notes copy. Without it every one of those
 # commands fails with "git: 'maintenance' is not a git command".
-# Debian ships it as a second copy of the 4 MB binary. The closure
+# Debian ships it as a second copy of the git binary. The closure
 # replaces the copy with a link below.
 #
 # git-remote-https is the transport program for an https URL, which
@@ -71,7 +71,8 @@ seeds="
 # writes info/exclude itself, but git init prints "warning: templates
 # not found in /usr/share/git-core/templates" without it, and the
 # driver runs git init for the store and again for every work tree.
-# The 88 kB buys a clean report from the command a volume starts with.
+# The directory is small, and it keeps the report of git init, the
+# command a volume starts with, clean.
 data="
 /usr/share/git-core/templates
 "
@@ -139,7 +140,7 @@ for path in $data; do
 done
 
 # The exec-path git is byte for byte the /usr/bin one, so a link
-# replaces the second 4 MB copy. git resolves its exec path through
+# replaces the second copy. git resolves its exec path through
 # the link the same way, which the release gate's gc run proves.
 if cmp -s "$out/usr/bin/git" "$out/usr/lib/git-core/git"; then
 	ln -sf ../../bin/git "$out/usr/lib/git-core/git"

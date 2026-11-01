@@ -3,8 +3,10 @@
 # with no SDK, and the simulators, and one image for PHD2, the guider,
 # which builds on indi as a client of its server. Each image is a library closure on
 # scratch: the programs of its list in images/, every library the
-# loader resolves for them, and the files they read by name. That is
-# 71 MB for indi, where Ubuntu with the same packages is about 1 GB.
+# loader resolves for them, and the files they read by name. So an
+# image leaves out the rest of each package, and every package that only
+# apt and the shell need. `docker image ls` after a build gives the
+# size of each image.
 #
 # Everything installs from dated snapshots of three archives: Ubuntu
 # 26.04 from snapshot.ubuntu.com, and the INDI PPA and the PHD2 PPA
@@ -163,8 +165,8 @@ RUN sh /family.sh simulators
 FROM indi AS indi-simulators
 COPY --from=simulators-tree /out /
 
-# PHD2 links GTK, wxWidgets, and OpenCV, about 300 MB of libraries that
-# no driver needs. So only this stage installs it, and the builder that
+# PHD2 links GTK, wxWidgets, and OpenCV, large libraries that no
+# driver needs. So only this stage installs it, and the builder that
 # every other image starts from stays without it.
 FROM builder AS phd2-tree
 COPY --from=indi-tree /out /base

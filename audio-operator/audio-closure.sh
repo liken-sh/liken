@@ -70,9 +70,8 @@ stdbuf=$(dpkg -L coreutils | grep '/libstdbuf\.so$')
 # pw-metadata brings nothing new.
 #
 # pw-record is how the capture container taps a sink's monitor ports
-# or a source's output ports. It is the same 125,240-byte pw-cat
-# binary under another name, so the link and its target are both
-# named here. flac and opusenc are the two encoders the container
+# or a source's output ports. It is the pw-cat binary under another
+# name, so the link and its target are both named here. flac and opusenc are the two encoders the container
 # pipes pw-record's raw samples into; the Go process does not encode
 # in their place because no pure-Go Opus encoder exists. libstdbuf.so
 # is what the container preloads into flac and opusenc with
@@ -80,11 +79,11 @@ stdbuf=$(dpkg -L coreutils | grep '/libstdbuf\.so$')
 # sink would otherwise deliver nothing until the tap ends. Its path
 # comes from dpkg for the reason the multiarch directory above does.
 #
-# These five seeds add 3,100,123 bytes to a closure that is
-# 25,626,562 bytes without them, which is 12.1 percent of it. The
-# largest part is libsndfile, which pw-cat links and which brings in
-# libvorbisenc, libvorbis, libmpg123, and libmp3lame: four codec
-# libraries that --raw never opens. libopus is already here, brought
+# The largest part of what these five seeds add is libsndfile, which
+# pw-cat links and which brings in libvorbisenc, libvorbis, libmpg123,
+# and libmp3lame: four codec libraries that --raw never opens. To
+# measure what the seeds cost, run this script with and without them
+# and compare `du -sb` of the two output directories. libopus is already here, brought
 # in by libspa-codec-bluez5-opus.so below, so opusenc adds the
 # encoder alone.
 #
