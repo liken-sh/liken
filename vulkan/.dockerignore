@@ -8,3 +8,5 @@ LICENSE
 package.toml
 .pre-commit-config.yaml
 smoke/
+# The pin's report, which runs on a workstation and never in a build.
+latest.sh

@@ -132,11 +132,11 @@ target "vulkan" {
   args = {
     VERSION = "20261024"
   }
-  tags       = ["ghcr.io/liken-sh/vulkan:20261024-2"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache", "type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache-20261024-2"]
+  tags       = ["ghcr.io/liken-sh/vulkan:20261024-3"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache", "type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache-20261024-3"]
   cache-to = concat(
     CACHE_WRITE == "vulkan" ? ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "vulkan" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache-20261024-2,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "vulkan" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache-20261024-3,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -151,11 +151,11 @@ target "astrometry" {
   args = {
     VERSION = "20261024"
   }
-  tags       = ["ghcr.io/liken-sh/astrometry:20261024-2"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache", "type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache-20261024-2"]
+  tags       = ["ghcr.io/liken-sh/astrometry:20261024-3"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache", "type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache-20261024-3"]
   cache-to = concat(
     CACHE_WRITE == "astrometry" ? ["type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "astrometry" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache-20261024-2,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "astrometry" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache-20261024-3,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -543,11 +543,11 @@ target "weston" {
   args = {
     VERSION = "20261024"
   }
-  tags       = ["ghcr.io/liken-sh/weston:20261024-3"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache", "type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20261024-3"]
+  tags       = ["ghcr.io/liken-sh/weston:20261024-4"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache", "type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20261024-4"]
   cache-to = concat(
     CACHE_WRITE == "weston" ? ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "weston" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20261024-3,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "weston" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20261024-4,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -746,11 +746,11 @@ target "vaapi" {
   args = {
     VERSION = "20261024"
   }
-  tags       = ["ghcr.io/liken-sh/vaapi:20261024-2"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache", "type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache-20261024-2"]
+  tags       = ["ghcr.io/liken-sh/vaapi:20261024-3"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache", "type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache-20261024-3"]
   cache-to = concat(
     CACHE_WRITE == "vaapi" ? ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "vaapi" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache-20261024-2,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "vaapi" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache-20261024-3,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -766,11 +766,11 @@ target "ffmpeg" {
   args = {
     VERSION = "20261024"
   }
-  tags       = ["ghcr.io/liken-sh/ffmpeg:20261024-2"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache", "type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache-20261024-2"]
+  tags       = ["ghcr.io/liken-sh/ffmpeg:20261024-3"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache", "type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache-20261024-3"]
   cache-to = concat(
     CACHE_WRITE == "ffmpeg" ? ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "ffmpeg" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache-20261024-2,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "ffmpeg" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache-20261024-3,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -1050,11 +1050,11 @@ target "mpv" {
   args = {
     VERSION = "20261024"
   }
-  tags       = ["ghcr.io/liken-sh/mpv:20261024-2"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache", "type=registry,ref=ghcr.io/liken-sh/mpv:buildcache-20261024-2"]
+  tags       = ["ghcr.io/liken-sh/mpv:20261024-3"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache", "type=registry,ref=ghcr.io/liken-sh/mpv:buildcache-20261024-3"]
   cache-to = concat(
     CACHE_WRITE == "mpv" ? ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "mpv" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache-20261024-2,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "mpv" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache-20261024-3,mode=max,ignore-error=true"] : [],
   )
 }
 

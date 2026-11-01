@@ -48,14 +48,29 @@ latest="$(date -u +%Y%m%d)"
 archive="https://snapshot.debian.org/archive/debian/${latest}T000000Z"
 
 # upstreams prints "image name version" for each [package.upstream]
-# entry of the six images.
+# entry of the six images that the snapshot installs.
 upstreams() {
-    local image
+    local image name version
     for image in "${images[@]}"; do
         awk -v i="$image" '/^\[/ { s = $0; next }
             s == "[package.upstream]" && / = / { gsub(/"/, "", $3); print i, $1, $3 }' \
             "$root/$image/package.toml"
+    done | while read -r image name version; do
+        built_from_source "$image" "$name" || echo "$image $name $version"
     done
+}
+
+# built_from_source is true for an entry that the image builds from an
+# upstream release and not from the snapshot. The weston image builds
+# Weston from its release tarball, and weston/latest.sh reports and
+# bumps that entry. sid also has a weston package, so without this
+# check a bump here writes the version of Debian's package over the
+# release that the image builds.
+built_from_source() {
+    case "$1/$2" in
+    weston/weston) return 0 ;;
+    esac
+    return 1
 }
 
 # The Packages indexes of the snapshot, as "package source
