@@ -50,26 +50,31 @@ type jellyfinMarks struct {
 	out       *jellyfinOutbound
 	topicBase string
 	namespace string
-	publish   func(topic string, payload []byte, retained bool)
-	now       func() time.Time
-	log       io.Writer
+	// publish answers whether the bus queued the message.
+	publish func(topic string, payload []byte, retained bool) bool
+	now     func() time.Time
+	log     io.Writer
 
 	mutex   sync.Mutex
 	pending map[string]titleMark
 	sent    map[string]int64
+	// The names in sent whose record the bus has not queued since the
+	// mark was sent or the last connect.
+	unrecorded map[string]bool
 }
 
 func newJellyfinMarks(out *jellyfinOutbound, topicBase, namespace string,
-	publish func(string, []byte, bool), now func() time.Time, log io.Writer) *jellyfinMarks {
+	publish func(string, []byte, bool) bool, now func() time.Time, log io.Writer) *jellyfinMarks {
 	return &jellyfinMarks{
-		out:       out,
-		topicBase: topicBase,
-		namespace: namespace,
-		publish:   publish,
-		now:       now,
-		log:       log,
-		pending:   map[string]titleMark{},
-		sent:      map[string]int64{},
+		out:        out,
+		topicBase:  topicBase,
+		namespace:  namespace,
+		publish:    publish,
+		now:        now,
+		log:        log,
+		pending:    map[string]titleMark{},
+		sent:       map[string]int64{},
+		unrecorded: map[string]bool{},
 	}
 }
 
@@ -106,6 +111,7 @@ func (m *jellyfinMarks) receiveSent(name string, payload []byte) {
 	if len(payload) == 0 {
 		m.mutex.Lock()
 		delete(m.sent, name)
+		delete(m.unrecorded, name)
 		m.mutex.Unlock()
 		return
 	}
@@ -118,6 +124,7 @@ func (m *jellyfinMarks) receiveSent(name string, payload []byte) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.sent[name] = record.At
+	delete(m.unrecorded, name)
 	delete(m.pending, name)
 }
 
@@ -131,19 +138,39 @@ func (m *jellyfinMarks) receiveSent(name string, payload []byte) {
 // here, because the progress role has cleared that mark.
 func (m *jellyfinMarks) republish() {
 	m.mutex.Lock()
-	records := map[string]int64{}
 	for name, at := range m.sent {
 		if markClearIn(at, m.now()) == 0 {
 			delete(m.sent, name)
+			delete(m.unrecorded, name)
 			continue
 		}
-		records[name] = at
+		m.unrecorded[name] = true
+	}
+	m.mutex.Unlock()
+	m.publishRecords()
+}
+
+// publishRecords publishes each record the bus has not queued, in name
+// order, and stops at the first one the bus drops. The bus drops a
+// message when its write queue is full, as it can be after a connect
+// sends every record at once, and the next pass resumes from that record.
+func (m *jellyfinMarks) publishRecords() {
+	m.mutex.Lock()
+	names := slices.Sorted(maps.Keys(m.unrecorded))
+	records := make([]int64, len(names))
+	for at, name := range names {
+		records[at] = m.sent[name]
 	}
 	m.mutex.Unlock()
 
-	for _, name := range slices.Sorted(maps.Keys(records)) {
-		payload, _ := json.Marshal(jellyfinMarkSent{At: records[name]})
-		m.publish(playMarkSentTopic(m.topicBase, m.namespace, name), payload, true)
+	for at, name := range names {
+		payload, _ := json.Marshal(jellyfinMarkSent{At: records[at]})
+		if !m.publish(playMarkSentTopic(m.topicBase, m.namespace, name), payload, true) {
+			return
+		}
+		m.mutex.Lock()
+		delete(m.unrecorded, name)
+		m.mutex.Unlock()
 	}
 }
 
@@ -154,6 +181,7 @@ func (m *jellyfinMarks) forget(name string) {
 	delete(m.pending, name)
 	_, recorded := m.sent[name]
 	delete(m.sent, name)
+	delete(m.unrecorded, name)
 	m.mutex.Unlock()
 
 	if recorded {
@@ -163,8 +191,11 @@ func (m *jellyfinMarks) forget(name string) {
 
 // push sends every mark that waits, in name order. A mark past its
 // retention is dropped unsent. A mark whose write failed waits for the next
-// pass, and a mark that landed leaves its record.
+// pass, and a mark that landed leaves its record. A record the bus dropped
+// goes out again at the end of the pass.
 func (m *jellyfinMarks) push(ctx context.Context) {
+	defer m.publishRecords()
+
 	m.mutex.Lock()
 	names := slices.Sorted(maps.Keys(m.pending))
 	marks := make([]titleMark, len(names))
@@ -183,10 +214,9 @@ func (m *jellyfinMarks) push(ctx context.Context) {
 		if !m.send(ctx, name, mark) {
 			continue
 		}
-		payload, _ := json.Marshal(jellyfinMarkSent{At: mark.At})
-		m.publish(playMarkSentTopic(m.topicBase, m.namespace, name), payload, true)
 		m.mutex.Lock()
 		m.sent[name] = mark.At
+		m.unrecorded[name] = true
 		delete(m.pending, name)
 		m.mutex.Unlock()
 	}

@@ -568,7 +568,8 @@ unplayed toggle, so the date cannot stop a second send alone. The role
 publishes each record it holds again after every connect to the broker,
 because a broker that restarts with persistence off holds no record,
 and the media browser publishes its marks again when its own session
-starts.
+starts. A record that the role's client drops on a full write queue goes
+out again on the role's next ten-second pass.
 
 The role clears the record when the progress role clears the mark. A
 record it reads more than 24 hours after `at`, it clears at once,

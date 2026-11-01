@@ -102,6 +102,7 @@ func newJellyfin(log io.Writer) *jellyfin {
 func (j *jellyfin) joinBus(address string) {
 	j.bus = newBus(address, "jellyfin-"+j.namespace, nil, func(*Bus) { j.marks.republish() }, j.onMessage)
 	j.publish = func(topic string, payload []byte, retained bool) { j.bus.Publish(topic, payload, retained) }
+	j.marks.publish = j.bus.Publish
 }
 
 // newJellyfinOn builds the role around a server and a clock a caller already
@@ -126,7 +127,10 @@ func newJellyfinOn(namespace, base, mediaBase, listen string, api *jellyfinAPI,
 	// The marks publish through the role, because newJellyfin puts the bus
 	// in the role's publish only after this returns.
 	role.marks = newJellyfinMarks(role.out, base, namespace,
-		func(topic string, payload []byte, retained bool) { role.publish(topic, payload, retained) }, now, log)
+		func(topic string, payload []byte, retained bool) bool {
+			role.publish(topic, payload, retained)
+			return true
+		}, now, log)
 	return role
 }
 
