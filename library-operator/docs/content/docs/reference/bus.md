@@ -564,7 +564,11 @@ lands for every person Jellyfin holds, and sends no mark whose record it
 reads. A jellyfin role that restarts within the mark's 24 hours reads
 both back, so it does not send the mark again over a toggle a person
 made in Jellyfin since. Jellyfin clears an item's last played date on an
-unplayed toggle, so the date cannot stop a second send alone.
+unplayed toggle, so the date cannot stop a second send alone. The role
+publishes each record it holds again after every connect to the broker,
+because a broker that restarts with persistence off holds no record,
+and the media browser publishes its marks again when its own session
+starts.
 
 The role clears the record when the progress role clears the mark. A
 record it reads more than 24 hours after `at`, it clears at once,

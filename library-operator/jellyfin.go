@@ -92,9 +92,16 @@ func newJellyfin(log io.Writer) *jellyfin {
 		time.Now, nil, log)
 	fmt.Fprintf(log, "library.liken.sh: carrying the progress of %s to %s\n", namespace, address)
 
-	role.bus = newBus(os.Getenv(busAddressVariable), "jellyfin-"+namespace, nil, nil, role.onMessage)
-	role.publish = func(topic string, payload []byte, retained bool) { role.bus.Publish(topic, payload, retained) }
+	role.joinBus(os.Getenv(busAddressVariable))
 	return role
+}
+
+// joinBus builds the role's client of the broker at the address, and
+// publishes through it. Each connect publishes the records of the sent
+// marks again (jellyfinmarks.go says why).
+func (j *jellyfin) joinBus(address string) {
+	j.bus = newBus(address, "jellyfin-"+j.namespace, nil, func(*Bus) { j.marks.republish() }, j.onMessage)
+	j.publish = func(topic string, payload []byte, retained bool) { j.bus.Publish(topic, payload, retained) }
 }
 
 // newJellyfinOn builds the role around a server and a clock a caller already

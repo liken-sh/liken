@@ -45,7 +45,7 @@ type jellyfinMarkSent struct {
 }
 
 // The marks half of the role: the marks that arrived and are not sent
-// yet, and the names of the marks whose record stands.
+// yet, and the time of the press of each mark whose record stands.
 type jellyfinMarks struct {
 	out       *jellyfinOutbound
 	topicBase string
@@ -56,7 +56,7 @@ type jellyfinMarks struct {
 
 	mutex   sync.Mutex
 	pending map[string]titleMark
-	sent    map[string]bool
+	sent    map[string]int64
 }
 
 func newJellyfinMarks(out *jellyfinOutbound, topicBase, namespace string,
@@ -69,7 +69,7 @@ func newJellyfinMarks(out *jellyfinOutbound, topicBase, namespace string,
 		now:       now,
 		log:       log,
 		pending:   map[string]titleMark{},
-		sent:      map[string]bool{},
+		sent:      map[string]int64{},
 	}
 }
 
@@ -94,7 +94,7 @@ func (m *jellyfinMarks) receive(name string, payload []byte) {
 
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	if !m.sent[name] {
+	if _, sent := m.sent[name]; !sent {
 		m.pending[name] = mark
 	}
 }
@@ -117,8 +117,34 @@ func (m *jellyfinMarks) receiveSent(name string, payload []byte) {
 
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	m.sent[name] = true
+	m.sent[name] = record.At
 	delete(m.pending, name)
+}
+
+// republish publishes every record that stands again, word for word. The
+// role's bus calls it on each connect, the first one included. The bus
+// runs with persistence off, so a broker that restarted holds no record,
+// and the browser publishes its marks again when its own session starts.
+// Without the records, a role that starts later reads each mark as unsent
+// and sends it a second time, which undoes an unplayed toggle a person
+// made in Jellyfin since. A record past its mark's retention is dropped
+// here, because the progress role has cleared that mark.
+func (m *jellyfinMarks) republish() {
+	m.mutex.Lock()
+	records := map[string]int64{}
+	for name, at := range m.sent {
+		if markClearIn(at, m.now()) == 0 {
+			delete(m.sent, name)
+			continue
+		}
+		records[name] = at
+	}
+	m.mutex.Unlock()
+
+	for _, name := range slices.Sorted(maps.Keys(records)) {
+		payload, _ := json.Marshal(jellyfinMarkSent{At: records[name]})
+		m.publish(playMarkSentTopic(m.topicBase, m.namespace, name), payload, true)
+	}
 }
 
 // forget drops a mark the progress role cleared, and clears the record of
@@ -126,7 +152,7 @@ func (m *jellyfinMarks) receiveSent(name string, payload []byte) {
 func (m *jellyfinMarks) forget(name string) {
 	m.mutex.Lock()
 	delete(m.pending, name)
-	recorded := m.sent[name]
+	_, recorded := m.sent[name]
 	delete(m.sent, name)
 	m.mutex.Unlock()
 
@@ -160,7 +186,7 @@ func (m *jellyfinMarks) push(ctx context.Context) {
 		payload, _ := json.Marshal(jellyfinMarkSent{At: mark.At})
 		m.publish(playMarkSentTopic(m.topicBase, m.namespace, name), payload, true)
 		m.mutex.Lock()
-		m.sent[name] = true
+		m.sent[name] = mark.At
 		delete(m.pending, name)
 		m.mutex.Unlock()
 	}
