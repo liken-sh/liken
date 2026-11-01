@@ -88,7 +88,15 @@ if [[ "${2:-linux-firmware}" == "wireless-regdb" ]]; then
         "$here/fetch.sh"
     echo "wireless-regdb: $regdb_pinned -> $regdb_latest"
     echo "kernel.org's sha256sums file stands behind these bytes"
-    echo "licensing/sources.sh mirrors this tarball; run it with --repin"
+    # licensing/sources.sh mirrors this tarball and pins it by digest,
+    # so a regdb bump moves that digest too. A refused re-pin leaves
+    # the domain pin moved and the mirror behind it, which is a
+    # release that cannot serve its own sources. Say that plainly,
+    # because the fix is a hand edit.
+    "$here/../licensing/sources.sh" --repin || {
+        echo "the pin moved; licensing/sources.sh still needs a hand edit" >&2
+        exit 1
+    }
     echo "next: make -C .. linux-firmware"
     exit 0
 fi
@@ -119,4 +127,8 @@ sed -i "s|^digest=\".*\"|digest=\"$digest\"|" "$here/fetch.sh"
 echo "linux-firmware: $pinned -> $latest"
 echo "kernel.org's sha256sums file stands behind these bytes"
 echo "the microcode domain builds AMD's blobs from this tarball; rebuild it too"
+# licensing/sources.sh needs no re-pin after this bump. It mirrors the
+# firmware tarball from this domain's own cache, which fetch.sh
+# verified against its own digest, so sources.sh holds no digest of
+# its own for it.
 echo "next: make -C .. linux-firmware microcode"
