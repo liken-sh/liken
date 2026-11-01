@@ -291,6 +291,11 @@ type operator struct {
 	// retained value. Only the pass goroutine touches it.
 	keysPublished map[string]string
 
+	// The units under media.liken.sh/none whose clear of the retained
+	// panel desire the bus has not queued. The pass is its only reader
+	// and writer.
+	panelClears map[string]bool
+
 	// The table last logged for each keys topic. keysPublished resets on a
 	// fresh broker session and this does not, so a republish writes no
 	// line and a person's edit does.
@@ -1180,12 +1185,17 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 		// the media layer asked for.
 		if idle.Controller == idleControllerNone {
 			// Nothing draws, so no desire is settled and the panel
-			// reports nothing. The retained desire is cleared once,
-			// while the desk still holds it, so a restarted operator
+			// reports nothing. The retained desire is cleared while
+			// the desk still holds it, so a restarted operator
 			// does not read the idle client pod's last word back off
 			// the broker after that pod is gone.
-			if o.panels.stateFor(key) != "" {
-				o.bus.Publish(playerPanelTopic(o.topicBase, player.Metadata.Namespace, player.Metadata.Name), nil, true)
+			//
+			// The bus drops a clear while it holds no session and when its
+			// write queue is full, and the desk drops the desire below, so
+			// panelClears holds each unit whose clear was not queued and the
+			// next pass publishes it again.
+			if o.panels.stateFor(key) != "" || o.panelClears[key] {
+				o.clearPanel(key, player.Metadata.Namespace, player.Metadata.Name)
 			}
 		} else {
 			drawn[key] = true
@@ -1245,6 +1255,13 @@ func (o *operator) reconcilePlayers(players []Player, plays []Play, timeZone str
 	// The panel desk shrinks to the units something draws, the way
 	// the codes desk shrinks to its Remotes.
 	o.panels.retain(drawn)
+	// A pending clear goes with its unit, and with a unit that something
+	// draws again, whose idle pod publishes a desire of its own.
+	for key := range o.panelClears {
+		if !live[key] || drawn[key] {
+			delete(o.panelClears, key)
+		}
+	}
 	// The overrides shrink the same way, and a unit dropped
 	// while its panel was dark takes a lift on the way out.
 	o.retainPanels(drawn)
@@ -1920,4 +1937,18 @@ func (o *operator) requeueAfter(delay time.Duration) {
 		return
 	}
 	time.AfterFunc(delay, func() { poke(o.wake) })
+}
+
+// clearPanel publishes the empty retained desire on one unit's panel
+// topic, and records the unit in panelClears while the bus has not queued
+// the clear.
+func (o *operator) clearPanel(key, namespace, name string) {
+	if o.bus.Publish(playerPanelTopic(o.topicBase, namespace, name), nil, true) {
+		delete(o.panelClears, key)
+		return
+	}
+	if o.panelClears == nil {
+		o.panelClears = map[string]bool{}
+	}
+	o.panelClears[key] = true
 }

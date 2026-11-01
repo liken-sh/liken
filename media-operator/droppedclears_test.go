@@ -127,3 +127,21 @@ func TestAReleaseWhoseClearWasDroppedKeepsThePlayUntilTheNextPass(t *testing.T) 
 		}
 	})
 }
+
+func TestAPanelClearDroppedOnAFullQueueIsPublishedOnTheNextPass(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cluster := screenCluster()
+		media, broker := busOperator(t, cluster)
+		statePanel(media, []Player{*housePlayer()}, panelDesireOff, nil)
+		player := *cluster.players["theater"]
+		player.Spec.Idle = &IdlePolicy{Controller: idleControllerNone}
+		fillQueue(media.bus)
+		media.reconcilePlayers([]Player{player}, nil, "", nil)
+
+		cleared := drainBroker(t, broker)
+		media.reconcilePlayers([]Player{player}, nil, "", nil)
+		synctest.Wait()
+
+		mustMatch(t, cleared[playerPanelTopic(defaultTopicBase, "house", "theater")], true)
+	})
+}
