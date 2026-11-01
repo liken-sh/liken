@@ -50,7 +50,12 @@ for c in "${channels[@]}"; do
 done
 alpha="$(releases alpha)" || alpha=""
 
-row flatcar "$flatcar" "$(tail -1 <<<"${alpha:-?}")" "${channel:-?}" alpha - \
+# The pin holds on the newest release with Flatcar's first disk layout.
+# A later layout makes an image larger than the 6144 MiB that Linode
+# accepts, and the host leaves the pin for the current stable release
+# at its first update. README.md gives the measurements.
+row flatcar "$flatcar" "$(tail -1 <<<"${alpha:-?}")" "${channel:-?}" alpha \
+    "the newest release whose image fits Linode's 6144 MiB limit; liken.sh/README.md" \
     "the release that the redirect host boots first"
 
 # providers prints "name source constraint" for each provider in the
