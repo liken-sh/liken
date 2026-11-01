@@ -255,6 +255,7 @@ jobs:
             --skip observatory-operator/
             --skip astrophotography-operator/
             --skip audio-operator/
+            --skip liken/userland/
             --skip bluetooth-operator/
             --skip brand/
             --skip ci/
@@ -909,6 +910,20 @@ jobs:
       security-events: write
       id-token: write
 
+  userland:
+    needs: [plan]
+    if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['userland'].check }}
+    uses: ./.github/workflows/component-userland.yaml
+    with:
+      stage: check
+      dryrun: ${{ fromJSON(needs.plan.outputs.components)['userland'].dryrun }}
+      version: ${{ fromJSON(needs.plan.outputs.components)['userland'].version }}
+      publish: ${{ fromJSON(needs.plan.outputs.components)['userland'].publish }}
+      jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['userland'].jobs) }}
+    permissions:
+      contents: read
+      packages: write
+
   bluetooth-operator:
     needs: [plan, trust]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['bluetooth-operator'].check }}
@@ -927,7 +942,7 @@ jobs:
       id-token: write
 
   bluetooth-operator-publish:
-    needs: [plan, bluetooth-operator, kubernetes, notices, toolchains, trust, trivy-db]
+    needs: [plan, bluetooth-operator, kubernetes, notices, toolchains, trust, userland, trivy-db]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['bluetooth-operator'].publish != 'none' }}
     uses: ./.github/workflows/component-bluetooth-operator.yaml
     with:
@@ -1243,7 +1258,7 @@ jobs:
       id-token: write
 
   liken-publish:
-    needs: [plan, liken, brand, kubernetes, toolchains, trust]
+    needs: [plan, liken, brand, kubernetes, toolchains, trust, userland]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['liken'].publish != 'none' }}
     uses: ./.github/workflows/component-liken.yaml
     with:
@@ -1415,7 +1430,7 @@ jobs:
   # check jobs. So it waits for the plan and each component's checks,
   # and not for the publish jobs, and it deploys while they run.
   site:
-    needs: [plan, toolchains, vulkan, astrometry, kubernetes, notices, trust, indi, weston, observatory-operator, astrophotography-operator, audio-operator, bluetooth-operator, brand, ci, vaapi, ffmpeg, display-operator, equipment-operator, firmware-operator, git-csi-driver, media-screen, library-operator, liken, mpv, media-operator, people-operator, per-node-csi-driver]
+    needs: [plan, toolchains, vulkan, astrometry, kubernetes, notices, trust, indi, weston, observatory-operator, astrophotography-operator, audio-operator, userland, bluetooth-operator, brand, ci, vaapi, ffmpeg, display-operator, equipment-operator, firmware-operator, git-csi-driver, media-screen, library-operator, liken, mpv, media-operator, people-operator, per-node-csi-driver]
     if: ${{ !failure() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PUBLISH == 'true' && needs.plan.outputs.site == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 20
@@ -1680,7 +1695,7 @@ jobs:
   # component and its version at this tag, whether this tag published
   # it or an earlier one did.
   record:
-    needs: [plan, toolchains, vulkan, vulkan-publish, astrometry, astrometry-publish, kubernetes, notices, trust, trust-publish, indi, indi-publish, weston, weston-publish, observatory-operator, observatory-operator-publish, astrophotography-operator, astrophotography-operator-publish, audio-operator, audio-operator-publish, bluetooth-operator, bluetooth-operator-publish, brand, ci, vaapi, vaapi-publish, ffmpeg, ffmpeg-publish, display-operator, display-operator-publish, equipment-operator, equipment-operator-publish, firmware-operator, firmware-operator-publish, git-csi-driver, git-csi-driver-publish, media-screen, library-operator, library-operator-publish, liken, liken-publish, mpv, mpv-publish, media-operator, media-operator-publish, people-operator, people-operator-publish, per-node-csi-driver, per-node-csi-driver-publish]
+    needs: [plan, toolchains, vulkan, vulkan-publish, astrometry, astrometry-publish, kubernetes, notices, trust, trust-publish, indi, indi-publish, weston, weston-publish, observatory-operator, observatory-operator-publish, astrophotography-operator, astrophotography-operator-publish, audio-operator, audio-operator-publish, userland, bluetooth-operator, bluetooth-operator-publish, brand, ci, vaapi, vaapi-publish, ffmpeg, ffmpeg-publish, display-operator, display-operator-publish, equipment-operator, equipment-operator-publish, firmware-operator, firmware-operator-publish, git-csi-driver, git-csi-driver-publish, media-screen, library-operator, library-operator-publish, liken, liken-publish, mpv, mpv-publish, media-operator, media-operator-publish, people-operator, people-operator-publish, per-node-csi-driver, per-node-csi-driver-publish]
     if: ${{ !cancelled() && github.ref_type == 'tag' && vars.PUBLISH == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10

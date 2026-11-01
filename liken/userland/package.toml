@@ -1,0 +1,8 @@
+# The BR2_EXTERNAL tree that buildroot builds the static programs from:
+# the OS's programs with os.config, and the daemons of the bluetoothd
+# image with bluetoothd.config. The OS and bluetooth-operator both
+# depend on it, so a change here rebuilds both, and a change elsewhere
+# in either one rebuilds only that one. It publishes nothing of its own.
+[package]
+name = "userland"
+license = "MIT"
