@@ -1,0 +1,80 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.6.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "metadata": {
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "author": "anchore",
+          "name": "syft",
+          "version": "1.55.0"
+        }
+      ]
+    },
+    "component": {
+      "bom-ref": "6a8f1c0e2d4b3a59",
+      "type": "file",
+      "name": "/k3s-data"
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "pkg:golang/github.com/k3s-io/containerd/v2@v2.3.4-k3s1?package-id=0a1b2c3d4e5f6071",
+      "type": "library",
+      "name": "github.com/k3s-io/containerd/v2",
+      "version": "v2.3.4-k3s1",
+      "purl": "pkg:golang/github.com/k3s-io/containerd/v2@v2.3.4-k3s1",
+      "properties": [
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/bin/containerd"
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "github.com/k3s-io/containerd/v2"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/golang.org/x/sync@v0.22.0?package-id=f12520e48c54dcb7",
+      "type": "library",
+      "name": "golang.org/x/sync",
+      "version": "v0.22.0",
+      "purl": "pkg:golang/golang.org/x/sync@v0.22.0",
+      "properties": [
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/bin/containerd"
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "github.com/k3s-io/containerd/v2"
+        }
+      ]
+    },
+    {
+      "bom-ref": "os:busybox@1.37.0",
+      "type": "operating-system",
+      "name": "busybox",
+      "version": "1.37.0"
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "pkg:golang/github.com/k3s-io/containerd/v2@v2.3.4-k3s1?package-id=0a1b2c3d4e5f6071",
+      "dependsOn": [
+        "pkg:golang/golang.org/x/sync@v0.22.0?package-id=f12520e48c54dcb7"
+      ]
+    }
+  ]
+}

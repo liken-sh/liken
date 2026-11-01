@@ -1,0 +1,70 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.6.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "metadata": {
+    "component": {
+      "bom-ref": "buildroot",
+      "name": "buildroot",
+      "version": "2026.11-git",
+      "type": "firmware"
+    },
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "name": "Buildroot generate-cyclonedx",
+          "version": "2026.11-git"
+        }
+      ]
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "e2fsprogs",
+      "type": "library",
+      "name": "e2fsprogs",
+      "version": "1.47.4",
+      "licenses": [
+        { "license": { "id": "GPL-2.0" } },
+        { "license": { "name": "MIT-like with advertising clause (libss and libet)" } }
+      ],
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://cdn.kernel.org/pub/linux/kernel/people/tytso/e2fsprogs/v1.47.4/e2fsprogs-1.47.4.tar.xz",
+          "hashes": [
+            { "alg": "SHA-256", "content": "fd5bf388cbdbe006a3d3b318d983b2948382440acc85a87f1e7d108653e8db0b" }
+          ]
+        }
+      ],
+      "properties": [{ "name": "BR_TYPE", "value": "target" }]
+    },
+    {
+      "bom-ref": "util-linux",
+      "type": "library",
+      "name": "util-linux",
+      "version": "2.41.5",
+      "properties": [{ "name": "BR_TYPE", "value": "target" }]
+    },
+    {
+      "bom-ref": "host-autoconf",
+      "type": "library",
+      "scope": "excluded",
+      "name": "autoconf",
+      "version": "2.73",
+      "properties": [{ "name": "BR_TYPE", "value": "host" }]
+    }
+  ],
+  "dependencies": [
+    { "ref": "buildroot", "dependsOn": ["e2fsprogs"] },
+    { "ref": "e2fsprogs", "dependsOn": ["host-autoconf", "util-linux"] }
+  ],
+  "vulnerabilities": [
+    {
+      "id": "CVE-2019-6293",
+      "analysis": { "state": "in_triage" },
+      "affects": [{ "ref": "host-autoconf" }]
+    }
+  ]
+}

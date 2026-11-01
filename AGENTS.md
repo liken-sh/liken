@@ -440,6 +440,22 @@ docker buildx imagetools inspect ghcr.io/liken-sh/<image>@<digest> --format '{{ 
 docker buildx imagetools inspect ghcr.io/liken-sh/<image>@<digest> --format '{{ json .Provenance }}'
 ```
 
+An OS release carries its SBOM, so a person or a scanner can read
+what a release ships without the tree it was built from. The SBOM is
+`sbom.cdx.json`, a CycloneDX document, beside the release's other
+files on `releases.liken.sh`, and `release.yaml` names it by its
+digest like every other artifact. `make release` writes it with
+`liken/releases/sbom/scan.sh`: syft, which `toolchains/images.toml`
+pins, scans the root filesystem that the image build staged, each
+image archive in it, the toolkit, and the programs that k3s writes
+out of its own binary. Then `liken/releases/sbom` merges those scans
+with each `pin.toml` and with buildroot's SBOM, and checks the result
+against the CycloneDX schema in `liken/releases/sbom/schema/`. When
+syft finds a program that a manifest or buildroot already names, the
+SBOM keeps the manifest's or buildroot's component, with its purl and
+license. The property `liken:source` of each component names its
+source, and the `compositions` state which lists are complete.
+
 The `releases` skill under `.agents/skills` holds the calendar scheme,
 what a tag releases, and how to pin a development build. Load it before
 tagging, publishing an image, or pinning a development build.

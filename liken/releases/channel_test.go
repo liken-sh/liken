@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -35,6 +36,7 @@ func bundledRelease(t *testing.T, version string) (string, string) {
 		"grub-boot.img":       "mbr stage bytes",
 		"grub-core.img":       "core image bytes",
 		"LICENSES.md":         "notices bytes",
+		"sbom.cdx.json":       "sbom bytes",
 	} {
 		if err := os.WriteFile(filepath.Join(src, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
@@ -46,7 +48,7 @@ func bundledRelease(t *testing.T, version string) (string, string) {
 		filepath.Join(src, "boot.cpio"), filepath.Join(src, "microcode.cpio"),
 		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"),
 		filepath.Join(src, "grub-boot.img"), filepath.Join(src, "grub-core.img"),
-		filepath.Join(src, "LICENSES.md"),
+		filepath.Join(src, "LICENSES.md"), filepath.Join(src, "sbom.cdx.json"),
 		channel, version, "1Gi", testComponents, &out)
 	if err != nil {
 		t.Fatal(err)
@@ -71,8 +73,13 @@ func TestBundleProducesAVerifiableRelease(t *testing.T) {
 	if release.Metadata.Name != "2026.07.11-001" {
 		t.Errorf("release name: %q", release.Metadata.Name)
 	}
-	if len(release.Artifacts) != 9 {
-		t.Fatalf("artifacts: %d", len(release.Artifacts))
+	var names []string
+	for _, a := range release.Artifacts {
+		names = append(names, a.Name)
+	}
+	want := []string{"vmlinuz", "liken.sqfs", "boot.cpio", "microcode.cpio", "liken", "systemd-bootx64.efi", "grub-boot.img", "grub-core.img", "LICENSES.md", "sbom.cdx.json"}
+	if !slices.Equal(names, want) {
+		t.Fatalf("artifacts: %v, want %v", names, want)
 	}
 	for _, a := range release.Artifacts {
 		f, err := os.Open(filepath.Join(channel, "2026.07.11-001", a.Name))
@@ -200,7 +207,7 @@ func TestChannelDocumentIgnoresForeignDirectories(t *testing.T) {
 func rebundleInto(t *testing.T, channel, version string) {
 	t.Helper()
 	src := t.TempDir()
-	for _, name := range []string{"vmlinuz", "liken.sqfs", "boot.cpio", "microcode.cpio", "liken", "systemd-bootx64.efi", "grub-boot.img", "grub-core.img", "LICENSES.md"} {
+	for _, name := range []string{"vmlinuz", "liken.sqfs", "boot.cpio", "microcode.cpio", "liken", "systemd-bootx64.efi", "grub-boot.img", "grub-core.img", "LICENSES.md", "sbom.cdx.json"} {
 		if err := os.WriteFile(filepath.Join(src, name), []byte(name+" bytes"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -210,7 +217,7 @@ func rebundleInto(t *testing.T, channel, version string) {
 		filepath.Join(src, "boot.cpio"), filepath.Join(src, "microcode.cpio"),
 		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"),
 		filepath.Join(src, "grub-boot.img"), filepath.Join(src, "grub-core.img"),
-		filepath.Join(src, "LICENSES.md"),
+		filepath.Join(src, "LICENSES.md"), filepath.Join(src, "sbom.cdx.json"),
 		channel, version, "1Gi", testComponents, &out)
 	if err != nil {
 		t.Fatal(err)
@@ -228,7 +235,7 @@ func TestBundleReplacesAPreviousAttempt(t *testing.T) {
 	}
 
 	src := t.TempDir()
-	for _, name := range []string{"vmlinuz", "liken.sqfs", "boot.cpio", "microcode.cpio", "liken", "systemd-bootx64.efi", "grub-boot.img", "grub-core.img", "LICENSES.md"} {
+	for _, name := range []string{"vmlinuz", "liken.sqfs", "boot.cpio", "microcode.cpio", "liken", "systemd-bootx64.efi", "grub-boot.img", "grub-core.img", "LICENSES.md", "sbom.cdx.json"} {
 		if err := os.WriteFile(filepath.Join(src, name), []byte(name), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -237,7 +244,7 @@ func TestBundleReplacesAPreviousAttempt(t *testing.T) {
 		filepath.Join(src, "boot.cpio"), filepath.Join(src, "microcode.cpio"),
 		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"),
 		filepath.Join(src, "grub-boot.img"), filepath.Join(src, "grub-core.img"),
-		filepath.Join(src, "LICENSES.md"),
+		filepath.Join(src, "LICENSES.md"), filepath.Join(src, "sbom.cdx.json"),
 		channel, "2026.07.11-001", "1Gi", testComponents, io.Discard)
 	if err != nil {
 		t.Fatal(err)
@@ -249,7 +256,7 @@ func TestBundleReplacesAPreviousAttempt(t *testing.T) {
 
 func TestBundleRefusesAMissingArtifact(t *testing.T) {
 	if err := Bundle("no-such-vmlinuz", "no-such-sqfs", "no-such-cpio", "no-such-ucode", "no-such-cli", "no-such-menu",
-		"no-such-mbr", "no-such-core", "no-such-licenses",
+		"no-such-mbr", "no-such-core", "no-such-licenses", "no-such-sbom",
 		t.TempDir(), "2026.07.11-001", "1Gi", testComponents, io.Discard); err == nil {
 		t.Error("bundling artifacts that don't exist must fail")
 	}
@@ -261,7 +268,7 @@ func TestBundleRefusesAReleaseThatOutgrowsItsSlots(t *testing.T) {
 	// fixture's artifacts are tiny, so a slot size below the fixed
 	// headroom trips the check. Nothing may remain in the channel.
 	src := t.TempDir()
-	for _, name := range []string{"vmlinuz", "liken.sqfs", "boot.cpio", "microcode.cpio", "liken", "systemd-bootx64.efi", "grub-boot.img", "grub-core.img", "LICENSES.md"} {
+	for _, name := range []string{"vmlinuz", "liken.sqfs", "boot.cpio", "microcode.cpio", "liken", "systemd-bootx64.efi", "grub-boot.img", "grub-core.img", "LICENSES.md", "sbom.cdx.json"} {
 		if err := os.WriteFile(filepath.Join(src, name), []byte(name), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -271,7 +278,7 @@ func TestBundleRefusesAReleaseThatOutgrowsItsSlots(t *testing.T) {
 		filepath.Join(src, "boot.cpio"), filepath.Join(src, "microcode.cpio"),
 		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"),
 		filepath.Join(src, "grub-boot.img"), filepath.Join(src, "grub-core.img"),
-		filepath.Join(src, "LICENSES.md"),
+		filepath.Join(src, "LICENSES.md"), filepath.Join(src, "sbom.cdx.json"),
 		channel, "2026.07.11-001", "32Mi", testComponents, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "outgrow") {
 		t.Fatalf("an oversized release must be refused by the budget: %v", err)
@@ -287,7 +294,7 @@ func TestBundleRefusesAMalformedVersion(t *testing.T) {
 	// to fetch. Nothing may land in the channel under the bad name.
 	channel := t.TempDir()
 	err := Bundle("vmlinuz", "liken.sqfs", "boot.cpio", "microcode.cpio", "liken", "menu.efi",
-		"grub-boot.img", "grub-core.img", "LICENSES.md",
+		"grub-boot.img", "grub-core.img", "LICENSES.md", "sbom.cdx.json",
 		channel, "1.2.3", "1Gi", testComponents, io.Discard)
 	if err == nil {
 		t.Fatal("a version outside the grammar must be refused")

@@ -122,8 +122,8 @@ usage:
       console= argument to every entry; the machines keep it
       permanently.
 
-  liken bundle [-slot-size 1Gi] <vmlinuz> <liken.sqfs> <boot.cpio> <microcode.cpio> <liken-cli> <systemd-boot.efi> <grub-boot.img> <grub-core.img> <licenses.md> <channel-dir> <version> [component=version ...]
-      Lay out a release: copy the nine files into the channel and
+  liken bundle [-slot-size 1Gi] <vmlinuz> <liken.sqfs> <boot.cpio> <microcode.cpio> <liken-cli> <systemd-boot.efi> <grub-boot.img> <grub-core.img> <licenses.md> <sbom.cdx.json> <channel-dir> <version> [component=version ...]
+      Lay out a release: copy the ten files into the channel and
       write the release.yaml that names each one by its digest. The
       version is a calendar date and serial (2026.07.11-001); the
       component=version pairs record which upstreams shipped inside,
@@ -268,18 +268,18 @@ func run(args []string) error {
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
-		if fs.NArg() < 11 {
-			return fmt.Errorf("usage: liken bundle [-slot-size 1Gi] <vmlinuz> <liken.sqfs> <boot.cpio> <microcode.cpio> <liken-cli> <systemd-boot.efi> <grub-boot.img> <grub-core.img> <licenses.md> <channel-dir> <version> [component=version ...]")
+		if fs.NArg() < 12 {
+			return fmt.Errorf("usage: liken bundle [-slot-size 1Gi] <vmlinuz> <liken.sqfs> <boot.cpio> <microcode.cpio> <liken-cli> <systemd-boot.efi> <grub-boot.img> <grub-core.img> <licenses.md> <sbom.cdx.json> <channel-dir> <version> [component=version ...]")
 		}
 		var components []machine.ReleaseComponent
-		for _, arg := range fs.Args()[11:] {
+		for _, arg := range fs.Args()[12:] {
 			name, version, ok := strings.Cut(arg, "=")
 			if !ok || name == "" || version == "" {
 				return fmt.Errorf("component %q must be name=version", arg)
 			}
 			components = append(components, machine.ReleaseComponent{Name: name, Version: version})
 		}
-		return releases.Bundle(fs.Arg(0), fs.Arg(1), fs.Arg(2), fs.Arg(3), fs.Arg(4), fs.Arg(5), fs.Arg(6), fs.Arg(7), fs.Arg(8), fs.Arg(9), fs.Arg(10), *slotSize, components, os.Stdout)
+		return releases.Bundle(fs.Arg(0), fs.Arg(1), fs.Arg(2), fs.Arg(3), fs.Arg(4), fs.Arg(5), fs.Arg(6), fs.Arg(7), fs.Arg(8), fs.Arg(9), fs.Arg(10), fs.Arg(11), *slotSize, components, os.Stdout)
 	case "index":
 		fs := flag.NewFlagSet("index", flag.ContinueOnError)
 		source := fs.String("source", "", "the channel's base URL, where the pages will be served")

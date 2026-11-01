@@ -1,0 +1,181 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.6.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "metadata": {
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "author": "anchore",
+          "name": "syft",
+          "version": "1.55.0"
+        }
+      ]
+    },
+    "component": {
+      "bom-ref": "f6f0483d207486c8",
+      "type": "file",
+      "name": "/root-fs"
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "pkg:golang/github.com/k3s-io/k3s@v1.37.1?package-id=d281714460f68935",
+      "type": "library",
+      "name": "github.com/k3s-io/k3s",
+      "version": "v1.37.1",
+      "purl": "pkg:golang/github.com/k3s-io/k3s@v1.37.1",
+      "properties": [
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/bin/k3s"
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "github.com/k3s-io/k3s"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/golang.org/x/sync@v0.22.0?package-id=f12520e48c54dcb7",
+      "type": "library",
+      "name": "golang.org/x/sync",
+      "version": "v0.22.0",
+      "purl": "pkg:golang/golang.org/x/sync@v0.22.0",
+      "properties": [
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/bin/k3s"
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "github.com/k3s-io/k3s"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/stdlib@1.26.8?package-id=dff74e7ab8d6bee5",
+      "type": "library",
+      "name": "stdlib",
+      "version": "go1.26.8",
+      "purl": "pkg:golang/stdlib@1.26.8",
+      "properties": [
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/bin/k3s"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/github.com/liken-sh/liken/liken@v0.0.0-20261101170642-9fd142ff982f?package-id=b2a89c489ac4a1d0",
+      "type": "library",
+      "name": "github.com/liken-sh/liken/liken",
+      "version": "v0.0.0-20261101170642-9fd142ff982f",
+      "purl": "pkg:golang/github.com/liken-sh/liken/liken@v0.0.0-20261101170642-9fd142ff982f",
+      "properties": [
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/liken"
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "github.com/liken-sh/liken/liken"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:golang/github.com/vishvananda/netlink@v1.3.1?package-id=ba322dd0cd2272cd",
+      "type": "library",
+      "name": "github.com/vishvananda/netlink",
+      "version": "v1.3.1",
+      "purl": "pkg:golang/github.com/vishvananda/netlink@v1.3.1",
+      "properties": [
+        {
+          "name": "syft:package:type",
+          "value": "go-module"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/liken"
+        },
+        {
+          "name": "syft:metadata:mainModule",
+          "value": "github.com/liken-sh/liken/liken"
+        }
+      ]
+    },
+    {
+      "bom-ref": "os:liken@2026.11.01-901",
+      "type": "operating-system",
+      "name": "liken",
+      "version": "2026.11.01-901"
+    },
+    {
+      "bom-ref": "1b6e9a0fb701da33",
+      "type": "file",
+      "name": "/root-fs/bin/k3s",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "92b94582eb7b34a8cf532e6006842b9ed215a6783cf56a3dd6271fd35243b2c0"
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:generic/104_quad_8?package-id=b7ee42f9c8473e71",
+      "type": "library",
+      "name": "104_quad_8",
+      "version": "UNKNOWN",
+      "licenses": [
+        {
+          "license": {
+            "name": "GPL v2"
+          }
+        }
+      ],
+      "purl": "pkg:generic/104_quad_8",
+      "properties": [
+        {
+          "name": "syft:package:type",
+          "value": "linux-kernel-module"
+        },
+        {
+          "name": "syft:location:0:path",
+          "value": "/lib/modules/7.3.1-070301-generic/kernel/drivers/counter/104-quad-8.ko.zst"
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "pkg:golang/github.com/k3s-io/k3s@v1.37.1?package-id=d281714460f68935",
+      "dependsOn": [
+        "pkg:golang/golang.org/x/sync@v0.22.0?package-id=f12520e48c54dcb7",
+        "pkg:golang/stdlib@1.26.8?package-id=dff74e7ab8d6bee5"
+      ]
+    },
+    {
+      "ref": "pkg:golang/github.com/liken-sh/liken/liken@v0.0.0-20261101170642-9fd142ff982f?package-id=b2a89c489ac4a1d0",
+      "dependsOn": [
+        "pkg:golang/github.com/vishvananda/netlink@v1.3.1?package-id=ba322dd0cd2272cd"
+      ]
+    }
+  ]
+}

@@ -191,6 +191,11 @@ latest_image() {
         latest_tag="$version"
         note="the newest release of sigstore/cosign"
         ;;
+    syft)
+        version="$(github_api repos/anchore/syft/releases/latest | jq -r .tag_name)" || version=""
+        latest_tag="$version"
+        note="the newest release of anchore/syft"
+        ;;
     corrosion)
         latest_tag="$(tags "$repo" | newest_matching '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]+$')" || latest_tag=""
         note="the newest release of liken-sh/corrosion"

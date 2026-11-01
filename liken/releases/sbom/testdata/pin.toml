@@ -1,0 +1,24 @@
+# A manifest with two shipped files and one file that only the build
+# reads, in the form of liken/grub/pin.toml.
+
+[k3s]
+version = "v1.37.1+k3s1"
+url = "https://github.com/k3s-io/k3s/releases/download/v1.37.1%2Bk3s1/k3s"
+sha256 = "92b94582eb7b34a8cf532e6006842b9ed215a6783cf56a3dd6271fd35243b2c0"
+purl = "pkg:github/k3s-io/k3s@v1.37.1%2Bk3s1"
+license = "Apache-2.0"
+
+[grub2-common]
+version = "2.14-2ubuntu3"
+url = "http://archive.ubuntu.com/ubuntu/pool/main/g/grub2/grub2-common_2.14-2ubuntu3_amd64.deb"
+sha256 = "5d45c86963028b5d027d65c9126580742f8924195f71265144dc7ea6422acdbd"
+purl = "pkg:deb/ubuntu/grub2-common@2.14-2ubuntu3?arch=amd64"
+license = "GPL-3.0-or-later"
+scope = "excluded"
+
+[linux-modules]
+version = "7.3.1"
+url = "https://kernel.ubuntu.com/mainline/v7.3.1/amd64/linux-modules-7.3.1-070301-generic_7.3.1-070301.202610301300_amd64.deb"
+sha256 = "7f9a44175036fd63b01ec317ccace29e184261a794d39046902439458fb18c2f"
+purl = "pkg:generic/linux-modules@7.3.1?download_url=https://kernel.ubuntu.com/mainline/v7.3.1/amd64/linux-modules-7.3.1-070301-generic_7.3.1-070301.202610301300_amd64.deb&checksum=sha256:7f9a44175036fd63b01ec317ccace29e184261a794d39046902439458fb18c2f"
+license = "GPL-2.0-only WITH Linux-syscall-note"

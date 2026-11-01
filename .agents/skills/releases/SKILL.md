@@ -1,6 +1,6 @@
 ---
 name: releases
-description: How the components of the liken repository version and release. Covers the CalVer scheme, the one release tag, which components a tag publishes, the development builds on main, the pinned base images, each image's SBOM, provenance, and cosign signature and how to verify them, pinning a development build, and the liken OS channel publish. Use when tagging, publishing an image, verifying a published image, pinning a development build, or reasoning about a component's version.
+description: How the components of the liken repository version and release. Covers the CalVer scheme, the one release tag, which components a tag publishes, the development builds on main, the pinned base images, each image's SBOM, provenance, and cosign signature and how to verify them, the OS release's SBOM, pinning a development build, and the liken OS channel publish. Use when tagging, publishing an image, verifying a published image, pinning a development build, or reasoning about a component's version.
 ---
 
 # Releases and development builds
@@ -169,7 +169,7 @@ target beside the repository's.
   names the component's images at the same version, so a cluster that
   follows the artifact moves the manifests and the images in one step.
 * The OS goes to the channel at `https://releases.liken.sh`, through
-  `liken/releases/publish.sh`.
+  `liken/releases/publish.sh`, with its SBOM.
 
 A published version never changes. A rerun of a failed tag pushes only
 what the failed run did not.
@@ -199,8 +199,8 @@ ref as the signer, and Rekor records the signature. cosign pushes the
 signature to the image's own ghcr.io repository, as an OCI referrer
 of the digest, or under the tag `sha256-<digest>` on a registry that
 has no referrers API. Only the publish job
-of a component with images holds `id-token: write`. A dry run builds
-the same attestations and signs nothing.
+of a component with images holds `id-token: write`. A dry run builds the
+same attestations and signs nothing.
 
 A signature that fails fails the publish, before `:latest` moves and
 before the deploy artifact names the image. The rerun finds the
@@ -272,6 +272,49 @@ let a session tell the kinds of build apart:
 A tag releases the OS when any of its paths changed since its previous
 release, whatever the tag was meant for. An OS release reboots every
 machine in a fleet that follows releases.
+
+## The OS release's SBOM
+
+Each OS release carries `sbom.cdx.json`, a CycloneDX SBOM, at
+`https://releases.liken.sh/<version>/sbom.cdx.json`. `release.yaml`
+names it by its digest like every other artifact, so it is on each
+machine's boot slot too. `make release` writes it before the bundle,
+with `liken/releases/sbom/scan.sh`, from three sources:
+
+* each `pin.toml` of a pin that the release ships: the kernel, k3s,
+  the firmware, and the rest, each with its purl, version, sha256,
+  license, and download URL. An entry with `scope = "excluded"`,
+  which only the build reads, keeps that scope;
+* buildroot's SBOM, `liken/userland/dist/sbom.cdx.json`, for the
+  static programs and every package they link, host packages with
+  the scope `excluded`;
+* syft, pinned in `toolchains/images.toml`, over the root filesystem
+  that the image build staged, each image archive in it, the toolkit,
+  and the programs that k3s writes out of its own binary. This is
+  where liken's own Go programs and their modules, and k3s's
+  containerd, runc, and CNI plugins, come from.
+
+`liken/releases/sbom` merges them. A program that syft finds at a
+path that `scan.sh` claims for a manifest or a buildroot package,
+such as `/bin/k3s`, keeps the manifest's or buildroot's component,
+and the modules it links depend on that component. The subject,
+`metadata.component`, is the release at its CalVer version. The
+`compositions` state `complete` for buildroot's packages and for each
+of liken's own Go programs, and `incomplete` for the release as a
+whole and for k3s, because syft identifies only programs that record
+what they contain. The merge checks the document against the
+CycloneDX schema in `liken/releases/sbom/schema/` before it writes
+the file. The lab's working-tree channel carries an SBOM of the
+manifests and buildroot alone, with no syft scan.
+
+Count the components by source, and read one:
+
+```sh
+sbom=releases/dist/<version>/sbom.cdx.json
+jq -r '.components[] | .properties[] | select(.name == "liken:source") | .value' "$sbom" | sort | uniq -c
+jq '.components[] | select(.name == "k3s")' "$sbom"
+jq '.compositions' "$sbom"
+```
 
 ## Rules
 

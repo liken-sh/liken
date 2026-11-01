@@ -3,7 +3,7 @@ package releases
 // This file bundles a release of liken: the artifacts and the
 // document that every fleet, everywhere, upgrades from.
 //
-// The bundle holds nine artifacts. vmlinuz, the system image
+// The bundle holds ten artifacts. vmlinuz, the system image
 // (liken.sqfs, the OS as a read-only filesystem that a machine mounts
 // as its root), and the boot archive (boot.cpio, the small initramfs
 // that the boot loader stages) are the operating system, with no
@@ -26,7 +26,13 @@ package releases
 // binaries, and the license terms of those projects require the
 // notices to travel with the bytes. So the notices are an artifact
 // like any other, and use the same channel, sticks, and slots the
-// binaries do. Because nothing here embeds a deployment, every digest
+// binaries do. sbom.cdx.json is the CycloneDX SBOM of the release,
+// which releases/sbom writes from each pin's manifest, buildroot's
+// SBOM, and syft's scans of the build. It is an artifact for the same
+// reason as the notices: the document names it by its digest, so a
+// reader who trusts the document trusts the SBOM, and a machine
+// carries the list of what it runs on its own slot. Because nothing
+// here embeds a deployment, every digest
 // stays stable for a given source tree. This makes it publishable on
 // a release page, and the same for everyone.
 //
@@ -69,7 +75,7 @@ const slotHeadroom = 64 << 20
 // slot at install and at upgrade, so their sum plus slotHeadroom
 // must fit, and a release that outgrows its slots fails right here,
 // at build time, rather than surprising someone at install time.
-func Bundle(vmlinuz, systemImage, bootArchive, microcode, cli, bootMenu, grubBoot, grubCore, licenses, channelDir, version, slotSize string, components []machine.ReleaseComponent, out io.Writer) error {
+func Bundle(vmlinuz, systemImage, bootArchive, microcode, cli, bootMenu, grubBoot, grubCore, licenses, sbom, channelDir, version, slotSize string, components []machine.ReleaseComponent, out io.Writer) error {
 	if err := api.ValidVersion(version); err != nil {
 		return err
 	}
@@ -100,6 +106,7 @@ func Bundle(vmlinuz, systemImage, bootArchive, microcode, cli, bootMenu, grubBoo
 		{grubBoot, "grub-boot.img"},
 		{grubCore, "grub-core.img"},
 		{licenses, "LICENSES.md"},
+		{sbom, "sbom.cdx.json"},
 	}
 	document := fmt.Sprintf("apiVersion: liken.sh/v1alpha1\nkind: Release\nmetadata:\n  name: %s\nartifacts:\n", version)
 	var slotPayload uint64

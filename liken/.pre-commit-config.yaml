@@ -13,11 +13,14 @@ repos:
       # environment block is exactly 1024 bytes, padded with '#', with
       # no final newline). So the whitespace fixers must leave them
       # alone. A patch is byte-exact too: the context line for an empty
-      # line is a single space, and git refuses a patch without it.
+      # line is a single space, and git refuses a patch without it. The
+      # CycloneDX schema is the bytes that its release tag serves, which
+      # releases/sbom/schema/latest.sh writes, so a fixer leaves those
+      # alone too.
       - id: trailing-whitespace
-        exclude: /testdata/|\.patch$
+        exclude: /testdata/|\.patch$|^releases/sbom/schema/
       - id: end-of-file-fixer
-        exclude: /testdata/
+        exclude: /testdata/|^releases/sbom/schema/
       - id: check-yaml
         # Kubernetes manifests are conventionally multi-document
         # streams (machine-operator/manifests/machine-operator.yaml

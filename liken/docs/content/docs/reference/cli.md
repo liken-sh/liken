@@ -246,7 +246,7 @@ screen: the menu and all the messages also go to that port.
 
 ## `liken bundle`
 
-    liken bundle [-slot-size 1Gi] <vmlinuz> <liken.sqfs> <boot.cpio> <microcode.cpio> <liken-cli> <systemd-boot.efi> <grub-boot.img> <grub-core.img> <licenses.md> <channel-dir> <version> [component=version ...]
+    liken bundle [-slot-size 1Gi] <vmlinuz> <liken.sqfs> <boot.cpio> <microcode.cpio> <liken-cli> <systemd-boot.efi> <grub-boot.img> <grub-core.img> <licenses.md> <sbom.cdx.json> <channel-dir> <version> [component=version ...]
 
 Lays out a release: it copies the artifacts into the channel and
 writes the `release.yaml` that names each one by its digest. The

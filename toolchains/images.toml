@@ -41,6 +41,12 @@ cosign = "ghcr.io/sigstore/cosign/cosign:v3.1.4@sha256:0f06154836d2de34f887a5c27
 # that writes each SBOM would change with no change to the tree.
 # ci/sign.go reads this line.
 buildkit-syft-scanner = "docker/buildkit-syft-scanner:1.12.1@sha256:873a7458c3c8ac8e32c7b796c10e1600b07b963d2aa000a72a2d97aaaa2d6315"
+# The SBOM generator that the OS release runs over its root
+# filesystem, its image archives, its toolkit, and the programs inside
+# k3s. No Dockerfile builds from it. liken/releases/Makefile runs it
+# with docker or podman and reads this line, so the program that
+# writes the release's SBOM changes only with a commit.
+syft = "anchore/syft:v1.55.0@sha256:4cc92b64ca74ffca4c94d4c8fcc01f217731375300be14d0b6eeb2e82eaa110a"
 
 # The images that a manifest, a guide, a skill, or a test names by
 # tag. A check in ci/ fails when one of those files names an image

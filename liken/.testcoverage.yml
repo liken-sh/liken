@@ -126,6 +126,11 @@ override:
   # listener.
   - path: ^releases$
     threshold: 84
+  # The SBOM merge of a release: pure functions over fixture SBOMs and
+  # a fixture manifest. What stays untested is main's exit and the
+  # errors of a write that the disk refuses.
+  - path: ^releases/sbom$
+    threshold: 88
   # The scaffold: the interview and the templates, and the tests
   # exercise them with scripted answers. What stays untested is a
   # scattering of I/O error returns.

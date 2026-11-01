@@ -30,6 +30,8 @@ fleet](/docs/guides/upgrade/) gives the steps that use it.
       grub-boot.img            the BIOS boot loader's first stage
       grub-core.img            the BIOS boot loader's second stage
       LICENSES.md              third-party license notices
+      sbom.cdx.json            the CycloneDX SBOM: every component in
+                               the release
       notes.md                 what changed in this release
       coverage.html            the test coverage of the tree it was built from
     sources/                   source mirrors for GPL and LGPL components,
@@ -105,6 +107,31 @@ stays one small file however many releases exist. The digests here are
 a convenience, and not an authority. A digest that the channel served
 proves nothing by itself, which is why you pin the digest in your
 own Cluster.
+
+## The SBOM
+
+`<version>/sbom.cdx.json` is a CycloneDX SBOM of the release. Give it
+to a scanner such as Trivy or Grype to learn which advisories apply
+to a release before a fleet adopts it. It lists:
+
+* each file that the release takes from another project, such as the
+  kernel, k3s, and the firmware, with its version, purl, sha256,
+  license, and download URL;
+* the static programs that buildroot builds, such as `mke2fs` and
+  `mount.nfs`, and every package that they link;
+* the Go programs that syft finds in the system image, in the
+  toolkit, and inside k3s, and the modules that each one links.
+
+The property `liken:source` of each component names where the entry
+came from: `manifest`, `buildroot`, or `syft`. The `compositions`
+section says which lists are complete. The list of everything in the
+release is incomplete, because a program that records nothing about
+what it links, such as a static C program, shows only when its own
+build wrote an SBOM.
+
+`release.yaml` lists the SBOM with its digest, like every other
+artifact, so each machine carries the SBOM of the release it runs on
+its boot slot. A release published before the SBOM existed has none.
 
 ## The notes
 

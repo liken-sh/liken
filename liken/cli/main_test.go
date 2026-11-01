@@ -96,7 +96,7 @@ func TestRunPacksADeploymentLayer(t *testing.T) {
 func bundledChannel(t *testing.T, version string, components ...string) string {
 	t.Helper()
 	src := t.TempDir()
-	for _, name := range []string{"vmlinuz", "liken.sqfs", "boot.cpio", "microcode.cpio", "liken", "systemd-bootx64.efi", "grub-boot.img", "grub-core.img", "LICENSES.md"} {
+	for _, name := range []string{"vmlinuz", "liken.sqfs", "boot.cpio", "microcode.cpio", "liken", "systemd-bootx64.efi", "grub-boot.img", "grub-core.img", "LICENSES.md", "sbom.cdx.json"} {
 		if err := os.WriteFile(filepath.Join(src, name), []byte(name+" bytes"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -106,7 +106,7 @@ func bundledChannel(t *testing.T, version string, components ...string) string {
 		filepath.Join(src, "boot.cpio"), filepath.Join(src, "microcode.cpio"),
 		filepath.Join(src, "liken"), filepath.Join(src, "systemd-bootx64.efi"),
 		filepath.Join(src, "grub-boot.img"), filepath.Join(src, "grub-core.img"),
-		filepath.Join(src, "LICENSES.md"), channel, version}
+		filepath.Join(src, "LICENSES.md"), filepath.Join(src, "sbom.cdx.json"), channel, version}
 	if err := run(append(args, components...)); err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestRunIndexesAChannel(t *testing.T) {
 
 func TestRunRefusesAMalformedComponent(t *testing.T) {
 	err := run([]string{"bundle", "vmlinuz", "liken.sqfs", "boot.cpio", "microcode.cpio", "liken", "menu.efi",
-		"grub-boot.img", "grub-core.img", "LICENSES.md",
+		"grub-boot.img", "grub-core.img", "LICENSES.md", "sbom.cdx.json",
 		t.TempDir(), "2026.07.11-001", "kernel"})
 	if err == nil || !strings.Contains(err.Error(), "name=version") {
 		t.Errorf("a component without name=version must be refused: %v", err)

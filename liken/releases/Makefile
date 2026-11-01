@@ -33,6 +33,12 @@
 #                                         the release workflow
 #                                         publishes to the channel
 #                                         under sources/)
+#   releases/dist/<version>/sbom.cdx.json the CycloneDX SBOM of the
+#                                         release, which sbom/scan.sh
+#                                         writes from each pin's
+#                                         manifest, buildroot's SBOM,
+#                                         and syft's scans of the
+#                                         build
 #   releases/dist/<version>/release.yaml  the document naming each
 #                                         artifact by sha256 digest,
 #                                         and recording the versions
@@ -142,13 +148,16 @@ build:
 
 # This is the release: the build, bundled. The toolkit in the bundle
 # is the same binary that lays out the bundle, a circularity that
-# comes with any bootstrapping tool. The report ends with the catalog
-# entry that a deployment commits to its Cluster to adopt this
-# release.
+# comes with any bootstrapping tool. The SBOM is written before the
+# bundle, from the root filesystem that the build staged, so the
+# release document names it by its digest. The report ends with the
+# catalog entry that a deployment commits to its Cluster to adopt
+# this release.
 release: build
 	$(MAKE) -C ../systemd-boot
 	$(MAKE) -C ../grub
 	$(MAKE) -C ../licensing
+	sbom/scan.sh $(VERSION) $(BUILD)/sbom.cdx.json $(BUILD)/generic/root $(BUILD)/cli/liken
 	$(BUILD)/cli/liken bundle -slot-size $(SLOT_SIZE) \
 		../kernel/dist/$(KERNEL_VERSION)/vmlinuz \
 		$(BUILD)/generic/liken.sqfs \
@@ -159,6 +168,7 @@ release: build
 		../grub/dist/$(GRUB_VERSION)/grub-boot.img \
 		../grub/dist/$(GRUB_VERSION)/grub-core.img \
 		../licensing/dist/LICENSES.md \
+		$(BUILD)/sbom.cdx.json \
 		dist $(VERSION) \
 		kernel=$(KERNEL_VERSION) \
 		k3s=$(K3S_VERSION) \

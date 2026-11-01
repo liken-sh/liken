@@ -59,6 +59,7 @@ The report has these sources:
 |---|---|
 | `liken/<domain>/latest.sh` | the OS domains, steps 2 to 4 |
 | `liken/dev-cluster/firmware/capsule/latest.sh` | edk2 and the Ubuntu snapshot of the lab's capsule firmware builder, which builds on the `ubuntu` entry of `toolchains/images.toml`; it has no `--bump`, because each move changes the compiler that builds the firmware, so edit `build.sh` or the `Dockerfile` by hand and boot the lab with `FIRMWARE=capsule`, and do the same after a move of the `ubuntu` entry |
+| `liken/releases/sbom/schema/latest.sh` | the CycloneDX schema that `liken/releases/sbom` checks the OS release's SBOM against; the bump writes the schema files of the newest specification release, and a new minor version changes the `specVersion` that the SBOM states, so run `make -C liken test-go` after it |
 | `toolchains/latest.sh` | each image in `toolchains/images.toml`, Go and Rust, each Go module and crate that is behind |
 | `toolchains/cargo-auditable/latest.sh` | cargo-auditable, which every Rust image builds with, step 5c |
 | `vulkan/latest.sh` | the Debian snapshot of the bases and `astrometry`, step 5 |
@@ -365,7 +366,7 @@ the version and the digest from the release's `.sha256` file into
 Then build each image whose Dockerfile runs `cargo auditable build`,
 and check that syft still lists the crates of one of them:
 `docker run --rm -v /var/run/docker.sock:/var/run/docker.sock
-anchore/syft:latest <image> -o json -q | jq '[.artifacts[] |
+anchore/syft:v1.55.0 <image> -o json -q | jq '[.artifacts[] |
 select(.type == "rust-crate")] | length'` prints more than 0. The Rust
 images are tracked components, so no revision changes.
 

@@ -448,6 +448,10 @@ smoke-bios: $(KERNEL_DIST)/vmlinuz $(IMAGE_DIR)/install.cpio kubeconfig
 # the bundle as the lab's substitute, and it sorts below any real
 # release cut the same day. The build removes yesterday's substitute
 # first, so the channel only ever holds one.
+#
+# The substitute's SBOM lists what the pins' manifests and buildroot
+# name, with no syft scan, so a rebuild of the lab stays quick.
+# releases/sbom/scan.sh gives the difference.
 LAB_VERSION := $(shell date +%Y.%m.%d)-000
 
 $(IMAGE_DIR)/channel/$(LAB_VERSION)/release.yaml: $(SYSTEM_IMAGE) $(BOOT_ARCHIVE) \
@@ -455,13 +459,16 @@ $(IMAGE_DIR)/channel/$(LAB_VERSION)/release.yaml: $(SYSTEM_IMAGE) $(BOOT_ARCHIVE
 		cli/dist/liken $(LIKEN_VERSION_STAMP) \
 		$(SYSTEMDBOOT_DIST)/systemd-bootx64.efi \
 		$(GRUB_DIST)/grub-boot.img $(GRUB_DIST)/grub-core.img \
-		licensing/dist/LICENSES.md
+		licensing/dist/LICENSES.md \
+		$(USERLAND_DIST)/sbom.cdx.json $(wildcard */pin.toml) ../trust/pin.toml \
+		releases/sbom/scan.sh $(wildcard releases/sbom/*.go releases/sbom/schema/*.json)
 	rm -rf $(IMAGE_DIR)/channel
+	releases/sbom/scan.sh $(LAB_VERSION) $(IMAGE_DIR)/sbom.cdx.json
 	cli/dist/liken bundle $(KERNEL_DIST)/vmlinuz $(SYSTEM_IMAGE) $(BOOT_ARCHIVE) \
 		$(MICROCODE_DIST)/microcode.cpio \
 		cli/dist/liken $(SYSTEMDBOOT_DIST)/systemd-bootx64.efi \
 		$(GRUB_DIST)/grub-boot.img $(GRUB_DIST)/grub-core.img \
-		licensing/dist/LICENSES.md \
+		licensing/dist/LICENSES.md $(IMAGE_DIR)/sbom.cdx.json \
 		$(IMAGE_DIR)/channel $(LAB_VERSION)
 
 # The install image is for the lab's fast -kernel boots. It composes
