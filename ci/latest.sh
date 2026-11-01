@@ -6,8 +6,9 @@
 # ci/ writes every workflow from its templates, so the templates and
 # the composite action in .github/actions/build-setup hold every
 # GitHub Action that CI runs. The generator holds the prek version and
-# the digest of its archive that every prek job installs and the Trivy version that each publish
-# job and the trivy job install, and each .pre-commit-config.yaml holds
+# the digest of its archive that every prek job installs, and the Trivy
+# version and the digest of its archive that each publish job, the
+# trivy-db job, and the trivy job install. Each .pre-commit-config.yaml holds
 # the revision of each hook repository. The flux action is not here,
 # because its version follows liken/flux/VERSION.
 #
@@ -30,7 +31,9 @@
 #   ci/latest.sh --bump prek           move the prek version and the
 #                                      digest of its archive; needs gh,
 #                                      which verifies the attestation
-#   ci/latest.sh --bump trivy          move the Trivy version
+#   ci/latest.sh --bump trivy          move the Trivy version and the
+#                                      digest of its archive; needs
+#                                      docker, which runs cosign
 #   ci/latest.sh --bump hook:<repo>    move one hook repository, such as
 #                                      pre-commit/pre-commit-hooks, in
 #                                      every .pre-commit-config.yaml
@@ -116,7 +119,7 @@ report() {
     trivy="$(pinned_trivy)"
     trivy_latest="$(newest_release aquasecurity/trivy)" || trivy_latest=""
     trivy_latest="${trivy_latest#v}"
-    row trivy "$trivy" "${trivy_latest:-?}" - - - "trivyVersion in ci/trivy.go"
+    row trivy "$trivy" "${trivy_latest:-?}" - - - "trivyVersion and trivySHA256 in ci/trivy.go"
 
     hooks >"$work/hooks"
     while read -r repo; do
@@ -166,8 +169,32 @@ trivy)
     new="${new#v}"
     [[ "$new" != null ]] || new=""
     bump_needed trivy "$old" "$new" || exit 0
+    # Each install step checks Trivy's archive against trivySHA256, so
+    # the bump pins the digest of the archive. Trivy signs each release
+    # asset keylessly with sigstore and publishes the bundle beside it.
+    # cosign, from the image that toolchains/images.toml names, accepts
+    # the bundle only when Fulcio certified the signer as the
+    # reusable-release workflow of aquasecurity/trivy at the release's
+    # tag, from GitHub's OIDC issuer. The container runs as the calling
+    # user, and HOME points at a writable directory for the sigstore
+    # trust root that cosign fetches and caches.
+    require_tools docker
+    asset="trivy_${new}_Linux-64bit.tar.gz"
+    base="https://github.com/aquasecurity/trivy/releases/download/v$new"
+    identity="https://github.com/aquasecurity/trivy/.github/workflows/reusable-release.yaml@refs/tags/v$new"
+    fetch_file "$base/$asset" "$work/$asset"
+    fetch_file "$base/$asset.sigstore.json" "$work/$asset.sigstore.json"
+    docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+        -v "$work:/work:ro" "$(image_of cosign)" verify-blob \
+        --bundle "/work/$asset.sigstore.json" \
+        --certificate-identity "$identity" \
+        --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+        "/work/$asset" >&2 || fail "$asset does not verify as signed by $identity"
+    digest="$(sha256sum "$work/$asset" | awk '{ print $1 }')"
     set_line "$here/trivy.go" '^const trivyVersion = ".*"$' "const trivyVersion = \"$new\""
-    bumped trivy "$old" "$new"
+    set_line "$here/trivy.go" '^const trivySHA256 = ".*"$' "const trivySHA256 = \"$digest\""
+    bumped trivy "$old" "$new, $asset $digest"
+    echo "the digest came from the archive, whose sigstore bundle verified as Trivy's release workflow"
     ;;
 hook:*)
     repo="${target#hook:}"

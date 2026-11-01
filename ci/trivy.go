@@ -19,6 +19,16 @@ import (
 // ci/latest.sh reports it against Trivy's newest release.
 const trivyVersion = "0.76.1"
 
+// trivySHA256 is the digest of Trivy's Linux-64bit archive at
+// trivyVersion. Each step that installs Trivy downloads the archive and
+// checks it against this digest before it unpacks the binary. The
+// setup-trivy action checks the archive only against the checksums file
+// of the same release, which it reads at run time, so a changed release
+// would change what CI runs. `ci/latest.sh --bump trivy` writes it with
+// trivyVersion, after the archive verifies against the sigstore
+// signature of Trivy's release workflow.
+const trivySHA256 = "c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0"
+
 // scanImage runs Trivy on one published image, and writes its findings
 // as SARIF to <dir>/<image>.sarif, which the job that runs the scan
 // uploads to code scanning under the category trivy/<image>.

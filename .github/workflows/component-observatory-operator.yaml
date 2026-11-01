@@ -588,11 +588,22 @@ jobs:
           key: trivy-db-${{ steps.trivy-day.outputs.day }}
           restore-keys: trivy-db-
 
+      # The step installs Trivy from its release archive, and checks the
+      # archive against trivySHA256 in ci/trivy.go before it unpacks the
+      # binary, so a release that changed after the bump fails here.
       - if: ${{ !inputs.dryrun }}
         continue-on-error: true
-        uses: aquasecurity/setup-trivy@v0.3.1
-        with:
-          version: v0.76.1
+        env:
+          TRIVY_VERSION: 0.76.1
+          TRIVY_SHA256: c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0
+        run: |
+          archive="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/$archive"
+          echo "$TRIVY_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict -
+          mkdir -p "$RUNNER_TEMP/trivy-bin"
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/trivy-bin" trivy
+          echo "$RUNNER_TEMP/trivy-bin" >> "$GITHUB_PATH"
 
       # Each image builds again through docker-bake.hcl, and pushes. An
       # image that ran in the images job above builds from the layers that

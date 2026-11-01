@@ -196,9 +196,10 @@ func TestThePublishUploadsATrivyScanOfEachImage(t *testing.T) {
 	for _, step := range publish["steps"].([]any) {
 		step := step.(map[string]any)
 		with, _ := step["with"].(map[string]any)
+		env, _ := step["env"].(map[string]any)
 		switch uses, _ := step["uses"].(string); {
-		case uses == "aquasecurity/setup-trivy@v0.3.1":
-			trivy, _ = with["version"].(string)
+		case env["TRIVY_VERSION"] != nil:
+			trivy, _ = env["TRIVY_VERSION"].(string)
 		case strings.HasPrefix(uses, "github/codeql-action/upload-sarif@"):
 			uploads = append(uploads, with["sarif_file"].(string)+" "+with["category"].(string))
 		}
@@ -206,7 +207,7 @@ func TestThePublishUploadsATrivyScanOfEachImage(t *testing.T) {
 			sarif = true
 		}
 	}
-	if trivy != "v"+trivyVersion || !sarif {
+	if trivy != trivyVersion || !sarif {
 		t.Errorf("trivy %q, the publish writes the scans: %v", trivy, sarif)
 	}
 	if want := []string{"trivy/base.sarif trivy/base", "trivy/base-dev.sarif trivy/base-dev"}; !reflect.DeepEqual(uploads, want) {
@@ -238,6 +239,7 @@ func TestTheTrivyJobScansEachImageThatThePlanNames(t *testing.T) {
 				Uses string            `yaml:"uses"`
 				Run  string            `yaml:"run"`
 				With map[string]string `yaml:"with"`
+				Env  map[string]string `yaml:"env"`
 			} `yaml:"steps"`
 		} `yaml:"jobs"`
 	}
@@ -255,15 +257,15 @@ func TestTheTrivyJobScansEachImageThatThePlanNames(t *testing.T) {
 	var trivy, scan, upload string
 	for _, step := range job.Steps {
 		switch {
-		case step.Uses == "aquasecurity/setup-trivy@v0.3.1":
-			trivy = step.With["version"]
+		case step.Env["TRIVY_VERSION"] != "":
+			trivy = step.Env["TRIVY_VERSION"]
 		case strings.Contains(step.Run, "go run . scan "):
 			scan = step.Run
 		case strings.HasPrefix(step.Uses, "github/codeql-action/upload-sarif@"):
 			upload = step.With["sarif_file"] + " " + step.With["category"]
 		}
 	}
-	if trivy != "v"+trivyVersion || scan != `go run . scan -root .. -image "$IMAGE" -version "$VERSION" -sarif "${{ github.workspace }}/trivy"` ||
+	if trivy != trivyVersion || scan != `go run . scan -root .. -image "$IMAGE" -version "$VERSION" -sarif "${{ github.workspace }}/trivy"` ||
 		upload != "trivy/${{ matrix.image }}.sarif trivy/${{ matrix.image }}" {
 		t.Errorf("trivy %q, scan %q, upload %q", trivy, scan, upload)
 	}
@@ -296,10 +298,11 @@ func TestEveryScanRestoresTheDatabaseThatTheTrivyDBJobSaves(t *testing.T) {
 		for _, step := range steps.([]any) {
 			step := step.(map[string]any)
 			with, _ := step["with"].(map[string]any)
+			env, _ := step["env"].(map[string]any)
 			switch uses, _ := step["uses"].(string); {
 			case uses == "actions/cache/restore@v6" && with["path"] == "~/.cache/trivy/db":
 				order = append(order, "restore "+with["restore-keys"].(string))
-			case uses == "aquasecurity/setup-trivy@v0.3.1":
+			case env["TRIVY_VERSION"] != nil:
 				order = append(order, "install")
 			}
 		}

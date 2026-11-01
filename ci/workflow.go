@@ -49,6 +49,7 @@ var templates = template.Must(template.New("").
 		"prekVersion":  func() string { return prekVersion },
 		"prekSHA256":   func() string { return prekSHA256 },
 		"trivyVersion": func() string { return trivyVersion },
+		"trivySHA256":  func() string { return trivySHA256 },
 		"trivyUpload": func(image, present string, dry bool) trivyUpload {
 			return trivyUpload{Image: image, Present: present, Dry: dry}
 		},

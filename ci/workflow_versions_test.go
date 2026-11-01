@@ -65,6 +65,46 @@ func TestEveryPrekStepVerifiesThePinnedDigest(t *testing.T) {
 	}
 }
 
+// setup-trivy installs Trivy with an install script that checks the
+// archive against the checksums file of the same release, read at run
+// time, so a changed release changes what CI runs. So each step that
+// installs Trivy checks the archive against the digest that this
+// repository pins.
+func TestEveryTrivyInstallVerifiesThePinnedDigest(t *testing.T) {
+	files, err := Workflows(fluxTree(t), graphFixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(trivySHA256) {
+		t.Fatalf("trivySHA256 is %q, want a SHA-256 digest", trivySHA256)
+	}
+	installs := 0
+	for file, text := range files {
+		if !strings.HasPrefix(file, ".github/workflows/") {
+			continue
+		}
+		if strings.Contains(string(text), "setup-trivy") {
+			t.Errorf("%s installs Trivy with setup-trivy", file)
+		}
+		for job, fields := range workflowJobs(t, text) {
+			steps, _ := fields["steps"].([]any)
+			for _, step := range steps {
+				env, _ := step.(map[string]any)["env"].(map[string]any)
+				if env["TRIVY_VERSION"] == nil {
+					continue
+				}
+				installs++
+				if env["TRIVY_SHA256"] != trivySHA256 {
+					t.Errorf("the %s job of %s installs Trivy with TRIVY_SHA256 %v, want %s", job, file, env["TRIVY_SHA256"], trivySHA256)
+				}
+			}
+		}
+	}
+	if installs == 0 {
+		t.Error("no step installs Trivy")
+	}
+}
+
 // The graph job runs on every push, so a pin that drifts fails the
 // commit that makes it drift.
 func TestTheGraphJobChecksThePins(t *testing.T) {
