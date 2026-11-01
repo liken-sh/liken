@@ -21,6 +21,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/liken-sh/liken/kubernetes/apiclient"
@@ -160,6 +161,12 @@ type operator struct {
 	// is its only reader and writer.
 	published map[string]string
 
+	// busConnected is set on the bus goroutine when a session reaches a
+	// CONNACK, and read on the pass goroutine, which then publishes every
+	// mark in published again (storemarks.go says why). It is atomic
+	// because the two goroutines share it with no other lock.
+	busConnected atomic.Bool
+
 	// The base of media-operator's topic tree, which every progress
 	// pod reads each Play's position from. The operator passes it
 	// down, so a cluster that moved that tree names it once, here.
@@ -271,12 +278,10 @@ func newOperator(client *apiclient.Client, stamped images,
 		providerCalls:  map[string]providerCall{},
 		log:            os.Stdout,
 	}
-	// The operator names no will. Its one publish is the empty
-	// retained payload that drops a departed library's topics, and a
-	// will replaces nothing about that: there is no message of the
-	// operator's own that a broker should stand in for when the
-	// connection breaks.
-	library.bus = newBus(busAddress, "library-operator", nil, nil, library.handleBusMessage)
+	// The operator names no will, because no message of its own says
+	// that it is gone: its retained marks stay true while it restarts.
+	// Each connect wakes the pass, which publishes those marks again.
+	library.bus = newBus(busAddress, "library-operator", nil, library.onBusConnect, library.handleBusMessage)
 	library.bus.Subscribe(libraryStatusFilter(topicBase))
 	library.bus.Subscribe(catalogAvailabilityFilter(topicBase))
 	library.bus.Subscribe(playRequestFilter(topicBase))
@@ -304,6 +309,10 @@ func newOperator(client *apiclient.Client, stamped images,
 func (o *operator) pass() {
 	ctx, done := context.WithTimeout(context.Background(), passTimeout)
 	defer done()
+
+	if o.busConnected.Swap(false) {
+		o.republishMarks()
+	}
 
 	// The class answers are this pass's own, so a class a person edits
 	// is read again on the next pass.

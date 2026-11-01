@@ -173,6 +173,28 @@ func (o *operator) publishMark(topic string, mark any) {
 	o.bus.Publish(topic, payload, true)
 }
 
+// onBusConnect runs on the bus goroutine each time a session reaches a
+// CONNACK, the first one included, and wakes the pass to publish the
+// marks again. The bus runs with persistence off, so a broker that
+// restarted holds none of them, and a publish made while the client was
+// disconnected was dropped although published records it. Without this,
+// a progress pod or a reporter that subscribes later reads no mark until
+// the object behind it changes or the operator restarts.
+func (o *operator) onBusConnect(*Bus) {
+	o.busConnected.Store(true)
+	poke(o.wake)
+}
+
+// republishMarks publishes every payload in published again, word for
+// word. A forget ask keeps the time it was first made, so a store reads
+// the same ask and not a new one. The topics go out in sorted order so
+// the frames are the same on every connect.
+func (o *operator) republishMarks() {
+	for _, topic := range slices.Sorted(maps.Keys(o.published)) {
+		o.bus.Publish(topic, []byte(o.published[topic]), true)
+	}
+}
+
 // publishStanding publishes a retained payload only where this operator
 // has put none on the topic. It is for a payload that carries the time
 // of the ask: a republish on every pass would rewrite the ask with a

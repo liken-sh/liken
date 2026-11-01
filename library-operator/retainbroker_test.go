@@ -23,6 +23,8 @@ type retainBroker struct {
 	mutex       sync.Mutex
 	retained    map[string][]byte
 	subscribers map[*brokerClient][]string
+	// The broker's end of every open connection, which restart closes.
+	conns map[net.Conn]struct{}
 	// Every topic a client published to, in the order the broker read them.
 	published []string
 }
@@ -45,7 +47,8 @@ func (c *brokerClient) write(frame []byte) {
 
 func newRetainBroker(t *testing.T) *retainBroker {
 	t.Helper()
-	return &retainBroker{retained: map[string][]byte{}, subscribers: map[*brokerClient][]string{}}
+	return &retainBroker{retained: map[string][]byte{},
+		subscribers: map[*brokerClient][]string{}, conns: map[net.Conn]struct{}{}}
 }
 
 // A dial that connects to the broker, for a Bus or a session.
@@ -84,7 +87,30 @@ func (b *retainBroker) retain(topic string, payload []byte) {
 	b.retained[topic] = payload
 }
 
+// Restarts the broker the way Mosquitto restarts with persistence off: every
+// connection closes, and every retained message is gone.
+func (b *retainBroker) restart() {
+	b.mutex.Lock()
+	clear(b.retained)
+	conns := make([]net.Conn, 0, len(b.conns))
+	for conn := range b.conns {
+		conns = append(conns, conn)
+	}
+	b.mutex.Unlock()
+	for _, conn := range conns {
+		conn.Close()
+	}
+}
+
 func (b *retainBroker) serve(conn net.Conn) {
+	b.mutex.Lock()
+	b.conns[conn] = struct{}{}
+	b.mutex.Unlock()
+	defer func() {
+		b.mutex.Lock()
+		delete(b.conns, conn)
+		b.mutex.Unlock()
+	}()
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
 	client := &brokerClient{out: make(chan []byte, 1<<16), done: make(chan struct{})}

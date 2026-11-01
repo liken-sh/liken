@@ -74,6 +74,14 @@ own audience topic when the answer on it lapses. The progress role
 clears each mark once it has recorded it and the retention has run,
 and the jellyfin role clears its record of a sent mark with the mark.
 
+A broker that runs with persistence off and restarts holds no retained
+message, and a publish that a client makes while it is disconnected is
+dropped. So the operator publishes each of its retained topics again
+after every connect to the broker, the first one included: the pass that
+the connect starts publishes the `refresh`, `audience`, `final`, and
+`forget` topics with the payload it last published on each, so a
+`forget` request keeps the time of the first ask.
+
 ## The library report
 
 `libraries/{namespace}/{name}/status`
@@ -144,7 +152,7 @@ The reporter counts each gap with the `Library`'s
 refresh or a retry reopened is in `gaps`. The reporter holds no API
 credential and cannot read the `Library`, so the operator publishes the
 refresh and retry times of each fact the `Library` names, retained,
-whenever the times change. The reporter subscribes to the refresh topics
+whenever the times change and after each connect to the broker. The reporter subscribes to the refresh topics
 of its own namespace and publishes the report again when one changes, so
 an edit of `spec.refresh` or `spec.retry` reaches `gaps` with no restart of
 the catalog pod. The payload is the value a `Job`'s containers read from
