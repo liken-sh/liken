@@ -4,10 +4,11 @@ package main
 // outboxes to the target's archive with promotion Jobs, and keeps the
 // target's counts and its ArchiveAvailable condition from their reports.
 //
-// The loop reads only the stores, and the Target's status is the whole
-// of what tells it that a frame waits. The runner adds one to the
-// outbox's pending in status.outboxes after each exposure, and that
-// write wakes the loop (watch.go). So the runner and the loop share no
+// The loop reads the stores, and the Target's status is the whole of
+// what tells it that a frame waits. It reads a Job it created from the
+// API server until the watch delivers the create (currentJobs). The
+// runner adds one to the outbox's pending in status.outboxes after each
+// exposure, and that write wakes the loop (watch.go). So the runner and the loop share no
 // memory, and a restart of the operator loses nothing: the next pass
 // reads the same status.
 //
@@ -53,8 +54,9 @@ import (
 // or a fact of this process, and a new process starts without them.
 type promotions struct {
 	*operator
-	// versions is the memo of the Targets whose status the loop wrote.
-	versions *memo.Versions
+	// versions is the memo of the Targets whose status the loop wrote,
+	// and jobs the memo of the Jobs it created.
+	versions, jobs *memo.Versions
 	// image is the operator's own image, which the Jobs run.
 	image string
 	// started holds each target and outbox claim that this process gave
@@ -74,7 +76,7 @@ const (
 
 // promote runs the promotion loop until ctx ends.
 func (o *operator) promote(ctx context.Context) {
-	p := &promotions{operator: o, versions: o.targetVersions, started: map[string]bool{}, metrics: newPromotionMetrics(o.metrics)}
+	p := &promotions{operator: o, versions: o.targetVersions, jobs: memo.New(), started: map[string]bool{}, metrics: newPromotionMetrics(o.metrics)}
 	retry := firstRetry
 	for {
 		wake := o.changed.wait()
@@ -114,10 +116,14 @@ type world struct {
 
 func (s *stores) view(kind string) informer.View { return s.collections[kind].View() }
 
-func (p *promotions) read() world {
+func (p *promotions) read() (world, error) {
+	jobs, err := p.currentJobs()
+	if err != nil {
+		return world{}, err
+	}
 	s := p.stores
 	w := world{
-		jobs:         informer.CachedList[jobObject](s.view("Job")),
+		jobs:         jobs,
 		pods:         informer.CachedList[podObject](s.view("Pod")),
 		reservations: informer.CachedList[observatory.Reservation](s.view(observatory.ReservationKind.Name)),
 		claims:       map[string]claimObject{},
@@ -139,7 +145,33 @@ func (p *promotions) read() world {
 			Telescope: telescopes[namespace+"/"+camera.Spec.OpticalTrain], Train: camera.Spec.OpticalTrain,
 		}
 	}
-	return w
+	return w, nil
+}
+
+// currentJobs lists the Jobs through the memo of the loop's creates.
+// The watch selects every Job with the operator's label, and each Job
+// the loop creates has it. So the list also holds each Job the loop
+// created that the store does not hold yet (informer.View.Whole), and
+// a pass that runs before the watch delivers the create does not create
+// the Job again. The memo forgets each Job that the list leaves out and
+// the store no longer holds.
+func (p *promotions) currentJobs() ([]jobObject, error) {
+	held := p.held("Job", p.jobs)
+	held.View.Whole = true
+	jobs, err := informer.CurrentList[jobObject](p.client, held, memo.NamespacedPath(jobPath))
+	if err != nil {
+		return nil, err
+	}
+	listed := make(map[string]bool, len(jobs))
+	for i := range jobs {
+		listed[memo.Key(&jobs[i].Metadata.ObjectMeta)] = true
+	}
+	p.jobs.ForgetGone(held.View.Store, listed)
+	return jobs, nil
+}
+
+func jobPath(namespace, name string) string {
+	return "/apis/batch/v1/namespaces/" + namespace + "/jobs/" + name
 }
 
 func targetPath(namespace, name string) string {
@@ -154,7 +186,10 @@ func (p *promotions) pass() error {
 	if err != nil {
 		return err
 	}
-	w := p.read()
+	w, err := p.read()
+	if err != nil {
+		return err
+	}
 	var problems []error
 	for i := range targets {
 		err := p.target(&targets[i], w)
@@ -249,8 +284,7 @@ func (p *promotions) rerun(t *astrophotography.Target, j jobObject) error {
 	if j.Metadata.DeletionTimestamp != nil {
 		return nil
 	}
-	path := "/apis/batch/v1/namespaces/" + j.Metadata.Namespace + "/jobs/" + j.Metadata.Name
-	err := p.client.RequestJSON(http.MethodDelete, path, []byte(`{"propagationPolicy":"Background"}`), nil)
+	err := p.client.RequestJSON(http.MethodDelete, jobPath(j.Metadata.Namespace, j.Metadata.Name), []byte(`{"propagationPolicy":"Background"}`), nil)
 	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil
 	}
@@ -307,9 +341,7 @@ func (p *promotions) startJob(t *astrophotography.Target, w world, number int32)
 			return err
 		}
 		job := promotionJob(t, entry.ClaimName, number, entry.Pending, image, w.cameras[namespace])
-		body, _ := json.Marshal(job)
-		err = p.client.RequestJSON(http.MethodPost, "/apis/batch/v1/namespaces/"+namespace+"/jobs", body, nil)
-		if err != nil && !errors.Is(err, apiclient.ErrConflict) {
+		if err := create(p.client, p.jobs, "/apis/batch/v1/namespaces/"+namespace+"/jobs", &job); err != nil {
 			return err
 		}
 		p.started[key] = true

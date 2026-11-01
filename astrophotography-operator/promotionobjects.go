@@ -7,6 +7,7 @@ package main
 // here costs nothing.
 
 import (
+	"github.com/liken-sh/liken/kubernetes/memo"
 	"github.com/liken-sh/liken/observatory-operator/observatory"
 )
 
@@ -42,6 +43,10 @@ type jobObject struct {
 	Spec       jobSpec    `json:"spec"`
 	Status     jobStatus  `json:"status,omitzero"`
 }
+
+// GetObjectMeta answers the metadata, for the memo of the loop's
+// creates (promotion.go).
+func (j *jobObject) GetObjectMeta() memo.Meta { return &j.Metadata.ObjectMeta }
 
 type jobSpec struct {
 	BackoffLimit            int32       `json:"backoffLimit"`
