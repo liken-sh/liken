@@ -58,7 +58,9 @@ mkdir -p "$cache"
 
 # The digest of the CLI tarball, pinned beside the version it belongs to.
 # flux/latest.sh --bump copies it from the checksum file that the
-# release publishes, so a fetch never reads a digest from upstream, and
+# release publishes, after the file's sigstore signature verifies as
+# the work of Flux's release workflow, so a fetch never reads a digest
+# from upstream, and
 # a file that changes upstream after the bump fails the check.
 declare -A flux_sha256=(
     ["v2.10.0"]="208dd7012c04fedeed5b2d0b6e63df3b15b1c34a381527811685c098bc9f8659"

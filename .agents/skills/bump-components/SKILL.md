@@ -317,7 +317,10 @@ check of each component fails.
 
 A new reference in `[build]` changes the recipe of each pinned
 component whose Dockerfile names that key, so each one needs a new
-revision, and the cascade in step 5 applies. Run `make workflows`
+revision, and the cascade in step 5 applies. No Dockerfile names
+`cosign`: `liken/flux/latest.sh --bump` runs it with docker to verify
+the signature of Flux's checksums file, so a move of `cosign` needs
+no revision, and a flux bump needs docker. Run `make workflows`
 after every bump of `images.toml`. `cd ci && go run . pins -root ..`
 fails when two copies of a Go version, a Rust version, a module, a
 crate, a hook revision, or an image tag disagree; CI runs it on every

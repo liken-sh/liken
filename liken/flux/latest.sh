@@ -17,6 +17,19 @@
 # release publishes a checksums file, and --bump copies the tarball's
 # line from it into fetch.sh.
 #
+# Flux signs the checksums file keylessly with sigstore: the release
+# workflow gets a short-lived certificate from sigstore's Fulcio for
+# its GitHub Actions identity, signs the file, records the signature
+# in sigstore's Rekor log, and publishes the result beside the file as
+# flux_<version>_checksums.txt.sigstore.json. --bump verifies that
+# bundle with cosign before it reads a digest, and stops when the
+# bundle is missing, does not verify, or names another signer. The
+# signer must be the release workflow of fluxcd/flux2 at the tag of
+# the release, as GitHub's OIDC issuer certified it, so a checksums
+# file that a person or another workflow signed fails too. cosign runs
+# from the image that the `cosign` entry of toolchains/images.toml
+# pins by digest, so --bump needs docker.
+#
 # Usage:
 #   flux/latest.sh          report the pin and the newest release
 #   flux/latest.sh --bump   write the newest release into VERSION, and
@@ -49,11 +62,51 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' flux "$pinned" "${latest:-?}" - - - \
     exit 0
 }
 
+for tool in curl docker; do
+    command -v "$tool" >/dev/null || {
+        echo "latest.sh: missing required tool: $tool" >&2
+        exit 1
+    }
+done
+
+cosign="$(sed -n '/^\[build\]/,/^\[/ s|^cosign = "\(.*\)"$|\1|p' \
+    "$here/../../toolchains/images.toml")"
+[[ -n "$cosign" ]] || {
+    echo "latest.sh: toolchains/images.toml names no cosign image" >&2
+    exit 1
+}
+identity="$repository/.github/workflows/release.yaml@refs/tags/$latest"
+issuer="https://token.actions.githubusercontent.com"
+
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
 # Release artifacts name the version without the leading v.
 bare="${latest#v}"
 sums="$repository/releases/download/$latest/flux_${bare}_checksums.txt"
 tarball="flux_${bare}_linux_amd64.tar.gz"
-digest="$(curl -fsSL --retry 3 --max-time 60 "$sums" | awk -v f="$tarball" '$2 == f { print $1 }')" || digest=""
+curl -fsSL --retry 3 --max-time 60 -o "$work/checksums.txt" "$sums" || {
+    echo "latest.sh: $sums did not answer" >&2
+    exit 1
+}
+curl -fsSL --retry 3 --max-time 60 -o "$work/checksums.txt.sigstore.json" "$sums.sigstore.json" || {
+    echo "latest.sh: flux $latest publishes no $sums.sigstore.json" >&2
+    exit 1
+}
+# The container runs as the calling user, so it reads the work
+# directory without a change to its permissions, and HOME points at a
+# writable directory for the sigstore trust root that cosign fetches
+# and caches.
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+    -v "$work:/work:ro" "$cosign" verify-blob \
+    --bundle /work/checksums.txt.sigstore.json \
+    --certificate-identity "$identity" \
+    --certificate-oidc-issuer "$issuer" \
+    /work/checksums.txt >&2 || {
+    echo "latest.sh: $sums does not verify as signed by $identity" >&2
+    exit 1
+}
+digest="$(awk -v f="$tarball" '$2 == f { print $1 }' "$work/checksums.txt")"
 [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || {
     echo "latest.sh: $sums lists no $tarball" >&2
     exit 1
@@ -64,5 +117,5 @@ digest="$(curl -fsSL --retry 3 --max-time 60 "$sums" | awk -v f="$tarball" '$2 =
 echo "$latest" >"$here/VERSION"
 sed -i "/^declare -A flux_sha256=(/{n;s|.*|    [\"$latest\"]=\"$digest\"|}" "$here/fetch.sh"
 echo "flux: $pinned -> $latest"
-echo "the digest came from the release's checksums file"
+echo "the digest came from the release's checksums file, signed by flux's release workflow"
 echo "next: make -C .. cluster-operator"

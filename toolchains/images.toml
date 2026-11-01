@@ -26,6 +26,12 @@ ubuntu = "ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11
 distroless = "gcr.io/distroless/static:nonroot@sha256:18f4cc26c9ffa7f20a359298be7deadac5c607c8e03a02b8119f1a5fc2f82c99"
 oras = "ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179"
 corrosion = "ghcr.io/liken-sh/corrosion:2026.10.31-001@sha256:8050e5a5a6d5638ffb4249aa1e9fcf8202258c1d37d18eb6413f99246196d85b"
+# The sigstore verifier. No Dockerfile builds from it. A bump script
+# runs it with docker to check a keyless signature before it copies a
+# digest from a signed file, and it reads this line, so the verifier
+# is pinned by digest like the builders; grep for cosign under liken/
+# to list the scripts.
+cosign = "ghcr.io/sigstore/cosign/cosign:v3.1.4@sha256:0f06154836d2de34f887a5c273506d52ca43edaa1d9e53e6510fa78a48f69c2d"
 
 # The images that a manifest, a guide, a skill, or a test names by
 # tag. A check in ci/ fails when one of those files names an image

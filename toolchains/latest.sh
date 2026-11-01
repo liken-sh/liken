@@ -239,6 +239,12 @@ latest_image() {
         latest_tag="$version"
         note="the newest release of oras-project/oras"
         ;;
+    cosign)
+        version="$(curl -fsS --retry 3 --max-time 20 "${github_auth[@]}" \
+            https://api.github.com/repos/sigstore/cosign/releases/latest | jq -r .tag_name)" || version=""
+        latest_tag="$version"
+        note="the newest release of sigstore/cosign"
+        ;;
     corrosion)
         latest_tag="$(tags "$repo" | newest_matching '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]+$')" || latest_tag=""
         note="the newest release of liken-sh/corrosion"
