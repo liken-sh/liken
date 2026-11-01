@@ -101,6 +101,25 @@ else
     exit 1
 fi
 
+# make decides what to rebuild from the dependency files that gcc
+# writes beside each object, and those files name the headers of the
+# compiler that built it. After a new builder image, make stops on a
+# header path that the new compiler does not have, and an object it
+# does not rebuild would mix two compilers in one firmware. So the
+# tree records the ID of the builder image that built it, and a
+# different ID removes every build product first: Build/, and the
+# untracked files of BaseTools/ and of each submodule. The patch
+# changes only OvmfPkg/, so the reset keeps it.
+builder_id="$(docker image inspect --format '{{.Id}}' "$builder")"
+stamp="$edk2/Build/.builder"
+if [ "$(cat "$stamp" 2>/dev/null)" != "$builder_id" ]; then
+    rm -rf "$edk2/Build"
+    git -C "$edk2" clean -fdxq -- BaseTools
+    git -C "$edk2" submodule foreach --quiet --recursive git clean -fdxq
+    mkdir -p "$edk2/Build"
+    echo "$builder_id" >"$stamp"
+fi
+
 # HOME points into the tree because the container has no home for the
 # calling user, and BaseTools writes its build configuration there.
 docker run --rm --user "$(id -u):$(id -g)" \
