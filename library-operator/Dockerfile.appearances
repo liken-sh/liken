@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # The image of `appearances`, the tool that finds the credited people on
 # screen in a title's keyframes. It holds the tool, OpenVINO's runtime
 # for the CPU and an Intel GPU, Intel's OpenCL runtime for the GPU, and

@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # This file builds both screen images, the idle screen and the display,
 # as two targets over one dependency stage. The two crates share a
 # workspace, a toolchain, and every dependency, so one file builds the

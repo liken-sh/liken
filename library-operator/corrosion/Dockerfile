@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # The Corrosion sidecar's image. A Corrosion agent runs beside every
 # scanner and every media browser and replicates the catalog to them,
 # and a second agent from the same image replicates the progress store.

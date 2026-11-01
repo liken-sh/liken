@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # The media browser's image: the Rust client, and the Wayland and Vulkan
 # libraries it opens by name on a real machine. The build context is this
 # directory, and brand/ and media-screen/ arrive as named build
