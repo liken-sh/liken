@@ -9,9 +9,10 @@ set -euo pipefail
 image=$1
 
 # The image must hold the notices of the third-party software in it,
-# as notices/check.sh describes.
+# as notices/check.sh describes, and the SBOM record of the bundle that
+# syft reads, because syft finds no package in the bundle itself.
 "$(dirname "$0")/../../notices/check.sh" "$image" \
-  usr/share/doc/mozilla-ca/copyright
+  usr/share/doc/mozilla-ca/copyright usr/share/doc/liken/trust.cdx.json
 here=$(cd "$(dirname "$0")/.." && pwd)
 date=$(cat "$here/VERSION")
 

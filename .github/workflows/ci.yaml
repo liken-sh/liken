@@ -723,7 +723,7 @@ jobs:
       id-token: write
 
   trust-publish:
-    needs: [plan, trust, trivy-db]
+    needs: [plan, trust, toolchains, trivy-db]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['trust'].publish != 'none' }}
     uses: ./.github/workflows/component-trust.yaml
     with:

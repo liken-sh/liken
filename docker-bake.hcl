@@ -166,14 +166,18 @@ target "trust" {
   context    = "trust"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
+  contexts = {
+    "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
+    "manifest" = "toolchains/manifest"
+  }
   args = {
     VERSION = "20261020"
   }
-  tags       = ["ghcr.io/liken-sh/trust:20261020-1"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/trust:buildcache", "type=registry,ref=ghcr.io/liken-sh/trust:buildcache-20261020-1"]
+  tags       = ["ghcr.io/liken-sh/trust:20261020-2"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/trust:buildcache", "type=registry,ref=ghcr.io/liken-sh/trust:buildcache-20261020-2"]
   cache-to = concat(
     CACHE_WRITE == "trust" ? ["type=registry,ref=ghcr.io/liken-sh/trust:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "trust" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/trust:buildcache-20261020-1,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "trust" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/trust:buildcache-20261020-2,mode=max,ignore-error=true"] : [],
   )
 }
 

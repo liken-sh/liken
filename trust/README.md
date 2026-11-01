@@ -14,6 +14,12 @@ part of the system:
   certificate data is under the MPL 2.0, which requires that each copy
   state the license. Every image that verifies TLS copies both with
   `COPY --from=trust / /` and names `trust` in its `[depends]`.
+- The image also holds `/usr/share/doc/liken/trust.cdx.json`, a
+  CycloneDX record of the bundle that `image-sbom` writes from
+  `pin.toml` during the build. syft finds no package in the bundle
+  itself, and it copies the record's component into the SBOM of this
+  image and of every image that copies it, with the purl and the
+  license of `pin.toml`.
 
 `trust` is a pinned component. Its version is the snapshot's date as
 `YYYYMMDD`, and the label `sh.liken.upstream.mozilla-ca` carries the

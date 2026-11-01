@@ -6,10 +6,13 @@
 
 # Mozilla's CA certificates, as curl publishes them. The data is
 # Mozilla's, under the MPL 2.0, which the image's copyright file
-# quotes.
+# quotes. The type is library, because the bundle is data that the TLS
+# libraries load, and syft drops a component of the type data from an
+# image's SBOM. NVD lists no CPE for the bundle.
 [cacert]
 version = "2026-10-20"
 url = "https://curl.se/ca/cacert-2026-10-20.pem"
 sha256 = "796f1389bfea13c0ed78f663b765baaff54a508e5483786bd6ece73c5e3e3cbe"
 purl = "pkg:generic/cacert@2026-10-20?download_url=https://curl.se/ca/cacert-2026-10-20.pem&checksum=sha256:796f1389bfea13c0ed78f663b765baaff54a508e5483786bd6ece73c5e3e3cbe"
 license = "MPL-2.0"
+type = "library"
