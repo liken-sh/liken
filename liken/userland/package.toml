@@ -6,3 +6,8 @@
 [package]
 name = "userland"
 license = "MIT"
+
+# shellcheck and the whitespace checks, from .pre-commit-config.yaml.
+[[jobs]]
+name = "prek"
+toolchain = "prek"
