@@ -154,7 +154,7 @@ jobs:{% range .Jobs %}
         with:
           prek-version: {% prekVersion %}
           sha256: {% prekSHA256 %}
-          extra-args: --all-files {% .Component %}/{% else %}{% if eq .Toolchain "codeql" %}{% template "codeql-init" . %}{% end %}{% $lines := lines .Run %}{% if not .Run %}{% else if eq (len $lines) 1 %}
+          extra-args: --all-files {% .Dir %}/{% else %}{% if eq .Toolchain "codeql" %}{% template "codeql-init" . %}{% end %}{% $lines := lines .Run %}{% if not .Run %}{% else if eq (len $lines) 1 %}
 
       - run: {% .Run %}{% else %}
 

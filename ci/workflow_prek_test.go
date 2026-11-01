@@ -41,6 +41,29 @@ func TestAPrekJobSkipsTheHooksThatOtherJobsRun(t *testing.T) {
 	}
 }
 
+// prek runs from the top of the repository and takes the directory of
+// the project it runs, so a component nested in another one names its
+// whole path, not its name.
+func TestANestedComponentsPrekJobNamesItsDirectory(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"os/package.toml":                 "[package]\nname = \"os\"\n",
+		"os/tree/package.toml":            "[package]\nname = \"tree\"\n[[jobs]]\nname = \"prek\"\ntoolchain = \"prek\"\n",
+		"os/tree/.pre-commit-config.yaml": "repos: []\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := Workflows(root, components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "extra-args: --all-files os/tree/\n"
+	if text := string(files[".github/workflows/component-tree.yaml"]); !strings.Contains(text, want) {
+		t.Errorf("the workflow lacks %q:\n%s", want, text)
+	}
+}
+
 func TestOnlyAPrekJobSkipsHooks(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"app/package.toml": "[package]\nname = \"app\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\nrun = \"make test\"\nskip = [\"x\"]\n",

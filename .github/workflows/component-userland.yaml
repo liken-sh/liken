@@ -81,4 +81,4 @@ jobs:
         with:
           prek-version: 0.5.9
           sha256: 2fee13923018dd517c19dba032ddcae8010cadfb81bc47e742ad5e8981a3f126
-          extra-args: --all-files userland/
+          extra-args: --all-files liken/userland/

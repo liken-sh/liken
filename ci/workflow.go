@@ -223,7 +223,7 @@ func dependencyOrder(components map[string]*Component) []*Component {
 
 type jobData struct {
 	Job
-	Component, WorkDir, ModuleDir string
+	Component, Dir, WorkDir, ModuleDir string
 	// Go is true when the job sets up Go: a go or hugo job always, and
 	// a prek job when its module directory has a go.mod and a hook
 	// that the job runs calls go or gofmt.
@@ -244,7 +244,7 @@ func componentData(root string, c *Component) (map[string]any, error) {
 	}
 	var jobs []jobData
 	for _, job := range c.Jobs {
-		d := jobData{Job: job, Component: c.Name(), WorkDir: path.Join(c.Dir, job.Dir),
+		d := jobData{Job: job, Component: c.Name(), Dir: c.Dir, WorkDir: path.Join(c.Dir, job.Dir),
 			ModuleDir: path.Join(c.Dir, orDefault(job.Module, job.Dir))}
 		if d.Timeout == 0 {
 			d.Timeout = 15
