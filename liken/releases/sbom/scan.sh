@@ -66,12 +66,18 @@ args=(-version "$version" -out "$out" -buildroot "$liken/userland/dist/sbom.cdx.
 
 # scan <source> <path> <name>: run syft over a path, mounted read-only,
 # and write <name>.cdx.json. The source is syft's scheme for the path:
-# dir, oci-archive, or file.
+# dir, oci-archive, or file. syft gives the location of a package in a
+# file source as the file's name in the container, so a file is mounted
+# under its own name, and the toolkit's location reads `liken`, its
+# name in the release. A directory or an archive is mounted at /scan,
+# because syft gives each location inside it from its root.
 scan() {
     local source="$1" path="$2" name="$3"
+    local mount=/scan
+    [[ "$source" == file ]] && mount="/$(basename "$path")"
     "$runtime" run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp --tmpfs /tmp:exec,mode=1777 \
-        -v "$path:/scan:ro" -v "$scan_dir:/out" "$syft" \
-        scan "$source:/scan" -q -o "cyclonedx-json=/out/$name.cdx.json"
+        -v "$path:$mount:ro" -v "$scan_dir:/out" "$syft" \
+        scan "$source:$mount" -q -o "cyclonedx-json=/out/$name.cdx.json"
 }
 
 if [[ -n "$root" ]]; then
