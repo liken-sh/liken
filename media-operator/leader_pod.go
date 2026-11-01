@@ -6,12 +6,16 @@ package main
 // every role but the operator: the command sidecar in every playback
 // pod, the reader in every Remote's pod, the player shim, and the api.
 // leader.go links kubernetes/election, which links client-go's leader
-// election, its typed clientset, and its scheme. That more than doubles
-// the binary and the memory each role takes at start, and those roles
-// never elect anything. The pod build sets the build tag pod, so
-// leader.go, the election, and the typed clientset stay out of it. The
-// api's watches link only client-go's reflector and dynamic client
-// (watch.go). The operator runs from the full build.
+// election, its typed clientset, and its scheme. Those packages add
+// to the size of the binary and to the memory that each role takes at
+// start, and these roles never elect anything. A role runs in every
+// playback pod and every Remote's pod, so the cost repeats on each
+// machine. The pod build sets the build tag pod, so leader.go, the
+// election, and the typed clientset stay out of it. The api's watches
+// link only client-go's reflector and dynamic client (watch.go). The
+// operator runs from the full build. To measure the difference, build
+// the binary twice with `go build -trimpath`, once with `-tags pod`
+// and once without, and compare the two file sizes.
 
 import (
 	"context"
