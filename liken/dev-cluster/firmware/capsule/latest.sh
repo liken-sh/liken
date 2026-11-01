@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 #
 # Report what the capsule builder pins: the edk2 release that build.sh
-# checks out, the Ubuntu image that the Dockerfile builds on, and the
-# date of the Ubuntu snapshot that it installs the compiler, nasm, and
-# iasl from.
+# checks out, and the date of the Ubuntu snapshot that the Dockerfile
+# installs the compiler, nasm, and iasl from. The Ubuntu image that the
+# Dockerfile builds on is the `ubuntu` entry of toolchains/images.toml,
+# and toolchains/latest.sh reports it.
 #
 # edk2 builds from source, so its newest channel is the newest
 # edk2-stable release. build.sh keeps the release that Debian's
@@ -12,8 +13,8 @@
 # use one layout. So a newer edk2 release than ovmf-generic packages
 # reads as a hold until ovmf-generic moves.
 #
-# The Ubuntu image and the snapshot take the newest channel of the
-# Ubuntu archive, which is its development series. A snapshot date
+# The snapshot's suite is the series of the ubuntu image, because the
+# packages and the image must come from one series. A snapshot date
 # names the archive as it stood at midnight UTC of that day, so
 # today's date in UTC is the newest date whose files are fixed, and
 # the snapshot row reads behind each day.
@@ -22,6 +23,7 @@
 # firmware, so a bump is a hand edit of build.sh or the Dockerfile,
 # followed by a boot of the lab with FIRMWARE=capsule, which builds the
 # firmware again because the Makefile lists both files as its inputs.
+# A move of the ubuntu entry changes the suite here too.
 #
 # Usage:
 #   dev-cluster/firmware/capsule/latest.sh   report the pins
@@ -53,17 +55,13 @@ if [[ -n "$edk2_latest" && "$edk2_latest" > "$ovmf_release" ]]; then
 fi
 row edk2 "$edk2" "${edk2_latest:-?}" - - "$hold" "the edk2 release that the capsule firmware builds from"
 
-# Launchpad lists each series with its version. The newest one is the
-# development series.
-series="$(curl -fsS --retry 3 --max-time 20 https://api.launchpad.net/devel/ubuntu/series |
-    jq -r '.entries[] | "\(.version) \(.name)"' | sort -V)" || series=""
-read -r newest_version newest_name < <(tail -1 <<<"$series") || true
+# Launchpad lists each series with its version, which names the series
+# of the ubuntu image's tag, such as resolute for 26.04.
+image="$(sed -n 's/^ubuntu = "ubuntu:\([0-9.]*\)@.*"$/\1/p' "$here/../../../../toolchains/images.toml")"
+image_series="$(curl -fsS --retry 3 --max-time 20 https://api.launchpad.net/devel/ubuntu/series |
+    jq -r --arg v "$image" '.entries[] | select(.version == $v) | .name')" || image_series=""
 
-from="$(sed -n 's/^FROM ubuntu:\([^@]*\)@.*$/\1/p' "$here/Dockerfile")"
 suite="$(sed -n "s/^ *'Suites: \([a-z]*\) .*$/\1/p" "$here/Dockerfile")"
-row ubuntu "$from" "${newest_version:-?}" "$suite" "${newest_name:-?}" - \
-    "the base of the capsule builder"
-
 snapshot="$(sed -n 's/^ENV SNAPSHOT=\([0-9]*\)$/\1/p' "$here/Dockerfile")"
-row snapshot "$snapshot" "$(date -u +%Y%m%d)" "$suite" "${newest_name:-?}" - \
+row snapshot "$snapshot" "$(date -u +%Y%m%d)" "$suite" "${image_series:-?}" - \
     "the Ubuntu snapshot that the builder installs gcc, nasm, and iasl from"

@@ -47,3 +47,31 @@ func imagePattern(name string) *regexp.Regexp {
 	}
 	return regexp.MustCompile(`(?:^|[^A-Za-z0-9._/-])(` + strings.Join(names, "|") + `):([A-Za-z0-9_][A-Za-z0-9_.-]*)`)
 }
+
+// isDockerfile is true for a Dockerfile: Dockerfile, or Dockerfile.<name>
+// beside it. A <Dockerfile>.dockerignore is the ignore file of one.
+func isDockerfile(name string) bool {
+	return name == "Dockerfile" || strings.HasPrefix(name, "Dockerfile.") && !strings.HasSuffix(name, ".dockerignore")
+}
+
+// outsideImages lists each image that a Dockerfile builds from or
+// copies from by a full reference, such as ubuntu:24.04@sha256:... A
+// Dockerfile names an outside image bare, by its key in images.toml, so
+// that one entry pins it for the whole repository, toolchains/latest.sh
+// reports it, and the bake file or the script that builds the file
+// resolves the key to the entry's reference. A bare name is a key of
+// images.toml, an image of the repository, a named build context, or a
+// stage; a name with a registry, a tag, or a digest is none of those. A
+// build argument fills its name at build time, so the check cannot read
+// it.
+func outsideImages(file, text string) []string {
+	var findings []string
+	parsed := parseDockerfile(text)
+	for _, name := range slices.Concat(parsed.From, parsed.Sources) {
+		if strings.Contains(name, "$") || !strings.ContainsAny(name, ":/@") {
+			continue
+		}
+		findings = append(findings, fmt.Sprintf("%s builds from %s, which is not a key of %s; name the image there and build from its key", file, name, imagesFile))
+	}
+	return findings
+}

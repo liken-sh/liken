@@ -33,6 +33,9 @@ func pinsTree(t *testing.T, changes map[string]string) string {
 		"a/Makefile":                "probe:\n\tdocker run --rm docker.io/library/debian:sid-slim true\n",
 		"a/probe_test.go":           "package a\n\nconst image = \"curlimages/curl:8.22.0\"\n",
 		"a/src/lib.rs":              "const IMAGE: &str = \"eclipse-mosquitto:2.0.22\";\n",
+		"a/Dockerfile": "FROM golang AS build\nFROM ${BASE} AS base\nFROM scratch\nCOPY --from=build /x /x\n" +
+			"COPY --from=trust / /\nRUN --mount=type=bind,from=vulkan,target=/v true\n",
+		"a/Dockerfile.cli": "FROM distroless\n",
 		// Out of scope: our own images, flux's generated manifests,
 		// test data, a cache, the plans, and the fixtures of ci's own
 		// tests.
@@ -99,6 +102,12 @@ func TestADriftedPinIsFound(t *testing.T) {
 			"a/probe_test.go:3 names curlimages/curl:8.5.0"},
 		"an image in a Rust file": {"a/src/lib.rs", "const IMAGE: &str = \"eclipse-mosquitto:2\";\n",
 			"a/src/lib.rs:1 names eclipse-mosquitto:2,"},
+		"an outside image in a FROM line": {"a/Dockerfile", "FROM ubuntu:24.04@sha256:abc AS build\n",
+			"a/Dockerfile builds from ubuntu:24.04@sha256:abc, which is not a key of toolchains/images.toml"},
+		"an outside image in a COPY --from": {"a/Dockerfile.cli", "FROM distroless\nCOPY --from=docker.io/library/busybox:1 /bin/sh /sh\n",
+			"a/Dockerfile.cli builds from docker.io/library/busybox:1,"},
+		"an outside image in a mount": {"a/Dockerfile", "FROM scratch\nRUN --mount=type=bind,from=alpine@sha256:abc,target=/a true\n",
+			"a/Dockerfile builds from alpine@sha256:abc,"},
 		"a copy of a protocol": {"b/src/liken-thing-v1.xml", "<protocol name=\"liken_thing_v1\" version=\"2\"/>\n",
 			"the Wayland protocol liken-thing-v1.xml has 2 versions:"},
 	}

@@ -31,6 +31,9 @@ import (
 //     .pre-commit-config.yaml;
 //   - each image of images.toml that a manifest, a guide, a skill, a
 //     Makefile, or a test names has the tag of its entry;
+//   - each Dockerfile names each outside image by its key in
+//     images.toml, and never by a reference of its own, which would be
+//     a second copy of the pin or a pin that no report reads;
 //   - each copy of a Wayland protocol that liken defines, such as
 //     liken-arrangement-v1.xml, holds the same bytes. The compositor
 //     module and each client build from their own directory, so each
@@ -81,6 +84,9 @@ func checkPins(root string) ([]string, error) {
 		if namesImages(file) {
 			findings = append(findings, imageDrift(file, string(data), tools)...)
 		}
+		if isDockerfile(path.Base(file)) {
+			findings = append(findings, outsideImages(file, string(data))...)
+		}
 	}
 	findings = append(findings, modules.drift("the Go module")...)
 	findings = append(findings, crates.drift("the crate")...)
@@ -98,7 +104,7 @@ func pinFiles(root string) ([]string, error) {
 	var files []string
 	for _, file := range all {
 		switch name := path.Base(file); {
-		case name == "go.mod", name == "rust-toolchain.toml", name == "Cargo.toml", name == ".pre-commit-config.yaml", isProtocol(name), namesImages(file):
+		case name == "go.mod", name == "rust-toolchain.toml", name == "Cargo.toml", name == ".pre-commit-config.yaml", isProtocol(name), isDockerfile(name), namesImages(file):
 			files = append(files, file)
 		}
 	}

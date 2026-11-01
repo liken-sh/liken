@@ -3,16 +3,19 @@
 # docker and git.
 #
 # The firmware binary depends on the compiler, nasm, and iasl versions,
-# so the base is pinned by digest and every package comes from one
-# dated snapshot of the Ubuntu archive. The same two pins give the same
-# toolchain on every laptop, and a new toolchain is a new date here.
+# so the base is the `ubuntu` entry of toolchains/images.toml, by its
+# digest, and every package comes from one dated snapshot of the
+# Ubuntu archive, in the series of that image. builder.sh passes the
+# entry's reference to the build as the context ubuntu. The same two
+# pins give the same toolchain on every laptop, and a new toolchain is
+# a new date here or a new entry there.
 #
 # The build context is trust/dist/<version>/ at the top of the
 # repository: the CA bundle that the trust component pins. The Ubuntu
 # image has no CA bundle, and snapshot.ubuntu.com answers only over
 # HTTPS.
-FROM ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
-ENV SNAPSHOT=20261015
+FROM ubuntu
+ENV SNAPSHOT=20261031
 COPY cacert.pem /etc/ssl/certs/ca-certificates.crt
 # The edk2 build needs gcc, nasm, iasl (acpica-tools), libuuid, and
 # Python. The catalog needs openssl for edk2's capsule signing tool,
@@ -23,7 +26,7 @@ RUN echo 'Acquire::https::CAInfo "/etc/ssl/certs/ca-certificates.crt";' >/etc/ap
     && printf '%s\n' \
         'Types: deb' \
         "URIs: https://snapshot.ubuntu.com/ubuntu/${SNAPSHOT}T000000Z/" \
-        'Suites: noble noble-updates noble-security' \
+        'Suites: resolute resolute-updates resolute-security' \
         'Components: main universe' \
         'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg' \
         >/etc/apt/sources.list.d/snapshot.sources \
