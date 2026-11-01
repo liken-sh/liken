@@ -73,6 +73,76 @@ func TestPacketRefusesABodyPastTheProtocolLimit(t *testing.T) {
 	}
 }
 
+// MQTT 3.1.1 sections 1.5.3 and 3.1.3.3 give a string and a will
+// payload two bytes of length, so 65,535 bytes is the longest that
+// each field can carry. A longer field would write a length that
+// wraps, and the broker would read the rest of the field as the next
+// field. Every encoder refuses the field instead.
+func TestEncodersRefuseAFieldPastTwoBytesOfLength(t *testing.T) {
+	long := string(make([]byte, mqttMaxFieldLength+1))
+	cases := []struct {
+		name   string
+		encode func() ([]byte, error)
+	}{
+		{name: "a publish topic", encode: func() ([]byte, error) { return encodePublish(long, nil, false) }},
+		{name: "a subscribe filter", encode: func() ([]byte, error) { return encodeSubscribe(1, long) }},
+		{name: "a client identifier", encode: func() ([]byte, error) { return encodeConnect(long, 30, nil) }},
+		{name: "a will topic", encode: func() ([]byte, error) {
+			return encodeConnect("op", 30, &busWill{Topic: long, Payload: []byte("offline")})
+		}},
+		{name: "a will payload", encode: func() ([]byte, error) {
+			return encodeConnect("op", 30, &busWill{Topic: "a/b", Payload: []byte(long)})
+		}},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			frame, err := each.encode()
+			if err == nil {
+				t.Errorf("a field of %d bytes framed to %d bytes, want an error", len(long), len(frame))
+			}
+		})
+	}
+}
+
+// A field of exactly 65,535 bytes is the longest that two bytes of
+// length express, so it encodes and reads back whole.
+func TestEncodePublishCarriesATopicAtTheFieldLimit(t *testing.T) {
+	topic := string(bytes.Repeat([]byte{'t'}, mqttMaxFieldLength))
+	frame := frameOf(encodePublish(topic, []byte("hi"), false))
+
+	_, body, err := readPacket(bufio.NewReader(bytes.NewReader(frame)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotTopic, payload, ok := parsePublish(body)
+	if !ok {
+		t.Fatal("the publish body did not parse")
+	}
+	if gotTopic != topic || string(payload) != "hi" {
+		t.Errorf("read back a topic of %d bytes and payload %q, want %d bytes and %q", len(gotTopic), payload, len(topic), "hi")
+	}
+}
+
+// MQTT 3.1.1 section 3.3.3 gives a PUBLISH payload no length of its
+// own: it is the rest of the body. So a payload longer than any
+// two-byte field still encodes and reads back whole.
+func TestEncodePublishCarriesAPayloadPastTwoBytesOfLength(t *testing.T) {
+	sent := bytes.Repeat([]byte{'p'}, mqttMaxFieldLength+1)
+	frame := frameOf(encodePublish("a/b", sent, true))
+
+	_, body, err := readPacket(bufio.NewReader(bytes.NewReader(frame)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	topic, payload, ok := parsePublish(body)
+	if !ok {
+		t.Fatal("the publish body did not parse")
+	}
+	if topic != "a/b" || !bytes.Equal(payload, sent) {
+		t.Errorf("read back topic %q and a payload of %d bytes, want %q and %d bytes", topic, len(payload), "a/b", len(sent))
+	}
+}
+
 func TestEncodeConnectWithNoWill(t *testing.T) {
 	packet := frameOf(encodeConnect("op", 30, nil))
 

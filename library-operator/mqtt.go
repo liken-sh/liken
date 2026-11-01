@@ -57,6 +57,12 @@ const (
 // each, so a longer body has no encoding that a broker accepts.
 const mqttMaxRemainingLength = 268_435_455
 
+// mqttMaxFieldLength is the longest string or byte field the protocol
+// can carry. MQTT 3.1.1 section 1.5.3 gives a string two bytes of
+// length, and section 3.1.3.3 gives the will payload the same two
+// bytes, so 65,535 is the most that the prefix can state.
+const mqttMaxFieldLength = 65_535
+
 // encodeRemainingLength writes the packet length in the variable-byte
 // form the protocol uses: seven bits of length per byte, and the high
 // bit set on every byte but the last. One byte covers up to 127, and
@@ -96,19 +102,20 @@ func decodeRemainingLength(reader io.ByteReader) (int, error) {
 	return 0, fmt.Errorf("mqtt: remaining length runs past four bytes")
 }
 
-// appendString writes one length-prefixed UTF-8 string, the shape the
-// protocol uses for a topic, a filter, and the client identifier: two
-// bytes of length, most significant first, then the bytes.
-func appendString(buffer []byte, value string) []byte {
+// appendField writes one length-prefixed field: two bytes of length,
+// most significant first, then the bytes. The protocol uses this shape
+// for a UTF-8 string, such as a topic, a filter, or the client
+// identifier, and for the will payload. A value past
+// mqttMaxFieldLength is refused, because its length would wrap in two
+// bytes and the broker would read the rest of the value as the next
+// field. The field names the value in the error, so the person who
+// reads the log knows which value is too long.
+func appendField[Value string | []byte](buffer []byte, field string, value Value) ([]byte, error) {
+	if len(value) > mqttMaxFieldLength {
+		return nil, fmt.Errorf("mqtt: a %s of %d bytes is longer than the %d bytes the protocol allows", field, len(value), mqttMaxFieldLength)
+	}
 	buffer = append(buffer, byte(len(value)>>8), byte(len(value)))
-	return append(buffer, value...)
-}
-
-// appendBytes writes one length-prefixed byte string, the shape a will
-// payload takes.
-func appendBytes(buffer []byte, value []byte) []byte {
-	buffer = append(buffer, byte(len(value)>>8), byte(len(value)))
-	return append(buffer, value...)
+	return append(buffer, value...), nil
 }
 
 // packet frames one control packet: a fixed-header first byte, then
@@ -143,14 +150,22 @@ func encodeConnect(clientID string, keepalive uint16, will *busWill) ([]byte, er
 		}
 	}
 
-	var body []byte
-	body = appendString(body, mqttProtocolName)
+	body, err := appendField(nil, "protocol name", mqttProtocolName)
+	if err != nil {
+		return nil, err
+	}
 	body = append(body, mqttProtocolLevel, flags)
 	body = append(body, byte(keepalive>>8), byte(keepalive))
-	body = appendString(body, clientID)
+	if body, err = appendField(body, "client identifier", clientID); err != nil {
+		return nil, err
+	}
 	if will != nil {
-		body = appendString(body, will.Topic)
-		body = appendBytes(body, will.Payload)
+		if body, err = appendField(body, "will topic", will.Topic); err != nil {
+			return nil, err
+		}
+		if body, err = appendField(body, "will payload", will.Payload); err != nil {
+			return nil, err
+		}
 	}
 	return packet(mqttConnect, body)
 }
@@ -159,13 +174,18 @@ func encodeConnect(clientID string, keepalive uint16, will *busWill) ([]byte, er
 // the first byte, and a retained publish tells the broker to hold this
 // payload as the topic's last value and deliver it to every later
 // subscriber. QoS 0 carries no packet identifier, so the body is the
-// length-prefixed topic and then the raw payload.
+// length-prefixed topic and then the raw payload. MQTT 3.1.1 section
+// 3.3.3 gives the payload no length of its own, because it is the rest
+// of the body, so only the remaining length limits it.
 func encodePublish(topic string, payload []byte, retained bool) ([]byte, error) {
 	first := byte(mqttPublish)
 	if retained {
 		first |= 0x01
 	}
-	body := appendString(nil, topic)
+	body, err := appendField(nil, "topic", topic)
+	if err != nil {
+		return nil, err
+	}
 	body = append(body, payload...)
 	return packet(first, body)
 }
@@ -176,8 +196,10 @@ func encodePublish(topic string, payload []byte, retained bool) ([]byte, error) 
 // in its SUBACK, then the length-prefixed filter and one byte of
 // requested QoS.
 func encodeSubscribe(packetID uint16, filter string) ([]byte, error) {
-	body := []byte{byte(packetID >> 8), byte(packetID)}
-	body = appendString(body, filter)
+	body, err := appendField([]byte{byte(packetID >> 8), byte(packetID)}, "topic filter", filter)
+	if err != nil {
+		return nil, err
+	}
 	body = append(body, 0x00)
 	return packet(mqttSubscribe|0x02, body)
 }
