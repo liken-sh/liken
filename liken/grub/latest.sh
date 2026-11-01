@@ -115,7 +115,9 @@ grep -qxF "$target" <<<"$versions" || {
 
 pc_bin="$(curl -fsSL --retry 3 --max-time 300 "$pool/grub-pc-bin_${target}_amd64.deb" |
     sha256sum | cut -d' ' -f1)"
-common="$(curl -fsSL --retry 3 --max-time 300 "$pool/grub-common_${target}_amd64.deb" |
+# grub-mkimage is in grub2-common from the 2.14 packaging on, and
+# fetch.sh takes that package for every version it does not name.
+common="$(curl -fsSL --retry 3 --max-time 300 "$pool/grub2-common_${target}_amd64.deb" |
     sha256sum | cut -d' ' -f1)"
 
 # The old entries stay. An older checkout still names its own version,

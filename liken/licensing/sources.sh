@@ -333,23 +333,23 @@ mirror "toolchain/alpine-$alpine_tag" "openssl-3.5.9.tar.gz" \
 # mirror means nobody has to depend on that.
 # Track systemd-boot/VERSION and grub/VERSION.
 launchpad="https://launchpad.net/ubuntu/+archive/primary/+sourcefiles"
-mirror "systemd-boot/$systemdboot_version" "systemd_259.5.orig.tar.gz" \
-    "80ed55a8a69c4bd1fb12a36659303372b37baf9ee224ef4f032db4b748be0f76" \
-    "$launchpad/systemd/$systemdboot_version/systemd_259.5.orig.tar.gz"
+mirror "systemd-boot/$systemdboot_version" "systemd_261.3.orig.tar.gz" \
+    "3f8d3d3969af7214bda600930e14c6a24135eb3dce1ba7f1b980b74e6dc15b72" \
+    "$launchpad/systemd/$systemdboot_version/systemd_261.3.orig.tar.gz"
 mirror "systemd-boot/$systemdboot_version" "systemd_$systemdboot_version.debian.tar.xz" \
-    "34048bc4b67dce61835a5a959d903f912d68bb09a93ba654e6ae33410c74aaa9" \
+    "337c25d28338d17316e52e2d2309a4b71946db7c350feb51555253bd296a29af" \
     "$launchpad/systemd/$systemdboot_version/systemd_$systemdboot_version.debian.tar.xz"
 mirror "systemd-boot/$systemdboot_version" "systemd_$systemdboot_version.dsc" \
-    "c4c764e0b98b7840619f16f42fb8229a344bc2946bd1a74612280d5e218f8177" \
+    "dbf49a9e6358233b12f706f5503bab6eceb557af22af21f321b6bc3191fed637" \
     "$launchpad/systemd/$systemdboot_version/systemd_$systemdboot_version.dsc"
-mirror "grub/$grub_version" "grub2_2.12.orig.tar.xz" \
-    "f3c97391f7c4eaa677a78e090c7e97e6dc47b16f655f04683ebd37bef7fe0faa" \
-    "$launchpad/grub2/$grub_version/grub2_2.12.orig.tar.xz"
+mirror "grub/$grub_version" "grub2_2.14.orig.tar.xz" \
+    "bc8d3c73535b8838d8c8e2654d73edc4e6ae8c8acdb45d5df5dc9a1547446d43" \
+    "$launchpad/grub2/$grub_version/grub2_2.14.orig.tar.xz"
 mirror "grub/$grub_version" "grub2_$grub_version.debian.tar.xz" \
-    "1e78cbb97d86461e8cb4789658cdeffeef32a784a006253dcc3b1b97d7056338" \
+    "5e8cc04300ff891370b9bdfe46f477b17694a97712f36a69c4d33ab19ab3aa91" \
     "$launchpad/grub2/$grub_version/grub2_$grub_version.debian.tar.xz"
 mirror "grub/$grub_version" "grub2_$grub_version.dsc" \
-    "e23bd4184ea731a890c338fbc8b73e18d53cf4c47b0e8dffd6a55b0d13798ffa" \
+    "2c697a2d159bc2494f32eafbd6fb67cddf2b3a8ae1088f8108f4276c5a600c07" \
     "$launchpad/grub2/$grub_version/grub2_$grub_version.dsc"
 
 # The CA bundle: MPL-2.0, whose obligation is to keep the file's own
