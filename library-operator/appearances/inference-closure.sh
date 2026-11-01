@@ -89,6 +89,38 @@ for package in intel-opencl-icd libigdgmm12; do
 done
 cp "$work/intel/usr/local/lib/igc2/NOTICES.txt" "$out/usr/share/doc/intel-graphics-compiler/"
 
+# syft and Trivy list an image's packages from dpkg's records, and the
+# copies above install no package, so without a record a scan lists
+# none of Intel's packages and matches no advisory against them. The
+# ffmpeg base keeps one record for each package in
+# /var/lib/dpkg/status.d/, the layout that vulkan/closure.sh writes,
+# and this script writes the same two files for each package it took a
+# file from. vulkan/closure.sh copies the stanza from the builder's
+# dpkg status, and these packages are not installed on the builder, so
+# the stanza here is the package's control file with the Status line
+# that dpkg adds on install. The md5sums keep the lines of the files
+# above, so a scanner knows which package owns each one. A record from
+# here replaces the base's record of the same package, such as
+# libigdgmm12, because the file in the image is Intel's.
+status=$out/var/lib/dpkg/status.d
+mkdir -p "$status"
+for deb in "$@"; do
+	package=$(dpkg-deb -f "$deb" Package)
+	dpkg-deb --ctrl-tarfile "$deb" | tar -xO ./md5sums | while read -r sum path; do
+		if [ -f "$out/$path" ]; then
+			printf '%s  %s\n' "$sum" "$path"
+		fi
+	done >"$status/$package.md5sums"
+	if [ ! -s "$status/$package.md5sums" ]; then
+		rm "$status/$package.md5sums"
+		continue
+	fi
+	{
+		printf 'Package: %s\nStatus: install ok installed\n' "$package"
+		dpkg-deb -f "$deb" | grep -v '^Package:'
+	} >"$status/$package"
+done
+
 # oneTBB names libdl.so.2 and libpthread.so.0, which glibc keeps as
 # empty files for old programs, and no program in the base names
 # either. They must come from the same glibc as the base's libc.so.6,
