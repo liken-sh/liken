@@ -122,8 +122,8 @@ Start a pod that mounts the archive claim read-only. It runs `sleep`,
 so you can read from it with `kubectl exec`:
 
 ```sh
-kubectl run -n observatory frames-out --image=busybox:1.37.0 --restart=Never \
-  --overrides='{"spec":{"containers":[{"name":"out","image":"busybox:1.37.0","command":["sleep","3600"],
+kubectl run -n observatory frames-out --image=busybox:1.38.0 --restart=Never \
+  --overrides='{"spec":{"containers":[{"name":"out","image":"busybox:1.38.0","command":["sleep","3600"],
     "volumeMounts":[{"name":"archive","mountPath":"/archive","readOnly":true}]}],
     "volumes":[{"name":"archive","persistentVolumeClaim":{"claimName":"archive","readOnly":true}}]}}'
 kubectl wait -n observatory --for=condition=Ready pod/frames-out

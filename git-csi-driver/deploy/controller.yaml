@@ -193,7 +193,7 @@ spec:
         # change to ControllerModifyVolume and records the answer on the
         # claim.
         - name: resizer
-          image: registry.k8s.io/sig-storage/csi-resizer:v2.2.1
+          image: registry.k8s.io/sig-storage/csi-resizer:v2.3.0
           args:
             - --csi-address=/csi/csi.sock
             # VolumeAttributesClass keeps the class-change feature on;
@@ -245,7 +245,7 @@ spec:
         # for a claim whose StorageClass names git.liken.sh, and posts
         # the refusal on that claim.
         - name: provisioner
-          image: registry.k8s.io/sig-storage/csi-provisioner:v6.3.0
+          image: registry.k8s.io/sig-storage/csi-provisioner:v6.4.0
           args:
             - --csi-address=/csi/csi.sock
             # The same Lease timing as the resizer above, for the same

@@ -23,8 +23,8 @@ alpine = "alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97af
 # because the image and the snapshot must come from the same day.
 debian = "debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84"
 ubuntu = "ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
-distroless = "gcr.io/distroless/static:nonroot@sha256:18f4cc26c9ffa7f20a359298be7deadac5c607c8e03a02b8119f1a5fc2f82c99"
-oras = "ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179"
+distroless = "gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329"
+oras = "ghcr.io/oras-project/oras:v1.3.6@sha256:9cfb578be975b762fd898b9d004243d8003aeb807a3e15b2ed212cdd1326c9eb"
 corrosion = "ghcr.io/liken-sh/corrosion:2026.10.31-001@sha256:8050e5a5a6d5638ffb4249aa1e9fcf8202258c1d37d18eb6413f99246196d85b"
 # The sigstore verifier. No Dockerfile builds from it. A bump script
 # runs it with docker to check a keyless signature before it copies a
@@ -38,8 +38,8 @@ cosign = "ghcr.io/sigstore/cosign/cosign:v3.1.4@sha256:0f06154836d2de34f887a5c27
 # from this table at another tag.
 [run]
 eclipse-mosquitto = "eclipse-mosquitto:2.0.22"
-csi-node-driver-registrar = "registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.17.0"
-csi-provisioner = "registry.k8s.io/sig-storage/csi-provisioner:v6.3.0"
-csi-resizer = "registry.k8s.io/sig-storage/csi-resizer:v2.2.1"
-curl = "curlimages/curl:8.22.0"
-busybox = "busybox:1.37.0"
+csi-node-driver-registrar = "registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.18.0"
+csi-provisioner = "registry.k8s.io/sig-storage/csi-provisioner:v6.4.0"
+csi-resizer = "registry.k8s.io/sig-storage/csi-resizer:v2.3.0"
+curl = "curlimages/curl:8.23.0"
+busybox = "busybox:1.38.0"

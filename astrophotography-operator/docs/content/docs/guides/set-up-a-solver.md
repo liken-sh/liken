@@ -86,8 +86,8 @@ Start a pod that mounts the claim, and copy the files into it with
 `tar` over `kubectl exec`:
 
 ```sh
-kubectl run -n observatory astrometry-load --image=busybox:1.37.0 --restart=Never \
-  --overrides='{"spec":{"containers":[{"name":"load","image":"busybox:1.37.0","command":["sleep","3600"],
+kubectl run -n observatory astrometry-load --image=busybox:1.38.0 --restart=Never \
+  --overrides='{"spec":{"containers":[{"name":"load","image":"busybox:1.38.0","command":["sleep","3600"],
     "volumeMounts":[{"name":"indexes","mountPath":"/indexes"}]}],
     "volumes":[{"name":"indexes","persistentVolumeClaim":{"claimName":"astrometry-indexes"}}]}}'
 kubectl wait -n observatory --for=condition=Ready pod/astrometry-load

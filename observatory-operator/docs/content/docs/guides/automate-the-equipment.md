@@ -260,7 +260,7 @@ namespace, and the action ends when the `Job` ends:
 spec:
   activation:
     - job:
-        image: curlimages/curl:8.22.0
+        image: curlimages/curl:8.23.0
         command: [curl, -fsS, -d, "roof opening", https://ntfy.example/backyard]
 ```
 

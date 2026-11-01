@@ -78,7 +78,7 @@ spec:
         # It reads the driver's name over the socket and tells the
         # kubelet where to find the socket.
         - name: registrar
-          image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.17.0
+          image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.18.0
           args:
             - --csi-address=/csi/csi.sock
             - --kubelet-registration-path=/var/lib/kubelet/plugins/per-node.liken.sh/csi.sock

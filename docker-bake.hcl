@@ -53,9 +53,9 @@ target "toolchains" {
     "corrosion" = "docker-image://ghcr.io/liken-sh/corrosion:2026.10.31-001@sha256:8050e5a5a6d5638ffb4249aa1e9fcf8202258c1d37d18eb6413f99246196d85b"
     "cosign" = "docker-image://ghcr.io/sigstore/cosign/cosign:v3.1.4@sha256:0f06154836d2de34f887a5c273506d52ca43edaa1d9e53e6510fa78a48f69c2d"
     "debian" = "docker-image://debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84"
-    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:18f4cc26c9ffa7f20a359298be7deadac5c607c8e03a02b8119f1a5fc2f82c99"
+    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329"
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
-    "oras" = "docker-image://ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179"
+    "oras" = "docker-image://ghcr.io/oras-project/oras:v1.3.6@sha256:9cfb578be975b762fd898b9d004243d8003aeb807a3e15b2ed212cdd1326c9eb"
     "rust" = "docker-image://rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
     "ubuntu" = "docker-image://ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7"
   }
@@ -574,7 +574,7 @@ target "observatory-operator-cli" {
   dockerfile = "Dockerfile.cli"
   platforms  = ["linux/amd64"]
   contexts = {
-    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:18f4cc26c9ffa7f20a359298be7deadac5c607c8e03a02b8119f1a5fc2f82c99"
+    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329"
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
@@ -650,7 +650,7 @@ target "audio-operator-cli" {
   dockerfile = "Dockerfile.cli"
   platforms  = ["linux/amd64"]
   contexts = {
-    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:18f4cc26c9ffa7f20a359298be7deadac5c607c8e03a02b8119f1a5fc2f82c99"
+    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329"
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
@@ -721,7 +721,7 @@ target "bluetooth-operator-cli" {
   dockerfile = "Dockerfile.cli"
   platforms  = ["linux/amd64"]
   contexts = {
-    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:18f4cc26c9ffa7f20a359298be7deadac5c607c8e03a02b8119f1a5fc2f82c99"
+    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329"
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
@@ -836,7 +836,7 @@ target "display-operator-cli" {
   dockerfile = "Dockerfile.cli"
   platforms  = ["linux/amd64"]
   contexts = {
-    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:18f4cc26c9ffa7f20a359298be7deadac5c607c8e03a02b8119f1a5fc2f82c99"
+    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329"
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
@@ -994,7 +994,7 @@ target "library-operator-appearances" {
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
-    "oras" = "docker-image://ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179"
+    "oras" = "docker-image://ghcr.io/oras-project/oras:v1.3.6@sha256:9cfb578be975b762fd898b9d004243d8003aeb807a3e15b2ed212cdd1326c9eb"
     "rust" = "docker-image://rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
   }
   args = {
@@ -1025,7 +1025,7 @@ target "library-operator-cli" {
   dockerfile = "Dockerfile.cli"
   platforms  = ["linux/amd64"]
   contexts = {
-    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:18f4cc26c9ffa7f20a359298be7deadac5c607c8e03a02b8119f1a5fc2f82c99"
+    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329"
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
@@ -1187,7 +1187,7 @@ target "media-operator-cli" {
   dockerfile = "Dockerfile.cli"
   platforms  = ["linux/amd64"]
   contexts = {
-    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:18f4cc26c9ffa7f20a359298be7deadac5c607c8e03a02b8119f1a5fc2f82c99"
+    "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329"
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "kubernetes" = "kubernetes"
     "notices" = "notices"

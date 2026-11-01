@@ -177,7 +177,7 @@ Write the pod to `capture-pod.yaml`:
       restartPolicy: Never
       containers:
         - name: curl
-          image: curlimages/curl:8.22.0
+          image: curlimages/curl:8.23.0
           command: [sleep, "3600"]
           volumeMounts:
             - name: ca
