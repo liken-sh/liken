@@ -52,7 +52,7 @@ target "toolchains" {
     "alpine" = "docker-image://alpine:edge@sha256:020dfcbaaf4cc1078bf2d9c7ba31a8466e334061dcd2f248001d68f79e52c000"
     "corrosion" = "docker-image://ghcr.io/liken-sh/corrosion:2026.10.31-001@sha256:8050e5a5a6d5638ffb4249aa1e9fcf8202258c1d37d18eb6413f99246196d85b"
     "cosign" = "docker-image://ghcr.io/sigstore/cosign/cosign:v3.1.4@sha256:0f06154836d2de34f887a5c273506d52ca43edaa1d9e53e6510fa78a48f69c2d"
-    "debian" = "docker-image://debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84"
+    "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
     "distroless" = "docker-image://gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329"
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "oras" = "docker-image://ghcr.io/oras-project/oras:v1.3.6@sha256:9cfb578be975b762fd898b9d004243d8003aeb807a3e15b2ed212cdd1326c9eb"
@@ -128,16 +128,16 @@ target "vulkan" {
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
   contexts = {
-    "debian" = "docker-image://debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84"
+    "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
   }
   args = {
-    VERSION = "20261024"
+    VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/vulkan:20261024-3"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache", "type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache-20261024-3"]
+  tags       = ["ghcr.io/liken-sh/vulkan:20261101-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache", "type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache-20261101-1"]
   cache-to = concat(
     CACHE_WRITE == "vulkan" ? ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "vulkan" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache-20261024-3,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "vulkan" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/vulkan:buildcache-20261101-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -147,16 +147,16 @@ target "astrometry" {
   platforms  = ["linux/amd64"]
   contexts = {
     "builder" = "vulkan"
-    "debian" = "docker-image://debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84"
+    "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
   }
   args = {
-    VERSION = "20261024"
+    VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/astrometry:20261024-3"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache", "type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache-20261024-3"]
+  tags       = ["ghcr.io/liken-sh/astrometry:20261101-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache", "type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache-20261101-1"]
   cache-to = concat(
     CACHE_WRITE == "astrometry" ? ["type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "astrometry" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache-20261024-3,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "astrometry" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/astrometry:buildcache-20261101-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -538,17 +538,17 @@ target "weston" {
   platforms  = ["linux/amd64"]
   contexts = {
     "builder" = "vulkan"
-    "debian" = "docker-image://debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84"
+    "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
     "vulkan" = "target:vulkan"
   }
   args = {
-    VERSION = "20261024"
+    VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/weston:20261024-4"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache", "type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20261024-4"]
+  tags       = ["ghcr.io/liken-sh/weston:20261101-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache", "type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20261101-1"]
   cache-to = concat(
     CACHE_WRITE == "weston" ? ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "weston" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20261024-4,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "weston" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20261101-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -631,14 +631,14 @@ target "audio-operator" {
   platforms  = ["linux/amd64"]
   contexts = {
     "builder" = "vulkan"
-    "debian" = "docker-image://debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84"
+    "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
   }
   args = {
     VERSION = VERSION
-    SNAPSHOT = "20261024"
+    SNAPSHOT = "20261101"
   }
   tags       = ["ghcr.io/liken-sh/audio-operator:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/audio-operator:buildcache"]
@@ -741,17 +741,17 @@ target "vaapi" {
   platforms  = ["linux/amd64"]
   contexts = {
     "builder" = "vulkan"
-    "debian" = "docker-image://debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84"
+    "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
     "vulkan" = "target:vulkan"
   }
   args = {
-    VERSION = "20261024"
+    VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/vaapi:20261024-3"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache", "type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache-20261024-3"]
+  tags       = ["ghcr.io/liken-sh/vaapi:20261101-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache", "type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache-20261101-1"]
   cache-to = concat(
     CACHE_WRITE == "vaapi" ? ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "vaapi" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache-20261024-3,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "vaapi" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/vaapi:buildcache-20261101-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -761,17 +761,17 @@ target "ffmpeg" {
   platforms  = ["linux/amd64"]
   contexts = {
     "builder" = "vulkan"
-    "debian" = "docker-image://debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84"
+    "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
     "vaapi" = "target:vaapi"
   }
   args = {
-    VERSION = "20261024"
+    VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/ffmpeg:20261024-3"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache", "type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache-20261024-3"]
+  tags       = ["ghcr.io/liken-sh/ffmpeg:20261101-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache", "type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache-20261101-1"]
   cache-to = concat(
     CACHE_WRITE == "ffmpeg" ? ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "ffmpeg" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache-20261024-3,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "ffmpeg" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/ffmpeg:buildcache-20261101-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -891,7 +891,7 @@ target "firmware-operator-scan" {
   platforms  = ["linux/amd64"]
   contexts = {
     "builder" = "vulkan"
-    "debian" = "docker-image://debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84"
+    "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
@@ -899,7 +899,7 @@ target "firmware-operator-scan" {
   }
   args = {
     VERSION = VERSION
-    SNAPSHOT = "20261024"
+    SNAPSHOT = "20261101"
   }
   tags       = ["ghcr.io/liken-sh/firmware-operator-scan:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/firmware-operator-scan:buildcache"]
@@ -912,7 +912,7 @@ target "git-csi-driver" {
   platforms  = ["linux/amd64"]
   contexts = {
     "builder" = "vulkan"
-    "debian" = "docker-image://debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84"
+    "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "kubernetes" = "kubernetes"
     "notices" = "notices"
@@ -920,7 +920,7 @@ target "git-csi-driver" {
   }
   args = {
     VERSION = VERSION
-    SNAPSHOT = "20261024"
+    SNAPSHOT = "20261101"
   }
   tags       = ["ghcr.io/liken-sh/git-csi-driver:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/git-csi-driver:buildcache"]
@@ -989,7 +989,7 @@ target "library-operator-appearances" {
   platforms  = ["linux/amd64"]
   contexts = {
     "appearances" = "library-operator/appearances"
-    "debian" = "docker-image://debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84"
+    "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
     "ffmpeg" = "target:ffmpeg"
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "kubernetes" = "kubernetes"
@@ -1045,17 +1045,17 @@ target "mpv" {
   platforms  = ["linux/amd64"]
   contexts = {
     "builder" = "vulkan"
-    "debian" = "docker-image://debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84"
+    "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
     "ffmpeg" = "target:ffmpeg"
   }
   args = {
-    VERSION = "20261024"
+    VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/mpv:20261024-3"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache", "type=registry,ref=ghcr.io/liken-sh/mpv:buildcache-20261024-3"]
+  tags       = ["ghcr.io/liken-sh/mpv:20261101-1"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache", "type=registry,ref=ghcr.io/liken-sh/mpv:buildcache-20261101-1"]
   cache-to = concat(
     CACHE_WRITE == "mpv" ? ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "mpv" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache-20261024-3,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "mpv" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache-20261101-1,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -1083,7 +1083,7 @@ target "media-operator-player" {
   contexts = {
     "brand" = "brand"
     "builder" = "vulkan"
-    "debian" = "docker-image://debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84"
+    "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "kubernetes" = "kubernetes"
     "mpv" = "target:mpv"
@@ -1092,7 +1092,7 @@ target "media-operator-player" {
   }
   args = {
     VERSION = VERSION
-    SNAPSHOT = "20261024"
+    SNAPSHOT = "20261101"
   }
   tags       = ["ghcr.io/liken-sh/media-operator-player:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/media-operator-player:buildcache"]
@@ -1107,7 +1107,7 @@ target "media-operator-idle" {
   contexts = {
     "brand" = "brand"
     "builder" = "vulkan"
-    "debian" = "docker-image://debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84"
+    "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
     "media-screen" = "media-screen"
     "notices" = "notices"
     "rust" = "docker-image://rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
@@ -1115,7 +1115,7 @@ target "media-operator-idle" {
   }
   args = {
     VERSION = VERSION
-    SNAPSHOT = "20261024"
+    SNAPSHOT = "20261101"
   }
   tags       = ["ghcr.io/liken-sh/media-operator-idle:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/media-operator-idle:buildcache"]
@@ -1130,7 +1130,7 @@ target "media-operator-display" {
   contexts = {
     "brand" = "brand"
     "builder" = "vulkan"
-    "debian" = "docker-image://debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84"
+    "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
     "media-screen" = "media-screen"
     "notices" = "notices"
     "rust" = "docker-image://rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
@@ -1138,7 +1138,7 @@ target "media-operator-display" {
   }
   args = {
     VERSION = VERSION
-    SNAPSHOT = "20261024"
+    SNAPSHOT = "20261101"
   }
   tags       = ["ghcr.io/liken-sh/media-operator-display:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/media-operator-display:buildcache"]
@@ -1168,7 +1168,7 @@ target "media-operator-capabilities" {
   dockerfile = "Dockerfile.capabilities"
   platforms  = ["linux/amd64"]
   contexts = {
-    "debian" = "docker-image://debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84"
+    "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "kubernetes" = "kubernetes"
     "notices" = "notices"

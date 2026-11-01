@@ -4,8 +4,8 @@
 name = "vaapi"
 # The date of the snapshot.debian.org archive that the build installs
 # from, as YYYYMMDD. Every base on Debian uses the same date.
-version = "20261024"
-revision = 3
+version = "20261101"
+revision = 1
 license = "MIT"
 
 # The upstream releases that the snapshot holds, as Debian names them.
@@ -14,7 +14,7 @@ license = "MIT"
 [package.upstream]
 libva = "2.24.1-2"
 intel-media-driver-non-free = "26.3.5+ds1-1"
-mesa = "26.2.5-1"
+mesa = "26.2.6-1"
 
 # shellcheck and the whitespace checks, from .pre-commit-config.yaml.
 [[jobs]]

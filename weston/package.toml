@@ -5,8 +5,8 @@
 name = "weston"
 # The date of the snapshot.debian.org archive that the build installs
 # from, as YYYYMMDD. Every base on Debian uses the same date.
-version = "20261024"
-revision = 4
+version = "20261101"
+revision = 1
 license = "MIT"
 
 # The upstream releases that the image holds. Each one is a label of
@@ -16,7 +16,7 @@ license = "MIT"
 # names it, and a new snapshot date updates it.
 [package.upstream]
 weston = "16.0.2"
-mesa = "26.2.5-1"
+mesa = "26.2.6-1"
 
 # shellcheck and the whitespace checks, from .pre-commit-config.yaml.
 [[jobs]]
