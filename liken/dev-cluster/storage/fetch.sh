@@ -49,13 +49,10 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../../toolchains/pin.sh
+source "$here/../../../toolchains/pin.sh"
 
-for tool in curl sha512sum; do
-    command -v "$tool" >/dev/null || {
-        echo "fetch.sh: missing required tool: $tool" >&2
-        exit 1
-    }
-done
+require_tools sha512sum
 
 # The suite that the pin in VERSION comes from. latest.sh reads this
 # line, and its --bump writes it.
@@ -73,45 +70,20 @@ sid)
     image="debian-sid-genericcloud-amd64-daily-$version.qcow2"
     url="$images/sid/daily/$version"
     ;;
-*)
-    echo "fetch.sh: no image naming known for the suite $suite" >&2
-    exit 1
-    ;;
+*) fail "no image naming known for the suite $suite" ;;
 esac
 
 cache="$here/cache/$version"
-mkdir -p "$cache"
 
 # The sha512 digest of each pinned build's image, from the build's
 # SHA512SUMS file. storage/latest.sh --bump writes it.
 declare -A image_sha512=(
     ["20261101-2649"]="8f012e85f08ab078da8a4ab5bb8fa5bd80f3d40502fde4fc6126a90028aa77ae357f8ac146e3dcdfbe9d75e8c4837de78dc8316e198bdd2981bacbf8cfcc141c"
 )
-digest="${image_sha512[$version]:-}"
-if [[ -z "$digest" ]]; then
-    echo "fetch.sh: no digest pinned for the storage image $version; storage/latest.sh --bump writes it" >&2
-    exit 1
-fi
 
-if ! sha512sum --check --status <<<"$digest  $cache/$image" >/dev/null 2>&1; then
-    echo "downloading Debian cloud image $version"
-    # The cloud image is large, and a long stream sometimes breaks
-    # partway through. -C - resumes each retry from the bytes already
-    # on disk, so repeated breaks still converge on a complete file.
-    # The checksum below decides whether the assembled bytes are good.
-    # The bytes go to a .partial file, which replaces the cached file
-    # only after it matches the digest. A .partial that does not match
-    # is deleted: when the file on disk is already full length, curl -C
-    # - gets a 416 answer, exits with success, and leaves the bytes as
-    # they are, so a bad full-length file would fail every later run.
-    curl -fL --retry 5 --retry-all-errors --retry-delay 5 --max-time 1800 -C - \
-        --progress-bar -o "$cache/$image.partial" "$url/$image"
-    sha512sum --check --quiet <<<"$digest  $cache/$image.partial" || {
-        rm -f "$cache/$image.partial"
-        exit 1
-    }
-    mv "$cache/$image.partial" "$cache/$image"
-fi
+# The cloud image is large, and a long stream sometimes breaks partway
+# through, so each retry resumes from the bytes already on disk.
+fetch_verified --resume "$url/$image" "${image_sha512[$version]:-}" "$cache/$image"
 ln -sfn "$image" "$cache/base.qcow2"
 
 echo "Debian cloud image $version:"

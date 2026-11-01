@@ -24,6 +24,9 @@ repos:
     rev: v0.11.0.1
     hooks:
       - id: shellcheck
+        # -x follows the source line of each fetch.sh and latest.sh
+        # into toolchains/pin.sh.
+        args: [-x]
   - repo: local
     hooks:
       - id: gofmt

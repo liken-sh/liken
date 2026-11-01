@@ -20,10 +20,12 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../../toolchains/pin.sh
+source "$here/../../../toolchains/pin.sh"
 
 pinned="$(cat "$here/VERSION")"
 
-record="$(curl -fsS --retry 3 --max-time 120 https://deb.debian.org/debian/dists/sid/main/binary-all/Packages.xz |
+record="$(fetch_text https://deb.debian.org/debian/dists/sid/main/binary-all/Packages.xz --max-time 120 |
     xz -dc |
     awk '/^Package: ovmf-generic$/ { found = 1 }
          found && /^Version:/ { version = $2 }
@@ -31,22 +33,15 @@ record="$(curl -fsS --retry 3 --max-time 120 https://deb.debian.org/debian/dists
 latest="${record%% *}"
 digest="${record##* }"
 
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' ovmf "$pinned" "${latest:-?}" sid sid - \
+row ovmf "$pinned" "$latest" sid sid - \
     "the lab's UEFI firmware, from Debian unstable; in no release"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
-[[ -n "$latest" ]] || {
-    echo "latest.sh: the Packages index did not answer" >&2
-    exit 1
-}
-[[ "$latest" != "$pinned" ]] || {
-    echo "ovmf $pinned is current"
-    exit 0
-}
+bump_needed ovmf "$pinned" "$latest" || exit 0
 
 echo "$latest" >"$here/VERSION"
-sed -i "s|^digest=\".*\"|digest=\"$digest\"|" "$here/fetch.sh"
-echo "ovmf: $pinned -> $latest"
+set_var "$here/fetch.sh" digest "$digest"
+bumped ovmf "$pinned" "$latest"
 echo "the digest came from Debian's signed Packages index"
-echo "next: make -C .. ovmf"
+next_step "make -C .. ovmf"

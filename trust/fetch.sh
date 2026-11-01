@@ -30,20 +30,16 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../toolchains/pin.sh
+source "$here/../toolchains/pin.sh"
 
-for tool in curl sha256sum; do
-    command -v "$tool" >/dev/null || {
-        echo "fetch.sh: missing required tool: $tool" >&2
-        exit 1
-    }
-done
+require_tools sha256sum
 
 version="${1:-$(cat "$here/VERSION")}"
 url="https://curl.se/ca/cacert-$version.pem"
 
 cache="$here/cache/$version"
 out="$here/dist/$version"
-mkdir -p "$cache"
 
 # The digest comes from the trust image's Dockerfile. Its ADD line
 # names the snapshot's URL with a --checksum on the line before, and
@@ -57,26 +53,10 @@ digest="$(awk -v url="$url" '
         print prev
     }
     { prev = $0 }' "$here/Dockerfile")"
-if [[ ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
-    echo "fetch.sh: trust/Dockerfile pins no digest for $url; trust/latest.sh --bump writes it" >&2
-    exit 1
-fi
+[[ "$digest" =~ ^[0-9a-f]{64}$ ]] ||
+    fail "trust/Dockerfile pins no digest for $url; trust/latest.sh --bump writes it"
 
-if ! sha256sum --check --status <<<"$digest  $cache/cacert.pem" >/dev/null 2>&1; then
-    echo "downloading CA bundle $version"
-    # The bytes go to a .partial file, which replaces the cached file
-    # only after it matches the digest. A .partial that does not match
-    # is deleted: when the file on disk is already full length, curl -C
-    # - gets a 416 answer, exits with success, and leaves the bytes as
-    # they are, so a bad full-length file would fail every later run.
-    curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
-        --progress-bar -o "$cache/cacert.pem.partial" "$url"
-    sha256sum --check --quiet <<<"$digest  $cache/cacert.pem.partial" || {
-        rm -f "$cache/cacert.pem.partial"
-        exit 1
-    }
-    mv "$cache/cacert.pem.partial" "$cache/cacert.pem"
-fi
+fetch_verified "$url" "$digest" "$cache/cacert.pem"
 
 rm -rf "$out"
 mkdir -p "$out"

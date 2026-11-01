@@ -27,35 +27,26 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
 repository="https://github.com/intel/Intel-Linux-Processor-Microcode-Data-Files"
 
 pinned="$(cat "$here/VERSION")"
 
-latest="$(git ls-remote --tags --refs "$repository" |
-    sed 's|.*refs/tags/microcode-||' |
-    grep -E '^[0-9]{8}' |
-    sort -V | tail -1)" || latest=""
+latest="$(newest_tag "$repository" '^[0-9]{8}' microcode-)" || latest=""
 
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' microcode "$pinned" "${latest:-?}" - - - \
+row microcode "$pinned" "$latest" - - - \
     "Intel's data files; the AMD blobs follow linux-firmware"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
-[[ -n "$latest" ]] || {
-    echo "latest.sh: the tag list did not answer" >&2
-    exit 1
-}
-[[ "$latest" != "$pinned" ]] || {
-    echo "the Intel microcode $pinned is current"
-    exit 0
-}
+bump_needed microcode "$pinned" "$latest" || exit 0
 
-url="$repository/archive/refs/tags/microcode-$latest.tar.gz"
-digest="$(curl -fsSL --retry 3 --max-time 300 "$url" | sha256sum | cut -d' ' -f1)"
+digest="$(digest_of_url "$repository/archive/refs/tags/microcode-$latest.tar.gz")"
 
 echo "$latest" >"$here/VERSION"
-sed -i "s|^digest=\".*\"|digest=\"$digest\"|" "$here/fetch.sh"
-echo "microcode: $pinned -> $latest"
+set_var "$here/fetch.sh" digest "$digest"
+bumped microcode "$pinned" "$latest"
 echo "the digest came from this download; nothing upstream signs it"
-echo "next: make -C .. microcode"
+next_step "make -C .. microcode"

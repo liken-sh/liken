@@ -41,6 +41,8 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
 archive="https://cdn.kernel.org/pub/linux/kernel/firmware"
 regdb_archive="https://mirrors.edge.kernel.org/pub/software/network/wireless-regdb"
@@ -49,21 +51,20 @@ pinned="$(cat "$here/VERSION")"
 # The regulatory database is a nested pin: fetch.sh holds the version
 # and the digest, because this domain's VERSION file names the
 # firmware release and nothing else.
-regdb_pinned="$(sed -n 's|^regdb_version="\(.*\)"$|\1|p' "$here/fetch.sh")"
+regdb_pinned="$(var_of "$here/fetch.sh" regdb_version)"
 
-latest="$(curl -fsS --retry 3 --max-time 60 "$archive/" |
+latest="$(fetch_text "$archive/" |
     grep -oE 'linux-firmware-[0-9]{8}\.tar\.xz' |
     sed -e 's|^linux-firmware-||' -e 's|\.tar\.xz$||' |
     sort | tail -1)" || latest=""
-regdb_latest="$(curl -fsS --retry 3 --max-time 60 "$regdb_archive/" |
+regdb_latest="$(fetch_text "$regdb_archive/" |
     grep -oE 'wireless-regdb-[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.tar\.xz' |
     sed -e 's|^wireless-regdb-||' -e 's|\.tar\.xz$||' |
     sort | tail -1)" || regdb_latest=""
 
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' linux-firmware "$pinned" "${latest:-?}" - - - \
-    "newest release tarball on kernel.org"
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' '  wireless-regdb' "$regdb_pinned" \
-    "${regdb_latest:-?}" - - - "regulatory.db, which cfg80211 declares"
+row linux-firmware "$pinned" "$latest" - - - "newest release tarball on kernel.org"
+row '  wireless-regdb' "$regdb_pinned" "$regdb_latest" - - - \
+    "regulatory.db, which cfg80211 declares"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
@@ -74,59 +75,34 @@ sums_digest() {
 }
 
 if [[ "${2:-linux-firmware}" == "wireless-regdb" ]]; then
-    [[ -n "$regdb_latest" ]] || {
-        echo "latest.sh: the wireless-regdb directory did not answer" >&2
-        exit 1
-    }
-    [[ "$regdb_latest" != "$regdb_pinned" ]] || {
-        echo "wireless-regdb $regdb_pinned is current"
-        exit 0
-    }
+    bump_needed wireless-regdb "$regdb_pinned" "$regdb_latest" || exit 0
     regdb_tarball="wireless-regdb-$regdb_latest.tar.xz"
     regdb_digest="$(sums_digest "$regdb_archive" "$regdb_tarball")"
-    sed -i \
-        -e "s|^regdb_version=\".*\"|regdb_version=\"$regdb_latest\"|" \
-        -e "s|^regdb_digest=\".*\"|regdb_digest=\"$regdb_digest\"|" \
-        "$here/fetch.sh"
-    echo "wireless-regdb: $regdb_pinned -> $regdb_latest"
+    set_var "$here/fetch.sh" regdb_version "$regdb_latest"
+    set_var "$here/fetch.sh" regdb_digest "$regdb_digest"
+    bumped wireless-regdb "$regdb_pinned" "$regdb_latest"
     echo "the digest came from sha256sums.asc, signed by kernel.org's checksum autosigner"
     # licensing/sources.sh mirrors this tarball and pins it by digest,
-    # so a regdb bump moves that digest too. A refused re-pin leaves
-    # the domain pin moved and the mirror behind it, which is a
-    # release that cannot serve its own sources. Say that plainly,
-    # because the fix is a hand edit.
-    "$here/../licensing/sources.sh" --repin || {
-        echo "the pin moved; licensing/sources.sh still needs a hand edit" >&2
-        exit 1
-    }
-    echo "next: make -C .. linux-firmware"
+    # so a regdb bump moves that digest too.
+    repin_sources
+    next_step "make -C .. linux-firmware"
     exit 0
 fi
 
-[[ "${2:-linux-firmware}" == "linux-firmware" ]] || {
-    echo "latest.sh: no pin named ${2}; try wireless-regdb" >&2
-    exit 1
-}
+[[ "${2:-linux-firmware}" == "linux-firmware" ]] || fail "no pin named ${2}; try wireless-regdb"
 
-[[ -n "$latest" ]] || {
-    echo "latest.sh: the firmware directory did not answer" >&2
-    exit 1
-}
-[[ "$latest" != "$pinned" ]] || {
-    echo "linux-firmware $pinned is current"
-    exit 0
-}
+bump_needed linux-firmware "$pinned" "$latest" || exit 0
 
 tarball="linux-firmware-$latest.tar.xz"
 digest="$(sums_digest "$archive" "$tarball")"
 
 echo "$latest" >"$here/VERSION"
-sed -i "s|^digest=\".*\"|digest=\"$digest\"|" "$here/fetch.sh"
-echo "linux-firmware: $pinned -> $latest"
+set_var "$here/fetch.sh" digest "$digest"
+bumped linux-firmware "$pinned" "$latest"
 echo "the digest came from sha256sums.asc, signed by kernel.org's checksum autosigner"
 echo "the microcode domain builds AMD's blobs from this tarball; rebuild it too"
 # licensing/sources.sh needs no re-pin after this bump. It mirrors the
 # firmware tarball from this domain's own cache, which fetch.sh
 # verified against its own digest, so sources.sh holds no digest of
 # its own for it.
-echo "next: make -C .. linux-firmware microcode"
+next_step "make -C .. linux-firmware microcode"

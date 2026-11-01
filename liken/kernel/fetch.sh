@@ -68,6 +68,8 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
 # An ordinary Linux development machine has every tool this script
 # needs: curl to fetch, ar (binutils) to open the .deb wrapper, tar and
@@ -75,12 +77,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # to index the modules at the end. This script checks for them first,
 # so a missing tool stops it immediately instead of partway through a
 # download.
-for tool in curl ar tar zstd sha256sum depmod; do
-    command -v "$tool" >/dev/null || {
-        echo "fetch.sh: missing required tool: $tool" >&2
-        exit 1
-    }
-done
+require_tools ar tar zstd sha256sum depmod
 
 arch="amd64"
 version="${1:-$(cat "$here/VERSION")}"
@@ -88,7 +85,6 @@ base="https://kernel.ubuntu.com/mainline/v$version/$arch"
 
 cache="$here/cache"
 out="$here/dist/$version"
-mkdir -p "$cache"
 
 # The two packages of each pinned build, as "<sha256>  <filename>"
 # lines, which is the form of the sha256 lines in the build's CHECKSUMS
@@ -116,48 +112,20 @@ trap 'rm -rf "$staging"' EXIT
 # builds).
 fetch() {
     local line="$1" digest deb payload
-    [[ -n "$line" ]] || {
-        echo "fetch.sh: no packages pinned for kernel $version; kernel/latest.sh --bump writes them" >&2
-        exit 1
-    }
+    [[ -n "$line" ]] || fail "no packages pinned for kernel $version; kernel/latest.sh --bump writes them"
     digest="${line%% *}"
     deb="${line##* }"
 
-    # A cached file that still matches its checksum is good. This
-    # script downloads anything else (missing, torn, or tampered)
-    # again, and the new download must verify before the script uses
-    # it.
-    if ! sha256sum --check --status <<<"$digest  $cache/$deb" >/dev/null 2>&1; then
-        echo "downloading $deb"
-        # These .debs are large, and a long stream sometimes breaks
-        # partway through. -C - resumes each retry from the bytes
-        # already on disk, so repeated breaks still converge on a
-        # complete file. The checksum below decides whether the
-        # assembled bytes are good.
-        # The bytes go to a .partial file, which replaces the cached
-        # file only after it matches the digest. A .partial that does
-        # not match is deleted: when the file on disk is already full
-        # length, curl -C - gets a 416 answer, exits with success, and
-        # leaves the bytes as they are, so a bad full-length file would
-        # fail every later run.
-        curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
-            --progress-bar -o "$cache/$deb.partial" "$base/$deb"
-        sha256sum --check --quiet <<<"$digest  $cache/$deb.partial" || {
-            rm -f "$cache/$deb.partial"
-            exit 1
-        }
-        mv "$cache/$deb.partial" "$cache/$deb"
-    fi
+    # These .debs are large, and a long stream sometimes breaks partway
+    # through, so each retry resumes from the bytes already on disk.
+    fetch_verified --resume "$base/$deb" "$digest" "$cache/$deb"
 
     payload="$(ar t "$cache/$deb" | grep '^data\.tar')"
     case "$payload" in
         *.tar) ar p "$cache/$deb" "$payload" | tar -x -C "$staging" ;;
         *.zst) ar p "$cache/$deb" "$payload" | tar --zstd -x -C "$staging" ;;
         *.xz)  ar p "$cache/$deb" "$payload" | tar -xJ -C "$staging" ;;
-        *)
-            echo "fetch.sh: unexpected payload format in $deb: $payload" >&2
-            exit 1
-            ;;
+        *) fail "unexpected payload format in $deb: $payload" ;;
     esac
 }
 

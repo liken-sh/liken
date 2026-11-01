@@ -36,13 +36,10 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
-for tool in curl sha256sum tar; do
-    command -v "$tool" >/dev/null || {
-        echo "fetch.sh: missing required tool: $tool" >&2
-        exit 1
-    }
-done
+require_tools sha256sum tar
 
 arch="amd64"
 version="${1:-$(cat "$here/VERSION")}"
@@ -54,38 +51,15 @@ tarball="flux_${bare}_linux_${arch}.tar.gz"
 
 cache="$here/cache/$version"
 out="$here/dist/$version"
-mkdir -p "$cache"
 
-# The digest of the CLI tarball, pinned beside the version it belongs to.
-# flux/latest.sh --bump copies it from the checksum file that the
+# The digest of the CLI tarball, pinned beside the version it belongs
+# to. flux/latest.sh --bump copies it from the checksum file that the
 # release publishes, after the file's sigstore signature verifies as
-# the work of Flux's release workflow, so a fetch never reads a digest
-# from upstream, and
-# a file that changes upstream after the bump fails the check.
+# the work of Flux's release workflow.
 declare -A flux_sha256=(
     ["v2.10.0"]="208dd7012c04fedeed5b2d0b6e63df3b15b1c34a381527811685c098bc9f8659"
 )
-digest="${flux_sha256[$version]:-}"
-if [[ -z "$digest" ]]; then
-    echo "fetch.sh: no digest pinned for flux $version; flux/latest.sh --bump writes it" >&2
-    exit 1
-fi
-
-if ! sha256sum --check --status <<<"$digest  $cache/$tarball" >/dev/null 2>&1; then
-    echo "downloading flux $version"
-    # The bytes go to a .partial file, which replaces the cached file
-    # only after it matches the digest. A .partial that does not match
-    # is deleted: when the file on disk is already full length, curl -C
-    # - gets a 416 answer, exits with success, and leaves the bytes as
-    # they are, so a bad full-length file would fail every later run.
-    curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
-        --progress-bar -o "$cache/$tarball.partial" "$base/$tarball"
-    sha256sum --check --quiet <<<"$digest  $cache/$tarball.partial" || {
-        rm -f "$cache/$tarball.partial"
-        exit 1
-    }
-    mv "$cache/$tarball.partial" "$cache/$tarball"
-fi
+fetch_verified --resume "$base/$tarball" "${flux_sha256[$version]:-}" "$cache/$tarball"
 tar -xzf "$cache/$tarball" -C "$cache" flux
 
 # Render the seed. --export writes manifests to stdout and touches no

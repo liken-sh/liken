@@ -35,13 +35,10 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../../toolchains/pin.sh
+source "$here/../../../toolchains/pin.sh"
 
-for tool in curl sha256sum dpkg-deb python3; do
-    command -v "$tool" >/dev/null || {
-        echo "fetch.sh: missing required tool: $tool" >&2
-        exit 1
-    }
-done
+require_tools sha256sum dpkg-deb python3
 
 version="$(cat "$here/VERSION")"
 digest="05c1593998ba58700ff86c062bde306321af1f5a2943ea9ceef6c2332f3f3374"
@@ -49,26 +46,16 @@ digest="05c1593998ba58700ff86c062bde306321af1f5a2943ea9ceef6c2332f3f3374"
 cache="$here/cache"
 deb="$cache/ovmf-generic_${version}_all.deb"
 out="$here/dist/$version"
-mkdir -p "$cache"
 
-if ! sha256sum --check --status <<<"$digest  $deb" >/dev/null 2>&1; then
+if ! digest_matches "$digest" "$deb"; then
     # snapshot.debian.org names each file by its SHA1, and answers the
-    # SHA1 of a package version from its metadata service.
+    # SHA1 of a package version from its metadata service. The SHA1
+    # only finds the file; the pinned SHA256 decides whether its bytes
+    # are good.
     encoded="${version//+/%2B}"
-    sha1="$(curl -fsS --retry 3 "https://snapshot.debian.org/mr/binary/ovmf-generic/$encoded/binfiles" |
+    sha1="$(fetch_text "https://snapshot.debian.org/mr/binary/ovmf-generic/$encoded/binfiles" |
         python3 -c 'import json, sys; print(json.load(sys.stdin)["result"][0]["hash"])')"
-    echo "downloading ovmf-generic $version"
-    # The bytes go to a .partial file, which replaces the cached file
-    # only after it matches the digest, so a torn or changed download
-    # never takes the name of a good one. The SHA1 above only finds the
-    # file; the pinned SHA256 decides whether its bytes are good.
-    curl -fL --retry 5 --retry-all-errors --retry-delay 5 \
-        --progress-bar -o "$deb.partial" "https://snapshot.debian.org/file/$sha1"
-    sha256sum --check --quiet <<<"$digest  $deb.partial" || {
-        rm -f "$deb.partial"
-        exit 1
-    }
-    mv "$deb.partial" "$deb"
+    fetch_verified "https://snapshot.debian.org/file/$sha1" "$digest" "$deb"
 fi
 
 rm -rf "$out"

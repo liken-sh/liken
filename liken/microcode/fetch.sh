@@ -49,13 +49,10 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
-for tool in curl sha256sum tar cpio; do
-    command -v "$tool" >/dev/null || {
-        echo "fetch.sh: missing required tool: $tool" >&2
-        exit 1
-    }
-done
+require_tools sha256sum tar cpio
 
 version="$(cat "$here/VERSION")"
 tarball="intel-microcode-$version.tar.gz"
@@ -71,23 +68,7 @@ amd="$here/../linux-firmware/cache/$linuxfirmware_version/amd-ucode"
 [[ -d "$amd" ]] || "$here/../linux-firmware/fetch.sh"
 
 cache="$here/cache"
-mkdir -p "$cache"
-
-if ! sha256sum --check --status <<<"$digest  $cache/$tarball" >/dev/null 2>&1; then
-    echo "downloading intel microcode $version"
-    # The bytes go to a .partial file, which replaces the cached file
-    # only after it matches the digest. A .partial that does not match
-    # is deleted: when the file on disk is already full length, curl -C
-    # - gets a 416 answer, exits with success, and leaves the bytes as
-    # they are, so a bad full-length file would fail every later run.
-    curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
-        --progress-bar -o "$cache/$tarball.partial" "$url"
-    sha256sum --check --quiet <<<"$digest  $cache/$tarball.partial" || {
-        rm -f "$cache/$tarball.partial"
-        exit 1
-    }
-    mv "$cache/$tarball.partial" "$cache/$tarball"
-fi
+fetch_verified --resume "$url" "$digest" "$cache/$tarball"
 
 out="$here/dist/$version"
 rm -rf "$out"

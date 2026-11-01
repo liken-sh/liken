@@ -46,6 +46,8 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
 index="https://kernel.ubuntu.com/mainline/"
 
@@ -55,61 +57,30 @@ pinned="$(cat "$here/VERSION")"
 # Sorting needs the trailing slash gone: '.' sorts before '/', so
 # "7.1.2/" would come out below "7.1/" and the newest release would
 # be whichever one happened to be shortest.
-latest="$(curl -fsS --retry 3 --max-time 60 "$index" |
+latest="$(fetch_text "$index" |
     grep -oE 'href="v[0-9][^"]*/"' |
     sed -e 's|href="v||' -e 's|/"$||' |
     grep -vE 'rc' |
     sort -V | tail -1)" || latest=""
 
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' kernel "$pinned" "${latest:-?}" \
-    mainline mainline - \
+row kernel "$pinned" "$latest" mainline mainline - \
     "Canonical's mainline builds, which lag kernel.org"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
-[[ -n "$latest" ]] || {
-    echo "latest.sh: the mainline index did not answer" >&2
-    exit 1
-}
-[[ "$latest" != "$pinned" ]] || {
-    echo "kernel $pinned is current"
-    exit 0
-}
-
-for tool in curl gpg gpgv; do
-    command -v "$tool" >/dev/null || {
-        echo "latest.sh: missing required tool: $tool" >&2
-        exit 1
-    }
-done
+bump_needed kernel "$pinned" "$latest" || exit 0
 
 signer="60AA7B6F30434AE68E569963E50C6A0917C622B0"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-curl -fsSL --retry 3 --max-time 60 -o "$work/CHECKSUMS" "${index}v$latest/amd64/CHECKSUMS" || {
-    echo "latest.sh: no mainline build found for $latest" >&2
-    echo "latest.sh: (not every release builds successfully; check $index)" >&2
-    exit 1
-}
-curl -fsSL --retry 3 --max-time 60 -o "$work/CHECKSUMS.gpg" "${index}v$latest/amd64/CHECKSUMS.gpg" || {
-    echo "latest.sh: the build of $latest publishes no CHECKSUMS.gpg signature" >&2
-    exit 1
-}
-# gpgv reads a binary keyring, and the repository keeps the key in
-# its armored form, which a person can read and compare. gpgv's
-# status lines name the fingerprint of the key that made a good
-# signature, and the bump accepts only the pinned one.
-gpg --dearmor <"$here/kernel-ppa.asc" >"$work/kernel-ppa.gpg"
-gpgv --status-fd 3 --keyring "$work/kernel-ppa.gpg" \
-    "$work/CHECKSUMS.gpg" "$work/CHECKSUMS" 3>"$work/status" || {
-    echo "latest.sh: the CHECKSUMS file of $latest does not verify against kernel-ppa.asc" >&2
-    exit 1
-}
-awk -v f="$signer" '$2 == "VALIDSIG" && $NF == f { found = 1 } END { exit !found }' "$work/status" || {
-    echo "latest.sh: the CHECKSUMS file of $latest is not signed by $signer" >&2
-    exit 1
-}
+# Not every release builds successfully, so a release in the index can
+# have no build to pin.
+url_exists "${index}v$latest/amd64/CHECKSUMS" ||
+    fail "no mainline build found for $latest; check $index"
+fetch_file "${index}v$latest/amd64/CHECKSUMS" "$work/CHECKSUMS"
+fetch_file "${index}v$latest/amd64/CHECKSUMS.gpg" "$work/CHECKSUMS.gpg"
+verify_signature --signer "$signer" "$here/kernel-ppa.asc" "$work/CHECKSUMS.gpg" "$work/CHECKSUMS"
 
 # The CHECKSUMS file holds sha1 lines (40 hex characters) and then
 # sha256 lines (64 characters), each in the form "<digest>  <filename>".
@@ -118,27 +89,15 @@ awk -v f="$signer" '$2 == "VALIDSIG" && $NF == f { found = 1 } END { exit !found
 checksums="$(cat "$work/CHECKSUMS")"
 image="$(grep -E '^[0-9a-f]{64}  linux-image-unsigned-.*-generic_.*_amd64\.deb$' <<<"$checksums" | head -n1)" || image=""
 modules="$(grep -E '^[0-9a-f]{64}  linux-modules-.*-generic_.*_amd64\.deb$' <<<"$checksums" | head -n1)" || modules=""
-[[ -n "$image" && -n "$modules" ]] || {
-    echo "latest.sh: the CHECKSUMS file of $latest lists no image or no modules package" >&2
-    exit 1
-}
+[[ -n "$image" && -n "$modules" ]] ||
+    fail "the CHECKSUMS file of $latest lists no image or no modules package"
 
-# Each array in fetch.sh holds one entry, the pinned version's, so the
-# bump replaces the line after each array's opening line.
 echo "$latest" >"$here/VERSION"
-sed -i \
-    -e "/^declare -A image_package=(/{n;s|.*|    [\"$latest\"]=\"$image\"|}" \
-    -e "/^declare -A modules_package=(/{n;s|.*|    [\"$latest\"]=\"$modules\"|}" \
-    "$here/fetch.sh"
-echo "kernel: $pinned -> $latest"
+set_entry "$here/fetch.sh" image_package "$latest" "$image"
+set_entry "$here/fetch.sh" modules_package "$latest" "$modules"
+bumped kernel "$pinned" "$latest"
 echo "the digests came from the build's CHECKSUMS file, signed by the Kernel PPA key"
 # licensing/sources.sh mirrors kernel.org's tarball of this release
-# and pins it by digest, so a kernel bump moves that digest too. A
-# refused re-pin leaves the domain pin moved and the mirror behind
-# it, which is a release that cannot serve its own sources. Say that
-# plainly, because the fix is a hand edit.
-"$here/../licensing/sources.sh" --repin || {
-    echo "the pin moved; licensing/sources.sh still needs a hand edit" >&2
-    exit 1
-}
-echo "next: make -C .. kernel"
+# and pins it by digest, so a kernel bump moves that digest too.
+repin_sources
+next_step "make -C .. kernel"

@@ -27,13 +27,10 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
-for tool in curl sha256sum; do
-    command -v "$tool" >/dev/null || {
-        echo "fetch.sh: missing required tool: $tool" >&2
-        exit 1
-    }
-done
+require_tools sha256sum
 
 version="${1:-$(cat "$here/VERSION")}"
 
@@ -42,41 +39,17 @@ base="https://github.com/k3s-io/k3s/releases/download/${version//+/%2B}"
 
 cache="$here/cache/$version"
 out="$here/dist/$version"
-mkdir -p "$cache"
 
-# The digest of the bare k3s binary, pinned beside the version it belongs to.
-# k3s/latest.sh --bump copies it from the sha256 manifest that the
-# release publishes, so a fetch never reads a digest from upstream, and
-# a file that changes upstream after the bump fails the check.
+# The digest of the bare k3s binary, pinned beside the version it
+# belongs to. k3s/latest.sh --bump copies it from the sha256 manifest
+# that the release publishes.
 declare -A k3s_sha256=(
     ["v1.37.1+k3s1"]="92b94582eb7b34a8cf532e6006842b9ed215a6783cf56a3dd6271fd35243b2c0"
 )
-digest="${k3s_sha256[$version]:-}"
-if [[ -z "$digest" ]]; then
-    echo "fetch.sh: no digest pinned for k3s $version; k3s/latest.sh --bump writes it" >&2
-    exit 1
-fi
 
-if ! sha256sum --check --status <<<"$digest  $cache/k3s" >/dev/null 2>&1; then
-    echo "downloading k3s $version"
-    # The k3s binary is about 80 MB, and a long stream sometimes
-    # breaks partway through. -C - resumes each retry from the bytes
-    # already on disk, so repeated breaks still converge on a
-    # complete file. The checksum below decides whether the
-    # assembled bytes are good.
-    # The bytes go to a .partial file, which replaces the cached file
-    # only after it matches the digest. A .partial that does not match
-    # is deleted: when the file on disk is already full length, curl -C
-    # - gets a 416 answer, exits with success, and leaves the bytes as
-    # they are, so a bad full-length file would fail every later run.
-    curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
-        --progress-bar -o "$cache/k3s.partial" "$base/k3s"
-    sha256sum --check --quiet <<<"$digest  $cache/k3s.partial" || {
-        rm -f "$cache/k3s.partial"
-        exit 1
-    }
-    mv "$cache/k3s.partial" "$cache/k3s"
-fi
+# The k3s binary is large, and a long stream sometimes breaks partway
+# through, so each retry resumes from the bytes already on disk.
+fetch_verified --resume "$base/k3s" "${k3s_sha256[$version]:-}" "$cache/k3s"
 
 rm -rf "$out"
 mkdir -p "$out"

@@ -38,43 +38,23 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
 repository="https://github.com/fluxcd/flux2"
 
 pinned="$(cat "$here/VERSION")"
 
-latest="$(git ls-remote --tags --refs "$repository" |
-    sed 's|.*refs/tags/||' |
-    grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' |
-    sort -V | tail -1)" || latest=""
+latest="$(newest_tag "$repository" '^v[0-9]+\.[0-9]+\.[0-9]+$')" || latest=""
 
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' flux "$pinned" "${latest:-?}" - - - \
-    "newest release tag, no release candidates"
+row flux "$pinned" "$latest" - - - "newest release tag, no release candidates"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
-[[ -n "$latest" ]] || {
-    echo "latest.sh: the tag list did not answer" >&2
-    exit 1
-}
-[[ "$latest" != "$pinned" ]] || {
-    echo "flux $pinned is current"
-    exit 0
-}
+bump_needed flux "$pinned" "$latest" || exit 0
 
-for tool in curl docker; do
-    command -v "$tool" >/dev/null || {
-        echo "latest.sh: missing required tool: $tool" >&2
-        exit 1
-    }
-done
-
-cosign="$(sed -n '/^\[build\]/,/^\[/ s|^cosign = "\(.*\)"$|\1|p' \
-    "$here/../../toolchains/images.toml")"
-[[ -n "$cosign" ]] || {
-    echo "latest.sh: toolchains/images.toml names no cosign image" >&2
-    exit 1
-}
+require_tools docker
+cosign="$(image_of cosign)"
 identity="$repository/.github/workflows/release.yaml@refs/tags/$latest"
 issuer="https://token.actions.githubusercontent.com"
 
@@ -85,14 +65,8 @@ trap 'rm -rf "$work"' EXIT
 bare="${latest#v}"
 sums="$repository/releases/download/$latest/flux_${bare}_checksums.txt"
 tarball="flux_${bare}_linux_amd64.tar.gz"
-curl -fsSL --retry 3 --max-time 60 -o "$work/checksums.txt" "$sums" || {
-    echo "latest.sh: $sums did not answer" >&2
-    exit 1
-}
-curl -fsSL --retry 3 --max-time 60 -o "$work/checksums.txt.sigstore.json" "$sums.sigstore.json" || {
-    echo "latest.sh: flux $latest publishes no $sums.sigstore.json" >&2
-    exit 1
-}
+fetch_file "$sums" "$work/checksums.txt"
+fetch_file "$sums.sigstore.json" "$work/checksums.txt.sigstore.json"
 # The container runs as the calling user, so it reads the work
 # directory without a change to its permissions, and HOME points at a
 # writable directory for the sigstore trust root that cosign fetches
@@ -102,20 +76,12 @@ docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
     --bundle /work/checksums.txt.sigstore.json \
     --certificate-identity "$identity" \
     --certificate-oidc-issuer "$issuer" \
-    /work/checksums.txt >&2 || {
-    echo "latest.sh: $sums does not verify as signed by $identity" >&2
-    exit 1
-}
+    /work/checksums.txt >&2 || fail "$sums does not verify as signed by $identity"
 digest="$(awk -v f="$tarball" '$2 == f { print $1 }' "$work/checksums.txt")"
-[[ "$digest" =~ ^[0-9a-f]{64}$ ]] || {
-    echo "latest.sh: $sums lists no $tarball" >&2
-    exit 1
-}
+[[ "$digest" =~ ^[0-9a-f]{64}$ ]] || fail "$sums lists no $tarball"
 
-# The array in fetch.sh holds one entry, the pinned version's, so the
-# bump replaces the line after the array's opening line.
 echo "$latest" >"$here/VERSION"
-sed -i "/^declare -A flux_sha256=(/{n;s|.*|    [\"$latest\"]=\"$digest\"|}" "$here/fetch.sh"
-echo "flux: $pinned -> $latest"
+set_entry "$here/fetch.sh" flux_sha256 "$latest" "$digest"
+bumped flux "$pinned" "$latest"
 echo "the digest came from the release's checksums file, signed by flux's release workflow"
-echo "next: make -C .. cluster-operator"
+next_step "make -C .. cluster-operator"

@@ -32,6 +32,8 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
 channels="https://update.k3s.io/v1-release/channels"
 
@@ -42,25 +44,18 @@ pinned="$(cat "$here/VERSION")"
 # the first "latest" field after "id":"latest" is the latest
 # channel's. This keeps the script's tool list at curl, with no JSON
 # parser to install.
-latest="$(curl -fsS --retry 3 --max-time 60 "$channels" |
+latest="$(fetch_text "$channels" |
     sed 's/.*"id":"latest"//' |
     grep -o '"latest":"[^"]*"' |
     head -1 |
     cut -d'"' -f4)" || latest=""
 
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' k3s "$pinned" "${latest:-?}" \
+row k3s "$pinned" "$latest" \
     latest latest - "the release that update.k3s.io names for the latest channel"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
-[[ -n "$latest" ]] || {
-    echo "latest.sh: the channel server did not answer" >&2
-    exit 1
-}
-[[ "$latest" != "$pinned" ]] || {
-    echo "k3s $pinned is current"
-    exit 0
-}
+bump_needed k3s "$pinned" "$latest" || exit 0
 
 # The manifest covers all of the release's artifacts. The line that
 # ends in exactly " k3s" names the bare server and agent binary. Its
@@ -68,20 +63,15 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' k3s "$pinned" "${latest:-?}" \
 # machine pulls its images over the network on its first boot instead.
 # The tag carries a +, which a URL path must escape.
 manifest="https://github.com/k3s-io/k3s/releases/download/${latest//+/%2B}/sha256sum-amd64.txt"
-digest="$(curl -fsSL --retry 3 --max-time 60 "$manifest" | awk '$2 == "k3s" { print $1 }')" || digest=""
-[[ "$digest" =~ ^[0-9a-f]{64}$ ]] || {
-    echo "latest.sh: $manifest lists no k3s binary" >&2
-    exit 1
-}
+digest="$(fetch_text "$manifest" | awk '$2 == "k3s" { print $1 }')" || digest=""
+[[ "$digest" =~ ^[0-9a-f]{64}$ ]] || fail "$manifest lists no k3s binary"
 
-# The array in fetch.sh holds one entry, the pinned version's, so the
-# bump replaces the line after the array's opening line.
 echo "$latest" >"$here/VERSION"
-sed -i "/^declare -A k3s_sha256=(/{n;s|.*|    [\"$latest\"]=\"$digest\"|}" "$here/fetch.sh"
-echo "k3s: $pinned -> $latest"
+set_entry "$here/fetch.sh" k3s_sha256 "$latest" "$digest"
+bumped k3s "$pinned" "$latest"
 echo "the digest came from the release's sha256 manifest"
 if [[ "${pinned%%+*}" != "${latest%%+*}" ]] &&
     [[ "$(cut -d. -f2 <<<"$pinned")" != "$(cut -d. -f2 <<<"$latest")" ]]; then
     echo "this crosses a Kubernetes minor; read the upstream release notes"
 fi
-echo "next: make -C .. k3s"
+next_step "make -C .. k3s"

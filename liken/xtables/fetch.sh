@@ -39,13 +39,10 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
-for tool in curl sha256sum tar; do
-    command -v "$tool" >/dev/null || {
-        echo "fetch.sh: missing required tool: $tool" >&2
-        exit 1
-    }
-done
+require_tools sha256sum tar
 
 arch="amd64"
 version="${1:-$(cat "$here/VERSION")}"
@@ -55,36 +52,14 @@ tarball="k3s-root-xtables-$arch.tar"
 
 cache="$here/cache/$version"
 out="$here/dist/$version"
-mkdir -p "$cache"
 
-# The digest of the xtables tarball, pinned beside the version it belongs to.
-# xtables/latest.sh --bump copies it from the sha256 manifest that the
-# release publishes, so a fetch never reads a digest from upstream, and
-# a file that changes upstream after the bump fails the check.
+# The digest of the xtables tarball, pinned beside the version it
+# belongs to. xtables/latest.sh --bump copies it from the sha256
+# manifest that the release publishes.
 declare -A xtables_sha256=(
     ["v0.15.2"]="1272950a6dd969ced16f36eed91f3cc3feb552edbb7d6dcfbfc9b04930d9ba3f"
 )
-digest="${xtables_sha256[$version]:-}"
-if [[ -z "$digest" ]]; then
-    echo "fetch.sh: no digest pinned for xtables $version; xtables/latest.sh --bump writes it" >&2
-    exit 1
-fi
-
-if ! sha256sum --check --status <<<"$digest  $cache/$tarball" >/dev/null 2>&1; then
-    echo "downloading xtables (k3s-root) $version"
-    # The bytes go to a .partial file, which replaces the cached file
-    # only after it matches the digest. A .partial that does not match
-    # is deleted: when the file on disk is already full length, curl -C
-    # - gets a 416 answer, exits with success, and leaves the bytes as
-    # they are, so a bad full-length file would fail every later run.
-    curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
-        --progress-bar -o "$cache/$tarball.partial" "$base/$tarball"
-    sha256sum --check --quiet <<<"$digest  $cache/$tarball.partial" || {
-        rm -f "$cache/$tarball.partial"
-        exit 1
-    }
-    mv "$cache/$tarball.partial" "$cache/$tarball"
-fi
+fetch_verified --resume "$base/$tarball" "${xtables_sha256[$version]:-}" "$cache/$tarball"
 
 rm -rf "$out"
 mkdir -p "$out"

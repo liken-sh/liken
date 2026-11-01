@@ -46,13 +46,10 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
-for tool in curl sha256sum tar xz; do
-    command -v "$tool" >/dev/null || {
-        echo "fetch.sh: missing required tool: $tool" >&2
-        exit 1
-    }
-done
+require_tools sha256sum tar xz
 
 version="$(cat "$here/VERSION")"
 tarball="linux-firmware-$version.tar.xz"
@@ -69,29 +66,12 @@ regdb_version="2026.09.03"
 regdb_digest="b22e0901227b820cd1c280abe681a15b773a5103a5e10dc442e94ebb34cbf58d"
 
 cache="$here/cache"
-mkdir -p "$cache"
 
-if ! sha256sum --check --status <<<"$digest  $cache/$tarball" >/dev/null 2>&1; then
-    echo "downloading $tarball"
-    # This tarball is about half a gigabyte, and a long HTTP/2 stream
-    # sometimes breaks partway through. A plain retry would start
-    # over and can fail the same way forever, so -C - resumes each
-    # attempt from the bytes already on disk and repeated breaks
-    # still converge on a complete file. The checksum below is what
-    # decides whether the assembled bytes are good.
-    # The bytes go to a .partial file, which replaces the cached file
-    # only after it matches the digest. A .partial that does not match
-    # is deleted: when the file on disk is already full length, curl -C
-    # - gets a 416 answer, exits with success, and leaves the bytes as
-    # they are, so a bad full-length file would fail every later run.
-    curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
-        --progress-bar -o "$cache/$tarball.partial" "$url"
-    sha256sum --check --quiet <<<"$digest  $cache/$tarball.partial" || {
-        rm -f "$cache/$tarball.partial"
-        exit 1
-    }
-    mv "$cache/$tarball.partial" "$cache/$tarball"
-fi
+# This tarball is large, and a long HTTP/2 stream sometimes breaks
+# partway through. A plain retry would start over and can fail the
+# same way forever, so each retry resumes from the bytes already on
+# disk.
+fetch_verified --resume "$url" "$digest" "$cache/$tarball"
 
 # The extracted tree is large (about 1.9 GB), so extraction is
 # skipped when the tree for this version is already present. The
@@ -112,21 +92,7 @@ echo "linux-firmware $version: $(find "$tree" -type f | wc -l) files"
 regdb_tarball="wireless-regdb-$regdb_version.tar.xz"
 regdb_url="https://mirrors.edge.kernel.org/pub/software/network/wireless-regdb/$regdb_tarball"
 
-if ! sha256sum --check --status <<<"$regdb_digest  $cache/$regdb_tarball" >/dev/null 2>&1; then
-    echo "downloading $regdb_tarball"
-    # The bytes go to a .partial file, which replaces the cached file
-    # only after it matches the digest, so a torn or changed download
-    # never takes the name of a good one. The tarball is small, so each
-    # download starts from the first byte and never resumes a .partial
-    # that an earlier run left.
-    curl -fL --retry 5 --retry-all-errors --retry-delay 5 \
-        --progress-bar -o "$cache/$regdb_tarball.partial" "$regdb_url"
-    sha256sum --check --quiet <<<"$regdb_digest  $cache/$regdb_tarball.partial" || {
-        rm -f "$cache/$regdb_tarball.partial"
-        exit 1
-    }
-    mv "$cache/$regdb_tarball.partial" "$cache/$regdb_tarball"
-fi
+fetch_verified "$regdb_url" "$regdb_digest" "$cache/$regdb_tarball"
 
 # regulatory.db is the artifact this pin exists for, so its presence
 # is what says the extraction finished.

@@ -26,7 +26,9 @@
 # The pin carries the image's digest in fetch.sh. Every build
 # directory holds a SHA512SUMS file, and --bump copies the image's
 # line from it into fetch.sh, with the suite line when the suite
-# changes.
+# changes. Debian publishes no signature of the SHA512SUMS file of a
+# cloud image build, so the digest rests on the HTTPS connection to
+# cloud.debian.org alone.
 #
 # Usage:
 #   dev-cluster/storage/latest.sh          report the pin
@@ -35,6 +37,8 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../../toolchains/pin.sh
+source "$here/../../../toolchains/pin.sh"
 
 newest_suite="sid"
 images="https://cloud.debian.org/images/cloud/$newest_suite/daily"
@@ -44,41 +48,29 @@ suite="$(sed -n 's|^suite="\([a-z]*\)"$|\1|p' "$here/fetch.sh")"
 
 # The listing also carries names that are not builds, like latest, so
 # the filter keeps only a date and a serial.
-latest="$(curl -fsS --retry 3 --max-time 60 "$images/" |
+latest="$(fetch_text "$images/" |
     grep -oE 'href="[0-9]{8}-[0-9]+/"' |
     sed -e 's|href="||' -e 's|/"$||' |
     sort -V | tail -1)" || latest=""
 
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' storage "$pinned" "${latest:-?}" \
+row storage "$pinned" "$latest" \
     "${suite:-?}" "$newest_suite" - "the lab's Debian cloud image; in no release"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
-[[ -n "$latest" ]] || {
-    echo "latest.sh: the image listing did not answer" >&2
-    exit 1
-}
-[[ "$latest" != "$pinned" || "$suite" != "$newest_suite" ]] || {
-    echo "the storage image $pinned is current"
-    exit 0
-}
+# A pin on another suite moves to sid even when the build names match.
+[[ "$suite" != "$newest_suite" ]] || bump_needed "the storage image" "$pinned" "$latest" || exit 0
+[[ -n "$latest" ]] || fail "the image listing did not answer"
 
 # sid's daily builds name the image with the word daily and the build.
 image="debian-sid-genericcloud-amd64-daily-$latest.qcow2"
-digest="$(curl -fsSL --retry 3 --max-time 60 "$images/$latest/SHA512SUMS" |
+digest="$(fetch_text "$images/$latest/SHA512SUMS" |
     awk -v img="$image" '$2 == img { print $1 }')" || digest=""
-[[ "$digest" =~ ^[0-9a-f]{128}$ ]] || {
-    echo "latest.sh: $images/$latest/SHA512SUMS lists no $image" >&2
-    exit 1
-}
+[[ "$digest" =~ ^[0-9a-f]{128}$ ]] || fail "$images/$latest/SHA512SUMS lists no $image"
 
-# The array in fetch.sh holds one entry, the pinned build's, so the
-# bump replaces the line after the array's opening line.
 echo "$latest" >"$here/VERSION"
-sed -i \
-    -e "s|^suite=\"[a-z]*\"$|suite=\"$newest_suite\"|" \
-    -e "/^declare -A image_sha512=(/{n;s|.*|    [\"$latest\"]=\"$digest\"|}" \
-    "$here/fetch.sh"
-echo "storage: $suite $pinned -> $newest_suite $latest"
-echo "the digest came from the build's SHA512SUMS file"
-echo "next: make -C .. storage"
+set_line "$here/fetch.sh" '^suite="[a-z]*"$' "suite=\"$newest_suite\""
+set_entry "$here/fetch.sh" image_sha512 "$latest" "$digest"
+bumped storage "$suite $pinned" "$newest_suite $latest"
+echo "the digest came from the build's SHA512SUMS file, which Debian does not sign"
+next_step "make -C .. storage"

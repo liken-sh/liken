@@ -26,35 +26,25 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
 repository="https://github.com/vcrhonek/hwdata"
 
 pinned="$(cat "$here/VERSION")"
 
-latest="$(git ls-remote --tags --refs "$repository" |
-    sed 's|.*refs/tags/||' |
-    grep -E '^v[0-9]+\.[0-9]+$' |
-    sort -V | tail -1)" || latest=""
+latest="$(newest_tag "$repository" '^v[0-9]+\.[0-9]+$')" || latest=""
 
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' hwdata "$pinned" "${latest:-?}" - - - \
-    "newest tag; the file ships from the tagged tree"
+row hwdata "$pinned" "$latest" - - - "newest tag; the file ships from the tagged tree"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
-[[ -n "$latest" ]] || {
-    echo "latest.sh: the tag list did not answer" >&2
-    exit 1
-}
-[[ "$latest" != "$pinned" ]] || {
-    echo "hwdata $pinned is current"
-    exit 0
-}
+bump_needed hwdata "$pinned" "$latest" || exit 0
 
-url="https://raw.githubusercontent.com/vcrhonek/hwdata/$latest/pci.ids"
-digest="$(curl -fsSL --retry 3 --max-time 300 "$url" | sha256sum | cut -d' ' -f1)"
+digest="$(digest_of_url "https://raw.githubusercontent.com/vcrhonek/hwdata/$latest/pci.ids")"
 
 echo "$latest" >"$here/VERSION"
-sed -i "s|^digest=\".*\"|digest=\"$digest\"|" "$here/fetch.sh"
-echo "hwdata: $pinned -> $latest"
+set_var "$here/fetch.sh" digest "$digest"
+bumped hwdata "$pinned" "$latest"
 echo "the digest came from this download; nothing upstream signs it"
-echo "next: make -C .. hwdata"
+next_step "make -C .. hwdata"

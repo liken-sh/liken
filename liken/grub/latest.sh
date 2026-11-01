@@ -40,6 +40,8 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
 pool="http://archive.ubuntu.com/ubuntu/pool/main/g/grub2"
 
@@ -53,7 +55,7 @@ api="https://api.launchpad.net/devel/ubuntu"
 # same record. The Proposed pocket holds builds that wait for their
 # tests, so they are not yet in the series.
 launchpad() {
-    curl -fsS --retry 3 --max-time 120 -G "$api/+archive/primary" \
+    fetch_text "$api/+archive/primary" --max-time 120 -G \
         --data ws.op=getPublishedSources --data source_name=grub2 \
         --data exact_match=true "$@" |
         grep -oE '"display_name": "[^"]*"|"pocket": "[^"]*"' |
@@ -70,7 +72,7 @@ newest_in() {
 
 pinned_series="$(launchpad --data "version=$pinned" | head -1 | cut -d' ' -f2)" ||
     pinned_series=""
-newest_series="$(curl -fsS --retry 3 --max-time 60 "$api" |
+newest_series="$(fetch_text "$api" |
     grep -oE '"current_series_link": "[^"]*"' |
     sed -e 's|.*/||' -e 's|"$||')" || newest_series=""
 
@@ -79,7 +81,7 @@ latest=""
 in_series=""
 [[ -z "$pinned_series" ]] || in_series="$(newest_in "$pinned_series")" || in_series=""
 
-versions="$(curl -fsS --retry 3 --max-time 60 "$pool/" |
+versions="$(fetch_text "$pool/" |
     grep -oE 'grub-pc-bin_[^"_]+_amd64\.deb' |
     sed -e 's|^grub-pc-bin_||' -e 's|_amd64\.deb$||' |
     sort -uV)" || versions=""
@@ -89,51 +91,27 @@ if [[ -n "$versions" ]] && ! grep -qxF "$pinned" <<<"$versions"; then
     note="the pin is gone from the pool"
 fi
 
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' grub "$pinned" "${latest:-?}" \
+row grub "$pinned" "$latest" \
     "${pinned_series:-?}" "${newest_series:-?}" - "$note"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
-[[ -n "$versions" ]] || {
-    echo "latest.sh: the pool listing did not answer" >&2
-    exit 1
-}
-[[ -n "${2:-}" || -n "$latest" ]] || {
-    echo "latest.sh: Launchpad named no version in the development series" >&2
-    exit 1
-}
+[[ -n "$versions" ]] || fail "the pool listing did not answer"
+[[ -n "${2:-}" || -n "$latest" ]] || fail "Launchpad named no version in the development series"
 
 target="${2:-$latest}"
-grep -qxF "$target" <<<"$versions" || {
-    echo "latest.sh: the pool does not carry $target" >&2
-    exit 1
-}
-[[ "$target" != "$pinned" ]] || {
-    echo "grub $pinned is current"
-    exit 0
-}
+grep -qxF "$target" <<<"$versions" || fail "the pool does not carry $target"
+bump_needed grub "$pinned" "$target" || exit 0
 
-pc_bin="$(curl -fsSL --retry 3 --max-time 300 "$pool/grub-pc-bin_${target}_amd64.deb" |
-    sha256sum | cut -d' ' -f1)"
+pc_bin="$(digest_of_url "$pool/grub-pc-bin_${target}_amd64.deb")"
 # grub-mkimage is in grub2-common from the 2.14 packaging on, and
 # fetch.sh takes that package for every version it does not name.
-common="$(curl -fsSL --retry 3 --max-time 300 "$pool/grub2-common_${target}_amd64.deb" |
-    sha256sum | cut -d' ' -f1)"
+common="$(digest_of_url "$pool/grub2-common_${target}_amd64.deb")"
 
-# The old entries stay. An older checkout still names its own version,
-# and a digest table that forgets is a build that cannot be repeated.
 echo "$target" >"$here/VERSION"
-sed -i \
-    -e "/^declare -A pc_bin_sha256=(/a\\    [\"$target\"]=\"$pc_bin\"" \
-    -e "/^declare -A common_sha256=(/a\\    [\"$target\"]=\"$common\"" \
-    "$here/fetch.sh"
-echo "grub: $pinned -> $target"
+add_entry "$here/fetch.sh" pc_bin_sha256 "$target" "$pc_bin"
+add_entry "$here/fetch.sh" common_sha256 "$target" "$common"
+bumped grub "$pinned" "$target"
 echo "the digests came from these downloads; Ubuntu signs indexes, not files"
-# A refused re-pin leaves the domain pin moved and the mirror
-# behind it, which is a release that cannot serve its own
-# sources. Say that plainly, because the fix is a hand edit.
-"$here/../licensing/sources.sh" --repin || {
-    echo "the pin moved; licensing/sources.sh still needs a hand edit" >&2
-    exit 1
-}
-echo "next: make -C .. grub"
+repin_sources
+next_step "make -C .. grub"

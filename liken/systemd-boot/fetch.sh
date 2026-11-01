@@ -41,54 +41,32 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
-for tool in curl ar tar zstd sha256sum; do
-    command -v "$tool" >/dev/null || {
-        echo "fetch.sh: missing required tool: $tool" >&2
-        exit 1
-    }
-done
+require_tools ar tar zstd sha256sum
 
 version="${1:-$(cat "$here/VERSION")}"
 
 # The deb's digest, pinned beside the version it belongs to. The
 # Ubuntu archive publishes per-file digests only inside its signed
 # Release indexes, not beside the files, so this file holds the pin.
-# A version bump must update it deliberately.
+# systemd-boot/latest.sh --bump adds the entry of each new version, and
+# the entries of older versions stay.
 declare -A deb_sha256=(
     ["261.3-0ubuntu3"]="128d8a69e4274dee41fcbd5d74e2c55ec4d67b1726005cce9b41c20a3ea453e6"
     ["259.5-0ubuntu3.4"]="e1d7a0e05abca7c33ff349eb43895cd09aed406894ab369f9a2654bcace418b0"
     ["259.5-0ubuntu3.3"]="0776d7f1bd2d80caf5882024b3d4b979a9ca8fe799f9828992b0959e0c19fa47"
     ["259.5-0ubuntu3"]="068d9c2f0c450c47869669367738057a604e5b8bab3b194ec7808c6e6e712ca6"
 )
-digest="${deb_sha256[$version]:-}"
-if [[ -z "$digest" ]]; then
-    echo "fetch.sh: no pinned digest for systemd-boot-efi $version; add it to deb_sha256" >&2
-    exit 1
-fi
 
 deb="systemd-boot-efi_${version}_amd64.deb"
 url="http://archive.ubuntu.com/ubuntu/pool/universe/s/systemd/$deb"
 
 cache="$here/cache/$version"
 out="$here/dist/$version"
-mkdir -p "$cache"
 
-if ! sha256sum --check --status <<<"$digest  $cache/$deb" >/dev/null 2>&1; then
-    echo "downloading systemd-boot-efi $version"
-    # The bytes go to a .partial file, which replaces the cached file
-    # only after it matches the digest. A .partial that does not match
-    # is deleted: when the file on disk is already full length, curl -C
-    # - gets a 416 answer, exits with success, and leaves the bytes as
-    # they are, so a bad full-length file would fail every later run.
-    curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
-        --progress-bar -o "$cache/$deb.partial" "$url"
-    sha256sum --check --quiet <<<"$digest  $cache/$deb.partial" || {
-        rm -f "$cache/$deb.partial"
-        exit 1
-    }
-    mv "$cache/$deb.partial" "$cache/$deb"
-fi
+fetch_verified --resume "$url" "${deb_sha256[$version]:-}" "$cache/$deb"
 
 # A .deb file is an `ar` archive wrapping a compressed tarball of the
 # files. liken extracts only the EFI binary from it.

@@ -48,20 +48,18 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
-for tool in curl ar tar zstd sha256sum; do
-    command -v "$tool" >/dev/null || {
-        echo "fetch.sh: missing required tool: $tool" >&2
-        exit 1
-    }
-done
+require_tools ar tar zstd sha256sum
 
 version="${1:-$(cat "$here/VERSION")}"
 
 # Per-deb digests, pinned beside the version they belong to. The
 # Ubuntu archive publishes per-file digests only inside its signed
 # Release indexes, not beside the files, so this file holds the pins.
-# A version bump must update them deliberately.
+# grub/latest.sh --bump adds the entries of each new version, and the
+# entries of older versions stay.
 declare -A pc_bin_sha256=(
     ["2.14-2ubuntu3"]="187f86d4c802a250d417f9f0d2a4095c2e3995ea5194f55a6d9ec27fd16f5055"
     ["2.12-1ubuntu7.3"]="698d80bc51c0c593fbc829758365a0e4bce96819e2c8c754ae77dfe39b0388df"
@@ -80,38 +78,11 @@ declare -A common_sha256=(
 pool="http://archive.ubuntu.com/ubuntu/pool/main/g/grub2"
 cache="$here/cache/$version"
 out="$here/dist/$version"
-mkdir -p "$cache"
-
-# fetch <deb filename> <digest>: download into the cache unless the
-# cached copy already verifies.
-fetch() {
-    local deb="$1" digest="$2"
-    if [[ -z "$digest" ]]; then
-        echo "fetch.sh: no pinned digest for $deb; add it above" >&2
-        exit 1
-    fi
-    if ! sha256sum --check --status <<<"$digest  $cache/$deb" >/dev/null 2>&1; then
-        echo "downloading $deb"
-        # The bytes go to a .partial file, which replaces the cached
-        # file only after it matches the digest. A .partial that does
-        # not match is deleted: when the file on disk is already full
-        # length, curl -C - gets a 416 answer, exits with success, and
-        # leaves the bytes as they are, so a bad full-length file would
-        # fail every later run.
-        curl -fL --retry 5 --retry-all-errors --retry-delay 5 -C - \
-            --progress-bar -o "$cache/$deb.partial" "$pool/$deb"
-        sha256sum --check --quiet <<<"$digest  $cache/$deb.partial" || {
-            rm -f "$cache/$deb.partial"
-            exit 1
-        }
-        mv "$cache/$deb.partial" "$cache/$deb"
-    fi
-}
 
 pc_bin="grub-pc-bin_${version}_amd64.deb"
 common="${mkimage_package[$version]:-grub2-common}_${version}_amd64.deb"
-fetch "$pc_bin" "${pc_bin_sha256[$version]:-}"
-fetch "$common" "${common_sha256[$version]:-}"
+fetch_verified --resume "$pool/$pc_bin" "${pc_bin_sha256[$version]:-}" "$cache/$pc_bin"
+fetch_verified --resume "$pool/$common" "${common_sha256[$version]:-}" "$cache/$common"
 
 # A .deb file is an `ar` archive wrapping a compressed tarball of the
 # files. This script takes the whole i386-pc tree, not just the

@@ -33,50 +33,34 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
 pinned="$(cat "$here/VERSION")"
 
 # The tag carries a +, which a URL path must escape.
 k3s="$(cat "$here/../k3s/VERSION")"
-latest="$(curl -fsS --retry 3 --max-time 60 \
-    "https://raw.githubusercontent.com/k3s-io/k3s/${k3s/+/%2B}/scripts/version.sh" |
+latest="$(fetch_text "https://raw.githubusercontent.com/k3s-io/k3s/${k3s/+/%2B}/scripts/version.sh" |
     sed -n 's/^VERSION_ROOT="\(v[0-9.]*\)"$/\1/p')" || latest=""
 
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' xtables "$pinned" "${latest:-?}" - - - \
+row xtables "$pinned" "$latest" - - - \
     "follows k3s $k3s: the k3s-root release it builds its userland from"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
-[[ -n "$latest" ]] || {
-    echo "latest.sh: k3s $k3s names no VERSION_ROOT" >&2
-    exit 1
-}
-[[ "$latest" != "$pinned" ]] || {
-    echo "xtables (k3s-root) $pinned is current"
-    exit 0
-}
+[[ -n "$latest" ]] || fail "k3s $k3s names no VERSION_ROOT"
+bump_needed xtables "$pinned" "$latest" || exit 0
 
 # One sha256 manifest per architecture covers all of the release's
 # artifacts, and the bump reads the line for the xtables tarball.
 manifest="https://github.com/k3s-io/k3s-root/releases/download/$latest/sha256sum-amd64.txt"
-digest="$(curl -fsSL --retry 3 --max-time 60 "$manifest" |
+digest="$(fetch_text "$manifest" |
     awk '$2 == "k3s-root-xtables-amd64.tar" { print $1 }')" || digest=""
-[[ "$digest" =~ ^[0-9a-f]{64}$ ]] || {
-    echo "latest.sh: $manifest lists no xtables tarball" >&2
-    exit 1
-}
+[[ "$digest" =~ ^[0-9a-f]{64}$ ]] || fail "$manifest lists no xtables tarball"
 
-# The array in fetch.sh holds one entry, the pinned version's, so the
-# bump replaces the line after the array's opening line.
 echo "$latest" >"$here/VERSION"
-sed -i "/^declare -A xtables_sha256=(/{n;s|.*|    [\"$latest\"]=\"$digest\"|}" "$here/fetch.sh"
-echo "xtables: $pinned -> $latest"
+set_entry "$here/fetch.sh" xtables_sha256 "$latest" "$digest"
+bumped xtables "$pinned" "$latest"
 echo "the digest came from the release's sha256 manifest"
-# A refused re-pin leaves the domain pin moved and the mirror
-# behind it, which is a release that cannot serve its own
-# sources. Say that plainly, because the fix is a hand edit.
-"$here/../licensing/sources.sh" --repin || {
-    echo "the pin moved; licensing/sources.sh still needs a hand edit" >&2
-    exit 1
-}
-echo "next: make -C .. xtables"
+repin_sources
+next_step "make -C .. xtables"
