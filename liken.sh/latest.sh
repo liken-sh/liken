@@ -28,15 +28,15 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-row() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$@"; }
+# shellcheck source-path=SCRIPTDIR source=../toolchains/pin.sh
+source "$here/../toolchains/pin.sh"
 
 channels=(lts stable beta alpha)
 
 # releases <channel> prints every release in the channel, oldest
 # first.
 releases() {
-    curl -fsS --retry 3 --max-time 30 "https://www.flatcar.org/releases-json/releases-$1.json" |
+    fetch_text "https://www.flatcar.org/releases-json/releases-$1.json" --max-time 30 |
         jq -r 'keys[] | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))' | sort -V
 }
 
@@ -70,7 +70,7 @@ providers() {
 }
 
 newest_provider() {
-    curl -fsS --retry 3 --max-time 20 "https://registry.terraform.io/v1/providers/$1/versions" |
+    fetch_text "https://registry.terraform.io/v1/providers/$1/versions" --max-time 20 |
         jq -r '.versions[].version' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1
 }
 
@@ -96,20 +96,12 @@ fi
 
 target="${2:-}"
 target="${target#provider:}"
-read -r _ source constraint < <(providers | awk -v n="$target" '$1 == n') || {
-    echo "latest.sh: terraform.tf has no provider named ${target:-?}; Flatcar moves by hand" >&2
-    exit 1
-}
-newest="$(newest_provider "$source")"
-[[ -n "$newest" ]] || {
-    echo "latest.sh: the Terraform registry did not answer for $source" >&2
-    exit 1
-}
+read -r _ source constraint < <(providers | awk -v n="$target" '$1 == n') ||
+    fail "terraform.tf has no provider named ${target:-?}; Flatcar moves by hand"
+newest="$(newest_provider "$source")" || newest=""
+[[ -n "$newest" ]] || fail "the Terraform registry did not answer for $source"
 new="$(latest_constraint "$constraint" "$newest")"
-[[ "$new" != "$constraint" ]] || {
-    echo "$target $constraint is current"
-    exit 0
-}
+bump_needed "$target" "$constraint" "$new" || exit 0
 sed -i "\\|source  = \"$source\"|{n;s|version = \".*\"|version = \"$new\"|}" "$here/terraform.tf"
-echo "$target: $constraint -> $new"
-echo "next: terraform init -upgrade and terraform plan in liken.sh, and read the provider's changelog"
+bumped "$target" "$constraint" "$new"
+next_step "terraform init -upgrade and terraform plan in liken.sh, and read the provider's changelog"

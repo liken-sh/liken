@@ -41,6 +41,8 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
 # The mirror names each file, and the version is inside the name, so
 # the pins are read from the same lines the channel serves.
@@ -78,8 +80,7 @@ newest_branch="edge"
 # pipeline that ends in a broken pipe fails, which would report every
 # package as unknown.
 alpine_package() {
-    curl -fsS --retry 3 --max-time 120 \
-        "https://dl-cdn.alpinelinux.org/alpine/$branch/main/x86_64/APKINDEX.tar.gz" |
+    fetch_text "https://dl-cdn.alpinelinux.org/alpine/$branch/main/x86_64/APKINDEX.tar.gz" --max-time 120 |
         tar -xzO APKINDEX |
         awk -v want="P:$1" -v RS='' '
             { hit = 0
@@ -107,27 +108,22 @@ fi
 # k3s-root replaces some of buildroot's packages with its own, but not
 # this one, so buildroot's makefile is the answer.
 k3s_root="$(cat "$here/../xtables/VERSION")"
-latest_buildroot="$(curl -fsS --retry 3 --max-time 60 \
-    "https://raw.githubusercontent.com/k3s-io/k3s-root/$k3s_root/scripts/download" |
+latest_buildroot="$(fetch_text "https://raw.githubusercontent.com/k3s-io/k3s-root/$k3s_root/scripts/download" |
     sed -n 's|.*BUILDROOT_VERSION:=\([^}]*\)}.*|\1|p' | head -1)" || latest_buildroot=""
 latest_iptables=""
 if [[ -n "$latest_buildroot" ]]; then
-    latest_iptables="$(curl -fsS --retry 3 --max-time 60 \
-        "https://raw.githubusercontent.com/buildroot/buildroot/$latest_buildroot/package/iptables/iptables.mk" |
+    latest_iptables="$(fetch_text "https://raw.githubusercontent.com/buildroot/buildroot/$latest_buildroot/package/iptables/iptables.mk" |
         sed -n 's|^IPTABLES_VERSION *= *||p' | head -1)" || latest_iptables=""
 fi
 
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' musl "$pinned_musl" "${latest_musl:-?}" \
-    "$branch" "$newest_branch" - "follows the alpine image in toolchains/images.toml"
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' util-linux "$pinned_utillinux" "${latest_utillinux:-?}" \
-    "$branch" "$newest_branch" - "follows the alpine image in toolchains/images.toml"
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' libnl "$pinned_libnl" "${latest_libnl:-?}" \
-    "$branch" "$newest_branch" - "follows the alpine image in toolchains/images.toml"
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' openssl "$pinned_openssl" "${latest_openssl:-?}" \
-    "$branch" "$newest_branch" - "follows the alpine image in toolchains/images.toml"
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' iptables "$pinned_iptables" "${latest_iptables:-?}" - - - \
+alpine_note="follows the alpine image in toolchains/images.toml"
+row musl "$pinned_musl" "$latest_musl" "$branch" "$newest_branch" - "$alpine_note"
+row util-linux "$pinned_utillinux" "$latest_utillinux" "$branch" "$newest_branch" - "$alpine_note"
+row libnl "$pinned_libnl" "$latest_libnl" "$branch" "$newest_branch" - "$alpine_note"
+row openssl "$pinned_openssl" "$latest_openssl" "$branch" "$newest_branch" - "$alpine_note"
+row iptables "$pinned_iptables" "$latest_iptables" - - - \
     "follows xtables: what k3s-root $k3s_root builds"
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' buildroot "$pinned_buildroot" "${latest_buildroot:-?}" - - - \
+row buildroot "$pinned_buildroot" "$latest_buildroot" - - - \
     "follows xtables: what k3s-root $k3s_root builds with"
 
 [[ "${1:-}" == "--bump" ]] || exit 0

@@ -31,18 +31,11 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../../../toolchains/pin.sh
+source "$here/../../../../toolchains/pin.sh"
 
-row() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$@"; }
-
-# The GitHub API allows 60 anonymous requests an hour, so the report
-# sends a token when one is at hand.
-github_auth=()
-token="${GITHUB_TOKEN:-$(gh auth token 2>/dev/null || true)}"
-[[ -n "$token" ]] && github_auth=(-H "Authorization: Bearer $token")
-
-edk2="$(sed -n 's/^edk2_tag="\(.*\)"$/\1/p' "$here/build.sh")"
-edk2_latest="$(curl -fsS --retry 3 --max-time 20 "${github_auth[@]}" \
-    https://api.github.com/repos/tianocore/edk2/releases/latest | jq -r .tag_name)" || edk2_latest=""
+edk2="$(var_of "$here/build.sh" edk2_tag)"
+edk2_latest="$(github_api repos/tianocore/edk2/releases/latest --max-time 20 | jq -r .tag_name)" || edk2_latest=""
 
 # ovmf-generic 2026.08+ds-2 packages edk2-stable202608.
 ovmf="$(cat "$here/../VERSION")"
@@ -53,12 +46,12 @@ hold=-
 if [[ -n "$edk2_latest" && "$edk2_latest" > "$ovmf_release" ]]; then
     hold="ovmf-generic $ovmf packages $ovmf_release, and the capsule firmware keeps its variable store layout"
 fi
-row edk2 "$edk2" "${edk2_latest:-?}" - - "$hold" "the edk2 release that the capsule firmware builds from"
+row edk2 "$edk2" "$edk2_latest" - - "$hold" "the edk2 release that the capsule firmware builds from"
 
 # Launchpad lists each series with its version, which names the series
 # of the ubuntu image's tag, such as resolute for 26.04.
 image="$(sed -n 's/^ubuntu = "ubuntu:\([0-9.]*\)@.*"$/\1/p' "$here/../../../../toolchains/images.toml")"
-image_series="$(curl -fsS --retry 3 --max-time 20 https://api.launchpad.net/devel/ubuntu/series |
+image_series="$(fetch_text https://api.launchpad.net/devel/ubuntu/series --max-time 20 |
     jq -r --arg v "$image" '.entries[] | select(.version == $v) | .name')" || image_series=""
 
 suite="$(sed -n "s/^ *'Suites: \([a-z]*\) .*$/\1/p" "$here/Dockerfile")"

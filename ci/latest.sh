@@ -38,12 +38,12 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../toolchains/pin.sh
+source "$here/../toolchains/pin.sh"
 root="$(cd "$here/.." && pwd)"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-
-row() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$@"; }
 
 # The files that name an action.
 workflow_sources() {
@@ -57,20 +57,12 @@ uses() {
         grep -v '^fluxcd/flux2/action ' | sort -u
 }
 
-# The GitHub API allows 60 anonymous requests an hour, and the report
-# sends about 20, so it sends a token when one is at hand.
-github_auth=()
-token="${GITHUB_TOKEN:-$(gh auth token 2>/dev/null || true)}"
-[[ -n "$token" ]] && github_auth=(-H "Authorization: Bearer $token")
-
 newest_release() {
-    curl -fsS --retry 3 --max-time 20 "${github_auth[@]}" \
-        "https://api.github.com/repos/$1/releases/latest" | jq -r .tag_name
+    github_api "repos/$1/releases/latest" --max-time 20 | jq -r .tag_name
 }
 
-newest_tag() {
-    git ls-remote --tags --refs "https://github.com/$1" |
-        sed 's|.*refs/tags/||' | grep -E '^v?[0-9]+(\.[0-9]+)+$' | sort -V | tail -1
+newest_version_tag() {
+    newest_tag "https://github.com/$1" '^v?[0-9]+(\.[0-9]+)+$'
 }
 
 # latest_ref <action> <pinned ref>: the ref that the newest release
@@ -79,7 +71,7 @@ latest_ref() {
     local repo release
     repo="$(cut -d/ -f1-2 <<<"$1")"
     release="$(newest_release "$repo")" || release=""
-    [[ "$release" =~ ^v?[0-9] ]] || release="$(newest_tag "$repo")" || release=""
+    [[ "$release" =~ ^v?[0-9] ]] || release="$(newest_version_tag "$repo")" || release=""
     [[ -n "$release" ]] || return 0
     if [[ "$2" =~ ^v[0-9]+$ ]]; then
         sed -E 's/^(v[0-9]+).*/\1/' <<<"$release"
@@ -129,7 +121,7 @@ report() {
     hooks >"$work/hooks"
     while read -r repo; do
         revs="$(awk -v r="$repo" '$1 == r { print $2 }' "$work/hooks" | sort -uV | paste -sd,)"
-        latest="$(newest_tag "$repo")" || latest=""
+        latest="$(newest_version_tag "$repo")" || latest=""
         row "  hook:$repo" "$revs" "${latest:-?}" - - - "the newest version tag"
     done < <(awk '{ print $1 }' "$work/hooks" | sort -u)
 }
@@ -141,18 +133,13 @@ fi
 
 target="${2:-}"
 case "$target" in
-"")
-    echo "latest.sh: --bump needs a name: an action, prek, trivy, or hook:<repo>" >&2
-    exit 1
-    ;;
+"") fail "--bump needs a name: an action, prek, trivy, or hook:<repo>" ;;
 prek)
     old="$(pinned_prek)"
-    new="$(newest_release j178/prek)"
+    new="$(newest_release j178/prek)" || new=""
     new="${new#v}"
-    [[ -n "$new" && "$new" != null ]] || {
-        echo "latest.sh: GitHub did not answer for j178/prek" >&2
-        exit 1
-    }
+    [[ "$new" != null ]] || new=""
+    bump_needed prek "$old" "$new" || exit 0
     # prek-action runs a prek that its own checksum table does not name
     # without a check, so prekSHA256 pins the digest of the archive that
     # the action downloads on the runner. The digest comes from the
@@ -161,44 +148,31 @@ prek)
     # changed release asset fails here and not in CI.
     asset="prek-x86_64-unknown-linux-gnu.tar.gz"
     base="https://github.com/j178/prek/releases/download/v$new"
-    curl -fsSL --retry 3 --max-time 120 -o "$work/$asset" "$base/$asset"
-    digest="$(curl -fsSL --retry 3 --max-time 20 "$base/$asset.sha256" | awk '{ print $1 }')"
-    [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || {
-        echo "latest.sh: $base/$asset.sha256 holds no SHA-256 digest" >&2
-        exit 1
-    }
+    fetch_file "$base/$asset" "$work/$asset"
+    digest="$(fetch_text "$base/$asset.sha256" --max-time 20 | awk '{ print $1 }')" || digest=""
+    [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || fail "$base/$asset.sha256 holds no SHA-256 digest"
     actual="$(sha256sum "$work/$asset" | awk '{ print $1 }')"
-    [[ "$actual" == "$digest" ]] || {
-        echo "latest.sh: $asset is $actual, and its .sha256 file says $digest" >&2
-        exit 1
-    }
+    [[ "$actual" == "$digest" ]] || fail "$asset is $actual, and its .sha256 file says $digest"
     gh attestation verify "$work/$asset" --repo j178/prek \
-        --signer-workflow j178/prek/.github/workflows/release.yml >/dev/null || {
-        echo "latest.sh: $asset carries no attestation of prek's release workflow" >&2
-        exit 1
-    }
-    sed -i -e "s/^const prekVersion = \".*\"$/const prekVersion = \"$new\"/" \
-        -e "s/^const prekSHA256 = \".*\"$/const prekSHA256 = \"$digest\"/" "$here/workflow.go"
-    echo "prek: $old -> $new, $asset $digest"
+        --signer-workflow j178/prek/.github/workflows/release.yml >/dev/null ||
+        fail "$asset carries no attestation of prek's release workflow"
+    set_line "$here/workflow.go" '^const prekVersion = ".*"$' "const prekVersion = \"$new\""
+    set_line "$here/workflow.go" '^const prekSHA256 = ".*"$' "const prekSHA256 = \"$digest\""
+    bumped prek "$old" "$new, $asset $digest"
     ;;
 trivy)
     old="$(pinned_trivy)"
-    new="$(newest_release aquasecurity/trivy)"
+    new="$(newest_release aquasecurity/trivy)" || new=""
     new="${new#v}"
-    [[ -n "$new" && "$new" != null ]] || {
-        echo "latest.sh: GitHub did not answer for aquasecurity/trivy" >&2
-        exit 1
-    }
-    sed -i "s/^const trivyVersion = \".*\"$/const trivyVersion = \"$new\"/" "$here/trivy.go"
-    echo "trivy: $old -> $new"
+    [[ "$new" != null ]] || new=""
+    bump_needed trivy "$old" "$new" || exit 0
+    set_line "$here/trivy.go" '^const trivyVersion = ".*"$' "const trivyVersion = \"$new\""
+    bumped trivy "$old" "$new"
     ;;
 hook:*)
     repo="${target#hook:}"
-    new="$(newest_tag "$repo")"
-    [[ -n "$new" ]] || {
-        echo "latest.sh: github.com/$repo has no version tag" >&2
-        exit 1
-    }
+    new="$(newest_version_tag "$repo")" || new=""
+    [[ -n "$new" ]] || fail "github.com/$repo has no version tag"
     hooks | awk -v r="$repo" '$1 == r { print $3 }' | sort -u | while read -r file; do
         sed -i "\\|- repo: https://github.com/$repo\$|{n;s|rev: .*|rev: $new|}" "$file"
         echo "${file#"$root"/}: $repo $new"
@@ -206,17 +180,12 @@ hook:*)
     ;;
 *)
     old="$(uses | awk -v a="$target" '$1 == a { print $2; exit }')"
-    [[ -n "$old" ]] || {
-        echo "latest.sh: no template uses $target" >&2
-        exit 1
-    }
+    [[ -n "$old" ]] || fail "no template uses $target"
     new="$(latest_ref "$target" "$old")"
-    [[ -n "$new" && "$new" != null ]] || {
-        echo "latest.sh: GitHub did not answer for $target" >&2
-        exit 1
-    }
+    [[ "$new" != null ]] || new=""
+    [[ -n "$new" ]] || fail "GitHub did not answer for $target"
     workflow_sources | xargs sed -i "s|uses: $target@[^ {]*|uses: $target@$new|"
-    echo "$target: $old -> $new"
+    bumped "$target" "$old" "$new"
     ;;
 esac
-echo "next: make workflows at the top of the repository"
+next_step "make workflows at the top of the repository"

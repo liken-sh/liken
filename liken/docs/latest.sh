@@ -21,6 +21,8 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$here/../../toolchains/pin.sh"
 
 repository="https://github.com/gohugoio/hugo"
 
@@ -31,29 +33,18 @@ repository="https://github.com/gohugoio/hugo"
 pinned="$(awk '$1 == "github.com/gohugoio/hugo" && $2 ~ /^v/ { sub(/^v/, "", $2); print $2 }' \
     "$here/go.mod")"
 
-latest="$(git ls-remote --tags --refs "$repository" |
-    sed 's|.*refs/tags/v||' |
-    grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' |
-    sort -V | tail -1)" || latest=""
+latest="$(newest_tag "$repository" '^[0-9]+\.[0-9]+\.[0-9]+$' v)" || latest=""
 
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' hugo "$pinned" "${latest:-?}" - - - \
-    "the website's build tool"
+row hugo "$pinned" "$latest" - - - "the website's build tool"
 
 [[ "${1:-}" == "--bump" ]] || exit 0
 
-[[ -n "$latest" ]] || {
-    echo "latest.sh: the tag list did not answer" >&2
-    exit 1
-}
-[[ "$latest" != "$pinned" ]] || {
-    echo "hugo $pinned is current"
-    exit 0
-}
+bump_needed hugo "$pinned" "$latest" || exit 0
 
 # go get moves the tool directive's version and writes the new
 # digests into go.sum in the same step, so the version and the
 # digests cannot disagree the way a hand-edited pair could.
 (cd "$here" && go get -tool "github.com/gohugoio/hugo@v$latest" && go mod tidy)
-echo "hugo: $pinned -> $latest"
+bumped hugo "$pinned" "$latest"
 echo "go.sum now pins the new digests"
-echo "next: make -C .. docs"
+next_step "make -C .. docs"
