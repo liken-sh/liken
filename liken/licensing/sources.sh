@@ -312,15 +312,15 @@ alpine_tag="$(sed -n '/^\[build\]/,/^\[/ s|^alpine = "alpine:\([^@"]*\).*"$|\1|p
     echo "sources.sh: toolchains/images.toml names no alpine image" >&2
     exit 1
 }
-mirror "toolchain/alpine-$alpine_tag" "musl-1.2.5.tar.gz" \
-    "a9a118bbe84d8764da0ea0d28b3ab3fae8477fc7e4085d90102b8596fc7c75e4" \
-    "https://musl.libc.org/releases/musl-1.2.5.tar.gz"
-mirror "toolchain/alpine-$alpine_tag" "util-linux-2.41.6.tar.xz" \
-    "e596083744e746be7d2823b62b43f4418dd7bf56303b4dc09e6fe8112fe3d7ed" \
-    "https://www.kernel.org/pub/linux/utils/util-linux/v2.41/util-linux-2.41.6.tar.xz"
-mirror "toolchain/alpine-$alpine_tag" "libnl-3.11.0.tar.gz" \
-    "2a56e1edefa3e68a7c00879496736fdbf62fc94ed3232c0baba127ecfa76874d" \
-    "https://github.com/thom311/libnl/releases/download/libnl3_11_0/libnl-3.11.0.tar.gz"
+mirror "toolchain/alpine-$alpine_tag" "musl-1.2.6.tar.gz" \
+    "d585fd3b613c66151fc3249e8ed44f77020cb5e6c1e635a616d3f9f82460512a" \
+    "https://musl.libc.org/releases/musl-1.2.6.tar.gz"
+mirror "toolchain/alpine-$alpine_tag" "util-linux-2.42.4.tar.xz" \
+    "fbd62a100ab7bb8746ba0661255c3c48185b1e9021507c624da01fbc696330ec" \
+    "https://www.kernel.org/pub/linux/utils/util-linux/v2.42/util-linux-2.42.4.tar.xz"
+mirror "toolchain/alpine-$alpine_tag" "libnl-3.12.0.tar.gz" \
+    "fc51ca7196f1a3f5fdf6ffd3864b50f4f9c02333be28be4eeca057e103c0dd18" \
+    "https://github.com/thom311/libnl/releases/download/libnl3_12_0/libnl-3.12.0.tar.gz"
 mirror "toolchain/alpine-$alpine_tag" "openssl-3.5.9.tar.gz" \
     "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a" \
     "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz"

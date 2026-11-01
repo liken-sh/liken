@@ -18,7 +18,7 @@ rust = "rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a
 # bluetoothd. Each OS fetch.sh that builds a static binary reads this
 # line too, and licensing/sources.sh and licensing/latest.sh read its
 # tag; grep for images.toml under liken/ to list them.
-alpine = "alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"
+alpine = "alpine:edge@sha256:020dfcbaaf4cc1078bf2d9c7ba31a8466e334061dcd2f248001d68f79e52c000"
 # The digest moves with the snapshot date in vulkan/package.toml,
 # because the image and the snapshot must come from the same day.
 debian = "debian:sid-slim@sha256:fb75970a5ba2a81ca409ed0cabcf05d53e058086fd397f7a63943ded5bd15f84"

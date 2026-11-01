@@ -167,9 +167,12 @@ make -j"$(nproc)" -C support >/dev/null
 make -j"$(nproc)" -C utils/mount LDFLAGS="-all-static" >/dev/null
 
 # A dynamic binary would run in this container and fail on the
-# machine, which has no loader. This step refuses to produce one.
+# machine, which has no loader. This step refuses to produce one. A
+# static PIE also passes: it carries no loader request and no library,
+# and relocates itself at start. gcc on Alpine builds one for -static,
+# and file(1) calls it "static-pie linked".
 strip utils/mount/mount.nfs
-file utils/mount/mount.nfs | grep -q "statically linked" || {
+file utils/mount/mount.nfs | grep -qE "statically linked|static-pie linked" || {
     echo "fetch.sh: mount.nfs is not statically linked" >&2
     exit 1
 }

@@ -154,9 +154,12 @@ make -j"$(nproc)" -C misc mke2fs >/dev/null
 
 # A dynamically linked binary here would run fine in this container
 # and fail on the machine, which has no loader and no libraries. This
-# step refuses to produce one.
+# step refuses to produce one. A static PIE also passes: it carries no
+# loader request and no library, and relocates itself at start. gcc on
+# Alpine builds one for -static, and file(1) calls it "static-pie
+# linked".
 strip misc/mke2fs
-file misc/mke2fs | grep -q "statically linked" || {
+file misc/mke2fs | grep -qE "statically linked|static-pie linked" || {
     echo "fetch.sh: mke2fs is not statically linked" >&2
     exit 1
 }

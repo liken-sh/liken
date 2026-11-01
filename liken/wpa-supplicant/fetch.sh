@@ -131,9 +131,12 @@ cp /config .config
 make -j"$(nproc)" wpa_supplicant LDFLAGS=-static >/dev/null
 
 # A dynamic binary would run in this container and fail on the
-# machine, which has no loader. This step refuses to produce one.
+# machine, which has no loader. This step refuses to produce one. A
+# static PIE also passes: it carries no loader request and no library,
+# and relocates itself at start. gcc on Alpine builds one for -static,
+# and file(1) calls it "static-pie linked".
 strip wpa_supplicant
-file wpa_supplicant | grep -q "statically linked" || {
+file wpa_supplicant | grep -qE "statically linked|static-pie linked" || {
     echo "fetch.sh: wpa_supplicant is not statically linked" >&2
     exit 1
 }

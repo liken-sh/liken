@@ -31,7 +31,10 @@
 # objects under them. A distribution's bluetoothd loads six shared
 # libraries on Alpine and fifteen on Debian, and each one is a file
 # whose version has to agree with the binary that opens it. The static
-# binaries here open none, so no version can disagree.
+# binaries here open none, so no version can disagree. The build checks
+# each binary with file(1) and accepts "statically linked" or
+# "static-pie linked": gcc on Alpine builds a static PIE for -static,
+# which carries no loader request and relocates itself at start.
 #
 # Two things make the static link work, and both are easy to lose:
 #
@@ -174,7 +177,7 @@ RUN set -eux; \
     for binary in /out/usr/libexec/bluetooth/bluetoothd /out/usr/bin/bluetoothctl \
         /out/usr/bin/btmon /out/usr/bin/btmgmt \
         /out/usr/bin/dbus-daemon /out/usr/bin/dbus-send; do \
-        file "$binary" | grep -q "statically linked" || { file "$binary"; exit 1; }; \
+        file "$binary" | grep -qE "statically linked|static-pie linked" || { file "$binary"; exit 1; }; \
     done
 
 # dbus's own system.conf, unchanged, and the policy file BlueZ

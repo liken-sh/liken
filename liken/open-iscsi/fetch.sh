@@ -195,10 +195,13 @@ ninja -C build iscsid iscsiadm >/dev/null
 
 # A dynamically linked binary here would run fine in this container
 # and fail on the machine, which has no loader and no libraries. This
-# step refuses to produce one.
+# step refuses to produce one. A static PIE also passes: it carries no
+# loader request and no library, and relocates itself at start. gcc on
+# Alpine builds one for -static, and file(1) calls it "static-pie
+# linked".
 strip build/iscsid build/iscsiadm
 for bin in iscsid iscsiadm; do
-    file "build/$bin" | grep -q "statically linked" || {
+    file "build/$bin" | grep -qE "statically linked|static-pie linked" || {
         echo "fetch.sh: $bin is not statically linked" >&2
         exit 1
     }
