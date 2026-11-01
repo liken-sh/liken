@@ -2,16 +2,17 @@
 # Collects git, ssh, and every file the two of them open at runtime
 # into one directory tree, so the image ships that tree and nothing
 # else. Run it in a builder that has git and openssh-client
-# installed, with the output directory as the
-# argument. audio-operator's audio-closure.sh is the same shape for
-# the same reason.
+# installed, with the output directory as the argument.
+#
+# The functions come from vulkan/closure.sh, the closure library of
+# every image on a Debian builder. The Dockerfile copies it from the
+# build context named builder.
 set -eu
 
-out=$1
+# shellcheck source=../vulkan/closure.sh
+. "$(dirname "$0")/closure.sh"
 
-# The multiarch directory that holds every library below, read from
-# dpkg so that no architecture is written down here.
-lib=$(dirname "$(dpkg -L libc6 | grep '/libc\.so\.6$')")
+out=$1
 
 # ldd reports the DT_NEEDED graph and nothing about a program that a
 # running program execs by name. Every seed below is such a file, and
@@ -77,67 +78,7 @@ data="
 /usr/share/git-core/templates
 "
 
-# hops prints every link of a symlink chain and then the file at the
-# end, because a soname is a link to a versioned file and the loader
-# opens the soname.
-hops() {
-	path=$1
-	while [ -L "$path" ]; do
-		printf '%s\n' "$path"
-		target=$(readlink "$path")
-		case $target in
-		/*) path=$target ;;
-		*) path=$(dirname "$path")/$target ;;
-		esac
-	done
-	printf '%s\n' "$path"
-}
-
-# needed prints the libraries ldd resolves for one file, which is the
-# whole DT_NEEDED graph. linux-vdso has no file behind it, and the
-# loader's own line prints with no arrow, which is what the two sed
-# patterns accept. A library the loader cannot find prints "not
-# found", and a tree missing one library fails at the first start in a
-# pod, so the build fails here instead. The exit stops the script only
-# when needed runs in the script's own shell and not in a pipeline, so
-# the loop below writes its output to a file.
-needed() {
-	if ldd "$1" | grep -q 'not found'; then
-		echo "$1 needs a library this builder does not have:" >&2
-		ldd "$1" | grep 'not found' >&2
-		exit 1
-	fi
-	ldd "$1" | sed -n 's/.*=> \(\/[^ ]*\).*/\1/p; s/^\t\(\/[^ ]*\) (0x.*/\1/p'
-}
-
-# /bin, /lib, and /lib64 are symlinks into /usr. ldd reports every
-# library under the name it resolved through them, the loader's own
-# path names /lib64, and the seeds name /bin/sh. The three links go in
-# first, so every copy below writes the path exactly as it was
-# resolved.
-mkdir -p "$out$lib" "$out/usr/lib64" "$out/usr/bin"
-for link in /bin /lib /lib64; do
-	if [ -L "$link" ]; then
-		cp -a --parents "$link" "$out"
-	fi
-done
-
-for seed in $seeds; do
-	{
-		hops "$seed"
-		needed "$(readlink -f "$seed")" >"$out/.needed"
-		while read -r path; do hops "$path"; done <"$out/.needed"
-	} >>"$out/.closure"
-done
-rm -f "$out/.needed"
-sort -u "$out/.closure" | while read -r path; do
-	cp -a --parents "$path" "$out"
-done
-rm -f "$out/.closure"
-
-for path in $data; do
-	cp -a --parents "$path" "$out"
-done
+collect "$out" "$seeds" "$data"
 
 # The exec-path git is byte for byte the /usr/bin one, so a link
 # replaces the second copy. git resolves its exec path through
@@ -145,8 +86,6 @@ done
 if cmp -s "$out/usr/bin/git" "$out/usr/lib/git-core/git"; then
 	ln -sf ../../bin/git "$out/usr/lib/git-core/git"
 fi
-
-mkdir -p "$out/etc"
 
 # ssh looks up the uid it runs as and refuses to start when no entry
 # answers, with "No user exists for uid". The manifests in deploy/
@@ -165,8 +104,4 @@ root:x:0:
 nogroup:x:65534:
 GROUP
 
-# Without a cache the loader searches its built-in directory list on
-# every open, and that list does not name the multiarch directory
-# that holds every library above.
-printf '%s\n' "$lib" >"$out/etc/ld.so.conf"
-ldconfig -r "$out"
+notices "$out" git-csi-driver

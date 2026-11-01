@@ -1,8 +1,11 @@
 #!/bin/sh
 # The functions that collect a program, everything it loads, and its
 # data files into one directory tree, so that an image ships that tree
-# and nothing else. Every base's closure script sources this file,
-# names its seeds and its data, and calls collect and then notices.
+# and nothing else. Every closure on a Debian or Ubuntu builder sources
+# this file, names its seeds and its data, and calls collect and then
+# notices. vulkan/closure.sh is the library. indi/closure.sh is a copy,
+# because the build context of indi does not reach vulkan/, and
+# `ci pins` fails when the two copies differ.
 #
 # Debian puts whole driver sets in one package, so apt cannot express
 # what an image needs. A closure can: it is the seeds named here, the
@@ -51,11 +54,11 @@ needed() {
 # collect writes the closure of $seeds and the files in $data to $out,
 # then builds the loader's cache there.
 #
-# /lib and /lib64 are symlinks to the directories under /usr, and ldd
-# reports every library under the name it resolved, which is the one
-# that goes through them. The loader's own path names /lib64. Copying
-# the two links first lets every copy below write the path exactly as
-# it was resolved.
+# /bin, /lib, and /lib64 are symlinks to the directories under /usr,
+# and ldd reports every library under the name it resolved, which is
+# the one that goes through them. The loader's own path names /lib64,
+# and a seed such as /bin/sh names /bin. Copying the links first lets
+# every copy below write the path exactly as it was resolved.
 #
 # Without a cache the loader searches its built-in directory list on
 # every open, and that list does not name the multiarch directory that
@@ -66,7 +69,7 @@ collect() {
 	data=$3
 
 	mkdir -p "$out$lib" "$out/usr/lib64" "$out/usr/bin"
-	for link in /lib /lib64; do
+	for link in /bin /lib /lib64; do
 		if [ -L "$link" ]; then
 			cp -a --parents "$link" "$out"
 		fi
@@ -95,33 +98,69 @@ collect() {
 }
 
 # notices writes into $out the notices that the licenses of its files
-# ask to travel with them. Each Debian package states its copyright and
-# its license in /usr/share/doc/<package>/copyright, and a closure
-# copies only what the loader resolves, which leaves those files
-# behind. So for each package that a file of $out came from, notices
-# copies the package's copyright file, and it copies the license texts
-# in /usr/share/common-licenses that the copyright files name by path.
+# ask to travel with them, and the record of the packages they came
+# from. Each Debian or Ubuntu package states its copyright and its
+# license in /usr/share/doc/<package>/copyright, and a closure copies
+# only what the loader resolves, which leaves those files behind. So
+# for each package that a file of $out came from, notices copies the
+# package's copyright file, and it copies the license texts in
+# /usr/share/common-licenses that the copyright files name by path.
 #
 # The GPL and the LGPL also require that the source be available. The
 # list /usr/share/doc/liken/<image>.packages names each package with its
-# version and its source package, and snapshot.debian.org serves the
-# source of every version that Debian published.
+# version and its source package, and the snapshots that the builder
+# installs from serve the sources of the same date. The list states
+# those snapshots as deb-src entries, from the sources file that the
+# builder's snapshot.sh wrote. notices/check.sh reads the list to prove
+# that the image holds each copyright file. A third argument, when
+# given, is a paragraph that the list adds to its header.
+#
+# syft and Trivy find the packages of an image in dpkg's database, and
+# a closure holds no /var/lib/dpkg/status. Both scanners also read
+# /var/lib/dpkg/status.d/, one file for each package, which is the
+# layout of Google's distroless images. So for each package, notices
+# writes the package's stanza from the builder's dpkg status into
+# status.d/<package>, and the lines of the package's md5sums that name
+# a file of $out into status.d/<package>.md5sums. The md5sums tell a
+# scanner which package owns each file. A scanner matches the packages
+# to the advisories of the distribution that /etc/os-release,
+# /etc/debian_version, and /etc/lsb-release name, so notices copies
+# those files too, and base-files, the package that holds them, is in
+# the record.
 #
 # Debian policy requires a copyright file in every package, so a
 # package without one fails the build here.
 notices() {
 	out=$1
 	image=$2
+	note=${3:-}
 	packages=$out/usr/share/doc/liken/$image.packages
+	status=$out/var/lib/dpkg/status.d
 
-	mkdir -p "$out/usr/share/doc/liken"
+	for path in /etc/os-release /etc/debian_version /etc/lsb-release; do
+		if [ -e "$path" ]; then
+			hops "$path"
+		fi
+	done >"$out/.release"
+	while read -r path; do
+		cp -a --parents "$path" "$out"
+	done <"$out/.release"
+	rm -f "$out/.release"
+
+	mkdir -p "$out/usr/share/doc/liken" "$status"
 	cat >"$packages" <<EOF
-ghcr.io/liken-sh/$image holds files of the Debian packages below,
-unmodified. /usr/share/doc/<package>/copyright states the copyright
-and the license of each package, and /usr/share/common-licenses holds
-the license texts that those files name. snapshot.debian.org serves
-the source of each package at
-https://snapshot.debian.org/package/<source>/<source version>/.
+ghcr.io/liken-sh/$image holds files of the packages below, unmodified.
+/usr/share/doc/<package>/copyright states the copyright and the
+license of each package, and /usr/share/common-licenses holds the
+license texts that those files name.${note:+
+
+$note}
+
+The snapshots that the image installs from serve the source of each
+package. With these sources, apt-get source <source>=<source version>
+fetches it:
+
+$(sed 's/^Types: deb$/Types: deb-src/' /etc/apt/sources.list.d/snapshot.sources)
 
 <package> <version> <source> <source version>
 EOF
@@ -132,6 +171,15 @@ EOF
 		mkdir -p "$out/usr/share/doc/$package"
 		cp -L "/usr/share/doc/$package/copyright" "$out/usr/share/doc/$package/copyright"
 		dpkg-query -W -f '${Package} ${Version} ${source:Package} ${source:Version}\n' "$package" >>"$packages"
+		dpkg-query -s "$package" >"$status/$package"
+		sums=$(dpkg-query --control-path "$package" md5sums)
+		if [ -n "$sums" ]; then
+			while read -r sum path; do
+				if [ ! -d "$out/$path" ] && { [ -e "$out/$path" ] || [ -L "$out/$path" ]; }; then
+					printf '%s  %s\n' "$sum" "$path"
+				fi
+			done <"$sums" >"$status/$package.md5sums"
+		fi
 	done
 	cp -a --parents /usr/share/common-licenses "$out"
 }

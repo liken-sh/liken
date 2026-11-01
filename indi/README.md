@@ -177,7 +177,13 @@ package that the closure took a file from, to
 `/usr/share/common-licenses`. It writes
 `/usr/share/doc/liken/<image>.packages`, which names each package, its
 version, and its source package, with the snapshots as `deb-src`
-entries, so `apt-get source` fetches the source of each one. The shim
+entries, so `apt-get source` fetches the source of each one. For each
+of those packages it also writes the package's dpkg stanza to
+`/var/lib/dpkg/status.d/<package>`, with its md5sums beside it, and
+copies `/etc/os-release` and `/etc/lsb-release`, so syft and Trivy
+list the image's packages. `closure.sh` is a copy of
+`vulkan/closure.sh`, because the build context of `indi` does not
+reach `vulkan/`, and `ci pins` fails when the two differ. The shim
 links the Go standard library, so `indi` holds the Go license at
 `/usr/share/doc/go/LICENSE`.
 

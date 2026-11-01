@@ -2,16 +2,18 @@
 # Collects PipeWire, WirePlumber, and every file the two daemons open
 # at runtime into one directory tree, so the image ships that tree and
 # nothing else. Run it in a builder that has the Debian packages
-# installed, with the output directory as the argument. The base
-# images collect their trees the same way, with the functions in
-# vulkan/closure.sh at the top of the repository.
+# installed, with the output directory as the argument.
+#
+# The functions come from vulkan/closure.sh, the closure library of
+# every image on a Debian builder. The Dockerfile copies it from the
+# build context named builder, and it sets $lib, the multiarch
+# directory that holds every library below.
 set -eu
 
-out=$1
+# shellcheck source=../vulkan/closure.sh
+. "$(dirname "$0")/closure.sh"
 
-# The multiarch directory that holds every library below, read from
-# dpkg so that no architecture is written down here.
-lib=$(dirname "$(dpkg -L libpipewire-0.3-modules | grep '/pipewire-0.3$')")
+out=$1
 
 # coreutils ships libstdbuf.so in a private directory of its own,
 # and the directory differs between releases, so the path is read
@@ -162,71 +164,5 @@ $lib/gconv/gconv-modules.cache
 $lib/gconv/gconv-modules.d
 "
 
-# Prints every hop of a symlink chain and then the file at the end,
-# because a soname is a link to a versioned file and the loader opens
-# the soname.
-hops() {
-	path=$1
-	while [ -L "$path" ]; do
-		printf '%s\n' "$path"
-		target=$(readlink "$path")
-		case $target in
-		/*) path=$target ;;
-		*) path=$(dirname "$path")/$target ;;
-		esac
-	done
-	printf '%s\n' "$path"
-}
-
-# ldd prints the whole DT_NEEDED graph of one file, so one call per
-# seed reaches every library the loader resolves at load time.
-# linux-vdso has no file behind it, and the loader's own line prints
-# with no arrow, which is what the two sed patterns accept. A library
-# the loader cannot find prints "not found", and a tree missing one
-# library fails at the first start in a pod, so the build fails here
-# instead. The exit stops the script only when needed runs in the
-# script's own shell and not in a pipeline, so the loop below writes
-# its output to a file.
-needed() {
-	if ldd "$1" | grep -q 'not found'; then
-		echo "$1 needs a library this builder does not have:" >&2
-		ldd "$1" | grep 'not found' >&2
-		exit 1
-	fi
-	ldd "$1" | sed -n 's/.*=> \(\/[^ ]*\).*/\1/p; s/^\t\(\/[^ ]*\) (0x.*/\1/p'
-}
-
-# /lib and /lib64 are symlinks into /usr. ldd reports every library
-# under the name it resolved through them, and the loader's own path
-# names /lib64. The two links go in first, so every copy below writes
-# the path exactly as it was resolved.
-mkdir -p "$out$lib" "$out/usr/lib64" "$out/usr/bin"
-for link in /lib /lib64; do
-	if [ -L "$link" ]; then
-		cp -a --parents "$link" "$out"
-	fi
-done
-
-for seed in $seeds; do
-	{
-		hops "$seed"
-		needed "$(readlink -f "$seed")" >"$out/.needed"
-		while read -r path; do hops "$path"; done <"$out/.needed"
-	} >>"$out/.closure"
-done
-rm -f "$out/.needed"
-sort -u "$out/.closure" | while read -r path; do
-	cp -a --parents "$path" "$out"
-done
-rm -f "$out/.closure"
-
-for path in $data; do
-	cp -a --parents "$path" "$out"
-done
-
-# Without a cache the loader searches its built-in directory list on
-# every open, and that list does not name the multiarch directory
-# that holds every library above.
-mkdir -p "$out/etc"
-printf '%s\n' "$lib" >"$out/etc/ld.so.conf"
-ldconfig -r "$out"
+collect "$out" "$seeds" "$data"
+notices "$out" audio-operator

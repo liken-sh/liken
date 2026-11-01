@@ -45,12 +45,12 @@ COPY --from=notices go.sh /
 RUN CGO_ENABLED=0 sh /go.sh /notices .
 
 # The closure installs from the same Debian image and the same
-# snapshot date as the base images. snapshot.sh comes from the vulkan
-# directory, the build context named builder, and SNAPSHOT is vulkan's
-# version.
+# snapshot date as the base images. snapshot.sh and closure.sh, the
+# closure library, come from the vulkan directory, the build context
+# named builder, and SNAPSHOT is vulkan's version.
 FROM debian AS closure
 ARG SNAPSHOT
-COPY --from=builder snapshot.sh snapshot.sha256 /
+COPY --from=builder snapshot.sh snapshot.sha256 closure.sh /
 # git is the program the driver runs. openssh-client is the transport a
 # deploy key uses.
 RUN sh /snapshot.sh "$SNAPSHOT" \
@@ -59,13 +59,12 @@ RUN sh /snapshot.sh "$SNAPSHOT" \
         git \
         openssh-client \
     && rm -rf /var/lib/apt/lists/*
+# The closure script sources closure.sh, which also writes the
+# copyright file of each Debian package that the closure took files
+# from, the list of those packages and their sources, and the dpkg
+# record of each package that syft and Trivy read.
 COPY git-closure.sh /
 RUN sh /git-closure.sh /out
-# The copyright file of each Debian package that the closure took files
-# from, and the list of those packages and their sources.
-# notices/debian.sh says why the image needs them.
-COPY --from=notices debian.sh /
-RUN sh /debian.sh /out git-csi-driver
 
 FROM scratch
 COPY --from=closure /out /

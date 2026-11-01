@@ -43,11 +43,12 @@ RUN CGO_ENABLED=0 sh /go.sh /notices .
 # snapshot date as the base images. The closure script names pipewire
 # 0.3, spa 0.2, and wireplumber 0.5, so a snapshot that moves one of
 # them fails this build. That failure is the report that the module
-# set needs reading again. snapshot.sh comes from the vulkan directory,
-# the build context named builder, and SNAPSHOT is vulkan's version.
+# set needs reading again. snapshot.sh and closure.sh, the closure
+# library, come from the vulkan directory, the build context named
+# builder, and SNAPSHOT is vulkan's version.
 FROM debian AS closure
 ARG SNAPSHOT
-COPY --from=builder snapshot.sh snapshot.sha256 /
+COPY --from=builder snapshot.sh snapshot.sha256 closure.sh /
 # pipewire-bin provides the daemon, pw-dump, which is how the operator
 # reads the graph, and pw-cli's family. The daemon creates every sink,
 # from the node declarations the declare container writes before it
@@ -74,13 +75,12 @@ RUN sh /snapshot.sh "$SNAPSHOT" \
         flac \
         opus-tools \
     && rm -rf /var/lib/apt/lists/*
+# The closure script sources closure.sh, which also writes the
+# copyright file of each Debian package that the closure took files
+# from, the list of those packages and their sources, and the dpkg
+# record of each package that syft and Trivy read.
 COPY audio-closure.sh /
 RUN sh /audio-closure.sh /out
-# The copyright file of each Debian package that the closure took files
-# from, and the list of those packages and their sources.
-# notices/debian.sh says why the image needs them.
-COPY --from=notices debian.sh /
-RUN sh /debian.sh /out audio-operator
 
 FROM scratch
 COPY --from=closure /out /

@@ -13,7 +13,6 @@ before you commit a change here.
 The voice rules in that file govern all prose in this directory,
 comments included.
 
-The pinned components, `vulkan` and the bases on it, and `indi`, do
-not read this directory. Each one holds its own copy of the Debian
-step in its `closure.sh`, so a change here forces no new revision of
-them. A change to the Debian step belongs in all three files.
+The notices of Debian and Ubuntu packages are not here. Every closure
+writes them with the `notices` function of `vulkan/closure.sh`, the
+closure library, and `indi/closure.sh` is a byte-for-byte copy of it.

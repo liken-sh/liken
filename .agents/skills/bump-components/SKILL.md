@@ -244,6 +244,17 @@ The files that a base's `.dockerignore` leaves out, such as its
 `README.md` and its `smoke/` check, are not in the recipe, and a
 change to them needs no revision.
 
+`vulkan/closure.sh` is the closure library, and every closure on a
+Debian or Ubuntu builder sources it: the bases, `astrometry`, and the
+closures of `audio-operator` and `git-csi-driver`, which take the
+`vulkan` directory as the build context `builder`. So a change to it
+needs a new revision of `vulkan` and the cascade above. `indi` keeps a
+copy, `indi/closure.sh`, and `ci pins` fails when the copy differs, so
+copy the change into it and raise the revision of `indi` too. The
+library writes each image's notices, its list of packages, and its
+dpkg records under `/var/lib/dpkg/status.d/`, which syft and Trivy
+read. "Closures" in the root `AGENTS.md` gives the form.
+
 ## 5b. The trust store
 
 `trust` at the top of the repository pins the CA bundle that every part

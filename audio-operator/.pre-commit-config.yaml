@@ -19,6 +19,9 @@ repos:
     rev: v0.11.0.1
     hooks:
       - id: shellcheck
+        # -x follows the source line of the closure script into
+        # closure.sh in the vulkan directory.
+        args: [-x]
   - repo: local
     hooks:
       - id: gofmt

@@ -86,8 +86,11 @@ done
 
 # The copyright file of indi-3rdparty-libs states one license for the
 # whole package and names none of the vendor SDKs in it, so each SDK's
-# own license file goes beside it.
-notices "$out" "$image"
+# own license file goes beside it, and the list of packages says so.
+notices "$out" "$image" "The copyright file of indi-3rdparty-libs does not name the
+vendor SDKs in that package. So when this image holds an SDK whose
+directory in the indi-3rdparty repository holds a license file,
+/usr/share/doc/indi-3rdparty-libs/<directory>/ holds that file."
 for path in $licenses; do
 	mkdir -p "$out/usr/share/doc/indi-3rdparty-libs/$(dirname "$path")"
 	cp "/sdk-licenses/$path" "$out/usr/share/doc/indi-3rdparty-libs/$path"

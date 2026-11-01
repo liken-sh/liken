@@ -54,6 +54,8 @@ func pinsTree(t *testing.T, changes map[string]string) string {
 		"a/layout/liken-thing-v1.xml":        "<protocol name=\"liken_thing_v1\"/>\n",
 		"b/src/liken-thing-v1.xml":           "<protocol name=\"liken_thing_v1\"/>\n",
 		"b/src/other-v1.xml":                 "<protocol name=\"other_v1\"/>\n",
+		"lib/closure.sh":                     "collect() { :; }\n",
+		"c/closure.sh":                       "collect() { :; }\n",
 	}
 	for name, text := range changes {
 		tree[name] = text
@@ -110,6 +112,8 @@ func TestADriftedPinIsFound(t *testing.T) {
 			"a/Dockerfile builds from alpine@sha256:abc,"},
 		"a copy of a protocol": {"b/src/liken-thing-v1.xml", "<protocol name=\"liken_thing_v1\" version=\"2\"/>\n",
 			"the Wayland protocol liken-thing-v1.xml has 2 versions:"},
+		"a copy of the closure library": {"c/closure.sh", "collect() { true; }\n",
+			"the closure library closure.sh has 2 versions:"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

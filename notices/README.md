@@ -29,13 +29,6 @@ The images of the operators take this directory as the build context
   `/usr/share/doc/<crate>-<version>/`. A crate that publishes no
   license file has its `Cargo.toml` there instead, which names the
   license and the authors.
-- `debian.sh` runs in a closure's Debian builder after the closure. It
-  copies the copyright file of each package that the closure took a
-  file from to `/usr/share/doc/<package>/copyright`, and the license
-  texts of `/usr/share/common-licenses`. It writes
-  `/usr/share/doc/liken/<image>.packages`, which names each package,
-  its version, and its source package. snapshot.debian.org serves the
-  source of every version that Debian published.
 
 Each script writes to a directory that the final stage copies whole,
 as in `COPY --from=build /notices /`.
@@ -45,16 +38,21 @@ the scripts leave it out: the module itself, the modules that `go.mod`
 replaces with a directory of the repository, and the crates that a
 build takes by path.
 
-## The pinned components
+## Debian and Ubuntu packages
 
-The bases, `vulkan` and the four on it, and the INDI images run the
-steps of `debian.sh` from their own `closure.sh`, in a function named
-`notices`. A pinned component's recipe covers every file of its build
-contexts, so a base that read this directory would need a new revision
-for each change here. The INDI images also carry the license file of
-each vendor SDK in them, from `indi/sdk-licenses/`, because the
-copyright file of the PPA's `indi-3rdparty-libs` names none of the
-SDKs.
+Every closure on a Debian or Ubuntu builder writes the notices of the
+packages it took files from with the `notices` function of
+`vulkan/closure.sh`, the closure library, and not with a script here.
+`indi/closure.sh` is a copy of that file, and `ci pins` fails when the
+two differ. The function copies the copyright file of each package to
+`/usr/share/doc/<package>/copyright` and the license texts of
+`/usr/share/common-licenses`. It writes
+`/usr/share/doc/liken/<image>.packages`, which names each package, its
+version, and its source package, with the builder's snapshots as
+`deb-src` entries, so `apt-get source` fetches the source of each one.
+The INDI images also carry the license file of each vendor SDK in
+them, from `indi/sdk-licenses/`, because the copyright file of the
+PPA's `indi-3rdparty-libs` names none of the SDKs.
 
 ## The check
 

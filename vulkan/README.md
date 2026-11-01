@@ -24,9 +24,18 @@ travel with them. A closure copies only what the loader resolves, so
 the closure took a file from, to `/usr/share/doc/<package>/copyright`,
 and the license texts of `/usr/share/common-licenses`. It writes
 `/usr/share/doc/liken/vulkan.packages`, which names each package, its
-version, and its source package. snapshot.debian.org serves the source
-of every version that Debian published. Each base above this one
-writes its own list beside it, such as `ffmpeg.packages`.
+version, and its source package, with the snapshot as a `deb-src`
+entry, so `apt-get source` fetches the source of each one. Each base
+above this one writes its own list beside it, such as
+`ffmpeg.packages`.
+
+For each of those packages, `closure.sh` also writes the package's
+stanza from the builder's dpkg status to
+`/var/lib/dpkg/status.d/<package>`, with the package's md5sums of the
+files that the tree holds beside it, and copies `/etc/os-release` and
+`/etc/debian_version`. syft and Trivy read that layout, the one that
+distroless images use, so the SBOM and the vulnerability scan of an
+image list its Debian packages.
 
 Debian puts every Vulkan driver in one package, and two of the seven,
 lavapipe and the AMD driver, link LLVM. The tree keeps the Intel and
@@ -39,8 +48,11 @@ The other bases take this directory as the build context named
 
 - `closure.sh` holds the functions that collect a closure, the
   function that copies the notices of the packages a closure took files
-  from, and the function that removes from a tree every file that the
-  base under it already holds.
+  from and writes their dpkg records, and the function that removes
+  from a tree every file that the base under it already holds. Every
+  closure on a Debian builder sources it, including the closures of
+  `audio-operator` and `git-csi-driver`. `indi/closure.sh` is a copy,
+  and `ci pins` fails when the two differ.
 - `snapshot.sh` points apt at one day of
   [snapshot.debian.org](https://snapshot.debian.org/), reads the
   package lists, and checks each `InRelease` file against its sha256

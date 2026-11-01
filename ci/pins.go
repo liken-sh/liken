@@ -38,7 +38,12 @@ import (
 //     liken-arrangement-v1.xml, holds the same bytes. The compositor
 //     module and each client build from their own directory, so each
 //     keeps a copy, and a client built from a drifted copy sends
-//     requests that the compositor does not read the same way.
+//     requests that the compositor does not read the same way;
+//   - each copy of the closure library, closure.sh, holds the same
+//     bytes. vulkan/closure.sh is the library, and indi keeps a copy
+//     because its build context does not reach vulkan/. A drifted copy
+//     builds images whose trees, notices, and package records follow
+//     other rules than the bases'.
 //
 // The plans keep the versions of their day, so the check reads none of
 // them. Neither does it read test data, a cache, or another checkout.
@@ -53,7 +58,7 @@ func checkPins(root string) ([]string, error) {
 	}
 	goVersion := strings.SplitN(parseImageRef(tools.Build["golang"]).Tag, "-", 2)[0]
 	rustVersion := strings.SplitN(parseImageRef(tools.Build["rust"]).Tag, "-", 2)[0]
-	modules, crates, hooks, protocols := versions{}, versions{}, versions{}, versions{}
+	modules, crates, hooks, protocols, closures := versions{}, versions{}, versions{}, versions{}, versions{}
 	var findings []string
 	for _, file := range files {
 		data, err := os.ReadFile(filepath.Join(root, file))
@@ -76,6 +81,8 @@ func checkPins(root string) ([]string, error) {
 			err = readHooks(file, data, hooks)
 		case isProtocol(name):
 			protocols.add(name, contentDigest(data), file)
+		case name == closureLibrary:
+			closures.add(name, contentDigest(data), file)
 		}
 		if err != nil {
 			return nil, err
@@ -92,6 +99,7 @@ func checkPins(root string) ([]string, error) {
 	findings = append(findings, crates.drift("the crate")...)
 	findings = append(findings, hooks.drift("the hook repository")...)
 	findings = append(findings, protocols.drift("the Wayland protocol")...)
+	findings = append(findings, closures.drift("the closure library")...)
 	return findings, nil
 }
 
@@ -104,7 +112,7 @@ func pinFiles(root string) ([]string, error) {
 	var files []string
 	for _, file := range all {
 		switch name := path.Base(file); {
-		case name == "go.mod", name == "rust-toolchain.toml", name == "Cargo.toml", name == ".pre-commit-config.yaml", isProtocol(name), isDockerfile(name), namesImages(file):
+		case name == "go.mod", name == "rust-toolchain.toml", name == "Cargo.toml", name == ".pre-commit-config.yaml", name == closureLibrary, isProtocol(name), isDockerfile(name), namesImages(file):
 			files = append(files, file)
 		}
 	}
@@ -133,6 +141,10 @@ func sourceFiles(root string) ([]string, error) {
 	slices.Sort(files)
 	return slices.Compact(files), nil
 }
+
+// closureLibrary is the file name of the closure library and of each
+// copy of it.
+const closureLibrary = "closure.sh"
 
 // isProtocol is true for the file of a Wayland protocol that liken
 // defines: liken-<name>-v<N>.xml, the form wayland-scanner reads.

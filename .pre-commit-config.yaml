@@ -8,7 +8,7 @@
 # that no component owns, to the inputs of the generated workflows, and
 # to the inputs of `ci pins`: a component's own exclusions, such as its
 # test data, stay in force.
-files: ^(\.agents/|\.github/|liken\.sh/|plans/|[^/]+$|ci/templates/|[^/]+/package\.toml$|.*/Dockerfile[^/]*$|toolchains/images\.toml$|toolchains/pin\.sh$|trust/keys/|.*/VERSION$|.*/fetch\.sh$|.*/latest\.sh$)
+files: ^(\.agents/|\.github/|liken\.sh/|plans/|[^/]+$|ci/templates/|[^/]+/package\.toml$|.*/Dockerfile[^/]*$|toolchains/images\.toml$|toolchains/pin\.sh$|trust/keys/|.*/VERSION$|.*/fetch\.sh$|.*/latest\.sh$|.*/closure\.sh$)
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -54,8 +54,9 @@ repos:
         # digest from the network, and each pin has a latest.sh that
         # make versions runs. A change to a script, a Dockerfile, a
         # VERSION, images.toml, versions.sh, the library, or a key in
-        # trust/keys/ that breaks a rule fails here.
+        # trust/keys/ that breaks a rule fails here, and so does a
+        # change that makes the two copies of closure.sh differ.
         entry: bash -c 'cd ci && go run . pins -root ..'
         language: system
-        files: (^|/)(fetch|latest)\.sh$|/Dockerfile[^/]*$|(^|/)VERSION$|^toolchains/(images\.toml|pin\.sh)$|^versions\.sh$|^trust/keys/
+        files: (^|/)(fetch|latest)\.sh$|/Dockerfile[^/]*$|(^|/)VERSION$|^toolchains/(images\.toml|pin\.sh)$|^versions\.sh$|^trust/keys/|(^|/)closure\.sh$
         pass_filenames: false

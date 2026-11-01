@@ -226,6 +226,28 @@ comment that excuses one line.
   and "static-pie linked", because gcc on Alpine builds a static PIE
   for `-static`.
 
+## Closures
+
+An image that ships files of Debian or Ubuntu packages without the
+packages is a closure on scratch, and a closure holds no
+`/var/lib/dpkg/status`. Without a package record, syft writes an SBOM
+with almost none of the image's packages, and Trivy finds no package
+to match against an advisory.
+
+So every closure on a Debian or Ubuntu builder sources
+`vulkan/closure.sh`, the closure library, through a build context, and
+calls `collect` and then `notices`. No closure writes its own ldd walk
+or its own copy of the notices. For every package that the tree holds
+a file of, `notices` writes `/var/lib/dpkg/status.d/<package>`, the
+package's stanza from the builder's dpkg status, and
+`/var/lib/dpkg/status.d/<package>.md5sums`. It also copies
+`/etc/os-release` and the distribution's version file, so a scanner
+knows which advisories apply. syft and Trivy read this layout, which
+Google's distroless images use. `indi/closure.sh` is a copy of the
+library, because the build context of `indi` does not reach `vulkan/`,
+and `cd ci && go run . pins -root ..` fails when the two copies
+differ.
+
 ## Releases and development builds
 
 One CalVer tag releases every component whose outputs changed since its
