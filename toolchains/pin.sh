@@ -309,6 +309,81 @@ verify_signature() {
     esac
 }
 
+# --- Debian and Ubuntu archives ------------------------------------------
+
+# archive_deb <key.asc> <suite URL> <index> <package> [<version>]
+#
+# Print "<version> <sha256>" for one binary package in a Debian or
+# Ubuntu archive, such as
+# archive_deb key.asc https://deb.debian.org/debian/dists/sid
+# main/binary-all/Packages.xz ovmf-generic. With no version, the
+# function takes the newest version that the index lists.
+#
+# The archive signs one file per suite, InRelease, and signs no
+# package. InRelease lists the digest of each Packages index, and each
+# Packages index lists the digest of each package. So the function
+# verifies InRelease against the key, checks the index against the
+# digest that the signed text lists, and checks the package against
+# the digest that the index lists. A change to any of the three files
+# on a mirror or in transit stops the bump. The key file holds every
+# key that signs the suite, because gpgv fails on a signature whose
+# key it does not have, and Debian signs each suite with the keys of
+# two releases.
+#
+# The function downloads the package and prints the sha256 of the
+# verified bytes, because a fetch.sh pins a sha256, and the Packages
+# indexes of Ubuntu's development series list only a SHA512.
+#
+# An InRelease file that names a Valid-Until date in the past stops
+# the function too, as it stops apt, so a mirror cannot serve an old
+# signed index that still names a superseded package.
+archive_deb() (
+    local key="$1" suite="$2" index="$3" package="$4" version="${5:-}"
+    local work valid digest record deb_digest
+    command -v xz >/dev/null || fail "missing required tool: xz"
+    work="$(mktemp -d)"
+    trap 'rm -rf "$work"' EXIT
+
+    fetch_file "$suite/InRelease" "$work/InRelease"
+    verify_signature "$key" "$work/InRelease" >"$work/Release"
+    valid="$(sed -n 's/^Valid-Until: //p' "$work/Release")"
+    if [[ -n "$valid" ]] && (($(date -d "$valid" +%s) < $(date +%s))); then
+        fail "$suite/InRelease expired at $valid"
+    fi
+
+    # The digest sections of a Release file start with a line such as
+    # "SHA256:", and each entry under one is "<digest> <size> <path>".
+    # SHA256 is the first choice, and Ubuntu's development series lists
+    # SHA512 alone.
+    digest="$(awk -v idx="$index" '
+        /^[^ ]/ { section = $1 }
+        section == "SHA256:" && $3 == idx { sha256 = $1 }
+        section == "SHA512:" && $3 == idx { sha512 = $1 }
+        END { print (sha256 != "" ? sha256 : sha512) }' "$work/Release")"
+    [[ -n "$digest" ]] || fail "$suite/InRelease lists no $index"
+    fetch_verified "$suite/$index" "$digest" "$work/Packages.xz"
+
+    # One record per package version: "<version> <filename> <digest>".
+    record="$(xz -dc "$work/Packages.xz" | awk -v p="$package" -v v="$version" '
+        /^Package: / { name = $2; ver = ""; file = ""; sha256 = ""; sha512 = "" }
+        /^Version: / { ver = $2 }
+        /^Filename: / { file = $2 }
+        /^SHA256: / { sha256 = $2 }
+        /^SHA512: / { sha512 = $2 }
+        /^$/ && name == p && (v == "" || ver == v) {
+            print ver, file, (sha256 != "" ? sha256 : sha512)
+        }
+        END {
+            if (name == p && (v == "" || ver == v))
+                print ver, file, (sha256 != "" ? sha256 : sha512)
+        }' | sort -V | tail -1)"
+    [[ -n "$record" ]] || fail "$suite/$index lists no $package ${version:-at any version}"
+    read -r version file deb_digest <<<"$record"
+
+    fetch_verified "${suite%/dists/*}/$file" "$deb_digest" "$work/package.deb"
+    echo "$version $(sha256sum "$work/package.deb" | cut -d' ' -f1)"
+)
+
 # --- the report ----------------------------------------------------------
 
 # row <name> <pinned> <latest> <channel> <newest channel> <hold> <note>

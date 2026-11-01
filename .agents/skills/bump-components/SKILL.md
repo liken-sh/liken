@@ -481,6 +481,10 @@ arguments and the reason for its behavior:
 - `verify_signature [--signer <fingerprint>] <key.asc> <signature>
   [<file>]` checks a detached signature, or a clearsigned file and
   prints its signed text.
+- `archive_deb <key.asc> <suite URL> <index> <package> [<version>]`
+  prints the version and the sha256 of one package of a Debian or
+  Ubuntu archive, through the suite's signed `InRelease` file and the
+  `Packages` index that it lists.
 - `container_runtime` and `image_of <key>` give a build its docker or
   podman and its image from `toolchains/images.toml`.
 - `row` prints one report row of seven columns, with `?` for an empty
@@ -535,6 +539,11 @@ names another signer:
   GitHub's OIDC issuer.
 - prek publishes a GitHub attestation of each archive.
   `ci/latest.sh --bump prek` verifies it with `gh attestation verify`.
+- Debian signs each suite's `InRelease` file, which lists the digest
+  of each `Packages` index, and the index lists the digest of each
+  package. `liken/dev-cluster/firmware/latest.sh` takes the digest of
+  `ovmf-generic` through that chain with `archive_deb`, against
+  Debian's archive keys in `liken/dev-cluster/firmware/debian-archive.asc`.
 
 A key that one script reads stays beside that script. A key that a
 second component reads moves to `trust/keys/`, with a section in its

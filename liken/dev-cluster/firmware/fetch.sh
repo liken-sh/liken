@@ -18,8 +18,9 @@
 # The pin is a Debian package version (firmware/VERSION). The package
 # leaves Debian's pool when a newer build replaces it, so this fetch
 # reads it from snapshot.debian.org, which keeps every package Debian
-# ever published. The digest below is the SHA256 that Debian's signed
-# Packages index lists for this version, and the fetch fails with an
+# ever published. The digest below is the SHA256 of the package that
+# latest.sh --bump downloaded and checked through sid's signed
+# InRelease file and its Packages index, and the fetch fails with an
 # error when the download disagrees.
 #
 # The lab ships in no release, so this firmware is not redistributed
