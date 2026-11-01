@@ -63,6 +63,8 @@ The report has these sources:
 | `vulkan/latest.sh` | the Debian snapshot of the bases and `astrometry`, step 5 |
 | `indi/latest.sh` | the snapshots of Ubuntu and the two PPAs, step 5a |
 | `trust/latest.sh` | the CA bundle, step 5b |
+| `bluetooth-operator/bluetoothd/latest.sh` | the BlueZ and dbus releases that the bluetoothd image builds, step 5e |
+| `library-operator/latest.sh` | OpenVINO, Intel's compute-runtime, gmmlib, and the graphics compiler in the appearances image, step 5e |
 | `ci/latest.sh` | the GitHub Actions, prek, and the hook revisions |
 | `liken.sh/latest.sh` | Flatcar and the Terraform providers |
 
@@ -389,6 +391,34 @@ each module and each workspace.
    a `dir` in its `package.toml`. A component's `make test` does not
    always build those directories: `library-operator`'s skips
    `appearances`, which CI builds as `rust-appearances`.
+
+## 5e. The sources inside operator images
+
+Two operator images fetch upstream releases in their Dockerfiles, and
+a `latest.sh` beside each Dockerfile reports and bumps them.
+
+`bluetooth-operator/bluetoothd/latest.sh --bump` moves BlueZ, and
+`--bump dbus` moves dbus to the newest release of a stable series,
+which has an even minor version. Each bump writes the version and the
+checksum that upstream publishes into `bluetoothd/Dockerfile`. Then
+run `docker buildx bake bluetoothd`. The build stops when a patch in
+`bluetoothd/patches/bluez/` no longer applies, and
+`bluetoothd/patches/README.md` says what to do. Read the BlueZ
+release notes for changes to the D-Bus API and to the mgmt socket,
+because the operator reads both.
+
+`library-operator/latest.sh --bump` moves OpenVINO within the
+archive channel that the pin names, such as `ubuntu24`. A row that
+reads `wrong channel` means Intel publishes an archive for a newer
+Ubuntu release; the move to it is a hand edit of the URL in
+`Dockerfile.appearances` and `appearances/README.md`, followed by the
+`--bump`. `--bump compute-runtime` moves the OpenCL driver, gmmlib
+from the same release, and the graphics compiler release that the
+runtime's release text names. Both bumps write URLs and checksums
+into `Dockerfile.appearances`. `appearances/inference-closure.sh`
+names the versioned library files of each runtime, so move those
+names by hand, then run `docker buildx bake
+library-operator-appearances`.
 
 ## 6. Report
 

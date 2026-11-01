@@ -84,9 +84,10 @@ ADD --checksum=sha256:772ce52d9b0aa375c77d391fccea71450d889c98b9af197bb8f05167a9
     https://storage.openvinotoolkit.org/repositories/openvino/packages/2026.4.1/linux/openvino_toolkit_ubuntu24_2026.4.1.22982.07f9c262b05_x86_64.tgz \
     /openvino.tgz
 
-# Intel's OpenCL runtime 26.35.39758.10 and gmmlib, and the graphics
-# compiler 2.41.5 that the runtime's release names. The sums are the
-# ones the two releases publish.
+# Intel's OpenCL runtime and gmmlib, from one compute-runtime release,
+# and the graphics compiler release that the runtime's release names.
+# The sums are the ones the two releases publish. latest.sh beside this
+# file reports each pin and moves them.
 ADD --checksum=sha256:61712caaddeba3d38e4f79e2a0fb23fea25596ca2d72c3144c6eea2331ec4301 \
     https://github.com/intel/compute-runtime/releases/download/26.35.39758.10/intel-opencl-icd_26.35.39758.10-0_amd64.deb \
     /debs/

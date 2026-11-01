@@ -5,3 +5,6 @@ deploy
 plans
 README.md
 LICENSE
+# The report of the bluetoothd image's pins, which runs on a
+# workstation and never in a build.
+bluetoothd/latest.sh
