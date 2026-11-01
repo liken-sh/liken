@@ -149,17 +149,22 @@ runs:
         path: trust/dist
         key: trust-${{ hashFiles('trust/VERSION', 'trust/pin.toml', 'trust/fetch.sh') }}
     # The userland's key covers every file of its BR2_EXTERNAL tree and
-    # the image table, the prerequisites that liken/Makefile declares
-    # and the bluetoothd image's files beside them, because each one
-    # changes what buildroot builds. A miss compiles buildroot's
+    # the builder image, because each one changes what buildroot
+    # builds. The build reads only the `buildroot` entry of
+    # toolchains/images.toml, so the key hashes that line and not the
+    # whole table, which changes with every bump of an image that the
+    # userland never runs. A miss compiles buildroot's
     # cross-compiler and every program, which the build job's limit in
     # liken/package.toml covers. open-iscsi/dist holds copies of the
     # userland's iscsid and iscsiadm and the iscsid image, which bakes
     # in the liken version, so it has no cache of its own.
+    - id: userland-builder
+      shell: bash
+      run: echo "digest=$(grep '^buildroot = ' toolchains/images.toml | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/userland/dist
-        key: userland-${{ hashFiles('liken/userland/**', 'toolchains/images.toml') }}
+        key: userland-${{ steps.userland-builder.outputs.digest }}-${{ hashFiles('liken/userland/**') }}
     # When the userland's key misses, buildroot builds again from a
     # fresh tree, and liken/userland/build.sh points it at the download
     # directory and the compiler cache in liken/userland/cache. A
@@ -173,7 +178,7 @@ runs:
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/userland/cache
-        key: userland-cache-${{ hashFiles('liken/userland/**', '!liken/userland/dist/**', '!liken/userland/cache/**', 'toolchains/images.toml') }}
+        key: userland-cache-${{ steps.userland-builder.outputs.digest }}-${{ hashFiles('liken/userland/**', '!liken/userland/dist/**', '!liken/userland/cache/**') }}
         restore-keys: userland-cache-
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
