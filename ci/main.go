@@ -8,7 +8,7 @@
 //	go run ./ci generate [-check]   write the workflows, the bake file, and dependabot.yml, or check them
 //	go run ./ci plan                decide what this workflow run does
 //	go run ./ci deps                check each [depends] against the code
-//	go run ./ci pins                check that each shared pin names one version
+//	go run ./ci pins                check the pins and the downloads against AGENTS.md
 //	go run ./ci namespaces          check that a namespace override moves no deploy object
 //	go run ./ci publish ...         push one component's outputs
 //	go run ./ci scan -image I -version V -sarif DIR

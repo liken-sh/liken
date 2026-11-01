@@ -10,28 +10,34 @@ import (
 // fetchesTree is a repository in which every pin follows the fetch
 // rules: a domain of the OS with its VERSION, fetch.sh, and latest.sh,
 // an image whose Dockerfile downloads under a latest.sh of its
-// component, and the scripts that read a checksum file at bump time or
-// in a test, which the rules allow.
+// component, the library that each fetch.sh and latest.sh sources, and
+// the scripts that read a checksum file at bump time or in a test,
+// which the rules allow.
 func fetchesTree(t *testing.T, changes map[string]string) string {
 	t.Helper()
 	tree := map[string]string{
 		"liken/k3s/VERSION": "v1.36.0+k3s1\n",
 		"liken/k3s/latest.sh": "#!/usr/bin/env bash\n" +
+			"# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh\n" +
+			"source \"$here/../../toolchains/pin.sh\"\n" +
 			"sums=\"$archive/sha256sums.asc\"\n" +
 			"digest=\"$(\"$here/../../trust/keys/kernel-org-digest.sh\" \"$sums\" k3s)\"\n",
 		"liken/k3s/fetch.sh": "#!/usr/bin/env bash\n" +
+			". \"$here/../../toolchains/pin.sh\"\n" +
 			"# latest.sh --bump copies the digest from sha256sums.asc.\n" +
 			"digest=\"aaaa\"\n" +
-			"if ! sha256sum --check --status <<<\"$digest  $cache/k3s\"; then\n" +
-			"    curl -fL --retry 5 -C - \\\n" +
-			"        --progress-bar -o \"$cache/k3s.partial\" \"$base/k3s\"\n" +
-			"    sha256sum --check --quiet <<<\"$digest  $cache/k3s.partial\"\n" +
-			"    mv \"$cache/k3s.partial\" \"$cache/k3s\"\n" +
-			"fi\n" +
-			"sha1=\"$(curl -fsS --retry 3 \"https://snapshot.debian.org/mr/binary/k3s/binfiles\" | jq -r .hash)\"\n" +
-			"curl -fsI \"$base/k3s\" >/dev/null\n" +
+			"fetch_verified --resume \"$base/k3s\" \"$digest\" \"$cache/k3s\"\n" +
+			"sha1=\"$(fetch_text \"https://snapshot.debian.org/mr/binary/k3s/binfiles\" | jq -r .hash)\"\n" +
+			"url_exists \"$base/k3s\"\n" +
+			"row k3s \"$pinned\" \"$latest\" - - - \"the digest that curl publishes\"\n" +
 			"file k3s | grep -qE \"statically linked|static-pie linked\" || echo \"k3s is not statically linked\"\n",
-		"a/latest.sh": "#!/bin/sh\ncurl -fsSL \"$base/dbus-$v.tar.xz.sha256sum\"\n",
+		"toolchains/pin.sh": "http() { curl -sS --retry 3 \"$@\"; }\n" +
+			"fetch_file() {\n" +
+			"    curl -fL -o \"$2.partial\" \"$1\"\n" +
+			"    mv \"$2.partial\" \"$2\"\n" +
+			"}\n" +
+			"url_exists() { curl -fsL -o /dev/null \"$1\"; }\n",
+		"a/latest.sh": "#!/bin/sh\nsource \"$here/../toolchains/pin.sh\"\nfetch_text \"$base/dbus-$v.tar.xz.sha256sum\"\n",
 		"a/image/Dockerfile": "FROM alpine AS build\n" +
 			"ADD --checksum=sha256:aaaa \\\n    https://example.org/a.tar.xz /a.tar.xz\n" +
 			"RUN wget -q \"https://example.org/b-${B}.tar.xz\" \\\n" +
@@ -113,6 +119,27 @@ func TestAFetchThatBreaksARuleIsFound(t *testing.T) {
 		"a static check that refuses a static PIE": {"liken/k3s/fetch.sh",
 			"#!/bin/sh\nfile k3s | grep -q \"statically linked\"\n",
 			"liken/k3s/fetch.sh:2 accepts \"statically linked\" and refuses \"static-pie linked\""},
+		"a latest.sh that does not source the library": {"liken/k3s/latest.sh",
+			"#!/bin/sh\nrow k3s v1 v1 - - - note\n",
+			"liken/k3s/latest.sh does not source toolchains/pin.sh"},
+		"a fetch.sh that does not source the library": {"liken/k3s/fetch.sh",
+			"#!/bin/sh\nfetch_verified \"$url\" \"$digest\" \"$cache/k3s\"\n",
+			"liken/k3s/fetch.sh does not source toolchains/pin.sh"},
+		"a source line one directory off": {"liken/k3s/latest.sh",
+			"#!/bin/sh\nsource \"$here/../toolchains/pin.sh\"\n",
+			"liken/k3s/latest.sh does not source toolchains/pin.sh"},
+		"a source line in a comment": {"liken/k3s/latest.sh",
+			"#!/bin/sh\n# source \"$here/../../toolchains/pin.sh\"\n",
+			"liken/k3s/latest.sh does not source toolchains/pin.sh"},
+		"a latest.sh that runs curl": {"liken/k3s/latest.sh",
+			"#!/bin/sh\nsource \"$here/../../toolchains/pin.sh\"\nlatest=\"$(curl -fsS \"$channels\" | jq -r .latest)\"\n",
+			"liken/k3s/latest.sh:3 runs curl, not a function of toolchains/pin.sh"},
+		"a fetch.sh that runs wget": {"liken/k3s/fetch.sh",
+			"#!/bin/sh\nsource \"$here/../../toolchains/pin.sh\"\nwget -qO- \"$base/k3s\" | tar -x\n",
+			"liken/k3s/fetch.sh:3 runs wget, not a function of toolchains/pin.sh"},
+		"a library download outside a .partial file": {"toolchains/pin.sh",
+			"fetch_file() { curl -fL -o \"$2\" \"$1\"; }\n",
+			"toolchains/pin.sh:1 downloads into \"$2\", not into a .partial file"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -145,6 +172,7 @@ func TestALatestShThatCannotRunIsFound(t *testing.T) {
 func TestAnAllowCommentExcusesTheLineBelowIt(t *testing.T) {
 	findings, err := checkFetches(fetchesTree(t, map[string]string{
 		"liken/k3s/fetch.sh": "#!/bin/sh\n" +
+			"source \"$here/../../toolchains/pin.sh\"\n" +
 			"# fetch-check: allow, the lookup returns a file name, not a digest\n" +
 			"curl -fsSL \"$base/SHA256SUMS\" -o \"$cache/names\"\n",
 	}))

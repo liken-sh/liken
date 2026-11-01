@@ -1,13 +1,14 @@
 # The hooks for the files at the top of the repository: the plans, the
-# agent files, the CI workflows, and the liken.sh domain, and the check
-# that the generated workflows match every package.toml. Each component
-# directory has its own .pre-commit-config.yaml, which prek finds from
-# this one and runs on that directory's files. prek also passes every
-# file in the repository to this config, so the filter below keeps
-# these hooks to the files that no component owns, and to the inputs of
-# the generated workflows: a component's own exclusions, such as its
+# agent files, the CI workflows, and the liken.sh domain, the check
+# that the generated workflows match every package.toml, and the check
+# of every pin. Each component directory has its own
+# .pre-commit-config.yaml, which prek finds from this one and runs on
+# that directory's files. prek also passes every file in the repository
+# to this config, so the filter below keeps these hooks to the files
+# that no component owns, to the inputs of the generated workflows, and
+# to the inputs of `ci pins`: a component's own exclusions, such as its
 # test data, stay in force.
-files: ^(\.agents/|\.github/|liken\.sh/|plans/|[^/]+$|ci/templates/|[^/]+/package\.toml$|.*/Dockerfile[^/]*$|toolchains/images\.toml$|liken/flux/VERSION$)
+files: ^(\.agents/|\.github/|liken\.sh/|plans/|[^/]+$|ci/templates/|[^/]+/package\.toml$|.*/Dockerfile[^/]*$|toolchains/images\.toml$|toolchains/pin\.sh$|trust/keys/|.*/VERSION$|.*/fetch\.sh$|.*/latest\.sh$)
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -27,6 +28,9 @@ repos:
     hooks:
       - id: shellcheck
         args: [-x]
+        # The scripts of the components reach this config for the pins
+        # hook below, and each component's own shellcheck checks them.
+        files: ^(\.agents/|liken\.sh/|[^/]+$)
   - repo: local
     hooks:
       - id: workflows
@@ -40,4 +44,18 @@ repos:
         entry: bash -c 'cd ci && go run . generate -root .. -check'
         language: system
         files: ^ci/templates/|/package\.toml$|^\.github/workflows/|^docker-bake\.hcl$|/Dockerfile[^/]*$|^toolchains/images\.toml$|^liken/flux/VERSION$
+        pass_filenames: false
+      - id: pins
+        name: pins and downloads follow the rules
+        # `ci pins` checks that each shared pin names one version, and
+        # that each pin follows the rules of "Pins and downloads" in
+        # AGENTS.md: each fetch.sh and latest.sh sources
+        # toolchains/pin.sh and downloads through it, no build reads a
+        # digest from the network, and each pin has a latest.sh that
+        # make versions runs. A change to a script, a Dockerfile, a
+        # VERSION, images.toml, versions.sh, the library, or a key in
+        # trust/keys/ that breaks a rule fails here.
+        entry: bash -c 'cd ci && go run . pins -root ..'
+        language: system
+        files: (^|/)(fetch|latest)\.sh$|/Dockerfile[^/]*$|(^|/)VERSION$|^toolchains/(images\.toml|pin\.sh)$|^versions\.sh$|^trust/keys/
         pass_filenames: false

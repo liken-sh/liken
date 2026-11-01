@@ -188,7 +188,7 @@ jobs:
         working-directory: ci
         run: go run . generate -root .. -check
 
-      - name: check that each shared pin names one version
+      - name: check the pins and the downloads against the rules in AGENTS.md
         working-directory: ci
         run: go run . pins -root ..
 

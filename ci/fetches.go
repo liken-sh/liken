@@ -30,7 +30,11 @@ import (
 //     verifies its signature through trust/keys/kernel-org-digest.sh;
 //   - a check that a binary is static accepts a static PIE, which gcc
 //     on Alpine builds for -static and file(1) calls "static-pie
-//     linked".
+//     linked";
+//   - each fetch.sh and latest.sh sources toolchains/pin.sh and reads
+//     the network only through its functions, never with curl or wget
+//     of its own, so each step of a pin has one implementation. The
+//     library itself downloads into .partial files, as a fetch.sh did.
 //
 // The checks read shell and Dockerfile text by pattern, not by parsing
 // it, so each one looks for a narrow form: a file name of a checksum
@@ -69,11 +73,14 @@ func checkFetches(root string) ([]string, error) {
 		lines := logicalLines(string(data))
 		findings = append(findings, staticChecks(file, lines)...)
 		switch {
+		case file == pinLibrary:
+			findings = append(findings, fetchScript(file, lines)...)
 		case name == "fetch.sh":
 			if !reported[dir] {
 				findings = append(findings, fmt.Sprintf("%s downloads a pin, and %s has no latest.sh", file, dir))
 			}
 			findings = append(findings, fetchScript(file, lines)...)
+			findings = append(findings, libraryUse(file, lines)...)
 		case isDockerfile(name):
 			found, downloads := dockerfileFetches(file, lines)
 			findings = append(findings, found...)
@@ -86,6 +93,7 @@ func checkFetches(root string) ([]string, error) {
 				return nil, err
 			}
 			findings = append(findings, found...)
+			findings = append(findings, libraryUse(file, lines)...)
 		}
 	}
 	return findings, nil
@@ -157,6 +165,89 @@ func fetchScript(file string, lines []line) []string {
 		}
 	}
 	return findings
+}
+
+// pinLibrary is the shell library of the pins, which every fetch.sh and
+// latest.sh sources.
+const pinLibrary = "toolchains/pin.sh"
+
+// libraryUse lists a fetch.sh or latest.sh that does not source the
+// library, and each line of one that runs curl or wget itself. A
+// source line is a command whose path, from the script's directory
+// through $here, is the library, so a comment that names the library
+// or a path one directory off does not count.
+func libraryUse(file string, lines []line) []string {
+	var findings []string
+	sources := false
+	for _, l := range lines {
+		words := commandWords(l.text)
+		if len(words) > 0 && (words[0] == "source" || words[0] == ".") && sourcesLibrary(file, l.text) {
+			sources = true
+		}
+		if l.allowed {
+			continue
+		}
+		for _, word := range words {
+			if word == "curl" || word == "wget" {
+				findings = append(findings, fmt.Sprintf("%s:%d runs %s, not a function of %s", file, l.n, word, pinLibrary))
+				break
+			}
+		}
+	}
+	if !sources {
+		findings = append([]string{fmt.Sprintf("%s does not source %s", file, pinLibrary)}, findings...)
+	}
+	return findings
+}
+
+// sourcesLibrary is true when a source line names the library by its
+// path from the script's directory, as "$here/../../toolchains/pin.sh".
+func sourcesLibrary(file, text string) bool {
+	for _, field := range strings.Fields(text) {
+		rest, ok := strings.CutPrefix(strings.Trim(field, `"'`), "$here/")
+		if ok && path.Join(path.Dir(file), rest) == pinLibrary {
+			return true
+		}
+	}
+	return false
+}
+
+// shellSeparators end one command, so the word after one is a command.
+var shellSeparators = []string{"|", "||", "&&", ";", "!", "{", "then", "do", "else", "if", "while", "until", "exec", "time"}
+
+// assignment matches a variable assignment, which can precede the
+// command that it sets the variable for.
+var assignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+
+// commandWords lists the words of a shell line that a shell runs as
+// commands: the first word, the word after a separator, and the first
+// word of each command substitution or subshell. A word inside a quoted
+// message, such as "the digest that curl publishes", is not a command.
+func commandWords(text string) []string {
+	var words []string
+	atCommand := true
+	for _, field := range strings.Fields(text) {
+		if i := strings.LastIndex(field, "$("); i >= 0 {
+			words = append(words, strings.Trim(field[i+2:], `"'`))
+			atCommand = false
+			continue
+		}
+		if rest, ok := strings.CutPrefix(field, "("); ok {
+			words = append(words, strings.Trim(rest, `"'`))
+			atCommand = false
+			continue
+		}
+		word := strings.Trim(field, `"'`)
+		switch {
+		case slices.Contains(shellSeparators, field) || strings.HasSuffix(field, ";"):
+			atCommand = true
+		case atCommand && assignment.MatchString(word):
+		case atCommand:
+			words = append(words, word)
+			atCommand = false
+		}
+	}
+	return words
 }
 
 // curlOutputFlags and wgetOutputFlags match short flags joined with
