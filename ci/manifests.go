@@ -41,7 +41,6 @@ var manifestScopes = []string{"required", "optional", "excluded"}
 // or because another SBOM already lists it.
 var unmanifested = map[string]string{
 	"liken/userland":             "buildroot writes the CycloneDX SBOM of the programs it builds",
-	"liken/open-iscsi":           "iscsid and iscsiadm link libraries that apk installs in the alpine image, which no download names, so a manifest of the downloads would not list them",
 	"liken/dev-cluster/firmware": "the lab's firmware ships in no release",
 	"liken/dev-cluster/storage":  "the lab's storage guest ships in no release",
 	"toolchains/cargo-auditable": "cargo-auditable is a build tool, and no image ships it",
