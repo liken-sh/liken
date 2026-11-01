@@ -15,7 +15,9 @@
 golang = "golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
 rust = "rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
 # The builder of the static binaries in the OS domains and in
-# bluetoothd. The four OS fetch.sh scripts read this line too.
+# bluetoothd. Each OS fetch.sh that builds a static binary reads this
+# line too, and licensing/sources.sh and licensing/latest.sh read its
+# tag; grep for images.toml under liken/ to list them.
 alpine = "alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"
 # The digest moves with the snapshot date in vulkan/package.toml,
 # because the image and the snapshot must come from the same day.

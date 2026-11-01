@@ -14,8 +14,11 @@
 # Unlike the other vendored domains, there is nothing trustworthy to
 # download: nobody publishes static builds of open-iscsi. So this
 # script builds them, from source tarballs pinned by sha256, inside a
-# container image pinned by digest. The pinned image fixes the
-# toolchain the same way the other pins fix the source. (Talos
+# container image pinned by digest. The image digest fixes only the
+# image's own files. The build installs the compiler and the static
+# libraries with apk add, from Alpine's package repository for the
+# image's branch as it is on the day of the build, so two builds of
+# the same pins can link different library releases. (Talos
 # compiles these same binaries for its iscsi-tools extension, a useful
 # independent comparison for an audit.) Building from source inside a
 # container (nfs-utils does the same) needs a container runtime on the

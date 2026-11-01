@@ -270,12 +270,17 @@ for tarball in "$here/../wpa-supplicant/cache/$wpasupplicant_version"/*.tar.*; d
     place "wpa-supplicant/$wpasupplicant_version" "$(basename "$tarball")" "$tarball"
 done
 
-# These are the static libraries that those builds link from the
+# These are the static libraries that those builds link in the
 # alpine image: musl (every binary's libc) and util-linux (libblkid
-# and libmount, in the iSCSI and NFS clients). Alpine patches its
-# packages lightly. These upstream tarballs match the packaged
-# versions, and toolchains/images.toml names the image digest for
-# anyone who wants to audit the exact bytes.
+# and libmount, in the iSCSI and NFS clients). The image does not
+# carry them. Each build runs apk add, which installs the compiler and
+# these libraries from Alpine's package repository for the image's
+# branch as it is on the day of the build, so the image digest in
+# toolchains/images.toml does not fix their versions or their bytes.
+# Alpine patches its packages lightly, and these upstream tarballs are
+# the versions that the branch's index lists. licensing/latest.sh
+# reports each one against that index, and a row that says "behind"
+# means a build now links a newer library than this mirror carries.
 # libnl is the third library: LGPL-2.1, linked into the wireless
 # supplicant, and the only way a program speaks nl80211.
 # Tracks the `alpine` entry in toolchains/images.toml, and the path
