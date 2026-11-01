@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // A request the API server answers notes the version it answered, so a
@@ -86,6 +88,49 @@ func TestTheMemoAnswersTheNotedKeysTheStoreDoesNotHold(t *testing.T) {
 	}
 }
 
+// A request that fails with an error other than 404 leaves the
+// object's state unknown: a create whose answer was lost may have
+// landed, and a 409 says that the object exists. So the memo answers
+// such an object among the keys that a list of a whole store reads
+// from the API server, and keeps its record when a list leaves it out.
+// A 404 says that the object is gone, and a delete answers no copy, so
+// the memo answers neither key, and a list that leaves the key out
+// forgets it.
+func TestTheMemoKeepsAnObjectWhoseRequestFailed(t *testing.T) {
+	for _, c := range []struct {
+		name       string
+		version    string
+		answer     error
+		wantUnheld []string
+		wantKept   bool
+	}{
+		{"a lost answer", "8", errors.New("connection refused"), []string{"studio"}, true},
+		{"a 409", "8", apiclient.ErrConflict, []string{"studio"}, true},
+		{"a 404", "8", apiclient.ErrNotFound, nil, false},
+		{"a delete", "", nil, nil, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			memo := New()
+			memo.Note("studio", "7")
+			_ = memo.Send("studio", func() (string, error) { return c.version, c.answer })
+
+			current := memo.Current("studio", "7") || memo.Current("studio", "8")
+			unheld := memo.Unheld(store{})
+			memo.ForgetGone(store{}, map[string]bool{})
+
+			if current {
+				t.Error("a store's copy is current after the request")
+			}
+			if !slices.Equal(unheld, c.wantUnheld) {
+				t.Errorf("Unheld = %v, want %v", unheld, c.wantUnheld)
+			}
+			if memo.Noted("studio") != c.wantKept {
+				t.Errorf("the memo kept studio after a list left it out: %v, want %v", memo.Noted("studio"), c.wantKept)
+			}
+		})
+	}
+}
+
 // Two requests about one object run one at a time, so the memo notes
 // their answers in the order the API server gave them. A request about
 // another object does not wait.
@@ -156,8 +201,8 @@ func TestAListForgetsTheObjectsThatAreGone(t *testing.T) {
 	none.ForgetGone(store{}, nil)
 }
 
-// The memo reports a key it noted at any version, the empty one
-// included, and nothing once it forgets the key.
+// The memo reports a key it noted at any version, or with none, and
+// nothing once it forgets the key.
 func TestTheMemoForgetsOneObject(t *testing.T) {
 	memo := New()
 	memo.Note("den", "3")

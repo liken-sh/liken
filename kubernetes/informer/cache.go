@@ -47,9 +47,10 @@ type View struct {
 
 	// Whole says the watch takes every object of the kind, with no
 	// selector. A list from such a store also holds each object the
-	// operator created or wrote that the store does not hold yet. Leave
-	// it false for a store with a selector, because an object the
-	// operator wrote can be outside the selection.
+	// operator created or wrote that the store does not hold yet, and
+	// each object whose last request failed, which may exist. Leave it
+	// false for a store with a selector, because an object the operator
+	// wrote can be outside the selection.
 	Whole bool
 
 	// Absent says the store's empty collection stands in for a kind the
@@ -147,7 +148,10 @@ func ReadFresh[T any, P Object[T]](c *apiclient.Client, versions *memo.Versions,
 // API server no longer holds is left out. A store that holds the whole
 // collection also answers each object the memo noted and the store does
 // not hold yet, such as one the operator created a moment ago, so a
-// pass does not create it again. path names the object of each key.
+// pass does not create it again. That includes an object whose last
+// request failed with an error other than 404 (memo.Versions.Send): a
+// read of such an object that fails again fails the list, and the next
+// list reads it again. path names the object of each key.
 func CurrentList[T any, P Object[T]](c *apiclient.Client, held Held, path func(key string) string) ([]T, error) {
 	// The informer can take a created object between the two reads, so
 	// the memo's keys are read first. In the other order, the store's

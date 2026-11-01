@@ -293,6 +293,32 @@ func TestAListThatCannotReadAnOlderCopyFails(t *testing.T) {
 	}
 }
 
+// A list from a whole store that cannot read an object the operator
+// created fails, and the next list reads the object again. A list that
+// left it out instead would make the pass create the object twice.
+func TestAListReadsACreateAgainAfterAFailedRead(t *testing.T) {
+	api := newFakeAPI()
+	created := api.put(newThing("a", "", 1))
+	versions := memo.New()
+	versions.Note("a", created.Metadata.ResourceVersion)
+	view := storeOf(t)
+	view.Whole = true
+	held := Held{View: view, Versions: versions}
+	client := testClient(t, api)
+	api.failing = true
+	_, failed := CurrentList[thing](client, held, thingPath)
+	api.failing = false
+
+	list, err := CurrentList[thing](client, held, thingPath)
+
+	if failed == nil {
+		t.Error("the list that could not read a succeeded")
+	}
+	if err != nil || len(list) != 1 || list[0].Metadata.ResourceVersion != created.Metadata.ResourceVersion {
+		t.Errorf("the list after the failure = %+v, %v; want a at %s", list, err, created.Metadata.ResourceVersion)
+	}
+}
+
 // arrivingStore is a store whose informer takes one object just after
 // the first read of its keys, the way the watch event of a create
 // lands while a pass lists.

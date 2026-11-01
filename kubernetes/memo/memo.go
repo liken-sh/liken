@@ -17,7 +17,12 @@
 // link client-go can record its writes too.
 package memo
 
-import "sync"
+import (
+	"errors"
+	"sync"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
+)
 
 // Versions records, for each object by its store key, the
 // resourceVersion of the newest copy the operator wrote or read from
@@ -26,7 +31,7 @@ import "sync"
 // every copy in a store is current to it.
 type Versions struct {
 	mu   sync.Mutex
-	seen map[string]string
+	seen map[string]objectRecord
 
 	// notes counts every note, and notedAt holds the count at each
 	// key's last note. A list compares the two to find the keys that a
@@ -43,9 +48,23 @@ type Versions struct {
 	requests map[string]*sync.Mutex
 }
 
+// objectRecord is what the memo holds about one object. A record with a
+// version holds the copy the API server answered. A record with no
+// version says that the operator holds no copy: it deleted the object,
+// the API server answered 404, or an answer carried no version. An
+// unknown record says that a request failed with another error, so the
+// object may exist at a version the operator never read: a create
+// whose answer was lost may have landed, and a 409 says the object
+// exists. No copy in a store is current to a record with no version or
+// an unknown one.
+type objectRecord struct {
+	version string
+	unknown bool
+}
+
 // New answers an empty memo.
 func New() *Versions {
-	return &Versions{seen: map[string]string{}, notedAt: map[string]uint64{}, requests: map[string]*sync.Mutex{}}
+	return &Versions{seen: map[string]objectRecord{}, notedAt: map[string]uint64{}, requests: map[string]*sync.Mutex{}}
 }
 
 // requestsOf answers the lock of one object's requests.
@@ -70,25 +89,27 @@ func (m *Versions) Current(key, version string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	seen, noted := m.seen[key]
-	return !noted || seen == version
+	return !noted || (!seen.unknown && seen.version == version)
 }
 
 // Note records the version of a copy the API server answered. An empty
-// version records an object the API server no longer holds, or one
-// that another writer changed, and no copy in a store matches it.
+// version records that the operator holds no copy, because it deleted
+// the object or the API server answered 404, and no copy in a store
+// matches it.
 func (m *Versions) Note(key, version string) {
 	if m == nil {
 		return
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.note(key, version)
+	m.note(key, objectRecord{version: version})
 }
 
-// note records one version. The caller holds mu.
-func (m *Versions) note(key, version string) {
+// note records what the memo holds about one object. The caller holds
+// mu.
+func (m *Versions) note(key string, r objectRecord) {
 	m.notes++
-	m.seen[key] = version
+	m.seen[key] = r
 	m.notedAt[key] = m.notes
 }
 
@@ -98,9 +119,12 @@ type KeyGetter interface {
 	GetByKey(key string) (item any, exists bool, err error)
 }
 
-// Unheld answers each key the memo noted at a version that the store
-// does not hold. These are objects the operator created or wrote a
-// moment ago, which the watch has not delivered yet.
+// Unheld answers each key that the store does not hold and that the
+// memo noted at a version or as unknown. These are objects the operator
+// created or wrote a moment ago, which the watch has not delivered yet,
+// and objects whose last request failed, which may exist. A key with no
+// version is not among them, because the operator deleted that object
+// or the API server answered 404 for it.
 func (m *Versions) Unheld(store KeyGetter) []string {
 	if m == nil {
 		return nil
@@ -108,8 +132,8 @@ func (m *Versions) Unheld(store KeyGetter) []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var keys []string
-	for key, version := range m.seen {
-		if _, held, _ := store.GetByKey(key); !held && version != "" {
+	for key, seen := range m.seen {
+		if _, held, _ := store.GetByKey(key); !held && (seen.unknown || seen.version != "") {
 			keys = append(keys, key)
 		}
 	}
@@ -117,10 +141,14 @@ func (m *Versions) Unheld(store KeyGetter) []string {
 }
 
 // Send runs one request about one object, and notes the version of the
-// copy the API server answered. A failed request notes the empty
-// version: after a 404 or a 409 the operator holds no copy of the API
-// server's, and a write whose answer was lost may have landed. The next
-// read of the object then goes to the API server.
+// copy the API server answered. A delete answers no copy and notes no
+// version, and so does any answer with no version. A 404 notes no
+// version too, because the object is gone. Any other failure, such as
+// a 409 or a write whose answer was lost and may have landed, notes the
+// object as unknown: it may exist at a version the operator never
+// read. In each case the next read of the object goes to the API
+// server, and a list of a whole store reads an unknown object even
+// when the store does not hold it (Unheld).
 func (m *Versions) Send(key string, request func() (version string, err error)) error {
 	if m == nil {
 		_, err := request()
@@ -130,10 +158,16 @@ func (m *Versions) Send(key string, request func() (version string, err error)) 
 	requests.Lock()
 	defer requests.Unlock()
 	version, err := request()
-	if err != nil {
-		version = ""
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	switch {
+	case err == nil:
+		m.note(key, objectRecord{version: version})
+	case errors.Is(err, apiclient.ErrNotFound):
+		m.note(key, objectRecord{})
+	default:
+		m.note(key, objectRecord{unknown: true})
 	}
-	m.Note(key, version)
 	return err
 }
 
@@ -176,7 +210,7 @@ func (m *Versions) SendList(request func() (versions map[string]string, err erro
 	defer m.mu.Unlock()
 	for key, version := range listed {
 		if m.notedAt[key] <= start {
-			m.note(key, version)
+			m.note(key, objectRecord{version: version})
 		}
 	}
 	return nil
@@ -190,14 +224,22 @@ func (m *Versions) SendList(request func() (versions map[string]string, err erro
 // every object for the life of the process. A key the store still holds
 // keeps its record, so a copy of an object the API server already
 // deleted is not current again before the watch removes it.
+//
+// An unknown record stays too, because the object may exist, and a pass
+// that forgot it would create the object again. A list of a whole store
+// reads such an object from the API server (Unheld), so the record ends
+// when the API server answers it: a copy gives it a version, and a 404
+// gives it none, and the next ForgetGone drops it. An operator calls
+// ForgetGone only after a list of a whole store, where every key that
+// the list left out was read, or was noted while the list ran.
 func (m *Versions) ForgetGone(store KeyGetter, listed map[string]bool) {
 	if m == nil {
 		return
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for key := range m.seen {
-		if listed[key] {
+	for key, seen := range m.seen {
+		if listed[key] || seen.unknown {
 			continue
 		}
 		if _, held, _ := store.GetByKey(key); held {
@@ -231,8 +273,8 @@ func (m *Versions) Forget(key string) {
 	delete(m.requests, key)
 }
 
-// Noted reports whether the memo holds a record of the key at any
-// version, the empty one included. A store that holds a whole selection
+// Noted reports whether the memo holds a record of the key, with a
+// version, with none, or unknown. A store that holds a whole selection
 // and not the key answers that no such object exists, unless the memo
 // noted it: the operator created it a moment ago, or a request about it
 // failed.
@@ -260,7 +302,7 @@ func (m *Versions) ForgetAt(key, version string) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if seen, noted := m.seen[key]; noted && seen == version {
+	if seen, noted := m.seen[key]; noted && !seen.unknown && seen.version == version {
 		delete(m.seen, key)
 		delete(m.notedAt, key)
 		delete(m.requests, key)

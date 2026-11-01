@@ -158,13 +158,12 @@ func TestAStatusWriteSettlesOnTheAPIServersCopy(t *testing.T) {
 // answers no copy, and no copy is current after it.
 func TestAWriteNotesTheCopyTheAPIServerAnswered(t *testing.T) {
 	cases := []struct {
-		name        string
-		answer      error
-		wantCopy    bool
-		wantCurrent string
+		name     string
+		answer   error
+		wantCopy bool
 	}{
-		{"a write that lands", nil, true, "8"},
-		{"a write that fails", errors.New("refused"), false, ""},
+		{"a write that lands", nil, true},
+		{"a write that fails", errors.New("refused"), false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -180,8 +179,8 @@ func TestAWriteNotesTheCopyTheAPIServerAnswered(t *testing.T) {
 			if (written != nil) != c.wantCopy || !errors.Is(err, c.answer) {
 				t.Errorf("Written = %+v, %v; want a copy %v and the error %v", written, err, c.wantCopy, c.answer)
 			}
-			if versions.Current("a", "7") || !versions.Current("a", c.wantCurrent) {
-				t.Errorf("the memo counts version 7 current, or not version %q", c.wantCurrent)
+			if versions.Current("a", "7") || versions.Current("a", "8") != c.wantCopy {
+				t.Errorf("version 7 is current, or version 8 is current %v; want %v", versions.Current("a", "8"), c.wantCopy)
 			}
 		})
 	}

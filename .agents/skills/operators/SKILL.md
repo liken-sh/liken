@@ -466,10 +466,15 @@ it.
   through `memo.Versions.Send`, which holds one request for an object
   at a time, so two goroutines that write one object note their
   answers in the order the API server gave them. A failed request notes
-  that the operator holds no current copy, because a write whose answer
+  that the operator holds no current copy. A `404` notes that the
+  object is gone. Any other failure notes the object as unknown,
+  because a `409` says that the object exists and a write whose answer
   was lost may have landed. A store that holds the whole collection
   (`informer.View.Whole`) also lists each object the operator created
-  that the store does not hold yet, so a pass does not create it twice.
+  that the store does not hold yet, and reads each unknown object from
+  the API server, so a pass does not create it twice.
+  `memo.Versions.ForgetGone` keeps an unknown record until a read
+  answers the object.
   Do not set `Whole` on a store with a selector: an object the operator
   wrote can be outside the selection.
 - **A 409.** A write from a copy that another writer changed gets

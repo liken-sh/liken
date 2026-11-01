@@ -99,7 +99,8 @@ func ReadList[T any, P Object[T]](c *apiclient.Client, versions *Versions, listP
 // Written sends one request that answers an object, such as a create,
 // an apply, or an update, and notes the version of the copy the API
 // server answered. A request that fails answers no copy, and notes that
-// the operator holds no current copy.
+// the operator holds no current copy: the object is gone after a 404,
+// and unknown after any other failure (Versions.Send).
 func Written[T any, P Object[T]](versions *Versions, key string, request func() (*T, error)) (*T, error) {
 	var answer *T
 	err := versions.Send(key, func() (string, error) {

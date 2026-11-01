@@ -160,8 +160,9 @@ func (p *promotions) read() (world, error) {
 // the loop creates has it. So the list also holds each Job the loop
 // created that the store does not hold yet (informer.View.Whole), and
 // a pass that runs before the watch delivers the create does not create
-// the Job again. The memo forgets each Job that the list leaves out and
-// the store no longer holds.
+// the Job again. A read of such a Job that fails leaves its version
+// unknown, and the next list reads the Job again. The memo forgets each
+// Job that the list leaves out and the store no longer holds.
 func (p *promotions) currentJobs() ([]jobObject, error) {
 	held := p.held("Job", p.jobs)
 	held.View.Whole = true
