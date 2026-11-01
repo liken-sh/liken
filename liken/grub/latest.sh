@@ -17,13 +17,20 @@
 # the pin's own series, which is the security update to take while the
 # pin stays on that series.
 #
-# Launchpad's API answers both questions, as JSON. The script reads
-# the two fields it needs with grep, so its tool list stays at curl.
+# Launchpad's API answers both questions, through the Launchpad
+# functions of toolchains/pin.sh.
 #
 # The pool is the one upstream here that forgets. It keeps only the
 # current build of each series, so a superseded pin returns a 404
 # error and the domain stops building. A pin that is no longer in the
 # pool's listing is reported as gone.
+#
+# Ubuntu signs no package. It signs each suite's InRelease file, which
+# lists the digest of each Packages index, and each index lists the
+# digest of each package. So a bump takes its digest through that
+# chain with ubuntu_deb_digest in toolchains/pin.sh, against the
+# archive key in trust/keys/ubuntu-archive.asc, and pins the sha256 of
+# the bytes it verified.
 #
 # This domain fetches two debs and pins both. They always share a
 # version, because they come from one source package, so one bump
@@ -47,39 +54,14 @@ pool="http://archive.ubuntu.com/ubuntu/pool/main/g/grub2"
 
 pinned="$(cat "$here/VERSION")"
 
-api="https://api.launchpad.net/devel/ubuntu"
-
-# getPublishedSources lists one record for each series and pocket that
-# publishes a version. A record's display_name reads like
-# "grub2 2.14-2ubuntu3 in tenacious", and its pocket follows it in the
-# same record. The Proposed pocket holds builds that wait for their
-# tests, so they are not yet in the series.
-launchpad() {
-    fetch_text "$api/+archive/primary" --max-time 120 -G \
-        --data ws.op=getPublishedSources --data source_name=grub2 \
-        --data exact_match=true "$@" |
-        grep -oE '"display_name": "[^"]*"|"pocket": "[^"]*"' |
-        paste - - |
-        grep -v '"pocket": "Proposed"' |
-        sed -E 's|^"display_name": "[^ ]+ ([^ ]+) in ([^"]+)".*|\1 \2|'
-}
-
-# The newest version that a series publishes now.
-newest_in() {
-    launchpad --data status=Published --data "distro_series=$api/$1" |
-        cut -d' ' -f1 | sort -V | tail -1
-}
-
-pinned_series="$(launchpad --data "version=$pinned" | head -1 | cut -d' ' -f2)" ||
+pinned_series="$(launchpad_published grub2 --data "version=$pinned" | head -1 | cut -d' ' -f2)" ||
     pinned_series=""
-newest_series="$(fetch_text "$api" |
-    grep -oE '"current_series_link": "[^"]*"' |
-    sed -e 's|.*/||' -e 's|"$||')" || newest_series=""
+newest_series="$(ubuntu_development_series)" || newest_series=""
 
 latest=""
-[[ -z "$newest_series" ]] || latest="$(newest_in "$newest_series")" || latest=""
+[[ -z "$newest_series" ]] || latest="$(ubuntu_newest_in grub2 "$newest_series")" || latest=""
 in_series=""
-[[ -z "$pinned_series" ]] || in_series="$(newest_in "$pinned_series")" || in_series=""
+[[ -z "$pinned_series" ]] || in_series="$(ubuntu_newest_in grub2 "$pinned_series")" || in_series=""
 
 versions="$(fetch_text "$pool/" |
     grep -oE 'grub-pc-bin_[^"_]+_amd64\.deb' |
@@ -103,15 +85,15 @@ target="${2:-$latest}"
 grep -qxF "$target" <<<"$versions" || fail "the pool does not carry $target"
 bump_needed grub "$pinned" "$target" || exit 0
 
-pc_bin="$(digest_of_url "$pool/grub-pc-bin_${target}_amd64.deb")"
+pc_bin="$(ubuntu_deb_digest grub2 grub-pc-bin main "$target")"
 # grub-mkimage is in grub2-common from the 2.14 packaging on, and
 # fetch.sh takes that package for every version it does not name.
-common="$(digest_of_url "$pool/grub2-common_${target}_amd64.deb")"
+common="$(ubuntu_deb_digest grub2 grub2-common main "$target")"
 
 echo "$target" >"$here/VERSION"
 add_entry "$here/fetch.sh" pc_bin_sha256 "$target" "$pc_bin"
 add_entry "$here/fetch.sh" common_sha256 "$target" "$common"
 bumped grub "$pinned" "$target"
-echo "the digests came from these downloads; Ubuntu signs indexes, not files"
+echo "the digests came from the Packages index, checked against InRelease, signed by Ubuntu's archive key"
 repin_sources
 next_step "make -C .. grub"

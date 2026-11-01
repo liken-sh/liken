@@ -17,17 +17,20 @@
 # build in the pin's own series, which is the security update to take
 # while the pin stays on that series.
 #
-# Launchpad's API answers both questions, as JSON. The script reads
-# the two fields it needs with grep, so its tool list stays at curl.
+# Launchpad's API answers both questions, through the Launchpad
+# functions of toolchains/pin.sh.
 #
 # The pool is the one upstream here that forgets. It keeps only the
 # current build of each series, so a superseded pin returns a 404
 # error and the domain stops building. A pin that is no longer in the
 # pool's listing is reported as gone.
 #
-# Ubuntu publishes per-file digests only inside its signed Release
-# indexes, so a bump computes the digest from its own download, the
-# same source the fetch's pin already came from.
+# Ubuntu signs no package. It signs each suite's InRelease file, which
+# lists the digest of each Packages index, and each index lists the
+# digest of each package. So a bump takes its digest through that
+# chain with ubuntu_deb_digest in toolchains/pin.sh, against the
+# archive key in trust/keys/ubuntu-archive.asc, and pins the sha256 of
+# the bytes it verified.
 #
 # Usage:
 #   systemd-boot/latest.sh                     report the pin
@@ -47,39 +50,14 @@ pool="http://archive.ubuntu.com/ubuntu/pool/universe/s/systemd"
 
 pinned="$(cat "$here/VERSION")"
 
-api="https://api.launchpad.net/devel/ubuntu"
-
-# getPublishedSources lists one record for each series and pocket that
-# publishes a version. A record's display_name reads like
-# "systemd 2.14-2ubuntu3 in tenacious", and its pocket follows it in the
-# same record. The Proposed pocket holds builds that wait for their
-# tests, so they are not yet in the series.
-launchpad() {
-    fetch_text "$api/+archive/primary" --max-time 120 -G \
-        --data ws.op=getPublishedSources --data source_name=systemd \
-        --data exact_match=true "$@" |
-        grep -oE '"display_name": "[^"]*"|"pocket": "[^"]*"' |
-        paste - - |
-        grep -v '"pocket": "Proposed"' |
-        sed -E 's|^"display_name": "[^ ]+ ([^ ]+) in ([^"]+)".*|\1 \2|'
-}
-
-# The newest version that a series publishes now.
-newest_in() {
-    launchpad --data status=Published --data "distro_series=$api/$1" |
-        cut -d' ' -f1 | sort -V | tail -1
-}
-
-pinned_series="$(launchpad --data "version=$pinned" | head -1 | cut -d' ' -f2)" ||
+pinned_series="$(launchpad_published systemd --data "version=$pinned" | head -1 | cut -d' ' -f2)" ||
     pinned_series=""
-newest_series="$(fetch_text "$api" |
-    grep -oE '"current_series_link": "[^"]*"' |
-    sed -e 's|.*/||' -e 's|"$||')" || newest_series=""
+newest_series="$(ubuntu_development_series)" || newest_series=""
 
 latest=""
-[[ -z "$newest_series" ]] || latest="$(newest_in "$newest_series")" || latest=""
+[[ -z "$newest_series" ]] || latest="$(ubuntu_newest_in systemd "$newest_series")" || latest=""
 in_series=""
-[[ -z "$pinned_series" ]] || in_series="$(newest_in "$pinned_series")" || in_series=""
+[[ -z "$pinned_series" ]] || in_series="$(ubuntu_newest_in systemd "$pinned_series")" || in_series=""
 
 versions="$(fetch_text "$pool/" |
     grep -oE 'systemd-boot-efi_[^"_]+_amd64\.deb' |
@@ -103,11 +81,11 @@ target="${2:-$latest}"
 grep -qxF "$target" <<<"$versions" || fail "the pool does not carry $target"
 bump_needed systemd-boot "$pinned" "$target" || exit 0
 
-digest="$(digest_of_url "$pool/systemd-boot-efi_${target}_amd64.deb")"
+digest="$(ubuntu_deb_digest systemd systemd-boot-efi universe "$target")"
 
 echo "$target" >"$here/VERSION"
 add_entry "$here/fetch.sh" deb_sha256 "$target" "$digest"
 bumped systemd-boot "$pinned" "$target"
-echo "the digest came from this download; Ubuntu signs indexes, not files"
+echo "the digest came from the Packages index, checked against InRelease, signed by Ubuntu's archive key"
 repin_sources
 next_step "make -C .. systemd-boot"

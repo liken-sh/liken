@@ -35,8 +35,8 @@
 # grub-mkimage --version on the build host before a re-pin.
 #
 # When Ubuntu supersedes this version, the URLs return a 404 error,
-# and the fix is the ordinary one-line re-pin: new version in
-# grub/VERSION, new digests below (sha256sum the two debs).
+# and the fix is the ordinary re-pin: grub/latest.sh --bump writes
+# the new version into grub/VERSION and its digests below.
 #
 # Usage:
 #   grub/fetch.sh    fetch the version pinned in VERSION
@@ -56,9 +56,10 @@ require_tools ar tar zstd sha256sum
 version="${1:-$(cat "$here/VERSION")}"
 
 # Per-deb digests, pinned beside the version they belong to. The
-# Ubuntu archive publishes per-file digests only inside its signed
-# Release indexes, not beside the files, so this file holds the pins.
-# grub/latest.sh --bump adds the entries of each new version, and the
+# Ubuntu archive publishes per-file digests only inside the Packages
+# indexes that its signed InRelease files list, not beside the files,
+# so this file holds the pins. grub/latest.sh --bump verifies that
+# chain and adds the entries of each new version, and the
 # entries of older versions stay.
 declare -A pc_bin_sha256=(
     ["2.14-2ubuntu3"]="187f86d4c802a250d417f9f0d2a4095c2e3995ea5194f55a6d9ec27fd16f5055"

@@ -485,6 +485,11 @@ arguments and the reason for its behavior:
   prints the version and the sha256 of one package of a Debian or
   Ubuntu archive, through the suite's signed `InRelease` file and the
   `Packages` index that it lists.
+- `launchpad_published`, `ubuntu_development_series`, and
+  `ubuntu_newest_in` read Launchpad's API for an Ubuntu source
+  package, and `ubuntu_deb_digest` takes the digest of one of its
+  packages through `archive_deb`, against
+  `trust/keys/ubuntu-archive.asc`.
 - `container_runtime` and `image_of <key>` give a build its docker or
   podman and its image from `toolchains/images.toml`.
 - `row` prints one report row of seven columns, with `?` for an empty
@@ -544,6 +549,9 @@ names another signer:
   package. `liken/dev-cluster/firmware/latest.sh` takes the digest of
   `ovmf-generic` through that chain with `archive_deb`, against
   Debian's archive keys in `liken/dev-cluster/firmware/debian-archive.asc`.
+- Ubuntu signs its archive the same way. `liken/grub/latest.sh` and
+  `liken/systemd-boot/latest.sh` take their digests through the chain
+  with `ubuntu_deb_digest`, against `trust/keys/ubuntu-archive.asc`.
 
 A key that one script reads stays beside that script. A key that a
 second component reads moves to `trust/keys/`, with a section in its

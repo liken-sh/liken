@@ -384,6 +384,66 @@ archive_deb() (
     echo "$version $(sha256sum "$work/package.deb" | cut -d' ' -f1)"
 )
 
+# ubuntu_api is the root of Launchpad's API for the Ubuntu
+# distribution, which names its series and what each one publishes.
+ubuntu_api="https://api.launchpad.net/devel/ubuntu"
+
+# launchpad_published <source package> [curl option]...: print
+# "<version> <series> <pocket>" for each publication of the source
+# package in Ubuntu's primary archive, newest series first. The
+# options narrow the query, as in --data status=Published. The
+# Proposed pocket holds builds that wait for their tests, so they are
+# not yet in the series, and the function leaves them out. The API
+# answers JSON, and the function reads the two fields it needs with
+# grep. A record's display_name reads like "grub2 2.14-2ubuntu3 in
+# tenacious", and its pocket follows it in the same record.
+launchpad_published() {
+    local source="$1"
+    shift
+    fetch_text "$ubuntu_api/+archive/primary" --max-time 120 -G \
+        --data ws.op=getPublishedSources --data "source_name=$source" \
+        --data exact_match=true "$@" |
+        grep -oE '"display_name": "[^"]*"|"pocket": "[^"]*"' |
+        paste - - |
+        grep -v '"pocket": "Proposed"' |
+        sed -E 's|^"display_name": "[^ ]+ ([^ ]+) in ([^"]+)"\t"pocket": "([^"]+)"$|\1 \2 \3|'
+}
+
+# ubuntu_development_series: print the series that Launchpad names as
+# Ubuntu's current one, which is the development series.
+ubuntu_development_series() {
+    fetch_text "$ubuntu_api" |
+        grep -oE '"current_series_link": "[^"]*"' |
+        sed -e 's|.*/||' -e 's|"$||'
+}
+
+# ubuntu_newest_in <source package> <series>: print the newest version
+# of the source package that the series publishes now.
+ubuntu_newest_in() {
+    launchpad_published "$1" --data status=Published --data "distro_series=$ubuntu_api/$2" |
+        cut -d' ' -f1 | sort -V | tail -1
+}
+
+# ubuntu_deb_digest <source package> <binary package> <component>
+# <version>: print the sha256 of an amd64 package of Ubuntu's archive
+# that one Ubuntu source package builds, through the signed InRelease
+# of the suite that publishes the version. Launchpad names the series
+# and the pocket, and each pocket other than Release is a suite of its
+# own, such as resolute-updates. trust/keys/ubuntu-archive.asc holds
+# the key that signs the archive.
+ubuntu_deb_digest() {
+    local source="$1" package="$2" component="$3" version="$4" series pocket suite
+    read -r _ series pocket < <(launchpad_published "$source" \
+        --data status=Published --data "version=$version" | head -1) ||
+        fail "Launchpad names no series that publishes $source $version"
+    suite="$series"
+    [[ "$pocket" == Release ]] || suite="$series-${pocket,,}"
+    archive_deb "$pin_root/trust/keys/ubuntu-archive.asc" \
+        "http://archive.ubuntu.com/ubuntu/dists/$suite" \
+        "$component/binary-amd64/Packages.xz" "$package" "$version" |
+        cut -d' ' -f2
+}
+
 # --- the report ----------------------------------------------------------
 
 # row <name> <pinned> <latest> <channel> <newest channel> <hold> <note>
