@@ -118,6 +118,27 @@ runs:
         sudo udevadm control --reload-rules
         sudo udevadm trigger --name-match=kvm
 
+    # The userland, the static programs that buildroot builds, is not
+    # in the Actions cache. liken/userland/artifact.sh pulls a finished
+    # build of the same inputs from ghcr.io/liken-sh/userland, and
+    # builds with buildroot when the registry holds none. The login
+    # lets the pull read the package when it is private. Only a push to
+    # main sets LIKEN_USERLAND_PUSH, so only main's builds write the
+    # package, and a branch never replaces what main pushed. A branch
+    # that changes liken/userland or the `buildroot` entry of
+    # toolchains/images.toml compiles the userland from source on each
+    # push, because no build of its inputs is in the registry until the
+    # change reaches main.
+    - if: ${{ github.event_name == 'push' }}
+      uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+    - if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      shell: bash
+      run: echo LIKEN_USERLAND_PUSH=1 >> "$GITHUB_ENV"
+
     # This is one cache for each vendored domain, keyed on the same
     # prerequisites that liken/Makefile declares for that domain's
     # artifact. A pin bump changes the key, so only that domain
@@ -148,41 +169,6 @@ runs:
       with:
         path: trust/dist
         key: trust-${{ hashFiles('trust/VERSION', 'trust/pin.toml', 'trust/fetch.sh') }}
-    # The userland's key covers every file of its BR2_EXTERNAL tree and
-    # the builder image, because each one changes what buildroot
-    # builds. The build reads only the `buildroot` entry of
-    # toolchains/images.toml, so the key hashes that line and not the
-    # whole table, which changes with every bump of an image that the
-    # userland never runs. The key leaves out the directories that the
-    # build writes, _build, cache, and dist, because the post step of
-    # each cache evaluates the key again after the build, and hashFiles
-    # fails on buildroot's work tree in _build. A miss compiles buildroot's
-    # cross-compiler and every program, which the build job's limit in
-    # liken/package.toml covers. open-iscsi/dist holds copies of the
-    # userland's iscsid and iscsiadm and the iscsid image, which bakes
-    # in the liken version, so it has no cache of its own.
-    - id: userland-builder
-      shell: bash
-      run: echo "digest=$(grep '^buildroot = ' toolchains/images.toml | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
-    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      with:
-        path: liken/userland/dist
-        key: userland-${{ steps.userland-builder.outputs.digest }}-${{ hashFiles('liken/userland/**', '!liken/userland/_build/**', '!liken/userland/cache/**', '!liken/userland/dist/**') }}
-    # When the userland's key misses, buildroot builds again from a
-    # fresh tree, and liken/userland/build.sh points it at the download
-    # directory and the compiler cache in liken/userland/cache. A
-    # change to one recipe changes the key above, so this cache
-    # restores the newest earlier entry through restore-keys: the
-    # tarballs that the change did not move are not downloaded again,
-    # and ccache returns each object whose compiler and source are
-    # unchanged. buildroot checks every tarball against its .hash
-    # file, so a stale entry costs a download and never changes what
-    # the build makes.
-    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      with:
-        path: liken/userland/cache
-        key: userland-cache-${{ steps.userland-builder.outputs.digest }}-${{ hashFiles('liken/userland/**', '!liken/userland/_build/**', '!liken/userland/cache/**', '!liken/userland/dist/**') }}
-        restore-keys: userland-cache-
     - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: liken/systemd-boot/dist
@@ -225,7 +211,6 @@ runs:
       run: |
         cd liken
         for dist in kernel/dist k3s/dist xtables/dist ../trust/dist \
-                    userland/dist \
                     systemd-boot/dist grub/dist linux-firmware/dist \
                     microcode/dist; do
             [ -d "$dist" ] && find "$dist" -type f -exec touch {} +

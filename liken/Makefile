@@ -46,8 +46,10 @@ MICROCODE_DIST := microcode/dist/$(MICROCODE_VERSION)
 
 # The userland builds its static binaries in the buildroot image that
 # toolchains/images.toml names. The table holds every outside image,
-# so a change to any entry rebuilds the userland, which is slower than
-# needed but never stale.
+# so a change to any entry runs the userland's rule again. The rule
+# compares the key of the inputs, which holds the `buildroot` line
+# alone, with the key that dist/ was built for, and keeps dist/ when
+# they match.
 IMAGE_PINS := ../toolchains/images.toml
 
 # The static programs that buildroot builds land in one directory,
@@ -125,9 +127,10 @@ microcode: $(MICROCODE_DIST)/microcode.cpio
 # wpa_supplicant, which init runs for a wireless spec.network entry;
 # and the time zone database, which a CronJob's spec.timeZone names a
 # zone of. buildroot builds them from pinned source in a pinned
-# container. See userland/build.sh. The prerequisites match the ones
-# that userland/Makefile declares.
-$(USERLAND_OUTPUTS) &: $(addprefix userland/,VERSION fetch.sh build.sh buildroot.sh \
+# container. See userland/build.sh. When the registry holds a build of
+# the same inputs, userland/artifact.sh pulls it in place of a build.
+# The prerequisites match the ones that userland/Makefile declares.
+$(USERLAND_OUTPUTS) &: $(addprefix userland/,VERSION fetch.sh build.sh artifact.sh buildroot.sh \
 		common.config os.config external.desc Config.in external.mk versions.mk \
 		wpa_supplicant.config) \
 		$(shell find userland/patches userland/iscsi -type f) $(IMAGE_PINS)

@@ -401,6 +401,11 @@ form, and `cd ci && go run . pins -root ..` fails on an `apk add`.
   builds. `liken/userland/buildroot.sh` runs both builds with
   `common.config`. A change to buildroot's recipe is a hook in
   `external.mk`.
+- A cold build of the OS's programs takes most of the OS build job, so
+  `liken/userland/artifact.sh` keeps each finished `dist/` in
+  `ghcr.io/liken-sh/userland`, tagged with a hash of the tree and the
+  `buildroot` entry. `make` pulls the tag, and builds only when the
+  pull fails. Only CI on `main` pushes a tag.
 - When buildroot's recipe builds a program only with shared libraries,
   a recipe of the tree builds it static: `iscsi/` holds open-iscsi and
   libkmod, and `bluetooth/` holds BlueZ. A patch to a project's source

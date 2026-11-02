@@ -481,8 +481,12 @@ jobs:
     # id-token: write lets cosign take the job's OIDC token and sign
     # each file of the release keyless, with this workflow at its ref
     # as the signer. No other job of the workflow holds it.
+    # packages: write lets the build push the userland that it compiles
+    # on main to ghcr.io/liken-sh/userland, as the build job does.
+    # liken/userland/artifact.sh gives the details.
     permissions:
       contents: read
+      packages: write
       id-token: write
     # The channel's key comes from the repository secrets that
     # liken.sh/terraform.tf keeps delivered.

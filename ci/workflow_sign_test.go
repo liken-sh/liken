@@ -88,3 +88,14 @@ func TestTheChannelPublishSignsBeforeItUploads(t *testing.T) {
 		t.Errorf("the channel publish reads contents %v, want read for the checkout", permissions["contents"])
 	}
 }
+
+// The OS's publish job builds the release, and on main it pushes the
+// userland that it compiles to ghcr.io/liken-sh/userland, so its
+// token must write packages like the build job's.
+func TestTheChannelPublishCanPushTheUserland(t *testing.T) {
+	jobs := workflowJobs(t, signFixture(t)[".github/workflows/component-os.yaml"])
+	permissions, _ := jobs["publish"]["permissions"].(map[string]any)
+	if permissions["packages"] != "write" {
+		t.Errorf("the channel publish grants packages %v, want write", permissions["packages"])
+	}
+}

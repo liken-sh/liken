@@ -36,10 +36,17 @@
 #   versions                      one line for each program, its name
 #                                 in the OS's components record and the
 #                                 version that the build used
+#   key                           the key of the inputs, which
+#                                 artifact.sh writes after the build
 #
 # The download directory is userland/cache/dl/, and the compiler cache
 # is userland/cache/ccache/. Each build starts from a fresh buildroot
 # tree in userland/_build/, and the compiler cache keeps a rebuild short.
+#
+# `make` runs this script only when artifact.sh finds no finished
+# build of the same inputs in dist/ or in the registry. A machine
+# without a registry build, such as a CI run on a branch that changes
+# this directory, compiles everything here from source.
 
 set -euo pipefail
 
