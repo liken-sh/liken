@@ -1622,11 +1622,18 @@ jobs:
           path: ~/.cache/go-build
           key: ${{ steps.hugo-cache.outputs.cache-primary-key }}
 
+      # A rerun of a job that the site needs runs this job again in the
+      # same run, and deploy-pages refuses a run that holds two
+      # artifacts of one name. So the artifact's name carries the
+      # attempt.
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: dist/docs
+          name: github-pages-${{ github.run_attempt }}
 
       - uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
 
       # The deploy finishing does not mean the public name serves the
       # new tree yet: Pages is behind a CDN that caches pages for up to
