@@ -244,8 +244,16 @@ func attestation(repo name.Repository, platform string, image, manifestDigest v1
 	if statement.PredicateType != spdxPredicate {
 		return a, fmt.Errorf("the SBOM of the %s image states the predicate %s", platform, statement.PredicateType)
 	}
-	if len(statement.Subject) != 1 || statement.Subject[0].Digest[image.Algorithm] != image.Hex {
+	// buildx lists the image once for each name the build published it
+	// under, so an image with two names has two subjects. Each one must
+	// name this image's digest.
+	if len(statement.Subject) == 0 {
 		return a, fmt.Errorf("the SBOM of the %s image describes another image", platform)
+	}
+	for _, subject := range statement.Subject {
+		if subject.Digest[image.Algorithm] != image.Hex {
+			return a, fmt.Errorf("the SBOM of the %s image describes another image", platform)
+		}
 	}
 	packages, err := SPDXPackages(statement.Predicate)
 	if err != nil {

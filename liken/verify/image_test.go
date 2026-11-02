@@ -125,3 +125,68 @@ func attestationWith(t *testing.T, r verifytest.Registry, change func(*v1.Manife
 	}
 	return r.Manifest(t, data, "")
 }
+
+// buildx names an image in the SBOM's statement once for each name the
+// build published it under, so an image with two names has two
+// subjects with one digest. Every subject must still name the image.
+func TestAttestationsReadTheSubjectsOfAnSBOM(t *testing.T) {
+	cases := []struct {
+		name   string
+		second string
+		reason string
+	}{
+		{"an image published under two names", "", ""},
+		{"a second subject of another image", "0000000000000000000000000000000000000000000000000000000000000000", "describes another image"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := verifytest.NewRegistry(t)
+			r.Publish(t)
+			index, err := v1.ParseIndexManifest(bytes.NewReader(image(t, "index.json")))
+			if err != nil {
+				t.Fatal(err)
+			}
+			index.Manifests[1].Digest = attestationWith(t, r, func(m *v1.Manifest) {
+				m.Layers[0] = sbomWithSecondSubject(t, r, c.second)
+			})
+			_, err = attestations(r.Repo, index, nil)
+			if c.reason == "" && err != nil {
+				t.Errorf("the check returned %v, want no error", err)
+			}
+			if c.reason != "" && (err == nil || !strings.Contains(err.Error(), c.reason)) {
+				t.Errorf("the check returned %v, want an error that says %q", err, c.reason)
+			}
+		})
+	}
+}
+
+// sbomWithSecondSubject pushes a copy of the SBOM's statement with a
+// second subject, which names the first subject's digest when digest is
+// empty, and returns the layer that points at it.
+func sbomWithSecondSubject(t *testing.T, r verifytest.Registry, digest string) v1.Descriptor {
+	var statement map[string]any
+	if err := json.Unmarshal(image(t, "sbom.intoto.json"), &statement); err != nil {
+		t.Fatal(err)
+	}
+	subjects := statement["subject"].([]any)
+	first := subjects[0].(map[string]any)
+	if digest == "" {
+		digest = first["digest"].(map[string]any)["sha256"].(string)
+	}
+	statement["subject"] = append(subjects, map[string]any{
+		"name":   "pkg:docker/ghcr.io/liken-sh/bluetoothd-other@2026.11.01-001?platform=linux%2Famd64",
+		"digest": map[string]any{"sha256": digest},
+	})
+	data, err := json.Marshal(statement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Blob(t, data)
+	m, err := v1.ParseManifest(bytes.NewReader(image(t, "attestation.json")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	layer := m.Layers[0]
+	layer.Digest, layer.Size, _ = v1.SHA256(bytes.NewReader(data))
+	return layer
+}
