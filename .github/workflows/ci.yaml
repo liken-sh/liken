@@ -172,34 +172,32 @@ jobs:
           restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-
 
       # The build cache holds Go's test results and the compiled
-      # packages of the job's own module, and most commits change both.
-      # So the key ends in the commit: each push to main saves a new
-      # entry, and every run restores the newest one. A key without the
-      # commit would save one entry when its files last changed. That
-      # entry would keep the test results and packages of that commit,
-      # and each run would compile the module's packages again and run
-      # the tests of every package. The cost is one entry for each job
-      # on each push to main. The modules are not in this entry, so
-      # each of these entries holds only compiled output.
-      #
-      # Before the commit, the key holds the hash of these files:
+      # packages of the dependencies and of the job's own module. The
+      # key holds the Go version and the hash of these files:
       #
       #   ci/go.sum
       #
-      # A restore takes the newest entry with the same hash. When no
-      # entry has that hash, as on a branch that changes one of the
-      # files, the restore takes the newest entry of the same job. Each
-      # job has entries of its own: a job that builds less would save
-      # an entry without the packages that the other job compiles, and
-      # the other job would restore it and compile them again.
+      # The key holds no commit, so main saves an entry only when one
+      # of these inputs changes, and the entry stays until the next
+      # change. A key that held the commit saved a new entry of several
+      # hundred megabytes for each job on each push to main, and those
+      # entries filled the repository's 10 GB. A run restores the entry
+      # of its inputs, which holds every dependency compiled. The
+      # packages of the module that changed since that entry compile
+      # again, and their tests run again.
+      #
+      # When no entry has the key, as on a branch that changes one of
+      # the files, the restore takes the newest entry of the same job.
+      # Each job has entries of its own: a job that builds less would
+      # save an entry without the packages that the other job
+      # compiles, and the other job would restore it and compile them
+      # again.
       - id: go-build
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}-${{ github.sha }}
-          restore-keys: |
-            go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}-
-            go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}
+          restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-
 
       - id: plan
         working-directory: ci
@@ -1487,17 +1485,15 @@ jobs:
       # no entry for its own go.sum restores the newest entry of the
       # family, and the site's entry holds every manual's build. The
       # hash covers every manual's go.sum, so the site's key never
-      # equals the key that a docs job saves for the same commit. The
-      # key ends in the commit for the reason the docs jobs give: Go
-      # trims a build cache entry that no build used for five days.
+      # equals the key that a docs job saves. The key holds no commit,
+      # for the reason the docs jobs give, so the site saves an entry
+      # only when a manual's go.sum changes.
       - id: hugo-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: hugo-build-${{ runner.os }}-${{ hashFiles('**/docs/go.sum') }}-${{ github.sha }}
-          restore-keys: |
-            hugo-build-${{ runner.os }}-${{ hashFiles('**/docs/go.sum') }}-
-            hugo-build-${{ runner.os }}-
+          key: hugo-build-${{ runner.os }}-${{ hashFiles('**/docs/go.sum') }}
+          restore-keys: hugo-build-${{ runner.os }}-
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: ${{ fromJSON(needs.plan.outputs.components)['kubernetes'].check && contains(fromJSON(needs.plan.outputs.components)['kubernetes'].jobs, 'go') }}
@@ -1753,34 +1749,32 @@ jobs:
           restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-
 
       # The build cache holds Go's test results and the compiled
-      # packages of the job's own module, and most commits change both.
-      # So the key ends in the commit: each push to main saves a new
-      # entry, and every run restores the newest one. A key without the
-      # commit would save one entry when its files last changed. That
-      # entry would keep the test results and packages of that commit,
-      # and each run would compile the module's packages again and run
-      # the tests of every package. The cost is one entry for each job
-      # on each push to main. The modules are not in this entry, so
-      # each of these entries holds only compiled output.
-      #
-      # Before the commit, the key holds the hash of these files:
+      # packages of the dependencies and of the job's own module. The
+      # key holds the Go version and the hash of these files:
       #
       #   ci/go.sum
       #
-      # A restore takes the newest entry with the same hash. When no
-      # entry has that hash, as on a branch that changes one of the
-      # files, the restore takes the newest entry of the same job. Each
-      # job has entries of its own: a job that builds less would save
-      # an entry without the packages that the other job compiles, and
-      # the other job would restore it and compile them again.
+      # The key holds no commit, so main saves an entry only when one
+      # of these inputs changes, and the entry stays until the next
+      # change. A key that held the commit saved a new entry of several
+      # hundred megabytes for each job on each push to main, and those
+      # entries filled the repository's 10 GB. A run restores the entry
+      # of its inputs, which holds every dependency compiled. The
+      # packages of the module that changed since that entry compile
+      # again, and their tests run again.
+      #
+      # When no entry has the key, as on a branch that changes one of
+      # the files, the restore takes the newest entry of the same job.
+      # Each job has entries of its own: a job that builds less would
+      # save an entry without the packages that the other job
+      # compiles, and the other job would restore it and compile them
+      # again.
       - id: go-build
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
-          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}-${{ github.sha }}
-          restore-keys: |
-            go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}-
-            go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}
+          restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-
 
       - name: write the release record
         working-directory: ci

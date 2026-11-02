@@ -102,21 +102,19 @@ jobs:{% range .Jobs %}
       - uses: {% action "actions/checkout" %}{% end %}{% if .Go %}
 {% template "go-restore" .Cache %}{% end %}{% if eq .Toolchain "hugo" %}
 
-      # A saved cache never changes, and Go trims a build cache entry
-      # that no build used for five days, so a build cache saved once
-      # would lose the compiled Hugo. This entry's key ends in the
-      # commit: each push to main saves a new one, and every run
-      # restores the newest one for the same go.sum, or for any go.sum
-      # when none matches, as on a branch that changes it. Every manual
-      # with the same go.sum shares the entry.
+      # The entry holds the compiled Hugo and the brand's page
+      # generators. go.sum chooses the version of each, so the key
+      # holds the hash of go.sum and no commit, and main saves an entry
+      # only when go.sum changes. A run restores the entry for its
+      # go.sum, or the newest entry for any go.sum when none matches,
+      # as on a branch that changes it. Every manual with the same
+      # go.sum shares the entry.
       - id: hugo-cache
         uses: {% action "actions/cache/restore" %}
         with:
           path: ~/.cache/go-build
-          key: hugo-build-${{ runner.os }}-${{ hashFiles('{% .ModuleDir %}/go.sum') }}-${{ github.sha }}
-          restore-keys: |
-            hugo-build-${{ runner.os }}-${{ hashFiles('{% .ModuleDir %}/go.sum') }}-
-            hugo-build-${{ runner.os }}-{% end %}{% if .Apt %}
+          key: hugo-build-${{ runner.os }}-${{ hashFiles('{% .ModuleDir %}/go.sum') }}
+          restore-keys: hugo-build-${{ runner.os }}-{% end %}{% if .Apt %}
 
       - name: install {% join .Apt ", " %}
         run: |

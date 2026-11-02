@@ -43,18 +43,16 @@ run = "make test"
 		"          cache: false\n",
 		// Each job has a build cache of its own: a job that builds less
 		// must not save the entry that another job then restores whole.
-		// The key ends in the commit, so each push to main saves the
-		// test results and packages of that commit, and a restore takes
-		// the newest entry with the same flags, then the job's newest.
-		"key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ github.job }}-${{ hashFiles('app/go.sum', 'app/Makefile', 'app/package.toml', 'app/.pre-commit-config.yaml') }}-${{ github.sha }}\n" +
-			"          restore-keys: |\n" +
-			"            go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ github.job }}-${{ hashFiles('app/go.sum', 'app/Makefile', 'app/package.toml', 'app/.pre-commit-config.yaml') }}-\n" +
-			"            go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ github.job }}-\n",
+		// The key holds no commit, so main saves an entry only when the
+		// files that choose the build change, and a restore takes the
+		// entry with the same flags, then the job's newest.
+		"key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ github.job }}-${{ hashFiles('app/go.sum', 'app/Makefile', 'app/package.toml', 'app/.pre-commit-config.yaml') }}\n" +
+			"          restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ github.job }}-\n",
 		// Every manual reads the same modules, so the manuals share one.
 		"key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-manuals-${{ hashFiles('app/docs/go.sum') }}\n" +
 			"          restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-manuals-\n",
-		"key: hugo-build-${{ runner.os }}-${{ hashFiles('app/docs/go.sum') }}-${{ github.sha }}\n" +
-			"          restore-keys: |\n            hugo-build-${{ runner.os }}-${{ hashFiles('app/docs/go.sum') }}-\n            hugo-build-${{ runner.os }}-\n",
+		"key: hugo-build-${{ runner.os }}-${{ hashFiles('app/docs/go.sum') }}\n" +
+			"          restore-keys: hugo-build-${{ runner.os }}-\n",
 		"      - if: ${{ github.ref == 'refs/heads/main' && steps.go-modules.outputs.cache-hit != 'true' }}\n        uses: " + pinnedText("actions/cache/save"),
 		"      - if: ${{ github.ref == 'refs/heads/main' && steps.go-build.outputs.cache-hit != 'true' }}\n        uses: " + pinnedText("actions/cache/save"),
 		"      - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}\n        uses: " + pinnedText("actions/cache/save"),
@@ -91,11 +89,37 @@ func TestABuildCacheFollowsWhatChoosesTheBuild(t *testing.T) {
 	}
 	text := string(files[".github/workflows/component-app.yaml"])
 	for _, want := range []string{
-		"${{ github.job }}-${{ hashFiles('app/svc/go.sum', 'app/svc/Makefile', 'app/package.toml', 'app/.pre-commit-config.yaml') }}-${{ github.sha }}\n",
-		"${{ github.job }}-${{ hashFiles('app/go.sum', 'app/Makefile', 'app/package.toml', 'app/.pre-commit-config.yaml') }}-${{ github.sha }}\n",
+		"${{ github.job }}-${{ hashFiles('app/svc/go.sum', 'app/svc/Makefile', 'app/package.toml', 'app/.pre-commit-config.yaml') }}\n",
+		"${{ github.job }}-${{ hashFiles('app/go.sum', 'app/Makefile', 'app/package.toml', 'app/.pre-commit-config.yaml') }}\n",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the workflow lacks the key %q:\n%s", want, text)
+		}
+	}
+}
+
+// A cache key that holds the commit misses on every push to main, so
+// every run on main saves a new entry, and the entries push each other
+// out of the repository's 10 GB. No key holds the commit, so main saves
+// an entry only when the inputs of its key change.
+func TestNoCacheKeyHoldsTheCommit(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"app/package.toml": "[package]\nname = \"app\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\nrun = \"make test\"\n[[jobs]]\nname = \"docs\"\ntoolchain = \"hugo\"\nmodule = \"docs\"\nrun = \"make docs\"\n",
+		"os/package.toml":  "[package]\nname = \"os\"\n[[jobs]]\nname = \"build\"\ntoolchain = \"os\"\nrun = \"make all\"\n[outputs]\nchannel = true\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := Workflows(root, components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range files {
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.Contains(line, "key") && strings.Contains(line, "github.sha") {
+				t.Errorf("%s: a cache key holds the commit: %s", name, strings.TrimSpace(line))
+			}
 		}
 	}
 }
@@ -139,7 +163,7 @@ func TestEveryJobOfAModuleSharesOneModulesEntry(t *testing.T) {
 	var (
 		modulePaths    = "~/go/pkg/mod/*\n!~/go/pkg/mod/cache\n~/go/pkg/mod/cache/download/**/*.mod\n~/go/pkg/mod/cache/download/**/*.ziphash\n"
 		restoreModules = pinnedRef("actions/cache/restore") + " go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ hashFiles('app/go.sum') }} " + modulePaths
-		restoreBuild   = pinnedRef("actions/cache/restore") + " go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ github.job }}-${{ hashFiles('app/go.sum', 'app/Makefile', 'app/package.toml', 'app/.pre-commit-config.yaml') }}-${{ github.sha }} ~/.cache/go-build"
+		restoreBuild   = pinnedRef("actions/cache/restore") + " go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-app-${{ github.job }}-${{ hashFiles('app/go.sum', 'app/Makefile', 'app/package.toml', 'app/.pre-commit-config.yaml') }} ~/.cache/go-build"
 		saveModules    = pinnedRef("actions/cache/save") + " ${{ steps.go-modules.outputs.cache-primary-key }} " + modulePaths
 		saveBuild      = pinnedRef("actions/cache/save") + " ${{ steps.go-build.outputs.cache-primary-key }} ~/.cache/go-build"
 	)

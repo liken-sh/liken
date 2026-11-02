@@ -358,22 +358,17 @@ func hooksRunGo(root string, c *Component, skip []string) (bool, error) {
 // tests, so it reads every module that the other jobs of the module
 // read.
 //
-// Any job other than a hugo job also keeps a build cache of its own,
-// whose key ends in the commit. The build cache holds Go's test results
-// and the compiled packages of the job's own module, and most commits
-// change both, so each push to main saves a new entry and every run
-// restores the newest one. A key without the commit would save one
-// entry when its files last changed, and each later run would compile
-// the module's packages again and run the tests of every package. The
-// cost is one entry of compiled output for each job on each push to
-// main.
-//
-// Before the commit, the build cache's key holds the hash of go.sum
-// and of the files that choose what the job compiles and with which
-// flags: the Makefile where the job runs, the component's package.toml,
-// which holds the job's command, and its hooks, which a prek job runs.
-// A restore takes the newest entry with the same hash first, so a run
-// starts from a build made with the same flags when one exists.
+// Any job other than a hugo job also keeps a build cache of its own.
+// Its key holds the hash of go.sum and of the files that choose what
+// the job compiles and with which flags: the Makefile where the job
+// runs, the component's package.toml, which holds the job's command,
+// and its hooks, which a prek job runs. The key holds no commit, so
+// main saves an entry only when one of those files or the Go version
+// changes. A key with the commit saved an entry of compiled output for
+// each job on each push to main, and those entries filled the 10 GB.
+// The entry holds every dependency compiled, and a run compiles again
+// and tests again only the packages of its module that changed since
+// the entry was saved.
 func jobCache(c *Component, d jobData) goCache {
 	sum := path.Join(d.ModuleDir, "go.sum")
 	if d.Toolchain == "hugo" {

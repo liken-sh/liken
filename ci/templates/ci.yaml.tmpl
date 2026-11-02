@@ -313,17 +313,15 @@ jobs:
       # no entry for its own go.sum restores the newest entry of the
       # family, and the site's entry holds every manual's build. The
       # hash covers every manual's go.sum, so the site's key never
-      # equals the key that a docs job saves for the same commit. The
-      # key ends in the commit for the reason the docs jobs give: Go
-      # trims a build cache entry that no build used for five days.
+      # equals the key that a docs job saves. The key holds no commit,
+      # for the reason the docs jobs give, so the site saves an entry
+      # only when a manual's go.sum changes.
       - id: hugo-cache
         uses: {% action "actions/cache/restore" %}
         with:
           path: ~/.cache/go-build
-          key: hugo-build-${{ runner.os }}-${{ hashFiles('**/docs/go.sum') }}-${{ github.sha }}
-          restore-keys: |
-            hugo-build-${{ runner.os }}-${{ hashFiles('**/docs/go.sum') }}-
-            hugo-build-${{ runner.os }}-
+          key: hugo-build-${{ runner.os }}-${{ hashFiles('**/docs/go.sum') }}
+          restore-keys: hugo-build-${{ runner.os }}-
 {% range .Coverage %}
       - uses: {% action "actions/download-artifact" %}
         if: ${{ fromJSON(needs.plan.outputs.components)['{% .Component %}'].check && contains(fromJSON(needs.plan.outputs.components)['{% .Component %}'].jobs, '{% .Job %}') }}

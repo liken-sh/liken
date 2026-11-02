@@ -36,8 +36,8 @@ func TestTheSiteSharesTheHugoBuildCacheAndBuildsInParallel(t *testing.T) {
 	}
 	text := string(files[".github/workflows/ci.yaml"])
 	for _, want := range []string{
-		"key: hugo-build-${{ runner.os }}-${{ hashFiles('**/docs/go.sum') }}-${{ github.sha }}\n" +
-			"          restore-keys: |\n            hugo-build-${{ runner.os }}-${{ hashFiles('**/docs/go.sum') }}-\n            hugo-build-${{ runner.os }}-\n",
+		"key: hugo-build-${{ runner.os }}-${{ hashFiles('**/docs/go.sum') }}\n" +
+			"          restore-keys: hugo-build-${{ runner.os }}-\n",
 		"      - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}\n        uses: " + pinnedText("actions/cache/save"),
 		"run: make -j\"$(nproc)\" site SITE_URL=https://liken.sh\n",
 	} {
