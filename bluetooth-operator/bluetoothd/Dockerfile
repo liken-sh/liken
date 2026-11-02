@@ -212,7 +212,12 @@ COPY --from=daemons /home/br-user/output/sbom.cdx.json /buildroot.cdx.json
 RUN /image-sbom -out /bluetoothd.cdx.json -buildroot /buildroot.cdx.json
 
 FROM scratch
-COPY --from=daemons /home/br-user/out/ /
+# buildroot builds as br-user, so the tree it leaves is that user's.
+# The daemon's container runs as root with every capability dropped
+# but four, and without CAP_DAC_OVERRIDE root cannot write
+# /etc/bluetooth/input.conf into a directory that another user owns.
+# So the tree is root's in the image.
+COPY --from=daemons --chown=0:0 /home/br-user/out/ /
 COPY --from=entrypoint /start-bluetoothd /start-bluetoothd
 COPY --from=entrypoint /start-btmon /start-btmon
 COPY --from=entrypoint /start-rescan /start-rescan
