@@ -59,6 +59,13 @@ against the document. [The release
 channel](https://liken.sh/docs/reference/release-channel/) describes the layout and
 the trust chain.
 
+The digest proves that the files match the release page. To prove
+also that `liken`'s CI signed them, run the check that [Verify a
+release or an image](https://liken.sh/docs/guides/verify/) describes. It downloads the
+release again:
+
+    ./liken verify release -digest sha256:<hex> <version>
+
 ## 2. Describe your cluster
 
     ./liken new mycluster

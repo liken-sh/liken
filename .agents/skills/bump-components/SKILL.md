@@ -60,6 +60,7 @@ The report has these sources:
 | `liken/<domain>/latest.sh` | the OS domains, steps 2 to 4 |
 | `liken/dev-cluster/firmware/capsule/latest.sh` | edk2 and the Ubuntu snapshot of the lab's capsule firmware builder, which builds on the `ubuntu` entry of `toolchains/images.toml`; it has no `--bump`, because each move changes the compiler that builds the firmware, so edit `build.sh` or the `Dockerfile` by hand and boot the lab with `FIRMWARE=capsule`, and do the same after a move of the `ubuntu` entry |
 | `liken/releases/sbom/schema/latest.sh` | the CycloneDX schema that `liken/releases/sbom` checks the OS release's SBOM against; the bump writes the schema files of the newest specification release, and a new minor version changes the `specVersion` that the SBOM states, so run `make -C liken test-go` after it |
+| `liken/verify/latest.sh` | Sigstore's trusted root, which `liken verify` and `liken sbom` check every signature against; the bump takes the root through Sigstore's TUF repository with the pinned cosign, so it needs docker, and its diff shows each key that came or went |
 | `toolchains/latest.sh` | each image in `toolchains/images.toml`, Go and Rust, each Go module and crate that is behind |
 | `toolchains/cargo-auditable/latest.sh` | cargo-auditable, which every Rust image builds with, step 5c |
 | `vulkan/latest.sh` | the Debian snapshot of the bases and `astrometry`, step 5 |

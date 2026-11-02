@@ -20,6 +20,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -107,6 +108,30 @@ usage:
       release's document. Pass "latest" to take whatever the channel
       currently names newest. -digest pins the document itself to a
       catalog entry's digest, closing the trust chain end to end.
+
+  liken verify release [-source URL] [-digest sha256:<hex>] <version>
+      Check that a published release is the one liken's CI signed:
+      the Sigstore bundle of release.yaml, then every artifact it
+      names, against its digest and its own bundle. The source
+      defaults to https://releases.liken.sh. -digest pins
+      release.yaml to a catalog entry's digest. Prints a line for
+      each file, and stops at the first file that fails. The system
+      image is the largest download, so the check takes as long as a
+      fetch.
+
+  liken verify image <reference>
+      Check that an image is one that liken's CI published: resolve
+      the reference to its index's digest, verify the cosign
+      signature of that digest, and read the SBOM and the provenance
+      that the index carries for each platform.
+
+  liken sbom [-json] [-source URL] <version|reference>
+      Print the packages of a release's or an image's SBOM: the
+      name, version, and package URL of each. A version such as
+      2026.11.01-001 names a release, and anything else names an
+      image. The SBOM's signature is checked first, as verify
+      checks it. -json prints the document itself: CycloneDX for a
+      release, SPDX for an image.
 
   liken media <release-dir> <deployment.cpio> <output.cpio>
       Build a bootable install image from a downloaded release and
@@ -243,6 +268,10 @@ func run(args []string) error {
 			return fmt.Errorf("usage: liken fetch [-digest sha256:<hex>] <source-url> <version|latest> <channel-dir>")
 		}
 		return releases.Fetch(fs.Arg(0), fs.Arg(1), *digest, fs.Arg(2), os.Stdout)
+	case "verify":
+		return verifyCommand(context.Background(), args[1:], os.Stdout)
+	case "sbom":
+		return sbomCommand(context.Background(), args[1:], os.Stdout)
 	case "media":
 		if len(args) != 4 {
 			return fmt.Errorf("usage: liken media <release-dir> <deployment.cpio> <output.cpio>")

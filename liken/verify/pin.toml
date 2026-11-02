@@ -1,0 +1,19 @@
+# The trusted root that verify/ compiles into the `liken` toolkit, for
+# the SBOM of a release. latest.sh --bump writes the version, url,
+# sha256, and purl, and toolchains/pin.sh describes each field. The
+# file is in the repository, so no build downloads it, and a test of
+# verify/ fails when trusted_root.json differs from this digest.
+
+# Sigstore's trusted root, the keys that judge every signature that
+# `liken verify` checks. The version is the version of the TUF targets
+# metadata that named this root. The root-signing repository publishes
+# it under the Apache 2.0 license. The type is data, because the file
+# holds keys and no program, and the release's SBOM is no image, so
+# syft never reads the type.
+[sigstore-trusted-root]
+version = "14"
+url = "https://tuf-repo-cdn.sigstore.dev/targets/6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66.trusted_root.json"
+sha256 = "6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66"
+purl = "pkg:generic/sigstore-trusted-root@14?download_url=https://tuf-repo-cdn.sigstore.dev/targets/6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66.trusted_root.json&checksum=sha256:6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66"
+license = "Apache-2.0"
+type = "data"

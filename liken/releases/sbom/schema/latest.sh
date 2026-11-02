@@ -5,8 +5,10 @@
 # has now.
 #
 # releases/sbom checks every SBOM that it writes against this schema
-# before it writes the file, and its tests check their output against
-# it too. The tests run with no network, so the schema is in the
+# before it writes the file, and `liken verify release` checks the SBOM
+# that a person downloads against it. schema.go in this directory
+# compiles the files into both programs. The tests run with no
+# network, so the schema is in the
 # repository: the bytes in this directory are the pin, SHA256SUMS
 # holds the digest of each file, and a review of a bump reads every
 # changed line. bom-<minor>.schema.json is the BOM
@@ -40,7 +42,7 @@ row cyclonedx-schema "$pinned" "$latest" - - - "the newest release of CycloneDX/
 bump_needed cyclonedx-schema "$pinned" "$latest" || exit 0
 
 # A new minor version renames the BOM schema, so the old file goes and
-# the new one takes its place. releases/sbom reads the one file that
+# the new one takes its place. schema.go reads the one file that
 # matches bom-*.schema.json.
 minor="$(cut -d. -f1-2 <<<"$latest")"
 base="https://raw.githubusercontent.com/CycloneDX/specification/$latest/schema"

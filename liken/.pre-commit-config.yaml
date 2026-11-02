@@ -16,11 +16,12 @@ repos:
       # line is a single space, and git refuses a patch without it. The
       # CycloneDX schema is the bytes that its release tag serves, which
       # releases/sbom/schema/latest.sh writes, so a fixer leaves those
-      # alone too.
+      # alone too, and so is Sigstore's trusted root, which
+      # verify/latest.sh writes.
       - id: trailing-whitespace
-        exclude: /testdata/|\.patch$|^releases/sbom/schema/
+        exclude: /testdata/|\.patch$|^releases/sbom/schema/|^verify/trusted_root\.json$
       - id: end-of-file-fixer
-        exclude: /testdata/|^releases/sbom/schema/
+        exclude: /testdata/|^releases/sbom/schema/|^verify/trusted_root\.json$
       - id: check-yaml
         # Kubernetes manifests are conventionally multi-document
         # streams (machine-operator/manifests/machine-operator.yaml

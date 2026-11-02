@@ -267,7 +267,9 @@ cli/dist/liken: $(wildcard cli/*.go) go.mod go.sum \
 		$(wildcard kubernetes/*.go) $(wildcard ../kubernetes/*/*.go) ../kubernetes/go.mod \
 		$(wildcard image/*.go) $(wildcard releases/*.go) \
 		$(wildcard disks/*.go) $(wildcard scaffold/*.go) \
-		$(wildcard scaffold/*.tmpl) $(LIKEN_VERSION_STAMP)
+		$(wildcard scaffold/*.tmpl) $(wildcard verify/*.go) verify/trusted_root.json \
+		$(wildcard releases/sbom/schema/*.go) $(wildcard releases/sbom/schema/*.json) \
+		$(LIKEN_VERSION_STAMP)
 	$(MAKE) -C cli
 
 cli: cli/dist/liken

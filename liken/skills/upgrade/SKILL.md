@@ -34,6 +34,12 @@ a catalog entry you can copy. To compute the digest yourself:
 
     curl -fsSL https://releases.liken.sh/<version>/release.yaml | sha256sum
 
+Before you add the entry to the catalog, check that `liken`'s CI
+signed the release, with the same digest. [Verify a release or an
+image](https://liken.sh/docs/guides/verify/) gives the meaning of each failure:
+
+    liken verify release -digest sha256:<hex> <version>
+
 ## 2. Catalog the release and set the target
 
     kubectl edit cluster

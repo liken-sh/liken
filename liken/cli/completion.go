@@ -27,8 +27,12 @@ const (
 	compDirectiveDefault    = 0
 )
 
-// The plugins group, the one verb with subcommands of its own.
-const pluginsVerb = "plugins"
+// The two verbs with subcommands of their own: the plugins group and
+// the verify group.
+const (
+	pluginsVerb = "plugins"
+	verifyVerb  = "verify"
+)
 
 // Every top-level verb the dispatcher answers, minus completion
 // and __complete, which serve the shell and never a person. A new verb
@@ -36,7 +40,7 @@ const pluginsVerb = "plugins"
 var topLevelVerbs = []string{
 	"new", "mint", "adopt", "kubeconfig", "kubectl", "stern", "flux",
 	"approve-reboot", "request-reboot", "plugins", "layer", "fetch",
-	"media", "stick", "bundle", "index", "serve", "version",
+	"verify", "sbom", "media", "stick", "bundle", "index", "serve", "version",
 }
 
 // The plugin domains the walk dispatches to a
@@ -83,7 +87,8 @@ type completionFlag struct {
 // Every flag the subcommands bind, in the completion table's own
 // form. The base CLI parses each subcommand with the standard flag
 // package, which reads one and two dashes alike, so the table names the
-// one-dash spelling the usage prints. Each of these reads a value.
+// one-dash spelling the usage prints. Each of these reads a value,
+// except -json, which is a switch.
 var completionFlags = []completionFlag{
 	{name: "-server", takesValue: true},
 	{name: "-digest", takesValue: true},
@@ -91,6 +96,7 @@ var completionFlags = []completionFlag{
 	{name: "-slot-size", takesValue: true},
 	{name: "-console", takesValue: true},
 	{name: "-firmware", takesValue: true},
+	{name: "-json", takesValue: false},
 }
 
 // What the words before the cursor amount to: the positional
@@ -137,14 +143,16 @@ func completeArgs(args []string) ([]string, int) {
 	}
 
 	// The word is a positional. With none given yet it names a
-	// verb or a plugin domain; after the plugins verb it names a plugins
-	// subcommand; a verb's own argument is a path, so the shell's file
-	// completion answers it.
+	// verb or a plugin domain; after the plugins or the verify verb it
+	// names one of that group's subcommands; a verb's own argument is a
+	// path, so the shell's file completion answers it.
 	switch {
 	case len(parse.positionals) == 0:
 		return filterByPrefix(topLevelCandidates(), toComplete), compDirectiveNoFileComp
 	case len(parse.positionals) == 1 && parse.positionals[0] == pluginsVerb:
 		return filterByPrefix(pluginsSubcommands, toComplete), compDirectiveNoFileComp
+	case len(parse.positionals) == 1 && parse.positionals[0] == verifyVerb:
+		return filterByPrefix(verifySubcommands, toComplete), compDirectiveNoFileComp
 	default:
 		return nil, compDirectiveDefault
 	}
@@ -210,7 +218,8 @@ func flagNames() []string {
 }
 
 // completeFlagValue offers the values a flag accepts. Every base
-// flag names an address, a digest, a size, or a console, none of which
+// flag that reads a value names an address, a digest, a size, or a
+// console, none of which
 // this CLI can enumerate, so it offers nothing and leaves the file
 // fallback off.
 func completeFlagValue(flag, toComplete string) ([]string, int) {

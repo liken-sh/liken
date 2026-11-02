@@ -23,7 +23,9 @@ $(DIST)/liken: ../go.mod ../go.sum $(wildcard *.go) \
 		$(wildcard ../../kubernetes/*/*.go) ../../kubernetes/go.mod $(wildcard ../plugins/*.go) \
 		$(wildcard ../image/*.go) $(wildcard ../releases/*.go) \
 		$(wildcard ../disks/*.go) $(wildcard ../scaffold/*.go) $(wildcard ../scaffold/*.tmpl) \
-		$(wildcard ../releases/*.tmpl) $(LIKEN_VERSION_STAMP)
+		$(wildcard ../releases/*.tmpl) $(wildcard ../verify/*.go) ../verify/trusted_root.json \
+		$(wildcard ../releases/sbom/schema/*.go) $(wildcard ../releases/sbom/schema/*.json) \
+		$(LIKEN_VERSION_STAMP)
 	CGO_ENABLED=0 go build -trimpath \
 		-ldflags "-X github.com/liken-sh/liken/liken/machine.Version=$(LIKEN_VERSION)" \
 		-o $(DIST)/liken .

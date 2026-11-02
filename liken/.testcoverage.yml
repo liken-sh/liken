@@ -131,6 +131,22 @@ override:
   # errors of a write that the disk refuses.
   - path: ^releases/sbom$
     threshold: 88
+  # The CycloneDX schema check that releases/sbom and verify share:
+  # the tests cover the refusals and the digests of the pinned files.
+  # What stays untested is the panics of a schema directory that the
+  # embed holds in the wrong shape.
+  - path: ^releases/sbom/schema$
+    threshold: 75
+  # The signature checks: the bundles of a real release's files and of
+  # a real image's signature, through httptest and an in-memory
+  # registry. What stays untested is the success of a whole release,
+  # whose system image is too large for the repository, and the
+  # errors of a registry or a channel that fails mid-read.
+  - path: ^verify$
+    threshold: 83
+  # The fixtures that the tests of verify and the CLI share.
+  - path: ^verify/verifytest$
+    threshold: 60
   # The scaffold: the interview and the templates, and the tests
   # exercise them with scripted answers. What stays untested is a
   # scattering of I/O error returns.

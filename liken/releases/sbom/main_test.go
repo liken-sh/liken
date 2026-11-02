@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/liken-sh/liken/liken/releases/sbom/schema"
 )
 
 // fixtureArgs is the command line that writes the SBOM of the
@@ -31,7 +33,7 @@ func TestRunWritesAValidSBOM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := validate(data); err != nil {
+	if err := schema.Validate(data); err != nil {
 		t.Fatal(err)
 	}
 	var written struct {
@@ -83,5 +85,11 @@ func TestRunRefuses(t *testing.T) {
 	}
 	if _, err := os.Stat(out); err == nil {
 		t.Error("a refused run wrote the SBOM")
+	}
+}
+
+func TestMergedSBOMValidates(t *testing.T) {
+	if err := schema.Validate(marshal(t, fixtureBOM(t))); err != nil {
+		t.Fatal(err)
 	}
 }

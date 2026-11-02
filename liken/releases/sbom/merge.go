@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/liken-sh/liken/liken/api"
+	"github.com/liken-sh/liken/liken/releases/sbom/schema"
 )
 
 // rootRef is the bom-ref of the release, the component that the SBOM
@@ -254,9 +255,9 @@ func isProgram(c map[string]any) bool {
 // way the release's other files do, and two releases never share one.
 func (m *merger) document(version string) (*bom, error) {
 	b := &bom{
-		Schema:      "http://cyclonedx.org/schema/bom-" + specVersion + ".schema.json",
+		Schema:      schema.URL,
 		BOMFormat:   "CycloneDX",
-		SpecVersion: specVersion,
+		SpecVersion: schema.SpecVersion,
 		Version:     1,
 		Metadata: metadata{
 			Tools:     tools{Components: uniqueTools(m.tools)},

@@ -34,6 +34,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/liken-sh/liken/liken/releases/sbom/schema"
 )
 
 func main() {
@@ -90,7 +92,7 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := validate(data); err != nil {
+	if err := schema.Validate(data); err != nil {
 		return err
 	}
 	return os.WriteFile(*out, append(data, '\n'), 0o644)

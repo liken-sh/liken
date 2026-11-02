@@ -207,6 +207,49 @@ To take the version that the channel names as the newest, give
 `latest`. `-digest` pins the release document to a known digest,
 which completes the trust chain.
 
+## `liken verify release`
+
+    liken verify release [-source URL] [-digest sha256:<hex>] <version>
+
+Checks that a published release is the one that `liken`'s CI signed.
+The command checks the Sigstore bundle of `release.yaml`, then
+downloads each artifact that `release.yaml` names and checks its size,
+its sha256, and its own bundle. Each signature must come from
+`component-liken.yaml` at a release tag. The command prints one line
+for each file that passes, then the number of components in the SBOM
+by their `liken:source`, and it stops at the first file that fails.
+
+`-source` defaults to `https://releases.liken.sh`. `-digest` pins
+`release.yaml` to a catalog entry's digest, as for `liken fetch`.
+Sigstore's trusted root is compiled into the toolkit, so the check
+reads no key from the network. [Verify a release or an
+image](/docs/guides/verify/) gives the steps and the meaning of each
+failure.
+
+## `liken verify image`
+
+    liken verify image <reference>
+
+Checks that an image is one that `liken`'s CI published. The command
+resolves the reference to the digest of the image's index, and checks
+the cosign signature of that digest: it must come from a component's
+workflow at `main` or at a release tag. Then it reads the SPDX SBOM
+and the SLSA provenance that the index carries for each platform, and
+prints the signer and the number of packages in each SBOM.
+
+## `liken sbom`
+
+    liken sbom [-json] [-source URL] <version|reference>
+
+Prints the name, version, and package URL of each package in the SBOM
+of a release or of an image. An argument of the form `2026.11.01-001`
+names a release on the channel that `-source` names, and any other
+argument names an image. The command checks the signature first, the
+same way as `liken verify`: for a release, the bundles of
+`release.yaml` and `sbom.cdx.json` and the SBOM's digest. `-json`
+prints the document itself, CycloneDX for a release and SPDX for an
+image, for a vulnerability scanner to read.
+
 ## `liken media`
 
     liken media <release-dir> <deployment.cpio> <output.cpio>

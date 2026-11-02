@@ -1,0 +1,68 @@
+apiVersion: liken.sh/v1alpha1
+kind: Release
+metadata:
+  name: 2026.11.01-001
+artifacts:
+  - name: vmlinuz
+    sha256: da87319a16928d4acc1627c3638244b318e06d88399a7260ac534daf6ba9aab5
+    size: 17764864
+  - name: liken.sqfs
+    sha256: 9a36bb5f9edddc681d9e720f53cb9a564847cdc74fa5d27674a5d3636dd7af20
+    size: 458600448
+  - name: boot.cpio
+    sha256: 2e2f08a0b5843dedffffb972803f184850106b7fe50abecacf56368babd5276a
+    size: 12370432
+  - name: microcode.cpio
+    sha256: 128449af2466143d8d7f811d2134dbb7cc1ceb33b541575d54e89bb30299cefe
+    size: 18013696
+  - name: liken
+    sha256: 444f7d627fab23b9373e834a20ce2970b7ebd281f6f7b7e0eea46bb3f6a7ee8d
+    size: 17466724
+  - name: systemd-bootx64.efi
+    sha256: 27f3a56cb0126c7c382efcf5f2660b54eb141fcb5cf31962f67985146a0de589
+    size: 158208
+  - name: grub-boot.img
+    sha256: 7720690bdaf25fd7e3ade7e01b8d0de91e0991653e2a6900011ab23daf6e6032
+    size: 512
+  - name: grub-core.img
+    sha256: 24fa17643d13bc00ecfad92d470daf29410c07a8ccc655da36845d1e4da48f40
+    size: 158333
+  - name: LICENSES.md
+    sha256: 33762792208c60381a38bee3e9ce223b53adee561d4e4403b3e81ac6317ee31c
+    size: 158326
+  - name: sbom.cdx.json
+    sha256: 6fac4d32e62a924b076a45c6724fa68eda15e3c9f6bab917378b5c66eb53268b
+    size: 1352690
+components:
+  - name: kernel
+    version: 7.3.1
+  - name: k3s
+    version: v1.37.1+k3s1
+  - name: xtables
+    version: v0.15.2
+  - name: trust
+    version: 2026-10-20
+  - name: e2fsprogs
+    version: 1.47.4
+  - name: open-iscsi
+    version: 2.1.13
+  - name: nfs-utils
+    version: 3.1.1
+  - name: wpa-supplicant
+    version: 2.12
+  - name: systemd-boot
+    version: 261.3-0ubuntu3
+  - name: grub
+    version: 2.14-2ubuntu3
+  - name: hwdata
+    version: v0.412
+  - name: tzdata
+    version: 2026f
+  - name: linux-firmware
+    version: 20261019
+  - name: wireless-regdb
+    version: 2026.09.03
+  - name: microcode
+    version: 20260925
+  - name: flux
+    version: v2.10.0

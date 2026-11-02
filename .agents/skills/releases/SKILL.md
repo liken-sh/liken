@@ -235,6 +235,15 @@ docker buildx imagetools inspect "$image@$digest" --format '{{ json .SBOM }}'
 docker buildx imagetools inspect "$image@$digest" --format '{{ json .Provenance }}'
 ```
 
+`liken verify image "$image:2026.11.01-001"` runs the same checks
+in-process, with sigstore-go and the trusted root pinned in
+`liken/verify/`: it resolves the tag to the index's digest, verifies
+the signature against the same identity, and reports the signer and
+the package count of each platform's SBOM. `liken sbom <reference>`
+prints the SBOM's packages after the same check, and `-json` prints
+the SPDX document. The commands above stay the reference for what
+the check does.
+
 To list the packages of the SBOM that came from a record, with the
 purl and the CPE of each:
 
@@ -357,7 +366,13 @@ cosign verify-blob release.yaml --bundle release.yaml.sigstore.json \
 ```
 
 The OS publishes from release tags alone, so the identity names no
-branch. A verified `release.yaml` also vouches for each artifact by
+branch. `liken verify release -digest sha256:<hex> <version>`
+runs this check on `release.yaml` and on every artifact it names, and
+checks each artifact's digest and the SBOM's schema too.
+`liken sbom <version>` checks `release.yaml` and the SBOM the same way
+and prints the SBOM's packages. `liken/verify/` holds both checks,
+and `liken/verify/latest.sh` reports and bumps the Sigstore trusted
+root that they read. A verified `release.yaml` also vouches for each artifact by
 its digest, as it does for a machine.
 
 To rehearse the signing on a lab release, sign with a throwaway key.

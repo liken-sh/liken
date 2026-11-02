@@ -149,6 +149,11 @@ cosign verify-blob release.yaml --bundle release.yaml.sigstore.json \
   --certificate-identity-regexp '^https://github\.com/liken-sh/liken/\.github/workflows/component-liken\.yaml@refs/tags/[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{3}$'
 ```
 
+[`liken verify release`](/docs/reference/cli/#liken-verify-release)
+runs the same check on `release.yaml` and on every artifact, with no
+cosign, and [Verify a release or an image](/docs/guides/verify/) gives
+the steps.
+
 A machine does not read the signatures. It trusts a release through
 the digest that its Cluster pins, as [the trust
 chain](#the-trust-chain) describes. The signature is for a person who
