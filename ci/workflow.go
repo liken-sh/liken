@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -232,6 +234,15 @@ type jobData struct {
 	Cache goCache
 	// Category is the code scanning category of a CodeQL job.
 	Category string
+	// Select is the name that the plan's list of jobs holds for this
+	// job. The shards of a job run when the job runs, so they select
+	// on the job's name.
+	Select string
+	// Matrix holds the number of each shard, in the shards of a job.
+	Matrix []int
+	// Needs names the shards that a sharded job waits for, and whose
+	// coverage files it downloads.
+	Needs string
 }
 
 func componentData(root string, c *Component) (map[string]any, error) {
@@ -277,6 +288,11 @@ func componentData(root string, c *Component) (map[string]any, error) {
 			artifacts[i] = path.Join(c.Dir, file)
 		}
 		d.Artifacts = artifacts
+		d.Select = job.Name
+		if job.Shards > 1 {
+			jobs = append(jobs, shardsOf(d))
+			d.Needs = job.Name + "-shard"
+		}
 		jobs = append(jobs, d)
 	}
 	images := c.Outputs.Images
@@ -369,6 +385,25 @@ func hooksRunGo(root string, c *Component, skip []string) (bool, error) {
 // The entry holds every dependency compiled, and a run compiles again
 // and tests again only the packages of its module that changed since
 // the entry was saved.
+// shardsOf answers the matrix job that runs a sharded job's ShardRun
+// once for each shard. Each shard keeps the job's toolchain, caches,
+// and timeout, and sets SHARD and SHARDS beside the job's own env.
+func shardsOf(d jobData) jobData {
+	shards := d
+	shards.Name = d.Name + "-shard"
+	shards.Run = d.ShardRun
+	shards.Matrix = make([]int, d.Shards)
+	for i := range shards.Matrix {
+		shards.Matrix[i] = i + 1
+	}
+	shards.Env = map[string]string{}
+	maps.Copy(shards.Env, d.Env)
+	shards.Env["SHARD"] = "${{ matrix.shard }}"
+	shards.Env["SHARDS"] = strconv.Itoa(d.Shards)
+	shards.Artifacts = nil
+	return shards
+}
+
 func jobCache(c *Component, d jobData) goCache {
 	sum := path.Join(d.ModuleDir, "go.sum")
 	if d.Toolchain == "hugo" {

@@ -77,8 +77,18 @@ jobs:{% range .Jobs %}
     # token that cannot write to code scanning, so the analysis runs
     # only for a branch of this repository.
     if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), '{% .Name %}') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}{% else %}
-    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), '{% .Name %}') }}{% end %}
-    runs-on: ubuntu-26.04
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), '{% .Select %}') }}{% end %}{% if .Needs %}
+    # The job merges the coverage files of its shards and checks them,
+    # so it waits for every shard.
+    needs: {% .Needs %}{% end %}
+    runs-on: ubuntu-26.04{% if .Matrix %}
+    # The shards of the job {% .Select %}. Each runs the tests of its share
+    # on a runner of its own, and a failed shard leaves the others to
+    # finish, so one run reports every failing test.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [{% range $i, $s := .Matrix %}{% if $i %}, {% end %}{% $s %}{% end %}]{% end %}
     timeout-minutes: {% .Timeout %}{% if eq .Toolchain "codeql" %}
     permissions:
       contents: read
@@ -152,7 +162,13 @@ jobs:{% range .Jobs %}
         with:
           prek-version: {% prekVersion %}
           sha256: {% prekSHA256 %}
-          extra-args: --all-files {% .Dir %}/{% else %}{% if eq .Toolchain "codeql" %}{% template "codeql-init" . %}{% end %}{% $lines := lines .Run %}{% if not .Run %}{% else if eq (len $lines) 1 %}
+          extra-args: --all-files {% .Dir %}/{% else %}{% if eq .Toolchain "codeql" %}{% template "codeql-init" . %}{% end %}{% if .Needs %}
+
+      # Each shard's files are in a directory named for its artifact.
+      - uses: {% action "actions/download-artifact" %}
+        with:
+          pattern: coverage-{% .Component %}-{% .Needs %}-*
+          path: {% .Dir %}/coverage-shards{% end %}{% $lines := lines .Run %}{% if not .Run %}{% else if eq (len $lines) 1 %}
 
       - run: {% .Run %}{% else %}
 
@@ -165,10 +181,10 @@ jobs:{% range .Jobs %}
           path: ~/.cache/go-build
           key: ${{ steps.hugo-cache.outputs.cache-primary-key }}{% end %}{% if .Coverage %}
 
-      # The site renders the coverage report from these files.
+      # {% if .Matrix %}The job {% .Select %} merges these files from every shard.{% else %}The site renders the coverage report from these files.{% end %}
       - uses: {% action "actions/upload-artifact" %}
         with:
-          name: coverage-{% .Component %}-{% .Name %}
+          name: coverage-{% .Component %}-{% .Name %}{% if .Matrix %}-${{ matrix.shard }}{% end %}
           path: |{% range .Coverage %}
             {% . %}{% end %}
           if-no-files-found: error

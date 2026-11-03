@@ -2,6 +2,10 @@
 # reads it once; it never belongs to the tree.
 /coverage.out
 
+# The shards' coverage profiles, which the gate job of CI downloads
+# and sums into coverage.out.
+/coverage-shards/
+
 # The coverage report that `make coverage-report` draws for the site.
 /coverage.html
 

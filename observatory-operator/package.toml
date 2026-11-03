@@ -18,13 +18,18 @@ components = ["indi", "kubernetes", "notices", "toolchains", "trust", "weston"]
 [docs]
 prefix = "observatory"
 
-# gofmt, vet, a tidy check of go.mod, and one run of the tests that
-# checks for races and writes the coverage profile, then the coverage
-# gate on that profile. .testcoverage.yml holds the floor.
+# The tests, with the race check and the coverage profile, in three
+# shards on three runners, because one runner takes about nine minutes
+# for the operator's package alone. Then this job runs gofmt, vet, and
+# a tidy check of go.mod, sums the shards' profiles, and runs the
+# coverage gate on the sum. .testcoverage.yml holds the floor. `make
+# test-go` runs the same checks in one process on a workstation.
 [[jobs]]
 name = "go"
 toolchain = "go"
-run = "make test-go"
+run = "make test-go-gate"
+shards = 3
+shard-run = "make test-go-shard"
 timeout = 15
 coverage = ["coverage.out"]
 

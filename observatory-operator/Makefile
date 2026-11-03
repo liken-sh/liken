@@ -22,12 +22,44 @@ test: test-go test-docs
 UNTESTED_PACKAGES := go list -f '{{if not (or .TestGoFiles .XTestGoFiles)}}{{.ImportPath}}{{end}}' ./...
 
 .PHONY: test-go
-test-go:
+test-go: test-go-lint
+	go test -race -covermode=atomic -coverprofile=coverage.out ./...
+	go tool go-test-coverage --config=.testcoverage.yml
+
+.PHONY: test-go-lint
+test-go-lint:
 	test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
 	go mod tidy -diff
 	test -z "$$($(UNTESTED_PACKAGES))" || { echo 'packages with no test file:'; $(UNTESTED_PACKAGES); exit 1; }
 	go vet ./...
-	go test -race -covermode=atomic -coverprofile=coverage.out ./...
+
+# Each test of the operator's package starts the operator against the
+# fake API server, and -race makes each one cost seconds of processor
+# time. So CI splits the tests into SHARDS jobs, which package.toml
+# sets, and each job runs the tests of its SHARD: every SHARDS-th name
+# of the sorted list of test names in the module. A name that two
+# packages share goes to one shard, which runs it in both packages, so
+# each test runs once. Each shard writes the coverage profile of every
+# package, with zero counts for the tests that the other shards run.
+SHARD ?= 1
+SHARDS ?= 1
+
+.PHONY: test-go-shard
+test-go-shard:
+	names=$$(go test -race -covermode=atomic -list . ./... | grep -E '^(Test|Example|Fuzz)' | sort -u | \
+		awk 'NR % $(SHARDS) == $(SHARD) % $(SHARDS)' | paste -sd '|') && \
+		test -n "$$names" && \
+		go test -race -covermode=atomic -coverprofile=coverage.out -run "^($$names)$$" ./...
+
+# The gate job of CI downloads each shard's profile into
+# coverage-shards/<artifact>/coverage.out, sums the count of each
+# block over the shards into coverage.out, and checks the sum against
+# the floor.
+.PHONY: test-go-gate
+test-go-gate: test-go-lint
+	awk 'FNR == 1 { next } { key = $$1 " " $$2; if (!(key in count)) order[++n] = key; count[key] += $$3 } \
+		END { print "mode: atomic"; for (i = 1; i <= n; i++) print order[i], count[order[i]] }' \
+		coverage-shards/*/coverage.out >coverage.out
 	go tool go-test-coverage --config=.testcoverage.yml
 
 # `liken plugins sync` installs the plugin of a release, so a developer

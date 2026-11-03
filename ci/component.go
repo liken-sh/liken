@@ -93,6 +93,15 @@ type Job struct {
 	// Skip names the hooks that a prek job leaves out, because another
 	// job of the component runs the same command.
 	Skip []string `toml:"skip"`
+	// Shards splits a job whose tests take more processor time than
+	// one runner gives in a few minutes. The workflow runs ShardRun in
+	// Shards jobs at once, with SHARD set to the number of each, from
+	// 1, and SHARDS to the count, and each uploads its coverage files.
+	// Then the job itself downloads them into coverage-shards/ under
+	// the component and runs Run, which merges them and checks the
+	// result. Zero and one mean one job.
+	Shards   int    `toml:"shards"`
+	ShardRun string `toml:"shard-run"`
 	// Language is the CodeQL language of a job whose toolchain is
 	// codeql. No package.toml declares such a job, because codeql.go
 	// derives each one, so the field has no key.
@@ -328,6 +337,17 @@ func (c *Component) validate(path string) error {
 		}
 		if len(job.Skip) > 0 && job.Toolchain != "prek" {
 			return fmt.Errorf("%s: job %q: only a prek job skips hooks", path, job.Name)
+		}
+		if (job.Shards > 1) != (job.ShardRun != "") {
+			return fmt.Errorf("%s: job %q: shards above one need a shard-run command, and a shard-run command needs shards above one", path, job.Name)
+		}
+		if job.Shards > 1 && len(job.Coverage) == 0 {
+			return fmt.Errorf("%s: job %q: a sharded job needs coverage files for its shards to hand to it", path, job.Name)
+		}
+	}
+	for _, job := range c.Jobs {
+		if job.Shards > 1 && jobs[job.Name+"-shard"] {
+			return fmt.Errorf("%s: the job %q takes the name of the shards of job %q", path, job.Name+"-shard", job.Name)
 		}
 	}
 	if jobs["images"] || jobs["publish"] {
