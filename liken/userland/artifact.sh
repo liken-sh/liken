@@ -23,8 +23,13 @@
 # `buildroot` line of toolchains/images.toml, which names the builder
 # image. The build reads no other line of that table. git leaves out
 # _build/, cache/, and dist/, because .gitignore names them, so the key
-# of a tree is the same before and after a build. A tree that is not a
-# git checkout has no key, and it always builds.
+# of a tree is the same before and after a build. The key also leaves
+# out bluetoothd.config and bluetooth/, which only the bluetoothd image
+# builds. buildroot parses the BlueZ recipe in the OS build too, but
+# os.config does not select it, so a change to it changes nothing that
+# build.sh writes, and the bluetoothd image's build in the same CI run
+# fails on a recipe that does not parse. A tree that is not a git
+# checkout has no key, and it always builds.
 #
 # The artifact is ghcr.io/liken-sh/userland:<key>, an OCI artifact
 # with one layer, a tarball of dist/. dist/key inside it holds the key
@@ -79,7 +84,8 @@ trap '[[ -z "$work" ]] || rm -rf "$work"' EXIT
 key() {
     git -C "$here" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
     {
-        git -C "$here" ls-files -z --cached --others --exclude-standard |
+        git -C "$here" ls-files -z --cached --others --exclude-standard \
+            -- . ':!bluetoothd.config' ':!bluetooth/' |
             sort -zu |
             while IFS= read -r -d '' file; do
                 [[ -f "$here/$file" ]] || continue
