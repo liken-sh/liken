@@ -58,15 +58,46 @@ WORKDIR /home/br-user
 ADD --chown=br-user:br-user --checksum=sha256:${BUILDROOT_SHA256} \
     https://github.com/buildroot/buildroot/archive/${BUILDROOT_COMMIT}.tar.gz buildroot.tar.gz
 RUN tar -xzf buildroot.tar.gz && mv "buildroot-${BUILDROOT_COMMIT}" buildroot && rm buildroot.tar.gz
-COPY --from=userland --chown=br-user:br-user . external/
+
+# The build copies only the files of the tree that buildroot reads for
+# bluetoothd.config. A build that misses the layer cache compiles a
+# cross-compiler before the daemons, so a change to a file that only
+# the OS's build reads, such as os.config, build.sh, or artifact.sh,
+# must not change these layers. Config.in and external.mk name the
+# recipes under iscsi/ too, so buildroot parses them in this build, and
+# patches/ is the directory that common.config names in
+# BR2_GLOBAL_PATCH_DIR.
+COPY --from=userland --chown=br-user:br-user \
+    buildroot.sh common.config bluetoothd.config \
+    Config.in external.desc external.mk versions.mk \
+    external/
+COPY --from=userland --chown=br-user:br-user bluetooth/ external/bluetooth/
+COPY --from=userland --chown=br-user:br-user iscsi/ external/iscsi/
+COPY --from=userland --chown=br-user:br-user patches/ external/patches/
+
+# The same step writes the package list that the SBOM step below reads,
+# and then deletes the cross-compiler, the build directories, and the
+# source tarballs that legal-info copied. The later steps read only the
+# target tree and legal-info's manifest and license files. The deleted
+# directories hold several gigabytes, and without the deletion they are
+# a layer of this step: the CI build compresses that layer into the
+# registry's layer cache, and a later build that reads the layer
+# downloads it again.
 RUN --mount=type=cache,target=/home/br-user/dl,uid=1000,gid=1000 \
     --mount=type=cache,target=/home/br-user/ccache,uid=1000,gid=1000 \
+    set -eu; \
     BR2_DL_DIR=/home/br-user/dl BR2_CCACHE_DIR=/home/br-user/ccache \
-    bash external/buildroot.sh /home/br-user/buildroot /home/br-user/output bluetoothd.config
+        bash external/buildroot.sh /home/br-user/buildroot /home/br-user/output bluetoothd.config; \
+    make --no-print-directory -s -C buildroot O=/home/br-user/output show-info >/home/br-user/show-info.json; \
+    cd /home/br-user/output; \
+    rm -rf build host staging per-package images legal-info/sources legal-info/host-sources
 
 # buildroot's CycloneDX SBOM of the build, as liken/userland/build.sh
-# writes the OS's: `show-info` prints each package of the
-# configuration, and generate-cyclonedx turns the list into the SBOM.
+# writes the OS's: `show-info` printed each package of the
+# configuration in the build step above, and generate-cyclonedx turns
+# the list into the SBOM. generate-cyclonedx reads the patches and the
+# .hash files of each package from the buildroot tree and the external
+# tree, not from the output directory.
 #
 # generate-cyclonedx reads the SPDX license list of the CycloneDX
 # version that it names, and downloads the list when its download
@@ -87,8 +118,8 @@ ADD --chown=br-user:br-user --checksum=sha256:${SPDX_SCHEMA_SHA256} \
 RUN set -eu; \
     cd buildroot; \
     test "$(sed -n 's/^DEFAULT_CYCLONEDX_VERSION = "\(.*\)"$/\1/p' utils/generate-cyclonedx)" = "$SPDX_SCHEMA_VERSION"; \
-    make --no-print-directory -s O=/home/br-user/output show-info \
-        | BR2_DL_DIR=/home/br-user/sbom-dl utils/generate-cyclonedx >/home/br-user/output/sbom.cdx.json
+    BR2_DL_DIR=/home/br-user/sbom-dl utils/generate-cyclonedx \
+        </home/br-user/show-info.json >/home/br-user/output/sbom.cdx.json
 
 # Every file the image ships, named. install -D fails on a path that
 # moved, so a BlueZ or dbus release that relocates one of these stops
