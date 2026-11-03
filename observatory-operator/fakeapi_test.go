@@ -340,19 +340,24 @@ func (a *fakeAPI) watch(w http.ResponseWriter, r *http.Request, collection strin
 			"annotations":     map[string]any{"k8s.io/initial-events-end": "true"},
 		}})
 	}
+	// store appends each event with the next version, so the log is in
+	// order of version. The watch starts at the first event after the
+	// version it was opened from, and on each change it reads only the
+	// events after the last one it read.
+	next, _ := slices.BinarySearchFunc(a.events, from+1, func(event fakeEvent, version int) int {
+		return event.version - version
+	})
 	a.mu.Unlock()
 	w.(http.Flusher).Flush()
 	for {
 		a.mu.Lock()
 		changed := a.changed
-		for _, event := range a.events {
-			if covers(collection, event.collection) && event.version > from {
-				if selects(selector, event.object) {
-					writeEvent(w, event.kind, event.object)
-				}
-				from = event.version
+		for _, event := range a.events[next:] {
+			if covers(collection, event.collection) && selects(selector, event.object) {
+				writeEvent(w, event.kind, event.object)
 			}
 		}
+		next = len(a.events)
 		a.mu.Unlock()
 		w.(http.Flusher).Flush()
 		select {
