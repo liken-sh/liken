@@ -468,8 +468,11 @@ func (a *fakeAPI) writeStatus(w http.ResponseWriter, r *http.Request, collection
 	next := clone(held)
 	next["status"] = written["status"]
 	// The API server stores nothing for a write that changes nothing:
-	// the resourceVersion stays, and no watch event follows.
-	if next = normalize(next); reflect.DeepEqual(next["status"], held["status"]) {
+	// the resourceVersion stays, and no watch event follows. The held
+	// object and the written status both come from JSON, so their
+	// numbers are float64 already, and they compare without a round
+	// trip.
+	if reflect.DeepEqual(next["status"], held["status"]) {
 		_ = json.NewEncoder(w).Encode(held)
 		return
 	}
