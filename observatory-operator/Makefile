@@ -54,9 +54,9 @@ test-go-shard:
 # The gate job of CI downloads each shard's profile into
 # coverage-shards/<artifact>/coverage.out, sums the count of each
 # block over the shards into coverage.out, and checks the sum against
-# the floor.
+# the floor. The lint job of CI runs test-go-lint beside the shards.
 .PHONY: test-go-gate
-test-go-gate: test-go-lint
+test-go-gate:
 	awk 'FNR == 1 { next } { key = $$1 " " $$2; if (!(key in count)) order[++n] = key; count[key] += $$3 } \
 		END { print "mode: atomic"; for (i = 1; i <= n; i++) print order[i], count[order[i]] }' \
 		coverage-shards/*/coverage.out >coverage.out

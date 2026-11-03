@@ -20,10 +20,10 @@ prefix = "observatory"
 
 # The tests, with the race check and the coverage profile, in four
 # shards on four runners, because one runner takes about nine minutes
-# for the operator's package alone. Then this job runs gofmt, vet, and
-# a tidy check of go.mod, sums the shards' profiles, and runs the
-# coverage gate on the sum. .testcoverage.yml holds the floor. `make
-# test-go` runs the same checks in one process on a workstation.
+# for the operator's package alone. Then this job sums the shards'
+# profiles and runs the coverage gate on the sum. .testcoverage.yml
+# holds the floor. `make test-go` runs the lint, the tests, and the
+# gate in one process on a workstation.
 [[jobs]]
 name = "go"
 toolchain = "go"
@@ -32,6 +32,14 @@ shards = 4
 shard-run = "make test-go-shard"
 timeout = 15
 coverage = ["coverage.out"]
+
+# gofmt, vet, a tidy check of go.mod, and the check that every package
+# has a test file. It runs beside the shards, so a vet that compiles
+# with no build cache does not delay the coverage gate.
+[[jobs]]
+name = "lint"
+toolchain = "go"
+run = "make test-go-lint"
 
 # The link check, the generated skills, and the site build.
 [[jobs]]
@@ -42,11 +50,11 @@ run = "make test-docs"
 
 # The hooks in .pre-commit-config.yaml: the formatters, the linters,
 # and the hygiene checks. The go job runs the tests and the coverage
-# gate.
+# gate, and the lint job runs gofmt, vet, and the tidy check.
 [[jobs]]
 name = "prek"
 toolchain = "prek"
-# The go job runs the same checks as these hooks.
+# The lint job runs the same checks as these hooks.
 skip = ["gofmt", "go-vet", "go-mod-tidy"]
 
 [outputs]

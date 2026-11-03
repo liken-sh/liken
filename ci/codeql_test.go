@@ -79,6 +79,31 @@ func TestTheLoaderDerivesACodeQLJobForEachAnalysis(t *testing.T) {
 	}
 }
 
+// Two Go jobs of one module, such as the tests and the lint, build the
+// same code, so the module gets one analysis, named for the first job.
+func TestTwoGoJobsOfOneModuleShareOneCodeQLJob(t *testing.T) {
+	components, err := LoadComponents(writeTree(t, map[string]string{
+		"app/package.toml": "[package]\nname = \"app\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\nrun = \"make test\"\n" +
+			"[[jobs]]\nname = \"lint\"\ntoolchain = \"go\"\nrun = \"make lint\"\n" +
+			"[[jobs]]\nname = \"docs\"\ntoolchain = \"go\"\nmodule = \"docs\"\nrun = \"make docs\"\n",
+		"app/go.mod":      "module example.com/app\n",
+		"app/main.go":     "package main\n",
+		"app/docs/go.mod": "module example.com/app/docs\n",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, job := range components["app"].Jobs {
+		if job.Toolchain == "codeql" {
+			got = append(got, job.Name+" "+job.Dir)
+		}
+	}
+	if want := []string{"codeql-go ", "codeql-docs docs"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("the CodeQL jobs are %q, not %q", got, want)
+	}
+}
+
 // A declared job cannot take a derived job's name.
 func TestAPackageTomlCannotDeclareACodeQLJob(t *testing.T) {
 	root := writeTree(t, map[string]string{"app/package.toml": "[package]\nname = \"app\"\n[[jobs]]\nname = \"codeql-go\"\ntoolchain = \"go\"\nrun = \"true\"\n"})

@@ -76,8 +76,13 @@ func languageSource(language, file string) bool {
 // the job it comes from. Those packages are the programs that the
 // job's tests run, such as ffmpeg and cage, and a build reads none of
 // them.
+//
+// Two jobs of one language in one directory, such as a module's tests
+// and its lint, build the same code, so they derive one job, named for
+// the first of them.
 func codeqlJobs(c *Component, sources []string) []Job {
 	var jobs []Job
+	analyzed := map[string]bool{}
 	for _, job := range c.Jobs {
 		language := ""
 		switch job.Toolchain {
@@ -92,6 +97,10 @@ func codeqlJobs(c *Component, sources []string) []Job {
 		if language == languageGo {
 			dir = orDefault(job.Module, job.Dir)
 		}
+		if analyzed[language+" "+dir] {
+			continue
+		}
+		analyzed[language+" "+dir] = true
 		derived := Job{Name: codeqlPrefix + job.Name, Toolchain: "codeql", Language: language, Dir: dir, Timeout: codeqlTimeout}
 		if language == languageGo {
 			derived.Run = "go build ./..."
